@@ -261,13 +261,15 @@ export function PeopleScreen() {
 function InviteColleague({ orgId, orgName }: { orgId: string; orgName: string }) {
   const [email, setEmail] = useState('');
   const [link, setLink] = useState<string | null>(null);
+  const [emailSent, setEmailSent] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   async function generate() {
     setBusy(true); setError(null);
     try {
-      const r = await client.createOrgInvitation(orgId, { email: email || undefined });
+      const r = await client.createOrgInvitation(orgId, { email: email || undefined, lang: getLang() });
+      setEmailSent(r.emailSent);
       setLink(`${location.origin}/signup?org=${encodeURIComponent(r.token)}`);
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
@@ -286,6 +288,7 @@ function InviteColleague({ orgId, orgName }: { orgId: string; orgName: string })
           <button className="btn primary" disabled={busy} onClick={generate}>{t('settings.generate')}</button>
         </div>
       )}
+      {link && emailSent && <div className="small"><b>{t('dlg.emailSent', { email })}</b></div>}
       {error && <div className="error">{error}</div>}
     </div>
   );

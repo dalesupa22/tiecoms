@@ -313,12 +313,15 @@ export const CreateInvitationInput = z.object({
   /** Para terceros (guest): fecha de salida del espacio. */
   accessUntil: z.iso.datetime().optional(),
   history: z.enum(['now', 'all']).default('now'),
+  /** Idioma del correo de invitación (si hay `email`). */
+  lang: z.enum(['es', 'en']).default('es'),
 });
 
 export const CreateOrgInvitationInput = z.object({
   email: email.optional(),
   role: z.enum(['member', 'admin']).default('member'),
   expiresInDays: z.number().int().min(1).max(60).default(14),
+  lang: z.enum(['es', 'en']).default('es'),
 });
 
 export interface OrgInvitationPreviewDTO {

@@ -690,8 +690,8 @@ export class TieComsClient {
     await this.loadBootstrap();
     return r;
   }
-  createInvitation(workspaceId: string, input: { email?: string; role: 'member' | 'guest' | 'admin'; conversationIds: string[]; expiresInDays?: number; accessUntil?: string; history?: 'now' | 'all' }) {
-    return this.request<{ id: string; token: string; expiresAt: string }>(`/workspaces/${workspaceId}/invitations`, { method: 'POST', json: input });
+  createInvitation(workspaceId: string, input: { email?: string; role: 'member' | 'guest' | 'admin'; conversationIds: string[]; expiresInDays?: number; accessUntil?: string; history?: 'now' | 'all'; lang?: 'es' | 'en' }) {
+    return this.request<{ id: string; token: string; expiresAt: string; emailSent: boolean }>(`/workspaces/${workspaceId}/invitations`, { method: 'POST', json: input });
   }
   async previewInvitation(token: string): Promise<InvitationPreviewDTO> {
     const res = await this.raw(`/invitations/${encodeURIComponent(token)}`, {}, false);
@@ -703,8 +703,8 @@ export class TieComsClient {
     await this.loadBootstrap();
     return r;
   }
-  createOrgInvitation(orgId: string, input: { email?: string; role?: 'member' | 'admin' } = {}) {
-    return this.request<{ id: string; token: string; expiresAt: string }>(`/organizations/${orgId}/invitations`, { method: 'POST', json: input });
+  createOrgInvitation(orgId: string, input: { email?: string; role?: 'member' | 'admin'; lang?: 'es' | 'en' } = {}) {
+    return this.request<{ id: string; token: string; expiresAt: string; emailSent: boolean }>(`/organizations/${orgId}/invitations`, { method: 'POST', json: input });
   }
   async previewOrgInvitation(token: string): Promise<OrgInvitationPreviewDTO> {
     const res = await this.raw(`/org-invitations/${encodeURIComponent(token)}`, {}, false);

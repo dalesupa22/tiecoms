@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { client, useClient } from '../app-client.ts';
 import { BASE, navigate } from '../router.ts';
 import { Avatar, Modal, orgById } from '../ui.tsx';
-import { errorText, t } from '../i18n.ts';
+import { errorText, getLang, t } from '../i18n.ts';
 
 function useSubmit() {
   const [busy, setBusy] = useState(false);
@@ -97,6 +97,7 @@ export function InviteDialog({ workspaceId, onClose }: { workspaceId: string; on
   const [until, setUntil] = useState('');
   const [history, setHistory] = useState<'now' | 'all'>('now');
   const [link, setLink] = useState<string | null>(null);
+  const [emailSent, setEmailSent] = useState(false);
   const [copied, setCopied] = useState(false);
   const s = useSubmit();
   const toggle = (id: string) => setPicked((x) => (x.includes(id) ? x.filter((y) => y !== id) : [...x, id]));
@@ -104,13 +105,16 @@ export function InviteDialog({ workspaceId, onClose }: { workspaceId: string; on
     const r = await client.createInvitation(workspaceId, {
       email: email || undefined, role, conversationIds: picked, history,
       accessUntil: role === 'guest' && until ? new Date(`${until}T23:59:59`).toISOString() : undefined,
+      lang: getLang(),
     });
+    setEmailSent(r.emailSent);
     setLink(`${location.origin}${BASE}/invite/${encodeURIComponent(r.token)}`);
   }); };
 
   if (link) {
     return (
       <Modal title={t('dlg.linkReady')} onClose={onClose}>
+        {emailSent && <p style={{ margin: 0 }}><b>{t('dlg.emailSent', { email })}</b></p>}
         <p className="muted" style={{ margin: 0 }}>{t('dlg.linkBody', { email: email ? t('dlg.linkOnlyFor', { email }) : '' })}</p>
         <div className="linkbox">
           <input className="input" readOnly value={link} onFocus={(e) => e.target.select()} />

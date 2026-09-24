@@ -5,6 +5,8 @@ import type {
 import { conversationAccess, workspaceAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Tx } from '../db.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import { config } from '../config.ts';
+import { invitationMail, trySendMail } from '../mail.ts';
 import { randomToken, sha256 } from '../security.ts';
 import { appendEvent, appendMessage } from './messages.ts';
 
@@ -227,7 +229,7 @@ export async function getOrCreateDirect(userId: string, otherId: string) {
 
 // ---------- Invitaciones ----------
 export async function createInvitation(userId: string, workspaceId: string, input: z.infer<typeof CreateInvitationInput>) {
-  return tx(async (c) => {
+  const inv = await tx(async (c) => {
     await workspaceAccess(c, userId, workspaceId, 'nonguest');
     if (input.role === 'admin') await workspaceAccess(c, userId, workspaceId, 'admin');
     if (input.conversationIds.length) {
@@ -249,6 +251,15 @@ export async function createInvitation(userId: string, workspaceId: string, inpu
     await audit(c, userId, 'invitation.created', { type: 'invitation', id: rows[0].id, workspaceId }, { role: input.role, email: input.email ?? null });
     return { id: rows[0].id as string, token, expiresAt: rows[0].expires_at as Date };
   });
+  let emailSent = false;
+  if (input.email) {
+    const { rows } = await pool.query('SELECT u.name, u.email, w.name AS ws_name FROM users u, workspaces w WHERE u.id = $1 AND w.id = $2', [userId, workspaceId]);
+    emailSent = await trySendMail(invitationMail({
+      lang: input.lang, to: input.email, inviterName: rows[0].name, inviterEmail: rows[0].email, targetName: rows[0].ws_name,
+      kind: 'workspace', url: `${config.publicOrigin}/invite/${encodeURIComponent(inv.token)}`, expiresAt: inv.expiresAt,
+    }));
+  }
+  return { ...inv, emailSent };
 }
 
 export async function previewInvitation(token: string): Promise<InvitationPreviewDTO> {

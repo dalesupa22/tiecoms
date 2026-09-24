@@ -6,7 +6,7 @@ import { ZodError } from 'zod';
 import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
-  RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, type AuthResult,
+  RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
   CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
@@ -15,6 +15,7 @@ import { ApiError, unauthorized } from './errors.ts';
 import * as auth from './modules/auth.ts';
 import * as sso from './modules/sso.ts';
 import * as domains from './modules/domains.ts';
+import { deleteAccount } from './modules/account.ts';
 import { bootstrap } from './modules/bootstrap.ts';
 import { listEvents, listMessages, markRead, sendMessage } from './modules/messages.ts';
 import * as ws from './modules/workspaces.ts';
@@ -134,6 +135,11 @@ export async function buildHttp() {
       await auth.revokeSession(req.userId, req.sessionId);
       reply.clearCookie(REFRESH_COOKIE, { path: COOKIE_PATH });
       return { ok: true };
+    });
+    priv.delete('/api/v1/account', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
+      const out = await deleteAccount(req.userId, DeleteAccountInput.parse(req.body ?? {}));
+      reply.clearCookie(REFRESH_COOKIE, { path: COOKIE_PATH });
+      return out;
     });
     priv.get('/api/v1/sessions', async (req) => ({ sessions: await auth.listSessions(req.userId), current: req.sessionId }));
     priv.delete<{ Params: { id: string } }>('/api/v1/sessions/:id', async (req) => {

@@ -8,7 +8,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -135,7 +134,7 @@ fun SplashOverlay(mode: Mode, ready: Boolean, onFinished: () -> Unit) {
     val strong = if (dark) Color(0xFFF3EDE6) else Color(0xFF1F1F1F)
     val a11y = stringResource(R.string.splash_a11y)
 
-    BoxWithConstraints(
+    Box(
         Modifier.fillMaxSize()
             .background(bg.copy(alpha = frame.exitAlpha))
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { skip = true }

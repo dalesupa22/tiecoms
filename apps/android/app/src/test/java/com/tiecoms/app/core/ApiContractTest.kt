@@ -40,6 +40,7 @@ class ApiContractTest {
                     path == "$AUTH_BASE_PATH/login" -> """{"accessToken":"t","accessExpiresAt":"2099-01-01T00:00:00Z","refreshToken":"r","sessionId":"s","user":{"id":"u1","name":"Ana"}}"""
                     path == "/api/v1/bootstrap" -> """{"me":{"id":"u1","name":"Ana","primaryOrgId":"o1"},"organizations":[{"id":"o1","name":"Acme","myRole":"owner"}],"conversations":[{"id":"c1","kind":"group","memberIds":["u1"]}]}"""
                     path == "/api/v1/reminders" -> """{"reminders":[]}"""
+                    path == "/api/v1/blocks" -> """{"userIds":[]}"""
                     path == "/api/v1/whatsapp/accounts" && request.method == "GET" -> """{"accounts":[$account],"max":5}"""
                     path == "/api/v1/whatsapp/accounts" -> account
                     path.endsWith("/relink") -> account.replace("\"qr\",", "\"pending\",")

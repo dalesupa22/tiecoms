@@ -8,6 +8,9 @@ import kotlinx.serialization.json.JsonElement
 const val CONTRACT_VERSION = "2026-09-23"
 const val PLATFORM = "android"
 
+@Serializable
+data class BlocksResult(val userIds: List<String> = emptyList())
+
 /**
  * Decodificación TOLERANTE: la app instalada debe seguir funcionando cuando el API
  * agregue campos o valores nuevos (regla del contrato: cambios aditivos).

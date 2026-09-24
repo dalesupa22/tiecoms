@@ -23,6 +23,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -115,6 +116,7 @@ fun LoginScreen(onSignup: () -> Unit) {
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var serverDialog by rememberSaveable { mutableStateOf(false) }
+    var pendingSso by remember { mutableStateOf<SsoProvider?>(null) }
     val container = LocalContainer.current
     val sso by container.sso.collectAsStateWithLifecycle()
     val exchanging = sso == com.tiecoms.app.AppContainer.SsoUi.Exchanging
@@ -143,11 +145,11 @@ fun LoginScreen(onSignup: () -> Unit) {
         Spacer(Modifier.height(28.dp))
         // SSO arriba del formulario.
         SsoButton(stringResource(R.string.sso_google), "G", enabled = !busy && !exchanging, tag = "ssoGoogle") {
-            error = null; container.startSso(ctx, SsoProvider.GOOGLE)
+            error = null; pendingSso = SsoProvider.GOOGLE
         }
         Spacer(Modifier.height(10.dp))
         SsoButton(stringResource(R.string.sso_microsoft), "M", enabled = !busy && !exchanging, tag = "ssoMicrosoft") {
-            error = null; container.startSso(ctx, SsoProvider.MICROSOFT)
+            error = null; pendingSso = SsoProvider.MICROSOFT
         }
         if (exchanging) {
             Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -178,11 +180,21 @@ fun LoginScreen(onSignup: () -> Unit) {
         Spacer(Modifier.height(28.dp))
         Text(stringResource(R.string.no_account), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         TextButton(onClick = onSignup, modifier = Modifier.testTag("goSignup")) { Text(stringResource(R.string.create_account), fontWeight = FontWeight.SemiBold) }
+        LegalLinks()
         if (BuildConfig.DEBUG) {
             Text(client.baseUrl, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
         }
     }
     if (serverDialog) ServerDialog(onDismiss = { serverDialog = false })
+    pendingSso?.let { provider ->
+        AlertDialog(
+            onDismissRequest = { pendingSso = null },
+            title = { Text(stringResource(R.string.legal_terms)) },
+            text = { Column { Text(stringResource(R.string.legal_accept)); LegalLinks() } },
+            confirmButton = { TextButton(onClick = { pendingSso = null; container.startSso(ctx, provider) }, modifier = Modifier.testTag("acceptSsoTerms")) { Text(stringResource(R.string.legal_accept_continue)) } },
+            dismissButton = { TextButton(onClick = { pendingSso = null }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
 }
 
 @Composable
@@ -240,6 +252,7 @@ fun SignupScreen(orgToken: String?, onLogin: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<OrgInvitationPreviewDTO?>(null) }
     var previewFailed by remember { mutableStateOf(false) }
+    var acceptedTerms by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(orgToken) {
         if (orgToken == null) return@LaunchedEffect
@@ -253,6 +266,7 @@ fun SignupScreen(orgToken: String?, onLogin: () -> Unit) {
 
     fun submit() {
         if (busy) return
+        if (!acceptedTerms) { error = ctx.getString(R.string.legal_required); return }
         if (name.isBlank() || email.isBlank() || (!joining && company.isBlank())) { error = ctx.getString(R.string.fill_required); return }
         if (password.length < 10) { error = ctx.getString(R.string.password_short); return }
         busy = true; error = null
@@ -284,6 +298,7 @@ fun SignupScreen(orgToken: String?, onLogin: () -> Unit) {
         val container = LocalContainer.current
         val sso by container.sso.collectAsStateWithLifecycle()
         fun ssoSignup(p: SsoProvider) {
+            if (!acceptedTerms) { error = ctx.getString(R.string.legal_required); return }
             if (!joining && company.isBlank()) { error = ctx.getString(R.string.auth_sso_needs_company); return }
             error = null
             container.startSso(ctx, p, orgInviteToken = if (joining) orgToken else null, orgName = if (joining) null else company.trim())
@@ -293,9 +308,14 @@ fun SignupScreen(orgToken: String?, onLogin: () -> Unit) {
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next), keyboardActions = next)
             Spacer(Modifier.height(10.dp))
         }
-        SsoButton(stringResource(R.string.sso_google), "G", enabled = !busy, tag = "ssoGoogleSignup") { ssoSignup(SsoProvider.GOOGLE) }
+        LegalLinks()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = acceptedTerms, onCheckedChange = { acceptedTerms = it }, modifier = Modifier.testTag("acceptTerms"))
+            Text(stringResource(R.string.legal_accept), style = MaterialTheme.typography.bodySmall)
+        }
+        SsoButton(stringResource(R.string.sso_google), "G", enabled = !busy && acceptedTerms, tag = "ssoGoogleSignup") { ssoSignup(SsoProvider.GOOGLE) }
         Spacer(Modifier.height(8.dp))
-        SsoButton(stringResource(R.string.sso_microsoft), "M", enabled = !busy, tag = "ssoMicrosoftSignup") { ssoSignup(SsoProvider.MICROSOFT) }
+        SsoButton(stringResource(R.string.sso_microsoft), "M", enabled = !busy && acceptedTerms, tag = "ssoMicrosoftSignup") { ssoSignup(SsoProvider.MICROSOFT) }
         ErrorText((sso as? com.tiecoms.app.AppContainer.SsoUi.Failed)?.message)
         Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             HorizontalDivider(Modifier.weight(1f))
@@ -315,7 +335,7 @@ fun SignupScreen(orgToken: String?, onLogin: () -> Unit) {
             keyboardActions = KeyboardActions(onDone = { submit() }))
         ErrorText(error)
         Spacer(Modifier.height(12.dp))
-        Button(onClick = ::submit, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("signup")) {
+        Button(onClick = ::submit, enabled = !busy && acceptedTerms, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("signup")) {
             if (busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
             else Text(stringResource(if (joining) R.string.signup_join else R.string.signup), fontWeight = FontWeight.SemiBold)
         }

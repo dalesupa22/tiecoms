@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="safety_report">Report</string>
+    <string name="safety_report_message">Report message</string>
+    <string name="safety_report_user">Report user</string>
+    <string name="safety_report_hint">Tell us about harassment, spam or inappropriate content. Our support team will review your report.</string>
+    <string name="safety_reason">Reason (at least 5 characters)</string>
+    <string name="safety_send_report">Send report</string>
+    <string name="safety_report_sent">Report received. Our team will review it.</string>
+    <string name="safety_block">Block %1$s?</string>
+    <string name="safety_unblock">Unblock %1$s?</string>
+    <string name="safety_block_action">Block user</string>
+    <string name="safety_unblock_action">Unblock user</string>
+    <string name="safety_block_hint">Their messages will be hidden. You cannot send each other direct messages or add each other to new chats. Existing shared groups remain available. You can unblock them here.</string>
+    <string name="safety_unblock_hint">Their messages will be visible again and you can contact each other.</string>
+    <string name="safety_blocked_chat">You blocked this person. Open conversation details to unblock them.</string>
+    <string name="legal_terms">Terms of use</string>
+    <string name="legal_privacy">Privacy policy</string>
+    <string name="legal_accept">I accept the terms of use and privacy policy, including the rules against abusive content.</string>
+    <string name="legal_required">Read and accept the terms and privacy policy to create an account.</string>
+    <string name="legal_accept_continue">Accept and continue</string>
+    <string name="safety_blocked_users">Blocked users</string>
+    <string name="safety_none_blocked">You have no blocked users.</string>
+    <string name="safety_unknown_user">User %1$s</string>
+</resources>

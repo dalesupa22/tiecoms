@@ -6,7 +6,7 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 |---|---|
 | applicationId | `com.tiecoms.app` |
 | minSdk / target / compile | 26 / 36 / 36 |
-| Versión | `versionName 1.1.0`, `versionCode 2`. Sube el `versionCode` en cada envío a Play. |
+| Versión | `versionName 1.1.0`, `versionCode 3`. Sube el `versionCode` en cada envío a Play. |
 | Contrato | `2026-09-23`. Se envía en `x-tiecoms-contract` y en `device.contract`. |
 | API por defecto | `https://app.tiecoms.com` |
 | Toolchain | Gradle 8.14.3 (wrapper), AGP 8.13.2, Kotlin 2.3.21 y JDK 17 |
@@ -57,6 +57,7 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
   - Ver los mensajes, fijar u ocultar un chat y vincularlo a una conversación. El evento `whatsapp.updated` refresca la pantalla.
 - **Empresa → Dominios** (solo owner o admin): listar, agregar y verificar con TXT. También se muestra el sello «Empresa verificada».
 - **Eliminar cuenta:** `DELETE /api/v1/account {confirmEmail, password?}`. La pantalla explica qué se borra y qué se conserva. Responde 400 si el correo no coincide y 403 si la contraseña está mal o falta. Al terminar borra las credenciales locales y vuelve al login.
+- **Seguridad de la comunidad:** los detalles de conversación permiten reportar y bloquear/desbloquear participantes; la pulsación larga permite reportar mensajes. El API guarda los reportes para revisión. El bloqueo oculta los mensajes del usuario y sus notificaciones y evita mensajes directos y nuevos chats entre las partes. Los grupos existentes siguen disponibles. El registro requiere aceptar los términos y la política de privacidad, accesibles también desde Login y Ajustes.
 - **Login y registro:** «Continuar con Google / Microsoft» y «o con tu correo». En el registro, el SSO exige antes el nombre de la empresa (`org_name`) o usa la invitación (`org`). Los errores `sso_*` y `domain_claimed` usan los textos de la web.
 - **Deep links:** `/c/<id>` (con `?m=<seq>` salta al mensaje), `/w/<id>`, `/invite/<token>`, `/signup?org=`, `/asuntos`, `/agenda`, `/trazo`, `/whatsapp`, `/ajustes` y `/share?text=`. Funcionan en los tres hosts con `autoVerify` y con el esquema `tiecoms://`. `tiecoms://auth/*` está reservado para el SSO.
 
@@ -180,12 +181,12 @@ El release lleva R8 y reducción de recursos. Las reglas de serialización está
    | Descripción completa | «TieComs conecta a personas, empresas y bots en un mismo lugar. Cada empresa conserva su identidad y cada persona ve solo su alcance. Conversa en espacios compartidos con clientes y proveedores; convierte mensajes en asuntos con responsable y fecha; agenda reuniones con confirmación; deriva una conversación para resolver algo aparte y devuelve el resultado; recibe recordatorios; trae mensajes desde WhatsApp, Slack o el correo con su origen; y organiza tus grupos de WhatsApp personal y Business. Cada empresa. Cada canal. Un solo hilo.» | «TieComs connects people, companies and bots in one place. Each company keeps its identity and everyone sees only their own scope. Talk in spaces shared with clients and suppliers; turn messages into issues with an owner and a date; schedule meetings with RSVPs; branch a conversation to solve something separately and bring the result back; get reminders; bring messages from WhatsApp, Slack or email with their origin; and organise your personal and Business WhatsApp groups. Every company. Every channel. One thread.» |
 
 5. **Contenido de la app.**
-   - **Privacidad:** `https://tiecoms.com/privacidad`.
-   - **Borrado de cuenta:** dentro de la app (Ajustes › Eliminar cuenta). Play exige también un enlace web: `https://app.tiecoms.com/ajustes`.
+   - **Privacidad:** `https://www.tiecoms.com/privacidad/`.
+   - **Borrado de cuenta:** dentro de la app (Ajustes › Eliminar cuenta). Enlace web: `https://www.tiecoms.com/eliminar-cuenta/`.
    - **Anuncios:** no.
    - **IARC:** los usuarios interactúan entre sí y comparten contenido.
    - **Público:** mayores de 18.
-   - **Seguridad de los datos:** nombre, correo, mensajes, identificador del dispositivo y, si se conecta, los chats de WhatsApp de esa cuenta. Todo va cifrado en tránsito, se puede borrar y no se comparte con terceros.
+   - **Seguridad de los datos:** nombre, correo, identificadores de usuario y dispositivo, mensajes y, de forma opcional, cargo/área, foto de perfil, archivos, reuniones, reportes, chats y contactos de WhatsApp de una cuenta conectada (sin permiso para acceder a la agenda del teléfono). Los datos viajan cifrados en tránsito. Declara los fines y la retención según la política publicada; el contenido compartido se muestra a los participantes autorizados.
    - **Cuenta demo para la revisión:** crea una cuenta en producción, por ejemplo `revision.play@tiecoms.com`, con una empresa y un espacio de ejemplo con otra cuenta demo de otra empresa. Pon las credenciales en «Acceso a la app». No uses las cuentas de prueba de 3041, que no existen en producción.
 6. **Permisos y por qué:**
 
@@ -201,7 +202,7 @@ El release lleva R8 y reducción de recursos. Las reglas de serialización está
 ## Pendientes y puntos de extensión
 
 - **Push remoto (FCM):** el backend aún no tiene registro de dispositivos. `PushRegistrar` / `NoopPushRegistrar` queda como punto de extensión. Mientras tanto, las notificaciones (mensajes, recordatorios y reuniones) son locales y solo llegan con el proceso vivo.
-- **Eliminar cuenta:** el endpoint está en la rama `account-deletion` (576d4b4). Aún no está en `main` ni en producción, así que hay que desplegarlo antes de publicar.
+- **Backend de publicación:** eliminación de cuenta, reportes y bloqueo están integrados en `main` (`e679a10`) y verificados en producción el 24 de septiembre de 2026. El bloqueo de mensajes directos se aplica en el servidor, no solo en la interfaz.
 - **SSO en vivo:** 3041 no tiene credenciales de Google/Microsoft y `/start` responde 503 `sso_unavailable` (controlado). El canje está probado con MockWebServer. Falta la prueba real en producción.
 - **WhatsApp:** en pruebas no hay WhatsApp real. Los estados y la interfaz se probaron con el API (lista vacía) y con MockWebServer (cuentas, QR, chats, vínculo). Falta una prueba con una cuenta real.
 - **Dominios:** falta la verificación real con DNS.

@@ -376,14 +376,15 @@ fun NewIssueDialog(conversationId: String, originMessageId: String?, defaultTitl
 @Composable
 fun PinsSheet(conv: ConversationDTO, onJump: (Long) -> Unit, onClose: () -> Unit) {
     val client = LocalClient.current
-    val data = client.state.collectAsStateWithLifecycle().value.data ?: return
+    val state by client.state.collectAsStateWithLifecycle()
+    val data = state.data ?: return
     var list by remember { mutableStateOf<List<MessageDTO>?>(null) }
     LaunchedEffect(conv.id) { list = runCatching { client.loadPins(conv.id) }.getOrDefault(emptyList()) }
     FormSheet(stringResource(R.string.pins_title), onClose, tag = "pinsSheet") {
         when {
             list == null -> CircularProgressIndicator()
             list!!.isEmpty() -> EmptyNote(stringResource(R.string.pins_empty))
-            else -> list!!.forEach { m ->
+            else -> list!!.filter { it.authorId !in state.blockedUserIds }.forEach { m ->
                 val p = Names.person(data, m.authorId)
                 Row(Modifier.fillMaxWidth().clickable { onJump(m.seq) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     PersonAvatar(p, data, size = 30.dp)

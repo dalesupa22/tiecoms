@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="safety_report">Reportar</string>
+    <string name="safety_report_message">Reportar mensaje</string>
+    <string name="safety_report_user">Reportar usuario</string>
+    <string name="safety_report_hint">Cuéntanos si hay acoso, spam o contenido inapropiado. Nuestro equipo de soporte revisará tu reporte.</string>
+    <string name="safety_reason">Motivo (mínimo 5 caracteres)</string>
+    <string name="safety_send_report">Enviar reporte</string>
+    <string name="safety_report_sent">Reporte recibido. Nuestro equipo lo revisará.</string>
+    <string name="safety_block">¿Bloquear a %1$s?</string>
+    <string name="safety_unblock">¿Desbloquear a %1$s?</string>
+    <string name="safety_block_action">Bloquear usuario</string>
+    <string name="safety_unblock_action">Desbloquear usuario</string>
+    <string name="safety_block_hint">Sus mensajes se ocultarán. No podrán enviarse mensajes directos ni agregarse a nuevos chats. Los grupos compartidos existentes seguirán disponibles. Puedes desbloquear a la persona aquí.</string>
+    <string name="safety_unblock_hint">Sus mensajes volverán a ser visibles y podrán comunicarse de nuevo.</string>
+    <string name="safety_blocked_chat">Bloqueaste a esta persona. Abre los detalles de la conversación para desbloquearla.</string>
+    <string name="legal_terms">Términos de uso</string>
+    <string name="legal_privacy">Política de privacidad</string>
+    <string name="legal_accept">Acepto los términos de uso y la política de privacidad, incluidas las reglas contra el contenido abusivo.</string>
+    <string name="legal_required">Lee y acepta los términos y la política de privacidad para crear una cuenta.</string>
+    <string name="legal_accept_continue">Aceptar y continuar</string>
+    <string name="safety_blocked_users">Usuarios bloqueados</string>
+    <string name="safety_none_blocked">No tienes usuarios bloqueados.</string>
+    <string name="safety_unknown_user">Usuario %1$s</string>
+</resources>

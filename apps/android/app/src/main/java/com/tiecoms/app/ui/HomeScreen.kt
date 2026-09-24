@@ -84,7 +84,14 @@ fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (Str
     val snackbar = LocalSnackbar.current
     val scope = rememberCoroutineScope()
     val state by client.state.collectAsStateWithLifecycle()
-    val data = state.data ?: return
+    val originalData = state.data ?: return
+    // Bootstrap previews do not expose their author. Hide them in shared chats
+    // containing a blocked participant; full conversations filter by author.
+    val data = remember(originalData, state.blockedUserIds) {
+        originalData.copy(conversations = originalData.conversations.map { c ->
+            if (c.memberIds.any { it in state.blockedUserIds }) c.copy(lastMessagePreview = "") else c
+        })
+    }
     var query by rememberSaveable { mutableStateOf("") }
     var refreshing by remember { mutableStateOf(false) }
     val internalFallback = stringResource(R.string.internal_default)

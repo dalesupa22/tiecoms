@@ -43,6 +43,9 @@ class V3ApiContractTest {
                             "conversations":[{"id":"c1","kind":"group","memberIds":["u1","u2"]},{"id":"c2","kind":"multi","memberIds":["u1","u2"]}]}"""
                     }
                     path == "/api/v1/reminders" -> """{"reminders":[]}"""
+                    path == "/api/v1/blocks" -> """{"userIds":[]}"""
+                    path == "/api/v1/blocks/u2" -> """{"ok":true}"""
+                    path == "/api/v1/reports" -> """{"id":"report-1"}"""
                     path == "/api/v1/chats" -> """{"id":"new","kind":"multi"}"""
                     path.endsWith("/members") -> """{"added":["u3"]}"""
                     path == "/api/v1/me" -> """{"id":"u1","name":"Ana R","title":null}"""
@@ -71,6 +74,25 @@ class V3ApiContractTest {
 
     private fun last(method: String, path: String) = requests.last { it.first.method == method && it.first.path!!.substringBefore('?') == path }
     private fun json(s: String) = TcJson.parseToJsonElement(s).jsonObject
+
+    @Test fun `reportar usuario o mensaje y bloquear con estado confirmado por el servidor`() = runBlocking {
+        client.loadBlocks()
+        assertTrue(client.state.value.blockedUserIds.isEmpty())
+        client.setUserBlocked("u2", true)
+        assertEquals("{}", last("PUT", "/api/v1/blocks/u2").third)
+        assertEquals(setOf("u2"), client.state.value.blockedUserIds)
+        val report = client.reportContent("u2", "m9", "  Harassment in this message  ")
+        assertEquals("report-1", report)
+        val body = json(last("POST", "/api/v1/reports").third)
+        assertEquals("u2", body["userId"]!!.jsonPrimitive.content)
+        assertEquals("m9", body["messageId"]!!.jsonPrimitive.content)
+        assertEquals("Harassment in this message", body["reason"]!!.jsonPrimitive.content)
+        client.setUserBlocked("u2", false)
+        assertEquals("", last("DELETE", "/api/v1/blocks/u2").third)
+        assertTrue(client.state.value.blockedUserIds.isEmpty())
+        assertTrue(runCatching { client.setUserBlocked("missing", true) }.isFailure)
+        assertTrue("Un error de servidor no debe fingir un bloqueo", client.state.value.blockedUserIds.isEmpty())
+    }
 
     @Test fun `crear chat, sumar personas y salir`() = runBlocking {
         val before = bootstraps

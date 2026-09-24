@@ -297,6 +297,7 @@ private fun MainNav() {
                 AddMembersScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() })
             }
             composable("profile") { ProfileScreen(onBack = { nav.popBackStack() }) }
+            composable("blocked-users") { BlockedUsersScreen(onBack = { nav.popBackStack() }) }
             composable("files") { FilesScreen(onBack = { nav.popBackStack() }) }
             composable("domains/{org}") { DomainsScreen(it.arguments?.getString("org") ?: "", onBack = { nav.popBackStack() }) }
             composable("delete-account") { DeleteAccountScreen(onBack = { nav.popBackStack() }) }

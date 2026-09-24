@@ -199,20 +199,22 @@ fun ConversationScreen(
     var returning by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<MessageDTO?>(null) }
     var confirmLeave by rememberSaveable { mutableStateOf(false) }
+    var reportMessage by remember { mutableStateOf<MessageDTO?>(null) }
 
     val listState = rememberLazyListState()
     val me = data.me.id
+    val blockedDirect = meta.kind == "direct" && meta.memberIds.any { it in state.blockedUserIds }
     val pending = state.pending.filter { it.conversationId == id }
-    val items = remember(conv?.messages, pending, conv?.hasMore, conv?.loading) {
-        buildItems(conv?.messages ?: emptyList(), pending, me, conv?.hasMore ?: false, conv?.loading ?: false, meta.historyFromSeq > 0)
+    val items = remember(conv?.messages, pending, conv?.hasMore, conv?.loading, state.blockedUserIds) {
+        buildItems((conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }, pending, me, conv?.hasMore ?: false, conv?.loading ?: false, meta.historyFromSeq > 0)
     }
-    val byId = remember(conv?.messages) { (conv?.messages ?: emptyList()).associateBy { it.id } }
+    val byId = remember(conv?.messages, state.blockedUserIds) { (conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }.associateBy { it.id } }
 
     fun jumpTo(seq: Long) {
         scope.launch {
             if (!client.ensureMessage(id, seq)) return@launch
             delay(80)
-            val idx = buildItems(client.state.value.conversations[id]?.messages ?: emptyList(), client.state.value.pending.filter { it.conversationId == id }, me, false, false, false)
+            val idx = buildItems((client.state.value.conversations[id]?.messages ?: emptyList()).filter { it.authorId !in client.state.value.blockedUserIds }, client.state.value.pending.filter { it.conversationId == id }, me, false, false, false)
                 .indexOfFirst { (it as? ChatItem.Msg)?.m?.seq == seq }
             if (idx >= 0) listState.animateScrollToItem(idx)
             highlight = seq
@@ -221,6 +223,7 @@ fun ConversationScreen(
     }
 
     LaunchedEffect(id, reloadKey) {
+        runCatching { client.loadBlocks() }
         loadError = null
         try { client.openConversation(id) } catch (e: Exception) { loadError = errorText(ctx, e) }
         launch { runCatching { client.loadIssues(conversationId = id) } }
@@ -293,6 +296,10 @@ fun ConversationScreen(
             }
             if (m.kind == "text") add(SheetItem(ctx.getString(R.string.menu_forward_chat), "↪", tag = "menuForwardChat") { forwarding = m })
             add(forwardMenu(ctx, data, meta, m))
+            if (!mine) {
+                add(null)
+                add(SheetItem(ctx.getString(R.string.safety_report_message), "⚑", danger = true, tag = "menuReport") { reportMessage = m })
+            }
             if (mine && m.kind == "text") {
                 add(null)
                 add(SheetItem(ctx.getString(R.string.menu_edit), "✎", tag = "menuEdit") { editing = m; replyTo = null })
@@ -375,7 +382,8 @@ fun ConversationScreen(
                 style = MaterialTheme.typography.labelMedium, fontStyle = FontStyle.Italic, color = chat.system,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).heightIn(min = 18.dp).semantics { liveRegion = LiveRegionMode.Polite }.testTag("typing"),
             )
-            if (meta.canPost) Composer(
+            if (blockedDirect) Text(stringResource(R.string.safety_blocked_chat), Modifier.fillMaxWidth().padding(16.dp).testTag("blockedChat"))
+            else if (meta.canPost) Composer(
                 id, title, data, replyTo, editing,
                 onCancelReply = { replyTo = null }, onCancelEdit = { editing = null },
                 onSend = { text ->
@@ -392,6 +400,7 @@ fun ConversationScreen(
     }
 
     menuFor?.let { m -> ActionSheet(excerpt(m.body, 80), messageMenu(m)) { menuFor = null } }
+    reportMessage?.let { ReportDialog(it.authorId, it.id, onClose = { reportMessage = null }) }
     if (convMenu) ActionSheet(title, conversationMenu(ctx, meta, data, onMeeting = { meeting = true to null }, onRemindCustom = { reminderCustom = true to null }, onLeave = { confirmLeave = true })) { convMenu = false }
     deriving?.let { m -> DeriveDialog(meta, m, onClose = { deriving = null }, onCreated = { cid -> onOpenConversation(cid, null) }) }
     newIssue?.let { (_, m) -> NewIssueDialog(id, m?.id, m?.let { excerpt(it.body) } ?: "", onClose = { newIssue = null }, onCreated = onOpenIssue) }

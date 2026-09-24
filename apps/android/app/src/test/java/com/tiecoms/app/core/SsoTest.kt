@@ -32,6 +32,7 @@ class SsoTest {
                 return when (request.path?.substringBefore('?')) {
                     "$AUTH_BASE_PATH/sso/exchange" -> exchangeResponse
                     "/api/v1/bootstrap" -> MockResponse().setBody("""{"contract":"2026-09-23","me":{"id":"u1","name":"Ana SSO"},"conversations":[],"nuevo":true}""")
+                    "/api/v1/blocks" -> MockResponse().setBody("""{"userIds":[]}""")
                     else -> MockResponse().setResponseCode(404)
                 }
             }

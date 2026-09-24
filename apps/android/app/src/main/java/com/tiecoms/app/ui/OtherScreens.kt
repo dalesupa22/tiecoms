@@ -80,6 +80,8 @@ fun DetailsScreen(
     var newIssue by rememberSaveable { mutableStateOf(false) }
     var newEvent by rememberSaveable { mutableStateOf(false) }
     var confirmLeave by rememberSaveable { mutableStateOf(false) }
+    var reportUser by remember { mutableStateOf<String?>(null) }
+    var blockUser by remember { mutableStateOf<com.tiecoms.app.core.PersonDTO?>(null) }
     val title = meta?.let { Names.conversationTitle(it, data, stringResource(R.string.internal_default), stringResource(R.string.conversation)) } ?: stringResource(R.string.details)
     SimpleScaffold(title = title, onBack = onBack) {
         if (meta == null) {
@@ -94,6 +96,7 @@ fun DetailsScreen(
         val issues = state.issues.values.filter { it.conversationId == id && !it.closed }
         val upcoming = state.events.values.filter { it.conversationId == id && it.cancelledAt == null && (parseInstant(it.endsAt)?.isAfter(java.time.Instant.now()) == true) }.sortedBy { it.startsAt }.take(5)
         LaunchedEffect(id) {
+            runCatching { client.loadBlocks() }
             runCatching { client.loadEvents(java.time.Instant.now().minusSeconds(3600), java.time.Instant.now().plusSeconds(60L * 86400), id) }
             runCatching { client.loadIssues(conversationId = id) }
         }
@@ -149,15 +152,17 @@ fun DetailsScreen(
                 items(issues, key = { "i" + it.id }) { Box(Modifier.padding(horizontal = 16.dp)) { IssueRow(it, data, showWhere = false, onOpen = onOpenIssue) } }
             }
             item { SectionHeader("${stringResource(R.string.participants)} · ${members.size}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp).padding(top = 8.dp).semantics { heading() }) }
-            items(members, key = { it.id }) { PersonRow(it, data, onDirect = if (it.id != data.me.id && meta.kind != "direct") ({
+            items(members, key = { it.id }) { PersonRow(it, data, onDirect = if (it.id != data.me.id && meta.kind != "direct" && it.id !in state.blockedUserIds) ({
                 scope.launch { runCatching { client.openDirect(it.id) }.onSuccess(onOpenConversation).onFailure { e -> container.toast(errorText(ctx, e)) } }
-            }) else null) }
+            }) else null, blocked = it.id in state.blockedUserIds, onReport = { reportUser = it.id }, onBlock = { blockUser = it }) }
             if (guests.isNotEmpty()) {
                 item { SectionHeader("${stringResource(R.string.guests)} · ${guests.size}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp).semantics { heading() }) }
-                items(guests, key = { it.id }) { PersonRow(it, data, onDirect = null) }
+                items(guests, key = { it.id }) { PersonRow(it, data, onDirect = null, blocked = it.id in state.blockedUserIds, onReport = { reportUser = it.id }, onBlock = { blockUser = it }) }
             }
         }
         if (newIssue) NewIssueDialog(id, null, "", onClose = { newIssue = false }, onCreated = onOpenIssue)
+        reportUser?.let { ReportDialog(it, onClose = { reportUser = null }) }
+        blockUser?.let { BlockUserDialog(it.id, it.name, it.id in state.blockedUserIds, onClose = { blockUser = null }) }
         if (newEvent) EventDialog(id, onClose = { newEvent = false })
         if (confirmLeave) AlertDialog(
             onDismissRequest = { confirmLeave = false }, text = { Text(stringResource(R.string.chat_leave_confirm)) },
@@ -171,7 +176,7 @@ fun DetailsScreen(
 }
 
 @Composable
-private fun PersonRow(p: com.tiecoms.app.core.PersonDTO, data: com.tiecoms.app.core.BootstrapDTO, onDirect: (() -> Unit)?) {
+private fun PersonRow(p: com.tiecoms.app.core.PersonDTO, data: com.tiecoms.app.core.BootstrapDTO, onDirect: (() -> Unit)?, blocked: Boolean, onReport: () -> Unit, onBlock: () -> Unit) {
     val org = Names.org(data, p.orgId)
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
         PersonAvatar(p, data, size = 40.dp, orgBadge = true)
@@ -189,6 +194,12 @@ private fun PersonRow(p: com.tiecoms.app.core.PersonDTO, data: com.tiecoms.app.c
                     if (p.guestUntil != null) stringResource(R.string.guest_until, dateText(p.guestUntil)) else stringResource(R.string.guest),
                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("guest-${p.id}"),
                 )
+            }
+            if (p.id != data.me.id) {
+                TextButton(onClick = onReport, modifier = Modifier.testTag("report-user-${p.id}")) { Text(stringResource(R.string.safety_report_user)) }
+                TextButton(onClick = onBlock, modifier = Modifier.testTag("block-user-${p.id}")) {
+                    Text(stringResource(if (blocked) R.string.safety_unblock_action else R.string.safety_block_action), color = MaterialTheme.colorScheme.error)
+                }
             }
         }
         if (onDirect != null) TextButton(onClick = onDirect) { Text("✉ " + stringResource(R.string.common_direct_message), style = MaterialTheme.typography.labelMedium) }
@@ -236,6 +247,8 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
             NavRow("👤 " + stringResource(R.string.profile_edit), null, tag = "rowProfile") { onNavigate("profile") }
             HorizontalDivider()
             NavRow("📁 " + stringResource(R.string.nav_files), null, tag = "rowFiles") { onNavigate("files") }
+            HorizontalDivider()
+            NavRow(stringResource(R.string.safety_blocked_users), null, tag = "rowBlockedUsers") { onNavigate("blocked-users") }
             HorizontalDivider()
             if (org != null) {
                 NavRow(stringResource(R.string.settings_team), listOfNotNull(org.name,
@@ -287,6 +300,7 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
             }
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
+            LegalLinks()
             OutlinedButton(onClick = { confirmLogout = true }, modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth().heightIn(min = 48.dp).testTag("logout")) {
                 Text(stringResource(R.string.logout), color = MaterialTheme.colorScheme.error)
             }

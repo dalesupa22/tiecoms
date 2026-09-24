@@ -62,6 +62,7 @@ data class ClientState(
     val waRevision: Int = 0,
     /** Sube cuando cambia algún árbol de archivos (`drive.updated`): la pantalla Archivos recarga. */
     val driveRevision: Int = 0,
+    val blockedUserIds: Set<String> = emptySet(),
 )
 
 /** Avisos puntuales para sonidos y notificaciones. */
@@ -291,6 +292,8 @@ class TieComsClient(
     private suspend fun afterLogin() {
         startAttempts = 0
         loadBootstrapInternal()
+        // Load safety preferences before showing content or starting realtime.
+        loadBlocks()
         val me = s.data!!.me.id
         val saved = storage.get("u:$me:outbox")?.let { runCatching { TcJson.decodeFromString(ListSerializer(PendingMessage.serializer()), it) }.getOrNull() } ?: emptyList()
         setState { copy(status = SessionStatus.READY, pending = saved.map { if (it.status == "sending") it.copy(status = "pending") else it }) }
@@ -350,6 +353,7 @@ class TieComsClient(
         if (s.status != SessionStatus.READY) return
         try {
             loadBootstrapInternal()
+            runCatching { loadBlocks() }
             for (c in s.data?.conversations ?: emptyList()) {
                 val local = s.conversations[c.id]
                 if (local?.loaded == true && c.lastEventSeq > local.lastEventSeq) scope.launch { catchUp(c.id) }
@@ -375,7 +379,9 @@ class TieComsClient(
 
     private fun onAccountEvent(e: AccountEvent) {
         when (e) {
-            is AccountEvent.ScopeChanged -> scheduleBootstrap()
+            is AccountEvent.ScopeChanged -> {
+                scope.launch { runCatching { loadBlocks() }; scheduleBootstrap() }
+            }
             is AccountEvent.ReadUpdated -> {
                 val c = meta(e.conversationId) ?: return
                 if (e.seq > c.lastReadSeq) patchMeta(c.id) {
@@ -423,7 +429,7 @@ class TieComsClient(
             // con mensajes escritos mientras estábamos desconectados, eso cuenta como recuperación.
             val createdAt = runCatching { Instant.parse(e.message.createdAt).toEpochMilli() }.getOrDefault(Long.MAX_VALUE)
             // Silenciada: sin sonido ni notificación.
-            if (fresh && !muted && e.message.authorId != myId && e.message.kind != "system" && createdAt >= liveSince) _signals.tryEmit(ClientSignal.Incoming(e.message))
+            if (fresh && !muted && e.message.authorId != myId && e.message.authorId !in s.blockedUserIds && e.message.kind != "system" && createdAt >= liveSince) _signals.tryEmit(ClientSignal.Incoming(e.message))
         }
         val local = s.conversations[e.conversationId]
         if (local?.loaded != true) {
@@ -892,6 +898,28 @@ class TieComsClient(
     }
     suspend fun removeMember(conversationId: String, userId: String) = withContext(dispatcher) {
         req("DELETE", "/conversations/$conversationId/members/$userId", null, JsonElement.serializer()); loadBootstrapInternal(); Unit
+    }
+
+    // ---------- Seguridad de la comunidad ----------
+    suspend fun loadBlocks() = withContext(dispatcher) {
+        val result = req("GET", "/blocks", null, BlocksResult.serializer())
+        setState { copy(blockedUserIds = result.userIds.toSet()) }
+    }
+
+    suspend fun setUserBlocked(userId: String, blocked: Boolean) = withContext(dispatcher) {
+        req(if (blocked) "PUT" else "DELETE", "/blocks/${enc(userId)}", if (blocked) buildJsonObject {} else null, JsonElement.serializer())
+        setState { copy(blockedUserIds = if (blocked) blockedUserIds + userId else blockedUserIds - userId) }
+        loadBootstrapInternal()
+    }
+
+    suspend fun reportContent(userId: String?, messageId: String?, reason: String) = withContext(dispatcher) {
+        require(userId != null || messageId != null)
+        require(reason.trim().length in 5..2000)
+        req("POST", "/reports", buildJsonObject {
+            userId?.let { put("userId", JsonPrimitive(it)) }
+            messageId?.let { put("messageId", JsonPrimitive(it)) }
+            put("reason", JsonPrimitive(reason.trim()))
+        }, IdResult.serializer()).id
     }
 
     // ---------- Eliminar la cuenta ----------

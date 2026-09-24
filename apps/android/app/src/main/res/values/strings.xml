@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">TieComs</string>
+    <string name="app_name" translatable="false">TieComs</string>
     <string name="tagline">One network across the companies you work with. Everyone sees their own scope.</string>
     <string name="cd_logo">TieComs logo</string>
     <string name="email">Work email</string>

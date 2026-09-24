@@ -5,6 +5,7 @@ página; si una frase de origen deja de existir, el build falla para no publicar
 una mezcla de idiomas.
 """
 from pathlib import Path
+import hashlib
 import json
 import shutil
 
@@ -18,6 +19,10 @@ for name in ['landing.css', 'landing.js', 'relay.css', 'relay.js']:
     shutil.copy2(src / name, dist / name)
 
 landing = (src / 'landing.html').read_text()
+# Versiona CSS/JS por contenido: Cloudflare los guarda horas en caché.
+for name in ['landing.css', 'landing.js', 'relay.css', 'relay.js']:
+    v = hashlib.sha256((src / name).read_bytes()).hexdigest()[:10]
+    landing = landing.replace(f'"/{name}"', f'"/{name}?v={v}"')
 (dist / 'index.html').write_text(landing)
 
 english, missing = landing, []

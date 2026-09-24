@@ -58,6 +58,8 @@ struct UserDTO: Codable, Equatable, Sendable {
     var title: String?
     var area: String?
     var primaryOrgId: String?
+    /// Ruta relativa de la foto (/api/v1/avatars/<uuid>) o nil.
+    var avatarUrl: String?
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -68,6 +70,7 @@ struct UserDTO: Codable, Equatable, Sendable {
         title = c.o("title")
         area = c.o("area")
         primaryOrgId = c.o("primaryOrgId")
+        avatarUrl = c.o("avatarUrl")
     }
 }
 
@@ -106,6 +109,8 @@ struct PersonDTO: Codable, Equatable, Identifiable, Sendable {
     var area: String?
     var guest: Bool
     var guestUntil: String?
+    /// Ruta relativa de la foto (/api/v1/avatars/<uuid>) o nil: se muestran iniciales.
+    var avatarUrl: String?
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -117,6 +122,7 @@ struct PersonDTO: Codable, Equatable, Identifiable, Sendable {
         area = c.o("area")
         guest = c.v("guest", false)
         guestUntil = c.o("guestUntil")
+        avatarUrl = c.o("avatarUrl")
     }
 }
 
@@ -147,7 +153,11 @@ struct WorkspaceDTO: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-enum ConversationKind: String, Codable, Sendable { case group, `internal`, direct }
+/// `multi` = chat grupal entre personas (de una o varias empresas) que no vive en un espacio.
+enum ConversationKind: String, Codable, Sendable { case group, `internal`, direct, multi
+    /// Directos y chats grupales van juntos en la lista (no pertenecen a un espacio).
+    var isChat: Bool { self == .direct || self == .multi }
+}
 
 struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
     var id: String
@@ -223,6 +233,8 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
     var replyTo: String?
     var mergedFrom: String?
     var forwarded: ForwardedInfo?
+    /// Vista previa del primer enlace; llega después del envío con `message.updated`.
+    var linkPreview: LinkPreviewDTO?
     var createdAt: String
     var editedAt: String?
     var deletedAt: String?
@@ -246,6 +258,7 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
         replyTo = c.o("replyTo")
         mergedFrom = c.o("mergedFrom")
         forwarded = c.o("forwarded")
+        linkPreview = c.o("linkPreview")
         createdAt = c.v("createdAt", "")
         editedAt = c.o("editedAt")
         deletedAt = c.o("deletedAt")
@@ -255,6 +268,35 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
          body: String, createdAt: String) {
         self.id = id; self.conversationId = conversationId; self.seq = seq; self.authorId = authorId
         self.clientMessageId = clientMessageId; self.kind = kind; self.body = body; self.createdAt = createdAt
+    }
+}
+
+/// Vista previa de un enlace. `imageUrl` es relativa al API (/api/v1/previews/<uuid>), pública y cacheable.
+struct LinkPreviewDTO: Codable, Equatable, Sendable {
+    var url: String
+    var title: String?
+    var description: String?
+    var siteName: String?
+    var imageUrl: String?
+
+    init(url: String, title: String? = nil, description: String? = nil, siteName: String? = nil, imageUrl: String? = nil) {
+        self.url = url; self.title = title; self.description = description; self.siteName = siteName; self.imageUrl = imageUrl
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        url = try c.decode(String.self, forKey: AnyKey("url"))
+        title = c.o("title")
+        description = c.o("description")
+        siteName = c.o("siteName")
+        imageUrl = c.o("imageUrl")
+    }
+
+    /// Sitio para mostrar: siteName o el host sin «www.».
+    var host: String {
+        if let s = siteName, !s.isEmpty { return s }
+        let h = URL(string: url)?.host ?? url
+        return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
     }
 }
 
@@ -421,6 +463,7 @@ enum AccountEvent: Decodable, Equatable, Sendable {
     case reminderDue(ReminderDTO)
     case prefsUpdated(conversationId: String?, workspaceId: String?)
     case whatsappUpdated(accountId: String)
+    case driveUpdated
     case other(type: String)
 
     init(from decoder: Decoder) throws {
@@ -433,6 +476,7 @@ enum AccountEvent: Decodable, Equatable, Sendable {
             if let r: ReminderDTO = c.o("reminder") { self = .reminderDue(r) } else { self = .other(type: type) }
         case "prefs.updated": self = .prefsUpdated(conversationId: c.o("conversationId"), workspaceId: c.o("workspaceId"))
         case "whatsapp.updated": self = .whatsappUpdated(accountId: c.v("accountId", ""))
+        case "drive.updated": self = .driveUpdated
         default: self = .other(type: type)
         }
     }

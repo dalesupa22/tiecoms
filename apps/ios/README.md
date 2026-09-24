@@ -25,6 +25,23 @@ Especificación común: `SPEC.md` y `SPEC-v2.md` del coordinador.
     correo), editar ("(editado)") y eliminar ("Mensaje eliminado").
   - Barra de fijados, etiqueta "Reenviado desde…", tarjeta de resultado de una derivada (`mergedFrom`),
     barra de linaje (de dónde viene, derivadas, devolver el resultado) y tarjetas de reunión en el chat.
+- **Chats entre personas** (botón ✎ de Inicio → «Nuevo chat»):
+  - Personas de `bootstrap.people` agrupadas por empresa (primero «Tu equipo», luego las demás por nombre y al
+    final terceros), con buscador por nombre, cargo, área o empresa y chips de seleccionados.
+  - Una persona abre su directo; varias crean un chat grupal `multi` (`POST /chats`), con nombre opcional y los
+    logos de las empresas involucradas. Sin nombre, el título son los primeros nombres («Mateo, Ana y 2 más»).
+  - En Inicio los `multi` van con los directos (sección «Chats») con caritas apiladas. En Detalles: cargo · área ·
+    empresa, «Agregar al grupo» (`history: now`) y «Salir del grupo».
+- **Vista previa de enlaces**: los enlaces del texto son tocables y, cuando llega `message.updated` con
+  `linkPreview`, se pinta la tarjeta (miniatura pública `/api/v1/previews/…`, sitio, título y descripción).
+- **Reenviar a otro chat**: hoja con buscador, selección de hasta 10 chats y comentario opcional. Todo va por
+  la cola persistente (cada envío con su `clientMessageId`).
+- **Perfil** (Ajustes → Editar perfil): nombre, cargo y área (`PATCH /me`); foto con PhotosPicker, recortada al
+  centro a 512×512 JPEG (`POST /me/avatar`, máx. 3 MB) y «Quitar foto». Las fotos se ven en todos los avatares
+  (iniciales de respaldo) con caché en memoria y URLCache.
+- **Archivos** (Ajustes o menú ⋯ de Inicio): «Mis archivos» y las carpetas de cada espacio; navegar, crear
+  carpeta, subir (octet-stream + `x-file-type`, hasta 25 MB) y abrir con la vista rápida del sistema (Compartir).
+  `drive.updated` recarga la carpeta abierta.
 - **Preferencias**: fijar arriba (conversaciones y espacios) y silenciar (1 h, 8 h, 1 semana o hasta
   que se reactive). Una conversación silenciada no suena ni notifica, pero cuenta como no leída.
 - **Asuntos**: filtros Míos / Abiertos / Cerrados agrupados por espacio. El detalle tiene estado,
@@ -81,11 +98,12 @@ apps/ios/
       SocketIOClient.swift    WebSocket propio: ping/pong, vigilancia, ACK, backoff 0,5→30 s con jitter
       APIClient.swift         HTTP, refresh de vuelo único, AuthRoutes (base /api/v1/auth)
       AppStore.swift          estado y sincronización (cursores, catch-up, cola, eventos nuevos, pestañas y enlaces)
-      AppStore+Features.swift edición, fijados, prefs, asuntos, agenda, recordatorios, derivar, dominios, WhatsApp, eliminar cuenta
+      AppStore+Features.swift edición, fijados, prefs, asuntos, agenda, recordatorios, derivar, reenviar, chats, perfil, archivos, dominios, WhatsApp, eliminar cuenta
       SSO.swift, SharedText.swift, Storage.swift (Keychain del grupo, ShareTargets), Feedback.swift (sonidos, hápticos, avisos)
       DeepLink.swift          /c /w /invite /signup /asuntos /agenda /trazo /whatsapp /share (tiecoms://auth/* reservado al SSO)
     UI/                       RootView (pestañas, splash, toast), Home, Conversation, Menus, Sheets, IssuesViews,
-                              AgendaViews, MoreViews (Trazo, Recordatorios, WhatsApp, Dominios, Eliminar cuenta), Splash
+                              AgendaViews, MoreViews (Trazo, Recordatorios, WhatsApp, Dominios, Eliminar cuenta), Splash,
+                              ChatsViews (nuevo chat, sumar personas, reenviar, vista previa), ProfileFilesViews (perfil, archivos)
     Resources/                Info.plist (generado), entitlements, PrivacyInfo, Assets (AppIcon, wordmark por capas), Sounds/*.caf, es/en
   TieComsShare/               extensión Compartir (SwiftUI) + Info.plist + entitlements
   TieComsTests/               unitarias + integración (IntegrationTests v1, IntegrationV2Tests)
@@ -133,6 +151,17 @@ TEST_RUNNER_TC_DELETE_API=http://localhost:3042 TEST_RUNNER_TC_SHOTS=/tmp/shots 
   xcodebuild test -scheme TieComs -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
+- v3 (chats grupales, vista previa, perfil, archivos) necesita un API con almacenamiento y worker. Se probó con
+  una base propia y el S3 falso del API:
+  ```bash
+  node apps/api/test/fake-s3.mjs 59043 &
+  # entorno = .env.mobile con PORT=3043, otra base y S3_BUCKET=local S3_ENDPOINT=http://localhost:59043
+  # AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=y; levantar src/server.ts y src/worker.ts con ese entorno
+  API_URL=http://localhost:3043 FIXTURE_OUT=/tmp/fx.json node scripts/mobile-fixture.mjs
+  ```
+  Luego se siembran la tercera persona, el chat `multi` (`multiId` en el fixture), mensajes con enlaces y una
+  carpeta, y se corren `TEST_RUNNER_TC_V3=1` (IntegrationV3Tests) y `TEST_RUNNER_TC_UI_V3=1`
+  (`testV3ChatsLinksForwardProfileFiles`, capturas con `TC_SHOTS`).
 - `scripts/realtime-peer2.mjs` es propio de iOS v2. `realtime-peer.mjs` no se cambió (lo usa Android).
   El par v2:
   - responde "eco: …" a los mensajes de A;

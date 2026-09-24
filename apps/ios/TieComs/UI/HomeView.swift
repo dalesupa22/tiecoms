@@ -3,6 +3,7 @@ import SwiftUI
 struct HomeView: View {
     @Environment(AppStore.self) private var store
     @State private var query = ""
+    @State private var newChat = false
 
     var body: some View {
         @Bindable var store = store
@@ -70,6 +71,7 @@ struct HomeView: View {
                     Button { store.homePath.append(.reminders) } label: {
                         Label(store.reminders.isEmpty ? L("rem.title") : "\(L("rem.title")) (\(store.reminders.count))", systemImage: "alarm")
                     }
+                    Button { store.homePath.append(.files) } label: { Label(L("nav.files"), systemImage: "folder") }
                     Button { store.homePath.append(.trazo) } label: { Label(L("nav.trazo"), systemImage: "arrow.triangle.branch") }
                     Button { store.homePath.append(.whatsapp) } label: { Label(L("nav.whatsapp"), systemImage: "message") }
                 } label: {
@@ -78,7 +80,13 @@ struct HomeView: View {
                 .accessibilityLabel(L("menu.open"))
                 .accessibilityIdentifier("home.more")
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { newChat = true } label: { Image(systemName: "square.and.pencil") }
+                    .accessibilityLabel(L("chat.new"))
+                    .accessibilityIdentifier("home.newChat")
+            }
         }
+        .sheet(isPresented: $newChat) { NewChatSheet() }
     }
 }
 
@@ -156,7 +164,9 @@ struct ConversationRow: View {
 
     @ViewBuilder private var icon: some View {
         if c.kind == .direct, let other = Naming.otherInDirect(d, c) {
-            Avatar(name: other.name, org: Naming.org(d, other.orgId), isAgent: other.kind == "agent", size: 44)
+            Avatar(person: other, org: Naming.org(d, other.orgId), size: 44, badge: true)
+        } else if c.kind == .multi {
+            StackedAvatars(d: d, c: c, box: 44)
         } else {
             Image(systemName: c.kind == .internal ? "lock.fill" : "number")
                 .font(.system(size: 18, weight: .semibold))
@@ -170,6 +180,7 @@ struct ConversationRow: View {
     private func accessibilityText(title: String, preview: String, time: String) -> String {
         var parts = [title]
         if c.kind == .internal { parts.append(L("kind.internalShort")) }
+        if c.kind == .multi { parts.append(Naming.subtitle(d, c)) }
         if c.isMuted { parts.append(L("side.muted")) }
         if c.pinnedAt != nil { parts.append(L("side.pinned")) }
         if c.unread > 0 { parts.append(L("a11y.unread", ["n": c.unread])) }

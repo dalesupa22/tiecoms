@@ -292,8 +292,8 @@
   "Wrong email or password"
  ],
  "home.directs": [
-  "Mensajes directos",
-  "Direct messages"
+  "Chats",
+  "Chats"
  ],
  "home.emptyBody": [
   "Cuando otra empresa te invite a un espacio, o crees uno desde la web, tus conversaciones aparecerán aquí.",
@@ -610,5 +610,25 @@
  "tab.home": [
   "Inicio",
   "Home"
+ ],
+ "profile.tooBig": [
+  "La foto pesa más de 3 MB.",
+  "The photo is larger than 3 MB."
+ ],
+ "profile.photoHintIOS": [
+  "Se recorta en cuadrado al centro.",
+  "Cropped to a centred square."
+ ],
+ "files.emptyHintIOS": [
+  "Usa «Subir archivos» en el botón +. Hasta 25 MB cada uno.",
+  "Use “Upload files” in the + button. Up to 25 MB each."
+ ],
+ "link.open": [
+  "Abrir enlace de {host}",
+  "Open link to {host}"
+ ],
+ "fwd.limit": [
+  "Hasta {n} chats a la vez",
+  "Up to {n} chats at once"
  ]
 }

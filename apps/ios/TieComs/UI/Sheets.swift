@@ -229,59 +229,7 @@ struct ConversationIssuesSheet: View {
     }
 }
 
-// MARK: Reenviar
-
-struct ForwardSheet: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
-    let source: MessageDTO
-    @State private var query = ""
-    @State private var target: String?
-    @State private var comment = ""
-
-    var body: some View {
-        NavigationStack {
-            if let d = store.data {
-                let list = d.conversations.filter {
-                    $0.canPost && $0.id != source.conversationId && (query.isEmpty || Naming.title(d, $0).localizedCaseInsensitiveContains(query))
-                }
-                Form {
-                    Section { Text("“\(excerpt(source.body, 240))”").italic() }
-                    Section(L("fwd.pick")) {
-                        ForEach(list) { c in
-                            Button { target = c.id } label: {
-                                HStack {
-                                    VStack(alignment: .leading) {
-                                        Text(Naming.title(d, c)).foregroundStyle(Theme.textPrimary)
-                                        Text(d.workspaces.first { $0.id == c.workspaceId }?.name ?? L("kind.direct")).font(.caption).foregroundStyle(Theme.textSecondary)
-                                    }
-                                    Spacer()
-                                    if target == c.id { Image(systemName: "checkmark").foregroundStyle(Theme.accentText) }
-                                }
-                            }
-                            .accessibilityAddTraits(target == c.id ? .isSelected : [])
-                        }
-                    }
-                    Section { TextField(L("fwd.comment"), text: $comment) }
-                }
-                .searchable(text: $query, prompt: L("fwd.search"))
-                .navigationTitle(L("fwd.title"))
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button(L("fwd.send")) {
-                            guard let target else { return }
-                            store.forward(source, to: target, comment: comment)
-                            store.show(L("toast.sent"))
-                            dismiss()
-                        }.disabled(target == nil)
-                    }
-                }
-            }
-        }
-    }
-}
+// Reenviar a otros chats: ForwardSheet en ChatsViews.swift.
 
 // MARK: Fijados
 
@@ -299,7 +247,7 @@ struct PinsSheet: View {
                     ForEach(list ?? []) { m in
                         let p = Naming.person(d, m.authorId)
                         HStack(alignment: .top, spacing: 10) {
-                            Avatar(name: p?.name ?? "?", org: Naming.org(d, p?.orgId), size: 30)
+                            Avatar(name: p?.name ?? "?", org: Naming.org(d, p?.orgId), size: 30, photo: p?.avatarUrl)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(p?.name ?? L("common.participant")).font(.caption.weight(.semibold))
                                 Text(excerpt(m.body, 140)).font(.subheadline)

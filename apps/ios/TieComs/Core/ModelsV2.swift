@@ -366,3 +366,77 @@ struct ListOf<T: Decodable>: Decodable {
         max = c.intOpt("max")
     }
 }
+
+// MARK: - Archivos (árbol de carpetas)
+
+struct DriveFolderDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var parentId: String?
+    var name: String
+    var createdBy: String?
+    var createdAt: String
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        parentId = c.o("parentId")
+        name = c.v("name", "")
+        createdBy = c.o("createdBy")
+        createdAt = c.v("createdAt", "")
+    }
+}
+
+struct DriveFileDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var folderId: String?
+    var name: String
+    var contentType: String
+    var size: Int
+    var createdBy: String?
+    var createdAt: String
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        folderId = c.o("folderId")
+        name = c.v("name", "")
+        contentType = c.v("contentType", "application/octet-stream")
+        size = c.int("size")
+        createdBy = c.o("createdBy")
+        createdAt = c.v("createdAt", "")
+    }
+}
+
+/// Un árbol completo: «Mis archivos» (workspaceId nil) o el de un espacio.
+struct DriveTreeDTO: Decodable, Equatable, Sendable {
+    var workspaceId: String?
+    var folders: [DriveFolderDTO]
+    var files: [DriveFileDTO]
+    var canManageAll: Bool
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        workspaceId = c.o("workspaceId")
+        folders = c.lossyArray("folders")
+        files = c.lossyArray("files")
+        canManageAll = c.v("canManageAll", false)
+    }
+
+    func folders(in parent: String?) -> [DriveFolderDTO] {
+        folders.filter { $0.parentId == parent }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+    func files(in folder: String?) -> [DriveFileDTO] {
+        files.filter { $0.folderId == folder }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+}
+
+/// Resultado de POST /chats: con una persona, el directo existente; con varias, un chat grupal.
+struct CreateChatResult: Decodable, Sendable {
+    var id: String
+    var kind: ConversationKind
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        kind = ConversationKind(rawValue: c.v("kind", "multi")) ?? .multi
+    }
+}

@@ -53,7 +53,7 @@ struct IssueRow: View {
             let conv = store.meta(issue.conversationId)
             let f = IssueSort.flags(issue)
             HStack(spacing: 10) {
-                Avatar(name: owner?.name ?? "—", org: Naming.org(d, owner?.orgId), size: 32)
+                Avatar(name: owner?.name ?? "—", org: Naming.org(d, owner?.orgId), size: 32, photo: owner?.avatarUrl)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(issue.title).font(.body.weight(.semibold)).foregroundStyle(Theme.textPrimary).lineLimit(2)
                     Text([owner?.name ?? L("common.none"), showWhere ? conv.map { L("issue.in", ["name": Naming.title(d, $0)]) } : nil].compactMap { $0 }.joined(separator: " · "))

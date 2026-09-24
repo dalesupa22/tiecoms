@@ -25,7 +25,23 @@ enum Naming {
             if c.name == "Equipo interno" { return L("conv.defaultInternal") }
             return c.name ?? L("conv.defaultInternal")
         case .group: return c.name ?? L("chat.aConversation")
+        case .multi:
+            if let n = c.name, !n.isEmpty { return n }
+            return multiTitle(d, c)
         }
+    }
+
+    /// Chat grupal sin nombre: primeros nombres de los demás («Mateo, Ana, Laura y 2 más»).
+    static func multiTitle(_ d: BootstrapDTO, _ c: ConversationDTO) -> String {
+        let names = c.memberIds.filter { $0 != d.me.id }.compactMap { person(d, $0)?.name.split(separator: " ").first.map(String.init) }
+        if names.isEmpty { return L("chat.groupChat") }
+        if names.count > 3 { return names.prefix(3).joined(separator: ", ") + " " + L("chat.andMore", ["n": names.count - 3]) }
+        return names.joined(separator: ", ")
+    }
+
+    /// Personas del chat distintas de mí (para avatares apilados).
+    static func others(_ d: BootstrapDTO, _ c: ConversationDTO) -> [PersonDTO] {
+        c.memberIds.filter { $0 != d.me.id }.compactMap { person(d, $0) }
     }
 
     /// Empresas que participan en la conversación (por sus miembros).
@@ -48,7 +64,43 @@ enum Naming {
             guard let other = otherInDirect(d, c) else { return "" }
             return [other.title, org(d, other.orgId)?.name ?? (other.guest ? L("common.guest") : nil)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         }
+        if c.kind == .multi {
+            let orgs = companies(d, c).prefix(3).map(\.name).joined(separator: ", ")
+            return [L("chat.groupChat"), orgs].filter { !$0.isEmpty }.joined(separator: " · ")
+        }
         return companies(d, c).map(\.name).joined(separator: " · ")
+    }
+
+    /// «cargo · área» de una persona (vacío si no tiene ninguno).
+    static func roleLine(_ p: PersonDTO) -> String {
+        [p.title, p.area].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    struct OrgGroup: Identifiable {
+        /// id de la empresa, o "_guests" para terceros sin empresa.
+        var id: String
+        var org: OrganizationDTO?
+        var isMine: Bool
+        var people: [PersonDTO]
+    }
+
+    /// Personas para un chat nuevo: solo humanas, sin mí ni `exclude`, filtradas por nombre, cargo, área o empresa,
+    /// agrupadas: primero mi empresa, luego las demás por nombre y al final los terceros (como PeoplePicker de la web).
+    static func peopleByOrg(_ d: BootstrapDTO, query: String, exclude: Set<String> = []) -> [OrgGroup] {
+        let fold: (String) -> String = { $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
+        let q = fold(query.trimmingCharacters(in: .whitespaces))
+        let people = d.people.filter { $0.kind == "human" && $0.id != d.me.id && !exclude.contains($0.id) }
+            .filter { p in q.isEmpty || [p.name, p.title, p.area, org(d, p.orgId)?.name].compactMap { $0 }.contains { fold($0).contains(q) } }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        var groups: [String: [PersonDTO]] = [:]
+        for p in people { groups[p.orgId.flatMap { org(d, $0) == nil ? nil : $0 } ?? "_guests", default: []].append(p) }
+        let mine = d.me.primaryOrgId
+        return groups.map { OrgGroup(id: $0.key, org: org(d, $0.key), isMine: $0.key == mine, people: $0.value) }
+            .sorted { a, b in
+                if a.isMine != b.isMine { return a.isMine }
+                if (a.id == "_guests") != (b.id == "_guests") { return b.id == "_guests" }
+                return (a.org?.name ?? "").localizedCaseInsensitiveCompare(b.org?.name ?? "") == .orderedAscending
+            }
     }
 
     static func authorLine(_ d: BootstrapDTO, _ authorId: String) -> (name: String, org: String?) {
@@ -63,7 +115,7 @@ enum Naming {
         var conversations: [ConversationDTO]
     }
 
-    /// Inicio: por espacio (grupos e internos), directos al final.
+    /// Inicio: por espacio (grupos e internos); directos y chats grupales juntos al final.
     static func sections(_ d: BootstrapDTO, filterWorkspace: String?, query: String) -> [Section] {
         let q = query.trimmingCharacters(in: .whitespaces).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
         func matches(_ c: ConversationDTO) -> Bool {
@@ -89,14 +141,14 @@ enum Naming {
                 return la > lb
             }
         for ws in workspaces {
-            let convs = d.conversations.filter { $0.workspaceId == ws.id && $0.kind != .direct && !pinnedIds.contains($0.id) && matches($0) }.sorted(by: byActivity)
+            let convs = d.conversations.filter { $0.workspaceId == ws.id && !$0.kind.isChat && !pinnedIds.contains($0.id) && matches($0) }.sorted(by: byActivity)
             if !convs.isEmpty { out.append(Section(id: ws.id, title: ws.name, workspace: ws, conversations: convs)) }
         }
         if filterWorkspace == nil {
             let wsIds = Set(d.workspaces.map(\.id))
-            let orphans = d.conversations.filter { c in c.kind != .direct && !pinnedIds.contains(c.id) && !(c.workspaceId.map(wsIds.contains) ?? false) && matches(c) }
+            let orphans = d.conversations.filter { c in !c.kind.isChat && !pinnedIds.contains(c.id) && !(c.workspaceId.map(wsIds.contains) ?? false) && matches(c) }
             if !orphans.isEmpty { out.append(Section(id: "_other", title: L("home.other"), workspace: nil, conversations: orphans.sorted(by: byActivity))) }
-            let directs = d.conversations.filter { $0.kind == .direct && !pinnedIds.contains($0.id) && matches($0) }.sorted(by: byActivity)
+            let directs = d.conversations.filter { $0.kind.isChat && !pinnedIds.contains($0.id) && matches($0) }.sorted(by: byActivity)
             if !directs.isEmpty { out.append(Section(id: "_directs", title: L("home.directs"), workspace: nil, conversations: directs)) }
         }
         return out

@@ -150,8 +150,10 @@ struct ConversationView: View {
                         }
                         .foregroundStyle(Theme.textPrimary)
                         let sub = Naming.subtitle(d, c)
-                        if !sub.isEmpty { Text(sub).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1) }
+                        if !sub.isEmpty { Text(sub).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1).truncationMode(.tail) }
                     }
+                    // Sin tope, un subtítulo largo (chat grupal con varias empresas) se recorta por ambos lados.
+                    .frame(maxWidth: 250)
                 }
                 .accessibilityLabel([Naming.title(d, c), Naming.subtitle(d, c)].filter { !$0.isEmpty }.joined(separator: ", "))
                 .accessibilityHint(L("chat.details"))
@@ -279,7 +281,9 @@ struct ConversationView: View {
                 quote: m.replyTo == nil ? nil : (quoted.map { q in (Naming.person(d, q.authorId)?.name ?? "", q.deletedAt != nil ? L("chat.deleted") : excerpt(q.body)) } ?? ("", L("reply.quoteMissing"))),
                 forwardedLabel: m.forwarded.map { forwardedLabel(d, $0) },
                 merged: m.mergedFrom.map { id in store.meta(id).map { L("lin.resultOf", ["name": Naming.title(d, $0)]) } ?? L("lin.resultHidden") },
-                pinned: store.pins[conversationId]?.contains(m.id) == true
+                pinned: store.pins[conversationId]?.contains(m.id) == true,
+                linkify: m.deletedAt == nil && m.kind == "text",
+                linkPreview: m.deletedAt == nil ? m.linkPreview : nil
             )
             .padding(.top, showAuthor ? 6 : 0)
             .contextMenu { if m.deletedAt == nil { messageMenu(d, c, m) } }
@@ -344,6 +348,8 @@ struct ConversationView: View {
             Button { sheet = .newIssue(m) } label: { Label(L("menu.issue"), systemImage: "checklist") }
             Button { sheet = .newEvent(m) } label: { Label(L("menu.meeting"), systemImage: "calendar.badge.plus") }
         }
+        Button { sheet = .forward(m) } label: { Label(L("menu.forwardChat"), systemImage: "arrowshape.turn.up.right") }
+            .accessibilityIdentifier("menu.forwardChat")
         Menu {
             Button { sheet = .forward(m) } label: { Label(L("fwd.tiecoms"), systemImage: "bubble.left.and.bubble.right") }
             Divider()
@@ -533,6 +539,10 @@ struct MessageBubble: View {
     var forwardedLabel: String? = nil
     var merged: String? = nil
     var pinned = false
+    /// Enlaces del texto tocables (solo mensajes de texto no eliminados).
+    var linkify = false
+    var linkPreview: LinkPreviewDTO? = nil
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         HStack {
@@ -565,11 +575,15 @@ struct MessageBubble: View {
                         Label(merged, systemImage: "arrow.uturn.backward").font(.caption.weight(.semibold))
                             .foregroundStyle(mine ? Color.white : Theme.accentText)
                     }
-                    Text(text)
-                        .font(.body)
-                        .italic(italic)
-                        .foregroundStyle(mine ? Color.white : Theme.textPrimary)
-                        .textSelection(.enabled)
+                    Group {
+                        if linkify { Text(Linkify.attributed(text)) } else { Text(text) }
+                    }
+                    .font(.body)
+                    .italic(italic)
+                    .foregroundStyle(mine ? Color.white : Theme.textPrimary)
+                    .tint(mine ? Color.white : Theme.accentText)
+                    .textSelection(.enabled)
+                    if let linkPreview { LinkPreviewCard(preview: linkPreview, mine: mine) }
                 }
                 .padding(.horizontal, 13).padding(.vertical, 8)
                 .background(
@@ -595,6 +609,14 @@ struct MessageBubble: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(a11yLabel)
         .accessibilityHint(status == .failed ? L("chat.retry") : "")
+        .accessibilityActions {
+            // Con VoiceOver la burbuja es un solo elemento: los enlaces se abren como acciones.
+            if linkify {
+                ForEach(Array(Linkify.links(in: text).prefix(3).enumerated()), id: \.offset) { _, l in
+                    Button(L("link.open", ["host": l.url.host ?? l.url.absoluteString])) { openURL(l.url) }
+                }
+            }
+        }
     }
 
     private var a11yLabel: String {
@@ -604,6 +626,7 @@ struct MessageBubble: View {
         if let quote { parts.append(L("reply.to", ["name": quote.author]) + ": " + quote.text) }
         if let merged { parts.append(merged) }
         parts.append(text)
+        if let p = linkPreview { parts.append([p.host, p.title].compactMap { $0 }.joined(separator: ": ")) }
         if pinned { parts.append(L("toast.pinned")) }
         switch status {
         case .sending: parts.append(L("chat.sending"))

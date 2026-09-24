@@ -4,6 +4,8 @@ import UserNotifications
 struct ConversationDetailsView: View {
     @Environment(AppStore.self) private var store
     let conversationId: String
+    @State private var adding = false
+    @State private var confirmLeave = false
 
     var body: some View {
         Group {
@@ -21,16 +23,29 @@ struct ConversationDetailsView: View {
                             if let ws = d.workspaces.first(where: { $0.id == c.workspaceId }) {
                                 Text("\(L("chat.space")): \(ws.name)").font(.subheadline).foregroundStyle(Theme.textSecondary)
                             }
-                            Text(c.kind == .internal
-                                 ? L("chat.scopeInternal", ["org": Naming.org(d, c.internalOrgId)?.name ?? ""])
-                                 : L("chat.scopeGroup"))
-                                .font(.footnote).foregroundStyle(Theme.textSecondary)
+                            if c.kind == .multi {
+                                let orgs = Naming.companies(d, c)
+                                HStack(spacing: 6) {
+                                    HStack(spacing: -4) { ForEach(orgs.prefix(5)) { OrgMark(org: $0, size: 20) } }
+                                    Text(Naming.subtitle(d, c)).font(.subheadline).foregroundStyle(Theme.textSecondary)
+                                }
+                            }
+                            if c.kind != .direct {
+                                Text(c.kind == .internal
+                                     ? L("chat.scopeInternal", ["org": Naming.org(d, c.internalOrgId)?.name ?? ""])
+                                     : c.kind == .multi ? L("chat.scopeMulti") : L("chat.scopeGroup"))
+                                    .font(.footnote).foregroundStyle(Theme.textSecondary)
+                            }
                         }
                         .padding(.vertical, 4)
                         .accessibilityElement(children: .combine)
                     }
                     if c.workspaceId != nil && c.kind != .direct { ConversationAgendaSection(conversationId: c.id) }
                     Section(L("details.participants", ["n": regular.count])) {
+                        if c.kind == .multi {
+                            Button { adding = true } label: { Label(L("dlg.addToGroup"), systemImage: "person.badge.plus") }
+                                .accessibilityIdentifier("details.addPeople")
+                        }
                         ForEach(regular) { p in PersonRow(d: d, p: p, isMe: p.id == d.me.id) }
                     }
                     if !guests.isEmpty {
@@ -38,8 +53,21 @@ struct ConversationDetailsView: View {
                             ForEach(guests) { p in PersonRow(d: d, p: p, isMe: p.id == d.me.id) }
                         }
                     }
+                    if c.kind == .multi {
+                        Section {
+                            Button(L("chat.leave"), role: .destructive) { confirmLeave = true }
+                                .accessibilityIdentifier("details.leave")
+                        }
+                    }
                 }
                 .listStyle(.insetGrouped)
+                .sheet(isPresented: $adding) { AddMembersSheet(conversationId: c.id) }
+                .confirmationDialog(L("chat.leaveConfirm"), isPresented: $confirmLeave, titleVisibility: .visible) {
+                    Button(L("chat.leave"), role: .destructive) {
+                        Task { do { try await store.leaveConversation(c.id) } catch { store.show(L10n.errorText(error)) } }
+                    }
+                    Button(L("common.cancel"), role: .cancel) {}
+                }
                 .scrollContentBackground(.hidden)
             } else {
                 ContentUnavailableView(L("chat.notFound"), systemImage: "lock.slash")
@@ -73,10 +101,10 @@ private struct PersonRow: View {
     var body: some View {
         let org = Naming.org(d, p.orgId)
         HStack(spacing: 12) {
-            Avatar(name: p.name, org: org, isAgent: p.kind == "agent", size: 38)
+            Avatar(person: p, org: org, size: 38, badge: true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(p.name + (isMe ? " " + L("common.you") : "")).font(.body)
-                let line = [p.title, org?.name ?? (p.guest ? L("common.guest") : L("common.noCompany"))].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                let line = [p.title, p.area, org?.name ?? (p.guest ? L("common.guest") : L("common.noCompany"))].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                 Text(line).font(.subheadline).foregroundStyle(Theme.textSecondary)
                 if p.guest {
                     Text(p.guestUntil != nil ? L("chat.guestUntil", ["date": L10n.shortDate(p.guestUntil)]) : L("common.guest"))
@@ -106,15 +134,17 @@ struct SettingsView: View {
                     let me = Naming.person(d, d.me.id)
                     let org = Naming.org(d, d.me.primaryOrgId)
                     HStack(spacing: 12) {
-                        Avatar(name: d.me.name, org: org, size: 44)
+                        Avatar(name: d.me.name, org: org, size: 56, photo: me?.avatarUrl ?? d.me.avatarUrl)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(d.me.name).font(.headline)
                             if let email = d.me.email { Text(email).font(.subheadline).foregroundStyle(Theme.textSecondary) }
-                            let line = [me?.title ?? d.me.title, org?.name].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                            let line = [me?.title ?? d.me.title, me?.area ?? d.me.area, org?.name].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                             if !line.isEmpty { Text(line).font(.subheadline).foregroundStyle(Theme.textSecondary) }
                         }
                     }
                     .accessibilityElement(children: .combine)
+                    NavigationLink(value: Route.profile) { Label(L("profile.edit"), systemImage: "person.crop.circle") }
+                        .accessibilityIdentifier("settings.editProfile")
                 }
             }
             Section {
@@ -147,6 +177,8 @@ struct SettingsView: View {
                 }
             }
             Section {
+                NavigationLink(value: Route.files) { Label(L("nav.files"), systemImage: "folder") }
+                    .accessibilityIdentifier("settings.files")
                 NavigationLink(value: Route.whatsapp) { Label(L("settings.whatsapp"), systemImage: "message") }
                 NavigationLink(value: Route.reminders) { Label(L("rem.title"), systemImage: "alarm") }
                 NavigationLink(value: Route.trazo) { Label(L("nav.trazo"), systemImage: "arrow.triangle.branch") }

@@ -173,7 +173,7 @@ struct EventDetailView: View {
                 ForEach(ev.invitees, id: \.userId) { i in
                     let p = Naming.person(d, i.userId)
                     HStack {
-                        Avatar(name: p?.name ?? "?", org: Naming.org(d, p?.orgId), size: 28)
+                        Avatar(name: p?.name ?? "?", org: Naming.org(d, p?.orgId), size: 28, photo: p?.avatarUrl)
                         Text(p?.name ?? L("common.participant"))
                         Spacer()
                         Text(L("cal.rsvp.\(i.rsvp.rawValue)")).font(.caption).foregroundStyle(Theme.textSecondary)

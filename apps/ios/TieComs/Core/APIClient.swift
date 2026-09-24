@@ -74,6 +74,19 @@ enum AppConfig {
     }
 }
 
+/// Rutas públicas que el API entrega relativas (fotos /api/v1/avatars/…, miniaturas /api/v1/previews/…):
+/// se les antepone el origen del API en uso.
+enum MediaURL {
+    nonisolated(unsafe) static var base: URL = AppConfig.apiBaseURL
+
+    static func absolute(_ path: String?, base: URL = MediaURL.base) -> URL? {
+        guard let path, !path.isEmpty else { return nil }
+        if path.hasPrefix("http://") || path.hasPrefix("https://") { return URL(string: path) }
+        let origin = base.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return URL(string: origin + (path.hasPrefix("/") ? path : "/" + path))
+    }
+}
+
 /// HTTP del API con renovación de sesión: un único refresh en vuelo, reintento
 /// una vez ante 401 y cierre de sesión si el refresh también devuelve 401.
 @MainActor
@@ -92,6 +105,7 @@ final class APIClient {
     init(baseURL: URL, secrets: SecretStore, session: URLSession? = nil) {
         self.baseURL = baseURL
         self.secrets = secrets
+        MediaURL.base = baseURL
         if let session { self.session = session } else {
             let cfg = URLSessionConfiguration.default
             cfg.timeoutIntervalForRequest = 20
@@ -113,7 +127,14 @@ final class APIClient {
         return URL(string: base + (path.hasPrefix("/api/") ? path : "/api/v1" + path))!
     }
 
-    private func raw(_ path: String, method: String = "GET", json: [String: Any]? = nil, auth: Bool = true) async throws -> (Data, HTTPURLResponse) {
+    /// Cuerpo crudo (fotos, archivos) en vez de JSON.
+    struct RawBody {
+        var data: Data
+        var contentType: String
+        var headers: [String: String] = [:]
+    }
+
+    private func raw(_ path: String, method: String = "GET", json: [String: Any]? = nil, body: RawBody? = nil, auth: Bool = true) async throws -> (Data, HTTPURLResponse) {
         var req = URLRequest(url: url(path))
         req.httpMethod = method
         req.setValue("ios", forHTTPHeaderField: "x-tiecoms-client")
@@ -122,6 +143,13 @@ final class APIClient {
         if let json {
             req.setValue("application/json", forHTTPHeaderField: "content-type")
             req.httpBody = try JSONSerialization.data(withJSONObject: json)
+        }
+        if let body {
+            req.setValue(body.contentType, forHTTPHeaderField: "content-type")
+            for (k, v) in body.headers { req.setValue(v, forHTTPHeaderField: k) }
+            req.httpBody = body.data
+            // Subidas de hasta 25 MB: más margen que el de las peticiones normales.
+            req.timeoutInterval = 180
         }
         if auth, let t = accessToken { req.setValue("Bearer \(t)", forHTTPHeaderField: "authorization") }
         do {
@@ -151,13 +179,19 @@ final class APIClient {
         return try decode(data)
     }
 
+    /// Petición autenticada con cuerpo crudo (foto de perfil, archivos).
+    func upload<T: Decodable>(_ path: String, method: String = "POST", body: RawBody) async throws -> T {
+        let data = try await requestData(path, method: method, body: body)
+        return try decode(data)
+    }
+
     @discardableResult
-    func requestData(_ path: String, method: String = "GET", json: [String: Any]? = nil) async throws -> Data {
+    func requestData(_ path: String, method: String = "GET", json: [String: Any]? = nil, body: RawBody? = nil) async throws -> Data {
         if accessToken == nil || Date() > accessExp.addingTimeInterval(-30) { _ = await refresh() }
-        var (data, res) = try await raw(path, method: method, json: json)
+        var (data, res) = try await raw(path, method: method, json: json, body: body)
         if res.statusCode == 401 {
             let r = await refresh()
-            if r == .ok { (data, res) = try await raw(path, method: method, json: json) }
+            if r == .ok { (data, res) = try await raw(path, method: method, json: json, body: body) }
         }
         if res.statusCode == 401 {
             signedOut()

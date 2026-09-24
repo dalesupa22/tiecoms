@@ -128,6 +128,9 @@ extension View {
             case .whatsapp: WhatsAppScreen()
             case .domains(let orgId): DomainsScreen(orgId: orgId)
             case .deleteAccount: DeleteAccountView()
+            case .profile: EditProfileView()
+            case .files: FilesRootView()
+            case .drive(let ws, let folder): DriveFolderView(workspaceId: ws, folderId: folder)
             }
         }
     }

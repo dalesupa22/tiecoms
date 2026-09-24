@@ -25,6 +25,10 @@ enum Route: Hashable {
     case whatsapp
     case domains(String)
     case deleteAccount
+    case profile
+    /// Archivos: raíz (lista de ámbitos) o una carpeta de un ámbito (workspaceId nil = «Mis archivos»).
+    case files
+    case drive(workspaceId: String?, folderId: String?)
 }
 
 enum AppTab: Hashable { case home, issues, agenda, settings }
@@ -59,6 +63,8 @@ final class AppStore {
     var events: [String: CalendarEventDTO] = [:]
     /// Sube cuando WhatsApp trae novedades: la pantalla vuelve a pedir la lista.
     var waRevision = 0
+    /// Sube cuando cambia algún árbol de archivos visible (drive.updated).
+    var driveRevision = 0
     /// Aviso breve (toast).
     var toast: String?
     /// Texto compartido hacia TieComs (tiecoms://share?text=…).
@@ -74,6 +80,15 @@ final class AppStore {
     var agendaPath: [Route] = []
     var settingsPath: [Route] = []
     var workspaceFilter: String?
+    /// Abre una pantalla en la pila de la pestaña visible.
+    func push(_ r: Route) {
+        switch tab {
+        case .home: homePath.append(r)
+        case .issues: issuesPath.append(r)
+        case .agenda: agendaPath.append(r)
+        case .settings: settingsPath.append(r)
+        }
+    }
     var alert: AppAlert?
     /// Invitación a un espacio abierta por enlace (hoja modal).
     var inviteToken: String?
@@ -301,6 +316,7 @@ final class AppStore {
             }
         case .prefsUpdated: scheduleBootstrap()
         case .whatsappUpdated: waRevision += 1
+        case .driveUpdated: driveRevision += 1
         case .other: break
         }
     }

@@ -75,17 +75,136 @@ struct Avatar: View {
     var org: OrganizationDTO?
     var isAgent = false
     var size: CGFloat = 40
-    var body: some View {
-        Text(isAgent ? "◇" : Naming.initials(name))
-            .font(.system(size: size * 0.36, weight: .semibold))
-            .foregroundStyle(isAgent ? Theme.cream : Color(css: org?.colorFg ?? "#5C554C"))
-            .frame(width: size, height: size)
-            .background(
-                RoundedRectangle(cornerRadius: isAgent ? 10 : size / 2)
-                    .fill(isAgent ? Theme.ink : Color(css: org?.colorBg ?? "#E0DACE"))
-            )
-            .accessibilityHidden(true)
+    /// Ruta relativa de la foto (/api/v1/avatars/…); sin foto o mientras carga, iniciales.
+    var photo: String? = nil
+    /// Marca de la empresa en la esquina (como la web con tamaño ≥ 30).
+    var badge = false
+
+    /// Avatar de una persona del snapshot (foto, iniciales o ◇ si es agente).
+    init(person: PersonDTO?, org: OrganizationDTO?, size: CGFloat = 40, badge: Bool = false) {
+        self.name = person?.name ?? "?"
+        self.org = org
+        self.isAgent = person?.kind == "agent"
+        self.size = size
+        self.photo = person?.avatarUrl
+        self.badge = badge
     }
+
+    init(name: String, org: OrganizationDTO?, isAgent: Bool = false, size: CGFloat = 40, photo: String? = nil, badge: Bool = false) {
+        self.name = name; self.org = org; self.isAgent = isAgent; self.size = size; self.photo = photo; self.badge = badge
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: isAgent ? 10 : size / 2)
+        ZStack {
+            shape.fill(isAgent ? Theme.ink : Color(css: org?.colorBg ?? "#E0DACE"))
+            Text(isAgent ? "◇" : Naming.initials(name))
+                .font(.system(size: size * 0.36, weight: .semibold))
+                .foregroundStyle(isAgent ? Theme.cream : Color(css: org?.colorFg ?? "#5C554C"))
+            if let url = MediaURL.absolute(photo) {
+                RemoteImage(url: url) { img in img.resizable().scaledToFill() }
+                    .frame(width: size, height: size)
+                    .clipShape(shape)
+            }
+        }
+        .frame(width: size, height: size)
+        .overlay(alignment: .bottomTrailing) {
+            if badge, let org {
+                OrgMark(org: org, size: max(12, size * 0.42))
+                    .overlay(RoundedRectangle(cornerRadius: size * 0.42 * 0.28).stroke(Theme.surface, lineWidth: 1.5))
+                    .offset(x: size * 0.08, y: size * 0.08)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// Caritas apiladas de un chat grupal (hasta 3). `box` > 0 las acomoda en un cuadro de ese lado
+/// (lista de chats: mismo ancho que el avatar de un directo); si no, en fila solapada como la web.
+struct StackedAvatars: View {
+    var d: BootstrapDTO
+    var c: ConversationDTO
+    var size: CGFloat = 24
+    var box: CGFloat = 0
+
+    var body: some View {
+        let others = Array(Naming.others(d, c).prefix(3))
+        Group {
+            if box > 0 { cluster(others) } else { row(others) }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func face(_ p: PersonDTO, _ s: CGFloat) -> some View {
+        Avatar(person: p, org: Naming.org(d, p.orgId), size: s)
+            .overlay(Circle().stroke(Theme.surface, lineWidth: 1.5))
+    }
+
+    @ViewBuilder private func row(_ others: [PersonDTO]) -> some View {
+        let step = size * 0.55
+        ZStack(alignment: .leading) {
+            ForEach(Array(others.enumerated()), id: \.element.id) { i, p in
+                face(p, size).offset(x: CGFloat(i) * step).zIndex(Double(3 - i))
+            }
+        }
+        .frame(width: size + CGFloat(max(0, others.count - 1)) * step, height: size, alignment: .leading)
+    }
+
+    @ViewBuilder private func cluster(_ others: [PersonDTO]) -> some View {
+        switch others.count {
+        case 0: Avatar(name: "?", org: nil, size: box)
+        case 1: face(others[0], box)
+        case 2:
+            let s = box * 0.68
+            ZStack(alignment: .topLeading) {
+                face(others[0], s)
+                face(others[1], s).offset(x: box - s, y: box - s)
+            }
+            .frame(width: box, height: box, alignment: .topLeading)
+        default:
+            let s = box * 0.56
+            ZStack(alignment: .topLeading) {
+                face(others[0], s).offset(x: (box - s) / 2, y: 0)
+                face(others[1], s).offset(x: 0, y: box - s)
+                face(others[2], s).offset(x: box - s, y: box - s)
+            }
+            .frame(width: box, height: box, alignment: .topLeading)
+        }
+    }
+}
+
+/// Imagen pública del API (fotos, miniaturas) con caché en memoria; URLCache guarda en disco
+/// según el cache-control inmutable que envía el servidor.
+struct RemoteImage<Content: View>: View {
+    let url: URL
+    @ViewBuilder var content: (Image) -> Content
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image { content(Image(uiImage: image)) } else { Color.clear }
+        }
+        .task(id: url) {
+            if let hit = RemoteImageCache.shared.object(forKey: url as NSURL) { image = hit; return }
+            image = nil
+            guard let (data, resp) = try? await RemoteImageCache.session.data(from: url),
+                  (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
+                  let img = UIImage(data: data) else { return }
+            RemoteImageCache.shared.setObject(img, forKey: url as NSURL)
+            image = img
+        }
+    }
+}
+
+enum RemoteImageCache {
+    static let shared: NSCache<NSURL, UIImage> = { let c = NSCache<NSURL, UIImage>(); c.countLimit = 300; return c }()
+    static let session: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.urlCache = URLCache(memoryCapacity: 8 << 20, diskCapacity: 80 << 20)
+        cfg.requestCachePolicy = .returnCacheDataElseLoad
+        cfg.timeoutIntervalForRequest = 20
+        return URLSession(configuration: cfg)
+    }()
 }
 
 /// Logo sobre su fondo crema (legible también en modo oscuro).

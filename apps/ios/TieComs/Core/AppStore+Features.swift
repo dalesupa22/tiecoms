@@ -214,11 +214,109 @@ extension AppStore {
     }
 
     /// Reenvía un mensaje a otra conversación conservando autor y origen.
+    /// Va por la cola persistente (`send`): cada envío tiene su clientMessageId y los reintentos lo reutilizan.
     func forward(_ source: MessageDTO, to target: String, comment: String?) {
         guard let d = data else { return }
-        if let comment, !comment.trimmingCharacters(in: .whitespaces).isEmpty { send(target, body: comment) }
+        if let comment, !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { send(target, body: comment) }
         let author = Naming.person(d, source.authorId)?.name
         send(target, body: source.body, forwarded: ForwardedInfo(source: .tiecoms, author: author, sentAt: source.createdAt, fromConversationId: source.conversationId))
+    }
+
+    /// Reenvío a varios chats (hasta 10, como la web). Devuelve cuántos destinos quedaron en cola.
+    @discardableResult
+    func forward(_ source: MessageDTO, to targets: [String], comment: String?) -> Int {
+        let list = Array(targets.prefix(AppStore.maxForwardTargets))
+        for t in list { forward(source, to: t, comment: comment) }
+        return list.count
+    }
+
+    nonisolated static let maxForwardTargets = 10
+
+    // MARK: Chats (directos y grupales entre empresas)
+
+    /// POST /chats: con una persona devuelve el directo (existente o nuevo); con varias, un chat `multi`.
+    /// Recarga el snapshot para que el chat ya esté en la lista al abrirlo.
+    @discardableResult
+    func createChat(userIds: [String], name: String?) async throws -> CreateChatResult {
+        var body: [String: Any] = ["userIds": userIds]
+        let n = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if userIds.count > 1, n.count >= 2 { body["name"] = String(n.prefix(120)) }
+        let r: CreateChatResult = try await api.request("/chats", method: "POST", json: body)
+        try await loadBootstrap()
+        return r
+    }
+
+    /// Suma personas a una conversación; ven desde ahora (history 'now').
+    func addMembers(_ conversationId: String, userIds: [String]) async throws {
+        try await api.requestData("/conversations/\(conversationId)/members", method: "POST", json: ["userIds": userIds, "history": "now"])
+        try await loadBootstrap()
+    }
+
+    /// Salir de un chat grupal (DELETE de mi propia membresía).
+    func leaveConversation(_ conversationId: String) async throws {
+        guard let me = me?.id else { return }
+        try await api.requestData("/conversations/\(conversationId)/members/\(me)", method: "DELETE")
+        homePath.removeAll { $0 == .conversation(conversationId) || $0 == .details(conversationId) }
+        try await loadBootstrap()
+    }
+
+    // MARK: Perfil
+
+    func updateProfile(name: String, title: String?, area: String?) async throws {
+        func clean(_ s: String?) -> Any { let t = s?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""; return t.isEmpty ? NSNull() : String(t.prefix(120)) }
+        let _: UserDTO = try await api.request("/me", method: "PATCH", json: ["name": name.trimmingCharacters(in: .whitespacesAndNewlines), "title": clean(title), "area": clean(area)])
+        try await loadBootstrap()
+    }
+
+    nonisolated static let maxAvatarBytes = 3 * 1024 * 1024
+
+    /// Sube la foto ya recortada (JPEG 512×512) como cuerpo crudo.
+    func uploadAvatar(jpeg: Data) async throws {
+        guard jpeg.count <= AppStore.maxAvatarBytes else {
+            throw ApiRequestError(status: 413, code: "bad_request", message: L("profile.tooBig"))
+        }
+        let _: UserDTO = try await api.upload("/me/avatar", body: .init(data: jpeg, contentType: "image/jpeg"))
+        try await loadBootstrap()
+    }
+
+    func removeAvatar() async throws {
+        try await api.requestData("/me/avatar", method: "DELETE")
+        try await loadBootstrap()
+    }
+
+    // MARK: Archivos
+
+    nonisolated static let maxDriveFileBytes = 25 * 1024 * 1024
+
+    func driveTree(workspaceId: String?) async throws -> DriveTreeDTO {
+        try await api.request("/drive/tree" + (workspaceId.map { "?workspaceId=\($0)" } ?? ""))
+    }
+
+    @discardableResult
+    func createDriveFolder(workspaceId: String?, parentId: String?, name: String) async throws -> DriveFolderDTO {
+        let body: [String: Any] = ["workspaceId": workspaceId ?? NSNull(), "parentId": parentId ?? NSNull(), "name": String(name.prefix(120))]
+        return try await api.request("/drive/folders", method: "POST", json: body)
+    }
+
+    /// POST /drive/files?name=&workspaceId=&folderId=: siempre octet-stream; el tipo real va en x-file-type.
+    @discardableResult
+    func uploadDriveFile(workspaceId: String?, folderId: String?, name: String, contentType: String, data: Data) async throws -> DriveFileDTO {
+        var q = URLComponents()
+        q.queryItems = [URLQueryItem(name: "name", value: String(name.prefix(400)))]
+        if let workspaceId { q.queryItems?.append(URLQueryItem(name: "workspaceId", value: workspaceId)) }
+        if let folderId { q.queryItems?.append(URLQueryItem(name: "folderId", value: folderId)) }
+        let query = q.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B") ?? ""
+        return try await api.upload("/drive/files?\(query)", body: .init(data: data, contentType: "application/octet-stream",
+                                                                          headers: ["x-file-type": contentType.isEmpty ? "application/octet-stream" : contentType]))
+    }
+
+    struct DownloadLink: Decodable { var url: String; init(from d: Decoder) throws { url = (try container(d)).v("url", "") } }
+
+    /// Enlace firmado (5 min) para descargar un archivo.
+    func driveFileLink(_ id: String) async throws -> URL {
+        let r: DownloadLink = try await api.request("/drive/files/\(id)/link")
+        guard let u = URL(string: r.url) else { throw ApiRequestError(status: 200, code: "decode", message: L("common.error")) }
+        return u
     }
 
     // MARK: Dominios de empresa

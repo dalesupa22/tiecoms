@@ -14,6 +14,8 @@ final class ChatFlowUITests: XCTestCase {
         var conversationId: String
         var a: Person
         var b: Person
+        /// Chat grupal entre empresas (lo crea el seed v3; opcional).
+        var multiId: String?
     }
 
     override func setUp() { continueAfterFailure = false }
@@ -225,5 +227,99 @@ final class ChatFlowUITests: XCTestCase {
         shotNamed("v2-06-agenda")
         app.tabBars.buttons["Ajustes"].tap()
         shotNamed("v2-07-ajustes")
+    }
+
+    /// v3: chats grupales entre empresas, vista previa de enlaces, reenviar a varios chats, perfil y archivos.
+    /// Requiere un fixture con `multiId` y mensajes con enlaces (vista previa ya generada por el worker).
+    func testV3ChatsLinksForwardProfileFiles() throws {
+        guard ProcessInfo.processInfo.environment["TC_UI_V3"] == "1" else { throw XCTSkip("Recorrido v3: TEST_RUNNER_TC_UI_V3=1") }
+        let f = try fixture()
+        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"), "no se prueba contra producción")
+        let multi = try XCTUnwrap(f.multiId, "el fixture v3 trae multiId")
+        let app = XCUIApplication()
+        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
+        app.launch()
+        let email = app.textFields["login.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 10))
+        email.tap(); email.typeText(f.a.email)
+        let password = app.secureTextFields["login.password"]
+        password.tap(); password.typeText(f.password)
+        app.buttons["login.submit"].tap()
+        allowNotificationsIfAsked()
+
+        // Inicio: el chat grupal va con los directos, con caritas apiladas.
+        let multiRow = app.buttons["conv.row.\(multi)"]
+        XCTAssertTrue(multiRow.waitForExistence(timeout: 15), "el chat grupal aparece en Inicio")
+        shot(app, "v3-01-inicio")
+
+        // Chat grupal: vista previa del enlace.
+        multiRow.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["msg.linkPreview"].firstMatch.waitForExistence(timeout: 10), "tarjeta de vista previa")
+        sleep(2) // miniatura
+        shot(app, "v3-02-chat-grupal-vista-previa")
+
+        // Detalles: cargo · área · empresa, sumar gente y salir.
+        app.buttons["chat.header"].tap()
+        XCTAssertTrue(app.buttons["details.addPeople"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["details.leave"].exists)
+        shot(app, "v3-03-detalles-multi")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // Reenviar: menú del mensaje → hoja con selección múltiple.
+        let bubble = element(app, containing: "Les comparto la ficha")
+        XCTAssertTrue(bubble.waitForExistence(timeout: 5))
+        bubble.press(forDuration: 1.0)
+        let fwd = app.buttons["menu.forwardChat"]
+        XCTAssertTrue(fwd.waitForExistence(timeout: 5), "menú con «Reenviar a otro chat»")
+        shot(app, "v3-04-menu-mensaje")
+        fwd.tap()
+        let target = app.buttons["fwd.target.\(f.conversationId)"]
+        XCTAssertTrue(target.waitForExistence(timeout: 5))
+        target.tap()
+        shot(app, "v3-05-reenviar")
+        app.buttons["fwd.send"].tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // El grupo del espacio: llega el reenvío y la tarjeta del enlace.
+        let groupRow = app.buttons["conv.row.\(f.conversationId)"]
+        XCTAssertTrue(groupRow.waitForExistence(timeout: 10))
+        groupRow.tap()
+        XCTAssertTrue(element(app, containing: "Reenviado").waitForExistence(timeout: 10), "el reenvío llega con su etiqueta")
+        sleep(2)
+        shot(app, "v3-06-grupo-reenviado")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // Nuevo chat: personas por empresa, con 2+ elegidas muestra logos y nombre opcional.
+        app.buttons["home.newChat"].tap()
+        XCTAssertTrue(app.buttons["picker.person.\(f.b.id)"].waitForExistence(timeout: 5))
+        shot(app, "v3-07-nuevo-chat")
+        app.buttons["picker.person.\(f.b.id)"].tap()
+        if let cId = ProcessInfo.processInfo.environment["TC_THIRD_ID"], app.buttons["picker.person.\(cId)"].exists { app.buttons["picker.person.\(cId)"].tap() }
+        shot(app, "v3-08-nuevo-chat-elegidos")
+        app.buttons["newChat.create"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["composer.field"].waitForExistence(timeout: 10), "abre el chat creado")
+        shot(app, "v3-09-chat-abierto")
+
+        // Perfil y archivos (pestaña Ajustes).
+        app.tabBars.buttons.element(boundBy: 3).tap()
+        let edit = app.buttons["settings.editProfile"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        shot(app, "v3-10-ajustes")
+        edit.tap()
+        XCTAssertTrue(app.textFields["profile.jobTitle"].waitForExistence(timeout: 5))
+        shot(app, "v3-11-perfil")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["settings.files"].tap()
+        app.buttons["files.mine"].tap()
+        let folder = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'drive.folder.'")).firstMatch
+        XCTAssertTrue(folder.waitForExistence(timeout: 10), "carpeta del seed")
+        shot(app, "v3-12-mis-archivos")
+        folder.tap()
+        let file = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'drive.file.'")).firstMatch
+        XCTAssertTrue(file.waitForExistence(timeout: 10))
+        shot(app, "v3-13-carpeta")
+        file.tap()
+        sleep(3)
+        shot(app, "v3-14-vista-rapida")
     }
 }

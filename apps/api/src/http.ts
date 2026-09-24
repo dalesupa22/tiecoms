@@ -7,7 +7,7 @@ import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
-  CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
+  UpdateProfileInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -19,11 +19,16 @@ import { deleteAccount } from './modules/account.ts';
 import { bootstrap } from './modules/bootstrap.ts';
 import { listEvents, listMessages, markRead, sendMessage } from './modules/messages.ts';
 import * as ws from './modules/workspaces.ts';
+import * as invitations from './modules/invitations.ts';
 import * as issues from './modules/issues.ts';
 import * as cal from './modules/calendar.ts';
 import * as prefs from './modules/prefs.ts';
 import * as reminders from './modules/reminders.ts';
 import * as wa from './modules/whatsapp.ts';
+import * as profile from './modules/profile.ts';
+import * as drive from './modules/drive.ts';
+import { readPreviewImage } from './modules/link-preview.ts';
+import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
 import { z } from 'zod';
 import { verifyAccess } from './security.ts';
@@ -49,11 +54,16 @@ export async function buildHttp() {
   await app.register(cors, {
     origin: [config.publicOrigin, ...config.extraOrigins],
     credentials: true,
-    allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract'],
+    allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract', 'x-file-type'],
     methods: ['GET', 'POST', 'DELETE', 'PATCH'],
     maxAge: 600,
   });
   await app.register(rateLimit, { max: 600, timeWindow: '1 minute', keyGenerator: (r) => r.ip });
+
+  // Fotos de perfil: el cuerpo llega crudo (la imagen ya recortada en el cliente).
+  // Archivos del árbol: siempre como octet-stream (el tipo real va en x-file-type), así un .json no se interpreta.
+  app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: drive.MAX_FILE_BYTES }, (_req, body, done) => done(null, body));
+  app.addContentTypeParser(/^image\//, { parseAs: 'buffer', bodyLimit: profile.MAX_AVATAR_BYTES }, (_req, body, done) => done(null, body));
 
   app.setErrorHandler((err: any, req, reply) => {
     if (err instanceof ZodError) {
@@ -148,6 +158,11 @@ export async function buildHttp() {
     });
 
     priv.get('/api/v1/bootstrap', async (req) => bootstrap(req.userId));
+    // Perfil propio
+    priv.patch('/api/v1/me', async (req) => profile.updateProfile(req.userId, UpdateProfileInput.parse(req.body)));
+    priv.post('/api/v1/me/avatar', { bodyLimit: profile.MAX_AVATAR_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+      async (req) => profile.setAvatar(req.userId, req.body as Buffer));
+    priv.delete('/api/v1/me/avatar', async (req) => profile.removeAvatar(req.userId));
     priv.get<{ Params: { id: string } }>('/api/v1/organizations/:id/domains', async (req) => ({ domains: await domains.listDomains(req.userId, req.params.id) }));
     priv.post<{ Params: { id: string } }>('/api/v1/organizations/:id/domains', async (req) =>
       domains.addDomain(req.userId, req.params.id, AddDomainInput.parse(req.body).domain));
@@ -162,10 +177,21 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/workspaces/:id/invitations', async (req) =>
       ws.createInvitation(req.userId, req.params.id, CreateInvitationInput.parse(req.body)));
 
+    // Pendientes con correo: listar, reenviar (enlace nuevo) y revocar. kind = organizations | workspaces.
+    for (const [path, kind] of [['organizations', 'org'], ['workspaces', 'workspace']] as const) {
+      priv.get<{ Params: { id: string } }>(`/api/v1/${path}/:id/invitations`, async (req) =>
+        ({ invitations: await invitations.listPendingInvitations(kind, req.userId, req.params.id) }));
+      priv.post<{ Params: { id: string; invId: string } }>(`/api/v1/${path}/:id/invitations/:invId/resend`, { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+        async (req) => invitations.resendInvitation(kind, req.userId, req.params.id, req.params.invId));
+      priv.delete<{ Params: { id: string; invId: string } }>(`/api/v1/${path}/:id/invitations/:invId`, async (req) =>
+        invitations.revokeInvitation(kind, req.userId, req.params.id, req.params.invId));
+    }
+
     priv.post<{ Params: { token: string } }>('/api/v1/invitations/:token/accept', async (req) =>
       ws.acceptInvitation(req.userId, req.params.token, AcceptInvitationInput.parse(req.body ?? {})));
 
     priv.post('/api/v1/directs', async (req) => ws.getOrCreateDirect(req.userId, CreateDirectInput.parse(req.body).userId));
+    priv.post('/api/v1/chats', async (req) => ws.createChat(req.userId, CreateChatInput.parse(req.body)));
 
     priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/messages', async (req) => {
       const q = PageQuery.parse(req.query);
@@ -218,6 +244,24 @@ export async function buildHttp() {
     priv.patch<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.updateIssue(req.userId, req.params.id, UpdateIssueInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/comments', async (req) => issues.commentIssue(req.userId, req.params.id, IssueCommentInput.parse(req.body).body));
 
+    // Archivos en árbol de carpetas («Mis archivos» o un espacio)
+    priv.get<{ Querystring: { workspaceId?: string } }>('/api/v1/drive/tree', async (req) =>
+      drive.tree(req.userId, req.query.workspaceId ? z.uuid().parse(req.query.workspaceId) : null));
+    priv.post('/api/v1/drive/folders', async (req) => drive.createFolder(req.userId, CreateFolderInput.parse(req.body)));
+    priv.patch<{ Params: { id: string } }>('/api/v1/drive/folders/:id', async (req) => drive.updateFolder(req.userId, z.uuid().parse(req.params.id), UpdateFolderInput.parse(req.body)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/drive/folders/:id', async (req) => drive.deleteFolder(req.userId, z.uuid().parse(req.params.id)));
+    priv.post('/api/v1/drive/files', { bodyLimit: drive.MAX_FILE_BYTES, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => {
+      const q = UploadFileQuery.parse(req.query);
+      if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube el archivo como application/octet-stream');
+      return drive.uploadFile(req.userId, {
+        workspaceId: q.workspaceId ?? null, folderId: q.folderId ?? null, name: q.name,
+        contentType: String(req.headers['x-file-type'] ?? 'application/octet-stream'), body: req.body,
+      });
+    });
+    priv.patch<{ Params: { id: string } }>('/api/v1/drive/files/:id', async (req) => drive.updateFile(req.userId, z.uuid().parse(req.params.id), UpdateFileInput.parse(req.body)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/drive/files/:id', async (req) => drive.deleteFile(req.userId, z.uuid().parse(req.params.id)));
+    priv.get<{ Params: { id: string } }>('/api/v1/drive/files/:id/link', async (req) => drive.downloadLink(req.userId, z.uuid().parse(req.params.id)));
+
     // Conectar WhatsApp (personal y Business): cuentas, chats y organización.
     priv.get('/api/v1/whatsapp/accounts', async (req) => ({ accounts: await wa.listAccounts(req.userId), max: wa.MAX_WA_ACCOUNTS }));
     priv.post('/api/v1/whatsapp/accounts', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => wa.createAccount(req.userId, CreateWaAccountInput.parse(req.body)));
@@ -241,6 +285,20 @@ export async function buildHttp() {
       await ws.removeMember(req.userId, req.params.id, req.params.userId);
       return { ok: true };
     });
+  });
+
+  // Foto de perfil: el id cambia en cada subida, así que se puede cachear para siempre.
+  app.get<{ Params: { id: string } }>('/api/v1/avatars/:id', async (req, reply) => {
+    const f = await profile.readAvatar(z.uuid().parse(req.params.id));
+    return reply.header('content-type', f.contentType).header('cache-control', 'public, max-age=31536000, immutable').send(f.body);
+  });
+
+  // Miniatura de una vista previa de enlace (guardada en S3 por el worker).
+  app.get<{ Params: { id: string } }>('/api/v1/previews/:id', async (req, reply) => {
+    const key = await readPreviewImage(z.uuid().parse(req.params.id));
+    if (!key) return reply.status(404).send({ error: { code: 'not_found', message: 'No encontrada' } });
+    const f = await getObject(key);
+    return reply.header('content-type', f.contentType).header('cache-control', 'public, max-age=31536000, immutable').send(f.body);
   });
 
   app.get<{ Params: { token: string } }>('/api/v1/org-invitations/:token', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => auth.previewOrgInvitation(req.params.token));

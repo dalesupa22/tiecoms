@@ -6,6 +6,7 @@ import { conversationAccess, workspaceAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Tx } from '../db.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { randomToken, sha256 } from '../security.ts';
+import { deliverInvitation, prepareInvitationFor } from './invitations.ts';
 import { appendEvent, appendMessage } from './messages.ts';
 
 /** Mensaje de sistema estructurado: cada cliente lo muestra en su idioma. */
@@ -120,12 +121,20 @@ export async function addMembers(userId: string, conversationId: string, input: 
   return tx(async (c) => {
     const a = await conversationAccess(c, userId, conversationId, 'manage');
     if (a.kind === 'direct') throw badRequest('Los directos no admiten más personas');
-    const { rows } = await c.query(
-      `SELECT wm.user_id, wm.org_id, u.name FROM workspace_memberships wm JOIN users u ON u.id = wm.user_id
-        WHERE wm.workspace_id = $1 AND wm.user_id = ANY($2) AND wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())`,
-      [a.workspaceId, input.userIds],
-    );
-    if (rows.length !== new Set(input.userIds).size) throw badRequest('Todas las personas deben participar en el espacio');
+    let rows: { user_id: string; org_id: string | null; name: string }[];
+    if (a.kind === 'multi') {
+      // Chat grupal: basta con que quien suma comparta un espacio o la empresa con cada persona.
+      const ok = await reachable(c, userId, [...new Set(input.userIds)]);
+      if (ok.length !== new Set(input.userIds).size) throw forbidden('Solo puedes sumar personas con las que compartes un espacio o tu empresa');
+      rows = (await c.query('SELECT id AS user_id, primary_org_id AS org_id, name FROM users WHERE id = ANY($1)', [ok])).rows;
+    } else {
+      rows = (await c.query(
+        `SELECT wm.user_id, wm.org_id, u.name FROM workspace_memberships wm JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = $1 AND wm.user_id = ANY($2) AND wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())`,
+        [a.workspaceId, input.userIds],
+      )).rows;
+      if (rows.length !== new Set(input.userIds).size) throw badRequest('Todas las personas deben participar en el espacio');
+    }
     if (a.kind === 'internal' && rows.some((r) => r.org_id !== a.internalOrgId)) throw badRequest('Un grupo interno solo admite personas de su empresa');
     const added = await addConversationMembers(c, conversationId, input.userIds, userId, input.history);
     if (added.length) {
@@ -155,17 +164,50 @@ export async function removeMember(userId: string, conversationId: string, targe
   });
 }
 
+/**
+ * A quién puedes escribir: personas con las que compartes un espacio activo o
+ * tu empresa. Devuelve el subconjunto alcanzable de ids.
+ */
+async function reachable(c: Tx, userId: string, ids: string[]): Promise<string[]> {
+  if (!ids.length) return [];
+  const { rows } = await c.query(
+    `SELECT DISTINCT u.id FROM users u
+      WHERE u.id = ANY($2) AND u.disabled_at IS NULL AND (
+        EXISTS (SELECT 1 FROM workspace_memberships a JOIN workspace_memberships b ON b.workspace_id = a.workspace_id
+                 WHERE a.user_id = $1 AND b.user_id = u.id AND a.revoked_at IS NULL AND b.revoked_at IS NULL
+                   AND (a.expires_at IS NULL OR a.expires_at > now()) AND (b.expires_at IS NULL OR b.expires_at > now()))
+        OR EXISTS (SELECT 1 FROM organization_memberships a JOIN organization_memberships b ON b.org_id = a.org_id
+                    WHERE a.user_id = $1 AND b.user_id = u.id))`,
+    [userId, ids],
+  );
+  return rows.map((r) => r.id as string);
+}
+
+/** Nuevo chat: una persona → directo; varias (de una o varias empresas) → chat grupal fuera de los espacios. */
+export async function createChat(userId: string, input: { userIds: string[]; name?: string }) {
+  const others = [...new Set(input.userIds)].filter((u) => u !== userId);
+  if (!others.length) throw badRequest('Elige al menos a una persona');
+  if (others.length === 1 && !input.name) return { ...(await getOrCreateDirect(userId, others[0]!)), kind: 'direct' as const };
+  return tx(async (c) => {
+    const ok = await reachable(c, userId, others);
+    if (ok.length !== others.length) throw forbidden('Solo puedes sumar personas con las que compartes un espacio o tu empresa');
+    const { rows } = await c.query("INSERT INTO conversations (kind, name, created_by) VALUES ('multi', $1, $2) RETURNING id", [input.name ?? null, userId]);
+    const id: string = rows[0].id;
+    // Quien crea administra; el resto participa y puede sumar a más gente.
+    await c.query('INSERT INTO conversation_memberships (conversation_id, user_id, can_manage, added_by) VALUES ($1,$2,true,$2)', [id, userId]);
+    for (const uid of others) await c.query('INSERT INTO conversation_memberships (conversation_id, user_id, can_manage, added_by) VALUES ($1,$2,true,$3)', [id, uid, userId]);
+    const { rows: names } = await c.query('SELECT name FROM users WHERE id = ANY($1) ORDER BY name', [others]);
+    await appendMessage(c, { conversationId: id, authorId: userId, kind: 'system', body: sys('chat.created', { names: names.map((r) => r.name).join(', ') }) });
+    await audit(c, userId, 'conversation.created', { type: 'conversation', id }, { kind: 'multi', members: others.length + 1 });
+    await scopeChanged(c, [userId, ...others], 'chat.created', { conversationId: id });
+    return { id, created: true, kind: 'multi' as const };
+  });
+}
+
 export async function getOrCreateDirect(userId: string, otherId: string) {
   if (otherId === userId) throw badRequest('No puedes abrir un directo contigo');
   return tx(async (c) => {
-    // Solo entre personas que comparten un espacio activo.
-    const { rowCount } = await c.query(
-      `SELECT 1 FROM workspace_memberships a JOIN workspace_memberships b ON b.workspace_id = a.workspace_id
-        WHERE a.user_id = $1 AND b.user_id = $2 AND a.revoked_at IS NULL AND b.revoked_at IS NULL
-          AND (a.expires_at IS NULL OR a.expires_at > now()) AND (b.expires_at IS NULL OR b.expires_at > now()) LIMIT 1`,
-      [userId, otherId],
-    );
-    if (!rowCount) throw forbidden('Solo puedes escribir directo a personas con las que compartes un espacio');
+    if ((await reachable(c, userId, [otherId])).length !== 1) throw forbidden('Solo puedes escribir a personas con las que compartes un espacio o tu empresa');
     const key = [userId, otherId].sort().join(':');
     const ins = await c.query(
       "INSERT INTO conversations (kind, dm_key, created_by) VALUES ('direct',$1,$2) ON CONFLICT (dm_key) DO NOTHING RETURNING id",
@@ -186,7 +228,7 @@ export async function getOrCreateDirect(userId: string, otherId: string) {
 
 // ---------- Invitaciones ----------
 export async function createInvitation(userId: string, workspaceId: string, input: z.infer<typeof CreateInvitationInput>) {
-  return tx(async (c) => {
+  const inv = await tx(async (c) => {
     await workspaceAccess(c, userId, workspaceId, 'nonguest');
     if (input.role === 'admin') await workspaceAccess(c, userId, workspaceId, 'admin');
     if (input.conversationIds.length) {
@@ -199,15 +241,18 @@ export async function createInvitation(userId: string, workspaceId: string, inpu
       if (rows.length !== new Set(input.conversationIds).size) throw badRequest('Solo puedes invitar a grupos compartidos donde participas');
     }
     if (input.role === 'guest' && !input.conversationIds.length) throw badRequest('Un tercero invitado debe entrar a grupos concretos');
+    if (input.email) await prepareInvitationFor(c, 'workspace', workspaceId, input.email);
     const token = randomToken(24);
     const { rows } = await c.query(
-      `INSERT INTO invitations (token_hash, workspace_id, invited_by, email, role, conversation_ids, history, access_until, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + make_interval(days => $9)) RETURNING id, expires_at`,
-      [sha256(token), workspaceId, userId, input.email ?? null, input.role, input.conversationIds, input.history, input.accessUntil ?? null, input.expiresInDays],
+      `INSERT INTO invitations (token_hash, workspace_id, invited_by, email, role, conversation_ids, history, access_until, expires_at, lang)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + make_interval(days => $9), $10) RETURNING id, expires_at`,
+      [sha256(token), workspaceId, userId, input.email ?? null, input.role, input.conversationIds, input.history, input.accessUntil ?? null, input.expiresInDays, input.lang],
     );
     await audit(c, userId, 'invitation.created', { type: 'invitation', id: rows[0].id, workspaceId }, { role: input.role, email: input.email ?? null });
     return { id: rows[0].id as string, token, expiresAt: rows[0].expires_at as Date };
   });
+  const mail = input.email ? await deliverInvitation('workspace', inv.id, inv.token) : null;
+  return { ...inv, emailSent: mail?.status === 'sent', emailStatus: mail?.status ?? null };
 }
 
 export async function previewInvitation(token: string): Promise<InvitationPreviewDTO> {

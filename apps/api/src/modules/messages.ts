@@ -4,6 +4,11 @@ import { enqueueOutbox, pool, tx, type Tx } from '../db.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { sha256 } from '../security.ts';
 
+/** Si el texto trae un enlace, el worker arma su vista previa (fuera de la transacción del envío). */
+async function queuePreview(c: Tx, messageId: string, body: string) {
+  if (/\bhttps?:\/\//i.test(body)) await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('link.preview', $1, 2)", [JSON.stringify({ messageId })]);
+}
+
 /** Eventos más antiguos que esto obligan al cliente a pedir un snapshot nuevo. */
 const MAX_CATCHUP_EVENTS = 5000;
 
@@ -20,6 +25,7 @@ export function toMessageDTO(r: any): MessageDTO {
     replyTo: r.reply_to,
     mergedFrom: r.merged_from_conversation_id ?? null,
     forwarded: r.forwarded ?? null,
+    linkPreview: deleted ? null : r.link_preview ?? null,
     createdAt: new Date(r.created_at).toISOString(),
     editedAt: r.edited_at ? new Date(r.edited_at).toISOString() : null,
     deletedAt: deleted ? new Date(r.deleted_at).toISOString() : null,
@@ -94,7 +100,9 @@ export async function sendMessage(userId: string, conversationId: string, input:
         if (input.forwarded.fromConversationId) await conversationAccess(c, userId, input.forwarded.fromConversationId, 'read');
         forwarded = { source: input.forwarded.source, author: input.forwarded.author ?? null, sentAt: input.forwarded.sentAt ?? null, fromConversationId: input.forwarded.fromConversationId ?? null };
       }
-      return appendMessage(c, { conversationId, authorId: userId, body: input.body, clientMessageId: input.clientMessageId, replyTo: input.replyTo ?? null, forwarded });
+      const m = await appendMessage(c, { conversationId, authorId: userId, body: input.body, clientMessageId: input.clientMessageId, replyTo: input.replyTo ?? null, forwarded });
+      await queuePreview(c, m.id, input.body);
+      return m;
     });
     return { message, duplicate: false };
   } catch (err: any) {
@@ -173,7 +181,9 @@ async function ownMessage(c: Tx, userId: string, messageId: string) {
 export async function editMessage(userId: string, messageId: string, body: string) {
   return tx(async (c) => {
     const m = await ownMessage(c, userId, messageId);
-    const { rows } = await c.query('UPDATE messages SET body = $2, body_sha256 = $3, edited_at = now() WHERE id = $1 RETURNING *', [messageId, body, sha256(body)]);
+    // Otro texto, otra vista previa: se quita la anterior y el worker lee el enlace nuevo.
+    const { rows } = await c.query('UPDATE messages SET body = $2, body_sha256 = $3, edited_at = now(), link_preview = NULL WHERE id = $1 RETURNING *', [messageId, body, sha256(body)]);
+    await queuePreview(c, messageId, body);
     const message = toMessageDTO(rows[0]);
     await appendEvent(c, m.conversation_id, { type: 'message.updated', conversationId: m.conversation_id, message }, messageId);
     return message;

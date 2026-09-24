@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import type { BootstrapDTO, ConversationDTO, OrganizationDTO, PersonDTO } from '@tiecoms/contracts';
 import { locale, systemText, t } from './i18n.ts';
+import { apiUrl } from './app-client.ts';
 
 export function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -17,7 +18,9 @@ export function Avatar({ person, org, size = 34 }: { person?: PersonDTO | null; 
   const fg = person?.kind === 'agent' ? '#f4f1ea' : org?.colorFg ?? '#5c554c';
   return (
     <span className="avatar" style={{ width: size, height: size, background: bg, color: fg, fontSize: size * 0.36, borderRadius: person?.kind === 'agent' ? 10 : 99 }}>
-      {person?.kind === 'agent' ? '◇' : initials(person?.name ?? '?')}
+      {person?.avatarUrl
+        ? <img src={apiUrl(person.avatarUrl)} alt="" loading="lazy" draggable={false} style={{ width: '100%', height: '100%', borderRadius: 'inherit', objectFit: 'cover' }} />
+        : person?.kind === 'agent' ? '◇' : initials(person?.name ?? '?')}
       {org && size >= 30 && <span className="badge" style={{ background: org.colorBg, color: org.colorFg }}>{org.mark}</span>}
     </span>
   );
@@ -48,6 +51,10 @@ export function conversationTitle(d: BootstrapDTO, c: ConversationDTO) {
     const other = c.memberIds.find((m) => m !== d.me.id);
     return personById(d, other)?.name ?? t('chat.aDirect');
   }
+  if (c.kind === 'multi' && !c.name) {
+    const names = c.memberIds.filter((m) => m !== d.me.id).map((m) => personById(d, m)?.name.split(' ')[0]).filter(Boolean) as string[];
+    return names.length > 3 ? `${names.slice(0, 3).join(', ')} ${t('chat.andMore', { n: names.length - 3 })}` : names.join(', ') || t('chat.groupChat');
+  }
   // Nombres que crea el sistema por defecto se muestran en el idioma de quien lee.
   if (c.kind === 'internal' && c.name === 'Equipo interno') return t('conv.defaultInternal');
   return c.name ?? t('chat.aConversation');
@@ -57,6 +64,10 @@ export function conversationSubtitle(d: BootstrapDTO, c: ConversationDTO) {
   if (c.kind === 'direct') {
     const other = personById(d, c.memberIds.find((m) => m !== d.me.id));
     return other ? [other.title, orgById(d, other.orgId)?.name ?? (other.guest ? t('common.guest') : null)].filter(Boolean).join(' · ') : '';
+  }
+  if (c.kind === 'multi') {
+    const orgs = [...new Set(c.memberIds.map((m) => orgById(d, personById(d, m)?.orgId)?.name).filter(Boolean))];
+    return [t('chat.groupChat'), orgs.slice(0, 3).join(', ')].filter(Boolean).join(' · ');
   }
   const ws = d.workspaces.find((w) => w.id === c.workspaceId);
   return [ws?.name, c.kind === 'internal' ? t('kind.internalShort') : c.level === 'directivo' ? t('kind.directivo') : null].filter(Boolean).join(' · ');

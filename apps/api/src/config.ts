@@ -23,6 +23,12 @@ export const config = {
   extraOrigins: (process.env.EXTRA_ORIGINS ?? 'tauri://localhost,http://tauri.localhost,capacitor://localhost,https://localhost')
     .split(',').map((s) => s.trim()).filter(Boolean),
   cookieSecure: process.env.COOKIE_SECURE !== 'false',
+  /** Origen público del API (para las redirect URI de Google/Microsoft). */
+  apiPublicOrigin: process.env.API_PUBLIC_ORIGIN ?? process.env.PUBLIC_ORIGIN ?? 'http://localhost:3020',
+  /** A dónde vuelve el navegador de las apps nativas y de escritorio. */
+  nativeRedirect: process.env.SSO_NATIVE_REDIRECT ?? 'tiecoms://auth/callback',
+  google: { clientId: process.env.GOOGLE_CLIENT_ID ?? '', clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '' },
+  microsoft: { clientId: process.env.MICROSOFT_CLIENT_ID ?? '', clientSecret: process.env.MICROSOFT_CLIENT_SECRET ?? '' },
   trustProxy: process.env.TRUST_PROXY !== 'false',
 };
 

@@ -217,3 +217,146 @@ describe('colegas de la misma empresa', () => {
     expect((await call('/auth/signup', { body: { name: 'Otra', email: `colega.${run}@example.com`, password: 'clave-segura-123', orgInviteToken: inv.json.token, device: { deviceId: randomUUID(), platform: 'ios' } } })).status).toBe(409);
   });
 });
+
+describe('asuntos', () => {
+  let issueId: string;
+  it('se abre desde un mensaje, con responsable, y se ve solo con acceso a la conversación', async () => {
+    const m = await call(`/conversations/${generalId}/messages`, { token: ana.token, body: { clientMessageId: randomUUID(), body: 'Necesito el acta firmada antes del viernes' } });
+    const r = await call(`/conversations/${generalId}/issues`, { token: ana.token, body: { title: 'Acta firmada', originMessageId: m.json.message.id, ownerId: ana.id, dueDate: '2026-10-02' } });
+    expect(r.status).toBe(200);
+    issueId = r.json.id;
+    expect(r.json.requestedBy).toBe(ana.id);
+    expect(r.json.originMessageSeq).toBe(m.json.message.seq);
+    // Tercero sin acceso a General: no lo ve ni por id.
+    expect((await call(`/issues/${issueId}`, { token: tercero.token })).status).toBe(404);
+    const list = await call(`/issues?workspaceId=${workspaceId}`, { token: tercero.token });
+    expect(list.json.issues.some((i: any) => i.id === issueId)).toBe(false);
+    // El responsable debe estar en la conversación.
+    expect((await call(`/conversations/${generalId}/issues`, { token: ana.token, body: { title: 'Otro', ownerId: tercero.id } })).status).toBe(400);
+  });
+
+  it('cambia de estado con historial y avisa en tiempo real a la conversación', async () => {
+    const s = await connect(ana);
+    const wait = new Promise<any>((res) => s.on('conv.event', (e: any) => e.type === 'issue.updated' && e.issue.id === issueId && e.issue.status === 'done' && res(e)));
+    const u = await call(`/issues/${issueId}`, { method: 'PATCH', token: ana.token, body: { status: 'done' } });
+    expect(u.status).toBe(200);
+    expect(u.json.closedAt).toBeTruthy();
+    expect((await wait).issue.status).toBe('done');
+    await call(`/issues/${issueId}/comments`, { token: ana.token, body: { body: 'Cerrado con el acta del jueves' } });
+    const g = await call(`/issues/${issueId}`, { token: ana.token });
+    expect(g.json.events.map((e: any) => e.kind)).toEqual(['created', 'status', 'comment']);
+    expect(g.json.issue.commentCount).toBe(1);
+    s.disconnect();
+  });
+});
+
+describe('bifurcaciones', () => {
+  let childId: string;
+  it('derivar como diagnóstico interno no revela la derivada a la otra empresa', async () => {
+    const m = await call(`/conversations/${generalId}/messages`, { token: ana.token, body: { clientMessageId: randomUUID(), body: '¿Por qué se duplican las notificaciones?' } });
+    const d = await call(`/conversations/${generalId}/derive`, { token: ana.token, body: { messageId: m.json.message.id, kind: 'internal', name: 'Diagnóstico · notificaciones' } });
+    expect(d.status).toBe(200);
+    childId = d.json.id;
+    const mine = await call('/bootstrap', { token: ana.token });
+    const child = mine.json.conversations.find((c: any) => c.id === childId);
+    expect(child.parentId).toBe(generalId);
+    expect(child.deriveKind).toBe('internal');
+    // Carla (otra empresa, no está en General) y Beto (fue retirado de la sesión) no la ven.
+    const other = await call('/bootstrap', { token: carla.token });
+    expect(other.json.conversations.some((c: any) => c.id === childId)).toBe(false);
+    // El aviso en el origen no incluye el nombre de la derivada.
+    const origin = await call(`/conversations/${generalId}/messages`, { token: ana.token });
+    const notice = origin.json.messages.reverse().find((x: any) => x.kind === 'system' && x.body.includes('derived.from'));
+    expect(notice.body).not.toContain('notificaciones');
+  });
+
+  it('devuelve el resultado al origen una sola vez', async () => {
+    const r = await call(`/conversations/${childId}/return`, { token: ana.token, body: { summary: 'Era el job de las 10:00. Queda en una sola notificación diaria.' } });
+    expect(r.status).toBe(200);
+    const origin = await call(`/conversations/${generalId}/messages`, { token: ana.token });
+    const back = origin.json.messages.find((x: any) => x.id === r.json.messageId);
+    expect(back.mergedFrom).toBe(childId);
+    expect((await call(`/conversations/${childId}/return`, { token: ana.token, body: { summary: 'otra vez' } })).status).toBe(409);
+    const b = await call('/bootstrap', { token: ana.token });
+    expect(b.json.conversations.find((c: any) => c.id === childId).returnedAt).toBeTruthy();
+  });
+
+  it('un tercero no puede derivar', async () => {
+    const legal = (await call('/bootstrap', { token: tercero.token })).json.conversations[0];
+    const m = await call(`/conversations/${legal.id}/messages`, { token: tercero.token, body: { clientMessageId: randomUUID(), body: 'Propongo revisar la 7.2' } });
+    expect((await call(`/conversations/${legal.id}/derive`, { token: tercero.token, body: { messageId: m.json.message.id, kind: 'same' } })).status).toBe(403);
+  });
+});
+
+describe('mensajes: editar, eliminar, fijar, no leído, reenvíos', () => {
+  it('solo el autor edita o elimina, y el borrado no reaparece al ponerse al día', async () => {
+    const m = await call(`/conversations/${generalId}/messages`, { token: ana.token, body: { clientMessageId: randomUUID(), body: 'Texto con error' } });
+    expect((await call(`/messages/${m.json.message.id}`, { method: 'PATCH', token: carla.token, body: { body: 'hack' } })).status).toBeGreaterThanOrEqual(403);
+    const e = await call(`/messages/${m.json.message.id}`, { method: 'PATCH', token: ana.token, body: { body: 'Texto corregido' } });
+    expect(e.json.editedAt).toBeTruthy();
+    await call(`/messages/${m.json.message.id}`, { method: 'DELETE', token: ana.token });
+    const page = await call(`/conversations/${generalId}/events?after=0&limit=500`, { token: ana.token });
+    const all = page.json.events.filter((x: any) => x.message?.id === m.json.message.id);
+    expect(all.length).toBeGreaterThan(0);
+    expect(all.every((x: any) => x.message.body === '')).toBe(true);
+  });
+
+  it('fija mensajes y marca como no leído desde un mensaje', async () => {
+    const m = await call(`/conversations/${generalId}/messages`, { token: ana.token, body: { clientMessageId: randomUUID(), body: 'Link del acta: https://example.com/acta' } });
+    const p = await call(`/messages/${m.json.message.id}/pin`, { method: 'POST', token: ana.token });
+    expect(p.json.messageIds).toContain(m.json.message.id);
+    expect((await call(`/conversations/${generalId}/pins`, { token: ana.token })).json.messages[0].id).toBe(m.json.message.id);
+    await call(`/conversations/${generalId}/unread`, { token: ana.token, body: { seq: m.json.message.seq } });
+    const b = await call('/bootstrap', { token: ana.token });
+    expect(b.json.conversations.find((c: any) => c.id === generalId).unread).toBeGreaterThan(0);
+  });
+
+  it('reenvío con origen WhatsApp y bloqueo de reenvío desde una conversación ajena', async () => {
+    const ok = await call(`/conversations/${generalId}/messages`, { token: ana.token, body: { clientMessageId: randomUUID(), body: 'Mañana llego a las 8', forwarded: { source: 'whatsapp', author: 'Pedro (cliente)' } } });
+    expect(ok.json.message.forwarded.source).toBe('whatsapp');
+    const foreign = await call('/workspaces', { token: carla.token, body: { name: `Privado de Carla ${run}` } });
+    const bad = await call(`/conversations/${generalId}/messages`, { token: ana.token, body: { clientMessageId: randomUUID(), body: 'x', forwarded: { source: 'tiecoms', fromConversationId: foreign.json.generalConversationId } } });
+    expect(bad.status).toBe(404);
+  });
+
+  it('fijar y silenciar son preferencias personales', async () => {
+    await call(`/conversations/${generalId}/prefs`, { method: 'PUT', token: ana.token, body: { pinned: true, mutedUntil: new Date(Date.now() + 3600_000).toISOString() } });
+    await call(`/workspaces/${workspaceId}/prefs`, { method: 'PUT', token: ana.token, body: { pinned: true } });
+    const b = await call('/bootstrap', { token: ana.token });
+    const c = b.json.conversations.find((x: any) => x.id === generalId);
+    expect(c.pinnedAt).toBeTruthy();
+    expect(c.mutedUntil).toBeTruthy();
+    expect(b.json.workspaces.find((w: any) => w.id === workspaceId).pinnedAt).toBeTruthy();
+  });
+});
+
+describe('recordatorios', () => {
+  it('se disparan a la hora y llegan como aviso en tiempo real', async () => {
+    const s = await connect(ana);
+    const due = new Promise<any>((res) => s.on('account.event', (e: any) => e.type === 'reminder.due' && res(e)));
+    const r = await call('/reminders', { token: ana.token, body: { conversationId: generalId, note: 'Revisar acta', remindAt: new Date(Date.now() + 1500).toISOString() } });
+    expect(r.status).toBe(200);
+    const e = await Promise.race([due, new Promise((_, rej) => setTimeout(() => rej(new Error('sin aviso')), 25_000))]) as any;
+    expect(e.reminder.id).toBe(r.json.id);
+    await call(`/reminders/${r.json.id}/done`, { token: ana.token, body: {} });
+    expect((await call('/reminders', { token: ana.token })).json.reminders.some((x: any) => x.id === r.json.id)).toBe(false);
+    s.disconnect();
+  }, 40_000);
+});
+
+describe('calendario', () => {
+  it('crea reuniones con invitados del grupo, respeta la audiencia y acepta RSVP', async () => {
+    const start = new Date(Date.now() + 86400_000);
+    const body = { title: 'Revisión semanal', startsAt: start.toISOString(), endsAt: new Date(start.getTime() + 3600_000).toISOString(), timezone: 'America/Bogota', location: 'https://meet.example.com/abc' };
+    const ev = await call(`/conversations/${generalId}/events`, { token: ana.token, body });
+    expect(ev.status).toBe(200);
+    expect(ev.json.invitees.length).toBeGreaterThan(1);
+    const range = `from=${new Date().toISOString()}&to=${new Date(Date.now() + 7 * 86400_000).toISOString()}`;
+    expect((await call(`/events?${range}`, { token: ana.token })).json.events.some((x: any) => x.id === ev.json.id)).toBe(true);
+    expect((await call(`/events?${range}`, { token: tercero.token })).json.events.some((x: any) => x.id === ev.json.id)).toBe(false);
+    expect((await call(`/events/${ev.json.id}`, { token: tercero.token })).status).toBe(404);
+    expect((await call(`/conversations/${generalId}/events`, { token: ana.token, body: { ...body, timezone: 'Marte/Olimpo' } })).status).toBe(400);
+    const c = await call(`/events/${ev.json.id}`, { method: 'DELETE', token: ana.token });
+    expect(c.json.cancelledAt).toBeTruthy();
+  });
+});

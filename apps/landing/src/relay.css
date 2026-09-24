@@ -1,6 +1,6 @@
 /* «Un hilo, muchas manos»: recorrido narrado por el scroll (sección fija mientras se baja). */
 .relay-section{position:relative;height:calc(7 * 72vh + 100vh);background:linear-gradient(#f6f3ec,#f1ede4);border-top:1px solid #e2dbce}
-.relay-sticky{position:sticky;top:0;height:100vh;display:grid;grid-template-columns:minmax(300px,.8fr) minmax(0,2fr);gap:clamp(24px,3.5vw,56px);align-items:center;padding:96px clamp(22px,5vw,76px) 28px;overflow:hidden}
+.relay-sticky{position:sticky;top:0;height:100vh;height:100svh;display:grid;grid-template-columns:minmax(300px,.8fr) minmax(0,2fr);gap:clamp(24px,3.5vw,56px);align-items:center;padding:96px clamp(22px,5vw,76px) 28px;overflow:hidden}
 
 /* Columna narrativa */
 .relay-side{display:flex;flex-direction:column;gap:18px;min-width:0}
@@ -127,7 +127,7 @@
 
 @media (max-width:1100px){.relay-tasks{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:900px){
-  .relay-section{height:calc(7 * 80vh + 100vh)}
+  .relay-section{height:calc(7 * 55vh + 100vh);height:calc(7 * 55svh + 100svh)}
   .relay-sticky{grid-template-columns:1fr;align-content:start;gap:12px;padding:86px 14px 14px}
   .relay-side{gap:10px}
   .relay-side h2,.relay-side .eyebrow,.relay-rail{display:none}
@@ -138,7 +138,12 @@
   .relay-canvas{padding:6px;border-radius:18px}
   .relay-board{padding:10px 12px}
   .relay-board-head span:not(.relay-progress):not(.relay-count){display:none}
-  .relay-task{padding:7px 9px;gap:4px}.relay-owner{font-size:11px}
+  .relay-sticky{padding-top:76px;gap:10px}
+  .relay-now h3{font-size:19px}
+  .relay-board-head{margin-bottom:8px;flex-wrap:nowrap;gap:10px}.relay-board-head .relay-progress{min-width:36px}.relay-board-head b{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.relay-board-head .relay-count{white-space:nowrap}
+  .relay-alert{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px;padding:6px 10px;margin-bottom:8px}.relay-alert b{margin-right:6px}
+  .relay-tasks{gap:6px}
+  .relay-task{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;padding:6px 8px;gap:3px 6px}.relay-task b{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.relay-task .relay-status{grid-column:2;grid-row:1;font-size:10px;padding:1px 6px}.relay-task .relay-owner{grid-column:1/-1}.relay-owner{font-size:11px}
   .insight-grid{grid-template-columns:1fr}
   .insight-points{grid-template-columns:1fr}
   .insight-section{padding:90px 20px}

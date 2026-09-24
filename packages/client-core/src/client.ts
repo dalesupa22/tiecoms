@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type EventsPage, type InvitationPreviewDTO, type MessageDTO, type OrgInvitationPreviewDTO, type Platform,
+  type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationPreviewDTO, type Platform, type ReminderDTO, type Rsvp,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -12,6 +12,7 @@ export interface PendingMessage {
   conversationId: string;
   body: string;
   replyTo: string | null;
+  forwarded?: ForwardedInfo | null;
   createdAt: string;
   attempts: number;
   status: 'pending' | 'sending' | 'failed';
@@ -37,7 +38,20 @@ export interface ClientState {
   conversations: Record<string, ConversationState>;
   pending: PendingMessage[];
   typing: Record<string, { userId: string; until: number }[]>;
+  /** Asuntos conocidos por id (se cargan por espacio, conversación o «míos» y se actualizan en vivo). */
+  issues: Record<string, IssueDTO>;
+  /** Mensajes fijados por conversación. */
+  pins: Record<string, string[]>;
+  reminders: ReminderDTO[];
+  events: Record<string, CalendarEventDTO>;
+  /** Sube cuando el puente de WhatsApp trae chats o mensajes nuevos: la pantalla vuelve a pedir la lista. */
+  waRevision: number;
 }
+
+/** Aviso para la interfaz (notificación del sistema, sonido, toast). */
+export type ClientNotice =
+  | { kind: 'message'; conversationId: string; message: MessageDTO }
+  | { kind: 'reminder'; reminder: ReminderDTO };
 
 export interface ClientOptions {
   /** Origen del API, p. ej. https://app.tiecoms.com. Vacío = mismo origen (web). */
@@ -47,9 +61,12 @@ export interface ClientOptions {
   storage: KeyValueStorage;
   /** Nativo: dónde guardar el refresh token. Web: omitir (cookie httpOnly). */
   secrets?: SecretStore;
+  /** Se llama con mensajes nuevos de otras personas (en conversaciones no silenciadas) y recordatorios vencidos. */
+  onNotice?: (n: ClientNotice) => void;
 }
 
 const uid = () => (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36));
+const base64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 /**
  * Cliente TieComs independiente de la interfaz. Toda la lógica de envío,
@@ -57,7 +74,7 @@ const uid = () => (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(3
  * escritorio y móvil se comporten igual.
  */
 export class TieComsClient {
-  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {} };
+  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], events: {}, waRevision: 0 };
   private listeners = new Set<() => void>();
   private accessToken: string | null = null;
   private accessExp = 0;
@@ -151,6 +168,33 @@ export class TieComsClient {
     await this.afterLogin();
   }
 
+  /**
+   * URL para entrar con Google o Microsoft. Se abre en el navegador (en apps, el del
+   * sistema); el verifier PKCE queda guardado hasta que vuelva el código.
+   */
+  async ssoStartUrl(provider: 'google' | 'microsoft', opts: { orgInviteToken?: string; orgName?: string; next?: string } = {}) {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    const verifier = base64url(bytes);
+    const challenge = base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
+    await this.opts.storage.set('sso:verifier', verifier);
+    const q = new URLSearchParams({ platform: this.opts.platform, code_challenge: challenge, code_challenge_method: 'S256' });
+    if (opts.orgInviteToken) q.set('org', opts.orgInviteToken);
+    if (opts.orgName) q.set('org_name', opts.orgName);
+    if (opts.next) q.set('next', opts.next);
+    return `${this.url(`/auth/${provider}/start`)}?${q}`;
+  }
+
+  /** Canjea el código que devolvió el servidor tras Google/Microsoft. */
+  async ssoComplete(code: string) {
+    const codeVerifier = await this.opts.storage.get<string>('sso:verifier');
+    await this.opts.storage.del('sso:verifier');
+    if (!codeVerifier) throw Object.assign(new Error('Vuelve a iniciar sesión desde esta app.'), { code: 'sso_state' });
+    const res = await this.raw('/auth/sso/exchange', { method: 'POST', json: { code, codeVerifier, device: await this.device() } }, false);
+    if (!res.ok) throw await parseError(res);
+    await this.applyAuth(await res.json());
+    await this.afterLogin();
+  }
+
   /** Refresco con vuelo único; en navegador se serializa entre pestañas con Web Locks. */
   private refresh(): Promise<boolean> {
     if (this.refreshing) return this.refreshing;
@@ -180,7 +224,7 @@ export class TieComsClient {
     this.accessToken = null;
     await this.opts.secrets?.set(null);
     if (userId) await this.opts.storage.clearPrefix(`u:${userId}:`);
-    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {} };
+    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], events: {}, waRevision: 0 };
     this.listeners.forEach((l) => l());
   }
 
@@ -191,6 +235,7 @@ export class TieComsClient {
     this.set({ status: 'ready', pending: pending.map((p) => ({ ...p, status: p.status === 'sending' ? 'pending' : p.status })) });
     this.connect();
     this.scheduleFlush(0);
+    void this.loadReminders().catch(() => {});
   }
 
   // ---------- Snapshot ----------
@@ -262,6 +307,12 @@ export class TieComsClient {
 
   private onAccountEvent(e: AccountEvent) {
     if (e.type === 'scope.changed') this.scheduleBootstrap();
+    if (e.type === 'prefs.updated') this.scheduleBootstrap();
+    if (e.type === 'whatsapp.updated') this.set({ waRevision: this.state.waRevision + 1 });
+    if (e.type === 'reminder.due') {
+      this.set({ reminders: [...this.state.reminders.filter((r) => r.id !== e.reminder.id), e.reminder].sort((a, b) => a.remindAt.localeCompare(b.remindAt)) });
+      this.opts.onNotice?.({ kind: 'reminder', reminder: e.reminder });
+    }
     if (e.type === 'read.updated') {
       const c = this.state.data?.conversations.find((x) => x.id === e.conversationId);
       if (c && e.seq > c.lastReadSeq) this.patchConversationMeta(c.id, { lastReadSeq: e.seq, unread: Math.max(0, c.lastMessageSeq - Math.max(e.seq, c.historyFromSeq)) });
@@ -272,6 +323,12 @@ export class TieComsClient {
     const local = this.state.conversations[e.conversationId];
     const meta = this.state.data?.conversations.find((c) => c.id === e.conversationId);
     if (!meta) { this.scheduleBootstrap(); return; }
+    // Los asuntos se actualizan aunque la conversación no esté abierta.
+    if (e.type === 'issue.updated') { this.putIssues([e.issue]); this.recountIssues(e.conversationId); }
+    if (e.type === 'pins.changed') this.set({ pins: { ...this.state.pins, [e.conversationId]: e.messageIds } });
+    if (e.type === 'calendar.updated') this.set({ events: { ...this.state.events, [e.event.id]: e.event } });
+    if (e.type === 'message.created' && e.message.authorId !== this.state.data?.me.id && e.message.kind === 'text'
+      && !(meta.mutedUntil && Date.parse(meta.mutedUntil) > Date.now())) this.opts.onNotice?.({ kind: 'message', conversationId: e.conversationId, message: e.message });
     if (e.type === 'message.created') this.bumpMeta(e.message);
     if (!local?.loaded) {
       this.patchConversationMeta(e.conversationId, { lastEventSeq: Math.max(meta.lastEventSeq, e.eventSeq) });
@@ -301,6 +358,8 @@ export class TieComsClient {
     let messages = local.messages;
     if (e.type === 'message.created' || e.type === 'message.updated') messages = upsertMessage(messages, e.message);
     if (e.type === 'members.changed') { this.patchConversationMeta(e.conversationId, { memberIds: e.memberIds }); this.scheduleBootstrap(); }
+    if (e.type === 'issue.updated') this.putIssues([e.issue]);
+    if (e.type === 'message.updated') this.patchPreviewIfLast(e.message);
     this.setConv(e.conversationId, { messages, lastEventSeq: e.eventSeq });
     if (e.type === 'message.created') this.dropPending(e.message);
   }
@@ -365,11 +424,11 @@ export class TieComsClient {
   typing(conversationId: string) { this.socket?.emit(SOCKET_EVENTS.typing, { conversationId }); }
 
   // ---------- Envío con cola persistente ----------
-  async send(conversationId: string, body: string, replyTo: string | null = null) {
+  async send(conversationId: string, body: string, replyTo: string | null = null, forwarded: ForwardedInfo | null = null) {
     const text = body.trim();
     if (!text) return;
     const p: PendingMessage = {
-      clientMessageId: uid(), conversationId, body: text, replyTo, createdAt: new Date().toISOString(),
+      clientMessageId: uid(), conversationId, body: text, replyTo, forwarded, createdAt: new Date().toISOString(),
       attempts: 0, status: 'pending', nextAttemptAt: 0,
     };
     // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
@@ -441,7 +500,7 @@ export class TieComsClient {
 
   /** Socket con ACK si está conectado; HTTP como respaldo. Mismo clientMessageId = idempotente. */
   private async deliver(p: PendingMessage): Promise<MessageDTO> {
-    const payload = { conversationId: p.conversationId, clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo };
+    const payload = { conversationId: p.conversationId, clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo, forwarded: p.forwarded ?? null };
     if (this.socket?.connected) {
       try {
         const r: any = await this.socket.timeout(8000).emitWithAck(SOCKET_EVENTS.send, payload);
@@ -454,9 +513,153 @@ export class TieComsClient {
       }
     }
     const r = await this.request<{ message: MessageDTO }>(`/conversations/${p.conversationId}/messages`, {
-      method: 'POST', json: { clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo },
+      method: 'POST', json: { clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo, forwarded: p.forwarded ?? null },
     });
     return r.message;
+  }
+
+  // ---------- Asuntos ----------
+  private putIssues(list: IssueDTO[]) {
+    if (!list.length) return;
+    const next = { ...this.state.issues };
+    for (const i of list) next[i.id] = i;
+    this.set({ issues: next });
+  }
+  private recountIssues(conversationId: string) {
+    const n = Object.values(this.state.issues).filter((i) => i.conversationId === conversationId && i.status !== 'done' && i.status !== 'cancelled').length;
+    this.patchConversationMeta(conversationId, { openIssues: n });
+  }
+  async loadIssues(filter: { workspaceId?: string; conversationId?: string; mine?: boolean; open?: boolean } = {}) {
+    const q = new URLSearchParams();
+    if (filter.workspaceId) q.set('workspaceId', filter.workspaceId);
+    if (filter.conversationId) q.set('conversationId', filter.conversationId);
+    if (filter.mine) q.set('mine', '1');
+    if (filter.open) q.set('open', '1');
+    const r = await this.request<{ issues: IssueDTO[] }>(`/issues?${q}`);
+    this.putIssues(r.issues);
+    return r.issues;
+  }
+  async createIssue(conversationId: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; originMessageId?: string | null }) {
+    const i = await this.request<IssueDTO>(`/conversations/${conversationId}/issues`, { method: 'POST', json: input });
+    this.putIssues([i]); this.recountIssues(conversationId);
+    return i;
+  }
+  async updateIssue(id: string, patch: Partial<Pick<IssueDTO, 'title' | 'status' | 'ownerId' | 'dueDate' | 'waitingOnOrgId'>>) {
+    const i = await this.request<IssueDTO>(`/issues/${id}`, { method: 'PATCH', json: patch });
+    this.putIssues([i]); this.recountIssues(i.conversationId);
+    return i;
+  }
+  async issueDetail(id: string) {
+    const r = await this.request<{ issue: IssueDTO; events: IssueEventDTO[] }>(`/issues/${id}`);
+    this.putIssues([r.issue]);
+    return r;
+  }
+  async commentIssue(id: string, body: string) {
+    const i = await this.request<IssueDTO>(`/issues/${id}/comments`, { method: 'POST', json: { body } });
+    this.putIssues([i]);
+    return i;
+  }
+
+  // ---------- Preferencias, fijados, no leído, edición ----------
+  async setConversationPrefs(id: string, prefs: { pinned?: boolean; mutedUntil?: string | null }) {
+    const patch: Partial<ConversationDTO> = {};
+    if (prefs.pinned !== undefined) patch.pinnedAt = prefs.pinned ? new Date().toISOString() : null;
+    if (prefs.mutedUntil !== undefined) patch.mutedUntil = prefs.mutedUntil;
+    this.patchConversationMeta(id, patch); // optimista; el servidor confirma
+    await this.request(`/conversations/${id}/prefs`, { method: 'PUT', json: prefs });
+  }
+  async setWorkspacePinned(id: string, pinned: boolean) {
+    const d = this.state.data;
+    if (d) this.set({ data: { ...d, workspaces: d.workspaces.map((w) => (w.id === id ? { ...w, pinnedAt: pinned ? new Date().toISOString() : null } : w)) } });
+    await this.request(`/workspaces/${id}/prefs`, { method: 'PUT', json: { pinned } });
+  }
+  async markUnread(conversationId: string, seq: number) {
+    const r = await this.request<{ lastReadSeq: number }>(`/conversations/${conversationId}/unread`, { method: 'POST', json: { seq } });
+    const c = this.state.data?.conversations.find((x) => x.id === conversationId);
+    if (c) this.patchConversationMeta(conversationId, { lastReadSeq: r.lastReadSeq, unread: Math.max(0, c.lastMessageSeq - Math.max(r.lastReadSeq, c.historyFromSeq)) });
+  }
+  async markConversationRead(conversationId: string) {
+    const c = this.state.data?.conversations.find((x) => x.id === conversationId);
+    if (!c) return;
+    this.patchConversationMeta(conversationId, { lastReadSeq: c.lastMessageSeq, unread: 0 });
+    await this.request(`/conversations/${conversationId}/read`, { method: 'POST', json: { seq: c.lastMessageSeq } });
+  }
+  private patchPreviewIfLast(m: MessageDTO) {
+    const c = this.state.data?.conversations.find((x) => x.id === m.conversationId);
+    if (c && c.lastMessageSeq === m.seq) this.patchConversationMeta(c.id, { lastMessagePreview: m.body.slice(0, 140) });
+  }
+  private upsertLocal(m: MessageDTO) {
+    const local = this.state.conversations[m.conversationId];
+    if (local?.loaded) this.setConv(m.conversationId, { messages: upsertMessage(local.messages, m) });
+    this.patchPreviewIfLast(m);
+  }
+  async editMessage(id: string, body: string) { const m = await this.request<MessageDTO>(`/messages/${id}`, { method: 'PATCH', json: { body } }); this.upsertLocal(m); }
+  async deleteMessage(id: string) { const m = await this.request<MessageDTO>(`/messages/${id}`, { method: 'DELETE' }); this.upsertLocal(m); }
+  async setMessagePinned(m: MessageDTO, pinned: boolean) {
+    const r = await this.request<{ messageIds: string[] }>(`/messages/${m.id}/pin`, { method: pinned ? 'POST' : 'DELETE' });
+    this.set({ pins: { ...this.state.pins, [m.conversationId]: r.messageIds } });
+  }
+  async loadPins(conversationId: string) {
+    const r = await this.request<{ messages: MessageDTO[] }>(`/conversations/${conversationId}/pins`);
+    this.set({ pins: { ...this.state.pins, [conversationId]: r.messages.map((m) => m.id) } });
+    return r.messages;
+  }
+
+  // ---------- Recordatorios ----------
+  async loadReminders() { const r = await this.request<{ reminders: ReminderDTO[] }>('/reminders'); this.set({ reminders: r.reminders }); return r.reminders; }
+  async createReminder(input: { conversationId: string; messageId?: string | null; note?: string | null; remindAt: string }) {
+    const r = await this.request<ReminderDTO>('/reminders', { method: 'POST', json: input });
+    this.set({ reminders: [...this.state.reminders, r].sort((a, b) => a.remindAt.localeCompare(b.remindAt)) });
+    return r;
+  }
+  async completeReminder(id: string) {
+    await this.request(`/reminders/${id}/done`, { method: 'POST', json: {} });
+    this.set({ reminders: this.state.reminders.filter((r) => r.id !== id) });
+  }
+  async snoozeReminder(id: string, until: string) {
+    await this.request(`/reminders/${id}/snooze`, { method: 'POST', json: { until } });
+    this.set({ reminders: this.state.reminders.map((r) => (r.id === id ? { ...r, remindAt: until, firedAt: null } : r)).sort((a, b) => a.remindAt.localeCompare(b.remindAt)) });
+  }
+
+  // ---------- Calendario ----------
+  private putEvents(list: CalendarEventDTO[]) { const n = { ...this.state.events }; for (const e of list) n[e.id] = e; this.set({ events: n }); }
+  async loadEvents(from: Date, to: Date, conversationId?: string) {
+    const q = new URLSearchParams({ from: from.toISOString(), to: to.toISOString(), ...(conversationId ? { conversationId } : {}) });
+    const r = await this.request<{ events: CalendarEventDTO[] }>(`/events?${q}`);
+    this.putEvents(r.events);
+    return r.events;
+  }
+  async createEvent(conversationId: string, input: { title: string; description?: string | null; location?: string | null; startsAt: string; endsAt: string; timezone: string; inviteeIds?: string[]; originMessageId?: string | null }) {
+    const e = await this.request<CalendarEventDTO>(`/conversations/${conversationId}/events`, { method: 'POST', json: input });
+    this.putEvents([e]); return e;
+  }
+  async updateEvent(id: string, patch: Record<string, unknown>) { const e = await this.request<CalendarEventDTO>(`/events/${id}`, { method: 'PATCH', json: patch }); this.putEvents([e]); return e; }
+  async cancelEvent(id: string) { const e = await this.request<CalendarEventDTO>(`/events/${id}`, { method: 'DELETE' }); this.putEvents([e]); return e; }
+  async rsvp(id: string, answer: Exclude<Rsvp, 'pending'>) { const e = await this.request<CalendarEventDTO>(`/events/${id}/rsvp`, { method: 'POST', json: { rsvp: answer } }); this.putEvents([e]); return e; }
+
+  // ---------- Bifurcaciones ----------
+  async derive(conversationId: string, input: { messageId: string; kind: 'same' | 'internal' | 'directive'; name?: string; reason?: string }) {
+    const r = await this.request<{ id: string }>(`/conversations/${conversationId}/derive`, { method: 'POST', json: input });
+    await this.loadBootstrap();
+    return r;
+  }
+  async returnResult(conversationId: string, summary: string) {
+    const r = await this.request<{ parentId: string; messageId: string }>(`/conversations/${conversationId}/return`, { method: 'POST', json: { summary } });
+    await this.loadBootstrap();
+    return r;
+  }
+
+  /** Carga hacia atrás hasta tener el mensaje con ese seq (para saltar a un mensaje de origen). */
+  async ensureMessage(conversationId: string, seq: number) {
+    await this.openConversation(conversationId);
+    for (let guard = 0; guard < 40; guard++) {
+      const c = this.state.conversations[conversationId];
+      if (!c?.loaded) return false;
+      if (c.messages.some((m) => m.seq === seq)) return true;
+      if (!c.hasMore || (c.messages[0]?.seq ?? 0) <= seq) return false;
+      await this.loadOlder(conversationId);
+    }
+    return false;
   }
 
   // ---------- Espacios, grupos, invitaciones ----------

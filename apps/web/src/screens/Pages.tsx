@@ -5,6 +5,11 @@ import { errorText, getLang, langPreference, locale, setLang, t, tn, useLang, ty
 import { navigate } from '../router.ts';
 import { Avatar, OrgMark, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, previewText, timeLabel } from '../ui.tsx';
 import { InviteDialog, NewGroupDialog, NewWorkspaceDialog } from './Dialogs.tsx';
+import { IssueDrawer, IssueRow, isClosed } from './Issues.tsx';
+import { TodayAgenda, newEvent } from './Calendar.tsx';
+import { RemindersSection } from './Bring.tsx';
+import { askNotifications, conversationMenu, personMenu } from '../actions.tsx';
+import { menuProps } from '../menu.tsx';
 import { SignOutButton, groupWorkspaces } from './Shell.tsx';
 
 function greeting() {
@@ -17,7 +22,7 @@ function ConvCard({ c }: { c: ConversationDTO }) {
   const other = c.kind === 'direct' ? personById(d, c.memberIds.find((m) => m !== d.me.id)) : null;
   const org = other ? orgById(d, other.orgId) : c.workspaceId ? counterpartOrg(d, c.workspaceId) : null;
   return (
-    <button className="card conv-card" onClick={() => navigate(`/c/${c.id}`)}>
+    <button className="card conv-card" onClick={() => navigate(`/c/${c.id}`)} {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
       {other ? <Avatar person={other} org={org} size={38} /> : <OrgMark org={org} size={38} />}
       <span className="grow" style={{ minWidth: 0 }}>
         <span className="row"><b className="ellipsis grow">{conversationTitle(d, c)}</b><span className="small muted">{timeLabel(c.lastMessageAt)}</span></span>
@@ -32,7 +37,13 @@ function ConvCard({ c }: { c: ConversationDTO }) {
 export function TodayScreen() {
   const d = useClient((s) => s.data)!;
   const pending = useClient((s) => s.pending);
+  const issues = useClient((s) => s.issues);
   const [newWs, setNewWs] = useState(false);
+  const [openIssue, setOpenIssue] = useState<string | null>(null);
+  useEffect(() => { client.loadIssues({ mine: true, open: true }).catch(() => {}); }, []);
+  const visible = new Set(d.conversations.map((c) => c.id));
+  const mine = Object.values(issues).filter((i) => i.ownerId === d.me.id && !isClosed(i) && visible.has(i.conversationId))
+    .sort((a, b) => (a.dueDate ?? '9').localeCompare(b.dueDate ?? '9'));
   const unreadConvs = d.conversations.filter((c) => c.unread > 0);
   const unread = unreadConvs.reduce((n, c) => n + c.unread, 0);
   const recent = d.conversations.filter((c) => c.lastMessageAt).slice(0, 6);
@@ -53,7 +64,7 @@ export function TodayScreen() {
         <div className="stat dark"><div className="eyebrow">{t('today.unread')}</div><div className="num">{unread}</div></div>
         <div className="stat dark"><div className="eyebrow">{t('today.waiting')}</div><div className="num">{unreadConvs.length}</div></div>
         <div className="stat"><div className="eyebrow">{t('today.spaces')}</div><div className="num">{d.workspaces.length}</div></div>
-        <div className="stat"><div className="eyebrow">{t('today.queued')}</div><div className="num">{pending.length}</div></div>
+        <div className="stat"><div className="eyebrow">{t('issue.yours')}</div><div className="num">{mine.length}</div></div>
       </div>
       {d.workspaces.length === 0 ? (
         <div className="card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
@@ -70,6 +81,12 @@ export function TodayScreen() {
             </div>
           </section>
           <section>
+            <TodayAgenda />
+            <RemindersSection />
+            <div className="row" style={{ marginBottom: 10 }}><span className="eyebrow grow">{t('issue.yours')}</span><button className="btn ghost small" onClick={() => navigate('/asuntos')}>{t('nav.issues')} ›</button></div>
+            <div className="list" style={{ marginBottom: 20 }}>
+              {mine.length ? mine.slice(0, 5).map((i) => <IssueRow key={i.id} i={i} onOpen={setOpenIssue} />) : <div className="empty">{t('issue.yoursEmpty')}</div>}
+            </div>
             <div className="row" style={{ marginBottom: 10 }}><span className="eyebrow grow">{t('today.recent')}</span></div>
             <div className="list">{recent.map((c) => <ConvCard key={c.id} c={c} />)}</div>
             <button className="btn" style={{ marginTop: 12, width: '100%' }} onClick={() => setNewWs(true)}>{t('today.newSpace')}</button>
@@ -77,6 +94,8 @@ export function TodayScreen() {
         </div>
       )}
       {newWs && <NewWorkspaceDialog onClose={() => setNewWs(false)} />}
+      {openIssue && <IssueDrawer id={openIssue} onClose={() => setOpenIssue(null)} />}
+      {pending.length > 0 && <div className="hint" style={{ marginTop: 16 }}>{t('today.queued')}: {pending.length}</div>}
     </div></div>
   );
 }
@@ -108,7 +127,7 @@ export function SpacesScreen() {
   const groups = useMemo(() => groupWorkspaces(d), [d]);
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 760 }}>
-      <div className="row"><h1 className="grow">{t('nav.spaces')}</h1><button className="btn primary small" onClick={() => setNewWs(true)}>{t('spaces.new')}</button></div>
+      <div className="row"><h1 className="grow">{t('nav.spaces')}</h1><button className="btn small" onClick={() => navigate('/participantes')}>{t('nav.people')}</button><button className="btn primary small" onClick={() => setNewWs(true)}>{t('spaces.new')}</button></div>
       {groups.length === 0 && <div className="empty">{t('spaces.empty')}</div>}
       {groups.map((g) => (
         <section key={g.org?.id ?? 'none'} style={{ marginTop: 18 }}>
@@ -134,6 +153,9 @@ export function WorkspaceScreen({ id }: { id: string }) {
   const d = useClient((s) => s.data)!;
   const ws = d.workspaces.find((w) => w.id === id);
   const [dialog, setDialog] = useState<'group' | 'invite' | null>(null);
+  const issues = useClient((s) => s.issues);
+  const [openIssue, setOpenIssue] = useState<string | null>(null);
+  useEffect(() => { client.loadIssues({ workspaceId: id }).catch(() => {}); }, [id]);
   if (!ws) return <div className="page"><div className="empty">{t('ws.notFound')}</div></div>;
   const convs = d.conversations.filter((c) => c.workspaceId === id);
   const orgs = ws.organizationIds.map((o) => orgById(d, o)).filter(Boolean);
@@ -152,6 +174,7 @@ export function WorkspaceScreen({ id }: { id: string }) {
         <div className="row" style={{ margin: '16px 0 24px', flexWrap: 'wrap' }}>
           <button className="btn primary" onClick={() => setDialog('invite')}>{t('ws.invite')}</button>
           <button className="btn" onClick={() => setDialog('group')}>{t('ws.newGroup')}</button>
+          <button className="btn" onClick={() => newEvent({ conversationId: convs.find((c) => c.canPost && c.kind !== 'direct')?.id })}>{t('cal.new')}</button>
         </div>
       )}
       <div className="cols">
@@ -159,8 +182,8 @@ export function WorkspaceScreen({ id }: { id: string }) {
           <div className="eyebrow" style={{ marginBottom: 10 }}>{t('ws.yourGroups')}</div>
           <div className="list">
             {convs.map((c) => (
-              <button key={c.id} className="card conv-card" onClick={() => navigate(`/c/${c.id}`)}>
-                <span className="mark" style={{ width: 34, height: 34, background: c.kind === 'internal' ? '#fff' : 'var(--paper-3)', border: '1px solid var(--line)', fontSize: 14 }}>{c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>
+              <button key={c.id} className="card conv-card" onClick={() => navigate(`/c/${c.id}`)} {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
+                <span className="mark" style={{ width: 34, height: 34, background: c.kind === 'internal' ? '#fff' : 'var(--paper-3)', border: '1px solid var(--line)', fontSize: 14 }}>{c.parentId ? '⑂' : c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>
                 <span className="grow" style={{ minWidth: 0 }}>
                   <span className="row"><b className="grow ellipsis">{conversationTitle(d, c)}</b><span className="small muted">{timeLabel(c.lastMessageAt)}</span></span>
                   <span className="small muted ellipsis" style={{ display: 'block' }}>{t(c.kind === 'internal' ? 'kind.internal' : c.level === 'directivo' ? 'kind.directivo' : 'kind.operativo')} · {tn(c.memberIds.length, 'n.participant', 'n.participants')}</span>
@@ -170,6 +193,14 @@ export function WorkspaceScreen({ id }: { id: string }) {
             ))}
           </div>
           <div className="hint" style={{ marginTop: 10 }}>{t('ws.onlyYours')}</div>
+          <div className="eyebrow" style={{ margin: '24px 0 10px' }}>{t('nav.issues')}</div>
+          <div className="list">
+            {(() => {
+              const visible = new Set(convs.map((c) => c.id));
+              const list = Object.values(issues).filter((i) => i.workspaceId === id && !isClosed(i) && visible.has(i.conversationId));
+              return list.length ? list.map((i) => <IssueRow key={i.id} i={i} onOpen={setOpenIssue} />) : <div className="empty">{t('issue.noIssues')}</div>;
+            })()}
+          </div>
         </section>
         <section>
           <div className="eyebrow" style={{ marginBottom: 10 }}>{t('ws.participants')}{isGuest ? '' : ` · ${members.length}`}</div>
@@ -190,6 +221,7 @@ export function WorkspaceScreen({ id }: { id: string }) {
       </div>
       {dialog === 'group' && <NewGroupDialog workspaceId={id} onClose={() => setDialog(null)} />}
       {dialog === 'invite' && <InviteDialog workspaceId={id} onClose={() => setDialog(null)} />}
+      {openIssue && <IssueDrawer id={openIssue} onClose={() => setOpenIssue(null)} />}
     </div></div>
   );
 }
@@ -211,7 +243,7 @@ export function PeopleScreen() {
           <div className="row" style={{ marginBottom: 8 }}>{k !== 'agents' && k !== 'guest' && <OrgMark org={orgById(d, k)} />}<b>{k === 'agents' ? t('common.agents') : k === 'guest' ? t('common.guests') : orgById(d, k)?.name}</b><span className="small muted">{list.length}</span></div>
           <div className="list">
             {list.map((p) => (
-              <div key={p.id} className="card conv-card">
+              <div key={p.id} className="card conv-card" {...menuProps(() => personMenu(p))}>
                 <Avatar person={p} org={orgById(d, p.orgId)} size={36} />
                 <span className="grow" style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{p.name}</b><span className="small muted ellipsis" style={{ display: 'block' }}>{[p.title, p.area].filter(Boolean).join(' · ')}{p.guest && p.guestUntil ? ` · ${t('people.until', { date: new Date(p.guestUntil).toLocaleDateString(locale(), { day: 'numeric', month: 'short' }) })}` : ''}</span></span>
                 <button className="btn small" onClick={() => client.openDirect(p.id).then((r) => navigate(`/c/${r.id}`))}>{t('common.message')}</button>
@@ -277,6 +309,14 @@ export function SettingsScreen() {
         <SignOutButton />
       </div>
 
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{t('settings.whatsapp')}</div>
+      <button className="card conv-card" style={{ marginBottom: 24 }} onClick={() => navigate('/whatsapp')}>
+        <span style={{ fontSize: 22 }} aria-hidden>✆</span>
+        <span className="grow"><b>{t('wa.connect').replace('＋ ', '')}</b><span className="small muted" style={{ display: 'block' }}>{t('settings.whatsappHint')}</span></span>
+        <span className="muted">›</span>
+      </button>
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{t('notif.title')}</div>
+      <NotificationToggle />
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('settings.language')}</div>
       <div className="seg" style={{ marginBottom: 24, maxWidth: 480 }}>
         {langOptions.map(([v, label]) => (
@@ -302,5 +342,17 @@ export function SettingsScreen() {
       </div>
       <div className="hint" style={{ marginTop: 18 }}>{t('settings.platforms')}</div>
     </div></div>
+  );
+}
+
+function NotificationToggle() {
+  const supported = 'Notification' in window;
+  const [perm, setPerm] = useState(supported ? Notification.permission : 'denied');
+  if (!supported) return null;
+  return (
+    <div className="card conv-card" style={{ marginBottom: 24 }}>
+      <span className="grow">{perm === 'granted' ? t('notif.on') : perm === 'denied' ? t('notif.blocked') : t('notif.enable')}</span>
+      {perm === 'default' && <button className="btn primary small" onClick={() => { askNotifications(); setTimeout(() => setPerm(Notification.permission), 1500); }}>{t('notif.enable')}</button>}
+    </div>
   );
 }

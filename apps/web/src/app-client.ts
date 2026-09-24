@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Platform } from '@tiecoms/contracts';
-import { IndexedDbStorage, MemoryStorage, TieComsClient, type ClientState, type SecretStore } from '@tiecoms/client-core';
+import { browserLang } from './i18n.ts';
+import { IndexedDbStorage, MemoryStorage, TieComsClient, type ClientNotice, type ClientState, type SecretStore } from '@tiecoms/client-core';
 
 function makeStorage() {
   try { return typeof indexedDB !== 'undefined' ? new IndexedDbStorage('tiecoms') : new MemoryStorage(); } catch { return new MemoryStorage(); }
@@ -14,7 +15,7 @@ function detectPlatform(): Platform {
   return 'web';
 }
 
-const platform = detectPlatform();
+export const platform = detectPlatform();
 
 /**
  * En apps nativas no hay cookie httpOnly de mismo origen: el refresh token se
@@ -27,15 +28,22 @@ const nativeSecrets: SecretStore = {
   async set(t) { try { if (t) localStorage.setItem('tiecoms:rt', t); else localStorage.removeItem('tiecoms:rt'); } catch {} },
 };
 
+const en = browserLang() === 'en';
+const mobile = navigator.userAgent.includes('Mobile');
 const DEVICE_NAMES: Record<Platform, string> = {
-  web: navigator.userAgent.includes('Mobile') ? 'Navegador móvil' : 'Navegador',
-  macos: 'TieComs para Mac', windows: 'TieComs para Windows', android: 'TieComs Android', ios: 'TieComs iPhone', agent: 'Agente',
+  web: en ? (mobile ? 'Mobile browser' : 'Browser') : (mobile ? 'Navegador móvil' : 'Navegador'),
+  macos: en ? 'TieComs for Mac' : 'TieComs para Mac', windows: en ? 'TieComs for Windows' : 'TieComs para Windows',
+  android: 'TieComs Android', ios: 'TieComs iPhone', agent: en ? 'Agent' : 'Agente',
 };
 
 // En web, API en el mismo origen. En apps, la variable de build apunta a https://app.tiecoms.com.
 const baseUrl = (import.meta.env.VITE_API_ORIGIN as string | undefined) ?? '';
 
+/** La interfaz registra aquí cómo mostrar avisos (notificación del sistema y toast). */
+export const notices: { handler: ((n: ClientNotice) => void) | null } = { handler: null };
+
 export const client = new TieComsClient({
+  onNotice: (n) => notices.handler?.(n),
   baseUrl,
   platform,
   deviceName: DEVICE_NAMES[platform],

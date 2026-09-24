@@ -67,6 +67,8 @@ echo "$REL" > $BASE/RELEASE
 if [ -e /etc/nginx/tiecoms/tls/fullchain.pem ]; then
   install -m 644 nginx/security-headers.conf /etc/nginx/tiecoms/security-headers.conf
   install -m 644 nginx/api-locations.conf /etc/nginx/tiecoms/api-locations.conf
+  install -m 644 nginx/app-links.conf /etc/nginx/tiecoms/app-links.conf
+  install -m 644 nginx/app-links-redirect.conf /etc/nginx/tiecoms/app-links-redirect.conf
   install -m 644 nginx/00-tiecoms-cloudflare.conf /etc/nginx/conf.d/00-tiecoms-cloudflare.conf
   install -m 644 nginx/tiecoms.conf /etc/nginx/conf.d/tiecoms.conf
   nginx -t && systemctl reload nginx

@@ -2,9 +2,10 @@ import type { AuthResult, DeviceInfo, LoginInput, OrgRole, SignupInput, UserDTO 
 import { config } from '../config.ts';
 import { audit, enqueueOutbox, pool, tx, type Db, type Tx } from '../db.ts';
 import { ApiError, badRequest, conflict, forbidden, notFound, unauthorized } from '../errors.ts';
-import { invitationMail, trySendMail, type MailLang } from '../mail.ts';
+import type { MailLang } from '../mail.ts';
 import { hashPassword, orgLook, randomToken, sha256, signAccess, verifyPassword } from '../security.ts';
 import { claimedBy, emailDomain, isPublicDomain } from './domains.ts';
+import { deliverInvitation, prepareInvitationFor } from './invitations.ts';
 
 /** Ventana en la que el refresh anterior sigue sirviendo (dos pestañas refrescando a la vez). */
 const ROTATION_GRACE_MS = 30_000;
@@ -130,24 +131,18 @@ export async function createOrgInvitation(userId: string, orgId: string, input: 
     const { rows } = await c.query('SELECT role FROM organization_memberships WHERE org_id = $1 AND user_id = $2', [orgId, userId]);
     if (!rows[0]) throw notFound('Empresa');
     if (!['owner', 'admin'].includes(rows[0].role)) throw forbidden('Solo quien administra la empresa puede invitar colegas');
+    if (input.email) await prepareInvitationFor(c, 'org', orgId, input.email);
     const token = randomToken(24);
     const r = await c.query(
-      `INSERT INTO org_invitations (token_hash, org_id, invited_by, email, role, expires_at)
-       VALUES ($1,$2,$3,$4,$5, now() + make_interval(days => $6)) RETURNING id, expires_at`,
-      [sha256(token), orgId, userId, input.email ?? null, input.role, input.expiresInDays],
+      `INSERT INTO org_invitations (token_hash, org_id, invited_by, email, role, expires_at, lang)
+       VALUES ($1,$2,$3,$4,$5, now() + make_interval(days => $6), $7) RETURNING id, expires_at`,
+      [sha256(token), orgId, userId, input.email ?? null, input.role, input.expiresInDays, input.lang ?? 'es'],
     );
     await audit(c, userId, 'org_invitation.created', { type: 'organization', id: orgId }, { email: input.email ?? null, role: input.role });
     return { id: r.rows[0].id as string, token, expiresAt: r.rows[0].expires_at as Date };
   });
-  let emailSent = false;
-  if (input.email) {
-    const { rows } = await pool.query('SELECT u.name, u.email, o.name AS org_name FROM users u, organizations o WHERE u.id = $1 AND o.id = $2', [userId, orgId]);
-    emailSent = await trySendMail(invitationMail({
-      lang: input.lang ?? 'es', to: input.email, inviterName: rows[0].name, inviterEmail: rows[0].email, targetName: rows[0].org_name,
-      kind: 'org', url: `${config.publicOrigin}/signup?org=${encodeURIComponent(inv.token)}`, expiresAt: inv.expiresAt,
-    }));
-  }
-  return { ...inv, emailSent };
+  const mail = input.email ? await deliverInvitation('org', inv.id, inv.token) : null;
+  return { ...inv, emailSent: mail?.status === 'sent', emailStatus: mail?.status ?? null };
 }
 
 export async function previewOrgInvitation(token: string) {

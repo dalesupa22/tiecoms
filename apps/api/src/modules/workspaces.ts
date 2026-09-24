@@ -5,9 +5,8 @@ import type {
 import { conversationAccess, workspaceAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Tx } from '../db.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
-import { config } from '../config.ts';
-import { invitationMail, trySendMail } from '../mail.ts';
 import { randomToken, sha256 } from '../security.ts';
+import { deliverInvitation, prepareInvitationFor } from './invitations.ts';
 import { appendEvent, appendMessage } from './messages.ts';
 
 /** Mensaje de sistema estructurado: cada cliente lo muestra en su idioma. */
@@ -242,24 +241,18 @@ export async function createInvitation(userId: string, workspaceId: string, inpu
       if (rows.length !== new Set(input.conversationIds).size) throw badRequest('Solo puedes invitar a grupos compartidos donde participas');
     }
     if (input.role === 'guest' && !input.conversationIds.length) throw badRequest('Un tercero invitado debe entrar a grupos concretos');
+    if (input.email) await prepareInvitationFor(c, 'workspace', workspaceId, input.email);
     const token = randomToken(24);
     const { rows } = await c.query(
-      `INSERT INTO invitations (token_hash, workspace_id, invited_by, email, role, conversation_ids, history, access_until, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + make_interval(days => $9)) RETURNING id, expires_at`,
-      [sha256(token), workspaceId, userId, input.email ?? null, input.role, input.conversationIds, input.history, input.accessUntil ?? null, input.expiresInDays],
+      `INSERT INTO invitations (token_hash, workspace_id, invited_by, email, role, conversation_ids, history, access_until, expires_at, lang)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + make_interval(days => $9), $10) RETURNING id, expires_at`,
+      [sha256(token), workspaceId, userId, input.email ?? null, input.role, input.conversationIds, input.history, input.accessUntil ?? null, input.expiresInDays, input.lang],
     );
     await audit(c, userId, 'invitation.created', { type: 'invitation', id: rows[0].id, workspaceId }, { role: input.role, email: input.email ?? null });
     return { id: rows[0].id as string, token, expiresAt: rows[0].expires_at as Date };
   });
-  let emailSent = false;
-  if (input.email) {
-    const { rows } = await pool.query('SELECT u.name, u.email, w.name AS ws_name FROM users u, workspaces w WHERE u.id = $1 AND w.id = $2', [userId, workspaceId]);
-    emailSent = await trySendMail(invitationMail({
-      lang: input.lang, to: input.email, inviterName: rows[0].name, inviterEmail: rows[0].email, targetName: rows[0].ws_name,
-      kind: 'workspace', url: `${config.publicOrigin}/invite/${encodeURIComponent(inv.token)}`, expiresAt: inv.expiresAt,
-    }));
-  }
-  return { ...inv, emailSent };
+  const mail = input.email ? await deliverInvitation('workspace', inv.id, inv.token) : null;
+  return { ...inv, emailSent: mail?.status === 'sent', emailStatus: mail?.status ?? null };
 }
 
 export async function previewInvitation(token: string): Promise<InvitationPreviewDTO> {

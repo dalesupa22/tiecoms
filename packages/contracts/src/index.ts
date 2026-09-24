@@ -358,6 +358,24 @@ export const ReturnResultInput = z.object({ summary: z.string().trim().min(2).ma
 
 export const AcceptInvitationInput = z.object({ orgId: z.uuid().optional() });
 
+/** Invitación con correo que aún no se acepta (lista de pendientes para reenviar o revocar). */
+export interface PendingInvitationDTO {
+  id: string;
+  email: string;
+  role: string;
+  invitedById: string;
+  invitedByName: string;
+  createdAt: string;
+  expiresAt: string;
+  expired: boolean;
+  /** Resultado del último envío: null si nunca se intentó. */
+  emailStatus: 'sent' | 'failed' | 'skipped' | null;
+  emailSentAt: string | null;
+  sendCount: number;
+  /** Quien invitó o quien administra puede reenviar y revocar. */
+  canManage: boolean;
+}
+
 export interface InvitationPreviewDTO {
   workspaceName: string;
   invitedByName: string;

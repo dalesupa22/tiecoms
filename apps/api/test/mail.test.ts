@@ -61,18 +61,26 @@ describe('mail', () => {
     expect(m.tags).toEqual(['org-invitation']);
   });
 
-  it('un rechazo de Brevo no rompe a quien invita (trySendMail devuelve false)', async () => {
+  it('un rechazo de Brevo no rompe a quien invita (trySendMail lo reporta como failed)', async () => {
     reply = { status: 400, body: { code: 'invalid_parameter', message: 'sender not valid' } };
     await expect(mail.sendMail(invite())).rejects.toThrow(/Brevo respondió 400: invalid_parameter sender not valid/);
-    expect(await mail.trySendMail(invite())).toBe(false);
+    expect(await mail.trySendMail(invite())).toMatchObject({ status: 'failed', error: expect.stringContaining('sender not valid') });
     reply = { status: 201, body: { messageId: 'x' } };
+  });
+
+  it('nunca envía a cuentas demo ni de pruebas', async () => {
+    last = null;
+    expect(await mail.trySendMail({ ...invite(), to: [{ email: 'lucia@demo.tiecoms.com' }] })).toEqual({ status: 'skipped', error: 'suppressed' });
+    expect(await mail.trySendMail({ ...invite(), to: [{ email: 'x@example.com' }] })).toEqual({ status: 'skipped', error: 'suppressed' });
+    expect(last).toBeNull();
+    expect(await mail.trySendMail(invite())).toEqual({ status: 'sent' });
   });
 
   it('sin llave no intenta enviar', async () => {
     delete process.env.BREVO_API_KEY;
     last = null;
     expect(mail.mailEnabled()).toBe(false);
-    expect(await mail.trySendMail(invite())).toBe(false);
+    expect(await mail.trySendMail(invite())).toEqual({ status: 'skipped', error: 'mail_unavailable' });
     expect(last).toBeNull();
     process.env.BREVO_API_KEY = 'xkeysib-test';
   });

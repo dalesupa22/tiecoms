@@ -39,15 +39,29 @@ export async function sendMail(m: Mail): Promise<string> {
   return body.messageId ?? '';
 }
 
-/** Envío que nunca rompe el flujo que lo llama: registra el fallo y devuelve false. */
-export async function trySendMail(m: Mail): Promise<boolean> {
-  if (!mailEnabled()) return false;
+export type MailResult = { status: 'sent' | 'failed' | 'skipped'; error?: string };
+
+/**
+ * Dominios a los que nunca se envía: cuentas demo y de pruebas (un rebote por cada
+ * resiembra dañaría la reputación del remitente).
+ */
+const suppressed = (process.env.MAIL_SUPPRESS_DOMAINS ?? 'demo.tiecoms.com,example.com,example.org,example.net')
+  .split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
+const isSuppressed = (email: string) => {
+  const domain = email.slice(email.lastIndexOf('@') + 1).toLowerCase();
+  return suppressed.some((d) => domain === d || domain.endsWith(`.${d}`));
+};
+
+/** Envío que nunca rompe el flujo que lo llama: registra el fallo y lo devuelve. */
+export async function trySendMail(m: Mail): Promise<MailResult> {
+  if (!mailEnabled()) return { status: 'skipped', error: 'mail_unavailable' };
+  if (m.to.every((r) => isSuppressed(r.email))) return { status: 'skipped', error: 'suppressed' };
   try {
-    await sendMail(m);
-    return true;
+    await sendMail({ ...m, to: m.to.filter((r) => !isSuppressed(r.email)) });
+    return { status: 'sent' };
   } catch (e: any) {
     console.log(`[mail] no se pudo enviar "${m.subject}" (${m.tags?.join(',') ?? ''}): ${e?.message}`);
-    return false;
+    return { status: 'failed', error: String(e?.message ?? e).slice(0, 500) };
   }
 }
 

@@ -3,6 +3,7 @@ import { client, useClient } from '../app-client.ts';
 import { BASE, navigate } from '../router.ts';
 import { Avatar, Modal, orgById } from '../ui.tsx';
 import { errorText, getLang, t } from '../i18n.ts';
+import { InviteResult, PendingInvitations } from './Invitations.tsx';
 
 function useSubmit() {
   const [busy, setBusy] = useState(false);
@@ -98,12 +99,11 @@ export function InviteDialog({ workspaceId, onClose }: { workspaceId: string; on
   const [history, setHistory] = useState<'now' | 'all'>('now');
   const [link, setLink] = useState<string | null>(null);
   const [emailSent, setEmailSent] = useState(false);
-  const [copied, setCopied] = useState(false);
   const s = useSubmit();
   const toggle = (id: string) => setPicked((x) => (x.includes(id) ? x.filter((y) => y !== id) : [...x, id]));
   const submit = (e: FormEvent) => { e.preventDefault(); void s.run(async () => {
     const r = await client.createInvitation(workspaceId, {
-      email: email || undefined, role, conversationIds: picked, history,
+      email: email.trim(), role, conversationIds: picked, history,
       accessUntil: role === 'guest' && until ? new Date(`${until}T23:59:59`).toISOString() : undefined,
       lang: getLang(),
     });
@@ -113,14 +113,12 @@ export function InviteDialog({ workspaceId, onClose }: { workspaceId: string; on
 
   if (link) {
     return (
-      <Modal title={t('dlg.linkReady')} onClose={onClose}>
-        {emailSent && <p style={{ margin: 0 }}><b>{t('dlg.emailSent', { email })}</b></p>}
-        <p className="muted" style={{ margin: 0 }}>{t('dlg.linkBody', { email: email ? t('dlg.linkOnlyFor', { email }) : '' })}</p>
-        <div className="linkbox">
-          <input className="input" readOnly value={link} onFocus={(e) => e.target.select()} />
-          <button className="btn primary" onClick={() => { void navigator.clipboard?.writeText(link); setCopied(true); }}>{copied ? t('common.copied') : t('common.copy')}</button>
+      <Modal title={emailSent ? t('dlg.inviteSent') : t('dlg.linkReady')} onClose={onClose}>
+        <InviteResult email={email.trim()} emailSent={emailSent} link={link} />
+        <div className="modal-actions">
+          <button className="btn" onClick={() => { setLink(null); setEmail(''); }}>{t('dlg.inviteAnother')}</button>
+          <button className="btn primary" onClick={onClose}>{t('common.done')}</button>
         </div>
-        <div className="modal-actions"><button className="btn" onClick={onClose}>{t('common.done')}</button></div>
       </Modal>
     );
   }
@@ -132,7 +130,7 @@ export function InviteDialog({ workspaceId, onClose }: { workspaceId: string; on
           <button type="button" className={role === 'guest' ? 'on' : ''} onClick={() => setRole('guest')}>{t('dlg.thirdParty')}</button>
         </div>
         <div className="hint">{role === 'member' ? t('dlg.memberHint') : t('dlg.guestHint')}</div>
-        <label className="field"><span>{t('dlg.emailOpt')}</span><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t('dlg.emailPh')} /></label>
+        <label className="field"><span>{t('dlg.emailReq')}</span><input className="input" type="email" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t('dlg.emailPh')} /></label>
         {role === 'guest' && <label className="field"><span>{t('dlg.leaveDate')}</span><input className="input" type="date" required value={until} onChange={(e) => setUntil(e.target.value)} min={new Date().toISOString().slice(0, 10)} /></label>}
         <div className="eyebrow">{t('dlg.groupsJoin')}</div>
         <div className="list">
@@ -145,8 +143,9 @@ export function InviteDialog({ workspaceId, onClose }: { workspaceId: string; on
           <button type="button" className={history === 'all' ? 'on' : ''} onClick={() => setHistory('all')}>{t('dlg.seeHistory')}</button>
         </div>
         {s.error && <div className="error">{s.error}</div>}
-        <div className="modal-actions"><button type="button" className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" disabled={s.busy || (role === 'guest' && !picked.length)}>{t('dlg.generate')}</button></div>
+        <div className="modal-actions"><button type="button" className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" disabled={s.busy || !email.trim() || (role === 'guest' && !picked.length)}>{s.busy ? t('common.wait') : t('dlg.sendInvite')}</button></div>
       </form>
+      <PendingInvitations scope="workspaces" id={workspaceId} />
     </Modal>
   );
 }

@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationPreviewDTO, type Platform, type ReminderDTO, type Rsvp,
+  type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -691,7 +691,7 @@ export class TieComsClient {
     return r;
   }
   createInvitation(workspaceId: string, input: { email?: string; role: 'member' | 'guest' | 'admin'; conversationIds: string[]; expiresInDays?: number; accessUntil?: string; history?: 'now' | 'all'; lang?: 'es' | 'en' }) {
-    return this.request<{ id: string; token: string; expiresAt: string; emailSent: boolean }>(`/workspaces/${workspaceId}/invitations`, { method: 'POST', json: input });
+    return this.request<{ id: string; token: string; expiresAt: string; emailSent: boolean; emailStatus: 'sent' | 'failed' | 'skipped' | null }>(`/workspaces/${workspaceId}/invitations`, { method: 'POST', json: input });
   }
   async previewInvitation(token: string): Promise<InvitationPreviewDTO> {
     const res = await this.raw(`/invitations/${encodeURIComponent(token)}`, {}, false);
@@ -704,7 +704,18 @@ export class TieComsClient {
     return r;
   }
   createOrgInvitation(orgId: string, input: { email?: string; role?: 'member' | 'admin'; lang?: 'es' | 'en' } = {}) {
-    return this.request<{ id: string; token: string; expiresAt: string; emailSent: boolean }>(`/organizations/${orgId}/invitations`, { method: 'POST', json: input });
+    return this.request<{ id: string; token: string; expiresAt: string; emailSent: boolean; emailStatus: 'sent' | 'failed' | 'skipped' | null }>(`/organizations/${orgId}/invitations`, { method: 'POST', json: input });
+  }
+  /** Invitaciones con correo aún sin aceptar de una empresa o un espacio. */
+  async listInvitations(scope: 'organizations' | 'workspaces', id: string) {
+    return (await this.request<{ invitations: PendingInvitationDTO[] }>(`/${scope}/${id}/invitations`)).invitations;
+  }
+  /** Reenvía el correo con un enlace nuevo (el anterior deja de servir). */
+  resendInvitation(scope: 'organizations' | 'workspaces', id: string, invitationId: string) {
+    return this.request<{ token: string; emailSent: boolean; emailStatus: 'sent' | 'failed' | 'skipped' }>(`/${scope}/${id}/invitations/${invitationId}/resend`, { method: 'POST', json: {} });
+  }
+  revokeInvitation(scope: 'organizations' | 'workspaces', id: string, invitationId: string) {
+    return this.request<{ ok: true }>(`/${scope}/${id}/invitations/${invitationId}`, { method: 'DELETE' });
   }
   async previewOrgInvitation(token: string): Promise<OrgInvitationPreviewDTO> {
     const res = await this.raw(`/org-invitations/${encodeURIComponent(token)}`, {}, false);

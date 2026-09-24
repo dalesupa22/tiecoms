@@ -18,6 +18,7 @@ import * as domains from './modules/domains.ts';
 import { bootstrap } from './modules/bootstrap.ts';
 import { listEvents, listMessages, markRead, sendMessage } from './modules/messages.ts';
 import * as ws from './modules/workspaces.ts';
+import * as invitations from './modules/invitations.ts';
 import * as issues from './modules/issues.ts';
 import * as cal from './modules/calendar.ts';
 import * as prefs from './modules/prefs.ts';
@@ -169,6 +170,16 @@ export async function buildHttp() {
       ws.createConversation(req.userId, req.params.id, CreateConversationInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/workspaces/:id/invitations', async (req) =>
       ws.createInvitation(req.userId, req.params.id, CreateInvitationInput.parse(req.body)));
+
+    // Pendientes con correo: listar, reenviar (enlace nuevo) y revocar. kind = organizations | workspaces.
+    for (const [path, kind] of [['organizations', 'org'], ['workspaces', 'workspace']] as const) {
+      priv.get<{ Params: { id: string } }>(`/api/v1/${path}/:id/invitations`, async (req) =>
+        ({ invitations: await invitations.listPendingInvitations(kind, req.userId, req.params.id) }));
+      priv.post<{ Params: { id: string; invId: string } }>(`/api/v1/${path}/:id/invitations/:invId/resend`, { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+        async (req) => invitations.resendInvitation(kind, req.userId, req.params.id, req.params.invId));
+      priv.delete<{ Params: { id: string; invId: string } }>(`/api/v1/${path}/:id/invitations/:invId`, async (req) =>
+        invitations.revokeInvitation(kind, req.userId, req.params.id, req.params.invId));
+    }
 
     priv.post<{ Params: { token: string } }>('/api/v1/invitations/:token/accept', async (req) =>
       ws.acceptInvitation(req.userId, req.params.token, AcceptInvitationInput.parse(req.body ?? {})));

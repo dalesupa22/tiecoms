@@ -18,6 +18,13 @@ export function AuthScreen({ mode, after }: { mode: 'login' | 'signup'; after?: 
     client.previewOrgInvitation(orgToken!).then((p) => { setOrgInvite(p); if (p.email) setF((x) => ({ ...x, email: p.email! })); }).catch((e) => setError(errorText(e)));
   }, [joining, orgToken]);
 
+  // Llega desde el correo de invitación a un espacio: el correo invitado ya viene escrito.
+  useEffect(() => {
+    const m = /^\/invite\/([^/?#]+)/.exec(after ?? '');
+    if (joining || !m) return;
+    client.previewInvitation(decodeURIComponent(m[1]!)).then((p) => { if (p.email) setF((x) => (x.email ? x : { ...x, email: p.email! })); }).catch(() => {});
+  }, [joining, after]);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);

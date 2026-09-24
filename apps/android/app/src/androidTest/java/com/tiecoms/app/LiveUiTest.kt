@@ -9,6 +9,7 @@ import android.os.Build
 import android.util.Log
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -132,14 +133,21 @@ class LiveUiTest {
         open("tiecoms://c/00000000-0000-0000-0000-000000000000")
         compose.waitUntil(10_000) { compose.onAllNodes(hasText("No tienes acceso", substring = true) or hasText("have access", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         log("deep link sin acceso → aviso mostrado")
-        // 8. Rotación: el borrador sobrevive
+        // 8. Rotación: el borrador y los mensajes sobreviven (captura tras 2 s, fuera de la animación)
         compose.onNodeWithTag("composer").performTextInput("borrador")
+        fun assertChatIntact(where: String) {
+            compose.waitUntilExactlyOneExists(hasTestTag("composer") and hasText("borrador"), 10_000)
+            compose.onNode(hasText("eco: $text"), useUnmergedTree = true).assertIsDisplayed()
+            compose.onNode(hasText(text) and hasTestTag("composer").not(), useUnmergedTree = true).assertIsDisplayed()
+            log("rotación ($where): borrador y mensajes visibles")
+        }
         scenario.onActivity { it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
-        compose.waitUntilExactlyOneExists(hasTestTag("composer") and hasText("borrador"), 10_000)
+        Thread.sleep(2_000); compose.waitForIdle()
+        assertChatIntact("horizontal")
+        screenshot("ui-03-landscape")
         scenario.onActivity { it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
-        compose.waitUntilExactlyOneExists(hasTestTag("composer") and hasText("borrador"), 10_000)
-        log("rotación: borrador conservado")
-
+        Thread.sleep(2_000); compose.waitForIdle()
+        assertChatIntact("vertical")
         screenshot("ui-02-final")
     }
 }

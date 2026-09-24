@@ -20,20 +20,31 @@ export function usePath() {
 }
 
 export type Route =
-  | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' }
+  | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' } | { name: 'agenda' } | { name: 'share' } | { name: 'whatsapp' }
   | { name: 'conversation'; id: string } | { name: 'workspace'; id: string }
-  | { name: 'login' } | { name: 'signup' } | { name: 'invite'; token: string };
+  | { name: 'login' } | { name: 'signup' } | { name: 'sso' } | { name: 'invite'; token: string };
 
 export function parse(path: string): Route {
   const [, a, b] = path.split('/');
   if (a === 'c' && b) return { name: 'conversation', id: b };
   if (a === 'w' && b) return { name: 'workspace', id: b };
   if (a === 'invite' && b) return { name: 'invite', token: decodeURIComponent(b) };
+  if (a === 'auth' && b === 'sso') return { name: 'sso' };
   if (a === 'login') return { name: 'login' };
   if (a === 'signup') return { name: 'signup' };
   if (a === 'conversaciones') return { name: 'inbox' };
   if (a === 'espacios') return { name: 'spaces' };
   if (a === 'participantes') return { name: 'people' };
   if (a === 'ajustes') return { name: 'settings' };
+  if (a === 'asuntos') return { name: 'issues' };
+  if (a === 'trazo') return { name: 'trazo' };
+  if (a === 'agenda') return { name: 'agenda' };
+  if (a === 'share') return { name: 'share' };
+  if (a === 'whatsapp') return { name: 'whatsapp' };
   return { name: 'today' };
+}
+
+/** Parámetro de búsqueda actual (p. ej. ?m=12 para saltar a un mensaje). */
+export function queryParam(name: string) {
+  return new URLSearchParams(location.search).get(name);
 }

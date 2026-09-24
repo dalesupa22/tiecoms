@@ -1,6 +1,7 @@
 import { CONTRACT_VERSION, type BootstrapDTO, type ConversationDTO, type OrganizationDTO, type PersonDTO, type WorkspaceDTO } from '@tiecoms/contracts';
 import { pool } from '../db.ts';
 import { loadUser } from './auth.ts';
+import { orgVerification } from './domains.ts';
 
 const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())`;
 
@@ -15,6 +16,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   const [ws, convs, people] = await Promise.all([
     pool.query(
       `SELECT w.id, w.name, w.department, w.glyph, w.owning_org_id, w.created_at, wm.role,
+              (SELECT wp.pinned_at FROM workspace_prefs wp WHERE wp.workspace_id = w.id AND wp.user_id = wm.user_id) AS pinned_at,
               ARRAY(SELECT org_id FROM workspace_organizations wo WHERE wo.workspace_id = w.id AND wo.left_at IS NULL ORDER BY wo.joined_at) AS org_ids,
               CASE WHEN wm.role = 'guest' THEN '{}'::uuid[] ELSE ARRAY(SELECT o.user_id FROM workspace_memberships o WHERE o.workspace_id = w.id
                 AND o.revoked_at IS NULL AND (o.expires_at IS NULL OR o.expires_at > now()) ORDER BY o.joined_at) END AS member_ids
@@ -25,7 +27,9 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
     ),
     pool.query(
       `SELECT c.id, c.workspace_id, c.kind, c.level, c.name, c.internal_org_id, c.last_message_seq, c.last_event_seq, c.last_message_at,
-              m.can_post, m.can_manage, m.history_from_seq, wm.role AS workspace_role,
+              c.parent_conversation_id, c.parent_message_id, (SELECT pm.seq FROM messages pm WHERE pm.id = c.parent_message_id) AS parent_message_seq, c.derive_kind, c.derive_reason, c.returned_at,
+              (SELECT count(*) FROM issues i WHERE i.conversation_id = c.id AND i.status NOT IN ('done','cancelled'))::int AS open_issues,
+              m.can_post, m.can_manage, m.history_from_seq, wm.role AS workspace_role, cp.pinned_at, cp.muted_until,
               COALESCE(rc.last_read_seq, 0) AS last_read_seq,
               ARRAY(SELECT user_id FROM conversation_memberships x WHERE x.conversation_id = c.id AND x.removed_at IS NULL ORDER BY x.joined_at) AS member_ids,
               (SELECT CASE WHEN lm.deleted_at IS NULL THEN left(lm.body, 140) ELSE '' END FROM messages lm
@@ -34,6 +38,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
          JOIN conversations c ON c.id = m.conversation_id AND c.archived_at IS NULL
          LEFT JOIN workspace_memberships wm ON wm.workspace_id = c.workspace_id AND wm.user_id = m.user_id
          LEFT JOIN read_cursors rc ON rc.conversation_id = c.id AND rc.user_id = m.user_id
+         LEFT JOIN conversation_prefs cp ON cp.conversation_id = c.id AND cp.user_id = m.user_id
         WHERE m.user_id = $1 AND m.removed_at IS NULL
           AND (c.workspace_id IS NULL OR (wm.user_id IS NOT NULL AND ${ACTIVE_WM}))
         ORDER BY c.last_message_at DESC NULLS LAST`,
@@ -69,6 +74,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   const workspaces: WorkspaceDTO[] = ws.rows.map((r) => ({
     id: r.id, name: r.name, department: r.department, glyph: r.glyph, owningOrgId: r.owning_org_id,
     organizationIds: r.org_ids, memberIds: r.member_ids, myRole: r.role, createdAt: new Date(r.created_at).toISOString(),
+    pinnedAt: r.pinned_at ? new Date(r.pinned_at).toISOString() : null,
   }));
 
   const conversations: ConversationDTO[] = convs.rows.map((r) => {
@@ -81,6 +87,11 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
       unread: Math.max(0, r.last_message_seq - readFrom),
       canPost: r.can_post, canManage: r.can_manage || ['lead', 'admin'].includes(r.workspace_role),
       historyFromSeq: r.history_from_seq,
+      parentId: r.parent_conversation_id, parentMessageId: r.parent_message_id, parentMessageSeq: r.parent_message_seq ?? null, deriveKind: r.derive_kind,
+      deriveReason: r.derive_reason, returnedAt: r.returned_at ? new Date(r.returned_at).toISOString() : null,
+      openIssues: r.open_issues,
+      pinnedAt: r.pinned_at ? new Date(r.pinned_at).toISOString() : null,
+      mutedUntil: r.muted_until && new Date(r.muted_until) > new Date() ? new Date(r.muted_until).toISOString() : null,
     };
   });
 
@@ -98,8 +109,10 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
        LEFT JOIN organization_memberships om ON om.org_id = o.id AND om.user_id = $2 WHERE o.id = ANY($1) ORDER BY o.name`,
     [[...orgIds], userId],
   );
+  const verified = await orgVerification(pool, [...orgIds]);
   const organizations: OrganizationDTO[] = orgs.rows.map((r) => ({
     id: r.id, name: r.name, mark: r.mark, colorBg: r.color_bg, colorFg: r.color_fg, ...(r.my_role ? { myRole: r.my_role } : {}),
+    verification: verified.get(r.id)?.level ?? 'none', verifiedDomain: verified.get(r.id)?.domain ?? null,
   }));
 
   return { contract: CONTRACT_VERSION, serverTime: new Date().toISOString(), me, organizations, workspaces, conversations, people: personList };

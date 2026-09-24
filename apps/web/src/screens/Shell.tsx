@@ -3,13 +3,21 @@ import type { BootstrapDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { asset, navigate, type Route } from '../router.ts';
 import { Avatar, OrgMark, conversationTitle, counterpartOrg, orgById, personById } from '../ui.tsx';
-import { NewWorkspaceDialog } from './Dialogs.tsx';
+import { InviteDialog, NewGroupDialog, NewWorkspaceDialog } from './Dialogs.tsx';
+import { conversationMenu, openDialog, workspaceMenu } from '../actions.tsx';
+import { menuProps } from '../menu.tsx';
+import { newEvent } from './Calendar.tsx';
+import type { ConversationDTO, WorkspaceDTO } from '@tiecoms/contracts';
 import { t } from '../i18n.ts';
 
 const NAV = [
   { name: 'today', label: 'nav.today', ico: '◑', to: '/' },
   { name: 'inbox', label: 'nav.inbox', ico: '◍', to: '/conversaciones' },
+  { name: 'agenda', label: 'nav.agenda', ico: '▤', to: '/agenda' },
+  { name: 'issues', label: 'nav.issues', ico: '◆', to: '/asuntos' },
+  { name: 'trazo', label: 'nav.trazo', ico: '⑂', to: '/trazo' },
   { name: 'people', label: 'nav.people', ico: '◎', to: '/participantes' },
+  { name: 'whatsapp', label: 'nav.whatsapp', ico: '✆', to: '/whatsapp' },
 ] as const;
 
 export function groupWorkspaces(d: BootstrapDTO) {
@@ -28,7 +36,9 @@ function Sidebar({ route }: { route: Route }) {
   const [newWs, setNewWs] = useState(false);
   const groups = useMemo(() => groupWorkspaces(d), [d]);
   const directs = d.conversations.filter((c) => c.kind === 'direct');
-  const unreadTotal = d.conversations.reduce((n, c) => n + c.unread, 0);
+  const unreadTotal = d.conversations.reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0);
+  const pinnedConvs = d.conversations.filter((c) => c.pinnedAt).sort((a, b) => (a.pinnedAt ?? '').localeCompare(b.pinnedAt ?? ''));
+  const pinnedWs = d.workspaces.filter((w) => w.pinnedAt);
   const me = personById(d, d.me.id);
   const myOrg = orgById(d, d.me.primaryOrgId);
   const activeConv = route.name === 'conversation' ? route.id : null;
@@ -53,6 +63,13 @@ function Sidebar({ route }: { route: Route }) {
           <span className="eyebrow grow">{t('side.companies')}</span>
           <button className="btn ghost small" onClick={() => setNewWs(true)} title={t('side.newSpace')} aria-label={t('side.newSpace')}>＋</button>
         </div>
+        {(pinnedConvs.length > 0 || pinnedWs.length > 0) && (
+          <div className="side-pinned">
+            <div className="eyebrow" style={{ padding: '4px 10px' }}>📌 {t('side.pinned')}</div>
+            {pinnedWs.map((w) => <WsTitle key={w.id} w={w} active={activeWs === w.id} />)}
+            {pinnedConvs.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} showWs />)}
+          </div>
+        )}
         {groups.length === 0 && <div className="hint" style={{ padding: '6px 10px' }}>{t('side.empty')}</div>}
         {groups.map((g) => (
           <div key={g.org?.id ?? 'none'}>
@@ -62,16 +79,8 @@ function Sidebar({ route }: { route: Route }) {
                 const convs = d.conversations.filter((c) => c.workspaceId === w.id);
                 return (
                   <div key={w.id}>
-                    <button className="side-ws-title" style={{ width: '100%', background: activeWs === w.id ? 'var(--card)' : undefined }} onClick={() => navigate(`/w/${w.id}`)}>
-                      <span className="grow ellipsis">{w.name}</span>
-                    </button>
-                    {convs.map((c) => (
-                      <button key={c.id} className={`side-conv ${activeConv === c.id ? 'active' : ''} ${c.unread ? 'unread' : ''}`} onClick={() => navigate(`/c/${c.id}`)}>
-                        <span className="hash">{c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>
-                        <span className="grow ellipsis">{conversationTitle(d, c)}</span>
-                        {c.unread > 0 && <span className="pill">{c.unread}</span>}
-                      </button>
-                    ))}
+                    <WsTitle w={w} active={activeWs === w.id} />
+                    {convs.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />)}
                   </div>
                 );
               })}
@@ -81,16 +90,7 @@ function Sidebar({ route }: { route: Route }) {
         {directs.length > 0 && (
           <>
             <div className="eyebrow" style={{ padding: '14px 10px 4px' }}>{t('side.directs')}</div>
-            {directs.map((c) => {
-              const other = personById(d, c.memberIds.find((m) => m !== d.me.id));
-              return (
-                <button key={c.id} className={`side-conv ${activeConv === c.id ? 'active' : ''} ${c.unread ? 'unread' : ''}`} onClick={() => navigate(`/c/${c.id}`)}>
-                  <Avatar person={other} org={orgById(d, other?.orgId)} size={22} />
-                  <span className="grow ellipsis">{conversationTitle(d, c)}</span>
-                  {c.unread > 0 && <span className="pill">{c.unread}</span>}
-                </button>
-              );
-            })}
+            {directs.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />)}
           </>
         )}
       </div>
@@ -107,13 +107,45 @@ function Sidebar({ route }: { route: Route }) {
   );
 }
 
+const isMuted = (c: ConversationDTO) => !!c.mutedUntil && Date.parse(c.mutedUntil) > Date.now();
+
+function ConvItem({ c, active, showWs = false }: { c: ConversationDTO; active: boolean; showWs?: boolean }) {
+  const d = useClient((s) => s.data)!;
+  const muted = isMuted(c);
+  const other = c.kind === 'direct' ? personById(d, c.memberIds.find((m) => m !== d.me.id)) : null;
+  const ws = showWs ? d.workspaces.find((w) => w.id === c.workspaceId) : null;
+  return (
+    <button className={`side-conv ${active ? 'active' : ''} ${c.unread && !muted ? 'unread' : ''} ${muted ? 'is-muted' : ''}`} onClick={() => navigate(`/c/${c.id}`)}
+      {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
+      {other ? <Avatar person={other} org={orgById(d, other.orgId)} size={22} />
+        : <span className="hash">{c.parentId ? '⑂' : c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>}
+      <span className="grow ellipsis">{conversationTitle(d, c)}{ws ? <span className="muted small"> · {ws.name}</span> : null}</span>
+      {muted && <span className="small" title={t('side.muted')}>🔕</span>}
+      {c.unread > 0 && <span className={`pill ${muted ? 'is-muted' : ''}`}>{c.unread}</span>}
+    </button>
+  );
+}
+
+function WsTitle({ w, active }: { w: WorkspaceDTO; active: boolean }) {
+  return (
+    <button className="side-ws-title" style={{ width: '100%', background: active ? 'var(--card)' : undefined }} onClick={() => navigate(`/w/${w.id}`)}
+      {...menuProps(() => workspaceMenu(w, {
+        onNewGroup: () => openDialog((close) => <NewGroupDialog workspaceId={w.id} onClose={close} />),
+        onInvite: () => openDialog((close) => <InviteDialog workspaceId={w.id} onClose={close} />),
+      }))}>
+      <span className="grow ellipsis">{w.pinnedAt ? '📌 ' : ''}{w.name}</span>
+    </button>
+  );
+}
+
 function MobileTabs({ route }: { route: Route }) {
-  const unread = useClient((s) => s.data?.conversations.reduce((n, c) => n + c.unread, 0) ?? 0);
+  const unread = useClient((s) => s.data?.conversations.reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0) ?? 0);
   const tabs = [
     { name: 'today', label: t('nav.today'), ico: '◑', to: '/' },
     { name: 'inbox', label: t('nav.chats'), ico: '◍', to: '/conversaciones' },
+    { name: 'agenda', label: t('nav.agenda'), ico: '▤', to: '/agenda' },
+    { name: 'issues', label: t('nav.issues'), ico: '◆', to: '/asuntos' },
     { name: 'spaces', label: t('nav.spaces'), ico: '▦', to: '/espacios' },
-    { name: 'people', label: t('nav.peopleShort'), ico: '◎', to: '/participantes' },
   ];
   return (
     <nav className="tabs" aria-label={t('nav.mainNav')}>

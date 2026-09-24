@@ -3,6 +3,7 @@ import type { ConversationDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, getLang, langPreference, locale, setLang, t, tn, useLang, type Lang } from '../i18n.ts';
 import { navigate } from '../router.ts';
+import { openProfile } from './Profile.tsx';
 import { Avatar, OrgMark, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, previewText, timeLabel } from '../ui.tsx';
 import { InviteDialog, NewGroupDialog, NewWorkspaceDialog } from './Dialogs.tsx';
 import { IssueDrawer, IssueRow, isClosed } from './Issues.tsx';
@@ -306,6 +307,7 @@ export function SettingsScreen() {
       <div className="card" style={{ padding: 18, display: 'flex', gap: 14, alignItems: 'center', margin: '14px 0 24px', flexWrap: 'wrap' }}>
         <Avatar person={personById(d, d.me.id)} org={myOrg} size={48} />
         <div className="grow"><b>{d.me.name}</b><div className="small muted">{d.me.email} · {[d.me.title, myOrg?.name].filter(Boolean).join(' · ')}</div></div>
+        <button className="btn" onClick={openProfile}>{t('profile.edit')}</button>
         <SignOutButton />
       </div>
 

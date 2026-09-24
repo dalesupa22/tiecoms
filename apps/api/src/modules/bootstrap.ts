@@ -61,7 +61,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
           WHERE mine.user_id = $1
          UNION SELECT $1::uuid
        )
-       SELECT u.id, u.name, u.kind, u.primary_org_id, om.title, om.area,
+       SELECT u.id, u.name, u.kind, u.primary_org_id, u.avatar_file_id, om.title, om.area,
               (SELECT bool_and(g.role = 'guest') FROM workspace_memberships g WHERE g.user_id = u.id AND g.revoked_at IS NULL) AS guest,
               (SELECT max(g.expires_at) FROM workspace_memberships g WHERE g.user_id = u.id AND g.role = 'guest' AND g.revoked_at IS NULL) AS guest_until
          FROM visible v JOIN users u ON u.id = v.user_id AND u.disabled_at IS NULL
@@ -98,6 +98,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   const personList: PersonDTO[] = people.rows.map((r) => ({
     id: r.id, name: r.name, kind: r.kind, orgId: r.guest ? null : r.primary_org_id, title: r.title, area: r.area,
     guest: Boolean(r.guest), guestUntil: r.guest_until ? new Date(r.guest_until).toISOString() : null,
+    avatarUrl: r.avatar_file_id ? `/api/v1/avatars/${r.avatar_file_id}` : null,
   }));
 
   const orgIds = new Set<string>();

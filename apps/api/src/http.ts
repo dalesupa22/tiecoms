@@ -7,7 +7,7 @@ import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, type AuthResult,
-  CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
+  UpdateProfileInput, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -23,6 +23,7 @@ import * as cal from './modules/calendar.ts';
 import * as prefs from './modules/prefs.ts';
 import * as reminders from './modules/reminders.ts';
 import * as wa from './modules/whatsapp.ts';
+import * as profile from './modules/profile.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
 import { z } from 'zod';
 import { verifyAccess } from './security.ts';
@@ -53,6 +54,9 @@ export async function buildHttp() {
     maxAge: 600,
   });
   await app.register(rateLimit, { max: 600, timeWindow: '1 minute', keyGenerator: (r) => r.ip });
+
+  // Fotos de perfil: el cuerpo llega crudo (la imagen ya recortada en el cliente).
+  app.addContentTypeParser(/^image\//, { parseAs: 'buffer', bodyLimit: profile.MAX_AVATAR_BYTES }, (_req, body, done) => done(null, body));
 
   app.setErrorHandler((err: any, req, reply) => {
     if (err instanceof ZodError) {
@@ -142,6 +146,11 @@ export async function buildHttp() {
     });
 
     priv.get('/api/v1/bootstrap', async (req) => bootstrap(req.userId));
+    // Perfil propio
+    priv.patch('/api/v1/me', async (req) => profile.updateProfile(req.userId, UpdateProfileInput.parse(req.body)));
+    priv.post('/api/v1/me/avatar', { bodyLimit: profile.MAX_AVATAR_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+      async (req) => profile.setAvatar(req.userId, req.body as Buffer));
+    priv.delete('/api/v1/me/avatar', async (req) => profile.removeAvatar(req.userId));
     priv.get<{ Params: { id: string } }>('/api/v1/organizations/:id/domains', async (req) => ({ domains: await domains.listDomains(req.userId, req.params.id) }));
     priv.post<{ Params: { id: string } }>('/api/v1/organizations/:id/domains', async (req) =>
       domains.addDomain(req.userId, req.params.id, AddDomainInput.parse(req.body).domain));
@@ -235,6 +244,12 @@ export async function buildHttp() {
       await ws.removeMember(req.userId, req.params.id, req.params.userId);
       return { ok: true };
     });
+  });
+
+  // Foto de perfil: el id cambia en cada subida, así que se puede cachear para siempre.
+  app.get<{ Params: { id: string } }>('/api/v1/avatars/:id', async (req, reply) => {
+    const f = await profile.readAvatar(z.uuid().parse(req.params.id));
+    return reply.header('content-type', f.contentType).header('cache-control', 'public, max-age=31536000, immutable').send(f.body);
   });
 
   app.get<{ Params: { token: string } }>('/api/v1/org-invitations/:token', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => auth.previewOrgInvitation(req.params.token));

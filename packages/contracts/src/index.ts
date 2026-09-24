@@ -68,6 +68,11 @@ export const SsoExchangeInput = z.preprocess(
 );
 export type SsoExchangeInput = z.infer<typeof SsoExchangeInput>;
 
+export const UpdateProfileInput = z.object({
+  name: personName.optional(),
+  title: z.string().trim().max(120).nullable().optional(),
+  area: z.string().trim().max(120).nullable().optional(),
+});
 export const AddDomainInput = z.object({ domain: z.string().trim().min(3).max(253) });
 
 export interface AuthResult {
@@ -93,6 +98,8 @@ export interface UserDTO {
   title?: string | null;
   area?: string | null;
   primaryOrgId: string | null;
+  /** Ruta de la foto (/api/v1/avatars/…) o null. */
+  avatarUrl?: string | null;
 }
 
 export interface OrganizationDTO {
@@ -127,6 +134,7 @@ export interface PersonDTO {
   area: string | null;
   guest: boolean;
   guestUntil: string | null;
+  avatarUrl?: string | null;
 }
 
 export interface WorkspaceDTO {

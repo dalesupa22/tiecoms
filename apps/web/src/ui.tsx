@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import type { BootstrapDTO, ConversationDTO, OrganizationDTO, PersonDTO } from '@tiecoms/contracts';
 import { locale, systemText, t } from './i18n.ts';
+import { apiUrl } from './app-client.ts';
 
 export function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -17,7 +18,9 @@ export function Avatar({ person, org, size = 34 }: { person?: PersonDTO | null; 
   const fg = person?.kind === 'agent' ? '#f4f1ea' : org?.colorFg ?? '#5c554c';
   return (
     <span className="avatar" style={{ width: size, height: size, background: bg, color: fg, fontSize: size * 0.36, borderRadius: person?.kind === 'agent' ? 10 : 99 }}>
-      {person?.kind === 'agent' ? '◇' : initials(person?.name ?? '?')}
+      {person?.avatarUrl
+        ? <img src={apiUrl(person.avatarUrl)} alt="" loading="lazy" draggable={false} style={{ width: '100%', height: '100%', borderRadius: 'inherit', objectFit: 'cover' }} />
+        : person?.kind === 'agent' ? '◇' : initials(person?.name ?? '?')}
       {org && size >= 30 && <span className="badge" style={{ background: org.colorBg, color: org.colorFg }}>{org.mark}</span>}
     </span>
   );

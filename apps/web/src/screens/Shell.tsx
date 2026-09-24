@@ -9,6 +9,7 @@ import { menuProps } from '../menu.tsx';
 import { newEvent } from './Calendar.tsx';
 import type { ConversationDTO, WorkspaceDTO } from '@tiecoms/contracts';
 import { t } from '../i18n.ts';
+import { openAccountMenu } from './Profile.tsx';
 
 const NAV = [
   { name: 'today', label: 'nav.today', ico: '◑', to: '/' },
@@ -94,13 +95,14 @@ function Sidebar({ route }: { route: Route }) {
           </>
         )}
       </div>
-      <button className="side-foot" style={{ border: 0, borderTop: '1px solid var(--line)', background: 'transparent', textAlign: 'left' }} onClick={() => navigate('/ajustes')}>
+      <button className="side-foot" style={{ border: 0, borderTop: '1px solid var(--line)', background: 'transparent', textAlign: 'left' }}
+        aria-haspopup="menu" title={t('profile.menu')} onClick={(e) => openAccountMenu(e.currentTarget)}>
         <Avatar person={me} org={myOrg} size={34} />
         <span className="grow" style={{ minWidth: 0 }}>
           <span className="ellipsis" style={{ display: 'block', fontWeight: 700 }}>{d.me.name}</span>
           <span className="ellipsis small muted" style={{ display: 'block' }}>{myOrg?.name}</span>
         </span>
-        <span className="muted">⚙</span>
+        <span className="muted" aria-hidden>⋯</span>
       </button>
       {newWs && <NewWorkspaceDialog onClose={() => setNewWs(false)} />}
     </aside>

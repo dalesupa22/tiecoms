@@ -412,3 +412,7 @@ a.btn { text-decoration: none; color: inherit; } a.btn.primary { color: var(--pa
   .wa-toolbar > .input:first-child { flex: 1 1 100%; }
   .wa-toolbar .seg { min-width: 0 !important; flex: 1 1 100%; }
 }
+
+/* ---------- Perfil ---------- */
+.profile-photo { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.avatar img { display: block; }

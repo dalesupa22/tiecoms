@@ -168,7 +168,7 @@ const es = {
   // Errores del API por código
   'err.unauthorized': 'Correo o contraseña incorrectos', 'err.conflict': 'Ya existe o ya no es válido', 'err.forbidden': 'No tienes permiso para esto',
   'err.not_found': 'No encontrado o fuera de tu alcance', 'err.rate_limited': 'Demasiados intentos. Espera un momento.', 'err.bad_request': 'Revisa los datos',
-  'err.internal': 'Error interno. Intenta de nuevo.', 'err.network': 'Sin conexión con el servidor',
+  'err.internal': 'Error interno. Intenta de nuevo.', 'err.storage_unavailable': 'Subir archivos aún no está habilitado en el servidor.', 'err.network': 'Sin conexión con el servidor',
   'err.domain_claimed': 'Tu empresa ya está en TieComs. Pide a su administrador que te invite.',
   'err.sso_expired': 'El inicio de sesión venció. Inténtalo de nuevo.', 'err.sso_state': 'No pudimos confirmar el inicio de sesión en este navegador. Inténtalo de nuevo.',
   'err.sso_cancelled': 'Cancelaste el inicio de sesión.', 'err.sso_failed': 'No pudimos completar el inicio de sesión.',
@@ -203,6 +203,11 @@ const es = {
   'wa.linkTo': 'Traer los mensajes nuevos a una conversación de TieComs', 'wa.notLinked': 'No vincular',
   'wa.linkHint': 'Los mensajes nuevos de este chat llegarán allí como «reenviado de WhatsApp», a tu nombre.', 'wa.linkedHint': 'Los mensajes nuevos llegan a',
   'settings.whatsapp': 'WhatsApp', 'settings.whatsappHint': 'Conecta tu WhatsApp personal y el Business para ver tus grupos organizados.',
+  // Perfil
+  'profile.menu': 'Tu cuenta', 'profile.edit': 'Editar perfil', 'profile.title': 'Tu perfil', 'profile.addPhoto': 'Subir foto', 'profile.changePhoto': 'Cambiar foto',
+  'profile.removePhoto': 'Quitar foto', 'profile.photoHint': 'PNG, JPG o WebP. Se recorta en cuadrado.', 'profile.photoSaved': 'Foto actualizada', 'profile.notImage': 'Elige una imagen.',
+  'profile.jobTitle': 'Cargo', 'profile.jobTitlePh': 'p. ej. Coordinadora de lanzamiento', 'profile.area': 'Área', 'profile.areaPh': 'p. ej. Operaciones',
+  'profile.save': 'Guardar', 'profile.saved': 'Perfil actualizado',
 };
 
 type Key = keyof typeof es;
@@ -346,7 +351,7 @@ const en: Record<Key, string> = {
   'day.today': 'Today', 'day.yesterday': 'Yesterday',
   'err.unauthorized': 'Wrong email or password', 'err.conflict': 'Already exists or is no longer valid', 'err.forbidden': 'You do not have permission to do this',
   'err.not_found': 'Not found or outside your scope', 'err.rate_limited': 'Too many attempts. Please wait a moment.', 'err.bad_request': 'Please check the details',
-  'err.internal': 'Internal error. Please try again.', 'err.network': 'Cannot reach the server',
+  'err.storage_unavailable': 'File uploads are not enabled on the server yet.', 'err.internal': 'Internal error. Please try again.', 'err.network': 'Cannot reach the server',
   'err.domain_claimed': 'Your company is already on TieComs. Ask its administrator to invite you.',
   'err.sso_expired': 'Sign-in expired. Please try again.', 'err.sso_state': 'We could not confirm the sign-in in this browser. Please try again.',
   'err.sso_cancelled': 'You cancelled the sign-in.', 'err.sso_failed': 'We could not complete the sign-in.',
@@ -380,6 +385,10 @@ const en: Record<Key, string> = {
   'wa.linkTo': 'Bring new messages into a TieComs conversation', 'wa.notLinked': 'Do not link',
   'wa.linkHint': 'New messages from this chat will land there as “forwarded from WhatsApp”, under your name.', 'wa.linkedHint': 'New messages go to',
   'settings.whatsapp': 'WhatsApp', 'settings.whatsappHint': 'Connect your personal WhatsApp and Business to see your groups organised.',
+  'profile.menu': 'Your account', 'profile.edit': 'Edit profile', 'profile.title': 'Your profile', 'profile.addPhoto': 'Upload photo', 'profile.changePhoto': 'Change photo',
+  'profile.removePhoto': 'Remove photo', 'profile.photoHint': 'PNG, JPG or WebP. Cropped to a square.', 'profile.photoSaved': 'Photo updated', 'profile.notImage': 'Pick an image.',
+  'profile.jobTitle': 'Role', 'profile.jobTitlePh': 'e.g. Launch coordinator', 'profile.area': 'Team', 'profile.areaPh': 'e.g. Operations',
+  'profile.save': 'Save', 'profile.saved': 'Profile updated',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };

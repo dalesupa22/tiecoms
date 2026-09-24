@@ -30,6 +30,7 @@ export async function conversationAccess(
        FROM conversations c
        JOIN conversation_memberships m
          ON m.conversation_id = c.id AND m.user_id = $2 AND m.removed_at IS NULL
+       JOIN users actor ON actor.id = m.user_id AND actor.disabled_at IS NULL
        LEFT JOIN workspace_memberships wm
          ON wm.workspace_id = c.workspace_id AND wm.user_id = $2
       WHERE c.id = $1 AND c.archived_at IS NULL

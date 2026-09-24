@@ -359,6 +359,7 @@ export async function deriveConversation(userId: string, parentId: string, input
       ids = [userId, m.author_id, ...leads];
     }
     ids = [...new Set([userId, ...ids])];
+    await ensureNotBlocked(c, userId, ids.filter((id) => id !== userId));
 
     const excerpt = String(m.body).replace(/\s+/g, ' ').trim().slice(0, 80);
     const prefix = input.kind === 'internal' ? 'Diagnóstico' : input.kind === 'directive' ? 'Decisión' : 'Derivada';

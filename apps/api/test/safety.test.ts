@@ -15,7 +15,7 @@ async function signup(name: string, orgInviteToken?: string) {
   return { token: r.json.accessToken as string, id: r.json.user.id as string, org: r.json.user.primaryOrgId as string };
 }
 let ana: Awaited<ReturnType<typeof signup>>, beto: Awaited<ReturnType<typeof signup>>, outsider: Awaited<ReturnType<typeof signup>>;
-let dm: string, message: string;
+let dm: string, message: string, group: string, groupMessage: string;
 beforeAll(async () => {
   ana = await signup('ana');
   const inv = await call(`/organizations/${ana.org}/invitations`, ana.token, 'POST', {});
@@ -23,6 +23,11 @@ beforeAll(async () => {
   outsider = await signup('outsider');
   dm = (await call('/directs', ana.token, 'POST', { userId: beto.id })).json.id;
   message = (await call(`/conversations/${dm}/messages`, beto.token, 'POST', { body: 'Contenido para reporte', clientMessageId: randomUUID() })).json.message.id;
+  const ws = (await call('/workspaces', ana.token, 'POST', { name: `Compartido ${run}` })).json;
+  group = ws.generalConversationId;
+  const invite = await call(`/workspaces/${ws.id}/invitations`, ana.token, 'POST', { role: 'member', conversationIds: [group] });
+  expect((await call(`/invitations/${invite.json.token}/accept`, beto.token, 'POST', {})).status).toBe(200);
+  groupMessage = (await call(`/conversations/${group}/messages`, ana.token, 'POST', { body: 'Origen de derivada', clientMessageId: randomUUID() })).json.message.id;
 });
 
 describe('seguridad de usuarios y contenido', () => {
@@ -53,6 +58,9 @@ describe('seguridad de usuarios y contenido', () => {
     }
     expect((await call('/directs', beto.token, 'POST', { userId: ana.id })).status).toBe(403);
     expect((await call('/chats', beto.token, 'POST', { userIds: [ana.id], name: 'Evasión' })).status).toBe(403);
+    expect((await call(`/conversations/${group}/derive`, beto.token, 'POST', { messageId: groupMessage, kind: 'same' })).status).toBe(403);
+    // Los grupos ya compartidos siguen funcionando; los clientes ocultan al autor bloqueado.
+    expect((await call(`/conversations/${group}/messages`, beto.token, 'POST', { body: 'Registro compartido', clientMessageId: randomUUID() })).status).toBe(201);
     expect((await call(`/blocks/${ana.id}`, ana.token, 'PUT')).status).toBe(400);
     expect((await call(`/blocks/${outsider.id}`, ana.token, 'PUT')).status).toBe(404);
   });

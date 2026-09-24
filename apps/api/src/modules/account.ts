@@ -4,8 +4,8 @@ import { verifyPassword } from '../security.ts';
 
 /**
  * Eliminar la cuenta (lo exigen App Store y Google Play). Los mensajes en
- * espacios compartidos son registro de las empresas y se conservan, pero ya no
- * muestran con una cuenta anonimizada: se borran nombre, correo, contraseña, identidades
+ * espacios compartidos son registro de las empresas y se conservan asociados
+ * a una cuenta anonimizada: se borran nombre, correo, contraseña, identidades
  * de Google/Microsoft, WhatsApp vinculado, preferencias y recordatorios, y la
  * persona sale de todas sus empresas, espacios y conversaciones.
  */
@@ -21,13 +21,14 @@ export async function deleteAccount(userId: string, input: { confirmEmail: strin
     // Empresas donde era la única persona dueña: la administración pasa a quien lleve más tiempo.
     const owned = await c.query(
       `SELECT om.org_id FROM organization_memberships om WHERE om.user_id = $1 AND om.role = 'owner'
-          AND NOT EXISTS (SELECT 1 FROM organization_memberships o WHERE o.org_id = om.org_id AND o.user_id <> $1 AND o.role = 'owner')`,
+          AND NOT EXISTS (SELECT 1 FROM organization_memberships o JOIN users u ON u.id = o.user_id AND u.disabled_at IS NULL
+            WHERE o.org_id = om.org_id AND o.user_id <> $1 AND o.role = 'owner')`,
       [userId],
     );
     for (const { org_id } of owned.rows) {
       const heir = await c.query(
-        `SELECT user_id FROM organization_memberships WHERE org_id = $1 AND user_id <> $2
-          ORDER BY (role = 'admin') DESC, joined_at LIMIT 1`,
+        `SELECT om.user_id FROM organization_memberships om JOIN users u ON u.id = om.user_id AND u.disabled_at IS NULL
+          WHERE om.org_id = $1 AND om.user_id <> $2 ORDER BY (om.role = 'admin') DESC, om.joined_at LIMIT 1`,
         [org_id, userId],
       );
       if (heir.rows[0]) {

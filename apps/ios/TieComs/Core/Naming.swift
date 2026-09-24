@@ -75,22 +75,28 @@ enum Naming {
         }
         let byActivity: (ConversationDTO, ConversationDTO) -> Bool = { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
         var out: [Section] = []
+        // Fijadas arriba (preferencia personal), fuera de su espacio.
+        let pinned = d.conversations.filter { $0.pinnedAt != nil && (filterWorkspace == nil || $0.workspaceId == filterWorkspace) && matches($0) }
+            .sorted { ($0.pinnedAt ?? "") < ($1.pinnedAt ?? "") }
+        let pinnedIds = Set(pinned.map(\.id))
+        if !pinned.isEmpty { out.append(Section(id: "_pinned", title: L("side.pinned"), workspace: nil, conversations: pinned)) }
         let workspaces = d.workspaces
             .filter { filterWorkspace == nil || $0.id == filterWorkspace }
             .sorted { a, b in
+                if (a.pinnedAt != nil) != (b.pinnedAt != nil) { return a.pinnedAt != nil }
                 let la = d.conversations.filter { $0.workspaceId == a.id }.compactMap(\.lastMessageAt).max() ?? a.createdAt
                 let lb = d.conversations.filter { $0.workspaceId == b.id }.compactMap(\.lastMessageAt).max() ?? b.createdAt
                 return la > lb
             }
         for ws in workspaces {
-            let convs = d.conversations.filter { $0.workspaceId == ws.id && $0.kind != .direct && matches($0) }.sorted(by: byActivity)
+            let convs = d.conversations.filter { $0.workspaceId == ws.id && $0.kind != .direct && !pinnedIds.contains($0.id) && matches($0) }.sorted(by: byActivity)
             if !convs.isEmpty { out.append(Section(id: ws.id, title: ws.name, workspace: ws, conversations: convs)) }
         }
         if filterWorkspace == nil {
             let wsIds = Set(d.workspaces.map(\.id))
-            let orphans = d.conversations.filter { c in c.kind != .direct && !(c.workspaceId.map(wsIds.contains) ?? false) && matches(c) }
+            let orphans = d.conversations.filter { c in c.kind != .direct && !pinnedIds.contains(c.id) && !(c.workspaceId.map(wsIds.contains) ?? false) && matches(c) }
             if !orphans.isEmpty { out.append(Section(id: "_other", title: L("home.other"), workspace: nil, conversations: orphans.sorted(by: byActivity))) }
-            let directs = d.conversations.filter { $0.kind == .direct && matches($0) }.sorted(by: byActivity)
+            let directs = d.conversations.filter { $0.kind == .direct && !pinnedIds.contains($0.id) && matches($0) }.sorted(by: byActivity)
             if !directs.isEmpty { out.append(Section(id: "_directs", title: L("home.directs"), workspace: nil, conversations: directs)) }
         }
         return out

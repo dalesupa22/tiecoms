@@ -18,8 +18,16 @@ struct TypingEntry: Equatable { var userId: String; var until: Date }
 enum Route: Hashable {
     case conversation(String)
     case details(String)
-    case settings
+    case issue(String)
+    case event(String)
+    case trazo
+    case reminders
+    case whatsapp
+    case domains(String)
+    case deleteAccount
 }
+
+enum AppTab: Hashable { case home, issues, agenda, settings }
 
 struct AppAlert: Identifiable, Equatable {
     let id = UUID()
@@ -43,8 +51,28 @@ final class AppStore {
     private(set) var conversations: [String: ConversationState] = [:]
     private(set) var pending: [PendingMessage] = []
     private(set) var typing: [String: [TypingEntry]] = [:]
+    /// Asuntos conocidos por id (se cargan por filtro y se actualizan en vivo).
+    var issues: [String: IssueDTO] = [:]
+    /// Mensajes fijados por conversación.
+    var pins: [String: [String]] = [:]
+    var reminders: [ReminderDTO] = []
+    var events: [String: CalendarEventDTO] = [:]
+    /// Sube cuando WhatsApp trae novedades: la pantalla vuelve a pedir la lista.
+    var waRevision = 0
+    /// Aviso breve (toast).
+    var toast: String?
+    /// Texto compartido hacia TieComs (tiecoms://share?text=…).
+    var shareText: String?
 
-    var path: [Route] = []
+    var tab: AppTab = .home
+    /// La app se abrió en frío por un enlace (splash corto).
+    var launchedByLink = false
+    var myOpenIssues: Int { guard let me = me?.id else { return 0 }; return issues.values.filter { $0.ownerId == me && !$0.status.closed }.count }
+    func show(_ message: String) { toast = message }
+    var homePath: [Route] = []
+    var issuesPath: [Route] = []
+    var agendaPath: [Route] = []
+    var settingsPath: [Route] = []
     var workspaceFilter: String?
     var alert: AppAlert?
     /// Invitación a un espacio abierta por enlace (hoja modal).
@@ -75,6 +103,7 @@ final class AppStore {
     @ObservationIgnored private(set) var catchUpEventsApplied = 0
     @ObservationIgnored private(set) var deliveredViaSocket = 0
     @ObservationIgnored private(set) var deliveredViaHTTP = 0
+    @ObservationIgnored var remindersDue = 0
     @ObservationIgnored var onLiveMessage: ((MessageDTO) -> Void)?
     @ObservationIgnored var onReady: (() -> Void)?
 
@@ -133,10 +162,11 @@ final class AppStore {
 
     /// SSO con Google/Microsoft: PKCE S256 + ASWebAuthenticationSession + canje del código.
     /// Devuelve normalmente si el usuario cancela (no hay nada que mostrar).
-    func loginWithSSO(_ provider: SSOProvider, authenticator: SSOAuthenticator? = nil) async throws {
+    func loginWithSSO(_ provider: SSOProvider, orgInviteToken: String? = nil, orgName: String? = nil, authenticator: SSOAuthenticator? = nil) async throws {
         let authenticator = authenticator ?? SSOAuthenticator()
         let pkce = PKCE.generate()
-        let url = SSOAuthenticator.startURL(base: api.baseURL, provider: provider, deviceId: Prefs.deviceId, pkce: pkce)
+        let url = SSOAuthenticator.startURL(base: api.baseURL, provider: provider, deviceId: Prefs.deviceId, pkce: pkce,
+                                            orgInviteToken: orgInviteToken, orgName: orgName)
         let code: String
         do { code = try await authenticator.authenticate(url: url) } catch SSOError.cancelled { return }
         try await completeSSO(code: code, verifier: pkce.verifier)
@@ -158,6 +188,7 @@ final class AppStore {
         startPathMonitor()
         scheduleFlush(0)
         consumePendingLink()
+        Task { try? await loadReminders() }
         onReady?()
     }
 
@@ -166,7 +197,14 @@ final class AppStore {
         handleSignedOut()
     }
 
+    /// Borra credenciales y estado local (tras eliminar la cuenta o si el servidor la cierra).
+    func signOutLocally() async {
+        api.clearCredentials()
+        handleSignedOut()
+    }
+
     private func handleSignedOut() {
+        ShareTargets.clear()
         socket.disconnect()
         pathMonitor?.cancel(); pathMonitor = nil
         api.clearCredentials()
@@ -176,7 +214,9 @@ final class AppStore {
         conversations = [:]
         pending = []
         typing = [:]
-        path = []
+        issues = [:]; pins = [:]; reminders = []; events = [:]
+        homePath = []; issuesPath = []; agendaPath = []; settingsPath = []
+        tab = .home
         workspaceFilter = nil
         openConversationId = nil
     }
@@ -190,16 +230,16 @@ final class AppStore {
         // Conversaciones que ya no están en mi alcance se purgan de la caché local.
         let allowed = Set(d.conversations.map(\.id))
         conversations = conversations.filter { allowed.contains($0.key) }
-        let keptPath = path.filter {
-            switch $0 {
-            case .conversation(let id), .details(let id): return allowed.contains(id)
-            case .settings: return true
-            }
+        func keep(_ p: [Route]) -> [Route] {
+            p.filter { if case .conversation(let id) = $0 { return allowed.contains(id) }; if case .details(let id) = $0 { return allowed.contains(id) }; return true }
         }
-        if keptPath != path { path = keptPath }
+        if keep(homePath) != homePath { homePath = keep(homePath) }
+        if keep(issuesPath) != issuesPath { issuesPath = keep(issuesPath) }
+        if keep(agendaPath) != agendaPath { agendaPath = keep(agendaPath) }
+        ShareTargets.save(d, apiURL: api.baseURL)
     }
 
-    private func scheduleBootstrap() {
+    func scheduleBootstrap() {
         guard bootstrapTask == nil else { return }
         bootstrapTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 250_000_000)
@@ -251,6 +291,16 @@ final class AppStore {
         case .readUpdated(let id, let seq):
             guard let c = meta(id), seq > c.lastReadSeq else { return }
             patchMeta(id) { $0.lastReadSeq = seq; $0.unread = max(0, $0.lastMessageSeq - max(seq, $0.historyFromSeq)) }
+        case .reminderDue(let r):
+            reminders = (reminders.filter { $0.id != r.id } + [r]).sorted { $0.remindAt < $1.remindAt }
+            remindersDue += 1
+            if let d = data {
+                let conv = meta(r.conversationId)
+                feedback?.notifyIncoming(conversationId: r.conversationId, title: L("rem.alert"),
+                                         author: conv.map { Naming.title(d, $0) } ?? "", body: r.note ?? "")
+            }
+        case .prefsUpdated: scheduleBootstrap()
+        case .whatsappUpdated: waRevision += 1
         case .other: break
         }
     }
@@ -269,8 +319,40 @@ final class AppStore {
         }
     }
 
+    /// Efectos que no dependen de tener los mensajes cargados (idempotentes).
+    private func sideEffects(_ e: ConversationEvent, live: Bool) {
+        switch e {
+        case .issueUpdated(let cid, _, let issue):
+            issues[issue.id] = issue
+            recountIssues(cid)
+        case .pinsChanged(let cid, _, let ids):
+            pins[cid] = ids
+        case .calendarUpdated(let cid, _, let ev):
+            let isNewEvent = events[ev.id] == nil
+            events[ev.id] = ev
+            // Reunión nueva de otra persona en vivo → aviso con tc_notify (salvo silenciada).
+            if live, isNewEvent, ev.organizerId != me?.id, !ev.isCancelled, let d = data, let c = meta(cid), !c.isMuted {
+                feedback?.notifyIncoming(conversationId: cid, title: ev.title, author: Naming.title(d, c), body: L10n.eventWhen(ev))
+            }
+        case .messageUpdated(_, _, let m):
+            patchPreviewIfLast(m)
+        default: break
+        }
+    }
+
+    func recountIssues(_ conversationId: String) {
+        let n = issues.values.filter { $0.conversationId == conversationId && !$0.status.closed }.count
+        patchMeta(conversationId) { $0.openIssues = n }
+    }
+
+    func patchPreviewIfLast(_ m: MessageDTO) {
+        guard let c = meta(m.conversationId), c.lastMessageSeq == m.seq else { return }
+        patchMeta(m.conversationId) { $0.lastMessagePreview = String((m.deletedAt != nil ? L("chat.deleted") : m.body).prefix(140)) }
+    }
+
     func onConversationEvent(_ e: ConversationEvent, live: Bool) {
         guard let m = meta(e.conversationId) else { scheduleBootstrap(); return }
+        sideEffects(e, live: live)
         var isNew = false
         if case .messageCreated(_, _, let msg) = e { isNew = bumpMeta(msg) }
         guard let local = conversations[e.conversationId], local.loaded else {
@@ -322,8 +404,10 @@ final class AppStore {
         case .membersChanged(let id, _, let ids):
             patchMeta(id) { $0.memberIds = ids }
             scheduleBootstrap()
+        case .issueUpdated, .pinsChanged, .calendarUpdated:
+            break // sus efectos van en sideEffects (también sin mensajes cargados)
         case .other:
-            break // redacted, issue.updated o tipos futuros: solo avanzan el cursor
+            break // redacted o tipos futuros: solo avanzan el cursor
         }
         local.lastEventSeq = e.eventSeq
         conversations[e.conversationId] = local
@@ -345,6 +429,7 @@ final class AppStore {
                 }
                 for e in page.events where e.eventSeq > (conversations[id]?.lastEventSeq ?? 0) {
                     if case .messageCreated(_, _, let m) = e { bumpMeta(m) }
+                    sideEffects(e, live: false)
                     apply(e)
                     catchUpEventsApplied += 1
                 }
@@ -357,9 +442,23 @@ final class AppStore {
 
     func meta(_ id: String) -> ConversationDTO? { data?.conversations.first { $0.id == id } }
 
-    private func patchMeta(_ id: String, _ f: (inout ConversationDTO) -> Void) {
+    func patchMeta(_ id: String, _ f: (inout ConversationDTO) -> Void) {
         guard let i = data?.conversations.firstIndex(where: { $0.id == id }) else { return }
         f(&data!.conversations[i])
+    }
+
+    func patchWorkspace(_ id: String, _ f: (inout WorkspaceDTO) -> Void) {
+        guard let i = data?.workspaces.firstIndex(where: { $0.id == id }) else { return }
+        f(&data!.workspaces[i])
+    }
+
+    /// Mensaje local ya conocido (actualiza la lista y la vista previa).
+    func upsertLocal(_ m: MessageDTO) {
+        if var local = conversations[m.conversationId], local.loaded {
+            local.messages = AppStore.upsert(local.messages, m)
+            conversations[m.conversationId] = local
+        }
+        patchPreviewIfLast(m)
     }
 
     func openConversation(_ id: String, force: Bool = false) async throws {
@@ -424,11 +523,12 @@ final class AppStore {
     // MARK: - Envío con cola persistente
 
     @discardableResult
-    func send(_ conversationId: String, body: String, clientMessageId: String = UUID().uuidString.lowercased()) -> PendingMessage? {
+    func send(_ conversationId: String, body: String, replyTo: String? = nil, forwarded: ForwardedInfo? = nil,
+              clientMessageId: String = UUID().uuidString.lowercased()) -> PendingMessage? {
         let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
-        let p = PendingMessage(clientMessageId: clientMessageId, conversationId: conversationId, body: String(text.prefix(8000)), replyTo: nil,
-                               createdAt: ISODate.string(), attempts: 0, status: .pending, error: nil, nextAttemptAt: 0)
+        let p = PendingMessage(clientMessageId: clientMessageId, conversationId: conversationId, body: String(text.prefix(8000)), replyTo: replyTo,
+                               forwarded: forwarded, createdAt: ISODate.string(), attempts: 0, status: .pending, error: nil, nextAttemptAt: 0)
         // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
         savePending(pending + [p])
         scheduleFlush(0)
@@ -505,7 +605,8 @@ final class AppStore {
 
     /// Socket con ACK si está conectado; HTTP como respaldo. Mismo clientMessageId = idempotente.
     func deliver(_ p: PendingMessage) async throws -> MessageDTO {
-        let payload: [String: Any] = ["conversationId": p.conversationId, "clientMessageId": p.clientMessageId, "body": p.body]
+        let payload: [String: Any] = ["conversationId": p.conversationId, "clientMessageId": p.clientMessageId, "body": p.body,
+                                      "replyTo": p.replyTo ?? NSNull(), "forwarded": p.forwarded?.json ?? NSNull()]
         if socket.state == .connected {
             do {
                 let r = try await socket.emitWithAck("message.send", payload, timeout: 8) as? [String: Any]
@@ -574,7 +675,10 @@ final class AppStore {
             if status == .ready { return }
             signupOrgToken = org
             showSignup = true
-        case .conversation, .workspace:
+        case .share(let text):
+            shareText = text ?? ""
+            if status != .ready { pendingLink = link }
+        default:
             if status == .ready { navigate(to: link) } else { pendingLink = link }
         }
     }
@@ -596,16 +700,23 @@ final class AppStore {
                 alert = AppAlert(title: L("link.noAccess"), message: nil)
                 return
             }
-            path = [.conversation(id)]
+            tab = .home
+            homePath = [.conversation(id)]
         case .workspace(let id):
             guard d.workspaces.contains(where: { $0.id == id }) else {
                 alert = AppAlert(title: L("link.noAccessSpace"), message: nil)
                 return
             }
-            path = []
+            tab = .home
+            homePath = []
             workspaceFilter = id
         case .invite(let t): inviteToken = t
         case .signup: break
+        case .issues: tab = .issues; issuesPath = []
+        case .agenda: tab = .agenda; agendaPath = []
+        case .trazo: tab = .home; homePath = [.trazo]
+        case .whatsapp: tab = .settings; settingsPath = [.whatsapp]
+        case .share(let text): shareText = text ?? ""
         }
     }
 

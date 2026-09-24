@@ -34,6 +34,13 @@ struct TieComsApp: App {
         s.onReady = { Task { await AppFeedback.shared.requestAuthorizationIfNeeded() } }
     }
 
+    private let launchedAt = Date()
+
+    /// Un enlace que llega en el primer segundo abrió la app en frío: splash corto.
+    private func markLinkLaunch() {
+        if Date().timeIntervalSince(launchedAt) < 1.5 { store.launchedByLink = true }
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -43,8 +50,9 @@ struct TieComsApp: App {
                     guard !AppConfig.isRunningUnitTests else { return }
                     await store.start()
                 }
-                .onOpenURL { store.handle(url: $0) }
+                .onOpenURL { markLinkLaunch(); store.handle(url: $0) }
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                    markLinkLaunch()
                     if let url = activity.webpageURL { store.handle(url: url) }
                 }
         }

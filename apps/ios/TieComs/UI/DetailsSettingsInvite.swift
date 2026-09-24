@@ -29,6 +29,7 @@ struct ConversationDetailsView: View {
                         .padding(.vertical, 4)
                         .accessibilityElement(children: .combine)
                     }
+                    if c.workspaceId != nil && c.kind != .direct { ConversationAgendaSection(conversationId: c.id) }
                     Section(L("details.participants", ["n": regular.count])) {
                         ForEach(regular) { p in PersonRow(d: d, p: p, isMe: p.id == d.me.id) }
                     }
@@ -47,6 +48,20 @@ struct ConversationDetailsView: View {
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle(L("chat.details"))
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Próximas reuniones de la conversación (panel de detalles).
+struct ConversationAgendaSection: View {
+    @Environment(AppStore.self) private var store
+    let conversationId: String
+    var body: some View {
+        let list = store.events.values.filter { $0.conversationId == conversationId && !$0.isCancelled && $0.end > Date() }
+            .sorted { $0.startsAt < $1.startsAt }.prefix(5)
+        Section("\(L("cal.upcoming")) · \(list.count)") {
+            if list.isEmpty { Text(L("cal.noUpcoming")).foregroundStyle(Theme.textSecondary) }
+            ForEach(Array(list)) { e in NavigationLink(value: Route.event(e.id)) { EventRow(event: e, showConv: false) } }
+        }
     }
 }
 
@@ -118,12 +133,32 @@ struct SettingsView: View {
                     }
                 }
             } header: { Text(L("settings.alerts")) } footer: { Text(L("settings.soundsHint")) }
+            if let d = store.data, let org = Naming.org(d, d.me.primaryOrgId) {
+                Section(L("settings.team")) {
+                    HStack(spacing: 10) {
+                        OrgMark(org: org, size: 28)
+                        Text(org.name)
+                        if org.verification != "none" { Image(systemName: "checkmark.seal.fill").foregroundStyle(.green).accessibilityLabel(L("dom.verified")) }
+                    }
+                    if org.canAdmin {
+                        NavigationLink(value: Route.domains(org.id)) { Label(L("dom.title"), systemImage: "globe") }
+                            .accessibilityIdentifier("settings.domains")
+                    }
+                }
+            }
+            Section {
+                NavigationLink(value: Route.whatsapp) { Label(L("settings.whatsapp"), systemImage: "message") }
+                NavigationLink(value: Route.reminders) { Label(L("rem.title"), systemImage: "alarm") }
+                NavigationLink(value: Route.trazo) { Label(L("nav.trazo"), systemImage: "arrow.triangle.branch") }
+            } footer: { Text(L("settings.whatsappHint")) }
             Section {
                 LabeledContent(L("settings.language"), value: L10n.lang == "es" ? "Español" : "English")
             } footer: { Text(L("settings.languageHint")) }
             Section {
                 Button(L("settings.logout"), role: .destructive) { confirmLogout = true }
                     .accessibilityIdentifier("settings.logout")
+                NavigationLink(value: Route.deleteAccount) { Text(L("del.title")).foregroundStyle(.red) }
+                    .accessibilityIdentifier("settings.deleteAccount")
             }
             Section {
                 LabeledContent(L("settings.version"), value: AppConfig.appVersion)

@@ -6,6 +6,11 @@ enum DeepLink: Equatable, Hashable {
     case workspace(String)
     case invite(String)
     case signup(orgToken: String?)
+    case issues
+    case agenda
+    case trazo
+    case whatsapp
+    case share(text: String?)
 
     static let hosts: Set<String> = ["app.tiecoms.com", "tiecoms.com", "www.tiecoms.com"]
 
@@ -28,6 +33,14 @@ enum DeepLink: Equatable, Hashable {
         case "c": return arg.flatMap { valid($0) ? .conversation($0) : nil }
         case "w": return arg.flatMap { valid($0) ? .workspace($0) : nil }
         case "invite": return arg.flatMap { $0.count <= 300 ? .invite($0) : nil }
+        case "asuntos", "issues": return .issues
+        case "agenda": return .agenda
+        case "trazo": return .trazo
+        case "whatsapp": return .whatsapp
+        case "share":
+            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let text = ["title", "text", "url"].compactMap { k in items.first(where: { $0.name == k })?.value }.filter { !$0.isEmpty }.joined(separator: "\n")
+            return .share(text: text.isEmpty ? nil : text)
         case "signup":
             let org = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "org" })?.value
             return .signup(orgToken: org?.isEmpty == false ? org : nil)

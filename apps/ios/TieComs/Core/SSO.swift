@@ -3,24 +3,6 @@ import CryptoKit
 import Foundation
 import UIKit
 
-/// Rutas de autenticación. La base queda en una constante porque el backend
-/// podría terminar sirviéndola en `/api/auth` en vez de `/api/v1/auth`.
-enum AuthRoutes {
-    static let base = "/api/v1/auth"
-    static var login: String { base + "/login" }
-    static var signup: String { base + "/signup" }
-    static var refresh: String { base + "/refresh" }
-    static var logout: String { base + "/logout" }
-    static var ssoExchange: String { base + "/sso/exchange" }
-    static func ssoStart(_ provider: SSOProvider) -> String { base + "/\(provider.rawValue)/start" }
-}
-
-enum SSOProvider: String, CaseIterable, Identifiable {
-    case google, microsoft
-    var id: String { rawValue }
-    var label: String { L(self == .google ? "auth.google" : "auth.microsoft") }
-}
-
 /// PKCE (RFC 7636) con S256.
 struct PKCE: Equatable {
     let verifier: String
@@ -78,7 +60,7 @@ enum SSOError: Error, Equatable {
 final class SSOAuthenticator: NSObject, ASWebAuthenticationPresentationContextProviding {
     private var session: ASWebAuthenticationSession?
 
-    static func startURL(base: URL, provider: SSOProvider, deviceId: String, pkce: PKCE) -> URL {
+    static func startURL(base: URL, provider: SSOProvider, deviceId: String, pkce: PKCE, orgInviteToken: String? = nil, orgName: String? = nil) -> URL {
         var c = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         let prefix = c.path.hasSuffix("/") ? String(c.path.dropLast()) : c.path
         c.path = prefix + AuthRoutes.ssoStart(provider)
@@ -88,6 +70,9 @@ final class SSOAuthenticator: NSObject, ASWebAuthenticationPresentationContextPr
             URLQueryItem(name: "code_challenge", value: pkce.challenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
         ]
+        // Registro con SSO: unirse a una empresa por invitación o crear una nueva con este nombre.
+        if let orgInviteToken { c.queryItems?.append(URLQueryItem(name: "org", value: orgInviteToken)) }
+        else if let orgName, !orgName.isEmpty { c.queryItems?.append(URLQueryItem(name: "org_name", value: orgName)) }
         return c.url!
     }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 private enum ChatItem: Identifiable {
     case day(String, Date)
@@ -15,11 +16,39 @@ private enum ChatItem: Identifiable {
     }
 }
 
+/// Hojas que se abren desde el menú de un mensaje o de la conversación.
+enum ChatSheet: Identifiable {
+    case derive(MessageDTO), returnResult, newIssue(MessageDTO?), newEvent(MessageDTO?), forward(MessageDTO)
+    case reminder(MessageDTO?), pins, issuesHere
+    var id: String {
+        switch self {
+        case .derive(let m): return "derive-\(m.id)"
+        case .returnResult: return "return"
+        case .newIssue(let m): return "issue-\(m?.id ?? "")"
+        case .newEvent(let m): return "event-\(m?.id ?? "")"
+        case .forward(let m): return "fwd-\(m.id)"
+        case .reminder(let m): return "rem-\(m?.id ?? "")"
+        case .pins: return "pins"
+        case .issuesHere: return "issues"
+        }
+    }
+}
+
+func excerpt(_ s: String, _ n: Int = 120) -> String {
+    let t = s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+    return t.count > n ? String(t.prefix(n)) + "…" : t
+}
+
 struct ConversationView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     let conversationId: String
     @State private var draft = ""
+    @State private var replyTo: MessageDTO?
+    @State private var editing: MessageDTO?
+    @State private var sheet: ChatSheet?
+    @State private var confirmDelete: MessageDTO?
     @FocusState private var composerFocused: Bool
 
     var body: some View {
@@ -34,7 +63,38 @@ struct ConversationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { store.openConversationId = conversationId }
         .onDisappear { if store.openConversationId == conversationId { store.openConversationId = nil } }
-        .task(id: conversationId) { try? await store.openConversation(conversationId) }
+        .task(id: conversationId) {
+            try? await store.openConversation(conversationId)
+            try? await store.loadPins(conversationId)
+            try? await store.loadIssues(conversationId: conversationId)
+            try? await store.loadEvents(from: Date().addingTimeInterval(-30 * 86400), to: Date().addingTimeInterval(90 * 86400), conversationId: conversationId)
+        }
+        .sheet(item: $sheet) { s in sheetView(s) }
+        .confirmationDialog(L("menu.deleteConfirm"), isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }), titleVisibility: .visible) {
+            Button(L("menu.delete"), role: .destructive) {
+                if let m = confirmDelete { act { try await store.deleteMessage(m.id) } }
+            }
+            Button(L("common.cancel"), role: .cancel) {}
+        }
+    }
+
+    @ViewBuilder private func sheetView(_ s: ChatSheet) -> some View {
+        switch s {
+        case .derive(let m): DeriveSheet(conversationId: conversationId, message: m)
+        case .returnResult: ReturnResultSheet(conversationId: conversationId)
+        case .newIssue(let m): NewIssueSheet(conversationId: conversationId, origin: m)
+        case .newEvent(let m): EventEditorSheet(conversationId: conversationId, origin: m, event: nil)
+        case .forward(let m): ForwardSheet(source: m)
+        case .reminder(let m): ReminderSheet(conversationId: conversationId, message: m)
+        case .pins: PinsSheet(conversationId: conversationId)
+        case .issuesHere: ConversationIssuesSheet(conversationId: conversationId)
+        }
+    }
+
+    private func act(toast: String? = nil, _ f: @escaping () async throws -> Void) {
+        Task {
+            do { try await f(); if let toast { store.show(toast) } } catch { store.show(L10n.errorText(error)) }
+        }
     }
 
     @ViewBuilder
@@ -44,6 +104,19 @@ struct ConversationView: View {
             if store.connection != .online {
                 ConnectionBanner(connection: store.connection).padding(.horizontal, 16).padding(.vertical, 6)
                     .background(Theme.surface)
+            }
+            LineageBar(conv: c, onReturn: { sheet = .returnResult })
+            let pinCount = store.pins[conversationId]?.count ?? 0
+            if pinCount > 0 {
+                Button { sheet = .pins } label: {
+                    Label(L("pins.count", ["n": pinCount]), systemImage: "pin.fill")
+                        .font(.footnote.weight(.semibold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(Theme.orange.opacity(0.10))
+                }
+                .foregroundStyle(Theme.accentText)
+                .accessibilityIdentifier("chat.pinsBar")
             }
             if let state, state.loaded {
                 messages(d, c, state)
@@ -73,6 +146,7 @@ struct ConversationView: View {
                         HStack(spacing: 4) {
                             if c.kind == .internal { Image(systemName: "lock.fill").font(.caption2) }
                             Text(Naming.title(d, c)).font(.headline).lineLimit(1)
+                            if c.isMuted { Image(systemName: "bell.slash.fill").font(.caption2).foregroundStyle(Theme.textSecondary) }
                         }
                         .foregroundStyle(Theme.textPrimary)
                         let sub = Naming.subtitle(d, c)
@@ -84,8 +158,18 @@ struct ConversationView: View {
                 .accessibilityIdentifier("chat.header")
             }
             ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink(value: Route.details(conversationId)) { Image(systemName: "info.circle") }
-                    .accessibilityLabel(L("chat.details"))
+                Menu {
+                    ConversationMenuItems(conv: c, onRemindCustom: { sheet = .reminder(nil) },
+                                          onMeeting: c.canPost ? { sheet = .newEvent(nil) } : nil)
+                    Divider()
+                    if c.workspaceId != nil && c.kind != .direct {
+                        Button { sheet = .issuesHere } label: { Label("\(L("issue.here")) · \(c.openIssues)", systemImage: "checklist") }
+                    }
+                    if (store.pins[conversationId]?.count ?? 0) > 0 { Button { sheet = .pins } label: { Label(L("pins.title"), systemImage: "pin") } }
+                    NavigationLink(value: Route.details(conversationId)) { Label(L("chat.details"), systemImage: "info.circle") }
+                } label: { Image(systemName: "ellipsis.circle") }
+                .accessibilityLabel(L("menu.open"))
+                .accessibilityIdentifier("chat.menu")
             }
         }
     }
@@ -93,7 +177,7 @@ struct ConversationView: View {
     private func buildItems(_ state: ConversationState, pending: [PendingMessage]) -> [ChatItem] {
         var items: [ChatItem] = []
         var lastDay: DateComponents?
-        var prevAuthor: String?
+        var prev: MessageDTO?
         var prevDate: Date?
         let cal = Calendar.current
         for m in state.messages {
@@ -102,15 +186,16 @@ struct ConversationView: View {
             if day != lastDay {
                 items.append(.day("\(day.year ?? 0)-\(day.month ?? 0)-\(day.day ?? 0)", date))
                 lastDay = day
-                prevAuthor = nil
+                prev = nil
             }
             if m.isSystem {
                 items.append(.system(m))
-                prevAuthor = nil
+                prev = nil
             } else {
-                let grouped = prevAuthor == m.authorId && prevDate.map { date.timeIntervalSince($0) < 300 } == true
+                let grouped = prev?.authorId == m.authorId && m.replyTo == nil && m.forwarded == nil
+                    && prevDate.map { date.timeIntervalSince($0) < 300 } == true
                 items.append(.message(m, showAuthor: !grouped))
-                prevAuthor = m.authorId
+                prev = m
             }
             prevDate = date
         }
@@ -121,6 +206,7 @@ struct ConversationView: View {
     @ViewBuilder
     private func messages(_ d: BootstrapDTO, _ c: ConversationDTO, _ state: ConversationState) -> some View {
         let items = buildItems(state, pending: store.pendingFor(conversationId))
+        let byId = Dictionary(state.messages.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 4) {
@@ -143,7 +229,7 @@ struct ConversationView: View {
                         Text(L("conv.noMessages")).font(.subheadline).foregroundStyle(Theme.textSecondary).padding(.top, 40)
                     }
                     ForEach(items) { item in
-                        row(d, item).id(item.id)
+                        row(d, c, item, byId: byId).id(item.id)
                     }
                     Color.clear.frame(height: 4).id("bottom")
                 }
@@ -170,7 +256,7 @@ struct ConversationView: View {
     }
 
     @ViewBuilder
-    private func row(_ d: BootstrapDTO, _ item: ChatItem) -> some View {
+    private func row(_ d: BootstrapDTO, _ c: ConversationDTO, _ item: ChatItem, byId: [String: MessageDTO]) -> some View {
         switch item {
         case .day(_, let date):
             Text(L10n.dayLabel(date))
@@ -180,21 +266,27 @@ struct ConversationView: View {
                 .padding(.vertical, 8)
                 .accessibilityAddTraits(.isHeader)
         case .system(let m):
-            Text(L10n.systemText(m.body))
-                .font(.footnote).foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .accessibilityIdentifier("msg.system")
+            SystemRow(message: m)
         case .message(let m, let showAuthor):
             let mine = m.authorId == d.me.id
-            MessageBubble(text: m.deletedAt != nil ? L("chat.deleted") : m.body, time: L10n.clock(m.createdAt), mine: mine,
-                          author: mine || !showAuthor ? nil : Naming.authorLine(d, m.authorId),
-                          status: nil, italic: m.deletedAt != nil)
-                .padding(.top, showAuthor ? 6 : 0)
-                .accessibilityIdentifier("msg.\(m.id)")
+            let quoted = m.replyTo.flatMap { byId[$0] }
+            MessageBubble(
+                text: m.deletedAt != nil ? L("chat.deleted") : m.body,
+                time: L10n.clock(m.createdAt) + (m.editedAt != nil && m.deletedAt == nil ? " " + L("msg.edited") : ""),
+                mine: mine,
+                author: mine || !showAuthor ? nil : Naming.authorLine(d, m.authorId),
+                status: nil, italic: m.deletedAt != nil,
+                quote: m.replyTo == nil ? nil : (quoted.map { q in (Naming.person(d, q.authorId)?.name ?? "", q.deletedAt != nil ? L("chat.deleted") : excerpt(q.body)) } ?? ("", L("reply.quoteMissing"))),
+                forwardedLabel: m.forwarded.map { forwardedLabel(d, $0) },
+                merged: m.mergedFrom.map { id in store.meta(id).map { L("lin.resultOf", ["name": Naming.title(d, $0)]) } ?? L("lin.resultHidden") },
+                pinned: store.pins[conversationId]?.contains(m.id) == true
+            )
+            .padding(.top, showAuthor ? 6 : 0)
+            .contextMenu { if m.deletedAt == nil { messageMenu(d, c, m) } }
+            .accessibilityIdentifier("msg.\(m.id)")
         case .pending(let p):
-            MessageBubble(text: p.body, time: "", mine: true, author: nil, status: p.status == .failed ? .failed : .sending, italic: false)
+            MessageBubble(text: p.body, time: "", mine: true, author: nil, status: p.status == .failed ? .failed : .sending, italic: false,
+                          forwardedLabel: p.forwarded.map { forwardedLabel(d, $0) })
                 .padding(.top, 4)
                 .onTapGesture { if p.status == .failed { store.retry(p.clientMessageId) } }
                 .contextMenu {
@@ -206,6 +298,75 @@ struct ConversationView: View {
                 .accessibilityAction(named: Text(L("chat.retry"))) { store.retry(p.clientMessageId) }
                 .accessibilityAction(named: Text(L("chat.discard"))) { store.discard(p.clientMessageId) }
                 .accessibilityIdentifier("pending.\(p.clientMessageId)")
+        }
+    }
+
+    private func forwardedLabel(_ d: BootstrapDTO, _ f: ForwardedInfo) -> String {
+        var label: String
+        if let from = f.fromConversationId.flatMap({ store.meta($0) }) {
+            label = L("fwd.fromConv", ["name": Naming.title(d, from)])
+        } else if let a = f.author, !a.isEmpty {
+            label = L("fwd.fromBy", ["source": L("src.\(f.source.rawValue)"), "author": a])
+        } else {
+            label = L("fwd.from", ["source": L("src.\(f.source.rawValue)")])
+        }
+        if let s = f.sentAt, !s.isEmpty { label += " · " + (s.contains("T") ? L10n.dateTime(ISODate.parse(s) ?? Date()) : s) }
+        return label
+    }
+
+    /// Menú de un mensaje (mismas acciones y orden que messageMenu de la web).
+    @ViewBuilder
+    private func messageMenu(_ d: BootstrapDTO, _ c: ConversationDTO, _ m: MessageDTO) -> some View {
+        let mine = m.authorId == d.me.id
+        let isPinned = store.pins[conversationId]?.contains(m.id) == true
+        let canWork = c.canPost && c.kind != .direct && c.workspaceId != nil
+        let myWsRole = d.workspaces.first { $0.id == c.workspaceId }?.myRole
+        if c.canPost {
+            Button { replyTo = m; editing = nil; composerFocused = true } label: { Label(L("menu.reply"), systemImage: "arrowshape.turn.up.left") }
+        }
+        Button { UIPasteboard.general.string = m.body; store.show(L("toast.copied")) } label: { Label(L("menu.copyText"), systemImage: "doc.on.doc") }
+        Button { UIPasteboard.general.string = "\(conversationLink(conversationId))?m=\(m.seq)"; store.show(L("toast.linkCopied")) } label: {
+            Label(L("menu.copyLink"), systemImage: "link")
+        }
+        Divider()
+        if c.canPost {
+            Button { act(toast: isPinned ? L("toast.unpinned") : L("toast.pinned")) { try await store.setMessagePinned(m, !isPinned) } } label: {
+                Label(isPinned ? L("menu.unpin") : L("menu.pin"), systemImage: isPinned ? "pin.slash" : "pin")
+            }
+        }
+        RemindMenu(conversationId: conversationId, message: m, onCustom: { sheet = .reminder(m) })
+        Button { act(toast: L("toast.markedUnread")) { try await store.markUnread(conversationId, seq: m.seq) } } label: {
+            Label(L("menu.markUnread"), systemImage: "circle.fill")
+        }
+        if canWork {
+            Divider()
+            if myWsRole != "guest" { Button { sheet = .derive(m) } label: { Label(L("menu.derive"), systemImage: "arrow.triangle.branch") } }
+            Button { sheet = .newIssue(m) } label: { Label(L("menu.issue"), systemImage: "checklist") }
+            Button { sheet = .newEvent(m) } label: { Label(L("menu.meeting"), systemImage: "calendar.badge.plus") }
+        }
+        Menu {
+            Button { sheet = .forward(m) } label: { Label(L("fwd.tiecoms"), systemImage: "bubble.left.and.bubble.right") }
+            Divider()
+            let author = Naming.person(d, m.authorId)?.name ?? ""
+            let link = "\(conversationLink(conversationId))?m=\(m.seq)"
+            let plain = "\(author): \(m.body)\n\n— \(Naming.title(d, c)) · TieComs\n\(link)"
+            Button(L("fwd.whatsapp")) {
+                if let u = URL(string: "https://wa.me/?text=\(plain.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")") { openURL(u) }
+            }
+            Button(L("fwd.slack")) {
+                UIPasteboard.general.string = ">\(m.body.replacingOccurrences(of: "\n", with: "\n>"))\n— *\(author)* · \(Naming.title(d, c)) · <\(link)|TieComs>"
+                store.show(L("toast.slackCopied"))
+            }
+            Button(L("fwd.teams")) { UIPasteboard.general.string = plain; store.show(L("toast.teamsCopied")) }
+            Button(L("fwd.email")) {
+                let subject = "\(Naming.title(d, c)) · TieComs".addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+                if let u = URL(string: "mailto:?subject=\(subject)&body=\(plain.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")") { openURL(u) }
+            }
+        } label: { Label(L("menu.forward"), systemImage: "arrowshape.turn.up.right") }
+        if mine {
+            Divider()
+            Button { editing = m; replyTo = nil; draft = m.body; composerFocused = true } label: { Label(L("menu.edit"), systemImage: "pencil") }
+            Button(role: .destructive) { confirmDelete = m } label: { Label(L("menu.delete"), systemImage: "trash") }
         }
     }
 
@@ -224,32 +385,139 @@ struct ConversationView: View {
     @ViewBuilder
     private func composer(_ d: BootstrapDTO, _ c: ConversationDTO) -> some View {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField(L("chat.placeholder", ["name": Naming.title(d, c)]), text: $draft, axis: .vertical)
-                .lineLimit(1...6)
-                .focused($composerFocused)
-                .padding(.horizontal, 14).padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: 20).fill(Theme.background))
-                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.textSecondary.opacity(0.25)))
-                .onChange(of: draft) { _, v in if !v.isEmpty { store.userIsTyping(conversationId) } }
-                .accessibilityLabel(L("chat.composerLabel"))
-                .accessibilityIdentifier("composer.field")
-            Button {
-                store.send(conversationId, body: draft)
-                draft = ""
-            } label: {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
-                    .background(Circle().fill(trimmed.isEmpty ? Theme.textSecondary.opacity(0.35) : Theme.bubbleMine))
+        VStack(spacing: 0) {
+            if let r = replyTo {
+                ContextBar(icon: "arrowshape.turn.up.left", title: L("reply.to", ["name": Naming.person(d, r.authorId)?.name ?? ""]),
+                           detail: excerpt(r.body, 100), cancelLabel: L("reply.cancel")) { replyTo = nil }
+                    .accessibilityIdentifier("composer.replyBar")
             }
-            .disabled(trimmed.isEmpty)
-            .accessibilityLabel(L("chat.send"))
-            .accessibilityIdentifier("composer.send")
+            if let e = editing {
+                ContextBar(icon: "pencil", title: L("menu.edit"), detail: excerpt(e.body, 100), cancelLabel: L("common.cancel")) {
+                    editing = nil; draft = ""
+                }
+                .accessibilityIdentifier("composer.editBar")
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField(L("chat.placeholder", ["name": Naming.title(d, c)]), text: $draft, axis: .vertical)
+                    .lineLimit(1...6)
+                    .focused($composerFocused)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 20).fill(Theme.background))
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.textSecondary.opacity(0.25)))
+                    .onChange(of: draft) { _, v in if !v.isEmpty && editing == nil { store.userIsTyping(conversationId) } }
+                    .accessibilityLabel(L("chat.composerLabel"))
+                    .accessibilityIdentifier("composer.field")
+                Button(action: submit) {
+                    Image(systemName: editing != nil ? "checkmark" : "arrow.up")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 40, height: 40)
+                        .background(Circle().fill(trimmed.isEmpty ? Theme.textSecondary.opacity(0.35) : Theme.bubbleMine))
+                }
+                .disabled(trimmed.isEmpty)
+                .accessibilityLabel(editing != nil ? L("edit.save") : L("chat.send"))
+                .accessibilityIdentifier("composer.send")
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Theme.surface.ignoresSafeArea(edges: .bottom))
+    }
+
+    private func submit() {
+        let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return }
+        if let e = editing {
+            editing = nil
+            draft = ""
+            if body != e.body { act { try await store.editMessage(e.id, body: body) } }
+            return
+        }
+        store.send(conversationId, body: draft, replyTo: replyTo?.id)
+        replyTo = nil
+        draft = ""
+    }
+}
+
+/// Barra sobre el compositor (respondiendo a / editando).
+struct ContextBar: View {
+    var icon: String
+    var title: String
+    var detail: String
+    var cancelLabel: String
+    var onCancel: () -> Void
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).foregroundStyle(Theme.accentText)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.caption.weight(.semibold)).foregroundStyle(Theme.textPrimary)
+                Text(detail).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
+            }
+            Spacer()
+            Button(action: onCancel) { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary) }
+                .accessibilityLabel(cancelLabel)
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .padding(.horizontal, 14)
+        .background(Theme.orange.opacity(0.08))
+    }
+}
+
+/// Mensaje de sistema: algunos enlazan a un asunto, una reunión o la conversación derivada.
+struct SystemRow: View {
+    @Environment(AppStore.self) private var store
+    let message: MessageDTO
+    var body: some View {
+        let p = message.systemPayload
+        let child = (p?["k"] as? String) == "derived.from" ? (p?["childId"] as? String).flatMap { store.meta($0) } : nil
+        let issueId = p?["issueId"] as? String
+        let eventId = p?["eventId"] as? String
+        VStack(spacing: 6) {
+            Text(L10n.systemText(message.body))
+                .font(.footnote).foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+            if let child, let d = store.data {
+                NavigationLink(value: Route.conversation(child.id)) { Text("⑂ \(Naming.title(d, child))").font(.footnote.weight(.semibold)) }
+            }
+            if let issueId {
+                NavigationLink(value: Route.issue(issueId)) { Text(L("lin.open")).font(.footnote.weight(.semibold)) }
+            }
+            if let eventId { EventCard(eventId: eventId) }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("msg.system")
+    }
+}
+
+/// Tarjeta de reunión dentro del chat.
+struct EventCard: View {
+    @Environment(AppStore.self) private var store
+    let eventId: String
+    var body: some View {
+        NavigationLink(value: Route.event(eventId)) {
+            if let ev = store.events[eventId] {
+                let mine = ev.invitees.first { $0.userId == store.me?.id }
+                HStack(spacing: 10) {
+                    Image(systemName: "calendar").font(.title3).foregroundStyle(Theme.accentText)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(ev.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textPrimary).strikethrough(ev.isCancelled)
+                        Text(ev.isCancelled ? L("cal.cancelled") : L10n.eventWhen(ev)).font(.caption).foregroundStyle(Theme.textSecondary)
+                        if let mine, !ev.isCancelled { Text(L("cal.rsvp.\(mine.rsvp.rawValue)")).font(.caption2.weight(.semibold)).foregroundStyle(Theme.accentText) }
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.textSecondary)
+                }
+                .padding(12)
+                .frame(maxWidth: 320)
+                .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surface))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.orange.opacity(0.35)))
+            } else {
+                Text(L("lin.open")).font(.footnote.weight(.semibold))
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("eventCard.\(eventId)")
     }
 }
 
@@ -261,6 +529,10 @@ struct MessageBubble: View {
     var author: (name: String, org: String?)?
     var status: Status?
     var italic: Bool
+    var quote: (author: String, text: String)? = nil
+    var forwardedLabel: String? = nil
+    var merged: String? = nil
+    var pinned = false
 
     var body: some View {
         HStack {
@@ -274,21 +546,40 @@ struct MessageBubble: View {
                     .lineLimit(1)
                     .padding(.horizontal, 4)
                 }
-                Text(text)
-                    .font(.body)
-                    .italic(italic)
-                    .foregroundStyle(mine ? Color.white : Theme.textPrimary)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 13).padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 18)
-                            .fill(mine ? Theme.bubbleMine : Theme.bubbleOther)
-                            .opacity(status == .sending ? 0.7 : 1)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18).stroke(Color.red, lineWidth: status == .failed ? 1.5 : 0)
-                    )
+                VStack(alignment: .leading, spacing: 6) {
+                    if let forwardedLabel {
+                        Label(forwardedLabel, systemImage: "arrowshape.turn.up.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(mine ? Color.white.opacity(0.9) : Theme.textSecondary)
+                    }
+                    if let quote {
+                        VStack(alignment: .leading, spacing: 1) {
+                            if !quote.author.isEmpty { Text(quote.author).font(.caption.weight(.semibold)) }
+                            Text(quote.text).font(.caption).lineLimit(2)
+                        }
+                        .foregroundStyle(mine ? Color.white.opacity(0.92) : Theme.textSecondary)
+                        .padding(.leading, 8)
+                        .overlay(alignment: .leading) { Rectangle().fill(mine ? Color.white.opacity(0.7) : Theme.orange).frame(width: 3) }
+                    }
+                    if let merged {
+                        Label(merged, systemImage: "arrow.uturn.backward").font(.caption.weight(.semibold))
+                            .foregroundStyle(mine ? Color.white : Theme.accentText)
+                    }
+                    Text(text)
+                        .font(.body)
+                        .italic(italic)
+                        .foregroundStyle(mine ? Color.white : Theme.textPrimary)
+                        .textSelection(.enabled)
+                }
+                .padding(.horizontal, 13).padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(mine ? Theme.bubbleMine : Theme.bubbleOther)
+                        .opacity(status == .sending ? 0.7 : 1)
+                )
+                .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.red, lineWidth: status == .failed ? 1.5 : 0))
                 HStack(spacing: 4) {
+                    if pinned { Image(systemName: "pin.fill").foregroundStyle(Theme.accentText) }
                     switch status {
                     case .sending: Image(systemName: "clock"); Text(L("chat.sending"))
                     case .failed: Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red); Text(L("chat.notSentTap")).foregroundStyle(.red)
@@ -309,12 +600,64 @@ struct MessageBubble: View {
     private var a11yLabel: String {
         var parts: [String] = []
         if mine { parts.append(L("a11y.you")) } else if let author { parts.append([author.name, author.org].compactMap { $0 }.joined(separator: ", ")) }
+        if let forwardedLabel { parts.append(forwardedLabel) }
+        if let quote { parts.append(L("reply.to", ["name": quote.author]) + ": " + quote.text) }
+        if let merged { parts.append(merged) }
         parts.append(text)
+        if pinned { parts.append(L("toast.pinned")) }
         switch status {
         case .sending: parts.append(L("chat.sending"))
         case .failed: parts.append(L("chat.notSent"))
         case nil: if !time.isEmpty { parts.append(time) }
         }
         return parts.joined(separator: ". ")
+    }
+}
+
+/// Barra de linaje: de dónde viene, en qué derivó y devolver el resultado.
+struct LineageBar: View {
+    @Environment(AppStore.self) private var store
+    let conv: ConversationDTO
+    var onReturn: () -> Void
+    var body: some View {
+        if let d = store.data {
+            let parent = conv.parentId.flatMap { store.meta($0) }
+            let kids = d.conversations.filter { $0.parentId == conv.id }
+            if conv.parentId != nil || !kids.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        Text(L("lin.label")).font(.caption2.weight(.bold)).textCase(.uppercase).foregroundStyle(Theme.textSecondary)
+                        if conv.parentId != nil {
+                            if let parent {
+                                NavigationLink(value: Route.conversation(parent.id)) { chip("↖ \(L("lin.from")) «\(Naming.title(d, parent))»") }
+                            } else { chip("↖ \(L("lin.fromHidden"))").opacity(0.7) }
+                        }
+                        if let k = conv.deriveKind { chip(L("lin.kind.\(k)"), tint: true) }
+                        if !kids.isEmpty { Text(L("lin.kids")).font(.caption).foregroundStyle(Theme.textSecondary) }
+                        ForEach(kids) { k in
+                            NavigationLink(value: Route.conversation(k.id)) { chip("⑂ \(Naming.title(d, k))\(k.returnedAt != nil ? " ✓" : "")") }
+                        }
+                        if conv.returnedAt != nil { Text("✓ \(L("lin.returned"))").font(.caption.weight(.semibold)).foregroundStyle(.green) }
+                        if parent != nil, conv.returnedAt == nil, conv.canPost {
+                            Button(L("lin.return"), action: onReturn)
+                                .font(.caption.weight(.semibold))
+                                .buttonStyle(.borderedProminent).tint(Theme.bubbleMine)
+                                .accessibilityIdentifier("lineage.return")
+                        }
+                        NavigationLink(value: Route.trazo) { Text(L("lin.trazo")).font(.caption) }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                }
+                .background(Theme.surface)
+                .accessibilityIdentifier("lineage")
+            }
+        }
+    }
+
+    private func chip(_ text: String, tint: Bool = false) -> some View {
+        Text(text).font(.caption.weight(.medium)).lineLimit(1)
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(Capsule().fill(tint ? Theme.orange.opacity(0.15) : Theme.bubbleOther))
+            .foregroundStyle(Theme.textPrimary)
     }
 }

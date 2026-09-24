@@ -7,22 +7,31 @@ protocol SecretStore: AnyObject {
     func set(_ value: String?)
 }
 
-/// Refresh token en el Keychain, solo en este dispositivo y tras el primer desbloqueo
-/// (la app puede refrescar la sesión al volver del segundo plano).
+/// Refresh token en el Keychain, solo en este dispositivo y tras el primer desbloqueo.
+/// Se guarda en el grupo compartido `group.com.tiecoms.app` para que la extensión de
+/// Compartir use la misma sesión. Si el grupo no está disponible (build sin firma),
+/// se usa el Keychain propio de la app. Lee y migra el ítem antiguo sin grupo.
 final class KeychainSecretStore: SecretStore {
+    static let sharedGroup = "group.com.tiecoms.app"
     private let service: String
     private let account = "refreshToken"
+    private let group: String?
 
-    init(service: String = "com.tiecoms.app.session") { self.service = service }
-
-    private var baseQuery: [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: service,
-         kSecAttrAccount as String: account]
+    init(service: String = "com.tiecoms.app.session", group: String? = KeychainSecretStore.sharedGroup) {
+        self.service = service
+        self.group = group
     }
 
-    func get() -> String? {
-        var q = baseQuery
+    private func query(group: String?) -> [String: Any] {
+        var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                kSecAttrService as String: service,
+                                kSecAttrAccount as String: account]
+        if let group { q[kSecAttrAccessGroup as String] = group }
+        return q
+    }
+
+    private func read(group: String?) -> String? {
+        var q = query(group: group)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: AnyObject?
@@ -30,15 +39,52 @@ final class KeychainSecretStore: SecretStore {
         return String(data: data, encoding: .utf8)
     }
 
+    func get() -> String? {
+        if let group, let v = read(group: group) { return v }
+        // Ítem de la versión 1.0 (sin grupo) o grupo no disponible.
+        guard let legacy = read(group: nil) else { return nil }
+        if group != nil { set(legacy) }
+        return legacy
+    }
+
     func set(_ value: String?) {
-        SecItemDelete(baseQuery as CFDictionary)
+        if let group { SecItemDelete(query(group: group) as CFDictionary) }
+        SecItemDelete(query(group: nil) as CFDictionary)
         guard let value, let data = value.data(using: .utf8) else { return }
-        var q = baseQuery
-        q[kSecValueData as String] = data
-        q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(q as CFDictionary, nil)
+        func add(_ group: String?) -> OSStatus {
+            var q = query(group: group)
+            q[kSecValueData as String] = data
+            q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            return SecItemAdd(q as CFDictionary, nil)
+        }
+        var status = add(group)
+        if status != errSecSuccess && group != nil { status = add(nil) }
         if status != errSecSuccess { NSLog("[TieComs] Keychain SecItemAdd falló: \(status)") }
     }
+}
+
+/// Lista de conversaciones para la extensión de Compartir (App Group). Solo títulos, sin mensajes.
+enum ShareTargets {
+    static let suite = "group.com.tiecoms.app"
+    struct Target: Codable, Equatable, Identifiable { var id: String; var title: String; var subtitle: String }
+
+    static func save(_ d: BootstrapDTO, apiURL: URL) {
+        guard let defaults = UserDefaults(suiteName: suite) else { return }
+        let list = d.conversations.filter(\.canPost).map { c in
+            Target(id: c.id, title: Naming.title(d, c), subtitle: d.workspaces.first(where: { $0.id == c.workspaceId })?.name ?? L("kind.direct"))
+        }
+        defaults.set(try? JSONEncoder().encode(list), forKey: "targets")
+        defaults.set(apiURL.absoluteString, forKey: "apiURL")
+        defaults.set(Prefs.deviceId, forKey: "deviceId")
+    }
+
+    static func load() -> (targets: [Target], apiURL: URL?, deviceId: String?) {
+        guard let defaults = UserDefaults(suiteName: suite) else { return ([], nil, nil) }
+        let list = (defaults.data(forKey: "targets")).flatMap { try? JSONDecoder().decode([Target].self, from: $0) } ?? []
+        return (list, defaults.string(forKey: "apiURL").flatMap(URL.init(string:)), defaults.string(forKey: "deviceId"))
+    }
+
+    static func clear() { UserDefaults(suiteName: suite)?.removeObject(forKey: "targets") }
 }
 
 /// Para pruebas: en memoria.
@@ -113,6 +159,7 @@ struct PendingMessage: Codable, Equatable, Identifiable, Sendable {
     var conversationId: String
     var body: String
     var replyTo: String?
+    var forwarded: ForwardedInfo?
     var createdAt: String
     var attempts: Int
     var status: Status

@@ -97,7 +97,7 @@ struct LoginView: View {
                 }
                 HStack(spacing: 10) {
                     Rectangle().fill(Theme.textSecondary.opacity(0.3)).frame(height: 1)
-                    Text(L("auth.or")).font(.footnote).foregroundStyle(Theme.textSecondary)
+                    Text(L("auth.orEmail")).font(.footnote).foregroundStyle(Theme.textSecondary)
                     Rectangle().fill(Theme.textSecondary.opacity(0.3)).frame(height: 1)
                 }
                 .accessibilityHidden(true)
@@ -145,10 +145,10 @@ struct LoginView: View {
         Task {
             do {
                 try await store.loginWithSSO(provider)
-            } catch SSOError.provider(_, let message) {
-                self.error = message ?? L("auth.ssoFailed")
+            } catch SSOError.provider(let code, let message) {
+                self.error = L10n.codeText(code, message: message)
             } catch SSOError.couldNotStart {
-                self.error = L("auth.ssoFailed")
+                self.error = L("err.sso_failed")
             } catch {
                 self.error = L10n.errorText(error)
             }
@@ -178,6 +178,25 @@ struct SignupView: View {
     @State private var orgInvite: OrgInvitationPreviewDTO?
     @State private var error: String?
     @State private var busy = false
+    @State private var ssoBusy: SSOProvider?
+
+    private func sso(_ provider: SSOProvider) {
+        if !joining && orgName.trimmingCharacters(in: .whitespaces).isEmpty { error = L("auth.ssoNeedsCompany"); return }
+        ssoBusy = provider
+        error = nil
+        Task {
+            do {
+                try await store.loginWithSSO(provider, orgInviteToken: orgToken, orgName: joining ? nil : orgName.trimmingCharacters(in: .whitespaces))
+            } catch SSOError.provider(let code, let message) {
+                self.error = L10n.codeText(code, message: message)
+            } catch SSOError.couldNotStart {
+                self.error = L("err.sso_failed")
+            } catch {
+                self.error = L10n.errorText(error)
+            }
+            ssoBusy = nil
+        }
+    }
 
     private var joining: Bool { orgToken != nil }
     private var canSubmit: Bool {
@@ -205,12 +224,27 @@ struct SignupView: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("signup.joining")
                 }
-                AuthField(label: L("auth.name"), text: $name, content: .name, identifier: "signup.name")
-                AuthField(label: L("auth.email"), text: $email, content: .username, keyboard: .emailAddress, identifier: "signup.email")
-                AuthField(label: L("auth.password"), text: $password, secure: true, content: .newPassword, identifier: "signup.password", hint: L("auth.passwordHint"))
                 if !joining {
                     AuthField(label: L("auth.company"), text: $orgName, content: .organizationName, identifier: "signup.company")
                 }
+                ForEach(SSOProvider.allCases) { provider in
+                    Button { sso(provider) } label: {
+                        HStack(spacing: 10) {
+                            if ssoBusy == provider { ProgressView().controlSize(.small) }
+                            Text(provider.label).font(.headline)
+                        }
+                        .foregroundStyle(Theme.textPrimary)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surface))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.textSecondary.opacity(0.35)))
+                    }
+                    .disabled(busy || ssoBusy != nil || (joining && orgInvite?.valid == false))
+                    .accessibilityIdentifier("signup.sso.\(provider.rawValue)")
+                }
+                Text(L("auth.orEmail")).font(.footnote).foregroundStyle(Theme.textSecondary).frame(maxWidth: .infinity)
+                AuthField(label: L("auth.name"), text: $name, content: .name, identifier: "signup.name")
+                AuthField(label: L("auth.email"), text: $email, content: .username, keyboard: .emailAddress, identifier: "signup.email")
+                AuthField(label: L("auth.password"), text: $password, secure: true, content: .newPassword, identifier: "signup.password", hint: L("auth.passwordHint"))
                 AuthField(label: L("auth.title"), text: $title, content: .jobTitle, identifier: "signup.title")
                 if let error { ErrorBanner(text: error) }
                 Button(action: submit) { Text(busy ? L("common.wait") : joining ? L("auth.signupJoin") : L("auth.signup")) }

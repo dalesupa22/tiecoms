@@ -12,7 +12,15 @@ protocol FeedbackSink: AnyObject {
     func notifyIncoming(conversationId: String, title: String, author: String, body: String)
 }
 
-enum SoundName: String, CaseIterable { case send = "tc_send", receive = "tc_receive", notify = "tc_notify" }
+enum SoundName: String, CaseIterable { case send = "tc_send", receive = "tc_receive", notify = "tc_notify", splash = "tc_splash" }
+
+/// Háptico ligero (al enviar y en el "nudo" del splash).
+@MainActor
+enum Haptics {
+    private static let light = UIImpactFeedbackGenerator(style: .light)
+    static func prepare() { light.prepare() }
+    static func tap() { light.impactOccurred() }
+}
 
 /// Reproduce los .caf del bundle con la categoría `.ambient`: respeta el interruptor
 /// de silencio y se mezcla con la música de otras apps sin interrumpirla.
@@ -21,7 +29,7 @@ final class SoundPlayer {
     private var players: [SoundName: AVAudioPlayer] = [:]
     private var configured = false
 
-    private func configure() {
+    func configure() {
         guard !configured else { return }
         configured = true
         try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default, options: [.mixWithOthers])
@@ -76,7 +84,8 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
         PushRegistration.registerIfEnabled()
     }
 
-    func playSend() { sounds.play(.send) }
+    func playSend() { sounds.play(.send); Haptics.tap() }
+    func playSplash() { sounds.play(.splash) }
     func playReceive() { sounds.play(.receive) }
 
     func notifyIncoming(conversationId: String, title: String, author: String, body: String) {

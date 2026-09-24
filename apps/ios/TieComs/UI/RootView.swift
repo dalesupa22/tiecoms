@@ -2,8 +2,24 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppStore.self) private var store
+    /// Splash animado solo en arranque en frío (este estado vive mientras viva el proceso).
+    @State private var showSplash = !AppConfig.launchFlag("TCNoSplash")
 
     var body: some View {
+        @Bindable var store = store
+        ZStack {
+            content
+            if showSplash {
+                AnimatedSplashView(ready: store.status != .loading, short: store.launchedByLink) {
+                    withAnimation(.easeOut(duration: 0.2)) { showSplash = false }
+                }
+                .transition(.opacity)
+                .zIndex(1)
+            }
+        }
+    }
+
+    @ViewBuilder private var content: some View {
         @Bindable var store = store
         Group {
             switch store.status {
@@ -62,20 +78,71 @@ struct UnreachableView: View {
     }
 }
 
-/// Inicio con sesión: lista de conversaciones y navegación.
+/// Con sesión: pestañas Inicio · Asuntos · Agenda · Ajustes, cada una con su pila.
 struct MainView: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
         @Bindable var store = store
-        NavigationStack(path: $store.path) {
-            HomeView()
-                .navigationDestination(for: Route.self) { route in
-                    switch route {
-                    case .conversation(let id): ConversationView(conversationId: id)
-                    case .details(let id): ConversationDetailsView(conversationId: id)
-                    case .settings: SettingsView()
-                    }
+        TabView(selection: $store.tab) {
+            NavigationStack(path: $store.homePath) { HomeView().routes() }
+                .tabItem { Label(L("nav.inbox"), systemImage: "bubble.left.and.bubble.right") }
+                .tag(AppTab.home)
+                .accessibilityIdentifier("tab.home")
+            NavigationStack(path: $store.issuesPath) { IssuesScreen().routes() }
+                .tabItem { Label(L("nav.issues"), systemImage: "checklist") }
+                .tag(AppTab.issues)
+                .badge(store.myOpenIssues)
+            NavigationStack(path: $store.agendaPath) { AgendaScreen().routes() }
+                .tabItem { Label(L("nav.agenda"), systemImage: "calendar") }
+                .tag(AppTab.agenda)
+            NavigationStack(path: $store.settingsPath) { SettingsView().routes() }
+                .tabItem { Label(L("settings.nav"), systemImage: "gearshape") }
+                .tag(AppTab.settings)
+        }
+        .overlay(alignment: .bottom) { ToastView() }
+        .sheet(isPresented: Binding(get: { store.shareText != nil }, set: { if !$0 { store.shareText = nil } })) {
+            ShareIntoTieComsView(text: store.shareText ?? "")
+        }
+    }
+}
+
+extension View {
+    /// Destinos de navegación comunes a todas las pestañas.
+    func routes() -> some View {
+        navigationDestination(for: Route.self) { route in
+            switch route {
+            case .conversation(let id): ConversationView(conversationId: id)
+            case .details(let id): ConversationDetailsView(conversationId: id)
+            case .issue(let id): IssueDetailView(issueId: id)
+            case .event(let id): EventDetailView(eventId: id)
+            case .trazo: TrazoScreen()
+            case .reminders: RemindersScreen()
+            case .whatsapp: WhatsAppScreen()
+            case .domains(let orgId): DomainsScreen(orgId: orgId)
+            case .deleteAccount: DeleteAccountView()
+            }
+        }
+    }
+}
+
+/// Aviso breve en la parte inferior.
+struct ToastView: View {
+    @Environment(AppStore.self) private var store
+    var body: some View {
+        if let text = store.toast {
+            Text(text)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(Capsule().fill(Theme.ink.opacity(0.92)))
+                .padding(.bottom, 64)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .accessibilityIdentifier("toast")
+                .task(id: text) {
+                    UIAccessibility.post(notification: .announcement, argument: text)
+                    try? await Task.sleep(nanoseconds: 2_400_000_000)
+                    withAnimation { if store.toast == text { store.toast = nil } }
                 }
         }
     }

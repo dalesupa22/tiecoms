@@ -8,37 +8,58 @@
 
 /* Begin PBXBuildFile section */
 		03A22D1626ECFD539C675363 /* DeepLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8557FC33955580880236C06D /* DeepLink.swift */; };
+		0F5BC7F5FF2D3BE382DEFCA9 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEABA7548C1667E663D4C70E /* Models.swift */; };
 		1395F25E40795DF8EAFACC33 /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22A6408E25FEDBF97D17364D /* L10n.swift */; };
+		156D13620D4172B7A660319F /* MoreViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73CF6675D407AE69D506868E /* MoreViews.swift */; };
 		1F41DF7AD84A179000EC01A5 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40384C3AF1B15FBE71FBFA01 /* RootView.swift */; };
 		20D1A10E2B92D7322DBF5B14 /* SSO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B359F9C564097CEE34D2A05 /* SSO.swift */; };
+		244A2B97C05B69418D6C313B /* AgendaViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A0096904EBC6C5EB1BA1A1 /* AgendaViews.swift */; };
+		2F9BEEE1A93572D3DC4F9C45 /* SocketIOProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF6A5A1072D180B50ABD7291 /* SocketIOProtocol.swift */; };
 		304A7ED6BCE177CE9A54BD8D /* SocketIOProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58CF969C93A44DD76EE4EE0B /* SocketIOProtocolTests.swift */; };
 		31DD07B095571C91D0FB232C /* StoreSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB118B40A5F8B04415623994 /* StoreSyncTests.swift */; };
 		3398EFD5E838BD6D49484EC1 /* Storage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3068A6F5B7DE8788B944476 /* Storage.swift */; };
+		3F8172550A64ECA0C549BB92 /* SharedText.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD8AAAA7104EA6BD0C5C7B6D /* SharedText.swift */; };
+		3FFDC3BF8E2B6DF516EAEADF /* Menus.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB336317C73EE48E2442822 /* Menus.swift */; };
 		4235D2A78399FB04776AC024 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 94F3BA09658690F94F865EB1 /* Localizable.strings */; };
 		4570A01F25E3C5B753F0763A /* SocketIOClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 310CB4DC9C904F41CD395304 /* SocketIOClient.swift */; };
 		46B7BBCD1ABD2B119DBC9044 /* Naming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38C26BEA687D356B4765DDC8 /* Naming.swift */; };
 		4861AC62C42CF71D8AEF1453 /* TieComsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CDA44DC6302797DC800B44D /* TieComsApp.swift */; };
+		4E2E49A1EBCDEC5A426728AA /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0EE4F0835A244D173D5CE5E /* APIClient.swift */; };
 		4FEFD3F104B5B20D25F7EBDB /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEABA7548C1667E663D4C70E /* Models.swift */; };
+		51C448F1465ABD2CC5559D7C /* Naming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38C26BEA687D356B4765DDC8 /* Naming.swift */; };
+		52C15EAD225474BC7E6CFFAD /* Storage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3068A6F5B7DE8788B944476 /* Storage.swift */; };
 		557557E2D14658FCBBB20E0E /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0EE4F0835A244D173D5CE5E /* APIClient.swift */; };
 		59508C7C91EA2B02ACAD615B /* SSOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A9581A136556B589C7E824 /* SSOTests.swift */; };
 		5C5A90EE8D7AFC7E28E68DF0 /* AuthViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 959E3DC72E9AF90351D4A075 /* AuthViews.swift */; };
 		5C5E810AB205F55137AC159E /* AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FBBF6EF55B008956531AAC9 /* AppStore.swift */; };
 		6768FE2C56CB7B3B9F237FEE /* tc_notify.caf in Resources */ = {isa = PBXBuildFile; fileRef = 4212E6B71E371BC46001BD89 /* tc_notify.caf */; };
 		6D2D27D981A66B9EE10C8F80 /* SocketIOProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF6A5A1072D180B50ABD7291 /* SocketIOProtocol.swift */; };
+		72863AF6EEA9BC2AA55D6C65 /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22A6408E25FEDBF97D17364D /* L10n.swift */; };
 		7449F903D57C1B5199447D89 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E62F7C36416F5CCC95C04ED6 /* PrivacyInfo.xcprivacy */; };
+		7695CD28B533BC509D30A44E /* tc_splash.caf in Resources */ = {isa = PBXBuildFile; fileRef = 341AE9974BB278BB3D3A1F18 /* tc_splash.caf */; };
+		787E7E59AC77EAC8C71369E1 /* Splash.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3792730DDF81227D7735C79E /* Splash.swift */; };
+		7D64F9F1796899E79F79CA25 /* AppStore+Features.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F521EF4D592789CF8E947FE /* AppStore+Features.swift */; };
 		8A1233EC493B295510B8946F /* ChatFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9435F794DD29ECC6D280393D /* ChatFlowUITests.swift */; };
+		8AC2E905821FD283821301E8 /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A19A9902A951D7919FF42F1D /* Sheets.swift */; };
 		91C244FFC2747DB60736CE3C /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7B7D04AEB3A584685873097 /* Theme.swift */; };
 		A913BA0E653F0DBAD93280AC /* TestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744AE6DDB5ABBFD7B89901B0 /* TestSupport.swift */; };
 		B0A1A021264C4E4F5C8C4EEE /* DecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 083932E17F3BCA024B4EBFD6 /* DecodingTests.swift */; };
 		C267D7565F6DF8D77BE41AEC /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5512C5E20A20FE9F456CC2F /* HomeView.swift */; };
+		C3A87CF68B11008DBB11502D /* SharedText.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD8AAAA7104EA6BD0C5C7B6D /* SharedText.swift */; };
+		C445F6D6FD6CB0ACC18B4AFD /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 94F3BA09658690F94F865EB1 /* Localizable.strings */; };
+		C618F3F520A9291D578E6F40 /* ModelsV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = B27D458CCA260DEF9234EB80 /* ModelsV2.swift */; };
 		C6E3F8CBA1099F05CBEC7F95 /* IntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10AC2E537D2E9D5B93E325A9 /* IntegrationTests.swift */; };
 		CF04A65A1B47AA8D769E0941 /* tc_receive.caf in Resources */ = {isa = PBXBuildFile; fileRef = 9DAF2FF0FD1C609CF44FCC84 /* tc_receive.caf */; };
 		D617012D196385E2A7505E73 /* Feedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23FEF82583783355CABE69D6 /* Feedback.swift */; };
+		DF70F9600ECDAC4BFCB859F8 /* TieComsShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CE447E4433F5B5B0E12C5810 /* TieComsShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		E3FCB75AC48F989B91D78245 /* tc_send.caf in Resources */ = {isa = PBXBuildFile; fileRef = A3F81ABD77EB22BDB57C8850 /* tc_send.caf */; };
+		E57DBC0E067E7BAD10EAB1A5 /* ModelsV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = B27D458CCA260DEF9234EB80 /* ModelsV2.swift */; };
 		E6B0D34AF575A80CDA81EBF7 /* DetailsSettingsInvite.swift in Sources */ = {isa = PBXBuildFile; fileRef = F718A99EA118584855D36A3B /* DetailsSettingsInvite.swift */; };
 		E6D0CF9A07083AAB76A12A8A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 583E047F344413AFA12319CA /* Assets.xcassets */; };
+		F0EB27FE06E76EE78C5A5313 /* IssuesViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 923D2E3C2F53E9B60B7EAF56 /* IssuesViews.swift */; };
 		F44BF670B9865D29323F6593 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 48624417014E35F069CBEC2F /* InfoPlist.strings */; };
 		F8DD637AF1318E32FDAE44F8 /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4257657A4BDB09D0C0C1CDB2 /* ConversationView.swift */; };
+		FF50839FD0654ACCA9235BCE /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BB1DA0E807FA769EC20724E /* ShareViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -49,6 +70,13 @@
 			remoteGlobalIDString = B5A6947E5E421A98DCBB71CC;
 			remoteInfo = TieComs;
 		};
+		8F91E1F63E5A37FE8B0F209C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 67D23E01D3EE86B7ED3C1C83 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0A8175BB507AE7DF8E90D5B4;
+			remoteInfo = TieComsShare;
+		};
 		8FC0FF199CD6BF415211E6C6 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 67D23E01D3EE86B7ED3C1C83 /* Project object */;
@@ -58,13 +86,30 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		6020E372E9690E830A3CFBE1 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				DF70F9600ECDAC4BFCB859F8 /* TieComsShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		00A0096904EBC6C5EB1BA1A1 /* AgendaViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgendaViews.swift; sourceTree = "<group>"; };
 		083932E17F3BCA024B4EBFD6 /* DecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecodingTests.swift; sourceTree = "<group>"; };
 		10AC2E537D2E9D5B93E325A9 /* IntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationTests.swift; sourceTree = "<group>"; };
 		22A6408E25FEDBF97D17364D /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
 		23FEF82583783355CABE69D6 /* Feedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Feedback.swift; sourceTree = "<group>"; };
 		2E948A0F8D7FB9B6478EEC20 /* TieComsTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TieComsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		310CB4DC9C904F41CD395304 /* SocketIOClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketIOClient.swift; sourceTree = "<group>"; };
+		341AE9974BB278BB3D3A1F18 /* tc_splash.caf */ = {isa = PBXFileReference; path = tc_splash.caf; sourceTree = "<group>"; };
+		3792730DDF81227D7735C79E /* Splash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Splash.swift; sourceTree = "<group>"; };
 		38C26BEA687D356B4765DDC8 /* Naming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Naming.swift; sourceTree = "<group>"; };
 		3EF3EC7982D199C50C43C25A /* TieComsUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TieComsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3F53D792BDF79B79D56A47AF /* es */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = es; path = es.lproj/InfoPlist.strings; sourceTree = "<group>"; };
@@ -72,23 +117,32 @@
 		40DB379F56AC17E565D91F7F /* es */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = es; path = es.lproj/Localizable.strings; sourceTree = "<group>"; };
 		4212E6B71E371BC46001BD89 /* tc_notify.caf */ = {isa = PBXFileReference; path = tc_notify.caf; sourceTree = "<group>"; };
 		4257657A4BDB09D0C0C1CDB2 /* ConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationView.swift; sourceTree = "<group>"; };
+		4BB1DA0E807FA769EC20724E /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		583E047F344413AFA12319CA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		58CF969C93A44DD76EE4EE0B /* SocketIOProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketIOProtocolTests.swift; sourceTree = "<group>"; };
 		5CDA44DC6302797DC800B44D /* TieComsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TieComsApp.swift; sourceTree = "<group>"; };
 		693D6FE05E8BDE87A56C7102 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		6F521EF4D592789CF8E947FE /* AppStore+Features.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStore+Features.swift"; sourceTree = "<group>"; };
+		73CF6675D407AE69D506868E /* MoreViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreViews.swift; sourceTree = "<group>"; };
 		744AE6DDB5ABBFD7B89901B0 /* TestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestSupport.swift; sourceTree = "<group>"; };
 		79A9581A136556B589C7E824 /* SSOTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSOTests.swift; sourceTree = "<group>"; };
 		7B359F9C564097CEE34D2A05 /* SSO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSO.swift; sourceTree = "<group>"; };
 		8557FC33955580880236C06D /* DeepLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLink.swift; sourceTree = "<group>"; };
+		8D00FFEF737CC563C49DFBB2 /* TieComsShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TieComsShare.entitlements; sourceTree = "<group>"; };
+		923D2E3C2F53E9B60B7EAF56 /* IssuesViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssuesViews.swift; sourceTree = "<group>"; };
 		9435F794DD29ECC6D280393D /* ChatFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatFlowUITests.swift; sourceTree = "<group>"; };
 		959E3DC72E9AF90351D4A075 /* AuthViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViews.swift; sourceTree = "<group>"; };
 		9DAF2FF0FD1C609CF44FCC84 /* tc_receive.caf */ = {isa = PBXFileReference; path = tc_receive.caf; sourceTree = "<group>"; };
 		9FBBF6EF55B008956531AAC9 /* AppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStore.swift; sourceTree = "<group>"; };
+		A19A9902A951D7919FF42F1D /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
 		A3F81ABD77EB22BDB57C8850 /* tc_send.caf */ = {isa = PBXFileReference; path = tc_send.caf; sourceTree = "<group>"; };
+		AD8AAAA7104EA6BD0C5C7B6D /* SharedText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedText.swift; sourceTree = "<group>"; };
+		B27D458CCA260DEF9234EB80 /* ModelsV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsV2.swift; sourceTree = "<group>"; };
 		B3068A6F5B7DE8788B944476 /* Storage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage.swift; sourceTree = "<group>"; };
 		C0EE4F0835A244D173D5CE5E /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		C9588E3F5C22848C8993510F /* TieComs.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TieComs.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CCF75E43B44050980EEF21D7 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		CE447E4433F5B5B0E12C5810 /* TieComsShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = TieComsShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		CEABA7548C1667E663D4C70E /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		CF6A5A1072D180B50ABD7291 /* SocketIOProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketIOProtocol.swift; sourceTree = "<group>"; };
 		D5512C5E20A20FE9F456CC2F /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
@@ -96,6 +150,7 @@
 		E62F7C36416F5CCC95C04ED6 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		E7B7D04AEB3A584685873097 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		EB118B40A5F8B04415623994 /* StoreSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreSyncTests.swift; sourceTree = "<group>"; };
+		EBB336317C73EE48E2442822 /* Menus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Menus.swift; sourceTree = "<group>"; };
 		F718A99EA118584855D36A3B /* DetailsSettingsInvite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailsSettingsInvite.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -124,11 +179,14 @@
 			children = (
 				C0EE4F0835A244D173D5CE5E /* APIClient.swift */,
 				9FBBF6EF55B008956531AAC9 /* AppStore.swift */,
+				6F521EF4D592789CF8E947FE /* AppStore+Features.swift */,
 				8557FC33955580880236C06D /* DeepLink.swift */,
 				23FEF82583783355CABE69D6 /* Feedback.swift */,
 				22A6408E25FEDBF97D17364D /* L10n.swift */,
 				CEABA7548C1667E663D4C70E /* Models.swift */,
+				B27D458CCA260DEF9234EB80 /* ModelsV2.swift */,
 				38C26BEA687D356B4765DDC8 /* Naming.swift */,
+				AD8AAAA7104EA6BD0C5C7B6D /* SharedText.swift */,
 				310CB4DC9C904F41CD395304 /* SocketIOClient.swift */,
 				CF6A5A1072D180B50ABD7291 /* SocketIOProtocol.swift */,
 				7B359F9C564097CEE34D2A05 /* SSO.swift */,
@@ -143,6 +201,7 @@
 				4212E6B71E371BC46001BD89 /* tc_notify.caf */,
 				9DAF2FF0FD1C609CF44FCC84 /* tc_receive.caf */,
 				A3F81ABD77EB22BDB57C8850 /* tc_send.caf */,
+				341AE9974BB278BB3D3A1F18 /* tc_splash.caf */,
 			);
 			path = Sounds;
 			sourceTree = "<group>";
@@ -158,11 +217,17 @@
 		A4ACA2A6CA7F27663579A400 /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				00A0096904EBC6C5EB1BA1A1 /* AgendaViews.swift */,
 				959E3DC72E9AF90351D4A075 /* AuthViews.swift */,
 				4257657A4BDB09D0C0C1CDB2 /* ConversationView.swift */,
 				F718A99EA118584855D36A3B /* DetailsSettingsInvite.swift */,
 				D5512C5E20A20FE9F456CC2F /* HomeView.swift */,
+				923D2E3C2F53E9B60B7EAF56 /* IssuesViews.swift */,
+				EBB336317C73EE48E2442822 /* Menus.swift */,
+				73CF6675D407AE69D506868E /* MoreViews.swift */,
 				40384C3AF1B15FBE71FBFA01 /* RootView.swift */,
+				A19A9902A951D7919FF42F1D /* Sheets.swift */,
+				3792730DDF81227D7735C79E /* Splash.swift */,
 				E7B7D04AEB3A584685873097 /* Theme.swift */,
 			);
 			path = UI;
@@ -172,6 +237,7 @@
 			isa = PBXGroup;
 			children = (
 				12A8C7878AEB1F064680F85C /* TieComs */,
+				DBE64CDA905925FE15CA3986 /* TieComsShare */,
 				E6E6FE6ED45C4B2C4FB1B1FC /* TieComsTests */,
 				118A408D65EB46BE1704F061 /* TieComsUITests */,
 				BEA94E96C93F5B4F54E2FB27 /* Products */,
@@ -195,10 +261,20 @@
 			isa = PBXGroup;
 			children = (
 				C9588E3F5C22848C8993510F /* TieComs.app */,
+				CE447E4433F5B5B0E12C5810 /* TieComsShare.appex */,
 				2E948A0F8D7FB9B6478EEC20 /* TieComsTests.xctest */,
 				3EF3EC7982D199C50C43C25A /* TieComsUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		DBE64CDA905925FE15CA3986 /* TieComsShare */ = {
+			isa = PBXGroup;
+			children = (
+				4BB1DA0E807FA769EC20724E /* ShareViewController.swift */,
+				8D00FFEF737CC563C49DFBB2 /* TieComsShare.entitlements */,
+			);
+			path = TieComsShare;
 			sourceTree = "<group>";
 		};
 		E6E6FE6ED45C4B2C4FB1B1FC /* TieComsTests */ = {
@@ -235,6 +311,24 @@
 			productReference = 2E948A0F8D7FB9B6478EEC20 /* TieComsTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		0A8175BB507AE7DF8E90D5B4 /* TieComsShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9AC62A7A2EE12827E74AC2A9 /* Build configuration list for PBXNativeTarget "TieComsShare" */;
+			buildPhases = (
+				66B72A57F3BB38754238BA2D /* Sources */,
+				EFA9963EC9433046836CD483 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TieComsShare;
+			packageProductDependencies = (
+			);
+			productName = TieComsShare;
+			productReference = CE447E4433F5B5B0E12C5810 /* TieComsShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		786759538745CD34DEE75E72 /* TieComsUITests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 7E7A8DA21A10769282053BA7 /* Build configuration list for PBXNativeTarget "TieComsUITests" */;
@@ -259,10 +353,12 @@
 			buildPhases = (
 				43B70CB70467271001EFA66C /* Sources */,
 				ED8CA87614DA13989919FB4D /* Resources */,
+				6020E372E9690E830A3CFBE1 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				F210A7966FDCD7862E71C216 /* PBXTargetDependency */,
 			);
 			name = TieComs;
 			packageProductDependencies = (
@@ -281,6 +377,10 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					0218F0C74468ED86260E08AA = {
+						DevelopmentTeam = B76US7H3L3;
+						ProvisioningStyle = Automatic;
+					};
+					0A8175BB507AE7DF8E90D5B4 = {
 						DevelopmentTeam = B76US7H3L3;
 						ProvisioningStyle = Automatic;
 					};
@@ -311,6 +411,7 @@
 			projectRoot = "";
 			targets = (
 				B5A6947E5E421A98DCBB71CC /* TieComs */,
+				0A8175BB507AE7DF8E90D5B4 /* TieComsShare */,
 				0218F0C74468ED86260E08AA /* TieComsTests */,
 				786759538745CD34DEE75E72 /* TieComsUITests */,
 			);
@@ -329,6 +430,15 @@
 				6768FE2C56CB7B3B9F237FEE /* tc_notify.caf in Resources */,
 				CF04A65A1B47AA8D769E0941 /* tc_receive.caf in Resources */,
 				E3FCB75AC48F989B91D78245 /* tc_send.caf in Resources */,
+				7695CD28B533BC509D30A44E /* tc_splash.caf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EFA9963EC9433046836CD483 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C445F6D6FD6CB0ACC18B4AFD /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -340,6 +450,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				557557E2D14658FCBBB20E0E /* APIClient.swift in Sources */,
+				244A2B97C05B69418D6C313B /* AgendaViews.swift in Sources */,
+				7D64F9F1796899E79F79CA25 /* AppStore+Features.swift in Sources */,
 				5C5E810AB205F55137AC159E /* AppStore.swift in Sources */,
 				5C5A90EE8D7AFC7E28E68DF0 /* AuthViews.swift in Sources */,
 				F8DD637AF1318E32FDAE44F8 /* ConversationView.swift in Sources */,
@@ -347,16 +459,39 @@
 				E6B0D34AF575A80CDA81EBF7 /* DetailsSettingsInvite.swift in Sources */,
 				D617012D196385E2A7505E73 /* Feedback.swift in Sources */,
 				C267D7565F6DF8D77BE41AEC /* HomeView.swift in Sources */,
+				F0EB27FE06E76EE78C5A5313 /* IssuesViews.swift in Sources */,
 				1395F25E40795DF8EAFACC33 /* L10n.swift in Sources */,
+				3FFDC3BF8E2B6DF516EAEADF /* Menus.swift in Sources */,
 				4FEFD3F104B5B20D25F7EBDB /* Models.swift in Sources */,
+				E57DBC0E067E7BAD10EAB1A5 /* ModelsV2.swift in Sources */,
+				156D13620D4172B7A660319F /* MoreViews.swift in Sources */,
 				46B7BBCD1ABD2B119DBC9044 /* Naming.swift in Sources */,
 				1F41DF7AD84A179000EC01A5 /* RootView.swift in Sources */,
 				20D1A10E2B92D7322DBF5B14 /* SSO.swift in Sources */,
+				C3A87CF68B11008DBB11502D /* SharedText.swift in Sources */,
+				8AC2E905821FD283821301E8 /* Sheets.swift in Sources */,
 				4570A01F25E3C5B753F0763A /* SocketIOClient.swift in Sources */,
 				6D2D27D981A66B9EE10C8F80 /* SocketIOProtocol.swift in Sources */,
+				787E7E59AC77EAC8C71369E1 /* Splash.swift in Sources */,
 				3398EFD5E838BD6D49484EC1 /* Storage.swift in Sources */,
 				91C244FFC2747DB60736CE3C /* Theme.swift in Sources */,
 				4861AC62C42CF71D8AEF1453 /* TieComsApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		66B72A57F3BB38754238BA2D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4E2E49A1EBCDEC5A426728AA /* APIClient.swift in Sources */,
+				72863AF6EEA9BC2AA55D6C65 /* L10n.swift in Sources */,
+				0F5BC7F5FF2D3BE382DEFCA9 /* Models.swift in Sources */,
+				C618F3F520A9291D578E6F40 /* ModelsV2.swift in Sources */,
+				51C448F1465ABD2CC5559D7C /* Naming.swift in Sources */,
+				FF50839FD0654ACCA9235BCE /* ShareViewController.swift in Sources */,
+				3F8172550A64ECA0C549BB92 /* SharedText.swift in Sources */,
+				2F9BEEE1A93572D3DC4F9C45 /* SocketIOProtocol.swift in Sources */,
+				52C15EAD225474BC7E6CFFAD /* Storage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -394,6 +529,11 @@
 			target = B5A6947E5E421A98DCBB71CC /* TieComs */;
 			targetProxy = 8FC0FF199CD6BF415211E6C6 /* PBXContainerItemProxy */;
 		};
+		F210A7966FDCD7862E71C216 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0A8175BB507AE7DF8E90D5B4 /* TieComsShare */;
+			targetProxy = 8F91E1F63E5A37FE8B0F209C /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
@@ -418,6 +558,44 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		183935C02973946F6F2A5DA3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = TieComsShare/TieComsShare.entitlements;
+				INFOPLIST_FILE = TieComsShare/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app.share;
+				PRODUCT_NAME = TieComsShare;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) SHARE_EXTENSION";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		2DAB2AE0F2480173E5947B74 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = TieComsShare/TieComsShare.entitlements;
+				INFOPLIST_FILE = TieComsShare/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app.share;
+				PRODUCT_NAME = TieComsShare;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) SHARE_EXTENSION";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		46C59D18C4A0E9B1C51E3DC3 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -504,7 +682,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = B76US7H3L3;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -526,7 +704,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.1.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -612,7 +790,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = B76US7H3L3;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -628,7 +806,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.1.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -696,6 +874,15 @@
 			buildConfigurations = (
 				EAE5AC8D79DBF1CB73FB7A61 /* Debug */,
 				CF0D21FDBDF565EA1225EC27 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9AC62A7A2EE12827E74AC2A9 /* Build configuration list for PBXNativeTarget "TieComsShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2DAB2AE0F2480173E5947B74 /* Debug */,
+				183935C02973946F6F2A5DA3 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

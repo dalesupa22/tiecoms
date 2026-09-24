@@ -17,6 +17,24 @@ struct ApiRequestError: Error, Equatable, LocalizedError {
     }
 }
 
+/// Rutas de autenticación. La base queda en una constante porque el backend
+/// podría terminar sirviéndola en `/api/auth` en vez de `/api/v1/auth`.
+enum AuthRoutes {
+    static let base = "/api/v1/auth"
+    static var login: String { base + "/login" }
+    static var signup: String { base + "/signup" }
+    static var refresh: String { base + "/refresh" }
+    static var logout: String { base + "/logout" }
+    static var ssoExchange: String { base + "/sso/exchange" }
+    static func ssoStart(_ provider: SSOProvider) -> String { base + "/\(provider.rawValue)/start" }
+}
+
+enum SSOProvider: String, CaseIterable, Identifiable {
+    case google, microsoft
+    var id: String { rawValue }
+    var label: String { L(self == .google ? "auth.withGoogle" : "auth.withMicrosoft") }
+}
+
 enum AppConfig {
     static let defaultAPI = "https://app.tiecoms.com"
 
@@ -29,6 +47,10 @@ enum AppConfig {
     }
 
     static var isRunningUnitTests: Bool { ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil }
+
+    static func launchValue(_ name: String) -> String? {
+        UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)[name] as? String
+    }
 
     static func launchFlag(_ name: String) -> Bool {
         (UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)[name] as? String).map { $0 == "YES" || $0 == "1" || $0 == "true" } ?? false

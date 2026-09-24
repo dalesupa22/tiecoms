@@ -23,13 +23,19 @@ enum L10n {
         if e.code == "bad_request", !e.paths.isEmpty {
             return L("err.bad_request") + ": " + Array(Set(e.paths)).sorted().joined(separator: ", ")
         }
-        let key = "err.\(e.code)"
-        let known = ["unauthorized", "conflict", "forbidden", "not_found", "rate_limited", "bad_request", "internal"]
-        if known.contains(e.code) {
-            // El servidor responde en español; en español se usa su texto, que es más preciso.
-            return lang == "es" && !e.message.isEmpty ? e.message : L(key)
+        return codeText(e.code, message: e.message)
+    }
+
+    /// Texto por código de error (err.<código> de la web). El servidor responde en español:
+    /// en español se usa su texto, que es más preciso; en inglés, la traducción del código.
+    static func codeText(_ code: String, message: String?) -> String {
+        let key = "err.\(code)"
+        if L(key) != key {
+            if lang == "es", let message, !message.isEmpty { return message }
+            return L(key)
         }
-        return e.message.isEmpty ? L("common.error") : e.message
+        if let message, !message.isEmpty { return message }
+        return L("common.error")
     }
 
     /// Los mensajes de sistema llegan como {"k": clave, ...datos}; los antiguos, como texto plano.
@@ -75,6 +81,17 @@ enum L10n {
         if cal.isDate(d, inSameDayAs: now) { return L("day.today") }
         if let y = cal.date(byAdding: .day, value: -1, to: now), cal.isDate(d, inSameDayAs: y) { return L("day.yesterday") }
         return d.formatted(Date.FormatStyle().weekday(.wide).day().month(.wide).locale(locale))
+    }
+
+    /// «Jueves, 25 de septiembre · 10:00–11:00» (como fmtWhen de la web).
+    static func eventWhen(_ ev: CalendarEventDTO) -> String {
+        let day = ev.start.formatted(Date.FormatStyle().weekday(.wide).day().month(.wide).locale(locale))
+        let t = Date.FormatStyle(date: .omitted, time: .shortened).locale(locale)
+        return "\(day.prefix(1).uppercased())\(day.dropFirst()) · \(ev.start.formatted(t))–\(ev.end.formatted(t))"
+    }
+
+    static func dateTime(_ d: Date) -> String {
+        d.formatted(Date.FormatStyle().weekday(.abbreviated).day().month(.abbreviated).hour().minute().locale(locale))
     }
 
     static func shortDate(_ iso: String?) -> String {

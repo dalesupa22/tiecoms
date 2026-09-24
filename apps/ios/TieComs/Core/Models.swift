@@ -44,7 +44,7 @@ extension KeyedDecodingContainer where K == AnyKey {
     }
 }
 
-private func container(_ d: Decoder) throws -> KeyedDecodingContainer<AnyKey> {
+func container(_ d: Decoder) throws -> KeyedDecodingContainer<AnyKey> {
     try d.container(keyedBy: AnyKey.self)
 }
 
@@ -78,10 +78,17 @@ struct OrganizationDTO: Codable, Equatable, Identifiable, Sendable {
     var colorBg: String
     var colorFg: String
     var myRole: String?
+    /// none | idp | dns
+    var verification: String
+    var verifiedDomain: String?
+
+    var canAdmin: Bool { myRole == "owner" || myRole == "admin" }
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))
+        verification = c.v("verification", "none")
+        verifiedDomain = c.o("verifiedDomain")
         name = c.v("name", "")
         mark = c.v("mark", "")
         colorBg = c.v("colorBg", "#E0DACE")
@@ -123,6 +130,7 @@ struct WorkspaceDTO: Codable, Equatable, Identifiable, Sendable {
     var memberIds: [String]
     var myRole: String
     var createdAt: String
+    var pinnedAt: String?
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -135,6 +143,7 @@ struct WorkspaceDTO: Codable, Equatable, Identifiable, Sendable {
         memberIds = c.v("memberIds", [])
         myRole = c.v("myRole", "member")
         createdAt = c.v("createdAt", "")
+        pinnedAt = c.o("pinnedAt")
     }
 }
 
@@ -159,8 +168,14 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
     var historyFromSeq: Int
     // Campos nuevos (bifurcaciones/issues): opcionales para convivir con API antiguos.
     var parentId: String?
+    var parentMessageId: String?
+    var parentMessageSeq: Int?
     var deriveKind: String?
+    var deriveReason: String?
+    var returnedAt: String?
     var openIssues: Int
+    /// Preferencia personal: fijada arriba.
+    var pinnedAt: String?
     /// Preferencia personal: silenciada hasta esta fecha (no avisa).
     var mutedUntil: String?
 
@@ -186,7 +201,12 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
         canManage = c.v("canManage", false)
         historyFromSeq = c.int("historyFromSeq")
         parentId = c.o("parentId")
+        parentMessageId = c.o("parentMessageId")
+        parentMessageSeq = c.intOpt("parentMessageSeq")
         deriveKind = c.o("deriveKind")
+        deriveReason = c.o("deriveReason")
+        returnedAt = c.o("returnedAt")
+        pinnedAt = c.o("pinnedAt")
         openIssues = c.int("openIssues")
         mutedUntil = c.o("mutedUntil")
     }
@@ -202,11 +222,17 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
     var body: String
     var replyTo: String?
     var mergedFrom: String?
+    var forwarded: ForwardedInfo?
     var createdAt: String
     var editedAt: String?
     var deletedAt: String?
 
     var isSystem: Bool { kind == "system" }
+    /// Mensaje de sistema estructurado ({"k": …}).
+    var systemPayload: [String: Any]? {
+        guard isSystem, body.hasPrefix("{"), let d = body.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: d)) as? [String: Any]
+    }
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -219,6 +245,7 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
         body = c.v("body", "")
         replyTo = c.o("replyTo")
         mergedFrom = c.o("mergedFrom")
+        forwarded = c.o("forwarded")
         createdAt = c.v("createdAt", "")
         editedAt = c.o("editedAt")
         deletedAt = c.o("deletedAt")
@@ -346,16 +373,21 @@ enum ConversationEvent: Decodable, Equatable, Sendable {
     case messageCreated(conversationId: String, eventSeq: Int, message: MessageDTO)
     case messageUpdated(conversationId: String, eventSeq: Int, message: MessageDTO)
     case membersChanged(conversationId: String, eventSeq: Int, memberIds: [String])
+    case issueUpdated(conversationId: String, eventSeq: Int, issue: IssueDTO)
+    case pinsChanged(conversationId: String, eventSeq: Int, messageIds: [String])
+    case calendarUpdated(conversationId: String, eventSeq: Int, event: CalendarEventDTO)
     case other(type: String, conversationId: String, eventSeq: Int)
 
     var conversationId: String {
         switch self {
-        case .messageCreated(let c, _, _), .messageUpdated(let c, _, _), .membersChanged(let c, _, _), .other(_, let c, _): return c
+        case .messageCreated(let c, _, _), .messageUpdated(let c, _, _), .membersChanged(let c, _, _), .issueUpdated(let c, _, _),
+             .pinsChanged(let c, _, _), .calendarUpdated(let c, _, _), .other(_, let c, _): return c
         }
     }
     var eventSeq: Int {
         switch self {
-        case .messageCreated(_, let s, _), .messageUpdated(_, let s, _), .membersChanged(_, let s, _), .other(_, _, let s): return s
+        case .messageCreated(_, let s, _), .messageUpdated(_, let s, _), .membersChanged(_, let s, _), .issueUpdated(_, let s, _),
+             .pinsChanged(_, let s, _), .calendarUpdated(_, let s, _), .other(_, _, let s): return s
         }
     }
 
@@ -371,6 +403,12 @@ enum ConversationEvent: Decodable, Equatable, Sendable {
             if let m: MessageDTO = c.o("message") { self = .messageUpdated(conversationId: conv, eventSeq: seq, message: m); return }
         case "members.changed":
             self = .membersChanged(conversationId: conv, eventSeq: seq, memberIds: c.v("memberIds", [])); return
+        case "issue.updated":
+            if let i: IssueDTO = c.o("issue") { self = .issueUpdated(conversationId: conv, eventSeq: seq, issue: i); return }
+        case "pins.changed":
+            self = .pinsChanged(conversationId: conv, eventSeq: seq, messageIds: c.v("messageIds", [])); return
+        case "calendar.updated":
+            if let e: CalendarEventDTO = c.o("event") { self = .calendarUpdated(conversationId: conv, eventSeq: seq, event: e); return }
         default: break
         }
         self = .other(type: type, conversationId: conv, eventSeq: seq)
@@ -380,6 +418,9 @@ enum ConversationEvent: Decodable, Equatable, Sendable {
 enum AccountEvent: Decodable, Equatable, Sendable {
     case scopeChanged(reason: String)
     case readUpdated(conversationId: String, seq: Int)
+    case reminderDue(ReminderDTO)
+    case prefsUpdated(conversationId: String?, workspaceId: String?)
+    case whatsappUpdated(accountId: String)
     case other(type: String)
 
     init(from decoder: Decoder) throws {
@@ -388,6 +429,10 @@ enum AccountEvent: Decodable, Equatable, Sendable {
         switch type {
         case "scope.changed": self = .scopeChanged(reason: c.v("reason", ""))
         case "read.updated": self = .readUpdated(conversationId: c.v("conversationId", ""), seq: c.int("seq"))
+        case "reminder.due":
+            if let r: ReminderDTO = c.o("reminder") { self = .reminderDue(r) } else { self = .other(type: type) }
+        case "prefs.updated": self = .prefsUpdated(conversationId: c.o("conversationId"), workspaceId: c.o("workspaceId"))
+        case "whatsapp.updated": self = .whatsappUpdated(accountId: c.v("accountId", ""))
         default: self = .other(type: type)
         }
     }

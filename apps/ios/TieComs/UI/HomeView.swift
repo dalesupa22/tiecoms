@@ -30,9 +30,18 @@ struct HomeView: View {
                             ForEach(s.conversations) { c in
                                 NavigationLink(value: Route.conversation(c.id)) { ConversationRow(d: d, c: c) }
                                     .accessibilityIdentifier("conv.row.\(c.id)")
+                                    .contextMenu { ConversationMenuItems(conv: c) }
                             }
                         } header: {
                             SectionHeader(d: d, section: s)
+                                .contextMenu {
+                                    if let ws = s.workspace {
+                                        Button {
+                                            Task { do { try await store.setWorkspacePinned(ws.id, ws.pinnedAt == nil) } catch { store.show(L10n.errorText(error)) } }
+                                        } label: { Label(ws.pinnedAt == nil ? L("menu.pinTop") : L("menu.unpinTop"), systemImage: "pin") }
+                                        Button { store.workspaceFilter = ws.id } label: { Label(L("menu.openSpace"), systemImage: "square.stack.3d.up") }
+                                    }
+                                }
                         }
                     }
                 }
@@ -57,9 +66,17 @@ struct HomeView: View {
         .searchable(text: $query, prompt: L("inbox.search"))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink(value: Route.settings) { Image(systemName: "gearshape") }
-                    .accessibilityLabel(L("settings.title"))
-                    .accessibilityIdentifier("home.settings")
+                Menu {
+                    Button { store.homePath.append(.reminders) } label: {
+                        Label(store.reminders.isEmpty ? L("rem.title") : "\(L("rem.title")) (\(store.reminders.count))", systemImage: "alarm")
+                    }
+                    Button { store.homePath.append(.trazo) } label: { Label(L("nav.trazo"), systemImage: "arrow.triangle.branch") }
+                    Button { store.homePath.append(.whatsapp) } label: { Label(L("nav.whatsapp"), systemImage: "message") }
+                } label: {
+                    Image(systemName: store.reminders.contains { (ISODate.parse($0.remindAt) ?? .distantFuture) <= Date() } ? "bell.badge" : "ellipsis.circle")
+                }
+                .accessibilityLabel(L("menu.open"))
+                .accessibilityIdentifier("home.more")
             }
         }
     }
@@ -112,6 +129,10 @@ struct ConversationRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(title).font(.body.weight(c.unread > 0 ? .semibold : .regular)).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                    if c.isMuted { Image(systemName: "bell.slash.fill").font(.caption2).foregroundStyle(Theme.textSecondary).accessibilityHidden(true) }
+                    if c.openIssues > 0 {
+                        Text("◆ \(c.openIssues)").font(.caption2.weight(.semibold)).foregroundStyle(Theme.accentText).accessibilityHidden(true)
+                    }
                     Spacer(minLength: 6)
                     Text(time).font(.caption).foregroundStyle(c.unread > 0 ? Theme.accentText : Theme.textSecondary)
                 }
@@ -122,7 +143,7 @@ struct ConversationRow: View {
                         Text(c.unread > 99 ? "99+" : "\(c.unread)")
                             .font(.caption.weight(.bold)).foregroundStyle(.white)
                             .padding(.horizontal, 7).padding(.vertical, 2)
-                            .background(Capsule().fill(Theme.bubbleMine))
+                            .background(Capsule().fill(c.isMuted ? Theme.textSecondary : Theme.bubbleMine))
                             .accessibilityHidden(true)
                     }
                 }
@@ -149,6 +170,8 @@ struct ConversationRow: View {
     private func accessibilityText(title: String, preview: String, time: String) -> String {
         var parts = [title]
         if c.kind == .internal { parts.append(L("kind.internalShort")) }
+        if c.isMuted { parts.append(L("side.muted")) }
+        if c.pinnedAt != nil { parts.append(L("side.pinned")) }
         if c.unread > 0 { parts.append(L("a11y.unread", ["n": c.unread])) }
         parts.append(preview)
         if !time.isEmpty { parts.append(time) }

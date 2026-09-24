@@ -11,8 +11,8 @@ settings:
     DEVELOPMENT_TEAM: B76US7H3L3
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "1.1.0"
+    CURRENT_PROJECT_VERSION: "2"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     LOCALIZATION_PREFERS_STRING_CATALOGS: NO
@@ -24,6 +24,9 @@ targets:
       - path: TieComs
         excludes:
           - "Resources/Info.plist"
+    dependencies:
+      - target: TieComsShare
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tiecoms.app
@@ -60,6 +63,49 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         UIBackgroundModes: []
+  TieComsShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: TieComsShare
+        excludes: ["Info.plist"]
+      - TieComs/Core/Models.swift
+      - TieComs/Core/ModelsV2.swift
+      - TieComs/Core/APIClient.swift
+      - TieComs/Core/Storage.swift
+      - TieComs/Core/SharedText.swift
+      - TieComs/Core/L10n.swift
+      - TieComs/Core/Naming.swift
+      - TieComs/Core/SocketIOProtocol.swift
+      - path: TieComs/Resources
+        includes: ["*.lproj/Localizable.strings"]
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tiecoms.app.share
+        PRODUCT_NAME: TieComsShare
+        INFOPLIST_FILE: TieComsShare/Info.plist
+        CODE_SIGN_ENTITLEMENTS: TieComsShare/TieComsShare.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SHARE_EXTENSION
+    info:
+      path: TieComsShare/Info.plist
+      properties:
+        CFBundleDisplayName: TieComs
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, es]
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
   TieComsTests:
     type: bundle.unit-test
     platform: iOS

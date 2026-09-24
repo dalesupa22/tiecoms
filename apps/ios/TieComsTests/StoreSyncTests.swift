@@ -127,10 +127,10 @@ final class StoreSyncTests: XCTestCase {
     func testDeepLinkWithoutAccessShowsAlert() {
         store.navigate(to: .conversation("no-es-mia"))
         XCTAssertNotNil(store.alert)
-        XCTAssertTrue(store.path.isEmpty)
+        XCTAssertTrue(store.homePath.isEmpty)
         store.alert = nil
         store.navigate(to: .conversation("c1"))
-        XCTAssertEqual(store.path, [.conversation("c1")])
+        XCTAssertEqual(store.homePath, [.conversation("c1")])
         store.navigate(to: .workspace("w1"))
         XCTAssertEqual(store.workspaceFilter, "w1")
     }

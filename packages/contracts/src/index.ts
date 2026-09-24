@@ -68,6 +68,11 @@ export const SsoExchangeInput = z.preprocess(
 );
 export type SsoExchangeInput = z.infer<typeof SsoExchangeInput>;
 
+export const UpdateProfileInput = z.object({
+  name: personName.optional(),
+  title: z.string().trim().max(120).nullable().optional(),
+  area: z.string().trim().max(120).nullable().optional(),
+});
 export const AddDomainInput = z.object({ domain: z.string().trim().min(3).max(253) });
 
 export interface AuthResult {
@@ -82,7 +87,8 @@ export interface AuthResult {
 // ---------- Entidades ----------
 export type OrgRole = 'owner' | 'admin' | 'member';
 export type WorkspaceRole = 'lead' | 'admin' | 'member' | 'guest';
-export type ConversationKind = 'group' | 'internal' | 'direct';
+/** multi = chat grupal entre personas (de una o varias empresas) que no vive en un espacio. */
+export type ConversationKind = 'group' | 'internal' | 'direct' | 'multi';
 export type ConversationLevel = 'directivo' | 'operativo' | null;
 
 export interface UserDTO {
@@ -93,6 +99,8 @@ export interface UserDTO {
   title?: string | null;
   area?: string | null;
   primaryOrgId: string | null;
+  /** Ruta de la foto (/api/v1/avatars/…) o null. */
+  avatarUrl?: string | null;
 }
 
 export interface OrganizationDTO {
@@ -127,6 +135,7 @@ export interface PersonDTO {
   area: string | null;
   guest: boolean;
   guestUntil: string | null;
+  avatarUrl?: string | null;
 }
 
 export interface WorkspaceDTO {
@@ -175,6 +184,8 @@ export interface ConversationDTO {
 }
 
 export type ForwardSource = 'whatsapp' | 'slack' | 'email' | 'teams' | 'tiecoms' | 'other';
+/** imageUrl es una ruta del API (/api/v1/previews/…): la miniatura ya está en TieComs. */
+export interface LinkPreviewDTO { url: string; title: string | null; description: string | null; siteName: string | null; imageUrl: string | null }
 export interface ForwardedInfo { source: ForwardSource; author?: string | null; sentAt?: string | null; fromConversationId?: string | null }
 
 export interface ReminderDTO {
@@ -252,6 +263,8 @@ export interface MessageDTO {
   mergedFrom: string | null;
   /** Mensaje traído desde WhatsApp, Slack, correo u otra conversación. */
   forwarded: ForwardedInfo | null;
+  /** Vista previa del primer enlace; llega después con message.updated. Clientes viejos pueden no traerla. */
+  linkPreview?: LinkPreviewDTO | null;
   createdAt: string;
   editedAt: string | null;
   deletedAt: string | null;
@@ -289,6 +302,8 @@ export const AddMembersInput = z.object({
 });
 
 export const CreateDirectInput = z.object({ userId: z.uuid() });
+/** Nuevo chat: con una persona abre (o reutiliza) el directo; con varias crea un chat grupal. */
+export const CreateChatInput = z.object({ userIds: z.array(z.uuid()).min(1).max(50), name: z.string().trim().min(2).max(120).optional() });
 
 export const CreateInvitationInput = z.object({
   email: email.optional(),
@@ -298,12 +313,15 @@ export const CreateInvitationInput = z.object({
   /** Para terceros (guest): fecha de salida del espacio. */
   accessUntil: z.iso.datetime().optional(),
   history: z.enum(['now', 'all']).default('now'),
+  /** Idioma del correo de invitación (si hay `email`). */
+  lang: z.enum(['es', 'en']).default('es'),
 });
 
 export const CreateOrgInvitationInput = z.object({
   email: email.optional(),
   role: z.enum(['member', 'admin']).default('member'),
   expiresInDays: z.number().int().min(1).max(60).default(14),
+  lang: z.enum(['es', 'en']).default('es'),
 });
 
 export interface OrgInvitationPreviewDTO {
@@ -339,6 +357,24 @@ export const DeriveInput = z.object({
 export const ReturnResultInput = z.object({ summary: z.string().trim().min(2).max(4000) });
 
 export const AcceptInvitationInput = z.object({ orgId: z.uuid().optional() });
+
+/** Invitación con correo que aún no se acepta (lista de pendientes para reenviar o revocar). */
+export interface PendingInvitationDTO {
+  id: string;
+  email: string;
+  role: string;
+  invitedById: string;
+  invitedByName: string;
+  createdAt: string;
+  expiresAt: string;
+  expired: boolean;
+  /** Resultado del último envío: null si nunca se intentó. */
+  emailStatus: 'sent' | 'failed' | 'skipped' | null;
+  emailSentAt: string | null;
+  sendCount: number;
+  /** Quien invitó o quien administra puede reenviar y revocar. */
+  canManage: boolean;
+}
 
 export interface InvitationPreviewDTO {
   workspaceName: string;
@@ -394,6 +430,17 @@ export const EventsQuery = z.object({
   after: z.coerce.number().int().min(0),
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
+
+// ---------- Archivos (árbol de carpetas) ----------
+export interface DriveFolderDTO { id: string; parentId: string | null; name: string; createdBy: string; createdAt: string }
+export interface DriveFileDTO { id: string; folderId: string | null; name: string; contentType: string; size: number; createdBy: string; createdAt: string; updatedAt: string }
+/** Un árbol completo: «Mis archivos» (workspaceId null) o el de un espacio. */
+export interface DriveTreeDTO { workspaceId: string | null; folders: DriveFolderDTO[]; files: DriveFileDTO[]; canManageAll: boolean }
+const driveName = z.string().trim().min(1).max(120);
+export const CreateFolderInput = z.object({ workspaceId: z.uuid().nullable().optional(), parentId: z.uuid().nullable().optional(), name: driveName });
+export const UpdateFolderInput = z.object({ name: driveName.optional(), parentId: z.uuid().nullable().optional() });
+export const UpdateFileInput = z.object({ name: driveName.optional(), folderId: z.uuid().nullable().optional() });
+export const UploadFileQuery = z.object({ workspaceId: z.uuid().optional(), folderId: z.uuid().optional(), name: z.string().min(1).max(400) });
 
 // ---------- Conectar WhatsApp ----------
 export const WaKind = z.enum(['personal', 'business']);
@@ -482,7 +529,8 @@ export type AccountEvent =
   | { type: 'read.updated'; conversationId: string; seq: number }
   | { type: 'reminder.due'; reminder: ReminderDTO }
   | { type: 'prefs.updated'; conversationId?: string; workspaceId?: string }
-  | { type: 'whatsapp.updated'; accountId: string };
+  | { type: 'whatsapp.updated'; accountId: string }
+  | { type: 'drive.updated'; workspaceId: string | null };
 
 export interface EventsPage {
   events: ConversationEvent[];

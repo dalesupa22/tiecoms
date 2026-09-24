@@ -10,7 +10,9 @@
   <link rel="alternate" hreflang="en" href="https://www.tiecoms.com/en/">
   <link rel="alternate" hreflang="x-default" href="https://www.tiecoms.com/">
   <link rel="stylesheet" href="/landing.css">
+  <link rel="stylesheet" href="/relay.css">
   <script src="/landing.js" defer></script>
+  <script src="/relay.js" defer></script>
   <title>TieComs · La conversación que conecta todo</title>
 </head>
 <body>
@@ -21,6 +23,7 @@
     </a>
     <nav class="desktop-nav" aria-label="Navegación principal">
       <a href="#como-funciona">Cómo funciona</a>
+      <a href="#recorrido">Recorrido</a>
       <a href="#espacios">Espacios</a>
       <a href="#confianza">Confianza</a>
     </nav>
@@ -149,6 +152,33 @@
         <div class="story-beat" data-story-beat="2"></div>
         <div class="story-beat" data-story-beat="3"></div>
         <div class="story-beat" data-story-beat="4"></div>
+      </div>
+    </section>
+
+    <section class="relay-section" id="recorrido" aria-labelledby="relay-title">
+      <div class="relay-intro">
+        <p class="eyebrow"><span class="eyebrow-dot eyebrow-dot-orange"></span> Un hilo, muchas manos</p>
+        <h2 id="relay-title">El trabajo cruza<br><em>fronteras.</em></h2>
+        <p class="section-lede">A veces entre empresas. A veces entre sedes de la misma empresa. Siempre con bots que ayudan y personas que deciden.</p>
+      </div>
+      <div class="relay-tabs" role="tablist" aria-label="Escenarios">
+        <button type="button" role="tab" class="is-active" aria-selected="true" data-relay-tab="companies">Entre empresas</button>
+        <button type="button" role="tab" aria-selected="false" data-relay-tab="branches">Entre sedes</button>
+      </div>
+      <div class="relay-player" data-relay>
+        <div class="relay-caption" aria-live="polite">
+          <span class="relay-step" data-relay-step></span>
+          <h3 data-relay-title></h3>
+          <p class="relay-quote" data-relay-quote></p>
+        </div>
+        <div class="relay-wrap" data-relay-wrap><div class="relay-stage" data-relay-stage></div></div>
+        <div class="relay-board" data-relay-board></div>
+        <div class="relay-controls">
+          <button type="button" data-relay-prev aria-label="Paso anterior">‹</button>
+          <button type="button" data-relay-play aria-label="Pausar">❚❚</button>
+          <div class="relay-dots" data-relay-dots></div>
+          <button type="button" data-relay-next aria-label="Paso siguiente">›</button>
+        </div>
       </div>
     </section>
 

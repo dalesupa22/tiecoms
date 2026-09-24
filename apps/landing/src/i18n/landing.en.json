@@ -24,8 +24,8 @@
   "aria-label=\"Main navigation\""
  ],
  [
-  "<a href=\"#como-funciona\">Cómo funciona</a>\n      <a href=\"#espacios\">Espacios</a>\n      <a href=\"#confianza\">Confianza</a>",
-  "<a href=\"#como-funciona\">How it works</a>\n      <a href=\"#espacios\">Spaces</a>\n      <a href=\"#confianza\">Trust</a>"
+  "<a href=\"#como-funciona\">Cómo funciona</a>\n      <a href=\"#recorrido\">Recorrido</a>\n      <a href=\"#espacios\">Espacios</a>\n      <a href=\"#confianza\">Confianza</a>",
+  "<a href=\"#como-funciona\">How it works</a>\n      <a href=\"#recorrido\">Journey</a>\n      <a href=\"#espacios\">Spaces</a>\n      <a href=\"#confianza\">Trust</a>"
  ],
  [
   ">Entrar <span aria-hidden=\"true\">→</span></a>",
@@ -306,5 +306,41 @@
  [
   "<a class=\"play-link\" href=\"https://app.tiecoms.com/signup\"><span class=\"play-icon\" aria-hidden=\"true\">↗</span> Crear cuenta gratis</a>",
   "<a class=\"play-link\" href=\"https://app.tiecoms.com/signup\"><span class=\"play-icon\" aria-hidden=\"true\">↗</span> Create a free account</a>"
+ ],
+ [
+  "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> Un hilo, muchas manos</p>",
+  "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> One thread, many hands</p>"
+ ],
+ [
+  "<h2 id=\"relay-title\">El trabajo cruza<br><em>fronteras.</em></h2>",
+  "<h2 id=\"relay-title\">Work crosses<br><em>boundaries.</em></h2>"
+ ],
+ [
+  "<p class=\"section-lede\">A veces entre empresas. A veces entre sedes de la misma empresa. Siempre con bots que ayudan y personas que deciden.</p>",
+  "<p class=\"section-lede\">Sometimes between companies. Sometimes between branches of the same company. Always with bots that help and people who decide.</p>"
+ ],
+ [
+  "aria-label=\"Escenarios\"",
+  "aria-label=\"Scenarios\""
+ ],
+ [
+  "data-relay-tab=\"companies\">Entre empresas</button>",
+  "data-relay-tab=\"companies\">Between companies</button>"
+ ],
+ [
+  "data-relay-tab=\"branches\">Entre sedes</button>",
+  "data-relay-tab=\"branches\">Between branches</button>"
+ ],
+ [
+  "<button type=\"button\" data-relay-prev aria-label=\"Paso anterior\">",
+  "<button type=\"button\" data-relay-prev aria-label=\"Previous step\">"
+ ],
+ [
+  "<button type=\"button\" data-relay-play aria-label=\"Pausar\">",
+  "<button type=\"button\" data-relay-play aria-label=\"Pause\">"
+ ],
+ [
+  "<button type=\"button\" data-relay-next aria-label=\"Paso siguiente\">",
+  "<button type=\"button\" data-relay-next aria-label=\"Next step\">"
  ]
 ]

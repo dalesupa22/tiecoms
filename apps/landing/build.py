@@ -14,7 +14,7 @@ dist = root / 'dist'
 shutil.rmtree(dist, ignore_errors=True)
 (dist / 'en').mkdir(parents=True)
 shutil.copytree(src / 'assets', dist / 'assets')
-for name in ['landing.css', 'landing.js']:
+for name in ['landing.css', 'landing.js', 'relay.css', 'relay.js']:
     shutil.copy2(src / name, dist / name)
 
 landing = (src / 'landing.html').read_text()

@@ -1,0 +1,98 @@
+/* «Un hilo, muchas manos»: recorrido animado entre empresas, sedes y bots. */
+.relay-section{padding:120px clamp(22px,7vw,110px) 130px;border-top:1px solid #ded7ca;background:var(--paper)}
+.relay-intro{display:grid;grid-template-columns:1.1fr .9fr;column-gap:60px;align-items:end;margin-bottom:34px}
+.relay-intro .eyebrow{grid-column:1/-1}
+.relay-intro h2{font-size:clamp(46px,5vw,74px);line-height:.99;letter-spacing:-.07em;margin:0;font-weight:600}
+.relay-intro h2 em{font-family:var(--display);font-weight:600;letter-spacing:-.06em;color:var(--orange-dark)}
+.relay-intro .section-lede{margin:0 0 6px;justify-self:end}
+.relay-tabs{display:inline-flex;gap:4px;padding:4px;border-radius:999px;background:#ebe6db;border:1px solid #ddd5c7;margin-bottom:22px}
+.relay-tabs button{border:0;background:transparent;border-radius:999px;padding:9px 18px;font-size:14px;font-weight:600;color:#6d665b;transition:background .2s,color .2s}
+.relay-tabs button.is-active{background:var(--ink);color:#fff}
+
+.relay-player{border:1px solid #dcd4c6;border-radius:28px;background:#f3efe6;padding:26px clamp(14px,2.4vw,30px) 20px;box-shadow:0 30px 80px -50px #3b2a1466}
+.relay-caption{text-align:center;margin-bottom:14px;min-height:74px}
+.relay-step{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:#8a8275}
+.relay-caption h3{margin:6px 0 0;font-size:clamp(22px,2.6vw,34px);letter-spacing:-.04em;font-weight:600;line-height:1.15}
+.relay-caption h3 em{font-style:normal;color:var(--orange-dark)}
+.relay-quote{display:none;margin:8px auto 0;max-width:520px;font-size:14px;color:#5f584e}
+.relay-quote b{color:var(--ink)}
+
+.relay-wrap{position:relative;width:100%;overflow:hidden}
+.relay-stage{position:absolute;left:0;top:0;width:1000px;height:540px;transform-origin:0 0}
+.relay-group{position:absolute;border-radius:18px;border:1.5px solid;padding:14px 16px;transition:opacity .5s,filter .5s}
+.relay-group header{display:flex;align-items:flex-start;gap:10px}
+.relay-mark{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-size:12px;font-weight:700;flex:none}
+.relay-gname{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.2}
+.relay-gname b{font-size:15px}
+.relay-gname small{font-size:11px;color:#7b7468}
+.relay-tag{font-family:var(--mono);font-size:9px;letter-spacing:.1em;border:1px solid;border-radius:6px;padding:2px 6px;background:#ffffffaa}
+.relay-group.is-idle{filter:grayscale(1);opacity:.55}
+.relay-node.is-idle{filter:grayscale(1);opacity:.45}
+.tone-blue.relay-group{background:#eaf0fd;border-color:#c9d6f5}.tone-blue .relay-mark{background:#3f6fd8;color:#fff}.tone-blue .relay-tag{color:#3f6fd8;border-color:#b9cbf3}
+.tone-green.relay-group{background:#e8f4e7;border-color:#c5e2c3}.tone-green .relay-mark{background:#3c8a55;color:#fff}.tone-green .relay-tag{color:#3c8a55;border-color:#b8dcb6}
+.tone-lilac.relay-group{background:#f1ebfc;border-color:#dccff6}.tone-lilac .relay-mark{background:#7a5bc8;color:#fff}.tone-lilac .relay-tag{color:#7a5bc8;border-color:#d4c5f2}
+
+.relay-rope{position:absolute;inset:0;width:1000px;height:540px;pointer-events:none;z-index:2}
+.relay-rope [data-mask]{transition:stroke-dashoffset 1.25s cubic-bezier(.65,.05,.25,1)}
+
+.relay-node{position:absolute;z-index:3;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:6px;transition:opacity .4s,transform .4s}
+.relay-avatar{width:56px;height:56px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:17px;color:#fff;position:relative;box-shadow:0 0 0 4px #f3efe6;transition:box-shadow .4s}
+.relay-node.is-square .relay-avatar{border-radius:16px}
+.relay-label{position:absolute;top:66px;white-space:nowrap;font-size:11.5px;color:#6d665b}
+.relay-label b{color:var(--ink);font-weight:600}
+.tone-blue .relay-avatar{background:#4a79de}.tone-navy .relay-avatar{background:#2d3f8f}.tone-green .relay-avatar{background:#3c8a55}
+.tone-lilac .relay-avatar{background:#7a5bc8}.tone-bot .relay-avatar{background:#151412;color:#ff9a4d;font-size:20px}
+.relay-node.is-reached .relay-avatar{box-shadow:0 0 0 4px #f3efe6,0 0 0 7px #ff7919,0 0 0 9px #3b2414}
+.relay-node.is-current .relay-avatar{animation:relayPulse 1.6s ease-out infinite}
+.relay-node.is-late:not(.is-reached){opacity:0;transform:translate(-50%,-40%)}
+@keyframes relayPulse{0%{box-shadow:0 0 0 4px #f3efe6,0 0 0 7px #ff7919,0 0 0 9px #3b2414,0 0 0 9px #ff791955}100%{box-shadow:0 0 0 4px #f3efe6,0 0 0 7px #ff7919,0 0 0 9px #3b2414,0 0 0 26px #ff791900}}
+
+.relay-bubble{position:absolute;z-index:4;width:240px;padding:10px 13px;border-radius:14px;background:#fff;border:1px solid #e0d8ca;font-size:13px;line-height:1.35;box-shadow:0 14px 34px -18px #3b2a1466;opacity:0}
+.relay-bubble small{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;color:#8a8275;margin-bottom:3px;text-transform:uppercase}
+.relay-bubble.is-bot{background:#151412;color:#fff;border-color:#151412}
+.relay-bubble.is-bot small{color:#ff9a4d}
+.relay-bubble.is-in{animation:relayIn .45s .55s ease-out forwards}
+@keyframes relayIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+.relay-board{margin-top:16px;border:1px solid #ded6c8;border-radius:18px;background:#fbf9f4;padding:14px 16px}
+.relay-board-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px;font-size:13px}
+.relay-board-head span{color:#7b7468}
+.relay-progress{flex:1;min-width:80px;height:6px;border-radius:9px;background:#ece6da;overflow:hidden}
+.relay-progress i{display:block;height:100%;background:var(--orange);border-radius:9px;transition:width .6s}
+.relay-count{font-family:var(--mono);font-size:11px}
+.relay-tasks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.relay-task{border:1px solid #e3dccf;border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:7px;background:#fff;transition:border-color .4s,box-shadow .4s}
+.relay-task.is-changed{border-color:#ff7919;box-shadow:0 0 0 3px #ff791922}
+.relay-task b{font-size:13px}
+.relay-owner{display:flex;align-items:center;gap:6px;font-size:12px;color:#6d665b}
+.relay-owner i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:9px;font-weight:700;color:#fff;background:#4a79de;flex:none}
+.relay-owner i.tone-green{background:#3c8a55}.relay-owner i.tone-lilac{background:#7a5bc8}.relay-owner i.tone-navy{background:#2d3f8f}.relay-owner i.tone-bot{background:#151412;color:#ff9a4d}
+.relay-owner i.is-empty{background:transparent;border:1.5px dashed #c9c1b3}
+.relay-status{align-self:flex-start;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;padding:3px 7px;border-radius:6px;background:#f0ece4;color:#8a8275}
+.relay-status.tone-run{background:#fff0e3;color:#c4520a}.relay-status.tone-ok{background:#e6f4e4;color:#2f7a45}
+.relay-status.tone-draft{background:#f1ebfc;color:#6b4bb8}.relay-status.tone-prog{background:#e8effd;color:#3a63c4}
+
+.relay-controls{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:16px}
+.relay-controls button{border:1px solid #d8d0c1;background:#fff;border-radius:999px;width:38px;height:38px;display:grid;place-items:center;font-size:13px;color:var(--ink)}
+.relay-dots{display:flex;gap:6px}
+.relay-dots .relay-dot{width:9px;height:9px;padding:0;border-radius:50%;border:0;background:#d6cebf}
+.relay-dots .relay-dot.is-active{background:var(--orange);width:24px;border-radius:9px}
+
+@media (max-width:900px){
+  .relay-intro{grid-template-columns:1fr}
+  .relay-intro .section-lede{justify-self:start;margin-top:14px}
+  .relay-tasks{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:640px){
+  .relay-section{padding:90px 16px 100px}
+  .relay-intro h2{font-size:clamp(40px,12vw,58px)}
+  .relay-player{padding:18px 10px 14px;border-radius:20px}
+  .relay-quote{display:block}
+  .relay-bubble{display:none}
+  .relay-tabs{display:flex;width:100%}
+  .relay-tabs button{flex:1;padding:9px 8px}
+}
+@media (prefers-reduced-motion:reduce){
+  .relay-rope [data-mask],.relay-progress i{transition:none}
+  .relay-node.is-current .relay-avatar,.relay-bubble.is-in{animation:none;opacity:1}
+}

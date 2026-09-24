@@ -61,6 +61,8 @@ final class AppStore {
     var pins: [String: [String]] = [:]
     var reminders: [ReminderDTO] = []
     var events: [String: CalendarEventDTO] = [:]
+    /// Bloqueos sincronizados antes de mostrar el contenido de la sesión.
+    var blockedUserIds: Set<String> = []
     /// Sube cuando WhatsApp trae novedades: la pantalla vuelve a pedir la lista.
     var waRevision = 0
     /// Sube cuando cambia algún árbol de archivos visible (drive.updated).
@@ -230,6 +232,7 @@ final class AppStore {
         pending = []
         typing = [:]
         issues = [:]; pins = [:]; reminders = []; events = [:]
+        blockedUserIds = []
         homePath = []; issuesPath = []; agendaPath = []; settingsPath = []
         tab = .home
         workspaceFilter = nil
@@ -239,6 +242,7 @@ final class AppStore {
     // MARK: - Snapshot
 
     func loadBootstrap() async throws {
+        try await loadBlockedUsers()
         var d: BootstrapDTO = try await api.request("/bootstrap")
         d.conversations.sort { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
         data = d
@@ -387,7 +391,7 @@ final class AppStore {
 
     /// Sonido/aviso por un mensaje recibido en vivo (nunca en el catch-up ni por mensajes de sistema).
     private func announce(_ msg: MessageDTO) {
-        guard msg.authorId != me?.id, !msg.isSystem, let d = data else { return }
+        guard msg.authorId != me?.id, !blockedUserIds.contains(msg.authorId), !msg.isSystem, let d = data else { return }
         if msg.conversationId == openConversationId && appActive {
             feedback?.playReceive()
         } else if let c = meta(msg.conversationId), !c.isMuted {

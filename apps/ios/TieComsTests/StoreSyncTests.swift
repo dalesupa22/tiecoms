@@ -47,6 +47,16 @@ final class StoreSyncTests: XCTestCase {
         XCTAssertTrue(spy.notifications.isEmpty)
     }
 
+    func testBlockedAuthorsDoNotPlaySoundsOrNotifyButKeepEventCursor() {
+        store.blockedUserIds = ["bob"]
+        store.onConversationEvent(created("c1", 6, seq: 3), live: true)
+        store.openConversationId = nil
+        store.onConversationEvent(created("c1", 7, seq: 4), live: true)
+        XCTAssertEqual(spy.receives, 0)
+        XCTAssertTrue(spy.notifications.isEmpty)
+        XCTAssertEqual(store.conversations["c1"]?.lastEventSeq, 7)
+    }
+
     func testDuplicateEventIsDiscarded() {
         store.onConversationEvent(created("c1", 6, seq: 3), live: true)
         store.onConversationEvent(created("c1", 6, seq: 3), live: true)

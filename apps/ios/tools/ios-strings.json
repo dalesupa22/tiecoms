@@ -630,5 +630,97 @@
  "fwd.limit": [
   "Hasta {n} chats a la vez",
   "Up to {n} chats at once"
+ ],
+ "safety.title": [
+  "Seguridad y ayuda",
+  "Safety and help"
+ ],
+ "safety.reportMessage": [
+  "Reportar mensaje",
+  "Report message"
+ ],
+ "safety.reportUser": [
+  "Reportar persona",
+  "Report person"
+ ],
+ "safety.reportTitle": [
+  "Enviar reporte",
+  "Send a report"
+ ],
+ "safety.reportHint": [
+  "Describe el contenido o la conducta que incumple las normas. TieComs revisará el reporte.",
+  "Describe content or behavior that violates the rules. TieComs will review your report."
+ ],
+ "safety.reason": [
+  "Motivo (5 a 2000 caracteres)",
+  "Reason (5–2000 characters)"
+ ],
+ "safety.send": [
+  "Enviar reporte",
+  "Send report"
+ ],
+ "safety.sent": [
+  "Reporte enviado. Gracias por ayudarnos a mantener TieComs seguro.",
+  "Report sent. Thank you for helping keep TieComs safe."
+ ],
+ "safety.block": [
+  "Bloquear persona",
+  "Block person"
+ ],
+ "safety.blockConfirm": [
+  "¿Bloquear a esta persona?",
+  "Block this person?"
+ ],
+ "safety.blockHint": [
+  "No podrán enviarse mensajes directos. Sus mensajes se ocultarán en este dispositivo; los demás participantes podrán seguir usando los grupos. Puedes desbloquearla en Ajustes.",
+  "You will no longer be able to exchange direct messages. Their messages will be hidden on this device; other participants can still use group chats. You can unblock them in Settings."
+ ],
+ "safety.blocked": [
+  "Persona bloqueada",
+  "Person blocked"
+ ],
+ "safety.unblock": [
+  "Desbloquear",
+  "Unblock"
+ ],
+ "safety.blockedUsers": [
+  "Personas bloqueadas",
+  "Blocked people"
+ ],
+ "safety.none": [
+  "No has bloqueado a nadie.",
+  "You have not blocked anyone."
+ ],
+ "safety.directBlocked": [
+  "Desbloquea a esta persona en Ajustes para enviar mensajes.",
+  "Unblock this person in Settings to send messages."
+ ],
+ "safety.support": [
+  "Contactar a soporte",
+  "Contact support"
+ ],
+ "safety.terms": [
+  "Términos y normas de uso",
+  "Terms and community rules"
+ ],
+ "err.blocked_user": [
+  "No se pueden enviar mensajes por un bloqueo entre estas cuentas.",
+  "Messages cannot be sent because one account has blocked the other."
+ ],
+ "safety.previewHidden": [
+  "Vista previa oculta por bloqueo",
+  "Preview hidden because of a blocked person"
+ ],
+ "safety.acceptTerms": [
+  "Acepto los términos y las normas de uso",
+  "I agree to the terms and community rules"
+ ],
+ "safety.privacy": [
+  "Política de privacidad",
+  "Privacy policy"
+ ],
+ "safety.rulesSummary": [
+  "No se permite contenido abusivo, discriminatorio, sexual, violento o ilegal. Puedes reportar mensajes y bloquear personas.",
+  "Abusive, discriminatory, sexual, violent or illegal content is not allowed. You can report messages and block people."
  ]
 }

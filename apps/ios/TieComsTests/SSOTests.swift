@@ -126,6 +126,7 @@ final class SSOTests: XCTestCase {
     func testCompleteSSOLeavesStoreReady() async throws {
         MockURLProtocol.routes["/api/v1/auth/sso/exchange"] = (200, authJSON)
         MockURLProtocol.routes["/api/v1/bootstrap"] = (200, bootstrapJSON)
+        MockURLProtocol.routes["/api/v1/blocks"] = (200, #"{"userIds":[]}"#)
         let store = AppStore(baseURL: base, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: nil,
                              session: MockURLProtocol.session())
         try await store.completeSSO(code: "c", verifier: "v")

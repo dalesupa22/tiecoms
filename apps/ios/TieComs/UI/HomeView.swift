@@ -125,12 +125,13 @@ private struct SectionHeader: View {
 }
 
 struct ConversationRow: View {
+    @Environment(AppStore.self) private var store
     var d: BootstrapDTO
     var c: ConversationDTO
 
     var body: some View {
         let title = Naming.title(d, c)
-        let preview = L10n.preview(c.lastMessagePreview) ?? L("conv.noMessages")
+        let preview = c.memberIds.contains(where: { store.blockedUserIds.contains($0) }) ? L("safety.previewHidden") : (L10n.preview(c.lastMessagePreview) ?? L("conv.noMessages"))
         let time = L10n.timeLabel(c.lastMessageAt)
         HStack(spacing: 12) {
             icon

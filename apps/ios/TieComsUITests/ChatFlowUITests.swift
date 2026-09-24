@@ -41,9 +41,16 @@ final class ChatFlowUITests: XCTestCase {
 
     private func allowNotificationsIfAsked() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for label in ["Permitir", "Allow"] {
-            let b = springboard.alerts.buttons[label]
-            if b.waitForExistence(timeout: 2) { b.tap(); return }
+        // El primer login también puede ofrecer guardar la contraseña sintética.
+        for surface in [springboard, XCUIApplication()] {
+            for label in ["Not Now", "Ahora no"] {
+                let button = surface.buttons[label]
+                if button.waitForExistence(timeout: 1) { button.tap() }
+            }
+            for label in ["Permitir", "Allow"] {
+                let button = surface.alerts.buttons[label]
+                if button.waitForExistence(timeout: 1) { button.tap() }
+            }
         }
     }
 
@@ -322,4 +329,77 @@ final class ChatFlowUITests: XCTestCase {
         sleep(3)
         shot(app, "v3-14-vista-rapida")
     }
+    /// Capturas reales para la ficha: solo lee un fixture de demostración local.
+    func testStoreScreenshots() throws {
+        guard ProcessInfo.processInfo.environment["TC_STORE_SHOTS"] == "1" else { throw XCTSkip("Capturas de tienda desactivadas") }
+        let f = try fixture()
+        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"), "solo entorno de pruebas")
+        let lang = ProcessInfo.processInfo.environment["TC_SHOT_LANG"] ?? "es"
+        let app = XCUIApplication()
+        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-AppleLanguages", "(\(lang))", "-AppleLocale", lang == "es" ? "es_CO" : "en_US"]
+        app.launch()
+        let email = app.textFields["login.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 15))
+        email.tap(); email.typeText(f.a.email)
+        let password = app.secureTextFields["login.password"]
+        password.tap(); password.typeText(f.password)
+        app.buttons["login.submit"].tap()
+        allowNotificationsIfAsked()
+        let row = app.buttons["conv.row.\(f.conversationId)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        sleep(2)
+        shot(app, "01-inicio")
+        row.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["composer.field"].waitForExistence(timeout: 10))
+        sleep(2)
+        shot(app, "02-conversacion")
+        app.buttons["chat.header"].tap()
+        sleep(2)
+        shot(app, "03-equipo")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        // iPad puede mostrar las pestañas arriba; los botones conservan sus etiquetas.
+        let issues = app.buttons[lang == "es" ? "Asuntos" : "Issues"].firstMatch
+        if issues.exists { issues.tap(); sleep(2); shot(app, "04-asuntos") }
+        let agenda = app.buttons[lang == "es" ? "Agenda" : "Calendar"].firstMatch
+        if agenda.exists { agenda.tap(); sleep(2); shot(app, "05-agenda") }
+    }
+
+    func testReportBlockAndUnblock() throws {
+        guard ProcessInfo.processInfo.environment["TC_SAFETY_UI"] == "1" else { throw XCTSkip("Seguridad UI desactivada") }
+        let f = try fixture()
+        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-AppleLanguages", "(es)"]
+        app.launch()
+        let email = app.textFields["login.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 15))
+        email.tap(); email.typeText(f.a.email)
+        let password = app.secureTextFields["login.password"]
+        password.tap(); password.typeText(f.password)
+        app.buttons["login.submit"].tap()
+        allowNotificationsIfAsked()
+        let row = app.buttons["conv.row.\(f.conversationId)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15)); row.tap()
+        XCTAssertTrue(app.buttons["chat.header"].waitForExistence(timeout: 10)); app.buttons["chat.header"].tap()
+        let person = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", f.b.name)).firstMatch
+        XCTAssertTrue(person.waitForExistence(timeout: 5)); person.press(forDuration: 1)
+        app.buttons["Reportar persona"].tap()
+        let reason = app.descendants(matching: .any)["safety.reason"]
+        XCTAssertTrue(reason.waitForExistence(timeout: 5)); reason.tap(); reason.typeText("Demostración de revisión de seguridad")
+        app.buttons["safety.send"].tap()
+        XCTAssertTrue(person.waitForExistence(timeout: 10))
+        person.press(forDuration: 1)
+        app.buttons["Bloquear persona"].tap()
+        app.buttons["Bloquear persona"].tap()
+        sleep(2)
+        person.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["Desbloquear"].waitForExistence(timeout: 5))
+        app.buttons["Desbloquear"].tap()
+        app.buttons["Desbloquear"].tap()
+        sleep(2)
+        person.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["Bloquear persona"].waitForExistence(timeout: 5))
+    }
+
 }

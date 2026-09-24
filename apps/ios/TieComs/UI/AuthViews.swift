@@ -73,6 +73,7 @@ struct LoginView: View {
     @State private var busy = false
     @State private var showServer = false
     @State private var ssoBusy: SSOProvider?
+    @State private var acceptedSSOTerms = false
 
     var body: some View {
         @Bindable var store = store
@@ -81,6 +82,7 @@ struct LoginView: View {
                 HStack { Spacer(); logo; Spacer() }.padding(.top, 24)
                 Text(L("brand.tagline")).font(.body).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
+                LegalConsentView(accepted: $acceptedSSOTerms, identifier: "login.acceptTerms")
                 ForEach(SSOProvider.allCases) { provider in
                     Button { sso(provider) } label: {
                         HStack(spacing: 10) {
@@ -92,7 +94,7 @@ struct LoginView: View {
                         .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surface))
                         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.textSecondary.opacity(0.35)))
                     }
-                    .disabled(busy || ssoBusy != nil)
+                    .disabled(!acceptedSSOTerms || busy || ssoBusy != nil)
                     .accessibilityIdentifier("login.sso.\(provider.rawValue)")
                 }
                 HStack(spacing: 10) {
@@ -140,6 +142,7 @@ struct LoginView: View {
     }
 
     private func sso(_ provider: SSOProvider) {
+        guard acceptedSSOTerms else { return }
         ssoBusy = provider
         error = nil
         Task {
@@ -179,8 +182,10 @@ struct SignupView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var ssoBusy: SSOProvider?
+    @State private var acceptedTerms = false
 
     private func sso(_ provider: SSOProvider) {
+        guard acceptedTerms else { return }
         if !joining && orgName.trimmingCharacters(in: .whitespaces).isEmpty { error = L("auth.ssoNeedsCompany"); return }
         ssoBusy = provider
         error = nil
@@ -200,7 +205,7 @@ struct SignupView: View {
 
     private var joining: Bool { orgToken != nil }
     private var canSubmit: Bool {
-        !busy && name.trimmingCharacters(in: .whitespaces).count >= 2 && email.contains("@") && password.count >= 10
+        acceptedTerms && !busy && name.trimmingCharacters(in: .whitespaces).count >= 2 && email.contains("@") && password.count >= 10
             && (joining ? orgInvite?.valid != false : orgName.trimmingCharacters(in: .whitespaces).count >= 2)
     }
 
@@ -227,6 +232,7 @@ struct SignupView: View {
                 if !joining {
                     AuthField(label: L("auth.company"), text: $orgName, content: .organizationName, identifier: "signup.company")
                 }
+                LegalConsentView(accepted: $acceptedTerms, identifier: "signup.acceptTerms")
                 ForEach(SSOProvider.allCases) { provider in
                     Button { sso(provider) } label: {
                         HStack(spacing: 10) {
@@ -238,7 +244,7 @@ struct SignupView: View {
                         .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surface))
                         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.textSecondary.opacity(0.35)))
                     }
-                    .disabled(busy || ssoBusy != nil || (joining && orgInvite?.valid == false))
+                    .disabled(!acceptedTerms || busy || ssoBusy != nil || (joining && orgInvite?.valid == false))
                     .accessibilityIdentifier("signup.sso.\(provider.rawValue)")
                 }
                 Text(L("auth.orEmail")).font(.footnote).foregroundStyle(Theme.textSecondary).frame(maxWidth: .infinity)

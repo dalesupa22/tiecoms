@@ -118,6 +118,16 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(L10n.systemText(#"{"k":"clave.desconocida"}"#), #"{"k":"clave.desconocida"}"#)
     }
 
+    func testMeetingSystemTextFormatsStartDate() {
+        for key in ["event.created", "event.moved"] {
+            let body = "{\"k\":\"\(key)\",\"title\":\"Revisión\",\"startsAt\":\"2026-09-24T21:00:00.000Z\"}"
+            let text = L10n.systemText(body)
+            XCTAssertTrue(text.contains("Revisión"), text)
+            XCTAssertFalse(text.contains("{when}"), text)
+            XCTAssertTrue(text.contains(L10n.dateTime(ISODate.parse("2026-09-24T21:00:00.000Z")!)), text)
+        }
+    }
+
     func testDeepLinks() {
         XCTAssertEqual(DeepLink.parse(URL(string: "tiecoms://c/abc-123")!), .conversation("abc-123"))
         XCTAssertEqual(DeepLink.parse(URL(string: "https://app.tiecoms.com/c/abc-123")!), .conversation("abc-123"))

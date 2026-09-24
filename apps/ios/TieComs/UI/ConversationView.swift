@@ -19,7 +19,7 @@ private enum ChatItem: Identifiable {
 /// Hojas que se abren desde el menú de un mensaje o de la conversación.
 enum ChatSheet: Identifiable {
     case derive(MessageDTO), returnResult, newIssue(MessageDTO?), newEvent(MessageDTO?), forward(MessageDTO)
-    case reminder(MessageDTO?), pins, issuesHere
+    case reminder(MessageDTO?), pins, issuesHere, report(MessageDTO)
     var id: String {
         switch self {
         case .derive(let m): return "derive-\(m.id)"
@@ -28,6 +28,7 @@ enum ChatSheet: Identifiable {
         case .newEvent(let m): return "event-\(m?.id ?? "")"
         case .forward(let m): return "fwd-\(m.id)"
         case .reminder(let m): return "rem-\(m?.id ?? "")"
+        case .report(let m): return "report-\(m.id)"
         case .pins: return "pins"
         case .issuesHere: return "issues"
         }
@@ -49,6 +50,7 @@ struct ConversationView: View {
     @State private var editing: MessageDTO?
     @State private var sheet: ChatSheet?
     @State private var confirmDelete: MessageDTO?
+    @State private var blockUserId: String?
     @FocusState private var composerFocused: Bool
 
     var body: some View {
@@ -70,6 +72,12 @@ struct ConversationView: View {
             try? await store.loadEvents(from: Date().addingTimeInterval(-30 * 86400), to: Date().addingTimeInterval(90 * 86400), conversationId: conversationId)
         }
         .sheet(item: $sheet) { s in sheetView(s) }
+        .confirmationDialog(L("safety.blockConfirm"), isPresented: Binding(get: { blockUserId != nil }, set: { if !$0 { blockUserId = nil } }), titleVisibility: .visible) {
+            Button(L("safety.block"), role: .destructive) {
+                if let id = blockUserId { act(toast: L("safety.blocked")) { try await store.setUserBlocked(id, blocked: true) } }
+            }
+            Button(L("common.cancel"), role: .cancel) {}
+        } message: { Text(L("safety.blockHint")) }
         .confirmationDialog(L("menu.deleteConfirm"), isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }), titleVisibility: .visible) {
             Button(L("menu.delete"), role: .destructive) {
                 if let m = confirmDelete { act { try await store.deleteMessage(m.id) } }
@@ -86,6 +94,7 @@ struct ConversationView: View {
         case .newEvent(let m): EventEditorSheet(conversationId: conversationId, origin: m, event: nil)
         case .forward(let m): ForwardSheet(source: m)
         case .reminder(let m): ReminderSheet(conversationId: conversationId, message: m)
+        case .report(let m): ReportContentSheet(userId: m.authorId, messageId: m.id)
         case .pins: PinsSheet(conversationId: conversationId)
         case .issuesHere: ConversationIssuesSheet(conversationId: conversationId)
         }
@@ -131,7 +140,9 @@ struct ConversationView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).accessibilityLabel(L("common.loading"))
             }
             typingLine
-            if c.canPost { composer(d, c) } else {
+            if c.kind == .direct && c.memberIds.contains(where: { store.blockedUserIds.contains($0) }) {
+                Text(L("safety.directBlocked")).font(.footnote).foregroundStyle(Theme.textSecondary).padding(14)
+            } else if c.canPost { composer(d, c) } else {
                 Text(L("chat.readOnly"))
                     .font(.footnote).foregroundStyle(Theme.textSecondary)
                     .frame(maxWidth: .infinity).padding(14)
@@ -182,7 +193,7 @@ struct ConversationView: View {
         var prev: MessageDTO?
         var prevDate: Date?
         let cal = Calendar.current
-        for m in state.messages {
+        for m in state.messages where !store.blockedUserIds.contains(m.authorId) {
             let date = ISODate.parse(m.createdAt) ?? Date()
             let day = cal.dateComponents([.year, .month, .day], from: date)
             if day != lastDay {
@@ -208,7 +219,7 @@ struct ConversationView: View {
     @ViewBuilder
     private func messages(_ d: BootstrapDTO, _ c: ConversationDTO, _ state: ConversationState) -> some View {
         let items = buildItems(state, pending: store.pendingFor(conversationId))
-        let byId = Dictionary(state.messages.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let byId = Dictionary(state.messages.filter { !store.blockedUserIds.contains($0.authorId) }.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 4) {
@@ -369,6 +380,13 @@ struct ConversationView: View {
                 if let u = URL(string: "mailto:?subject=\(subject)&body=\(plain.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")") { openURL(u) }
             }
         } label: { Label(L("menu.forward"), systemImage: "arrowshape.turn.up.right") }
+        if !mine {
+            Divider()
+            Button { sheet = .report(m) } label: { Label(L("safety.reportMessage"), systemImage: "flag") }
+                .accessibilityIdentifier("safety.reportMessage")
+            Button(role: .destructive) { blockUserId = m.authorId } label: { Label(L("safety.block"), systemImage: "person.slash") }
+                .accessibilityIdentifier("safety.block")
+        }
         if mine {
             Divider()
             Button { editing = m; replyTo = nil; draft = m.body; composerFocused = true } label: { Label(L("menu.edit"), systemImage: "pencil") }

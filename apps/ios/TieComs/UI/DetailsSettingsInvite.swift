@@ -94,6 +94,9 @@ struct ConversationAgendaSection: View {
 }
 
 private struct PersonRow: View {
+    @Environment(AppStore.self) private var store
+    @State private var report = false
+    @State private var confirmBlock = false
     var d: BootstrapDTO
     var p: PersonDTO
     var isMe: Bool
@@ -116,6 +119,24 @@ private struct PersonRow: View {
             }
         }
         .accessibilityElement(children: .combine)
+        .contextMenu {
+            if !isMe {
+                Button { report = true } label: { Label(L("safety.reportUser"), systemImage: "flag") }
+                Button(role: .destructive) { confirmBlock = true } label: {
+                    Label(L(store.blockedUserIds.contains(p.id) ? "safety.unblock" : "safety.block"), systemImage: "person.slash")
+                }
+            }
+        }
+        .sheet(isPresented: $report) { ReportContentSheet(userId: p.id) }
+        .confirmationDialog(L(store.blockedUserIds.contains(p.id) ? "safety.unblock" : "safety.blockConfirm"), isPresented: $confirmBlock, titleVisibility: .visible) {
+            Button(L(store.blockedUserIds.contains(p.id) ? "safety.unblock" : "safety.block"), role: .destructive) {
+                Task {
+                    do { try await store.setUserBlocked(p.id, blocked: !store.blockedUserIds.contains(p.id)) }
+                    catch { store.show(L10n.errorText(error)) }
+                }
+            }
+            Button(L("common.cancel"), role: .cancel) {}
+        } message: { Text(L("safety.blockHint")) }
     }
 }
 
@@ -183,6 +204,13 @@ struct SettingsView: View {
                 NavigationLink(value: Route.reminders) { Label(L("rem.title"), systemImage: "alarm") }
                 NavigationLink(value: Route.trazo) { Label(L("nav.trazo"), systemImage: "arrow.triangle.branch") }
             } footer: { Text(L("settings.whatsappHint")) }
+            Section(L("safety.title")) {
+                NavigationLink { BlockedUsersView() } label: { Label(L("safety.blockedUsers"), systemImage: "person.slash") }
+                    .accessibilityIdentifier("settings.blockedUsers")
+                Link(L("safety.support"), destination: URL(string: L10n.lang == "es" ? "https://www.tiecoms.com/soporte/" : "https://www.tiecoms.com/en/support/")!)
+                Link(L("safety.terms"), destination: URL(string: L10n.lang == "es" ? "https://www.tiecoms.com/terminos/" : "https://www.tiecoms.com/en/terms/")!)
+                Link(L("safety.privacy"), destination: URL(string: L10n.lang == "es" ? "https://www.tiecoms.com/privacidad/" : "https://www.tiecoms.com/en/privacy/")!)
+            }
             Section {
                 LabeledContent(L("settings.language"), value: L10n.lang == "es" ? "Español" : "English")
             } footer: { Text(L("settings.languageHint")) }

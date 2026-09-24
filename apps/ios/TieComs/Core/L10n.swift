@@ -52,6 +52,10 @@ enum L10n {
             else if let v = value as? NSNumber { vars[name] = v.stringValue }
             else if let arr = value as? [String] { vars[name] = arr.joined(separator: ", ") }
         }
+        // El API envía startsAt; la plantilla usa una fecha localizada para {when}.
+        if let startsAt = obj["startsAt"] as? String, let date = ISODate.parse(startsAt) {
+            vars["when"] = dateTime(date)
+        }
         var out = s
         for (k, v) in vars { out = out.replacingOccurrences(of: "{\(k)}", with: v.description) }
         return out

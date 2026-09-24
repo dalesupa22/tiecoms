@@ -10,7 +10,7 @@ Especificación común: `SPEC.md` y `SPEC-v2.md` del coordinador.
 | Bundle ID | `com.tiecoms.app` (app) · `com.tiecoms.app.share` (extensión Compartir) |
 | Team | `B76US7H3L3` (CERTILABOR SAS), firma automática |
 | App Group | `group.com.tiecoms.app`: Keychain compartido y lista de conversaciones para la extensión |
-| Versión | 1.1.0 (build 2), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
+| Versión | 1.1.0 (build 3), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.tiecoms.com` por defecto; `-TCApiURL <url>` al lanzar (pruebas) |
 
@@ -58,6 +58,8 @@ Especificación común: `SPEC.md` y `SPEC-v2.md` del coordinador.
   - `whatsapp.updated` refresca la pantalla.
 - **Dominios de empresa** (solo owner/admin, en Ajustes → Tu empresa): listar, agregar y verificar por
   TXT.
+- **Seguridad**: reportar mensajes/personas, bloquear mensajes directos y ocultar contenido de personas
+  bloqueadas; lista para desbloquear en Ajustes. El registro requiere aceptar términos y normas.
 - **Eliminar cuenta** (Ajustes): pantalla que explica qué se borra y qué se conserva, pide el correo y
   la contraseña (si la cuenta tiene), y ejecuta `DELETE /api/v1/account`. Al terminar borra las
   credenciales locales y vuelve al login.
@@ -188,16 +190,29 @@ disparan mientras la app está viva.
 ## Checklist de publicación (App Store Connect)
 
 **Firma**
-- En esta Mac no hay perfiles de aprovisionamiento. `archive` con firma automática falla con
-  "No profiles for 'com.tiecoms.app'".
-- El archivo de Release se generó con `CODE_SIGNING_ALLOWED=NO`. Para publicar, inicia sesión con una
-  cuenta del team en Xcode › Settings › Accounts y ejecuta:
+- El proyecto usa firma automática. Para esa vía, inicia sesión con una cuenta del team en
+  Xcode › Settings › Accounts. Un archivo con `CODE_SIGNING_ALLOWED=NO` sirve para validar la
+  compilación, pero no se puede subir sin firmarlo.
+- Con la cuenta configurada, archiva así:
   ```bash
   xcodebuild -scheme TieComs -configuration Release -destination 'generic/platform=iOS' \
     -archivePath build/TieComs.xcarchive -allowProvisioningUpdates archive
   xcodebuild -exportArchive -archivePath build/TieComs.xcarchive -exportPath build/export \
     -exportOptionsPlist ExportOptions.plist -allowProvisioningUpdates   # method app-store-connect, teamID B76US7H3L3
   ```
+
+- También se puede archivar sin iniciar sesión en Xcode si el llavero contiene el certificado
+  Apple Distribution y su clave privada, y están instalados los perfiles de distribución
+  `TieComs AppStore` y `TieComsShare AppStore`:
+  ```bash
+  xcodebuild -scheme TieComs -configuration Release -destination 'generic/platform=iOS' \
+    -archivePath build/TieComs.xcarchive CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY='Apple Distribution' \
+    'PROVISIONING_PROFILE_SPECIFIER=$(TARGET_NAME) AppStore' archive
+  xcodebuild -exportArchive -archivePath build/TieComs.xcarchive -exportPath build/export \
+    -exportOptionsPlist ExportOptions.plist
+  ```
+  `ExportOptions.plist` incluye el team y la correspondencia de ambos perfiles manuales. No contiene
+  claves privadas ni credenciales de App Store Connect.
 
 **Portal de desarrollo**
 - App IDs `com.tiecoms.app` (Associated Domains + App Groups) y `com.tiecoms.app.share` (App Groups).
@@ -238,13 +253,23 @@ disparan mientras la app está viva.
 **Permisos y por qué**
 - Notificaciones: avisos de mensajes, recordatorios y reuniones. Se piden después del primer login.
 - Red local (ATS `NSAllowsLocalNetworking`): solo para pruebas contra localhost.
-- No usa cámara, micrófono, contactos ni ubicación. El QR de WhatsApp se muestra, no se escanea.
+- No solicita permisos de cámara, micrófono, contactos ni ubicación. El QR de WhatsApp se muestra,
+  no se escanea. Si el usuario conecta WhatsApp, el servidor sincroniza los contactos de esa cuenta.
 - Compartir: la extensión recibe el texto o enlace que el usuario comparte a propósito.
 
 **Privacidad**
-- `PrivacyInfo.xcprivacy`: UserDefaults (CA92.1); correo, nombre y contenido del usuario vinculados,
-  sin rastreo.
+- `PrivacyInfo.xcprivacy` se incluye en la app y la extensión: UserDefaults propios (CA92.1) y del
+  App Group (1C8F.1); nombre, correo, teléfono y contactos opcionales de WhatsApp, mensajes, fotos elegidas,
+  archivos y otro contenido del usuario, reportes de soporte, ID de cuenta, ID propio del dispositivo e interacción
+  con el producto (lecturas, actividad y sesiones) vinculados a la cuenta para funcionalidad, sin rastreo. Las fotos usan el selector del sistema; no se solicita
+  acceso completo a la fototeca.
 - Contenido de WhatsApp: solo lo ve el dueño.
+
+**Inicio de sesión (guía 4.8)**
+- Se conservan Google y Microsoft, además de correo/contraseña. Apple exime las apps de educación o
+  empresa que requieren una cuenta educativa o empresarial existente. Como TieComs también permite
+  crear una empresa desde el registro, App Review debe evaluar si esta excepción aplica; no se asume
+  aprobación. Fuente: https://developer.apple.com/app-store/review/guidelines/#login-services
 
 **Cuentas de demostración para la revisión**
 - Crea dos cuentas de empresas distintas con un grupo compartido en producción (mismo esquema que
@@ -254,8 +279,8 @@ disparan mientras la app está viva.
 
 **Eliminar cuenta (guía 5.1.1(v))**
 - Implementado contra `DELETE /api/v1/account`.
-- Falta backend: la rama `account-deletion` (576d4b4) aún no está en main ni en producción. Debe
-  estar desplegada antes de enviar a revisión.
+- Backend integrado en producción en `e679a10`: eliminación de cuenta y controles de reporte/bloqueo.
+  Antes de enviar una nueva versión, vuelve a verificar la eliminación con una cuenta de prueba.
 
 **Otros**
 - `ITSAppUsesNonExemptEncryption = false` (solo HTTPS del sistema).
@@ -263,6 +288,5 @@ disparan mientras la app está viva.
 
 **Qué falta de backend**
 - Endpoint de tokens push (APNs).
-- Desplegar `account-deletion`.
 - AASA en los 3 hosts.
 - Credenciales de SSO en el entorno donde se pruebe (3041 responde `503 sso_unavailable`).

@@ -11,6 +11,7 @@
 		0F5BC7F5FF2D3BE382DEFCA9 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEABA7548C1667E663D4C70E /* Models.swift */; };
 		0FB9025BC5B98D0AB8FF9DA4 /* ChatsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3984F4BEE9569D66E54FB453 /* ChatsViews.swift */; };
 		1395F25E40795DF8EAFACC33 /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22A6408E25FEDBF97D17364D /* L10n.swift */; };
+		14A77CAC57CD8DBB415ADB70 /* SafetyViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38083679FBE06019FE270EA7 /* SafetyViews.swift */; };
 		156D13620D4172B7A660319F /* MoreViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73CF6675D407AE69D506868E /* MoreViews.swift */; };
 		1F41DF7AD84A179000EC01A5 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40384C3AF1B15FBE71FBFA01 /* RootView.swift */; };
 		20D1A10E2B92D7322DBF5B14 /* SSO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B359F9C564097CEE34D2A05 /* SSO.swift */; };
@@ -41,6 +42,7 @@
 		72863AF6EEA9BC2AA55D6C65 /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22A6408E25FEDBF97D17364D /* L10n.swift */; };
 		7449F903D57C1B5199447D89 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E62F7C36416F5CCC95C04ED6 /* PrivacyInfo.xcprivacy */; };
 		7695CD28B533BC509D30A44E /* tc_splash.caf in Resources */ = {isa = PBXBuildFile; fileRef = 341AE9974BB278BB3D3A1F18 /* tc_splash.caf */; };
+		76C5C689B36884A3C54C59B3 /* SafetyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BBA4C886B6327B84516EA02 /* SafetyTests.swift */; };
 		787E7E59AC77EAC8C71369E1 /* Splash.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3792730DDF81227D7735C79E /* Splash.swift */; };
 		7CAF1C4ADC5EEB29A1DC74FD /* V2Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF721E25FDD0841A9CA663EC /* V2Tests.swift */; };
 		7D64F9F1796899E79F79CA25 /* AppStore+Features.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F521EF4D592789CF8E947FE /* AppStore+Features.swift */; };
@@ -49,6 +51,7 @@
 		91C244FFC2747DB60736CE3C /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7B7D04AEB3A584685873097 /* Theme.swift */; };
 		A913BA0E653F0DBAD93280AC /* TestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744AE6DDB5ABBFD7B89901B0 /* TestSupport.swift */; };
 		B0A1A021264C4E4F5C8C4EEE /* DecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 083932E17F3BCA024B4EBFD6 /* DecodingTests.swift */; };
+		B6395729C0738589FC24BC19 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E62F7C36416F5CCC95C04ED6 /* PrivacyInfo.xcprivacy */; };
 		C267D7565F6DF8D77BE41AEC /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5512C5E20A20FE9F456CC2F /* HomeView.swift */; };
 		C3A87CF68B11008DBB11502D /* SharedText.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD8AAAA7104EA6BD0C5C7B6D /* SharedText.swift */; };
 		C445F6D6FD6CB0ACC18B4AFD /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 94F3BA09658690F94F865EB1 /* Localizable.strings */; };
@@ -116,6 +119,7 @@
 		310CB4DC9C904F41CD395304 /* SocketIOClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketIOClient.swift; sourceTree = "<group>"; };
 		341AE9974BB278BB3D3A1F18 /* tc_splash.caf */ = {isa = PBXFileReference; path = tc_splash.caf; sourceTree = "<group>"; };
 		3792730DDF81227D7735C79E /* Splash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Splash.swift; sourceTree = "<group>"; };
+		38083679FBE06019FE270EA7 /* SafetyViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyViews.swift; sourceTree = "<group>"; };
 		38C26BEA687D356B4765DDC8 /* Naming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Naming.swift; sourceTree = "<group>"; };
 		3984F4BEE9569D66E54FB453 /* ChatsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatsViews.swift; sourceTree = "<group>"; };
 		3EF3EC7982D199C50C43C25A /* TieComsUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TieComsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -129,6 +133,7 @@
 		58CF969C93A44DD76EE4EE0B /* SocketIOProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketIOProtocolTests.swift; sourceTree = "<group>"; };
 		5CDA44DC6302797DC800B44D /* TieComsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TieComsApp.swift; sourceTree = "<group>"; };
 		693D6FE05E8BDE87A56C7102 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		6BBA4C886B6327B84516EA02 /* SafetyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyTests.swift; sourceTree = "<group>"; };
 		6F521EF4D592789CF8E947FE /* AppStore+Features.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStore+Features.swift"; sourceTree = "<group>"; };
 		701807F5A1694A914A001927 /* ChatsProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatsProfileTests.swift; sourceTree = "<group>"; };
 		73CF6675D407AE69D506868E /* MoreViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreViews.swift; sourceTree = "<group>"; };
@@ -240,6 +245,7 @@
 				73CF6675D407AE69D506868E /* MoreViews.swift */,
 				E6E05B9B11BCDD8884DC3611 /* ProfileFilesViews.swift */,
 				40384C3AF1B15FBE71FBFA01 /* RootView.swift */,
+				38083679FBE06019FE270EA7 /* SafetyViews.swift */,
 				A19A9902A951D7919FF42F1D /* Sheets.swift */,
 				3792730DDF81227D7735C79E /* Splash.swift */,
 				E7B7D04AEB3A584685873097 /* Theme.swift */,
@@ -299,6 +305,7 @@
 				10AC2E537D2E9D5B93E325A9 /* IntegrationTests.swift */,
 				8352A75C9CCA7DA3612850D3 /* IntegrationV2Tests.swift */,
 				79F11C1668BB980DEBC703A6 /* IntegrationV3Tests.swift */,
+				6BBA4C886B6327B84516EA02 /* SafetyTests.swift */,
 				58CF969C93A44DD76EE4EE0B /* SocketIOProtocolTests.swift */,
 				79A9581A136556B589C7E824 /* SSOTests.swift */,
 				EB118B40A5F8B04415623994 /* StoreSyncTests.swift */,
@@ -457,6 +464,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C445F6D6FD6CB0ACC18B4AFD /* Localizable.strings in Resources */,
+				B6395729C0738589FC24BC19 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -488,6 +496,7 @@
 				F22350FDCAF65606418DF454 /* ProfileFilesViews.swift in Sources */,
 				1F41DF7AD84A179000EC01A5 /* RootView.swift in Sources */,
 				20D1A10E2B92D7322DBF5B14 /* SSO.swift in Sources */,
+				14A77CAC57CD8DBB415ADB70 /* SafetyViews.swift in Sources */,
 				C3A87CF68B11008DBB11502D /* SharedText.swift in Sources */,
 				8AC2E905821FD283821301E8 /* Sheets.swift in Sources */,
 				4570A01F25E3C5B753F0763A /* SocketIOClient.swift in Sources */,
@@ -533,6 +542,7 @@
 				5E3407CBD9D372C2E43D5C86 /* IntegrationV2Tests.swift in Sources */,
 				364D144461099A53D0778965 /* IntegrationV3Tests.swift in Sources */,
 				59508C7C91EA2B02ACAD615B /* SSOTests.swift in Sources */,
+				76C5C689B36884A3C54C59B3 /* SafetyTests.swift in Sources */,
 				304A7ED6BCE177CE9A54BD8D /* SocketIOProtocolTests.swift in Sources */,
 				31DD07B095571C91D0FB232C /* StoreSyncTests.swift in Sources */,
 				A913BA0E653F0DBAD93280AC /* TestSupport.swift in Sources */,
@@ -706,7 +716,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = B76US7H3L3;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -814,7 +824,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = B76US7H3L3;
 				ENABLE_NS_ASSERTIONS = NO;

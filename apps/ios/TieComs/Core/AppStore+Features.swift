@@ -6,6 +6,27 @@ import Foundation
 extension AppStore {
     private func enc(_ s: String) -> String { s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? s }
 
+    // MARK: Seguridad
+
+    struct BlockedUsers: Decodable { let userIds: [String] }
+
+    func loadBlockedUsers() async throws {
+        let result: BlockedUsers = try await api.request("/blocks")
+        blockedUserIds = Set(result.userIds)
+    }
+
+    func setUserBlocked(_ userId: String, blocked: Bool) async throws {
+        try await api.requestData("/blocks/\(enc(userId))", method: blocked ? "PUT" : "DELETE")
+        if blocked { blockedUserIds.insert(userId) } else { blockedUserIds.remove(userId) }
+    }
+
+    func reportContent(userId: String? = nil, messageId: String? = nil, reason: String) async throws {
+        var body: [String: Any] = ["reason": reason.trimmingCharacters(in: .whitespacesAndNewlines)]
+        if let userId { body["userId"] = userId }
+        if let messageId { body["messageId"] = messageId }
+        try await api.requestData("/reports", method: "POST", json: body)
+    }
+
     // MARK: Mensajes
 
     func editMessage(_ id: String, body: String) async throws {

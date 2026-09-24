@@ -242,9 +242,9 @@ struct PinsSheet: View {
         NavigationStack {
             List {
                 if list == nil { ProgressView() }
-                if list?.isEmpty == true { Text(L("pins.empty")).foregroundStyle(Theme.textSecondary) }
+                if list?.filter({ !store.blockedUserIds.contains($0.authorId) }).isEmpty == true { Text(L("pins.empty")).foregroundStyle(Theme.textSecondary) }
                 if let d = store.data {
-                    ForEach(list ?? []) { m in
+                    ForEach((list ?? []).filter { !store.blockedUserIds.contains($0.authorId) }) { m in
                         let p = Naming.person(d, m.authorId)
                         HStack(alignment: .top, spacing: 10) {
                             Avatar(name: p?.name ?? "?", org: Naming.org(d, p?.orgId), size: 30, photo: p?.avatarUrl)

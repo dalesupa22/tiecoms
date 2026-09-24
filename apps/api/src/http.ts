@@ -27,6 +27,7 @@ import * as reminders from './modules/reminders.ts';
 import * as wa from './modules/whatsapp.ts';
 import * as profile from './modules/profile.ts';
 import * as drive from './modules/drive.ts';
+import * as safety from './modules/safety.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
 import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
@@ -55,7 +56,7 @@ export async function buildHttp() {
     origin: [config.publicOrigin, ...config.extraOrigins],
     credentials: true,
     allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract', 'x-file-type'],
-    methods: ['GET', 'POST', 'DELETE', 'PATCH'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     maxAge: 600,
   });
   await app.register(rateLimit, { max: 600, timeWindow: '1 minute', keyGenerator: (r) => r.ip });
@@ -137,6 +138,12 @@ export async function buildHttp() {
       const h = req.headers.authorization;
       if (!h?.startsWith('Bearer ')) throw unauthorized();
       const claims = await verifyAccess(h.slice(7));
+      const active = await pool.query(
+        `SELECT 1 FROM sessions s JOIN users u ON u.id = s.user_id
+          WHERE s.id = $1 AND s.user_id = $2 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.disabled_at IS NULL`,
+        [claims.sid, claims.sub],
+      );
+      if (!active.rowCount) throw unauthorized();
       req.userId = claims.sub;
       req.sessionId = claims.sid;
     });
@@ -158,6 +165,11 @@ export async function buildHttp() {
     });
 
     priv.get('/api/v1/bootstrap', async (req) => bootstrap(req.userId));
+    priv.get('/api/v1/blocks', async (req) => safety.listBlocks(req.userId));
+    priv.put<{ Params: { id: string } }>('/api/v1/blocks/:id', async (req) => safety.setBlock(req.userId, z.uuid().parse(req.params.id), true));
+    priv.delete<{ Params: { id: string } }>('/api/v1/blocks/:id', async (req) => safety.setBlock(req.userId, z.uuid().parse(req.params.id), false));
+    priv.post('/api/v1/reports', { config: { rateLimit: { hook: 'preHandler', max: 10, timeWindow: '1 hour', keyGenerator: (req) => req.userId } } }, async (req) =>
+      safety.report(req.userId, z.object({ userId: z.uuid().optional(), messageId: z.uuid().optional(), reason: z.string().trim().min(5).max(2000) }).parse(req.body)));
     // Perfil propio
     priv.patch('/api/v1/me', async (req) => profile.updateProfile(req.userId, UpdateProfileInput.parse(req.body)));
     priv.post('/api/v1/me/avatar', { bodyLimit: profile.MAX_AVATAR_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },

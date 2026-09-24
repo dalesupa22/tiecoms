@@ -4,7 +4,7 @@ import { cp, rm } from 'node:fs/promises';
 
 await rm('dist', { recursive: true, force: true });
 await build({
-  entryPoints: { server: 'src/server.ts', worker: 'src/worker.ts', 'wa-bridge': 'src/wa-bridge.ts', migrate: 'src/migrate-cli.ts' },
+  entryPoints: { server: 'src/server.ts', worker: 'src/worker.ts', 'wa-bridge': 'src/wa-bridge.ts', migrate: 'src/migrate-cli.ts', moderation: 'src/moderation-cli.ts', deletion: 'src/deletion-cli.ts' },
   outdir: 'dist',
   bundle: true,
   platform: 'node',

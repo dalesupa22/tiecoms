@@ -1,5 +1,6 @@
 import type { Db } from './db.ts';
 import { forbidden, notFound } from './errors.ts';
+import { ensureNotBlocked } from './modules/safety.ts';
 
 export interface ConversationAccess {
   id: string;
@@ -46,6 +47,10 @@ export async function conversationAccess(
     historyFromSeq: r.history_from_seq, workspaceRole: r.workspace_role,
   };
   if (need === 'post' && !a.canPost) throw forbidden('No puedes publicar en esta conversación');
+  if (need === 'post' && a.kind === 'direct') {
+    const peers = await db.query('SELECT user_id FROM conversation_memberships WHERE conversation_id = $1 AND user_id <> $2 AND removed_at IS NULL', [conversationId, userId]);
+    await ensureNotBlocked(db, userId, peers.rows.map((p) => p.user_id as string));
+  }
   if (need === 'manage' && !a.canManage) throw forbidden('No puedes administrar esta conversación');
   return a;
 }

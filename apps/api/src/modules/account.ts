@@ -5,7 +5,7 @@ import { verifyPassword } from '../security.ts';
 /**
  * Eliminar la cuenta (lo exigen App Store y Google Play). Los mensajes en
  * espacios compartidos son registro de las empresas y se conservan, pero ya no
- * se asocian a una persona: se borran nombre, correo, contraseña, identidades
+ * muestran con una cuenta anonimizada: se borran nombre, correo, contraseña, identidades
  * de Google/Microsoft, WhatsApp vinculado, preferencias y recordatorios, y la
  * persona sale de todas sus empresas, espacios y conversaciones.
  */
@@ -52,7 +52,28 @@ export async function deleteAccount(userId: string, input: { confirmEmail: strin
     await c.query('UPDATE invitations SET revoked_at = now() WHERE invited_by = $1 AND accepted_at IS NULL AND revoked_at IS NULL', [userId]);
     await c.query('UPDATE org_invitations SET revoked_at = now() WHERE invited_by = $1 AND accepted_at IS NULL AND revoked_at IS NULL', [userId]);
     await c.query('DELETE FROM user_identities WHERE user_id = $1', [userId]);
+    await c.query('DELETE FROM sso_codes WHERE user_id = $1', [userId]);
     await c.query('DELETE FROM reminders WHERE user_id = $1', [userId]);
+    await c.query('DELETE FROM conversation_prefs WHERE user_id = $1', [userId]);
+    await c.query('DELETE FROM workspace_prefs WHERE user_id = $1', [userId]);
+    await c.query('DELETE FROM read_cursors WHERE user_id = $1', [userId]);
+    await c.query('DELETE FROM user_blocks WHERE blocker_id = $1 OR blocked_id = $1', [userId]);
+    await c.query('DELETE FROM push_subscriptions WHERE session_id IN (SELECT id FROM sessions WHERE user_id = $1)', [userId]);
+    // Los archivos personales y las fotos dejan de servirse inmediatamente. El worker
+    // borra S3 con reintentos durables; los archivos compartidos del espacio permanecen.
+    const personalFiles = await c.query(
+      `UPDATE files SET deleted_at = COALESCE(deleted_at, now()), name = NULL, updated_at = now()
+        WHERE owner_id = $1 AND (purpose = 'avatar' OR (purpose = 'document' AND workspace_id IS NULL))
+        RETURNING id, s3_key`, [userId],
+    );
+    for (const file of personalFiles.rows) {
+      await c.query(
+        `INSERT INTO jobs (kind, payload, dedupe_key) VALUES ('account.delete_file', $1, $2)
+          ON CONFLICT (dedupe_key) DO NOTHING`,
+        [JSON.stringify({ fileId: file.id, key: file.s3_key }), `delete-file:${file.id}`],
+      );
+    }
+    await c.query('DELETE FROM folders WHERE owner_id = $1 AND workspace_id IS NULL', [userId]);
     const wa = await c.query('UPDATE wa_accounts SET removed_at = now(), updated_at = now() WHERE user_id = $1 AND removed_at IS NULL RETURNING id', [userId]);
 
     const sessions = await c.query('UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL RETURNING id', [userId]);
@@ -60,7 +81,7 @@ export async function deleteAccount(userId: string, input: { confirmEmail: strin
 
     await c.query(
       `UPDATE users SET name = 'Cuenta eliminada', email = 'deleted+' || id || '@deleted.tiecoms.invalid',
-              password_hash = NULL, primary_org_id = NULL, disabled_at = now() WHERE id = $1`,
+              password_hash = NULL, avatar_file_id = NULL, primary_org_id = NULL, email_verified_at = NULL, disabled_at = now() WHERE id = $1`,
       [userId],
     );
     if (peers.rows.length) {

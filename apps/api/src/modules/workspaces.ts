@@ -8,6 +8,7 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { randomToken, sha256 } from '../security.ts';
 import { deliverInvitation, prepareInvitationFor } from './invitations.ts';
 import { appendEvent, appendMessage } from './messages.ts';
+import { ensureNotBlocked } from './safety.ts';
 
 /** Mensaje de sistema estructurado: cada cliente lo muestra en su idioma. */
 const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, ...p });
@@ -95,6 +96,7 @@ export async function createConversation(userId: string, workspaceId: string, in
     const internalOrgId = input.kind === 'internal' ? wa.orgId : null;
     if (input.kind === 'internal' && !internalOrgId) throw badRequest('No perteneces a una empresa en este espacio');
     const others = [...new Set(input.memberIds.filter((id) => id !== userId))];
+    await ensureNotBlocked(c, userId, others);
     if (others.length) {
       const { rows } = await c.query(
         `SELECT user_id, org_id FROM workspace_memberships
@@ -121,6 +123,7 @@ export async function addMembers(userId: string, conversationId: string, input: 
   return tx(async (c) => {
     const a = await conversationAccess(c, userId, conversationId, 'manage');
     if (a.kind === 'direct') throw badRequest('Los directos no admiten más personas');
+    await ensureNotBlocked(c, userId, input.userIds);
     let rows: { user_id: string; org_id: string | null; name: string }[];
     if (a.kind === 'multi') {
       // Chat grupal: basta con que quien suma comparta un espacio o la empresa con cada persona.
@@ -170,6 +173,7 @@ export async function removeMember(userId: string, conversationId: string, targe
  */
 async function reachable(c: Tx, userId: string, ids: string[]): Promise<string[]> {
   if (!ids.length) return [];
+  await ensureNotBlocked(c, userId, ids);
   const { rows } = await c.query(
     `SELECT DISTINCT u.id FROM users u
       WHERE u.id = ANY($2) AND u.disabled_at IS NULL AND (

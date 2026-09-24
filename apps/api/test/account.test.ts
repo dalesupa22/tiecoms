@@ -10,11 +10,11 @@ const API = process.env.API_URL ?? 'http://localhost:3020';
 const run = randomUUID().slice(0, 8);
 const PASSWORD = 'clave-segura-123';
 
-async function call(path: string, opts: { method?: string; token?: string; body?: unknown } = {}) {
+async function call(path: string, opts: { method?: string; token?: string; body?: unknown; raw?: Buffer; type?: string } = {}) {
   const res = await fetch(`${API}/api/v1${path}`, {
-    method: opts.method ?? (opts.body ? 'POST' : 'GET'),
-    headers: { ...(opts.body ? { 'content-type': 'application/json' } : {}), ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    method: opts.method ?? (opts.body || opts.raw ? 'POST' : 'GET'),
+    headers: { ...(opts.body ? { 'content-type': 'application/json' } : opts.raw ? { 'content-type': opts.type ?? 'application/octet-stream' } : {}), ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}) },
+    body: opts.body ? JSON.stringify(opts.body) : opts.raw,
   });
   return { status: res.status, json: (await res.json().catch(() => ({}))) as any };
 }
@@ -32,6 +32,15 @@ describe('eliminar cuenta', () => {
     const sent = await call(`/conversations/${ws.generalConversationId}/messages`, { token: a.accessToken, body: { clientMessageId: randomUUID(), body: 'queda en el registro' } });
     expect(sent.status).toBe(201);
 
+    // Las funciones que llegaron después de la rama original también se eliminan.
+    const avatar = await call('/me/avatar', { token: a.accessToken, raw: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'), type: 'image/png' });
+    expect(avatar.status).toBe(200);
+    const personal = await call('/drive/files?name=privado.txt', { token: a.accessToken, raw: Buffer.from('archivo personal') });
+    expect(personal.status).toBe(200);
+    const shared = await call(`/drive/files?name=compartido.txt&workspaceId=${ws.id}`, { token: a.accessToken, raw: Buffer.from('registro del espacio') });
+    expect(shared.status).toBe(200);
+    const oldDownload = (await call(`/drive/files/${personal.json.id}/link`, { token: a.accessToken })).json.url;
+
     const socket = io(API, { path: '/api/socket.io', transports: ['websocket'], auth: { token: a.accessToken } });
     await new Promise((r) => socket.once('ready', r));
     const kicked = new Promise((r) => socket.once('disconnect', r));
@@ -47,6 +56,11 @@ describe('eliminar cuenta', () => {
     // Ya no entra ni refresca.
     expect((await call('/auth/login', { body: { email, password: PASSWORD, device: device() } })).status).toBe(401);
     expect((await call('/auth/refresh', { body: { refreshToken: a.refreshToken } })).status).toBe(401);
+    expect((await call('/me', { method: 'PATCH', token: a.accessToken, body: { name: 'Cuenta resucitada' } })).status).toBe(401);
+    expect((await call('/workspaces', { token: a.accessToken, body: { name: 'No permitido' } })).status).toBe(401);
+    expect((await fetch(`${API}${avatar.json.avatarUrl}`)).status).toBe(404);
+    // El worker elimina el objeto, no solo el enlace de TieComs (S3 falso local).
+    await expect.poll(async () => (await fetch(oldDownload)).status, { timeout: 10_000 }).toBe(404);
     // Se puede volver a registrar con el mismo correo.
     expect((await call('/auth/signup', { body: { name: 'Nueva', email, password: PASSWORD, orgName: `Otra ${run}`, device: device() } })).status).toBe(200);
 
@@ -58,6 +72,8 @@ describe('eliminar cuenta', () => {
     expect(conv.memberIds).not.toContain(a.user.id);
     const msgs = (await call(`/conversations/${ws.generalConversationId}/messages`, { token: colega.accessToken })).json.messages;
     expect(msgs.some((m: any) => m.body === 'queda en el registro')).toBe(true);
+    const files = (await call(`/drive/tree?workspaceId=${ws.id}`, { token: colega.accessToken })).json.files;
+    expect(files.some((f: any) => f.id === shared.json.id)).toBe(true);
     socket.close();
   }, 30_000);
 });

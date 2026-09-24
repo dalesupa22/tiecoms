@@ -1,0 +1,14 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DeleteTieComsPersonalAccountObjects",
+      "Effect": "Allow",
+      "Action": "s3:DeleteObject",
+      "Resource": [
+        "arn:aws:s3:::xerticoms/tiecoms/avatars/*",
+        "arn:aws:s3:::xerticoms/tiecoms/drive/me/*"
+      ]
+    }
+  ]
+}

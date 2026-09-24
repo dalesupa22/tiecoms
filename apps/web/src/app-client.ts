@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { Platform } from '@tiecoms/contracts';
+import { browserLang } from './i18n.ts';
 import { IndexedDbStorage, MemoryStorage, TieComsClient, type ClientState, type SecretStore } from '@tiecoms/client-core';
 
 function makeStorage() {
@@ -27,9 +28,12 @@ const nativeSecrets: SecretStore = {
   async set(t) { try { if (t) localStorage.setItem('tiecoms:rt', t); else localStorage.removeItem('tiecoms:rt'); } catch {} },
 };
 
+const en = browserLang() === 'en';
+const mobile = navigator.userAgent.includes('Mobile');
 const DEVICE_NAMES: Record<Platform, string> = {
-  web: navigator.userAgent.includes('Mobile') ? 'Navegador móvil' : 'Navegador',
-  macos: 'TieComs para Mac', windows: 'TieComs para Windows', android: 'TieComs Android', ios: 'TieComs iPhone', agent: 'Agente',
+  web: en ? (mobile ? 'Mobile browser' : 'Browser') : (mobile ? 'Navegador móvil' : 'Navegador'),
+  macos: en ? 'TieComs for Mac' : 'TieComs para Mac', windows: en ? 'TieComs for Windows' : 'TieComs para Windows',
+  android: 'TieComs Android', ios: 'TieComs iPhone', agent: en ? 'Agent' : 'Agente',
 };
 
 // En web, API en el mismo origen. En apps, la variable de build apunta a https://app.tiecoms.com.

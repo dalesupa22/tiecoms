@@ -267,3 +267,85 @@ export async function acceptInvitation(userId: string, token: string, input: z.i
     return { workspaceId: inv.workspace_id as string, conversationIds: inv.conversation_ids as string[] };
   });
 }
+
+// ---------- Bifurcaciones: derivar y devolver ----------
+/**
+ * Deriva una conversación nueva desde un mensaje, para resolver algo aparte sin
+ * mover el hilo original:
+ *  - same: misma audiencia que el origen.
+ *  - internal: solo las personas de mi empresa que están en el origen.
+ *  - directive: quien deriva, el autor del mensaje y quienes lideran o administran el espacio.
+ * La derivada empieza sin historial. En el origen queda un aviso sin el nombre,
+ * porque no todos los del origen pueden ver la derivada.
+ */
+export async function deriveConversation(userId: string, parentId: string, input: { messageId: string; kind: 'same' | 'internal' | 'directive'; name?: string; reason?: string }) {
+  return tx(async (c) => {
+    const a = await conversationAccess(c, userId, parentId, 'post', true);
+    if (!a.workspaceId) throw badRequest('Solo se deriva desde conversaciones de un espacio');
+    const wa = await workspaceAccess(c, userId, a.workspaceId, 'nonguest');
+    const msg = await c.query('SELECT id, author_id, body, kind, seq FROM messages WHERE id = $1 AND conversation_id = $2', [input.messageId, parentId]);
+    const m = msg.rows[0];
+    if (!m || m.seq <= a.historyFromSeq || m.kind !== 'text') throw badRequest('Solo se deriva desde un mensaje visible de esta conversación');
+    const parent = (await c.query('SELECT name, level FROM conversations WHERE id = $1', [parentId])).rows[0];
+
+    const members = (await c.query(
+      `SELECT cm.user_id, wm.org_id, wm.role FROM conversation_memberships cm
+         JOIN workspace_memberships wm ON wm.workspace_id = $2 AND wm.user_id = cm.user_id AND wm.revoked_at IS NULL
+          AND (wm.expires_at IS NULL OR wm.expires_at > now())
+        WHERE cm.conversation_id = $1 AND cm.removed_at IS NULL`,
+      [parentId, a.workspaceId],
+    )).rows as { user_id: string; org_id: string | null; role: string }[];
+    let ids: string[];
+    let kind: 'group' | 'internal' = 'group';
+    let level: string | null = parent.level ?? 'operativo';
+    let internalOrgId: string | null = null;
+    if (input.kind === 'same') ids = members.map((x) => x.user_id);
+    else if (input.kind === 'internal') {
+      if (!wa.orgId) throw badRequest('No perteneces a una empresa en este espacio');
+      kind = 'internal'; level = null; internalOrgId = wa.orgId;
+      ids = members.filter((x) => x.org_id === wa.orgId).map((x) => x.user_id);
+    } else {
+      level = 'directivo';
+      const leads = (await c.query("SELECT user_id FROM workspace_memberships WHERE workspace_id = $1 AND role IN ('lead','admin') AND revoked_at IS NULL", [a.workspaceId])).rows.map((r) => r.user_id);
+      ids = [userId, m.author_id, ...leads];
+    }
+    ids = [...new Set([userId, ...ids])];
+
+    const excerpt = String(m.body).replace(/\s+/g, ' ').trim().slice(0, 80);
+    const prefix = input.kind === 'internal' ? 'Diagnóstico' : input.kind === 'directive' ? 'Decisión' : 'Derivada';
+    const name = input.name ?? `${prefix} · ${excerpt.slice(0, 40).replace(/\s+\S*$/, '')}`;
+    const conv = await c.query(
+      `INSERT INTO conversations (workspace_id, kind, level, name, internal_org_id, created_by, parent_conversation_id, parent_message_id, derive_kind, derive_reason, derived_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$6) RETURNING id`,
+      [a.workspaceId, kind, level, name, internalOrgId, userId, parentId, m.id, input.kind, input.reason ?? null],
+    );
+    const childId: string = conv.rows[0].id;
+    await addConversationMembers(c, childId, [userId], userId, 'all', true);
+    const others = ids.filter((x) => x !== userId);
+    if (others.length) await addConversationMembers(c, childId, others, userId, 'all');
+    await appendMessage(c, { conversationId: childId, authorId: userId, kind: 'system', body: sys('derived.here', { parent: parent.name, excerpt, reason: input.reason ?? null }) });
+    await appendMessage(c, { conversationId: parentId, authorId: userId, kind: 'system', body: sys('derived.from', { kind: input.kind, childId, messageId: m.id }) });
+    await audit(c, userId, 'conversation.derived', { type: 'conversation', id: childId, workspaceId: a.workspaceId }, { parentId, kind: input.kind });
+    return { id: childId };
+  });
+}
+
+/** Devuelve el resultado de una derivada a su origen: publica el cierre allí y marca el reencuentro. */
+export async function returnResult(userId: string, childId: string, summary: string) {
+  return tx(async (c) => {
+    await conversationAccess(c, userId, childId, 'post', true);
+    const { rows } = await c.query('SELECT name, parent_conversation_id, returned_at FROM conversations WHERE id = $1', [childId]);
+    const child = rows[0];
+    if (!child?.parent_conversation_id) throw badRequest('Esta conversación no se derivó de otra');
+    if (child.returned_at) throw conflict('Esta derivada ya devolvió su resultado');
+    // Quien devuelve también debe poder escribir en el origen.
+    await conversationAccess(c, userId, child.parent_conversation_id, 'post', true);
+    const msg = await appendMessage(c, { conversationId: child.parent_conversation_id, authorId: userId, body: summary, mergedFrom: childId });
+    await c.query('UPDATE conversations SET returned_at = now(), returned_message_id = $2 WHERE id = $1', [childId, msg.id]);
+    await appendMessage(c, { conversationId: childId, authorId: userId, kind: 'system', body: sys('returned', {}) });
+    const members = (await c.query('SELECT user_id FROM conversation_memberships WHERE conversation_id = ANY($1) AND removed_at IS NULL', [[childId, child.parent_conversation_id]])).rows.map((r) => r.user_id);
+    await scopeChanged(c, [...new Set(members)], 'conversation.returned');
+    await audit(c, userId, 'conversation.returned', { type: 'conversation', id: childId }, { parentId: child.parent_conversation_id });
+    return { parentId: child.parent_conversation_id as string, messageId: msg.id };
+  });
+}

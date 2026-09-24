@@ -124,6 +124,47 @@ export interface ConversationDTO {
   canManage: boolean;
   /** Mensajes visibles para mí a partir de este seq (exclusivo). */
   historyFromSeq: number;
+  /** Bifurcación: de qué conversación y mensaje se derivó. El nombre del origen solo se conoce si también lo puedo leer. */
+  parentId: string | null;
+  parentMessageId: string | null;
+  parentMessageSeq: number | null;
+  deriveKind: DeriveKind | null;
+  deriveReason: string | null;
+  returnedAt: string | null;
+  openIssues: number;
+}
+
+export type DeriveKind = 'same' | 'internal' | 'directive';
+export type IssueStatus = 'open' | 'in_progress' | 'waiting' | 'done' | 'cancelled';
+
+export interface IssueDTO {
+  id: string;
+  workspaceId: string;
+  conversationId: string;
+  originMessageId: string | null;
+  originMessageSeq: number | null;
+  title: string;
+  status: IssueStatus;
+  waitingOnOrgId: string | null;
+  ownerId: string | null;
+  requestedBy: string | null;
+  dueDate: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Desde cuándo está en el estado actual (para detectar cuellos de botella). */
+  statusSince: string;
+  closedAt: string | null;
+  commentCount: number;
+}
+
+export interface IssueEventDTO {
+  id: number;
+  issueId: string;
+  actorId: string;
+  kind: 'created' | 'status' | 'owner' | 'due' | 'title' | 'comment' | 'waiting';
+  payload: Record<string, unknown>;
+  createdAt: string;
 }
 
 export interface MessageDTO {
@@ -135,6 +176,8 @@ export interface MessageDTO {
   kind: 'text' | 'system';
   body: string;
   replyTo: string | null;
+  /** Si este mensaje trae de vuelta el resultado de una conversación derivada. */
+  mergedFrom: string | null;
   createdAt: string;
   editedAt: string | null;
   deletedAt: string | null;
@@ -197,6 +240,30 @@ export interface OrgInvitationPreviewDTO {
   valid: boolean;
 }
 
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+export const CreateIssueInput = z.object({
+  title: z.string().trim().min(2).max(200),
+  ownerId: z.uuid().nullable().optional(),
+  dueDate: isoDate.nullable().optional(),
+  originMessageId: z.uuid().nullable().optional(),
+});
+export const UpdateIssueInput = z.object({
+  title: z.string().trim().min(2).max(200).optional(),
+  status: z.enum(['open', 'in_progress', 'waiting', 'done', 'cancelled']).optional(),
+  ownerId: z.uuid().nullable().optional(),
+  dueDate: isoDate.nullable().optional(),
+  waitingOnOrgId: z.uuid().nullable().optional(),
+});
+export const IssueCommentInput = z.object({ body: z.string().trim().min(1).max(4000) });
+
+export const DeriveInput = z.object({
+  messageId: z.uuid(),
+  kind: z.enum(['same', 'internal', 'directive']),
+  name: z.string().trim().min(2).max(120).optional(),
+  reason: z.string().trim().max(300).optional(),
+});
+export const ReturnResultInput = z.object({ summary: z.string().trim().min(2).max(4000) });
+
 export const AcceptInvitationInput = z.object({ orgId: z.uuid().optional() });
 
 export interface InvitationPreviewDTO {
@@ -235,6 +302,7 @@ export type ConversationEvent =
   | { type: 'message.created'; conversationId: string; eventSeq: number; message: MessageDTO }
   | { type: 'message.updated'; conversationId: string; eventSeq: number; message: MessageDTO }
   | { type: 'members.changed'; conversationId: string; eventSeq: number; memberIds: string[] }
+  | { type: 'issue.updated'; conversationId: string; eventSeq: number; issue: IssueDTO }
   /** Evento fuera de tu historial visible: solo avanza el cursor. */
   | { type: 'redacted'; conversationId: string; eventSeq: number };
 

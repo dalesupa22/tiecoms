@@ -217,3 +217,73 @@ describe('colegas de la misma empresa', () => {
     expect((await call('/auth/signup', { body: { name: 'Otra', email: `colega.${run}@example.com`, password: 'clave-segura-123', orgInviteToken: inv.json.token, device: { deviceId: randomUUID(), platform: 'ios' } } })).status).toBe(409);
   });
 });
+
+describe('asuntos', () => {
+  let issueId: string;
+  it('se abre desde un mensaje, con responsable, y se ve solo con acceso a la conversación', async () => {
+    const m = await call(`/conversations/${generalId}/messages`, { token: ana.token, body: { clientMessageId: randomUUID(), body: 'Necesito el acta firmada antes del viernes' } });
+    const r = await call(`/conversations/${generalId}/issues`, { token: ana.token, body: { title: 'Acta firmada', originMessageId: m.json.message.id, ownerId: ana.id, dueDate: '2026-10-02' } });
+    expect(r.status).toBe(200);
+    issueId = r.json.id;
+    expect(r.json.requestedBy).toBe(ana.id);
+    expect(r.json.originMessageSeq).toBe(m.json.message.seq);
+    // Tercero sin acceso a General: no lo ve ni por id.
+    expect((await call(`/issues/${issueId}`, { token: tercero.token })).status).toBe(404);
+    const list = await call(`/issues?workspaceId=${workspaceId}`, { token: tercero.token });
+    expect(list.json.issues.some((i: any) => i.id === issueId)).toBe(false);
+    // El responsable debe estar en la conversación.
+    expect((await call(`/conversations/${generalId}/issues`, { token: ana.token, body: { title: 'Otro', ownerId: tercero.id } })).status).toBe(400);
+  });
+
+  it('cambia de estado con historial y avisa en tiempo real a la conversación', async () => {
+    const s = await connect(ana);
+    const wait = new Promise<any>((res) => s.on('conv.event', (e: any) => e.type === 'issue.updated' && e.issue.id === issueId && e.issue.status === 'done' && res(e)));
+    const u = await call(`/issues/${issueId}`, { method: 'PATCH', token: ana.token, body: { status: 'done' } });
+    expect(u.status).toBe(200);
+    expect(u.json.closedAt).toBeTruthy();
+    expect((await wait).issue.status).toBe('done');
+    await call(`/issues/${issueId}/comments`, { token: ana.token, body: { body: 'Cerrado con el acta del jueves' } });
+    const g = await call(`/issues/${issueId}`, { token: ana.token });
+    expect(g.json.events.map((e: any) => e.kind)).toEqual(['created', 'status', 'comment']);
+    expect(g.json.issue.commentCount).toBe(1);
+    s.disconnect();
+  });
+});
+
+describe('bifurcaciones', () => {
+  let childId: string;
+  it('derivar como diagnóstico interno no revela la derivada a la otra empresa', async () => {
+    const m = await call(`/conversations/${generalId}/messages`, { token: ana.token, body: { clientMessageId: randomUUID(), body: '¿Por qué se duplican las notificaciones?' } });
+    const d = await call(`/conversations/${generalId}/derive`, { token: ana.token, body: { messageId: m.json.message.id, kind: 'internal', name: 'Diagnóstico · notificaciones' } });
+    expect(d.status).toBe(200);
+    childId = d.json.id;
+    const mine = await call('/bootstrap', { token: ana.token });
+    const child = mine.json.conversations.find((c: any) => c.id === childId);
+    expect(child.parentId).toBe(generalId);
+    expect(child.deriveKind).toBe('internal');
+    // Carla (otra empresa, no está en General) y Beto (fue retirado de la sesión) no la ven.
+    const other = await call('/bootstrap', { token: carla.token });
+    expect(other.json.conversations.some((c: any) => c.id === childId)).toBe(false);
+    // El aviso en el origen no incluye el nombre de la derivada.
+    const origin = await call(`/conversations/${generalId}/messages`, { token: ana.token });
+    const notice = origin.json.messages.reverse().find((x: any) => x.kind === 'system' && x.body.includes('derived.from'));
+    expect(notice.body).not.toContain('notificaciones');
+  });
+
+  it('devuelve el resultado al origen una sola vez', async () => {
+    const r = await call(`/conversations/${childId}/return`, { token: ana.token, body: { summary: 'Era el job de las 10:00. Queda en una sola notificación diaria.' } });
+    expect(r.status).toBe(200);
+    const origin = await call(`/conversations/${generalId}/messages`, { token: ana.token });
+    const back = origin.json.messages.find((x: any) => x.id === r.json.messageId);
+    expect(back.mergedFrom).toBe(childId);
+    expect((await call(`/conversations/${childId}/return`, { token: ana.token, body: { summary: 'otra vez' } })).status).toBe(409);
+    const b = await call('/bootstrap', { token: ana.token });
+    expect(b.json.conversations.find((c: any) => c.id === childId).returnedAt).toBeTruthy();
+  });
+
+  it('un tercero no puede derivar', async () => {
+    const legal = (await call('/bootstrap', { token: tercero.token })).json.conversations[0];
+    const m = await call(`/conversations/${legal.id}/messages`, { token: tercero.token, body: { clientMessageId: randomUUID(), body: 'Propongo revisar la 7.2' } });
+    expect((await call(`/conversations/${legal.id}/derive`, { token: tercero.token, body: { messageId: m.json.message.id, kind: 'same' } })).status).toBe(403);
+  });
+});

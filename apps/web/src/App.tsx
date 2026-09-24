@@ -7,6 +7,8 @@ import { ConversationScreen } from './screens/Conversation.tsx';
 import { InviteScreen } from './screens/Invite.tsx';
 import { InboxScreen, PeopleScreen, SettingsScreen, SpacesScreen, TodayScreen, WorkspaceScreen } from './screens/Pages.tsx';
 import { Shell } from './screens/Shell.tsx';
+import { IssuesScreen } from './screens/Issues.tsx';
+import { TrazoScreen } from './screens/Lineage.tsx';
 
 function nextParam() {
   const n = new URLSearchParams(location.search).get('next');
@@ -36,9 +38,11 @@ export function App() {
       {route.name === 'inbox' && <InboxScreen />}
       {route.name === 'spaces' && <SpacesScreen />}
       {route.name === 'people' && <PeopleScreen />}
+      {route.name === 'issues' && <IssuesScreen />}
+      {route.name === 'trazo' && <TrazoScreen />}
       {route.name === 'settings' && <SettingsScreen />}
       {route.name === 'workspace' && <WorkspaceScreen key={route.id} id={route.id} />}
-      {route.name === 'conversation' && <ConversationScreen key={route.id} id={route.id} />}
+      {route.name === 'conversation' && <ConversationScreen key={route.id + location.search} id={route.id} />}
     </Shell>
   );
 }

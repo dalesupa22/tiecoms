@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import type { MessageDTO } from '@tiecoms/contracts';
+import type { IssueDTO, MessageDTO } from '@tiecoms/contracts';
 import type { PendingMessage } from '@tiecoms/client-core';
 import { client, useClient } from '../app-client.ts';
-import { navigate } from '../router.ts';
+import { navigate, queryParam } from '../router.ts';
 import { Avatar, OrgMark, conversationSubtitle, conversationTitle, dayLabel, orgById, personById } from '../ui.tsx';
 import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { AddMembersDialog } from './Dialogs.tsx';
+import { IssueDrawer, IssueRow, NewIssueDialog, isClosed } from './Issues.tsx';
+import { DeriveDialog, LineageBar, MergedCard } from './Lineage.tsx';
 
 type Row =
   | { kind: 'day'; key: string; label: string }
@@ -23,6 +25,12 @@ export function ConversationScreen({ id }: { id: string }) {
   const [panel, setPanel] = useState(() => window.innerWidth > 1180);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deriving, setDeriving] = useState<MessageDTO | null>(null);
+  const [newIssue, setNewIssue] = useState<{ origin?: MessageDTO } | null>(null);
+  const [openIssue, setOpenIssue] = useState<string | null>(null);
+  const [actionsFor, setActionsFor] = useState<string | null>(null);
+  const [highlight, setHighlight] = useState<number | null>(null);
+  const allIssues = useClient((s) => s.issues);
   const [text, setText] = useState(() => { try { return localStorage.getItem(draftKey(id)) ?? ''; } catch { return ''; } });
   const scroller = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -32,6 +40,18 @@ export function ConversationScreen({ id }: { id: string }) {
   useEffect(() => {
     // La pantalla se monta de nuevo por conversación (key={id}), así el borrador no se cruza.
     client.openConversation(id).catch((e) => setError(errorText(e)));
+    client.loadIssues({ conversationId: id }).catch(() => {});
+    // ?m=seq: salta al mensaje de origen (de un asunto, de una derivada o de un resultado devuelto).
+    const target = Number(queryParam('m'));
+    if (target > 0) {
+      atBottom.current = false;
+      void client.ensureMessage(id, target).then((found) => {
+        if (!found) return;
+        setHighlight(target);
+        requestAnimationFrame(() => document.getElementById(`msg-${id}-${target}`)?.scrollIntoView({ block: 'center' }));
+        setTimeout(() => setHighlight(null), 2800);
+      });
+    }
   }, [id]);
 
   // Borrador local por conversación: sobrevive recargas y cambios de conversación.
@@ -94,6 +114,11 @@ export function ConversationScreen({ id }: { id: string }) {
   };
 
   const title = conversationTitle(d, conv);
+  const issuesHere = Object.values(allIssues).filter((i: IssueDTO) => i.conversationId === id);
+  const openHere = issuesHere.filter((i) => !isClosed(i));
+  const issueOf = (mid: string) => openHere.find((i) => i.originMessageId === mid);
+  const canWork = conv.canPost && conv.kind !== 'direct' && !!conv.workspaceId;
+  const myWsRole = d.workspaces.find((w) => w.id === conv.workspaceId)?.myRole;
   const ws = d.workspaces.find((w) => w.id === conv.workspaceId);
   const typers = (typing ?? []).filter((t) => t.until > Date.now()).map((t) => personById(d, t.userId)?.name.split(' ')[0]).filter(Boolean);
   const orgsHere = [...new Set(conv.memberIds.map((m) => personById(d, m)?.orgId).filter(Boolean))].map((o) => orgById(d, o as string));
@@ -111,6 +136,21 @@ export function ConversationScreen({ id }: { id: string }) {
           {ws && <button className="btn ghost small only-desktop" onClick={() => navigate(`/w/${ws.id}`)}>{t('chat.space')}</button>}
           <button className="icon-btn" aria-label={t('chat.details')} onClick={() => setPanel(!panel)}>ⓘ</button>
         </header>
+        <LineageBar conv={conv} />
+        {openHere.length > 0 && (
+          <div className="issues-here">
+            <span className="eyebrow">{t('issue.here')}</span>
+            {openHere.map((i) => {
+              const owner = personById(d, i.ownerId);
+              return (
+                <button key={i.id} className="issue-chip" onClick={() => setOpenIssue(i.id)}>
+                  <Avatar person={owner} org={orgById(d, owner?.orgId)} size={22} />
+                  <span className="ellipsis">{i.title}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <div className="msgs" ref={scroller} onScroll={onScroll} role="log" aria-live="polite">
           {local?.loading && !local.loaded && <div className="msg-sys">{t('common.loading')}</div>}
@@ -121,11 +161,12 @@ export function ConversationScreen({ id }: { id: string }) {
             if (r.kind === 'day') return <div key={r.key} className="day">{r.label}</div>;
             if (r.kind === 'pending') return <PendingRow key={r.key} p={r.p} />;
             const m = r.m;
-            if (m.kind === 'system') return <div key={r.key} className="msg-sys">{systemText(m.body)}</div>;
+            if (m.kind === 'system') return <SystemRow key={r.key} m={m} onIssue={setOpenIssue} />;
             const author = personById(d, m.authorId);
             const org = orgById(d, author?.orgId);
             return (
-              <div key={r.key} className={`msg ${r.cont ? 'cont' : ''}`}>
+              <div key={r.key} id={`msg-${id}-${m.seq}`} className={`msg ${r.cont ? 'cont' : ''} ${highlight === m.seq ? 'is-highlight' : ''} ${actionsFor === m.id ? 'show-actions' : ''}`}
+                onClick={(e) => { if (window.matchMedia('(pointer: coarse)').matches && !(e.target as HTMLElement).closest('button')) setActionsFor(actionsFor === m.id ? null : m.id); }}>
                 <div>{!r.cont && <Avatar person={author} org={org} size={34} />}</div>
                 <div style={{ minWidth: 0 }}>
                   {!r.cont && (
@@ -135,7 +176,17 @@ export function ConversationScreen({ id }: { id: string }) {
                       <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
                   )}
+                  {m.mergedFrom && <MergedCard childId={m.mergedFrom} />}
                   <div className="msg-body">{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.body}</div>
+                  {issueOf(m.id) && (
+                    <button className="msg-issue" onClick={() => setOpenIssue(issueOf(m.id)!.id)}>◆ {issueOf(m.id)!.title}</button>
+                  )}
+                  {canWork && !m.deletedAt && (
+                    <div className="msg-actions">
+                      {myWsRole !== 'guest' && <button onClick={() => setDeriving(m)}>{t('derive.action')}</button>}
+                      <button onClick={() => setNewIssue({ origin: m })}>{t('issue.fromMessage')}</button>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -163,6 +214,16 @@ export function ConversationScreen({ id }: { id: string }) {
             <div className="serif" style={{ fontSize: 26, lineHeight: 1.1 }}>{title}</div>
             <div className="small muted">{conversationSubtitle(d, conv)}</div>
           </div>
+          {canWork && (
+            <div>
+              <div className="row" style={{ marginBottom: 6 }}>
+                <span className="eyebrow grow">{t('nav.issues')} · {openHere.length}</span>
+                <button className="btn small" onClick={() => setNewIssue({})}>{t('issue.new')}</button>
+              </div>
+              {openHere.length === 0 && <div className="hint">{t('issue.noIssues')}</div>}
+              <div className="list" style={{ gap: 6 }}>{openHere.map((i) => <IssueRow key={i.id} i={i} showWhere={false} onOpen={setOpenIssue} />)}</div>
+            </div>
+          )}
           {conv.kind !== 'direct' && (
             <div className="card" style={{ padding: 12 }}>
               <div className="eyebrow" style={{ marginBottom: 6 }}>{t('chat.scope')}</div>
@@ -200,6 +261,13 @@ export function ConversationScreen({ id }: { id: string }) {
         </aside>
       )}
       {adding && <AddMembersDialog conversationId={id} onClose={() => setAdding(false)} />}
+      {deriving && <DeriveDialog conv={conv} message={deriving} onClose={() => setDeriving(null)} />}
+      {newIssue && (
+        <NewIssueDialog conversationId={id} originMessageId={newIssue.origin?.id}
+          defaultTitle={newIssue.origin ? newIssue.origin.body.replace(/\s+/g, ' ').trim().slice(0, 90) : ''}
+          onClose={() => setNewIssue(null)} onCreated={(i) => setOpenIssue(i.id)} />
+      )}
+      {openIssue && <IssueDrawer id={openIssue} onClose={() => setOpenIssue(null)} />}
     </div>
   );
 }
@@ -224,6 +292,21 @@ function PendingRow({ p }: { p: PendingMessage }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Mensajes de sistema: algunos enlazan a un asunto o a la conversación derivada (si la puedes ver). */
+function SystemRow({ m, onIssue }: { m: MessageDTO; onIssue: (id: string) => void }) {
+  const d = useClient((s) => s.data)!;
+  let p: any = null;
+  try { p = m.body.startsWith('{') ? JSON.parse(m.body) : null; } catch {}
+  const child = p?.k === 'derived.from' ? d.conversations.find((c) => c.id === p.childId) : null;
+  return (
+    <div className="msg-sys">
+      {systemText(m.body)}
+      {child && <> · <button className="link-btn" onClick={() => navigate(`/c/${child.id}`)}>⑂ {conversationTitle(d, child)}</button></>}
+      {p?.issueId && <> · <button className="link-btn" onClick={() => onIssue(p.issueId)}>{t('lin.open')}</button></>}
     </div>
   );
 }

@@ -18,6 +18,7 @@ export function toMessageDTO(r: any): MessageDTO {
     kind: r.kind,
     body: deleted ? '' : r.body,
     replyTo: r.reply_to,
+    mergedFrom: r.merged_from_conversation_id ?? null,
     createdAt: new Date(r.created_at).toISOString(),
     editedAt: r.edited_at ? new Date(r.edited_at).toISOString() : null,
     deletedAt: deleted ? new Date(r.deleted_at).toISOString() : null,
@@ -46,10 +47,10 @@ export async function appendEvent(c: Tx, conversationId: string, event: Omit<Con
  */
 export async function appendMessage(c: Tx, p: {
   conversationId: string; authorId: string; body: string; kind?: 'text' | 'system';
-  clientMessageId?: string | null; replyTo?: string | null;
+  clientMessageId?: string | null; replyTo?: string | null; mergedFrom?: string | null;
 }): Promise<MessageDTO> {
-  const { rows } = await c.query('SELECT tiecoms_append_message($1, $2, $3, $4, $5, $6) AS m', [
-    p.conversationId, p.authorId, p.clientMessageId ?? null, p.kind ?? 'text', p.body, p.replyTo ?? null,
+  const { rows } = await c.query('SELECT tiecoms_append_message($1, $2, $3, $4, $5, $6, $7) AS m', [
+    p.conversationId, p.authorId, p.clientMessageId ?? null, p.kind ?? 'text', p.body, p.replyTo ?? null, p.mergedFrom ?? null,
   ]);
   return rows[0].m as MessageDTO;
 }

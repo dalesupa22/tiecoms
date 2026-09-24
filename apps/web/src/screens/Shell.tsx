@@ -9,6 +9,8 @@ import { t } from '../i18n.ts';
 const NAV = [
   { name: 'today', label: 'nav.today', ico: '◑', to: '/' },
   { name: 'inbox', label: 'nav.inbox', ico: '◍', to: '/conversaciones' },
+  { name: 'issues', label: 'nav.issues', ico: '◆', to: '/asuntos' },
+  { name: 'trazo', label: 'nav.trazo', ico: '⑂', to: '/trazo' },
   { name: 'people', label: 'nav.people', ico: '◎', to: '/participantes' },
 ] as const;
 
@@ -67,7 +69,7 @@ function Sidebar({ route }: { route: Route }) {
                     </button>
                     {convs.map((c) => (
                       <button key={c.id} className={`side-conv ${activeConv === c.id ? 'active' : ''} ${c.unread ? 'unread' : ''}`} onClick={() => navigate(`/c/${c.id}`)}>
-                        <span className="hash">{c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>
+                        <span className="hash">{c.parentId ? '⑂' : c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>
                         <span className="grow ellipsis">{conversationTitle(d, c)}</span>
                         {c.unread > 0 && <span className="pill">{c.unread}</span>}
                       </button>
@@ -112,6 +114,7 @@ function MobileTabs({ route }: { route: Route }) {
   const tabs = [
     { name: 'today', label: t('nav.today'), ico: '◑', to: '/' },
     { name: 'inbox', label: t('nav.chats'), ico: '◍', to: '/conversaciones' },
+    { name: 'issues', label: t('nav.issues'), ico: '◆', to: '/asuntos' },
     { name: 'spaces', label: t('nav.spaces'), ico: '▦', to: '/espacios' },
     { name: 'people', label: t('nav.peopleShort'), ico: '◎', to: '/participantes' },
   ];

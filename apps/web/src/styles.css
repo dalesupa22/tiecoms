@@ -191,7 +191,7 @@ a:hover { color: var(--accent-ink); }
   .shell.show-side .side { display: flex; border-right: 0; }
   .shell.show-side .main { display: none; }
   .tabs {
-    display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); background: var(--paper-2);
+    display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--line); background: var(--paper-2);
     padding: 4px 4px calc(4px + var(--safe-b));
   }
   .shell.in-conv .tabs { display: none; }
@@ -214,3 +214,71 @@ a:hover { color: var(--accent-ink); }
   .only-desktop { display: none !important; }
 }
 @media (min-width: 861px) { .only-mobile { display: none !important; } }
+
+/* ---------- Asuntos ---------- */
+.issue-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; text-align: left; width: 100%; }
+.issue-row:hover { background: #fff; }
+.issue-row.is-jam { border-color: #f0b58f; background: #fffaf6; }
+.ist { font-size: 11px; font-weight: 700; border-radius: 99px; padding: 2px 8px; white-space: nowrap; background: var(--paper-3); color: var(--ink-2); }
+.ist-in_progress { background: #e8effd; color: #3a63c4; }
+.ist-waiting { background: #fff1e3; color: #b65a12; }
+.ist-done { background: #e6f3e5; color: #2f7a45; }
+.ist-cancelled { background: #efebe5; color: #8a8378; text-decoration: line-through; }
+.jam-badge { font-size: 11px; font-weight: 700; color: #a8420e; background: #ffe9dc; border-radius: 99px; padding: 2px 8px; white-space: nowrap; }
+.jam-alert { font-size: 13px; color: #8f3a0b; background: #fff1e8; border: 1px solid #ffd3b8; border-radius: 10px; padding: 8px 12px; }
+.issue-seg { flex-wrap: wrap; }
+.issue-seg button { min-width: 88px; }
+.issue-timeline { display: flex; flex-direction: column; gap: 10px; max-height: 260px; overflow: auto; padding-right: 4px; }
+.issue-ev { display: flex; gap: 8px; align-items: flex-start; }
+.issue-comment { margin-top: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; white-space: pre-wrap; font-size: 13px; }
+.issues-here { display: flex; align-items: center; gap: 8px; padding: 8px 18px; border-bottom: 1px solid var(--line); overflow-x: auto; background: var(--paper); }
+.issue-chip { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--card); border-radius: 99px; padding: 3px 11px 3px 4px; font-size: 13px; font-weight: 600; max-width: 280px; flex: none; }
+.issue-chip:hover { border-color: var(--ink); }
+.msg-issue { margin-top: 4px; border: 1px solid #e6c9b6; background: #fbf1ea; color: #8f4527; border-radius: 99px; font-size: 12px; font-weight: 600; padding: 2px 10px; }
+
+/* ---------- Acciones por mensaje ---------- */
+.msg { position: relative; }
+.msg-actions { display: none; gap: 4px; margin-top: 4px; }
+.msg-actions button { border: 1px solid var(--line); background: var(--card); border-radius: 99px; font-size: 12px; font-weight: 600; padding: 3px 10px; color: var(--ink-2); }
+.msg-actions button:hover { border-color: var(--accent); color: var(--accent-ink); }
+@media (pointer: fine) { .msg:hover .msg-actions { display: flex; } }
+.msg.show-actions .msg-actions { display: flex; }
+.msg.is-highlight { background: #fdf3df; box-shadow: inset 3px 0 0 var(--orange); transition: background 1s; }
+.link-btn { border: 0; background: none; color: var(--accent); font-weight: 600; padding: 0; font-size: inherit; }
+.link-btn:hover { text-decoration: underline; }
+
+/* ---------- Bifurcaciones ---------- */
+.lineage { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 18px; background: #f6f2e9; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.lin-chip { border: 1px solid var(--line); background: var(--card); border-radius: 99px; padding: 3px 11px; font-weight: 600; font-size: 12.5px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lin-chip:hover { border-color: var(--ink); }
+.lin-chip.is-muted { color: var(--muted); font-weight: 500; }
+.lin-done { color: #2f7a45; font-weight: 700; font-size: 12px; white-space: nowrap; }
+.lin-open { color: #b65a12; font-weight: 700; font-size: 12px; white-space: nowrap; }
+.kind-badge { font-size: 10.5px; font-weight: 700; letter-spacing: .3px; border-radius: 6px; padding: 1px 7px; white-space: nowrap; }
+.k-same { background: #e8effd; color: #3a63c4; }
+.k-internal { background: #fff; color: var(--ink-2); border: 1px solid var(--line); }
+.k-directive { background: #1b1917; color: #f4f1ea; }
+.merged-card { display: flex; align-items: center; gap: 8px; margin: 4px 0; padding: 6px 10px; border-radius: 10px; background: #eef6ec; border: 1px solid #cfe6cb; color: #2f6b3f; font-size: 12.5px; font-weight: 600; }
+.merged-card span { flex: 1; min-width: 0; }
+.derive-quote { margin: 0; padding: 10px 14px; border-left: 3px solid var(--orange); background: var(--card); border-radius: 0 10px 10px 0; color: var(--ink-2); font-size: 13.5px; }
+.derive-opt.is-on { border-color: var(--ink); background: #fff; }
+
+/* ---------- Trazo ---------- */
+.trazo-chain { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.trazo-chain > header { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+.trazo-nodes { display: flex; flex-direction: column; gap: 8px; }
+.trazo-row { display: flex; align-items: stretch; }
+.trazo-rail { width: 22px; flex: none; border-left: 1.5px solid #cdc5b7; border-bottom: 1.5px solid #cdc5b7; border-radius: 0 0 0 12px; height: 26px; margin-top: -10px; }
+.trazo-node { flex: 1; min-width: 0; text-align: left; border: 1px solid var(--line); background: #fff; border-radius: 12px; padding: 10px 14px; }
+.trazo-node:hover { border-color: var(--ink); }
+.trazo-node.is-open { border-left: 3px solid #e8883a; }
+.trazo-node.is-back { border-left: 3px solid #3d7a4f; }
+@media (max-width: 860px) {
+  .tabs button { font-size: 10px; }
+  .issue-row { flex-wrap: wrap; }
+  .issue-row .grow { flex-basis: 60%; }
+  .lineage, .issues-here { padding: 6px 10px; }
+}
+/* En el panel angosto el asunto se apila: título arriba, señales abajo. */
+.panel .issue-row { flex-wrap: wrap; row-gap: 6px; }
+.panel .issue-row .grow { flex: 1 1 calc(100% - 44px); }

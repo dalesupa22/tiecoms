@@ -33,12 +33,19 @@ Pruebas de extremo a extremo (contra una base de pruebas, nunca producción):
 API_URL=http://localhost:3020 npm test
 ```
 
+## Asuntos y bifurcaciones
+
+- **Asuntos**: pendientes que nacen de un mensaje (o a mano), con responsable, fecha, estado (abierto, en curso, esperando a otra empresa, resuelto, descartado), historial y comentarios. Heredan la audiencia de su conversación. Se marcan como posible cuello de botella si llevan 2+ días sin moverse o se vencen.
+- **Bifurcaciones**: «⑂ Derivar» un mensaje crea una conversación aparte (misma audiencia, diagnóstico interno de mi empresa o decisión directiva). La derivada muestra su linaje y «↩ Devolver el resultado» publica el cierre en el origen. En el origen no se revela el nombre de una derivada que no todos pueden ver. **Trazo** muestra cada cadena completa.
+- Arnés visual sin backend para desarrollo: `npm -w @tiecoms/web run dev` y abrir `/harness.html?to=/c/general&lang=es`.
+
 ## Datos de demostración
 
 `scripts/seed-demo.mjs` crea por el API 3 empresas (Xertify, Estudio Norte, Nexo Logística), 6 personas, un tercero (Julián Castro, consultor con fecha de salida), 2 espacios entre empresas, grupos compartidos, directivo, internos y directos. Cuentas: `danny|laura|mateo|ana|lucia|carlos|julian@demo.tiecoms.com`, misma contraseña (en `.secrets/demo_password`, fuera de git).
 
 ```bash
 API_URL=https://app.tiecoms.com DEMO_PASSWORD='...' node scripts/seed-demo.mjs        # una sola vez
+API_URL=https://app.tiecoms.com DEMO_PASSWORD='...' node scripts/seed-demo-extras.mjs # asuntos y bifurcaciones de demo
 API_URL=https://app.tiecoms.com DEMO_PASSWORD='...' node scripts/three-sessions.mjs   # 3 sesiones en vivo: latencia y alcance
 ```
 

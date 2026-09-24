@@ -25,6 +25,8 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
     ),
     pool.query(
       `SELECT c.id, c.workspace_id, c.kind, c.level, c.name, c.internal_org_id, c.last_message_seq, c.last_event_seq, c.last_message_at,
+              c.parent_conversation_id, c.parent_message_id, (SELECT pm.seq FROM messages pm WHERE pm.id = c.parent_message_id) AS parent_message_seq, c.derive_kind, c.derive_reason, c.returned_at,
+              (SELECT count(*) FROM issues i WHERE i.conversation_id = c.id AND i.status NOT IN ('done','cancelled'))::int AS open_issues,
               m.can_post, m.can_manage, m.history_from_seq, wm.role AS workspace_role,
               COALESCE(rc.last_read_seq, 0) AS last_read_seq,
               ARRAY(SELECT user_id FROM conversation_memberships x WHERE x.conversation_id = c.id AND x.removed_at IS NULL ORDER BY x.joined_at) AS member_ids,
@@ -81,6 +83,9 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
       unread: Math.max(0, r.last_message_seq - readFrom),
       canPost: r.can_post, canManage: r.can_manage || ['lead', 'admin'].includes(r.workspace_role),
       historyFromSeq: r.history_from_seq,
+      parentId: r.parent_conversation_id, parentMessageId: r.parent_message_id, parentMessageSeq: r.parent_message_seq ?? null, deriveKind: r.derive_kind,
+      deriveReason: r.derive_reason, returnedAt: r.returned_at ? new Date(r.returned_at).toISOString() : null,
+      openIssues: r.open_issues,
     };
   });
 

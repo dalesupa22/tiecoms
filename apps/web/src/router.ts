@@ -20,7 +20,7 @@ export function usePath() {
 }
 
 export type Route =
-  | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' }
+  | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' }
   | { name: 'conversation'; id: string } | { name: 'workspace'; id: string }
   | { name: 'login' } | { name: 'signup' } | { name: 'invite'; token: string };
 
@@ -35,5 +35,12 @@ export function parse(path: string): Route {
   if (a === 'espacios') return { name: 'spaces' };
   if (a === 'participantes') return { name: 'people' };
   if (a === 'ajustes') return { name: 'settings' };
+  if (a === 'asuntos') return { name: 'issues' };
+  if (a === 'trazo') return { name: 'trazo' };
   return { name: 'today' };
+}
+
+/** Parámetro de búsqueda actual (p. ej. ?m=12 para saltar a un mensaje). */
+export function queryParam(name: string) {
+  return new URLSearchParams(location.search).get(name);
 }

@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type EventsPage, type InvitationPreviewDTO, type MessageDTO, type OrgInvitationPreviewDTO, type Platform,
+  type EventsPage, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationPreviewDTO, type Platform,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -37,6 +37,8 @@ export interface ClientState {
   conversations: Record<string, ConversationState>;
   pending: PendingMessage[];
   typing: Record<string, { userId: string; until: number }[]>;
+  /** Asuntos conocidos por id (se cargan por espacio, conversación o «míos» y se actualizan en vivo). */
+  issues: Record<string, IssueDTO>;
 }
 
 export interface ClientOptions {
@@ -57,7 +59,7 @@ const uid = () => (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(3
  * escritorio y móvil se comporten igual.
  */
 export class TieComsClient {
-  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {} };
+  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {} };
   private listeners = new Set<() => void>();
   private accessToken: string | null = null;
   private accessExp = 0;
@@ -180,7 +182,7 @@ export class TieComsClient {
     this.accessToken = null;
     await this.opts.secrets?.set(null);
     if (userId) await this.opts.storage.clearPrefix(`u:${userId}:`);
-    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {} };
+    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {} };
     this.listeners.forEach((l) => l());
   }
 
@@ -272,6 +274,8 @@ export class TieComsClient {
     const local = this.state.conversations[e.conversationId];
     const meta = this.state.data?.conversations.find((c) => c.id === e.conversationId);
     if (!meta) { this.scheduleBootstrap(); return; }
+    // Los asuntos se actualizan aunque la conversación no esté abierta.
+    if (e.type === 'issue.updated') { this.putIssues([e.issue]); this.recountIssues(e.conversationId); }
     if (e.type === 'message.created') this.bumpMeta(e.message);
     if (!local?.loaded) {
       this.patchConversationMeta(e.conversationId, { lastEventSeq: Math.max(meta.lastEventSeq, e.eventSeq) });
@@ -301,6 +305,7 @@ export class TieComsClient {
     let messages = local.messages;
     if (e.type === 'message.created' || e.type === 'message.updated') messages = upsertMessage(messages, e.message);
     if (e.type === 'members.changed') { this.patchConversationMeta(e.conversationId, { memberIds: e.memberIds }); this.scheduleBootstrap(); }
+    if (e.type === 'issue.updated') this.putIssues([e.issue]);
     this.setConv(e.conversationId, { messages, lastEventSeq: e.eventSeq });
     if (e.type === 'message.created') this.dropPending(e.message);
   }
@@ -457,6 +462,73 @@ export class TieComsClient {
       method: 'POST', json: { clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo },
     });
     return r.message;
+  }
+
+  // ---------- Asuntos ----------
+  private putIssues(list: IssueDTO[]) {
+    if (!list.length) return;
+    const next = { ...this.state.issues };
+    for (const i of list) next[i.id] = i;
+    this.set({ issues: next });
+  }
+  private recountIssues(conversationId: string) {
+    const n = Object.values(this.state.issues).filter((i) => i.conversationId === conversationId && i.status !== 'done' && i.status !== 'cancelled').length;
+    this.patchConversationMeta(conversationId, { openIssues: n });
+  }
+  async loadIssues(filter: { workspaceId?: string; conversationId?: string; mine?: boolean; open?: boolean } = {}) {
+    const q = new URLSearchParams();
+    if (filter.workspaceId) q.set('workspaceId', filter.workspaceId);
+    if (filter.conversationId) q.set('conversationId', filter.conversationId);
+    if (filter.mine) q.set('mine', '1');
+    if (filter.open) q.set('open', '1');
+    const r = await this.request<{ issues: IssueDTO[] }>(`/issues?${q}`);
+    this.putIssues(r.issues);
+    return r.issues;
+  }
+  async createIssue(conversationId: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; originMessageId?: string | null }) {
+    const i = await this.request<IssueDTO>(`/conversations/${conversationId}/issues`, { method: 'POST', json: input });
+    this.putIssues([i]); this.recountIssues(conversationId);
+    return i;
+  }
+  async updateIssue(id: string, patch: Partial<Pick<IssueDTO, 'title' | 'status' | 'ownerId' | 'dueDate' | 'waitingOnOrgId'>>) {
+    const i = await this.request<IssueDTO>(`/issues/${id}`, { method: 'PATCH', json: patch });
+    this.putIssues([i]); this.recountIssues(i.conversationId);
+    return i;
+  }
+  async issueDetail(id: string) {
+    const r = await this.request<{ issue: IssueDTO; events: IssueEventDTO[] }>(`/issues/${id}`);
+    this.putIssues([r.issue]);
+    return r;
+  }
+  async commentIssue(id: string, body: string) {
+    const i = await this.request<IssueDTO>(`/issues/${id}/comments`, { method: 'POST', json: { body } });
+    this.putIssues([i]);
+    return i;
+  }
+
+  // ---------- Bifurcaciones ----------
+  async derive(conversationId: string, input: { messageId: string; kind: 'same' | 'internal' | 'directive'; name?: string; reason?: string }) {
+    const r = await this.request<{ id: string }>(`/conversations/${conversationId}/derive`, { method: 'POST', json: input });
+    await this.loadBootstrap();
+    return r;
+  }
+  async returnResult(conversationId: string, summary: string) {
+    const r = await this.request<{ parentId: string; messageId: string }>(`/conversations/${conversationId}/return`, { method: 'POST', json: { summary } });
+    await this.loadBootstrap();
+    return r;
+  }
+
+  /** Carga hacia atrás hasta tener el mensaje con ese seq (para saltar a un mensaje de origen). */
+  async ensureMessage(conversationId: string, seq: number) {
+    await this.openConversation(conversationId);
+    for (let guard = 0; guard < 40; guard++) {
+      const c = this.state.conversations[conversationId];
+      if (!c?.loaded) return false;
+      if (c.messages.some((m) => m.seq === seq)) return true;
+      if (!c.hasMore || (c.messages[0]?.seq ?? 0) <= seq) return false;
+      await this.loadOlder(conversationId);
+    }
+    return false;
   }
 
   // ---------- Espacios, grupos, invitaciones ----------

@@ -51,6 +51,10 @@ export function conversationTitle(d: BootstrapDTO, c: ConversationDTO) {
     const other = c.memberIds.find((m) => m !== d.me.id);
     return personById(d, other)?.name ?? t('chat.aDirect');
   }
+  if (c.kind === 'multi' && !c.name) {
+    const names = c.memberIds.filter((m) => m !== d.me.id).map((m) => personById(d, m)?.name.split(' ')[0]).filter(Boolean) as string[];
+    return names.length > 3 ? `${names.slice(0, 3).join(', ')} ${t('chat.andMore', { n: names.length - 3 })}` : names.join(', ') || t('chat.groupChat');
+  }
   // Nombres que crea el sistema por defecto se muestran en el idioma de quien lee.
   if (c.kind === 'internal' && c.name === 'Equipo interno') return t('conv.defaultInternal');
   return c.name ?? t('chat.aConversation');
@@ -60,6 +64,10 @@ export function conversationSubtitle(d: BootstrapDTO, c: ConversationDTO) {
   if (c.kind === 'direct') {
     const other = personById(d, c.memberIds.find((m) => m !== d.me.id));
     return other ? [other.title, orgById(d, other.orgId)?.name ?? (other.guest ? t('common.guest') : null)].filter(Boolean).join(' · ') : '';
+  }
+  if (c.kind === 'multi') {
+    const orgs = [...new Set(c.memberIds.map((m) => orgById(d, personById(d, m)?.orgId)?.name).filter(Boolean))];
+    return [t('chat.groupChat'), orgs.slice(0, 3).join(', ')].filter(Boolean).join(' · ');
   }
   const ws = d.workspaces.find((w) => w.id === c.workspaceId);
   return [ws?.name, c.kind === 'internal' ? t('kind.internalShort') : c.level === 'directivo' ? t('kind.directivo') : null].filter(Boolean).join(' · ');

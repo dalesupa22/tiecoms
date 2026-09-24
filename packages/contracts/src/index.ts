@@ -87,7 +87,8 @@ export interface AuthResult {
 // ---------- Entidades ----------
 export type OrgRole = 'owner' | 'admin' | 'member';
 export type WorkspaceRole = 'lead' | 'admin' | 'member' | 'guest';
-export type ConversationKind = 'group' | 'internal' | 'direct';
+/** multi = chat grupal entre personas (de una o varias empresas) que no vive en un espacio. */
+export type ConversationKind = 'group' | 'internal' | 'direct' | 'multi';
 export type ConversationLevel = 'directivo' | 'operativo' | null;
 
 export interface UserDTO {
@@ -183,6 +184,8 @@ export interface ConversationDTO {
 }
 
 export type ForwardSource = 'whatsapp' | 'slack' | 'email' | 'teams' | 'tiecoms' | 'other';
+/** imageUrl es una ruta del API (/api/v1/previews/…): la miniatura ya está en TieComs. */
+export interface LinkPreviewDTO { url: string; title: string | null; description: string | null; siteName: string | null; imageUrl: string | null }
 export interface ForwardedInfo { source: ForwardSource; author?: string | null; sentAt?: string | null; fromConversationId?: string | null }
 
 export interface ReminderDTO {
@@ -260,6 +263,8 @@ export interface MessageDTO {
   mergedFrom: string | null;
   /** Mensaje traído desde WhatsApp, Slack, correo u otra conversación. */
   forwarded: ForwardedInfo | null;
+  /** Vista previa del primer enlace; llega después con message.updated. Clientes viejos pueden no traerla. */
+  linkPreview?: LinkPreviewDTO | null;
   createdAt: string;
   editedAt: string | null;
   deletedAt: string | null;
@@ -297,6 +302,8 @@ export const AddMembersInput = z.object({
 });
 
 export const CreateDirectInput = z.object({ userId: z.uuid() });
+/** Nuevo chat: con una persona abre (o reutiliza) el directo; con varias crea un chat grupal. */
+export const CreateChatInput = z.object({ userIds: z.array(z.uuid()).min(1).max(50), name: z.string().trim().min(2).max(120).optional() });
 
 export const CreateInvitationInput = z.object({
   email: email.optional(),

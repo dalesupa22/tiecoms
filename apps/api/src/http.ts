@@ -7,7 +7,7 @@ import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, type AuthResult,
-  UpdateProfileInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
+  UpdateProfileInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -25,6 +25,8 @@ import * as reminders from './modules/reminders.ts';
 import * as wa from './modules/whatsapp.ts';
 import * as profile from './modules/profile.ts';
 import * as drive from './modules/drive.ts';
+import { readPreviewImage } from './modules/link-preview.ts';
+import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
 import { z } from 'zod';
 import { verifyAccess } from './security.ts';
@@ -172,6 +174,7 @@ export async function buildHttp() {
       ws.acceptInvitation(req.userId, req.params.token, AcceptInvitationInput.parse(req.body ?? {})));
 
     priv.post('/api/v1/directs', async (req) => ws.getOrCreateDirect(req.userId, CreateDirectInput.parse(req.body).userId));
+    priv.post('/api/v1/chats', async (req) => ws.createChat(req.userId, CreateChatInput.parse(req.body)));
 
     priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/messages', async (req) => {
       const q = PageQuery.parse(req.query);
@@ -270,6 +273,14 @@ export async function buildHttp() {
   // Foto de perfil: el id cambia en cada subida, así que se puede cachear para siempre.
   app.get<{ Params: { id: string } }>('/api/v1/avatars/:id', async (req, reply) => {
     const f = await profile.readAvatar(z.uuid().parse(req.params.id));
+    return reply.header('content-type', f.contentType).header('cache-control', 'public, max-age=31536000, immutable').send(f.body);
+  });
+
+  // Miniatura de una vista previa de enlace (guardada en S3 por el worker).
+  app.get<{ Params: { id: string } }>('/api/v1/previews/:id', async (req, reply) => {
+    const key = await readPreviewImage(z.uuid().parse(req.params.id));
+    if (!key) return reply.status(404).send({ error: { code: 'not_found', message: 'No encontrada' } });
+    const f = await getObject(key);
     return reply.header('content-type', f.contentType).header('cache-control', 'public, max-age=31536000, immutable').send(f.body);
   });
 

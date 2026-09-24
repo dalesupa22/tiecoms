@@ -3,7 +3,7 @@ import { forbidden, notFound } from './errors.ts';
 
 export interface ConversationAccess {
   id: string;
-  kind: 'group' | 'internal' | 'direct';
+  kind: 'group' | 'internal' | 'direct' | 'multi';
   workspaceId: string | null;
   internalOrgId: string | null;
   lastMessageSeq: number;

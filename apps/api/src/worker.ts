@@ -7,6 +7,7 @@ import { hostname } from 'node:os';
 import { enqueueOutbox, pool, tx } from './db.ts';
 import { fireDueReminders } from './modules/reminders.ts';
 import { cleanupExpired as cleanupSso } from './modules/sso.ts';
+import { previewMessage } from './modules/link-preview.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
 const LEASE_SECONDS = 120;
@@ -14,6 +15,8 @@ const LEASE_SECONDS = 120;
 type Handler = (payload: any) => Promise<void>;
 
 const handlers: Record<string, Handler> = {
+  /** Vista previa del primer enlace de un mensaje. */
+  async 'link.preview'(p) { await previewMessage(p.messageId); },
   /** Terceros vencidos: se revoca el acceso y se sacan sus sockets de las salas. */
   async 'housekeeping.expire_guests'() {
     await tx(async (c) => {

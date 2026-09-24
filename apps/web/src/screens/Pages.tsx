@@ -4,12 +4,13 @@ import { client, useClient } from '../app-client.ts';
 import { errorText, getLang, langPreference, locale, setLang, t, tn, useLang, type Lang } from '../i18n.ts';
 import { navigate } from '../router.ts';
 import { openProfile } from './Profile.tsx';
+import { NewChatDialog, StackedAvatars } from './Chats.tsx';
 import { Avatar, OrgMark, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, previewText, timeLabel } from '../ui.tsx';
 import { InviteDialog, NewGroupDialog, NewWorkspaceDialog } from './Dialogs.tsx';
 import { IssueDrawer, IssueRow, isClosed } from './Issues.tsx';
 import { TodayAgenda, newEvent } from './Calendar.tsx';
 import { RemindersSection } from './Bring.tsx';
-import { askNotifications, conversationMenu, personMenu } from '../actions.tsx';
+import { askNotifications, conversationMenu, openDialog, personMenu } from '../actions.tsx';
 import { menuProps } from '../menu.tsx';
 import { SignOutButton, groupWorkspaces } from './Shell.tsx';
 
@@ -24,7 +25,7 @@ function ConvCard({ c }: { c: ConversationDTO }) {
   const org = other ? orgById(d, other.orgId) : c.workspaceId ? counterpartOrg(d, c.workspaceId) : null;
   return (
     <button className="card conv-card" onClick={() => navigate(`/c/${c.id}`)} {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
-      {other ? <Avatar person={other} org={org} size={38} /> : <OrgMark org={org} size={38} />}
+      {other ? <Avatar person={other} org={org} size={38} /> : c.kind === 'multi' ? <StackedAvatars c={c} size={30} /> : <OrgMark org={org} size={38} />}
       <span className="grow" style={{ minWidth: 0 }}>
         <span className="row"><b className="ellipsis grow">{conversationTitle(d, c)}</b><span className="small muted">{timeLabel(c.lastMessageAt)}</span></span>
         <span className="small muted ellipsis" style={{ display: 'block' }}>{conversationSubtitle(d, c)}</span>
@@ -105,12 +106,12 @@ export function InboxScreen() {
   const d = useClient((s) => s.data)!;
   const [filter, setFilter] = useState<'all' | 'unread' | 'direct'>('all');
   const [q, setQ] = useState('');
-  const list = d.conversations.filter((c) => (filter === 'unread' ? c.unread > 0 : filter === 'direct' ? c.kind === 'direct' : true))
+  const list = d.conversations.filter((c) => (filter === 'unread' ? c.unread > 0 : filter === 'direct' ? c.kind === 'direct' || c.kind === 'multi' : true))
     .filter((c) => !q || conversationTitle(d, c).toLowerCase().includes(q.toLowerCase()));
   const label = { all: t('inbox.all'), unread: t('inbox.unread'), direct: t('inbox.directs') };
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 760 }}>
-      <h1>{t('nav.inbox')}</h1>
+      <div className="row"><h1 className="grow">{t('nav.inbox')}</h1><button className="btn primary small" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)}>＋ {t('chat.new')}</button></div>
       <div className="row" style={{ margin: '14px 0', flexWrap: 'wrap' }}>
         <input className="input grow" style={{ minWidth: 180 }} placeholder={t('inbox.search')} value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="seg" style={{ minWidth: 260 }}>

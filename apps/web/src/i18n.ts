@@ -32,7 +32,7 @@ const es = {
   // Navegación
   'nav.today': 'Hoy', 'nav.inbox': 'Conversaciones', 'nav.chats': 'Chats', 'nav.spaces': 'Espacios', 'nav.people': 'Participantes', 'nav.peopleShort': 'Personas',
   'nav.mainNav': 'Navegación principal', 'side.companies': 'Empresas y espacios', 'side.newSpace': 'Nuevo espacio con un cliente',
-  'side.empty': 'Crea tu primer espacio de trabajo con otra empresa.', 'side.directs': 'Directos',
+  'side.empty': 'Crea tu primer espacio de trabajo con otra empresa.', 'side.directs': 'Chats',
   'conn.connecting': 'Conectando…', 'conn.offline': 'Sin conexión. Tus mensajes quedan en cola y se envían al volver.',
   // Hoy
   'today.morning': 'Buenos días', 'today.afternoon': 'Buenas tardes', 'today.evening': 'Buenas noches',
@@ -142,7 +142,7 @@ const es = {
   'edit.save': 'Guardar', 'edit.hint': 'Esc para cancelar · Enter para guardar', 'pins.title': 'Fijados', 'pins.empty': 'No hay mensajes fijados.', 'pins.count': '{n} fijados',
   'side.pinned': 'Fijados', 'side.muted': 'Silenciado',
   // Reenvíos
-  'fwd.title': 'Reenviar a TieComs', 'fwd.pick': 'Elige la conversación', 'fwd.search': 'Buscar conversación', 'fwd.comment': 'Agregar un comentario (opcional)', 'fwd.send': 'Reenviar',
+  'fwd.title': 'Reenviar a otro chat', 'fwd.pick': 'Elige la conversación', 'fwd.search': 'Buscar conversación', 'fwd.comment': 'Agregar un comentario (opcional)', 'fwd.send': 'Reenviar',
   'fwd.label': 'Reenviado', 'fwd.from': 'Reenviado desde {source}', 'fwd.fromBy': 'Reenviado desde {source} · {author}', 'fwd.fromConv': 'Reenviado desde «{name}»',
   'src.whatsapp': 'WhatsApp', 'src.slack': 'Slack', 'src.email': 'correo', 'src.teams': 'Teams', 'src.tiecoms': 'TieComs', 'src.other': 'otra app',
   'imp.action': 'Traer desde WhatsApp, Slack o correo', 'imp.title': 'Traer a TieComs', 'imp.body': 'Pega lo que copiaste de WhatsApp, Slack, un correo u otra app. Queda marcado con su origen y su autor original.',
@@ -218,6 +218,15 @@ const es = {
   'files.deleteFileConfirm': '¿Eliminar «{name}»?', 'files.tooBig': 'Algunos archivos pesan más de 25 MB y no se subieron.', 'files.uploaded': '{n} archivo(s) subido(s)',
   'files.uploading': 'Subiendo {done} de {total}…', 'files.dropHere': 'Suelta para subir a «{name}»', 'files.moveTitle': 'Mover «{name}»', 'files.moveHere': 'Mover aquí',
   'files.moved': 'Movido', 'files.expand': 'Abrir carpeta', 'files.collapse': 'Cerrar carpeta',
+  // Chats y reenvíos
+  'chat.new': 'Nuevo chat', 'chat.newHint': 'Elige una persona para un directo o varias para un chat grupal. Pueden ser de tu equipo o de otras empresas con las que trabajas.',
+  'chat.searchPeople': 'Buscar por nombre, cargo, área o empresa', 'chat.nobody': 'Nadie coincide.', 'chat.myTeam': 'Tu equipo',
+  'chat.crossCompany': 'Chat entre {n} empresas: cada quien se ve con su logo.', 'chat.sameCompany': 'Chat de tu equipo.',
+  'chat.groupNamePh': 'Nombre del chat (opcional)', 'chat.createGroup': 'Crear chat de {n}', 'chat.openDirect': 'Abrir chat',
+  'chat.groupChat': 'Chat grupal', 'chat.andMore': 'y {n} más', 'common.remove': 'Quitar',
+  'chat.scopeMulti': 'Solo las personas de este chat pueden leerlo. Quien entra después ve desde ese momento.',
+  'sys.chat.created': 'Chat creado con {names}.', 'menu.forwardChat': 'Reenviar a otro chat',
+  'fwd.sentMany': 'Reenviado a {n} chats', 'fwd.sendMany': 'Reenviar a {n}',
 };
 
 type Key = keyof typeof es;
@@ -244,7 +253,7 @@ const en: Record<Key, string> = {
   'role.Lead': 'Lead', 'role.Admin': 'Admin', 'role.Member': 'Member', 'role.Guest': 'Guest',
   'nav.today': 'Today', 'nav.inbox': 'Conversations', 'nav.chats': 'Chats', 'nav.spaces': 'Spaces', 'nav.people': 'People', 'nav.peopleShort': 'People',
   'nav.mainNav': 'Main navigation', 'side.companies': 'Companies and spaces', 'side.newSpace': 'New space with a client',
-  'side.empty': 'Create your first workspace with another company.', 'side.directs': 'Direct messages',
+  'side.empty': 'Create your first workspace with another company.', 'side.directs': 'Chats',
   'conn.connecting': 'Connecting…', 'conn.offline': 'Offline. Your messages are queued and will be sent when you reconnect.',
   'today.morning': 'Good morning', 'today.afternoon': 'Good afternoon', 'today.evening': 'Good evening',
   'today.summary': '{messages} in {conversations}', 'today.upToDate': 'You are all caught up.', 'today.spacesWith': '{spaces} with {companies}',
@@ -338,7 +347,7 @@ const en: Record<Key, string> = {
   'reply.to': 'Replying to {name}', 'reply.cancel': 'Cancel reply', 'reply.quoteMissing': 'Reply to an earlier message', 'msg.edited': '(edited)',
   'edit.save': 'Save', 'edit.hint': 'Esc to cancel · Enter to save', 'pins.title': 'Pinned', 'pins.empty': 'No pinned messages.', 'pins.count': '{n} pinned',
   'side.pinned': 'Pinned', 'side.muted': 'Muted',
-  'fwd.title': 'Forward to TieComs', 'fwd.pick': 'Choose the conversation', 'fwd.search': 'Search conversation', 'fwd.comment': 'Add a comment (optional)', 'fwd.send': 'Forward',
+  'fwd.title': 'Forward to another chat', 'fwd.pick': 'Choose the conversation', 'fwd.search': 'Search conversation', 'fwd.comment': 'Add a comment (optional)', 'fwd.send': 'Forward',
   'fwd.label': 'Forwarded', 'fwd.from': 'Forwarded from {source}', 'fwd.fromBy': 'Forwarded from {source} · {author}', 'fwd.fromConv': 'Forwarded from “{name}”',
   'src.whatsapp': 'WhatsApp', 'src.slack': 'Slack', 'src.email': 'email', 'src.teams': 'Teams', 'src.tiecoms': 'TieComs', 'src.other': 'another app',
   'imp.action': 'Bring in from WhatsApp, Slack or email', 'imp.title': 'Bring into TieComs', 'imp.body': 'Paste what you copied from WhatsApp, Slack, an email or another app. It keeps its source and original author.',
@@ -408,6 +417,14 @@ const en: Record<Key, string> = {
   'files.deleteFileConfirm': 'Delete “{name}”?', 'files.tooBig': 'Some files are over 25 MB and were not uploaded.', 'files.uploaded': '{n} file(s) uploaded',
   'files.uploading': 'Uploading {done} of {total}…', 'files.dropHere': 'Drop to upload to “{name}”', 'files.moveTitle': 'Move “{name}”', 'files.moveHere': 'Move here',
   'files.moved': 'Moved', 'files.expand': 'Open folder', 'files.collapse': 'Close folder',
+  'chat.new': 'New chat', 'chat.newHint': 'Pick one person for a direct message or several for a group chat. They can be on your team or at other companies you work with.',
+  'chat.searchPeople': 'Search by name, role, team or company', 'chat.nobody': 'Nobody matches.', 'chat.myTeam': 'Your team',
+  'chat.crossCompany': 'Chat across {n} companies: everyone shows with their logo.', 'chat.sameCompany': 'Chat with your team.',
+  'chat.groupNamePh': 'Chat name (optional)', 'chat.createGroup': 'Create chat of {n}', 'chat.openDirect': 'Open chat',
+  'chat.groupChat': 'Group chat', 'chat.andMore': 'and {n} more', 'common.remove': 'Remove',
+  'chat.scopeMulti': 'Only the people in this chat can read it. Anyone added later sees from that moment on.',
+  'sys.chat.created': 'Chat created with {names}.', 'menu.forwardChat': 'Forward to another chat',
+  'fwd.sentMany': 'Forwarded to {n} chats', 'fwd.sendMany': 'Forward to {n}',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };

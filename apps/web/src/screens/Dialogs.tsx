@@ -75,7 +75,7 @@ export function NewGroupDialog({ workspaceId, onClose }: { workspaceId: string; 
             <label key={p.id} className="check">
               <input type="checkbox" checked={picked.includes(p.id)} onChange={() => toggle(p.id)} />
               <Avatar person={p} org={orgById(d, p.orgId)} size={28} />
-              <span className="grow"><b>{p.name}</b><span className="small muted"> · {orgById(d, p.orgId)?.name ?? t('common.guest')}</span></span>
+              <span className="grow"><b>{p.name}</b><span className="small muted"> · {[p.title, p.area, orgById(d, p.orgId)?.name ?? t('common.guest')].filter(Boolean).join(' · ')}</span></span>
             </label>
           ))}
         </div>
@@ -150,7 +150,8 @@ export function InviteDialog({ workspaceId, onClose }: { workspaceId: string; on
 export function AddMembersDialog({ conversationId, onClose }: { conversationId: string; onClose: () => void }) {
   const d = useClient((st) => st.data)!;
   const conv = d.conversations.find((c) => c.id === conversationId)!;
-  const inWs = new Set(d.workspaces.find((w) => w.id === conv.workspaceId)?.memberIds ?? []);
+  // En un chat grupal se puede sumar a cualquiera con quien compartas un espacio o la empresa.
+  const inWs = new Set(conv.kind === 'multi' ? d.people.map((p) => p.id) : d.workspaces.find((w) => w.id === conv.workspaceId)?.memberIds ?? []);
   let candidates = d.people.filter((p) => inWs.has(p.id) && !conv.memberIds.includes(p.id));
   if (conv.kind === 'internal') candidates = candidates.filter((p) => p.orgId === conv.internalOrgId);
   const [picked, setPicked] = useState<string[]>([]);

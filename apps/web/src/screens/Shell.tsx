@@ -10,6 +10,7 @@ import { newEvent } from './Calendar.tsx';
 import type { ConversationDTO, WorkspaceDTO } from '@tiecoms/contracts';
 import { t } from '../i18n.ts';
 import { openAccountMenu } from './Profile.tsx';
+import { NewChatDialog, StackedAvatars } from './Chats.tsx';
 
 const NAV = [
   { name: 'today', label: 'nav.today', ico: '◑', to: '/' },
@@ -37,7 +38,8 @@ function Sidebar({ route }: { route: Route }) {
   const d = useClient((s) => s.data)!;
   const [newWs, setNewWs] = useState(false);
   const groups = useMemo(() => groupWorkspaces(d), [d]);
-  const directs = d.conversations.filter((c) => c.kind === 'direct');
+  const directs = d.conversations.filter((c) => c.kind === 'direct' || c.kind === 'multi')
+    .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''));
   const unreadTotal = d.conversations.reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0);
   const pinnedConvs = d.conversations.filter((c) => c.pinnedAt).sort((a, b) => (a.pinnedAt ?? '').localeCompare(b.pinnedAt ?? ''));
   const pinnedWs = d.workspaces.filter((w) => w.pinnedAt);
@@ -89,12 +91,12 @@ function Sidebar({ route }: { route: Route }) {
             </div>
           </div>
         ))}
-        {directs.length > 0 && (
-          <>
-            <div className="eyebrow" style={{ padding: '14px 10px 4px' }}>{t('side.directs')}</div>
-            {directs.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />)}
-          </>
-        )}
+        <div className="row" style={{ padding: '14px 10px 2px' }}>
+          <span className="eyebrow grow">{t('side.directs')}</span>
+          <button className="btn ghost small" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)} title={t('chat.new')} aria-label={t('chat.new')}>＋</button>
+        </div>
+        {directs.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />)}
+        {directs.length === 0 && <button className="side-conv" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)}><span className="hash">＋</span><span className="grow muted">{t('chat.new')}</span></button>}
       </div>
       <button className="side-foot" style={{ border: 0, borderTop: '1px solid var(--line)', background: 'transparent', textAlign: 'left' }}
         aria-haspopup="menu" title={t('profile.menu')} onClick={(e) => openAccountMenu(e.currentTarget)}>
@@ -120,7 +122,7 @@ function ConvItem({ c, active, showWs = false }: { c: ConversationDTO; active: b
   return (
     <button className={`side-conv ${active ? 'active' : ''} ${c.unread && !muted ? 'unread' : ''} ${muted ? 'is-muted' : ''}`} onClick={() => navigate(`/c/${c.id}`)}
       {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
-      {other ? <Avatar person={other} org={orgById(d, other.orgId)} size={22} />
+      {other ? <Avatar person={other} org={orgById(d, other.orgId)} size={22} /> : c.kind === 'multi' ? <StackedAvatars c={c} size={20} />
         : <span className="hash">{c.parentId ? '⑂' : c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>}
       <span className="grow ellipsis">{conversationTitle(d, c)}{ws ? <span className="muted small"> · {ws.name}</span> : null}</span>
       {muted && <span className="small" title={t('side.muted')}>🔕</span>}

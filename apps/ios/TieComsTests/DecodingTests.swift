@@ -69,9 +69,9 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(members, .membersChanged(conversationId: "c1", eventSeq: 8, memberIds: ["a", "b"]))
     }
 
-    func testUnknownRedactedAndIssueEventsKeepSeq() throws {
+    func testUnknownRedactedAndBrokenEventsKeepSeq() throws {
         for json in [
-            #"{"type":"issue.updated","conversationId":"c1","eventSeq":11,"issue":{"id":"i1","status":"open"}}"#,
+            #"{"type":"issue.updated","conversationId":"c1","eventSeq":11,"issue":{"sinId":true}}"#,
             #"{"type":"redacted","conversationId":"c1","eventSeq":12}"#,
             #"{"type":"reaction.added","conversationId":"c1","eventSeq":13,"emoji":"🎉"}"#,
             // message.created con un mensaje ilegible: no se cae, solo avanza el cursor.

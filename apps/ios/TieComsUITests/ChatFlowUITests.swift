@@ -59,10 +59,11 @@ final class ChatFlowUITests: XCTestCase {
     }
 
     func testLoginSendEchoAndDeepLinks() throws {
+        guard ProcessInfo.processInfo.environment["TC_UI_V1"] == "1" else { throw XCTSkip("Recorrido v1: TEST_RUNNER_TC_UI_V1=1") }
         let f = try fixture()
         XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"), "no se prueba contra producción")
         let app = XCUIApplication()
-        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
+        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
         app.launch()
 
         // 1. Login como A
@@ -126,5 +127,103 @@ final class ChatFlowUITests: XCTestCase {
         // Deja la app en primer plano para la captura final.
         app.activate()
         shot(app, "06-final")
+    }
+
+    // MARK: v2
+
+    private func shotNamed(_ name: String) {
+        let s = XCUIScreen.main.screenshot()
+        let a = XCTAttachment(screenshot: s); a.name = name; a.lifetime = .keepAlways; add(a)
+        if let dir = ProcessInfo.processInfo.environment["TC_SHOTS"], !dir.isEmpty {
+            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            try? s.pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
+        }
+    }
+
+    /// Fotogramas del splash (≈0,7 s, 1,5 s, 2,3 s) congelados con -TCSplashFreeze.
+    func testSplashFrames() throws {
+        for t in ["0.7", "1.5", "2.3"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-TCSplashFreeze", t, "-TCResetSession", "YES", "-TCApiURL", "http://127.0.0.1:9", "-AppleLanguages", "(es)"]
+            app.launch()
+            XCTAssertTrue(app.otherElements["splash"].waitForExistence(timeout: 5))
+            sleep(1)
+            shotNamed("splash-\(t)")
+            app.terminate()
+        }
+    }
+
+    /// Splash → login (≤ 3 s) → conversación → pulsación larga → fijar y editar → el par responde en vivo.
+    func testV2SplashPinEditLive() throws {
+        let f = try fixture()
+        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
+        app.launchArguments += ["-TCMetrics", "YES"]
+        app.launch()
+        // La app mide cuánto estuvo el splash en pantalla (XCUITest espera a que la app quede quieta
+        // y la animación lo retrasa, así que no se cronometra desde aquí).
+        let metric = app.staticTexts["metrics.splash"]
+        XCTAssertTrue(metric.waitForExistence(timeout: 10))
+        let raw = [metric.label, metric.value as? String ?? ""].joined(separator: " ")
+        let splashMs = Int(raw.filter(\.isNumber)) ?? 99_999
+        print("[medida] métrica cruda: \(raw)")
+        print("[medida] UI v2: splash en pantalla hasta el login = \(splashMs) ms")
+        XCTAssertLessThanOrEqual(splashMs, 3000, "el splash termina y aparece el login en ≤ 3 s")
+        let email = app.textFields["login.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 5) && email.isHittable)
+        shotNamed("v2-01-login")
+
+        email.tap(); email.typeText(f.a.email)
+        let password = app.secureTextFields["login.password"]
+        password.tap(); password.typeText(f.password)
+        app.buttons["login.submit"].tap()
+        allowNotificationsIfAsked()
+
+        let row = app.buttons["conv.row.\(f.conversationId)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        shotNamed("v2-02-inicio")
+        row.tap()
+
+        let field = app.descendants(matching: .any)["composer.field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        let text = "hola v2 desde iOS \(Int.random(in: 100...999))"
+        field.tap(); field.typeText(text)
+        app.buttons["composer.send"].tap()
+        XCTAssertTrue(element(app, containing: "eco: \(text)").waitForExistence(timeout: 10), "eco del par")
+
+        // Pulsación larga sobre mi mensaje → Fijar mensaje
+        let mine = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Tú", text)).firstMatch
+        XCTAssertTrue(mine.waitForExistence(timeout: 5))
+        mine.press(forDuration: 1.0)
+        let pin = app.buttons["Fijar mensaje"]
+        XCTAssertTrue(pin.waitForExistence(timeout: 5), "menú de acciones del mensaje")
+        shotNamed("v2-03-menu")
+        pin.tap()
+        XCTAssertTrue(element(app, containing: "vi fijados:").waitForExistence(timeout: 10), "el par ve el fijado")
+        XCTAssertTrue(app.buttons["chat.pinsBar"].waitForExistence(timeout: 5), "barra de fijados")
+
+        // Pulsación larga → Editar → guardar
+        mine.press(forDuration: 1.0)
+        let edit = app.buttons["Editar"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        edit.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["composer.editBar"].waitForExistence(timeout: 5))
+        field.typeText(" (editado)")
+        app.buttons["composer.send"].tap()
+        XCTAssertTrue(element(app, containing: "vi edición: \(text) (editado)").waitForExistence(timeout: 10), "el par ve la edición en vivo")
+        XCTAssertTrue(element(app, containing: "(editado)").exists)
+        shotNamed("v2-04-fijado-editado")
+
+        // Pestañas nuevas (atrás cierra el teclado)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.tabBars.buttons["Asuntos"].tap()
+        XCTAssertTrue(app.navigationBars["Asuntos"].waitForExistence(timeout: 5))
+        shotNamed("v2-05-asuntos")
+        app.tabBars.buttons["Agenda"].tap()
+        XCTAssertTrue(app.navigationBars["Agenda"].waitForExistence(timeout: 5))
+        shotNamed("v2-06-agenda")
+        app.tabBars.buttons["Ajustes"].tap()
+        shotNamed("v2-07-ajustes")
     }
 }

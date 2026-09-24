@@ -497,6 +497,7 @@
 "sys.members.added.all" = "Joined: {names}, with access to the history.";
 "sys.returned" = "This conversation returned its result to its origin.";
 "sys.workspace.created" = "Space “{name}” created.";
+"tab.home" = "Home";
 "toast.copied" = "Copied";
 "toast.linkCopied" = "Link copied · it only opens for people with access";
 "toast.markedUnread" = "Marked as unread";

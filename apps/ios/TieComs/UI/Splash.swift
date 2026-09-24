@@ -94,7 +94,7 @@ enum SplashTimeline {
     static func pulse(_ t: Double) -> (radius: Double, opacity: Double) {
         let p = progress(t, 1.30, 1.75)
         guard p > 0, p < 1 else { return (0, 0) }
-        return (easeOut(p), 0.55 * (1 - p))
+        return (easeOut(p), 0.38 * (1 - p) * (1 - p))
     }
 
     /// Chispa k: desplazamiento (en unidades del ancho del logo) y opacidad. Salen en abanico hacia arriba y caen.
@@ -161,7 +161,8 @@ struct AnimatedSplashView: View {
     var ready: Bool
     /// Arranque en frío por un enlace.
     var short: Bool
-    var onFinish: () -> Void
+    /// Recibe cuánto estuvo en pantalla (segundos).
+    var onFinish: (Double) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
@@ -223,7 +224,7 @@ struct AnimatedSplashView: View {
         if !reduceMotion, !hapticDone, t >= SplashTimeline.hapticAt { hapticDone = true; Haptics.tap() }
         let done = reduceMotion ? (ready && elapsed > 1.1) || elapsed > SplashTimeline.maxWait
                                 : t >= SplashTimeline.total || elapsed > SplashTimeline.maxWait + 0.4
-        if done { finished = true; onFinish() }
+        if done { finished = true; onFinish(elapsed) }
     }
 
     // MARK: Dibujo
@@ -303,7 +304,7 @@ struct AnimatedSplashView: View {
         let knot = CGPoint(x: rect.minX + SplashTimeline.knot.x * rect.width, y: rect.minY + SplashTimeline.knot.y * rect.height)
         let pulse = SplashTimeline.pulse(t)
         if pulse.opacity > 0 {
-            let r = 20 + pulse.radius * rect.width * 0.35
+            let r = 12 + pulse.radius * rect.width * 0.26
             g.fill(Path(ellipseIn: CGRect(x: knot.x - r, y: knot.y - r, width: 2 * r, height: 2 * r)), with: .color(Theme.orange.opacity(pulse.opacity)))
         }
         for k in 0..<SplashTimeline.sparkCount {

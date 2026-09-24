@@ -4,13 +4,20 @@ struct RootView: View {
     @Environment(AppStore.self) private var store
     /// Splash animado solo en arranque en frío (este estado vive mientras viva el proceso).
     @State private var showSplash = !AppConfig.launchFlag("TCNoSplash")
+    @State private var splashSeconds: Double?
 
     var body: some View {
         @Bindable var store = store
-        ZStack {
+        ZStack(alignment: .topLeading) {
             content
+            // Solo pruebas de interfaz (-TCMetrics YES): duración real del splash.
+            if AppConfig.launchFlag("TCMetrics"), let s = splashSeconds {
+                Text("\(Int(s * 1000))").font(.system(size: 2)).opacity(0.05)
+                    .accessibilityIdentifier("metrics.splash").accessibilityLabel("\(Int(s * 1000))")
+            }
             if showSplash {
-                AnimatedSplashView(ready: store.status != .loading, short: store.launchedByLink) {
+                AnimatedSplashView(ready: store.status != .loading, short: store.launchedByLink) { seconds in
+                    splashSeconds = seconds
                     withAnimation(.easeOut(duration: 0.2)) { showSplash = false }
                 }
                 .transition(.opacity)
@@ -86,7 +93,7 @@ struct MainView: View {
         @Bindable var store = store
         TabView(selection: $store.tab) {
             NavigationStack(path: $store.homePath) { HomeView().routes() }
-                .tabItem { Label(L("nav.inbox"), systemImage: "bubble.left.and.bubble.right") }
+                .tabItem { Label(L("tab.home"), systemImage: "bubble.left.and.bubble.right") }
                 .tag(AppTab.home)
                 .accessibilityIdentifier("tab.home")
             NavigationStack(path: $store.issuesPath) { IssuesScreen().routes() }

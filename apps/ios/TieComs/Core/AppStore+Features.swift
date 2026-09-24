@@ -64,7 +64,7 @@ extension AppStore {
         try await api.requestData("/workspaces/\(id)/prefs", method: "PUT", json: ["pinned": pinned])
     }
 
-    static func muteUntil(_ option: MuteOption, now: Date = Date()) -> Date {
+    nonisolated static func muteUntil(_ option: MuteOption, now: Date = Date()) -> Date {
         switch option {
         case .hour: return now.addingTimeInterval(3600)
         case .eightHours: return now.addingTimeInterval(8 * 3600)

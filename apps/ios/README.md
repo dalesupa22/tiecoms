@@ -1,16 +1,70 @@
 # TieComs para iOS (nativo)
 
-App nativa en SwiftUI (iOS 17+), sin WebView ni Capacitor y sin dependencias externas.
-Se comporta igual que la app Android (especificación común: navegación, textos, sonidos,
-enlaces y reglas de sincronización de `packages/client-core`).
+App nativa en SwiftUI (iOS 17+). No usa WebView, Capacitor ni dependencias externas.
+Se comporta igual que la app Android y que la web: la navegación, los textos, los sonidos, los enlaces
+y las reglas de sincronización salen de `packages/client-core` y de `apps/web`.
+Especificación común: `SPEC.md` y `SPEC-v2.md` del coordinador.
 
 | | |
 |---|---|
-| Bundle ID | `com.tiecoms.app` |
+| Bundle ID | `com.tiecoms.app` (app) · `com.tiecoms.app.share` (extensión Compartir) |
 | Team | `B76US7H3L3` (CERTILABOR SAS), firma automática |
-| Versión | 1.0.0 (build 1) — `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` en `project.yml` |
+| App Group | `group.com.tiecoms.app`: Keychain compartido y lista de conversaciones para la extensión |
+| Versión | 1.1.0 (build 2), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.tiecoms.com` por defecto; `-TCApiURL <url>` al lanzar (pruebas) |
+
+## Qué hace (v1.1)
+
+- **Pestañas**: Inicio · Asuntos · Agenda · Ajustes. Trazo, Recordatorios y WhatsApp se abren desde el
+  menú ⋯ de Inicio y desde Ajustes.
+- **Conversación**:
+  - Pulsación larga sobre un mensaje (equivale al clic derecho de la web): responder con cita, copiar
+    texto o enlace, fijar o quitar, recordarme (tiempos rápidos o fecha elegida), marcar como no leído
+    desde aquí, derivar, abrir asunto, agendar reunión, reenviar (a TieComs, WhatsApp, Slack, Teams o
+    correo), editar ("(editado)") y eliminar ("Mensaje eliminado").
+  - Barra de fijados, etiqueta "Reenviado desde…", tarjeta de resultado de una derivada (`mergedFrom`),
+    barra de linaje (de dónde viene, derivadas, devolver el resultado) y tarjetas de reunión en el chat.
+- **Preferencias**: fijar arriba (conversaciones y espacios) y silenciar (1 h, 8 h, 1 semana o hasta
+  que se reactive). Una conversación silenciada no suena ni notifica, pero cuenta como no leída.
+- **Asuntos**: filtros Míos / Abiertos / Cerrados agrupados por espacio. El detalle tiene estado,
+  responsable, fecha límite, "esperando a <empresa>", mensaje de origen, historial y comentarios, y
+  muestra la señal de cuello de botella.
+- **Agenda**: lista por día y semana; crear, editar y cancelar reuniones con zona horaria e invitados;
+  RSVP (Asistiré / Tal vez / No asistiré); agregar a Google Calendar u Outlook.
+- **Recordatorios**: lista Ahora / Próximos, Hecho y Posponer 1 h. `reminder.due` genera una
+  notificación local con `tc_notify`.
+- **WhatsApp**:
+  - Cuentas personal y Business con QR o código de emparejamiento; generar otro código y desconectar.
+  - Organizador por categorías, chats con sus mensajes, fijar u ocultar, y vincular un chat a una
+    conversación de TieComs.
+  - `whatsapp.updated` refresca la pantalla.
+- **Dominios de empresa** (solo owner/admin, en Ajustes → Tu empresa): listar, agregar y verificar por
+  TXT.
+- **Eliminar cuenta** (Ajustes): pantalla que explica qué se borra y qué se conserva, pide el correo y
+  la contraseña (si la cuenta tiene), y ejecuta `DELETE /api/v1/account`. Al terminar borra las
+  credenciales locales y vuelve al login.
+- **Compartir hacia TieComs**:
+  - La extensión de iOS acepta texto o un enlace desde cualquier app. El usuario elige la conversación
+    y el texto se publica con `forwarded`.
+  - El origen se detecta por el formato: un chat de WhatsApp se separa en mensajes con su autor; un
+    correo toma De/Asunto; en otro caso queda como "otra app".
+  - La extensión usa la sesión de la app (Keychain del grupo). En la app, lo mismo funciona con
+    `tiecoms://share?text=…`.
+- **Login y registro**:
+  - "Continuar con Google" y "Continuar con Microsoft" abren `ASWebAuthenticationSession` con PKCE S256.
+  - En el registro, el nombre de la empresa (`org_name`) o la invitación (`org`) se pasan al `/start`.
+  - Los errores del SSO usan los mismos textos que la web (`err.sso_*`, `err.domain_claimed`).
+- **Splash "Un solo hilo"** (arranque en frío, `UI/Splash.swift`):
+  - Personas, luego el hilo naranja que las une, el nudo, el logo que nace con un pulso y chispas, y
+    el eslogan.
+  - Se dibuja con Canvas + TimelineView a 60 fps. La coreografía es una función pura del tiempo
+    (`SplashTimeline`).
+  - Sonido `tc_splash` en t = 0,30 s (respeta el interruptor de Sonidos y el modo silencio) y háptico
+    ligero en el nudo (t = 1,02 s).
+  - Un toque salta al final. Con Reduce Motion solo hace un fundido del logo. Con un enlace en frío
+    empieza en la fase 4 y dura como máximo 1,2 s. Si la sesión aún carga, un punto late hasta 6 s.
+  - Launch Screen: crema liso, `#161413` en modo oscuro.
 
 ## Estructura
 
@@ -18,114 +72,168 @@ enlaces y reglas de sincronización de `packages/client-core`).
 apps/ios/
   project.yml                 XcodeGen (fuente de verdad del proyecto)
   TieComs.xcodeproj           generado por XcodeGen (no editar a mano)
+  tools/gen-strings.mjs       genera Localizable.strings desde apps/web/src/i18n.ts + tools/ios-strings.json
   TieComs/
-    App/TieComsApp.swift      @main, AppDelegate (notificaciones, punto de extensión APNs)
+    App/TieComsApp.swift      @main, AppDelegate (notificaciones, punto de extensión APNs), detección de enlace en frío
     Core/
-      Models.swift            DTO con decodificación tolerante; eventos desconocidos → .other (avanzan el cursor)
-      SocketIOProtocol.swift  paquetes Engine.IO v4 / Socket.IO v5 (0/1/2/3/4x, ACK, namespaces)
-      SocketIOClient.swift    WebSocket (URLSessionWebSocketTask): ping/pong, vigilancia, ACK, backoff 0,5→30 s con jitter
-      APIClient.swift         HTTP, refresh de vuelo único, reintento ante 401, cierre de sesión si el refresh da 401
-      AppStore.swift          estado observable: bootstrap, cursores, catch-up /events, resetRequired, cola persistente,
-                              envío socket+ACK con respaldo HTTP (mismo clientMessageId), leído con debounce, escribiendo,
-                              enlaces, ciclo de vida (primer plano / red)
-      SSO.swift               Google/Microsoft: PKCE S256 + ASWebAuthenticationSession; AuthRoutes.base = "/api/v1/auth"
-      Storage.swift           refresh token en Keychain (AfterFirstUnlockThisDeviceOnly), preferencias, cola en disco
-      Feedback.swift          sonidos (.ambient), notificaciones locales con tc_notify.caf, PushRegistration (APNs, apagado)
-      DeepLink.swift          https://{app.,www.,}tiecoms.com/{c,w,invite,signup} y tiecoms://… (tiecoms://auth/* reservado a SSO)
-      L10n.swift, Naming.swift
-    UI/                       Login, Registro, Inicio, Conversación, Detalles, Ajustes, Invitación, pantalla oculta de servidor
-    Resources/                Info.plist (generado), entitlements, PrivacyInfo.xcprivacy, Assets (AppIcon 1024), Sounds/*.caf, es/en.lproj
-  TieComsTests/               unitarias (paquetes, decodificación, sincronización, SSO con URLProtocol simulado) + integración
-  TieComsUITests/             recorrido real: login → conversación → eco del par → deep links
+      Models.swift, ModelsV2.swift   DTO con decodificación tolerante (asuntos, agenda, recordatorios, reenvíos, dominios, WhatsApp)
+      SocketIOProtocol.swift  paquetes Engine.IO v4 / Socket.IO v5
+      SocketIOClient.swift    WebSocket propio: ping/pong, vigilancia, ACK, backoff 0,5→30 s con jitter
+      APIClient.swift         HTTP, refresh de vuelo único, AuthRoutes (base /api/v1/auth)
+      AppStore.swift          estado y sincronización (cursores, catch-up, cola, eventos nuevos, pestañas y enlaces)
+      AppStore+Features.swift edición, fijados, prefs, asuntos, agenda, recordatorios, derivar, dominios, WhatsApp, eliminar cuenta
+      SSO.swift, SharedText.swift, Storage.swift (Keychain del grupo, ShareTargets), Feedback.swift (sonidos, hápticos, avisos)
+      DeepLink.swift          /c /w /invite /signup /asuntos /agenda /trazo /whatsapp /share (tiecoms://auth/* reservado al SSO)
+    UI/                       RootView (pestañas, splash, toast), Home, Conversation, Menus, Sheets, IssuesViews,
+                              AgendaViews, MoreViews (Trazo, Recordatorios, WhatsApp, Dominios, Eliminar cuenta), Splash
+    Resources/                Info.plist (generado), entitlements, PrivacyInfo, Assets (AppIcon, wordmark por capas), Sounds/*.caf, es/en
+  TieComsShare/               extensión Compartir (SwiftUI) + Info.plist + entitlements
+  TieComsTests/               unitarias + integración (IntegrationTests v1, IntegrationV2Tests)
+  TieComsUITests/             recorridos v1 (deep links) y v2 (splash → login → fijar/editar → par en vivo), fotogramas del splash
 ```
 
 ## Compilar
 
 ```bash
 cd apps/ios
-/opt/homebrew/bin/xcodegen generate          # tras cambiar project.yml o añadir archivos
+node tools/gen-strings.mjs                    # si cambian los textos de la web o tools/ios-strings.json
+/opt/homebrew/bin/xcodegen generate           # tras cambiar project.yml o añadir archivos
 xcodebuild -scheme TieComs -destination 'platform=iOS Simulator,name=iPhone 17 Pro' CODE_SIGNING_ALLOWED=NO build
 ```
 
-Si hay dos simuladores con el mismo nombre, usa `id=<UDID>` (`xcrun simctl list devices`).
-En simulador también compila con la firma normal ("Sign to Run Locally"), que es la que conviene
-para probar: así el Keychain tiene `application-identifier`. El entitlement de Associated Domains
-no impide compilar en simulador, así que hay una sola configuración.
+Si hay dos simuladores con el mismo nombre, usa `id=<UDID>`. Para las pruebas conviene la firma local
+del simulador ("Sign to Run Locally"): aplica los entitlements (Keychain del grupo). Si el grupo no está
+disponible (build sin firma), el Keychain cae al grupo propio de la app y la extensión no ve la sesión.
 
-Servidor en depuración: argumento `-TCApiURL http://localhost:3021`, o mantener pulsado el logo
-del login (solo builds Debug) y escribir la URL (se aplica al reiniciar). `-TCResetSession YES`
-borra la sesión guardada al arrancar (lo usa la prueba de UI).
+Argumentos de lanzamiento (solo pruebas):
+
+| Argumento | Efecto |
+|---|---|
+| `-TCApiURL <url>` | Usa esa URL de API. |
+| `-TCResetSession YES` | Borra la sesión al arrancar. |
+| `-TCNoSplash YES` | Arranca sin splash. |
+| `-TCSplashFreeze <s>` | Congela el splash en ese instante (capturas). |
+| `-TCMetrics YES` | Expone la duración del splash a la prueba de UI. |
+
+En builds Debug también se puede cambiar el servidor manteniendo pulsado el logo del login.
 
 ## Probar
 
-Nunca contra producción. API de pruebas en `http://localhost:3021` (base `tiecoms_test`).
+Nunca contra producción. API de pruebas en `http://localhost:3041` (base `tiecoms_mobile`, con worker).
+La eliminación de cuenta se prueba en `http://localhost:3042` (rama backend `account-deletion`, misma base).
 
 ```bash
 cd <raíz del worktree>
-API_URL=http://localhost:3021 FIXTURE_OUT=/tmp/fx.json node scripts/mobile-fixture.mjs   # A y B de dos empresas
-FIXTURE=/tmp/fx.json PEER_TIMEOUT_MS=400000 node scripts/realtime-peer.mjs &             # par que responde "eco: …"
+API_URL=http://localhost:3041 FIXTURE_OUT=/tmp/fx.json node scripts/mobile-fixture.mjs
+FIXTURE=/tmp/fx.json API_URL=http://localhost:3041 node scripts/realtime-peer2.mjs &   # par v2 (eco, edición, fijados, RSVP)
 
 cd apps/ios
-# Unitarias (sin red) — las de integración se omiten si no hay fixture
-xcodebuild test -scheme TieComs -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TieComsTests
-
-# Integración + UI: el fixture llega por el entorno del test runner (Xcode quita el prefijo TEST_RUNNER_)
-TEST_RUNNER_TC_FIXTURE=/tmp/fx.json TEST_RUNNER_TC_PEER=1 TEST_RUNNER_TC_SHOTS=/tmp/shots \
+TEST_RUNNER_TC_FIXTURE=/tmp/fx.json TEST_RUNNER_TC_PEER=1 TEST_RUNNER_TC_PEER2=1 TEST_RUNNER_TC_UI_V1=1 \
+TEST_RUNNER_TC_DELETE_API=http://localhost:3042 TEST_RUNNER_TC_SHOTS=/tmp/shots \
   xcodebuild test -scheme TieComs -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
-Las credenciales solo están en el JSON del fixture (contraseña aleatoria); nada va en el código.
-El login del API tiene límite de 10/min por IP: las pruebas de integración comparten una sesión.
+- `scripts/realtime-peer2.mjs` es propio de iOS v2. `realtime-peer.mjs` no se cambió (lo usa Android).
+  El par v2:
+  - responde "eco: …" a los mensajes de A;
+  - responde "vi edición: …", "vi borrado" o "vi fijados: n" cuando A edita, borra o fija;
+  - con "par: edita" publica, edita y fija un mensaje suyo;
+  - con "par: reunión" confirma la última reunión.
+- Las credenciales solo están en el JSON del fixture; nada va en el código. El login tiene límite de 10/min.
+- La prueba del recordatorio espera hasta 100 s, porque lo crea para dentro de 1 min.
 
 ## Enlaces
 
-- Esquema propio: `tiecoms://c/<id>`, `tiecoms://w/<id>`, `tiecoms://invite/<token>`, `tiecoms://signup?org=<token>`.
-- Enlaces universales: `applinks:app.tiecoms.com`, `applinks:tiecoms.com`, `applinks:www.tiecoms.com`
-  (entitlement en `TieComs/Resources/TieComs.entitlements`). El servidor debe publicar
-  `https://<host>/.well-known/apple-app-site-association` con `appIDs: ["B76US7H3L3.com.tiecoms.app"]`
-  y rutas `/c/*`, `/w/*`, `/invite/*`, `/signup*` (lo hace el coordinador). Hasta que el AASA exista
-  y la app esté firmada con el App ID que tenga la capacidad, un enlace https abre Safari.
-- `tiecoms://auth/callback` está reservado al SSO y el router lo ignora.
-
-## SSO (Google / Microsoft)
-
-`<base>/api/v1/auth/{google|microsoft}/start?platform=ios&device_id=…&code_challenge=…&code_challenge_method=S256`
-en `ASWebAuthenticationSession` (callback `tiecoms`, sesión no efímera) → `tiecoms://auth/callback?code=…`
-→ `POST <base>/api/v1/auth/sso/exchange {code, code_verifier, device}`. Si el backend mueve las rutas a
-`/api/auth`, cambiar solo `AuthRoutes.base` en `Core/SSO.swift`. Probado con URLProtocol simulado
-(el endpoint aún no existía en el API de pruebas).
+- Esquema propio: `tiecoms://c/<id>`, `/w/<id>`, `/invite/<token>`, `/signup?org=`, `/asuntos`, `/agenda`, `/trazo`,
+  `/whatsapp`, `/share?text=`.
+- Enlaces universales: `applinks:` para app.tiecoms.com, tiecoms.com y www.tiecoms.com. El AASA lo
+  publica el coordinador. Sin AASA y sin firmar con el App ID, un enlace https abre Safari: está
+  comprobado en simulador.
 
 ## Push remoto
 
-El backend todavía no recibe tokens de dispositivo. Punto de extensión en `Core/Feedback.swift`
-(`PushRegistration`): activar la capacidad Push Notifications (`aps-environment`), poner
-`enabled = true` y enviar el token al endpoint cuando exista. Mientras tanto hay notificaciones
-locales mientras la app está viva (banner en primer plano solo si el mensaje es de otra conversación).
+El backend aún no recibe tokens. El punto de extensión es `PushRegistration` en `Core/Feedback.swift`.
+Las notificaciones locales (mensajes de otra conversación, recordatorios y reuniones nuevas) solo se
+disparan mientras la app está viva.
 
-## Firmar y subir a App Store Connect — qué falta
+## Checklist de publicación (App Store Connect)
 
-1. **App ID** `com.tiecoms.app` en developer.apple.com (team B76US7H3L3) con la capacidad
-   **Associated Domains** (y Push Notifications cuando exista el backend). Con firma automática
-   Xcode lo crea si la cuenta está iniciada en Xcode › Settings › Accounts.
-2. **App en App Store Connect**: "Nueva app" → iOS, nombre "TieComs", idioma principal español,
-   bundle `com.tiecoms.app`, SKU (p. ej. `tiecoms-ios`).
-3. Archivar y subir:
-   ```bash
-   xcodebuild -scheme TieComs -configuration Release -destination 'generic/platform=iOS' \
-     -archivePath build/TieComs.xcarchive -allowProvisioningUpdates archive
-   xcodebuild -exportArchive -archivePath build/TieComs.xcarchive -exportPath build/export \
-     -exportOptionsPlist ExportOptions.plist -allowProvisioningUpdates
-   xcrun altool --upload-app -f build/export/TieComs.ipa -t ios --apiKey <KEY_ID> --apiIssuer <ISSUER_ID>
-   ```
-   `ExportOptions.plist`: `method` = `app-store-connect`, `teamID` = `B76US7H3L3`, `signingStyle` = `automatic`.
-   Para CI hace falta una clave de API de App Store Connect (.p8); no está en el repo.
-4. **Ficha**: capturas 6,9" (iPhone 17 Pro Max, 1320×2868) y 13" iPad si se mantiene iPad
-   (`TARGETED_DEVICE_FAMILY` = 1,2; quitar el 2 si no se publica para iPad), descripción, palabras clave,
-   URL de soporte y de privacidad, categoría (Negocios / Productividad), clasificación por edad.
-5. **Privacidad**: el manifiesto `PrivacyInfo.xcprivacy` declara UserDefaults (CA92.1) y datos
-   vinculados sin rastreo (correo, nombre, contenido). Responder igual en "Privacidad de la app".
-6. **Revisión**: la app requiere cuenta → dar a Apple una cuenta de demostración con una conversación.
-   Si hay registro dentro de la app, Apple exige también **borrar la cuenta desde la app**
-   (guía 5.1.1(v)): falta un endpoint en el API y el botón en Ajustes.
-7. `ITSAppUsesNonExemptEncryption = false` ya está en el Info.plist (solo HTTPS del sistema).
-8. ATS: `NSAllowsLocalNetworking` solo permite http a localhost/red local (pruebas); producción es https.
+**Firma**
+- En esta Mac no hay perfiles de aprovisionamiento. `archive` con firma automática falla con
+  "No profiles for 'com.tiecoms.app'".
+- El archivo de Release se generó con `CODE_SIGNING_ALLOWED=NO`. Para publicar, inicia sesión con una
+  cuenta del team en Xcode › Settings › Accounts y ejecuta:
+  ```bash
+  xcodebuild -scheme TieComs -configuration Release -destination 'generic/platform=iOS' \
+    -archivePath build/TieComs.xcarchive -allowProvisioningUpdates archive
+  xcodebuild -exportArchive -archivePath build/TieComs.xcarchive -exportPath build/export \
+    -exportOptionsPlist ExportOptions.plist -allowProvisioningUpdates   # method app-store-connect, teamID B76US7H3L3
+  ```
+
+**Portal de desarrollo**
+- App IDs `com.tiecoms.app` (Associated Domains + App Groups) y `com.tiecoms.app.share` (App Groups).
+- App Group `group.com.tiecoms.app`.
+- La firma automática los crea con `-allowProvisioningUpdates`.
+
+**App Store Connect**
+- Nueva app iOS "TieComs", idioma principal español, bundle `com.tiecoms.app`, SKU `tiecoms-ios`.
+- Categoría Negocios (secundaria Productividad), clasificación 4+.
+
+**Capturas sugeridas** (6,9", iPhone 17 Pro Max 1320×2868; sale de `TieComsUITests` con `TC_SHOTS`)
+1. Splash / logo "Un solo hilo".
+2. Inicio con espacios, fijadas y no leídos.
+3. Conversación entre dos empresas con cita y reenviado.
+4. Menú de acciones de un mensaje.
+5. Asuntos con cuello de botella.
+6. Agenda con reunión y RSVP.
+7. WhatsApp organizado.
+
+**Texto de la ficha (es)**
+- Subtítulo: "Una red entre empresas".
+- Descripción: "TieComs une a las personas de las empresas con las que trabajas en una sola red. Cada
+  empresa conserva su identidad y cada persona ve solo su alcance. Conversa en grupos compartidos o
+  internos, convierte mensajes en asuntos con responsable y fecha, agenda reuniones, deriva un tema y
+  devuelve el resultado, y trae lo importante desde WhatsApp, Slack o el correo. Cada empresa. Cada
+  canal. Un solo hilo."
+- Palabras clave: "chat empresas,clientes,proveedores,asuntos,agenda,whatsapp,equipos,b2b".
+
+**Store listing (en)**
+- Subtitle: "One network across companies".
+- Description: "TieComs connects the people of the companies you work with in one network. Every
+  company keeps its identity and everyone only sees their own scope. Talk in shared or internal
+  groups, turn messages into issues with an owner and a due date, schedule meetings, branch a topic
+  off and bring the result back, and bring in what matters from WhatsApp, Slack or email. Every
+  company. Every channel. One thread."
+- Keywords: "business chat,clients,suppliers,issues,calendar,whatsapp,teams,b2b".
+
+**Permisos y por qué**
+- Notificaciones: avisos de mensajes, recordatorios y reuniones. Se piden después del primer login.
+- Red local (ATS `NSAllowsLocalNetworking`): solo para pruebas contra localhost.
+- No usa cámara, micrófono, contactos ni ubicación. El QR de WhatsApp se muestra, no se escanea.
+- Compartir: la extensión recibe el texto o enlace que el usuario comparte a propósito.
+
+**Privacidad**
+- `PrivacyInfo.xcprivacy`: UserDefaults (CA92.1); correo, nombre y contenido del usuario vinculados,
+  sin rastreo.
+- Contenido de WhatsApp: solo lo ve el dueño.
+
+**Cuentas de demostración para la revisión**
+- Crea dos cuentas de empresas distintas con un grupo compartido en producción (mismo esquema que
+  `scripts/mobile-fixture.mjs`).
+- Entrega una a Apple con conversación, un asunto y una reunión de ejemplo.
+- WhatsApp necesita un teléfono real: explícalo en las notas de revisión.
+
+**Eliminar cuenta (guía 5.1.1(v))**
+- Implementado contra `DELETE /api/v1/account`.
+- Falta backend: la rama `account-deletion` (576d4b4) aún no está en main ni en producción. Debe
+  estar desplegada antes de enviar a revisión.
+
+**Otros**
+- `ITSAppUsesNonExemptEncryption = false` (solo HTTPS del sistema).
+- iPad: `TARGETED_DEVICE_FAMILY` = 1,2; quita el 2 si no se publica para iPad.
+
+**Qué falta de backend**
+- Endpoint de tokens push (APNs).
+- Desplegar `account-deletion`.
+- AASA en los 3 hosts.
+- Credenciales de SSO en el entorno donde se pruebe (3041 responde `503 sso_unavailable`).

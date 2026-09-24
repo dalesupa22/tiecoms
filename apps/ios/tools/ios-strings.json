@@ -606,5 +606,9 @@
  "del.badPassword": [
   "La contraseña no es correcta.",
   "The password is not correct."
+ ],
+ "tab.home": [
+  "Inicio",
+  "Home"
  ]
 }

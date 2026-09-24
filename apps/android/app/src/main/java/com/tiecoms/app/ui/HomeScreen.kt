@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -77,7 +78,7 @@ private sealed interface HomeRow {
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (String) -> Unit, onShortcut: (String) -> Unit) {
+fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (String) -> Unit, onShortcut: (String) -> Unit, onNewChat: () -> Unit = {}) {
     val client = LocalClient.current
     val ctx = LocalContext.current
     val snackbar = LocalSnackbar.current
@@ -104,7 +105,9 @@ fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (Str
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.conversations), fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() }) },
-                actions = {},
+                actions = {
+                    IconButton(onClick = onNewChat, modifier = Modifier.testTag("newChat")) { Icon(Icons.Filled.Edit, stringResource(R.string.chat_new)) }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -129,6 +132,7 @@ fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (Str
             ) {
                 item { androidx.compose.material3.AssistChip(onClick = { onShortcut("reminders") }, label = { Text("⏰ " + stringResource(R.string.rem_title) + if (dueReminders > 0) " · $dueReminders" else "") }, modifier = Modifier.testTag("shortcutReminders")) }
                 item { androidx.compose.material3.AssistChip(onClick = { onShortcut("trazo") }, label = { Text("⑂ " + stringResource(R.string.nav_trazo)) }) }
+                item { androidx.compose.material3.AssistChip(onClick = { onShortcut("files") }, label = { Text("📁 " + stringResource(R.string.nav_files)) }, modifier = Modifier.testTag("shortcutFiles")) }
                 item { androidx.compose.material3.AssistChip(onClick = { onShortcut("whatsapp") }, label = { Text("🟢 " + stringResource(R.string.nav_whatsapp)) }, modifier = Modifier.testTag("shortcutWhatsApp")) }
             }
             if (filterWs != null) {
@@ -236,7 +240,8 @@ private fun buildRows(data: BootstrapDTO, query: String, wsFilter: String?, inte
         pinned.forEach { rows += HomeRow.Conv(it, "p:" + it.id) }
     }
     val rest = convs.filter { it.pinnedAt == null }
-    val byWs = rest.filter { it.kind != "direct" }.groupBy { it.workspaceId }
+    // Directos y chats grupales (multi) no viven en un espacio: van juntos en «Chats».
+    val byWs = rest.filter { !it.isChat }.groupBy { it.workspaceId }
     val wsOrder: List<WorkspaceDTO?> = data.workspaces
         .sortedWith(compareByDescending<WorkspaceDTO> { it.pinnedAt != null }.thenByDescending { ws -> byWs[ws.id]?.maxOfOrNull { it.lastMessageAt ?: "" } ?: ws.createdAt })
         .let { list -> list + if (byWs.keys.any { k -> list.none { it.id == k } }) listOf(null) else emptyList() }
@@ -248,7 +253,7 @@ private fun buildRows(data: BootstrapDTO, query: String, wsFilter: String?, inte
         list.sortedWith(compareBy<ConversationDTO> { if (it.kind == "internal") 1 else 0 }.thenByDescending { it.lastMessageAt ?: "" })
             .forEach { rows += HomeRow.Conv(it) }
     }
-    val directs = rest.filter { it.kind == "direct" }
+    val directs = rest.filter { it.isChat }
     if (directs.isNotEmpty()) {
         rows += HomeRow.Header(directsTitle, "h:directs")
         directs.forEach { rows += HomeRow.Conv(it) }
@@ -264,7 +269,7 @@ private fun ConversationRow(c: ConversationDTO, data: BootstrapDTO, internalFall
     val preview = c.lastMessagePreview?.let { if (it.startsWith("{")) systemText(ctx, it) else it } ?: stringResource(R.string.no_messages)
     val time = relativeTime(ctx, c.lastMessageAt)
     val (bg, fg, label) = when (c.kind) {
-        "direct" -> {
+        "direct", "multi" -> {
             val other = Names.otherInDirect(c, data)
             val org = Names.org(data, other?.orgId)
             Triple(parseColor(org?.colorBg, Brand.Black), parseColor(org?.colorFg, Color.White), title)
@@ -285,7 +290,11 @@ private fun ConversationRow(c: ConversationDTO, data: BootstrapDTO, internalFall
             .semantics(mergeDescendants = true) { contentDescription = a11y }.testTag("conv-${c.id}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Avatar(label, bg, fg, square = c.kind != "direct")
+        when (c.kind) {
+            "direct" -> Avatar(label, bg, fg, photo = Names.otherInDirect(c, data)?.avatarUrl)
+            "multi" -> StackedAvatars(c, data)
+            else -> Avatar(label, bg, fg, square = true)
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

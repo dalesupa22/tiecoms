@@ -24,7 +24,7 @@
     <string name="conversations">Conversaciones</string>
     <string name="search">Buscar conversación o persona</string>
     <string name="clear_search">Borrar búsqueda</string>
-    <string name="direct_messages">Mensajes directos</string>
+    <string name="direct_messages">Chats</string>
     <string name="home_empty">Aún no tienes conversaciones. Cuando otra empresa te invite a un espacio, aparecerá aquí.</string>
     <string name="home_empty_filter">No hay conversaciones con ese filtro.</string>
     <string name="filter_space">Espacio: %1$s</string>

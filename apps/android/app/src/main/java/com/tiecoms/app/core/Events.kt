@@ -29,6 +29,8 @@ sealed interface AccountEvent {
     data class ReminderDue(val reminder: ReminderDTO) : AccountEvent
     data class PrefsUpdated(val conversationId: String?, val workspaceId: String?) : AccountEvent
     data class WhatsAppUpdated(val accountId: String?) : AccountEvent
+    /** Cambió un árbol de archivos (workspaceId null = «Mis archivos»). */
+    data class DriveUpdated(val workspaceId: String?) : AccountEvent
     data class Unknown(val type: String) : AccountEvent
 }
 
@@ -76,6 +78,7 @@ fun decodeAccountEvent(el: JsonElement): AccountEvent {
         "reminder.due" -> obj(o, "reminder", ReminderDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { AccountEvent.ReminderDue(it) } ?: AccountEvent.Unknown(type)
         "prefs.updated" -> AccountEvent.PrefsUpdated(o.str("conversationId"), o.str("workspaceId"))
         "whatsapp.updated" -> AccountEvent.WhatsAppUpdated(o.str("accountId"))
+        "drive.updated" -> AccountEvent.DriveUpdated(o.str("workspaceId"))
         else -> AccountEvent.Unknown(type)
     }
 }

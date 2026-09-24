@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,6 +49,7 @@ import com.tiecoms.app.core.BootstrapDTO
 import com.tiecoms.app.core.Bring
 import com.tiecoms.app.core.ConversationDTO
 import com.tiecoms.app.core.ForwardedInfo
+import com.tiecoms.app.core.MAX_FORWARD_TARGETS
 import com.tiecoms.app.core.MessageDTO
 import com.tiecoms.app.core.Names
 import com.tiecoms.app.core.PersonDTO
@@ -109,7 +112,7 @@ fun ReminderDialog(conv: ConversationDTO, message: MessageDTO?, onClose: () -> U
 }
 
 /** Submenú «Reenviar»: a otra conversación de TieComs o hacia otras apps (texto como la web). */
-fun forwardMenu(ctx: Context, d: BootstrapDTO, conv: ConversationDTO, m: MessageDTO, openInternal: () -> Unit): SheetItem {
+fun forwardMenu(ctx: Context, d: BootstrapDTO, conv: ConversationDTO, m: MessageDTO): SheetItem {
     val container = (ctx.applicationContext as com.tiecoms.app.TieComsApp).container
     val author = Names.person(d, m.authorId)?.name ?: ""
     val title = titleOf(ctx, conv, d)
@@ -119,7 +122,6 @@ fun forwardMenu(ctx: Context, d: BootstrapDTO, conv: ConversationDTO, m: Message
     return SheetItem(
         ctx.getString(R.string.menu_forward), "↪", tag = "menuForward",
         children = listOf(
-            SheetItem(ctx.getString(R.string.fwd_tiecoms), "◍", tag = "fwdTiecoms", onClick = openInternal),
             SheetItem(ctx.getString(R.string.fwd_whatsapp), "🟢", onClick = { open("https://wa.me/?text=" + Uri.encode(plain)) }),
             SheetItem(ctx.getString(R.string.fwd_slack), "#", onClick = {
                 copyToClipboard(ctx, ">" + m.body.split('\n').joinToString("\n>") + "\n— *$author* · $title · <$link|TieComs>")
@@ -131,27 +133,80 @@ fun forwardMenu(ctx: Context, d: BootstrapDTO, conv: ConversationDTO, m: Message
     )
 }
 
-/** Reenviar un mensaje a otra conversación de TieComs, conservando autor y origen. */
+/**
+ * Reenviar a otros chats (ForwardToChatsDialog de la web): buscador, selección de hasta 10 chats y comentario
+ * opcional. Todo va por la cola persistente: en cada destino, primero el comentario y luego el original con su autor y origen.
+ */
 @Composable
 fun ForwardDialog(source: MessageDTO, onClose: () -> Unit, onSent: (String) -> Unit) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val container = LocalContainer.current
     val data = client.state.collectAsStateWithLifecycle().value.data ?: return
-    var target by rememberSaveable { mutableStateOf<String?>(null) }
+    var picked by rememberSaveable { mutableStateOf(listOf<String>()) }
     var comment by rememberSaveable { mutableStateOf("") }
+    var q by rememberSaveable { mutableStateOf("") }
     val author = Names.person(data, source.authorId)?.name
+    val list = remember(data, q, source.conversationId) {
+        data.conversations.filter { it.canPost && it.id != source.conversationId && (q.isBlank() || titleOf(ctx, it, data).contains(q.trim(), ignoreCase = true)) }
+            .sortedByDescending { it.lastMessageAt ?: "" }
+    }
     FormSheet(stringResource(R.string.fwd_title), onClose, tag = "forwardDialog") {
         Quote(source.body.take(240))
-        ConversationPicker(data, target, { target = it }, exclude = source.conversationId)
-        OutlinedTextField(comment, { comment = it }, placeholder = { Text(stringResource(R.string.fwd_comment)) }, modifier = Modifier.fillMaxWidth())
-        DialogButtons(onClose, stringResource(R.string.fwd_send), enabled = target != null, confirmTag = "forwardSend") {
-            val t = target ?: return@DialogButtons
-            if (comment.isNotBlank()) client.send(t, comment.trim())
-            client.send(t, source.body, null, ForwardedInfo("tiecoms", author, source.createdAt, source.conversationId))
-            container.toast(ctx.getString(R.string.toast_sent))
-            onClose(); onSent(t)
+        author?.let { Text("— $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        OutlinedTextField(q, { q = it }, placeholder = { Text(stringResource(R.string.fwd_search)) }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("fwdSearch"))
+        if (picked.size >= MAX_FORWARD_TARGETS) Text(stringResource(R.string.fwd_limit, MAX_FORWARD_TARGETS), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = 340.dp).testTag("fwdList")) {
+            items(list.size, key = { list[it].id }) { i ->
+                val c = list[i]
+                val on = c.id in picked
+                ChatOption(c, data, on, enabled = on || picked.size < MAX_FORWARD_TARGETS) {
+                    picked = if (on) picked - c.id else if (picked.size >= MAX_FORWARD_TARGETS) picked else picked + c.id
+                }
+            }
         }
+        OutlinedTextField(comment, { comment = it }, placeholder = { Text(stringResource(R.string.fwd_comment)) }, modifier = Modifier.fillMaxWidth().testTag("fwdComment"))
+        DialogButtons(onClose, if (picked.size > 1) stringResource(R.string.fwd_send_many, picked.size) else stringResource(R.string.fwd_send), enabled = picked.isNotEmpty(), confirmTag = "forwardSend") {
+            val n = client.forward(source, picked, comment)
+            container.toast(if (n == 1) ctx.getString(R.string.toast_sent) else ctx.getString(R.string.fwd_sent_many, n))
+            val one = picked.singleOrNull()
+            onClose(); one?.let(onSent)
+        }
+    }
+}
+
+/** Fila de chat para elegir destinos: avatar (persona, caritas apiladas o espacio), título, subtítulo y logos. */
+@Composable
+private fun ChatOption(c: ConversationDTO, data: BootstrapDTO, on: Boolean, enabled: Boolean, onToggle: () -> Unit) {
+    val ctx = LocalContext.current
+    val other = if (c.kind == "direct") Names.otherInDirect(c, data) else null
+    val ws = data.workspaces.firstOrNull { it.id == c.workspaceId }
+    val sub = when {
+        other != null -> listOfNotNull(other.title, Names.org(data, other.orgId)?.name).filter { it.isNotBlank() }.joinToString(" · ")
+        ws != null -> ws.name
+        else -> stringResource(R.string.chat_group_chat)
+    }
+    Row(
+        Modifier.fillMaxWidth().toggleable(on, enabled = enabled, role = Role.Checkbox) { onToggle() }.heightIn(min = 56.dp).padding(vertical = 4.dp).testTag("fwd-${c.id}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(on, null, enabled = enabled)
+        Spacer(Modifier.width(6.dp))
+        when {
+            other != null -> PersonAvatar(other, data, size = 34.dp)
+            c.kind == "multi" -> StackedAvatars(c, data, size = 34.dp)
+            else -> {
+                val o = Names.org(data, c.internalOrgId ?: ws?.owningOrgId)
+                Avatar(ws?.glyph?.takeIf { it.isNotBlank() } ?: if (c.kind == "internal") "◌" else "#",
+                    parseColor(o?.colorBg, com.tiecoms.app.ui.theme.Brand.Orange), parseColor(o?.colorFg, androidx.compose.ui.graphics.Color.White), size = 34.dp, square = true)
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(titleOf(ctx, c, data), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (sub.isNotBlank()) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (other == null) Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) { Names.participantOrgs(c, data).take(4).forEach { OrgMark(it, size = 16.dp) } }
     }
 }
 
@@ -331,8 +386,7 @@ fun PinsSheet(conv: ConversationDTO, onJump: (Long) -> Unit, onClose: () -> Unit
             else -> list!!.forEach { m ->
                 val p = Names.person(data, m.authorId)
                 Row(Modifier.fillMaxWidth().clickable { onJump(m.seq) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    val o = Names.org(data, p?.orgId)
-                    Avatar(p?.name ?: "?", parseColor(o?.colorBg, com.tiecoms.app.ui.theme.Brand.Black), parseColor(o?.colorFg, androidx.compose.ui.graphics.Color.White), size = 30.dp)
+                    PersonAvatar(p, data, size = 30.dp)
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(p?.name ?: "", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)

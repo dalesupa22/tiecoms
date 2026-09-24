@@ -111,7 +111,7 @@ fun IssueRow(i: IssueDTO, data: BootstrapDTO, showWhere: Boolean = true, onOpen:
     val f = issueFlags(i)
     Row(Modifier.fillMaxWidth().clickable { onOpen(i.id) }.heightIn(min = 60.dp).padding(vertical = 8.dp).testTag("issue-${i.id}"), verticalAlignment = Alignment.CenterVertically) {
         val o = Names.org(data, owner?.orgId)
-        Avatar(owner?.name ?: "–", parseColor(o?.colorBg, Color(0xFFBDB5AE)), parseColor(o?.colorFg, Color.White), size = 32.dp)
+        Avatar(owner?.name ?: "–", parseColor(o?.colorBg, Color(0xFFBDB5AE)), parseColor(o?.colorFg, Color.White), size = 32.dp, photo = owner?.avatarUrl)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(i.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)

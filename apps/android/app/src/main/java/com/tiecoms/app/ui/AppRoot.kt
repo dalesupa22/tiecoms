@@ -251,6 +251,7 @@ private fun MainNav() {
                     onClearFilter = { nav.navigate("home") { popUpTo(0) { inclusive = true } } },
                     onOpen = { id -> openConv(id) },
                     onShortcut = { r -> nav.navigate(r) { launchSingleTop = true } },
+                    onNewChat = { nav.navigate("newchat") { launchSingleTop = true } },
                 )
             }
             composable("issues") { IssuesScreen(onOpen = { nav.navigate("issue/$it") }) }
@@ -271,7 +272,9 @@ private fun MainNav() {
             composable("details/{id}") {
                 DetailsScreen(id = it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() },
                     onOpenIssue = { i -> nav.navigate("issue/$i") }, onOpenEvent = { e -> nav.navigate("event/$e") },
-                    onOpenConversation = { c -> openConv(c) })
+                    onOpenConversation = { c -> openConv(c) },
+                    onAddMembers = { c -> nav.navigate("addmembers/$c") { launchSingleTop = true } },
+                    onLeft = { nav.popBackStack(nav.graph.findStartDestination().id, false) })
             }
             composable("issue/{id}") {
                 IssueDetailScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() }, onOpenOrigin = { c, seq -> openConv(c, seq) })
@@ -287,6 +290,14 @@ private fun MainNav() {
                 ShareScreen(draft?.text ?: "", draft?.source ?: "other", onBack = { container.shareDraft = null; if (!nav.popBackStack()) tab("home") },
                     onDone = { c -> container.shareDraft = null; nav.popBackStack(); openConv(c) })
             }
+            composable("newchat") {
+                NewChatScreen(onBack = { nav.popBackStack() }, onOpened = { c -> nav.popBackStack(); openConv(c) })
+            }
+            composable("addmembers/{id}") {
+                AddMembersScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() })
+            }
+            composable("profile") { ProfileScreen(onBack = { nav.popBackStack() }) }
+            composable("files") { FilesScreen(onBack = { nav.popBackStack() }) }
             composable("domains/{org}") { DomainsScreen(it.arguments?.getString("org") ?: "", onBack = { nav.popBackStack() }) }
             composable("delete-account") { DeleteAccountScreen(onBack = { nav.popBackStack() }) }
             composable("invite/{token}") {

@@ -66,7 +66,10 @@ import kotlinx.coroutines.launch
 
 // ---------- Detalles de conversación ----------
 @Composable
-fun DetailsScreen(id: String, onBack: () -> Unit, onOpenIssue: (String) -> Unit, onOpenEvent: (String) -> Unit, onOpenConversation: (String) -> Unit) {
+fun DetailsScreen(
+    id: String, onBack: () -> Unit, onOpenIssue: (String) -> Unit, onOpenEvent: (String) -> Unit, onOpenConversation: (String) -> Unit,
+    onAddMembers: (String) -> Unit = {}, onLeft: () -> Unit = onBack,
+) {
     val client = LocalClient.current
     val container = LocalContainer.current
     val ctx = LocalContext.current
@@ -76,6 +79,7 @@ fun DetailsScreen(id: String, onBack: () -> Unit, onOpenIssue: (String) -> Unit,
     val meta = data?.conversations?.firstOrNull { it.id == id }
     var newIssue by rememberSaveable { mutableStateOf(false) }
     var newEvent by rememberSaveable { mutableStateOf(false) }
+    var confirmLeave by rememberSaveable { mutableStateOf(false) }
     val title = meta?.let { Names.conversationTitle(it, data, stringResource(R.string.internal_default), stringResource(R.string.conversation)) } ?: stringResource(R.string.details)
     SimpleScaffold(title = title, onBack = onBack) {
         if (meta == null) {
@@ -100,15 +104,30 @@ fun DetailsScreen(id: String, onBack: () -> Unit, onOpenIssue: (String) -> Unit,
                         SectionHeader(stringResource(R.string.space))
                         Text(ws.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
                     }
+                    if (meta.kind == "multi") {
+                        // Chat grupal: logos de las empresas y «Chat grupal · empresas».
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp).testTag("multiOrgs")) {
+                            Names.participantOrgs(meta, data).take(5).forEach { o -> OrgMark(o, size = 22.dp, modifier = Modifier.padding(end = 4.dp)) }
+                            Spacer(Modifier.width(4.dp))
+                            Text(Names.multiSubtitle(meta, data), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                     SectionHeader(stringResource(R.string.scope))
                     Text(
                         when (meta.kind) {
                             "internal" -> stringResource(R.string.scope_internal, Names.org(data, meta.internalOrgId)?.name ?: "")
                             "direct" -> stringResource(R.string.scope_direct)
+                            "multi" -> stringResource(R.string.chat_scope_multi)
                             else -> stringResource(R.string.scope_group)
                         },
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp),
                     )
+                    if (meta.kind == "multi") {
+                        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (meta.canPost) OutlinedButton(onClick = { onAddMembers(id) }, modifier = Modifier.testTag("addPeople")) { Text("＋ " + stringResource(R.string.dlg_add_to_group)) }
+                            TextButton(onClick = { confirmLeave = true }, modifier = Modifier.testTag("leaveChat")) { Text(stringResource(R.string.menu_leave), color = MaterialTheme.colorScheme.error) }
+                        }
+                    }
                 }
             }
             if (canWork) {
@@ -140,6 +159,14 @@ fun DetailsScreen(id: String, onBack: () -> Unit, onOpenIssue: (String) -> Unit,
         }
         if (newIssue) NewIssueDialog(id, null, "", onClose = { newIssue = false }, onCreated = onOpenIssue)
         if (newEvent) EventDialog(id, onClose = { newEvent = false })
+        if (confirmLeave) AlertDialog(
+            onDismissRequest = { confirmLeave = false }, text = { Text(stringResource(R.string.chat_leave_confirm)) },
+            confirmButton = { TextButton(onClick = {
+                confirmLeave = false
+                scope.launch { runCatching { client.removeMember(id, data.me.id) }.onSuccess { onLeft() }.onFailure { e -> container.toast(errorText(ctx, e)) } }
+            }, modifier = Modifier.testTag("confirmLeave")) { Text(stringResource(R.string.menu_leave)) } },
+            dismissButton = { TextButton(onClick = { confirmLeave = false }) { Text(stringResource(R.string.cancel)) } },
+        )
     }
 }
 
@@ -147,12 +174,14 @@ fun DetailsScreen(id: String, onBack: () -> Unit, onOpenIssue: (String) -> Unit,
 private fun PersonRow(p: com.tiecoms.app.core.PersonDTO, data: com.tiecoms.app.core.BootstrapDTO, onDirect: (() -> Unit)?) {
     val org = Names.org(data, p.orgId)
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
-        Avatar(p.name, parseColor(org?.colorBg, Brand.Black), parseColor(org?.colorFg, Color.White), size = 40.dp)
+        PersonAvatar(p, data, size = 40.dp, orgBadge = true)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(p.name + if (p.id == data.me.id) " " + stringResource(R.string.you) else "", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            // cargo · área · empresa
             Text(
-                listOfNotNull(org?.name ?: stringResource(R.string.no_company), p.title?.takeIf { it.isNotBlank() }).joinToString(" · "),
+                listOfNotNull(p.title?.takeIf { it.isNotBlank() }, p.area?.takeIf { it.isNotBlank() },
+                    org?.name ?: if (p.guest) stringResource(R.string.common_guest) else stringResource(R.string.no_company)).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (p.guest) {
@@ -192,9 +221,21 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
             val me = data?.me
             val org = Names.org(data, me?.primaryOrgId)
             SettingsSection(stringResource(R.string.account)) {
-                Text(me?.name ?: "", style = MaterialTheme.typography.titleMedium)
-                me?.email?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Avatar(me?.name ?: "?", parseColor(org?.colorBg, Brand.Black), parseColor(org?.colorFg, Color.White), size = 56.dp, photo = me?.avatarUrl)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(me?.name ?: "", style = MaterialTheme.typography.titleMedium)
+                        val line = listOfNotNull(me?.title, me?.area, org?.name).filter { it.isNotBlank() }.joinToString(" · ")
+                        if (line.isNotEmpty()) Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        me?.email?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
+                }
             }
+            HorizontalDivider()
+            NavRow("👤 " + stringResource(R.string.profile_edit), null, tag = "rowProfile") { onNavigate("profile") }
+            HorizontalDivider()
+            NavRow("📁 " + stringResource(R.string.nav_files), null, tag = "rowFiles") { onNavigate("files") }
             HorizontalDivider()
             if (org != null) {
                 NavRow(stringResource(R.string.settings_team), listOfNotNull(org.name,

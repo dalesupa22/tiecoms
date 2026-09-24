@@ -60,6 +60,8 @@ data class ClientState(
     val events: Map<String, CalendarEventDTO> = emptyMap(),
     /** Sube cuando el puente de WhatsApp trae novedades: la pantalla vuelve a pedir la lista. */
     val waRevision: Int = 0,
+    /** Sube cuando cambia algún árbol de archivos (`drive.updated`): la pantalla Archivos recarga. */
+    val driveRevision: Int = 0,
 )
 
 /** Avisos puntuales para sonidos y notificaciones. */
@@ -159,12 +161,12 @@ class TieComsClient(
     val myId: String? get() = s.data?.me?.id
 
     // ---------- HTTP con sesión ----------
-    private suspend fun <T> request(method: String, path: String, body: String? = null, serializer: KSerializer<T>): T {
+    private suspend fun <T> request(method: String, path: String, body: String? = null, serializer: KSerializer<T>, raw: HttpApi.RawBody? = null): T {
         if (accessToken != null && now() > accessExp - 30_000) refresh()
-        var r = http.exec(method, path, body, accessToken)
+        var r = http.exec(method, path, body, accessToken, raw)
         if (r.code == 401) {
             when (refresh()) {
-                RefreshOutcome.OK -> r = http.exec(method, path, body, accessToken)
+                RefreshOutcome.OK -> r = http.exec(method, path, body, accessToken, raw)
                 RefreshOutcome.UNAUTHORIZED -> { handleSignedOut(); throw HttpApi.parseError(r) }
                 RefreshOutcome.NETWORK -> throw HttpApi.parseError(r)
             }
@@ -386,6 +388,7 @@ class TieComsClient(
             }
             is AccountEvent.PrefsUpdated -> scheduleBootstrap()
             is AccountEvent.WhatsAppUpdated -> setState { copy(waRevision = waRevision + 1) }
+            is AccountEvent.DriveUpdated -> setState { copy(driveRevision = driveRevision + 1) }
             is AccountEvent.Unknown -> Unit
         }
     }
@@ -809,6 +812,79 @@ class TieComsClient(
         }
         return false
     }
+
+    // ---------- Reenviar a otros chats ----------
+    /**
+     * Reenvía un mensaje a varios chats (hasta [MAX_FORWARD_TARGETS]). Todo va por la cola persistente:
+     * cada envío recibe su clientMessageId al encolarse y los reintentos lo reutilizan (idempotente).
+     * Devuelve cuántos destinos quedaron en cola.
+     */
+    fun forward(source: MessageDTO, targets: List<String>, comment: String?): Int {
+        val author = Names.person(s.data, source.authorId)?.name
+        val plan = Forwarding.plan(source, targets, comment, author)
+        plan.forEach { send(it.conversationId, it.body, null, it.forwarded) }
+        return plan.map { it.conversationId }.distinct().size
+    }
+
+    // ---------- Chats (directos y grupales entre empresas) ----------
+    /** POST /chats: con una persona devuelve el directo; con varias, un chat `multi`. Recarga el snapshot. */
+    suspend fun createChat(userIds: List<String>, name: String?): CreateChatResult = withContext(dispatcher) {
+        val n = name?.trim().orEmpty()
+        val body = buildJsonObject {
+            put("userIds", kotlinx.serialization.json.JsonArray(userIds.distinct().map { JsonPrimitive(it) }))
+            if (userIds.size > 1 && n.length >= 2) put("name", JsonPrimitive(n.take(120)))
+        }
+        val r = req("POST", "/chats", body, CreateChatResult.serializer())
+        loadBootstrapInternal(); r
+    }
+
+    /** Suma personas a una conversación; ven desde ahora (history 'now'). */
+    suspend fun addMembers(conversationId: String, userIds: List<String>) = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("userIds", kotlinx.serialization.json.JsonArray(userIds.distinct().map { JsonPrimitive(it) })); put("history", JsonPrimitive("now"))
+        }
+        req("POST", "/conversations/$conversationId/members", body, JsonElement.serializer()); loadBootstrapInternal(); Unit
+    }
+
+    // ---------- Perfil ----------
+    /** PATCH /me: nombre, cargo y área (vacío = null, para borrarlos). */
+    suspend fun updateProfile(name: String, title: String?, area: String?) = withContext(dispatcher) {
+        fun clean(v: String?) = v?.trim()?.take(120)?.ifEmpty { null }?.let { JsonPrimitive(it) } ?: JsonNull
+        val body = buildJsonObject { put("name", JsonPrimitive(name.trim().take(120))); put("title", clean(title)); put("area", clean(area)) }
+        req("PATCH", "/me", body, UserDTO.serializer()); loadBootstrapInternal(); Unit
+    }
+
+    /** Sube la foto ya recortada (JPEG 512×512) como cuerpo crudo image/jpeg. */
+    suspend fun uploadAvatar(jpeg: ByteArray) = withContext(dispatcher) {
+        if (jpeg.size > MAX_AVATAR_BYTES) throw ApiException(413, "too_large", "La foto pesa más de 3 MB.")
+        request("POST", "/me/avatar", null, UserDTO.serializer(), HttpApi.RawBody(jpeg, "image/jpeg")); loadBootstrapInternal(); Unit
+    }
+
+    suspend fun removeAvatar() = withContext(dispatcher) { req("DELETE", "/me/avatar", null, JsonElement.serializer()); loadBootstrapInternal(); Unit }
+
+    /** Ruta relativa del API (fotos, miniaturas) → URL absoluta. */
+    fun mediaUrl(path: String?): String? = Media.absolute(path, baseUrl)
+
+    // ---------- Archivos ----------
+    suspend fun driveTree(workspaceId: String?): DriveTreeDTO = withContext(dispatcher) {
+        req("GET", "/drive/tree" + q("workspaceId" to workspaceId), null, DriveTreeDTO.serializer())
+    }
+    suspend fun createDriveFolder(workspaceId: String?, parentId: String?, name: String): DriveFolderDTO = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("workspaceId", workspaceId?.let { JsonPrimitive(it) } ?: JsonNull); put("parentId", parentId?.let { JsonPrimitive(it) } ?: JsonNull)
+            put("name", JsonPrimitive(name.trim().take(120)))
+        }
+        req("POST", "/drive/folders", body, DriveFolderDTO.serializer())
+    }
+    /** POST /drive/files?name=&workspaceId=&folderId=: siempre octet-stream; el tipo real va en x-file-type. */
+    suspend fun uploadDriveFile(workspaceId: String?, folderId: String?, name: String, contentType: String?, bytes: ByteArray): DriveFileDTO = withContext(dispatcher) {
+        if (bytes.size > MAX_DRIVE_FILE_BYTES) throw ApiException(413, "too_large", "El archivo pesa más de 25 MB.")
+        val type = contentType?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
+        request("POST", "/drive/files" + q("name" to name.take(400), "workspaceId" to workspaceId, "folderId" to folderId), null, DriveFileDTO.serializer(),
+            HttpApi.RawBody(bytes, "application/octet-stream", mapOf("x-file-type" to type)))
+    }
+    /** Enlace firmado (unos minutos) para abrir o descargar un archivo. */
+    suspend fun driveFileLink(id: String): String = withContext(dispatcher) { req("GET", "/drive/files/$id/link", null, LinkResult.serializer()).url }
 
     // ---------- Personas y grupos ----------
     suspend fun openDirect(userId: String): String = withContext(dispatcher) {

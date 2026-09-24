@@ -40,6 +40,15 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
   - Tarjeta de la reunión dentro del chat, con RSVP.
 - **Recordatorios:** la lista con Ahora y Próximos, Hecho y Posponer 1 h. El evento `reminder.due` genera una notificación local con `tc_notify`.
 - **Reenviados:** la burbuja muestra «Reenviado desde WhatsApp · Juan · fecha» o «Reenviado desde «<conversación>»». Traer desde WhatsApp, Slack o correo (⤓ en el compositor) interpreta los chats exportados de WhatsApp y las cabeceras De/Asunto de los correos.
+- **Chats entre personas** (✎ en Inicio → «Nuevo chat»):
+  - Personas de `bootstrap.people` (solo humanas, sin mí) por empresa: «Tu equipo» primero, luego las demás por nombre y al final los terceros. Cada fila lleva foto o iniciales, el logo de la empresa, nombre y «cargo · área». Buscador por nombre, cargo, área o empresa (sin tildes) y chips con los elegidos.
+  - Una persona abre su directo y varias crean un chat `multi` (`POST /chats {userIds, name?}`), con los logos de las empresas y un nombre opcional. Después se recarga `/bootstrap` y se abre el chat.
+  - Sin nombre, el título son los primeros nombres («Mateo, Ana, Laura y 2 más»). Subtítulo «Chat grupal · empresas». En Inicio van con los directos (sección «Chats») con caritas apiladas.
+  - Detalles: cargo · área · empresa de cada persona; en un `multi`, «Agregar al grupo» (`history: now`) y «Salir del grupo».
+- **Vista previa de enlaces:** los enlaces del texto son tocables (`LinkAnnotation`, sin la puntuación final) y, cuando llega `message.updated` con `linkPreview`, se pinta la tarjeta (miniatura pública `/api/v1/previews/…`, sitio, título y descripción). Se abre en Custom Tabs.
+- **Reenviar a otro chat** (pulsación larga): hoja con buscador, hasta 10 chats y comentario opcional. Por destino, primero el comentario y luego el original con `forwarded {source: tiecoms, author, sentAt, fromConversationId}`, todo por la cola persistente (un `clientMessageId` por envío).
+- **Perfil** (Ajustes → Editar perfil): nombre, cargo y área (`PATCH /me`); foto con el Photo Picker del sistema, con orientación EXIF, recorte al centro a 512×512 JPEG (`POST /me/avatar`, máx. 3 MB) y «Quitar foto». Las fotos se ven en todos los avatares, con las iniciales de respaldo. El cargador es propio (`platform/ImageLoader`): LRU en memoria y caché HTTP de OkHttp en disco.
+- **Archivos** (Ajustes o el acceso de Inicio): «Mis archivos» y una raíz por espacio, con migas, buscador en todo el árbol, crear carpeta, subir (octet-stream + `x-file-type`, hasta 25 MB) y abrir con el enlace firmado. `drive.updated` recarga la carpeta abierta.
 - **Compartir hacia TieComs:** es un destino `ACTION_SEND text/plain`. Se elige la conversación y el texto se envía con `forwarded`. El origen se detecta por el paquete de la app que comparte (WhatsApp, Slack, Teams, Gmail u Outlook); si no se reconoce, queda como `other`.
 - **WhatsApp:**
   - Cuentas personal y Business, vinculadas con QR (imagen `data:` del API) o con código de 8 letras.
@@ -119,6 +128,8 @@ adb shell am instrument -w -e apiUrl http://10.0.2.2:3041 -e email <a.email> -e 
 adb pull /sdcard/Android/data/com.tiecoms.app/files/   # splash-*.png, ui-*.png
 ```
 
+- **v3** (chats `multi`, vista previa, perfil y archivos) necesita un API con almacenamiento y worker. Se probó con una base propia en el Postgres Docker (`tiecoms-sso-pg`, puerto 55432, base `tiecoms_android_v3`), el S3 falso de main (`node apps/api/test/fake-s3.mjs 59044`) y el API en el 3044 (`S3_BUCKET=local S3_ENDPOINT=http://localhost:59044 AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=y`, con `src/server.ts` y `src/worker.ts`). `V3DecodingTest` y `V3ApiContractTest` corren sin servidor.
+- `TIECOMS_PEER_DIR` debe tener `scripts/` copiado (no enlazado) junto a `node_modules`: Node resuelve los módulos desde la ruta real del script.
 - **`SplashUiTest`** usa UiAutomator con el reloj real; la regla de Compose usa un reloj virtual. En debug, las etiquetas de prueba se exponen como `resource-id`.
 - **`LiveUiTest`** recorre login → pestañas → conversación → eco del par → pulsación larga → fijar («visto fijado: 1» del par) → editar («visto editado: …» del par) → compartir con `ACTION_SEND` → deep links → rotación.
 - **App Links `https://`:** sin un `assetlinks.json` válido, Android 12+ abre Chrome. Para probar sin verificar: `adb shell pm set-app-links-user-selection --user 0 --package com.tiecoms.app true all`.

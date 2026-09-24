@@ -38,6 +38,8 @@ data class UserDTO(
     val title: String? = null,
     val area: String? = null,
     val primaryOrgId: String? = null,
+    /** Ruta relativa de la foto (/api/v1/avatars/<uuid>), pública; null = iniciales. */
+    val avatarUrl: String? = null,
 )
 
 @Serializable
@@ -72,6 +74,8 @@ data class PersonDTO(
     val area: String? = null,
     val guest: Boolean = false,
     val guestUntil: String? = null,
+    /** Ruta relativa de la foto (/api/v1/avatars/<uuid>), pública; null = iniciales. */
+    val avatarUrl: String? = null,
 )
 
 @Serializable
@@ -92,7 +96,10 @@ data class WorkspaceDTO(
 data class ConversationDTO(
     val id: String = "",
     val workspaceId: String? = null,
-    /** group | internal | direct (valores futuros se tratan como group). */
+    /**
+     * group | internal | direct | multi (valores futuros se tratan como group).
+     * `multi` = chat grupal entre personas (de una o varias empresas), sin espacio (workspaceId null).
+     */
     val kind: String = "group",
     val level: String? = null,
     val name: String? = null,
@@ -120,6 +127,9 @@ data class ConversationDTO(
     val pinnedAt: String? = null,
     val mutedUntil: String? = null,
 ) {
+    /** Directos y chats grupales van juntos en la lista: no pertenecen a un espacio. */
+    val isChat: Boolean get() = kind == "direct" || kind == "multi"
+
     fun mutedAt(nowMs: Long): Boolean =
         mutedUntil?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() > nowMs }.getOrDefault(false) } ?: false
 }
@@ -149,7 +159,28 @@ data class MessageDTO(
     val deletedAt: String? = null,
     val mergedFrom: String? = null,
     val forwarded: ForwardedInfo? = null,
+    /** Vista previa del primer enlace; llega después del envío con `message.updated`. */
+    val linkPreview: LinkPreviewDTO? = null,
 )
+
+/** Vista previa de un enlace. `imageUrl` es relativa al API (/api/v1/previews/<uuid>), pública y cacheable. */
+@Serializable
+data class LinkPreviewDTO(
+    val url: String = "",
+    val title: String? = null,
+    val description: String? = null,
+    val siteName: String? = null,
+    val imageUrl: String? = null,
+) {
+    /** Sitio para mostrar: siteName o el host sin «www.». */
+    val host: String get() {
+        siteName?.takeIf { it.isNotBlank() }?.let { return it }
+        val h = runCatching { java.net.URI(url).host }.getOrNull() ?: url
+        return h.removePrefix("www.")
+    }
+    /** Solo se pinta si trae una URL http(s). */
+    val usable: Boolean get() = url.startsWith("http://") || url.startsWith("https://")
+}
 
 @Serializable
 data class BootstrapDTO(
@@ -393,3 +424,62 @@ data class WaChatDTO(
 @Serializable data class WaMessageDTO(val id: String = "", val fromMe: Boolean = false, val author: String? = null, val kind: String = "text", val body: String = "", val sentAt: String = "")
 @Serializable data class WaMessagesPage(val messages: List<WaMessageDTO> = emptyList())
 @Serializable data class WaOrganizeResult(val reviewed: Int = 0, val changed: Int = 0)
+
+// ---------- Chats, perfil y archivos ----------
+/** Resultado de POST /chats: con una persona, el directo (existente o nuevo); con varias, un chat `multi`. */
+@Serializable data class CreateChatResult(val id: String = "", val kind: String = "multi")
+
+@Serializable
+data class DriveFolderDTO(
+    val id: String = "",
+    val parentId: String? = null,
+    val name: String = "",
+    val createdBy: String? = null,
+    val createdAt: String = "",
+)
+
+@Serializable
+data class DriveFileDTO(
+    val id: String = "",
+    val folderId: String? = null,
+    val name: String = "",
+    val contentType: String = "application/octet-stream",
+    val size: Long = 0,
+    val createdBy: String? = null,
+    val createdAt: String = "",
+    val updatedAt: String? = null,
+)
+
+/** Un árbol completo: «Mis archivos» (workspaceId null) o el de un espacio. */
+@Serializable
+data class DriveTreeDTO(
+    val workspaceId: String? = null,
+    val folders: List<DriveFolderDTO> = emptyList(),
+    val files: List<DriveFileDTO> = emptyList(),
+    val canManageAll: Boolean = false,
+) {
+    fun foldersIn(parent: String?): List<DriveFolderDTO> = folders.filter { it.parentId == parent }.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+    fun filesIn(folder: String?): List<DriveFileDTO> = files.filter { it.folderId == folder }.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+
+    /** Ruta de carpetas desde la raíz hasta [id] (migas de pan). */
+    fun pathTo(id: String?): List<DriveFolderDTO> {
+        val byId = folders.associateBy { it.id }
+        val out = ArrayDeque<DriveFolderDTO>()
+        var cur = id?.let { byId[it] }
+        while (cur != null && out.size < 50) { out.addFirst(cur); cur = cur.parentId?.let { byId[it] } }
+        return out.toList()
+    }
+
+    /** Búsqueda en todo el árbol (como la web: carpetas y archivos cuyo nombre contiene el texto). */
+    fun search(q: String): Pair<List<DriveFolderDTO>, List<DriveFileDTO>> {
+        val n = q.trim()
+        if (n.isEmpty()) return emptyList<DriveFolderDTO>() to emptyList()
+        return folders.filter { it.name.contains(n, ignoreCase = true) } to files.filter { it.name.contains(n, ignoreCase = true) }
+    }
+}
+
+@Serializable data class LinkResult(val url: String = "")
+
+const val MAX_AVATAR_BYTES = 3 * 1024 * 1024
+const val MAX_DRIVE_FILE_BYTES = 25 * 1024 * 1024
+const val MAX_FORWARD_TARGETS = 10

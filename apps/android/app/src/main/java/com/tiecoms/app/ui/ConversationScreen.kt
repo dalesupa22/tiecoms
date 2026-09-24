@@ -291,7 +291,8 @@ fun ConversationScreen(
                 add(SheetItem(ctx.getString(R.string.menu_issue), "◆", tag = "menuIssue") { newIssue = true to m })
                 add(SheetItem(ctx.getString(R.string.menu_meeting), "📅", tag = "menuMeeting") { meeting = true to m })
             }
-            add(forwardMenu(ctx, data, meta, m) { forwarding = m })
+            if (m.kind == "text") add(SheetItem(ctx.getString(R.string.menu_forward_chat), "↪", tag = "menuForwardChat") { forwarding = m })
+            add(forwardMenu(ctx, data, meta, m))
             if (mine && m.kind == "text") {
                 add(null)
                 add(SheetItem(ctx.getString(R.string.menu_edit), "✎", tag = "menuEdit") { editing = m; replyTo = null })
@@ -312,7 +313,8 @@ fun ConversationScreen(
                             Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false).testTag("chatTitle"))
                             if (muted) Text(" 🔕", modifier = Modifier.semantics { contentDescription = ctx.getString(R.string.side_muted) })
                         }
-                        val sub = listOfNotNull(orgs.ifEmpty { null }, if (meta.kind != "direct") ctx.getString(R.string.participants_n, meta.memberIds.size) else null).joinToString(" · ")
+                        val head = if (meta.kind == "multi") Names.multiSubtitle(meta, data) else orgs.ifEmpty { null }
+                        val sub = listOfNotNull(head, if (meta.kind != "direct") ctx.getString(R.string.participants_n, meta.memberIds.size) else null).joinToString(" · ")
                         if (sub.isNotEmpty()) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 },
@@ -646,7 +648,9 @@ private fun MessageBubble(
                     if (child != null) TextButton(onClick = { onOpenConversation(child.id) }) { Text(stringResource(R.string.lin_open), color = fg) }
                 }
             }
-            Text(body, color = fg, style = MaterialTheme.typography.bodyLarge, fontStyle = if (deleted) FontStyle.Italic else null)
+            if (deleted) Text(body, color = fg, style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
+            else LinkifiedText(body, fg, Modifier.testTag("body-${m.seq}"))
+            m.linkPreview?.takeIf { !deleted && it.usable }?.let { LinkPreviewCard(it, fg, Modifier.padding(top = 6.dp)) }
             Text(
                 listOfNotNull(if (pinnedHere && item.mine) "📌" else null, time, if (m.editedAt != null && !deleted) stringResource(R.string.msg_edited) else null).joinToString(" "),
                 style = MaterialTheme.typography.labelSmall, color = fg.copy(alpha = 0.75f), modifier = Modifier.align(Alignment.End),

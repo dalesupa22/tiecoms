@@ -1,7 +1,10 @@
 package com.tiecoms.app.ui
 
 import android.content.Context
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -9,10 +12,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.zIndex
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -22,6 +30,11 @@ import androidx.compose.ui.unit.dp
 import com.tiecoms.app.AppContainer
 import com.tiecoms.app.R
 import com.tiecoms.app.core.ApiException
+import com.tiecoms.app.core.BootstrapDTO
+import com.tiecoms.app.core.ConversationDTO
+import com.tiecoms.app.core.OrganizationDTO
+import com.tiecoms.app.core.PersonDTO
+import com.tiecoms.app.ui.theme.Brand
 import com.tiecoms.app.core.Names
 import com.tiecoms.app.core.NetworkException
 import com.tiecoms.app.core.TcJson
@@ -64,6 +77,7 @@ fun errorText(ctx: Context, e: Throwable): String = when (e) {
             "sso_email_unverified" -> R.string.err_sso_email_unverified
             "account_disabled" -> R.string.err_account_disabled
             "domain_claimed" -> R.string.err_domain_claimed
+            "storage_unavailable" -> R.string.err_storage_unavailable
             else -> null
         }
         when {
@@ -98,6 +112,7 @@ fun systemText(ctx: Context, body: String): String {
         "member.left" -> ctx.getString(R.string.sys_member_left, str("name"))
         "member.removed" -> ctx.getString(R.string.sys_member_removed, str("name"))
         "member.joined" -> ctx.getString(R.string.sys_member_joined, str("name"))
+        "chat.created" -> ctx.getString(R.string.sys_chat_created, str("names"))
         "issue.created" -> ctx.getString(R.string.sys_issue_created, str("title"))
         "issue.closed" -> ctx.getString(R.string.sys_issue_closed, str("title"))
         "issue.reopened" -> ctx.getString(R.string.sys_issue_reopened, str("title"))
@@ -151,9 +166,12 @@ fun parseColor(hex: String?, fallback: Color): Color = runCatching {
     when (h.length) { 6 -> Color(0xFF000000 or v); 8 -> Color(v); else -> fallback }
 }.getOrDefault(fallback)
 
-/** Avatar con iniciales y el color de la empresa (decorativo para lectores de pantalla). */
+/**
+ * Avatar con iniciales y el color de la empresa (decorativo para lectores de pantalla).
+ * Con [photo] (ruta relativa /api/v1/avatars/… o URL) se pinta la foto encima; mientras carga o si falla, quedan las iniciales.
+ */
 @Composable
-fun Avatar(label: String, bg: Color, fg: Color, size: Dp = 44.dp, square: Boolean = false, modifier: Modifier = Modifier) {
+fun Avatar(label: String, bg: Color, fg: Color, size: Dp = 44.dp, square: Boolean = false, modifier: Modifier = Modifier, photo: String? = null) {
     Box(
         modifier = modifier.size(size).clip(if (square) RoundedCornerShape(12.dp) else CircleShape).background(bg).clearAndSetSemantics {},
         contentAlignment = Alignment.Center,
@@ -166,7 +184,67 @@ fun Avatar(label: String, bg: Color, fg: Color, size: Dp = 44.dp, square: Boolea
             fontSize = with(LocalDensity.current) { (size * 0.38f).toSp() },
             maxLines = 1,
         )
+        if (!photo.isNullOrBlank()) RemoteImage(photo, Modifier.matchParentSize(), sizeHint = size)
     }
+}
+
+/** Avatar de una persona: su foto o sus iniciales sobre el color de su empresa; opcionalmente con el logo de la empresa en la esquina. */
+@Composable
+fun PersonAvatar(p: PersonDTO?, data: BootstrapDTO?, size: Dp = 40.dp, orgBadge: Boolean = false, modifier: Modifier = Modifier) {
+    val org = Names.org(data, p?.orgId)
+    Box(modifier.size(size)) {
+        Avatar(p?.name ?: "?", parseColor(org?.colorBg, Brand.Black), parseColor(org?.colorFg, Color.White), size = size, photo = p?.avatarUrl)
+        if (orgBadge && org != null) OrgMark(org, size = size * 0.42f, modifier = Modifier.align(Alignment.BottomEnd))
+    }
+}
+
+/** Logo de una empresa: su marca (org.mark) sobre sus colores. */
+@Composable
+fun OrgMark(org: OrganizationDTO?, size: Dp = 20.dp, modifier: Modifier = Modifier) {
+    val bg = parseColor(org?.colorBg, Color(0xFFBDB5AE))
+    val fg = parseColor(org?.colorFg, Color.White)
+    val label = org?.mark?.takeIf { it.isNotBlank() } ?: org?.name?.let { Names.initials(it) } ?: "?"
+    Box(
+        modifier.size(size).clip(RoundedCornerShape(size * 0.28f)).background(bg)
+            .border(1.dp, MaterialTheme.colorScheme.surface, RoundedCornerShape(size * 0.28f)).clearAndSetSemantics {},
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label.take(3), color = fg, fontWeight = FontWeight.Bold, maxLines = 1,
+            fontSize = with(LocalDensity.current) { (size * if (label.length > 2) 0.34f else 0.46f).toSp() })
+    }
+}
+
+/** Caritas apiladas de un chat grupal (hasta 3 personas distintas de mí). */
+@Composable
+fun StackedAvatars(c: ConversationDTO, data: BootstrapDTO?, size: Dp = 44.dp) {
+    val others = Names.others(c, data).take(3)
+    if (others.isEmpty()) {
+        Avatar("👥", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant, size = size)
+        return
+    }
+    val face = if (others.size == 1) size else size * 0.66f
+    val step = if (others.size == 1) 0.dp else (size - face) / (others.size - 1)
+    Box(Modifier.size(size).clearAndSetSemantics {}) {
+        others.forEachIndexed { i, p ->
+            val org = Names.org(data, p.orgId)
+            Avatar(
+                p.name, parseColor(org?.colorBg, Brand.Black), parseColor(org?.colorFg, Color.White), size = face, photo = p.avatarUrl,
+                modifier = Modifier.offset(x = step * i, y = if (i % 2 == 0) 0.dp else size - face).zIndex((3 - i).toFloat())
+                    .border(1.5.dp, MaterialTheme.colorScheme.surface, CircleShape),
+            )
+        }
+    }
+}
+
+/** Imagen pública del API (foto o miniatura) con caché; no pinta nada mientras carga o si falla. */
+@Composable
+fun RemoteImage(path: String, modifier: Modifier = Modifier, sizeHint: Dp = 96.dp, contentScale: ContentScale = ContentScale.Crop) {
+    val client = LocalClient.current
+    val images = LocalContainer.current.images
+    val url = remember(path, client.baseUrl) { client.mediaUrl(path) } ?: return
+    val px = with(LocalDensity.current) { sizeHint.roundToPx() }.coerceIn(32, 1024)
+    val bmp by produceState(images.cached(url, px), url, px) { if (value == null) value = images.load(url, px) }
+    bmp?.let { Image(it, contentDescription = null, modifier = modifier, contentScale = contentScale) }
 }
 
 @Composable

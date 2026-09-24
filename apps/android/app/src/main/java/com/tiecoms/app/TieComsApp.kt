@@ -105,7 +105,12 @@ class AppContainer(private val app: Application) {
 
     private fun newClient(url: String) = TieComsClient(url, deviceName, storage, secrets, okHttp)
 
+    /** Imágenes remotas (fotos y miniaturas públicas) con caché en memoria y en disco. */
+    val images by lazy { com.tiecoms.app.platform.ImageLoader(app, okHttp) }
+
     fun init() {
+        // Títulos de chats grupales sin nombre, en el idioma del teléfono (código puro de core/Names).
+        Names.labels = Names.Labels(app.getString(R.string.chat_group_chat), app.getString(R.string.chat_and_more))
         notifier.ensureChannel()
         sounds.hashCode() // precarga SoundPool: el sonido del splash debe estar listo en t = 0,3 s
         scope.launch { _client.value.start() }

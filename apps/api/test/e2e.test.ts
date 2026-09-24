@@ -197,3 +197,23 @@ describe('sesiones', () => {
     await disconnected;
   });
 });
+
+describe('colegas de la misma empresa', () => {
+  it('un colega se une con invitación de empresa, queda en la misma empresa y aparece en el directorio', async () => {
+    const inv = await call(`/organizations/${ana.orgId}/invitations`, { token: ana.token, body: { email: `colega.${run}@example.com` } });
+    expect(inv.status).toBe(200);
+    expect((await call(`/org-invitations/${inv.json.token}`)).json.valid).toBe(true);
+    // Otro correo no puede usarla.
+    const wrong = await call('/auth/signup', { body: { name: 'Intruso', email: `otro.${run}@example.com`, password: 'clave-segura-123', orgInviteToken: inv.json.token, device: { deviceId: randomUUID(), platform: 'ios' } } });
+    expect(wrong.status).toBe(403);
+    const ok = await call('/auth/signup', { body: { name: 'Colega Ana', email: `colega.${run}@example.com`, password: 'clave-segura-123', orgInviteToken: inv.json.token, device: { deviceId: randomUUID(), platform: 'ios' } } });
+    expect(ok.status).toBe(200);
+    expect(ok.json.user.primaryOrgId).toBe(ana.orgId);
+    const b = await call('/bootstrap', { token: ana.token });
+    expect(b.json.people.some((p: any) => p.id === ok.json.user.id)).toBe(true);
+    // Un miembro sin rol de administración no puede invitar colegas.
+    expect((await call(`/organizations/${ana.orgId}/invitations`, { token: ok.json.accessToken, body: {} })).status).toBe(403);
+    // Y la invitación ya no sirve otra vez.
+    expect((await call('/auth/signup', { body: { name: 'Otra', email: `colega.${run}@example.com`, password: 'clave-segura-123', orgInviteToken: inv.json.token, device: { deviceId: randomUUID(), platform: 'ios' } } })).status).toBe(409);
+  });
+});

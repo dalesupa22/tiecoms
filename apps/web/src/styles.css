@@ -80,8 +80,8 @@ a:hover { color: var(--accent-ink); }
 .tag { font-size: 11px; font-weight: 600; border-radius: 6px; padding: 1px 6px; background: var(--paper-3); color: var(--ink-2); }
 
 /* ---------- Autenticación ---------- */
-.auth { min-height: 100%; display: grid; place-items: center; padding: 32px 16px calc(32px + var(--safe-b)); }
-.auth-card { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 18px; }
+.auth { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 32px 16px calc(32px + var(--safe-b)); }
+.auth-card { width: min(420px, 100%); display: flex; flex-direction: column; gap: 18px; }
 .auth-card img { width: 260px; max-width: 80%; height: auto; }
 .auth-card form { display: flex; flex-direction: column; gap: 12px; }
 .auth-switch { font-size: 13px; color: var(--muted); }

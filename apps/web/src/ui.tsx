@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import type { BootstrapDTO, ConversationDTO, OrganizationDTO, PersonDTO } from '@tiecoms/contracts';
+import { locale, systemText, t } from './i18n.ts';
 
 export function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -31,7 +32,7 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="row"><h3 className="grow">{title}</h3><button className="icon-btn" onClick={onClose} aria-label="Cerrar">×</button></div>
+        <div className="row"><h3 className="grow">{title}</h3><button className="icon-btn" onClick={onClose} aria-label={t('common.close')}>×</button></div>
         {children}
       </div>
     </div>
@@ -45,18 +46,20 @@ export const personById = (d: BootstrapDTO, id: string | null | undefined) => d.
 export function conversationTitle(d: BootstrapDTO, c: ConversationDTO) {
   if (c.kind === 'direct') {
     const other = c.memberIds.find((m) => m !== d.me.id);
-    return personById(d, other)?.name ?? 'Directo';
+    return personById(d, other)?.name ?? t('chat.aDirect');
   }
-  return c.name ?? 'Conversación';
+  // Nombres que crea el sistema por defecto se muestran en el idioma de quien lee.
+  if (c.kind === 'internal' && c.name === 'Equipo interno') return t('conv.defaultInternal');
+  return c.name ?? t('chat.aConversation');
 }
 
 export function conversationSubtitle(d: BootstrapDTO, c: ConversationDTO) {
   if (c.kind === 'direct') {
     const other = personById(d, c.memberIds.find((m) => m !== d.me.id));
-    return other ? [other.title, orgById(d, other.orgId)?.name ?? (other.guest ? 'Tercero invitado' : null)].filter(Boolean).join(' · ') : '';
+    return other ? [other.title, orgById(d, other.orgId)?.name ?? (other.guest ? t('common.guest') : null)].filter(Boolean).join(' · ') : '';
   }
   const ws = d.workspaces.find((w) => w.id === c.workspaceId);
-  return [ws?.name, c.kind === 'internal' ? 'Interno' : c.level === 'directivo' ? 'Directivo' : null].filter(Boolean).join(' · ');
+  return [ws?.name, c.kind === 'internal' ? t('kind.internalShort') : c.level === 'directivo' ? t('kind.directivo') : null].filter(Boolean).join(' · ');
 }
 
 /** Empresa "contraparte" de un espacio desde mi punto de vista (para agrupar la barra lateral). */
@@ -72,17 +75,18 @@ export function timeLabel(iso: string | null) {
   if (!iso) return '';
   const d = new Date(iso);
   const now = new Date();
-  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
-  return d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString(locale(), { day: 'numeric', month: 'short' });
 }
 
 export function dayLabel(iso: string) {
   const d = new Date(iso);
   const now = new Date();
   const y = new Date(now); y.setDate(now.getDate() - 1);
-  if (d.toDateString() === now.toDateString()) return 'Hoy';
-  if (d.toDateString() === y.toDateString()) return 'Ayer';
-  return d.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' });
+  if (d.toDateString() === now.toDateString()) return t('day.today');
+  if (d.toDateString() === y.toDateString()) return t('day.yesterday');
+  return d.toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
-export const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+/** Vista previa de la barra lateral: los mensajes de sistema se traducen. */
+export const previewText = (body: string | null) => (body ? systemText(body) : null);

@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type EventsPage, type InvitationPreviewDTO, type MessageDTO, type Platform,
+  type EventsPage, type InvitationPreviewDTO, type MessageDTO, type OrgInvitationPreviewDTO, type Platform,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -144,7 +144,7 @@ export class TieComsClient {
     await this.afterLogin();
   }
 
-  async signup(input: { name: string; email: string; password: string; orgName: string; title?: string }) {
+  async signup(input: { name: string; email: string; password: string; orgName?: string; orgInviteToken?: string; title?: string }) {
     const res = await this.raw('/auth/signup', { method: 'POST', json: { ...input, device: await this.device() } }, false);
     if (!res.ok) throw await parseError(res);
     await this.applyAuth(await res.json());
@@ -496,6 +496,14 @@ export class TieComsClient {
     const r = await this.request<{ workspaceId: string; conversationIds: string[] }>(`/invitations/${encodeURIComponent(token)}/accept`, { method: 'POST', json: {} });
     await this.loadBootstrap();
     return r;
+  }
+  createOrgInvitation(orgId: string, input: { email?: string; role?: 'member' | 'admin' } = {}) {
+    return this.request<{ id: string; token: string; expiresAt: string }>(`/organizations/${orgId}/invitations`, { method: 'POST', json: input });
+  }
+  async previewOrgInvitation(token: string): Promise<OrgInvitationPreviewDTO> {
+    const res = await this.raw(`/org-invitations/${encodeURIComponent(token)}`, {}, false);
+    if (!res.ok) throw await parseError(res);
+    return res.json();
   }
   sessions() { return this.request<{ sessions: { id: string; deviceName: string; platform: string; lastSeenAt: string }[]; current: string }>('/sessions'); }
   revokeSession(id: string) { return this.request(`/sessions/${id}`, { method: 'DELETE' }); }

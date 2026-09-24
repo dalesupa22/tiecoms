@@ -49,6 +49,11 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
          SELECT DISTINCT o.user_id FROM workspace_memberships wm
            JOIN workspace_memberships o ON o.workspace_id = wm.workspace_id AND o.revoked_at IS NULL AND (o.expires_at IS NULL OR o.expires_at > now())
           WHERE wm.user_id = $1 AND wm.role <> 'guest' AND ${ACTIVE_WM}
+         UNION
+         -- Colegas de mis empresas.
+         SELECT DISTINCT o.user_id FROM organization_memberships mine
+           JOIN organization_memberships o ON o.org_id = mine.org_id
+          WHERE mine.user_id = $1
          UNION SELECT $1::uuid
        )
        SELECT u.id, u.name, u.kind, u.primary_org_id, om.title, om.area,

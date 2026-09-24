@@ -25,7 +25,7 @@ export const DeviceInfo = z.object({
 export type DeviceInfo = z.infer<typeof DeviceInfo>;
 
 const email = z.email().max(254).transform((s) => s.trim().toLowerCase());
-const password = z.string().min(10, 'Mínimo 10 caracteres').max(200);
+const password = z.string().min(10).max(200);
 const personName = z.string().trim().min(2).max(120);
 
 // ---------- Auth ----------
@@ -33,10 +33,13 @@ export const SignupInput = z.object({
   name: personName,
   email,
   password,
-  orgName: z.string().trim().min(2).max(120),
+  /** Crea una empresa nueva… */
+  orgName: z.string().trim().min(2).max(120).optional(),
+  /** …o se une a una existente con una invitación de empresa. */
+  orgInviteToken: z.string().min(16).max(200).optional(),
   title: z.string().trim().max(120).optional(),
   device: DeviceInfo,
-});
+}).refine((v) => !!v.orgName || !!v.orgInviteToken, { message: 'org_required', path: ['orgName'] });
 export type SignupInput = z.infer<typeof SignupInput>;
 
 export const LoginInput = z.object({ email, password: z.string().min(1).max(200), device: DeviceInfo });
@@ -179,6 +182,20 @@ export const CreateInvitationInput = z.object({
   accessUntil: z.iso.datetime().optional(),
   history: z.enum(['now', 'all']).default('now'),
 });
+
+export const CreateOrgInvitationInput = z.object({
+  email: email.optional(),
+  role: z.enum(['member', 'admin']).default('member'),
+  expiresInDays: z.number().int().min(1).max(60).default(14),
+});
+
+export interface OrgInvitationPreviewDTO {
+  orgName: string;
+  invitedByName: string;
+  email: string | null;
+  expiresAt: string;
+  valid: boolean;
+}
 
 export const AcceptInvitationInput = z.object({ orgId: z.uuid().optional() });
 

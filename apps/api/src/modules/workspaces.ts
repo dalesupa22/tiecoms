@@ -8,6 +8,9 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { randomToken, sha256 } from '../security.ts';
 import { appendEvent, appendMessage } from './messages.ts';
 
+/** Mensaje de sistema estructurado: cada cliente lo muestra en su idioma. */
+const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, ...p });
+
 async function primaryOrg(c: Tx, userId: string, orgId?: string) {
   const { rows } = await c.query(
     `SELECT om.org_id, u.name FROM organization_memberships om JOIN users u ON u.id = om.user_id
@@ -78,7 +81,7 @@ export async function createWorkspace(userId: string, input: z.infer<typeof Crea
       await c.query('INSERT INTO conversation_memberships (conversation_id, user_id, can_manage, added_by) VALUES ($1,$2,true,$2)', [conv, userId]);
       await enqueueOutbox(c, 'rooms.join', { userIds: [userId], conversationId: conv });
     }
-    await appendMessage(c, { conversationId: general.rows[0].id, authorId: userId, kind: 'system', body: `Espacio «${input.name}» creado.` });
+    await appendMessage(c, { conversationId: general.rows[0].id, authorId: userId, kind: 'system', body: sys('workspace.created', { name: input.name }) });
     await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'scope.changed', reason: 'workspace.created' } });
     await audit(c, userId, 'workspace.created', { type: 'workspace', id: workspaceId, workspaceId });
     return { id: workspaceId, generalConversationId: general.rows[0].id as string };
@@ -107,7 +110,7 @@ export async function createConversation(userId: string, workspaceId: string, in
     const conversationId: string = conv.rows[0].id;
     await addConversationMembers(c, conversationId, [userId], userId, 'all', true);
     if (others.length) await addConversationMembers(c, conversationId, others, userId, 'all');
-    await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: `Grupo «${input.name}» creado.` });
+    await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: sys('group.created', { name: input.name }) });
     await audit(c, userId, 'conversation.created', { type: 'conversation', id: conversationId, workspaceId });
     return { id: conversationId };
   });
@@ -127,8 +130,7 @@ export async function addMembers(userId: string, conversationId: string, input: 
     const added = await addConversationMembers(c, conversationId, input.userIds, userId, input.history);
     if (added.length) {
       const names = rows.filter((r) => added.includes(r.user_id)).map((r) => r.name).join(', ');
-      const note = input.history === 'all' ? ' con acceso al historial' : ' (ven solo lo nuevo)';
-      await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: `Se unió: ${names}${note}.` });
+      await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: sys('members.added', { names, history: input.history }) });
       await audit(c, userId, 'conversation.members_added', { type: 'conversation', id: conversationId, workspaceId: a.workspaceId }, { added, history: input.history });
     }
     return { added };
@@ -146,7 +148,7 @@ export async function removeMember(userId: string, conversationId: string, targe
     );
     if (!r.rowCount) throw notFound('Participante');
     const name = (await c.query('SELECT name FROM users WHERE id = $1', [targetId])).rows[0]?.name ?? 'Alguien';
-    await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: targetId === userId ? `${name} salió del grupo.` : `${name} ya no participa en este grupo.` });
+    await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: sys(targetId === userId ? 'member.left' : 'member.removed', { name }) });
     await appendEvent(c, conversationId, { type: 'members.changed', conversationId, memberIds: await activeMemberIds(c, conversationId) });
     await scopeChanged(c, [targetId], 'conversation.left', undefined, { conversationId });
     await audit(c, userId, 'conversation.member_removed', { type: 'conversation', id: conversationId, workspaceId: a.workspaceId }, { targetId });
@@ -255,7 +257,7 @@ export async function acceptInvitation(userId: string, token: string, input: z.i
     }
     for (const convId of inv.conversation_ids as string[]) {
       const added = await addConversationMembers(c, convId, [userId], inv.invited_by, inv.history);
-      if (added.length) await appendMessage(c, { conversationId: convId, authorId: userId, kind: 'system', body: `${me.rows[0].name} se unió por invitación.` });
+      if (added.length) await appendMessage(c, { conversationId: convId, authorId: userId, kind: 'system', body: sys('member.joined', { name: me.rows[0].name }) });
     }
     await c.query('UPDATE invitations SET accepted_by = $2, accepted_at = now() WHERE id = $1', [inv.id, userId]);
     // Los demás participantes del espacio ven a la persona nueva en su directorio.

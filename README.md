@@ -33,6 +33,17 @@ Pruebas de extremo a extremo (contra una base de pruebas, nunca producción):
 API_URL=http://localhost:3020 npm test
 ```
 
+## Datos de demostración
+
+`scripts/seed-demo.mjs` crea por el API 3 empresas (Xertify, Estudio Norte, Nexo Logística), 6 personas, un tercero (Julián Castro, consultor con fecha de salida), 2 espacios entre empresas, grupos compartidos, directivo, internos y directos. Cuentas: `danny|laura|mateo|ana|lucia|carlos|julian@demo.tiecoms.com`, misma contraseña (en `.secrets/demo_password`, fuera de git).
+
+```bash
+API_URL=https://app.tiecoms.com DEMO_PASSWORD='...' node scripts/seed-demo.mjs        # una sola vez
+API_URL=https://app.tiecoms.com DEMO_PASSWORD='...' node scripts/three-sessions.mjs   # 3 sesiones en vivo: latencia y alcance
+```
+
+Idioma: la app usa el del navegador (español si lo prefiere, inglés en otro caso); se puede fijar en Ajustes. Los mensajes de sistema se guardan como clave + datos y cada cliente los muestra en su idioma.
+
 ## Despliegue
 
 Dominios: www.tiecoms.com (landing es/en), app.tiecoms.com (app + API en `/api/`). `tiecoms.com` y las rutas antiguas `/app/*` y `/producto.html` redirigen.

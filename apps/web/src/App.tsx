@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useClient } from './app-client.ts';
+import { useLang } from './i18n.ts';
 import { asset, navigate, parse, usePath } from './router.ts';
 import { AuthScreen } from './screens/Auth.tsx';
 import { ConversationScreen } from './screens/Conversation.tsx';
@@ -15,6 +16,8 @@ function nextParam() {
 export function App() {
   const path = usePath();
   const status = useClient((s) => s.status);
+  // Cambiar de idioma vuelve a pintar toda la app (key={lang}).
+  const lang = useLang();
   const route = parse(path);
 
   useEffect(() => {
@@ -23,12 +26,12 @@ export function App() {
   }, [status, route.name, path]);
 
   if (status === 'loading') return <div className="auth"><img src={asset("/tiecoms-mark.svg")} alt="TieComs" width={160} height={35} style={{ opacity: 0.6 }} /></div>;
-  if (route.name === 'invite') return <InviteScreen token={route.token} />;
-  if (status === 'anonymous') return <AuthScreen mode={route.name === 'signup' ? 'signup' : 'login'} after={nextParam()} />;
+  if (route.name === 'invite') return <InviteScreen key={lang} token={route.token} />;
+  if (status === 'anonymous') return <AuthScreen key={lang} mode={route.name === 'signup' ? 'signup' : 'login'} after={nextParam()} />;
   if (route.name === 'login' || route.name === 'signup') return null;
 
   return (
-    <Shell route={route}>
+    <Shell key={lang} route={route}>
       {route.name === 'today' && <TodayScreen />}
       {route.name === 'inbox' && <InboxScreen />}
       {route.name === 'spaces' && <SpacesScreen />}

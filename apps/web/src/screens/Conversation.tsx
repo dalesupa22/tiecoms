@@ -3,7 +3,8 @@ import type { MessageDTO } from '@tiecoms/contracts';
 import type { PendingMessage } from '@tiecoms/client-core';
 import { client, useClient } from '../app-client.ts';
 import { navigate } from '../router.ts';
-import { Avatar, OrgMark, conversationSubtitle, conversationTitle, dayLabel, orgById, personById, plural } from '../ui.tsx';
+import { Avatar, OrgMark, conversationSubtitle, conversationTitle, dayLabel, orgById, personById } from '../ui.tsx';
+import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { AddMembersDialog } from './Dialogs.tsx';
 
 type Row =
@@ -30,7 +31,7 @@ export function ConversationScreen({ id }: { id: string }) {
 
   useEffect(() => {
     // La pantalla se monta de nuevo por conversación (key={id}), así el borrador no se cruza.
-    client.openConversation(id).catch((e) => setError(e.message));
+    client.openConversation(id).catch((e) => setError(errorText(e)));
   }, [id]);
 
   // Borrador local por conversación: sobrevive recargas y cambios de conversación.
@@ -68,7 +69,7 @@ export function ConversationScreen({ id }: { id: string }) {
 
   if (!conv) {
     return (
-      <div className="page"><div className="empty">Esta conversación no existe o está fuera de tu alcance.</div></div>
+      <div className="page"><div className="empty">{t('chat.notFound')}</div></div>
     );
   }
 
@@ -101,26 +102,26 @@ export function ConversationScreen({ id }: { id: string }) {
     <div className={`conv ${panel ? '' : 'no-panel'}`}>
       <section className="conv-main">
         <header className="conv-head">
-          <button className="icon-btn only-mobile" aria-label="Volver" onClick={() => (history.length > 1 ? history.back() : navigate('/conversaciones'))}>‹</button>
+          <button className="icon-btn only-mobile" aria-label={t('common.back')} onClick={() => (history.length > 1 ? history.back() : navigate('/conversaciones'))}>‹</button>
           <div className="grow" style={{ minWidth: 0 }}>
             <h2 className="ellipsis">{conv.kind === 'internal' ? '◌ ' : conv.level === 'directivo' ? '◆ ' : ''}{title}</h2>
-            <div className="small muted ellipsis">{conversationSubtitle(d, conv)}{conv.kind !== 'direct' ? ` · ${plural(conv.memberIds.length, 'participante', 'participantes')}` : ''}</div>
+            <div className="small muted ellipsis">{conversationSubtitle(d, conv)}{conv.kind !== 'direct' ? ` · ${tn(conv.memberIds.length, 'n.participant', 'n.participants')}` : ''}</div>
           </div>
           <div className="row only-desktop">{orgsHere.map((o) => o && <OrgMark key={o.id} org={o} size={22} />)}</div>
-          {ws && <button className="btn ghost small only-desktop" onClick={() => navigate(`/w/${ws.id}`)}>Espacio</button>}
-          <button className="icon-btn" aria-label="Detalles" onClick={() => setPanel(!panel)}>ⓘ</button>
+          {ws && <button className="btn ghost small only-desktop" onClick={() => navigate(`/w/${ws.id}`)}>{t('chat.space')}</button>}
+          <button className="icon-btn" aria-label={t('chat.details')} onClick={() => setPanel(!panel)}>ⓘ</button>
         </header>
 
         <div className="msgs" ref={scroller} onScroll={onScroll} role="log" aria-live="polite">
-          {local?.loading && !local.loaded && <div className="msg-sys">Cargando…</div>}
-          {local?.loaded && !local.hasMore && conv.historyFromSeq > 0 && <div className="msg-sys">Entraste aquí más tarde: ves los mensajes desde tu llegada.</div>}
-          {local?.loaded && local.hasMore && <div className="msg-sys">{local.loading ? 'Cargando anteriores…' : '·'}</div>}
+          {local?.loading && !local.loaded && <div className="msg-sys">{t('common.loading')}</div>}
+          {local?.loaded && !local.hasMore && conv.historyFromSeq > 0 && <div className="msg-sys">{t('chat.lateJoin')}</div>}
+          {local?.loaded && local.hasMore && <div className="msg-sys">{local.loading ? t('chat.loadingOlder') : '·'}</div>}
           {error && <div className="error" style={{ textAlign: 'center' }}>{error}</div>}
           {rows.map((r) => {
             if (r.kind === 'day') return <div key={r.key} className="day">{r.label}</div>;
             if (r.kind === 'pending') return <PendingRow key={r.key} p={r.p} />;
             const m = r.m;
-            if (m.kind === 'system') return <div key={r.key} className="msg-sys">{m.body}</div>;
+            if (m.kind === 'system') return <div key={r.key} className="msg-sys">{systemText(m.body)}</div>;
             const author = personById(d, m.authorId);
             const org = orgById(d, author?.orgId);
             return (
@@ -129,49 +130,49 @@ export function ConversationScreen({ id }: { id: string }) {
                 <div style={{ minWidth: 0 }}>
                   {!r.cont && (
                     <div className="msg-meta">
-                      <span className="msg-author">{author?.name ?? 'Participante anterior'}</span>
-                      <span className="msg-org">{org?.name ?? (author?.guest ? 'Tercero invitado' : '')}</span>
-                      <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className="msg-author">{author?.name ?? t('chat.formerParticipant')}</span>
+                      <span className="msg-org">{org?.name ?? (author?.guest ? t('common.guest') : '')}</span>
+                      <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
                   )}
-                  <div className="msg-body">{m.deletedAt ? <i className="muted">Mensaje eliminado</i> : m.body}</div>
+                  <div className="msg-body">{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.body}</div>
                 </div>
               </div>
             );
           })}
         </div>
-        <div className="typing">{typers.length ? `${typers.join(', ')} está escribiendo…` : ''}</div>
+        <div className="typing">{typers.length ? t(typers.length > 1 ? 'chat.typingMany' : 'chat.typingOne', { names: typers.join(', ') }) : ''}</div>
         <div className="composer">
           {conv.canPost ? (
             <div className="composer-box">
               <textarea
-                ref={input} rows={1} value={text} placeholder={`Escribe a ${title}`} aria-label="Mensaje"
+                ref={input} rows={1} value={text} placeholder={t('chat.placeholder', { name: title })} aria-label={t('common.message')}
                 onChange={(e) => { setText(e.target.value); client.typing(id); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(180, e.target.scrollHeight)}px`; }}
                 onKeyDown={onKey} enterKeyHint="send"
               />
-              <button className="send" onClick={send} disabled={!text.trim()} aria-label="Enviar">➤</button>
+              <button className="send" onClick={send} disabled={!text.trim()} aria-label={t('chat.send')}>➤</button>
             </div>
-          ) : <div className="hint" style={{ textAlign: 'center', padding: 8 }}>Solo lectura: no puedes publicar en esta conversación.</div>}
+          ) : <div className="hint" style={{ textAlign: 'center', padding: 8 }}>{t('chat.readOnly')}</div>}
         </div>
       </section>
 
       {panel && (
         <aside className="panel">
-          <div className="row"><span className="eyebrow grow">Detalles</span><button className="icon-btn" onClick={() => setPanel(false)} aria-label="Cerrar detalles">×</button></div>
+          <div className="row"><span className="eyebrow grow">{t('chat.details')}</span><button className="icon-btn" onClick={() => setPanel(false)} aria-label={t('common.close')}>×</button></div>
           <div>
             <div className="serif" style={{ fontSize: 26, lineHeight: 1.1 }}>{title}</div>
             <div className="small muted">{conversationSubtitle(d, conv)}</div>
           </div>
           {conv.kind !== 'direct' && (
             <div className="card" style={{ padding: 12 }}>
-              <div className="eyebrow" style={{ marginBottom: 6 }}>Alcance</div>
-              <div className="small">{conv.kind === 'internal' ? `Solo personas de ${orgById(d, conv.internalOrgId)?.name ?? 'una empresa'}.` : 'Solo quienes están en este grupo pueden leerlo. Entrar después no da acceso al historial salvo concesión explícita.'}</div>
+              <div className="eyebrow" style={{ marginBottom: 6 }}>{t('chat.scope')}</div>
+              <div className="small">{conv.kind === 'internal' ? t('chat.scopeInternal', { org: orgById(d, conv.internalOrgId)?.name ?? '' }) : t('chat.scopeGroup')}</div>
             </div>
           )}
           <div>
             <div className="row" style={{ marginBottom: 6 }}>
-              <span className="eyebrow grow">Participantes · {conv.memberIds.length}</span>
-              {conv.canManage && conv.kind !== 'direct' && <button className="btn small" onClick={() => setAdding(true)}>＋ Agregar</button>}
+              <span className="eyebrow grow">{t('ws.participants')} · {conv.memberIds.length}</span>
+              {conv.canManage && conv.kind !== 'direct' && <button className="btn small" onClick={() => setAdding(true)}>{t('chat.add')}</button>}
             </div>
             {conv.memberIds.map((mid) => {
               const p = personById(d, mid);
@@ -180,21 +181,21 @@ export function ConversationScreen({ id }: { id: string }) {
                 <div key={mid} className="member">
                   <Avatar person={p} org={o} size={32} />
                   <div className="grow" style={{ minWidth: 0 }}>
-                    <div className="ellipsis" style={{ fontWeight: 600 }}>{p?.name ?? 'Participante'}{mid === d.me.id ? ' (tú)' : ''}</div>
-                    <div className="small muted ellipsis">{[p?.title, o?.name ?? (p?.guest ? `Tercero${p.guestUntil ? ` hasta ${new Date(p.guestUntil).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}` : ''}` : null)].filter(Boolean).join(' · ')}</div>
+                    <div className="ellipsis" style={{ fontWeight: 600 }}>{p?.name ?? t('common.participant')}{mid === d.me.id ? ` ${t('common.you')}` : ''}</div>
+                    <div className="small muted ellipsis">{[p?.title, o?.name ?? (p?.guest ? (p.guestUntil ? t('chat.guestUntil', { date: new Date(p.guestUntil).toLocaleDateString(locale(), { day: 'numeric', month: 'short' }) }) : t('common.guest')) : null)].filter(Boolean).join(' · ')}</div>
                   </div>
                   {mid !== d.me.id && conv.kind !== 'direct' && (
-                    <button className="btn ghost small" title="Mensaje directo" onClick={() => client.openDirect(mid).then((r) => navigate(`/c/${r.id}`)).catch((e) => setError(e.message))}>✉</button>
+                    <button className="btn ghost small" title={t('common.directMessage')} aria-label={t('common.directMessage')} onClick={() => client.openDirect(mid).then((r) => navigate(`/c/${r.id}`)).catch((e) => setError(errorText(e)))}>✉</button>
                   )}
                   {conv.canManage && mid !== d.me.id && conv.kind !== 'direct' && (
-                    <button className="btn ghost small" title="Quitar del grupo" onClick={() => { if (confirm(`¿Quitar a ${p?.name} de este grupo?`)) void client.removeMember(id, mid).catch((e) => setError(e.message)); }}>−</button>
+                    <button className="btn ghost small" title={t('chat.remove')} aria-label={t('chat.remove')} onClick={() => { if (confirm(t('chat.removeConfirm', { name: p?.name ?? '' }))) void client.removeMember(id, mid).catch((e) => setError(errorText(e))); }}>−</button>
                   )}
                 </div>
               );
             })}
           </div>
           {conv.kind !== 'direct' && (
-            <button className="btn ghost small" onClick={() => { if (confirm('¿Salir de este grupo?')) void client.removeMember(id, d.me.id).then(() => navigate('/')); }}>Salir del grupo</button>
+            <button className="btn ghost small" onClick={() => { if (confirm(t('chat.leaveConfirm'))) void client.removeMember(id, d.me.id).then(() => navigate('/')); }}>{t('chat.leave')}</button>
           )}
         </aside>
       )}
@@ -212,14 +213,14 @@ function PendingRow({ p }: { p: PendingMessage }) {
       <div>
         <div className="msg-meta">
           <span className="msg-author">{d.me.name}</span>
-          <span className="msg-time">{p.status === 'failed' ? 'No se envió' : p.attempts > 0 ? 'Reintentando…' : 'Enviando…'}</span>
+          <span className="msg-time">{p.status === 'failed' ? t('chat.notSent') : p.attempts > 0 ? t('chat.retrying') : t('chat.sending')}</span>
         </div>
         <div className="msg-body">{p.body}</div>
         {p.status === 'failed' && (
           <div className="row small" style={{ marginTop: 4 }}>
             <span className="error">{p.error}</span>
-            <button className="btn small" onClick={() => client.retry(p.clientMessageId)}>Reintentar</button>
-            <button className="btn ghost small" onClick={() => client.discard(p.clientMessageId)}>Descartar</button>
+            <button className="btn small" onClick={() => client.retry(p.clientMessageId)}>{t('chat.retry')}</button>
+            <button className="btn ghost small" onClick={() => client.discard(p.clientMessageId)}>{t('chat.discard')}</button>
           </div>
         )}
       </div>

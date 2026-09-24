@@ -4,11 +4,12 @@ import { client, useClient } from '../app-client.ts';
 import { asset, navigate, type Route } from '../router.ts';
 import { Avatar, OrgMark, conversationTitle, counterpartOrg, orgById, personById } from '../ui.tsx';
 import { NewWorkspaceDialog } from './Dialogs.tsx';
+import { t } from '../i18n.ts';
 
 const NAV = [
-  { name: 'today', label: 'Hoy', ico: '◑', to: '/' },
-  { name: 'inbox', label: 'Conversaciones', ico: '◍', to: '/conversaciones' },
-  { name: 'people', label: 'Participantes', ico: '◎', to: '/participantes' },
+  { name: 'today', label: 'nav.today', ico: '◑', to: '/' },
+  { name: 'inbox', label: 'nav.inbox', ico: '◍', to: '/conversaciones' },
+  { name: 'people', label: 'nav.people', ico: '◎', to: '/participantes' },
 ] as const;
 
 export function groupWorkspaces(d: BootstrapDTO) {
@@ -37,25 +38,25 @@ function Sidebar({ route }: { route: Route }) {
     <aside className="side">
       <div className="side-brand">
         <img src={asset("/tiecoms-mark.svg")} alt="TieComs" width={118} height={26} />
-        <span className="eyebrow" style={{ fontSize: 10 }}>Tu red</span>
+        <span className="eyebrow" style={{ fontSize: 10 }}>{t('brand.network')}</span>
       </div>
       <nav className="nav">
         {NAV.map((n) => (
           <button key={n.name} className={`nav-item ${route.name === n.name ? 'active' : ''}`} onClick={() => navigate(n.to)}>
-            <span className="ico">{n.ico}</span><span className="grow">{n.label}</span>
+            <span className="ico">{n.ico}</span><span className="grow">{t(n.label)}</span>
             {n.name === 'today' && unreadTotal > 0 && <span className="pill">{unreadTotal}</span>}
           </button>
         ))}
       </nav>
       <div className="side-scroll">
         <div className="row" style={{ padding: '6px 10px 2px' }}>
-          <span className="eyebrow grow">Empresas y espacios</span>
-          <button className="btn ghost small" onClick={() => setNewWs(true)} title="Nuevo espacio con un cliente">＋</button>
+          <span className="eyebrow grow">{t('side.companies')}</span>
+          <button className="btn ghost small" onClick={() => setNewWs(true)} title={t('side.newSpace')} aria-label={t('side.newSpace')}>＋</button>
         </div>
-        {groups.length === 0 && <div className="hint" style={{ padding: '6px 10px' }}>Crea tu primer espacio de trabajo con otra empresa.</div>}
+        {groups.length === 0 && <div className="hint" style={{ padding: '6px 10px' }}>{t('side.empty')}</div>}
         {groups.map((g) => (
           <div key={g.org?.id ?? 'none'}>
-            <div className="side-org"><OrgMark org={g.org} /><span className="ellipsis">{g.org?.name ?? 'Sin empresa'}</span></div>
+            <div className="side-org"><OrgMark org={g.org} /><span className="ellipsis">{g.org?.name ?? t('common.noCompany')}</span></div>
             <div className="side-ws">
               {g.workspaces.map((w) => {
                 const convs = d.conversations.filter((c) => c.workspaceId === w.id);
@@ -79,7 +80,7 @@ function Sidebar({ route }: { route: Route }) {
         ))}
         {directs.length > 0 && (
           <>
-            <div className="eyebrow" style={{ padding: '14px 10px 4px' }}>Directos</div>
+            <div className="eyebrow" style={{ padding: '14px 10px 4px' }}>{t('side.directs')}</div>
             {directs.map((c) => {
               const other = personById(d, c.memberIds.find((m) => m !== d.me.id));
               return (
@@ -109,13 +110,13 @@ function Sidebar({ route }: { route: Route }) {
 function MobileTabs({ route }: { route: Route }) {
   const unread = useClient((s) => s.data?.conversations.reduce((n, c) => n + c.unread, 0) ?? 0);
   const tabs = [
-    { name: 'today', label: 'Hoy', ico: '◑', to: '/' },
-    { name: 'inbox', label: 'Chats', ico: '◍', to: '/conversaciones' },
-    { name: 'spaces', label: 'Espacios', ico: '▦', to: '/espacios' },
-    { name: 'people', label: 'Personas', ico: '◎', to: '/participantes' },
+    { name: 'today', label: t('nav.today'), ico: '◑', to: '/' },
+    { name: 'inbox', label: t('nav.chats'), ico: '◍', to: '/conversaciones' },
+    { name: 'spaces', label: t('nav.spaces'), ico: '▦', to: '/espacios' },
+    { name: 'people', label: t('nav.peopleShort'), ico: '◎', to: '/participantes' },
   ];
   return (
-    <nav className="tabs" aria-label="Navegación principal">
+    <nav className="tabs" aria-label={t('nav.mainNav')}>
       {tabs.map((t) => (
         <button key={t.name} className={route.name === t.name ? 'on' : ''} onClick={() => navigate(t.to)}>
           <span className="ico">{t.ico}</span>{t.label}
@@ -133,7 +134,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     <div className={`shell ${inConv ? 'in-conv' : ''}`}>
       <Sidebar route={route} />
       <main className="main">
-        {connection !== 'online' && <div className="conn" role="status">{connection === 'connecting' ? 'Conectando…' : 'Sin conexión. Tus mensajes quedan en cola y se envían al volver.'}</div>}
+        {connection !== 'online' && <div className="conn" role="status">{connection === 'connecting' ? t('conn.connecting') : t('conn.offline')}</div>}
         {children}
       </main>
       <MobileTabs route={route} />
@@ -142,5 +143,5 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
 }
 
 export function SignOutButton() {
-  return <button className="btn" onClick={() => client.logout().then(() => navigate('/login', true))}>Cerrar sesión</button>;
+  return <button className="btn" onClick={() => client.logout().then(() => navigate('/login', true))}>{t('settings.logout')}</button>;
 }

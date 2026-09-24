@@ -10,7 +10,7 @@ Especificación común: `SPEC.md` y `SPEC-v2.md` del coordinador.
 | Bundle ID | `com.tiecoms.app` (app) · `com.tiecoms.app.share` (extensión Compartir) |
 | Team | `B76US7H3L3` (CERTILABOR SAS), firma automática |
 | App Group | `group.com.tiecoms.app`: Keychain compartido y lista de conversaciones para la extensión |
-| Versión | 1.1.0 (build 3), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
+| Versión | 1.1.0 (build 4), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.tiecoms.com` por defecto; `-TCApiURL <url>` al lanzar (pruebas) |
 
@@ -260,8 +260,8 @@ disparan mientras la app está viva.
 **Privacidad**
 - `PrivacyInfo.xcprivacy` se incluye en la app y la extensión: UserDefaults propios (CA92.1) y del
   App Group (1C8F.1); nombre, correo, teléfono y contactos opcionales de WhatsApp, mensajes, fotos elegidas,
-  archivos y otro contenido del usuario, reportes de soporte, ID de cuenta, ID propio del dispositivo e interacción
-  con el producto (lecturas, actividad y sesiones) vinculados a la cuenta para funcionalidad, sin rastreo. Las fotos usan el selector del sistema; no se solicita
+  audio y archivos elegidos, otro contenido del usuario, reportes de soporte, ID de cuenta, ID propio del dispositivo e interacción
+  con el producto (lecturas, actividad y sesiones) y búsquedas de WhatsApp enviadas al servidor (los registros HTTP conservan la consulta), vinculados a la cuenta para funcionalidad, sin rastreo. Las fotos usan el selector del sistema; no se solicita
   acceso completo a la fototeca.
 - Contenido de WhatsApp: solo lo ve el dueño.
 

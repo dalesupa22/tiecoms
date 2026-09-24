@@ -41,3 +41,16 @@ services:
     deploy:
       resources:
         limits: { cpus: "0.5", memory: 256M, pids: 64 }
+
+  # Conectar WhatsApp: una sesión (dispositivo vinculado) por cuenta conectada.
+  wa:
+    <<: *common
+    command: ["node", "--enable-source-maps", "wa-bridge.js"]
+    environment:
+      INSTANCE_ID: wa-1
+      DB_POOL_MAX: "4"
+    stop_grace_period: 15s
+    healthcheck: { disable: true }
+    deploy:
+      resources:
+        limits: { cpus: "0.75", memory: 512M, pids: 128 }

@@ -12,6 +12,7 @@ import { IssuesScreen } from './screens/Issues.tsx';
 import { TrazoScreen } from './screens/Lineage.tsx';
 import { AgendaScreen } from './screens/Calendar.tsx';
 import { ShareScreen } from './screens/Bring.tsx';
+import { WhatsAppScreen } from './screens/WhatsApp.tsx';
 import { DialogHost } from './actions.tsx';
 import { MenuHost, ToastHost } from './menu.tsx';
 
@@ -51,6 +52,7 @@ export function App() {
       {route.name === 'trazo' && <TrazoScreen />}
       {route.name === 'agenda' && <AgendaScreen />}
       {route.name === 'share' && <ShareScreen />}
+      {route.name === 'whatsapp' && <WhatsAppScreen />}
       {route.name === 'settings' && <SettingsScreen />}
       {route.name === 'workspace' && <WorkspaceScreen key={route.id} id={route.id} />}
       {route.name === 'conversation' && <ConversationScreen key={route.id + location.search} id={route.id} />}

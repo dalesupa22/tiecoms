@@ -395,6 +395,75 @@ export const EventsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
 
+// ---------- Conectar WhatsApp ----------
+export const WaKind = z.enum(['personal', 'business']);
+export type WaKind = z.infer<typeof WaKind>;
+export const WaCategory = z.enum(['trabajo', 'clientes', 'familia', 'amigos', 'comunidad', 'otros']);
+export type WaCategory = z.infer<typeof WaCategory>;
+export type WaStatus = 'pending' | 'qr' | 'connected' | 'reconnecting' | 'expired' | 'logged_out' | 'error';
+
+/** Número con indicativo para vincular con código de 8 letras en vez de QR (útil desde el mismo teléfono). */
+const PairPhone = z.string().trim().max(24).regex(/^[+\d\s()-]*$/, 'Solo números').nullable().optional();
+export const CreateWaAccountInput = z.object({ label: z.string().trim().min(1).max(60), kind: WaKind, pairPhone: PairPhone });
+export const UpdateWaAccountInput = z.object({ label: z.string().trim().min(1).max(60).optional(), kind: WaKind.optional() });
+export const RelinkWaAccountInput = z.object({ pairPhone: PairPhone });
+export const WaChatsQuery = z.object({
+  accountId: z.uuid().optional(),
+  category: WaCategory.optional(),
+  groups: z.enum(['1', '0']).optional(),
+  q: z.string().max(100).optional(),
+  hidden: z.enum(['1', '0']).optional(),
+  limit: z.coerce.number().int().min(1).max(1000).default(500),
+});
+export const UpdateWaChatInput = z.object({
+  /** null = volver a la categoría sugerida. */
+  category: WaCategory.nullable().optional(),
+  pinned: z.boolean().optional(),
+  hidden: z.boolean().optional(),
+  /** Conversación de TieComs a la que llegan los mensajes nuevos de este chat (null = desvincular). */
+  linkedConversationId: z.uuid().nullable().optional(),
+});
+export const WaMessagesQuery = z.object({ before: z.iso.datetime().optional(), limit: z.coerce.number().int().min(1).max(200).default(60) });
+
+export interface WaAccountDTO {
+  id: string;
+  label: string;
+  kind: WaKind;
+  status: WaStatus;
+  phone: string | null;
+  pushName: string | null;
+  platform: string | null;
+  /** data:image/png del QR mientras status = 'qr'. */
+  qr: string | null;
+  pairingCode: string | null;
+  lastError: string | null;
+  connectedAt: string | null;
+  lastSyncAt: string | null;
+  chats: number;
+  groups: number;
+  createdAt: string;
+}
+export interface WaChatDTO {
+  accountId: string;
+  accountLabel: string;
+  accountKind: WaKind;
+  jid: string;
+  name: string;
+  isGroup: boolean;
+  participants: number | null;
+  description: string | null;
+  lastMessageAt: string | null;
+  lastPreview: string | null;
+  unread: number;
+  category: WaCategory;
+  categoryManual: boolean;
+  pinned: boolean;
+  hidden: boolean;
+  archivedInWhatsApp: boolean;
+  linkedConversationId: string | null;
+}
+export interface WaMessageDTO { id: string; fromMe: boolean; author: string | null; kind: string; body: string; sentAt: string }
+
 // ---------- Eventos en tiempo real ----------
 /** Evento durable de una conversación, ordenado por eventSeq. */
 export type ConversationEvent =
@@ -412,7 +481,8 @@ export type AccountEvent =
   | { type: 'scope.changed'; reason: string }
   | { type: 'read.updated'; conversationId: string; seq: number }
   | { type: 'reminder.due'; reminder: ReminderDTO }
-  | { type: 'prefs.updated'; conversationId?: string; workspaceId?: string };
+  | { type: 'prefs.updated'; conversationId?: string; workspaceId?: string }
+  | { type: 'whatsapp.updated'; accountId: string };
 
 export interface EventsPage {
   events: ConversationEvent[];

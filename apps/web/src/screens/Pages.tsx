@@ -309,6 +309,12 @@ export function SettingsScreen() {
         <SignOutButton />
       </div>
 
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{t('settings.whatsapp')}</div>
+      <button className="card conv-card" style={{ marginBottom: 24 }} onClick={() => navigate('/whatsapp')}>
+        <span style={{ fontSize: 22 }} aria-hidden>✆</span>
+        <span className="grow"><b>{t('wa.connect').replace('＋ ', '')}</b><span className="small muted" style={{ display: 'block' }}>{t('settings.whatsappHint')}</span></span>
+        <span className="muted">›</span>
+      </button>
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('notif.title')}</div>
       <NotificationToggle />
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('settings.language')}</div>

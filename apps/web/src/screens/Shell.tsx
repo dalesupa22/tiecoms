@@ -17,6 +17,7 @@ const NAV = [
   { name: 'issues', label: 'nav.issues', ico: '◆', to: '/asuntos' },
   { name: 'trazo', label: 'nav.trazo', ico: '⑂', to: '/trazo' },
   { name: 'people', label: 'nav.people', ico: '◎', to: '/participantes' },
+  { name: 'whatsapp', label: 'nav.whatsapp', ico: '✆', to: '/whatsapp' },
 ] as const;
 
 export function groupWorkspaces(d: BootstrapDTO) {

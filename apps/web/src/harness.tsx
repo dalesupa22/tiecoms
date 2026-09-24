@@ -87,6 +87,49 @@ const reminders = [
     dec: { messages: [], lastEventSeq: 0, hasMore: false, loaded: true, loading: false },
   },
 });
-(client as any).request = async () => { throw new Error('arnés sin backend'); };
+// WhatsApp de ejemplo: la personal conectada y la Business esperando el QR.
+const qrSvg = `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 21 21" shape-rendering="crispEdges"><rect width="21" height="21" fill="#fff"/>' + Array.from({ length: 180 }, (_, i) => `<rect x="${(i * 7) % 21}" y="${Math.floor((i * 7) / 21) % 21}" width="1" height="1"/>`).join('') + '<rect x="0" y="0" width="7" height="7" fill="none" stroke="#000"/><rect x="14" y="0" width="7" height="7" fill="none" stroke="#000"/><rect x="0" y="14" width="7" height="7" fill="none" stroke="#000"/></svg>')}`;
+const waAccounts = [
+  { id: 'wa1', label: 'Personal', kind: 'personal', status: 'connected', phone: '573001112233', pushName: 'Danny', platform: 'android', qr: null, pairingCode: null, lastError: null, connectedAt: iso(D), lastSyncAt: iso(60_000), chats: 214, groups: 38, createdAt: iso(D) },
+  { id: 'wa2', label: 'Business', kind: 'business', status: q.get('wa') === 'code' ? 'qr' : 'qr', phone: null, pushName: null, platform: null, qr: qrSvg, pairingCode: q.get('wa') === 'code' ? 'K7Q2WX9M' : null, lastError: null, connectedAt: null, lastSyncAt: null, chats: 0, groups: 0, createdAt: iso(H) },
+];
+const waChat = (jid: string, name: string, category: string, extra: Record<string, unknown> = {}) => ({
+  accountId: 'wa1', accountLabel: 'Personal', accountKind: 'personal', jid, name, isGroup: true, participants: 12, description: null,
+  lastMessageAt: iso(3 * H), lastPreview: null, unread: 0, category, categoryManual: false, pinned: false, hidden: false, archivedInWhatsApp: false, linkedConversationId: null, ...extra,
+});
+const waChats = [
+  waChat('g1@g.us', 'Equipo Xertify', 'trabajo', { unread: 4, lastPreview: 'Laura: el despliegue quedó listo', lastMessageAt: iso(20 * 60_000), participants: 9, pinned: true, linkedConversationId: 'internal' }),
+  waChat('g2@g.us', 'Soporte UniAndes · credenciales', 'clientes', { unread: 2, lastPreview: 'Lorena: ¿ya se aplicó la recarga?', lastMessageAt: iso(45 * 60_000), participants: 14 }),
+  waChat('g3@g.us', 'Familia Suárez ❤️', 'familia', { lastPreview: 'Mamá: 📷 Foto', lastMessageAt: iso(2 * H), participants: 11 }),
+  waChat('g4@g.us', 'Los parceros ⚽', 'amigos', { unread: 17, lastPreview: 'Juan: ¿partido el sábado?', lastMessageAt: iso(3 * H), participants: 23 }),
+  waChat('g5@g.us', 'Conjunto Torres del Parque', 'comunidad', { lastPreview: 'Administración: corte de agua mañana', lastMessageAt: iso(D), participants: 180 }),
+  waChat('g6@g.us', 'Estudio Norte · lanzamiento', 'trabajo', { lastPreview: 'Mateo: seguimos el viernes', lastMessageAt: iso(26 * H), participants: 6 }),
+  waChat('g7@g.us', 'Viaje Cartagena 2026', 'amigos', { lastPreview: 'Tú: reservé el hotel', lastMessageAt: iso(3 * D), participants: 5 }),
+];
+const waMsgs = [
+  { id: 'a', fromMe: false, author: 'Laura Gómez', kind: 'text', body: '¿Quién revisa el PR de firmas?', sentAt: iso(3 * H) },
+  { id: 'b', fromMe: true, author: null, kind: 'text', body: 'Yo lo miro después del almuerzo', sentAt: iso(2 * H) },
+  { id: 'c', fromMe: false, author: 'Carlos', kind: 'image', body: '📷 Captura del error', sentAt: iso(H) },
+  { id: 'd', fromMe: false, author: 'Laura Gómez', kind: 'text', body: 'El despliegue quedó listo ✅', sentAt: iso(20 * 60_000) },
+];
+(client as any).request = async (path: string, init: any = {}) => {
+  if (path === '/whatsapp/accounts' && !init.method) return { accounts: waAccounts, max: 5 };
+  if (path.startsWith('/whatsapp/chats?')) {
+    const p = new URLSearchParams(path.split('?')[1]);
+    const cat = p.get('category');
+    const counts: Record<string, { total: number; unread: number }> = {};
+    for (const c of waChats) { const k = counts[c.category] ??= { total: 0, unread: 0 }; k.total++; if (c.unread) k.unread++; }
+    return { chats: waChats.filter((c) => !cat || c.category === cat), categories: counts };
+  }
+  if (/\/whatsapp\/chats\/.+\/messages/.test(path)) return { messages: waMsgs };
+  if (path.startsWith('/whatsapp/chats/') && init.method === 'PATCH') {
+    const jid = decodeURIComponent(path.split('/')[4]!);
+    const c = waChats.find((x) => x.jid === jid)!;
+    Object.assign(c, init.json, init.json.category !== undefined ? { categoryManual: init.json.category !== null } : {});
+    return c;
+  }
+  if (path === '/whatsapp/organize') return { reviewed: 7, changed: 0 };
+  throw new Error('arnés sin backend');
+};
 history.replaceState(null, '', q.get('to') ?? '/');
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

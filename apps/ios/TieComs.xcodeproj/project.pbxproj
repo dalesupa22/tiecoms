@@ -1,0 +1,706 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		03A22D1626ECFD539C675363 /* DeepLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8557FC33955580880236C06D /* DeepLink.swift */; };
+		1395F25E40795DF8EAFACC33 /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22A6408E25FEDBF97D17364D /* L10n.swift */; };
+		1F41DF7AD84A179000EC01A5 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40384C3AF1B15FBE71FBFA01 /* RootView.swift */; };
+		20D1A10E2B92D7322DBF5B14 /* SSO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B359F9C564097CEE34D2A05 /* SSO.swift */; };
+		304A7ED6BCE177CE9A54BD8D /* SocketIOProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58CF969C93A44DD76EE4EE0B /* SocketIOProtocolTests.swift */; };
+		31DD07B095571C91D0FB232C /* StoreSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB118B40A5F8B04415623994 /* StoreSyncTests.swift */; };
+		3398EFD5E838BD6D49484EC1 /* Storage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3068A6F5B7DE8788B944476 /* Storage.swift */; };
+		4235D2A78399FB04776AC024 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 94F3BA09658690F94F865EB1 /* Localizable.strings */; };
+		4570A01F25E3C5B753F0763A /* SocketIOClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 310CB4DC9C904F41CD395304 /* SocketIOClient.swift */; };
+		46B7BBCD1ABD2B119DBC9044 /* Naming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38C26BEA687D356B4765DDC8 /* Naming.swift */; };
+		4861AC62C42CF71D8AEF1453 /* TieComsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CDA44DC6302797DC800B44D /* TieComsApp.swift */; };
+		4FEFD3F104B5B20D25F7EBDB /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEABA7548C1667E663D4C70E /* Models.swift */; };
+		557557E2D14658FCBBB20E0E /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0EE4F0835A244D173D5CE5E /* APIClient.swift */; };
+		59508C7C91EA2B02ACAD615B /* SSOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A9581A136556B589C7E824 /* SSOTests.swift */; };
+		5C5A90EE8D7AFC7E28E68DF0 /* AuthViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 959E3DC72E9AF90351D4A075 /* AuthViews.swift */; };
+		5C5E810AB205F55137AC159E /* AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FBBF6EF55B008956531AAC9 /* AppStore.swift */; };
+		6768FE2C56CB7B3B9F237FEE /* tc_notify.caf in Resources */ = {isa = PBXBuildFile; fileRef = 4212E6B71E371BC46001BD89 /* tc_notify.caf */; };
+		6D2D27D981A66B9EE10C8F80 /* SocketIOProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF6A5A1072D180B50ABD7291 /* SocketIOProtocol.swift */; };
+		7449F903D57C1B5199447D89 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E62F7C36416F5CCC95C04ED6 /* PrivacyInfo.xcprivacy */; };
+		8A1233EC493B295510B8946F /* ChatFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9435F794DD29ECC6D280393D /* ChatFlowUITests.swift */; };
+		91C244FFC2747DB60736CE3C /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7B7D04AEB3A584685873097 /* Theme.swift */; };
+		A913BA0E653F0DBAD93280AC /* TestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744AE6DDB5ABBFD7B89901B0 /* TestSupport.swift */; };
+		B0A1A021264C4E4F5C8C4EEE /* DecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 083932E17F3BCA024B4EBFD6 /* DecodingTests.swift */; };
+		C267D7565F6DF8D77BE41AEC /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5512C5E20A20FE9F456CC2F /* HomeView.swift */; };
+		C6E3F8CBA1099F05CBEC7F95 /* IntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10AC2E537D2E9D5B93E325A9 /* IntegrationTests.swift */; };
+		CF04A65A1B47AA8D769E0941 /* tc_receive.caf in Resources */ = {isa = PBXBuildFile; fileRef = 9DAF2FF0FD1C609CF44FCC84 /* tc_receive.caf */; };
+		D617012D196385E2A7505E73 /* Feedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23FEF82583783355CABE69D6 /* Feedback.swift */; };
+		E3FCB75AC48F989B91D78245 /* tc_send.caf in Resources */ = {isa = PBXBuildFile; fileRef = A3F81ABD77EB22BDB57C8850 /* tc_send.caf */; };
+		E6B0D34AF575A80CDA81EBF7 /* DetailsSettingsInvite.swift in Sources */ = {isa = PBXBuildFile; fileRef = F718A99EA118584855D36A3B /* DetailsSettingsInvite.swift */; };
+		E6D0CF9A07083AAB76A12A8A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 583E047F344413AFA12319CA /* Assets.xcassets */; };
+		F44BF670B9865D29323F6593 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 48624417014E35F069CBEC2F /* InfoPlist.strings */; };
+		F8DD637AF1318E32FDAE44F8 /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4257657A4BDB09D0C0C1CDB2 /* ConversationView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		622D5BC9AC2CE5ABB08E740C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 67D23E01D3EE86B7ED3C1C83 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B5A6947E5E421A98DCBB71CC;
+			remoteInfo = TieComs;
+		};
+		8FC0FF199CD6BF415211E6C6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 67D23E01D3EE86B7ED3C1C83 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B5A6947E5E421A98DCBB71CC;
+			remoteInfo = TieComs;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		083932E17F3BCA024B4EBFD6 /* DecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecodingTests.swift; sourceTree = "<group>"; };
+		10AC2E537D2E9D5B93E325A9 /* IntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationTests.swift; sourceTree = "<group>"; };
+		22A6408E25FEDBF97D17364D /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
+		23FEF82583783355CABE69D6 /* Feedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Feedback.swift; sourceTree = "<group>"; };
+		2E948A0F8D7FB9B6478EEC20 /* TieComsTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TieComsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		310CB4DC9C904F41CD395304 /* SocketIOClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketIOClient.swift; sourceTree = "<group>"; };
+		38C26BEA687D356B4765DDC8 /* Naming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Naming.swift; sourceTree = "<group>"; };
+		3EF3EC7982D199C50C43C25A /* TieComsUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TieComsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		3F53D792BDF79B79D56A47AF /* es */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = es; path = es.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		40384C3AF1B15FBE71FBFA01 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		40DB379F56AC17E565D91F7F /* es */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = es; path = es.lproj/Localizable.strings; sourceTree = "<group>"; };
+		4212E6B71E371BC46001BD89 /* tc_notify.caf */ = {isa = PBXFileReference; path = tc_notify.caf; sourceTree = "<group>"; };
+		4257657A4BDB09D0C0C1CDB2 /* ConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationView.swift; sourceTree = "<group>"; };
+		583E047F344413AFA12319CA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		58CF969C93A44DD76EE4EE0B /* SocketIOProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketIOProtocolTests.swift; sourceTree = "<group>"; };
+		5CDA44DC6302797DC800B44D /* TieComsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TieComsApp.swift; sourceTree = "<group>"; };
+		693D6FE05E8BDE87A56C7102 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		744AE6DDB5ABBFD7B89901B0 /* TestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestSupport.swift; sourceTree = "<group>"; };
+		79A9581A136556B589C7E824 /* SSOTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSOTests.swift; sourceTree = "<group>"; };
+		7B359F9C564097CEE34D2A05 /* SSO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSO.swift; sourceTree = "<group>"; };
+		8557FC33955580880236C06D /* DeepLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLink.swift; sourceTree = "<group>"; };
+		9435F794DD29ECC6D280393D /* ChatFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatFlowUITests.swift; sourceTree = "<group>"; };
+		959E3DC72E9AF90351D4A075 /* AuthViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViews.swift; sourceTree = "<group>"; };
+		9DAF2FF0FD1C609CF44FCC84 /* tc_receive.caf */ = {isa = PBXFileReference; path = tc_receive.caf; sourceTree = "<group>"; };
+		9FBBF6EF55B008956531AAC9 /* AppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStore.swift; sourceTree = "<group>"; };
+		A3F81ABD77EB22BDB57C8850 /* tc_send.caf */ = {isa = PBXFileReference; path = tc_send.caf; sourceTree = "<group>"; };
+		B3068A6F5B7DE8788B944476 /* Storage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage.swift; sourceTree = "<group>"; };
+		C0EE4F0835A244D173D5CE5E /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		C9588E3F5C22848C8993510F /* TieComs.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TieComs.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CCF75E43B44050980EEF21D7 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		CEABA7548C1667E663D4C70E /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		CF6A5A1072D180B50ABD7291 /* SocketIOProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketIOProtocol.swift; sourceTree = "<group>"; };
+		D5512C5E20A20FE9F456CC2F /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		E4842EF37BA97EFDD7E0A622 /* TieComs.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TieComs.entitlements; sourceTree = "<group>"; };
+		E62F7C36416F5CCC95C04ED6 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		E7B7D04AEB3A584685873097 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		EB118B40A5F8B04415623994 /* StoreSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreSyncTests.swift; sourceTree = "<group>"; };
+		F718A99EA118584855D36A3B /* DetailsSettingsInvite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailsSettingsInvite.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		118A408D65EB46BE1704F061 /* TieComsUITests */ = {
+			isa = PBXGroup;
+			children = (
+				9435F794DD29ECC6D280393D /* ChatFlowUITests.swift */,
+			);
+			path = TieComsUITests;
+			sourceTree = "<group>";
+		};
+		12A8C7878AEB1F064680F85C /* TieComs */ = {
+			isa = PBXGroup;
+			children = (
+				69F3866A53B847E4C62D0056 /* App */,
+				1A034EA337552117D38C1662 /* Core */,
+				BD690B1BCE11133E21F33264 /* Resources */,
+				A4ACA2A6CA7F27663579A400 /* UI */,
+			);
+			path = TieComs;
+			sourceTree = "<group>";
+		};
+		1A034EA337552117D38C1662 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				C0EE4F0835A244D173D5CE5E /* APIClient.swift */,
+				9FBBF6EF55B008956531AAC9 /* AppStore.swift */,
+				8557FC33955580880236C06D /* DeepLink.swift */,
+				23FEF82583783355CABE69D6 /* Feedback.swift */,
+				22A6408E25FEDBF97D17364D /* L10n.swift */,
+				CEABA7548C1667E663D4C70E /* Models.swift */,
+				38C26BEA687D356B4765DDC8 /* Naming.swift */,
+				310CB4DC9C904F41CD395304 /* SocketIOClient.swift */,
+				CF6A5A1072D180B50ABD7291 /* SocketIOProtocol.swift */,
+				7B359F9C564097CEE34D2A05 /* SSO.swift */,
+				B3068A6F5B7DE8788B944476 /* Storage.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		54F0ADC4BA79F893C308869D /* Sounds */ = {
+			isa = PBXGroup;
+			children = (
+				4212E6B71E371BC46001BD89 /* tc_notify.caf */,
+				9DAF2FF0FD1C609CF44FCC84 /* tc_receive.caf */,
+				A3F81ABD77EB22BDB57C8850 /* tc_send.caf */,
+			);
+			path = Sounds;
+			sourceTree = "<group>";
+		};
+		69F3866A53B847E4C62D0056 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				5CDA44DC6302797DC800B44D /* TieComsApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A4ACA2A6CA7F27663579A400 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				959E3DC72E9AF90351D4A075 /* AuthViews.swift */,
+				4257657A4BDB09D0C0C1CDB2 /* ConversationView.swift */,
+				F718A99EA118584855D36A3B /* DetailsSettingsInvite.swift */,
+				D5512C5E20A20FE9F456CC2F /* HomeView.swift */,
+				40384C3AF1B15FBE71FBFA01 /* RootView.swift */,
+				E7B7D04AEB3A584685873097 /* Theme.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		A9AE8CAF23D27B9701E36340 = {
+			isa = PBXGroup;
+			children = (
+				12A8C7878AEB1F064680F85C /* TieComs */,
+				E6E6FE6ED45C4B2C4FB1B1FC /* TieComsTests */,
+				118A408D65EB46BE1704F061 /* TieComsUITests */,
+				BEA94E96C93F5B4F54E2FB27 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		BD690B1BCE11133E21F33264 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				583E047F344413AFA12319CA /* Assets.xcassets */,
+				48624417014E35F069CBEC2F /* InfoPlist.strings */,
+				94F3BA09658690F94F865EB1 /* Localizable.strings */,
+				E62F7C36416F5CCC95C04ED6 /* PrivacyInfo.xcprivacy */,
+				E4842EF37BA97EFDD7E0A622 /* TieComs.entitlements */,
+				54F0ADC4BA79F893C308869D /* Sounds */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		BEA94E96C93F5B4F54E2FB27 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C9588E3F5C22848C8993510F /* TieComs.app */,
+				2E948A0F8D7FB9B6478EEC20 /* TieComsTests.xctest */,
+				3EF3EC7982D199C50C43C25A /* TieComsUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E6E6FE6ED45C4B2C4FB1B1FC /* TieComsTests */ = {
+			isa = PBXGroup;
+			children = (
+				083932E17F3BCA024B4EBFD6 /* DecodingTests.swift */,
+				10AC2E537D2E9D5B93E325A9 /* IntegrationTests.swift */,
+				58CF969C93A44DD76EE4EE0B /* SocketIOProtocolTests.swift */,
+				79A9581A136556B589C7E824 /* SSOTests.swift */,
+				EB118B40A5F8B04415623994 /* StoreSyncTests.swift */,
+				744AE6DDB5ABBFD7B89901B0 /* TestSupport.swift */,
+			);
+			path = TieComsTests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0218F0C74468ED86260E08AA /* TieComsTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6A7C7AA841F19993BB04228F /* Build configuration list for PBXNativeTarget "TieComsTests" */;
+			buildPhases = (
+				83383022128296F439AF47B4 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				87BA2BA2B32AE0D00EB73708 /* PBXTargetDependency */,
+			);
+			name = TieComsTests;
+			packageProductDependencies = (
+			);
+			productName = TieComsTests;
+			productReference = 2E948A0F8D7FB9B6478EEC20 /* TieComsTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		786759538745CD34DEE75E72 /* TieComsUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7E7A8DA21A10769282053BA7 /* Build configuration list for PBXNativeTarget "TieComsUITests" */;
+			buildPhases = (
+				74E97E3C7704BFF5F4B38023 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1E1DFEE6DCB7A646D4EA25A9 /* PBXTargetDependency */,
+			);
+			name = TieComsUITests;
+			packageProductDependencies = (
+			);
+			productName = TieComsUITests;
+			productReference = 3EF3EC7982D199C50C43C25A /* TieComsUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		B5A6947E5E421A98DCBB71CC /* TieComs */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 877C04C5C3E8F147C37DD859 /* Build configuration list for PBXNativeTarget "TieComs" */;
+			buildPhases = (
+				43B70CB70467271001EFA66C /* Sources */,
+				ED8CA87614DA13989919FB4D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TieComs;
+			packageProductDependencies = (
+			);
+			productName = TieComs;
+			productReference = C9588E3F5C22848C8993510F /* TieComs.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		67D23E01D3EE86B7ED3C1C83 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					0218F0C74468ED86260E08AA = {
+						DevelopmentTeam = B76US7H3L3;
+						ProvisioningStyle = Automatic;
+					};
+					786759538745CD34DEE75E72 = {
+						DevelopmentTeam = B76US7H3L3;
+						ProvisioningStyle = Automatic;
+						TestTargetID = B5A6947E5E421A98DCBB71CC;
+					};
+					B5A6947E5E421A98DCBB71CC = {
+						DevelopmentTeam = B76US7H3L3;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 5A6DCEEE916D51A25942FC09 /* Build configuration list for PBXProject "TieComs" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+				es,
+			);
+			mainGroup = A9AE8CAF23D27B9701E36340;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B5A6947E5E421A98DCBB71CC /* TieComs */,
+				0218F0C74468ED86260E08AA /* TieComsTests */,
+				786759538745CD34DEE75E72 /* TieComsUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		ED8CA87614DA13989919FB4D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E6D0CF9A07083AAB76A12A8A /* Assets.xcassets in Resources */,
+				F44BF670B9865D29323F6593 /* InfoPlist.strings in Resources */,
+				4235D2A78399FB04776AC024 /* Localizable.strings in Resources */,
+				7449F903D57C1B5199447D89 /* PrivacyInfo.xcprivacy in Resources */,
+				6768FE2C56CB7B3B9F237FEE /* tc_notify.caf in Resources */,
+				CF04A65A1B47AA8D769E0941 /* tc_receive.caf in Resources */,
+				E3FCB75AC48F989B91D78245 /* tc_send.caf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		43B70CB70467271001EFA66C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				557557E2D14658FCBBB20E0E /* APIClient.swift in Sources */,
+				5C5E810AB205F55137AC159E /* AppStore.swift in Sources */,
+				5C5A90EE8D7AFC7E28E68DF0 /* AuthViews.swift in Sources */,
+				F8DD637AF1318E32FDAE44F8 /* ConversationView.swift in Sources */,
+				03A22D1626ECFD539C675363 /* DeepLink.swift in Sources */,
+				E6B0D34AF575A80CDA81EBF7 /* DetailsSettingsInvite.swift in Sources */,
+				D617012D196385E2A7505E73 /* Feedback.swift in Sources */,
+				C267D7565F6DF8D77BE41AEC /* HomeView.swift in Sources */,
+				1395F25E40795DF8EAFACC33 /* L10n.swift in Sources */,
+				4FEFD3F104B5B20D25F7EBDB /* Models.swift in Sources */,
+				46B7BBCD1ABD2B119DBC9044 /* Naming.swift in Sources */,
+				1F41DF7AD84A179000EC01A5 /* RootView.swift in Sources */,
+				20D1A10E2B92D7322DBF5B14 /* SSO.swift in Sources */,
+				4570A01F25E3C5B753F0763A /* SocketIOClient.swift in Sources */,
+				6D2D27D981A66B9EE10C8F80 /* SocketIOProtocol.swift in Sources */,
+				3398EFD5E838BD6D49484EC1 /* Storage.swift in Sources */,
+				91C244FFC2747DB60736CE3C /* Theme.swift in Sources */,
+				4861AC62C42CF71D8AEF1453 /* TieComsApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		74E97E3C7704BFF5F4B38023 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8A1233EC493B295510B8946F /* ChatFlowUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		83383022128296F439AF47B4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0A1A021264C4E4F5C8C4EEE /* DecodingTests.swift in Sources */,
+				C6E3F8CBA1099F05CBEC7F95 /* IntegrationTests.swift in Sources */,
+				59508C7C91EA2B02ACAD615B /* SSOTests.swift in Sources */,
+				304A7ED6BCE177CE9A54BD8D /* SocketIOProtocolTests.swift in Sources */,
+				31DD07B095571C91D0FB232C /* StoreSyncTests.swift in Sources */,
+				A913BA0E653F0DBAD93280AC /* TestSupport.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1E1DFEE6DCB7A646D4EA25A9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B5A6947E5E421A98DCBB71CC /* TieComs */;
+			targetProxy = 622D5BC9AC2CE5ABB08E740C /* PBXContainerItemProxy */;
+		};
+		87BA2BA2B32AE0D00EB73708 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B5A6947E5E421A98DCBB71CC /* TieComs */;
+			targetProxy = 8FC0FF199CD6BF415211E6C6 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		48624417014E35F069CBEC2F /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				693D6FE05E8BDE87A56C7102 /* en */,
+				3F53D792BDF79B79D56A47AF /* es */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+		94F3BA09658690F94F865EB1 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				CCF75E43B44050980EEF21D7 /* en */,
+				40DB379F56AC17E565D91F7F /* es */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		46C59D18C4A0E9B1C51E3DC3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = TieComs;
+			};
+			name = Release;
+		};
+		6F06DFB8438E8CA5435048E5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = TieComs;
+			};
+			name = Debug;
+		};
+		A4EC4C59C975B977015CE61C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TieComs.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TieComs";
+			};
+			name = Release;
+		};
+		A8E1AFFC99234BE4FAABBE61 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = B76US7H3L3;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		B302A1309864848706AF329B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TieComs.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TieComs";
+			};
+			name = Debug;
+		};
+		CF0D21FDBDF565EA1225EC27 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = TieComs/Resources/TieComs.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = TieComs/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app;
+				PRODUCT_NAME = TieComs;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		DEAD34376A81DF9D8E705093 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = B76US7H3L3;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		EAE5AC8D79DBF1CB73FB7A61 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = TieComs/Resources/TieComs.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = TieComs/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app;
+				PRODUCT_NAME = TieComs;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		5A6DCEEE916D51A25942FC09 /* Build configuration list for PBXProject "TieComs" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A8E1AFFC99234BE4FAABBE61 /* Debug */,
+				DEAD34376A81DF9D8E705093 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6A7C7AA841F19993BB04228F /* Build configuration list for PBXNativeTarget "TieComsTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B302A1309864848706AF329B /* Debug */,
+				A4EC4C59C975B977015CE61C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7E7A8DA21A10769282053BA7 /* Build configuration list for PBXNativeTarget "TieComsUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6F06DFB8438E8CA5435048E5 /* Debug */,
+				46C59D18C4A0E9B1C51E3DC3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		877C04C5C3E8F147C37DD859 /* Build configuration list for PBXNativeTarget "TieComs" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EAE5AC8D79DBF1CB73FB7A61 /* Debug */,
+				CF0D21FDBDF565EA1225EC27 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 67D23E01D3EE86B7ED3C1C83 /* Project object */;
+}

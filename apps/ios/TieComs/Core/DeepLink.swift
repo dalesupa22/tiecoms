@@ -1,0 +1,41 @@
+import Foundation
+
+/// Enlaces que abre la app: https://{app.,www.,}tiecoms.com/... y tiecoms://...
+enum DeepLink: Equatable, Hashable {
+    case conversation(String)
+    case workspace(String)
+    case invite(String)
+    case signup(orgToken: String?)
+
+    static let hosts: Set<String> = ["app.tiecoms.com", "tiecoms.com", "www.tiecoms.com"]
+
+    static func parse(_ url: URL) -> DeepLink? {
+        guard let scheme = url.scheme?.lowercased() else { return nil }
+        var parts: [String]
+        if scheme == "tiecoms" {
+            // El host `auth` está reservado para el callback de SSO.
+            if url.host?.lowercased() == "auth" { return nil }
+            // tiecoms://c/<id> → host "c", ruta "/<id>". También se acepta tiecoms:///c/<id>.
+            parts = (url.host.map { [$0] } ?? []) + url.pathComponents.filter { $0 != "/" }
+        } else if scheme == "https" || scheme == "http" {
+            guard let host = url.host?.lowercased(), hosts.contains(host) else { return nil }
+            parts = url.pathComponents.filter { $0 != "/" }
+        } else { return nil }
+        parts = parts.filter { !$0.isEmpty }
+        guard let head = parts.first?.lowercased() else { return nil }
+        let arg = parts.count > 1 ? parts[1].removingPercentEncoding ?? parts[1] : nil
+        switch head {
+        case "c": return arg.flatMap { valid($0) ? .conversation($0) : nil }
+        case "w": return arg.flatMap { valid($0) ? .workspace($0) : nil }
+        case "invite": return arg.flatMap { $0.count <= 300 ? .invite($0) : nil }
+        case "signup":
+            let org = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "org" })?.value
+            return .signup(orgToken: org?.isEmpty == false ? org : nil)
+        default: return nil
+        }
+    }
+
+    private static func valid(_ id: String) -> Bool {
+        id.count <= 64 && id.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" }
+    }
+}

@@ -1,0 +1,102 @@
+name: TieComs
+options:
+  bundleIdPrefix: com.tiecoms
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+settings:
+  base:
+    DEVELOPMENT_TEAM: B76US7H3L3
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: NO
+targets:
+  TieComs:
+    type: application
+    platform: iOS
+    sources:
+      - path: TieComs
+        excludes:
+          - "Resources/Info.plist"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tiecoms.app
+        PRODUCT_NAME: TieComs
+        INFOPLIST_FILE: TieComs/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: TieComs/Resources/TieComs.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        ENABLE_PREVIEWS: YES
+        SWIFT_EMIT_LOC_STRINGS: NO
+    info:
+      path: TieComs/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: TieComs
+        CFBundleName: TieComs
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, es]
+        CFBundleAllowMixedLocalizations: true
+        ITSAppUsesNonExemptEncryption: false
+        LSRequiresIPhoneOS: true
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        CFBundleURLTypes:
+          - CFBundleURLName: com.tiecoms.app
+            CFBundleURLSchemes: [tiecoms]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        UIBackgroundModes: []
+  TieComsTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [TieComsTests]
+    dependencies:
+      - target: TieComs
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tiecoms.app.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/TieComs.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TieComs
+        BUNDLE_LOADER: $(TEST_HOST)
+  TieComsUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [TieComsUITests]
+    dependencies:
+      - target: TieComs
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tiecoms.app.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: TieComs
+schemes:
+  TieComs:
+    build:
+      targets:
+        TieComs: all
+        TieComsTests: [test]
+        TieComsUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - name: TieComsTests
+        - name: TieComsUITests
+    archive:
+      config: Release

@@ -47,6 +47,29 @@ export type LoginInput = z.infer<typeof LoginInput>;
 
 export const RefreshInput = z.object({ refreshToken: z.string().optional() });
 
+// ---------- Inicio de sesión con Google / Microsoft ----------
+export const SsoProvider = z.enum(['google', 'microsoft']);
+export type SsoProvider = z.infer<typeof SsoProvider>;
+
+/**
+ * Flujo para todas las plataformas (web, iOS, Android, escritorio):
+ * 1. El cliente abre en el navegador del sistema
+ *    GET /api/v1/auth/{provider}/start?platform=&code_challenge=&code_challenge_method=S256[&org=<token>][&org_name=][&next=]
+ * 2. El servidor habla con Google/Microsoft y redirige a
+ *    web: {origen}/auth/sso?code=…   nativas y escritorio: tiecoms://auth/callback?code=…
+ *    (si falla: …?error=<código>&message=<texto>)
+ * 3. El cliente canjea el código (60 s, un solo uso) con su code_verifier.
+ */
+const pkceVerifier = z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/);
+/** Acepta `codeVerifier` (web) y `code_verifier` (apps iOS y Android, estilo RFC 7636). */
+export const SsoExchangeInput = z.preprocess(
+  (v: any) => (v && typeof v === 'object' && v.codeVerifier === undefined && v.code_verifier !== undefined ? { ...v, codeVerifier: v.code_verifier } : v),
+  z.object({ code: z.string().min(16).max(200), codeVerifier: pkceVerifier, device: DeviceInfo }),
+);
+export type SsoExchangeInput = z.infer<typeof SsoExchangeInput>;
+
+export const AddDomainInput = z.object({ domain: z.string().trim().min(3).max(253) });
+
 export interface AuthResult {
   accessToken: string;
   accessExpiresAt: string;
@@ -80,6 +103,19 @@ export interface OrganizationDTO {
   colorFg: string;
   /** Solo presente en organizaciones donde el usuario es miembro. */
   myRole?: OrgRole;
+  /** none: sin verificar; idp: dominio confirmado por Google Workspace o Microsoft Entra; dns: registro TXT verificado. */
+  verification?: 'none' | 'idp' | 'dns';
+  verifiedDomain?: string | null;
+}
+
+export interface OrgDomainDTO {
+  domain: string;
+  status: 'pending' | 'idp' | 'dns';
+  /** Registro TXT que el administrador debe crear en su DNS. */
+  txtName: string;
+  txtValue: string;
+  verifiedAt: string | null;
+  lastCheckedAt: string | null;
 }
 
 export interface PersonDTO {

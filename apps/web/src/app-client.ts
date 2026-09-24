@@ -15,7 +15,7 @@ function detectPlatform(): Platform {
   return 'web';
 }
 
-const platform = detectPlatform();
+export const platform = detectPlatform();
 
 /**
  * En apps nativas no hay cookie httpOnly de mismo origen: el refresh token se

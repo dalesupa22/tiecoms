@@ -1,0 +1,19 @@
+{
+  "name": "tiecoms",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "npm@10.9.2",
+  "workspaces": ["packages/*", "apps/api", "apps/web", "apps/mobile", "apps/desktop"],
+  "scripts": {
+    "dev:api": "npm -w @tiecoms/api run dev",
+    "dev:web": "npm -w @tiecoms/web run dev",
+    "build": "npm -w @tiecoms/api run build && npm -w @tiecoms/web run build",
+    "typecheck": "npm -w @tiecoms/contracts run typecheck && npm -w @tiecoms/client-core run typecheck && npm -w @tiecoms/api run typecheck && npm -w @tiecoms/web run typecheck",
+    "test": "npm -w @tiecoms/api run test",
+    "migrate": "npm -w @tiecoms/api run migrate",
+    "deploy": "bash infra/deploy.sh"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

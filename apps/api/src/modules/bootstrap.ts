@@ -1,0 +1,101 @@
+import { CONTRACT_VERSION, type BootstrapDTO, type ConversationDTO, type OrganizationDTO, type PersonDTO, type WorkspaceDTO } from '@tiecoms/contracts';
+import { pool } from '../db.ts';
+import { loadUser } from './auth.ts';
+
+const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())`;
+
+/**
+ * Snapshot autorizado de la cuenta: todo lo que el cliente necesita para
+ * dibujar la barra lateral y reconciliar tras una desconexión larga.
+ * Nada fuera del alcance de la persona sale de aquí (ni nombres de grupos).
+ */
+export async function bootstrap(userId: string): Promise<BootstrapDTO> {
+  const me = await loadUser(pool, userId);
+
+  const [ws, convs, people] = await Promise.all([
+    pool.query(
+      `SELECT w.id, w.name, w.department, w.glyph, w.owning_org_id, w.created_at, wm.role,
+              ARRAY(SELECT org_id FROM workspace_organizations wo WHERE wo.workspace_id = w.id AND wo.left_at IS NULL ORDER BY wo.joined_at) AS org_ids,
+              CASE WHEN wm.role = 'guest' THEN '{}'::uuid[] ELSE ARRAY(SELECT o.user_id FROM workspace_memberships o WHERE o.workspace_id = w.id
+                AND o.revoked_at IS NULL AND (o.expires_at IS NULL OR o.expires_at > now()) ORDER BY o.joined_at) END AS member_ids
+         FROM workspace_memberships wm JOIN workspaces w ON w.id = wm.workspace_id
+        WHERE wm.user_id = $1 AND ${ACTIVE_WM} AND w.archived_at IS NULL
+        ORDER BY w.created_at`,
+      [userId],
+    ),
+    pool.query(
+      `SELECT c.id, c.workspace_id, c.kind, c.level, c.name, c.internal_org_id, c.last_message_seq, c.last_event_seq, c.last_message_at,
+              m.can_post, m.can_manage, m.history_from_seq, wm.role AS workspace_role,
+              COALESCE(rc.last_read_seq, 0) AS last_read_seq,
+              ARRAY(SELECT user_id FROM conversation_memberships x WHERE x.conversation_id = c.id AND x.removed_at IS NULL ORDER BY x.joined_at) AS member_ids,
+              (SELECT CASE WHEN lm.deleted_at IS NULL THEN left(lm.body, 140) ELSE '' END FROM messages lm
+                WHERE lm.conversation_id = c.id AND lm.seq = c.last_message_seq AND lm.seq > m.history_from_seq) AS preview
+         FROM conversation_memberships m
+         JOIN conversations c ON c.id = m.conversation_id AND c.archived_at IS NULL
+         LEFT JOIN workspace_memberships wm ON wm.workspace_id = c.workspace_id AND wm.user_id = m.user_id
+         LEFT JOIN read_cursors rc ON rc.conversation_id = c.id AND rc.user_id = m.user_id
+        WHERE m.user_id = $1 AND m.removed_at IS NULL
+          AND (c.workspace_id IS NULL OR (wm.user_id IS NOT NULL AND ${ACTIVE_WM}))
+        ORDER BY c.last_message_at DESC NULLS LAST`,
+      [userId],
+    ),
+    // Directorio: quienes comparten un grupo conmigo y, si no soy tercero, todo el espacio.
+    pool.query(
+      `WITH visible AS (
+         SELECT DISTINCT other.user_id FROM conversation_memberships mine
+           JOIN conversation_memberships other ON other.conversation_id = mine.conversation_id AND other.removed_at IS NULL
+          WHERE mine.user_id = $1 AND mine.removed_at IS NULL
+         UNION
+         SELECT DISTINCT o.user_id FROM workspace_memberships wm
+           JOIN workspace_memberships o ON o.workspace_id = wm.workspace_id AND o.revoked_at IS NULL AND (o.expires_at IS NULL OR o.expires_at > now())
+          WHERE wm.user_id = $1 AND wm.role <> 'guest' AND ${ACTIVE_WM}
+         UNION SELECT $1::uuid
+       )
+       SELECT u.id, u.name, u.kind, u.primary_org_id, om.title, om.area,
+              (SELECT bool_and(g.role = 'guest') FROM workspace_memberships g WHERE g.user_id = u.id AND g.revoked_at IS NULL) AS guest,
+              (SELECT max(g.expires_at) FROM workspace_memberships g WHERE g.user_id = u.id AND g.role = 'guest' AND g.revoked_at IS NULL) AS guest_until
+         FROM visible v JOIN users u ON u.id = v.user_id AND u.disabled_at IS NULL
+         LEFT JOIN organization_memberships om ON om.user_id = u.id AND om.org_id = u.primary_org_id
+        ORDER BY u.name`,
+      [userId],
+    ),
+  ]);
+
+  const workspaces: WorkspaceDTO[] = ws.rows.map((r) => ({
+    id: r.id, name: r.name, department: r.department, glyph: r.glyph, owningOrgId: r.owning_org_id,
+    organizationIds: r.org_ids, memberIds: r.member_ids, myRole: r.role, createdAt: new Date(r.created_at).toISOString(),
+  }));
+
+  const conversations: ConversationDTO[] = convs.rows.map((r) => {
+    const readFrom = Math.max(r.last_read_seq, r.history_from_seq);
+    return {
+      id: r.id, workspaceId: r.workspace_id, kind: r.kind, level: r.level, name: r.name, internalOrgId: r.internal_org_id,
+      memberIds: r.member_ids, lastMessageSeq: r.last_message_seq, lastEventSeq: r.last_event_seq,
+      lastMessageAt: r.last_message_at ? new Date(r.last_message_at).toISOString() : null,
+      lastMessagePreview: r.preview, lastReadSeq: r.last_read_seq,
+      unread: Math.max(0, r.last_message_seq - readFrom),
+      canPost: r.can_post, canManage: r.can_manage || ['lead', 'admin'].includes(r.workspace_role),
+      historyFromSeq: r.history_from_seq,
+    };
+  });
+
+  const personList: PersonDTO[] = people.rows.map((r) => ({
+    id: r.id, name: r.name, kind: r.kind, orgId: r.guest ? null : r.primary_org_id, title: r.title, area: r.area,
+    guest: Boolean(r.guest), guestUntil: r.guest_until ? new Date(r.guest_until).toISOString() : null,
+  }));
+
+  const orgIds = new Set<string>();
+  workspaces.forEach((w) => w.organizationIds.forEach((o) => orgIds.add(o)));
+  personList.forEach((p) => p.orgId && orgIds.add(p.orgId));
+  if (me.primaryOrgId) orgIds.add(me.primaryOrgId);
+  const orgs = await pool.query(
+    `SELECT o.id, o.name, o.mark, o.color_bg, o.color_fg, om.role AS my_role FROM organizations o
+       LEFT JOIN organization_memberships om ON om.org_id = o.id AND om.user_id = $2 WHERE o.id = ANY($1) ORDER BY o.name`,
+    [[...orgIds], userId],
+  );
+  const organizations: OrganizationDTO[] = orgs.rows.map((r) => ({
+    id: r.id, name: r.name, mark: r.mark, colorBg: r.color_bg, colorFg: r.color_fg, ...(r.my_role ? { myRole: r.my_role } : {}),
+  }));
+
+  return { contract: CONTRACT_VERSION, serverTime: new Date().toISOString(), me, organizations, workspaces, conversations, people: personList };
+}

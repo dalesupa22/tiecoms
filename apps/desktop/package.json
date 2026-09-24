@@ -1,0 +1,12 @@
+{
+  "name": "@tiecoms/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:mac": "tauri build --target universal-apple-darwin",
+    "build:win": "tauri build --target x86_64-pc-windows-msvc"
+  },
+  "devDependencies": { "@tauri-apps/cli": "2.11.5" }
+}

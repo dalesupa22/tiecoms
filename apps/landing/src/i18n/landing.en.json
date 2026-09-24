@@ -1,0 +1,310 @@
+[
+ [
+  "<a class=\"text-link lang-link\" href=\"/en/\" hreflang=\"en\" lang=\"en\" aria-label=\"English version\">EN</a>",
+  "<a class=\"text-link lang-link\" href=\"/\" hreflang=\"es\" lang=\"es\" aria-label=\"Versión en español\">ES</a>"
+ ],
+ [
+  "<html lang=\"es\">",
+  "<html lang=\"en\">"
+ ],
+ [
+  "content=\"TieComs conecta humanos, empresas y bots en conversaciones que saben continuar.\"",
+  "content=\"TieComs connects people, companies and bots in conversations that know how to keep going.\""
+ ],
+ [
+  "<title>TieComs · La conversación que conecta todo</title>",
+  "<title>TieComs · The conversation that connects everything</title>"
+ ],
+ [
+  "aria-label=\"TieComs, inicio\"",
+  "aria-label=\"TieComs, home\""
+ ],
+ [
+  "aria-label=\"Navegación principal\"",
+  "aria-label=\"Main navigation\""
+ ],
+ [
+  "<a href=\"#como-funciona\">Cómo funciona</a>\n      <a href=\"#espacios\">Espacios</a>\n      <a href=\"#confianza\">Confianza</a>",
+  "<a href=\"#como-funciona\">How it works</a>\n      <a href=\"#espacios\">Spaces</a>\n      <a href=\"#confianza\">Trust</a>"
+ ],
+ [
+  ">Entrar <span aria-hidden=\"true\">→</span></a>",
+  ">Sign in <span aria-hidden=\"true\">→</span></a>"
+ ],
+ [
+  "aria-label=\"Abrir menú\"",
+  "aria-label=\"Open menu\""
+ ],
+ [
+  "<span class=\"eyebrow-dot\"></span> El trabajo se mueve conversando</p>",
+  "<span class=\"eyebrow-dot\"></span> Work moves through conversation</p>"
+ ],
+ [
+  "<h1 id=\"hero-title\">Conecta humanos,<br>empresas <em>y bots.</em></h1>",
+  "<h1 id=\"hero-title\">Connect people,<br>companies <em>and bots.</em></h1>"
+ ],
+ [
+  "TieComs reúne a las personas correctas, la empresa indicada y los bots que resuelven. El hilo sigue vivo aunque cambie de manos.",
+  "TieComs brings together the right people, the right company and the bots that get things done. The thread stays alive even when it changes hands."
+ ],
+ [
+  ">Sigue la conversación <span aria-hidden=\"true\">↓</span></a>",
+  ">Follow the conversation <span aria-hidden=\"true\">↓</span></a>"
+ ],
+ [
+  "<span>Diseñado para equipos que trabajan entre equipos.</span>",
+  "<span>Built for teams that work across teams.</span>"
+ ],
+ [
+  "aria-label=\"Ejemplo ilustrativo de una conversación TieComs\"",
+  "aria-label=\"Illustrative example of a TieComs conversation\""
+ ],
+ [
+  "<span>UN HILO. MUCHAS CONEXIONES.</span>",
+  "<span>ONE THREAD. MANY CONNECTIONS.</span>"
+ ],
+ [
+  "<span class=\"status-pill\">OPERATIVO</span>",
+  "<span class=\"status-pill\">OPERATIONAL</span>"
+ ],
+ [
+  "<span class=\"message-meta\">Ana · persona</span><p>¿Podemos tener todo listo para el viernes?</p>",
+  "<span class=\"message-meta\">Ana · person</span><p>Can we have everything ready by Friday?</p>"
+ ],
+ [
+  "<p>Reviso el plan. Conecto al equipo con <b>Nexo · Logística</b>.</p><div class=\"bot-chip\">↗ conversación derivada</div>",
+  "<p>Checking the plan. Connecting the team with <b>Nexo · Logistics</b>.</p><div class=\"bot-chip\">↗ branched conversation</div>"
+ ],
+ [
+  "<span class=\"message-meta\">Nexo · empresa</span><p>Entrega confirmada. Devuelvo la respuesta al equipo.</p>",
+  "<span class=\"message-meta\">Nexo · company</span><p>Delivery confirmed. Sending the answer back to the team.</p>"
+ ],
+ [
+  "<span>Sigue este hilo al bajar</span>",
+  "<span>Follow this thread as you scroll</span>"
+ ],
+ [
+  "<span class=\"tag-icon\">●</span> persona</div>",
+  "<span class=\"tag-icon\">●</span> person</div>"
+ ],
+ [
+  "<span class=\"tag-icon\">↗</span> empresa</div>",
+  "<span class=\"tag-icon\">↗</span> company</div>"
+ ],
+ [
+  "<span>Desplázate para seguir el hilo</span>",
+  "<span>Scroll to follow the thread</span>"
+ ],
+ [
+  "aria-label=\"Qué conecta TieComs\"",
+  "aria-label=\"What TieComs connects\""
+ ],
+ [
+  "<div class=\"signal-intro\">Una red para el trabajo real</div>",
+  "<div class=\"signal-intro\">A network for real work</div>"
+ ],
+ [
+  "<i class=\"signal-human\"></i> HUMANOS</span><span><i class=\"signal-company\"></i> EMPRESAS</span><span><i class=\"signal-bot\"></i> BOTS</span><span><i class=\"signal-arrow\">↗</i> RESULTADOS</span>",
+  "<i class=\"signal-human\"></i> PEOPLE</span><span><i class=\"signal-company\"></i> COMPANIES</span><span><i class=\"signal-bot\"></i> BOTS</span><span><i class=\"signal-arrow\">↗</i> OUTCOMES</span>"
+ ],
+ [
+  "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> Sigue el hilo</p>",
+  "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> Follow the thread</p>"
+ ],
+ [
+  "<h2 id=\"story-title\">Una conversación<br><em>lleva a otra.</em></h2>",
+  "<h2 id=\"story-title\">One conversation<br><em>leads to another.</em></h2>"
+ ],
+ [
+  "<p class=\"section-lede\">Y a otra empresa. Y a un bot. Y de vuelta a la persona que lo inició todo.</p>",
+  "<p class=\"section-lede\">And to another company. And to a bot. And back to the person who started it all.</p>"
+ ],
+ [
+  "<h3 data-phase-title>Todo empieza con una persona.</h3>",
+  "<h3 data-phase-title>It all starts with one person.</h3>"
+ ],
+ [
+  "<p data-phase-description>Ana necesita una respuesta. La conversación reúne al cliente y a su equipo, con el mismo contexto.</p>",
+  "<p data-phase-description>Ana needs an answer. The conversation brings the client and their team together, with the same context.</p>"
+ ],
+ [
+  "aria-label=\"Etapas del recorrido\"",
+  "aria-label=\"Journey stages\""
+ ],
+ [
+  "aria-label=\"Etapa 1: Una persona pregunta\"><span>01</span><b>Pregunta</b>",
+  "aria-label=\"Stage 1: A person asks\"><span>01</span><b>Ask</b>"
+ ],
+ [
+  "aria-label=\"Etapa 2: El equipo deriva\"><span>02</span><b>Deriva</b>",
+  "aria-label=\"Stage 2: The team branches out\"><span>02</span><b>Branch</b>"
+ ],
+ [
+  "aria-label=\"Etapa 3: Otra empresa colabora\"><span>03</span><b>Conecta</b>",
+  "aria-label=\"Stage 3: Another company collaborates\"><span>03</span><b>Connect</b>"
+ ],
+ [
+  "aria-label=\"Etapa 4: Humano y bot resuelven\"><span>04</span><b>Resuelve</b>",
+  "aria-label=\"Stage 4: Human and bot resolve\"><span>04</span><b>Resolve</b>"
+ ],
+ [
+  "aria-label=\"Etapa 5: El resultado regresa\"><span>05</span><b>Regresa</b>",
+  "aria-label=\"Stage 5: The result returns\"><span>05</span><b>Return</b>"
+ ],
+ [
+  ">Saltar al producto <span aria-hidden=\"true\">↓</span></a>",
+  ">Skip to the product <span aria-hidden=\"true\">↓</span></a>"
+ ],
+ [
+  "<span data-stage-label>CLIENTE + EQUIPO</span>",
+  "<span data-stage-label>CLIENT + TEAM</span>"
+ ],
+ [
+  "↳ Se abre un hilo interno</span>",
+  "↳ An internal thread opens</span>"
+ ],
+ [
+  "↗ Otra empresa entra en acción</span>",
+  "↗ Another company steps in</span>"
+ ],
+ [
+  "✦ El bot trae el contexto</span>",
+  "✦ The bot brings the context</span>"
+ ],
+ [
+  "↩ El resultado vuelve a casa</span>",
+  "↩ The result comes home</span>"
+ ],
+ [
+  "<h3>Un lanzamiento en equipo</h3></div><span class=\"room-kind\">Compartido</span>",
+  "<h3>A team launch</h3></div><span class=\"room-kind\">Shared</span>"
+ ],
+ [
+  "<strong>Ana <small>Cliente</small></strong><p>¿Podemos tener todo listo para el viernes?</p>",
+  "<strong>Ana <small>Client</small></strong><p>Can we have everything ready by Friday?</p>"
+ ],
+ [
+  "<p>Lo reviso con el equipo y te confirmo por aquí.</p>",
+  "<p>I'll check with the team and confirm here.</p>"
+ ],
+ [
+  "<div class=\"journey-event\"><span>↳</span> Se abrió una conversación interna</div>",
+  "<div class=\"journey-event\"><span>↳</span> An internal conversation was opened</div>"
+ ],
+ [
+  "<strong>Todo listo para el viernes.</strong><p>Producción y entrega confirmadas. Ana, ya podemos avanzar.</p>",
+  "<strong>All set for Friday.</strong><p>Production and delivery confirmed. Ana, we're good to go.</p>"
+ ],
+ [
+  "<span data-origin-status>El hilo sigue abierto</span>",
+  "<span data-origin-status>The thread is still open</span>"
+ ],
+ [
+  "<h3>Coordinación del lanzamiento</h3></div><span class=\"room-kind\">Interno</span>",
+  "<h3>Launch coordination</h3></div><span class=\"room-kind\">Internal</span>"
+ ],
+ [
+  "<strong>Mateo <small>Equipo</small></strong><p>¿Qué necesitamos para llegar al viernes?</p>",
+  "<strong>Mateo <small>Team</small></strong><p>What do we need to make Friday?</p>"
+ ],
+ [
+  "<strong>Coms <small>Agente IA</small></strong><p>La producción está lista. Falta confirmar la entrega con Nexo.</p><span class=\"context-badge\">Contexto compartido con permiso</span>",
+  "<strong>Coms <small>AI agent</small></strong><p>Production is ready. Delivery with Nexo still needs confirming.</p><span class=\"context-badge\">Context shared with permission</span>"
+ ],
+ [
+  "<span>↗ Consulta derivada a Nexo</span>",
+  "<span>↗ Request branched to Nexo</span>"
+ ],
+ [
+  "<h3>Una entrega, dos empresas</h3></div><span class=\"room-kind\">Compartido</span>",
+  "<h3>One delivery, two companies</h3></div><span class=\"room-kind\">Shared</span>"
+ ],
+ [
+  "<p>Lucía, ¿podemos recibir el pedido el jueves?</p>",
+  "<p>Lucía, can we receive the order on Thursday?</p>"
+ ],
+ [
+  "<p>Reviso la ruta con nuestro asistente.</p>",
+  "<p>Checking the route with our assistant.</p>"
+ ],
+ [
+  "<div class=\"journey-event\"><span>↳</span> Nexo conecta a su equipo de logística</div>",
+  "<div class=\"journey-event\"><span>↳</span> Nexo brings in its logistics team</div>"
+ ],
+ [
+  "<span>Dos empresas. El mismo objetivo.</span>",
+  "<span>Two companies. One goal.</span>"
+ ],
+ [
+  "<small>NEXO · LOGÍSTICA</small><h3>La IA propone. Tú decides.</h3></div><span class=\"room-kind\">Interno</span>",
+  "<small>NEXO · LOGISTICS</small><h3>AI proposes. You decide.</h3></div><span class=\"room-kind\">Internal</span>"
+ ],
+ [
+  "<strong>Ruta <small>Agente IA</small></strong><p>Hay espacio el jueves a las 10:00. Preparé la confirmación.</p>",
+  "<strong>Ruta <small>AI agent</small></strong><p>There's a slot Thursday at 10:00. I've drafted the confirmation.</p>"
+ ],
+ [
+  "<p>Perfecto. Aprobado. Devuelve la respuesta al equipo.</p>",
+  "<p>Perfect. Approved. Send the answer back to the team.</p>"
+ ],
+ [
+  "<div class=\"approval-badge\">✓ Validado por Lucía</div>",
+  "<div class=\"approval-badge\">✓ Approved by Lucía</div>"
+ ],
+ [
+  "<span>↩ Respuesta lista para regresar</span>",
+  "<span>↩ Answer ready to return</span>"
+ ],
+ [
+  "<span data-journey-status>El contexto acompaña cada paso.</span><span class=\"demo-label\">Ejemplo ilustrativo</span>",
+  "<span data-journey-status>Context travels with every step.</span><span class=\"demo-label\">Illustrative example</span>"
+ ],
+ [
+  "<span class=\"eyebrow-dot eyebrow-dot-lilac\"></span> Una vista para cada ritmo</p><h2 id=\"feature-title\">Menos pestañas.<br><em>Más continuidad.</em></h2><p class=\"section-lede\">Cada equipo tiene su forma de avanzar. TieComs convierte mensajes, decisiones y derivaciones en una memoria compartida.</p>",
+  "<span class=\"eyebrow-dot eyebrow-dot-lilac\"></span> A view for every rhythm</p><h2 id=\"feature-title\">Fewer tabs.<br><em>More continuity.</em></h2><p class=\"section-lede\">Every team moves forward its own way. TieComs turns messages, decisions and branches into shared memory.</p>"
+ ],
+ [
+  "<span class=\"feature-name\">TRAZO</span><span class=\"feature-arrow\">↗</span></div><h3>Ve el recorrido, no solo el mensaje.</h3><p>Entiende quién tomó la conversación, dónde se derivó y qué resultado regresó.</p><div class=\"mini-trace-ui\"><div class=\"mini-ui-head\"><span>Validación de firma</span><small>2 empresas · 1 bot</small>",
+  "<span class=\"feature-name\">TRACE</span><span class=\"feature-arrow\">↗</span></div><h3>See the journey, not just the message.</h3><p>Understand who picked up the conversation, where it branched and what result came back.</p><div class=\"mini-trace-ui\"><div class=\"mini-ui-head\"><span>Signature validation</span><small>2 companies · 1 bot</small>"
+ ],
+ [
+  "<div class=\"mini-ui-return\">↩ devuelve al equipo</div>",
+  "<div class=\"mini-ui-return\">↩ returns to the team</div>"
+ ],
+ [
+  "<span class=\"feature-name\">MESA</span><span class=\"feature-arrow\">↗</span></div><h3>Trabaja en varias conversaciones sin perderte.</h3><p>Cuatro hilos abiertos. Un solo lugar para decidir qué sigue.</p><div class=\"desk-ui\"><div class=\"desk-tab active\">Lanzamiento <b>6</b></div><div class=\"desk-tab\">Entrega Nexo <b>3</b></div><div class=\"desk-tab\">Arquitectura <b>2</b></div>",
+  "<span class=\"feature-name\">DESK</span><span class=\"feature-arrow\">↗</span></div><h3>Work across conversations without getting lost.</h3><p>Four open threads. One place to decide what's next.</p><div class=\"desk-ui\"><div class=\"desk-tab active\">Launch <b>6</b></div><div class=\"desk-tab\">Nexo delivery <b>3</b></div><div class=\"desk-tab\">Architecture <b>2</b></div>"
+ ],
+ [
+  "<span class=\"feature-name\">PULSO</span><span class=\"feature-arrow\">↗</span></div><h3>Lo importante aparece a tiempo.</h3><p>Señales claras para priorizar, responder y volver a conectar.</p><div class=\"pulse-ui\"><span class=\"pulse-ring\"></span><strong>18</strong><small>hilos activos hoy</small>",
+  "<span class=\"feature-name\">PULSE</span><span class=\"feature-arrow\">↗</span></div><h3>What matters shows up on time.</h3><p>Clear signals to prioritize, reply and reconnect.</p><div class=\"pulse-ui\"><span class=\"pulse-ring\"></span><strong>18</strong><small>active threads today</small>"
+ ],
+ [
+  "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> La regla de TieComs</p><h2 id=\"manifesto-title\">La inteligencia ayuda.<br><em>La conversación decide.</em></h2><p>Los bots proponen, las empresas colaboran y las personas mantienen el criterio. Cada paso queda visible para que el trabajo avance con confianza.</p>",
+  "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> The TieComs rule</p><h2 id=\"manifesto-title\">Intelligence helps.<br><em>The conversation decides.</em></h2><p>Bots propose, companies collaborate and people keep the judgment. Every step stays visible so work moves forward with confidence.</p>"
+ ],
+ [
+  "<span class=\"eyebrow-dot\"></span> El siguiente hilo puede empezar aquí</p><h2 id=\"cta-title\">Conecta lo que hoy<br><em>trabaja separado.</em></h2><p>Descubre una forma de trabajar donde cada conversación tiene un camino y cada respuesta encuentra su lugar.</p><a class=\"button button-light\" href=\"https://app.tiecoms.com/signup\">Empezar ahora <span aria-hidden=\"true\">↗</span></a>",
+  "<span class=\"eyebrow-dot\"></span> The next thread can start here</p><h2 id=\"cta-title\">Connect what today<br><em>works apart.</em></h2><p>Discover a way of working where every conversation has a path and every answer finds its place.</p><a class=\"button button-light\" href=\"https://app.tiecoms.com/signup\">Get started <span aria-hidden=\"true\">↗</span></a>"
+ ],
+ [
+  "<span>contexto que<br>viaja contigo</span>",
+  "<span>context that<br>travels with you</span>"
+ ],
+ [
+  "<span>hilo para<br>todo el equipo</span>",
+  "<span>thread for<br>the whole team</span>"
+ ],
+ [
+  "<p>Conecta humanos, empresas y bots.</p><div class=\"footer-links\"><a href=\"#como-funciona\">Cómo funciona</a><a href=\"#espacios\">Producto</a><a href=\"https://app.tiecoms.com/\">App</a><a href=\"#inicio\">Volver arriba ↑</a></div>",
+  "<p>Connects people, companies and bots.</p><div class=\"footer-links\"><a href=\"#como-funciona\">How it works</a><a href=\"#espacios\">Product</a><a href=\"https://app.tiecoms.com/\">App</a><a href=\"#inicio\">Back to top ↑</a></div>"
+ ],
+ [
+  "<a class=\"button button-dark\" href=\"https://app.tiecoms.com/signup\">Probar TieComs <span aria-hidden=\"true\">↗</span></a>",
+  "<a class=\"button button-dark\" href=\"https://app.tiecoms.com/signup\">Try TieComs <span aria-hidden=\"true\">↗</span></a>"
+ ],
+ [
+  "<a class=\"play-link\" href=\"https://app.tiecoms.com/signup\"><span class=\"play-icon\" aria-hidden=\"true\">↗</span> Crear cuenta gratis</a>",
+  "<a class=\"play-link\" href=\"https://app.tiecoms.com/signup\"><span class=\"play-icon\" aria-hidden=\"true\">↗</span> Create a free account</a>"
+ ]
+]

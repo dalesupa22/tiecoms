@@ -1,0 +1,7 @@
+{
+  "appId": "com.tiecoms.app",
+  "appName": "TieComs",
+  "webDir": "../web/dist",
+  "server": { "androidScheme": "https" },
+  "ios": { "contentInset": "never" }
+}

@@ -1,0 +1,43 @@
+# TieComs en una EC2. Para escalar horizontalmente: más réplicas de `api`
+# detrás del balanceador (el adaptador PostgreSQL de Socket.IO reparte eventos
+# entre nodos y el outbox usa SKIP LOCKED); `worker` puede vivir en otra máquina.
+name: tiecoms
+
+x-common: &common
+  image: "tiecoms-api:${TIECOMS_RELEASE:?set_release}"
+  env_file: /opt/tiecoms/shared/api.env
+  restart: unless-stopped
+  logging:
+    driver: local
+    options: { max-size: "20m", max-file: "5" }
+  volumes:
+    - type: bind
+      source: /opt/tiecoms/shared/rds-ca.pem
+      target: /run/secrets/rds-ca.pem
+      read_only: true
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  tmpfs: ["/tmp"]
+
+services:
+  api:
+    <<: *common
+    ports: ["127.0.0.1:3020:3020"]
+    environment:
+      INSTANCE_ID: api-1
+      PORT: "3020"
+    stop_grace_period: 20s
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M, pids: 256 }
+
+  worker:
+    <<: *common
+    command: ["node", "--enable-source-maps", "worker.js"]
+    environment:
+      INSTANCE_ID: worker-1
+      DB_POOL_MAX: "3"
+    healthcheck: { disable: true }
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M, pids: 64 }

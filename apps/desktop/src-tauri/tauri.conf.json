@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TieComs",
+  "version": "0.1.0",
+  "identifier": "com.tiecoms.desktop",
+  "build": {
+    "beforeDevCommand": "npm -w @tiecoms/web run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "VITE_API_ORIGIN=https://app.tiecoms.com npm -w @tiecoms/web run build",
+    "frontendDist": "../../web/dist"
+  },
+  "app": {
+    "windows": [{ "title": "TieComs", "width": 1280, "height": 820, "minWidth": 380, "minHeight": 560 }],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' https://app.tiecoms.com wss://app.tiecoms.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "app", "msi", "nsis"],
+    "icon": ["../../web/public/icon-512.png"],
+    "category": "Business",
+    "shortDescription": "La red de trabajo entre empresas"
+  }
+}

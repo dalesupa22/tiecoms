@@ -160,7 +160,7 @@ El release lleva R8 y reducción de recursos. Las reglas de serialización está
 4. **Ficha de Play Store.**
    - Ícono: `play-512.png`, junto a este README.
    - Gráfico de funciones: 1024×500.
-   - Categoría: Empresa. Contacto: soporte@tiecoms.com.
+   - Categoría: Empresa. Contacto: admin@tiecoms.com.
 
    Capturas sugeridas (teléfono, en español; en el scratchpad de pruebas hay versiones de referencia):
    1. Splash «Un solo hilo» (fotograma del logo con el eslogan).

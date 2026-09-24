@@ -316,10 +316,6 @@
   "<h2 id=\"relay-title\">Work crosses<br><em>boundaries.</em></h2>"
  ],
  [
-  "<p class=\"section-lede\">A veces entre empresas. A veces entre sedes de la misma empresa. Siempre con bots que ayudan y personas que deciden.</p>",
-  "<p class=\"section-lede\">Sometimes between companies. Sometimes between branches of the same company. Always with bots that help and people who decide.</p>"
- ],
- [
   "aria-label=\"Escenarios\"",
   "aria-label=\"Scenarios\""
  ],
@@ -332,15 +328,39 @@
   "data-relay-tab=\"branches\">Between branches</button>"
  ],
  [
-  "<button type=\"button\" data-relay-prev aria-label=\"Paso anterior\">",
-  "<button type=\"button\" data-relay-prev aria-label=\"Previous step\">"
+  "aria-label=\"Pasos del recorrido\"",
+  "aria-label=\"Journey steps\""
  ],
  [
-  "<button type=\"button\" data-relay-play aria-label=\"Pausar\">",
-  "<button type=\"button\" data-relay-play aria-label=\"Pause\">"
+  "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> La ventaja que se paga sola</p>",
+  "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> The advantage that pays for itself</p>"
  ],
  [
-  "<button type=\"button\" data-relay-next aria-label=\"Paso siguiente\">",
-  "<button type=\"button\" data-relay-next aria-label=\"Next step\">"
+  "<h2 id=\"insight-title\">Ve el <em>cuello de botella</em> antes de que te cueste.</h2>",
+  "<h2 id=\"insight-title\">Spot the <em>bottleneck</em> before it costs you.</h2>"
+ ],
+ [
+  "<p class=\"lede\">Cada hilo muestra quién tiene el trabajo, cuánto lleva esperando y qué está frenando. Detectar a tiempo dónde se atasca un negocio ahorra días de operación y, en una empresa grande, millones.</p>",
+  "<p class=\"lede\">Every thread shows who holds the work, how long it has been waiting and what is holding it up. Catching where a business gets stuck saves days of operation and, in a large company, millions.</p>"
+ ],
+ [
+  "<div><b>Quién lo tiene</b><span>Persona, empresa, sede o bot responsable de cada paso.</span></div>",
+  "<div><b>Who holds it</b><span>The person, company, branch or bot that owns each step.</span></div>"
+ ],
+ [
+  "<div><b>Cuánto espera</b><span>El tiempo detenido se ve en el mismo hilo, no en un informe.</span></div>",
+  "<div><b>How long it waits</b><span>Idle time shows up in the thread itself, not in a report.</span></div>"
+ ],
+ [
+  "<div><b>Qué frena</b><span>La tarea que detiene a las demás se señala sola.</span></div>",
+  "<div><b>What blocks it</b><span>The task holding up the rest gets flagged on its own.</span></div>"
+ ],
+ [
+  "<p>Una hora perdida en un cuello de botella es una hora perdida para todo el sistema.</p>",
+  "<p>An hour lost at a bottleneck is an hour lost for the entire system.</p>"
+ ],
+ [
+  "<span><b>Eliyahu M. Goldratt</b>Autor de «La meta» y creador de la teoría de las restricciones</span>",
+  "<span><b>Eliyahu M. Goldratt</b>Author of “The Goal” and creator of the Theory of Constraints</span>"
  ]
 ]

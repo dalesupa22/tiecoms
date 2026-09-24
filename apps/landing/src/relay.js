@@ -1,320 +1,322 @@
 /*
- * «Un hilo, muchas manos»: recorrido animado de una conversación que pasa
- * entre personas, empresas o sedes, y bots. Dos escenarios con los mismos datos
- * de forma: entre empresas (proveedor + firma legal) y entre sedes de una empresa.
+ * «Un hilo, muchas manos»: recorrido de una conversación que pasa entre personas,
+ * empresas o sedes, y bots. La sección se fija en pantalla y el scroll la narra:
+ * cada tramo de desplazamiento es un paso y la cuerda se dibuja al ritmo del scroll.
+ * El tablero señala el cuello de botella del recorrido y cuándo se resuelve.
  * Sin dependencias; los textos salen del idioma de la página (<html lang>).
  */
 (() => {
-  const root = document.querySelector('[data-relay]');
-  if (!root) return;
+  const section = document.querySelector('[data-relay-section]');
+  if (!section) return;
   const L = document.documentElement.lang === 'en' ? 'en' : 'es';
   const tr = (v) => (v && typeof v === 'object' && 'es' in v ? v[L] : v);
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const STEP_MS = 3600;
 
   const STATUS = {
-    waiting: { es: 'EN ESPERA', en: 'WAITING', tone: 'idle' },
-    unassigned: { es: 'SIN ASIGNAR', en: 'UNASSIGNED', tone: 'idle' },
-    running: { es: 'EN REVISIÓN', en: 'RUNNING CHECKS', tone: 'run' },
-    signed: { es: 'FIRMADO', en: 'SIGNED', tone: 'ok' },
-    draft: { es: 'BORRADOR RECIBIDO', en: 'DRAFT RECEIVED', tone: 'draft' },
-    approvedBoth: { es: 'APROBADO POR AMBOS', en: 'APPROVED BY BOTH', tone: 'ok' },
-    approved: { es: 'APROBADO', en: 'APPROVED', tone: 'ok' },
-    passed: { es: 'SUPERADO', en: 'PASSED', tone: 'ok' },
-    progress: { es: 'EN CURSO', en: 'IN PROGRESS', tone: 'prog' },
-    done: { es: 'LISTO', en: 'DONE', tone: 'ok' },
+    waiting: { es: 'En espera', en: 'Waiting', tone: 'idle' },
+    unassigned: { es: 'Sin asignar', en: 'Unassigned', tone: 'idle' },
+    running: { es: 'En revisión', en: 'Running checks', tone: 'run' },
+    signed: { es: 'Firmado', en: 'Signed', tone: 'ok' },
+    draft: { es: 'Borrador recibido', en: 'Draft received', tone: 'draft' },
+    blocked: { es: 'Detenido', en: 'Blocked', tone: 'jam' },
+    approvedBoth: { es: 'Aprobado por ambos', en: 'Approved by both', tone: 'ok' },
+    approved: { es: 'Aprobado', en: 'Approved', tone: 'ok' },
+    passed: { es: 'Validado', en: 'Passed', tone: 'ok' },
+    progress: { es: 'En curso', en: 'In progress', tone: 'prog' },
+    done: { es: 'Listo', en: 'Done', tone: 'ok' },
   };
   const OK = new Set(['signed', 'approvedBoth', 'approved', 'passed', 'done']);
-
   const T = {
-    step: { es: 'PASO', en: 'STEP' }, done: { es: 'listas', en: 'done' }, noOwner: { es: 'Sin responsable', en: 'No owner yet' },
-    play: { es: 'Reproducir', en: 'Play' }, pause: { es: 'Pausar', en: 'Pause' }, prev: { es: 'Paso anterior', en: 'Previous step' }, next: { es: 'Paso siguiente', en: 'Next step' },
-    goto: { es: 'Ir al paso', en: 'Go to step' }, waitingYou: { es: 'Esperando…', en: 'Waiting for you…' },
+    done: { es: 'listas', en: 'done' }, noOwner: { es: 'Sin responsable', en: 'No owner yet' }, goto: { es: 'Ir al paso', en: 'Go to step' },
+    jam: { es: 'Cuello de botella detectado', en: 'Bottleneck detected' }, unjam: { es: 'Cuello de botella resuelto', en: 'Bottleneck cleared' },
   };
 
-  // ---------- Escenarios (coordenadas en un escenario de 1000 × 540) ----------
+  // ---------- Escenarios (escenario de 1000 × 450) ----------
   const scenarios = {
     companies: {
-      board: { es: 'Incorporación de proveedor · Nova Logistics', en: 'Vendor onboarding · Nova Logistics' },
+      board: { es: 'Incorporación de proveedor', en: 'Vendor onboarding' },
       meta: { es: '3 empresas · 7 personas · 1 agente IA', en: '3 companies · 7 people · 1 AI agent' },
       groups: [
-        { id: 'acme', x: 24, y: 28, w: 300, h: 400, tone: 'blue', mark: 'A', name: 'Acme', sub: { es: 'Retail · 2.400 empleados', en: 'Retail · 2,400 employees' }, tag: { es: 'CLIENTE', en: 'CLIENT' } },
-        { id: 'nova', x: 676, y: 28, w: 300, h: 400, tone: 'green', mark: 'N', name: 'Nova Logistics', sub: { es: 'Carga y fulfillment', en: 'Freight & fulfillment' }, tag: { es: 'PROVEEDOR', en: 'VENDOR' } },
-        { id: 'lexa', x: 372, y: 250, w: 256, h: 200, tone: 'lilac', mark: 'L', name: 'Lexa Legal', sub: { es: 'Asesoría comercial', en: 'Commercial counsel' }, tag: { es: 'FIRMA LEGAL', en: 'LAW FIRM' } },
+        { id: 'acme', x: 20, y: 20, w: 300, h: 410, tone: 'blue', mark: 'A', name: 'Acme', sub: { es: 'Retail · 2.400 empleados', en: 'Retail · 2,400 employees' }, tag: { es: 'Cliente', en: 'Client' } },
+        { id: 'nova', x: 680, y: 20, w: 300, h: 410, tone: 'green', mark: 'N', name: 'Nova Logistics', sub: { es: 'Carga y fulfillment', en: 'Freight & fulfillment' }, tag: { es: 'Proveedor', en: 'Vendor' } },
+        { id: 'lexa', x: 372, y: 238, w: 256, h: 192, tone: 'lilac', mark: 'L', name: 'Lexa Legal', sub: { es: 'Asesoría comercial', en: 'Commercial counsel' }, tag: { es: 'Firma legal', en: 'Law firm' } },
       ],
       nodes: {
-        sara: { x: 118, y: 136, ini: 'SR', name: 'Sara', role: { es: 'Compras', en: 'Procurement' }, tone: 'blue' },
-        tom: { x: 106, y: 336, ini: 'TB', name: 'Tom', role: { es: 'Operaciones', en: 'Operations' }, tone: 'blue' },
-        nico: { x: 238, y: 350, ini: 'NC', name: 'Nico', role: { es: 'TI', en: 'IT' }, tone: 'navy', late: true },
-        ai: { x: 500, y: 124, ini: '✦', name: 'TieComs AI', role: { es: 'Agente', en: 'Agent' }, tone: 'bot' },
+        sara: { x: 122, y: 140, ini: 'SR', name: 'Sara', role: { es: 'Compras', en: 'Procurement' }, tone: 'blue' },
+        tom: { x: 112, y: 330, ini: 'TB', name: 'Tom', role: { es: 'Operaciones', en: 'Operations' }, tone: 'blue' },
+        nico: { x: 246, y: 330, ini: 'NC', name: 'Nico', role: { es: 'TI', en: 'IT' }, tone: 'navy', late: true },
+        ai: { x: 500, y: 118, ini: '✦', name: 'TieComs AI', role: { es: 'Agente', en: 'Agent' }, tone: 'bot' },
         leo: { x: 830, y: 140, ini: 'LP', name: 'Leo', role: { es: 'Cuenta', en: 'Account lead' }, tone: 'green' },
-        kai: { x: 830, y: 336, ini: 'KA', name: 'Kai', role: { es: 'Implementación', en: 'Implementation' }, tone: 'green' },
-        maria: { x: 470, y: 368, ini: 'MG', name: 'María', role: { es: 'Abogada', en: 'Lawyer' }, tone: 'lilac' },
+        kai: { x: 830, y: 330, ini: 'KA', name: 'Kai', role: { es: 'Implementación', en: 'Implementation' }, tone: 'green' },
+        maria: { x: 500, y: 340, ini: 'MG', name: 'María', role: { es: 'Abogada', en: 'Lawyer' }, tone: 'lilac' },
       },
       tasks: [
         { id: 'nda', name: 'NDA' },
-        { id: 'contract', name: { es: 'Revisión de contrato', en: 'Contract review' } },
-        { id: 'security', name: { es: 'Revisión de seguridad', en: 'Security review' } },
-        { id: 'access', name: { es: 'Accesos y kickoff', en: 'Access & kickoff' } },
+        { id: 'contract', name: { es: 'Contrato', en: 'Contract' } },
+        { id: 'security', name: { es: 'Seguridad', en: 'Security' } },
+        { id: 'access', name: { es: 'Accesos', en: 'Access' } },
       ],
       steps: [
-        { to: ['sara', 'tom'], title: { es: 'Acme incorpora a un <em>nuevo proveedor</em>.', en: 'Acme is onboarding a <em>new vendor</em>.' },
-          say: { who: 'tom', org: 'Acme', text: { es: 'Sara, arranco el onboarding de Nova hoy.', en: 'Sara, I’m starting Nova’s onboarding today.' } },
+        { to: ['sara', 'tom'], short: { es: 'Arranca', en: 'Kick-off' }, title: { es: 'Acme incorpora a un <em>nuevo proveedor</em>.', en: 'Acme is onboarding a <em>new vendor</em>.' },
+          say: { who: 'tom', org: 'Acme', text: { es: 'Sara, arranco hoy la incorporación de Nova.', en: 'Sara, I’m starting Nova’s onboarding today.' } },
           tasks: { nda: ['waiting'], contract: ['waiting'], security: ['unassigned'], access: ['unassigned'] } },
-        { to: ['ai'], title: { es: 'La <em>IA</em> arma el plan de incorporación.', en: '<em>AI</em> builds the onboarding plan.' },
-          say: { who: 'ai', org: 'TieComs', text: { es: 'Plan listo: NDA, contrato, seguridad y accesos.', en: 'Plan ready: NDA, contract, security, access.' } },
+        { to: ['ai'], short: { es: 'Planea', en: 'Plan' }, title: { es: 'La <em>IA</em> arma el plan.', en: '<em>AI</em> builds the plan.' },
+          say: { who: 'ai', org: 'TieComs', text: { es: 'Plan listo: NDA, contrato, seguridad y accesos. Reviso seguridad mientras tanto.', en: 'Plan ready: NDA, contract, security, access. I’ll run the security checks meanwhile.' } },
           tasks: { security: ['running', 'ai'] } },
-        { to: ['leo'], title: { es: 'El proveedor <em>entra al hilo</em>.', en: 'The vendor <em>joins the thread</em>.' },
-          say: { who: 'leo', org: 'Nova', text: { es: 'Hola Acme 👋 Firmamos el NDA hoy mismo.', en: 'Hi Acme 👋 We’ll sign the NDA today.' } },
+        { to: ['leo'], short: { es: 'Conecta', en: 'Connect' }, title: { es: 'El proveedor <em>entra al hilo</em>.', en: 'The vendor <em>joins the thread</em>.' },
+          say: { who: 'leo', org: 'Nova Logistics', text: { es: 'Hola, Acme. Firmamos el NDA hoy mismo.', en: 'Hi Acme. We’ll sign the NDA today.' } },
           tasks: { nda: ['signed', 'leo'] } },
-        { to: ['maria'], title: { es: 'Una abogada de una <em>tercera empresa</em> se suma.', en: 'A lawyer from a <em>third company</em> steps in.' },
-          say: { who: 'maria', org: 'Lexa Legal', text: { es: 'La cláusula 7 necesita un ajuste. Envío redacción.', en: 'Clause 7 needs a tweak. Sending a redline.' } },
-          tasks: { contract: ['draft', 'maria'] } },
-        { to: ['leo'], title: { es: 'El proveedor <em>responde</em>.', en: 'The vendor <em>answers</em>.' },
-          say: { who: 'leo', org: 'Nova', text: { es: 'Aceptamos el ajuste de la cláusula 7.', en: 'We accept the clause 7 change.' } },
-          tasks: { contract: ['approvedBoth', 'maria'], security: ['passed', 'ai'] } },
-        { to: ['tom'], title: { es: 'De vuelta a Acme para <em>firmar</em>.', en: 'Back to Acme to <em>sign</em>.' },
-          say: { who: 'tom', org: 'Acme', text: { es: 'Firmado ✍️ Pasamos a accesos.', en: 'Signed ✍️ Moving on to access.' } },
+        { to: ['maria'], short: { es: 'Revisa', en: 'Review' }, title: { es: 'Una <em>tercera empresa</em> se suma.', en: 'A <em>third company</em> steps in.' },
+          say: { who: 'maria', org: 'Lexa Legal', text: { es: 'La cláusula 7 necesita un ajuste. Envío la redacción.', en: 'Clause 7 needs a change. Sending the redline.' } },
+          tasks: { contract: ['blocked', 'maria'] },
+          jam: { task: 'contract', text: { es: 'El contrato lleva 2 días esperando la cláusula 7 y frena todo lo demás.', en: 'The contract has waited 2 days on clause 7, holding up everything else.' } } },
+        { to: ['leo'], short: { es: 'Responde', en: 'Answer' }, title: { es: 'El proveedor <em>responde</em>.', en: 'The vendor <em>answers</em>.' },
+          say: { who: 'leo', org: 'Nova Logistics', text: { es: 'Aceptamos el ajuste de la cláusula 7.', en: 'We accept the clause 7 change.' } },
+          tasks: { contract: ['approvedBoth', 'maria'], security: ['passed', 'ai'] },
+          unjam: { es: 'Resuelto en el mismo hilo, sin reuniones ni cadenas de correo.', en: 'Solved in the same thread, no meetings or email chains.' } },
+        { to: ['tom'], short: { es: 'Firma', en: 'Sign' }, title: { es: 'De vuelta a Acme para <em>firmar</em>.', en: 'Back to Acme to <em>sign</em>.' },
+          say: { who: 'tom', org: 'Acme', text: { es: 'Firmado. Seguimos con los accesos.', en: 'Signed. Moving on to access.' } },
           tasks: { contract: ['signed', 'tom'] } },
-        { to: ['nico'], title: { es: '…y sigue con el <em>siguiente compañero</em>.', en: '…and on to the <em>next teammate</em>.' },
-          say: { who: 'nico', org: 'Acme', text: { es: 'Accesos listos. Kickoff el lunes 9:00.', en: 'Access ready. Kickoff Mon 9:00.' } },
+        { to: ['nico'], short: { es: 'Continúa', en: 'Continue' }, title: { es: 'Y el hilo sigue con el <em>siguiente compañero</em>.', en: 'And the thread moves to the <em>next teammate</em>.' },
+          say: { who: 'nico', org: 'Acme', text: { es: 'Accesos listos. Kickoff el lunes a las 9:00.', en: 'Access ready. Kickoff Monday at 9:00.' } },
           tasks: { access: ['progress', 'nico'] } },
       ],
     },
     branches: {
-      board: { es: 'Reposición para campaña · Sucursal Medellín', en: 'Campaign restock · Medellín branch' },
+      frame: { es: 'Grupo Andino · una sola empresa', en: 'Grupo Andino · one company' },
+      board: { es: 'Campaña regional Q4', en: 'Regional Q4 campaign' },
       meta: { es: '1 empresa · 3 sedes · 5 personas · 2 bots', en: '1 company · 3 branches · 5 people · 2 bots' },
       groups: [
-        { id: 'hq', x: 24, y: 28, w: 300, h: 400, tone: 'blue', mark: 'AR', name: 'Bogotá', sub: { es: 'Andina Retail · Logística y finanzas', en: 'Andina Retail · Logistics & finance' }, tag: { es: 'SEDE PRINCIPAL', en: 'HQ' } },
-        { id: 'med', x: 676, y: 28, w: 300, h: 400, tone: 'green', mark: 'MD', name: 'Medellín', sub: { es: 'Andina Retail · El Poblado', en: 'Andina Retail · El Poblado' }, tag: { es: 'SUCURSAL', en: 'BRANCH' } },
-        { id: 'lima', x: 372, y: 250, w: 256, h: 200, tone: 'lilac', mark: 'LI', name: 'Lima', sub: 'Andina Retail · Miraflores', tag: { es: 'SUCURSAL', en: 'BRANCH' } },
+        { id: 'bog', x: 20, y: 30, w: 300, h: 400, tone: 'blue', mark: 'BO', name: 'Bogotá', sub: { es: 'Marketing · Legal corporativo', en: 'Marketing · Corporate legal' }, tag: { es: 'Casa matriz', en: 'Headquarters' } },
+        { id: 'mex', x: 680, y: 30, w: 300, h: 400, tone: 'green', mark: 'MX', name: { es: 'Ciudad de México', en: 'Mexico City' }, sub: { es: 'Comercial · Operaciones', en: 'Sales · Operations' }, tag: { es: 'Sucursal', en: 'Branch' } },
+        { id: 'scl', x: 372, y: 238, w: 256, h: 192, tone: 'lilac', mark: 'CL', name: 'Santiago', sub: { es: 'Legal · Retail', en: 'Legal · Retail' }, tag: { es: 'Sucursal', en: 'Branch' } },
       ],
       nodes: {
-        juan: { x: 830, y: 336, ini: 'JP', name: 'Juan', role: { es: 'Visual merchandising', en: 'Visual merchandising' }, tone: 'green' },
-        camila: { x: 830, y: 140, ini: 'CM', name: 'Camila', role: { es: 'Jefa de tienda', en: 'Store manager' }, tone: 'green' },
-        inv: { x: 246, y: 150, ini: '◇', name: { es: 'Bot de inventario', en: 'Inventory bot' }, role: { es: 'Stock en vivo', en: 'Live stock' }, tone: 'bot', square: true },
-        andres: { x: 106, y: 336, ini: 'AR', name: 'Andrés', role: { es: 'Logística', en: 'Logistics' }, tone: 'blue' },
-        rosa: { x: 470, y: 368, ini: 'RQ', name: 'Rosa', role: { es: 'Jefa de tienda', en: 'Store manager' }, tone: 'lilac' },
-        ai: { x: 500, y: 124, ini: '✦', name: 'TieComs AI', role: { es: 'Agente', en: 'Agent' }, tone: 'bot' },
-        jorge: { x: 118, y: 136, ini: 'JL', name: 'Jorge', role: { es: 'Finanzas', en: 'Finance' }, tone: 'blue' },
+        valentina: { x: 122, y: 146, ini: 'VR', name: 'Valentina', role: { es: 'Marketing regional', en: 'Regional marketing' }, tone: 'blue' },
+        erp: { x: 250, y: 250, ini: '◇', name: 'ERP', role: { es: 'Bot de stock', en: 'Stock bot' }, tone: 'bot', square: true },
+        andres: { x: 112, y: 340, ini: 'AM', name: 'Andrés', role: { es: 'Legal corporativo', en: 'Corporate legal' }, tone: 'blue' },
+        ai: { x: 500, y: 118, ini: '✦', name: 'TieComs AI', role: { es: 'Agente', en: 'Agent' }, tone: 'bot' },
+        diego: { x: 830, y: 146, ini: 'DL', name: 'Diego', role: { es: 'Comercial', en: 'Sales' }, tone: 'green' },
+        sofia: { x: 830, y: 340, ini: 'SP', name: 'Sofía', role: { es: 'Operaciones', en: 'Operations' }, tone: 'green' },
+        francisca: { x: 500, y: 340, ini: 'FV', name: 'Francisca', role: { es: 'Legal', en: 'Legal' }, tone: 'lilac' },
       },
       tasks: [
-        { id: 'stock', name: { es: 'Consulta de stock', en: 'Stock check' } },
-        { id: 'transfer', name: { es: 'Traslado Bogotá → Medellín', en: 'Transfer Bogotá → Medellín' } },
-        { id: 'lima', name: { es: 'Envío desde Lima', en: 'Shipment from Lima' } },
-        { id: 'approval', name: { es: 'Aprobación de costo', en: 'Cost approval' } },
+        { id: 'plan', name: { es: 'Plan por país', en: 'Country plan' } },
+        { id: 'prices', name: { es: 'Precios locales', en: 'Local pricing' } },
+        { id: 'stock', name: { es: 'Stock', en: 'Stock' } },
+        { id: 'legal', name: { es: 'Bases legales', en: 'Legal terms' } },
       ],
       steps: [
-        { to: ['juan', 'camila'], title: { es: 'Una sucursal detecta un <em>faltante</em>.', en: 'A branch spots a <em>stock gap</em>.' },
-          say: { who: 'camila', org: 'Medellín', text: { es: 'Quedan 12 chaquetas y la campaña empieza el sábado.', en: '12 jackets left and the campaign starts Saturday.' } },
-          tasks: { stock: ['waiting'], transfer: ['unassigned'], lima: ['unassigned'], approval: ['unassigned'] } },
-        { to: ['inv'], title: { es: 'El <em>bot de inventario</em> busca en todas las sedes.', en: 'The <em>inventory bot</em> checks every branch.' },
-          say: { who: 'inv', org: 'Andina Retail', text: { es: 'CEDI Bogotá: 120 · Lima: 40 · Cali: 0.', en: 'Bogotá DC: 120 · Lima: 40 · Cali: 0.' } },
-          tasks: { stock: ['done', 'inv'] } },
-        { to: ['andres'], title: { es: 'La <em>sede principal</em> entra al hilo.', en: '<em>Headquarters</em> joins the thread.' },
-          say: { who: 'andres', org: 'Bogotá', text: { es: 'Despacho 100 unidades mañana a las 6:00.', en: 'Shipping 100 units tomorrow at 6:00.' } },
-          tasks: { transfer: ['progress', 'andres'] } },
-        { to: ['rosa'], title: { es: '<em>Otra sucursal</em> ayuda.', en: '<em>Another branch</em> pitches in.' },
-          say: { who: 'rosa', org: 'Lima', text: { es: 'Desde Lima enviamos 30 por traslado interno.', en: 'Lima sends 30 via internal transfer.' } },
-          tasks: { lima: ['progress', 'rosa'] } },
-        { to: ['ai'], title: { es: 'La <em>IA</em> consolida el plan y el costo.', en: '<em>AI</em> consolidates the plan and cost.' },
-          say: { who: 'ai', org: 'TieComs', text: { es: '100 desde Bogotá + 30 desde Lima. Costo interno: USD 410.', en: '100 from Bogotá + 30 from Lima. Internal cost: USD 410.' } },
-          tasks: { approval: ['running', 'ai'] } },
-        { to: ['jorge'], title: { es: 'Finanzas <em>aprueba</em> en la sede principal.', en: 'Finance <em>approves</em> at headquarters.' },
-          say: { who: 'jorge', org: 'Bogotá', text: { es: 'Aprobado. Cargo al centro de costo Medellín.', en: 'Approved. Charged to the Medellín cost center.' } },
-          tasks: { approval: ['approved', 'jorge'], transfer: ['done', 'andres'], lima: ['done', 'rosa'] } },
-        { to: ['camila'], title: { es: '…y la tienda abre con <em>stock completo</em>.', en: '…and the store opens <em>fully stocked</em>.' },
-          say: { who: 'camila', org: 'Medellín', text: { es: '¡Recibido! La campaña arranca completa.', en: 'Received! The campaign starts fully stocked.' } },
+        { to: ['valentina'], short: { es: 'Lanza', en: 'Launch' }, title: { es: 'La casa matriz lanza una <em>campaña regional</em>.', en: 'Headquarters launches a <em>regional campaign</em>.' },
+          say: { who: 'valentina', org: 'Bogotá', text: { es: 'Salimos con la campaña Q4 en Colombia, México y Chile el 1 de noviembre.', en: 'We launch the Q4 campaign in Colombia, Mexico and Chile on November 1.' } },
+          tasks: { plan: ['waiting'], prices: ['unassigned'], stock: ['unassigned'], legal: ['unassigned'] } },
+        { to: ['ai'], short: { es: 'Reparte', en: 'Split' }, title: { es: 'La <em>IA</em> reparte el trabajo por sede.', en: '<em>AI</em> splits the work by branch.' },
+          say: { who: 'ai', org: 'TieComs', text: { es: 'Plan por país listo: precios, stock y bases legales, con responsable en cada sede.', en: 'Country plan ready: pricing, stock and legal terms, with an owner in each branch.' } },
+          tasks: { plan: ['done', 'ai'] } },
+        { to: ['diego'], short: { es: 'Adapta', en: 'Adapt' }, title: { es: '<em>México</em> adapta los precios.', en: '<em>Mexico</em> adapts the pricing.' },
+          say: { who: 'diego', org: 'Ciudad de México', text: { es: 'Precios en MXN listos, con impuestos locales incluidos.', en: 'MXN prices ready, local taxes included.' } },
+          tasks: { prices: ['progress', 'diego'] } },
+        { to: ['erp'], short: { es: 'Valida', en: 'Verify' }, title: { es: 'El <em>bot del ERP</em> valida el stock.', en: 'The <em>ERP bot</em> checks stock.' },
+          say: { who: 'erp', org: 'Grupo Andino', text: { es: 'Stock suficiente en México y Chile. Bogotá necesita 2.000 unidades más.', en: 'Enough stock in Mexico and Chile. Bogotá needs 2,000 more units.' } },
+          tasks: { stock: ['passed', 'erp'], prices: ['done', 'diego'] } },
+        { to: ['francisca'], short: { es: 'Ajusta', en: 'Adjust' }, title: { es: '<em>Chile</em> pide un ajuste legal.', en: '<em>Chile</em> asks for a legal change.' },
+          say: { who: 'francisca', org: 'Santiago', text: { es: 'En Chile la promoción necesita bases protocolizadas ante notario.', en: 'In Chile the promotion needs notarized terms.' } },
+          tasks: { legal: ['blocked', 'francisca'] },
+          jam: { task: 'legal', text: { es: 'Las bases de Chile detienen el lanzamiento en los tres países.', en: 'Chile’s legal terms are holding the launch in all three countries.' } } },
+        { to: ['andres'], short: { es: 'Aprueba', en: 'Approve' }, title: { es: 'Legal corporativo <em>aprueba</em>.', en: 'Corporate legal <em>approves</em>.' },
+          say: { who: 'andres', org: 'Bogotá', text: { es: 'Aprobado, con las bases de Chile. Queda en el registro de la campaña.', en: 'Approved, with the Chile terms. Logged in the campaign record.' } },
+          tasks: { legal: ['approved', 'andres'] },
+          unjam: { es: 'La casa matriz lo vio a tiempo y la fecha de salida se mantiene.', en: 'Headquarters caught it in time and the launch date holds.' } },
+        { to: ['valentina'], short: { es: 'Sale', en: 'Go live' }, title: { es: 'Y las tres sedes salen <em>el mismo día</em>.', en: 'And all three branches go live <em>the same day</em>.' },
+          say: { who: 'valentina', org: 'Bogotá', text: { es: 'Campaña activa en los tres países. Gracias, equipo.', en: 'Campaign live in all three countries. Thanks, team.' } },
           tasks: {} },
       ],
     },
   };
 
-  // ---------- Montaje ----------
-  const $ = (sel) => root.querySelector(sel);
+  // ---------- Referencias ----------
+  const $ = (s) => section.querySelector(s);
   const wrap = $('[data-relay-wrap]');
   const stage = $('[data-relay-stage]');
   const stepEl = $('[data-relay-step]');
   const titleEl = $('[data-relay-title]');
-  const quoteEl = $('[data-relay-quote]');
+  const msgEl = $('[data-relay-msg]');
+  const railEl = $('[data-relay-rail]');
   const boardEl = $('[data-relay-board]');
-  const dotsEl = $('[data-relay-dots]');
-  const playBtn = $('[data-relay-play]');
-  const tabs = [...root.closest('section').querySelectorAll('[data-relay-tab]')];
+  const tabs = [...section.querySelectorAll('[data-relay-tab]')];
   const svgNS = 'http://www.w3.org/2000/svg';
-  const uid = `relay${Math.random().toString(36).slice(2, 7)}`;
+  const W = 1000, H = 450;
 
-  let sc, key = 'companies', step = 0, timer = null, playing = !reduceMotion, visible = false;
-  let route = [], stepEnds = [], lengths = [], total = 0, maskPath = null;
+  let key = 'companies', sc, route = [], ends = [], lens = [], total = 0, ropes = [], knot = null, pathEl = null;
+  let step = -1;
 
   function fit() {
-    const s = wrap.clientWidth / 1000;
+    const s = Math.min(wrap.clientWidth / W, 1.15);
     stage.style.transform = `scale(${s})`;
-    wrap.style.height = `${540 * s}px`;
+    wrap.style.height = `${H * s}px`;
   }
   new ResizeObserver(fit).observe(wrap);
 
-  // Curva suave que pasa por todos los puntos (Catmull-Rom → Bézier), segmento a segmento.
-  function segments(pts) {
+  function segs(pts) {
     const out = [];
     for (let i = 0; i < pts.length - 1; i++) {
-      const p0 = pts[i - 1] ?? pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] ?? p2;
-      const k = 0.22;
+      const p0 = pts[i - 1] ?? pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] ?? p2, k = 0.2;
       const c1 = [p1[0] + (p2[0] - p0[0]) * k, p1[1] + (p2[1] - p0[1]) * k];
       const c2 = [p2[0] - (p3[0] - p1[0]) * k, p2[1] - (p3[1] - p1[1]) * k];
       out.push(`C${c1[0].toFixed(1)} ${c1[1].toFixed(1)} ${c2[0].toFixed(1)} ${c2[1].toFixed(1)} ${p2[0]} ${p2[1]}`);
     }
     return out;
   }
-
-  function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+  const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 
   function build() {
     sc = scenarios[key];
     stage.textContent = '';
+    section.dataset.scenario = key;
+    if (sc.frame) stage.appendChild(el('div', 'relay-frame', `<span>${tr(sc.frame)}</span>`));
     for (const g of sc.groups) {
       const card = el('div', `relay-group tone-${g.tone}`);
       Object.assign(card.style, { left: `${g.x}px`, top: `${g.y}px`, width: `${g.w}px`, height: `${g.h}px` });
-      card.innerHTML = `<header><span class="relay-mark">${g.mark}</span><span class="relay-gname"><b>${tr(g.name)}</b><small>${tr(g.sub)}</small></span><span class="relay-tag">${tr(g.tag)}</span></header>`;
       card.dataset.group = g.id;
+      card.innerHTML = `<header><span class="relay-mark">${g.mark}</span><span class="relay-gname"><b>${tr(g.name)}</b><small>${tr(g.sub)}</small></span><span class="relay-tag">${tr(g.tag)}</span></header>`;
       stage.appendChild(card);
     }
-    // Recorrido completo del escenario: cada paso agrega uno o más puntos.
-    route = []; stepEnds = [];
-    for (const s of sc.steps) { route.push(...s.to); stepEnds.push(route.length); }
+    route = []; ends = [];
+    for (const s of sc.steps) { route.push(...s.to); ends.push(route.length - 1); }
     const pts = route.map((id) => [sc.nodes[id].x, sc.nodes[id].y]);
-    const segs = segments(pts);
-    const d = `M${pts[0][0]} ${pts[0][1]} ${segs.join(' ')}`;
-
+    const sg = segs(pts);
+    const d = `M${pts[0][0]} ${pts[0][1]} ${sg.join(' ')}`;
     const svg = document.createElementNS(svgNS, 'svg');
-    svg.setAttribute('viewBox', '0 0 1000 540');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     svg.setAttribute('class', 'relay-rope');
     svg.setAttribute('aria-hidden', 'true');
-    svg.innerHTML = `<defs><mask id="${uid}-m" maskUnits="userSpaceOnUse" x="0" y="0" width="1000" height="540"><path d="${d}" fill="none" stroke="#fff" stroke-width="16" stroke-linecap="round" data-mask/></mask></defs>
-      <g mask="url(#${uid}-m)" fill="none" stroke-linecap="round" stroke-linejoin="round">
-        <path d="${d}" stroke="#3b2414" stroke-width="9"/>
-        <path d="${d}" stroke="#ff7919" stroke-width="6"/>
-        <path d="${d}" stroke="#ffd2a8" stroke-width="1.6" stroke-dasharray="3 7"/>
-      </g>`;
+    svg.innerHTML = `<defs><linearGradient id="relayCore" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1000" y2="450"><stop offset="0" stop-color="#ff9d45"/><stop offset="1" stop-color="#f06200"/></linearGradient></defs>
+      <path class="relay-rope-shadow" d="${d}"/><path class="relay-rope-outline" d="${d}"/><path class="relay-rope-core" d="${d}"/>
+      <circle class="relay-knot" r="6.5"/>`;
     stage.appendChild(svg);
-    maskPath = svg.querySelector('[data-mask]');
-    // Longitud acumulada en cada punto del recorrido (medida con la misma curva).
+    ropes = [...svg.querySelectorAll('path')];
+    knot = svg.querySelector('.relay-knot');
+    pathEl = ropes[2];
     const probe = document.createElementNS(svgNS, 'path');
     svg.appendChild(probe);
-    lengths = pts.map((p, i) => { if (i === 0) return 0; probe.setAttribute('d', `M${pts[0][0]} ${pts[0][1]} ${segs.slice(0, i).join(' ')}`); return probe.getTotalLength(); });
+    lens = pts.map((_, i) => { if (!i) return 0; probe.setAttribute('d', `M${pts[0][0]} ${pts[0][1]} ${sg.slice(0, i).join(' ')}`); return probe.getTotalLength(); });
     probe.remove();
-    total = lengths[lengths.length - 1] + 2;
-    maskPath.style.strokeDasharray = `${total} ${total}`;
-    maskPath.style.strokeDashoffset = `${total}`;
+    total = lens[lens.length - 1] + 1;
+    ropes.forEach((p) => { p.style.strokeDasharray = `${total} ${total}`; p.style.strokeDashoffset = `${total}`; });
 
     for (const [id, n] of Object.entries(sc.nodes)) {
       const node = el('div', `relay-node tone-${n.tone}${n.square ? ' is-square' : ''}${n.late ? ' is-late' : ''}`);
       node.style.left = `${n.x}px`; node.style.top = `${n.y}px`;
       node.dataset.node = id;
-      node.innerHTML = `<span class="relay-avatar">${n.ini}</span><span class="relay-label"><b>${tr(n.name)}</b> · ${tr(n.role)}</span>`;
+      node.innerHTML = `<span class="relay-avatar">${n.ini}<i class="relay-typing" aria-hidden="true"><b></b><b></b><b></b></i></span><span class="relay-label"><b>${tr(n.name)}</b> · ${tr(n.role)}</span>`;
       stage.appendChild(node);
     }
-    const bubble = el('div', 'relay-bubble'); bubble.dataset.bubble = '';
-    stage.appendChild(bubble);
 
-    dotsEl.textContent = '';
-    sc.steps.forEach((_, i) => {
-      const b = el('button', 'relay-dot'); b.type = 'button';
+    railEl.textContent = '';
+    sc.steps.forEach((s, i) => {
+      const b = el('button', 'relay-rail-item', `<span>${String(i + 1).padStart(2, '0')}</span>${tr(s.short)}`);
+      b.type = 'button';
       b.setAttribute('aria-label', `${tr(T.goto)} ${i + 1}`);
-      b.addEventListener('click', () => { go(i); restart(); });
-      dotsEl.appendChild(b);
+      b.addEventListener('click', () => scrollToStep(i));
+      railEl.appendChild(b);
     });
+    step = -1;
     fit();
   }
 
+  const groupOf = (id) => {
+    const n = sc.nodes[id];
+    return sc.groups.find((g) => n.x >= g.x && n.x <= g.x + g.w && n.y >= g.y && n.y <= g.y + g.h)?.id ?? 'bot';
+  };
   function taskState(i) {
-    const state = {};
-    for (const t of sc.tasks) state[t.id] = ['unassigned'];
-    for (let s = 0; s <= i; s++) Object.assign(state, sc.steps[s].tasks);
-    return state;
+    const st = {};
+    for (const t of sc.tasks) st[t.id] = ['unassigned'];
+    for (let s = 0; s <= i; s++) Object.assign(st, sc.steps[s].tasks);
+    // Al final de «Entre sedes» todo queda listo: la campaña sale completa.
+    if (i === sc.steps.length - 1 && key === 'branches') for (const t of sc.tasks) if (!OK.has(st[t.id][0])) st[t.id] = ['done', st[t.id][1]];
+    return st;
   }
 
-  function render() {
-    const s = sc.steps[step];
-    const n = sc.steps.length;
-    stepEl.textContent = `${tr(T.step)} ${step + 1} / ${n}`;
-    titleEl.innerHTML = tr(s.title);
+  // Cambios discretos del paso: textos, nodos, tablero y cuello de botella.
+  function setStep(i) {
+    if (i === step) return;
+    step = i;
+    const s = sc.steps[i];
     const who = sc.nodes[s.say.who];
-    quoteEl.innerHTML = `<b>${tr(who.name)} · ${s.say.org}</b> ${tr(s.say.text)}`;
+    stepEl.innerHTML = `<b>${String(i + 1).padStart(2, '0')}</b> / ${String(sc.steps.length).padStart(2, '0')}`;
+    titleEl.innerHTML = tr(s.title);
+    msgEl.className = `relay-msg${who.tone === 'bot' ? ' is-bot' : ''}`;
+    msgEl.innerHTML = `<span class="relay-msg-avatar tone-${who.tone}${who.square ? ' is-square' : ''}">${who.ini}</span><span class="relay-msg-body"><small>${tr(who.name)} · ${s.say.org}</small>${tr(s.say.text)}</span>`;
+    for (const x of [titleEl, msgEl]) { x.classList.remove('is-in'); void x.offsetWidth; x.classList.add('is-in'); }
 
-    // Cuerda: se revela hasta el último punto de este paso.
-    const upto = stepEnds[step] - 1;
-    maskPath.style.strokeDashoffset = `${total - lengths[upto]}`;
-    const reached = new Set(route.slice(0, upto + 1));
-    const touched = new Set([...reached].map((id) => groupOf(id)));
+    const reached = new Set(route.slice(0, ends[i] + 1));
+    const touched = new Set([...reached].map(groupOf));
     stage.querySelectorAll('[data-node]').forEach((e) => {
       const id = e.dataset.node;
       e.classList.toggle('is-reached', reached.has(id));
-      e.classList.toggle('is-current', id === route[upto]);
-      // Quien pertenece a una empresa o sede que aún no entra al hilo se ve apagado.
+      e.classList.toggle('is-current', id === s.say.who);
       e.classList.toggle('is-idle', !reached.has(id) && !touched.has(groupOf(id)));
+      e.classList.toggle('is-jam', !!s.jam && id === s.say.who);
     });
     stage.querySelectorAll('[data-group]').forEach((g) => g.classList.toggle('is-idle', !touched.has(g.dataset.group)));
+    railEl.querySelectorAll('.relay-rail-item').forEach((b, k) => { b.classList.toggle('is-active', k === i); b.classList.toggle('is-past', k < i); });
 
-    // Globo junto a quien habla, dentro del escenario.
-    const b = stage.querySelector('[data-bubble]');
-    b.className = `relay-bubble${who.tone === 'bot' ? ' is-bot' : ''}`;
-    b.innerHTML = `<small>${tr(who.name)} · ${s.say.org}</small>${tr(s.say.text)}`;
-    // Nodos centrales arriba (la IA): el globo va debajo para no tapar las tarjetas.
-    const central = who.x > 360 && who.x < 640 && who.y < 200;
-    const left = central ? who.x - 120 : who.x > 640 ? who.x - 250 : who.x + 40;
-    const top = central ? who.y + 48 : who.y > 300 ? who.y - 108 : who.y - 86;
-    Object.assign(b.style, { left: `${Math.max(8, Math.min(left, 752))}px`, top: `${Math.max(6, top)}px` });
-    b.classList.remove('is-in'); void b.offsetWidth; b.classList.add('is-in');
-
-    // Tablero de tareas.
-    const st = taskState(step);
-    const doneCount = sc.tasks.filter((t) => OK.has(st[t.id][0])).length;
-    boardEl.innerHTML = `<div class="relay-board-head"><b>${tr(sc.board)}</b><span>${tr(sc.meta)}</span><span class="relay-progress"><i style="width:${(doneCount / sc.tasks.length) * 100}%"></i></span><span class="relay-count">${doneCount}/${sc.tasks.length} ${tr(T.done)}</span></div>
+    const st = taskState(i);
+    const done = sc.tasks.filter((t) => OK.has(st[t.id][0])).length;
+    const alert = s.jam
+      ? `<div class="relay-alert is-jam"><b>⏱ ${tr(T.jam)}</b>${tr(s.jam.text)}</div>`
+      : s.unjam ? `<div class="relay-alert is-clear"><b>✓ ${tr(T.unjam)}</b>${tr(s.unjam)}</div>` : '';
+    boardEl.innerHTML = `<div class="relay-board-head"><b>${tr(sc.board)}</b><span>${tr(sc.meta)}</span><span class="relay-progress"><i style="width:${(done / sc.tasks.length) * 100}%"></i></span><span class="relay-count">${done}/${sc.tasks.length} ${tr(T.done)}</span></div>
+      ${alert}
       <div class="relay-tasks">${sc.tasks.map((t) => {
         const [code, owner] = st[t.id];
         const o = owner && sc.nodes[owner];
-        const meta = STATUS[code];
-        const changed = sc.steps[step].tasks[t.id] ? ' is-changed' : '';
-        return `<div class="relay-task${changed}"><b>${tr(t.name)}</b><span class="relay-owner">${o ? `<i class="tone-${o.tone}">${o.ini}</i>${tr(o.name)}` : `<i class="is-empty"></i>${tr(T.noOwner)}`}</span><span class="relay-status tone-${meta.tone}">${meta[L]}</span></div>`;
+        const m = STATUS[code];
+        const cls = s.jam?.task === t.id ? ' is-jam' : s.tasks[t.id] ? ' is-changed' : '';
+        return `<div class="relay-task${cls}"><b>${tr(t.name)}</b><span class="relay-owner">${o ? `<i class="tone-${o.tone}${o.square ? ' is-square' : ''}">${o.ini}</i>${tr(o.name)}` : `<i class="is-empty"></i>${tr(T.noOwner)}`}</span><span class="relay-status tone-${m.tone}">${m[L]}</span></div>`;
       }).join('')}</div>`;
-
-    dotsEl.querySelectorAll('.relay-dot').forEach((d, i) => { d.classList.toggle('is-active', i === step); d.setAttribute('aria-current', i === step ? 'step' : 'false'); });
-    playBtn.setAttribute('aria-label', tr(playing ? T.pause : T.play));
-    playBtn.textContent = playing ? '❚❚' : '▶';
   }
 
-  function groupOf(id) {
-    const n = sc.nodes[id];
-    const g = sc.groups.find((g) => n.x >= g.x && n.x <= g.x + g.w && n.y >= g.y && n.y <= g.y + g.h);
-    return g?.id ?? 'bot';
+  // Cambio continuo: la cuerda avanza con el scroll dentro de cada paso.
+  function setProgress(p) {
+    const n = sc.steps.length;
+    const f = Math.min(n - 1e-6, Math.max(0, p * n));
+    const i = Math.floor(f);
+    const within = reduceMotion ? 1 : Math.min(1, (f - i) / 0.55); // dibuja en el primer 55 % del paso y luego espera
+    const eased = 1 - Math.pow(1 - within, 3);
+    const from = i === 0 ? 0 : lens[ends[i - 1]];
+    const len = from + (lens[ends[i]] - from) * eased;
+    ropes.forEach((r) => { r.style.strokeDashoffset = `${total - len}`; });
+    const pt = pathEl.getPointAtLength(Math.max(0.01, len));
+    knot.setAttribute('cx', pt.x); knot.setAttribute('cy', pt.y);
+    knot.style.opacity = len > 1 && within < 1 ? '1' : '0';
+    setStep(i);
   }
 
-  function go(i) { step = (i + sc.steps.length) % sc.steps.length; render(); }
-
-  function tick() {
-    const last = step === sc.steps.length - 1;
-    timer = setTimeout(() => { go(last ? 0 : step + 1); tick(); }, last ? STEP_MS + 2200 : STEP_MS);
+  function progressNow() {
+    const r = section.getBoundingClientRect();
+    const run = section.offsetHeight - window.innerHeight;
+    return run > 0 ? Math.min(1, Math.max(0, -r.top / run)) : 0;
   }
-  function stop() { clearTimeout(timer); timer = null; }
-  function restart() { stop(); if (playing && visible) tick(); }
+  function scrollToStep(i) {
+    const run = section.offsetHeight - window.innerHeight;
+    const top = section.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: top + run * ((i + 0.7) / sc.steps.length), behavior: reduceMotion ? 'auto' : 'smooth' });
+  }
 
-  playBtn.addEventListener('click', () => { playing = !playing; render(); restart(); });
-  $('[data-relay-prev]').addEventListener('click', () => { go(step - 1); restart(); });
-  $('[data-relay-next]').addEventListener('click', () => { go(step + 1); restart(); });
+  let ticking = false;
+  const onScroll = () => { if (ticking) return; ticking = true; requestAnimationFrame(() => { ticking = false; setProgress(progressNow()); }); };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll);
+
   tabs.forEach((t) => t.addEventListener('click', () => {
+    if (t.dataset.relayTab === key) return;
     key = t.dataset.relayTab;
     tabs.forEach((x) => { const on = x === t; x.classList.toggle('is-active', on); x.setAttribute('aria-selected', String(on)); });
-    build(); step = 0;
-    requestAnimationFrame(() => { render(); restart(); });
+    build();
+    setProgress(progressNow());
   }));
 
-  if ('IntersectionObserver' in window) {
-    new IntersectionObserver((es) => es.forEach((e) => { visible = e.isIntersecting; restart(); }), { threshold: 0.25 }).observe(root);
-  } else { visible = true; }
-
   build();
-  // Sin animación: se muestra el recorrido completo desde el inicio.
-  if (reduceMotion) { step = sc.steps.length - 1; }
-  requestAnimationFrame(() => { render(); restart(); });
+  setProgress(progressNow());
 })();

@@ -155,30 +155,45 @@
       </div>
     </section>
 
-    <section class="relay-section" id="recorrido" aria-labelledby="relay-title">
-      <div class="relay-intro">
-        <p class="eyebrow"><span class="eyebrow-dot eyebrow-dot-orange"></span> Un hilo, muchas manos</p>
-        <h2 id="relay-title">El trabajo cruza<br><em>fronteras.</em></h2>
-        <p class="section-lede">A veces entre empresas. A veces entre sedes de la misma empresa. Siempre con bots que ayudan y personas que deciden.</p>
-      </div>
-      <div class="relay-tabs" role="tablist" aria-label="Escenarios">
-        <button type="button" role="tab" class="is-active" aria-selected="true" data-relay-tab="companies">Entre empresas</button>
-        <button type="button" role="tab" aria-selected="false" data-relay-tab="branches">Entre sedes</button>
-      </div>
-      <div class="relay-player" data-relay>
-        <div class="relay-caption" aria-live="polite">
-          <span class="relay-step" data-relay-step></span>
-          <h3 data-relay-title></h3>
-          <p class="relay-quote" data-relay-quote></p>
+    <section class="relay-section" id="recorrido" data-relay-section aria-labelledby="relay-title">
+      <div class="relay-sticky">
+        <div class="relay-side">
+          <p class="eyebrow"><span class="eyebrow-dot eyebrow-dot-orange"></span> Un hilo, muchas manos</p>
+          <h2 id="relay-title">El trabajo cruza<br><em>fronteras.</em></h2>
+          <div class="relay-tabs" role="tablist" aria-label="Escenarios">
+            <button type="button" role="tab" class="is-active" aria-selected="true" data-relay-tab="companies">Entre empresas</button>
+            <button type="button" role="tab" aria-selected="false" data-relay-tab="branches">Entre sedes</button>
+          </div>
+          <div class="relay-now" aria-live="polite">
+            <span class="relay-step" data-relay-step></span>
+            <h3 data-relay-title></h3>
+            <div class="relay-msg" data-relay-msg></div>
+          </div>
+          <nav class="relay-rail" data-relay-rail aria-label="Pasos del recorrido"></nav>
         </div>
-        <div class="relay-wrap" data-relay-wrap><div class="relay-stage" data-relay-stage></div></div>
-        <div class="relay-board" data-relay-board></div>
-        <div class="relay-controls">
-          <button type="button" data-relay-prev aria-label="Paso anterior">‹</button>
-          <button type="button" data-relay-play aria-label="Pausar">❚❚</button>
-          <div class="relay-dots" data-relay-dots></div>
-          <button type="button" data-relay-next aria-label="Paso siguiente">›</button>
+        <div class="relay-main">
+          <div class="relay-canvas"><div class="relay-wrap" data-relay-wrap><div class="relay-stage" data-relay-stage></div></div></div>
+          <div class="relay-board" data-relay-board></div>
         </div>
+      </div>
+    </section>
+
+    <section class="insight-section" id="cuellos-de-botella" aria-labelledby="insight-title">
+      <div class="insight-grid">
+        <div>
+          <p class="eyebrow"><span class="eyebrow-dot eyebrow-dot-orange"></span> La ventaja que se paga sola</p>
+          <h2 id="insight-title">Ve el <em>cuello de botella</em> antes de que te cueste.</h2>
+          <p class="lede">Cada hilo muestra quién tiene el trabajo, cuánto lleva esperando y qué está frenando. Detectar a tiempo dónde se atasca un negocio ahorra días de operación y, en una empresa grande, millones.</p>
+          <div class="insight-points">
+            <div><b>Quién lo tiene</b><span>Persona, empresa, sede o bot responsable de cada paso.</span></div>
+            <div><b>Cuánto espera</b><span>El tiempo detenido se ve en el mismo hilo, no en un informe.</span></div>
+            <div><b>Qué frena</b><span>La tarea que detiene a las demás se señala sola.</span></div>
+          </div>
+        </div>
+        <blockquote class="insight-quote">
+          <p>Una hora perdida en un cuello de botella es una hora perdida para todo el sistema.</p>
+          <footer><i>EG</i><span><b>Eliyahu M. Goldratt</b>Autor de «La meta» y creador de la teoría de las restricciones</span></footer>
+        </blockquote>
       </div>
     </section>
 

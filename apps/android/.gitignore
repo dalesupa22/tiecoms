@@ -1,0 +1,23 @@
+# Gradle / Android Studio
+.gradle/
+build/
+/app/build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+captures/
+.cxx/
+.externalNativeBuild/
+# Firma: nunca en el repo
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+# Salidas
+*.apk
+*.aab
+*.ap_
+*.dex
+# Credenciales de pruebas locales
+fixture*.json

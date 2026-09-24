@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icono monocromo de notificación: burbuja de chat con tres puntos (del logo). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2.5C6.75,2.5 2.5,6.4 2.5,11.25c0,2.6 1.23,4.94 3.18,6.54L5,21.5l4.02,-1.94c0.95,0.25 1.95,0.39 2.98,0.39c5.25,0 9.5,-3.9 9.5,-8.7S17.25,2.5 12,2.5zM7.75,12.75a1.5,1.5 0,1 1,0 -3a1.5,1.5 0,0 1,0 3zM12,12.75a1.5,1.5 0,1 1,0 -3a1.5,1.5 0,0 1,0 3zM16.25,12.75a1.5,1.5 0,1 1,0 -3a1.5,1.5 0,0 1,0 3z" />
+</vector>

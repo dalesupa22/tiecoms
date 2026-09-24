@@ -1,0 +1,646 @@
+package com.tiecoms.app.core
+
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import okhttp3.OkHttpClient
+import java.time.Instant
+import java.util.UUID
+import kotlin.random.Random
+
+enum class SessionStatus { LOADING, ANONYMOUS, READY, UNREACHABLE }
+
+data class ConversationState(
+    val messages: List<MessageDTO> = emptyList(),
+    /** Cursor continuo: nunca avanza sobre un hueco. */
+    val lastEventSeq: Long = 0,
+    val hasMore: Boolean = true,
+    val loaded: Boolean = false,
+    val loading: Boolean = false,
+)
+
+data class TypingEntry(val userId: String, val until: Long)
+
+data class ClientState(
+    val status: SessionStatus = SessionStatus.LOADING,
+    val connection: ConnectionStatus = ConnectionStatus.OFFLINE,
+    val data: BootstrapDTO? = null,
+    val conversations: Map<String, ConversationState> = emptyMap(),
+    val pending: List<PendingMessage> = emptyList(),
+    val typing: Map<String, List<TypingEntry>> = emptyMap(),
+)
+
+/** Avisos puntuales para sonidos y notificaciones. */
+sealed interface ClientSignal {
+    /** Mensaje de otra persona recibido EN VIVO (no en la recuperación masiva). */
+    data class Incoming(val message: MessageDTO) : ClientSignal
+    /** El servidor confirmó un mensaje propio. */
+    data class Sent(val message: MessageDTO) : ClientSignal
+    data object SignedOut : ClientSignal
+}
+
+private enum class RefreshOutcome { OK, UNAUTHORIZED, NETWORK }
+
+/**
+ * Cliente TieComs independiente de la interfaz (mismo comportamiento que
+ * packages/client-core): cola persistente, reintentos idempotentes con
+ * clientMessageId, cursores lastEventSeq, catch-up con /events?after= y resetRequired.
+ *
+ * Todo el estado se muta en un único hilo lógico ([dispatcher]); las llamadas de red
+ * son asíncronas y no lo bloquean.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+class TieComsClient(
+    baseUrl: String,
+    private val deviceName: String,
+    private val storage: KeyValueStorage,
+    private val secrets: SecretStore,
+    okHttp: OkHttpClient,
+    private val now: () -> Long = System::currentTimeMillis,
+) {
+    val http = HttpApi(baseUrl, okHttp)
+    val baseUrl: String get() = http.baseUrl
+    private val dispatcher = Dispatchers.Default.limitedParallelism(1)
+    private val scope = CoroutineScope(SupervisorJob() + dispatcher)
+
+    private val _state = MutableStateFlow(ClientState())
+    val state: StateFlow<ClientState> = _state.asStateFlow()
+    private val _signals = MutableSharedFlow<ClientSignal>(extraBufferCapacity = 64)
+    val signals: SharedFlow<ClientSignal> = _signals.asSharedFlow()
+
+    private var accessToken: String? = null
+    private var accessExp = 0L
+    private var refreshing: Deferred<RefreshOutcome>? = null
+    private var flushJob: Job? = null
+    private var bootstrapJob: Job? = null
+    private var startRetryJob: Job? = null
+    private val readJobs = HashMap<String, Job>()
+    private val catchingUp = HashSet<String>()
+    private var flushing = false
+    private var lastTypingSent = 0L
+
+    /** Diferencia reloj servidor − reloj local (de /bootstrap serverTime). */
+    private var serverOffset = 0L
+    /** Hora (del servidor) desde la que la conexión actual está en vivo; lo anterior es recuperación. */
+    private var liveSince = Long.MAX_VALUE
+
+    /** Contadores de diagnóstico (pruebas): por dónde salió cada mensaje. */
+    @Volatile var sentViaSocket = 0; private set
+    @Volatile var sentViaHttp = 0; private set
+
+    private val socket = RealtimeSocket(
+        okHttp.newBuilder().readTimeout(java.time.Duration.ZERO).build(),
+        { http.socketUrl() },
+        scope,
+        object : RealtimeSocket.Listener {
+            override suspend fun accessToken(): String? {
+                if (accessToken == null || now() > accessExp - 30_000) refresh()
+                return accessToken
+            }
+            override fun onStatus(status: ConnectionStatus) = setState { copy(connection = status) }
+            override fun onEvent(name: String, args: List<JsonElement>) = onSocketEvent(name, args)
+            override suspend fun onUnauthorized(): Boolean = when (refresh()) {
+                RefreshOutcome.OK -> true
+                RefreshOutcome.NETWORK -> true
+                RefreshOutcome.UNAUTHORIZED -> { handleSignedOut(); false }
+            }
+        },
+    )
+
+    private inline fun setState(f: ClientState.() -> ClientState) { _state.value = _state.value.f() }
+    private val s get() = _state.value
+
+    private fun setConv(id: String, f: ConversationState.() -> ConversationState) = setState {
+        copy(conversations = conversations + (id to (conversations[id] ?: ConversationState()).f()))
+    }
+
+    private fun patchMeta(id: String, f: ConversationDTO.() -> ConversationDTO) = setState {
+        val d = data ?: return@setState this
+        copy(data = d.copy(conversations = d.conversations.map { if (it.id == id) it.f() else it }))
+    }
+
+    fun meta(id: String): ConversationDTO? = s.data?.conversations?.firstOrNull { it.id == id }
+    val myId: String? get() = s.data?.me?.id
+
+    // ---------- HTTP con sesión ----------
+    private suspend fun <T> request(method: String, path: String, body: String? = null, serializer: KSerializer<T>): T {
+        if (accessToken != null && now() > accessExp - 30_000) refresh()
+        var r = http.exec(method, path, body, accessToken)
+        if (r.code == 401) {
+            when (refresh()) {
+                RefreshOutcome.OK -> r = http.exec(method, path, body, accessToken)
+                RefreshOutcome.UNAUTHORIZED -> { handleSignedOut(); throw HttpApi.parseError(r) }
+                RefreshOutcome.NETWORK -> throw HttpApi.parseError(r)
+            }
+            if (r.code == 401) { handleSignedOut(); throw HttpApi.parseError(r) }
+        }
+        if (!r.ok) throw HttpApi.parseError(r)
+        return TcJson.decodeFromString(serializer, r.body.ifBlank { "{}" })
+    }
+
+    private suspend fun requestUnit(method: String, path: String, body: String? = null) {
+        request(method, path, body, JsonElement.serializer())
+    }
+
+    // ---------- Sesión ----------
+    private fun deviceId(): String = storage.get("device:id") ?: UUID.randomUUID().toString().also { storage.set("device:id", it) }
+    private fun device() = DeviceInfo(deviceId = deviceId(), name = deviceName.take(120))
+
+    private fun applyAuth(r: AuthResult) {
+        accessToken = r.accessToken
+        accessExp = runCatching { Instant.parse(r.accessExpiresAt).toEpochMilli() }.getOrElse { now() + 10 * 60_000 }
+        r.refreshToken?.let { secrets.set(it) }
+    }
+
+    /** Arranque: intenta reanudar la sesión guardada. */
+    suspend fun start() = withContext(dispatcher) {
+        startRetryJob?.cancel()
+        setState { copy(status = SessionStatus.LOADING) }
+        if (secrets.get() == null) { setState { copy(status = SessionStatus.ANONYMOUS) }; return@withContext }
+        when (refresh()) {
+            RefreshOutcome.OK -> try { afterLogin() } catch (e: NetworkException) { unreachable() }
+            RefreshOutcome.UNAUTHORIZED -> setState { copy(status = SessionStatus.ANONYMOUS) }
+            RefreshOutcome.NETWORK -> unreachable()
+        }
+    }
+
+    private var startAttempts = 0
+    private fun unreachable() {
+        setState { copy(status = SessionStatus.UNREACHABLE) }
+        val wait = minOf(30_000L, 1000L shl minOf(startAttempts++, 5))
+        startRetryJob = scope.launch { delay(wait); start() }
+    }
+
+    suspend fun login(email: String, password: String) = withContext(dispatcher) {
+        val body = TcJson.encodeToString(LoginBody.serializer(), LoginBody(email.trim(), password, device()))
+        val r = http.exec("POST", "$AUTH_BASE_PATH/login", body)
+        if (!r.ok) throw HttpApi.parseError(r)
+        applyAuth(TcJson.decodeFromString(AuthResult.serializer(), r.body))
+        afterLogin()
+    }
+
+    suspend fun signup(name: String, email: String, password: String, orgName: String?, orgInviteToken: String?, title: String?) = withContext(dispatcher) {
+        val body = TcJson.encodeToString(
+            SignupBody.serializer(),
+            SignupBody(name.trim(), email.trim(), password, orgName?.trim()?.ifEmpty { null }, orgInviteToken, title?.trim()?.ifEmpty { null }, device()),
+        )
+        val r = http.exec("POST", "$AUTH_BASE_PATH/signup", body)
+        if (!r.ok) throw HttpApi.parseError(r)
+        applyAuth(TcJson.decodeFromString(AuthResult.serializer(), r.body))
+        afterLogin()
+    }
+
+    // ---------- SSO (Google / Microsoft) con PKCE ----------
+    /** Prepara el intento (verifier guardado en disco) y devuelve la URL a abrir en Custom Tabs. */
+    fun beginSso(provider: SsoProvider): String {
+        val verifier = Pkce.newVerifier()
+        storage.set(SSO_KEY, TcJson.encodeToString(SsoAttempt.serializer(), SsoAttempt(provider.path, verifier, now())))
+        return Sso.startUrl(baseUrl, provider, deviceId(), Pkce.challenge(verifier))
+    }
+
+    fun hasSsoAttempt(): Boolean = storage.get(SSO_KEY) != null
+
+    /** Canjea el código de un solo uso (60 s) por la misma sesión que devuelve el login. */
+    suspend fun completeSso(code: String) = withContext(dispatcher) {
+        val attempt = storage.get(SSO_KEY)?.let { runCatching { TcJson.decodeFromString(SsoAttempt.serializer(), it) }.getOrNull() }
+        storage.set(SSO_KEY, null)
+        if (attempt == null || now() - attempt.startedAt > 15 * 60_000) throw ApiException(400, "sso_expired", "")
+        val body = TcJson.encodeToString(SsoExchangeBody.serializer(), SsoExchangeBody(code, attempt.verifier, device()))
+        val r = http.exec("POST", "$AUTH_BASE_PATH/sso/exchange", body)
+        if (!r.ok) throw HttpApi.parseError(r)
+        applyAuth(TcJson.decodeFromString(AuthResult.serializer(), r.body))
+        afterLogin()
+    }
+
+    fun clearSso() = storage.set(SSO_KEY, null)
+
+    /** Refresco con vuelo único; rota el refresh token. */
+    private suspend fun refresh(): RefreshOutcome {
+        refreshing?.let { return it.await() }
+        val d = scope.async {
+            val stored = secrets.get() ?: return@async RefreshOutcome.UNAUTHORIZED
+            val r = try {
+                http.exec("POST", "$AUTH_BASE_PATH/refresh", TcJson.encodeToString(RefreshBody.serializer(), RefreshBody(stored)))
+            } catch (e: NetworkException) { return@async RefreshOutcome.NETWORK }
+            when {
+                r.ok -> { applyAuth(TcJson.decodeFromString(AuthResult.serializer(), r.body)); RefreshOutcome.OK }
+                r.code == 401 || r.code == 400 || r.code == 403 -> { accessToken = null; secrets.set(null); RefreshOutcome.UNAUTHORIZED }
+                else -> RefreshOutcome.NETWORK
+            }
+        }
+        refreshing = d
+        try { return d.await() } finally { if (refreshing === d) refreshing = null }
+    }
+
+    suspend fun logout() = withContext(dispatcher) {
+        try { requestUnit("POST", "$AUTH_BASE_PATH/logout", "{}") } catch (_: Exception) {}
+        handleSignedOut()
+    }
+
+    private fun handleSignedOut() {
+        val me = s.data?.me?.id
+        socket.stop()
+        flushJob?.cancel(); bootstrapJob?.cancel(); startRetryJob?.cancel()
+        readJobs.values.forEach { it.cancel() }; readJobs.clear()
+        accessToken = null
+        secrets.set(null)
+        if (me != null) storage.clearPrefix("u:$me:")
+        val wasSignedIn = s.status != SessionStatus.ANONYMOUS
+        _state.value = ClientState(status = SessionStatus.ANONYMOUS)
+        if (wasSignedIn) _signals.tryEmit(ClientSignal.SignedOut)
+    }
+
+    private suspend fun afterLogin() {
+        startAttempts = 0
+        loadBootstrapInternal()
+        val me = s.data!!.me.id
+        val saved = storage.get("u:$me:outbox")?.let { runCatching { TcJson.decodeFromString(ListSerializer(PendingMessage.serializer()), it) }.getOrNull() } ?: emptyList()
+        setState { copy(status = SessionStatus.READY, pending = saved.map { if (it.status == "sending") it.copy(status = "pending") else it }) }
+        socket.start()
+        scheduleFlush(0)
+    }
+
+    // ---------- Snapshot ----------
+    suspend fun loadBootstrap(): BootstrapDTO = withContext(dispatcher) { loadBootstrapInternal() }
+
+    private suspend fun loadBootstrapInternal(): BootstrapDTO {
+        val data = request("GET", "/bootstrap", null, BootstrapDTO.serializer())
+        runCatching { Instant.parse(data.serverTime).toEpochMilli() }.getOrNull()?.let { serverOffset = it - now() }
+        val sorted = data.copy(conversations = data.conversations.sortedByDescending { it.lastMessageAt ?: "" })
+        // Conversaciones que ya no están en mi alcance: se purgan de la caché local.
+        val allowed = sorted.conversations.map { it.id }.toSet()
+        setState { copy(data = sorted, conversations = conversations.filterKeys { it in allowed }) }
+        return sorted
+    }
+
+    private fun scheduleBootstrap() {
+        if (bootstrapJob?.isActive == true) return
+        bootstrapJob = scope.launch { delay(250); runCatching { loadBootstrapInternal() } }
+    }
+
+    // ---------- Tiempo real ----------
+    private fun onSocketEvent(name: String, args: List<JsonElement>) {
+        val payload = args.firstOrNull() ?: return
+        when (name) {
+            "ready" -> { liveSince = now() + serverOffset; scope.launch { resyncInternal() } }
+            "conv.event" -> decodeConversationEvent(payload)?.let { onConversationEvent(it) }
+            "account.event" -> onAccountEvent(decodeAccountEvent(payload))
+            "typing" -> {
+                val o = payload as? JsonObject ?: return
+                val conv = (o["conversationId"] as? JsonPrimitive)?.contentOrNull ?: return
+                val user = (o["userId"] as? JsonPrimitive)?.contentOrNull ?: return
+                if (user == myId) return
+                val t = now()
+                setState {
+                    val list = (typing[conv] ?: emptyList()).filter { it.until > t && it.userId != user } + TypingEntry(user, t + 4000)
+                    copy(typing = typing + (conv to list))
+                }
+                scope.launch {
+                    delay(4100)
+                    val t2 = now()
+                    setState { copy(typing = typing.mapValues { (_, l) -> l.filter { it.until > t2 } }.filterValues { it.isNotEmpty() }) }
+                }
+            }
+        }
+    }
+
+    /** Tras reconectar o volver a primer plano: snapshot + recuperación de huecos + cola. */
+    suspend fun resync() = withContext(dispatcher) { resyncInternal() }
+
+    private suspend fun resyncInternal() {
+        if (s.status != SessionStatus.READY) return
+        try {
+            loadBootstrapInternal()
+            for (c in s.data?.conversations ?: emptyList()) {
+                val local = s.conversations[c.id]
+                if (local?.loaded == true && c.lastEventSeq > local.lastEventSeq) scope.launch { catchUp(c.id) }
+            }
+        } catch (_: Exception) {}
+        scheduleFlush(0)
+    }
+
+    /** Volver a primer plano o recuperar la red. */
+    fun wake(forceReconnect: Boolean = false) {
+        scope.launch {
+            when (s.status) {
+                SessionStatus.READY -> {
+                    if (s.connection == ConnectionStatus.ONLINE && !forceReconnect) resyncInternal()
+                    else socket.reconnectNow(force = forceReconnect)
+                    scheduleFlush(0)
+                }
+                SessionStatus.UNREACHABLE -> start()
+                else -> Unit
+            }
+        }
+    }
+
+    private fun onAccountEvent(e: AccountEvent) {
+        when (e) {
+            is AccountEvent.ScopeChanged -> scheduleBootstrap()
+            is AccountEvent.ReadUpdated -> {
+                val c = meta(e.conversationId) ?: return
+                if (e.seq > c.lastReadSeq) patchMeta(c.id) {
+                    copy(lastReadSeq = e.seq, unread = maxOf(0L, lastMessageSeq - maxOf(e.seq, historyFromSeq)).toInt())
+                }
+            }
+            is AccountEvent.Unknown -> Unit
+        }
+    }
+
+    private fun onConversationEvent(e: ConversationEvent) {
+        val meta = meta(e.conversationId)
+        if (meta == null) { scheduleBootstrap(); return }
+        if (e is ConversationEvent.MessageCreated) {
+            val fresh = bumpMeta(e.message)
+            // Solo suena lo creado con la conexión ya en vivo: si el despacho del servidor llega tarde
+            // con mensajes escritos mientras estábamos desconectados, eso cuenta como recuperación.
+            val createdAt = runCatching { Instant.parse(e.message.createdAt).toEpochMilli() }.getOrDefault(Long.MAX_VALUE)
+            if (fresh && e.message.authorId != myId && e.message.kind != "system" && createdAt >= liveSince) _signals.tryEmit(ClientSignal.Incoming(e.message))
+        }
+        val local = s.conversations[e.conversationId]
+        if (local?.loaded != true) {
+            patchMeta(e.conversationId) { copy(lastEventSeq = maxOf(lastEventSeq, e.eventSeq)) }
+            return
+        }
+        if (e.eventSeq <= local.lastEventSeq) return // duplicado de transporte
+        if (e.eventSeq > local.lastEventSeq + 1) { scope.launch { catchUp(e.conversationId) }; return } // hueco
+        applyEvent(e)
+    }
+
+    /** Actualiza la vista previa y los no leídos. Devuelve true si el mensaje es nuevo. */
+    private fun bumpMeta(m: MessageDTO): Boolean {
+        val c = meta(m.conversationId) ?: return false
+        if (m.seq <= c.lastMessageSeq) return false
+        val mine = m.authorId == myId
+        val lastRead = if (mine) m.seq else c.lastReadSeq
+        patchMeta(c.id) {
+            copy(
+                lastMessageSeq = m.seq, lastMessageAt = m.createdAt, lastMessagePreview = m.body.take(140), lastReadSeq = lastRead,
+                unread = maxOf(0L, m.seq - maxOf(lastRead, historyFromSeq)).toInt(),
+            )
+        }
+        setState { copy(data = data?.copy(conversations = data.conversations.sortedByDescending { it.lastMessageAt ?: "" })) }
+        return true
+    }
+
+    private fun applyEvent(e: ConversationEvent) {
+        val local = s.conversations[e.conversationId] ?: return
+        var messages = local.messages
+        when (e) {
+            is ConversationEvent.MessageCreated -> messages = upsertMessage(messages, e.message)
+            is ConversationEvent.MessageUpdated -> messages = upsertMessage(messages, e.message)
+            is ConversationEvent.MembersChanged -> { patchMeta(e.conversationId) { copy(memberIds = e.memberIds) }; scheduleBootstrap() }
+            is ConversationEvent.CursorOnly -> Unit
+        }
+        setConv(e.conversationId) { copy(messages = messages, lastEventSeq = maxOf(lastEventSeq, e.eventSeq)) }
+        if (e is ConversationEvent.MessageCreated) dropPending(e.message)
+    }
+
+    private suspend fun catchUp(conversationId: String) {
+        if (!catchingUp.add(conversationId)) return
+        try {
+            while (true) {
+                val local = s.conversations[conversationId] ?: return
+                val page = request("GET", "/conversations/$conversationId/events?after=${local.lastEventSeq}&limit=200", null, EventsPageRaw.serializer())
+                if (page.resetRequired) { catchingUp.remove(conversationId); openInternal(conversationId, force = true); return }
+                val events = page.events.mapNotNull { decodeConversationEvent(it) }.sortedBy { it.eventSeq }
+                for (e in events) {
+                    val cur = s.conversations[conversationId] ?: return
+                    if (e.eventSeq > cur.lastEventSeq) applyEvent(e)
+                }
+                if (page.events.size < 200) return
+            }
+        } catch (_: Exception) {
+        } finally { catchingUp.remove(conversationId) }
+    }
+
+    // ---------- Conversaciones ----------
+    suspend fun openConversation(id: String, force: Boolean = false) = withContext(dispatcher) { openInternal(id, force) }
+
+    private suspend fun openInternal(id: String, force: Boolean) {
+        val local = s.conversations[id]
+        if (local?.loaded == true && !force) { scope.launch { catchUp(id) }; return }
+        if (local?.loading == true) return
+        setConv(id) { copy(loading = true) }
+        try {
+            val page = request("GET", "/conversations/$id/messages?limit=50", null, MessagesPage.serializer())
+            setConv(id) { copy(messages = page.messages.sortedBy { it.seq }, hasMore = page.hasMore, lastEventSeq = page.lastEventSeq, loaded = true, loading = false) }
+            // Eventos que llegaron mientras cargábamos.
+            scope.launch { catchUp(id) }
+        } catch (e: Exception) {
+            setConv(id) { copy(loading = false) }
+            throw e
+        }
+    }
+
+    suspend fun loadOlder(id: String) = withContext(dispatcher) {
+        val local = s.conversations[id] ?: return@withContext
+        if (!local.loaded || !local.hasMore || local.loading) return@withContext
+        val before = local.messages.firstOrNull()?.seq ?: return@withContext
+        setConv(id) { copy(loading = true) }
+        try {
+            val page = request("GET", "/conversations/$id/messages?before=$before&limit=50", null, MessagesPage.serializer())
+            setConv(id) {
+                val known = messages.map { it.id }.toSet()
+                copy(messages = (page.messages.filter { it.id !in known } + messages).sortedBy { it.seq }, hasMore = page.hasMore, loading = false)
+            }
+        } catch (_: Exception) { setConv(id) { copy(loading = false) } }
+    }
+
+    /** Marca leído hasta el último mensaje (con debounce). */
+    fun markRead(id: String) {
+        scope.launch {
+            val c = meta(id) ?: return@launch
+            if (c.lastMessageSeq <= c.lastReadSeq && c.unread == 0) return@launch
+            patchMeta(id) { copy(lastReadSeq = lastMessageSeq, unread = 0) }
+            readJobs[id]?.cancel()
+            readJobs[id] = scope.launch {
+                delay(400)
+                val seq = meta(id)?.lastReadSeq ?: 0
+                runCatching { requestUnit("POST", "/conversations/$id/read", TcJson.encodeToString(ReadBody.serializer(), ReadBody(seq))) }
+            }
+        }
+    }
+
+    /** Aviso de escritura: como máximo uno cada 2 s. */
+    fun typing(conversationId: String) {
+        scope.launch {
+            val t = now()
+            if (t - lastTypingSent < 2000) return@launch
+            lastTypingSent = t
+            socket.emit("typing", buildJsonObject { put("conversationId", JsonPrimitive(conversationId)) })
+        }
+    }
+
+    // ---------- Envío con cola persistente ----------
+    fun send(conversationId: String, body: String, replyTo: String? = null): String? {
+        val text = body.trim()
+        if (text.isEmpty()) return null
+        val p = PendingMessage(
+            clientMessageId = UUID.randomUUID().toString(), conversationId = conversationId, body = text,
+            replyTo = replyTo, createdAt = Instant.ofEpochMilli(now()).toString(),
+        )
+        // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
+        scope.launch {
+            savePending(s.pending + p)
+            scheduleFlush(0)
+        }
+        return p.clientMessageId
+    }
+
+    fun retry(clientMessageId: String) {
+        scope.launch {
+            savePending(s.pending.map { if (it.clientMessageId == clientMessageId) it.copy(status = "pending", nextAttemptAt = 0, error = null) else it })
+            scheduleFlush(0)
+        }
+    }
+
+    fun discard(clientMessageId: String) {
+        scope.launch { savePending(s.pending.filter { it.clientMessageId != clientMessageId }) }
+    }
+
+    private fun savePending(list: List<PendingMessage>) {
+        setState { copy(pending = list) }
+        val me = myId ?: return
+        storage.set("u:$me:outbox", TcJson.encodeToString(ListSerializer(PendingMessage.serializer()), list))
+    }
+
+    private fun dropPending(m: MessageDTO) {
+        if (m.authorId != myId || m.clientMessageId == null) return
+        if (s.pending.any { it.clientMessageId == m.clientMessageId }) savePending(s.pending.filter { it.clientMessageId != m.clientMessageId })
+    }
+
+    private fun scheduleFlush(ms: Long) {
+        flushJob?.cancel()
+        flushJob = scope.launch { delay(ms); flush() }
+    }
+
+    private suspend fun flush() {
+        if (flushing || s.status != SessionStatus.READY) return
+        flushing = true
+        try {
+            // En orden: dentro de una conversación, los mensajes salen uno tras otro.
+            for (p in s.pending.toList()) {
+                if (p.status == "failed" || p.nextAttemptAt > now()) continue
+                if (s.pending.none { it.clientMessageId == p.clientMessageId }) continue
+                updatePending(p.clientMessageId) { copy(status = "sending") }
+                try {
+                    val message = deliver(p)
+                    if (s.conversations[p.conversationId]?.loaded == true) setConv(p.conversationId) { copy(messages = upsertMessage(messages, message)) }
+                    bumpMeta(message)
+                    savePending(s.pending.filter { it.clientMessageId != p.clientMessageId })
+                    _signals.tryEmit(ClientSignal.Sent(message))
+                } catch (e: Exception) {
+                    if (s.status != SessionStatus.READY) return
+                    val permanent = e is ApiException && e.permanent
+                    val attempts = p.attempts + 1
+                    val backoff = (minOf(30_000.0, 500.0 * (1 shl minOf(attempts, 6))) * (0.5 + Random.nextDouble())).toLong()
+                    updatePending(p.clientMessageId) {
+                        if (permanent) copy(status = "failed", attempts = attempts, error = e.message)
+                        else copy(status = "pending", attempts = attempts, nextAttemptAt = now() + backoff)
+                    }
+                    if (!permanent) { flushing = false; savePending(s.pending); scheduleFlush(backoff); return }
+                }
+            }
+        } finally {
+            flushing = false
+            if (s.status == SessionStatus.READY) savePending(s.pending)
+        }
+    }
+
+    private fun updatePending(id: String, f: PendingMessage.() -> PendingMessage) =
+        setState { copy(pending = pending.map { if (it.clientMessageId == id) it.f() else it }) }
+
+    /** Socket con ACK si está conectado; HTTP como respaldo. Mismo clientMessageId = idempotente. */
+    private suspend fun deliver(p: PendingMessage): MessageDTO {
+        if (socket.connected) {
+            try {
+                val payload = TcJson.encodeToJsonElement(SocketSendBody.serializer(), SocketSendBody(p.conversationId, p.clientMessageId, p.body, p.replyTo))
+                val r = socket.emitWithAck("message.send", payload, 8000).firstOrNull() as? JsonObject
+                if ((r?.get("ok") as? JsonPrimitive)?.booleanOrNull == true) {
+                    val m = r["message"]?.let { runCatching { TcJson.decodeFromJsonElement(MessageDTO.serializer(), it) }.getOrNull() }
+                    if (m != null && m.id.isNotEmpty()) { sentViaSocket++; return m }
+                } else if (r != null) {
+                    val err = r["error"] as? JsonObject
+                    val code = (err?.get("code") as? JsonPrimitive)?.contentOrNull ?: "error"
+                    val status = when (code) { "forbidden" -> 403; "not_found" -> 404; "conflict" -> 409; "bad_request" -> 400; else -> 503 }
+                    throw ApiException(status, code, (err?.get("message") as? JsonPrimitive)?.contentOrNull ?: "No se pudo enviar")
+                }
+            } catch (e: ApiException) {
+                throw e
+            } catch (_: TimeoutCancellationException) {
+                // Timeout del ACK: se reintenta por HTTP con el mismo identificador.
+            } catch (_: SocketNotConnected) {
+            }
+        }
+        val r = request(
+            "POST", "/conversations/${p.conversationId}/messages",
+            TcJson.encodeToString(SendBody.serializer(), SendBody(p.clientMessageId, p.body, p.replyTo)), SendResult.serializer(),
+        )
+        sentViaHttp++
+        return r.message ?: throw ApiException(500, "internal", "Respuesta sin mensaje")
+    }
+
+    // ---------- Invitaciones ----------
+    suspend fun previewInvitation(token: String): InvitationPreviewDTO = withContext(dispatcher) {
+        val r = http.exec("GET", "/invitations/${enc(token)}")
+        if (!r.ok) throw HttpApi.parseError(r)
+        TcJson.decodeFromString(InvitationPreviewDTO.serializer(), r.body)
+    }
+
+    suspend fun acceptInvitation(token: String): AcceptInvitationResult = withContext(dispatcher) {
+        val r = request("POST", "/invitations/${enc(token)}/accept", "{}", AcceptInvitationResult.serializer())
+        loadBootstrapInternal()
+        r
+    }
+
+    suspend fun previewOrgInvitation(token: String): OrgInvitationPreviewDTO = withContext(dispatcher) {
+        val r = http.exec("GET", "/org-invitations/${enc(token)}")
+        if (!r.ok) throw HttpApi.parseError(r)
+        TcJson.decodeFromString(OrgInvitationPreviewDTO.serializer(), r.body)
+    }
+
+    private fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20")
+
+    // ---------- Pruebas / ciclo de vida ----------
+    /** Corta el socket sin cerrar la sesión (pruebas de recuperación). */
+    fun debugDisconnect() { scope.launch { socket.stop() } }
+    fun debugReconnect() { scope.launch { socket.start() } }
+
+    fun close() {
+        socket.stop()
+        scope.cancel()
+    }
+}
+
+private const val SSO_KEY = "sso:attempt"
+
+internal fun upsertMessage(list: List<MessageDTO>, m: MessageDTO): List<MessageDTO> {
+    val i = list.indexOfFirst { it.id == m.id }
+    if (i >= 0) return list.toMutableList().also { it[i] = m }
+    if (list.isEmpty() || list.last().seq < m.seq) return list + m
+    return (list + m).sortedBy { it.seq }
+}

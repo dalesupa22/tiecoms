@@ -186,7 +186,7 @@ El release lleva R8 y reducción de recursos. Las reglas de serialización está
    - **Anuncios:** no.
    - **IARC:** los usuarios interactúan entre sí y comparten contenido.
    - **Público:** mayores de 18.
-   - **Seguridad de los datos:** nombre, correo, identificadores de usuario y dispositivo, mensajes y, de forma opcional, cargo/área, foto de perfil, archivos, reuniones, reportes, chats y contactos de WhatsApp de una cuenta conectada (sin permiso para acceder a la agenda del teléfono). Los datos viajan cifrados en tránsito. Declara los fines y la retención según la política publicada; el contenido compartido se muestra a los participantes autorizados.
+   - **Seguridad de los datos:** nombre, correo, identificadores de usuario y dispositivo, mensajes, actividad en la app (inicio de sesión, última actividad de sesión y confirmaciones de lectura) y, de forma opcional, cargo/área, foto de perfil, archivos, reuniones, reportes, chats y contactos de WhatsApp de una cuenta conectada (sin permiso para acceder a la agenda del teléfono). La actividad de uso está vinculada al usuario y se utiliza para el funcionamiento de la app. Los datos viajan cifrados en tránsito. Declara los fines y la retención según la política publicada; el contenido compartido se muestra a los participantes autorizados.
    - **Cuenta demo para la revisión:** crea una cuenta en producción, por ejemplo `revision.play@tiecoms.com`, con una empresa y un espacio de ejemplo con otra cuenta demo de otra empresa. Pon las credenciales en «Acceso a la app». No uses las cuentas de prueba de 3041, que no existen en producción.
 6. **Permisos y por qué:**
 

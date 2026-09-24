@@ -5,7 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import { ZodError } from 'zod';
 import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput,
-  CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateWorkspaceInput, DeriveInput, IssueCommentInput, ReturnResultInput, UpdateIssueInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
+  CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, type AuthResult,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
@@ -16,6 +16,11 @@ import { bootstrap } from './modules/bootstrap.ts';
 import { listEvents, listMessages, markRead, sendMessage } from './modules/messages.ts';
 import * as ws from './modules/workspaces.ts';
 import * as issues from './modules/issues.ts';
+import * as cal from './modules/calendar.ts';
+import * as prefs from './modules/prefs.ts';
+import * as reminders from './modules/reminders.ts';
+import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
+import { z } from 'zod';
 import { verifyAccess } from './security.ts';
 
 const REFRESH_COOKIE = 'tc_rt';
@@ -143,6 +148,31 @@ export async function buildHttp() {
     });
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/read', async (req) => markRead(req.userId, req.params.id, MarkReadInput.parse(req.body).seq));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/members', async (req) => ws.addMembers(req.userId, req.params.id, AddMembersInput.parse(req.body)));
+    // Preferencias personales, no leído, mensajes
+    priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/prefs', async (req) => prefs.setConversationPrefs(req.userId, req.params.id, ConversationPrefsInput.parse(req.body)));
+    priv.put<{ Params: { id: string } }>('/api/v1/workspaces/:id/prefs', async (req) => prefs.setWorkspacePrefs(req.userId, req.params.id, WorkspacePrefsInput.parse(req.body).pinned));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/unread', async (req) => markUnread(req.userId, req.params.id, MarkUnreadInput.parse(req.body).seq));
+    priv.patch<{ Params: { id: string } }>('/api/v1/messages/:id', async (req) => editMessage(req.userId, req.params.id, EditMessageInput.parse(req.body).body));
+    priv.delete<{ Params: { id: string } }>('/api/v1/messages/:id', async (req) => deleteMessage(req.userId, req.params.id));
+    priv.post<{ Params: { id: string } }>('/api/v1/messages/:id/pin', async (req) => setPin(req.userId, req.params.id, true));
+    priv.delete<{ Params: { id: string } }>('/api/v1/messages/:id/pin', async (req) => setPin(req.userId, req.params.id, false));
+    priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/pins', async (req) => ({ messages: await listPins(req.userId, req.params.id) }));
+    // Recordatorios
+    priv.get('/api/v1/reminders', async (req) => ({ reminders: await reminders.listReminders(req.userId) }));
+    priv.post('/api/v1/reminders', async (req) => reminders.createReminder(req.userId, CreateReminderInput.parse(req.body)));
+    priv.post<{ Params: { id: string } }>('/api/v1/reminders/:id/done', async (req) => reminders.completeReminder(req.userId, req.params.id));
+    priv.post<{ Params: { id: string } }>('/api/v1/reminders/:id/snooze', async (req) => reminders.completeReminder(req.userId, req.params.id, z.object({ until: z.iso.datetime() }).parse(req.body).until));
+    // Calendario
+    priv.get<{ Querystring: { from?: string; to?: string; conversationId?: string } }>('/api/v1/events', async (req) => {
+      const q = z.object({ from: z.iso.datetime(), to: z.iso.datetime(), conversationId: z.uuid().optional() }).parse(req.query);
+      return { events: await cal.listEvents(req.userId, q.from, q.to, q.conversationId) };
+    });
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/events', async (req) => cal.createEvent(req.userId, req.params.id, CreateEventInput.parse(req.body)));
+    priv.get<{ Params: { id: string } }>('/api/v1/events/:id', async (req) => cal.getEvent(req.userId, req.params.id));
+    priv.patch<{ Params: { id: string } }>('/api/v1/events/:id', async (req) => cal.updateEvent(req.userId, req.params.id, UpdateEventInput.parse(req.body)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/events/:id', async (req) => cal.cancelEvent(req.userId, req.params.id));
+    priv.post<{ Params: { id: string } }>('/api/v1/events/:id/rsvp', async (req) => cal.rsvp(req.userId, req.params.id, RsvpInput.parse(req.body).rsvp));
+
     // Bifurcaciones
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/derive', async (req) => ws.deriveConversation(req.userId, req.params.id, DeriveInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/return', async (req) => ws.returnResult(req.userId, req.params.id, ReturnResultInput.parse(req.body).summary));

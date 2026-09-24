@@ -1,7 +1,7 @@
-import type { ConversationEvent, EventsPage, MessageDTO, SendMessageInput } from '@tiecoms/contracts';
+import type { ConversationEvent, EventsPage, ForwardedInfo, MessageDTO, SendMessageInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { enqueueOutbox, pool, tx, type Tx } from '../db.ts';
-import { badRequest, conflict } from '../errors.ts';
+import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { sha256 } from '../security.ts';
 
 /** Eventos más antiguos que esto obligan al cliente a pedir un snapshot nuevo. */
@@ -19,6 +19,7 @@ export function toMessageDTO(r: any): MessageDTO {
     body: deleted ? '' : r.body,
     replyTo: r.reply_to,
     mergedFrom: r.merged_from_conversation_id ?? null,
+    forwarded: r.forwarded ?? null,
     createdAt: new Date(r.created_at).toISOString(),
     editedAt: r.edited_at ? new Date(r.edited_at).toISOString() : null,
     deletedAt: deleted ? new Date(r.deleted_at).toISOString() : null,
@@ -47,10 +48,11 @@ export async function appendEvent(c: Tx, conversationId: string, event: Omit<Con
  */
 export async function appendMessage(c: Tx, p: {
   conversationId: string; authorId: string; body: string; kind?: 'text' | 'system';
-  clientMessageId?: string | null; replyTo?: string | null; mergedFrom?: string | null;
+  clientMessageId?: string | null; replyTo?: string | null; mergedFrom?: string | null; forwarded?: ForwardedInfo | null;
 }): Promise<MessageDTO> {
-  const { rows } = await c.query('SELECT tiecoms_append_message($1, $2, $3, $4, $5, $6, $7) AS m', [
+  const { rows } = await c.query('SELECT tiecoms_append_message($1, $2, $3, $4, $5, $6, $7, $8) AS m', [
     p.conversationId, p.authorId, p.clientMessageId ?? null, p.kind ?? 'text', p.body, p.replyTo ?? null, p.mergedFrom ?? null,
+    p.forwarded ? JSON.stringify(p.forwarded) : null,
   ]);
   return rows[0].m as MessageDTO;
 }
@@ -86,7 +88,13 @@ export async function sendMessage(userId: string, conversationId: string, input:
         const { rowCount } = await c.query('SELECT 1 FROM messages WHERE id = $1 AND conversation_id = $2', [input.replyTo, conversationId]);
         if (!rowCount) throw badRequest('El mensaje citado no está en esta conversación');
       }
-      return appendMessage(c, { conversationId, authorId: userId, body: input.body, clientMessageId: input.clientMessageId, replyTo: input.replyTo ?? null });
+      let forwarded: ForwardedInfo | null = null;
+      if (input.forwarded) {
+        // Reenviar desde otra conversación exige poder leerla: no se puede atribuir contenido ajeno.
+        if (input.forwarded.fromConversationId) await conversationAccess(c, userId, input.forwarded.fromConversationId, 'read');
+        forwarded = { source: input.forwarded.source, author: input.forwarded.author ?? null, sentAt: input.forwarded.sentAt ?? null, fromConversationId: input.forwarded.fromConversationId ?? null };
+      }
+      return appendMessage(c, { conversationId, authorId: userId, body: input.body, clientMessageId: input.clientMessageId, replyTo: input.replyTo ?? null, forwarded });
     });
     return { message, duplicate: false };
   } catch (err: any) {
@@ -115,7 +123,7 @@ export async function listEvents(userId: string, conversationId: string, after: 
   const a = await conversationAccess(pool, userId, conversationId, 'read');
   if (a.lastEventSeq - after > MAX_CATCHUP_EVENTS) return { events: [], resetRequired: true, lastEventSeq: a.lastEventSeq };
   const { rows } = await pool.query(
-    `SELECT e.payload, m.seq AS message_seq FROM conversation_events e
+    `SELECT e.payload, m.seq AS message_seq, m.deleted_at AS message_deleted_at FROM conversation_events e
        LEFT JOIN messages m ON m.id = e.message_id
       WHERE e.conversation_id = $1 AND e.event_seq > $2 ORDER BY e.event_seq LIMIT $3`,
     [conversationId, after, limit],
@@ -124,6 +132,10 @@ export async function listEvents(userId: string, conversationId: string, after: 
   const events = rows.map((r) => {
     if (r.message_seq !== null && r.message_seq <= a.historyFromSeq) {
       return { type: 'redacted', conversationId, eventSeq: r.payload.eventSeq } as ConversationEvent;
+    }
+    // Un mensaje eliminado después no reenvía su contenido anterior al ponerse al día.
+    if (r.message_deleted_at && r.payload.message) {
+      return { ...r.payload, message: { ...r.payload.message, body: '', deletedAt: new Date(r.message_deleted_at).toISOString() } } as ConversationEvent;
     }
     return r.payload as ConversationEvent;
   });
@@ -145,4 +157,83 @@ export async function markRead(userId: string, conversationId: string, seq: numb
     await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'read.updated', conversationId, seq: lastRead } });
     return { lastReadSeq: lastRead };
   });
+}
+
+// ---------- Editar, eliminar, no leído, fijar ----------
+async function ownMessage(c: Tx, userId: string, messageId: string) {
+  const { rows } = await c.query('SELECT * FROM messages WHERE id = $1', [messageId]);
+  const m = rows[0];
+  if (!m) throw notFound('Mensaje');
+  await conversationAccess(c, userId, m.conversation_id, 'post', true);
+  if (m.author_id !== userId || m.kind !== 'text') throw forbidden('Solo puedes cambiar tus propios mensajes');
+  if (m.deleted_at) throw conflict('El mensaje ya fue eliminado');
+  return m;
+}
+
+export async function editMessage(userId: string, messageId: string, body: string) {
+  return tx(async (c) => {
+    const m = await ownMessage(c, userId, messageId);
+    const { rows } = await c.query('UPDATE messages SET body = $2, body_sha256 = $3, edited_at = now() WHERE id = $1 RETURNING *', [messageId, body, sha256(body)]);
+    const message = toMessageDTO(rows[0]);
+    await appendEvent(c, m.conversation_id, { type: 'message.updated', conversationId: m.conversation_id, message }, messageId);
+    return message;
+  });
+}
+
+export async function deleteMessage(userId: string, messageId: string) {
+  return tx(async (c) => {
+    const m = await ownMessage(c, userId, messageId);
+    // Borrado lógico: se conserva el orden y queda la marca; el contenido deja de servirse.
+    const { rows } = await c.query("UPDATE messages SET body = '', deleted_at = now() WHERE id = $1 RETURNING *", [messageId]);
+    await c.query('DELETE FROM message_pins WHERE message_id = $1', [messageId]);
+    const message = toMessageDTO(rows[0]);
+    await appendEvent(c, m.conversation_id, { type: 'message.updated', conversationId: m.conversation_id, message }, messageId);
+    return message;
+  });
+}
+
+/** Marca como no leído desde un mensaje: el cursor queda justo antes de él. */
+export async function markUnread(userId: string, conversationId: string, seq: number) {
+  return tx(async (c) => {
+    const a = await conversationAccess(c, userId, conversationId, 'read');
+    const target = Math.max(a.historyFromSeq, Math.min(seq, a.lastMessageSeq) - 1);
+    await c.query(
+      `INSERT INTO read_cursors (conversation_id, user_id, last_read_seq) VALUES ($1,$2,$3)
+       ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_seq = EXCLUDED.last_read_seq, updated_at = now()`,
+      [conversationId, userId, target],
+    );
+    await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'read.updated', conversationId, seq: target } });
+    return { lastReadSeq: target };
+  });
+}
+
+async function pinIds(c: Tx | typeof pool, conversationId: string) {
+  const { rows } = await c.query('SELECT message_id FROM message_pins WHERE conversation_id = $1 ORDER BY pinned_at DESC', [conversationId]);
+  return rows.map((r) => r.message_id as string);
+}
+
+export async function setPin(userId: string, messageId: string, pinned: boolean) {
+  return tx(async (c) => {
+    const { rows } = await c.query('SELECT conversation_id, seq, kind, deleted_at FROM messages WHERE id = $1', [messageId]);
+    const m = rows[0];
+    if (!m) throw notFound('Mensaje');
+    const a = await conversationAccess(c, userId, m.conversation_id, 'post', true);
+    if (m.seq <= a.historyFromSeq || m.kind !== 'text' || m.deleted_at) throw badRequest('Ese mensaje no se puede fijar');
+    if (pinned) await c.query('INSERT INTO message_pins (conversation_id, message_id, pinned_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [m.conversation_id, messageId, userId]);
+    else await c.query('DELETE FROM message_pins WHERE conversation_id = $1 AND message_id = $2', [m.conversation_id, messageId]);
+    const messageIds = await pinIds(c, m.conversation_id);
+    await appendEvent(c, m.conversation_id, { type: 'pins.changed', conversationId: m.conversation_id, messageIds });
+    return { messageIds };
+  });
+}
+
+/** Mensajes fijados visibles para la persona (respeta su historial). */
+export async function listPins(userId: string, conversationId: string) {
+  const a = await conversationAccess(pool, userId, conversationId, 'read');
+  const { rows } = await pool.query(
+    `SELECT m.* FROM message_pins p JOIN messages m ON m.id = p.message_id
+      WHERE p.conversation_id = $1 AND m.seq > $2 AND m.deleted_at IS NULL ORDER BY p.pinned_at DESC`,
+    [conversationId, a.historyFromSeq],
+  );
+  return rows.map(toMessageDTO);
 }

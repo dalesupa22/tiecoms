@@ -5,6 +5,7 @@
  */
 import { hostname } from 'node:os';
 import { enqueueOutbox, pool, tx } from './db.ts';
+import { fireDueReminders } from './modules/reminders.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
 const LEASE_SECONDS = 120;
@@ -86,8 +87,11 @@ async function runOne(): Promise<boolean> {
 let stop = false;
 async function loop() {
   let lastSchedule = 0;
+  let lastReminders = 0;
   while (!stop) {
     try {
+      // Recordatorios: revisión cada 15 s; el aviso llega por el outbox a los dispositivos de la persona.
+      if (Date.now() - lastReminders > 15_000) { lastReminders = Date.now(); const n = await fireDueReminders(); if (n) console.log(`[worker] recordatorios disparados: ${n}`); }
       if (Date.now() - lastSchedule > 30_000) { await schedule(); lastSchedule = Date.now(); }
       const worked = await runOne();
       if (!worked) await new Promise((r) => setTimeout(r, 1000));

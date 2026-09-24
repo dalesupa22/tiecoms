@@ -104,6 +104,7 @@ export interface WorkspaceDTO {
   memberIds: string[];
   myRole: WorkspaceRole;
   createdAt: string;
+  pinnedAt: string | null;
 }
 
 export interface ConversationDTO {
@@ -132,6 +133,41 @@ export interface ConversationDTO {
   deriveReason: string | null;
   returnedAt: string | null;
   openIssues: number;
+  /** Preferencias personales. */
+  pinnedAt: string | null;
+  mutedUntil: string | null;
+}
+
+export type ForwardSource = 'whatsapp' | 'slack' | 'email' | 'teams' | 'tiecoms' | 'other';
+export interface ForwardedInfo { source: ForwardSource; author?: string | null; sentAt?: string | null; fromConversationId?: string | null }
+
+export interface ReminderDTO {
+  id: string;
+  conversationId: string;
+  messageId: string | null;
+  messageSeq: number | null;
+  note: string | null;
+  remindAt: string;
+  firedAt: string | null;
+  doneAt: string | null;
+}
+
+export type Rsvp = 'pending' | 'yes' | 'no' | 'maybe';
+export interface CalendarEventDTO {
+  id: string;
+  workspaceId: string;
+  conversationId: string;
+  originMessageId: string | null;
+  title: string;
+  description: string | null;
+  location: string | null;
+  startsAt: string;
+  endsAt: string;
+  timezone: string;
+  organizerId: string;
+  invitees: { userId: string; rsvp: Rsvp }[];
+  cancelledAt: string | null;
+  updatedAt: string;
 }
 
 export type DeriveKind = 'same' | 'internal' | 'directive';
@@ -178,6 +214,8 @@ export interface MessageDTO {
   replyTo: string | null;
   /** Si este mensaje trae de vuelta el resultado de una conversación derivada. */
   mergedFrom: string | null;
+  /** Mensaje traído desde WhatsApp, Slack, correo u otra conversación. */
+  forwarded: ForwardedInfo | null;
   createdAt: string;
   editedAt: string | null;
   deletedAt: string | null;
@@ -277,11 +315,36 @@ export interface InvitationPreviewDTO {
 }
 
 // ---------- Mensajes ----------
+export const ForwardedInput = z.object({
+  source: z.enum(['whatsapp', 'slack', 'email', 'teams', 'tiecoms', 'other']),
+  author: z.string().trim().max(120).nullable().optional(),
+  sentAt: z.string().max(40).nullable().optional(),
+  fromConversationId: z.uuid().nullable().optional(),
+});
 export const SendMessageInput = z.object({
   clientMessageId: z.string().min(8).max(64),
   body: z.string().trim().min(1).max(8000),
   replyTo: z.uuid().nullable().optional(),
+  forwarded: ForwardedInput.nullable().optional(),
 });
+export const EditMessageInput = z.object({ body: z.string().trim().min(1).max(8000) });
+export const ConversationPrefsInput = z.object({ pinned: z.boolean().optional(), mutedUntil: z.iso.datetime().nullable().optional() });
+export const WorkspacePrefsInput = z.object({ pinned: z.boolean() });
+export const MarkUnreadInput = z.object({ seq: z.number().int().min(1) });
+export const CreateReminderInput = z.object({
+  conversationId: z.uuid(), messageId: z.uuid().nullable().optional(), note: z.string().trim().max(300).nullable().optional(), remindAt: z.iso.datetime(),
+});
+export const CreateEventInput = z.object({
+  title: z.string().trim().min(2).max(200),
+  description: z.string().trim().max(4000).nullable().optional(),
+  location: z.string().trim().max(500).nullable().optional(),
+  startsAt: z.iso.datetime(), endsAt: z.iso.datetime(),
+  timezone: z.string().min(1).max(64),
+  inviteeIds: z.array(z.uuid()).max(200).optional(),
+  originMessageId: z.uuid().nullable().optional(),
+});
+export const UpdateEventInput = CreateEventInput.partial();
+export const RsvpInput = z.object({ rsvp: z.enum(['yes', 'no', 'maybe']) });
 export type SendMessageInput = z.infer<typeof SendMessageInput>;
 
 export const MarkReadInput = z.object({ seq: z.number().int().min(0) });
@@ -303,13 +366,17 @@ export type ConversationEvent =
   | { type: 'message.updated'; conversationId: string; eventSeq: number; message: MessageDTO }
   | { type: 'members.changed'; conversationId: string; eventSeq: number; memberIds: string[] }
   | { type: 'issue.updated'; conversationId: string; eventSeq: number; issue: IssueDTO }
+  | { type: 'pins.changed'; conversationId: string; eventSeq: number; messageIds: string[] }
+  | { type: 'calendar.updated'; conversationId: string; eventSeq: number; event: CalendarEventDTO }
   /** Evento fuera de tu historial visible: solo avanza el cursor. */
   | { type: 'redacted'; conversationId: string; eventSeq: number };
 
 /** Aviso a una cuenta: algo cambió en su alcance; el cliente vuelve a pedir /bootstrap. */
 export type AccountEvent =
   | { type: 'scope.changed'; reason: string }
-  | { type: 'read.updated'; conversationId: string; seq: number };
+  | { type: 'read.updated'; conversationId: string; seq: number }
+  | { type: 'reminder.due'; reminder: ReminderDTO }
+  | { type: 'prefs.updated'; conversationId?: string; workspaceId?: string };
 
 export interface EventsPage {
   events: ConversationEvent[];

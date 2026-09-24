@@ -19,11 +19,11 @@ const person = (id: string, name: string, orgId: string | null, title: string, g
 const conv = (c: Partial<ConversationDTO> & { id: string }): ConversationDTO => ({
   workspaceId: 'ws1', kind: 'group', level: 'operativo', name: null, internalOrgId: null, memberIds: [], lastMessageSeq: 0, lastEventSeq: 0,
   lastMessageAt: iso(2 * H), lastMessagePreview: null, lastReadSeq: 0, unread: 0, canPost: true, canManage: true, historyFromSeq: 0,
-  parentId: null, parentMessageId: null, parentMessageSeq: null, deriveKind: null, deriveReason: null, returnedAt: null, openIssues: 0, ...c,
+  parentId: null, parentMessageId: null, parentMessageSeq: null, deriveKind: null, deriveReason: null, returnedAt: null, openIssues: 0, pinnedAt: null, mutedUntil: null, ...c,
 });
 let seq = 0;
 const msg = (cid: string, a: string, body: string, ago: number, extra: Partial<MessageDTO> = {}): MessageDTO => ({
-  id: `${cid}-m${++seq}`, conversationId: cid, seq, authorId: a, clientMessageId: null, kind: 'text', body, replyTo: null, mergedFrom: null,
+  id: `${cid}-m${++seq}`, conversationId: cid, seq, authorId: a, clientMessageId: null, kind: 'text', body, replyTo: null, mergedFrom: null, forwarded: null,
   createdAt: iso(ago), editedAt: null, deletedAt: null, ...extra,
 });
 
@@ -36,7 +36,8 @@ const g = [
   msg('general', 'danny', JSON.stringify({ k: 'derived.from', kind: 'internal', childId: 'diag' }), 2 * D - H, { kind: 'system' }),
   msg('general', 'danny', JSON.stringify({ k: 'issue.created', title: 'Plantilla final de certificados', issueId: 'i1' }), 2 * D - 2 * H, { kind: 'system' }),
   msg('general', 'danny', 'Era el job de las 10:00: reenviaba a quien no había firmado. Queda en una sola notificación diaria.', 5 * H, { mergedFrom: 'diag' }),
-  msg('general', 'mateo', 'Perfecto, gracias. Seguimos con la salida del viernes.', 2 * H),
+  msg('general', 'mateo', 'Perfecto, gracias. Seguimos con la salida del viernes.', 2 * H, { replyTo: 'general-m7' }),
+  msg('general', 'ana', 'Mañana llego a las 8 con el diseñador.', 90 * 60_000, { forwarded: { source: 'whatsapp', author: 'Pedro (Estudio Norte)', sentAt: '24/9/26 07:41' } }),
 ];
 seq = 0;
 const dg = [
@@ -50,9 +51,9 @@ const data: BootstrapDTO = {
   contract: 'dev', serverTime: new Date().toISOString(),
   me: { id: 'danny', name: 'Danny Suárez', kind: 'human', title: 'Líder técnico', area: null, primaryOrgId: 'xertify', email: 'danny@demo.tiecoms.com' },
   organizations: [org('xertify', 'Xertify', 'X', '#dcd0f2', '#3b2a5a', true), org('norte', 'Estudio Norte', 'EN', '#e8d5a8', '#4a3a14')],
-  workspaces: [{ id: 'ws1', name: 'Lanzamiento · Estudio Norte', department: 'Portal de certificados', glyph: null, owningOrgId: 'xertify', organizationIds: ['xertify', 'norte'], memberIds: ['danny', 'laura', 'mateo', 'ana'], myRole: 'lead', createdAt: iso(4 * D) }],
+  workspaces: [{ id: 'ws1', name: 'Lanzamiento · Estudio Norte', department: 'Portal de certificados', glyph: null, owningOrgId: 'xertify', organizationIds: ['xertify', 'norte'], memberIds: ['danny', 'laura', 'mateo', 'ana'], myRole: 'lead', createdAt: iso(4 * D), pinnedAt: null }],
   conversations: [
-    conv({ id: 'general', name: 'General', memberIds: ['danny', 'laura', 'mateo', 'ana'], lastMessageSeq: g.length, lastEventSeq: g.length, lastReadSeq: g.length - 1, unread: 1, lastMessagePreview: g[g.length - 1]!.body, openIssues: 2 }),
+    conv({ id: 'general', name: 'General', pinnedAt: iso(D), memberIds: ['danny', 'laura', 'mateo', 'ana'], lastMessageSeq: g.length, lastEventSeq: g.length, lastReadSeq: g.length - 1, unread: 1, lastMessagePreview: g[g.length - 1]!.body, openIssues: 2 }),
     conv({ id: 'diag', name: 'Diagnóstico · notificaciones duplicadas', kind: 'internal', level: null, internalOrgId: 'xertify', memberIds: ['danny', 'laura'], parentId: 'general', parentMessageId: 'general-m4', parentMessageSeq: 4, deriveKind: 'internal', deriveReason: 'Ana necesita saber si es el job o un reenvío', returnedAt: iso(5 * H), lastMessageSeq: dg.length, lastEventSeq: dg.length, lastReadSeq: dg.length }),
     conv({ id: 'dec', name: 'Decisión · fecha de salida', level: 'directivo', memberIds: ['danny', 'mateo'], parentId: 'general', parentMessageId: 'general-m2', parentMessageSeq: 2, deriveKind: 'directive', lastMessageSeq: 0 }),
     conv({ id: 'internal', name: 'Equipo interno', kind: 'internal', level: null, internalOrgId: 'xertify', memberIds: ['danny', 'laura'] }),
@@ -69,8 +70,17 @@ const issues: Record<string, IssueDTO> = {
   i3: issue({ id: 'i3', title: 'Confirmar fecha con dirección', status: 'done', ownerId: 'mateo', closedAt: iso(D) }),
 };
 
+const at = (h: number, m = 0, dayOffset = 0) => { const x = new Date(); x.setDate(x.getDate() + dayOffset); x.setHours(h, m, 0, 0); return x.toISOString(); };
+const events = {
+  e1: { id: 'e1', workspaceId: 'ws1', conversationId: 'general', originMessageId: null, title: 'Revisión semanal con Estudio Norte', description: 'Avance de la integración', location: 'https://meet.google.com/abc-defg-hij', startsAt: at(10), endsAt: at(11), timezone: 'America/Bogota', organizerId: 'danny', invitees: [{ userId: 'danny', rsvp: 'yes' as const }, { userId: 'mateo', rsvp: 'maybe' as const }, { userId: 'ana', rsvp: 'pending' as const }], cancelledAt: null, updatedAt: iso(H) },
+  e2: { id: 'e2', workspaceId: 'ws1', conversationId: 'dec', originMessageId: null, title: 'Decisión fecha de salida', description: null, location: 'Sala 3, Edificio SD', startsAt: at(15, 30, 1), endsAt: at(16, 30, 1), timezone: 'America/Bogota', organizerId: 'mateo', invitees: [{ userId: 'danny', rsvp: 'yes' as const }, { userId: 'mateo', rsvp: 'yes' as const }], cancelledAt: null, updatedAt: iso(H) },
+};
+const reminders = [
+  { id: 'r1', conversationId: 'general', messageId: 'general-m3', messageSeq: 3, note: 'Confirmar formato con Ana', remindAt: iso(10 * 60_000), firedAt: iso(9 * 60_000), doneAt: null },
+  { id: 'r2', conversationId: 'diag', messageId: null, messageSeq: null, note: null, remindAt: iso(-5 * H), firedAt: null, doneAt: null },
+];
 (client as any).set({
-  status: 'ready', connection: 'online', data, issues,
+  status: 'ready', connection: 'online', data, issues, events, reminders, pins: { general: ['general-m3'] },
   conversations: {
     general: { messages: g, lastEventSeq: g.length, hasMore: false, loaded: true, loading: false },
     diag: { messages: dg, lastEventSeq: dg.length, hasMore: false, loaded: true, loading: false },

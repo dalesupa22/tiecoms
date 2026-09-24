@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { useClient } from './app-client.ts';
+import { notices, useClient } from './app-client.ts';
+import { handleNotice } from './notices.ts';
 import { useLang } from './i18n.ts';
 import { asset, navigate, parse, usePath } from './router.ts';
 import { AuthScreen } from './screens/Auth.tsx';
@@ -9,11 +10,17 @@ import { InboxScreen, PeopleScreen, SettingsScreen, SpacesScreen, TodayScreen, W
 import { Shell } from './screens/Shell.tsx';
 import { IssuesScreen } from './screens/Issues.tsx';
 import { TrazoScreen } from './screens/Lineage.tsx';
+import { AgendaScreen } from './screens/Calendar.tsx';
+import { ShareScreen } from './screens/Bring.tsx';
+import { DialogHost } from './actions.tsx';
+import { MenuHost, ToastHost } from './menu.tsx';
 
 function nextParam() {
   const n = new URLSearchParams(location.search).get('next');
   return n && n.startsWith('/') && !n.startsWith('//') ? n : undefined;
 }
+
+notices.handler = handleNotice;
 
 export function App() {
   const path = usePath();
@@ -33,6 +40,7 @@ export function App() {
   if (route.name === 'login' || route.name === 'signup') return null;
 
   return (
+    <>
     <Shell key={lang} route={route}>
       {route.name === 'today' && <TodayScreen />}
       {route.name === 'inbox' && <InboxScreen />}
@@ -40,9 +48,15 @@ export function App() {
       {route.name === 'people' && <PeopleScreen />}
       {route.name === 'issues' && <IssuesScreen />}
       {route.name === 'trazo' && <TrazoScreen />}
+      {route.name === 'agenda' && <AgendaScreen />}
+      {route.name === 'share' && <ShareScreen />}
       {route.name === 'settings' && <SettingsScreen />}
       {route.name === 'workspace' && <WorkspaceScreen key={route.id} id={route.id} />}
       {route.name === 'conversation' && <ConversationScreen key={route.id + location.search} id={route.id} />}
     </Shell>
+    <MenuHost />
+    <DialogHost />
+    <ToastHost />
+    </>
   );
 }

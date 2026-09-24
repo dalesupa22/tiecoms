@@ -20,7 +20,7 @@ export function usePath() {
 }
 
 export type Route =
-  | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' }
+  | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' } | { name: 'agenda' } | { name: 'share' }
   | { name: 'conversation'; id: string } | { name: 'workspace'; id: string }
   | { name: 'login' } | { name: 'signup' } | { name: 'invite'; token: string };
 
@@ -37,6 +37,8 @@ export function parse(path: string): Route {
   if (a === 'ajustes') return { name: 'settings' };
   if (a === 'asuntos') return { name: 'issues' };
   if (a === 'trazo') return { name: 'trazo' };
+  if (a === 'agenda') return { name: 'agenda' };
+  if (a === 'share') return { name: 'share' };
   return { name: 'today' };
 }
 

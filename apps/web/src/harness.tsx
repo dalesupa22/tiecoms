@@ -37,6 +37,7 @@ const g = [
   msg('general', 'danny', JSON.stringify({ k: 'issue.created', title: 'Plantilla final de certificados', issueId: 'i1' }), 2 * D - 2 * H, { kind: 'system' }),
   msg('general', 'danny', 'Era el job de las 10:00: reenviaba a quien no había firmado. Queda en una sola notificación diaria.', 5 * H, { mergedFrom: 'diag' }),
   msg('general', 'mateo', 'Perfecto, gracias. Seguimos con la salida del viernes.', 2 * H, { replyTo: 'general-m7' }),
+  msg('general', 'laura', 'Les dejo la guía de marca https://www.tiecoms.com/', 100 * 60_000, { linkPreview: { url: 'https://www.tiecoms.com/', title: 'TieComs · Una sola red entre las empresas con las que trabajas', description: 'Conversaciones, asuntos y archivos entre equipos de distintas empresas, cada quien con su alcance.', siteName: 'TieComs', imageUrl: '/tiecoms-mark.svg' } }),
   msg('general', 'ana', 'Mañana llego a las 8 con el diseñador.', 90 * 60_000, { forwarded: { source: 'whatsapp', author: 'Pedro (Estudio Norte)', sentAt: '24/9/26 07:41' } }),
 ];
 seq = 0;
@@ -56,6 +57,7 @@ const data: BootstrapDTO = {
     conv({ id: 'general', name: 'General', pinnedAt: iso(D), memberIds: ['danny', 'laura', 'mateo', 'ana'], lastMessageSeq: g.length, lastEventSeq: g.length, lastReadSeq: g.length - 1, unread: 1, lastMessagePreview: g[g.length - 1]!.body, openIssues: 2 }),
     conv({ id: 'diag', name: 'Diagnóstico · notificaciones duplicadas', kind: 'internal', level: null, internalOrgId: 'xertify', memberIds: ['danny', 'laura'], parentId: 'general', parentMessageId: 'general-m4', parentMessageSeq: 4, deriveKind: 'internal', deriveReason: 'Ana necesita saber si es el job o un reenvío', returnedAt: iso(5 * H), lastMessageSeq: dg.length, lastEventSeq: dg.length, lastReadSeq: dg.length }),
     conv({ id: 'dec', name: 'Decisión · fecha de salida', level: 'directivo', memberIds: ['danny', 'mateo'], parentId: 'general', parentMessageId: 'general-m2', parentMessageSeq: 2, deriveKind: 'directive', lastMessageSeq: 0 }),
+    conv({ id: 'multi1', kind: 'multi', workspaceId: null, level: null, name: null, memberIds: ['danny', 'mateo', 'ana', 'laura'], unread: 2, lastMessagePreview: '¿Nos vemos el jueves?' }),
     conv({ id: 'internal', name: 'Equipo interno', kind: 'internal', level: null, internalOrgId: 'xertify', memberIds: ['danny', 'laura'] }),
   ],
   people: [person('danny', 'Danny Suárez', 'xertify', 'Líder técnico'), person('laura', 'Laura Gómez', 'xertify', 'Soporte'), person('mateo', 'Mateo Rivas', 'norte', 'Director de proyectos'), person('ana', 'Ana Torres', 'norte', 'Coordinadora')],
@@ -129,6 +131,16 @@ const waMsgs = [
     return c;
   }
   if (path === '/whatsapp/organize') return { reviewed: 7, changed: 0 };
+  if (path.startsWith('/drive/tree')) {
+    const ws = path.includes('workspaceId');
+    const fo = (id: string, name: string, parentId: string | null) => ({ id, name, parentId, createdBy: 'danny', createdAt: iso(3 * D) });
+    const fi = (id: string, name: string, folderId: string | null, contentType: string, size: number, by = 'danny') => ({ id, name, folderId, contentType, size, createdBy: by, createdAt: iso(2 * D), updatedAt: iso(D) });
+    return ws
+      ? { workspaceId: 'ws1', canManageAll: true, folders: [fo('w1', 'Entregables', null), fo('w2', 'Actas', null), fo('w3', 'Diseños', 'w1')],
+          files: [fi('x1', 'Cronograma lanzamiento.xlsx', 'w1', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 48_000, 'mateo'), fi('x2', 'Acta 24-sep.pdf', 'w2', 'application/pdf', 320_000, 'ana'), fi('x3', 'Portada.png', 'w3', 'image/png', 1_900_000, 'laura')] }
+      : { workspaceId: null, canManageAll: true, folders: [fo('f1', 'Contratos', null), fo('f2', '2026', 'f1'), fo('f3', 'Facturas', null)],
+          files: [fi('a1', 'Propuesta Estudio Norte.pdf', null, 'application/pdf', 812_000), fi('a2', 'Contrato marco.docx', 'f2', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 96_000), fi('a3', 'Notas.txt', null, 'text/plain', 1_200)] };
+  }
   throw new Error('arnés sin backend');
 };
 history.replaceState(null, '', q.get('to') ?? '/');

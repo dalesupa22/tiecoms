@@ -38,6 +38,8 @@ const DEVICE_NAMES: Record<Platform, string> = {
 
 // En web, API en el mismo origen. En apps, la variable de build apunta a https://app.tiecoms.com.
 const baseUrl = (import.meta.env.VITE_API_ORIGIN as string | undefined) ?? '';
+/** Rutas del API usadas directamente por la interfaz (p. ej. fotos en <img>). */
+export const apiUrl = (path: string) => `${baseUrl}${path}`;
 
 /** La interfaz registra aquí cómo mostrar avisos (notificación del sistema y toast). */
 export const notices: { handler: ((n: ClientNotice) => void) | null } = { handler: null };

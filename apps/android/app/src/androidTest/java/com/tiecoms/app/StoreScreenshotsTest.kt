@@ -101,6 +101,11 @@ class StoreScreenshotsTest {
             compose.onNodeWithTag("confirmBlock").performClick()
             compose.waitUntilDoesNotExist(hasTestTag("confirmBlock"),10000)
             assertFalse(arg("otherId") in app.container.client.value.state.value.blockedUserIds)
-        } finally { activity.close() }
+        } finally {
+            // Deep links reuse the singleTask activity. Remove its task before
+            // closing the scenario so its final lifecycle is deterministic.
+            activity.onActivity { it.finishAndRemoveTask() }
+            activity.close()
+        }
     }
 }

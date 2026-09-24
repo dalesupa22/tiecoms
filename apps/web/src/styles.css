@@ -416,3 +416,36 @@ a.btn { text-decoration: none; color: inherit; } a.btn.primary { color: var(--pa
 /* ---------- Perfil ---------- */
 .profile-photo { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
 .avatar img { display: block; }
+
+/* ---------- Archivos ---------- */
+.drive { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 14px; align-items: start; }
+.drive-tree { padding: 6px; display: grid; gap: 1px; position: sticky; top: 0; max-height: calc(100vh - 140px); overflow: auto; }
+.drive-node { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
+.drive-node:hover { background: var(--paper-2); }
+.drive-node.active { background: var(--paper-3); }
+.drive-node.active .drive-label { font-weight: 700; }
+.drive-caret { border: 0; background: transparent; width: 20px; height: 26px; color: var(--muted); padding: 0; flex: none; }
+.drive-label { flex: 1; min-width: 0; border: 0; background: transparent; text-align: left; display: flex; gap: 6px; align-items: center; padding: 5px 6px 5px 2px; font-size: 13px; }
+.drive-main { position: relative; min-height: 360px; padding: 0 0 8px; overflow: hidden; }
+.drive-main.is-drag { border-color: var(--accent); }
+.drive-head { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.drive-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; }
+.drive-crumbs button { border: 0; background: transparent; padding: 4px 6px; border-radius: 6px; font-weight: 600; color: var(--ink-2); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drive-crumbs button:hover { background: var(--paper-2); }
+.drive-crumbs button.on { color: var(--ink); font-weight: 800; }
+.drive-list { display: grid; }
+.drive-item { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; width: 100%; }
+.drive-item:hover { background: #fff; }
+.drive-item:last-child { border-bottom: 0; }
+.drive-ico { width: 34px; height: 34px; border-radius: 10px; background: var(--paper-2); display: grid; place-items: center; font-size: 18px; flex: none; }
+.drive-more { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); flex: none; }
+.drive-more:hover { background: var(--paper-3); }
+.drive-empty { display: grid; justify-items: center; gap: 6px; padding: 48px 16px; text-align: center; }
+.drive-drop { position: absolute; inset: 0; background: rgba(184, 98, 63, 0.08); border: 2px dashed var(--accent); border-radius: var(--radius); display: grid; place-items: center; font-weight: 700; color: var(--accent-ink); pointer-events: none; }
+.drive-progress { position: relative; margin: 10px 12px 0; padding: 6px 10px; font-size: 12px; background: var(--paper-2); border-radius: 8px; overflow: hidden; }
+.drive-progress span { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(61, 122, 79, 0.18); transition: width 0.2s; }
+@media (max-width: 860px) {
+  .drive { grid-template-columns: minmax(0, 1fr); }
+  .drive-tree { position: static; max-height: 220px; }
+  .drive-head .input { max-width: none !important; flex: 1 1 100%; }
+}

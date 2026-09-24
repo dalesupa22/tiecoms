@@ -129,6 +129,16 @@ const waMsgs = [
     return c;
   }
   if (path === '/whatsapp/organize') return { reviewed: 7, changed: 0 };
+  if (path.startsWith('/drive/tree')) {
+    const ws = path.includes('workspaceId');
+    const fo = (id: string, name: string, parentId: string | null) => ({ id, name, parentId, createdBy: 'danny', createdAt: iso(3 * D) });
+    const fi = (id: string, name: string, folderId: string | null, contentType: string, size: number, by = 'danny') => ({ id, name, folderId, contentType, size, createdBy: by, createdAt: iso(2 * D), updatedAt: iso(D) });
+    return ws
+      ? { workspaceId: 'ws1', canManageAll: true, folders: [fo('w1', 'Entregables', null), fo('w2', 'Actas', null), fo('w3', 'Diseños', 'w1')],
+          files: [fi('x1', 'Cronograma lanzamiento.xlsx', 'w1', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 48_000, 'mateo'), fi('x2', 'Acta 24-sep.pdf', 'w2', 'application/pdf', 320_000, 'ana'), fi('x3', 'Portada.png', 'w3', 'image/png', 1_900_000, 'laura')] }
+      : { workspaceId: null, canManageAll: true, folders: [fo('f1', 'Contratos', null), fo('f2', '2026', 'f1'), fo('f3', 'Facturas', null)],
+          files: [fi('a1', 'Propuesta Estudio Norte.pdf', null, 'application/pdf', 812_000), fi('a2', 'Contrato marco.docx', 'f2', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 96_000), fi('a3', 'Notas.txt', null, 'text/plain', 1_200)] };
+  }
   throw new Error('arnés sin backend');
 };
 history.replaceState(null, '', q.get('to') ?? '/');

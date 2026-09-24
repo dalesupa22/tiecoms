@@ -403,6 +403,17 @@ export const EventsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
 
+// ---------- Archivos (árbol de carpetas) ----------
+export interface DriveFolderDTO { id: string; parentId: string | null; name: string; createdBy: string; createdAt: string }
+export interface DriveFileDTO { id: string; folderId: string | null; name: string; contentType: string; size: number; createdBy: string; createdAt: string; updatedAt: string }
+/** Un árbol completo: «Mis archivos» (workspaceId null) o el de un espacio. */
+export interface DriveTreeDTO { workspaceId: string | null; folders: DriveFolderDTO[]; files: DriveFileDTO[]; canManageAll: boolean }
+const driveName = z.string().trim().min(1).max(120);
+export const CreateFolderInput = z.object({ workspaceId: z.uuid().nullable().optional(), parentId: z.uuid().nullable().optional(), name: driveName });
+export const UpdateFolderInput = z.object({ name: driveName.optional(), parentId: z.uuid().nullable().optional() });
+export const UpdateFileInput = z.object({ name: driveName.optional(), folderId: z.uuid().nullable().optional() });
+export const UploadFileQuery = z.object({ workspaceId: z.uuid().optional(), folderId: z.uuid().optional(), name: z.string().min(1).max(400) });
+
 // ---------- Conectar WhatsApp ----------
 export const WaKind = z.enum(['personal', 'business']);
 export type WaKind = z.infer<typeof WaKind>;
@@ -490,7 +501,8 @@ export type AccountEvent =
   | { type: 'read.updated'; conversationId: string; seq: number }
   | { type: 'reminder.due'; reminder: ReminderDTO }
   | { type: 'prefs.updated'; conversationId?: string; workspaceId?: string }
-  | { type: 'whatsapp.updated'; accountId: string };
+  | { type: 'whatsapp.updated'; accountId: string }
+  | { type: 'drive.updated'; workspaceId: string | null };
 
 export interface EventsPage {
   events: ConversationEvent[];

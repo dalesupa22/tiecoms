@@ -103,6 +103,7 @@ export function openAccountMenu(anchor: HTMLElement) {
     { label: t('profile.edit'), icon: '✎', onSelect: openProfile },
     { label: t('profile.changePhoto'), icon: '📷', onSelect: openProfile },
     { divider: true },
+    { label: t('nav.files'), icon: '▣', onSelect: () => navigate('/archivos') },
     { label: t('nav.whatsapp'), icon: '✆', onSelect: () => navigate('/whatsapp') },
     { label: t('settings.language'), icon: '🌐', hint: pref ? (pref === 'es' ? 'ES' : 'EN') : getLang().toUpperCase(),
       items: langs.map(([v, label]) => ({ label, icon: pref === v ? '✓' : '', onSelect: () => setLang(v) })) },

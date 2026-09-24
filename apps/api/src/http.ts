@@ -7,7 +7,7 @@ import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, type AuthResult,
-  UpdateProfileInput, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
+  UpdateProfileInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -24,6 +24,7 @@ import * as prefs from './modules/prefs.ts';
 import * as reminders from './modules/reminders.ts';
 import * as wa from './modules/whatsapp.ts';
 import * as profile from './modules/profile.ts';
+import * as drive from './modules/drive.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
 import { z } from 'zod';
 import { verifyAccess } from './security.ts';
@@ -49,13 +50,15 @@ export async function buildHttp() {
   await app.register(cors, {
     origin: [config.publicOrigin, ...config.extraOrigins],
     credentials: true,
-    allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract'],
+    allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract', 'x-file-type'],
     methods: ['GET', 'POST', 'DELETE', 'PATCH'],
     maxAge: 600,
   });
   await app.register(rateLimit, { max: 600, timeWindow: '1 minute', keyGenerator: (r) => r.ip });
 
   // Fotos de perfil: el cuerpo llega crudo (la imagen ya recortada en el cliente).
+  // Archivos del árbol: siempre como octet-stream (el tipo real va en x-file-type), así un .json no se interpreta.
+  app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: drive.MAX_FILE_BYTES }, (_req, body, done) => done(null, body));
   app.addContentTypeParser(/^image\//, { parseAs: 'buffer', bodyLimit: profile.MAX_AVATAR_BYTES }, (_req, body, done) => done(null, body));
 
   app.setErrorHandler((err: any, req, reply) => {
@@ -220,6 +223,24 @@ export async function buildHttp() {
     priv.get<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.getIssue(req.userId, req.params.id));
     priv.patch<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.updateIssue(req.userId, req.params.id, UpdateIssueInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/comments', async (req) => issues.commentIssue(req.userId, req.params.id, IssueCommentInput.parse(req.body).body));
+
+    // Archivos en árbol de carpetas («Mis archivos» o un espacio)
+    priv.get<{ Querystring: { workspaceId?: string } }>('/api/v1/drive/tree', async (req) =>
+      drive.tree(req.userId, req.query.workspaceId ? z.uuid().parse(req.query.workspaceId) : null));
+    priv.post('/api/v1/drive/folders', async (req) => drive.createFolder(req.userId, CreateFolderInput.parse(req.body)));
+    priv.patch<{ Params: { id: string } }>('/api/v1/drive/folders/:id', async (req) => drive.updateFolder(req.userId, z.uuid().parse(req.params.id), UpdateFolderInput.parse(req.body)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/drive/folders/:id', async (req) => drive.deleteFolder(req.userId, z.uuid().parse(req.params.id)));
+    priv.post('/api/v1/drive/files', { bodyLimit: drive.MAX_FILE_BYTES, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => {
+      const q = UploadFileQuery.parse(req.query);
+      if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube el archivo como application/octet-stream');
+      return drive.uploadFile(req.userId, {
+        workspaceId: q.workspaceId ?? null, folderId: q.folderId ?? null, name: q.name,
+        contentType: String(req.headers['x-file-type'] ?? 'application/octet-stream'), body: req.body,
+      });
+    });
+    priv.patch<{ Params: { id: string } }>('/api/v1/drive/files/:id', async (req) => drive.updateFile(req.userId, z.uuid().parse(req.params.id), UpdateFileInput.parse(req.body)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/drive/files/:id', async (req) => drive.deleteFile(req.userId, z.uuid().parse(req.params.id)));
+    priv.get<{ Params: { id: string } }>('/api/v1/drive/files/:id/link', async (req) => drive.downloadLink(req.userId, z.uuid().parse(req.params.id)));
 
     // Conectar WhatsApp (personal y Business): cuentas, chats y organización.
     priv.get('/api/v1/whatsapp/accounts', async (req) => ({ accounts: await wa.listAccounts(req.userId), max: wa.MAX_WA_ACCOUNTS }));

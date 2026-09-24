@@ -208,6 +208,16 @@ const es = {
   'profile.removePhoto': 'Quitar foto', 'profile.photoHint': 'PNG, JPG o WebP. Se recorta en cuadrado.', 'profile.photoSaved': 'Foto actualizada', 'profile.notImage': 'Elige una imagen.',
   'profile.jobTitle': 'Cargo', 'profile.jobTitlePh': 'p. ej. Coordinadora de lanzamiento', 'profile.area': 'Área', 'profile.areaPh': 'p. ej. Operaciones',
   'profile.save': 'Guardar', 'profile.saved': 'Perfil actualizado',
+  // Archivos
+  'nav.files': 'Archivos', 'files.title': 'Archivos', 'files.mine': 'Mis archivos', 'files.tree': 'Carpetas',
+  'files.intro': 'Guarda y ordena documentos en carpetas. «Mis archivos» solo lo ves tú; cada espacio tiene sus carpetas compartidas con quienes están en él.',
+  'files.newFolder': 'Nueva carpeta', 'files.upload': 'Subir archivos', 'files.folderName': 'Nombre de la carpeta', 'files.newName': 'Nuevo nombre',
+  'files.search': 'Buscar aquí', 'files.empty': 'Esta carpeta está vacía', 'files.emptyHint': 'Arrastra archivos aquí o usa «Subir archivos». Hasta 25 MB cada uno.',
+  'files.noResults': 'Nada coincide', 'files.items': '{n} elementos', 'files.item1': '1 elemento', 'files.item0': 'Vacía', 'files.open': 'Abrir', 'files.rename': 'Cambiar nombre', 'files.move': 'Mover a…',
+  'files.delete': 'Eliminar', 'files.download': 'Descargar', 'files.deleteFolderConfirm': '¿Eliminar la carpeta «{name}» con todo lo que tiene dentro?',
+  'files.deleteFileConfirm': '¿Eliminar «{name}»?', 'files.tooBig': 'Algunos archivos pesan más de 25 MB y no se subieron.', 'files.uploaded': '{n} archivo(s) subido(s)',
+  'files.uploading': 'Subiendo {done} de {total}…', 'files.dropHere': 'Suelta para subir a «{name}»', 'files.moveTitle': 'Mover «{name}»', 'files.moveHere': 'Mover aquí',
+  'files.moved': 'Movido', 'files.expand': 'Abrir carpeta', 'files.collapse': 'Cerrar carpeta',
 };
 
 type Key = keyof typeof es;
@@ -389,6 +399,15 @@ const en: Record<Key, string> = {
   'profile.removePhoto': 'Remove photo', 'profile.photoHint': 'PNG, JPG or WebP. Cropped to a square.', 'profile.photoSaved': 'Photo updated', 'profile.notImage': 'Pick an image.',
   'profile.jobTitle': 'Role', 'profile.jobTitlePh': 'e.g. Launch coordinator', 'profile.area': 'Team', 'profile.areaPh': 'e.g. Operations',
   'profile.save': 'Save', 'profile.saved': 'Profile updated',
+  'nav.files': 'Files', 'files.title': 'Files', 'files.mine': 'My files', 'files.tree': 'Folders',
+  'files.intro': 'Store and organise documents in folders. Only you see “My files”; each space has shared folders for the people in it.',
+  'files.newFolder': 'New folder', 'files.upload': 'Upload files', 'files.folderName': 'Folder name', 'files.newName': 'New name',
+  'files.search': 'Search here', 'files.empty': 'This folder is empty', 'files.emptyHint': 'Drag files here or use “Upload files”. Up to 25 MB each.',
+  'files.noResults': 'Nothing matches', 'files.items': '{n} items', 'files.item1': '1 item', 'files.item0': 'Empty', 'files.open': 'Open', 'files.rename': 'Rename', 'files.move': 'Move to…',
+  'files.delete': 'Delete', 'files.download': 'Download', 'files.deleteFolderConfirm': 'Delete the folder “{name}” and everything in it?',
+  'files.deleteFileConfirm': 'Delete “{name}”?', 'files.tooBig': 'Some files are over 25 MB and were not uploaded.', 'files.uploaded': '{n} file(s) uploaded',
+  'files.uploading': 'Uploading {done} of {total}…', 'files.dropHere': 'Drop to upload to “{name}”', 'files.moveTitle': 'Move “{name}”', 'files.moveHere': 'Move here',
+  'files.moved': 'Moved', 'files.expand': 'Open folder', 'files.collapse': 'Close folder',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };

@@ -46,6 +46,8 @@ export interface ClientState {
   events: Record<string, CalendarEventDTO>;
   /** Sube cuando el puente de WhatsApp trae chats o mensajes nuevos: la pantalla vuelve a pedir la lista. */
   waRevision: number;
+  /** Sube cuando cambia algún árbol de archivos visible para la persona. */
+  driveRevision: number;
 }
 
 /** Aviso para la interfaz (notificación del sistema, sonido, toast). */
@@ -74,7 +76,7 @@ const base64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+
  * escritorio y móvil se comporten igual.
  */
 export class TieComsClient {
-  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], events: {}, waRevision: 0 };
+  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], events: {}, waRevision: 0, driveRevision: 0 };
   private listeners = new Set<() => void>();
   private accessToken: string | null = null;
   private accessExp = 0;
@@ -224,7 +226,7 @@ export class TieComsClient {
     this.accessToken = null;
     await this.opts.secrets?.set(null);
     if (userId) await this.opts.storage.clearPrefix(`u:${userId}:`);
-    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], events: {}, waRevision: 0 };
+    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], events: {}, waRevision: 0, driveRevision: 0 };
     this.listeners.forEach((l) => l());
   }
 
@@ -309,6 +311,7 @@ export class TieComsClient {
     if (e.type === 'scope.changed') this.scheduleBootstrap();
     if (e.type === 'prefs.updated') this.scheduleBootstrap();
     if (e.type === 'whatsapp.updated') this.set({ waRevision: this.state.waRevision + 1 });
+    if (e.type === 'drive.updated') this.set({ driveRevision: this.state.driveRevision + 1 });
     if (e.type === 'reminder.due') {
       this.set({ reminders: [...this.state.reminders.filter((r) => r.id !== e.reminder.id), e.reminder].sort((a, b) => a.remindAt.localeCompare(b.remindAt)) });
       this.opts.onNotice?.({ kind: 'reminder', reminder: e.reminder });

@@ -4,6 +4,7 @@
  * otros usos del bucket. Sin configuración, las subidas responden 503.
  */
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ApiError } from './errors.ts';
 
 const bucket = process.env.S3_BUCKET ?? '';
@@ -34,6 +35,20 @@ export async function getObject(key: string) {
   return { body: Buffer.from(await r.Body!.transformToByteArray()), contentType: r.ContentType ?? 'application/octet-stream' };
 }
 
+/** Enlace temporal de descarga directo a S3 (el navegador baja el archivo sin pasar por el API). */
+export async function presignDownload(key: string, fileName: string, contentType: string, seconds = 300) {
+  const ascii = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
+  return getSignedUrl(client(), new GetObjectCommand({
+    Bucket: bucket, Key: key, ResponseContentType: contentType,
+    ResponseContentDisposition: `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+  }), { expiresIn: seconds });
+}
+
+/**
+ * La política del usuario de S3 niega DeleteObject (probado el 24-sep-2026): el
+ * borrado en TieComs es lógico. Con S3_ALLOW_DELETE=true se borra también el objeto.
+ */
 export async function deleteObject(key: string) {
+  if (process.env.S3_ALLOW_DELETE !== 'true') return;
   await client().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }

@@ -79,7 +79,7 @@ export async function notifyReport(reportId: string) {
   const { rows } = await pool.query('SELECT id, notified_at FROM safety_reports WHERE id = $1', [reportId]);
   if (!rows[0] || rows[0].notified_at) return;
   const text = `Hay un reporte de seguridad pendiente en TieComs. Referencia: ${reportId}. Revisar la cola de moderación del servidor según docs/MODERATION.md.`;
-  await sendMail({ to: [{ email: process.env.MODERATION_EMAIL ?? 'soporte@tiecoms.com' }], subject: `TieComs: reporte ${reportId}`, text,
+  await sendMail({ to: [{ email: process.env.MODERATION_EMAIL ?? 'admin@tiecoms.com' }], subject: `TieComs: reporte ${reportId}`, text,
     html: `<p>${text}</p>`, tags: ['safety-report'] });
   await pool.query('UPDATE safety_reports SET notified_at = now() WHERE id = $1', [reportId]);
 }

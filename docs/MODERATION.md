@@ -2,7 +2,7 @@
 
 Las apps permiten reportar mensajes/personas y bloquear contacto. El bloqueo impide nuevos directos, envíos directos en ambos sentidos y nuevos chats grupales iniciados con esa persona. Las apps ocultan sus mensajes en grupos compartidos. Se puede desbloquear desde Ajustes.
 
-`POST /api/v1/reports` guarda el reporte antes de responder. Un trabajo con reintentos avisa a `soporte@tiecoms.com` (configurable con `MODERATION_EMAIL`); el correo contiene únicamente la referencia, no el mensaje privado. El operador debe revisar y responder a los reportes, incluidos los trabajos de notificación fallidos. No hay moderación automática ni garantía de plazo de respuesta implementada.
+`POST /api/v1/reports` guarda el reporte antes de responder. Un trabajo con reintentos avisa a `admin@tiecoms.com` (configurable con `MODERATION_EMAIL`); el correo contiene únicamente la referencia, no el mensaje privado. El operador debe revisar y responder a los reportes, incluidos los trabajos de notificación fallidos. No hay moderación automática ni garantía de plazo de respuesta implementada.
 
 La cola y las acciones requieren acceso SSH al servidor:
 

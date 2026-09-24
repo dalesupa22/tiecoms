@@ -6,12 +6,14 @@ import { ZodError } from 'zod';
 import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
-  RefreshInput, SendMessageInput, SignupInput, type AuthResult,
+  RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, type AuthResult,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
 import { ApiError, unauthorized } from './errors.ts';
 import * as auth from './modules/auth.ts';
+import * as sso from './modules/sso.ts';
+import * as domains from './modules/domains.ts';
 import { bootstrap } from './modules/bootstrap.ts';
 import { listEvents, listMessages, markRead, sendMessage } from './modules/messages.ts';
 import * as ws from './modules/workspaces.ts';
@@ -25,6 +27,7 @@ import { verifyAccess } from './security.ts';
 
 const REFRESH_COOKIE = 'tc_rt';
 const COOKIE_PATH = '/api/v1/auth';
+const SSO_COOKIE = 'tc_sso';
 
 declare module 'fastify' {
   interface FastifyRequest { userId: string; sessionId: string }
@@ -98,6 +101,23 @@ export async function buildHttp() {
     return sendAuth(req, reply, await auth.refresh(token));
   });
 
+  // ---------- Google / Microsoft ----------
+  // El navegador del sistema abre /start; la cookie ata el vuelo a ese navegador (Lax: vuelve en la navegación del proveedor).
+  app.get<{ Params: { provider: string } }>('/api/v1/auth/:provider/start', authLimit, async (req, reply) => {
+    const { url, state } = await sso.start(sso.parseProvider(req.params.provider), req.query);
+    reply.setCookie(SSO_COOKIE, state, { httpOnly: true, secure: config.cookieSecure, sameSite: 'lax', path: COOKIE_PATH, maxAge: 600 });
+    reply.header('cache-control', 'no-store');
+    return reply.redirect(url, 302);
+  });
+  app.get<{ Params: { provider: string }; Querystring: Record<string, string | undefined> }>('/api/v1/auth/:provider/callback', authLimit, async (req, reply) => {
+    const target = await sso.callback(sso.parseProvider(req.params.provider), req.query, req.cookies[SSO_COOKIE]);
+    reply.clearCookie(SSO_COOKIE, { path: COOKIE_PATH });
+    reply.header('cache-control', 'no-store');
+    reply.header('referrer-policy', 'no-referrer');
+    return reply.redirect(target, 302);
+  });
+  app.post('/api/v1/auth/sso/exchange', authLimit, async (req, reply) => sendAuth(req, reply, await sso.exchange(SsoExchangeInput.parse(req.body))));
+
   // ---------- Rutas autenticadas ----------
   app.register(async (priv) => {
     priv.addHook('onRequest', async (req) => {
@@ -120,6 +140,11 @@ export async function buildHttp() {
     });
 
     priv.get('/api/v1/bootstrap', async (req) => bootstrap(req.userId));
+    priv.get<{ Params: { id: string } }>('/api/v1/organizations/:id/domains', async (req) => ({ domains: await domains.listDomains(req.userId, req.params.id) }));
+    priv.post<{ Params: { id: string } }>('/api/v1/organizations/:id/domains', async (req) =>
+      domains.addDomain(req.userId, req.params.id, AddDomainInput.parse(req.body).domain));
+    priv.post<{ Params: { id: string; domain: string } }>('/api/v1/organizations/:id/domains/:domain/verify', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+      async (req) => domains.verifyDomain(req.userId, req.params.id, req.params.domain));
     priv.post<{ Params: { id: string } }>('/api/v1/organizations/:id/invitations', async (req) =>
       auth.createOrgInvitation(req.userId, req.params.id, CreateOrgInvitationInput.parse(req.body ?? {})));
 

@@ -64,6 +64,7 @@ export interface ClientOptions {
 }
 
 const uid = () => (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36));
+const base64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 /**
  * Cliente TieComs independiente de la interfaz. Toda la lógica de envío,
@@ -160,6 +161,33 @@ export class TieComsClient {
 
   async signup(input: { name: string; email: string; password: string; orgName?: string; orgInviteToken?: string; title?: string }) {
     const res = await this.raw('/auth/signup', { method: 'POST', json: { ...input, device: await this.device() } }, false);
+    if (!res.ok) throw await parseError(res);
+    await this.applyAuth(await res.json());
+    await this.afterLogin();
+  }
+
+  /**
+   * URL para entrar con Google o Microsoft. Se abre en el navegador (en apps, el del
+   * sistema); el verifier PKCE queda guardado hasta que vuelva el código.
+   */
+  async ssoStartUrl(provider: 'google' | 'microsoft', opts: { orgInviteToken?: string; orgName?: string; next?: string } = {}) {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    const verifier = base64url(bytes);
+    const challenge = base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
+    await this.opts.storage.set('sso:verifier', verifier);
+    const q = new URLSearchParams({ platform: this.opts.platform, code_challenge: challenge, code_challenge_method: 'S256' });
+    if (opts.orgInviteToken) q.set('org', opts.orgInviteToken);
+    if (opts.orgName) q.set('org_name', opts.orgName);
+    if (opts.next) q.set('next', opts.next);
+    return `${this.url(`/auth/${provider}/start`)}?${q}`;
+  }
+
+  /** Canjea el código que devolvió el servidor tras Google/Microsoft. */
+  async ssoComplete(code: string) {
+    const codeVerifier = await this.opts.storage.get<string>('sso:verifier');
+    await this.opts.storage.del('sso:verifier');
+    if (!codeVerifier) throw Object.assign(new Error('Vuelve a iniciar sesión desde esta app.'), { code: 'sso_state' });
+    const res = await this.raw('/auth/sso/exchange', { method: 'POST', json: { code, codeVerifier, device: await this.device() } }, false);
     if (!res.ok) throw await parseError(res);
     await this.applyAuth(await res.json());
     await this.afterLogin();

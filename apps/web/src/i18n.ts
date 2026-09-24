@@ -19,6 +19,8 @@ const es = {
   'auth.email': 'Correo de trabajo', 'auth.password': 'Contraseña', 'auth.passwordHint': 'Mínimo 10 caracteres.',
   'auth.login': 'Entrar', 'auth.signup': 'Crear cuenta y empresa', 'auth.signupJoin': 'Crear cuenta y unirme',
   'auth.noAccount': '¿Tu empresa aún no está en TieComs?', 'auth.createAccount': 'Crear cuenta', 'auth.haveAccount': '¿Ya tienes cuenta?',
+  'auth.withGoogle': 'Continuar con Google', 'auth.withMicrosoft': 'Continuar con Microsoft', 'auth.orEmail': 'o con tu correo',
+  'auth.ssoNeedsCompany': 'Escribe el nombre de tu empresa antes de continuar.', 'auth.backToLogin': 'Volver a entrar',
   'auth.joining': 'Te unes a {org}', 'auth.joiningBy': '{name} te invitó a su empresa.', 'auth.inviteInvalid': 'La invitación a la empresa ya no es válida.',
   // Invitación a espacio
   'invite.title': 'Invitación', 'invite.by': '{name}{org} te invita como {role}.', 'invite.forEmail': 'Esta invitación es para {email}.',
@@ -167,6 +169,11 @@ const es = {
   'err.unauthorized': 'Correo o contraseña incorrectos', 'err.conflict': 'Ya existe o ya no es válido', 'err.forbidden': 'No tienes permiso para esto',
   'err.not_found': 'No encontrado o fuera de tu alcance', 'err.rate_limited': 'Demasiados intentos. Espera un momento.', 'err.bad_request': 'Revisa los datos',
   'err.internal': 'Error interno. Intenta de nuevo.', 'err.network': 'Sin conexión con el servidor',
+  'err.domain_claimed': 'Tu empresa ya está en TieComs. Pide a su administrador que te invite.',
+  'err.sso_expired': 'El inicio de sesión venció. Inténtalo de nuevo.', 'err.sso_state': 'No pudimos confirmar el inicio de sesión en este navegador. Inténtalo de nuevo.',
+  'err.sso_cancelled': 'Cancelaste el inicio de sesión.', 'err.sso_failed': 'No pudimos completar el inicio de sesión.',
+  'err.sso_unavailable': 'Este inicio de sesión aún no está disponible.', 'err.sso_personal_account': 'Usa tu cuenta de Microsoft de trabajo; las cuentas personales no están habilitadas.',
+  'err.sso_email_unverified': 'Tu proveedor no ha verificado este correo. Entra con tu correo y contraseña.', 'err.account_disabled': 'Esta cuenta está desactivada.',
 };
 
 type Key = keyof typeof es;
@@ -182,6 +189,8 @@ const en: Record<Key, string> = {
   'auth.email': 'Work email', 'auth.password': 'Password', 'auth.passwordHint': 'At least 10 characters.',
   'auth.login': 'Sign in', 'auth.signup': 'Create account and company', 'auth.signupJoin': 'Create account and join',
   'auth.noAccount': 'Is your company not on TieComs yet?', 'auth.createAccount': 'Create account', 'auth.haveAccount': 'Already have an account?',
+  'auth.withGoogle': 'Continue with Google', 'auth.withMicrosoft': 'Continue with Microsoft', 'auth.orEmail': 'or with your email',
+  'auth.ssoNeedsCompany': 'Type your company name before continuing.', 'auth.backToLogin': 'Back to sign in',
   'auth.joining': 'You are joining {org}', 'auth.joiningBy': '{name} invited you to their company.', 'auth.inviteInvalid': 'This company invitation is no longer valid.',
   'invite.title': 'Invitation', 'invite.by': '{name}{org} invites you as {role}.', 'invite.forEmail': 'This invitation is for {email}.',
   'invite.invalid': 'This invitation was already used, revoked or has expired.',
@@ -309,6 +318,11 @@ const en: Record<Key, string> = {
   'err.unauthorized': 'Wrong email or password', 'err.conflict': 'Already exists or is no longer valid', 'err.forbidden': 'You do not have permission to do this',
   'err.not_found': 'Not found or outside your scope', 'err.rate_limited': 'Too many attempts. Please wait a moment.', 'err.bad_request': 'Please check the details',
   'err.internal': 'Internal error. Please try again.', 'err.network': 'Cannot reach the server',
+  'err.domain_claimed': 'Your company is already on TieComs. Ask its administrator to invite you.',
+  'err.sso_expired': 'Sign-in expired. Please try again.', 'err.sso_state': 'We could not confirm the sign-in in this browser. Please try again.',
+  'err.sso_cancelled': 'You cancelled the sign-in.', 'err.sso_failed': 'We could not complete the sign-in.',
+  'err.sso_unavailable': 'This sign-in option is not available yet.', 'err.sso_personal_account': 'Use your work Microsoft account; personal accounts are not enabled.',
+  'err.sso_email_unverified': 'Your provider has not verified this email. Sign in with your email and password.', 'err.account_disabled': 'This account is disabled.',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };

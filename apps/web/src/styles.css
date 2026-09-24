@@ -351,3 +351,9 @@ a:hover { color: var(--accent-ink); }
 .reminder-row.is-due { border-color: #f0b58f; background: #fffaf6; }
 .rem-ico { font-size: 16px; }
 a.btn { text-decoration: none; color: inherit; } a.btn.primary { color: var(--paper); }
+
+/* Entrar con Google / Microsoft */
+.sso { display: grid; gap: 10px; }
+.sso-btn { width: 100%; gap: 10px; min-height: 44px; }
+.sso-or { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; margin: 6px 0 2px; }
+.sso-or::before, .sso-or::after { content: ""; flex: 1; height: 1px; background: var(--line); }

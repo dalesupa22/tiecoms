@@ -6,6 +6,7 @@
 import { hostname } from 'node:os';
 import { enqueueOutbox, pool, tx } from './db.ts';
 import { fireDueReminders } from './modules/reminders.ts';
+import { cleanupExpired as cleanupSso } from './modules/sso.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
 const LEASE_SECONDS = 120;
@@ -39,6 +40,7 @@ const handlers: Record<string, Handler> = {
     await pool.query("DELETE FROM jobs WHERE done_at < now() - interval '7 days'");
     await pool.query("DELETE FROM sessions WHERE (revoked_at < now() - interval '30 days') OR (expires_at < now() - interval '30 days')");
     await pool.query("DELETE FROM socket_io_attachments WHERE created_at < now() - interval '1 hour'");
+    await cleanupSso();
   },
 };
 

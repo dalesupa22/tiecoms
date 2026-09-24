@@ -1,6 +1,7 @@
 import { CONTRACT_VERSION, type BootstrapDTO, type ConversationDTO, type OrganizationDTO, type PersonDTO, type WorkspaceDTO } from '@tiecoms/contracts';
 import { pool } from '../db.ts';
 import { loadUser } from './auth.ts';
+import { orgVerification } from './domains.ts';
 
 const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())`;
 
@@ -108,8 +109,10 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
        LEFT JOIN organization_memberships om ON om.org_id = o.id AND om.user_id = $2 WHERE o.id = ANY($1) ORDER BY o.name`,
     [[...orgIds], userId],
   );
+  const verified = await orgVerification(pool, [...orgIds]);
   const organizations: OrganizationDTO[] = orgs.rows.map((r) => ({
     id: r.id, name: r.name, mark: r.mark, colorBg: r.color_bg, colorFg: r.color_fg, ...(r.my_role ? { myRole: r.my_role } : {}),
+    verification: verified.get(r.id)?.level ?? 'none', verifiedDomain: verified.get(r.id)?.domain ?? null,
   }));
 
   return { contract: CONTRACT_VERSION, serverTime: new Date().toISOString(), me, organizations, workspaces, conversations, people: personList };

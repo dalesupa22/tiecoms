@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -51,6 +52,14 @@ data class ClientState(
     val conversations: Map<String, ConversationState> = emptyMap(),
     val pending: List<PendingMessage> = emptyList(),
     val typing: Map<String, List<TypingEntry>> = emptyMap(),
+    /** Asuntos conocidos por id (se cargan por espacio, conversación o «míos» y se actualizan en vivo). */
+    val issues: Map<String, IssueDTO> = emptyMap(),
+    /** Mensajes fijados por conversación. */
+    val pins: Map<String, List<String>> = emptyMap(),
+    val reminders: List<ReminderDTO> = emptyList(),
+    val events: Map<String, CalendarEventDTO> = emptyMap(),
+    /** Sube cuando el puente de WhatsApp trae novedades: la pantalla vuelve a pedir la lista. */
+    val waRevision: Int = 0,
 )
 
 /** Avisos puntuales para sonidos y notificaciones. */
@@ -60,6 +69,10 @@ sealed interface ClientSignal {
     /** El servidor confirmó un mensaje propio. */
     data class Sent(val message: MessageDTO) : ClientSignal
     data object SignedOut : ClientSignal
+    /** Recordatorio vencido (evento de cuenta `reminder.due`). */
+    data class ReminderDue(val reminder: ReminderDTO) : ClientSignal
+    /** Reunión nueva, movida o cancelada por otra persona, en vivo. kind: created | moved | cancelled */
+    data class CalendarChanged(val event: CalendarEventDTO, val kind: String) : ClientSignal
 }
 
 private enum class RefreshOutcome { OK, UNAUTHORIZED, NETWORK }
@@ -215,10 +228,10 @@ class TieComsClient(
 
     // ---------- SSO (Google / Microsoft) con PKCE ----------
     /** Prepara el intento (verifier guardado en disco) y devuelve la URL a abrir en Custom Tabs. */
-    fun beginSso(provider: SsoProvider): String {
+    fun beginSso(provider: SsoProvider, orgInviteToken: String? = null, orgName: String? = null): String {
         val verifier = Pkce.newVerifier()
         storage.set(SSO_KEY, TcJson.encodeToString(SsoAttempt.serializer(), SsoAttempt(provider.path, verifier, now())))
-        return Sso.startUrl(baseUrl, provider, deviceId(), Pkce.challenge(verifier))
+        return Sso.startUrl(baseUrl, provider, deviceId(), Pkce.challenge(verifier), orgInviteToken, orgName)
     }
 
     fun hasSsoAttempt(): Boolean = storage.get(SSO_KEY) != null
@@ -281,6 +294,7 @@ class TieComsClient(
         setState { copy(status = SessionStatus.READY, pending = saved.map { if (it.status == "sending") it.copy(status = "pending") else it }) }
         socket.start()
         scheduleFlush(0)
+        scope.launch { runCatching { loadRemindersInternal() } }
     }
 
     // ---------- Snapshot ----------
@@ -366,6 +380,12 @@ class TieComsClient(
                     copy(lastReadSeq = e.seq, unread = maxOf(0L, lastMessageSeq - maxOf(e.seq, historyFromSeq)).toInt())
                 }
             }
+            is AccountEvent.ReminderDue -> {
+                setState { copy(reminders = (reminders.filter { it.id != e.reminder.id } + e.reminder).sortedBy { it.remindAt }) }
+                _signals.tryEmit(ClientSignal.ReminderDue(e.reminder))
+            }
+            is AccountEvent.PrefsUpdated -> scheduleBootstrap()
+            is AccountEvent.WhatsAppUpdated -> setState { copy(waRevision = waRevision + 1) }
             is AccountEvent.Unknown -> Unit
         }
     }
@@ -373,12 +393,34 @@ class TieComsClient(
     private fun onConversationEvent(e: ConversationEvent) {
         val meta = meta(e.conversationId)
         if (meta == null) { scheduleBootstrap(); return }
+        val muted = meta.mutedAt(now())
+        // Asuntos, fijados y reuniones se actualizan aunque la conversación no esté abierta.
+        when (e) {
+            is ConversationEvent.IssueUpdated -> { putIssues(listOf(e.issue)); recountIssues(e.conversationId) }
+            is ConversationEvent.PinsChanged -> setState { copy(pins = pins + (e.conversationId to e.messageIds)) }
+            is ConversationEvent.CalendarUpdated -> {
+                val prev = s.events[e.event.id]
+                putEvents(listOf(e.event))
+                val ev = e.event
+                val invited = ev.invitees.any { it.userId == myId }
+                val kind = when {
+                    prev == null && ev.cancelledAt == null -> "created"
+                    prev != null && prev.cancelledAt == null && ev.cancelledAt != null -> "cancelled"
+                    prev != null && prev.startsAt != ev.startsAt -> "moved"
+                    else -> null
+                }
+                val fresh = runCatching { Instant.parse(ev.updatedAt).toEpochMilli() }.getOrDefault(0L) >= liveSince
+                if (kind != null && invited && ev.organizerId != myId && !muted && fresh) _signals.tryEmit(ClientSignal.CalendarChanged(ev, kind))
+            }
+            else -> Unit
+        }
         if (e is ConversationEvent.MessageCreated) {
             val fresh = bumpMeta(e.message)
             // Solo suena lo creado con la conexión ya en vivo: si el despacho del servidor llega tarde
             // con mensajes escritos mientras estábamos desconectados, eso cuenta como recuperación.
             val createdAt = runCatching { Instant.parse(e.message.createdAt).toEpochMilli() }.getOrDefault(Long.MAX_VALUE)
-            if (fresh && e.message.authorId != myId && e.message.kind != "system" && createdAt >= liveSince) _signals.tryEmit(ClientSignal.Incoming(e.message))
+            // Silenciada: sin sonido ni notificación.
+            if (fresh && !muted && e.message.authorId != myId && e.message.kind != "system" && createdAt >= liveSince) _signals.tryEmit(ClientSignal.Incoming(e.message))
         }
         val local = s.conversations[e.conversationId]
         if (local?.loaded != true) {
@@ -411,8 +453,11 @@ class TieComsClient(
         var messages = local.messages
         when (e) {
             is ConversationEvent.MessageCreated -> messages = upsertMessage(messages, e.message)
-            is ConversationEvent.MessageUpdated -> messages = upsertMessage(messages, e.message)
+            is ConversationEvent.MessageUpdated -> { messages = upsertMessage(messages, e.message); patchPreviewIfLast(e.message) }
             is ConversationEvent.MembersChanged -> { patchMeta(e.conversationId) { copy(memberIds = e.memberIds) }; scheduleBootstrap() }
+            is ConversationEvent.IssueUpdated -> putIssues(listOf(e.issue))
+            is ConversationEvent.PinsChanged -> setState { copy(pins = pins + (e.conversationId to e.messageIds)) }
+            is ConversationEvent.CalendarUpdated -> putEvents(listOf(e.event))
             is ConversationEvent.CursorOnly -> Unit
         }
         setConv(e.conversationId) { copy(messages = messages, lastEventSeq = maxOf(lastEventSeq, e.eventSeq)) }
@@ -496,12 +541,12 @@ class TieComsClient(
     }
 
     // ---------- Envío con cola persistente ----------
-    fun send(conversationId: String, body: String, replyTo: String? = null): String? {
+    fun send(conversationId: String, body: String, replyTo: String? = null, forwarded: ForwardedInfo? = null): String? {
         val text = body.trim()
         if (text.isEmpty()) return null
         val p = PendingMessage(
             clientMessageId = UUID.randomUUID().toString(), conversationId = conversationId, body = text,
-            replyTo = replyTo, createdAt = Instant.ofEpochMilli(now()).toString(),
+            replyTo = replyTo, forwarded = forwarded, createdAt = Instant.ofEpochMilli(now()).toString(),
         )
         // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
         scope.launch {
@@ -578,7 +623,7 @@ class TieComsClient(
     private suspend fun deliver(p: PendingMessage): MessageDTO {
         if (socket.connected) {
             try {
-                val payload = TcJson.encodeToJsonElement(SocketSendBody.serializer(), SocketSendBody(p.conversationId, p.clientMessageId, p.body, p.replyTo))
+                val payload = TcJson.encodeToJsonElement(SocketSendBody.serializer(), SocketSendBody(p.conversationId, p.clientMessageId, p.body, p.replyTo, p.forwarded))
                 val r = socket.emitWithAck("message.send", payload, 8000).firstOrNull() as? JsonObject
                 if ((r?.get("ok") as? JsonPrimitive)?.booleanOrNull == true) {
                     val m = r["message"]?.let { runCatching { TcJson.decodeFromJsonElement(MessageDTO.serializer(), it) }.getOrNull() }
@@ -598,11 +643,222 @@ class TieComsClient(
         }
         val r = request(
             "POST", "/conversations/${p.conversationId}/messages",
-            TcJson.encodeToString(SendBody.serializer(), SendBody(p.clientMessageId, p.body, p.replyTo)), SendResult.serializer(),
+            TcJson.encodeToString(SendBody.serializer(), SendBody(p.clientMessageId, p.body, p.replyTo, p.forwarded)), SendResult.serializer(),
         )
         sentViaHttp++
         return r.message ?: throw ApiException(500, "internal", "Respuesta sin mensaje")
     }
+
+    // ---------- JSON genérico ----------
+    private suspend fun <T> req(method: String, path: String, body: JsonElement?, ser: KSerializer<T>): T =
+        request(method, path, body?.toString() ?: if (method == "GET" || method == "DELETE") null else "{}", ser)
+
+    private fun q(vararg pairs: Pair<String, String?>): String =
+        pairs.filter { it.second != null }.joinToString("&", prefix = "?") { "${it.first}=${enc(it.second!!)}" }.let { if (it == "?") "" else it }
+
+    // ---------- Asuntos ----------
+    private fun putIssues(list: List<IssueDTO>) {
+        if (list.isEmpty()) return
+        setState { copy(issues = issues + list.associateBy { it.id }) }
+    }
+    private fun recountIssues(conversationId: String) {
+        val n = s.issues.values.count { it.conversationId == conversationId && !it.closed }
+        patchMeta(conversationId) { copy(openIssues = n) }
+    }
+    suspend fun loadIssues(workspaceId: String? = null, conversationId: String? = null, mine: Boolean = false, open: Boolean = false): List<IssueDTO> = withContext(dispatcher) {
+        val r = req("GET", "/issues" + q("workspaceId" to workspaceId, "conversationId" to conversationId, "mine" to if (mine) "1" else null, "open" to if (open) "1" else null), null, IssuesPage.serializer())
+        putIssues(r.issues); r.issues
+    }
+    suspend fun createIssue(conversationId: String, title: String, ownerId: String?, dueDate: String?, originMessageId: String?): IssueDTO = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("title", JsonPrimitive(title)); put("ownerId", ownerId?.let { JsonPrimitive(it) } ?: JsonNull)
+            put("dueDate", dueDate?.let { JsonPrimitive(it) } ?: JsonNull); put("originMessageId", originMessageId?.let { JsonPrimitive(it) } ?: JsonNull)
+        }
+        val i = req("POST", "/conversations/$conversationId/issues", body, IssueDTO.serializer())
+        putIssues(listOf(i)); recountIssues(conversationId); i
+    }
+    /** patch: title, status, ownerId, dueDate, waitingOnOrgId (null explícito = borrar). */
+    suspend fun updateIssue(id: String, patch: JsonObject): IssueDTO = withContext(dispatcher) {
+        val i = req("PATCH", "/issues/$id", patch, IssueDTO.serializer())
+        putIssues(listOf(i)); recountIssues(i.conversationId); i
+    }
+    suspend fun issueDetail(id: String): IssueDetail = withContext(dispatcher) {
+        val r = req("GET", "/issues/$id", null, IssueDetail.serializer()); putIssues(listOf(r.issue)); r
+    }
+    suspend fun commentIssue(id: String, body: String): IssueDTO = withContext(dispatcher) {
+        val i = req("POST", "/issues/$id/comments", buildJsonObject { put("body", JsonPrimitive(body)) }, IssueDTO.serializer()); putIssues(listOf(i)); i
+    }
+
+    // ---------- Preferencias, fijados, no leído, edición ----------
+    /** pinned null = no cambia. mutedUntil: [UNCHANGED] = no cambia, null = reactivar. */
+    suspend fun setConversationPrefs(id: String, pinned: Boolean? = null, mutedUntil: String? = UNCHANGED) = withContext(dispatcher) {
+        val body = buildJsonObject {
+            pinned?.let { put("pinned", JsonPrimitive(it)) }
+            if (mutedUntil !== UNCHANGED) put("mutedUntil", mutedUntil?.let { JsonPrimitive(it) } ?: JsonNull)
+        }
+        val before = meta(id)
+        patchMeta(id) {
+            var c = this
+            if (pinned != null) c = c.copy(pinnedAt = if (pinned) Instant.ofEpochMilli(now()).toString() else null)
+            if (mutedUntil !== UNCHANGED) c = c.copy(mutedUntil = mutedUntil)
+            c
+        }
+        try { req("PUT", "/conversations/$id/prefs", body, JsonElement.serializer()) } catch (e: Exception) {
+            before?.let { b -> patchMeta(id) { copy(pinnedAt = b.pinnedAt, mutedUntil = b.mutedUntil) } }; throw e
+        }
+        Unit
+    }
+    suspend fun setWorkspacePinned(id: String, pinned: Boolean) = withContext(dispatcher) {
+        setState { copy(data = data?.copy(workspaces = data.workspaces.map { if (it.id == id) it.copy(pinnedAt = if (pinned) Instant.ofEpochMilli(now()).toString() else null) else it })) }
+        req("PUT", "/workspaces/$id/prefs", buildJsonObject { put("pinned", JsonPrimitive(pinned)) }, JsonElement.serializer()); Unit
+    }
+    suspend fun markUnread(conversationId: String, seq: Long) = withContext(dispatcher) {
+        val r = req("POST", "/conversations/$conversationId/unread", buildJsonObject { put("seq", JsonPrimitive(seq)) }, ReadResult.serializer())
+        readJobs[conversationId]?.cancel()
+        patchMeta(conversationId) { copy(lastReadSeq = r.lastReadSeq, unread = maxOf(0L, lastMessageSeq - maxOf(r.lastReadSeq, historyFromSeq)).toInt()) }
+    }
+    suspend fun markConversationRead(conversationId: String) = withContext(dispatcher) {
+        val c = meta(conversationId) ?: return@withContext
+        patchMeta(conversationId) { copy(lastReadSeq = lastMessageSeq, unread = 0) }
+        req("POST", "/conversations/$conversationId/read", buildJsonObject { put("seq", JsonPrimitive(c.lastMessageSeq)) }, JsonElement.serializer()); Unit
+    }
+    private fun patchPreviewIfLast(m: MessageDTO) {
+        val c = meta(m.conversationId) ?: return
+        if (c.lastMessageSeq == m.seq) patchMeta(c.id) { copy(lastMessagePreview = m.body.take(140)) }
+    }
+    private fun upsertLocal(m: MessageDTO) {
+        if (s.conversations[m.conversationId]?.loaded == true) setConv(m.conversationId) { copy(messages = upsertMessage(messages, m)) }
+        patchPreviewIfLast(m)
+    }
+    suspend fun editMessage(id: String, body: String): MessageDTO = withContext(dispatcher) {
+        req("PATCH", "/messages/$id", buildJsonObject { put("body", JsonPrimitive(body)) }, MessageDTO.serializer()).also { upsertLocal(it) }
+    }
+    suspend fun deleteMessage(id: String): MessageDTO = withContext(dispatcher) {
+        req("DELETE", "/messages/$id", null, MessageDTO.serializer()).also { upsertLocal(it) }
+    }
+    suspend fun setMessagePinned(m: MessageDTO, pinned: Boolean) = withContext(dispatcher) {
+        val r = req(if (pinned) "POST" else "DELETE", "/messages/${m.id}/pin", null, PinsResult.serializer())
+        setState { copy(pins = pins + (m.conversationId to r.messageIds)) }
+    }
+    suspend fun loadPins(conversationId: String): List<MessageDTO> = withContext(dispatcher) {
+        val r = req("GET", "/conversations/$conversationId/pins", null, PinnedMessages.serializer())
+        setState { copy(pins = pins + (conversationId to r.messages.map { it.id })) }
+        r.messages
+    }
+
+    // ---------- Recordatorios ----------
+    private suspend fun loadRemindersInternal(): List<ReminderDTO> {
+        val r = req("GET", "/reminders", null, RemindersPage.serializer()); setState { copy(reminders = r.reminders.sortedBy { it.remindAt }) }; return r.reminders
+    }
+    suspend fun loadReminders(): List<ReminderDTO> = withContext(dispatcher) { loadRemindersInternal() }
+    suspend fun createReminder(conversationId: String, messageId: String?, note: String?, remindAt: Instant): ReminderDTO = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("conversationId", JsonPrimitive(conversationId)); put("messageId", messageId?.let { JsonPrimitive(it) } ?: JsonNull)
+            put("note", note?.let { JsonPrimitive(it.take(300)) } ?: JsonNull); put("remindAt", JsonPrimitive(remindAt.toString()))
+        }
+        val r = req("POST", "/reminders", body, ReminderDTO.serializer())
+        setState { copy(reminders = (reminders.filter { it.id != r.id } + r).sortedBy { it.remindAt }) }; r
+    }
+    suspend fun completeReminder(id: String) = withContext(dispatcher) {
+        req("POST", "/reminders/$id/done", buildJsonObject {}, JsonElement.serializer()); setState { copy(reminders = reminders.filter { it.id != id }) }
+    }
+    suspend fun snoozeReminder(id: String, until: Instant) = withContext(dispatcher) {
+        req("POST", "/reminders/$id/snooze", buildJsonObject { put("until", JsonPrimitive(until.toString())) }, JsonElement.serializer())
+        setState { copy(reminders = reminders.map { if (it.id == id) it.copy(remindAt = until.toString(), firedAt = null) else it }.sortedBy { it.remindAt }) }
+    }
+
+    // ---------- Agenda ----------
+    private fun putEvents(list: List<CalendarEventDTO>) { if (list.isNotEmpty()) setState { copy(events = events + list.associateBy { it.id }) } }
+    suspend fun loadEvents(from: Instant, to: Instant, conversationId: String? = null): List<CalendarEventDTO> = withContext(dispatcher) {
+        val r = req("GET", "/events" + q("from" to from.toString(), "to" to to.toString(), "conversationId" to conversationId), null, CalendarPage.serializer())
+        putEvents(r.events); r.events
+    }
+    suspend fun getEvent(id: String): CalendarEventDTO = withContext(dispatcher) { req("GET", "/events/$id", null, CalendarEventDTO.serializer()).also { putEvents(listOf(it)) } }
+    /** input: title, description, location, startsAt, endsAt, timezone, inviteeIds, originMessageId */
+    suspend fun createEvent(conversationId: String, input: JsonObject): CalendarEventDTO = withContext(dispatcher) {
+        req("POST", "/conversations/$conversationId/events", input, CalendarEventDTO.serializer()).also { putEvents(listOf(it)) }
+    }
+    suspend fun updateEvent(id: String, patch: JsonObject): CalendarEventDTO = withContext(dispatcher) { req("PATCH", "/events/$id", patch, CalendarEventDTO.serializer()).also { putEvents(listOf(it)) } }
+    suspend fun cancelEvent(id: String): CalendarEventDTO = withContext(dispatcher) { req("DELETE", "/events/$id", null, CalendarEventDTO.serializer()).also { putEvents(listOf(it)) } }
+    /** answer: yes | no | maybe */
+    suspend fun rsvp(id: String, answer: String): CalendarEventDTO = withContext(dispatcher) {
+        req("POST", "/events/$id/rsvp", buildJsonObject { put("rsvp", JsonPrimitive(answer)) }, CalendarEventDTO.serializer()).also { putEvents(listOf(it)) }
+    }
+
+    // ---------- Bifurcaciones ----------
+    suspend fun derive(conversationId: String, messageId: String, kind: String, name: String?, reason: String?): String = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("messageId", JsonPrimitive(messageId)); put("kind", JsonPrimitive(kind))
+            name?.takeIf { it.isNotBlank() }?.let { put("name", JsonPrimitive(it)) }; reason?.takeIf { it.isNotBlank() }?.let { put("reason", JsonPrimitive(it)) }
+        }
+        val r = req("POST", "/conversations/$conversationId/derive", body, IdResult.serializer()); loadBootstrapInternal(); r.id
+    }
+    suspend fun returnResult(conversationId: String, summary: String): ReturnResult = withContext(dispatcher) {
+        val r = req("POST", "/conversations/$conversationId/return", buildJsonObject { put("summary", JsonPrimitive(summary)) }, ReturnResult.serializer())
+        loadBootstrapInternal(); r
+    }
+    /** Carga hacia atrás hasta tener el mensaje con ese seq (para saltar a un mensaje de origen). */
+    suspend fun ensureMessage(conversationId: String, seq: Long): Boolean {
+        openConversation(conversationId)
+        repeat(40) {
+            val c = state.value.conversations[conversationId] ?: return false
+            if (!c.loaded) return false
+            if (c.messages.any { it.seq == seq }) return true
+            if (!c.hasMore || (c.messages.firstOrNull()?.seq ?: 0) <= seq) return false
+            loadOlder(conversationId)
+        }
+        return false
+    }
+
+    // ---------- Personas y grupos ----------
+    suspend fun openDirect(userId: String): String = withContext(dispatcher) {
+        val r = req("POST", "/directs", buildJsonObject { put("userId", JsonPrimitive(userId)) }, IdResult.serializer()); loadBootstrapInternal(); r.id
+    }
+    suspend fun removeMember(conversationId: String, userId: String) = withContext(dispatcher) {
+        req("DELETE", "/conversations/$conversationId/members/$userId", null, JsonElement.serializer()); loadBootstrapInternal(); Unit
+    }
+
+    // ---------- Eliminar la cuenta ----------
+    /** DELETE /account {confirmEmail, password?}. 400: el correo no coincide · 403: contraseña incorrecta. */
+    suspend fun deleteAccount(confirmEmail: String, password: String?) = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("confirmEmail", JsonPrimitive(confirmEmail.trim().lowercase()))
+            password?.takeIf { it.isNotEmpty() }?.let { put("password", JsonPrimitive(it)) }
+        }
+        req("DELETE", "/account", body, JsonElement.serializer())
+        handleSignedOut()
+    }
+
+    // ---------- Dominios de empresa ----------
+    suspend fun listDomains(orgId: String): List<OrgDomainDTO> = withContext(dispatcher) { req("GET", "/organizations/$orgId/domains", null, DomainsPage.serializer()).domains }
+    suspend fun addDomain(orgId: String, domain: String): OrgDomainDTO = withContext(dispatcher) {
+        req("POST", "/organizations/$orgId/domains", buildJsonObject { put("domain", JsonPrimitive(domain)) }, OrgDomainDTO.serializer())
+    }
+    suspend fun verifyDomain(orgId: String, domain: String): OrgDomainDTO = withContext(dispatcher) {
+        req("POST", "/organizations/$orgId/domains/${enc(domain)}/verify", buildJsonObject {}, OrgDomainDTO.serializer()).also { runCatching { loadBootstrapInternal() } }
+    }
+
+    // ---------- WhatsApp ----------
+    suspend fun waAccounts(): WaAccountsPage = withContext(dispatcher) { req("GET", "/whatsapp/accounts", null, WaAccountsPage.serializer()) }
+    suspend fun waCreate(label: String, kind: String, pairPhone: String?): WaAccountDTO = withContext(dispatcher) {
+        req("POST", "/whatsapp/accounts", buildJsonObject {
+            put("label", JsonPrimitive(label)); put("kind", JsonPrimitive(kind)); put("pairPhone", pairPhone?.let { JsonPrimitive(it) } ?: JsonNull)
+        }, WaAccountDTO.serializer())
+    }
+    suspend fun waRelink(id: String, pairPhone: String?): WaAccountDTO = withContext(dispatcher) {
+        req("POST", "/whatsapp/accounts/$id/relink", buildJsonObject { put("pairPhone", pairPhone?.let { JsonPrimitive(it) } ?: JsonNull) }, WaAccountDTO.serializer())
+    }
+    suspend fun waRemove(id: String) = withContext(dispatcher) { req("DELETE", "/whatsapp/accounts/$id", null, JsonElement.serializer()); Unit }
+    suspend fun waChats(accountId: String?, category: String?, groups: Boolean?, hidden: Boolean, search: String?): WaChatsPage = withContext(dispatcher) {
+        req("GET", "/whatsapp/chats" + q("accountId" to accountId, "category" to category, "groups" to groups?.let { if (it) "1" else "0" }, "hidden" to if (hidden) "1" else null, "q" to search?.takeIf { it.isNotBlank() }), null, WaChatsPage.serializer())
+    }
+    suspend fun waPatchChat(c: WaChatDTO, patch: JsonObject): WaChatDTO = withContext(dispatcher) {
+        req("PATCH", "/whatsapp/chats/${c.accountId}/${enc(c.jid)}", patch, WaChatDTO.serializer())
+    }
+    suspend fun waMessages(c: WaChatDTO): List<WaMessageDTO> = withContext(dispatcher) {
+        req("GET", "/whatsapp/chats/${c.accountId}/${enc(c.jid)}/messages?limit=80", null, WaMessagesPage.serializer()).messages
+    }
+    suspend fun waOrganize(): WaOrganizeResult = withContext(dispatcher) { req("POST", "/whatsapp/organize", buildJsonObject {}, WaOrganizeResult.serializer()) }
 
     // ---------- Invitaciones ----------
     suspend fun previewInvitation(token: String): InvitationPreviewDTO = withContext(dispatcher) {
@@ -637,6 +893,9 @@ class TieComsClient(
 }
 
 private const val SSO_KEY = "sso:attempt"
+
+/** Marcador de «no cambiar» para parámetros anulables. */
+@JvmField val UNCHANGED: String = String(charArrayOf('\u0000'))
 
 internal fun upsertMessage(list: List<MessageDTO>, m: MessageDTO): List<MessageDTO> {
     val i = list.indexOfFirst { it.id == m.id }

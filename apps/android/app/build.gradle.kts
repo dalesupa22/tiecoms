@@ -31,8 +31,8 @@ android {
         applicationId = "com.tiecoms.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "DEFAULT_API_URL", "\"https://app.tiecoms.com\"")
         buildConfigField("String", "CONTRACT_VERSION", "\"2026-09-23\"")
@@ -76,6 +76,7 @@ android {
             // Integración contra el API de pruebas: el fixture llega por entorno, nunca en el código.
             it.environment("TIECOMS_FIXTURE", System.getenv("TIECOMS_FIXTURE") ?: "")
             it.environment("TIECOMS_PEER_DIR", System.getenv("TIECOMS_PEER_DIR") ?: "")
+            it.environment("TIECOMS_DELETE_API", System.getenv("TIECOMS_DELETE_API") ?: "")
             it.testLogging { events("passed", "skipped", "failed", "standardOut", "standardError"); showStandardStreams = true }
         }
     }
@@ -102,6 +103,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.androidx.browser)
+    implementation(libs.androidx.splashscreen)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
 

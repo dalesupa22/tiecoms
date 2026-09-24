@@ -39,6 +39,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -48,6 +49,20 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.ui.platform.testTag
+import com.tiecoms.app.core.DeepLinks
 import com.tiecoms.app.R
 import com.tiecoms.app.container
 import com.tiecoms.app.core.DeepLink
@@ -56,14 +71,19 @@ import kotlinx.coroutines.launch
 
 val LocalSnackbar = staticCompositionLocalOf { SnackbarHostState() }
 
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun AppRoot() {
     val container = LocalContext.current.container
     val client by container.client.collectAsStateWithLifecycle()
     val state by client.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val splash by container.splashMode.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { container.toasts.collect { snackbar.showSnackbar(it) } }
     CompositionLocalProvider(LocalClient provides client, LocalContainer provides container, LocalSnackbar provides snackbar) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        // En debug las etiquetas de prueba se exponen como resource-id (UiAutomator del test del splash).
+        val rootMod = if (com.tiecoms.app.BuildConfig.DEBUG) Modifier.semantics { testTagsAsResourceId = true } else Modifier
+        Surface(Modifier.fillMaxSize().then(rootMod), color = MaterialTheme.colorScheme.background) {
             Box(Modifier.fillMaxSize()) {
                 when (state.status) {
                     SessionStatus.LOADING -> Splash()
@@ -72,6 +92,10 @@ fun AppRoot() {
                     SessionStatus.READY -> MainNav()
                 }
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 72.dp))
+                // Splash animado sobre la app: la app carga debajo y aparece cuando el splash se aleja.
+                splash?.let { mode ->
+                    SplashOverlay(mode, ready = state.status != SessionStatus.LOADING) { container.splashMode.value = null }
+                }
             }
         }
     }
@@ -107,9 +131,10 @@ private fun Unreachable() {
 
 @Composable
 fun Logo(modifier: Modifier = Modifier) {
-    // El logo trae fondo crema: en modo oscuro va sobre una tarjeta crema redondeada.
-    Box(modifier.background(com.tiecoms.app.ui.theme.Brand.Cream, androidx.compose.foundation.shape.RoundedCornerShape(20.dp)).padding(8.dp)) {
-        Image(painterResource(R.drawable.logo_wide), contentDescription = stringResource(R.string.cd_logo), modifier = Modifier.fillMaxWidth())
+    // Wordmark transparente; en modo oscuro, la versión con tinta crema.
+    val dark = androidx.compose.foundation.isSystemInDarkTheme()
+    Box(modifier.padding(4.dp)) {
+        Image(painterResource(if (dark) R.drawable.wordmark_light else R.drawable.wordmark), contentDescription = stringResource(R.string.cd_logo), modifier = Modifier.fillMaxWidth())
     }
 }
 
@@ -146,15 +171,19 @@ private fun AuthNav() {
     }
 }
 
+private val TABS = listOf("home?ws={ws}", "issues", "agenda", "settings")
+
 @Composable
 private fun MainNav() {
     val nav = rememberNavController()
     val container = LocalContainer.current
     val client = LocalClient.current
     val ctx = LocalContext.current
-    val snackbar = LocalSnackbar.current
     val pending by container.pendingLink.collectAsStateWithLifecycle()
     val state by client.state.collectAsStateWithLifecycle()
+    val backStack by nav.currentBackStackEntryAsState()
+    val route = backStack?.destination?.route
+    val uiScope = rememberCoroutineScope()
 
     // Permiso de notificaciones (Android 13+), una sola vez.
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -167,53 +196,111 @@ private fun MainNav() {
         }
     }
 
-    // El aviso se lanza en un scope propio: al consumir el enlace cambia la clave del efecto y
-    // lo cancelaría (el snackbar se cerraría al instante).
-    val uiScope = rememberCoroutineScope()
+    fun openConv(id: String, seq: Long? = null) = nav.navigate("conv/$id" + (seq?.let { "?m=$it" } ?: "")) { launchSingleTop = true }
+    fun tab(r: String) = nav.navigate(r) { popUpTo(nav.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true }
+
+    // El aviso se lanza en un scope propio: al consumir el enlace cambia la clave del efecto y lo cancelaría.
     LaunchedEffect(pending, state.data != null) {
         val p = pending ?: return@LaunchedEffect
         val data = state.data ?: return@LaunchedEffect
         container.pendingLink.value = null
         when (p) {
             is DeepLink.Conversation ->
-                if (data.conversations.any { it.id == p.id }) nav.navigate("conv/${p.id}") { launchSingleTop = true; popUpTo(nav.graph.startDestinationId) }
-                else uiScope.launch { snackbar.showSnackbar(ctx.getString(R.string.no_access)) }
+                if (data.conversations.any { it.id == p.id }) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.id, p.seq) }
+                else uiScope.launch { container.toast(ctx.getString(R.string.no_access)) }
             is DeepLink.Workspace ->
                 if (data.workspaces.any { it.id == p.id }) nav.navigate("home?ws=${p.id}") { popUpTo(0) { inclusive = true } }
-                else uiScope.launch { snackbar.showSnackbar(ctx.getString(R.string.err_not_found)) }
+                else uiScope.launch { container.toast(ctx.getString(R.string.err_not_found)) }
             is DeepLink.Invite -> nav.navigate("invite/${p.token}") { launchSingleTop = true }
+            is DeepLink.Screen -> when (p.name) {
+                DeepLinks.SCREEN_ISSUES -> tab("issues")
+                DeepLinks.SCREEN_AGENDA -> tab("agenda")
+                DeepLinks.SCREEN_SETTINGS -> tab("settings")
+                DeepLinks.SCREEN_TRAZO -> nav.navigate("trazo") { launchSingleTop = true }
+                DeepLinks.SCREEN_WHATSAPP -> nav.navigate("whatsapp") { launchSingleTop = true }
+            }
+            is DeepLink.Share -> { container.shareDraft = p; nav.navigate("share") { launchSingleTop = true } }
             is DeepLink.Signup -> Unit
         }
     }
 
-    NavHost(nav, startDestination = "home?ws={ws}") {
-        composable("home?ws={ws}", arguments = listOf(navArgument("ws") { type = NavType.StringType; nullable = true; defaultValue = null })) {
-            HomeScreen(
-                workspaceFilter = it.arguments?.getString("ws"),
-                onClearFilter = { nav.navigate("home") { popUpTo(0) { inclusive = true } } },
-                onOpen = { id -> nav.navigate("conv/$id") { launchSingleTop = true } },
-                onSettings = { nav.navigate("settings") { launchSingleTop = true } },
-            )
-        }
-        composable("conv/{id}") {
-            val id = it.arguments?.getString("id") ?: ""
-            ConversationScreen(id = id, onBack = { if (!nav.popBackStack()) nav.navigate("home") }, onDetails = { nav.navigate("details/$id") { launchSingleTop = true } })
-        }
-        composable("details/{id}") {
-            DetailsScreen(id = it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() })
-        }
-        composable("settings") { SettingsScreen(onBack = { nav.popBackStack() }) }
-        composable("invite/{token}") {
-            InviteScreen(
-                token = it.arguments?.getString("token") ?: "",
-                signedIn = true,
-                onBack = { if (!nav.popBackStack()) nav.navigate("home") },
-                onLogin = {}, onSignup = {},
-                onJoined = { ws, conv ->
-                    if (conv != null) nav.navigate("conv/$conv") { popUpTo(nav.graph.startDestinationId) }
-                    else nav.navigate("home?ws=$ws") { popUpTo(0) { inclusive = true } }
-                },
-            )
+    Scaffold(
+        bottomBar = {
+            if (route in TABS) NavigationBar(modifier = Modifier.testTag("tabs")) {
+                val items = listOf(
+                    Triple("home?ws={ws}", R.string.nav_home, Icons.Filled.Home),
+                    Triple("issues", R.string.nav_issues, Icons.Filled.CheckCircle),
+                    Triple("agenda", R.string.nav_agenda, Icons.Filled.DateRange),
+                    Triple("settings", R.string.nav_settings, Icons.Filled.Settings),
+                )
+                items.forEach { (r, label, icon) ->
+                    NavigationBarItem(
+                        selected = route == r, onClick = { tab(if (r.startsWith("home")) "home" else r) },
+                        icon = { Icon(icon, null) }, label = { Text(stringResource(label)) },
+                        modifier = Modifier.testTag("tab-" + r.substringBefore('?')),
+                    )
+                }
+            }
+        },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+    ) { pad ->
+        NavHost(nav, startDestination = "home?ws={ws}", modifier = Modifier.padding(pad)) {
+            composable("home?ws={ws}", arguments = listOf(navArgument("ws") { type = NavType.StringType; nullable = true; defaultValue = null })) {
+                HomeScreen(
+                    workspaceFilter = it.arguments?.getString("ws"),
+                    onClearFilter = { nav.navigate("home") { popUpTo(0) { inclusive = true } } },
+                    onOpen = { id -> openConv(id) },
+                    onShortcut = { r -> nav.navigate(r) { launchSingleTop = true } },
+                )
+            }
+            composable("issues") { IssuesScreen(onOpen = { nav.navigate("issue/$it") }) }
+            composable("agenda") { AgendaScreen(onOpenEvent = { nav.navigate("event/$it") }) }
+            composable("settings") { SettingsScreen(onNavigate = { r -> nav.navigate(r) { launchSingleTop = true } }) }
+            composable("conv/{id}?m={m}", arguments = listOf(navArgument("m") { type = NavType.StringType; nullable = true; defaultValue = null })) {
+                val id = it.arguments?.getString("id") ?: ""
+                ConversationScreen(
+                    id = id, jumpSeq = it.arguments?.getString("m")?.toLongOrNull(),
+                    onBack = { if (!nav.popBackStack()) tab("home") },
+                    onDetails = { nav.navigate("details/$id") { launchSingleTop = true } },
+                    onOpenConversation = { cid, seq -> openConv(cid, seq) },
+                    onOpenIssue = { nav.navigate("issue/$it") },
+                    onOpenEvent = { nav.navigate("event/$it") },
+                    onTrazo = { nav.navigate("trazo") { launchSingleTop = true } },
+                )
+            }
+            composable("details/{id}") {
+                DetailsScreen(id = it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() },
+                    onOpenIssue = { i -> nav.navigate("issue/$i") }, onOpenEvent = { e -> nav.navigate("event/$e") },
+                    onOpenConversation = { c -> openConv(c) })
+            }
+            composable("issue/{id}") {
+                IssueDetailScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() }, onOpenOrigin = { c, seq -> openConv(c, seq) })
+            }
+            composable("event/{id}") {
+                EventDetailScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() }, onOpenChat = { c -> openConv(c) })
+            }
+            composable("reminders") { RemindersScreen(onBack = { nav.popBackStack() }, onOpen = { c, seq -> openConv(c, seq) }) }
+            composable("trazo") { TrazoScreen(onBack = { nav.popBackStack() }, onOpen = { c -> openConv(c) }) }
+            composable("whatsapp") { WhatsAppScreen(onBack = { nav.popBackStack() }, onOpenConversation = { c -> openConv(c) }) }
+            composable("share") {
+                val draft = container.shareDraft
+                ShareScreen(draft?.text ?: "", draft?.source ?: "other", onBack = { container.shareDraft = null; if (!nav.popBackStack()) tab("home") },
+                    onDone = { c -> container.shareDraft = null; nav.popBackStack(); openConv(c) })
+            }
+            composable("domains/{org}") { DomainsScreen(it.arguments?.getString("org") ?: "", onBack = { nav.popBackStack() }) }
+            composable("delete-account") { DeleteAccountScreen(onBack = { nav.popBackStack() }) }
+            composable("invite/{token}") {
+                InviteScreen(
+                    token = it.arguments?.getString("token") ?: "",
+                    signedIn = true,
+                    onBack = { if (!nav.popBackStack()) tab("home") },
+                    onLogin = {}, onSignup = {},
+                    onJoined = { ws, conv ->
+                        if (conv != null) openConv(conv)
+                        else nav.navigate("home?ws=$ws") { popUpTo(0) { inclusive = true } }
+                    },
+                )
+            }
         }
     }
 }

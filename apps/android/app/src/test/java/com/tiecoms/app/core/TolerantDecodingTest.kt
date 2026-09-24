@@ -42,8 +42,8 @@ class TolerantDecodingTest {
         assertEquals(4L, e!!.eventSeq)
     }
 
-    @Test fun `tipos desconocidos, redacted e issue updated solo avanzan el cursor`() {
-        for (type in listOf("redacted", "issue.updated", "reaction.added", "")) {
+    @Test fun `tipos desconocidos y redacted solo avanzan el cursor`() {
+        for (type in listOf("redacted", "reaction.added", "")) {
             val e = decodeConversationEvent(TcJson.parseToJsonElement("""{"type":"$type","conversationId":"c1","eventSeq":11,"issue":{"id":"i"}}"""))
             assertEquals(ConversationEvent.CursorOnly("c1", 11, type), e)
         }

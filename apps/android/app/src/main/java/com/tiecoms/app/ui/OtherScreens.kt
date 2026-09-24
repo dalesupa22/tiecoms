@@ -6,6 +6,10 @@ import android.provider.Settings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -62,21 +66,33 @@ import kotlinx.coroutines.launch
 
 // ---------- Detalles de conversación ----------
 @Composable
-fun DetailsScreen(id: String, onBack: () -> Unit) {
+fun DetailsScreen(id: String, onBack: () -> Unit, onOpenIssue: (String) -> Unit, onOpenEvent: (String) -> Unit, onOpenConversation: (String) -> Unit) {
     val client = LocalClient.current
+    val container = LocalContainer.current
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val state by client.state.collectAsStateWithLifecycle()
     val data = state.data
     val meta = data?.conversations?.firstOrNull { it.id == id }
+    var newIssue by rememberSaveable { mutableStateOf(false) }
+    var newEvent by rememberSaveable { mutableStateOf(false) }
     val title = meta?.let { Names.conversationTitle(it, data, stringResource(R.string.internal_default), stringResource(R.string.conversation)) } ?: stringResource(R.string.details)
     SimpleScaffold(title = title, onBack = onBack) {
-        if (meta == null || data == null) {
+        if (meta == null) {
             Text(stringResource(R.string.chat_not_found), Modifier.padding(24.dp))
             return@SimpleScaffold
         }
         val ws = data.workspaces.firstOrNull { it.id == meta.workspaceId }
+        val canWork = meta.canPost && meta.kind != "direct" && meta.workspaceId != null
         val people = meta.memberIds.mapNotNull { Names.person(data, it) }
             .sortedWith(compareBy({ it.guest }, { it.orgId != data.me.primaryOrgId }, { it.name }))
         val (members, guests) = people.partition { !it.guest }
+        val issues = state.issues.values.filter { it.conversationId == id && !it.closed }
+        val upcoming = state.events.values.filter { it.conversationId == id && it.cancelledAt == null && (parseInstant(it.endsAt)?.isAfter(java.time.Instant.now()) == true) }.sortedBy { it.startsAt }.take(5)
+        LaunchedEffect(id) {
+            runCatching { client.loadEvents(java.time.Instant.now().minusSeconds(3600), java.time.Instant.now().plusSeconds(60L * 86400), id) }
+            runCatching { client.loadIssues(conversationId = id) }
+        }
         LazyColumn(Modifier.fillMaxWidth().testTag("participants")) {
             item {
                 Column(Modifier.padding(16.dp)) {
@@ -95,18 +111,40 @@ fun DetailsScreen(id: String, onBack: () -> Unit) {
                     )
                 }
             }
-            item { SectionHeader("${stringResource(R.string.participants)} · ${members.size}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp).semantics { heading() }) }
-            items(members, key = { it.id }) { PersonRow(it, data) }
+            if (canWork) {
+                item {
+                    Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        SectionHeader("${stringResource(R.string.cal_upcoming)} · ${upcoming.size}", Modifier.weight(1f).semantics { heading() })
+                        TextButton(onClick = { newEvent = true }) { Text(stringResource(R.string.cal_new)) }
+                    }
+                    if (upcoming.isEmpty()) Text(stringResource(R.string.cal_no_upcoming), Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                items(upcoming, key = { "e" + it.id }) { Box(Modifier.padding(horizontal = 16.dp)) { EventRow(it, data, showConv = false, onOpen = onOpenEvent) } }
+                item {
+                    Row(Modifier.padding(horizontal = 16.dp).padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        SectionHeader("${stringResource(R.string.nav_issues)} · ${issues.size}", Modifier.weight(1f).semantics { heading() })
+                        TextButton(onClick = { newIssue = true }) { Text(stringResource(R.string.issue_new)) }
+                    }
+                    if (issues.isEmpty()) Text(stringResource(R.string.issue_no_issues), Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                items(issues, key = { "i" + it.id }) { Box(Modifier.padding(horizontal = 16.dp)) { IssueRow(it, data, showWhere = false, onOpen = onOpenIssue) } }
+            }
+            item { SectionHeader("${stringResource(R.string.participants)} · ${members.size}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp).padding(top = 8.dp).semantics { heading() }) }
+            items(members, key = { it.id }) { PersonRow(it, data, onDirect = if (it.id != data.me.id && meta.kind != "direct") ({
+                scope.launch { runCatching { client.openDirect(it.id) }.onSuccess(onOpenConversation).onFailure { e -> container.toast(errorText(ctx, e)) } }
+            }) else null) }
             if (guests.isNotEmpty()) {
                 item { SectionHeader("${stringResource(R.string.guests)} · ${guests.size}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp).semantics { heading() }) }
-                items(guests, key = { it.id }) { PersonRow(it, data) }
+                items(guests, key = { it.id }) { PersonRow(it, data, onDirect = null) }
             }
         }
+        if (newIssue) NewIssueDialog(id, null, "", onClose = { newIssue = false }, onCreated = onOpenIssue)
+        if (newEvent) EventDialog(id, onClose = { newEvent = false })
     }
 }
 
 @Composable
-private fun PersonRow(p: com.tiecoms.app.core.PersonDTO, data: com.tiecoms.app.core.BootstrapDTO) {
+private fun PersonRow(p: com.tiecoms.app.core.PersonDTO, data: com.tiecoms.app.core.BootstrapDTO, onDirect: (() -> Unit)?) {
     val org = Names.org(data, p.orgId)
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
         Avatar(p.name, parseColor(org?.colorBg, Brand.Black), parseColor(org?.colorFg, Color.White), size = 40.dp)
@@ -124,12 +162,13 @@ private fun PersonRow(p: com.tiecoms.app.core.PersonDTO, data: com.tiecoms.app.c
                 )
             }
         }
+        if (onDirect != null) TextButton(onClick = onDirect) { Text("✉ " + stringResource(R.string.common_direct_message), style = MaterialTheme.typography.labelMedium) }
     }
 }
 
 // ---------- Ajustes ----------
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(onNavigate: (String) -> Unit) {
     val client = LocalClient.current
     val container = LocalContainer.current
     val ctx = LocalContext.current
@@ -148,15 +187,26 @@ fun SettingsScreen(onBack: () -> Unit) {
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
 
-    SimpleScaffold(title = stringResource(R.string.settings), onBack = onBack) {
-        Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
+    TabScaffold(title = stringResource(R.string.nav_settings)) {
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 32.dp).testTag("settingsScreen")) {
+            val me = data?.me
+            val org = Names.org(data, me?.primaryOrgId)
             SettingsSection(stringResource(R.string.account)) {
-                val me = data?.me
-                val org = Names.org(data, me?.primaryOrgId)
                 Text(me?.name ?: "", style = MaterialTheme.typography.titleMedium)
                 me?.email?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                org?.let { Text(it.name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
+            HorizontalDivider()
+            if (org != null) {
+                NavRow(stringResource(R.string.settings_team), listOfNotNull(org.name,
+                    if (org.verification != "none") "✓ " + stringResource(R.string.org_verified, org.verifiedDomain ?: "") else null).joinToString(" · "),
+                    tag = "rowCompany") { onNavigate("domains/${org.id}") }
+                HorizontalDivider()
+            }
+            NavRow("🟢 " + stringResource(R.string.nav_whatsapp), stringResource(R.string.settings_whatsapp_hint), tag = "rowWhatsApp") { onNavigate("whatsapp") }
+            HorizontalDivider()
+            NavRow("⏰ " + stringResource(R.string.rem_title), null, tag = "rowReminders") { onNavigate("reminders") }
+            HorizontalDivider()
+            NavRow("⑂ " + stringResource(R.string.nav_trazo), null, tag = "rowTrazo") { onNavigate("trazo") }
             HorizontalDivider()
             Row(
                 Modifier.fillMaxWidth().clickable(role = Role.Switch) { sounds = !sounds; container.settings.soundsEnabled = sounds }
@@ -199,6 +249,10 @@ fun SettingsScreen(onBack: () -> Unit) {
             OutlinedButton(onClick = { confirmLogout = true }, modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth().heightIn(min = 48.dp).testTag("logout")) {
                 Text(stringResource(R.string.logout), color = MaterialTheme.colorScheme.error)
             }
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = { onNavigate("delete-account") }, modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth().heightIn(min = 48.dp).testTag("rowDelete")) {
+                Text(stringResource(R.string.del_title), color = MaterialTheme.colorScheme.error)
+            }
             Spacer(Modifier.height(24.dp))
             Text(
                 stringResource(R.string.version, BuildConfig.VERSION_NAME) + " (${BuildConfig.VERSION_CODE})",
@@ -215,6 +269,31 @@ fun SettingsScreen(onBack: () -> Unit) {
             dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text(stringResource(R.string.cancel)) } },
         )
     }
+}
+
+@Composable
+private fun NavRow(title: String, subtitle: String?, tag: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 56.dp).padding(16.dp).semantics(mergeDescendants = true) {}.testTag(tag), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun TabScaffold(title: String, content: @Composable ColumnScope.() -> Unit) {
+    androidx.compose.material3.Scaffold(
+        topBar = {
+            androidx.compose.material3.TopAppBar(
+                title = { Text(title, fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() }) },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+            )
+        },
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+    ) { pad -> Column(Modifier.padding(pad).fillMaxSize(), content = content) }
 }
 
 @Composable

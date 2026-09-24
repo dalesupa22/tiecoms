@@ -6,7 +6,7 @@ import android.media.AudioManager
 import android.media.SoundPool
 import com.tiecoms.app.R
 
-enum class Sound { SEND, RECEIVE, NOTIFY }
+enum class Sound { SEND, RECEIVE, NOTIFY, SPLASH }
 
 /**
  * Sonidos cortos de la app con SoundPool. Usa el flujo de notificaciones
@@ -32,6 +32,7 @@ class SoundPlayer(context: Context, private val settings: AppSettings) {
             Sound.SEND to pool.load(context, R.raw.tc_send, 1),
             Sound.RECEIVE to pool.load(context, R.raw.tc_receive, 1),
             Sound.NOTIFY to pool.load(context, R.raw.tc_notify, 1),
+            Sound.SPLASH to pool.load(context, R.raw.tc_splash, 1),
         )
     }
 

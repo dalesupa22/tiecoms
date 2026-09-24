@@ -29,7 +29,7 @@
         android:localeConfig="@xml/locales_config"
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
-        android:theme="@style/Theme.TieComs"
+        android:theme="@style/Theme.TieComs.Starting"
         tools:targetApi="36">
 
         <activity
@@ -55,6 +55,19 @@
                 <data android:pathPrefix="/w/" />
                 <data android:pathPrefix="/invite/" />
                 <data android:pathPrefix="/signup" />
+                <data android:pathPrefix="/asuntos" />
+                <data android:pathPrefix="/agenda" />
+                <data android:pathPrefix="/trazo" />
+                <data android:pathPrefix="/whatsapp" />
+                <data android:pathPrefix="/share" />
+                <data android:pathPrefix="/ajustes" />
+            </intent-filter>
+
+            <!-- Compartir hacia TieComs desde otras apps (texto). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
 
             <!-- Retorno del SSO (Google / Microsoft): tiecoms://auth/callback?code=… | ?error=…&message=… -->

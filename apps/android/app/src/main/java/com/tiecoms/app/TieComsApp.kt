@@ -84,6 +84,20 @@ class AppContainer(private val app: Application) {
     /** Enlace pendiente de abrir (llega sin sesión o antes de cargar el snapshot). */
     val pendingLink = MutableStateFlow<DeepLink?>(null)
 
+    /** Splash animado: solo en el arranque en frío (primera actividad del proceso). */
+    @Volatile var splashPending = true
+    val splashMode = MutableStateFlow<com.tiecoms.app.core.SplashChoreo.Mode?>(null)
+    /** Diagnóstico (pruebas): reloj de uptime al primer fotograma del splash y al terminar. */
+    @Volatile var splashStartedAt = 0L
+    @Volatile var splashEndedAt = 0L
+
+    /** Texto compartido desde otra app, a la espera de elegir conversación. */
+    @Volatile var shareDraft: DeepLink.Share? = null
+
+    /** Avisos breves (equivalente a los «toasts» de la web). */
+    val toasts = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 8)
+    fun toast(text: String) { toasts.tryEmit(text) }
+
     /** Conversación visible en pantalla (para decidir entre sonido de recepción o de aviso). */
     @Volatile var openConversationId: String? = null
 
@@ -93,6 +107,7 @@ class AppContainer(private val app: Application) {
 
     fun init() {
         notifier.ensureChannel()
+        sounds.hashCode() // precarga SoundPool: el sonido del splash debe estar listo en t = 0,3 s
         scope.launch { _client.value.start() }
         scope.launch { client.flatMapLatest { it.signals }.collect { onSignal(it) } }
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
@@ -119,8 +134,8 @@ class AppContainer(private val app: Application) {
     val sso = MutableStateFlow<SsoUi>(SsoUi.Idle)
 
     /** Abre el proveedor en Custom Tabs (nunca WebView). El verifier PKCE queda en disco. */
-    fun startSso(activity: Context, provider: SsoProvider) {
-        val url = client.value.beginSso(provider)
+    fun startSso(activity: Context, provider: SsoProvider, orgInviteToken: String? = null, orgName: String? = null) {
+        val url = client.value.beginSso(provider, orgInviteToken, orgName)
         sso.value = SsoUi.Idle
         val tabs = CustomTabsIntent.Builder()
             .setShowTitle(true)
@@ -147,7 +162,7 @@ class AppContainer(private val app: Application) {
             is SsoCallback.Error -> {
                 c.clearSso()
                 // Si la persona canceló no se muestra nada.
-                sso.value = if (cb.cancelled) SsoUi.Idle else SsoUi.Failed(cb.message ?: app.getString(R.string.err_generic))
+                sso.value = if (cb.cancelled) SsoUi.Idle else SsoUi.Failed(com.tiecoms.app.ui.ssoErrorText(app, cb.code, cb.message))
             }
         }
     }
@@ -183,6 +198,25 @@ class AppContainer(private val app: Application) {
                     if (it.kind == "direct") name else "$author · $name"
                 } ?: author
                 notifier.showMessage(m.conversationId, title, m.body.take(300), silent = fg || !settings.soundsEnabled)
+            }
+            is ClientSignal.ReminderDue -> {
+                val r = sig.reminder
+                val c = client.value
+                val conv = c.meta(r.conversationId)
+                val name = conv?.let { Names.conversationTitle(it, c.state.value.data, app.getString(R.string.internal_default), app.getString(R.string.conversation)) } ?: ""
+                if (foreground) sounds.play(Sound.NOTIFY)
+                notifier.showMessage(r.conversationId, "⏰ " + app.getString(R.string.rem_alert), listOf(r.note, name).filter { !it.isNullOrBlank() }.joinToString(" · "),
+                    silent = foreground || !settings.soundsEnabled, tag = "rem:" + r.id, seq = r.messageSeq)
+            }
+            is ClientSignal.CalendarChanged -> {
+                val ev = sig.event
+                if (foreground) sounds.play(Sound.NOTIFY)
+                val title = app.getString(when (sig.kind) { "moved" -> R.string.cal_notif_moved; "cancelled" -> R.string.cal_notif_cancelled; else -> R.string.cal_notif_created }, ev.title)
+                val whenText = runCatching {
+                    java.time.Instant.parse(ev.startsAt).atZone(java.time.ZoneId.systemDefault())
+                        .format(java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM, java.time.format.FormatStyle.SHORT))
+                }.getOrDefault("")
+                notifier.showMessage(ev.conversationId, "📅 $title", whenText, silent = foreground || !settings.soundsEnabled, tag = "cal:" + ev.id)
             }
             ClientSignal.SignedOut -> Unit
         }

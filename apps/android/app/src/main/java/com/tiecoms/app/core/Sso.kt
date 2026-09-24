@@ -45,7 +45,7 @@ sealed interface SsoCallback {
     data class Code(val code: String) : SsoCallback
     data class Error(val code: String, val message: String?) : SsoCallback {
         /** La persona cerró o rechazó el acceso: no se muestra ningún error. */
-        val cancelled: Boolean get() = code in setOf("access_denied", "cancelled", "canceled", "user_cancelled", "user_canceled")
+        val cancelled: Boolean get() = code in setOf("access_denied", "cancelled", "canceled", "user_cancelled", "user_canceled", "sso_cancelled")
     }
 }
 
@@ -53,10 +53,12 @@ object Sso {
     const val CALLBACK_HOST = "auth"
     const val CALLBACK_PATH = "/callback"
 
-    fun startUrl(baseUrl: String, provider: SsoProvider, deviceId: String, challenge: String): String {
-        fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+    /** [orgInviteToken] une a una empresa por invitación; [orgName] crea la empresa (registro). */
+    fun startUrl(baseUrl: String, provider: SsoProvider, deviceId: String, challenge: String, orgInviteToken: String? = null, orgName: String? = null): String {
+        fun enc(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
         return "${baseUrl.trimEnd('/')}$AUTH_BASE_PATH/${provider.path}/start" +
-            "?platform=$PLATFORM&device_id=${enc(deviceId)}&code_challenge=${enc(challenge)}&code_challenge_method=S256"
+            "?platform=$PLATFORM&device_id=${enc(deviceId)}&code_challenge=${enc(challenge)}&code_challenge_method=S256" +
+            (orgInviteToken?.let { "&org=${enc(it)}" } ?: "") + (orgName?.takeIf { it.isNotBlank() }?.let { "&org_name=${enc(it.trim())}" } ?: "")
     }
 
     /** tiecoms://auth/callback?code=… | ?error=…&message=… (null si no es un callback de SSO). */

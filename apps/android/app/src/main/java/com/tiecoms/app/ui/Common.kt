@@ -56,11 +56,20 @@ fun errorText(ctx: Context, e: Throwable): String = when (e) {
             "bad_request" -> R.string.err_bad_request
             "internal" -> R.string.err_internal
             "sso_expired" -> R.string.sso_expired
+            "sso_state" -> R.string.err_sso_state
+            "sso_cancelled" -> R.string.err_sso_cancelled
+            "sso_failed" -> R.string.err_sso_failed
+            "sso_unavailable" -> R.string.err_sso_unavailable
+            "sso_personal_account" -> R.string.err_sso_personal_account
+            "sso_email_unverified" -> R.string.err_sso_email_unverified
+            "account_disabled" -> R.string.err_account_disabled
+            "domain_claimed" -> R.string.err_domain_claimed
             else -> null
         }
         when {
+            key == null && !e.message.isNullOrBlank() && !e.message!!.startsWith("HTTP ") -> e.message!!
             e.code == "bad_request" -> ctx.getString(R.string.err_bad_request) + detailPaths(e)
-            key != null && isSpanish() && e.code != "unauthorized" && e.code != "sso_expired" && !e.message.isNullOrBlank() -> e.message!!
+            key != null && isSpanish() && e.code != "unauthorized" && e.code != "sso_expired" && !e.code.startsWith("sso_") && !e.message.isNullOrBlank() -> e.message!!
             key != null -> ctx.getString(key)
             else -> ctx.getString(R.string.err_generic)
         }
@@ -89,6 +98,15 @@ fun systemText(ctx: Context, body: String): String {
         "member.left" -> ctx.getString(R.string.sys_member_left, str("name"))
         "member.removed" -> ctx.getString(R.string.sys_member_removed, str("name"))
         "member.joined" -> ctx.getString(R.string.sys_member_joined, str("name"))
+        "issue.created" -> ctx.getString(R.string.sys_issue_created, str("title"))
+        "issue.closed" -> ctx.getString(R.string.sys_issue_closed, str("title"))
+        "issue.reopened" -> ctx.getString(R.string.sys_issue_reopened, str("title"))
+        "derived.here" -> ctx.getString(R.string.sys_derived_here, str("parent"), str("excerpt"))
+        "derived.from" -> ctx.getString(R.string.sys_derived_from)
+        "returned" -> ctx.getString(R.string.sys_returned)
+        "event.created" -> ctx.getString(R.string.sys_event_created, str("title"), parseInstant(str("startsAt"))?.let { whenText(it) } ?: "")
+        "event.moved" -> ctx.getString(R.string.sys_event_moved, str("title"), parseInstant(str("startsAt"))?.let { whenText(it) } ?: "")
+        "event.cancelled" -> ctx.getString(R.string.sys_event_cancelled, str("title"))
         else -> body
     }
 }
@@ -160,4 +178,11 @@ fun SectionHeader(text: String, modifier: Modifier = Modifier) {
         fontWeight = FontWeight.SemiBold,
         modifier = modifier,
     )
+}
+
+/** Texto de error para el retorno del SSO (?error=código&message=texto), como errorText({code, message}) de la web. */
+fun ssoErrorText(ctx: Context, code: String, message: String?): String {
+    val e = ApiException(400, code, message ?: "")
+    val mapped = errorText(ctx, e)
+    return if (mapped == ctx.getString(R.string.err_generic) && !message.isNullOrBlank()) message else mapped
 }

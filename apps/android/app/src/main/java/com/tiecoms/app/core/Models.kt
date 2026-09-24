@@ -57,6 +57,9 @@ data class OrganizationDTO(
     val colorBg: String = "#FF7A00",
     val colorFg: String = "#FFFFFF",
     val myRole: String? = null,
+    /** none | idp | dns */
+    val verification: String = "none",
+    val verifiedDomain: String? = null,
 )
 
 @Serializable
@@ -82,6 +85,7 @@ data class WorkspaceDTO(
     val memberIds: List<String> = emptyList(),
     val myRole: String = "member",
     val createdAt: String = "",
+    val pinnedAt: String? = null,
 )
 
 @Serializable
@@ -103,10 +107,30 @@ data class ConversationDTO(
     val canPost: Boolean = true,
     val canManage: Boolean = false,
     val historyFromSeq: Long = 0,
-    // Campos nuevos (bifurcaciones): se aceptan y se ignoran en esta versión de la interfaz.
+    /** Bifurcación: de qué conversación y mensaje se derivó. */
     val parentId: String? = null,
+    val parentMessageId: String? = null,
+    val parentMessageSeq: Long? = null,
+    /** same | internal | directive */
     val deriveKind: String? = null,
+    val deriveReason: String? = null,
+    val returnedAt: String? = null,
     val openIssues: Int = 0,
+    /** Preferencias personales. */
+    val pinnedAt: String? = null,
+    val mutedUntil: String? = null,
+) {
+    fun mutedAt(nowMs: Long): Boolean =
+        mutedUntil?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() > nowMs }.getOrDefault(false) } ?: false
+}
+
+/** whatsapp | slack | email | teams | tiecoms | other */
+@Serializable
+data class ForwardedInfo(
+    val source: String = "other",
+    val author: String? = null,
+    val sentAt: String? = null,
+    val fromConversationId: String? = null,
 )
 
 @Serializable
@@ -124,6 +148,7 @@ data class MessageDTO(
     val editedAt: String? = null,
     val deletedAt: String? = null,
     val mergedFrom: String? = null,
+    val forwarded: ForwardedInfo? = null,
 )
 
 @Serializable
@@ -203,10 +228,13 @@ data class SignupBody(
 data class RefreshBody(val refreshToken: String)
 
 @Serializable
-data class SendBody(val clientMessageId: String, val body: String, val replyTo: String? = null)
+data class SendBody(val clientMessageId: String, val body: String, val replyTo: String? = null, val forwarded: ForwardedInfo? = null)
 
 @Serializable
-data class SocketSendBody(val conversationId: String, val clientMessageId: String, val body: String, val replyTo: String? = null)
+data class SocketSendBody(
+    val conversationId: String, val clientMessageId: String, val body: String,
+    val replyTo: String? = null, val forwarded: ForwardedInfo? = null,
+)
 
 @Serializable
 data class ReadBody(val seq: Long)
@@ -218,6 +246,7 @@ data class PendingMessage(
     val conversationId: String,
     val body: String,
     val replyTo: String? = null,
+    val forwarded: ForwardedInfo? = null,
     val createdAt: String,
     val attempts: Int = 0,
     /** pending | sending | failed */
@@ -225,3 +254,142 @@ data class PendingMessage(
     val error: String? = null,
     val nextAttemptAt: Long = 0,
 )
+
+// ---------- Recordatorios, agenda, asuntos, dominios, WhatsApp ----------
+@Serializable
+data class ReminderDTO(
+    val id: String = "",
+    val conversationId: String = "",
+    val messageId: String? = null,
+    val messageSeq: Long? = null,
+    val note: String? = null,
+    val remindAt: String = "",
+    val firedAt: String? = null,
+    val doneAt: String? = null,
+)
+
+@Serializable
+data class Invitee(val userId: String = "", val rsvp: String = "pending")
+
+@Serializable
+data class CalendarEventDTO(
+    val id: String = "",
+    val workspaceId: String = "",
+    val conversationId: String = "",
+    val originMessageId: String? = null,
+    val title: String = "",
+    val description: String? = null,
+    val location: String? = null,
+    val startsAt: String = "",
+    val endsAt: String = "",
+    val timezone: String = "UTC",
+    val organizerId: String = "",
+    val invitees: List<Invitee> = emptyList(),
+    val cancelledAt: String? = null,
+    val updatedAt: String = "",
+)
+
+@Serializable
+data class IssueDTO(
+    val id: String = "",
+    val workspaceId: String = "",
+    val conversationId: String = "",
+    val originMessageId: String? = null,
+    val originMessageSeq: Long? = null,
+    val title: String = "",
+    /** open | in_progress | waiting | done | cancelled */
+    val status: String = "open",
+    val waitingOnOrgId: String? = null,
+    val ownerId: String? = null,
+    val requestedBy: String? = null,
+    val dueDate: String? = null,
+    val createdBy: String = "",
+    val createdAt: String = "",
+    val updatedAt: String = "",
+    val statusSince: String = "",
+    val closedAt: String? = null,
+    val commentCount: Int = 0,
+) {
+    val closed: Boolean get() = status == "done" || status == "cancelled"
+}
+
+@Serializable
+data class IssueEventDTO(
+    val id: Long = 0,
+    val issueId: String = "",
+    val actorId: String = "",
+    /** created | status | owner | due | title | comment | waiting */
+    val kind: String = "",
+    val payload: kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.JsonObject(emptyMap()),
+    val createdAt: String = "",
+)
+
+@Serializable data class IssueDetail(val issue: IssueDTO = IssueDTO(), val events: List<IssueEventDTO> = emptyList())
+@Serializable data class IssuesPage(val issues: List<IssueDTO> = emptyList())
+@Serializable data class RemindersPage(val reminders: List<ReminderDTO> = emptyList())
+@Serializable data class CalendarPage(val events: List<CalendarEventDTO> = emptyList())
+@Serializable data class PinsResult(val messageIds: List<String> = emptyList())
+@Serializable data class PinnedMessages(val messages: List<MessageDTO> = emptyList())
+@Serializable data class ReadResult(val lastReadSeq: Long = 0)
+@Serializable data class IdResult(val id: String = "")
+@Serializable data class ReturnResult(val parentId: String = "", val messageId: String = "")
+
+@Serializable
+data class OrgDomainDTO(
+    val domain: String = "",
+    /** pending | idp | dns */
+    val status: String = "pending",
+    val txtName: String = "",
+    val txtValue: String = "",
+    val verifiedAt: String? = null,
+    val lastCheckedAt: String? = null,
+)
+@Serializable data class DomainsPage(val domains: List<OrgDomainDTO> = emptyList())
+
+@Serializable
+data class WaAccountDTO(
+    val id: String = "",
+    val label: String = "",
+    /** personal | business */
+    val kind: String = "personal",
+    /** pending | qr | connected | reconnecting | expired | logged_out | error */
+    val status: String = "pending",
+    val phone: String? = null,
+    val pushName: String? = null,
+    val platform: String? = null,
+    val qr: String? = null,
+    val pairingCode: String? = null,
+    val lastError: String? = null,
+    val connectedAt: String? = null,
+    val lastSyncAt: String? = null,
+    val chats: Int = 0,
+    val groups: Int = 0,
+    val createdAt: String = "",
+)
+@Serializable data class WaAccountsPage(val accounts: List<WaAccountDTO> = emptyList(), val max: Int = 5)
+
+@Serializable
+data class WaChatDTO(
+    val accountId: String = "",
+    val accountLabel: String = "",
+    val accountKind: String = "personal",
+    val jid: String = "",
+    val name: String = "",
+    val isGroup: Boolean = false,
+    val participants: Int? = null,
+    val description: String? = null,
+    val lastMessageAt: String? = null,
+    val lastPreview: String? = null,
+    val unread: Int = 0,
+    val category: String = "otros",
+    val categoryManual: Boolean = false,
+    val pinned: Boolean = false,
+    val hidden: Boolean = false,
+    val archivedInWhatsApp: Boolean = false,
+    val linkedConversationId: String? = null,
+)
+@Serializable data class WaCount(val total: Int = 0, val unread: Int = 0)
+@Serializable data class WaChatsPage(val chats: List<WaChatDTO> = emptyList(), val categories: Map<String, WaCount> = emptyMap())
+@Serializable data class WaMessageDTO(val id: String = "", val fromMe: Boolean = false, val author: String? = null, val kind: String = "text", val body: String = "", val sentAt: String = "")
+@Serializable data class WaMessagesPage(val messages: List<WaMessageDTO> = emptyList())
+@Serializable data class WaOrganizeResult(val reviewed: Int = 0, val changed: Int = 0)

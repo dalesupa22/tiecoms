@@ -5,15 +5,29 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.tiecoms.app.core.DeepLink
 import com.tiecoms.app.core.DeepLinks
+import com.tiecoms.app.core.SplashChoreo
 import com.tiecoms.app.core.Sso
 import com.tiecoms.app.ui.AppRoot
 import com.tiecoms.app.ui.theme.TieComsTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Splash del sistema (crema con el TC) → splash animado en Compose, con un fundido rápido.
+        val system = installSplashScreen()
         super.onCreate(savedInstanceState)
+        system.setOnExitAnimationListener { v ->
+            v.view.animate().alpha(0f).setDuration(150).withEndAction { v.remove() }.start()
+        }
         enableEdgeToEdge()
+        // Arranque en frío: primera actividad del proceso. Con un enlace se muestra la versión corta.
+        if (savedInstanceState == null && container.splashPending) {
+            container.splashPending = false
+            val linked = intent?.action == Intent.ACTION_VIEW || intent?.action == Intent.ACTION_SEND
+            container.splashMode.value = if (linked) SplashChoreo.Mode.SHORT else SplashChoreo.Mode.FULL
+        }
         // Tras una rotación el intent es el mismo: no se vuelve a abrir el enlace.
         if (savedInstanceState == null) handleIntent(intent)
         setContent { TieComsTheme { AppRoot() } }
@@ -29,6 +43,11 @@ class MainActivity : ComponentActivity() {
         intent ?: return
         // Solo debug: `adb shell am start -n com.tiecoms.app/.MainActivity -e apiUrl http://10.0.2.2:3021`
         if (BuildConfig.DEBUG) intent.getStringExtra("apiUrl")?.let { container.setDebugApiUrl(it) }
+        if (intent.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true) {
+            val text = listOfNotNull(intent.getStringExtra(Intent.EXTRA_SUBJECT), intent.getStringExtra(Intent.EXTRA_TEXT)).joinToString("\n").trim()
+            container.pendingLink.value = DeepLink.Share(text, DeepLinks.sourceForPackage(referrer?.host))
+            return
+        }
         if (intent.action == Intent.ACTION_VIEW) {
             val data = intent.dataString
             // tiecoms://auth/callback es el retorno del SSO, no un destino de navegación.

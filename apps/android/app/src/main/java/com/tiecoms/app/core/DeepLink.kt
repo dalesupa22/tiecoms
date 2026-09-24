@@ -5,15 +5,37 @@ import java.net.URLDecoder
 
 /** Destinos que la app sabe abrir desde un enlace (https o tiecoms://). */
 sealed interface DeepLink {
-    data class Conversation(val id: String) : DeepLink
+    /** [seq]: salta a ese mensaje (?m=seq). */
+    data class Conversation(val id: String, val seq: Long? = null) : DeepLink
     data class Workspace(val id: String) : DeepLink
     data class Invite(val token: String) : DeepLink
     data class Signup(val orgToken: String?) : DeepLink
+    /** Pantallas principales: asuntos, agenda, trazo, whatsapp, ajustes, recordatorios. */
+    data class Screen(val name: String) : DeepLink
+    /** Texto que llega desde «Compartir» del sistema (o /share?text=). source: whatsapp|slack|email|teams|other */
+    data class Share(val text: String, val source: String = "other") : DeepLink
 }
 
 object DeepLinks {
     val HOSTS = setOf("app.tiecoms.com", "tiecoms.com", "www.tiecoms.com")
     const val SCHEME = "tiecoms"
+    const val SCREEN_ISSUES = "issues"
+    const val SCREEN_AGENDA = "agenda"
+    const val SCREEN_TRAZO = "trazo"
+    const val SCREEN_WHATSAPP = "whatsapp"
+    const val SCREEN_SETTINGS = "settings"
+
+    /** Origen probable según la app que comparte (paquete del referrer). */
+    fun sourceForPackage(pkg: String?): String {
+        val p = pkg?.lowercase() ?: return "other"
+        return when {
+            p.startsWith("com.whatsapp") -> "whatsapp"
+            p.startsWith("com.slack") -> "slack"
+            p.startsWith("com.microsoft.teams") -> "teams"
+            p.startsWith("com.google.android.gm") || p.startsWith("com.microsoft.office.outlook") || p.contains("mail") -> "email"
+            else -> "other"
+        }
+    }
     private val ID = Regex("^[A-Za-z0-9_-]{1,200}$")
 
     /**
@@ -38,10 +60,16 @@ object DeepLinks {
         val head = segments.firstOrNull()?.lowercase() ?: return null
         val arg = segments.getOrNull(1)?.takeIf { ID.matches(it) }
         return when (head) {
-            "c" -> arg?.let { DeepLink.Conversation(it) }
+            "c" -> arg?.let { DeepLink.Conversation(it, query["m"]?.toLongOrNull()?.takeIf { s -> s > 0 }) }
             "w" -> arg?.let { DeepLink.Workspace(it) }
             "invite" -> arg?.let { DeepLink.Invite(it) }
             "signup" -> DeepLink.Signup(query["org"]?.takeIf { ID.matches(it) })
+            "asuntos" -> DeepLink.Screen(SCREEN_ISSUES)
+            "agenda" -> DeepLink.Screen(SCREEN_AGENDA)
+            "trazo" -> DeepLink.Screen(SCREEN_TRAZO)
+            "whatsapp" -> DeepLink.Screen(SCREEN_WHATSAPP)
+            "ajustes" -> DeepLink.Screen(SCREEN_SETTINGS)
+            "share" -> DeepLink.Share(listOfNotNull(query["title"], query["text"], query["url"]).joinToString("\n").trim())
             else -> null
         }
     }

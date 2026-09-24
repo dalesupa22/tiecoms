@@ -159,7 +159,7 @@ fun LoginScreen(onSignup: () -> Unit) {
         ErrorText(ssoError)
         Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             HorizontalDivider(Modifier.weight(1f))
-            Text(stringResource(R.string.or), Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.auth_or_email), Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             HorizontalDivider(Modifier.weight(1f))
         }
         OutlinedTextField(
@@ -186,7 +186,7 @@ fun LoginScreen(onSignup: () -> Unit) {
 }
 
 @Composable
-private fun SsoButton(label: String, mark: String, enabled: Boolean, tag: String, onClick: () -> Unit) {
+fun SsoButton(label: String, mark: String, enabled: Boolean, tag: String, onClick: () -> Unit) {
     OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag(tag)) {
         // Marca simple (no el logotipo del proveedor): decorativa para lectores de pantalla.
         Text(mark, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clearAndSetSemantics {})
@@ -280,6 +280,28 @@ fun SignupScreen(orgToken: String?, onLogin: () -> Unit) {
         }
         val fieldMod = Modifier.fillMaxWidth()
         val next = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) })
+        // En las apps el SSO va por el navegador del sistema. Para crear empresa hace falta su nombre.
+        val container = LocalContainer.current
+        val sso by container.sso.collectAsStateWithLifecycle()
+        fun ssoSignup(p: SsoProvider) {
+            if (!joining && company.isBlank()) { error = ctx.getString(R.string.auth_sso_needs_company); return }
+            error = null
+            container.startSso(ctx, p, orgInviteToken = if (joining) orgToken else null, orgName = if (joining) null else company.trim())
+        }
+        if (!joining) {
+            OutlinedTextField(company, { company = it }, label = { Text(stringResource(R.string.company)) }, singleLine = true, modifier = fieldMod.testTag("company"),
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next), keyboardActions = next)
+            Spacer(Modifier.height(10.dp))
+        }
+        SsoButton(stringResource(R.string.sso_google), "G", enabled = !busy, tag = "ssoGoogleSignup") { ssoSignup(SsoProvider.GOOGLE) }
+        Spacer(Modifier.height(8.dp))
+        SsoButton(stringResource(R.string.sso_microsoft), "M", enabled = !busy, tag = "ssoMicrosoftSignup") { ssoSignup(SsoProvider.MICROSOFT) }
+        ErrorText((sso as? com.tiecoms.app.AppContainer.SsoUi.Failed)?.message)
+        Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            HorizontalDivider(Modifier.weight(1f))
+            Text(stringResource(R.string.auth_or_email), Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            HorizontalDivider(Modifier.weight(1f))
+        }
         OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.name)) }, singleLine = true, modifier = fieldMod.testTag("name"),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next), keyboardActions = next)
         Spacer(Modifier.height(10.dp))
@@ -288,11 +310,6 @@ fun SignupScreen(orgToken: String?, onLogin: () -> Unit) {
         Spacer(Modifier.height(10.dp))
         PasswordField(password, { password = it }, stringResource(R.string.password), ImeAction.Next, { focus.moveFocus(FocusDirection.Down) }, stringResource(R.string.password_hint))
         Spacer(Modifier.height(6.dp))
-        if (!joining) {
-            OutlinedTextField(company, { company = it }, label = { Text(stringResource(R.string.company)) }, singleLine = true, modifier = fieldMod.testTag("company"),
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next), keyboardActions = next)
-            Spacer(Modifier.height(10.dp))
-        }
         OutlinedTextField(title, { title = it }, label = { Text(stringResource(R.string.role_title)) }, singleLine = true, modifier = fieldMod.testTag("title"),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { submit() }))

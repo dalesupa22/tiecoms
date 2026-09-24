@@ -50,11 +50,13 @@ class Notifier(private val context: Context) {
     }
 
     /** [silent]: con la app abierta el sonido lo pone SoundPool (o está desactivado en Ajustes). */
-    fun showMessage(conversationId: String, title: String, text: String, silent: Boolean) {
+    /** [tag]: identifica la notificación (por defecto, la conversación); [seq]: salta a ese mensaje al tocarla. */
+    fun showMessage(conversationId: String, title: String, text: String, silent: Boolean, tag: String = conversationId, seq: Long? = null) {
         if (!enabled()) return
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("tiecoms://c/$conversationId"), context, MainActivity::class.java)
+        val uri = "tiecoms://c/$conversationId" + (seq?.let { "?m=$it" } ?: "")
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri), context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        val pi = PendingIntent.getActivity(context, conversationId.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val pi = PendingIntent.getActivity(context, tag.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_tiecoms)
             .setColor(0xFFFF7A00.toInt())
@@ -68,7 +70,7 @@ class Notifier(private val context: Context) {
             .setContentIntent(pi)
             .build()
         try {
-            NotificationManagerCompat.from(context).notify(conversationId.hashCode(), n)
+            NotificationManagerCompat.from(context).notify(tag.hashCode(), n)
         } catch (e: SecurityException) {
             Log.w("TieComs", "Sin permiso de notificaciones")
         }

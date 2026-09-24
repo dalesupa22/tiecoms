@@ -45,6 +45,15 @@ final class ChatFlowUITests: XCTestCase {
         }
     }
 
+    /// iOS puede pedir confirmación ("¿Abrir en TieComs?") al abrir un esquema propio.
+    private func confirmOpenIfAsked() {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for label in ["Abrir", "Open"] {
+            let b = springboard.buttons[label]
+            if b.waitForExistence(timeout: 2) { b.tap(); return }
+        }
+    }
+
     private func element(_ app: XCUIApplication, containing text: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
@@ -90,7 +99,10 @@ final class ChatFlowUITests: XCTestCase {
         // 4. Volver a Inicio y abrir el deep link del esquema propio
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        app.open(URL(string: "tiecoms://c/\(f.conversationId)")!)
+        // Por el sistema (como un enlace tocado en otra app): XCUIApplication.open relanzaría la app
+        // con -TCResetSession y perdería la sesión.
+        XCUIDevice.shared.system.open(URL(string: "tiecoms://c/\(f.conversationId)")!)
+        confirmOpenIfAsked()
         XCTAssertTrue(app.descendants(matching: .any)["composer.field"].waitForExistence(timeout: 10), "tiecoms://c/<id> abre la conversación")
         shot(app, "04-deeplink-esquema")
 
@@ -98,6 +110,7 @@ final class ChatFlowUITests: XCTestCase {
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         XCUIDevice.shared.system.open(URL(string: "https://app.tiecoms.com/c/\(f.conversationId)")!)
+        confirmOpenIfAsked()
         sleep(4)
         let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
         let inApp = app.state == .runningForeground && app.descendants(matching: .any)["composer.field"].exists

@@ -108,10 +108,11 @@ struct LoginView: View {
                     .buttonStyle(PrimaryButtonStyle())
                     .disabled(busy || email.isEmpty || password.isEmpty)
                     .accessibilityIdentifier("login.submit")
-                HStack(spacing: 4) {
-                    Text(L("auth.noAccount")).foregroundStyle(Theme.textSecondary)
+                VStack(spacing: 4) {
+                    Text(L("auth.noAccount")).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
                     Button(L("auth.createAccount")) { store.signupOrgToken = nil; store.showSignup = true }
                         .fontWeight(.semibold)
+                        .frame(minHeight: 44)
                         .accessibilityIdentifier("login.createAccount")
                 }
                 .font(.subheadline)

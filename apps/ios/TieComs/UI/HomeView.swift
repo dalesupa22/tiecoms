@@ -111,10 +111,6 @@ struct ConversationRow: View {
             icon
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
-                    if c.kind == .internal {
-                        Image(systemName: "lock.fill").font(.caption).foregroundStyle(Theme.textSecondary)
-                            .accessibilityLabel(L("kind.internalShort"))
-                    }
                     Text(title).font(.body.weight(c.unread > 0 ? .semibold : .regular)).foregroundStyle(Theme.textPrimary).lineLimit(1)
                     Spacer(minLength: 6)
                     Text(time).font(.caption).foregroundStyle(c.unread > 0 ? Theme.accentText : Theme.textSecondary)

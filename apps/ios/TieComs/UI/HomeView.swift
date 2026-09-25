@@ -88,7 +88,7 @@ struct HomeView: View {
                 .overlay {
                     if tree.isEmpty && searching { ContentUnavailableView.search(text: query) }
                     else if tree.isEmpty && tab != .all {
-                        ContentUnavailableView(L("home.tab.empty"), systemImage: "checkmark.seal", description: Text(L("home.tab.emptyBody")))
+                        ContentUnavailableView(L("home.empty.\(tab.rawValue)"), systemImage: tab == .unread ? "checkmark.seal" : "tray")
                             .accessibilityIdentifier("home.tab.emptyState")
                     }
                 }

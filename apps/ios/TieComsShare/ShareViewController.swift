@@ -71,7 +71,7 @@ final class ShareModel {
     func toggle(_ id: String) {
         if let i = selected.firstIndex(of: id) { selected.remove(at: i) }
         else if selected.count < AttachmentRules.maxShareTargets { selected.append(id) }
-        else { error = L("shareX.maxTargets", ["n": AttachmentRules.maxShareTargets]) }
+        else { error = L("share.max5") }
     }
 
     func loadInput() async {
@@ -173,24 +173,24 @@ struct ShareExtensionView: View {
                 if !model.hasSession {
                     VStack(spacing: 16) {
                         Image(systemName: "person.crop.circle.badge.exclamationmark").font(.system(size: 48)).foregroundStyle(orange)
-                        Text(L("shareX.signIn")).font(.headline).multilineTextAlignment(.center)
-                        Button(L("shareX.openApp")) { model.openApp() }.buttonStyle(.borderedProminent).tint(orange)
+                        Text(L("share.signIn")).font(.headline).multilineTextAlignment(.center)
+                        Button(L("share.openApp")) { model.openApp() }.buttonStyle(.borderedProminent).tint(orange)
                             .accessibilityIdentifier("share.openApp")
                     }
                     .padding(32)
                 } else if model.sentCount > 0 && !model.sending {
-                    ContentUnavailableView(L("shareX.sent", ["n": model.sentCount]), systemImage: "checkmark.circle.fill")
+                    ContentUnavailableView(model.sentCount == 1 ? L("share.sentOne") : L("share.sentMany", ["n": model.sentCount]), systemImage: "checkmark.circle.fill")
                 } else {
                     content
                 }
             }
-            .navigationTitle(L("share.title"))
+            .navigationTitle(L("share.header"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { model.cancel() }.disabled(model.sending) }
                 ToolbarItem(placement: .confirmationAction) {
                     if model.sending { ProgressView() } else if model.hasSession {
-                        Button(L("chat.send")) { Task { await model.send() } }.bold().disabled(!model.canSend).accessibilityIdentifier("share.send")
+                        Button(model.selected.count > 1 ? L("share.sendTo", ["n": model.selected.count]) : L("share.send")) { Task { await model.send() } }.bold().disabled(!model.canSend).accessibilityIdentifier("share.send")
                     }
                 }
             }
@@ -210,7 +210,7 @@ struct ShareExtensionView: View {
                 }
                 if !model.text.isEmpty { Text(String(model.text.prefix(300))).font(.subheadline).italic().lineLimit(4) }
                 ForEach(model.problems, id: \.self) { Text($0).font(.footnote).foregroundStyle(.red) }
-                TextField(L("shareX.addMessage"), text: $model.comment, axis: .vertical).lineLimit(1...4).accessibilityIdentifier("share.comment")
+                TextField(L("share.addMessage"), text: $model.comment, axis: .vertical).lineLimit(1...4).accessibilityIdentifier("share.comment")
             }
             if let e = model.error { Section { Text(e).foregroundStyle(.red).font(.footnote) } }
             if !model.selected.isEmpty {

@@ -787,45 +787,13 @@
   "Laterales",
   "Side"
  ],
- "home.tab.empty": [
-  "Estás al día 🎉",
-  "You are all caught up 🎉"
- ],
- "home.tab.emptyBody": [
-  "No hay nada aquí por ahora.",
-  "Nothing here for now."
- ],
- "shareX.signIn": [
-  "Inicia sesión en TieComs para compartir",
-  "Sign in to TieComs to share"
- ],
- "shareX.openApp": [
-  "Abrir TieComs",
-  "Open TieComs"
- ],
- "shareX.addMessage": [
-  "Añadir un mensaje…",
-  "Add a message…"
- ],
  "shareX.suggested": [
   "Sugerida",
   "Suggested"
  ],
- "shareX.recent": [
-  "Recientes",
-  "Recent"
- ],
  "shareX.selected": [
   "{n} de {max} conversaciones",
   "{n} of {max} conversations"
- ],
- "shareX.maxTargets": [
-  "Puedes enviar a {n} conversaciones a la vez.",
-  "You can send to {n} conversations at once."
- ],
- "shareX.sent": [
-  "Enviado a {n} conversaciones",
-  "Sent to {n} conversations"
  ],
  "att.tooBig": [
   "«{name}» pesa más de 25 MB.",

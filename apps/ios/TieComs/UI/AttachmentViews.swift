@@ -120,6 +120,8 @@ struct AttachmentsBlock: View {
                 .accessibilityIdentifier("att.media.\(a.id)")
             }
         }
+        // LazyVGrid ocupa todo el ancho disponible: se fija al de las fotos para que la burbuja se ciña.
+        .frame(width: CGFloat(cols) * side + CGFloat(cols - 1) * 4)
     }
 
     private func aspect(_ a: AttachmentDTO) -> CGFloat {

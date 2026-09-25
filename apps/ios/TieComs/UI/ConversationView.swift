@@ -732,10 +732,12 @@ struct MessageBubble: View {
                     .foregroundStyle(mine ? Color.white : Theme.textPrimary)
                     .tint(mine ? Color.white : Theme.accentText)
                     .textSelection(.enabled)
+                    // Con fotos la burbuja se ciñe a ellas; el texto conserva su margen.
+                    .padding(.horizontal, attachments.isEmpty ? 0 : 9).padding(.bottom, attachments.isEmpty ? 0 : 4)
                     }
                     if let linkPreview { LinkPreviewCard(preview: linkPreview, mine: mine) }
                 }
-                .padding(.horizontal, 13).padding(.vertical, 8)
+                .padding(.horizontal, attachments.isEmpty ? 13 : 4).padding(.vertical, attachments.isEmpty ? 8 : 4)
                 .background(
                     RoundedRectangle(cornerRadius: 18)
                         .fill(mine ? Theme.bubbleMine : Theme.bubbleOther)

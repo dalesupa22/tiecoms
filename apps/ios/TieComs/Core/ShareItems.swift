@@ -101,7 +101,7 @@ enum ShareSections {
         if let s = suggested, let t = list.first(where: { $0.id == s }) { out.append((L("shareX.suggested"), [t])); used.insert(s) }
         if q.isEmpty {
             let recent = byRecent.filter { !used.contains($0.id) }.prefix(recentCount)
-            if !recent.isEmpty { out.append((L("shareX.recent"), Array(recent))); used.formUnion(recent.map(\.id)) }
+            if !recent.isEmpty { out.append((L("share.recent"), Array(recent))); used.formUnion(recent.map(\.id)) }
         }
         var groups: [String: [ShareTargets.Target]] = [:]
         var order: [String] = []

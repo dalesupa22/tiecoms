@@ -154,7 +154,7 @@ const es = {
   'imp.action': 'Traer desde WhatsApp, Slack o correo', 'imp.title': 'Traer a TieComs', 'imp.body': 'Pega lo que copiaste de WhatsApp, Slack, un correo u otra app. Queda marcado con su origen y su autor original.',
   'imp.source': 'Desde', 'imp.paste': 'Pega aquí el mensaje, el hilo o el correo', 'imp.author': 'Autor original (opcional)', 'imp.detected': 'Detecté {n} mensajes de WhatsApp',
   'imp.asMany': 'Traerlos como {n} mensajes separados', 'imp.asOne': 'Traerlo como un solo mensaje', 'imp.send': 'Traer', 'imp.subject': 'Asunto: {s}',
-  'share.title': 'Compartir en TieComs', 'share.body': 'Elige dónde publicar lo que compartiste.', 'share.empty': 'No llegó texto para compartir.',
+  'share.title': 'Compartir en TieComs', 'share.body': 'Elige dónde publicar lo que compartiste.', 'share.empty': 'No llegó nada para compartir.',
   // Recordatorios
   'rem.title': 'Recordatorios', 'rem.due': 'Ahora', 'rem.upcoming': 'Próximos', 'rem.empty': 'Sin recordatorios pendientes.', 'rem.done': 'Hecho', 'rem.snooze': 'Posponer 1 h',
   'rem.open': 'Abrir', 'rem.custom': 'Recordarme', 'rem.when': 'Cuándo', 'rem.note': 'Nota (opcional)', 'rem.save': 'Guardar recordatorio', 'rem.about': 'Sobre «{name}»',
@@ -280,6 +280,20 @@ const es = {
   'push.markRead': 'Marcar como leído', 'push.newMessage': 'Mensaje nuevo', 'push.reminder': 'Recordatorio', 'push.newMeeting': 'Nueva reunión',
   'push.channelMessages': 'Mensajes', 'push.channelMessagesDesc': 'Mensajes nuevos de tus conversaciones',
   'push.channelReminders': 'Recordatorios', 'push.channelRemindersDesc': 'Recordatorios que pediste', 'push.channelEvents': 'Reuniones', 'push.channelEventsDesc': 'Convocatorias a reuniones',
+  // ---------- SPEC v4: adjuntos, compartir y pestañas de Inicio ----------
+  'att.photo': '📷 Foto', 'att.photos': '📷 {n} fotos', 'att.video': '🎬 Video', 'att.videos': '🎬 {n} videos', 'att.media': '🖼 {n} fotos y videos',
+  'att.file': '📎 {name}', 'att.files': '📎 {n} archivos', 'att.add': 'Adjuntar', 'att.fromPhotos': 'Fotos y videos', 'att.fromCamera': 'Cámara', 'att.fromFiles': 'Archivos',
+  'att.drop': 'Suelta aquí para adjuntar', 'att.uploading': 'Subiendo…', 'att.uploadingN': 'Subiendo {i} de {n}…', 'att.failed': 'No se pudo subir «{name}»',
+  'att.tooBig': '«{name}» pesa más de 25 MB', 'att.max': 'Máximo 10 adjuntos por mensaje', 'att.remove': 'Quitar adjunto', 'att.retry': 'Reintentar',
+  'att.download': 'Descargar', 'att.open': 'Abrir', 'att.more': '+{n}', 'att.viewer': 'Foto', 'att.prev': 'Anterior', 'att.next': 'Siguiente',
+  'att.unavailable': 'Adjunto no disponible', 'att.outOfHistory': 'Este adjunto está fuera de tu historial', 'att.count': '{i} de {n}',
+  'home.tab.all': 'Todo', 'home.tab.unread': 'No leídos', 'home.tab.issues': 'Asuntos', 'home.tab.chats': 'Chats', 'home.tab.sides': 'Laterales',
+  'home.empty.unread': 'Estás al día 🎉', 'home.empty.issues': 'No hay conversaciones con asuntos abiertos.', 'home.empty.chats': 'Aún no tienes chats.',
+  'common.youShort': 'Tú', 'home.empty.sides': 'Aún no hay conversaciones laterales.', 'home.empty.all': 'Aún no tienes conversaciones.', 'home.filters': 'Filtros',
+  'share.header': 'Compartir en TieComs', 'share.addMessage': 'Añadir un mensaje…', 'share.send': 'Enviar', 'share.sendTo': 'Enviar a {n}',
+  'share.max5': 'Puedes enviar a 5 conversaciones como máximo.', 'share.signIn': 'Inicia sesión en TieComs para compartir', 'share.openApp': 'Abrir TieComs',
+  'share.sentOne': 'Compartido', 'share.sentMany': 'Compartido en {n} conversaciones', 'share.progress': 'Enviando {i} de {n}…', 'share.recent': 'Recientes',
+  'share.items': '{n} elementos', 'share.item': '1 elemento', 'share.failed': 'No se pudo compartir', 'share.pick': 'Elige hasta 5 conversaciones',
 };
 
 type Key = keyof typeof es;
@@ -412,7 +426,7 @@ const en: Record<Key, string> = {
   'imp.action': 'Bring in from WhatsApp, Slack or email', 'imp.title': 'Bring into TieComs', 'imp.body': 'Paste what you copied from WhatsApp, Slack, an email or another app. It keeps its source and original author.',
   'imp.source': 'From', 'imp.paste': 'Paste the message, thread or email here', 'imp.author': 'Original author (optional)', 'imp.detected': 'Detected {n} WhatsApp messages',
   'imp.asMany': 'Bring them as {n} separate messages', 'imp.asOne': 'Bring it as a single message', 'imp.send': 'Bring in', 'imp.subject': 'Subject: {s}',
-  'share.title': 'Share to TieComs', 'share.body': 'Choose where to post what you shared.', 'share.empty': 'No text arrived to share.',
+  'share.title': 'Share to TieComs', 'share.body': 'Choose where to post what you shared.', 'share.empty': 'Nothing arrived to share.',
   'rem.title': 'Reminders', 'rem.due': 'Now', 'rem.upcoming': 'Upcoming', 'rem.empty': 'No pending reminders.', 'rem.done': 'Done', 'rem.snooze': 'Snooze 1 h',
   'rem.open': 'Open', 'rem.custom': 'Remind me', 'rem.when': 'When', 'rem.note': 'Note (optional)', 'rem.save': 'Save reminder', 'rem.about': 'About “{name}”',
   'rem.alert': 'Reminder', 'notif.enable': 'Turn on browser notifications', 'notif.on': 'Notifications are on in this browser', 'notif.blocked': 'The browser blocked notifications',
@@ -531,6 +545,20 @@ const en: Record<Key, string> = {
   'push.markRead': 'Mark as read', 'push.newMessage': 'New message', 'push.reminder': 'Reminder', 'push.newMeeting': 'New meeting',
   'push.channelMessages': 'Messages', 'push.channelMessagesDesc': 'New messages in your conversations',
   'push.channelReminders': 'Reminders', 'push.channelRemindersDesc': 'Reminders you asked for', 'push.channelEvents': 'Meetings', 'push.channelEventsDesc': 'Meeting invitations',
+  // ---------- SPEC v4: attachments, sharing and Home tabs ----------
+  'att.photo': '📷 Photo', 'att.photos': '📷 {n} photos', 'att.video': '🎬 Video', 'att.videos': '🎬 {n} videos', 'att.media': '🖼 {n} photos and videos',
+  'att.file': '📎 {name}', 'att.files': '📎 {n} files', 'att.add': 'Attach', 'att.fromPhotos': 'Photos and videos', 'att.fromCamera': 'Camera', 'att.fromFiles': 'Files',
+  'att.drop': 'Drop here to attach', 'att.uploading': 'Uploading…', 'att.uploadingN': 'Uploading {i} of {n}…', 'att.failed': 'Could not upload “{name}”',
+  'att.tooBig': '“{name}” is larger than 25 MB', 'att.max': 'Up to 10 attachments per message', 'att.remove': 'Remove attachment', 'att.retry': 'Retry',
+  'att.download': 'Download', 'att.open': 'Open', 'att.more': '+{n}', 'att.viewer': 'Photo', 'att.prev': 'Previous', 'att.next': 'Next',
+  'att.unavailable': 'Attachment not available', 'att.outOfHistory': 'This attachment is outside your history', 'att.count': '{i} of {n}',
+  'home.tab.all': 'All', 'home.tab.unread': 'Unread', 'home.tab.issues': 'Issues', 'home.tab.chats': 'Chats', 'home.tab.sides': 'Side',
+  'home.empty.unread': 'You are all caught up 🎉', 'home.empty.issues': 'No conversations with open issues.', 'home.empty.chats': 'You have no chats yet.',
+  'common.youShort': 'You', 'home.empty.sides': 'No side conversations yet.', 'home.empty.all': 'You have no conversations yet.', 'home.filters': 'Filters',
+  'share.header': 'Share to TieComs', 'share.addMessage': 'Add a message…', 'share.send': 'Send', 'share.sendTo': 'Send to {n}',
+  'share.max5': 'You can send to up to 5 conversations.', 'share.signIn': 'Sign in to TieComs to share', 'share.openApp': 'Open TieComs',
+  'share.sentOne': 'Shared', 'share.sentMany': 'Shared to {n} conversations', 'share.progress': 'Sending {i} of {n}…', 'share.recent': 'Recent',
+  'share.items': '{n} items', 'share.item': '1 item', 'share.failed': 'Could not share', 'share.pick': 'Pick up to 5 conversations',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };
@@ -599,4 +627,12 @@ export function systemText(body: string): string {
     if (p.startsAt) p.when = new Date(p.startsAt).toLocaleString(locale(), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
     return key in es ? t(key, p) : body;
   } catch { return body; }
+}
+
+/** «📷 3 fotos», «🎬 Video», «📎 contrato.pdf» a partir del resumen del API. */
+export function attachmentSummaryText(a: { count: number; images: number; videos: number; files: number; firstName: string | null }): string {
+  if (a.images === a.count) return a.count === 1 ? t('att.photo') : t('att.photos', { n: a.count });
+  if (a.videos === a.count) return a.count === 1 ? t('att.video') : t('att.videos', { n: a.count });
+  if (a.images + a.videos === a.count) return t('att.media', { n: a.count });
+  return a.count === 1 ? t('att.file', { name: a.firstName ?? '' }) : t('att.files', { n: a.count });
 }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { BootstrapDTO, ConversationDTO, LinkPreviewDTO, MessageDTO, PersonDTO } from '@tiecoms/contracts';
 import { apiUrl, client, useClient } from '../app-client.ts';
-import { errorText, t } from '../i18n.ts';
+import { attachmentSummaryText, errorText, t } from '../i18n.ts';
 import { toast } from '../menu.tsx';
 import { navigate } from '../router.ts';
 import { Avatar, Modal, OrgMark, conversationTitle, orgById, personById } from '../ui.tsx';
@@ -166,7 +166,9 @@ export function ForwardToChatsDialog({ source, onClose }: { source: MessageDTO; 
     try {
       for (const target of picked) {
         if (comment.trim()) await client.send(target, comment.trim());
-        await client.send(target, source.body, null, { source: 'tiecoms', author, sentAt: source.createdAt, fromConversationId: source.conversationId });
+        // Los adjuntos se reenvían como copias del mismo archivo (forwardAttachmentIds).
+        await client.send(target, source.body, null, { source: 'tiecoms', author, sentAt: source.createdAt, fromConversationId: source.conversationId },
+          { forwardAttachmentIds: (source.attachments ?? []).map((a) => a.id) });
       }
       const one = picked.length === 1 ? picked[0]! : null;
       toast(picked.length === 1 ? t('toast.sent') : t('fwd.sentMany', { n: picked.length }), one ? { label: t('lin.open'), run: () => navigate(`/c/${one}`) } : undefined);
@@ -175,7 +177,7 @@ export function ForwardToChatsDialog({ source, onClose }: { source: MessageDTO; 
   }
   return (
     <Modal title={t('fwd.title')} onClose={onClose}>
-      <blockquote className="derive-quote">“{source.body.slice(0, 240)}”{author ? <span className="small muted"> — {author}</span> : null}</blockquote>
+      <blockquote className="derive-quote">{source.body ? `“${source.body.slice(0, 240)}”` : null}{source.attachments?.length ? ` ${attachmentSummaryText({ count: source.attachments.length, images: source.attachments.filter((a) => a.contentType.startsWith('image/')).length, videos: source.attachments.filter((a) => a.contentType.startsWith('video/')).length, files: 0, firstName: source.attachments[0]!.name })}` : null}{author ? <span className="small muted"> — {author}</span> : null}</blockquote>
       <input className="input" placeholder={t('fwd.search')} value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
       <div className="list" style={{ maxHeight: 280, overflow: 'auto', gap: 4 }}>
         {list.map((c) => <ChatOption key={c.id} d={d} c={c} on={picked.includes(c.id)} onToggle={() => toggle(c.id)} />)}

@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import type { BootstrapDTO, ConversationDTO, OrganizationDTO, PersonDTO } from '@tiecoms/contracts';
-import { locale, systemText, t } from './i18n.ts';
+import { attachmentSummaryText, locale, systemText, t } from './i18n.ts';
 import { apiUrl } from './app-client.ts';
 
 export function initials(name: string) {
@@ -18,7 +18,21 @@ export function OrgMark({ org, size = 26 }: { org?: OrganizationDTO | null; size
  * el id en minúsculas (caracteres ASCII), módulo 8. Paleta accesible con texto blanco, sin naranja
  * (el naranja es de la marca y de mis mensajes).
  */
-export const PERSON_COLORS = ['#2F6FDB', '#1E8E5A', '#7C4DDB', '#0B8793', '#B83280', '#4C51BF', '#52606D', '#C53030'] as const;
+// Todos cumplen AA (≥ 4.5:1) con texto blanco.
+export const PERSON_COLORS = ['#2F6FDB', '#1A7F51', '#7C4DDB', '#0A7C87', '#B83280', '#4C51BF', '#52606D', '#C53030'] as const;
+
+/** Contraste WCAG entre un color y el blanco. */
+export function contrastWithWhite(hex: string): number {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return 1;
+  const ch = [0, 2, 4].map((i) => parseInt(m[1]!.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  const lum = 0.2126 * ch[0]! + 0.7152 * ch[1]! + 0.0722 * ch[2]!;
+  return 1.05 / (lum + 0.05);
+}
+/** Naranja sobrio que sí cumple AA con texto blanco (#E8710A no alcanza en letra pequeña). */
+export const BADGE_ORANGE = '#B45309';
+/** Fondo del globo de no leídos: el color de la empresa solo si el texto blanco cumple AA; si no, el naranja sobrio. */
+export const badgeColor = (org?: OrganizationDTO | null) => (org && contrastWithWhite(org.colorBg) >= 4.5 ? org.colorBg : BADGE_ORANGE);
 export function personColor(id: string | null | undefined): string {
   if (!id) return '#8a8177';
   let h = 0x811c9dc5;
@@ -125,3 +139,14 @@ export function dayLabel(iso: string) {
 
 /** Vista previa de la barra lateral: los mensajes de sistema se traducen. */
 export const previewText = (body: string | null) => (body ? systemText(body) : null);
+
+/** Vista previa de una conversación: prefiere el último mensaje de una persona (con sus adjuntos) sobre los avisos de sistema. */
+export function conversationPreview(d: BootstrapDTO, c: ConversationDTO): string | null {
+  const h = c.lastHumanPreview;
+  if (h) {
+    const who = h.authorId === d.me.id ? t('common.youShort') : c.kind !== 'direct' ? personById(d, h.authorId)?.name.split(' ')[0] : null;
+    const text = [h.attachments ? attachmentSummaryText(h.attachments) : '', h.body.replace(/\s+/g, ' ').trim()].filter(Boolean).join(' · ');
+    if (text) return who ? `${who}: ${text}` : text;
+  }
+  return previewText(c.lastMessagePreview);
+}

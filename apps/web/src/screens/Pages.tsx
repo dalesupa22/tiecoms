@@ -5,7 +5,7 @@ import { errorText, getLang, langPreference, locale, setLang, t, tn, useLang, ty
 import { navigate } from '../router.ts';
 import { openProfile } from './Profile.tsx';
 import { NewChatDialog, StackedAvatars } from './Chats.tsx';
-import { Avatar, ConvAvatar, OrgMark, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, previewText, timeLabel } from '../ui.tsx';
+import { Avatar, ConvAvatar, OrgMark, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, conversationPreview, timeLabel } from '../ui.tsx';
 import { InviteDialog, NewGroupDialog, NewWorkspaceDialog } from './Dialogs.tsx';
 import { InviteResult, PendingInvitations } from './Invitations.tsx';
 import { IssueDrawer, IssueRow, isClosed } from './Issues.tsx';
@@ -30,7 +30,7 @@ function ConvCard({ c }: { c: ConversationDTO }) {
       <span className="grow" style={{ minWidth: 0 }}>
         <span className="row"><b className="ellipsis grow">{conversationTitle(d, c)}</b><span className="small muted">{timeLabel(c.lastMessageAt)}</span></span>
         <span className="small muted ellipsis" style={{ display: 'block' }}>{conversationSubtitle(d, c)}</span>
-        <span className="small ellipsis" style={{ display: 'block', color: c.unread ? 'var(--ink)' : 'var(--muted)' }}>{previewText(c.lastMessagePreview) ?? t('conv.noMessages')}</span>
+        <span className="small ellipsis" style={{ display: 'block', color: c.unread ? 'var(--ink)' : 'var(--muted)' }}>{conversationPreview(d, c) ?? t('conv.noMessages')}</span>
       </span>
       {c.unread > 0 && <span className="pill">{c.unread}</span>}
     </button>

@@ -21,6 +21,7 @@ const conv = (c: Partial<ConversationDTO> & { id: string }): ConversationDTO => 
   lastMessageAt: iso(2 * H), lastMessagePreview: null, lastReadSeq: 0, unread: 0, canPost: true, canManage: true, historyFromSeq: 0,
   parentId: null, parentMessageId: null, parentMessageSeq: null, deriveKind: null, deriveReason: null, returnedAt: null, openIssues: 0, pinnedAt: null, mutedUntil: null, ...c,
 });
+const att = (id: string, name: string, contentType: string, sizeBytes: number) => ({ id, name, contentType, sizeBytes, width: 1200, height: 900, url: `/api/v1/attachments/${id}`, thumbUrl: null });
 let seq = 0;
 const msg = (cid: string, a: string, body: string, ago: number, extra: Partial<MessageDTO> = {}): MessageDTO => ({
   id: `${cid}-m${++seq}`, conversationId: cid, seq, authorId: a, clientMessageId: null, kind: 'text', body, replyTo: null, mergedFrom: null, forwarded: null,
@@ -39,6 +40,8 @@ const g = [
   msg('general', 'mateo', 'Perfecto, gracias. Seguimos con la salida del viernes.', 2 * H, { replyTo: 'general-m7' }),
   msg('general', 'laura', 'Les dejo la guía de marca https://www.tiecoms.com/', 100 * 60_000, { linkPreview: { url: 'https://www.tiecoms.com/', title: 'TieComs · Una sola red entre las empresas con las que trabajas', description: 'Conversaciones, asuntos y archivos entre equipos de distintas empresas, cada quien con su alcance.', siteName: 'TieComs', imageUrl: '/tiecoms-mark.svg' } }),
   msg('general', 'ana', 'Mañana llego a las 8 con el diseñador.', 90 * 60_000, { forwarded: { source: 'whatsapp', author: 'Pedro (Estudio Norte)', sentAt: '24/9/26 07:41' } }),
+  msg('general', 'mateo', 'Fotos de la visita de hoy', 60 * 60_000, { attachments: [1, 2, 3, 4, 5, 6].map((i) => att(`f${i}`, `visita-${i}.jpg`, 'image/jpeg', 820_000)) }),
+  msg('general', 'laura', '', 40 * 60_000, { attachments: [att('p1', 'Contrato marco v3.pdf', 'application/pdf', 1_240_000), att('x1', 'Cronograma.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 48_000)] }),
 ];
 seq = 0;
 const dg = [
@@ -129,6 +132,10 @@ const waMsgs = [
   { id: 'c', fromMe: false, author: 'Carlos', kind: 'image', body: '📷 Captura del error', sentAt: iso(H) },
   { id: 'd', fromMe: false, author: 'Laura Gómez', kind: 'text', body: 'El despliegue quedó listo ✅', sentAt: iso(20 * 60_000) },
 ];
+(client as any).fetchBlob = async () => (await fetch('/tiecoms-mark.svg')).blob();
+// Subidas simuladas: devuelven un AttachmentDTO y el envío queda en cola (sin backend).
+(client as any).uploadAttachment = async (_c: string, f: File, name: string) => { await new Promise((r) => setTimeout(r, 300)); return att(`up-${Date.now()}`, name, f.type || 'application/octet-stream', f.size); };
+(client as any).uploadAttachmentThumb = async (id: string) => att(id, 'thumb', 'image/jpeg', 1);
 (client as any).request = async (path: string, init: any = {}) => {
   if (path === '/whatsapp/accounts' && !init.method) return { accounts: waAccounts, max: 5 };
   if (path.startsWith('/whatsapp/chats?')) {

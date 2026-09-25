@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp,
+  type AttachmentDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -13,6 +13,9 @@ export interface PendingMessage {
   body: string;
   replyTo: string | null;
   forwarded?: ForwardedInfo | null;
+  /** Adjuntos ya subidos (para pintarlos mientras se envía) y adjuntos reenviados de otro mensaje. */
+  attachments?: AttachmentDTO[];
+  forwardAttachmentIds?: string[];
   createdAt: string;
   attempts: number;
   status: 'pending' | 'sending' | 'failed';
@@ -427,11 +430,14 @@ export class TieComsClient {
   typing(conversationId: string) { this.socket?.emit(SOCKET_EVENTS.typing, { conversationId }); }
 
   // ---------- Envío con cola persistente ----------
-  async send(conversationId: string, body: string, replyTo: string | null = null, forwarded: ForwardedInfo | null = null) {
+  async send(conversationId: string, body: string, replyTo: string | null = null, forwarded: ForwardedInfo | null = null,
+    extra: { attachments?: AttachmentDTO[]; forwardAttachmentIds?: string[] } = {}) {
     const text = body.trim();
-    if (!text) return;
+    if (!text && !extra.attachments?.length && !extra.forwardAttachmentIds?.length) return;
     const p: PendingMessage = {
       clientMessageId: uid(), conversationId, body: text, replyTo, forwarded, createdAt: new Date().toISOString(),
+      ...(extra.attachments?.length ? { attachments: extra.attachments } : {}),
+      ...(extra.forwardAttachmentIds?.length ? { forwardAttachmentIds: extra.forwardAttachmentIds } : {}),
       attempts: 0, status: 'pending', nextAttemptAt: 0,
     };
     // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
@@ -503,7 +509,11 @@ export class TieComsClient {
 
   /** Socket con ACK si está conectado; HTTP como respaldo. Mismo clientMessageId = idempotente. */
   private async deliver(p: PendingMessage): Promise<MessageDTO> {
-    const payload = { conversationId: p.conversationId, clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo, forwarded: p.forwarded ?? null };
+    const files = {
+      ...(p.attachments?.length ? { attachmentIds: p.attachments.map((a) => a.id) } : {}),
+      ...(p.forwardAttachmentIds?.length ? { forwardAttachmentIds: p.forwardAttachmentIds } : {}),
+    };
+    const payload = { conversationId: p.conversationId, clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo, forwarded: p.forwarded ?? null, ...files };
     if (this.socket?.connected) {
       try {
         const r: any = await this.socket.timeout(8000).emitWithAck(SOCKET_EVENTS.send, payload);
@@ -516,7 +526,7 @@ export class TieComsClient {
       }
     }
     const r = await this.request<{ message: MessageDTO }>(`/conversations/${p.conversationId}/messages`, {
-      method: 'POST', json: { clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo, forwarded: p.forwarded ?? null },
+      method: 'POST', json: { clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo, forwarded: p.forwarded ?? null, ...files },
     });
     return r.message;
   }
@@ -650,6 +660,28 @@ export class TieComsClient {
     const r = await this.request<{ parentId: string; messageId: string }>(`/conversations/${conversationId}/return`, { method: 'POST', json: { summary } });
     await this.loadBootstrap();
     return r;
+  }
+
+  // ---------- Adjuntos ----------
+  /** Sube un archivo a una conversación (queda pendiente hasta que un mensaje lo use). ≤ 25 MB. */
+  uploadAttachment(conversationId: string, file: Blob, name: string) {
+    return this.request<AttachmentDTO>(`/conversations/${conversationId}/attachments`, {
+      method: 'POST', body: file,
+      headers: { 'content-type': 'application/octet-stream', 'x-file-name': encodeURIComponent(name), 'x-file-type': file.type || 'application/octet-stream' },
+    });
+  }
+  /** Miniatura opcional (JPEG/PNG/WebP ≤ 512 KB) de un adjunto aún pendiente. */
+  uploadAttachmentThumb(id: string, thumb: Blob) {
+    return this.request<AttachmentDTO>(`/attachments/${id}/thumb`, { method: 'POST', body: thumb, headers: { 'content-type': 'application/octet-stream' } });
+  }
+  /** Descarga autenticada (Bearer) de una ruta del API, p. ej. AttachmentDTO.url. */
+  async fetchBlob(apiPath: string): Promise<Blob> {
+    const path = apiPath.replace(/^\/api\/v1/, '');
+    if (this.accessToken && Date.now() > this.accessExp - 30_000) await this.refresh();
+    let res = await this.raw(path);
+    if (res.status === 401 && (await this.refresh())) res = await this.raw(path);
+    if (!res.ok) throw await parseError(res);
+    return res.blob();
   }
 
   /** Conversación lateral privada desde un mensaje (no publica nada en el origen). */

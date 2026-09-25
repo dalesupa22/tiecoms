@@ -4,7 +4,9 @@ import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
 import { toast } from '../menu.tsx';
 import { navigate, queryParam } from '../router.ts';
-import { Modal, conversationTitle } from '../ui.tsx';
+import { ConvAvatar, Modal, conversationSubtitle, conversationTitle } from '../ui.tsx';
+import { MAX_ATTACHMENT_BYTES } from '@tiecoms/contracts';
+import { FileChip } from './Attachments.tsx';
 
 // ---------- WhatsApp: «[24/9/26, 10:12] Juan: texto» o «24/9/26 10:12 - Juan: texto» ----------
 const WA_LINE = /^‎?\[?(\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?(?:\s?[ap]\.?\s?m\.?)?)\]?\s*(?:-\s*)?([^:]{1,60}):\s([\s\S]*)$/i;
@@ -82,21 +84,108 @@ export function BringDialog({ conversationId, initialText = '', initialSource = 
 }
 
 /** Destino de «Compartir» del sistema (PWA en Android): /share?text=… */
+/** Lo que llegó desde otra app: por GET (título/texto/enlace) o por el service worker (POST con archivos). */
+async function readShared(): Promise<{ text: string; files: File[] }> {
+  const text = [queryParam('title'), queryParam('text'), queryParam('url')].filter(Boolean).join('\n').trim();
+  const id = queryParam('shared');
+  if (!id || typeof caches === 'undefined') return { text, files: [] };
+  try {
+    const cache = await caches.open('tiecoms-share');
+    const base = `${import.meta.env.BASE_URL}__share/${id}/`;
+    const metaRes = await cache.match(`${base}meta`);
+    if (!metaRes) return { text, files: [] };
+    const meta = await metaRes.json();
+    const files: File[] = [];
+    for (const key of meta.files as string[]) {
+      const r = await cache.match(key);
+      if (!r) continue;
+      files.push(new File([await r.blob()], decodeURIComponent(r.headers.get('x-file-name') ?? 'archivo'), { type: r.headers.get('content-type') ?? '' }));
+      await cache.delete(key);
+    }
+    await cache.delete(`${base}meta`);
+    return { text: [meta.title, meta.text, meta.url].filter(Boolean).join('\n').trim() || text, files };
+  } catch { return { text, files: [] }; }
+}
+
+/**
+ * «Compartir en TieComs»: vista previa, buscador, hasta 5 conversaciones (recientes primero),
+ * mensaje opcional y envío con progreso. Mismo diseño que la extensión de iOS y la actividad de Android.
+ */
 export function ShareScreen() {
   const d = useClient((s) => s.data)!;
-  const shared = [queryParam('title'), queryParam('text'), queryParam('url')].filter(Boolean).join('\n').trim();
-  const [target, setTarget] = useState<string | null>(null);
+  const [shared, setShared] = useState<{ text: string; files: File[] } | null>(null);
   const [q, setQ] = useState('');
-  const list = d.conversations.filter((c) => c.canPost && (!q || conversationTitle(d, c).toLowerCase().includes(q.toLowerCase())));
-  if (target) return <BringDialog conversationId={target} initialText={shared} onClose={() => setTarget(null)} onDone={() => navigate(`/c/${target}`, true)} />;
+  const [picked, setPicked] = useState<string[]>([]);
+  const [note, setNote] = useState('');
+  const [progress, setProgress] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const previews = useMemo(() => (shared?.files ?? []).filter((f) => f.type.startsWith('image/')).map((f) => URL.createObjectURL(f)), [shared]);
+  useEffect(() => { void readShared().then(setShared); }, []);
+  useEffect(() => () => previews.forEach((u) => URL.revokeObjectURL(u)), [previews]);
+  const needle = q.trim().toLowerCase();
+  const list = d.conversations
+    .filter((c) => c.canPost && (!needle || conversationTitle(d, c).toLowerCase().includes(needle)))
+    .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''));
+  const toggle = (id: string) => setPicked((x) => (x.includes(id) ? x.filter((y) => y !== id) : x.length >= 5 ? (toast(t('share.max5')), x) : [...x, id]));
+  const tooBig = (shared?.files ?? []).find((f) => f.size > MAX_ATTACHMENT_BYTES);
+  const items = (shared?.files.length ?? 0) + (shared?.text ? 1 : 0);
+
+  async function send() {
+    if (!shared) return;
+    setError(null);
+    const body = [note.trim(), shared.text].filter(Boolean).join('\n\n');
+    try {
+      const steps = picked.length * (shared.files.length + 1);
+      let step = 0;
+      for (const conv of picked) {
+        // Los adjuntos pertenecen a una conversación: se suben a cada destino.
+        const attachments = [];
+        for (const f of shared.files) {
+          setProgress(t('share.progress', { i: ++step, n: steps }));
+          attachments.push(await client.uploadAttachment(conv, f, f.name));
+        }
+        setProgress(t('share.progress', { i: ++step, n: steps }));
+        await client.send(conv, body, null, null, { attachments });
+      }
+      toast(picked.length === 1 ? t('share.sentOne') : t('share.sentMany', { n: picked.length }));
+      navigate(picked.length === 1 ? `/c/${picked[0]}` : '/', true);
+    } catch (e) { setError(errorText(e) || t('share.failed')); setProgress(null); }
+  }
+
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 640 }}>
-      <h1>{t('share.title')}</h1>
-      <div className="muted">{t('share.body')}</div>
-      {shared ? <blockquote className="derive-quote" style={{ margin: '14px 0' }}>{shared.slice(0, 400)}</blockquote> : <div className="empty">{t('share.empty')}</div>}
-      <input className="input" placeholder={t('fwd.search')} value={q} onChange={(e) => setQ(e.target.value)} />
-      <div className="list" style={{ marginTop: 10 }}>
-        {list.map((c) => <button key={c.id} className="card conv-card" onClick={() => setTarget(c.id)}><b className="grow ellipsis">{conversationTitle(d, c)}</b><span className="muted">›</span></button>)}
+      <h1>{t('share.header')}</h1>
+      {!shared ? <div className="muted">{t('common.loading')}</div> : items === 0 ? <div className="empty">{t('share.empty')}</div> : (
+        <>
+          <div className="small muted">{items === 1 ? t('share.item') : t('share.items', { n: items })}</div>
+          {previews.length > 0 && <div className="share-thumbs">{previews.map((u) => <img key={u} src={u} alt="" />)}</div>}
+          {shared.files.filter((f) => !f.type.startsWith('image/')).map((f) => <FileChip key={f.name + f.size} a={{ name: f.name, contentType: f.type, sizeBytes: f.size }} />)}
+          {shared.text && <blockquote className="derive-quote" style={{ margin: '10px 0' }}>{shared.text.slice(0, 400)}</blockquote>}
+          {tooBig && <div className="error">{t('att.tooBig', { name: tooBig.name })}</div>}
+        </>
+      )}
+      <input className="input" style={{ marginTop: 12 }} placeholder={t('fwd.search')} value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="eyebrow" style={{ margin: '12px 0 6px' }}>{needle ? t('share.pick') : t('share.recent')}</div>
+      <div className="list" style={{ maxHeight: 360, overflow: 'auto', gap: 4 }}>
+        {list.map((c) => (
+          <label key={c.id} className={`check fwd-opt ${picked.includes(c.id) ? 'is-on' : ''}`}>
+            <input type="checkbox" checked={picked.includes(c.id)} onChange={() => toggle(c.id)} />
+            <ConvAvatar c={c} size={28} />
+            <span className="grow" style={{ minWidth: 0 }}>
+              <b className="ellipsis" style={{ display: 'block' }}>{conversationTitle(d, c)}</b>
+              <span className="small muted ellipsis" style={{ display: 'block' }}>{conversationSubtitle(d, c)}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <textarea className="input" rows={2} style={{ marginTop: 10 }} placeholder={t('share.addMessage')} value={note} onChange={(e) => setNote(e.target.value)} />
+      {error && <div className="error">{error}</div>}
+      <div className="modal-actions" style={{ marginTop: 10 }}>
+        <span className="small muted grow">{progress ?? ''}</span>
+        <button className="btn ghost" onClick={() => navigate('/', true)}>{t('common.cancel')}</button>
+        <button className="btn primary" disabled={!picked.length || !items || !!tooBig || !!progress} onClick={send}>
+          {picked.length > 1 ? t('share.sendTo', { n: picked.length }) : t('share.send')}
+        </button>
       </div>
     </div></div>
   );

@@ -300,6 +300,9 @@ const es = {
   'chat.directive': 'Nivel directivo', 'chat.createSpaceGroup': 'Crear grupo', 'chat.noSpaces': 'Aún no tienes espacios con otras empresas.',
   'chat.spaceMembers': 'Participantes del espacio', 'chat.searchSpace': 'Buscar en este espacio',
   'home.sortHint': 'Primero lo que tiene mensajes sin leer; luego por actividad reciente.',
+  // ---------- SPEC v4 E: asuntos y agenda en directos y chats grupales ----------
+  'cal.soon': 'Empieza en {n} min: {title}', 'cal.soonShort': 'En {n} min', 'cal.chatsSection': 'Chats', 'issue.chatsSection': 'Chats',
+  'cal.inChat': 'En el chat «{name}»', 'cal.channelSoon': 'Avisos de reunión', 'cal.channelSoonDesc': 'Aviso 10 minutos antes de tus reuniones',
 };
 
 type Key = keyof typeof es;
@@ -571,6 +574,9 @@ const en: Record<Key, string> = {
   'chat.directive': 'Directive level', 'chat.createSpaceGroup': 'Create group', 'chat.noSpaces': "You don't have spaces with other companies yet.",
   'chat.spaceMembers': 'Space participants', 'chat.searchSpace': 'Search this space',
   'home.sortHint': 'Unread first, then by recent activity.',
+  // ---------- SPEC v4 E: issues and calendar in direct and group chats ----------
+  'cal.soon': 'Starts in {n} min: {title}', 'cal.soonShort': 'In {n} min', 'cal.chatsSection': 'Chats', 'issue.chatsSection': 'Chats',
+  'cal.inChat': 'In the chat “{name}”', 'cal.channelSoon': 'Meeting alerts', 'cal.channelSoonDesc': 'Alert 10 minutes before your meetings',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };

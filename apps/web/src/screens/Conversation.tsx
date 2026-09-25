@@ -161,7 +161,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const title = conversationTitle(d, conv);
   const openHere = Object.values(allIssues).filter((i: IssueDTO) => i.conversationId === id && !isClosed(i));
   const issueOf = (mid: string) => openHere.find((i) => i.originMessageId === mid);
-  const canWork = conv.canPost && conv.kind !== 'direct' && !!conv.workspaceId;
+  // Asuntos y reuniones en todas (también directos y chats grupales); derivar sigue siendo de espacios.
+  const canWork = conv.canPost;
+  const canDerive = canWork && conv.kind !== 'direct' && !!conv.workspaceId;
   const myWsRole = d.workspaces.find((w) => w.id === conv.workspaceId)?.myRole;
   const ws = d.workspaces.find((w) => w.id === conv.workspaceId);
   const typers = (typing ?? []).filter((x) => x.until > Date.now()).map((x) => personById(d, x.userId)?.name.split(' ')[0]).filter(Boolean);
@@ -187,7 +189,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       { label: t('menu.markUnread'), icon: '●', onSelect: () => client.markUnread(id, m.seq).then(() => toast(t('toast.markedUnread'))).catch((e) => toast(errorText(e))) },
       ...(canWork ? [
         { divider: true },
-        ...(myWsRole !== 'guest' ? [{ label: t('menu.derive'), icon: '⑂', onSelect: () => setDeriving(m) }] : []),
+        ...(canDerive && myWsRole !== 'guest' ? [{ label: t('menu.derive'), icon: '⑂', onSelect: () => setDeriving(m) }] : []),
         { label: t('menu.issue'), icon: '◆', onSelect: () => setNewIssue({ origin: m }) },
         { label: t('menu.meeting'), icon: '📅', onSelect: () => newEvent({ conversationId: id, originMessageId: m.id, defaultTitle: excerpt(m.body, 80) }) },
       ] : []),
@@ -297,7 +299,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                     <div className="msg-actions">
                       {conv.canPost && <button onClick={() => { setReplyTo(m); input.current?.focus(); }}>↩ {t('menu.reply')}</button>}
                       <button onClick={() => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />)}>↪ {t('menu.forward')}</button>
-                      {canWork && myWsRole !== 'guest' && <button onClick={() => setDeriving(m)}>{t('derive.action')}</button>}
+                      {canDerive && myWsRole !== 'guest' && <button onClick={() => setDeriving(m)}>{t('derive.action')}</button>}
                       {canWork && <button onClick={() => setNewIssue({ origin: m })}>{t('issue.fromMessage')}</button>}
                       <button aria-label={t('menu.open')} onClick={(e) => { const rr = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(rr.left, rr.bottom + 4, messageMenu(m)); }}>⋯</button>
                     </div>

@@ -56,7 +56,9 @@ export interface ClientState {
 /** Aviso para la interfaz (notificación del sistema, sonido, toast). */
 export type ClientNotice =
   | { kind: 'message'; conversationId: string; message: MessageDTO }
-  | { kind: 'reminder'; reminder: ReminderDTO };
+  | { kind: 'reminder'; reminder: ReminderDTO }
+  /** Una reunión a la que voy empieza en `minutes` minutos. */
+  | { kind: 'eventSoon'; event: CalendarEventDTO; minutes: number };
 
 export interface ClientOptions {
   /** Origen del API, p. ej. https://app.tiecoms.com. Vacío = mismo origen (web). */
@@ -318,6 +320,10 @@ export class TieComsClient {
     if (e.type === 'reminder.due') {
       this.set({ reminders: [...this.state.reminders.filter((r) => r.id !== e.reminder.id), e.reminder].sort((a, b) => a.remindAt.localeCompare(b.remindAt)) });
       this.opts.onNotice?.({ kind: 'reminder', reminder: e.reminder });
+    }
+    if (e.type === 'event.soon') {
+      this.putEvents([e.event]);
+      this.opts.onNotice?.({ kind: 'eventSoon', event: e.event, minutes: e.minutes });
     }
     if (e.type === 'read.updated') {
       const c = this.state.data?.conversations.find((x) => x.id === e.conversationId);

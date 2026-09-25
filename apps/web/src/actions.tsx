@@ -161,7 +161,7 @@ export function conversationMenu(conv: ConversationDTO, extra: { onNewMeeting?: 
       : { label: t('menu.markUnreadConv'), icon: '●', disabled: conv.lastMessageSeq <= conv.historyFromSeq, onSelect: () => void client.markUnread(conv.id, conv.lastMessageSeq).then(() => toast(t('toast.markedUnread'))).catch((e) => toast(errorText(e))) },
     muteMenu(conv),
     remindMenu(conv),
-    ...(extra.onNewMeeting && conv.workspaceId ? [{ label: t('menu.meeting'), icon: '📅', onSelect: extra.onNewMeeting }] : []),
+    ...(extra.onNewMeeting && conv.canPost ? [{ label: t('menu.meeting'), icon: '📅', onSelect: extra.onNewMeeting }] : []),
     { divider: true },
     { label: t('menu.copyLink'), icon: '⛓', onSelect: async () => { await copyText(convLink(conv.id)); toast(t('toast.linkCopied')); } },
     ...(conv.kind !== 'direct' ? [{ divider: true }, {

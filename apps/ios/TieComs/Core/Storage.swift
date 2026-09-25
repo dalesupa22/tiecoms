@@ -57,6 +57,9 @@ final class KeychainSecretStore: SecretStore {
         }
         // Migración (build 6): antes había una sola cuenta para cualquier servidor. Se copia sin borrarla;
         // si no era de este servidor, el refresh dará 401 y solo se limpia la copia de este servidor.
+        #if DEBUG
+        if let v = debugFallbackValue() { return v }
+        #endif
         guard account != Self.legacyAccount else { return nil }
         let migrated = group.flatMap { read(group: $0, account: Self.legacyAccount) } ?? read(group: nil, account: Self.legacyAccount)
         if let migrated { set(migrated) }
@@ -76,7 +79,29 @@ final class KeychainSecretStore: SecretStore {
         var status = add(group)
         if status != errSecSuccess && group != nil { status = add(nil) }
         if status != errSecSuccess { NSLog("[TieComs] Keychain SecItemAdd falló: \(status)") }
+        #if DEBUG
+        // Solo depuración: una build de simulador sin firmar no tiene entitlements (-34018) y la sesión
+        // se perdía en cada relanzamiento. En ese caso se guarda en un archivo protegido de la app.
+        debugFallback(status == errSecSuccess ? nil : value)
+        #endif
     }
+
+    #if DEBUG
+    private var fallbackURL: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("debug-session-\(account).txt")
+    }
+    private func debugFallback(_ value: String?) {
+        guard let url = fallbackURL else { return }
+        if let value {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? Data(value.utf8).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        } else { try? FileManager.default.removeItem(at: url) }
+    }
+    fileprivate func debugFallbackValue() -> String? {
+        fallbackURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) }.flatMap { $0.isEmpty ? nil : $0 }
+    }
+    #endif
 }
 
 /// Lista de conversaciones para la extensión de Compartir (App Group). Solo títulos, sin mensajes.

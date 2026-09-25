@@ -246,4 +246,18 @@ final class V4Tests: XCTestCase {
         XCTAssertNil(secrets.get(), "401 del refresh: sesión cerrada")
         XCTAssertTrue(signedOut)
     }
+
+    /// Migración real en el Keychain del simulador: el ítem de la build 5 (cuenta única) pasa al servidor actual.
+    func testKeychainMigrationFromBuild5() {
+        let service = "com.tiecoms.test.\(UUID().uuidString)"
+        let legacy = KeychainSecretStore(service: service)
+        legacy.set("rt-legacy")
+        XCTAssertEqual(legacy.get(), "rt-legacy")
+        let dev = KeychainSecretStore(service: service, apiURL: URL(string: "http://localhost:3043"))
+        XCTAssertEqual(dev.get(), "rt-legacy", "se copia al servidor actual")
+        dev.set("rt-dev")
+        XCTAssertEqual(dev.get(), "rt-dev")
+        XCTAssertEqual(legacy.get(), "rt-legacy", "no toca la de producción")
+        dev.set(nil); legacy.set(nil)
+    }
 }

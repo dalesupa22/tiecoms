@@ -68,6 +68,8 @@ export const SsoExchangeInput = z.preprocess(
 );
 export type SsoExchangeInput = z.infer<typeof SsoExchangeInput>;
 
+/** Eliminar la cuenta: se confirma escribiendo el correo; con contraseña, también se pide. */
+export const DeleteAccountInput = z.object({ confirmEmail: email, password: z.string().max(200).optional() });
 export const UpdateProfileInput = z.object({
   name: personName.optional(),
   title: z.string().trim().max(120).nullable().optional(),

@@ -3,6 +3,7 @@ import { conversationAccess } from '../access.ts';
 import { enqueueOutbox, pool, tx, type Tx } from '../db.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { sha256 } from '../security.ts';
+import { claimForMessage, hideForMessage, linkToMessage } from './attachments.ts';
 
 /** Si el texto trae un enlace, el worker arma su vista previa (fuera de la transacción del envío). */
 async function queuePreview(c: Tx, messageId: string, body: string) {
@@ -39,6 +40,7 @@ export function toMessageDTO(r: any): MessageDTO {
     mergedFrom: r.merged_from_conversation_id ?? null,
     forwarded: r.forwarded ?? null,
     linkPreview: deleted ? null : r.link_preview ?? null,
+    attachments: deleted ? [] : r.attachments ?? [],
     createdAt: new Date(r.created_at).toISOString(),
     editedAt: r.edited_at ? new Date(r.edited_at).toISOString() : null,
     deletedAt: deleted ? new Date(r.deleted_at).toISOString() : null,
@@ -68,10 +70,11 @@ export async function appendEvent(c: Tx, conversationId: string, event: Omit<Con
 export async function appendMessage(c: Tx, p: {
   conversationId: string; authorId: string; body: string; kind?: 'text' | 'system';
   clientMessageId?: string | null; replyTo?: string | null; mergedFrom?: string | null; forwarded?: ForwardedInfo | null;
+  attachments?: import('@tiecoms/contracts').AttachmentDTO[] | null; hash?: Buffer | null;
 }): Promise<MessageDTO> {
-  const { rows } = await c.query('SELECT tiecoms_append_message($1, $2, $3, $4, $5, $6, $7, $8) AS m', [
+  const { rows } = await c.query('SELECT tiecoms_append_message($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) AS m', [
     p.conversationId, p.authorId, p.clientMessageId ?? null, p.kind ?? 'text', p.body, p.replyTo ?? null, p.mergedFrom ?? null,
-    p.forwarded ? JSON.stringify(p.forwarded) : null,
+    p.forwarded ? JSON.stringify(p.forwarded) : null, p.attachments?.length ? JSON.stringify(p.attachments) : null, p.hash ?? null,
   ]);
   const m = rows[0].m as MessageDTO;
   if ((p.kind ?? 'text') === 'text') await queuePush(c, m.id, p.conversationId, p.authorId);
@@ -86,8 +89,13 @@ async function findByClientId(conversationId: string, authorId: string, clientMe
   return rows[0];
 }
 
-function sameBody(row: any, body: string) {
-  return Buffer.compare(row.body_sha256, sha256(body)) === 0;
+/** Hash de idempotencia: el texto y, si hay, los ids de adjuntos (propios y reenviados) en orden. */
+export function contentHash(body: string, own: string[] = [], fwd: string[] = []) {
+  return own.length || fwd.length ? sha256(`${body}\u001fatt:${own.join(',')}|fwd:${fwd.join(',')}`) : sha256(body);
+}
+
+function sameBody(row: any, input: { body: string; attachmentIds?: string[]; forwardAttachmentIds?: string[] }) {
+  return Buffer.compare(row.body_sha256, contentHash(input.body, input.attachmentIds, input.forwardAttachmentIds)) === 0;
 }
 
 /**
@@ -99,7 +107,7 @@ export async function sendMessage(userId: string, conversationId: string, input:
   if (existing) {
     // Aun así revalida el acceso: un duplicado no debe filtrar datos a quien perdió permiso.
     await conversationAccess(pool, userId, conversationId, 'read');
-    if (!sameBody(existing, input.body)) throw conflict('clientMessageId reutilizado con otro contenido');
+    if (!sameBody(existing, input)) throw conflict('clientMessageId reutilizado con otro contenido');
     return { message: toMessageDTO(existing), duplicate: true };
   }
   try {
@@ -126,7 +134,12 @@ export async function sendMessage(userId: string, conversationId: string, input:
         }
         forwarded = { source: input.forwarded.source, author: input.forwarded.author ?? null, sentAt: input.forwarded.sentAt ?? null, fromConversationId: from, messageId: originalId, ...(quote ?? {}) };
       }
-      const m = await appendMessage(c, { conversationId, authorId: userId, body: input.body, clientMessageId: input.clientMessageId, replyTo: input.replyTo ?? null, forwarded });
+      const claimed = await claimForMessage(c, userId, conversationId, input.attachmentIds ?? [], input.forwardAttachmentIds ?? []);
+      const m = await appendMessage(c, {
+        conversationId, authorId: userId, body: input.body, clientMessageId: input.clientMessageId, replyTo: input.replyTo ?? null, forwarded,
+        attachments: claimed.map((x) => x.dto), hash: contentHash(input.body, input.attachmentIds, input.forwardAttachmentIds),
+      });
+      if (claimed.length) await linkToMessage(c, m.id, claimed.map((x) => x.id));
       await queuePreview(c, m.id, input.body);
       return m;
     });
@@ -135,7 +148,7 @@ export async function sendMessage(userId: string, conversationId: string, input:
     // Dos reintentos simultáneos: el segundo choca con la restricción única y devuelve el primero.
     if (err?.code === '23505') {
       const row = await findByClientId(conversationId, userId, input.clientMessageId);
-      if (row && sameBody(row, input.body)) return { message: toMessageDTO(row), duplicate: true };
+      if (row && sameBody(row, input)) return { message: toMessageDTO(row), duplicate: true };
       if (row) throw conflict('clientMessageId reutilizado con otro contenido');
     }
     throw err;
@@ -169,7 +182,7 @@ export async function listEvents(userId: string, conversationId: string, after: 
     }
     // Un mensaje eliminado después no reenvía su contenido anterior al ponerse al día.
     if (r.message_deleted_at && r.payload.message) {
-      return { ...r.payload, message: { ...r.payload.message, body: '', deletedAt: new Date(r.message_deleted_at).toISOString() } } as ConversationEvent;
+      return { ...r.payload, message: { ...r.payload.message, body: '', attachments: [], linkPreview: null, deletedAt: new Date(r.message_deleted_at).toISOString() } } as ConversationEvent;
     }
     return r.payload as ConversationEvent;
   });
@@ -220,7 +233,8 @@ export async function deleteMessage(userId: string, messageId: string) {
   return tx(async (c) => {
     const m = await ownMessage(c, userId, messageId);
     // Borrado lógico: se conserva el orden y queda la marca; el contenido deja de servirse.
-    const { rows } = await c.query("UPDATE messages SET body = '', deleted_at = now() WHERE id = $1 RETURNING *", [messageId]);
+    const { rows } = await c.query("UPDATE messages SET body = '', attachments = NULL, deleted_at = now() WHERE id = $1 RETURNING *", [messageId]);
+    await hideForMessage(c, messageId);
     await c.query('DELETE FROM message_pins WHERE message_id = $1', [messageId]);
     const message = toMessageDTO(rows[0]);
     await appendEvent(c, m.conversation_id, { type: 'message.updated', conversationId: m.conversation_id, message }, messageId);

@@ -11,6 +11,7 @@ import { previewMessage } from './modules/link-preview.ts';
 import { deletePersonalObject } from './storage.ts';
 import { notifyReport } from './modules/safety.ts';
 import { pushEvent, pushMessage, pushReminder } from './modules/push.ts';
+import { cleanupPending as cleanupAttachments } from './modules/attachments.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
 const LEASE_SECONDS = 120;
@@ -58,6 +59,8 @@ const handlers: Record<string, Handler> = {
     await pool.query("DELETE FROM audit_events WHERE created_at < now() - interval '24 months'");
     await pool.query("DELETE FROM safety_reports WHERE created_at < now() - interval '24 months'");
     await cleanupSso();
+    const stale = await cleanupAttachments();
+    if (stale) console.log(`[worker] adjuntos pendientes borrados: ${stale}`);
   },
 };
 

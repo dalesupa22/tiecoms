@@ -30,6 +30,7 @@ import * as profile from './modules/profile.ts';
 import * as drive from './modules/drive.ts';
 import * as safety from './modules/safety.ts';
 import * as push from './modules/push.ts';
+import * as attachments from './modules/attachments.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
 import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
@@ -181,6 +182,40 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/avatar', { bodyLimit: profile.MAX_AVATAR_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
       async (req) => profile.setGroupAvatar(req.userId, z.uuid().parse(req.params.id), req.body as Buffer));
     priv.delete<{ Params: { id: string } }>('/api/v1/conversations/:id/avatar', async (req) => profile.removeGroupAvatar(req.userId, z.uuid().parse(req.params.id)));
+    // Adjuntos de mensajes: se suben como octet-stream (nombre y tipo en cabeceras) y un mensaje los usa después.
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/attachments', { bodyLimit: attachments.MAX_UPLOAD_BYTES, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => {
+      if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube el archivo como application/octet-stream');
+      return attachments.upload(req.userId, z.uuid().parse(req.params.id), {
+        body: req.body, name: String(req.headers['x-file-name'] ?? ''), type: String(req.headers['x-file-type'] ?? ''),
+      });
+    });
+    priv.post<{ Params: { id: string } }>('/api/v1/attachments/:id/thumb', { bodyLimit: attachments.MAX_THUMB_BYTES, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => {
+      if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube la miniatura como application/octet-stream');
+      return attachments.uploadThumb(req.userId, z.uuid().parse(req.params.id), req.body);
+    });
+    for (const thumb of [false, true]) {
+      priv.get<{ Params: { id: string }; Querystring: { download?: string } }>(`/api/v1/attachments/:id${thumb ? '/thumb' : ''}`, async (req, reply) => {
+        const f = await attachments.fetchFile(req.userId, z.uuid().parse(req.params.id), thumb);
+        const ascii = f.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
+        const disp = f.inline && req.query.download !== '1' ? 'inline' : 'attachment';
+        reply.header('content-type', f.contentType)
+          .header('content-disposition', `${disp}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(f.name)}`)
+          .header('cache-control', 'private, max-age=31536000, immutable')
+          .header('x-content-type-options', 'nosniff')
+          .header('content-security-policy', "default-src 'none'; sandbox")
+          .header('accept-ranges', 'bytes');
+        // Rango simple (bytes=a-b): los reproductores de video lo piden.
+        const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+        if (range && (range[1] || range[2])) {
+          const total = f.body.length;
+          let start = range[1] ? Number(range[1]) : Math.max(0, total - Number(range[2]));
+          let end = range[1] && range[2] ? Math.min(Number(range[2]), total - 1) : total - 1;
+          if (start >= total || start > end) return reply.status(416).header('content-range', `bytes */${total}`).send();
+          return reply.status(206).header('content-range', `bytes ${start}-${end}/${total}`).send(f.body.subarray(start, end + 1));
+        }
+        return reply.send(f.body);
+      });
+    }
     // Notificaciones push: un token por sesión.
     priv.put('/api/v1/push/token', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) =>
       push.registerToken(req.sessionId, PushTokenInput.parse(req.body), String(req.headers['accept-language'] ?? '')));

@@ -185,7 +185,41 @@ export interface ConversationDTO {
   mutedUntil: string | null;
   /** Foto del grupo o chat (/api/v1/avatars/…) o null. Clientes viejos pueden no traerla. */
   avatarUrl?: string | null;
+  /**
+   * Vista previa preferida para la lista: el último mensaje de texto (de una persona o un agente) entre los
+   * últimos 20 visibles, aunque después haya mensajes de sistema. null si no hay ninguno. Clientes viejos: ausente.
+   */
+  lastHumanPreview?: MessagePreviewDTO | null;
 }
+
+/** Resumen de adjuntos para vistas previas: «📷 Foto», «📷 3 fotos», «🎬 Video», «📎 nombre». */
+export interface AttachmentSummaryDTO { count: number; images: number; videos: number; files: number; firstName: string | null }
+export interface MessagePreviewDTO {
+  messageId: string;
+  seq: number;
+  authorId: string;
+  /** Texto (puede ser '' si el mensaje solo trae adjuntos). */
+  body: string;
+  attachments: AttachmentSummaryDTO | null;
+  createdAt: string;
+}
+
+/**
+ * Adjunto de un mensaje. url y thumbUrl son rutas del API que exigen Bearer (quien puede leer el mensaje).
+ * width/height solo en imágenes cuyo formato el servidor sabe leer; thumbUrl solo si alguien subió la miniatura.
+ */
+export interface AttachmentDTO {
+  id: string;
+  name: string;
+  contentType: string;
+  sizeBytes: number;
+  width: number | null;
+  height: number | null;
+  url: string;
+  thumbUrl: string | null;
+}
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
 
 export type ForwardSource = 'whatsapp' | 'slack' | 'email' | 'teams' | 'tiecoms' | 'other';
 /** imageUrl es una ruta del API (/api/v1/previews/…): la miniatura ya está en TieComs. */
@@ -277,6 +311,8 @@ export interface MessageDTO {
   forwarded: ForwardedInfo | null;
   /** Vista previa del primer enlace; llega después con message.updated. Clientes viejos pueden no traerla. */
   linkPreview?: LinkPreviewDTO | null;
+  /** Adjuntos en el orden de envío ([] o ausente si no hay; [] si el mensaje se eliminó). */
+  attachments?: AttachmentDTO[];
   createdAt: string;
   editedAt: string | null;
   deletedAt: string | null;
@@ -418,10 +454,16 @@ export const ForwardedInput = z.object({
 });
 export const SendMessageInput = z.object({
   clientMessageId: z.string().min(8).max(64),
-  body: z.string().trim().min(1).max(8000),
+  /** Puede ir vacío ('') si el mensaje lleva adjuntos. */
+  body: z.string().trim().max(8000),
   replyTo: z.uuid().nullable().optional(),
   forwarded: ForwardedInput.nullable().optional(),
-});
+  /** Adjuntos subidos por mí a esta conversación y aún sin usar (POST /conversations/:id/attachments). */
+  attachmentIds: z.array(z.uuid()).max(10).optional(),
+  /** Reenvío: adjuntos de mensajes que puedo leer; el servidor crea copias que apuntan al mismo archivo. */
+  forwardAttachmentIds: z.array(z.uuid()).max(10).optional(),
+}).refine((v) => v.body.length > 0 || !!v.attachmentIds?.length || !!v.forwardAttachmentIds?.length, { message: 'body_or_attachments', path: ['body'] })
+  .refine((v) => (v.attachmentIds?.length ?? 0) + (v.forwardAttachmentIds?.length ?? 0) <= 10, { message: 'max_10_attachments', path: ['attachmentIds'] });
 export const EditMessageInput = z.object({ body: z.string().trim().min(1).max(8000) });
 export const ConversationPrefsInput = z.object({ pinned: z.boolean().optional(), mutedUntil: z.iso.datetime().nullable().optional() });
 export const WorkspacePrefsInput = z.object({ pinned: z.boolean() });

@@ -7,6 +7,7 @@
 import type { PushData } from '@tiecoms/contracts';
 import { pool, tx } from '../db.ts';
 import { sendApns, sendFcm, type PushResult } from '../push-transport.ts';
+import { summarize, summaryText } from './attachments.ts';
 
 type Lang = 'es' | 'en';
 
@@ -53,6 +54,13 @@ async function badges(userIds: string[]): Promise<Map<string, number>> {
     [userIds],
   );
   return new Map(rows.map((r) => [r.user_id as string, r.n as number]));
+}
+
+/** «📷 2 fotos · texto» o solo el texto (≤ 180). */
+function messageText(body: string, atts: any, lang: Lang) {
+  const sum = summarize(atts);
+  const text = [sum ? summaryText(sum, lang) : '', body.replace(/\s+/g, ' ').trim()].filter(Boolean).join(' · ');
+  return clip(text, 180) || (lang === 'en' ? 'New message' : 'Mensaje nuevo');
 }
 
 const clip = (s: string, n: number) => { const t = s.replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
@@ -108,7 +116,7 @@ async function deliver(targets: Target[], note: (t: Target) => Note) {
 /** Mensaje de texto nuevo. */
 export async function pushMessage(messageId: string) {
   const { rows } = await pool.query(
-    `SELECT m.id, m.conversation_id, m.seq, m.author_id, m.body, m.deleted_at, m.kind, c.kind AS conv_kind, c.name AS conv_name,
+    `SELECT m.id, m.conversation_id, m.seq, m.author_id, m.body, m.attachments, m.deleted_at, m.kind, c.kind AS conv_kind, c.name AS conv_name,
             u.name AS author_name, u.avatar_file_id, o.name AS org_name
        FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN users u ON u.id = m.author_id
        LEFT JOIN organizations o ON o.id = u.primary_org_id WHERE m.id = $1`,
@@ -135,7 +143,7 @@ export async function pushMessage(messageId: string) {
   await deliver(targets, (t) => ({
     title: direct ? m.author_name : m.conv_name || m.author_name,
     subtitle: direct ? null : [m.author_name, m.org_name].filter(Boolean).join(' · '),
-    body: clip(m.body, 180) || (t.lang === 'en' ? 'New message' : 'Mensaje nuevo'),
+    body: messageText(m.body, m.attachments, t.lang),
     threadId: m.conversation_id, category: 'TC_MESSAGE', collapseId: m.id,
     data: { type: 'message', conversationId: m.conversation_id, messageId: m.id, authorId: m.author_id, authorName: m.author_name, authorAvatarUrl: avatar },
   }));

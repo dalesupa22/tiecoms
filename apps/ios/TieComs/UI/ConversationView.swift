@@ -59,6 +59,7 @@ struct ConversationView: View {
     @State private var sheet: ChatSheet?
     @State private var confirmDelete: MessageDTO?
     @State private var blockUserId: String?
+    @State private var recorder = VoiceRecorder()
     @FocusState private var composerFocused: Bool
 
     var body: some View {
@@ -328,7 +329,8 @@ struct ConversationView: View {
                 pinned: store.pins[conversationId]?.contains(m.id) == true,
                 linkify: m.deletedAt == nil && m.kind == "text",
                 linkPreview: m.deletedAt == nil ? m.linkPreview : nil,
-                attachments: m.deletedAt == nil ? m.attachments : []
+                attachments: m.deletedAt == nil ? m.attachments : [],
+                messageId: m.id, conversationId: conversationId
             )
             Group {
                 if m.deletedAt == nil {
@@ -510,6 +512,9 @@ struct ConversationView: View {
             }
             StagedAttachments(staged: $staged, progress: uploadProgress)
             HStack(alignment: .bottom, spacing: 8) {
+                if recorder.isActive {
+                    VoiceRecordingBar(recorder: recorder, onSend: sendVoice, onDiscard: { store.show(L("voice.cancelled")) })
+                } else {
                 if editing == nil { AttachButton(staged: $staged) { store.show($0) } }
                 TextField(L("chat.placeholder", ["name": Naming.title(d, c)]), text: $draft, axis: .vertical)
                     .lineLimit(1...6)
@@ -520,6 +525,11 @@ struct ConversationView: View {
                     .onChange(of: draft) { _, v in if !v.isEmpty && editing == nil { store.userIsTyping(conversationId) } }
                     .accessibilityLabel(L("chat.composerLabel"))
                     .accessibilityIdentifier("composer.field")
+                }
+                // Compositor vacío: micrófono (mantener pulsado para grabar). Con texto o adjuntos: enviar.
+                if editing == nil && trimmed.isEmpty && staged.isEmpty && !uploading && recorder.state != .locked {
+                    VoiceRecordButton(recorder: recorder, onSend: sendVoice)
+                } else if !recorder.isActive {
                 Button(action: submit) {
                     Image(systemName: editing != nil ? "checkmark" : "arrow.up")
                         .font(.system(size: 17, weight: .bold))
@@ -530,10 +540,25 @@ struct ConversationView: View {
                 .disabled((trimmed.isEmpty && staged.isEmpty) || uploading)
                 .accessibilityLabel(editing != nil ? L("edit.save") : L("chat.send"))
                 .accessibilityIdentifier("composer.send")
+                }
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
         }
         .background(Theme.surface.ignoresSafeArea(edges: .bottom))
+    }
+
+    /// Nota de voz: se sube (x-voice-note) y se envía con body '' y su attachmentId.
+    private func sendVoice(_ data: Data, _ durationMs: Int, _ waveform: [Double]) {
+        let reply = replyTo?.id
+        uploading = true
+        Task {
+            defer { uploading = false }
+            do {
+                let a = try await store.api.uploadVoiceNote(conversationId, data: data, durationMs: durationMs, waveform: waveform)
+                store.send(conversationId, body: "", replyTo: reply, attachments: [a])
+                replyTo = nil
+            } catch { store.show(L10n.errorText(error)) }
+        }
     }
 
     private func submit() {
@@ -683,6 +708,8 @@ struct MessageBubble: View {
     var linkify = false
     var linkPreview: LinkPreviewDTO? = nil
     var attachments: [AttachmentDTO] = []
+    var messageId: String? = nil
+    var conversationId: String? = nil
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -723,7 +750,7 @@ struct MessageBubble: View {
                         Label(merged, systemImage: "arrow.uturn.backward").font(.caption.weight(.semibold))
                             .foregroundStyle(mine ? Color.white : Theme.accentText)
                     }
-                    if !attachments.isEmpty { AttachmentsBlock(attachments: attachments, mine: mine) }
+                    if !attachments.isEmpty { AttachmentsBlock(attachments: attachments, mine: mine, messageId: messageId, conversationId: conversationId) }
                     if !text.isEmpty || attachments.isEmpty {
                     Group {
                         if linkify { Text(Linkify.attributed(text)) } else { Text(text) }
@@ -759,7 +786,8 @@ struct MessageBubble: View {
             }
             if !mine { Spacer(minLength: 48) }
         }
-        .accessibilityElement(children: .ignore)
+        // Con adjuntos (fotos, archivos, voz) sus controles siguen accesibles.
+        .accessibilityElement(children: attachments.isEmpty ? .ignore : .contain)
         .accessibilityLabel(a11yLabel)
         .accessibilityHint(status == .failed ? L("chat.retry") : "")
         .accessibilityActions {

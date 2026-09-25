@@ -465,14 +465,23 @@ struct AttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     /// /api/v1/attachments/<id> (autenticada con Bearer).
     var url: String
     var thumbUrl: String?
+    /// 'voice' en notas de voz (SPEC-v4 F); los adjuntos normales no lo traen.
+    var kind: String?
+    var durationMs: Int?
+    /// Hasta 64 valores 0…1.
+    var waveform: [Double]?
+    var transcript: VoiceTranscript?
 
-    var isImage: Bool { contentType.hasPrefix("image/") }
-    var isVideo: Bool { contentType.hasPrefix("video/") }
+    var isVoice: Bool { kind == "voice" }
+    var isImage: Bool { !isVoice && contentType.hasPrefix("image/") }
+    var isVideo: Bool { !isVoice && contentType.hasPrefix("video/") }
     var isMedia: Bool { isImage || isVideo }
 
-    init(id: String, name: String, contentType: String, sizeBytes: Int, width: Int? = nil, height: Int? = nil, url: String, thumbUrl: String? = nil) {
+    init(id: String, name: String, contentType: String, sizeBytes: Int, width: Int? = nil, height: Int? = nil, url: String, thumbUrl: String? = nil,
+         kind: String? = nil, durationMs: Int? = nil, waveform: [Double]? = nil, transcript: VoiceTranscript? = nil) {
         self.id = id; self.name = name; self.contentType = contentType; self.sizeBytes = sizeBytes
         self.width = width; self.height = height; self.url = url; self.thumbUrl = thumbUrl
+        self.kind = kind; self.durationMs = durationMs; self.waveform = waveform; self.transcript = transcript
     }
 
     init(from decoder: Decoder) throws {
@@ -485,6 +494,30 @@ struct AttachmentDTO: Codable, Equatable, Identifiable, Sendable {
         height = c.intOpt("height")
         url = c.v("url", "/api/v1/attachments/\(id)")
         thumbUrl = c.o("thumbUrl")
+        kind = c.o("kind")
+        durationMs = c.intOpt("durationMs")
+        waveform = (c.o("waveform") as [Double]?).map { $0.prefix(64).map { min(1, max(0, $0)) } }
+        transcript = c.o("transcript")
+    }
+}
+
+/// Transcripción de una nota de voz: pending → done | failed; disabled si el servidor no tiene llave.
+struct VoiceTranscript: Codable, Equatable, Sendable {
+    enum Status: String, Codable, Sendable { case pending, done, failed, disabled }
+    var status: Status
+    var text: String?
+    var language: String?
+    var summary: String?
+    /// Título para el chip «Crear asunto: …».
+    var suggestedIssue: String?
+
+    init(status: Status, text: String? = nil, language: String? = nil, summary: String? = nil, suggestedIssue: String? = nil) {
+        self.status = status; self.text = text; self.language = language; self.summary = summary; self.suggestedIssue = suggestedIssue
+    }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        status = Status(rawValue: c.v("status", "pending")) ?? .pending
+        text = c.o("text"); language = c.o("language"); summary = c.o("summary"); suggestedIssue = c.o("suggestedIssue")
     }
 }
 
@@ -492,12 +525,15 @@ struct AttachmentDTO: Codable, Equatable, Identifiable, Sendable {
 struct HumanPreview: Codable, Equatable, Sendable {
     struct Counts: Codable, Equatable, Sendable {
         var count: Int; var images: Int; var videos: Int; var files: Int; var firstName: String?
-        init(count: Int, images: Int, videos: Int, files: Int, firstName: String?) {
+        var voices: Int = 0; var voiceDurationMs: Int?
+        init(count: Int, images: Int, videos: Int, files: Int, firstName: String?, voices: Int = 0, voiceDurationMs: Int? = nil) {
             self.count = count; self.images = images; self.videos = videos; self.files = files; self.firstName = firstName
+            self.voices = voices; self.voiceDurationMs = voiceDurationMs
         }
         init(from decoder: Decoder) throws {
             let c = try container(decoder)
             count = c.int("count"); images = c.int("images"); videos = c.int("videos"); files = c.int("files"); firstName = c.o("firstName")
+            voices = c.int("voices"); voiceDurationMs = c.intOpt("voiceDurationMs")
         }
     }
     var messageId: String?

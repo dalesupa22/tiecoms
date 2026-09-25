@@ -842,6 +842,7 @@
 "voice.copied" = "Transcript copied";
 "voice.copy" = "Copy transcript";
 "voice.createIssue" = "Create issue: {title}";
+"voice.disabled" = "Transcription not available";
 "voice.discard" = "Discard";
 "voice.failed" = "Could not transcribe";
 "voice.hideTranscript" = "Hide transcript";

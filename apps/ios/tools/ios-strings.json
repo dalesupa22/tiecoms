@@ -830,5 +830,9 @@
  "att.openFile": [
   "Abre el archivo",
   "Opens the file"
+ ],
+ "voice.disabled": [
+  "Transcripción no disponible",
+  "Transcription not available"
  ]
 }

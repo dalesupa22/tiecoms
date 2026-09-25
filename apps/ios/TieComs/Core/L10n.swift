@@ -96,8 +96,11 @@ enum L10n {
         return preview(c.lastMessagePreview)
     }
 
+    /// Igual que attachmentSummaryText de la web.
     static func countsLabel(_ a: HumanPreview.Counts) -> String? {
         guard a.count > 0 else { return nil }
+        if a.voices > 0 && a.voices == a.count { return voiceLabel(a.voiceDurationMs) }
+        if a.images + a.videos == a.count && a.images > 0 && a.videos > 0 { return L("att.media", ["n": a.count]) }
         if a.images == a.count { return a.count == 1 ? L("att.photo") : L("att.photos", ["n": a.count]) }
         if a.videos == a.count { return a.count == 1 ? L("att.video") : L("att.videos", ["n": a.count]) }
         if a.count == 1, let n = a.firstName { return L("att.file", ["name": n]) }
@@ -107,11 +110,26 @@ enum L10n {
     /// «📷 Foto», «📷 3 fotos», «🎬 Video», «📎 nombre» (+ el texto si lo hay), como la web y el push.
     static func attachmentsLabel(_ list: [AttachmentDTO]) -> String? {
         guard !list.isEmpty else { return nil }
+        let voices = list.filter(\.isVoice)
+        if voices.count == list.count { return voiceLabel(voices.count == 1 ? voices[0].durationMs : voices.compactMap(\.durationMs).reduce(0, +)) }
         let images = list.filter(\.isImage).count, videos = list.filter(\.isVideo).count
+        if images > 0 && videos > 0 && images + videos == list.count { return L("att.media", ["n": list.count]) }
         if images == list.count { return images == 1 ? L("att.photo") : L("att.photos", ["n": images]) }
         if videos == list.count { return videos == 1 ? L("att.video") : L("att.videos", ["n": videos]) }
         if list.count == 1 { return L("att.file", ["name": list[0].name]) }
         return L("att.files", ["n": list.count])
+    }
+
+    /// «🎤 Nota de voz (0:42)».
+    static func voiceLabel(_ ms: Int?) -> String {
+        guard let ms, ms > 0 else { return L("voice.previewShort") }
+        return L("voice.preview", ["d": duration(ms)])
+    }
+
+    /// m:ss (como voiceDuration de la web).
+    static func duration(_ ms: Int) -> String {
+        let s = max(0, Int((Double(ms) / 1000).rounded()))
+        return "\(s / 60):" + String(format: "%02d", s % 60)
     }
 
     static func messagePreview(_ m: MessageDTO) -> String {

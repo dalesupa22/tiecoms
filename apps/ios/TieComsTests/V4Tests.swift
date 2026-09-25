@@ -144,14 +144,14 @@ final class V4Tests: XCTestCase {
         let s = ShareSections.build(targets, query: "", suggested: "c3", recentCount: 2)
         XCTAssertEqual(s.first?.title, L("shareX.suggested"))
         XCTAssertEqual(s[0].items.map(\.id), ["c3"])
-        XCTAssertEqual(s[1].title, L("shareX.recent"))
+        XCTAssertEqual(s[1].title, L("share.recent"))
         XCTAssertEqual(s[1].items.map(\.id), ["d1", "c1"], "recientes primero")
         XCTAssertEqual(Set(s.flatMap(\.items).map(\.id)).count, s.flatMap(\.items).count, "sin repetidos")
         XCTAssertEqual(s.last?.title == L("side.directs") || s.contains { $0.title == "Estudio Norte · Lanzamiento" }, true)
 
         let q = ShareSections.build(targets, query: "comite", suggested: nil)
         XCTAssertEqual(q.flatMap(\.items).map(\.id), ["c1"], "búsqueda sin tildes; sin «recientes»")
-        XCTAssertFalse(q.contains { $0.title == L("shareX.recent") })
+        XCTAssertFalse(q.contains { $0.title == L("share.recent") })
         // La sugerencia de iOS solo se usa si la conversación sigue disponible.
         XCTAssertNotEqual(ShareSections.build(targets, query: "", suggested: "borrada").first?.title, L("shareX.suggested"))
 
@@ -259,5 +259,116 @@ final class V4Tests: XCTestCase {
         XCTAssertEqual(dev.get(), "rt-dev")
         XCTAssertEqual(legacy.get(), "rt-legacy", "no toca la de producción")
         dev.set(nil); legacy.set(nil)
+    }
+
+    // MARK: D. Orden y «Grupo en un espacio»
+
+    private func conv(_ id: String, unread: Int = 0, muted: Bool = false, pinned: Bool = false, at: String, human: String? = nil) throws -> ConversationDTO {
+        let h = human.map { #","lastHumanPreview":{"seq":1,"body":"x","createdAt":"\#($0)"}"# } ?? ""
+        return try dec(ConversationDTO.self, #"{"id":"\#(id)","kind":"group","unread":\#(unread),"lastMessageAt":"\#(at)"\#(muted ? #","mutedUntil":"2099-01-01T00:00:00Z""# : "")\#(pinned ? #","pinnedAt":"2026-01-01T00:00:00Z""# : "")\#(h)}"#)
+    }
+
+    func testHomeOrderMatchesWeb() throws {
+        let a = try conv("a", at: "2026-09-25T10:00:00Z")
+        let b = try conv("b", unread: 2, at: "2026-09-20T10:00:00Z")
+        let c = try conv("c", unread: 5, muted: true, at: "2026-09-25T12:00:00Z")
+        let d = try conv("d", pinned: true, at: "2026-09-01T10:00:00Z")
+        let e = try conv("e", at: "2026-09-25T09:00:00Z", human: "2026-09-25T11:00:00Z")
+        let f = try conv("f", at: "2026-09-25T10:00:00Z")
+        let sorted = [a, b, c, d, e, f].sorted(by: HomeOrder.before).map(\.id)
+        // No leídos primero; silenciada cuenta como leída; fijada arriba de su bloque; actividad = lastHumanPreview ?? lastMessageAt; desempate por id.
+        XCTAssertEqual(sorted, ["b", "d", "c", "e", "a", "f"])
+        XCTAssertTrue(HomeOrder.rankBefore(.init(unread: 1, activity: "2020"), .init(unread: 0, activity: "2030")))
+        XCTAssertTrue(HomeOrder.rankBefore(.init(unread: 3, activity: "2020"), .init(unread: 1, activity: "2030")))
+        XCTAssertTrue(HomeOrder.rankBefore(.init(unread: 0, activity: "2030"), .init(unread: 0, activity: "2020")))
+
+        let t = Naming.homeTree(try boot())
+        XCTAssertEqual(t.companies.map { $0.org?.name ?? "" }, ["Estudio Norte", "Xertify"], "la empresa con no leídos va primero")
+        XCTAssertEqual(t.companies[0].workspaces[0].convs.map(\.conv.id), ["c1", "c2"], "c1 con no leídos; c2 silenciada")
+        XCTAssertFalse(t.orderSignature.isEmpty)
+    }
+
+    func testSpaceGroupFormData() throws {
+        let d = try dec(BootstrapDTO.self, #"""
+        {"contract":"x","serverTime":"","me":{"id":"me","name":"Ana","kind":"human","primaryOrgId":"oA"},
+         "organizations":[{"id":"oA","name":"Xertify","myRole":"owner"},{"id":"oB","name":"Norte"}],
+         "workspaces":[{"id":"w1","name":"Lanzamiento","owningOrgId":"oA","organizationIds":["oA","oB"],"memberIds":["me","bob","col"],"myRole":"lead","createdAt":""},
+                       {"id":"w2","name":"Ajeno","owningOrgId":"oB","organizationIds":["oA","oB"],"memberIds":["me","bob"],"myRole":"guest","createdAt":""}],
+         "conversations":[],
+         "people":[{"id":"me","name":"Ana","kind":"human","orgId":"oA"},{"id":"bob","name":"Bob","kind":"human","orgId":"oB"},{"id":"col","name":"Carla Núñez","kind":"human","orgId":"oA"}]}
+        """#)
+        let groups = SpaceGroupForm.groups(d)
+        XCTAssertEqual(groups.flatMap { $0.1.map(\.id) }, ["w1"], "sin espacios donde soy tercero")
+        XCTAssertEqual(groups.first?.0, "oB", "agrupado por la empresa contraparte")
+        let ws = d.workspaces[0]
+        XCTAssertEqual(SpaceGroupForm.candidates(d, ws, isInternal: false, query: "").map(\.id), ["bob", "col"])
+        XCTAssertEqual(SpaceGroupForm.candidates(d, ws, isInternal: true, query: "").map(\.id), ["col"], "interno: solo mi empresa")
+        XCTAssertEqual(SpaceGroupForm.candidates(d, ws, isInternal: false, query: "nunez").map(\.id), ["col"], "búsqueda sin tildes")
+    }
+
+    // MARK: E. Asuntos y agenda en chats; aviso de 10 min
+
+    func testIssuesAndEventsInChats() throws {
+        let d = try boot()
+        let i1 = try dec(IssueDTO.self, #"{"id":"i1","workspaceId":null,"conversationId":"d1","title":"Contrato","status":"open"}"#)
+        let i2 = try dec(IssueDTO.self, #"{"id":"i2","workspaceId":"w1","conversationId":"c1","title":"Fecha","status":"open"}"#)
+        XCTAssertNil(i1.workspaceId)
+        let tree = IssueTree.group(d, [i1, i2])
+        XCTAssertEqual(tree.map(\.isChats), [false, true], "«Chats» después de las empresas")
+        XCTAssertEqual(tree.last?.workspaces.first?.convs.map(\.id), ["d1"])
+        let ev = try dec(CalendarEventDTO.self, #"{"id":"e1","workspaceId":null,"conversationId":"d1","title":"Revisión","startsAt":"2026-09-25T15:00:00Z","endsAt":"2026-09-25T15:30:00Z"}"#)
+        XCTAssertNil(ev.workspaceId)
+
+        let soon = try dec(AccountEvent.self, #"{"type":"event.soon","minutes":10,"event":{"id":"e1","conversationId":"d1","title":"Revisión","startsAt":"2026-09-25T15:00:00Z","endsAt":"2026-09-25T15:30:00Z"}}"#)
+        guard case .eventSoon(let e, let m) = soon else { return XCTFail("event.soon") }
+        XCTAssertEqual(e.id, "e1"); XCTAssertEqual(m, 10)
+        XCTAssertEqual(L("cal.soon", ["n": 10, "title": "Revisión"]).contains("Revisión"), true)
+
+        let push = PushPayload(userInfo: ["type": "event", "conversationId": "d1", "eventId": "e1", "minutes": 10,
+                                          "aps": ["alert": ["title": "Empieza en 10 min: Revisión", "body": "10:00"], "category": "TC_EVENT", "thread-id": "d1"]])
+        XCTAssertEqual(push?.isEventSoon, true)
+        XCTAssertEqual(push?.category, PushPayload.eventCategory)
+        let invite = PushPayload(userInfo: ["type": "event", "conversationId": "d1", "eventId": "e1", "aps": ["alert": ["title": "Reunión", "body": "x"]]])
+        XCTAssertEqual(invite?.isEventSoon, false, "la convocatoria no trae minutes")
+    }
+
+    // MARK: F. Notas de voz
+
+    func testVoiceNoteDecodeAndPreview() throws {
+        let m = try dec(MessageDTO.self, #"""
+        {"id":"m","seq":1,"authorId":"u","body":"","createdAt":"","attachments":[
+          {"id":"v1","name":"nota.m4a","contentType":"audio/mp4","sizeBytes":9000,"url":"/api/v1/attachments/v1","kind":"voice","durationMs":42400,
+           "waveform":[0.1,0.5,1.4,-2],"transcript":{"status":"done","text":"Hola, te envío el contrato el jueves","language":"es","summary":null,"suggestedIssue":"Enviar el contrato el jueves"}}]}
+        """#)
+        let v = try XCTUnwrap(m.attachments.first)
+        XCTAssertTrue(v.isVoice); XCTAssertFalse(v.isMedia)
+        XCTAssertEqual(v.durationMs, 42400)
+        XCTAssertEqual(v.waveform, [0.1, 0.5, 1, 0], "0…1")
+        XCTAssertEqual(v.transcript?.status, .done)
+        XCTAssertEqual(v.transcript?.suggestedIssue, "Enviar el contrato el jueves")
+        XCTAssertEqual(L10n.duration(42400), "0:42")
+        XCTAssertEqual(L10n.duration(61_600), "1:02")
+        XCTAssertEqual(L10n.messagePreview(m), L("voice.preview", ["d": "0:42"]))
+        let fresh = try dec(AttachmentDTO.self, #"{"id":"v2","name":"n.m4a","contentType":"audio/mp4","sizeBytes":1,"kind":"voice","transcript":null}"#)
+        XCTAssertNil(fresh.transcript, "recién subido llega null")
+        XCTAssertEqual(try dec(VoiceTranscript.self, #"{"status":"raro"}"#).status, .pending)
+        let counts = HumanPreview.Counts(count: 1, images: 0, videos: 0, files: 0, firstName: nil, voices: 1, voiceDurationMs: 42400)
+        XCTAssertEqual(L10n.countsLabel(counts), L("voice.preview", ["d": "0:42"]))
+        XCTAssertEqual(L10n.countsLabel(.init(count: 3, images: 2, videos: 1, files: 0, firstName: nil)), L("att.media", ["n": 3]))
+    }
+
+    func testVoiceWaveformHelpers() {
+        XCTAssertEqual(VoiceRules.downsample([]), [])
+        XCTAssertEqual(VoiceRules.downsample([0.2, 0.4]), [0.2, 0.4])
+        let many = (0..<640).map { Double($0 % 10) / 10 }
+        let w = VoiceRules.downsample(many)
+        XCTAssertEqual(w.count, 64)
+        XCTAssertTrue(w.allSatisfy { $0 >= 0 && $0 <= 1 })
+        XCTAssertEqual(w.first, 0.9, "máximo por tramo")
+        XCTAssertEqual(VoiceRules.waveformHeader([0, 0.5, 1]), "0.00,0.50,1.00")
+        XCTAssertLessThan(VoiceRules.level(db: -160), 0.05)
+        XCTAssertEqual(VoiceRules.level(db: 0), 1, accuracy: 0.001)
+        XCTAssertGreaterThan(VoiceRules.level(db: -20), VoiceRules.level(db: -40))
+        XCTAssertEqual(VoiceRules.maxMs, 900_000)
     }
 }

@@ -78,6 +78,8 @@ struct AttachmentsBlock: View {
     @Environment(AppStore.self) private var store
     let attachments: [AttachmentDTO]
     var mine: Bool
+    var messageId: String? = nil
+    var conversationId: String? = nil
     @State private var viewer: ViewerStart?
     @State private var preview: URL?
     @State private var loadingFile: String?
@@ -86,8 +88,11 @@ struct AttachmentsBlock: View {
 
     var body: some View {
         let media = attachments.filter(\.isMedia)
-        let files = attachments.filter { !$0.isMedia }
+        let files = attachments.filter { !$0.isMedia && !$0.isVoice }
         VStack(alignment: .leading, spacing: 6) {
+            ForEach(attachments.filter(\.isVoice)) { v in
+                VoiceNoteView(att: v, mine: mine, conversationId: conversationId, messageId: messageId, authorIsMe: mine)
+            }
             if !media.isEmpty { grid(media) }
             ForEach(files) { f in fileChip(f) }
         }

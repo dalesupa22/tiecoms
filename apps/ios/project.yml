@@ -53,7 +53,8 @@ targets:
         CFBundleAllowMixedLocalizations: true
         ITSAppUsesNonExemptEncryption: false
         NSUserActivityTypes: [INSendMessageIntent]
-        NSCameraUsageDescription: TieComs uses the camera only when you choose to take a profile or group photo.
+        NSCameraUsageDescription: TieComs uses the camera when you choose to take a profile or group photo, or a photo or video to attach.
+        NSMicrophoneUsageDescription: TieComs uses the microphone to record the voice notes you send in your conversations.
         LSRequiresIPhoneOS: true
         UILaunchScreen:
           UIColorName: LaunchBackground

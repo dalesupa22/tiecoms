@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 import UIKit
 @testable import TieComs
@@ -93,6 +94,84 @@ final class IntegrationV4Tests: XCTestCase {
                                                                                     data: Data(count: AttachmentRules.maxBytes + 1)), progress: { _ in })
             XCTFail("debía rechazarse")
         } catch let e as ApiRequestError { XCTAssertEqual(e.code, "too_large") }
+    }
+}
+
+extension IntegrationV4Tests {
+    /// m4a AAC de ~1,5 s (tono) generado en el simulador, como el de la grabadora.
+    static func toneM4A(seconds: Double = 1.5) throws -> Data {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tono-\(UUID().uuidString).m4a")
+        let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 24_000, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 32_000]
+        let fmt = AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1)!
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+            let frames = AVAudioFrameCount(24_000 * seconds)
+            let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: frames)!
+            buf.frameLength = frames
+            for i in 0..<Int(frames) { buf.floatChannelData![0][i] = Float(sin(Double(i) * 2 * .pi * 440 / 24_000) * 0.3) }
+            try file.write(from: buf)
+        }
+        defer { try? FileManager.default.removeItem(at: url) }
+        return try Data(contentsOf: url)
+    }
+
+    /// Nota de voz en un directo (x-voice-note); asunto y reunión en el directo (SPEC-v4 E y F).
+    func testVoiceNoteAndChatIssuesAndEvents() async throws {
+        let f = try fx()
+        let s = AppStore(baseURL: URL(string: f.apiUrl)!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: nil)
+        try await s.login(email: f.a.email, password: f.password)
+        try await waitUntil(10, "socket") { s.connection == .online }
+        let (_, bLogin) = try await http(f, "POST", "/auth/login", token: nil, body: ["email": f.b.email, "password": f.password,
+                                                                                     "device": ["deviceId": UUID().uuidString, "name": "XCTest B v4F", "platform": "agent"]])
+        let tokenB = try XCTUnwrap((bLogin as? [String: Any])?["accessToken"] as? String)
+        let (_, dj) = try await http(f, "POST", "/directs", token: tokenB, body: ["userId": f.a.id])
+        let directId = try XCTUnwrap(((dj as? [String: Any])?["conversation"] as? [String: Any])?["id"] as? String ?? (dj as? [String: Any])?["id"] as? String)
+        try await s.refreshAll()
+        try await s.openConversation(directId)
+
+        // F. Voz: sube, envía con body '' y la transcripción pasa de null a pending/disabled/done.
+        let audio = try Self.toneM4A()
+        let wave = VoiceRules.downsample((0..<150).map { Double($0 % 7) / 7 })
+        let a = try await s.api.uploadVoiceNote(directId, data: audio, durationMs: 1500, waveform: wave)
+        XCTAssertEqual(a.kind, "voice")
+        XCTAssertEqual(a.durationMs, 1500)
+        XCTAssertEqual(a.waveform?.count, 64)
+        XCTAssertNil(a.transcript, "recién subida: sin transcripción")
+        let p = try XCTUnwrap(s.send(directId, body: "", attachments: [a]))
+        try await waitUntil(15, "nota de voz en el chat") {
+            (s.conversations[directId]?.messages ?? []).contains { $0.clientMessageId == p.clientMessageId && $0.attachments.first?.isVoice == true }
+        }
+        let status = s.conversations[directId]?.messages.first { $0.clientMessageId == p.clientMessageId }?.attachments.first?.transcript?.status
+        XCTAssertTrue([.pending, .disabled, .done].contains(status), "estado: \(String(describing: status))")
+        // Si hay llave, message.updated trae el texto; si no, queda disabled.
+        let deadline = Date().addingTimeInterval(25)
+        var final = status
+        while Date() < deadline, final == .pending {
+            try await Task.sleep(nanoseconds: 500_000_000)
+            final = s.conversations[directId]?.messages.first { $0.clientMessageId == p.clientMessageId }?.attachments.first?.transcript?.status
+        }
+        print("[voice] transcripción final: \(String(describing: final))")
+        XCTAssertNotEqual(final, .pending, "message.updated actualiza la transcripción")
+        let played = try await s.api.download(a.url)
+        XCTAssertGreaterThan(played.count, 1000, "se reproduce con Bearer")
+        XCTAssertNotNil(try? AVAudioPlayer(data: played, fileTypeHint: AVFileType.m4a.rawValue), "AAC m4a reproducible")
+        try await s.refreshAll()
+        XCTAssertEqual(s.meta(directId)?.lastHumanPreview?.attachments?.voices, 1)
+        XCTAssertTrue(L10n.listPreview(try XCTUnwrap(s.meta(directId)))?.hasPrefix("🎤") == true)
+
+        // E. Asunto y reunión en el directo (workspaceId null); aparecen en las listas.
+        let issue = try await s.createIssue(conversationId: directId, title: "Enviar el contrato revisado", ownerId: f.b.id, dueDate: nil, originMessageId: nil)
+        XCTAssertNil(issue.workspaceId)
+        let all = try await s.loadIssues()
+        XCTAssertTrue(all.contains { $0.id == issue.id }, "GET /issues incluye los de directos")
+        XCTAssertTrue(IssueTree.group(s.data!, all).contains { $0.isChats })
+        let start = Date().addingTimeInterval(3600)
+        let ev = try await s.createEvent(conversationId: directId, ["title": "Revisión del contrato", "startsAt": ISODate.string(start),
+                                                                    "endsAt": ISODate.string(start.addingTimeInterval(1800)), "timezone": "America/Bogota"])
+        XCTAssertNil(ev.workspaceId)
+        XCTAssertEqual(Set(ev.invitees.map(\.userId)), Set([f.a.id, f.b.id]), "sin inviteeIds se invita a todos")
+        let evs = try await s.loadEvents(from: Date(), to: Date().addingTimeInterval(86400))
+        XCTAssertTrue(evs.contains { $0.id == ev.id })
     }
 }
 

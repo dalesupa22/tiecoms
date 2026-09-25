@@ -4,6 +4,7 @@ import { client, useClient } from '../app-client.ts';
 import { asset, navigate, type Route } from '../router.ts';
 import { Avatar, ConvAvatar, OrgMark, badgeColor, conversationTitle, counterpartOrg, orgById, personById } from '../ui.tsx';
 import { hangsUnderOrigin, sidesOf } from './Side.tsx';
+import { MentionsInbox } from './Mentions.tsx';
 import { InviteDialog, NewGroupDialog, NewWorkspaceDialog } from './Dialogs.tsx';
 import { conversationMenu, openDialog, workspaceMenu } from '../actions.tsx';
 import { menuProps } from '../menu.tsx';
@@ -39,12 +40,15 @@ export function groupWorkspaces(d: BootstrapDTO) {
 /** Actividad: el último mensaje de una persona si lo hay; si no, el último mensaje. */
 export const activityOf = (c: ConversationDTO) => c.lastHumanPreview?.createdAt ?? c.lastMessageAt ?? '';
 /** Con no leídos (no silenciada) cuenta como pendiente; silenciada con no leídos cuenta como leída. */
-export const pendingOf = (c: ConversationDTO) => (c.unread > 0 && !isMuted(c) ? c.unread : 0);
+export const pendingOf = (c: ConversationDTO) => (c.unread > 0 && (!isMuted(c) || (c.unreadMentions ?? 0) > 0) ? c.unread : 0);
 /**
  * Primero las que tienen no leídos, luego el resto; en cada bloque las fijadas arriba y después por
  * actividad descendente. Desempate por id para que el orden sea estable.
  */
 export function compareConversations(a: ConversationDTO, b: ConversationDTO) {
+  // Una mención sin leer sube arriba del todo (aunque la conversación esté silenciada).
+  const ma = (a.unreadMentions ?? 0) > 0 ? 1 : 0, mb = (b.unreadMentions ?? 0) > 0 ? 1 : 0;
+  if (ma !== mb) return mb - ma;
   const ua = pendingOf(a) > 0 ? 1 : 0, ub = pendingOf(b) > 0 ? 1 : 0;
   if (ua !== ub) return ub - ua;
   const pa = a.pinnedAt ? 1 : 0, pb = b.pinnedAt ? 1 : 0;
@@ -70,13 +74,14 @@ export function sortHome(d: BootstrapDTO, groups: ReturnType<typeof groupWorkspa
 }
 
 // ---------- Pestañas de Inicio (mismas reglas en web, iOS y Android) ----------
-export type HomeTab = 'all' | 'unread' | 'issues' | 'chats' | 'sides';
-export const HOME_TABS: HomeTab[] = ['all', 'unread', 'issues', 'chats', 'sides'];
+export type HomeTab = 'all' | 'unread' | 'mentions' | 'issues' | 'chats' | 'sides';
+export const HOME_TABS: HomeTab[] = ['all', 'unread', 'mentions', 'issues', 'chats', 'sides'];
 const TAB_KEY = 'tiecoms:homeTab';
 /** No leídos = unread > 0 y no silenciada; Asuntos = openIssues > 0; Chats = direct + multi; Laterales = deriveKind 'side'. */
 export function matchesTab(c: ConversationDTO, tab: HomeTab) {
   switch (tab) {
-    case 'unread': return c.unread > 0 && !isMuted(c);
+    case 'unread': return c.unread > 0 && (!isMuted(c) || (c.unreadMentions ?? 0) > 0);
+    case 'mentions': return (c.unreadMentions ?? 0) > 0;
     case 'issues': return c.openIssues > 0;
     case 'chats': return c.kind === 'direct' || c.kind === 'multi';
     case 'sides': return c.deriveKind === 'side';
@@ -89,7 +94,7 @@ function HomeTabs({ d, tab, onTab }: { d: BootstrapDTO; tab: HomeTab; onTab: (t:
   return (
     <div className="home-tabs" role="tablist" aria-label={t('home.filters')}>
       {HOME_TABS.map((k) => {
-        const n = k === 'all' ? d.conversations.length : d.conversations.filter((c) => matchesTab(c, k)).length;
+        const n = k === 'all' ? d.conversations.length : k === 'mentions' ? d.conversations.reduce((s, c) => s + (c.unreadMentions ?? 0), 0) : d.conversations.filter((c) => matchesTab(c, k)).length;
         return (
           <button key={k} role="tab" aria-selected={tab === k} className={`home-tab ${tab === k ? 'on' : ''}`} onClick={() => onTab(k)}>
             {t(`home.tab.${k}`)}{k !== 'all' && n > 0 ? <span className="home-tab-n">{n}</span> : null}
@@ -139,7 +144,8 @@ function Sidebar({ route }: { route: Route }) {
       </nav>
       <div className="side-scroll">
         <HomeTabs d={d} tab={tab} onTab={setTab} />
-        {nothing && <div className="home-empty">{t(`home.empty.${tab}`)}</div>}
+        {tab === 'mentions' ? <MentionsInbox /> : <>
+        {nothing && <div className="home-empty">{t(`home.empty.${tab}` as 'home.empty.all')}</div>}
         <div className="row" style={{ padding: '6px 10px 2px' }}>
           <span className="eyebrow grow">{t('side.companies')}</span>
           <button className="btn ghost small" onClick={() => setNewWs(true)} title={t('side.newSpace')} aria-label={t('side.newSpace')}>＋</button>
@@ -174,6 +180,7 @@ function Sidebar({ route }: { route: Route }) {
         </div>
         {directs.map((c) => <ConvWithSides key={c.id} c={c} activeConv={activeConv} tab={tab} />)}
         {directs.length === 0 && tab === 'all' && <button className="side-conv" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)}><span className="hash">＋</span><span className="grow muted">{t('chat.new')}</span></button>}
+        </>}
       </div>
       <button className="side-foot" style={{ border: 0, borderTop: '1px solid var(--line)', background: 'transparent', textAlign: 'left' }}
         aria-haspopup="menu" title={t('profile.menu')} onClick={(e) => openAccountMenu(e.currentTarget)}>
@@ -215,6 +222,7 @@ function ConvItem({ c, active, showWs = false }: { c: ConversationDTO; active: b
         : <ConvAvatar c={c} size={22} fallback={c.kind === 'multi' && c.deriveKind !== 'side' ? <StackedAvatars c={c} size={20} /> : undefined} />}
       <span className="grow ellipsis">{conversationTitle(d, c)}{ws ? <span className="muted small"> · {ws.name}</span> : null}</span>
       {muted && <span className="small" title={t('side.muted')}>🔕</span>}
+      {(c.unreadMentions ?? 0) > 0 && <span className="pill mention-pill" title={t('mention.youMentioned')}>@</span>}
       {c.unread > 0 && <span className={`pill ${muted ? 'is-muted' : ''}`} style={{ background: badgeColor(c.workspaceId ? counterpartOrg(d, c.workspaceId) : null) }}>{c.unread}</span>}
     </button>
   );

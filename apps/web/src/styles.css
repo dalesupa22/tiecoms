@@ -605,3 +605,23 @@ a.btn { text-decoration: none; color: inherit; } a.btn.primary { color: var(--pa
 .quick-replies { display: flex; gap: 6px; overflow-x: auto; padding: 4px 14px 0; }
 .quick-replies button { flex: none; border: 1px solid #b9dde0; background: #eef7f8; color: #08636b; border-radius: 99px; padding: 4px 12px; font-size: 12.5px; font-weight: 600; }
 .merged-card.is-side { border-color: #b9dde0; background: #eef7f8; }
+
+/* ---------- Menciones ---------- */
+.mention-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
+.mention-wrap textarea { position: relative; z-index: 1; background: transparent; width: 100%; }
+.mention-mirror { position: absolute; inset: 0; z-index: 0; white-space: pre-wrap; overflow-wrap: break-word; color: transparent; pointer-events: none; font: inherit; padding: inherit; }
+.mention-mirror mark { background: rgba(10, 124, 135, .16); color: transparent; border-radius: 4px; }
+.mention-picker { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 20; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, .12); padding: 4px; display: grid; gap: 2px; max-height: 280px; overflow: auto; }
+.mention-picker > button { display: flex; align-items: center; gap: 10px; border: 0; background: transparent; border-radius: 8px; padding: 6px 8px; text-align: left; }
+.mention-picker > button.on, .mention-picker > button:hover { background: var(--paper-2); }
+.mention-all-ico { width: 28px; height: 28px; border-radius: 99px; background: var(--ink); color: #fff; display: grid; place-items: center; font-weight: 700; }
+.mention-outsider { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-top: 1px solid var(--line); }
+.mention { border: 0; background: none; padding: 0; font: inherit; font-weight: 700; cursor: pointer; }
+.mention.is-me { background: #fdebd9; color: #8a3f00 !important; border-radius: 4px; padding: 0 2px; }
+.msg.mentions-me { box-shadow: inset 3px 0 0 #B45309; background: rgba(180, 83, 9, .05); border-radius: 10px; }
+.pill.mention-pill { background: #B45309 !important; margin-right: 2px; }
+.mention-inbox { display: grid; gap: 2px; padding: 4px 6px; }
+.mention-item { display: flex; gap: 8px; align-items: flex-start; border: 0; background: transparent; border-radius: 10px; padding: 7px 8px; text-align: left; }
+.mention-item:hover { background: var(--card); }
+.mention-item.unread b { color: var(--ink); }
+.mention-item.unread { background: rgba(180, 83, 9, .06); }

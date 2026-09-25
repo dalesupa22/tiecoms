@@ -41,6 +41,7 @@ const g = [
   msg('general', 'laura', 'Les dejo la guía de marca https://www.tiecoms.com/', 100 * 60_000, { linkPreview: { url: 'https://www.tiecoms.com/', title: 'TieComs · Una sola red entre las empresas con las que trabajas', description: 'Conversaciones, asuntos y archivos entre equipos de distintas empresas, cada quien con su alcance.', siteName: 'TieComs', imageUrl: '/tiecoms-mark.svg' } }),
   msg('general', 'ana', 'Mañana llego a las 8 con el diseñador.', 90 * 60_000, { forwarded: { source: 'whatsapp', author: 'Pedro (Estudio Norte)', sentAt: '24/9/26 07:41' } }),
   msg('general', 'mateo', 'Fotos de la visita de hoy', 60 * 60_000, { attachments: [1, 2, 3, 4, 5, 6].map((i) => att(`f${i}`, `visita-${i}.jpg`, 'image/jpeg', 820_000)) }),
+  msg('general', 'mateo', '@Danny Suárez ¿puedes revisar con @Laura Gómez la plantilla?', 50 * 60_000, { mentions: [{ userId: 'danny', start: 0, length: 13 }, { userId: 'laura', start: 34, length: 12 }] }),
   msg('general', 'ana', '', 45 * 60_000, { attachments: [{ ...att('v1', 'nota-de-voz.m4a', 'audio/mp4', 31_000), kind: 'voice', durationMs: 52_000, waveform: Array.from({ length: 48 }, (_, i) => 0.2 + 0.8 * Math.abs(Math.sin(i / 3))), transcript: { status: 'done', text: 'Hola Danny, el jueves te mando el contrato revisado con los cambios de la cláusula cuatro.', language: 'es-CO', summary: 'Ana confirma a Danny que el jueves le envía el contrato revisado.', suggestedIssue: 'Enviar el contrato revisado el jueves' } }] }),
   msg('general', 'laura', '', 40 * 60_000, { attachments: [att('p1', 'Contrato marco v3.pdf', 'application/pdf', 1_240_000), att('x1', 'Cronograma.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 48_000)] }),
 ];
@@ -69,7 +70,7 @@ const data: BootstrapDTO = {
   organizations: [org('xertify', 'Xertify', 'X', '#dcd0f2', '#3b2a5a', true), org('norte', 'Estudio Norte', 'EN', '#e8d5a8', '#4a3a14')],
   workspaces: [{ id: 'ws1', name: 'Lanzamiento · Estudio Norte', department: 'Portal de certificados', glyph: null, owningOrgId: 'xertify', organizationIds: ['xertify', 'norte'], memberIds: ['danny', 'laura', 'mateo', 'ana'], myRole: 'lead', createdAt: iso(4 * D), pinnedAt: null }],
   conversations: [
-    conv({ id: 'general', name: 'General', pinnedAt: iso(D), memberIds: ['danny', 'laura', 'mateo', 'ana'], lastMessageSeq: g.length, lastEventSeq: g.length, lastReadSeq: g.length - 1, unread: 1, lastMessagePreview: g[g.length - 1]!.body, openIssues: 2 }),
+    conv({ id: 'general', name: 'General', pinnedAt: iso(D), memberIds: ['danny', 'laura', 'mateo', 'ana'], lastMessageSeq: g.length, lastEventSeq: g.length, lastReadSeq: g.length - 1, unread: 1, unreadMentions: 1, lastMessagePreview: g[g.length - 1]!.body, openIssues: 2 }),
     conv({ id: 'diag', name: 'Diagnóstico · notificaciones duplicadas', kind: 'internal', level: null, internalOrgId: 'xertify', memberIds: ['danny', 'laura'], parentId: 'general', parentMessageId: 'general-m4', parentMessageSeq: 4, deriveKind: 'internal', deriveReason: 'Ana necesita saber si es el job o un reenvío', returnedAt: iso(5 * H), lastMessageSeq: dg.length, lastEventSeq: dg.length, lastReadSeq: dg.length }),
     conv({ id: 'dec', name: 'Decisión · fecha de salida', level: 'directivo', memberIds: ['danny', 'mateo'], parentId: 'general', parentMessageId: 'general-m2', parentMessageSeq: 2, deriveKind: 'directive', lastMessageSeq: 0 }),
     conv({ id: 'multi1', kind: 'multi', workspaceId: null, level: null, name: 'Equipo mixto', avatarUrl: '/tiecoms-mark.svg', memberIds: ['danny', 'mateo', 'ana', 'laura'], unread: 2, lastMessagePreview: '¿Nos vemos el jueves?' }),
@@ -133,6 +134,7 @@ const waMsgs = [
   { id: 'c', fromMe: false, author: 'Carlos', kind: 'image', body: '📷 Captura del error', sentAt: iso(H) },
   { id: 'd', fromMe: false, author: 'Laura Gómez', kind: 'text', body: 'El despliegue quedó listo ✅', sentAt: iso(20 * 60_000) },
 ];
+(client as any).listMentions = async () => ({ hasMore: false, mentions: g.filter((m) => m.mentions?.some((x) => x.userId === 'danny')).map((m) => ({ message: m, conversationId: 'general', all: false, read: false, createdAt: m.createdAt })) });
 (client as any).fetchBlob = async () => (await fetch('/tiecoms-mark.svg')).blob();
 // Subidas simuladas: devuelven un AttachmentDTO y el envío queda en cola (sin backend).
 (client as any).uploadAttachment = async (_c: string, f: File, name: string) => { await new Promise((r) => setTimeout(r, 300)); return att(`up-${Date.now()}`, name, f.type || 'application/octet-stream', f.size); };

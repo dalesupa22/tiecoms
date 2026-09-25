@@ -322,6 +322,12 @@ const es = {
   'side.suggestedFallback': 'Últimas respuestas', 'side.suggesting': 'Preparando un resumen…', 'side.addPerson': 'Añadir persona',
   'side.leave': 'Salir del sidechat', 'side.minimize': 'Minimizar', 'side.pickPeople': 'Con quién', 'side.suggestions': 'Sugerencias',
   'side.enterSends': 'Enter envía', 'side.defaultName': 'Sidechat · {excerpt}', 'side.returnEdit': 'Puedes editarlo antes de publicarlo.',
+  // ---------- SPEC v4 H: menciones con @ ----------
+  'mention.all': 'todos', 'mention.allHint': 'Avisar a todos en este chat', 'mention.youMentioned': 'Te mencionaron', 'mention.mentionedYou': '{name} te mencionó',
+  'mention.inbox': 'Menciones', 'mention.empty': 'Nadie te ha mencionado todavía.', 'mention.tab': 'Menciones', 'mention.badge': '@',
+  'mention.notInChat': '{name} no está en este chat', 'mention.addToChat': 'Añadir', 'mention.askSide': 'Preguntarle en un sidechat',
+  'mention.dropped': 'No se pudo mencionar a: {names}', 'mention.picker': 'Mencionar a alguien', 'mention.noMatch': 'Nadie coincide en este chat.',
+  'home.tab.mentions': 'Menciones', 'mention.loadMore': 'Ver más', 'mention.inConv': 'en {name}', 'mention.allLabel': '@todos',
 };
 
 type Key = keyof typeof es;
@@ -615,6 +621,12 @@ const en: Record<Key, string> = {
   'side.suggestedFallback': 'Latest replies', 'side.suggesting': 'Preparing a summary…', 'side.addPerson': 'Add person',
   'side.leave': 'Leave sidechat', 'side.minimize': 'Minimize', 'side.pickPeople': 'With whom', 'side.suggestions': 'Suggestions',
   'side.enterSends': 'Enter sends', 'side.defaultName': 'Sidechat · {excerpt}', 'side.returnEdit': 'You can edit it before posting.',
+  // ---------- SPEC v4 H: @mentions ----------
+  'mention.all': 'all', 'mention.allHint': 'Notify everyone in this chat', 'mention.youMentioned': 'You were mentioned', 'mention.mentionedYou': '{name} mentioned you',
+  'mention.inbox': 'Mentions', 'mention.empty': 'Nobody has mentioned you yet.', 'mention.tab': 'Mentions', 'mention.badge': '@',
+  'mention.notInChat': '{name} is not in this chat', 'mention.addToChat': 'Add', 'mention.askSide': 'Ask them in a sidechat',
+  'mention.dropped': 'Could not mention: {names}', 'mention.picker': 'Mention someone', 'mention.noMatch': 'Nobody in this chat matches.',
+  'home.tab.mentions': 'Mentions', 'mention.loadMore': 'Load more', 'mention.inConv': 'in {name}', 'mention.allLabel': '@all',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };

@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type AttachmentDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp,
+  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -16,6 +16,7 @@ export interface PendingMessage {
   /** Adjuntos ya subidos (para pintarlos mientras se envía) y adjuntos reenviados de otro mensaje. */
   attachments?: AttachmentDTO[];
   forwardAttachmentIds?: string[];
+  mentions?: MentionDTO[];
   createdAt: string;
   attempts: number;
   status: 'pending' | 'sending' | 'failed';
@@ -437,13 +438,17 @@ export class TieComsClient {
 
   // ---------- Envío con cola persistente ----------
   async send(conversationId: string, body: string, replyTo: string | null = null, forwarded: ForwardedInfo | null = null,
-    extra: { attachments?: AttachmentDTO[]; forwardAttachmentIds?: string[] } = {}) {
+    extra: { attachments?: AttachmentDTO[]; forwardAttachmentIds?: string[]; mentions?: MentionDTO[] } = {}) {
     const text = body.trim();
+    // Las menciones se miden sobre el texto recortado (como lo guarda el servidor).
+    const lead = body.length - body.trimStart().length;
+    const mentions = (extra.mentions ?? []).map((m) => ({ ...m, start: m.start - lead })).filter((m) => m.start >= 0 && m.start + m.length <= text.length);
     if (!text && !extra.attachments?.length && !extra.forwardAttachmentIds?.length) return;
     const p: PendingMessage = {
       clientMessageId: uid(), conversationId, body: text, replyTo, forwarded, createdAt: new Date().toISOString(),
       ...(extra.attachments?.length ? { attachments: extra.attachments } : {}),
       ...(extra.forwardAttachmentIds?.length ? { forwardAttachmentIds: extra.forwardAttachmentIds } : {}),
+      ...(mentions.length ? { mentions } : {}),
       attempts: 0, status: 'pending', nextAttemptAt: 0,
     };
     // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
@@ -518,6 +523,7 @@ export class TieComsClient {
     const files = {
       ...(p.attachments?.length ? { attachmentIds: p.attachments.map((a) => a.id) } : {}),
       ...(p.forwardAttachmentIds?.length ? { forwardAttachmentIds: p.forwardAttachmentIds } : {}),
+      ...(p.mentions?.length ? { mentions: p.mentions } : {}),
     };
     const payload = { conversationId: p.conversationId, clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo, forwarded: p.forwarded ?? null, ...files };
     if (this.socket?.connected) {
@@ -612,7 +618,11 @@ export class TieComsClient {
     if (local?.loaded) this.setConv(m.conversationId, { messages: upsertMessage(local.messages, m) });
     this.patchPreviewIfLast(m);
   }
-  async editMessage(id: string, body: string) { const m = await this.request<MessageDTO>(`/messages/${id}`, { method: 'PATCH', json: { body } }); this.upsertLocal(m); }
+  async editMessage(id: string, body: string, mentions?: MentionDTO[]) { const m = await this.request<MessageDTO>(`/messages/${id}`, { method: 'PATCH', json: { body, ...(mentions ? { mentions } : {}) } }); this.upsertLocal(m); }
+  /** Bandeja «Menciones»: más recientes primero; before = createdAt del último que ya tienes. */
+  listMentions(before?: string, limit = 50) {
+    return this.request<{ mentions: MentionItemDTO[]; hasMore: boolean }>(`/mentions?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`);
+  }
   async deleteMessage(id: string) { const m = await this.request<MessageDTO>(`/messages/${id}`, { method: 'DELETE' }); this.upsertLocal(m); }
   async setMessagePinned(m: MessageDTO, pinned: boolean) {
     const r = await this.request<{ messageIds: string[] }>(`/messages/${m.id}/pin`, { method: pinned ? 'POST' : 'DELETE' });

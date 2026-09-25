@@ -11,6 +11,7 @@ import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationT
 import { PhotoCropDialog, pickImage } from './PhotoCrop.tsx';
 import { AttachmentsView, DraftTray, pickFiles, useDrafts } from './Attachments.tsx';
 import { VoiceRecorder } from './Voice.tsx';
+import { MentionMirror, MessageText, backspaceToken, mentionsFor, mentionsMe, useMentionPicker, type MentionToken } from './Mentions.tsx';
 import { QuickReplies, SideChip, SideConnector, SideDialog, replyPrivately, sidesOf, takePrivateDraft } from './Side.tsx';
 import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
@@ -58,6 +59,21 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const atBottom = useRef(true);
   const prevHeight = useRef(0);
   const input = useRef<HTMLTextAreaElement>(null);
+  // Menciones: tokens «@Nombre» del compositor y lista que aparece al escribir «@».
+  const [tokens, setTokens] = useState<MentionToken[]>([]);
+  const [caret, setCaret] = useState(0);
+  const picker = useMentionPicker({
+    conv, text, caret, messages: local?.messages ?? [],
+    onPick: (range, token) => {
+      const insert = `@${token.label} `;
+      const next = text.slice(0, range.start) + insert + text.slice(range.end);
+      const pos = range.start + insert.length;
+      setText(next); setCaret(pos);
+      setTokens((ts) => [...ts.filter((x) => !(x.userId === token.userId && x.label === token.label)), token]);
+      requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(pos, pos); });
+    },
+    onAddPerson: (p) => void client.addMembers(id, [p.id], 'now').then(() => toast(t('toast.sent'))).catch((e) => toast(errorText(e))),
+  });
 
   const jumpTo = (seq: number) => {
     atBottom.current = false;
@@ -133,14 +149,23 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       // «Responder en privado»: el directo lleva la referencia al mensaje original (el servidor pone la cita).
       const author = personById(d, privateReply.authorId)?.name ?? null;
       void client.send(id, body, null, { source: 'tiecoms', author, sentAt: privateReply.createdAt, fromConversationId: privateReply.conversationId, messageId: privateReply.id }, { attachments });
-    } else void client.send(id, body, replyTo?.id ?? null, null, { attachments });
+    } else void client.send(id, text, replyTo?.id ?? null, null, { attachments, mentions: mentionsFor(text, tokens) });
     drafts.clear();
+    setTokens([]);
     setText('');
     setReplyTo(null);
     setPrivateReply(null);
     input.current?.focus();
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (picker.onKeyDown(e)) return;
+    if (e.key === 'Backspace' && tokens.length) {
+      const el = e.currentTarget;
+      if (el.selectionStart === el.selectionEnd) {
+        const r = backspaceToken(text, el.selectionStart, tokens);
+        if (r) { e.preventDefault(); setText(r.text); setCaret(r.caret); requestAnimationFrame(() => el.setSelectionRange(r.caret, r.caret)); return; }
+      }
+    }
     // Enter envía en escritorio; en móvil el teclado inserta salto de línea y se usa el botón.
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && window.matchMedia('(pointer: fine)').matches) { e.preventDefault(); send(); }
     if (e.key === 'Escape' && replyTo) setReplyTo(null);
@@ -157,7 +182,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     const orig = byId.get(editing.id);
     setEditing(null);
     if (!body || body === orig?.body) return;
-    try { await client.editMessage(editing.id, body); } catch (e) { toast(errorText(e)); }
+    // Conserva las menciones que siguen en el texto editado.
+    const kept: MentionToken[] = (orig?.mentions ?? []).map((m) => ({ userId: m.userId, label: (orig?.body ?? '').slice(m.start + 1, m.start + m.length) }));
+    try { await client.editMessage(editing.id, body, mentionsFor(body, kept)); } catch (e) { toast(errorText(e)); }
   };
 
   const title = conversationTitle(d, conv);
@@ -286,7 +313,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
             const isEditing = editing?.id === m.id;
             const menu = m.deletedAt ? null : menuProps(() => messageMenu(m));
             return (
-              <div key={r.key} id={`msg-${id}-${m.seq}`} data-mid={m.id} className={`msg ${r.cont ? 'cont' : ''} ${highlight === m.seq ? 'is-highlight' : ''} ${pinned.has(m.id) ? 'is-pinned' : ''} ${sideConv?.parentMessageId === m.id ? 'is-anchor' : ''}`} {...(menu ?? {})}>
+              <div key={r.key} id={`msg-${id}-${m.seq}`} data-mid={m.id} className={`msg ${r.cont ? 'cont' : ''} ${highlight === m.seq ? 'is-highlight' : ''} ${pinned.has(m.id) ? 'is-pinned' : ''} ${sideConv?.parentMessageId === m.id ? 'is-anchor' : ''} ${mentionsMe(d, m) ? 'mentions-me' : ''}`} {...(menu ?? {})}>
                 <div>{!r.cont && <Avatar person={author} org={org} size={34} />}</div>
                 <div style={{ minWidth: 0 }}>
                   {!r.cont && (
@@ -311,7 +338,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                       <div className="row small"><span className="muted grow">{t('edit.hint')}</span><button className="btn ghost small" onClick={() => setEditing(null)}>{t('common.cancel')}</button><button className="btn primary small" onClick={saveEdit}>{t('edit.save')}</button></div>
                     </div>
                   ) : (
-                    (m.body || m.deletedAt || !m.attachments?.length) && <div className="msg-body">{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <Linkify text={m.body} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
+                    (m.body || m.deletedAt || !m.attachments?.length) && <div className="msg-body">{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <MessageText d={d} body={m.body} mentions={m.mentions} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
                   )}
                   {!m.deletedAt && !!m.attachments?.length && <AttachmentsView list={m.attachments} onCreateIssue={canWork ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
                   {!m.deletedAt && !isEditing && m.linkPreview && <LinkPreviewCard p={m.linkPreview} />}
@@ -361,12 +388,17 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                 ]);
               }}>📎</button>
               <button className="bring-btn" title={t('imp.action')} aria-label={t('imp.action')} onClick={() => openDialog((close) => <BringDialog conversationId={id} onClose={close} />)}>⤓</button>
+              <div className="mention-wrap">
+              {picker.view}
+              <MentionMirror text={text} tokens={tokens} taRef={input} />
               <textarea
                 ref={input} rows={1} value={text} placeholder={isSide ? (sideOthers.length === 1 ? t('side.placeholder', { name: personById(d, sideOthers[0])?.name.split(' ')[0] ?? '' }) : t('side.placeholderMany')) : t('chat.placeholder', { name: title })} aria-label={t('common.message')}
-                onChange={(e) => { setText(e.target.value); client.typing(id); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(180, e.target.scrollHeight)}px`; }}
+                onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+                onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart); client.typing(id); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(180, e.target.scrollHeight)}px`; }}
                 onKeyDown={onKey} enterKeyHint="send"
                 onPaste={(e) => { const files = [...e.clipboardData.files]; if (files.length) { e.preventDefault(); drafts.add(files); } }}
               />
+              </div>
               {/* Con el compositor vacío, el micrófono: mantener pulsado graba una nota de voz. */}
               {!text.trim() && !drafts.drafts.length && !privateReply
                 ? <VoiceRecorder conversationId={id} onSent={() => { atBottom.current = true; setReplyTo(null); }} />

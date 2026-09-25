@@ -26,6 +26,8 @@ enum Naming {
             return c.name ?? L("conv.defaultInternal")
         case .group: return c.name ?? L("chat.aConversation")
         case .multi:
+            // Sidechats viejos «Consulta · …» se muestran con el nombre nuevo «Sidechat · …».
+            if isSide(c), let n = c.name, n.hasPrefix("Consulta · ") { return L("side.defaultName", ["excerpt": String(n.dropFirst("Consulta · ".count))]) }
             if let n = c.name, !n.isEmpty { return n }
             return multiTitle(d, c)
         }

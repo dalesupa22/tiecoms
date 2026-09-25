@@ -200,7 +200,7 @@ struct VoiceRecordButton: View {
             .accessibilityIdentifier("composer.mic")
             .alert(L("voice.micDenied"), isPresented: $denied) {
                 Button(L("common.close"), role: .cancel) {}
-                Button(L("nav.settings")) { if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) } }
+                Button(L("settings.nav")) { if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) } }
             }
     }
 

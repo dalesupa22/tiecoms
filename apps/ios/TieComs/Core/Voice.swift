@@ -140,6 +140,9 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
     var rate: Float = 1 { didSet { player?.rate = rate } }
     private var player: AVAudioPlayer?
     private var timer: Timer?
+    private var api: APIClient?
+    /// Reproducción continua: la nota que sigue a esta (en el mensaje siguiente), si la hay.
+    var nextProvider: ((String) -> AttachmentDTO?)?
     /// Notas ya escuchadas (para el punto «Sin escuchar»).
     private(set) var heard: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "tc.voice.heard") ?? [])
 
@@ -150,6 +153,7 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
         }
         stop()
         currentId = att.id
+        self.api = api
         do {
             let data = try await AttachmentCache.shared.data(att.url, api: api)
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
@@ -194,6 +198,22 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        Task { @MainActor in self.stop() }
+        Task { @MainActor in
+            let finished = self.currentId
+            let api = self.api
+            self.stop()
+            // Notas seguidas: al terminar una, suena la siguiente.
+            if flag, let finished, let api, let next = self.nextProvider?(finished) { await self.toggle(next, api: api) }
+        }
+    }
+
+    /// La nota siguiente en una lista ordenada de mensajes: otra nota del mismo mensaje o del mensaje inmediatamente siguiente.
+    nonisolated static func next(after id: String, in messages: [MessageDTO]) -> AttachmentDTO? {
+        let humans = messages.filter { !$0.isSystem && $0.deletedAt == nil }
+        guard let i = humans.firstIndex(where: { $0.attachments.contains { $0.id == id } }) else { return nil }
+        let voices = humans[i].attachments.filter(\.isVoice)
+        if let j = voices.firstIndex(where: { $0.id == id }), j + 1 < voices.count { return voices[j + 1] }
+        guard i + 1 < humans.count else { return nil }
+        return humans[i + 1].attachments.first(where: \.isVoice)
     }
 }

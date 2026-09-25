@@ -3,7 +3,7 @@ import Foundation
 /// Payload de un push de TieComs (APNs): `aps` + datos (PushData del contrato).
 /// Tolerante: campos o tipos desconocidos no rompen; `type` desconocido → .message.
 struct PushPayload: Equatable {
-    enum Kind: String { case message, reminder, event }
+    enum Kind: String { case message, reminder, event, side }
 
     var kind: Kind
     var conversationId: String
@@ -14,6 +14,10 @@ struct PushPayload: Equatable {
     var authorAvatarPath: String?
     var reminderId: String?
     var eventId: String?
+    /// Sidechat (type 'side'): origen, ancla y extracto (SPEC-v4 G).
+    var sideOfConversationId: String?
+    var sideOfMessageId: String?
+    var sideOfExcerpt: String?
     /// Solo en el aviso de 10 min antes (la convocatoria no lo trae).
     var minutes: Int?
     var title: String
@@ -26,6 +30,7 @@ struct PushPayload: Equatable {
     static let messageCategory = "TC_MESSAGE"
     static let reminderCategory = "TC_REMINDER"
     static let eventCategory = "TC_EVENT"
+    static let sideCategory = "TC_SIDE"
 
     init?(userInfo: [AnyHashable: Any]) {
         func str(_ k: String) -> String? {
@@ -43,6 +48,11 @@ struct PushPayload: Equatable {
         reminderId = str("reminderId")
         eventId = str("eventId")
         minutes = str("minutes").flatMap(Int.init)
+        var sideOf = userInfo["sideOf"] as? [String: Any]
+        if sideOf == nil, let s = userInfo["sideOf"] as? String, let d = s.data(using: .utf8) { sideOf = try? JSONSerialization.jsonObject(with: d) as? [String: Any] }
+        sideOfConversationId = (sideOf?["conversationId"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        sideOfMessageId = sideOf?["messageId"] as? String
+        sideOfExcerpt = sideOf?["excerpt"] as? String
         let aps = userInfo["aps"] as? [String: Any] ?? [:]
         if let alert = aps["alert"] as? [String: Any] {
             title = alert["title"] as? String ?? ""

@@ -109,13 +109,13 @@ final class FeedbackUITests: XCTestCase {
         // 8. Pulsación larga con vista previa → 4. Preguntar en privado (lateral).
         let theirs = element(app, containing: "Necesito confirmarla hoy")
         theirs.press(forDuration: 1.0)
-        let ask = app.buttons["Preguntar en privado (lateral)"]
+        let ask = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Preguntar'")).firstMatch
         XCTAssertTrue(ask.waitForExistence(timeout: 5))
         shot("v3-03-menu-mensaje")
         ask.tap()
         let person = app.buttons["side.person.\(f.b.id)"]
         XCTAssertTrue(person.waitForExistence(timeout: 5))
-        person.tap()
+        if !person.isSelected { person.tap() }   // el autor del mensaje viene elegido
         let q = app.descendants(matching: .any)["side.question"]
         q.tap(); q.typeText("¿Me ayudas con esta fecha?")
         app.buttons["side.submit"].tap()
@@ -123,7 +123,7 @@ final class FeedbackUITests: XCTestCase {
         XCTAssertTrue(element(app, containing: "¿Me ayudas con esta fecha?").waitForExistence(timeout: 8))
         shot("v3-04-lateral")
         app.buttons["side.close"].tap()
-        let chip = element(app, containing: "Consulta lateral")
+        let chip = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'side.chip.'")).firstMatch
         let chipOK = chip.waitForExistence(timeout: 6)
         shot("v3-04b-chip-lateral")
         XCTAssertTrue(chipOK, "chip «Consulta lateral» bajo el ancla")

@@ -238,6 +238,8 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
     var body: String
     var replyTo: String?
     var mergedFrom: String?
+    /// 'side' | 'same' | 'internal' | 'directive' (qué tipo de conversación se llevó al hilo).
+    var mergedKind: String?
     var forwarded: ForwardedInfo?
     /// Vista previa del primer enlace; llega después del envío con `message.updated`.
     var linkPreview: LinkPreviewDTO?
@@ -265,6 +267,7 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
         body = c.v("body", "")
         replyTo = c.o("replyTo")
         mergedFrom = c.o("mergedFrom")
+        mergedKind = c.o("mergedKind")
         forwarded = c.o("forwarded")
         linkPreview = c.o("linkPreview")
         attachments = c.lossyArray("attachments")

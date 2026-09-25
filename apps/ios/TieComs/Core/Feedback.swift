@@ -68,6 +68,8 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     var openConversationId: (() -> String?)?
     /// Toque en una notificación.
     var onOpenConversation: ((String) -> Void)?
+    /// Toque en un push de sidechat: (origen, sidechat).
+    var onOpenSide: ((String, String) -> Void)?
     /// Acción «Responder» desde la notificación (envía por HTTP).
     var onReply: ((String, String) async -> Void)?
     /// Acción «Marcar como leído».
@@ -173,7 +175,11 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
         case PushRegistration.markReadAction:
             if let mark = await MainActor.run(body: { AppFeedback.shared.onMarkRead }) { await mark(conv) }
         default:
-            await MainActor.run { AppFeedback.shared.onOpenConversation?(conv) }
+            let p = PushPayload(userInfo: response.notification.request.content.userInfo)
+            await MainActor.run {
+                if p?.kind == .side, let origin = p?.sideOfConversationId { AppFeedback.shared.onOpenSide?(origin, conv) }
+                else { AppFeedback.shared.onOpenConversation?(conv) }
+            }
         }
     }
 }
@@ -211,6 +217,9 @@ enum PushRegistration {
                                    options: [.hiddenPreviewsShowTitle]),
             UNNotificationCategory(identifier: PushPayload.reminderCategory, actions: [], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: PushPayload.eventCategory, actions: [], intentIdentifiers: [], options: []),
+            // Sidechat: «Responder» en línea envía al sidechat sin abrir la app.
+            UNNotificationCategory(identifier: PushPayload.sideCategory, actions: [reply, read], intentIdentifiers: ["INSendMessageIntent"],
+                                   options: [.hiddenPreviewsShowTitle]),
         ]
     }
 }

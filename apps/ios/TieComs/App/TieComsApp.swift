@@ -33,6 +33,7 @@ struct TieComsApp: App {
         _store = State(initialValue: s)
         AppFeedback.shared.openConversationId = { [weak s] in s?.appActive == true ? s?.openConversationId : nil }
         AppFeedback.shared.onOpenConversation = { [weak s] id in s?.handle(.conversation(id)) }
+        AppFeedback.shared.onOpenSide = { [weak s] origin, side in s?.openSide(origin: origin, side: side) }
         AppFeedback.shared.onReply = { [weak s] conv, text in await s?.replyFromNotification(conv, text: text) }
         AppFeedback.shared.onMarkRead = { [weak s] conv in await s?.markReadFromNotification(conv) }
         AppFeedback.shared.socketOnline = { [weak s] in s?.connection == .online && s?.appActive == true }

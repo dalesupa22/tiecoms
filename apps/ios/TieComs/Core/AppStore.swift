@@ -73,6 +73,8 @@ final class AppStore {
     var toast: String?
     /// Salto pendiente a un mensaje (?m=<seq>) por conversación.
     var jumpTo: [String: Int] = [:]
+    /// Sidechat a desplegar al abrir una conversación de origen (push TC_SIDE).
+    var sideToOpen: [String: String] = [:]
     /// Respuestas en privado pendientes por conversación directa (cita sobre el compositor).
     var privateReplies: [String: PrivateReplyDraft] = [:]
     /// Texto compartido hacia TieComs (tiecoms://share?text=…).
@@ -750,6 +752,17 @@ final class AppStore {
             if status != .ready { pendingLink = link }
         default:
             if status == .ready { navigate(to: link) } else { pendingLink = link }
+        }
+    }
+
+    /// Push de sidechat: si puedo leer el origen, lo abro con el sidechat desplegado; si no, el sidechat a pantalla completa.
+    func openSide(origin: String, side: String) {
+        guard status == .ready else { pendingLink = .conversation(side); return }
+        if meta(origin) != nil {
+            sideToOpen[origin] = side
+            navigate(to: .conversation(origin))
+        } else {
+            navigate(to: .conversation(side))
         }
     }
 

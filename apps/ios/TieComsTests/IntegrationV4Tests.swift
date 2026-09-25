@@ -175,4 +175,45 @@ extension IntegrationV4Tests {
     }
 }
 
+extension IntegrationV4Tests {
+    /// G. Sidechat: B pregunta a A sobre un mensaje; A responde, pide el resumen sugerido y lo lleva al hilo (mergedKind 'side').
+    func testSidechatReturnSuggest() async throws {
+        let f = try fx()
+        let s = AppStore(baseURL: URL(string: f.apiUrl)!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: nil)
+        try await s.login(email: f.a.email, password: f.password)
+        try await waitUntil(10, "socket") { s.connection == .online }
+        let (_, bLogin) = try await http(f, "POST", "/auth/login", token: nil, body: ["email": f.b.email, "password": f.password,
+                                                                                     "device": ["deviceId": UUID().uuidString, "name": "XCTest B v5", "platform": "agent"]])
+        let tokenB = try XCTUnwrap((bLogin as? [String: Any])?["accessToken"] as? String)
+        let (_, mj) = try await http(f, "POST", "/conversations/\(f.conversationId)/messages", token: tokenB,
+                                     body: ["clientMessageId": UUID().uuidString, "body": "¿Salimos el jueves? (v5)"])
+        let anchor = try XCTUnwrap(((mj as? [String: Any])?["message"] as? [String: Any])?["id"] as? String)
+        let (_, sj) = try await http(f, "POST", "/conversations/\(f.conversationId)/side", token: tokenB,
+                                     body: ["messageId": anchor, "userIds": [f.a.id], "question": "Entre nos, ¿llegamos?"])
+        let sideId = try XCTUnwrap((sj as? [String: Any])?["id"] as? String)
+        try await s.refreshAll()
+        let side = try XCTUnwrap(s.meta(sideId))
+        XCTAssertTrue(Naming.isSide(side))
+        XCTAssertEqual(side.parentMessageId, anchor)
+        XCTAssertTrue(Naming.title(s.data!, side).hasPrefix("Sidechat"), "nombre por defecto «Sidechat · …»")
+        try await s.openConversation(sideId)
+        try await s.openConversation(f.conversationId)
+        _ = s.send(sideId, body: L("side.quick.check"))
+        _ = s.send(sideId, body: "Sí, llegamos el jueves con todo listo.")
+        try await waitUntil(15, "respuestas en el sidechat") { s.pending.isEmpty && (s.conversations[sideId]?.messages.count ?? 0) >= 4 }
+        XCTAssertGreaterThanOrEqual(SideLogic.messageCount(try XCTUnwrap(s.meta(sideId))), 3)
+
+        let sug = try await s.suggestReturn(sideId)
+        XCTAssertFalse(sug.summary.isEmpty)
+        XCTAssertTrue(["ai", "fallback"].contains(sug.source))
+        print("[side] resumen \(sug.source): \(sug.summary)")
+        let parent = try await s.returnResult(sideId, summary: sug.summary)
+        XCTAssertEqual(parent, f.conversationId)
+        try await waitUntil(15, "mensaje «Desde un sidechat» en el hilo") {
+            (s.conversations[f.conversationId]?.messages ?? []).contains { $0.mergedFrom == sideId && $0.mergedKind == "side" }
+        }
+        XCTAssertNotNil(s.meta(sideId)?.returnedAt, "chip verde «Llevado al hilo»")
+    }
+}
+
 @MainActor private final class ProgressBox { var values: [Double] = [] }

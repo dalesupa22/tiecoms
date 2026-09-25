@@ -104,27 +104,62 @@ struct DeriveSheet: View {
     }
 }
 
+/// «Llevar al hilo»: resumen editable (sugerido por IA si el servidor tiene DeepSeek; si no, las últimas respuestas),
+/// vista previa de cómo se verá en el grupo y «Publicar en el hilo».
 struct ReturnResultSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     let conversationId: String
     @State private var summary = ""
+    @State private var source: String?
+    @State private var suggesting = false
     @State private var busy = false
     @State private var error: String?
 
     var body: some View {
         let d = store.data
         let parent = store.meta(conversationId)?.parentId.flatMap { store.meta($0) }
-        SheetForm(title: L("lin.returnTitle"), action: L("lin.returnSend"), busy: busy, disabled: summary.trimmingCharacters(in: .whitespaces).count < 2, error: error, onSubmit: submit) {
+        let parentName = parent.flatMap { p in d.map { Naming.title($0, p) } } ?? ""
+        SheetForm(title: L("side.return"), action: L("side.publish"), busy: busy, disabled: summary.trimmingCharacters(in: .whitespaces).count < 2, error: error, onSubmit: submit) {
             Section {
-                Text(L("lin.returnBody", ["name": parent.flatMap { p in d.map { Naming.title($0, p) } } ?? ""])).font(.footnote).foregroundStyle(Theme.textSecondary)
-                TextField("", text: $summary, axis: .vertical).lineLimit(4...12).accessibilityIdentifier("return.summary")
+                Text(L("lin.returnBody", ["name": parentName])).font(.footnote).foregroundStyle(Theme.textSecondary)
+                ZStack(alignment: .topLeading) {
+                    TextField("", text: $summary, axis: .vertical).lineLimit(4...12).accessibilityIdentifier("return.summary")
+                    if suggesting { ProgressView().frame(maxWidth: .infinity, alignment: .trailing) }
+                }
+                if suggesting { Text(L("side.suggesting")).font(.caption).foregroundStyle(Theme.textSecondary) }
+                else { Text(L("side.returnEdit")).font(.caption).foregroundStyle(Theme.textSecondary) }
+                if let source {
+                    Label(source == "ai" ? L("side.suggested") : L("side.suggestedFallback"), systemImage: source == "ai" ? "sparkles" : "text.quote")
+                        .font(.caption).foregroundStyle(Theme.textSecondary)
+                        .accessibilityIdentifier("return.source.\(source)")
+                }
+            }
+            Section(L("side.previewInGroup")) {
+                if let d, let me = Naming.person(d, d.me.id) {
+                    HStack(alignment: .top, spacing: 8) {
+                        Avatar(person: me, org: Naming.org(d, me.orgId), size: 28)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(L("side.fromSidechat"), systemImage: "bubble.left.and.text.bubble.right").font(.caption2.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.9))
+                            Text(summary.isEmpty ? "…" : summary).foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 16).fill(Theme.bubbleMine))
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("return.preview")
+                }
             }
         }
-        .onAppear {
-            if summary.isEmpty {
-                summary = store.conversations[conversationId]?.messages.last { !$0.isSystem && $0.deletedAt == nil }?.body ?? ""
-            }
+        .task {
+            guard summary.isEmpty else { return }
+            summary = store.localReturnSummary(conversationId)
+            suggesting = true
+            if let s = try? await store.suggestReturn(conversationId), !s.summary.isEmpty {
+                summary = s.summary; source = s.source
+            } else { source = "fallback" }
+            suggesting = false
         }
     }
 

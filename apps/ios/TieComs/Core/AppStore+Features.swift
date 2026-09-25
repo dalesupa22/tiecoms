@@ -228,6 +228,26 @@ extension AppStore {
         return r.id
     }
 
+    struct ReturnSuggestion: Decodable, Sendable {
+        var summary: String
+        var source: String
+        var isAI: Bool { source == "ai" }
+        init(summary: String, source: String) { self.summary = summary; self.source = source }
+        init(from decoder: Decoder) throws { let c = try container(decoder); summary = c.v("summary", ""); source = c.v("source", "fallback") }
+    }
+
+    /// Resumen sugerido para «Llevar al hilo» (IA si hay DeepSeek; si no, source 'fallback').
+    func suggestReturn(_ sideId: String) async throws -> ReturnSuggestion {
+        try await api.request("/conversations/\(sideId)/return/suggest", method: "POST", json: [:])
+    }
+
+    /// Resumen de respaldo local: las últimas respuestas (sin la pregunta inicial).
+    func localReturnSummary(_ sideId: String) -> String {
+        let msgs = (conversations[sideId]?.messages ?? []).filter { !$0.isSystem && $0.deletedAt == nil && !$0.body.isEmpty }
+        let replies = msgs.count > 1 ? Array(msgs.dropFirst()) : msgs
+        return replies.suffix(3).map { m in "\(data.flatMap { Naming.person($0, m.authorId)?.name } ?? ""): \(m.body)" }.joined(separator: "\n")
+    }
+
     func returnResult(_ conversationId: String, summary: String) async throws -> String {
         let r: ReturnOut = try await api.request("/conversations/\(conversationId)/return", method: "POST", json: ["summary": summary])
         try await loadBootstrap()

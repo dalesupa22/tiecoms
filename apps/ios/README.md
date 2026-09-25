@@ -236,6 +236,16 @@ TEST_RUNNER_TC_FIXTURE4=/tmp/fx4.json TEST_RUNNER_TC_SHOTS=/tmp/v4 xcodebuild te
   -destination 'platform=iOS Simulator,id=<sim>' -only-testing:TieComsTests -only-testing:TieComsUITests/ShareUITests
 ```
 
+### Sidechats (SPEC-v4 G)
+
+- `SideViews.swift`: iniciar (ancla como burbuja, sugerencias autor/mencionados/frecuentes, Enter envía con una persona),
+  panel (avatares, «Privado · solo ustedes N», ⋯, tarjeta del ancla, respuestas rápidas), chip-hilo bajo el ancla
+  (`lastMessageSeq − 1` mensajes, verde si se llevó al hilo) y `SidePanelPresenter`: split ~40 % con conector curvo en iPad
+  (preferencias de anclaje `SideAnchorKey`), hoja media/grande con línea al ancla en iPhone y burbuja flotante al arrastrar abajo.
+- Push `TC_SIDE` con «Responder» en línea; al tocarlo abre el origen con el sidechat desplegado (`AppStore.openSide`).
+- «Llevar al hilo» con `POST /conversations/:sideId/return/suggest` (IA o respaldo) y vista previa; `mergedKind:'side'`.
+- Notas de voz seguidas se reproducen una tras otra (`VoicePlayer.next`).
+
 ## Push (APNs)
 
 - **Registro**:

@@ -44,11 +44,16 @@ struct ConversationView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
+    @Environment(\.horizontalSizeClass) private var sizeClass
     let conversationId: String
     /// Dentro del panel de una conversación lateral.
     var embedded = false
     @State private var draft = ""
     @State private var sidePanel: String?
+    /// Pide desplazar el chat a un mensaje (ancla de un sidechat) y resaltarlo.
+    @State private var reveal: String?
+    @State private var dragging: (id: String, dx: CGFloat)?
+    @State private var addingToSide = false
     @State private var highlighted: String?
     @State private var staged: [LocalAttachment] = []
     @State private var uploadProgress: [UUID: Double] = [:]
@@ -72,7 +77,13 @@ struct ConversationView: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { store.openConversationId = conversationId }
+        .onAppear {
+            store.openConversationId = conversationId
+            let id = conversationId
+            VoicePlayer.shared.nextProvider = { [weak store] finished in
+                VoicePlayer.next(after: finished, in: store?.conversations[id]?.messages ?? [])
+            }
+        }
         .onDisappear { if store.openConversationId == conversationId { store.openConversationId = nil } }
         .task(id: conversationId) {
             try? await store.openConversation(conversationId)
@@ -87,7 +98,15 @@ struct ConversationView: View {
             NewSideSheet(conversationId: conversationId, message: m) { id in sidePanel = id }
         }
         // iPad / pantalla ancha: panel a la derecha; iPhone: hoja casi completa sobre el chat.
-        .modifier(SidePanelPresenter(sideId: $sidePanel))
+        .modifier(SidePanelPresenter(sideId: $sidePanel,
+                                     anchorColor: activeAnchor.flatMap { id in store.conversations[conversationId]?.messages.first { $0.id == id } }
+                                        .map { PersonColor.text($0.authorId) } ?? Theme.orange,
+                                     onRevealAnchor: { reveal = $0 }))
+        // Push de un sidechat: abre el origen con el sidechat desplegado.
+        .onChange(of: store.sideToOpen[conversationId], initial: true) { _, v in
+            if let v { sidePanel = v; store.sideToOpen[conversationId] = nil }
+        }
+        .sheet(isPresented: $addingToSide) { AddMembersSheet(conversationId: conversationId) }
         .onChange(of: sidePanel) { _, v in if v == nil { store.openConversationId = conversationId } }
         .confirmationDialog(L("safety.blockConfirm"), isPresented: Binding(get: { blockUserId != nil }, set: { if !$0 { blockUserId = nil } }), titleVisibility: .visible) {
             Button(L("safety.block"), role: .destructive) {
@@ -169,6 +188,8 @@ struct ConversationView: View {
             }
         }
         .toolbar {
+            // Dentro del panel del sidechat la cabecera es la del panel (no se mezcla con la del chat de origen).
+            if !embedded {
             ToolbarItem(placement: .principal) {
                 NavigationLink(value: Route.details(conversationId)) {
                     VStack(spacing: 1) {
@@ -203,6 +224,7 @@ struct ConversationView: View {
                 } label: { Image(systemName: "ellipsis.circle") }
                 .accessibilityLabel(L("menu.open"))
                 .accessibilityIdentifier("chat.menu")
+            }
             }
         }
     }
@@ -256,7 +278,9 @@ struct ConversationView: View {
                         Text(L("chat.lateJoin")).font(.footnote).foregroundStyle(Theme.textSecondary)
                             .multilineTextAlignment(.center).padding(12)
                     }
-                    if state.messages.isEmpty && items.isEmpty {
+                    if embedded && Naming.isSide(c) && !state.messages.contains(where: { !$0.isSystem }) {
+                        SideEmptyState()
+                    } else if state.messages.isEmpty && items.isEmpty {
                         Text(L("conv.noMessages")).font(.subheadline).foregroundStyle(Theme.textSecondary).padding(.top, 40)
                     }
                     ForEach(items) { item in
@@ -268,6 +292,8 @@ struct ConversationView: View {
                 .padding(.vertical, 8)
             }
             .defaultScrollAnchor(.bottom)
+            // Teléfono con el sidechat a medias: espacio abajo para que el ancla pueda subir sobre la hoja.
+            .contentMargins(.bottom, sidePanel != nil && sizeClass == .compact ? 420 : 0, for: .scrollContent)
             // ?m=<seq>: cargar hacia atrás hasta el mensaje, centrarlo y resaltarlo.
             .task(id: store.jumpTo[conversationId]) {
                 guard let seq = store.jumpTo[conversationId] else { return }
@@ -278,6 +304,15 @@ struct ConversationView: View {
                     highlighted = id
                     try? await Task.sleep(nanoseconds: 1_800_000_000)
                     withAnimation { highlighted = nil }
+                }
+            }
+            .onChange(of: reveal) { _, id in
+                guard let id else { return }
+                reveal = nil
+                // En teléfono queda arriba, visible sobre la hoja a medias.
+                Task {
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(id, anchor: UnitPoint(x: 0.5, y: sizeClass == .compact ? 0.12 : 0.4)) }
                 }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -291,6 +326,34 @@ struct ConversationView: View {
             .onAppear { markReadIfVisible() }
             .onChange(of: scenePhase) { _, p in if p == .active { markReadIfVisible() } }
         }
+    }
+
+    /// Quien preguntó en este sidechat (autor del primer mensaje de una persona).
+    private func sideAsker(_ c: ConversationDTO) -> MessageDTO? {
+        guard Naming.isSide(c) else { return nil }
+        return store.conversations[conversationId]?.messages.first { !$0.isSystem && $0.deletedAt == nil }
+    }
+
+    private func composerPlaceholder(_ d: BootstrapDTO, _ c: ConversationDTO) -> String {
+        if let q = sideAsker(c), q.authorId != d.me.id, let name = Naming.person(d, q.authorId)?.name {
+            return L("side.placeholder", ["name": name.split(separator: " ").first.map(String.init) ?? name])
+        }
+        if Naming.isSide(c) { return L("side.placeholderMany") }
+        return L("chat.placeholder", ["name": Naming.title(d, c)])
+    }
+
+    /// Respuestas rápidas: en un sidechat donde me preguntaron y aún no he respondido.
+    private func showQuickReplies(_ d: BootstrapDTO, _ c: ConversationDTO) -> Bool {
+        guard editing == nil, draft.isEmpty, let q = sideAsker(c), q.authorId != d.me.id else { return false }
+        let last = store.conversations[conversationId]?.messages.last { !$0.isSystem && $0.deletedAt == nil }
+        return last?.authorId != d.me.id && store.pendingFor(conversationId).isEmpty
+    }
+
+    /// Mensaje ancla del sidechat abierto.
+    private var activeAnchor: String? { sidePanel.flatMap { store.meta($0)?.parentMessageId } }
+
+    private func canAskSide(_ c: ConversationDTO, _ m: MessageDTO) -> Bool {
+        m.kind == "text" && m.deletedAt == nil && !Naming.isSide(c) && !embedded
     }
 
     private func markReadIfVisible() {
@@ -325,7 +388,8 @@ struct ConversationView: View {
                 status: nil, italic: m.deletedAt != nil,
                 quote: m.replyTo == nil ? nil : (quoted.map { q in (Naming.person(d, q.authorId)?.name ?? "", q.deletedAt != nil ? L("chat.deleted") : excerpt(q.body)) } ?? ("", L("reply.quoteMissing"))),
                 forwardedLabel: m.forwarded.map { forwardedLabel(d, $0, mine: mine, authorName: author?.name) },
-                merged: m.mergedFrom.map { id in store.meta(id).map { L("lin.resultOf", ["name": Naming.title(d, $0)]) } ?? L("lin.resultHidden") },
+                merged: m.mergedKind == "side" ? L("side.fromSidechat")
+                    : m.mergedFrom.map { id in store.meta(id).map { L("lin.resultOf", ["name": Naming.title(d, $0)]) } ?? L("lin.resultHidden") },
                 pinned: store.pins[conversationId]?.contains(m.id) == true,
                 linkify: m.deletedAt == nil && m.kind == "text",
                 linkPreview: m.deletedAt == nil ? m.linkPreview : nil,
@@ -342,6 +406,33 @@ struct ConversationView: View {
             }
             .padding(.top, showAuthor ? 6 : 0)
             .background(RoundedRectangle(cornerRadius: 12).fill(Theme.orange.opacity(highlighted == m.id ? 0.18 : 0)))
+            // Ancla del sidechat abierto: halo suave y posición para el conector.
+            .background {
+                if activeAnchor == m.id {
+                    RoundedRectangle(cornerRadius: 20).fill(PersonColor.text(m.authorId).opacity(0.10))
+                        .shadow(color: PersonColor.text(m.authorId).opacity(0.45), radius: 10)
+                        .padding(-4)
+                }
+            }
+            .anchorPreference(key: SideAnchorKey.self, value: .bounds) { activeAnchor == m.id ? ["anchor": $0] : [:] }
+            // Deslizar la burbuja a la derecha = «Preguntar en un sidechat» (solo en chats que lo permiten).
+            .offset(x: dragging?.id == m.id ? min(90, max(0, dragging!.dx)) : 0)
+            .overlay(alignment: .leading) {
+                if dragging?.id == m.id, (dragging?.dx ?? 0) > 20 {
+                    Image(systemName: "bubble.left.and.text.bubble.right.fill").foregroundStyle(Theme.orange)
+                        .opacity(min(1, Double((dragging?.dx ?? 0) / 70)))
+                        .offset(x: -6)
+                }
+            }
+            .simultaneousGesture(canAskSide(c, m) ? DragGesture(minimumDistance: 24)
+                .onChanged { v in
+                    guard abs(v.translation.width) > abs(v.translation.height) * 2 else { return }
+                    dragging = (m.id, v.translation.width)
+                }
+                .onEnded { v in
+                    if dragging?.id == m.id, v.translation.width > 70 { askSide = m; Haptics.tap() }
+                    withAnimation(.spring(response: 0.3)) { dragging = nil }
+                } : nil)
             .accessibilityIdentifier("msg.\(m.id)")
             let sides = store.sides(of: m.id)
             if !sides.isEmpty {
@@ -420,7 +511,7 @@ struct ConversationView: View {
                 act { try await store.startPrivateReply(to: m) }
             } label: { Label(L("preply.action"), systemImage: "lock.bubble") }
         }
-        if m.kind == "text" && !Naming.isSide(c) {
+        if canAskSide(c, m) {
             Button { askSide = m } label: { Label(L("side.ask"), systemImage: "bubble.left.and.text.bubble.right") }
         }
         Button { UIPasteboard.general.string = m.body; store.show(L("toast.copied")) } label: { Label(L("menu.copyText"), systemImage: "doc.on.doc") }
@@ -510,13 +601,16 @@ struct ConversationView: View {
                 }
                 .accessibilityIdentifier("composer.editBar")
             }
+            if showQuickReplies(d, c) {
+                SideQuickReplies(onSend: { store.send(conversationId, body: $0) }, onAskOther: { addingToSide = true })
+            }
             StagedAttachments(staged: $staged, progress: uploadProgress)
             HStack(alignment: .bottom, spacing: 8) {
                 if recorder.isActive {
                     VoiceRecordingBar(recorder: recorder, onSend: sendVoice, onDiscard: { store.show(L("voice.cancelled")) })
                 } else {
                 if editing == nil { AttachButton(staged: $staged) { store.show($0) } }
-                TextField(L("chat.placeholder", ["name": Naming.title(d, c)]), text: $draft, axis: .vertical)
+                TextField(composerPlaceholder(d, c), text: $draft, axis: .vertical)
                     .lineLimit(1...6)
                     .focused($composerFocused)
                     .padding(.horizontal, 14).padding(.vertical, 10)

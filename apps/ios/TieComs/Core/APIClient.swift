@@ -156,6 +156,7 @@ final class APIClient {
         var req = URLRequest(url: url(path))
         req.httpMethod = method
         req.setValue("ios", forHTTPHeaderField: "x-tiecoms-client")
+        req.setValue(L10n.lang, forHTTPHeaderField: "accept-language")
         req.setValue(Contract.version, forHTTPHeaderField: "x-tiecoms-contract")
         req.setValue("application/json", forHTTPHeaderField: "accept")
         if let json {
@@ -231,6 +232,7 @@ final class APIClient {
             req.httpMethod = "POST"
             req.timeoutInterval = 300
             req.setValue("ios", forHTTPHeaderField: "x-tiecoms-client")
+            req.setValue(L10n.lang, forHTTPHeaderField: "accept-language")
             req.setValue(Contract.version, forHTTPHeaderField: "x-tiecoms-contract")
             req.setValue(contentType, forHTTPHeaderField: "content-type")
             for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }

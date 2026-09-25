@@ -834,5 +834,57 @@
  "voice.disabled": [
   "Transcripción no disponible",
   "Transcription not available"
+ ],
+ "side.privateN": [
+  "Privado · solo ustedes {n}",
+  "Private · only you {n}"
+ ],
+ "side.seeInChat": [
+  "Ver en el chat",
+  "See in chat"
+ ],
+ "side.quick.check": [
+  "Déjame reviso",
+  "Let me check"
+ ],
+ "side.quick.later": [
+  "Te respondo en un rato",
+  "I'll get back to you soon"
+ ],
+ "side.returnedChip": [
+  "✓ Llevado al hilo",
+  "✓ Brought to the thread"
+ ],
+ "side.pickHint": [
+  "Elige una o varias personas",
+  "Choose one or more people"
+ ],
+ "side.morePeople": [
+  "Más personas",
+  "More people"
+ ],
+ "side.lessPeople": [
+  "Menos",
+  "Less"
+ ],
+ "side.addPerson": [
+  "Añadir persona",
+  "Add person"
+ ],
+ "side.leave": [
+  "Salir del sidechat",
+  "Leave sidechat"
+ ],
+ "side.reopen": [
+  "Abrir sidechat",
+  "Open sidechat"
+ ],
+ "side.drop": [
+  "Soltar",
+  "Dismiss"
+ ],
+ "side.fromSidechat": [
+  "Desde un sidechat",
+  "From a sidechat"
  ]
 }

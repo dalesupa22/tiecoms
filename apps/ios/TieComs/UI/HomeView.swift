@@ -34,6 +34,9 @@ struct HomeView: View {
                         }
                         .listRowBackground(Color.clear)
                     }
+                    if tab == .mentions {
+                        MentionsInboxSection()
+                    } else {
                     if !tree.pinned.isEmpty {
                         Section {
                             ForEach(tree.pinned) { c in convLink(d, c, indent: 0, showWs: true) }
@@ -82,13 +85,14 @@ struct HomeView: View {
                     } header: {
                         HomeHeader(title: L("side.directs"), action: (L("chat.new"), { newChat = true }), identifier: "home.newChatSection")
                     }
+                    }
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
                 .animation(.spring(response: 0.45, dampingFraction: 0.9), value: tree.orderSignature)
                 .overlay {
                     if tree.isEmpty && searching { ContentUnavailableView.search(text: query) }
-                    else if tree.isEmpty && tab != .all {
+                    else if tree.isEmpty && tab != .all && tab != .mentions {
                         ContentUnavailableView(L("home.empty.\(tab.rawValue)"), systemImage: tab == .unread ? "checkmark.seal" : "tray")
                             .accessibilityIdentifier("home.tab.emptyState")
                     }
@@ -225,6 +229,17 @@ struct WorkspaceRow: View {
     }
 }
 
+/// Badge «@» junto a los no leídos cuando me mencionaron.
+struct MentionBadge: View {
+    var body: some View {
+        Text(L("mention.badge")).font(.caption2.weight(.heavy)).foregroundStyle(.white)
+            .frame(width: 20, height: 18)
+            .background(Capsule().fill(Theme.badgeFallback))
+            .accessibilityHidden(true)
+            .accessibilityIdentifier("home.mentionBadge")
+    }
+}
+
 struct UnreadPill: View {
     var count: Int
     var color: Color? = nil
@@ -263,7 +278,8 @@ struct HierarchyConvRow: View {
                     }
                     if c.isMuted { Image(systemName: "bell.slash.fill").font(.caption2).foregroundStyle(Theme.textSecondary).accessibilityHidden(true) }
                     Spacer(minLength: 4)
-                    if c.unread > 0 { UnreadPill(count: c.unread, color: badgeColor, muted: c.isMuted) }
+                    if c.unreadMentions > 0 { MentionBadge() }
+                    if c.unread > 0 { UnreadPill(count: c.unread, color: badgeColor, muted: c.isMuted && c.unreadMentions == 0) }
                 }
                 HStack(spacing: 6) {
                     Text(preview).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
@@ -283,7 +299,8 @@ struct HierarchyConvRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel([title, c.isMuted ? L("side.muted") : nil, c.unread > 0 ? L("a11y.unread", ["n": c.unread]) : nil, preview, time,
+        .accessibilityLabel([title, c.isMuted ? L("side.muted") : nil, c.unreadMentions > 0 ? L("mention.youMentioned") : nil,
+                             c.unread > 0 ? L("a11y.unread", ["n": c.unread]) : nil, preview, time,
                              c.openIssues > 0 ? (c.openIssues == 1 ? L("issue.chipOne") : L("issue.chipMany", ["n": c.openIssues])).replacingOccurrences(of: "◆ ", with: "") : nil].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
     }
 }
@@ -355,6 +372,7 @@ struct ConversationRow: View {
                 HStack(alignment: .top) {
                     Text(preview).font(.subheadline).foregroundStyle(Theme.textSecondary).lineLimit(2)
                     Spacer(minLength: 6)
+                    if c.unreadMentions > 0 { MentionBadge() }
                     if c.unread > 0 {
                         Text(c.unread > 99 ? "99+" : "\(c.unread)")
                             .font(.caption.weight(.bold)).foregroundStyle(.white)
@@ -391,6 +409,7 @@ struct ConversationRow: View {
         if c.kind == .multi { parts.append(Naming.subtitle(d, c)) }
         if c.isMuted { parts.append(L("side.muted")) }
         if c.pinnedAt != nil { parts.append(L("side.pinned")) }
+        if c.unreadMentions > 0 { parts.append(L("mention.youMentioned")) }
         if c.unread > 0 { parts.append(L("a11y.unread", ["n": c.unread])) }
         parts.append(preview)
         if !time.isEmpty { parts.append(time) }
@@ -434,5 +453,70 @@ struct HomeTabs: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 6)
         }
+    }
+}
+
+/// Bandeja «Menciones» (pestaña de Inicio): mis menciones recientes con el texto resaltado; tocar abre el mensaje.
+struct MentionsInboxSection: View {
+    @Environment(AppStore.self) private var store
+    @State private var items: [MentionItem] = []
+    @State private var hasMore = false
+    @State private var loading = false
+    @State private var error: String?
+
+    var body: some View {
+        Section {
+            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            if items.isEmpty && !loading && error == nil {
+                Text(L("mention.empty")).foregroundStyle(Theme.textSecondary).accessibilityIdentifier("mention.empty")
+            }
+            if let d = store.data {
+                ForEach(items) { it in row(d, it) }
+            }
+            if loading { ProgressView().frame(maxWidth: .infinity) }
+            if hasMore && !loading {
+                Button(L("mention.loadMore")) { Task { await load(more: true) } }.accessibilityIdentifier("mention.loadMore")
+            }
+        } header: { HomeHeader(title: L("mention.inbox")) }
+        .task { await load(more: false) }
+    }
+
+    private func row(_ d: BootstrapDTO, _ it: MentionItem) -> some View {
+        let author = Naming.person(d, it.message.authorId)
+        let conv = store.meta(it.conversationId)
+        let title = conv.map { Naming.title(d, $0) } ?? ""
+        return Button {
+            store.jumpTo[it.conversationId] = it.message.seq
+            store.navigate(to: .conversation(it.conversationId))
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Avatar(person: author, org: Naming.org(d, author?.orgId), size: 36)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Text(author?.name ?? "").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textPrimary)
+                        if !title.isEmpty { Text(L("mention.inConv", ["name": title])).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1) }
+                        Spacer(minLength: 4)
+                        Text(L10n.timeLabel(it.createdAt)).font(.caption2).foregroundStyle(Theme.textSecondary)
+                    }
+                    Text(MentionText.attributed(AttributedString(it.message.body), text: it.message.body, mentions: it.message.mentions, mine: false, links: false))
+                        .font(.subheadline).lineLimit(3).foregroundStyle(Theme.textPrimary)
+                }
+                if !it.read { Circle().fill(Theme.orange).frame(width: 8, height: 8).padding(.top, 6).accessibilityLabel(L("home.tab.unread")) }
+            }
+            .padding(.vertical, 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("mention.item.\(it.message.id)")
+    }
+
+    private func load(more: Bool) async {
+        loading = true
+        defer { loading = false }
+        do {
+            let page = try await store.loadMentions(before: more ? items.last?.createdAt : nil)
+            items = more ? items + page.mentions.filter { n in !items.contains { $0.id == n.id } } : page.mentions
+            hasMore = page.hasMore
+            error = nil
+        } catch { self.error = L10n.errorText(error) }
     }
 }

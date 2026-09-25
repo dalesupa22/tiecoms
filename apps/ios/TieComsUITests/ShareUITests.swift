@@ -184,19 +184,23 @@ final class ShareUITests: XCTestCase {
 
         // F. Nota de voz en el directo con B: burbuja, transcripción y chip «Crear asunto».
         app.buttons["home.tab.chats"].tap()
-        let direct = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'conv.row.' AND label CONTAINS %@", f.b.name)).firstMatch
-        XCTAssertTrue(direct.waitForExistence(timeout: 8))
+        let direct = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'conv.row.' AND label BEGINSWITH %@", f.b.name)).firstMatch
+        // Con muchos sidechats el directo puede quedar más abajo en la lista.
+        for _ in 0..<5 where !direct.waitForExistence(timeout: 2) { app.swipeUp() }
+        XCTAssertTrue(direct.waitForExistence(timeout: 4))
         direct.tap()
-        let play = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'voice.play.'")).firstMatch
-        XCTAssertTrue(play.waitForExistence(timeout: 10), "burbuja de voz")
-        let toggle = app.buttons["voice.transcriptToggle"].firstMatch
-        if toggle.waitForExistence(timeout: 5) { toggle.tap() }
+        let plays = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'voice.play.'"))
+        XCTAssertTrue(plays.firstMatch.waitForExistence(timeout: 10), "burbuja de voz")
+        let play = plays.element(boundBy: plays.count - 1)   // la más reciente (abajo)
+        let toggles = app.buttons.matching(identifier: "voice.transcriptToggle")
+        if toggles.firstMatch.waitForExistence(timeout: 5) { toggles.element(boundBy: toggles.count - 1).tap() }
         sleep(1)
         shot("v4-15-nota-de-voz")
         play.tap()
         sleep(1)
         shot("v4-16-nota-reproduciendo")
         app.navigationBars.buttons.element(boundBy: 0).tap()
+        for _ in 0..<5 where !app.buttons["home.tab.all"].exists { app.swipeDown() }
         app.buttons["home.tab.all"].tap()
 
         // E. Asuntos: sección «Chats» después de las empresas.

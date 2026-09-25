@@ -29,9 +29,31 @@ extension AppStore {
 
     // MARK: Mensajes
 
-    func editMessage(_ id: String, body: String) async throws {
-        let m: MessageDTO = try await api.request("/messages/\(id)", method: "PATCH", json: ["body": body])
-        upsertLocal(m)
+    /// Siempre manda las menciones (reemplazan a las anteriores).
+    func editMessage(_ id: String, body: String, mentions: [Mention] = []) async throws {
+        let (text, ms) = MentionText.trimmed(body, mentions: mentions)
+        let r: EditResult = try await api.request("/messages/\(id)", method: "PATCH",
+                                                  json: ["body": text, "mentions": MentionText.valid(ms, in: text).map(\.json)])
+        upsertLocal(r.message)
+        reportDroppedMentions(r.droppedMentions)
+    }
+
+    /// PATCH /messages/:id devuelve el mensaje (o {message, droppedMentions}).
+    struct EditResult: Decodable {
+        var message: MessageDTO
+        var droppedMentions: [String]
+        init(from decoder: Decoder) throws {
+            let c = try container(decoder)
+            if let m: MessageDTO = c.o("message") { message = m } else { message = try MessageDTO(from: decoder) }
+            droppedMentions = c.v("droppedMentions", [])
+        }
+    }
+
+    /// Bandeja de menciones: GET /mentions?before&limit.
+    func loadMentions(before: String? = nil, limit: Int = 30) async throws -> MentionsPage {
+        var q = "limit=\(limit)"
+        if let before, let e = before.addingPercentEncoding(withAllowedCharacters: .alphanumerics) { q += "&before=\(e)" }
+        return try await api.request("/mentions?\(q)")
     }
 
     func deleteMessage(_ id: String) async throws {
@@ -62,7 +84,7 @@ extension AppStore {
 
     func markConversationRead(_ conversationId: String) async throws {
         guard let c = meta(conversationId) else { return }
-        patchMeta(conversationId) { $0.lastReadSeq = c.lastMessageSeq; $0.unread = 0 }
+        patchMeta(conversationId) { $0.lastReadSeq = c.lastMessageSeq; $0.unread = 0; $0.unreadMentions = 0 }
         try await api.requestData("/conversations/\(conversationId)/read", method: "POST", json: ["seq": c.lastMessageSeq])
     }
 

@@ -134,4 +134,60 @@ final class SidechatUITests: XCTestCase {
         sleep(2)
         shot("v5-06-sidechat-nuevo")
     }
+
+    /// H. Menciones: buscador al teclear @, token, resaltado (especial cuando me mencionan), badge @ y bandeja.
+    func testMentions() throws {
+        let f = try fixture()
+        let tag = String(UUID().uuidString.prefix(4))
+        let tb = login(f, f.b.email)
+        let anaName = f.a.name
+        let body = "@\(anaName) ¿me confirmas la fecha? 📅 \(tag)"
+        http(f, "POST", "/conversations/\(f.conversationId)/messages", token: tb,
+             body: ["clientMessageId": UUID().uuidString, "body": body, "mentions": [["userId": f.a.id, "start": 0, "length": ("@" + anaName as NSString).length]]])
+
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let app = XCUIApplication()
+        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
+        app.launch()
+        let email = app.textFields["login.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 10))
+        email.tap(); email.typeText(f.a.email)
+        let pw = app.secureTextFields["login.password"]
+        pw.tap(); pw.typeText(f.password)
+        app.buttons["login.submit"].tap()
+        let row = app.buttons["conv.row.\(f.conversationId)"]
+        let until = Date().addingTimeInterval(15)
+        while Date() < until && !row.isHittable {
+            if app.buttons["push.later"].exists { app.buttons["push.later"].tap() }
+            for surface in [app, springboard] { for label in ["Not Now", "Ahora no"] where surface.buttons[label].exists { surface.buttons[label].tap() } }
+            usleep(300_000)
+        }
+        if app.buttons["push.later"].waitForExistence(timeout: 3) { app.buttons["push.later"].tap() }
+        sleep(1)
+        for surface in [app, springboard] { for label in ["Not Now", "Ahora no"] where surface.buttons[label].exists { surface.buttons[label].tap() } }
+        if app.buttons["home.tab.all"].waitForExistence(timeout: 5) { app.buttons["home.tab.all"].tap() }
+        let mentioned = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "conv.row.\(f.conversationId)", "Te mencionaron")).firstMatch
+        XCTAssertTrue(mentioned.waitForExistence(timeout: 8), "badge @ en Inicio (etiqueta accesible «Te mencionaron»)")
+        shot("v6-01-inicio-badge")
+        app.buttons["home.tab.mentions"].tap()
+        let item = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'mention.item.'")).firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 8), "bandeja de menciones")
+        shot("v6-02-bandeja")
+        item.tap()
+        sleep(2)
+        shot("v6-03-me-mencionaron")
+
+        // Escribir @ abre el buscador; elegir inserta el token.
+        let field = app.descendants(matching: .any)["composer.field"].firstMatch
+        field.tap(); field.typeText("Listo @")
+        XCTAssertTrue(app.descendants(matching: .any)["mention.picker"].waitForExistence(timeout: 5), "buscador de menciones")
+        shot("v6-04-buscador")
+        app.buttons["mention.pick.\(f.b.id)"].tap()
+        field.typeText("te aviso 👍")
+        app.buttons["composer.send"].tap()
+        sleep(2)
+        shot("v6-05-mencion-enviada")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["home.tab.all"].tap()
+    }
 }

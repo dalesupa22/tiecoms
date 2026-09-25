@@ -14,7 +14,7 @@ final class NotificationService: UNNotificationServiceExtension {
         best = content
         guard let p = PushPayload(userInfo: request.content.userInfo) else { contentHandler(content); return }
         content.threadIdentifier = p.threadId ?? p.conversationId
-        guard p.kind == .message || p.kind == .side, let authorId = p.authorId else { contentHandler(content); return }
+        guard p.kind == .message || p.kind == .side || p.kind == .mention, let authorId = p.authorId else { contentHandler(content); return }
         let base = UserDefaults(suiteName: "group.com.tiecoms.app")?.string(forKey: "apiURL").flatMap(URL.init(string:))
         Task {
             var image: INImage?

@@ -249,6 +249,8 @@ struct PendingMessage: Codable, Equatable, Identifiable, Sendable {
     var forwardAttachmentIds: [String]? = nil
     /// Copia local para mostrar la burbuja mientras se envía.
     var attachments: [AttachmentDTO]? = nil
+    /// Menciones con @ (offsets UTF-16 sobre body ya recortado).
+    var mentions: [Mention]? = nil
     var createdAt: String
     var attempts: Int
     var status: Status

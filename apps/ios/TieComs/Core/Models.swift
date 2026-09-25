@@ -192,6 +192,8 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
     var lastHumanPreview: HumanPreview?
     /// Preferencia personal: silenciada hasta esta fecha (no avisa).
     var mutedUntil: String?
+    /// Menciones a mí (o @todos) sin leer (SPEC-v4 H).
+    var unreadMentions: Int = 0
 
     var isMuted: Bool { (ISODate.parse(mutedUntil) ?? .distantPast) > Date() }
 
@@ -223,6 +225,7 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
         pinnedAt = c.o("pinnedAt")
         avatarUrl = c.o("avatarUrl")
         lastHumanPreview = c.o("lastHumanPreview")
+        unreadMentions = c.int("unreadMentions")
         openIssues = c.int("openIssues")
         mutedUntil = c.o("mutedUntil")
     }
@@ -245,6 +248,8 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
     var linkPreview: LinkPreviewDTO?
     /// Adjuntos (vacío en mensajes viejos).
     var attachments: [AttachmentDTO] = []
+    /// Menciones válidas, ordenadas por start (offsets UTF-16 sobre body).
+    var mentions: [Mention] = []
     var createdAt: String
     var editedAt: String?
     var deletedAt: String?
@@ -271,6 +276,7 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
         forwarded = c.o("forwarded")
         linkPreview = c.o("linkPreview")
         attachments = c.lossyArray("attachments")
+        mentions = c.lossyArray("mentions")
         createdAt = c.v("createdAt", "")
         editedAt = c.o("editedAt")
         deletedAt = c.o("deletedAt")
@@ -365,10 +371,12 @@ struct MessagesPage: Decodable, Sendable {
 struct SendResult: Decodable, Sendable {
     var message: MessageDTO
     var duplicate: Bool
+    var droppedMentions: [String]
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         message = try c.decode(MessageDTO.self, forKey: AnyKey("message"))
         duplicate = c.v("duplicate", false)
+        droppedMentions = c.v("droppedMentions", [])
     }
 }
 

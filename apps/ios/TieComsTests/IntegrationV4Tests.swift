@@ -216,4 +216,53 @@ extension IntegrationV4Tests {
     }
 }
 
+extension IntegrationV4Tests {
+    /// H. Menciones: A menciona a B con emojis y tildes; el servidor guarda los offsets UTF-16, B las ve en unreadMentions
+    /// y en la bandeja; una mención a alguien que no está vuelve en droppedMentions; editar reemplaza las menciones.
+    func testMentions() async throws {
+        let f = try fx()
+        let s = AppStore(baseURL: URL(string: f.apiUrl)!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: nil)
+        try await s.login(email: f.a.email, password: f.password)
+        try await waitUntil(10, "socket") { s.connection == .online }
+        try await s.openConversation(f.conversationId)
+        let (_, bLogin) = try await http(f, "POST", "/auth/login", token: nil, body: ["email": f.b.email, "password": f.password,
+                                                                                     "device": ["deviceId": UUID().uuidString, "name": "XCTest B v6", "platform": "agent"]])
+        let tokenB = try XCTUnwrap((bLogin as? [String: Any])?["accessToken"] as? String)
+
+        let prefix = "  🎉 ¿Revisás esto, "
+        var draft = prefix + "@"
+        let q = try XCTUnwrap(MentionText.activeQuery(in: draft))
+        let ins = MentionText.insert(name: f.b.name, userId: f.b.id, into: draft, at: q.start, mentions: [])
+        draft = ins.text + "porfa? 🙏"
+        let outsider = UUID().uuidString.lowercased()
+        let bogus = Mention(userId: outsider, start: (draft as NSString).length, length: 6)
+        draft += "@nadie"
+        let p = try XCTUnwrap(s.send(f.conversationId, body: draft, mentions: ins.mentions + [bogus]))
+        XCTAssertEqual(p.mentions?.first?.start, (prefix as NSString).length - 2, "offsets tras recortar los 2 espacios iniciales")
+        try await waitUntil(15, "mensaje con mención") {
+            (s.conversations[f.conversationId]?.messages ?? []).contains { $0.clientMessageId == p.clientMessageId && !$0.mentions.isEmpty }
+        }
+        let m = try XCTUnwrap(s.conversations[f.conversationId]?.messages.first { $0.clientMessageId == p.clientMessageId })
+        XCTAssertEqual(m.mentions.map(\.userId), [f.b.id], "el servidor descarta a quien no está")
+        let span = (m.body as NSString).substring(with: NSRange(location: m.mentions[0].start, length: m.mentions[0].length))
+        XCTAssertEqual(span, "@" + f.b.name, "offsets UTF-16 correctos con emojis y tildes")
+
+        // B: unreadMentions y bandeja.
+        let (_, boot) = try await http(f, "GET", "/bootstrap", token: tokenB)
+        let conv = ((boot as? [String: Any])?["conversations"] as? [[String: Any]])?.first { $0["id"] as? String == f.conversationId }
+        XCTAssertGreaterThanOrEqual(conv?["unreadMentions"] as? Int ?? 0, 1)
+        let (st, inbox) = try await http(f, "GET", "/mentions?limit=5", token: tokenB)
+        XCTAssertEqual(st, 200)
+        let data = try JSONSerialization.data(withJSONObject: inbox ?? [:])
+        let page = try JSONDecoder().decode(MentionsPage.self, from: data)
+        XCTAssertTrue(page.mentions.contains { $0.message.id == m.id }, "bandeja de B")
+
+        // Editar reemplaza las menciones (aquí se quitan todas).
+        try await s.editMessage(m.id, body: "Ya no hace falta 🙂", mentions: [])
+        try await waitUntil(10, "edición sin menciones") {
+            s.conversations[f.conversationId]?.messages.first { $0.id == m.id }?.mentions.isEmpty == true
+        }
+    }
+}
+
 @MainActor private final class ProgressBox { var values: [Double] = [] }

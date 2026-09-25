@@ -273,7 +273,8 @@ extension Naming {
 /// (silenciadas cuentan como leídas), en cada bloque las fijadas arriba y luego por actividad descendente; desempate por id.
 enum HomeOrder {
     static func activity(_ c: ConversationDTO) -> String { c.lastHumanPreview?.createdAt ?? c.lastMessageAt ?? "" }
-    static func pending(_ c: ConversationDTO) -> Int { c.unread > 0 && !c.isMuted ? c.unread : 0 }
+    /// Una mención sin leer cuenta aunque la conversación esté silenciada (SPEC-v4 H).
+    static func pending(_ c: ConversationDTO) -> Int { c.unread > 0 && (!c.isMuted || c.unreadMentions > 0) ? c.unread : 0 }
 
     static func before(_ a: ConversationDTO, _ b: ConversationDTO) -> Bool {
         let ua = pending(a) > 0, ub = pending(b) > 0
@@ -299,14 +300,15 @@ enum HomeOrder {
 
 /// Pestañas grandes de Inicio: Todo · No leídos · Asuntos · Chats · Laterales (home.tab.* de la web).
 enum HomeFilter: String, CaseIterable, Identifiable {
-    case all, unread, issues, chats, sides
+    case all, unread, mentions, issues, chats, sides
     var id: String { rawValue }
     var labelKey: String { "home.tab.\(rawValue)" }
 
     func includes(_ c: ConversationDTO) -> Bool {
         switch self {
         case .all: return true
-        case .unread: return c.unread > 0 && !c.isMuted
+        case .unread: return c.unread > 0 && (!c.isMuted || c.unreadMentions > 0)
+        case .mentions: return c.unreadMentions > 0
         case .issues: return c.openIssues > 0
         case .chats: return c.kind == .direct || c.kind == .multi   // como la web: las laterales son multi
         case .sides: return Naming.isSide(c)

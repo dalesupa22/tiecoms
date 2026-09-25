@@ -73,6 +73,8 @@ struct NewSideSheet: View {
     @Environment(\.dismiss) private var dismiss
     let conversationId: String
     let message: MessageDTO
+    /// Personas ya elegidas (p. ej. «Preguntarle en un sidechat» desde una mención a alguien que no está).
+    var preselect: [String] = []
     var onCreated: (String) -> Void
 
     @State private var query = ""
@@ -138,7 +140,8 @@ struct NewSideSheet: View {
                     }
                 }
                 .onAppear {
-                    if chosen.isEmpty, let first = suggested.first, first.id == message.authorId { chosen = [first.id] }
+                    if chosen.isEmpty, !preselect.isEmpty { chosen = preselect }
+                    else if chosen.isEmpty, let first = suggested.first, first.id == message.authorId { chosen = [first.id] }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { questionFocused = true }
                 }
             }

@@ -424,22 +424,30 @@ final class AppStore {
         guard msg.authorId != me?.id, !blockedUserIds.contains(msg.authorId), !msg.isSystem, let d = data else { return }
         if msg.conversationId == openConversationId && appActive {
             feedback?.playReceive()
-        } else if let c = meta(msg.conversationId), !c.isMuted {
+        } else if let c = meta(msg.conversationId) {
             let author = Naming.person(d, msg.authorId)?.name ?? L("common.participant")
-            feedback?.notifyIncoming(conversationId: c.id, title: Naming.title(d, c), author: author, body: msg.body)
+            // Una mención a mí avisa aunque la conversación esté silenciada (salvo el silencio «siempre»).
+            if MentionText.mentionsMe(msg.mentions, me: d.me.id, authorId: msg.authorId), !MentionText.mutedForever(c) {
+                feedback?.notifyIncoming(conversationId: c.id, title: L("mention.mentionedYou", ["name": author]), author: Naming.title(d, c), body: msg.body)
+            } else if !c.isMuted {
+                feedback?.notifyIncoming(conversationId: c.id, title: Naming.title(d, c), author: author, body: msg.body)
+            }
         }
     }
 
     @discardableResult
     private func bumpMeta(_ m: MessageDTO) -> Bool {
         guard let c = meta(m.conversationId), m.seq > c.lastMessageSeq else { return false }
-        let mine = m.authorId == me?.id
+        // Se lee antes: dentro del closure `data` está en acceso exclusivo y leer `me` aborta.
+        let myId = me?.id
+        let mine = m.authorId == myId
         patchMeta(c.id) {
             $0.lastMessageSeq = m.seq
             $0.lastMessageAt = m.createdAt
             $0.lastMessagePreview = String(L10n.messagePreview(m).prefix(140))
             if mine { $0.lastReadSeq = m.seq }
             $0.unread = max(0, m.seq - max($0.lastReadSeq, $0.historyFromSeq))
+            if let me = myId, MentionText.mentionsMe(m.mentions, me: me, authorId: m.authorId) { $0.unreadMentions += 1 }
         }
         // Reordena para que la conversación con actividad suba.
         data?.conversations.sort { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
@@ -558,7 +566,7 @@ final class AppStore {
     /// Marca como leído con debounce (400 ms).
     func markRead(_ id: String) {
         guard let c = meta(id), c.lastMessageSeq > c.lastReadSeq else { return }
-        patchMeta(id) { $0.lastReadSeq = $0.lastMessageSeq; $0.unread = 0 }
+        patchMeta(id) { $0.lastReadSeq = $0.lastMessageSeq; $0.unread = 0; $0.unreadMentions = 0 }
         readTasks[id]?.cancel()
         readTasks[id] = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 400_000_000)
@@ -587,15 +595,17 @@ final class AppStore {
 
     @discardableResult
     func send(_ conversationId: String, body: String, replyTo: String? = nil, forwarded: ForwardedInfo? = nil,
-              attachments: [AttachmentDTO] = [], forwardAttachments: [AttachmentDTO] = [],
+              attachments: [AttachmentDTO] = [], forwardAttachments: [AttachmentDTO] = [], mentions: [Mention] = [],
               clientMessageId: String = UUID().uuidString.lowercased()) -> PendingMessage? {
-        let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        // El servidor recorta el texto: se recorta aquí y se corren las menciones.
+        let (text, mentionsTrimmed) = MentionText.trimmed(body, mentions: mentions)
         // Con adjuntos el texto puede ir vacío.
         guard !text.isEmpty || !attachments.isEmpty || !forwardAttachments.isEmpty else { return nil }
         let p = PendingMessage(clientMessageId: clientMessageId, conversationId: conversationId, body: String(text.prefix(8000)), replyTo: replyTo,
                                forwarded: forwarded, attachmentIds: attachments.isEmpty ? nil : attachments.map(\.id),
                                forwardAttachmentIds: forwardAttachments.isEmpty ? nil : forwardAttachments.map(\.id),
                                attachments: (attachments + forwardAttachments).isEmpty ? nil : attachments + forwardAttachments,
+                               mentions: mentionsTrimmed.isEmpty ? nil : MentionText.valid(mentionsTrimmed, in: String(text.prefix(8000))),
                                createdAt: ISODate.string(), attempts: 0, status: .pending, error: nil, nextAttemptAt: 0)
         Donations.donate(self, conversationId: conversationId)
         // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
@@ -678,10 +688,15 @@ final class AppStore {
                                       "replyTo": p.replyTo ?? NSNull(), "forwarded": p.forwarded?.json ?? NSNull()]
         if let ids = p.attachmentIds, !ids.isEmpty { payload["attachmentIds"] = ids }
         if let ids = p.forwardAttachmentIds, !ids.isEmpty { payload["forwardAttachmentIds"] = ids }
+        if let ms = p.mentions, !ms.isEmpty { payload["mentions"] = ms.map(\.json) }
         if socket.state == .connected {
             do {
                 let r = try await socket.emitWithAck("message.send", payload, timeout: 8) as? [String: Any]
-                if r?["ok"] as? Bool == true, let m = JSONBridge.decode(MessageDTO.self, from: r?["message"]) { deliveredViaSocket += 1; return m }
+                if r?["ok"] as? Bool == true, let m = JSONBridge.decode(MessageDTO.self, from: r?["message"]) {
+                    deliveredViaSocket += 1
+                    reportDroppedMentions(r?["droppedMentions"] as? [String] ?? [])
+                    return m
+                }
                 if let err = r?["error"] as? [String: Any] {
                     let code = err["code"] as? String ?? "error"
                     let status = ["forbidden": 403, "not_found": 404, "conflict": 409, "bad_request": 400][code] ?? 503
@@ -697,7 +712,15 @@ final class AppStore {
         body.removeValue(forKey: "conversationId")
         let r: SendResult = try await api.request("/conversations/\(p.conversationId)/messages", method: "POST", json: body)
         deliveredViaHTTP += 1
+        reportDroppedMentions(r.droppedMentions)
         return r.message
+    }
+
+    /// El servidor descartó menciones (no están en el chat, @todos no permitido): aviso sutil.
+    func reportDroppedMentions(_ ids: [String]) {
+        guard !ids.isEmpty, let d = data else { return }
+        let names = ids.map { $0 == Mention.all ? L("mention.allLabel") : (Naming.person(d, $0)?.name ?? "?") }
+        show(L("mention.dropped", ["names": names.joined(separator: ", ")]))
     }
 
     static func upsert(_ list: [MessageDTO], _ m: MessageDTO) -> [MessageDTO] {

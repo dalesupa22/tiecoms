@@ -549,3 +549,21 @@ struct HumanPreview: Codable, Equatable, Sendable {
         attachments = c.o("attachments"); createdAt = c.o("createdAt")
     }
 }
+
+/// Mención con @ (SPEC-v4 H): offsets en unidades UTF-16 sobre `body`; el tramo empieza con "@". `userId` puede ser 'all'.
+struct Mention: Codable, Equatable, Hashable, Sendable {
+    static let all = "all"
+    var userId: String
+    var start: Int
+    var length: Int
+    var end: Int { start + length }
+    var isAll: Bool { userId == Mention.all }
+
+    init(userId: String, start: Int, length: Int) { self.userId = userId; self.start = start; self.length = length }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        userId = c.v("userId", ""); start = c.int("start"); length = c.int("length")
+    }
+    var json: [String: Any] { ["userId": userId, "start": start, "length": length] }
+}
+

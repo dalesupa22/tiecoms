@@ -246,6 +246,16 @@ TEST_RUNNER_TC_FIXTURE4=/tmp/fx4.json TEST_RUNNER_TC_SHOTS=/tmp/v4 xcodebuild te
 - «Llevar al hilo» con `POST /conversations/:sideId/return/suggest` (IA o respaldo) y vista previa; `mergedKind:'side'`.
 - Notas de voz seguidas se reproducen una tras otra (`VoicePlayer.next`).
 
+### Menciones con @ (SPEC-v4 H)
+
+- `Mentions.swift` (lógica pura, offsets UTF-16 con `utf16`/`NSString`): consulta «@…» al final del borrador, inserción del
+  token «@Nombre », `reconcile` (un retroceso borra el token entero; las demás se corren), recorte como el servidor, validación
+  (empieza con @, sin solapes, máx. 50), `mentionsMe` (@todos para todos menos el autor) y resaltado en la burbuja.
+- `MentionViews.swift`: buscador sobre el compositor (quien más escribe primero, @todos en grupos, «X no está en este chat ·
+  Añadir / Preguntarle en un sidechat») y ficha de la persona al tocar una mención.
+- Inicio: badge «@» y orden arriba aunque esté silenciada (`unreadMentions`), pestaña «Menciones» con la bandeja `GET /mentions`.
+- Avisos: una mención notifica aunque el chat esté silenciado (salvo «siempre»); `droppedMentions` → aviso sutil.
+
 ## Push (APNs)
 
 - **Registro**:

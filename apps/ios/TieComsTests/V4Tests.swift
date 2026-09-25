@@ -184,7 +184,7 @@ final class V4Tests: XCTestCase {
 
     func testHomeFiltersAndCounts() throws {
         let d = try boot()
-        XCTAssertEqual(HomeFilter.allCases.map(\.labelKey), ["home.tab.all", "home.tab.unread", "home.tab.issues", "home.tab.chats", "home.tab.sides"])
+        XCTAssertEqual(HomeFilter.allCases.map(\.labelKey), ["home.tab.all", "home.tab.unread", "home.tab.mentions", "home.tab.issues", "home.tab.chats", "home.tab.sides"])
         XCTAssertEqual(HomeFilter.all.count(d), 5)
         XCTAssertEqual(HomeFilter.unread.count(d), 2, "c1 y s1; c2 está silenciada")
         XCTAssertEqual(HomeFilter.issues.count(d), 1)

@@ -54,6 +54,11 @@ struct ConversationView: View {
     @State private var reveal: String?
     @State private var dragging: (id: String, dx: CGFloat)?
     @State private var addingToSide = false
+    /// Menciones del borrador (offsets UTF-16) y ficha de una persona mencionada.
+    @State private var draftMentions: [Mention] = []
+    @State private var reconcilingDraft = false
+    @State private var personCard: String?
+    @State private var sideForPerson: String?
     @State private var highlighted: String?
     @State private var staged: [LocalAttachment] = []
     @State private var uploadProgress: [UUID: Double] = [:]
@@ -98,7 +103,7 @@ struct ConversationView: View {
         }
         .sheet(item: $sheet) { s in sheetView(s) }
         .sheet(item: Binding(get: { askSide }, set: { askSide = $0 })) { m in
-            NewSideSheet(conversationId: conversationId, message: m) { id in sidePanel = id }
+            NewSideSheet(conversationId: conversationId, message: m, preselect: sideForPerson.map { [$0] } ?? []) { id in sidePanel = id; sideForPerson = nil }
         }
         // iPad / pantalla ancha: panel a la derecha; iPhone: hoja casi completa sobre el chat.
         .modifier(SidePanelPresenter(sideId: $sidePanel,
@@ -110,6 +115,14 @@ struct ConversationView: View {
             if let v { sidePanel = v; store.sideToOpen[conversationId] = nil }
         }
         .sheet(isPresented: $addingToSide) { AddMembersSheet(conversationId: conversationId) }
+        .sheet(item: Binding(get: { personCard.map(IdBox.init) }, set: { personCard = $0?.id })) { box in
+            PersonCardSheet(personId: box.id).presentationDetents([.height(300)])
+        }
+        // Tocar una mención abre la ficha de la persona.
+        .environment(\.openURL, OpenURLAction { url in
+            if url.scheme == "tiecoms-mention", let id = url.host { personCard = id; return .handled }
+            return .systemAction
+        })
         .onChange(of: sidePanel) { _, v in if v == nil { store.openConversationId = conversationId } }
         .confirmationDialog(L("safety.blockConfirm"), isPresented: Binding(get: { blockUserId != nil }, set: { if !$0 { blockUserId = nil } }), titleVisibility: .visible) {
             Button(L("safety.block"), role: .destructive) {
@@ -331,6 +344,20 @@ struct ConversationView: View {
         }
     }
 
+    /// «@consulta» al final del borrador (no si ese "@" ya es un token).
+    private var mentionQuery: (start: Int, query: String)? {
+        guard editing == nil || true, let q = MentionText.activeQuery(in: draft), !draftMentions.contains(where: { $0.start == q.start }) else { return nil }
+        return q
+    }
+
+    private func pickMention(name: String, userId: String, at start: Int) {
+        let r = MentionText.insert(name: name, userId: userId, into: draft, at: start, mentions: draftMentions)
+        reconcilingDraft = true
+        draftMentions = r.mentions
+        draft = r.text
+        Haptics.tap()
+    }
+
     /// Quien preguntó en este sidechat (autor del primer mensaje de una persona).
     private func sideAsker(_ c: ConversationDTO) -> MessageDTO? {
         guard Naming.isSide(c) else { return nil }
@@ -397,7 +424,9 @@ struct ConversationView: View {
                 linkify: m.deletedAt == nil && m.kind == "text",
                 linkPreview: m.deletedAt == nil ? m.linkPreview : nil,
                 attachments: m.deletedAt == nil ? m.attachments : [],
-                messageId: m.id, conversationId: conversationId
+                messageId: m.id, conversationId: conversationId,
+                mentions: m.deletedAt == nil ? m.mentions : [],
+                mentionsMe: m.deletedAt == nil && MentionText.mentionsMe(m.mentions, me: d.me.id, authorId: m.authorId)
             )
             Group {
                 if m.deletedAt == nil {
@@ -457,7 +486,7 @@ struct ConversationView: View {
             }
         case .pending(let p):
             MessageBubble(text: p.body, time: "", mine: true, author: nil, status: p.status == .failed ? .failed : .sending, italic: false,
-                          forwardedLabel: p.forwarded.map { forwardedLabel(d, $0) }, attachments: p.attachments ?? [])
+                          forwardedLabel: p.forwarded.map { forwardedLabel(d, $0) }, attachments: p.attachments ?? [], mentions: p.mentions ?? [])
                 .padding(.top, 4)
                 .onTapGesture { if p.status == .failed { store.retry(p.clientMessageId) } }
                 .contextMenu {
@@ -567,7 +596,7 @@ struct ConversationView: View {
         }
         if mine {
             Divider()
-            Button { editing = m; replyTo = nil; draft = m.body; composerFocused = true } label: { Label(L("menu.edit"), systemImage: "pencil") }
+            Button { editing = m; replyTo = nil; reconcilingDraft = true; draft = m.body; draftMentions = m.mentions; composerFocused = true } label: { Label(L("menu.edit"), systemImage: "pencil") }
             Button(role: .destructive) { confirmDelete = m } label: { Label(L("menu.delete"), systemImage: "trash") }
         }
     }
@@ -604,6 +633,15 @@ struct ConversationView: View {
                 }
                 .accessibilityIdentifier("composer.editBar")
             }
+            if let q = mentionQuery {
+                MentionPicker(d: d, c: c, query: q.query, messages: store.conversations[conversationId]?.messages ?? [],
+                              onPick: { name, userId in pickMention(name: name, userId: userId, at: q.start) },
+                              onAdd: { _ in sheet = nil; addingToSide = true },
+                              onAskSide: { p in
+                                  sideForPerson = p.id
+                                  askSide = store.conversations[conversationId]?.messages.last { !$0.isSystem && $0.deletedAt == nil && $0.kind == "text" }
+                              })
+            }
             if showQuickReplies(d, c) {
                 SideQuickReplies(onSend: { store.send(conversationId, body: $0) }, onAskOther: { addingToSide = true })
             }
@@ -619,7 +657,14 @@ struct ConversationView: View {
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .background(RoundedRectangle(cornerRadius: 20).fill(Theme.background))
                     .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.textSecondary.opacity(0.25)))
-                    .onChange(of: draft) { _, v in if !v.isEmpty && editing == nil { store.userIsTyping(conversationId) } }
+                    .onChange(of: draft) { old, new in
+                        if !new.isEmpty && editing == nil { store.userIsTyping(conversationId) }
+                        // Un token de mención se borra entero; las demás menciones se corren.
+                        if reconcilingDraft { reconcilingDraft = false; return }
+                        let r = MentionText.reconcile(old: old, new: new, mentions: draftMentions)
+                        draftMentions = r.mentions
+                        if r.text != new { reconcilingDraft = true; draft = r.text }
+                    }
                     .accessibilityLabel(L("chat.composerLabel"))
                     .accessibilityIdentifier("composer.field")
                 }
@@ -664,12 +709,14 @@ struct ConversationView: View {
         if let e = editing {
             editing = nil
             draft = ""
-            if body != e.body { act { try await store.editMessage(e.id, body: body) } }
+            let ms = draftMentions
+            draftMentions = []
+            if body != e.body || ms != e.mentions { act { try await store.editMessage(e.id, body: body, mentions: ms) } }
             return
         }
         if !staged.isEmpty {
             // Adjuntos: se suben (con progreso) y luego se envía el mensaje con sus ids.
-            let files = staged, text = draft, reply = replyTo?.id
+            let files = staged, text = draft, reply = replyTo?.id, ms = draftMentions
             uploading = true
             Task {
                 defer { uploading = false; uploadProgress = [:] }
@@ -684,8 +731,9 @@ struct ConversationView: View {
                         return
                     }
                 }
-                store.send(conversationId, body: text, replyTo: reply, attachments: done)
+                store.send(conversationId, body: text, replyTo: reply, attachments: done, mentions: ms)
                 staged = []
+                draftMentions = []
                 draft = ""
                 replyTo = nil
             }
@@ -694,9 +742,10 @@ struct ConversationView: View {
         if let pr = store.privateReplies[conversationId] {
             store.sendPrivateReply(pr, body: draft)
         } else {
-            store.send(conversationId, body: draft, replyTo: replyTo?.id)
+            store.send(conversationId, body: draft, replyTo: replyTo?.id, mentions: draftMentions)
         }
         replyTo = nil
+        draftMentions = []
         draft = ""
     }
 
@@ -807,6 +856,8 @@ struct MessageBubble: View {
     var attachments: [AttachmentDTO] = []
     var messageId: String? = nil
     var conversationId: String? = nil
+    var mentions: [Mention] = []
+    var mentionsMe = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -850,12 +901,14 @@ struct MessageBubble: View {
                     if !attachments.isEmpty { AttachmentsBlock(attachments: attachments, mine: mine, messageId: messageId, conversationId: conversationId) }
                     if !text.isEmpty || attachments.isEmpty {
                     Group {
-                        if linkify { Text(Linkify.attributed(text)) } else { Text(text) }
+                        if linkify || !mentions.isEmpty {
+                            Text(MentionText.attributed(linkify ? Linkify.attributed(text) : AttributedString(text), text: text, mentions: mentions, mine: mine))
+                        } else { Text(text) }
                     }
                     .font(.body)
                     .italic(italic)
                     .foregroundStyle(mine ? Color.white : Theme.textPrimary)
-                    .tint(mine ? Color.white : Theme.accentText)
+                    .tint(mine ? Color.white : (mentions.first { !$0.isAll }.map { PersonColor.text($0.userId) } ?? Theme.accentText))  // las menciones son enlaces: toman el color de la persona
                     .textSelection(.enabled)
                     // Con fotos la burbuja se ciñe a ellas; el texto conserva su margen.
                     .padding(.horizontal, attachments.isEmpty ? 0 : 9).padding(.bottom, attachments.isEmpty ? 0 : 4)
@@ -865,9 +918,16 @@ struct MessageBubble: View {
                 .padding(.horizontal, attachments.isEmpty ? 13 : 4).padding(.vertical, attachments.isEmpty ? 8 : 4)
                 .background(
                     RoundedRectangle(cornerRadius: 18)
-                        .fill(mine ? Theme.bubbleMine : Theme.bubbleOther)
+                        .fill(mine ? Theme.bubbleMine : (mentionsMe ? Theme.orange.opacity(0.16) : Theme.bubbleOther))
                         .opacity(status == .sending ? 0.7 : 1)
                 )
+                // Me mencionaron: fondo naranja suave y barra lateral de acento.
+                .overlay(alignment: .leading) {
+                    if mentionsMe && !mine {
+                        UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: 18).fill(Theme.orange).frame(width: 4)
+                            .accessibilityHidden(true)
+                    }
+                }
                 .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.red, lineWidth: status == .failed ? 1.5 : 0))
                 HStack(spacing: 4) {
                     if pinned { Image(systemName: "pin.fill").foregroundStyle(Theme.accentText) }
@@ -903,6 +963,7 @@ struct MessageBubble: View {
         if let forwardedLabel { parts.append(forwardedLabel) }
         if let quote { parts.append(L("reply.to", ["name": quote.author]) + ": " + quote.text) }
         if let merged { parts.append(merged) }
+        if mentionsMe { parts.append(L("mention.youMentioned")) }
         parts.append(text)
         if let p = linkPreview { parts.append([p.host, p.title].compactMap { $0 }.joined(separator: ": ")) }
         if pinned { parts.append(L("toast.pinned")) }

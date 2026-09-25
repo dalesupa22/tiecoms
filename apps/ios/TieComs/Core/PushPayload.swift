@@ -3,7 +3,7 @@ import Foundation
 /// Payload de un push de TieComs (APNs): `aps` + datos (PushData del contrato).
 /// Tolerante: campos o tipos desconocidos no rompen; `type` desconocido → .message.
 struct PushPayload: Equatable {
-    enum Kind: String { case message, reminder, event, side }
+    enum Kind: String { case message, reminder, event, side, mention }
 
     var kind: Kind
     var conversationId: String

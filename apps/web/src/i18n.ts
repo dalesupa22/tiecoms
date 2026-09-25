@@ -105,7 +105,7 @@ const es = {
   'issue.waitingOn': 'Esperando a', 'issue.waitingOnPh': 'Elige una empresa', 'issue.here': 'Asuntos aquí', 'issue.origin': 'Ver mensaje de origen',
   'issue.originOut': 'El mensaje de origen quedó fuera de tu historial', 'issue.requestedBy': 'Lo pidió {name}', 'issue.manual': 'Creado a mano',
   'issue.stalled': 'Detenido hace {n} días', 'issue.stalledOne': 'Detenido hace 1 día', 'issue.overdue': 'Vencido', 'issue.today': 'Vence hoy',
-  'issue.comment': 'Comentar', 'issue.commentPh': 'Escribe un avance o una pregunta…', 'issue.history': 'Historial', 'issue.noIssues': 'No hay asuntos abiertos aquí.',
+  'issue.comment': 'Comentar', 'issue.commentPh': 'Escribe una actualización o una pregunta…', 'issue.history': 'Historial', 'issue.noIssues': 'No hay asuntos abiertos aquí.',
   'issue.mine': 'Míos', 'issue.allOpen': 'Abiertos', 'issue.closed': 'Cerrados', 'issue.pageSub': 'Lo que quedó pendiente en tus conversaciones, con responsable y fecha. Cada asunto guarda el mensaje donde nació y solo lo ve quien puede leer esa conversación.',
   'issue.empty': 'No hay asuntos con este filtro.', 'issue.yours': 'Tus asuntos', 'issue.yoursEmpty': 'No tienes asuntos abiertos.', 'issue.in': 'en {name}',
   'issue.ev.created': 'abrió el asunto', 'issue.ev.status': 'cambió el estado a {to}', 'issue.ev.owner': 'cambió el responsable', 'issue.ev.due': 'cambió la fecha a {to}',
@@ -233,6 +233,53 @@ const es = {
   'chat.scopeMulti': 'Solo las personas de este chat pueden leerlo. Quien entra después ve desde ese momento.',
   'sys.chat.created': 'Chat creado con {names}.', 'menu.forwardChat': 'Reenviar a otro chat',
   'fwd.sentMany': 'Reenviado a {n} chats', 'fwd.sendMany': 'Reenviar a {n}',
+  // ---------- Ronda de feedback de TestFlight (web, iOS y Android comparten estos textos) ----------
+  'common.saving': 'Guardando…', 'common.saved': 'Guardado', 'common.search': 'Buscar', 'common.all': 'Todos',
+  'common.unsaved': 'Tienes cambios sin guardar', 'common.discardChanges': '¿Descartar los cambios?',
+  // Conversaciones laterales
+  'side.ask': 'Preguntar en privado (lateral)', 'side.title': 'Conversación lateral', 'side.kind': 'Lateral',
+  'side.body': 'Pregunta en privado sobre este mensaje. En este chat no se publica nada y nadie más sabrá que existe.',
+  'side.anchor': 'Sobre este mensaje', 'side.pick': 'Con quién', 'side.search': 'Buscar en este chat o en tu empresa',
+  'side.inChat': 'En este chat', 'side.colleagues': 'Colegas de tu empresa', 'side.selected': '{n} seleccionadas', 'side.selectedOne': '1 seleccionada',
+  'side.why.outsider': 'Es de otra empresa y no está en este chat', 'side.why.blocked': 'Hay un bloqueo activo', 'side.why.history': 'No ve este mensaje',
+  'side.question': 'Tu pregunta (opcional)', 'side.questionPh': 'No tengo ni idea, ¿me ayudas?', 'side.create': 'Abrir conversación lateral',
+  'side.chip': '💬 Consulta lateral', 'side.chipN': '💬 Consulta lateral · {n}', 'side.private': 'Privada: solo la ven quienes están aquí.',
+  'side.return': 'Llevar la respuesta al hilo', 'side.returnBody': 'Se publica en «{name}» como respuesta a la consulta. Quienes están allí la verán.',
+  'side.returnOnlyOrigin': 'Solo quien participa en la conversación de origen puede llevar la respuesta.', 'side.returned': 'La respuesta ya está en el hilo',
+  'side.close': 'Cerrar lateral', 'side.openFull': 'Abrir en pantalla completa', 'side.list': 'Laterales', 'side.fromMessage': 'Consulta sobre un mensaje de {name}',
+  'side.aiSoon': 'Pronto podrás sumar agentes de IA a las laterales.',
+  'sys.side.started': 'Consulta lateral sobre un mensaje de {authorName}: «{excerpt}»',
+  'sys.side.startedIn': 'Consulta lateral sobre un mensaje de {authorName} en «{parentName}»: «{excerpt}»',
+  'lin.kind.side': 'Lateral', 'err.side_outsider': 'Solo puedes sumar a participantes de este chat o a colegas de tu empresa.',
+  'err.blocked_user': 'No se puede contactar a esta persona porque hay un bloqueo activo.',
+  // Responder en privado y nuevo chat
+  'preply.action': 'Responder en privado', 'preply.bar': 'Respondiendo en privado a {name}', 'preply.cancel': 'Cancelar respuesta privada',
+  'preply.you': 'Respondiste en privado a: «{excerpt}»', 'preply.other': '{name} te respondió en privado a: «{excerpt}»',
+  'preply.in': 'en «{name}»', 'preply.open': 'Ver original', 'preply.unreachable': 'No puedes escribirle en privado a esta persona.',
+  'chat.newButton': 'Nuevo chat', 'chat.pickPeople': 'Elige una o varias personas', 'chat.selectedN': '{n} seleccionadas', 'people.sendMessage': 'Enviar mensaje',
+  // Foto de grupo y recorte de fotos
+  'group.photo': 'Foto del grupo', 'group.addPhoto': 'Poner foto del grupo', 'group.changePhoto': 'Cambiar foto del grupo', 'group.removePhoto': 'Quitar foto',
+  'group.removeConfirm': '¿Quitar la foto del grupo?', 'group.photoSaved': 'Foto del grupo actualizada', 'group.photoRemoved': 'Foto del grupo quitada',
+  'group.photoOnlyAdmins': 'Solo quien administra el grupo puede cambiar su foto.',
+  'sys.group.photo_changed': 'Cambió la foto del grupo.', 'sys.group.photo_removed': 'Quitó la foto del grupo.',
+  'photo.cropTitle': 'Ajusta tu foto', 'photo.cropGroupTitle': 'Ajusta la foto del grupo', 'photo.cropHint': 'Arrastra para mover y usa el zoom para encuadrar.',
+  'photo.zoom': 'Zoom', 'photo.preview': 'Vista previa', 'photo.save': 'Guardar', 'photo.cancel': 'Cancelar', 'photo.saving': 'Subiendo foto…', 'photo.saved': 'Foto actualizada',
+  'photo.choose': 'Elegir foto', 'photo.fromGallery': 'Elegir de la galería', 'photo.fromCamera': 'Tomar foto', 'photo.fromFiles': 'Elegir archivo',
+  'photo.remove': 'Quitar foto', 'photo.removeConfirm': '¿Quitar tu foto de perfil?', 'photo.removed': 'Foto quitada',
+  'photo.compressed': 'La imagen pesaba más de 3 MB: la comprimimos antes de subirla.', 'photo.invalid': 'Formato no válido. Usa una foto PNG, JPG, WebP o HEIC.',
+  'photo.failed': 'No se pudo subir la foto. Intenta de nuevo.', 'photo.tapToChange': 'Toca tu foto para cambiarla',
+  // Asuntos en la jerarquía
+  'issue.chipOne': '◆ 1 asunto', 'issue.chipMany': '◆ {n} asuntos', 'issue.openBar': 'Asuntos abiertos ({n})', 'issue.all': 'Todos',
+  'issue.noComments': 'Aún no hay comentarios.', 'issue.commented': 'comentó', 'issue.commentSent': 'Comentario publicado',
+  'home.collapse': 'Contraer', 'home.expand': 'Expandir', 'home.path': '{org} · {space}', 'home.unreadIn': '{n} sin leer',
+  // Notificaciones push
+  'push.primerTitle': 'Activa las notificaciones', 'push.primerBody': 'Te avisamos cuando alguien te escriba, cuando venza un recordatorio o te convoquen a una reunión. Puedes silenciar cada conversación cuando quieras.',
+  'push.enable': 'Activar notificaciones', 'push.later': 'Ahora no', 'push.denied': 'Las notificaciones están desactivadas en los ajustes del sistema.', 'push.openSettings': 'Abrir ajustes',
+  'push.unavailable': 'Las notificaciones push no están disponibles en este dispositivo.',
+  'push.reply': 'Responder', 'push.replyPh': 'Escribe una respuesta…', 'push.replySent': 'Respuesta enviada', 'push.replyFailed': 'No se pudo enviar la respuesta',
+  'push.markRead': 'Marcar como leído', 'push.newMessage': 'Mensaje nuevo', 'push.reminder': 'Recordatorio', 'push.newMeeting': 'Nueva reunión',
+  'push.channelMessages': 'Mensajes', 'push.channelMessagesDesc': 'Mensajes nuevos de tus conversaciones',
+  'push.channelReminders': 'Recordatorios', 'push.channelRemindersDesc': 'Recordatorios que pediste', 'push.channelEvents': 'Reuniones', 'push.channelEventsDesc': 'Convocatorias a reuniones',
 };
 
 type Key = keyof typeof es;
@@ -437,6 +484,53 @@ const en: Record<Key, string> = {
   'chat.scopeMulti': 'Only the people in this chat can read it. Anyone added later sees from that moment on.',
   'sys.chat.created': 'Chat created with {names}.', 'menu.forwardChat': 'Forward to another chat',
   'fwd.sentMany': 'Forwarded to {n} chats', 'fwd.sendMany': 'Forward to {n}',
+  // ---------- TestFlight feedback round (web, iOS and Android share these strings) ----------
+  'common.saving': 'Saving…', 'common.saved': 'Saved', 'common.search': 'Search', 'common.all': 'All',
+  'common.unsaved': 'You have unsaved changes', 'common.discardChanges': 'Discard changes?',
+  // Side conversations
+  'side.ask': 'Ask privately (side conversation)', 'side.title': 'Side conversation', 'side.kind': 'Side',
+  'side.body': 'Ask privately about this message. Nothing is posted in this chat and nobody else will know it exists.',
+  'side.anchor': 'About this message', 'side.pick': 'With whom', 'side.search': 'Search this chat or your company',
+  'side.inChat': 'In this chat', 'side.colleagues': 'Colleagues at your company', 'side.selected': '{n} selected', 'side.selectedOne': '1 selected',
+  'side.why.outsider': 'From another company and not in this chat', 'side.why.blocked': 'There is an active block', 'side.why.history': 'Cannot see this message',
+  'side.question': 'Your question (optional)', 'side.questionPh': 'I have no idea, can you help?', 'side.create': 'Start side conversation',
+  'side.chip': '💬 Side conversation', 'side.chipN': '💬 Side conversation · {n}', 'side.private': 'Private: only the people here can see it.',
+  'side.return': 'Bring the answer back to the thread', 'side.returnBody': 'It is posted in “{name}” as the answer. Everyone there will see it.',
+  'side.returnOnlyOrigin': 'Only someone in the original conversation can bring the answer back.', 'side.returned': 'The answer is already in the thread',
+  'side.close': 'Close side conversation', 'side.openFull': 'Open full screen', 'side.list': 'Side conversations', 'side.fromMessage': 'About a message from {name}',
+  'side.aiSoon': 'Soon you will be able to add AI agents to side conversations.',
+  'sys.side.started': 'Side conversation about a message from {authorName}: “{excerpt}”',
+  'sys.side.startedIn': 'Side conversation about a message from {authorName} in “{parentName}”: “{excerpt}”',
+  'lin.kind.side': 'Side', 'err.side_outsider': 'You can only add people in this chat or colleagues from your company.',
+  'err.blocked_user': 'You cannot contact this person because there is an active block.',
+  // Private reply and new chat
+  'preply.action': 'Reply privately', 'preply.bar': 'Replying privately to {name}', 'preply.cancel': 'Cancel private reply',
+  'preply.you': 'You replied privately to: “{excerpt}”', 'preply.other': '{name} replied privately to: “{excerpt}”',
+  'preply.in': 'in “{name}”', 'preply.open': 'View original', 'preply.unreachable': 'You cannot message this person privately.',
+  'chat.newButton': 'New chat', 'chat.pickPeople': 'Pick one or more people', 'chat.selectedN': '{n} selected', 'people.sendMessage': 'Send message',
+  // Group photo and photo cropping
+  'group.photo': 'Group photo', 'group.addPhoto': 'Add group photo', 'group.changePhoto': 'Change group photo', 'group.removePhoto': 'Remove photo',
+  'group.removeConfirm': 'Remove the group photo?', 'group.photoSaved': 'Group photo updated', 'group.photoRemoved': 'Group photo removed',
+  'group.photoOnlyAdmins': 'Only the group admins can change its photo.',
+  'sys.group.photo_changed': 'Changed the group photo.', 'sys.group.photo_removed': 'Removed the group photo.',
+  'photo.cropTitle': 'Adjust your photo', 'photo.cropGroupTitle': 'Adjust the group photo', 'photo.cropHint': 'Drag to move and use zoom to frame it.',
+  'photo.zoom': 'Zoom', 'photo.preview': 'Preview', 'photo.save': 'Save', 'photo.cancel': 'Cancel', 'photo.saving': 'Uploading photo…', 'photo.saved': 'Photo updated',
+  'photo.choose': 'Choose photo', 'photo.fromGallery': 'Choose from library', 'photo.fromCamera': 'Take photo', 'photo.fromFiles': 'Choose file',
+  'photo.remove': 'Remove photo', 'photo.removeConfirm': 'Remove your profile photo?', 'photo.removed': 'Photo removed',
+  'photo.compressed': 'The image was over 3 MB, so we compressed it before uploading.', 'photo.invalid': 'Unsupported format. Use a PNG, JPG, WebP or HEIC photo.',
+  'photo.failed': 'The photo could not be uploaded. Try again.', 'photo.tapToChange': 'Tap your photo to change it',
+  // Issues in the hierarchy
+  'issue.chipOne': '◆ 1 issue', 'issue.chipMany': '◆ {n} issues', 'issue.openBar': 'Open issues ({n})', 'issue.all': 'All',
+  'issue.noComments': 'No comments yet.', 'issue.commented': 'commented', 'issue.commentSent': 'Comment posted',
+  'home.collapse': 'Collapse', 'home.expand': 'Expand', 'home.path': '{org} · {space}', 'home.unreadIn': '{n} unread',
+  // Push notifications
+  'push.primerTitle': 'Turn on notifications', 'push.primerBody': 'We let you know when someone writes to you, when a reminder is due or when you are invited to a meeting. You can mute any conversation whenever you want.',
+  'push.enable': 'Turn on notifications', 'push.later': 'Not now', 'push.denied': 'Notifications are turned off in system settings.', 'push.openSettings': 'Open settings',
+  'push.unavailable': 'Push notifications are not available on this device.',
+  'push.reply': 'Reply', 'push.replyPh': 'Write a reply…', 'push.replySent': 'Reply sent', 'push.replyFailed': 'The reply could not be sent',
+  'push.markRead': 'Mark as read', 'push.newMessage': 'New message', 'push.reminder': 'Reminder', 'push.newMeeting': 'New meeting',
+  'push.channelMessages': 'Messages', 'push.channelMessagesDesc': 'New messages in your conversations',
+  'push.channelReminders': 'Reminders', 'push.channelRemindersDesc': 'Reminders you asked for', 'push.channelEvents': 'Meetings', 'push.channelEventsDesc': 'Meeting invitations',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };
@@ -501,7 +595,7 @@ export function systemText(body: string): string {
   if (!body.startsWith('{')) return body;
   try {
     const p = JSON.parse(body);
-    const key = (p.k === 'members.added' && p.history === 'all' ? 'sys.members.added.all' : `sys.${p.k}`) as Key;
+    const key = (p.k === 'members.added' && p.history === 'all' ? 'sys.members.added.all' : p.k === 'side.started' && p.parentName ? 'sys.side.startedIn' : `sys.${p.k}`) as Key;
     if (p.startsAt) p.when = new Date(p.startsAt).toLocaleString(locale(), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
     return key in es ? t(key, p) : body;
   } catch { return body; }

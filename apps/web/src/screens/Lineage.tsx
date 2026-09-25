@@ -5,7 +5,7 @@ import { errorText, locale, t } from '../i18n.ts';
 import { navigate } from '../router.ts';
 import { Modal, OrgMark, conversationTitle, orgById, personById } from '../ui.tsx';
 
-const KIND_TONE: Record<DeriveKind, string> = { same: 'k-same', internal: 'k-internal', directive: 'k-directive' };
+const KIND_TONE: Record<DeriveKind, string> = { same: 'k-same', internal: 'k-internal', directive: 'k-directive', side: 'k-side' };
 
 export function KindBadge({ kind }: { kind: DeriveKind | null }) {
   if (!kind) return null;
@@ -22,13 +22,13 @@ export function DeriveDialog({ conv, message, onClose }: { conv: ConversationDTO
   const myOrg = orgById(d, d.me.primaryOrgId);
   const excerpt = message.body.replace(/\s+/g, ' ').trim();
   const short = excerpt.length > 40 ? `${excerpt.slice(0, 40).replace(/\s+\S*$/, '')}…` : excerpt;
-  const [kind, setKind] = useState<DeriveKind>('same');
+  const [kind, setKind] = useState<Exclude<DeriveKind, 'side'>>('same');
   const [name, setName] = useState(`${t('derive.prefix.same')} · ${short}`);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pick = (k: DeriveKind) => { setKind(k); setName(`${t(`derive.prefix.${k}`)} · ${short}`); };
-  const options: [DeriveKind, string, string][] = [
+  const pick = (k: Exclude<DeriveKind, 'side'>) => { setKind(k); setName(`${t(`derive.prefix.${k}`)} · ${short}`); };
+  const options: [Exclude<DeriveKind, 'side'>, string, string][] = [
     ['same', t('derive.same'), t('derive.sameNote')],
     ['internal', t('derive.internal', { org: myOrg?.name ?? '' }), t('derive.internalNote')],
     ['directive', t('derive.directive'), t('derive.directiveNote')],
@@ -83,8 +83,8 @@ function ReturnDialog({ conv, parentName, onClose }: { conv: ConversationDTO; pa
     } catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
   return (
-    <Modal title={t('lin.returnTitle')} onClose={onClose}>
-      <p className="muted" style={{ margin: 0 }}>{t('lin.returnBody', { name: parentName })}</p>
+    <Modal title={conv.deriveKind === 'side' ? t('side.return') : t('lin.returnTitle')} onClose={onClose}>
+      <p className="muted" style={{ margin: 0 }}>{conv.deriveKind === 'side' ? t('side.returnBody', { name: parentName }) : t('lin.returnBody', { name: parentName })}</p>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <textarea className="input" rows={5} required minLength={2} maxLength={4000} value={summary} onChange={(e) => setSummary(e.target.value)} />
         {error && <div className="error">{error}</div>}
@@ -99,7 +99,8 @@ export function LineageBar({ conv }: { conv: ConversationDTO }) {
   const d = useClient((s) => s.data)!;
   const [returning, setReturning] = useState(false);
   const parent = conv.parentId ? d.conversations.find((c) => c.id === conv.parentId) : null;
-  const kids = d.conversations.filter((c) => c.parentId === conv.id);
+  // Las laterales son privadas y se ven como chip bajo su mensaje ancla, no aquí.
+  const kids = d.conversations.filter((c) => c.parentId === conv.id && c.deriveKind !== 'side');
   if (!conv.parentId && !kids.length) return null;
   return (
     <div className="lineage">
@@ -115,7 +116,7 @@ export function LineageBar({ conv }: { conv: ConversationDTO }) {
       <span className="grow" />
       {conv.returnedAt && <span className="lin-done">✓ {t('lin.returned')}</span>}
       {conv.parentId && parent && !conv.returnedAt && conv.canPost && (
-        <button className="btn primary small" onClick={() => setReturning(true)}>{t('lin.return')}</button>
+        <button className="btn primary small" onClick={() => setReturning(true)}>{conv.deriveKind === 'side' ? `↩ ${t('side.return')}` : t('lin.return')}</button>
       )}
       <button className="btn ghost small" onClick={() => navigate('/trazo')}>{t('lin.trazo')}</button>
       {returning && parent && <ReturnDialog conv={conv} parentName={conversationTitle(d, parent)} onClose={() => setReturning(false)} />}

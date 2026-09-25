@@ -652,6 +652,30 @@ export class TieComsClient {
     return r;
   }
 
+  /** Conversación lateral privada desde un mensaje (no publica nada en el origen). */
+  async openSide(conversationId: string, input: { messageId: string; userIds: string[]; question?: string }) {
+    const r = await this.request<{ id: string }>(`/conversations/${conversationId}/side`, { method: 'POST', json: input });
+    await this.loadBootstrap();
+    return r;
+  }
+  /** Nuevo chat: una persona → directo (reutiliza el existente); varias → chat grupal. */
+  async createChat(userIds: string[], name?: string) {
+    const r = await this.request<{ id: string; kind: 'direct' | 'multi' }>('/chats', { method: 'POST', json: { userIds, ...(name ? { name } : {}) } });
+    await this.loadBootstrap();
+    return r;
+  }
+  /** Foto de grupo o chat: bytes de la imagen (PNG, JPG o WebP, ≤ 3 MB). */
+  async setConversationAvatar(conversationId: string, image: Blob) {
+    const r = await this.request<{ avatarUrl: string }>(`/conversations/${conversationId}/avatar`, { method: 'POST', body: image, headers: { 'content-type': image.type || 'image/jpeg' } });
+    await this.loadBootstrap();
+    return r;
+  }
+  async removeConversationAvatar(conversationId: string) {
+    const r = await this.request<{ avatarUrl: null }>(`/conversations/${conversationId}/avatar`, { method: 'DELETE' });
+    await this.loadBootstrap();
+    return r;
+  }
+
   /** Carga hacia atrás hasta tener el mensaje con ese seq (para saltar a un mensaje de origen). */
   async ensureMessage(conversationId: string, seq: number) {
     await this.openConversation(conversationId);

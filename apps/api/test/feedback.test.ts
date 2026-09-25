@@ -205,7 +205,8 @@ describe('responder en privado', () => {
     const fw = { source: 'tiecoms', author: 'Ana', sentAt: new Date().toISOString(), fromConversationId: generalId, messageId: anchorId };
     const r = await send(beto, dm.json.id, 'Te cuento por aquí', { forwarded: fw });
     expect(r.status).toBe(201);
-    expect(r.json.message.forwarded).toMatchObject({ source: 'tiecoms', fromConversationId: generalId, messageId: anchorId });
+    expect(r.json.message.forwarded).toMatchObject({ source: 'tiecoms', fromConversationId: generalId, messageId: anchorId, excerpt: 'No tengo ni idea de cómo cerrar el contrato con el proveedor de logística' });
+    expect(r.json.message.forwarded.messageSeq).toBeGreaterThan(0);
     const seen = (await call(`/conversations/${dm.json.id}/messages`, { token: ana.token })).json.messages.at(-1);
     expect(seen.forwarded.messageId).toBe(anchorId);
     // Sin conversación de origen, o con un mensaje de otra conversación, no.

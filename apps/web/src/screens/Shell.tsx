@@ -2,7 +2,8 @@ import { useMemo, useState, type ReactNode } from 'react';
 import type { BootstrapDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { asset, navigate, type Route } from '../router.ts';
-import { Avatar, OrgMark, conversationTitle, counterpartOrg, orgById, personById } from '../ui.tsx';
+import { Avatar, ConvAvatar, OrgMark, conversationTitle, counterpartOrg, orgById, personById } from '../ui.tsx';
+import { hangsUnderOrigin, sidesOf } from './Side.tsx';
 import { InviteDialog, NewGroupDialog, NewWorkspaceDialog } from './Dialogs.tsx';
 import { conversationMenu, openDialog, workspaceMenu } from '../actions.tsx';
 import { menuProps } from '../menu.tsx';
@@ -38,7 +39,8 @@ function Sidebar({ route }: { route: Route }) {
   const d = useClient((s) => s.data)!;
   const [newWs, setNewWs] = useState(false);
   const groups = useMemo(() => groupWorkspaces(d), [d]);
-  const directs = d.conversations.filter((c) => c.kind === 'direct' || c.kind === 'multi')
+  // Las laterales cuelgan de su conversación de origen (si la veo); si no, van con los chats.
+  const directs = d.conversations.filter((c) => (c.kind === 'direct' || c.kind === 'multi') && !hangsUnderOrigin(d, c))
     .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''));
   const unreadTotal = d.conversations.reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0);
   const pinnedConvs = d.conversations.filter((c) => c.pinnedAt).sort((a, b) => (a.pinnedAt ?? '').localeCompare(b.pinnedAt ?? ''));
@@ -84,7 +86,7 @@ function Sidebar({ route }: { route: Route }) {
                 return (
                   <div key={w.id}>
                     <WsTitle w={w} active={activeWs === w.id} />
-                    {convs.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />)}
+                    {convs.map((c) => <ConvWithSides key={c.id} c={c} activeConv={activeConv} />)}
                   </div>
                 );
               })}
@@ -95,7 +97,7 @@ function Sidebar({ route }: { route: Route }) {
           <span className="eyebrow grow">{t('side.directs')}</span>
           <button className="btn ghost small" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)} title={t('chat.new')} aria-label={t('chat.new')}>＋</button>
         </div>
-        {directs.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />)}
+        {directs.map((c) => <ConvWithSides key={c.id} c={c} activeConv={activeConv} />)}
         {directs.length === 0 && <button className="side-conv" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)}><span className="hash">＋</span><span className="grow muted">{t('chat.new')}</span></button>}
       </div>
       <button className="side-foot" style={{ border: 0, borderTop: '1px solid var(--line)', background: 'transparent', textAlign: 'left' }}
@@ -112,6 +114,18 @@ function Sidebar({ route }: { route: Route }) {
   );
 }
 
+/** Conversación y, debajo con sangría, sus laterales. */
+function ConvWithSides({ c, activeConv }: { c: ConversationDTO; activeConv: string | null }) {
+  const d = useClient((s) => s.data)!;
+  const sides = sidesOf(d, c.id);
+  return (
+    <>
+      <ConvItem c={c} active={activeConv === c.id} />
+      {sides.length > 0 && <div className="side-sides">{sides.map((x) => <ConvItem key={x.id} c={x} active={activeConv === x.id} />)}</div>}
+    </>
+  );
+}
+
 const isMuted = (c: ConversationDTO) => !!c.mutedUntil && Date.parse(c.mutedUntil) > Date.now();
 
 function ConvItem({ c, active, showWs = false }: { c: ConversationDTO; active: boolean; showWs?: boolean }) {
@@ -122,8 +136,8 @@ function ConvItem({ c, active, showWs = false }: { c: ConversationDTO; active: b
   return (
     <button className={`side-conv ${active ? 'active' : ''} ${c.unread && !muted ? 'unread' : ''} ${muted ? 'is-muted' : ''}`} onClick={() => navigate(`/c/${c.id}`)}
       {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
-      {other ? <Avatar person={other} org={orgById(d, other.orgId)} size={22} /> : c.kind === 'multi' ? <StackedAvatars c={c} size={20} />
-        : <span className="hash">{c.parentId ? '⑂' : c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>}
+      {other ? <Avatar person={other} org={orgById(d, other.orgId)} size={22} />
+        : <ConvAvatar c={c} size={22} fallback={c.kind === 'multi' && c.deriveKind !== 'side' ? <StackedAvatars c={c} size={20} /> : undefined} />}
       <span className="grow ellipsis">{conversationTitle(d, c)}{ws ? <span className="muted small"> · {ws.name}</span> : null}</span>
       {muted && <span className="small" title={t('side.muted')}>🔕</span>}
       {c.unread > 0 && <span className={`pill ${muted ? 'is-muted' : ''}`}>{c.unread}</span>}

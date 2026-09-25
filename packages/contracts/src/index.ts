@@ -190,8 +190,14 @@ export interface ConversationDTO {
 export type ForwardSource = 'whatsapp' | 'slack' | 'email' | 'teams' | 'tiecoms' | 'other';
 /** imageUrl es una ruta del API (/api/v1/previews/…): la miniatura ya está en TieComs. */
 export interface LinkPreviewDTO { url: string; title: string | null; description: string | null; siteName: string | null; imageUrl: string | null }
-/** messageId: mensaje original (p. ej. «Responder en privado»); el enlace solo abre si el lector puede leer el origen. */
-export interface ForwardedInfo { source: ForwardSource; author?: string | null; sentAt?: string | null; fromConversationId?: string | null; messageId?: string | null }
+/**
+ * messageId: mensaje original (p. ej. «Responder en privado»); el enlace solo abre si el lector puede leer el origen.
+ * messageSeq y excerpt (≤ 200) los pone el servidor a partir del original cuando llega messageId.
+ */
+export interface ForwardedInfo {
+  source: ForwardSource; author?: string | null; sentAt?: string | null; fromConversationId?: string | null;
+  messageId?: string | null; messageSeq?: number | null; excerpt?: string | null;
+}
 
 export interface ReminderDTO {
   id: string;

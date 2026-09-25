@@ -24,7 +24,7 @@ beforeAll(async () => {
     req.on('data', (c) => (d += c));
     req.on('end', () => {
       apnsReqs.push({ headers: req.headers, body: JSON.parse(d) });
-      res.writeHead(apnsReply.status, { 'content-type': 'application/json' }).end(apnsReply.body ? JSON.stringify(apnsReply.body) : undefined);
+      res.writeHead(apnsReply.status, { 'content-type': 'application/json' }).end(apnsReply.body ? JSON.stringify(apnsReply.body) : '');
     });
   });
   fcm = http.createServer((req, res) => {

@@ -13,9 +13,23 @@ export function OrgMark({ org, size = 26 }: { org?: OrganizationDTO | null; size
   return <span className="mark" title={org.name} style={{ width: size, height: size, background: org.colorBg, color: org.colorFg, fontSize: size * 0.4 }}>{org.mark}</span>;
 }
 
+/**
+ * Color estable por persona (el mismo en web, iOS y Android): FNV-1a de 32 bits sobre
+ * el id en minúsculas (caracteres ASCII), módulo 8. Paleta accesible con texto blanco, sin naranja
+ * (el naranja es de la marca y de mis mensajes).
+ */
+export const PERSON_COLORS = ['#2F6FDB', '#1E8E5A', '#7C4DDB', '#0B8793', '#B83280', '#4C51BF', '#52606D', '#C53030'] as const;
+export function personColor(id: string | null | undefined): string {
+  if (!id) return '#8a8177';
+  let h = 0x811c9dc5;
+  for (const ch of id.toLowerCase()) { h ^= ch.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+  return PERSON_COLORS[h % PERSON_COLORS.length]!;
+}
+
 export function Avatar({ person, org, size = 34 }: { person?: PersonDTO | null; org?: OrganizationDTO | null; size?: number }) {
-  const bg = person?.kind === 'agent' ? '#1b1917' : org?.colorBg ?? '#e0dace';
-  const fg = person?.kind === 'agent' ? '#f4f1ea' : org?.colorFg ?? '#5c554c';
+  // Sin foto: iniciales sobre el color estable de la persona; la empresa va en la insignia.
+  const bg = person?.kind === 'agent' ? '#1b1917' : person ? personColor(person.id) : '#e0dace';
+  const fg = person?.kind === 'agent' ? '#f4f1ea' : person ? '#ffffff' : '#5c554c';
   return (
     <span className="avatar" style={{ width: size, height: size, background: bg, color: fg, fontSize: size * 0.36, borderRadius: person?.kind === 'agent' ? 10 : 99 }}>
       {person?.avatarUrl
@@ -24,6 +38,16 @@ export function Avatar({ person, org, size = 34 }: { person?: PersonDTO | null; 
       {org && size >= 30 && <span className="badge" style={{ background: org.colorBg, color: org.colorFg }}>{org.mark}</span>}
     </span>
   );
+}
+
+/** Foto de un grupo o chat; sin foto, el ícono de siempre (#, candado, ◆, 💬 lateral). */
+export function ConvAvatar({ c, size = 22, fallback }: { c: ConversationDTO; size?: number; fallback?: ReactNode }) {
+  if (c.avatarUrl) {
+    return <img className="conv-avatar" src={apiUrl(c.avatarUrl)} alt="" width={size} height={size} loading="lazy" draggable={false}
+      style={{ width: size, height: size, borderRadius: c.kind === 'multi' ? 99 : Math.round(size * 0.28), objectFit: 'cover', flex: 'none' }} />;
+  }
+  if (fallback) return <>{fallback}</>;
+  return <span className="hash">{c.deriveKind === 'side' ? '💬' : c.parentId ? '⑂' : c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>;
 }
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
@@ -67,7 +91,7 @@ export function conversationSubtitle(d: BootstrapDTO, c: ConversationDTO) {
   }
   if (c.kind === 'multi') {
     const orgs = [...new Set(c.memberIds.map((m) => orgById(d, personById(d, m)?.orgId)?.name).filter(Boolean))];
-    return [t('chat.groupChat'), orgs.slice(0, 3).join(', ')].filter(Boolean).join(' · ');
+    return [c.deriveKind === 'side' ? `💬 ${t('side.kind')}` : t('chat.groupChat'), orgs.slice(0, 3).join(', ')].filter(Boolean).join(' · ');
   }
   const ws = d.workspaces.find((w) => w.id === c.workspaceId);
   return [ws?.name, c.kind === 'internal' ? t('kind.internalShort') : c.level === 'directivo' ? t('kind.directivo') : null].filter(Boolean).join(' · ');

@@ -7,7 +7,9 @@ import { conversationMenu, forwardMenu, messageLink, openDialog, remindMenu } fr
 import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate, queryParam } from '../router.ts';
-import { Avatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, orgById, personById } from '../ui.tsx';
+import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, orgById, personById, personColor } from '../ui.tsx';
+import { PhotoCropDialog, pickImage } from './PhotoCrop.tsx';
+import { SideChip, SideDialog, replyPrivately, sidesOf, takePrivateDraft } from './Side.tsx';
 import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
 import { AddMembersDialog } from './Dialogs.tsx';
@@ -22,7 +24,7 @@ type Row =
 const draftKey = (id: string) => `tiecoms:draft:${id}`;
 const excerpt = (s: string, n = 90) => s.replace(/\s+/g, ' ').trim().slice(0, n);
 
-export function ConversationScreen({ id }: { id: string }) {
+export function ConversationScreen({ id, embedded }: { id: string; embedded?: { onClose: () => void; anchor?: MessageDTO | null } }) {
   const d = useClient((s) => s.data)!;
   const conv = d.conversations.find((c) => c.id === id);
   const local = useClient((s) => s.conversations[id]);
@@ -30,7 +32,13 @@ export function ConversationScreen({ id }: { id: string }) {
   const typing = useClient((s) => s.typing[id]);
   const pinIds = useClient((s) => s.pins[id]);
   const allIssues = useClient((s) => s.issues);
-  const [panel, setPanel] = useState(() => window.innerWidth > 1180);
+  const [panelPref, setPanel] = useState(() => window.innerWidth > 1180);
+  const panel = panelPref && !embedded;
+  // Conversación lateral abierta como panel a la derecha (o hoja en el teléfono).
+  const [sideId, setSideId] = useState<string | null>(null);
+  const [sideFor, setSideFor] = useState<MessageDTO | null>(null);
+  const [privateReply, setPrivateReply] = useState<MessageDTO | null>(() => takePrivateDraft(id));
+  const [groupCrop, setGroupCrop] = useState<File | null>(null);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deriving, setDeriving] = useState<MessageDTO | null>(null);
@@ -114,15 +122,21 @@ export function ConversationScreen({ id }: { id: string }) {
     const body = text.trim();
     if (!body || !conv.canPost) return;
     atBottom.current = true;
-    void client.send(id, body, replyTo?.id ?? null);
+    if (privateReply) {
+      // «Responder en privado»: el directo lleva la referencia al mensaje original (el servidor pone la cita).
+      const author = personById(d, privateReply.authorId)?.name ?? null;
+      void client.send(id, body, null, { source: 'tiecoms', author, sentAt: privateReply.createdAt, fromConversationId: privateReply.conversationId, messageId: privateReply.id });
+    } else void client.send(id, body, replyTo?.id ?? null);
     setText('');
     setReplyTo(null);
+    setPrivateReply(null);
     input.current?.focus();
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Enter envía en escritorio; en móvil el teclado inserta salto de línea y se usa el botón.
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && window.matchMedia('(pointer: fine)').matches) { e.preventDefault(); send(); }
     if (e.key === 'Escape' && replyTo) setReplyTo(null);
+    if (e.key === 'Escape' && privateReply) setPrivateReply(null);
     // Flecha arriba con el campo vacío: editar mi último mensaje (como en Slack).
     if (e.key === 'ArrowUp' && !text) {
       const mine = [...(local?.messages ?? [])].reverse().find((m) => m.authorId === d.me.id && m.kind === 'text' && !m.deletedAt);
@@ -148,12 +162,17 @@ export function ConversationScreen({ id }: { id: string }) {
   const orgsHere = [...new Set(conv.memberIds.map((m) => personById(d, m)?.orgId).filter(Boolean))].map((o) => orgById(d, o as string));
   const pinned = new Set(pinIds ?? []);
   const muted = !!conv.mutedUntil && Date.parse(conv.mutedUntil) > Date.now();
+  const canPhoto = conv.kind !== 'direct' && conv.canPost && (conv.kind === 'multi' || conv.canManage);
+  const sideConv = sideId ? d.conversations.find((c) => c.id === sideId) : null;
+  const sideAnchor = sideConv?.parentMessageId ? byId.get(sideConv.parentMessageId) ?? null : null;
 
   const messageMenu = (m: MessageDTO): MenuItem[] => {
     const mine = m.authorId === d.me.id;
     const isPinned = pinned.has(m.id);
     return [
       ...(conv.canPost ? [{ label: t('menu.reply'), icon: '↩', onSelect: () => { setReplyTo(m); input.current?.focus(); } }] : []),
+      ...(!mine && conv.kind !== 'direct' ? [{ label: t('preply.action'), icon: '✉', onSelect: () => void replyPrivately(m) }] : []),
+      ...(!embedded ? [{ label: t('side.ask'), icon: '💬', onSelect: () => setSideFor(m) }] : []),
       { label: t('menu.copyText'), icon: '⧉', onSelect: async () => { await copyText(m.body); toast(t('toast.copied')); } },
       { label: t('menu.copyLink'), icon: '⛓', onSelect: async () => { await copyText(messageLink(m)); toast(t('toast.linkCopied')); } },
       { divider: true },
@@ -177,10 +196,11 @@ export function ConversationScreen({ id }: { id: string }) {
   };
 
   return (
-    <div className={`conv ${panel ? '' : 'no-panel'}`}>
+    <div className={`conv ${panel || sideConv ? '' : 'no-panel'} ${sideConv ? 'has-side' : ''} ${embedded ? 'is-embedded' : ''}`}>
       <section className="conv-main">
         <header className="conv-head" onContextMenu={contextHandler(() => conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) }))}>
-          <button className="icon-btn only-mobile" aria-label={t('common.back')} onClick={() => (history.length > 1 ? history.back() : navigate('/conversaciones'))}>‹</button>
+          {!embedded && <button className="icon-btn only-mobile" aria-label={t('common.back')} onClick={() => (history.length > 1 ? history.back() : navigate('/conversaciones'))}>‹</button>}
+          {conv.kind !== 'direct' && conv.avatarUrl && <ConvAvatar c={conv} size={30} />}
           <div className="grow" style={{ minWidth: 0 }}>
             <h2 className="ellipsis">{conv.kind === 'internal' ? '◌ ' : conv.level === 'directivo' ? '◆ ' : ''}{title}{muted ? ' 🔕' : ''}</h2>
             <div className="small muted ellipsis">{conversationSubtitle(d, conv)}{conv.kind !== 'direct' ? ` · ${tn(conv.memberIds.length, 'n.participant', 'n.participants')}` : ''}</div>
@@ -189,8 +209,17 @@ export function ConversationScreen({ id }: { id: string }) {
           {pinned.size > 0 && <button className="btn ghost small" onClick={() => setShowPins(true)} title={t('pins.title')}>📌 {pinned.size}</button>}
           {ws && <button className="btn ghost small only-desktop" onClick={() => navigate(`/w/${ws.id}`)}>{t('chat.space')}</button>}
           <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) })); }}>⋯</button>
-          <button className="icon-btn" aria-label={t('chat.details')} onClick={() => setPanel(!panel)}>ⓘ</button>
+          {embedded ? <>
+            <button className="icon-btn" aria-label={t('side.openFull')} title={t('side.openFull')} onClick={() => navigate(`/c/${id}`)}>⤢</button>
+            <button className="icon-btn" aria-label={t('side.close')} title={t('side.close')} onClick={embedded.onClose}>×</button>
+          </> : <button className="icon-btn" aria-label={t('chat.details')} onClick={() => setPanel(!panelPref)}>ⓘ</button>}
         </header>
+        {embedded?.anchor && (
+          <div className="side-anchor">
+            <span className="eyebrow">{t('side.anchor')}</span>
+            <div className="small ellipsis"><b>{personById(d, embedded.anchor.authorId)?.name}</b> · {excerpt(embedded.anchor.body, 160)}</div>
+          </div>
+        )}
         <LineageBar conv={conv} />
         {openHere.length > 0 && (
           <div className="issues-here">
@@ -228,7 +257,7 @@ export function ConversationScreen({ id }: { id: string }) {
                 <div style={{ minWidth: 0 }}>
                   {!r.cont && (
                     <div className="msg-meta">
-                      <span className="msg-author">{author?.name ?? t('chat.formerParticipant')}</span>
+                      <span className="msg-author" style={conv.kind !== 'direct' && author ? { color: personColor(author.id) } : undefined}>{author?.name ?? t('chat.formerParticipant')}</span>
                       <span className="msg-org">{org?.name ?? (author?.guest ? t('common.guest') : '')}</span>
                       <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span>
                       {pinned.has(m.id) && <span className="msg-time">📌</span>}
@@ -251,6 +280,7 @@ export function ConversationScreen({ id }: { id: string }) {
                     <div className="msg-body">{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <Linkify text={m.body} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
                   )}
                   {!m.deletedAt && !isEditing && m.linkPreview && <LinkPreviewCard p={m.linkPreview} />}
+                  {!embedded && <SideChip d={d} sides={sidesOf(d, id, m.id)} onOpen={setSideId} />}
                   {issueOf(m.id) && <button className="msg-issue" onClick={() => setOpenIssue(issueOf(m.id)!.id)}>◆ {issueOf(m.id)!.title}</button>}
                   {!m.deletedAt && !isEditing && (
                     <div className="msg-actions">
@@ -268,6 +298,12 @@ export function ConversationScreen({ id }: { id: string }) {
         </div>
         <div className="typing">{typers.length ? t(typers.length > 1 ? 'chat.typingMany' : 'chat.typingOne', { names: typers.join(', ') }) : ''}</div>
         <div className="composer">
+          {privateReply && (
+            <div className="reply-bar is-private">
+              <span className="grow ellipsis"><b>✉ {t('preply.bar', { name: personById(d, privateReply.authorId)?.name ?? '' })}</b> · {excerpt(privateReply.body, 100)}</span>
+              <button className="icon-btn" aria-label={t('preply.cancel')} onClick={() => setPrivateReply(null)}>×</button>
+            </div>
+          )}
           {replyTo && (
             <div className="reply-bar">
               <span className="grow ellipsis"><b>{t('reply.to', { name: personById(d, replyTo.authorId)?.name ?? '' })}</b> · {excerpt(replyTo.body, 100)}</span>
@@ -288,13 +324,27 @@ export function ConversationScreen({ id }: { id: string }) {
         </div>
       </section>
 
-      {panel && (
+      {sideConv && (
+        <aside className="side-panel" aria-label={t('side.title')}>
+          <ConversationScreen key={sideConv.id} id={sideConv.id} embedded={{ onClose: () => setSideId(null), anchor: sideAnchor }} />
+        </aside>
+      )}
+      {panel && !sideConv && (
         <aside className="panel">
           <div className="row"><span className="eyebrow grow">{t('chat.details')}</span><button className="icon-btn" onClick={() => setPanel(false)} aria-label={t('common.close')}>×</button></div>
-          <div>
-            <div className="serif" style={{ fontSize: 26, lineHeight: 1.1 }}>{title}</div>
-            <div className="small muted">{conversationSubtitle(d, conv)}</div>
+          <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+            {conv.kind !== 'direct' && conv.avatarUrl && <ConvAvatar c={conv} size={56} />}
+            <div className="grow" style={{ minWidth: 0 }}>
+              <div className="serif" style={{ fontSize: 26, lineHeight: 1.1 }}>{title}</div>
+              <div className="small muted">{conversationSubtitle(d, conv)}</div>
+            </div>
           </div>
+          {canPhoto && (
+            <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+              <button className="btn small" onClick={() => void pickImage().then((f) => { if (!f) return; if (!f.type.startsWith('image/')) toast(t('photo.invalid')); else setGroupCrop(f); })}>📷 {conv.avatarUrl ? t('group.changePhoto') : t('group.addPhoto')}</button>
+              {conv.avatarUrl && <button className="btn ghost small" onClick={() => { if (confirm(t('group.removeConfirm'))) void client.removeConversationAvatar(id).then(() => toast(t('group.photoRemoved'))).catch((e) => toast(errorText(e))); }}>{t('group.removePhoto')}</button>}
+            </div>
+          )}
           {canWork && <ConversationAgenda conv={conv} />}
           {canWork && (
             <div>
@@ -342,6 +392,9 @@ export function ConversationScreen({ id }: { id: string }) {
           )}
         </aside>
       )}
+      {sideFor && <SideDialog conv={conv} message={sideFor} onClose={() => setSideFor(null)} onOpened={setSideId} />}
+      {groupCrop && <PhotoCropDialog file={groupCrop} title={t('photo.cropGroupTitle')} onClose={() => setGroupCrop(null)}
+        onSave={async (blob) => { await client.setConversationAvatar(id, blob); }} />}
       {adding && <AddMembersDialog conversationId={id} onClose={() => setAdding(false)} />}
       {deriving && <DeriveDialog conv={conv} message={deriving} onClose={() => setDeriving(null)} />}
       {newIssue && (
@@ -358,6 +411,17 @@ export function ConversationScreen({ id }: { id: string }) {
 function ForwardedTag({ d, m }: { d: BootstrapDTO; m: MessageDTO }) {
   const f = m.forwarded!;
   const from = f.fromConversationId ? d.conversations.find((c) => c.id === f.fromConversationId) : null;
+  if (f.messageId) {
+    // «Responder en privado»: cita del original, con enlace si quien lee puede abrir el origen.
+    const mine = m.authorId === d.me.id;
+    const text = mine ? t('preply.you', { excerpt: f.excerpt ?? '' }) : t('preply.other', { name: personById(d, m.authorId)?.name ?? '', excerpt: f.excerpt ?? '' });
+    return (
+      <div className="fwd-tag src-private">
+        ✉ {text}
+        {from && <> <span className="muted">{t('preply.in', { name: conversationTitle(d, from) })}</span> · <button className="link-btn" onClick={() => navigate(`/c/${from.id}${f.messageSeq ? `?m=${f.messageSeq}` : ''}`)}>{t('preply.open')}</button></>}
+      </div>
+    );
+  }
   const label = from ? t('fwd.fromConv', { name: conversationTitle(d, from) })
     : f.author ? t('fwd.fromBy', { source: t(`src.${f.source}`), author: f.author }) : t('fwd.from', { source: t(`src.${f.source}`) });
   return <div className={`fwd-tag src-${f.source}`}>↪ {label}{f.sentAt ? <span className="muted"> · {f.sentAt.includes('T') ? new Date(f.sentAt).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : f.sentAt}</span> : null}</div>;

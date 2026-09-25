@@ -188,5 +188,5 @@ export function workspaceMenu(ws: WorkspaceDTO, extra: { onNewGroup?: () => void
 export function personMenu(p: PersonDTO): MenuItem[] {
   const me = client.getState().data?.me.id;
   if (p.id === me) return [];
-  return [{ label: t('menu.dm'), icon: '✉', onSelect: () => void client.openDirect(p.id).then((r) => navigate(`/c/${r.id}`)).catch((e) => toast(errorText(e))) }];
+  return [{ label: t('people.sendMessage'), icon: '✉', onSelect: () => void client.openDirect(p.id).then((r) => navigate(`/c/${r.id}`)).catch((e) => toast(errorText(e))) }];
 }

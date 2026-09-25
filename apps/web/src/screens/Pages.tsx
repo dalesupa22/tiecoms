@@ -5,14 +5,14 @@ import { errorText, getLang, langPreference, locale, setLang, t, tn, useLang, ty
 import { navigate } from '../router.ts';
 import { openProfile } from './Profile.tsx';
 import { NewChatDialog, StackedAvatars } from './Chats.tsx';
-import { Avatar, OrgMark, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, previewText, timeLabel } from '../ui.tsx';
+import { Avatar, ConvAvatar, OrgMark, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, previewText, timeLabel } from '../ui.tsx';
 import { InviteDialog, NewGroupDialog, NewWorkspaceDialog } from './Dialogs.tsx';
 import { InviteResult, PendingInvitations } from './Invitations.tsx';
 import { IssueDrawer, IssueRow, isClosed } from './Issues.tsx';
 import { TodayAgenda, newEvent } from './Calendar.tsx';
 import { RemindersSection } from './Bring.tsx';
 import { askNotifications, conversationMenu, openDialog, personMenu } from '../actions.tsx';
-import { menuProps } from '../menu.tsx';
+import { menuProps, toast } from '../menu.tsx';
 import { SignOutButton, groupWorkspaces } from './Shell.tsx';
 
 function greeting() {
@@ -26,7 +26,7 @@ function ConvCard({ c }: { c: ConversationDTO }) {
   const org = other ? orgById(d, other.orgId) : c.workspaceId ? counterpartOrg(d, c.workspaceId) : null;
   return (
     <button className="card conv-card" onClick={() => navigate(`/c/${c.id}`)} {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
-      {other ? <Avatar person={other} org={org} size={38} /> : c.kind === 'multi' ? <StackedAvatars c={c} size={30} /> : <OrgMark org={org} size={38} />}
+      {other ? <Avatar person={other} org={org} size={38} /> : c.avatarUrl ? <ConvAvatar c={c} size={38} /> : c.deriveKind === 'side' ? <span className="mark" style={{ width: 38, height: 38, background: 'var(--paper-3)', fontSize: 18 }}>💬</span> : c.kind === 'multi' ? <StackedAvatars c={c} size={30} /> : <OrgMark org={org} size={38} />}
       <span className="grow" style={{ minWidth: 0 }}>
         <span className="row"><b className="ellipsis grow">{conversationTitle(d, c)}</b><span className="small muted">{timeLabel(c.lastMessageAt)}</span></span>
         <span className="small muted ellipsis" style={{ display: 'block' }}>{conversationSubtitle(d, c)}</span>
@@ -186,7 +186,7 @@ export function WorkspaceScreen({ id }: { id: string }) {
           <div className="list">
             {convs.map((c) => (
               <button key={c.id} className="card conv-card" onClick={() => navigate(`/c/${c.id}`)} {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
-                <span className="mark" style={{ width: 34, height: 34, background: c.kind === 'internal' ? '#fff' : 'var(--paper-3)', border: '1px solid var(--line)', fontSize: 14 }}>{c.parentId ? '⑂' : c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>
+                {c.avatarUrl ? <ConvAvatar c={c} size={34} /> : <span className="mark" style={{ width: 34, height: 34, background: c.kind === 'internal' ? '#fff' : 'var(--paper-3)', border: '1px solid var(--line)', fontSize: 14 }}>{c.parentId ? '⑂' : c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>}
                 <span className="grow" style={{ minWidth: 0 }}>
                   <span className="row"><b className="grow ellipsis">{conversationTitle(d, c)}</b><span className="small muted">{timeLabel(c.lastMessageAt)}</span></span>
                   <span className="small muted ellipsis" style={{ display: 'block' }}>{t(c.kind === 'internal' ? 'kind.internal' : c.level === 'directivo' ? 'kind.directivo' : 'kind.operativo')} · {tn(c.memberIds.length, 'n.participant', 'n.participants')}</span>
@@ -249,7 +249,7 @@ export function PeopleScreen() {
               <div key={p.id} className="card conv-card" {...menuProps(() => personMenu(p))}>
                 <Avatar person={p} org={orgById(d, p.orgId)} size={36} />
                 <span className="grow" style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{p.name}</b><span className="small muted ellipsis" style={{ display: 'block' }}>{[p.title, p.area].filter(Boolean).join(' · ')}{p.guest && p.guestUntil ? ` · ${t('people.until', { date: new Date(p.guestUntil).toLocaleDateString(locale(), { day: 'numeric', month: 'short' }) })}` : ''}</span></span>
-                <button className="btn small" onClick={() => client.openDirect(p.id).then((r) => navigate(`/c/${r.id}`))}>{t('common.message')}</button>
+                {p.id !== d.me.id && <button className="btn small" onClick={() => client.openDirect(p.id).then((r) => navigate(`/c/${r.id}`)).catch((e) => toast(errorText(e)))}>✉ {t('people.sendMessage')}</button>}
               </div>
             ))}
           </div>

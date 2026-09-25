@@ -115,12 +115,16 @@ export async function sendMessage(userId: string, conversationId: string, input:
         const from = input.forwarded.fromConversationId ?? null;
         const src = from ? await conversationAccess(c, userId, from, 'read') : null;
         const originalId = input.forwarded.messageId ?? null;
+        let quote: { messageSeq: number; excerpt: string } | null = null;
         if (originalId) {
           // «Responder en privado»: el mensaje original debe ser visible para quien responde.
-          const o = src ? (await c.query('SELECT seq FROM messages WHERE id = $1 AND conversation_id = $2', [originalId, from])).rows[0] : null;
-          if (!o || o.seq <= src!.historyFromSeq) throw badRequest('El mensaje original no está en la conversación de origen');
+          // El extracto lo pone el servidor desde el original (no lo declara el cliente).
+          const o = src ? (await c.query('SELECT seq, body, kind, deleted_at FROM messages WHERE id = $1 AND conversation_id = $2', [originalId, from])).rows[0] : null;
+          if (!o || o.seq <= src!.historyFromSeq || o.kind !== 'text' || o.deleted_at) throw badRequest('El mensaje original no está en la conversación de origen');
+          const flat = String(o.body).replace(/\s+/g, ' ').trim();
+          quote = { messageSeq: o.seq, excerpt: flat.length > 200 ? `${flat.slice(0, 199)}…` : flat };
         }
-        forwarded = { source: input.forwarded.source, author: input.forwarded.author ?? null, sentAt: input.forwarded.sentAt ?? null, fromConversationId: from, messageId: originalId };
+        forwarded = { source: input.forwarded.source, author: input.forwarded.author ?? null, sentAt: input.forwarded.sentAt ?? null, fromConversationId: from, messageId: originalId, ...(quote ?? {}) };
       }
       const m = await appendMessage(c, { conversationId, authorId: userId, body: input.body, clientMessageId: input.clientMessageId, replyTo: input.replyTo ?? null, forwarded });
       await queuePreview(c, m.id, input.body);

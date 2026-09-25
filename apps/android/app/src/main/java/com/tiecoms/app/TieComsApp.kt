@@ -1,6 +1,7 @@
 package com.tiecoms.app
 
 import android.app.Application
+import androidx.compose.ui.graphics.asAndroidBitmap
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
@@ -94,6 +95,10 @@ class AppContainer(private val app: Application) {
     /** Texto compartido desde otra app, a la espera de elegir conversación. */
     @Volatile var shareDraft: DeepLink.Share? = null
 
+    /** Respuesta en privado en curso: el directo destino y el mensaje original (SPEC-v3 §7). */
+    data class PrivateReply(val targetConversationId: String, val source: com.tiecoms.app.core.MessageDTO, val authorName: String?)
+    val privateReply = MutableStateFlow<PrivateReply?>(null)
+
     /** Avisos breves (equivalente a los «toasts» de la web). */
     val toasts = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 8)
     fun toast(text: String) { toasts.tryEmit(text) }
@@ -126,6 +131,40 @@ class AppContainer(private val app: Application) {
                     override fun onAvailable(network: Network) { client.value.wake(forceReconnect = false) }
                 },
             )
+        }
+    }
+
+    /** Nombre visible de una conversación (para notificaciones). */
+    fun conversationName(id: String): String {
+        val c = client.value
+        val conv = c.meta(id) ?: return ""
+        return Names.conversationTitle(conv, c.state.value.data, app.getString(R.string.internal_default), app.getString(R.string.conversation))
+    }
+
+    private suspend fun loadAvatar(path: String?): android.graphics.Bitmap? {
+        val url = client.value.mediaUrl(path?.takeIf { it.isNotBlank() }) ?: return null
+        return runCatching { images.load(url, 128)?.let { it.asAndroidBitmap() } }.getOrNull()
+    }
+
+    /**
+     * Push de FCM (SPEC-v3 §6). Si la app está en primer plano con el socket en línea, el socket ya avisó;
+     * si el mensaje ya se mostró (socket o push repetido), no se duplica.
+     */
+    fun showPush(p: com.tiecoms.app.core.PushMessage) {
+        val c = client.value
+        if (foreground && c.state.value.status == com.tiecoms.app.core.SessionStatus.READY && c.state.value.connection == com.tiecoms.app.core.ConnectionStatus.ONLINE) return
+        if (!notifier.firstTime(p.messageId)) return
+        scope.launch {
+            when (p.type) {
+                "message" -> {
+                    val isGroup = p.subtitle.isNotBlank()
+                    val author = p.authorName?.takeIf { it.isNotBlank() } ?: p.title
+                    notifier.showConversation(p.conversationId, p.title, isGroup, p.authorId?.takeIf { it.isNotBlank() } ?: author, author, p.body,
+                        loadAvatar(p.authorAvatarUrl), silent = !settings.soundsEnabled, badge = p.badge, messageId = p.messageId)
+                }
+                else -> notifier.showMessage(p.conversationId, p.title, listOf(p.subtitle, p.body).filter { it.isNotBlank() }.joinToString(" · "),
+                    silent = !settings.soundsEnabled, tag = p.type + ":" + (p.reminderId ?: p.eventId ?: p.messageId))
+            }
         }
     }
 
@@ -194,15 +233,18 @@ class AppContainer(private val app: Application) {
                 val fg = foreground
                 if (fg && openConversationId == m.conversationId) { sounds.play(Sound.RECEIVE); return }
                 if (fg) sounds.play(Sound.NOTIFY)
+                if (!notifier.firstTime(m.id)) return // ya llegó por push
                 val c = client.value
                 val data = c.state.value.data
                 val conv = c.meta(m.conversationId)
-                val author = Names.person(data, m.authorId)?.name ?: app.getString(R.string.former_participant)
-                val title = conv?.let {
-                    val name = Names.conversationTitle(it, data, app.getString(R.string.internal_default), app.getString(R.string.conversation))
-                    if (it.kind == "direct") name else "$author · $name"
-                } ?: author
-                notifier.showMessage(m.conversationId, title, m.body.take(300), silent = fg || !settings.soundsEnabled)
+                val author = Names.person(data, m.authorId)
+                val authorName = author?.name ?: app.getString(R.string.former_participant)
+                val isGroup = conv != null && conv.kind != "direct"
+                scope.launch {
+                    val icon = loadAvatar(author?.avatarUrl)
+                    notifier.showConversation(m.conversationId, if (isGroup) conversationName(m.conversationId) else authorName, isGroup,
+                        m.authorId ?: "?", authorName, m.body.take(300), icon, silent = fg || !settings.soundsEnabled, badge = c.badge(), messageId = m.id, seq = m.seq)
+                }
             }
             is ClientSignal.ReminderDue -> {
                 val r = sig.reminder

@@ -71,6 +71,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -133,9 +136,11 @@ private fun buildItems(messages: List<MessageDTO>, pending: List<PendingMessage>
     for (m in messages) {
         val day = localDate(m.createdAt)
         if (day != null && day != lastDay) { out += ChatItem.Day(day); lastDay = day; prev = null }
-        val gap = prev?.let { p -> (parseInstant(m.createdAt)?.toEpochMilli() ?: 0) - (parseInstant(p.createdAt)?.toEpochMilli() ?: 0) > 5 * 60_000 } ?: true
-        val cont = prev != null && prev.kind == "text" && m.kind == "text" && prev.authorId == m.authorId && m.replyTo == null && m.forwarded == null && !gap
-        out += ChatItem.Msg(m, m.authorId == me, m.kind != "system" && !cont)
+        val starts = com.tiecoms.app.core.Runs.startsRun(
+            prev?.authorId, prev?.kind, prev?.let { parseInstant(it.createdAt)?.toEpochMilli() }, m.authorId, m.kind,
+            parseInstant(m.createdAt)?.toEpochMilli() ?: 0L, m.replyTo != null, m.forwarded != null,
+        )
+        out += ChatItem.Msg(m, m.authorId == me, starts)
         prev = m
     }
     val today = LocalDate.now()
@@ -160,6 +165,10 @@ fun ConversationScreen(
     onOpenIssue: (String) -> Unit,
     onOpenEvent: (String) -> Unit,
     onTrazo: () -> Unit,
+    onOpenWorkspace: (String) -> Unit = {},
+    onPrivateReply: (MessageDTO) -> Unit = {},
+    /** Dentro del panel de una lateral: sin barra superior propia. */
+    embedded: Boolean = false,
 ) {
     val client = LocalClient.current
     val container = LocalContainer.current
@@ -186,6 +195,8 @@ fun ConversationScreen(
     var reloadKey by remember { mutableIntStateOf(0) }
     var highlight by remember { mutableStateOf<Long?>(null) }
     var menuFor by remember { mutableStateOf<MessageDTO?>(null) }
+    var sideStart by remember { mutableStateOf<MessageDTO?>(null) }
+    var sideOpen by rememberSaveable { mutableStateOf<String?>(null) }
     var convMenu by rememberSaveable { mutableStateOf(false) }
     var replyTo by remember { mutableStateOf<MessageDTO?>(null) }
     var editing by remember { mutableStateOf<MessageDTO?>(null) }
@@ -252,9 +263,15 @@ fun ConversationScreen(
 
     val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex <= 1 } }
     val newest = items.firstOrNull()
+    // «Seguir el final»: solo cambia con la lista quieta. Si llega un mensaje durante la animación de otro
+    // (mi envío y la respuesta inmediata), atBottom daría falso a mitad de camino y dejaría de seguir.
+    var follow by remember(id) { mutableStateOf(true) }
+    LaunchedEffect(listState, id) {
+        snapshotFlow { atBottom to listState.isScrollInProgress }.distinctUntilChanged().collect { (b, moving) -> if (!moving) follow = b }
+    }
     LaunchedEffect(newest?.key) {
         val mine = newest is ChatItem.Pending || (newest as? ChatItem.Msg)?.mine == true
-        if (newest != null && highlight == null && (atBottom || mine)) listState.animateScrollToItem(0)
+        if (newest != null && highlight == null && (follow || mine)) { follow = true; listState.animateScrollToItem(0) }
     }
     LaunchedEffect(listState, id) {
         snapshotFlow { (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) to listState.layoutInfo.totalItemsCount }
@@ -280,6 +297,9 @@ fun ConversationScreen(
         val isPinned = m.id in pinned
         return buildList {
             if (meta.canPost) add(SheetItem(ctx.getString(R.string.menu_reply), "↩", tag = "menuReply") { replyTo = m; editing = null })
+            // Responder en privado (SPEC-v3 §7): en grupos y chats grupales, a mensajes ajenos.
+            if (!mine && meta.kind != "direct" && m.kind == "text" && Names.person(data, m.authorId)?.kind == "human")
+                add(SheetItem(ctx.getString(R.string.menu_reply_private), "🔒", tag = "menuReplyPrivate") { onPrivateReply(m) })
             add(SheetItem(ctx.getString(R.string.menu_copy_text), "⧉") { copyToClipboard(ctx, m.body); container.toast(ctx.getString(R.string.toast_copied)) })
             add(SheetItem(ctx.getString(R.string.menu_copy_link), "⛓") { copyToClipboard(ctx, messageLink(id, m.seq)); container.toast(ctx.getString(R.string.toast_link_copied)) })
             add(null)
@@ -294,6 +314,8 @@ fun ConversationScreen(
                 add(SheetItem(ctx.getString(R.string.menu_issue), "◆", tag = "menuIssue") { newIssue = true to m })
                 add(SheetItem(ctx.getString(R.string.menu_meeting), "📅", tag = "menuMeeting") { meeting = true to m })
             }
+            // Conversación lateral (SPEC-v3 §4): preguntar en privado sobre este mensaje.
+            if (m.kind == "text" && m.deletedAt == null) add(SheetItem(ctx.getString(R.string.menu_ask_side), "💬", tag = "menuSide") { sideStart = m })
             if (m.kind == "text") add(SheetItem(ctx.getString(R.string.menu_forward_chat), "↪", tag = "menuForwardChat") { forwarding = m })
             add(forwardMenu(ctx, data, meta, m))
             if (!mine) {
@@ -308,21 +330,40 @@ fun ConversationScreen(
         }
     }
 
+    val wide = LocalConfiguration.current.screenWidthDp >= 840
+    val sideMeta = sideOpen?.let { sid -> data.conversations.firstOrNull { it.id == sid } }
+    Row(Modifier.fillMaxSize()) {
+    Box(Modifier.weight(1f)) {
     Scaffold(
-        topBar = {
+        topBar = { if (!embedded)
             TopAppBar(
                 navigationIcon = { IconButton(onClick = onBack, modifier = Modifier.testTag("back")) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
                 title = {
-                    Column(Modifier.clickable(onClick = onDetails).semantics(mergeDescendants = true) { heading() }) {
+                    Column {
+                        Column(Modifier.clickable(onClick = onDetails).semantics(mergeDescendants = true) { heading() }) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (meta.kind == "internal") { Icon(Icons.Filled.Lock, stringResource(R.string.internal_cd), Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)) }
                             if (meta.level == "directivo") Text("◆ ", color = Brand.Orange)
                             Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false).testTag("chatTitle"))
                             if (muted) Text(" 🔕", modifier = Modifier.semantics { contentDescription = ctx.getString(R.string.side_muted) })
                         }
-                        val head = if (meta.kind == "multi") Names.multiSubtitle(meta, data) else orgs.ifEmpty { null }
-                        val sub = listOfNotNull(head, if (meta.kind != "direct") ctx.getString(R.string.participants_n, meta.memberIds.size) else null).joinToString(" · ")
-                        if (sub.isNotEmpty()) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        // Ruta «Empresa · Espacio» (SPEC-v3 §9); en chats y laterales, su subtítulo propio.
+                        val ws = data.workspaces.firstOrNull { it.id == meta.workspaceId }
+                        if (ws != null) {
+                            val org = com.tiecoms.app.core.HomeTree.counterpartOrg(data, ws)
+                            Text(listOfNotNull(org?.name, ws.name).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable { onOpenWorkspace(ws.id) }.testTag("chatPath"))
+                        } else {
+                            val parent = meta.parentId?.let { pid -> data.conversations.firstOrNull { it.id == pid } }
+                            val head = when {
+                                meta.isSide -> listOfNotNull(ctx.getString(R.string.side_title), parent?.let { titleOf(ctx, it, data) }).joinToString(" · ")
+                                meta.kind == "multi" -> Names.multiSubtitle(meta, data)
+                                else -> orgs.ifEmpty { null }
+                            }
+                            if (!head.isNullOrEmpty()) Text(head, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.testTag("chatPath"))
+                        }
                     }
                 },
                 actions = {
@@ -340,7 +381,7 @@ fun ConversationScreen(
         Column(Modifier.padding(pad).fillMaxSize().navigationBarsPadding().imePadding()) {
             ConnectionBanner(state.connection)
             LineageBar(meta, data, onOpenConversation, onReturn = { returning = true }, onTrazo = onTrazo)
-            IssueChips(openHere, data, onOpenIssue)
+            OpenIssuesBar(openHere, data, onOpenIssue)
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     conv?.loaded != true && loadError != null -> Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -361,8 +402,13 @@ fun ConversationScreen(
                                 else MessageBubble(
                                     item, data, quoted = item.m.replyTo?.let { byId[it] }, pinnedHere = item.m.id in pinned, highlighted = highlight == item.m.seq,
                                     issue = openHere.firstOrNull { it.originMessageId == item.m.id },
+                                    showAvatars = meta.kind != "direct",
+                                    sides = sidesOf(data, id, item.m.id), onOpenSide = { sid -> sideOpen = sid },
+                                    menuOpen = menuFor?.id == item.m.id,
+                                    menuItems = { messageMenu(item.m) },
+                                    onDismissMenu = { menuFor = null },
                                     onLongPress = { if (item.m.deletedAt == null) menuFor = item.m },
-                                    onQuote = { q -> jumpTo(q.seq) }, onIssue = onOpenIssue, onOpenConversation = { c -> onOpenConversation(c, null) },
+                                    onQuote = { q -> jumpTo(q.seq) }, onIssue = onOpenIssue, onOpenConversation = { c, seq -> onOpenConversation(c, seq) },
                                 )
                                 is ChatItem.Pending -> PendingBubble(item.p, onRetry = { client.retry(item.p.clientMessageId) }, onDiscard = { client.discard(item.p.clientMessageId) })
                                 ChatItem.LateJoin -> Notice(stringResource(R.string.late_join))
@@ -383,23 +429,51 @@ fun ConversationScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).heightIn(min = 18.dp).semantics { liveRegion = LiveRegionMode.Polite }.testTag("typing"),
             )
             if (blockedDirect) Text(stringResource(R.string.safety_blocked_chat), Modifier.fillMaxWidth().padding(16.dp).testTag("blockedChat"))
-            else if (meta.canPost) Composer(
+            else if (meta.canPost) {
+                val pr by container.privateReply.collectAsStateWithLifecycle()
+                val privateHere = pr?.takeIf { it.targetConversationId == id }
+                if (privateHere != null) Banner(
+                    stringResource(R.string.reply_private_to, privateHere.authorName ?: "") + " · «" + excerpt(privateHere.source.body, 100) + "»",
+                    stringResource(R.string.reply_cancel), { container.privateReply.value = null }, "privateReplyBar",
+                )
+                Composer(
                 id, title, data, replyTo, editing,
                 onCancelReply = { replyTo = null }, onCancelEdit = { editing = null },
                 onSend = { text ->
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                    client.send(id, text, replyTo?.id); replyTo = null
+                    if (privateHere != null) {
+                        val src = privateHere.source
+                        client.send(id, text, null, com.tiecoms.app.core.ForwardedInfo("tiecoms", privateHere.authorName, src.createdAt, src.conversationId, src.id))
+                        container.privateReply.value = null
+                    } else client.send(id, text, replyTo?.id)
+                    replyTo = null
                 },
                 onSaveEdit = { m, text ->
                     editing = null
                     if (text.isNotBlank() && text != m.body) act { client.editMessage(m.id, text) }
                 },
                 onBring = { bringing = true },
-            ) else ReadOnlyNotice()
+            ) } else ReadOnlyNotice()
         }
     }
+    }
+    // Panel de la lateral: a la derecha en pantalla ancha (iPad/tableta), hoja casi completa en teléfono.
+    if (sideMeta != null && wide && !embedded) {
+        androidx.compose.material3.VerticalDivider()
+        Column(Modifier.width(420.dp).fillMaxSize().testTag("sidePanel")) {
+            SidePanelHeader(sideMeta, conv?.messages?.firstOrNull { it.id == sideMeta.parentMessageId }, data, onFull = { sideOpen = null; onOpenConversation(sideMeta.id, null) }, onClose = { sideOpen = null })
+            ConversationScreen(sideMeta.id, null, onBack = { sideOpen = null }, onDetails = onDetails, onOpenConversation = onOpenConversation, onOpenIssue = onOpenIssue,
+                onOpenEvent = onOpenEvent, onTrazo = onTrazo, onOpenWorkspace = onOpenWorkspace, onPrivateReply = onPrivateReply, embedded = true)
+        }
+    }
+    }
+    if (sideMeta != null && !wide && !embedded) SideSheetHost(onClose = { sideOpen = null }) {
+        SidePanelHeader(sideMeta, conv?.messages?.firstOrNull { it.id == sideMeta.parentMessageId }, data, onFull = { sideOpen = null; onOpenConversation(sideMeta.id, null) }, onClose = { sideOpen = null })
+        ConversationScreen(sideMeta.id, null, onBack = { sideOpen = null }, onDetails = onDetails, onOpenConversation = onOpenConversation, onOpenIssue = onOpenIssue,
+            onOpenEvent = onOpenEvent, onTrazo = onTrazo, onOpenWorkspace = onOpenWorkspace, onPrivateReply = onPrivateReply, embedded = true)
+    }
+    sideStart?.let { m -> SideStartSheet(meta, m, onClose = { sideStart = null }, onStarted = { sid -> sideOpen = sid }) }
 
-    menuFor?.let { m -> ActionSheet(excerpt(m.body, 80), messageMenu(m)) { menuFor = null } }
     reportMessage?.let { ReportDialog(it.authorId, it.id, onClose = { reportMessage = null }) }
     if (convMenu) ActionSheet(title, conversationMenu(ctx, meta, data, onMeeting = { meeting = true to null }, onRemindCustom = { reminderCustom = true to null }, onLeave = { confirmLeave = true })) { convMenu = false }
     deriving?.let { m -> DeriveDialog(meta, m, onClose = { deriving = null }, onCreated = { cid -> onOpenConversation(cid, null) }) }
@@ -467,7 +541,8 @@ fun conversationMenu(ctx: android.content.Context, conv: ConversationDTO, data: 
 private fun LineageBar(conv: ConversationDTO, data: BootstrapDTO, onOpen: (String, Long?) -> Unit, onReturn: () -> Unit, onTrazo: () -> Unit) {
     val ctx = LocalContext.current
     val parent = conv.parentId?.let { pid -> data.conversations.firstOrNull { it.id == pid } }
-    val kids = data.conversations.filter { it.parentId == conv.id }
+    // Las laterales no van en el linaje: cuelgan de su mensaje ancla (chip «Consulta lateral»).
+    val kids = data.conversations.filter { it.parentId == conv.id && !it.isSide }
     if (conv.parentId == null && kids.isEmpty()) return
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth().testTag("lineage")) {
         FlowRow(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -480,7 +555,7 @@ private fun LineageBar(conv: ConversationDTO, data: BootstrapDTO, onOpen: (Strin
             if (kids.isNotEmpty()) Text(stringResource(R.string.lin_kids), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             kids.forEach { k -> LinChip("⑂ " + titleOf(ctx, k, data) + if (k.returnedAt != null) " ✓" else "") { onOpen(k.id, null) } }
             if (conv.returnedAt != null) Text("✓ " + stringResource(R.string.lin_returned), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-            if (parent != null && conv.returnedAt == null && conv.canPost) TextButton(onClick = onReturn, modifier = Modifier.testTag("returnButton")) { Text(stringResource(R.string.lin_return)) }
+            if (parent != null && conv.returnedAt == null && conv.canPost) TextButton(onClick = onReturn, modifier = Modifier.testTag("returnButton")) { Text(stringResource(if (conv.isSide) R.string.side_return else R.string.lin_return)) }
             TextButton(onClick = onTrazo) { Text(stringResource(R.string.lin_trazo)) }
         }
     }
@@ -574,7 +649,7 @@ private fun SystemRow(
     val eventId = p?.s("eventId")
     val issueId = p?.s("issueId")
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(systemText(ctx, m.body), style = MaterialTheme.typography.bodySmall, color = chat.system, textAlign = TextAlign.Center,
+        Text(systemText(ctx, m.body, Names.person(data, m.authorId)?.name), style = MaterialTheme.typography.bodySmall, color = chat.system, textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 24.dp).testTag("system"))
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             if (child != null) TextButton(onClick = { onOpenConversation(child.id, null) }) { Text("⑂ " + titleOf(ctx, child, data)) }
@@ -592,8 +667,14 @@ private fun SystemRow(
 @Composable
 private fun MessageBubble(
     item: ChatItem.Msg, data: BootstrapDTO, quoted: MessageDTO?, pinnedHere: Boolean, highlighted: Boolean, issue: IssueDTO?,
-    onLongPress: () -> Unit, onQuote: (MessageDTO) -> Unit, onIssue: (String) -> Unit, onOpenConversation: (String) -> Unit,
+    showAvatars: Boolean, menuOpen: Boolean, menuItems: () -> List<SheetItem?>, onDismissMenu: () -> Unit,
+    sides: List<ConversationDTO> = emptyList(), onOpenSide: (String) -> Unit = {},
+    onLongPress: () -> Unit, onQuote: (MessageDTO) -> Unit, onIssue: (String) -> Unit, onOpenConversation: (String, Long?) -> Unit,
 ) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val openMenu = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onLongPress() }
+    // La burbuja se eleva mientras su menú está abierto (como el menú contextual de iPhone).
+    val lift by androidx.compose.animation.core.animateFloatAsState(if (menuOpen) 1f else 0f, label = "lift")
     val ctx = LocalContext.current
     val m = item.m
     val chat = LocalChatColors.current
@@ -610,18 +691,39 @@ private fun MessageBubble(
         Modifier.fillMaxWidth().background(hl, RoundedCornerShape(8.dp)).padding(top = if (item.showAuthor) 8.dp else 2.dp),
         horizontalAlignment = if (item.mine) Alignment.End else Alignment.Start,
     ) {
+        val avatarGap = if (showAvatars && !item.mine) 34.dp else 0.dp
         if (!item.mine && item.showAuthor) {
-            Text(buildString { append(authorName); orgName?.let { append(" · "); append(it) }; if (pinnedHere) append("  📌") },
-                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 12.dp, bottom = 2.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.padding(start = 12.dp + avatarGap, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(authorName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                    color = if (showAvatars) personColor(m.authorId) else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false).testTag("author-${m.seq}"))
+                Text(buildString { orgName?.let { append(" · "); append(it) }; if (pinnedHere) append("  📌") },
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
-        val maxW = (LocalConfiguration.current.screenWidthDp * 0.8f).coerceAtMost(480f).dp
+        val maxW = ((LocalConfiguration.current.screenWidthDp * 0.8f).coerceAtMost(480f)).dp - avatarGap
         val shape = if (item.mine) RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp) else RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)
         val fg = if (item.mine) chat.onMine else chat.onOther
+        Row(verticalAlignment = Alignment.Bottom) {
+        if (showAvatars && !item.mine) {
+            if (item.showAuthor) AuthorAvatar(author, m.authorId, 28.dp, Modifier.testTag("avatar-${m.seq}")) else Spacer(Modifier.width(28.dp))
+            Spacer(Modifier.width(6.dp))
+        }
+        Box {
         Column(
             Modifier.widthIn(max = maxW)
+                .graphicsLayer { val s = 1f + 0.03f * lift; scaleX = s; scaleY = s; shadowElevation = 12f * lift * density; this.shape = shape; clip = false }
                 .background(if (item.mine) chat.mineBubble else chat.otherBubble, shape)
-                .combinedClickable(onClick = {}, onLongClick = onLongPress, onLongClickLabel = menuLabel)
+                .combinedClickable(onClick = {}, onLongClick = openMenu, onLongClickLabel = menuLabel)
+                // Clic derecho con ratón o panel táctil: el mismo menú.
+                .pointerInput(m.id) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val e = awaitPointerEvent()
+                            if (e.type == androidx.compose.ui.input.pointer.PointerEventType.Press && e.buttons.isSecondaryPressed) { onLongPress(); e.changes.forEach { it.consume() } }
+                        }
+                    }
+                }
                 .padding(horizontal = 12.dp, vertical = 8.dp)
                 .semantics(mergeDescendants = true) {
                     contentDescription = a11y
@@ -638,7 +740,21 @@ private fun MessageBubble(
                     )
                 }
             }
-            m.forwarded?.let { f ->
+            m.forwarded?.takeIf { it.messageId != null }?.let { f ->
+                // Respuesta en privado: el servidor agrega forwarded.excerpt y messageSeq (el cliente no manda el extracto).
+                val from = f.fromConversationId?.let { cid -> data.conversations.firstOrNull { it.id == cid } }
+                val quote = f.excerpt?.takeIf { it.isNotBlank() }
+                    ?: f.fromConversationId?.let { cid -> LocalClient.current.state.collectAsStateWithLifecycle().value.conversations[cid]?.messages?.firstOrNull { it.id == f.messageId }?.body }?.let { excerpt(it, 200) }
+                    ?: ""
+                val base = if (item.mine) stringResource(R.string.reply_private_label, quote)
+                    else stringResource(R.string.reply_private_label_them, Names.person(data, m.authorId)?.name ?: "", quote)
+                val label = if (from != null) base + " " + stringResource(R.string.reply_private_in, titleOf(ctx, from, data)) + " · " + stringResource(R.string.reply_private_open) else base
+                Surface(color = fg.copy(alpha = 0.12f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(bottom = 4.dp)
+                    .clickable(enabled = from != null) { from?.let { onOpenConversation(it.id, f.messageSeq) } }.testTag("privateReplyTag")) {
+                    Text("✉ $label", Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall, color = fg, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            m.forwarded?.takeIf { it.messageId == null }?.let { f ->
                 val from = f.fromConversationId?.let { cid -> data.conversations.firstOrNull { it.id == cid } }
                 val label = when {
                     from != null -> stringResource(R.string.fwd_from_conv, titleOf(ctx, from, data))
@@ -654,7 +770,7 @@ private fun MessageBubble(
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 2.dp)) {
                     Text("↩ " + (child?.let { stringResource(R.string.lin_result_of, titleOf(ctx, it, data)) } ?: stringResource(R.string.lin_result_hidden)),
                         style = MaterialTheme.typography.labelSmall, color = fg, fontWeight = FontWeight.SemiBold)
-                    if (child != null) TextButton(onClick = { onOpenConversation(child.id) }) { Text(stringResource(R.string.lin_open), color = fg) }
+                    if (child != null) TextButton(onClick = { onOpenConversation(child.id, null) }) { Text(stringResource(R.string.lin_open), color = fg) }
                 }
             }
             if (deleted) Text(body, color = fg, style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
@@ -665,6 +781,10 @@ private fun MessageBubble(
                 style = MaterialTheme.typography.labelSmall, color = fg.copy(alpha = 0.75f), modifier = Modifier.align(Alignment.End),
             )
         }
+        AnchoredMenu(menuOpen, if (menuOpen) menuItems() else emptyList(), onDismissMenu)
+        }
+        }
+        SideChip(sides, onOpenSide)
         if (issue != null) TextButton(onClick = { onIssue(issue.id) }) { Text("◆ " + issue.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium) }
     }
 }

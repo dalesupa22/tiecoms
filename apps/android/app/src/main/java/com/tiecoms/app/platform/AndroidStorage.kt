@@ -80,6 +80,10 @@ class KeystoreSecretStore(context: Context) : SecretStore {
 /** Preferencias de la persona en este dispositivo. */
 class AppSettings(context: Context) {
     private val prefs = context.getSharedPreferences("tiecoms_settings", Context.MODE_PRIVATE)
+    /** Empresas y espacios colapsados en Inicio (claves «org:<id>» y «ws:<id>»). */
+    var collapsed: Set<String>
+        get() = prefs.getStringSet("collapsed", emptySet()) ?: emptySet()
+        set(v) { prefs.edit().putStringSet("collapsed", v).apply() }
     var soundsEnabled: Boolean
         get() = prefs.getBoolean("sounds", true)
         set(v) { prefs.edit().putBoolean("sounds", v).apply() }

@@ -5,6 +5,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -84,34 +88,32 @@ fun ProfileScreen(onBack: () -> Unit) {
     var busy by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+    var photoFlow by rememberSaveable { mutableStateOf(false) }
+    var confirmRemove by rememberSaveable { mutableStateOf(false) }
+    PhotoFlow(photoFlow, onDismiss = { photoFlow = false }, upload = { client.uploadAvatar(it) }, onSaved = { container.toast(ctx.getString(R.string.photo_saved)) })
+    if (confirmRemove) RemovePhotoDialog(onConfirm = {
         busy = "photo"; error = null
-        scope.launch {
-            try {
-                val jpeg = ImageTools.avatarJpeg(ctx, uri)
-                if (jpeg == null) error = ctx.getString(R.string.profile_not_image)
-                else { client.uploadAvatar(jpeg); container.toast(ctx.getString(R.string.profile_photo_saved)) }
-            } catch (e: Exception) {
-                error = if ((e as? com.tiecoms.app.core.ApiException)?.code == "too_large") ctx.getString(R.string.profile_too_big) else errorText(ctx, e)
-            } finally { busy = null }
-        }
-    }
+        scope.launch { try { client.removeAvatar() } catch (e: Exception) { error = errorText(ctx, e) } finally { busy = null } }
+    }, onDismiss = { confirmRemove = false })
+    // Guardar solo se habilita si algo cambió (SPEC-v3 §2).
+    val changed = name.trim() != me.name || title.trim() != (me.title ?: "") || area.trim() != (me.area ?: "")
 
     SimpleScaffold(title = stringResource(R.string.profile_title), onBack = onBack) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding().padding(20.dp).testTag("profileScreen"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Avatar(me.name, parseColor(org?.colorBg, Brand.Black), parseColor(org?.colorFg, Color.White), size = 88.dp, photo = me.avatarUrl, modifier = Modifier.testTag("profileAvatar"))
+                Box(Modifier.clickable(enabled = busy == null, onClickLabel = stringResource(R.string.photo_choose)) { photoFlow = true }) {
+                    Avatar(me.name, parseColor(org?.colorBg, Brand.Black), parseColor(org?.colorFg, Color.White), size = 88.dp, photo = me.avatarUrl, modifier = Modifier.testTag("profileAvatar"))
+                    Box(Modifier.align(Alignment.BottomEnd).size(28.dp).background(MaterialTheme.colorScheme.primary, androidx.compose.foundation.shape.CircleShape), contentAlignment = Alignment.Center) {
+                        Icon(androidx.compose.material.icons.Icons.Filled.Edit, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                    }
+                }
                 Spacer(Modifier.width(16.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OutlinedButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, enabled = busy == null,
+                    OutlinedButton(onClick = { photoFlow = true }, enabled = busy == null,
                         modifier = Modifier.testTag("pickPhoto")) {
                         Text(stringResource(if (me.avatarUrl != null) R.string.profile_change_photo else R.string.profile_add_photo))
                     }
-                    if (me.avatarUrl != null) TextButton(onClick = {
-                        busy = "photo"; error = null
-                        scope.launch { try { client.removeAvatar() } catch (e: Exception) { error = errorText(ctx, e) } finally { busy = null } }
-                    }, enabled = busy == null, modifier = Modifier.testTag("removePhoto")) { Text(stringResource(R.string.profile_remove_photo), color = MaterialTheme.colorScheme.error) }
+                    if (me.avatarUrl != null) TextButton(onClick = { confirmRemove = true }, enabled = busy == null, modifier = Modifier.testTag("removePhoto")) { Text(stringResource(R.string.profile_remove_photo), color = MaterialTheme.colorScheme.error) }
                     Text(stringResource(R.string.profile_photo_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -123,7 +125,7 @@ fun ProfileScreen(onBack: () -> Unit) {
                 singleLine = true, modifier = Modifier.fillMaxWidth().testTag("profileArea"))
             ErrorText(error)
             Button(
-                enabled = busy == null && name.trim().length >= 2,
+                enabled = busy == null && name.trim().length >= 2 && changed,
                 onClick = {
                     busy = "save"; error = null
                     scope.launch {

@@ -121,7 +121,7 @@ data class ConversationDTO(
     val parentId: String? = null,
     val parentMessageId: String? = null,
     val parentMessageSeq: Long? = null,
-    /** same | internal | directive */
+    /** same | internal | directive | side (conversación lateral privada; valores futuros → derivada genérica) */
     val deriveKind: String? = null,
     val deriveReason: String? = null,
     val returnedAt: String? = null,
@@ -129,9 +129,13 @@ data class ConversationDTO(
     /** Preferencias personales. */
     val pinnedAt: String? = null,
     val mutedUntil: String? = null,
+    /** Foto del grupo: ruta /api/v1/avatars/<fileId> (null = ícono # / candado / iniciales). */
+    val avatarUrl: String? = null,
 ) {
     /** Directos y chats grupales van juntos en la lista: no pertenecen a un espacio. */
     val isChat: Boolean get() = kind == "direct" || kind == "multi"
+    /** Conversación lateral: consulta privada que cuelga de un mensaje de [parentId]. */
+    val isSide: Boolean get() = deriveKind == "side" && parentId != null
 
     fun mutedAt(nowMs: Long): Boolean =
         mutedUntil?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() > nowMs }.getOrDefault(false) } ?: false
@@ -144,6 +148,11 @@ data class ForwardedInfo(
     val author: String? = null,
     val sentAt: String? = null,
     val fromConversationId: String? = null,
+    /** Respuesta en privado: el mensaje original al que responde. */
+    val messageId: String? = null,
+    /** Los pone el servidor cuando hay messageId: número del original (enlace ?m=) y extracto (≤ 200). */
+    val messageSeq: Long? = null,
+    val excerpt: String? = null,
 )
 
 @Serializable
@@ -430,6 +439,7 @@ data class WaChatDTO(
 
 // ---------- Chats, perfil y archivos ----------
 /** Resultado de POST /chats: con una persona, el directo (existente o nuevo); con varias, un chat `multi`. */
+@Serializable data class AvatarResult(val avatarUrl: String? = null)
 @Serializable data class CreateChatResult(val id: String = "", val kind: String = "multi")
 
 @Serializable

@@ -85,17 +85,41 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 - Las conversaciones silenciadas no suenan ni notifican.
 - Los eventos de catch-up no suenan: solo cuenta lo creado después de que la conexión quedó en vivo.
 
+### Feedback de TestFlight (SPEC-v3)
+
+- **Pulsación larga (como en iPhone):** háptico `LongPress`, la burbuja se eleva (escala 1,03 y sombra) y se abre un menú anclado con íconos, en el mismo orden que iOS. Se cierra al tocar fuera o con Atrás. El clic derecho (ratón o trackpad) abre el mismo menú. En Inicio, la pulsación larga sobre una conversación ofrece fijar, silenciar, marcar como no leída y Detalles.
+- **Quién escribió qué:** en grupos y chats `multi`, las burbujas ajenas llevan un avatar de 28 dp (foto, o iniciales sobre un color estable por persona) y el nombre en color. Las rachas del mismo autor de menos de 5 minutos se agrupan. El color es idéntico al de la web (`personColor` de `apps/web/src/ui.tsx`: FNV-1a de 32 bits sobre el id en minúsculas, módulo 8) y nunca es naranja. Mis burbujas usan `#E8710A` en claro y `#C75F08` en oscuro. Los directos no llevan avatar.
+- **Inicio:** hay dos secciones, «Empresas y espacios» y «Chats», cada una con su «+». La jerarquía es empresa contraparte → espacio → conversaciones; las laterales cuelgan de su origen. Empresas y espacios se pueden contraer, el estado se recuerda y, contraídos, suman los no leídos (sin contar los silenciados). Cada conversación lleva el chip «◆ N asuntos», que abre la lista filtrada. El encabezado del chat muestra «Empresa · Espacio» y lleva a ese espacio. Bajo los fijados aparece la barra «Asuntos abiertos (N)». La pestaña Asuntos agrupa por empresa → espacio → conversación, con los filtros Míos, Abiertos y Todos. Las vistas previas de mensajes de sistema nunca muestran JSON crudo.
+- **Laterales:** «Preguntar en privado (lateral)» abre un selector con las personas del chat y las colegas de tu empresa. Quien sea de otra empresa aparece deshabilitado, con el motivo (`side_outsider` trae sus ids). La pregunta es opcional. En pantallas anchas (≥ 840 dp) la lateral abre como panel a la derecha; en teléfono, como hoja casi a pantalla completa con el ancla fija arriba. Bajo el mensaje ancla queda el chip «💬 Consulta lateral · N». Desde ahí se puede «Llevar la respuesta al hilo». Las laterales no aparecen en la barra de linaje.
+- **Responder en privado:** envía `forwarded.messageId` al directo. El servidor agrega `messageSeq` y `excerpt`, y la cita «Respondiste en privado a: «…» en «General» · Ver original» abre `/c/<origen>?m=<seq>`.
+- **Fotos:** perfil y grupo usan el mismo flujo: galería, cámara (FileProvider) o archivos → editor de recorte circular (mover y pellizcar) → Guardar, con progreso y aviso. La foto sale como JPEG de 512 × 512 comprimido por debajo de 3 MB. Quitar la foto pide confirmación. Un formato inválido muestra error. En el perfil, Guardar se habilita solo si hay cambios. La foto de grupo solo se puede cambiar con `canManage`, o en cualquier chat `multi`; en directos, nunca.
+- **Comentarios de asuntos:** un solo compositor («Escribe una actualización o una pregunta…» + Comentar). El historial muestra autor, avatar y hora, y se actualiza en vivo con `issue.updated`.
+- **Textos:** `tools/strings_v3.py` genera `strings_v3.xml` desde `apps/web/src/i18n.ts` (rama `mobile-feedback`, 86341e1), con 100 claves de la web. Solo 4 textos son propios de Android.
+
+### Notificaciones push (FCM)
+
+- **Contrato:** mensajes data-only según el contrato de `mobile-feedback`. Llevan `title`, `subtitle`, `body`, `badge`, `type` (message, reminder o event), `conversationId`, `messageId`, `authorId`, `authorName` y `authorAvatarUrl`; ver `core/PushPayload.kt`. El token se registra con `PUT /api/v1/push/token` (`provider: fcm`, `lang`) después del login. Al cerrar sesión el servidor borra el token.
+- **Notificación:** usa `MessagingStyle` con la `Person` del autor y su foto. Crea un atajo de conversación de larga duración (`LocusId`), así aparece en la sección Conversaciones y se puede abrir como burbuja (`BubbleActivity`). Trae las acciones Responder (RemoteInput, sin abrir la app) y Marcar como leído. Hay tres canales: Mensajes, Recordatorios y Reuniones, todos con el sonido `tc_notify`. El badge es la suma de no leídos de las conversaciones no silenciadas.
+- **Duplicados:** si el mismo mensaje llega por el socket y por push, se muestra una sola vez (se deduplica por `messageId`). Con la app en primer plano y el socket en vivo, el push se ignora.
+- **Sin `google-services.json` (estado actual):** el build compila igual, pero Firebase no se inicializa y el push remoto queda desactivado. Las notificaciones locales del socket siguen funcionando. **Para activarlo, Danny debe:**
+  1. Crear el proyecto de Firebase (o usar el GCP `tiecoms`) y agregar la app Android `com.tiecoms.app`, con los SHA-256 de la clave de subida y de la firma de Play.
+  2. Descargar `google-services.json` a `apps/android/app/`. Está en `.gitignore` y no se sube.
+  3. En el servidor, configurar la cuenta de servicio de FCM (HTTP v1) según el README del API de `mobile-feedback`.
+- **Antes de pedir el permiso:** en Android 13+ se muestra una explicación («Activa las notificaciones») antes de pedir `POST_NOTIFICATIONS`.
+
 ## Estructura
 
 ```
 app/src/main/java/com/tiecoms/app/
   core/            Kotlin puro (JVM): DTO tolerantes, eventos, Socket.IO propio, cliente, SSO/PKCE, deep links,
                    SplashChoreo (coreografía), Bring (interpretar WhatsApp y correo)
-  platform/        Keystore (refresh token), SharedPreferences, SoundPool, notificaciones, PushRegistrar
+  platform/        Keystore (refresh token), SharedPreferences, SoundPool, notificaciones (MessagingStyle, atajos,
+                   burbujas), FCM (TcMessagingService, NotificationActionReceiver), recorte de fotos
   ui/              AppRoot (pestañas y rutas), Splash, AuthScreens, HomeScreen, ConversationScreen, ChatDialogs,
                    IssuesScreens, AgendaScreens, MoreScreens (Trazo, Recordatorios, Compartir, Dominios, Eliminar cuenta),
                    WhatsAppScreen, OtherScreens (Detalles, Ajustes, Invitación), Widgets
 tools/strings_v2.py  textos v2 (es/en) copiados de apps/web/src/i18n.ts → res/values{,-es}/strings_v2.xml
+tools/strings_v3.py  textos v3 leídos de apps/web/src/i18n.ts (mobile-feedback) → strings_v3.xml
 ```
 
 Hay unos pocos textos que la web todavía no tiene: dominios, eliminar cuenta, «Calendario del teléfono» y los avisos de reunión. Están marcados como «nativo» en `tools/strings_v2.py`, para copiarlos igual en iOS.
@@ -133,6 +157,17 @@ adb pull /sdcard/Android/data/com.tiecoms.app/files/   # splash-*.png, ui-*.png
 - `TIECOMS_PEER_DIR` debe tener `scripts/` copiado (no enlazado) junto a `node_modules`: Node resuelve los módulos desde la ruta real del script.
 - **`SplashUiTest`** usa UiAutomator con el reloj real; la regla de Compose usa un reloj virtual. En debug, las etiquetas de prueba se exponen como `resource-id`.
 - **`LiveUiTest`** recorre login → pestañas → conversación → eco del par → pulsación larga → fijar («visto fijado: 1» del par) → editar («visto editado: …» del par) → compartir con `ACTION_SEND` → deep links → rotación.
+- **v3 feedback (3043, rama `mobile-feedback`):**
+  ```bash
+  API_URL=http://localhost:3043 FIXTURE_OUT=/tmp/fx3043.json node scripts/mobile-fixture.mjs
+  TIECOMS_FIXTURE=/tmp/fx3043.json ./gradlew :app:testDebugUnitTest --tests '*LiveV3Feedback*'
+  FIXTURE=/tmp/fx3043.json API_URL=http://localhost:3043 NODE_ROOT=<node_modules> node scripts/realtime-peer2.mjs &
+  adb shell am instrument -w -e apiUrl http://10.0.2.2:3043 -e email <a.email> -e password <pw> -e conversationId <id> -e peerId <b.id> \
+    -e class com.tiecoms.app.FeedbackUiTest,com.tiecoms.app.CropEditorUiTest com.tiecoms.app.test/androidx.test.runner.AndroidJUnitRunner
+  ```
+  - `FeedbackUiTest` recorre: jerarquía de Inicio → menú de la lista → avatares → menú anclado del mensaje (toque fuera y clic derecho) → lateral → respuesta en privado → barra de asuntos → comentario → foto del grupo → push de FCM simulado con `TcMessagingService.handle` (verifica `MessagingStyle`, atajo, burbuja, acciones y badge) → Responder desde la notificación.
+  - `CropEditorUiTest` recorta una foto real y verifica un JPEG de 512 × 512 de ≤ 3 MB.
+  - `FeedbackV3Test` corre en la JVM sin servidor.
 - **App Links `https://`:** sin un `assetlinks.json` válido, Android 12+ abre Chrome. Para probar sin verificar: `adb shell pm set-app-links-user-selection --user 0 --package com.tiecoms.app true all`.
 
 ## Firmar
@@ -201,9 +236,9 @@ El release lleva R8 y reducción de recursos. Las reglas de serialización está
 
 ## Pendientes y puntos de extensión
 
-- **Push remoto (FCM):** el backend aún no tiene registro de dispositivos. `PushRegistrar` / `NoopPushRegistrar` queda como punto de extensión. Mientras tanto, las notificaciones (mensajes, recordatorios y reuniones) son locales y solo llegan con el proceso vivo.
+- **Push remoto (FCM):** el cliente está completo, pero falta `google-services.json`; ver «Notificaciones push». La prueba con un FCM real queda pendiente hasta tenerlo.
 - **Backend de publicación:** eliminación de cuenta, reportes y bloqueo están integrados en `main` (`e679a10`) y verificados en producción el 24 de septiembre de 2026. El bloqueo de mensajes directos se aplica en el servidor, no solo en la interfaz.
 - **SSO en vivo:** 3041 no tiene credenciales de Google/Microsoft y `/start` responde 503 `sso_unavailable` (controlado). El canje está probado con MockWebServer. Falta la prueba real en producción.
 - **WhatsApp:** en pruebas no hay WhatsApp real. Los estados y la interfaz se probaron con el API (lista vacía) y con MockWebServer (cuentas, QR, chats, vínculo). Falta una prueba con una cuenta real.
 - **Dominios:** falta la verificación real con DNS.
-- **Gestión de miembros:** la web tiene más herramientas de administración (crear espacio o grupo, invitar, agregar o quitar miembros) que no se portaron en esta ronda.
+- **Gestión de miembros:** la web tiene más herramientas de administración (crear grupo, invitar, quitar miembros) que no se portaron; crear espacio sí está desde Inicio.

@@ -22,6 +22,32 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Alarm
+import androidx.compose.material.icons.outlined.MarkChatUnread
+import androidx.compose.material.icons.outlined.CallSplit
+import androidx.compose.material.icons.outlined.TaskAlt
+import androidx.compose.material.icons.outlined.Event
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.DoneAll
+import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.NotificationsOff
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Chat
+import androidx.compose.material.icons.outlined.Tag
+import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.automirrored.outlined.Reply
+import androidx.compose.material.icons.automirrored.outlined.Forward
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
@@ -297,3 +323,84 @@ fun FormSheet(title: String, onDismiss: () -> Unit, tag: String? = null, content
     }
 }
 
+
+/** Ícono Material para cada glifo de los menús (mismos significados que los SF Symbols de iOS). */
+fun iconForGlyph(glyph: String): androidx.compose.ui.graphics.vector.ImageVector? {
+    val I = Icons.Outlined
+    val A = Icons.AutoMirrored.Outlined
+    return when (glyph) {
+        "↩" -> A.Reply
+        "⧉" -> I.ContentCopy
+        "⛓" -> I.Link
+        "📌" -> I.PushPin
+        "⏰" -> I.Alarm
+        "●" -> I.MarkChatUnread
+        "⑂" -> I.CallSplit
+        "◆" -> I.TaskAlt
+        "📅" -> I.Event
+        "↪" -> A.Forward
+        "✎" -> I.Edit
+        "🗑" -> I.Delete
+        "⚑" -> I.Flag
+        "↗" -> A.OpenInNew
+        "✓" -> I.DoneAll
+        "🔔" -> I.NotificationsActive
+        "🔕" -> I.NotificationsOff
+        "⎋" -> A.Logout
+        "ⓘ" -> I.Info
+        "🔒" -> I.Lock
+        "💬" -> I.Forum
+        "✉" -> I.Email
+        "🟢" -> I.Chat
+        "◍" -> I.Forum
+        "#" -> I.Tag
+        "T" -> I.Groups
+        "⊘" -> I.Block
+        else -> null
+    }
+}
+
+/**
+ * Menú contextual anclado (como el de iPhone): se abre junto al elemento que lo invoca, con íconos,
+ * separadores y submenús que se abren dentro del mismo menú; se cierra al tocar fuera.
+ */
+@Composable
+fun AnchoredMenu(expanded: Boolean, items: List<SheetItem?>, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    var stack by remember(expanded) { mutableStateOf(listOf<SheetItem>()) }
+    val current = stack.lastOrNull()
+    val list = current?.children ?: items
+    androidx.compose.material3.DropdownMenu(
+        expanded = expanded, onDismissRequest = onDismiss,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+        modifier = modifier.widthIn(min = 240.dp).testTag("contextMenu"),
+    ) {
+        if (current != null) {
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text(current.label, fontWeight = FontWeight.SemiBold) },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) },
+                onClick = { stack = stack.dropLast(1) },
+            )
+            HorizontalDivider()
+        }
+        list.forEachIndexed { i, it ->
+            if (it == null) { if (i > 0 && i < list.lastIndex && list[i - 1] != null) HorizontalDivider(Modifier.padding(vertical = 2.dp)); return@forEachIndexed }
+            val color = when { !it.enabled -> MaterialTheme.colorScheme.outline; it.danger -> MaterialTheme.colorScheme.error; else -> MaterialTheme.colorScheme.onSurface }
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text(it.label, color = color) },
+                leadingIcon = {
+                    val icon = iconForGlyph(it.glyph)
+                    if (icon != null) Icon(icon, null, tint = if (it.danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                    else if (it.glyph.isNotEmpty()) Text(it.glyph, style = MaterialTheme.typography.titleSmall)
+                },
+                trailingIcon = when {
+                    it.children != null -> ({ Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) })
+                    it.hint != null -> ({ Text(it.hint, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) })
+                    else -> null
+                },
+                enabled = it.enabled,
+                onClick = { if (it.children != null) stack = stack + it else { onDismiss(); it.onClick?.invoke() } },
+                modifier = if (it.tag != null) Modifier.testTag(it.tag) else Modifier,
+            )
+        }
+    }
+}

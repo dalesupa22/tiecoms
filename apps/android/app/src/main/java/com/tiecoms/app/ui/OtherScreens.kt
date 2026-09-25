@@ -100,7 +100,29 @@ fun DetailsScreen(
             runCatching { client.loadEvents(java.time.Instant.now().minusSeconds(3600), java.time.Instant.now().plusSeconds(60L * 86400), id) }
             runCatching { client.loadIssues(conversationId = id) }
         }
+        // Foto del grupo (SPEC-v3 §1): canManage en grupos/internos, cualquier miembro en chats grupales; nunca en directos.
+        val canPhoto = meta.kind != "direct" && (meta.kind == "multi" || meta.canManage)
+        var photoFlow by rememberSaveable { mutableStateOf(false) }
+        var confirmRemove by rememberSaveable { mutableStateOf(false) }
+        var photoError by remember { mutableStateOf<String?>(null) }
+        PhotoFlow(photoFlow, onDismiss = { photoFlow = false }, upload = { client.setConversationAvatar(id, it) }, onSaved = { container.toast(ctx.getString(R.string.group_photo_saved)) }, group = true)
+        if (confirmRemove) RemovePhotoDialog(onConfirm = {
+            scope.launch { runCatching { client.removeConversationAvatar(id) }.onSuccess { container.toast(ctx.getString(R.string.group_photo_removed)) }.onFailure { photoError = errorText(ctx, it) } }
+        }, onDismiss = { confirmRemove = false }, group = true)
         LazyColumn(Modifier.fillMaxWidth().testTag("participants")) {
+            item {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ConversationIcon(meta, data, 72.dp)
+                    Spacer(Modifier.width(16.dp))
+                    if (canPhoto) Column {
+                        OutlinedButton(onClick = { photoFlow = true }, modifier = Modifier.testTag("groupPhoto")) { Text(stringResource(if (meta.avatarUrl == null) R.string.group_add_photo else R.string.group_change_photo)) }
+                        if (meta.avatarUrl != null) TextButton(onClick = { confirmRemove = true }, modifier = Modifier.testTag("groupPhotoRemove")) {
+                            Text(stringResource(R.string.group_remove_photo), color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+                ErrorText(photoError)
+            }
             item {
                 Column(Modifier.padding(16.dp)) {
                     if (ws != null) {

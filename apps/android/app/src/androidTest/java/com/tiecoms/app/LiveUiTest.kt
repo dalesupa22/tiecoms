@@ -92,7 +92,7 @@ class LiveUiTest {
 
     private fun longPressText(text: String) {
         compose.onNode(hasText(text), useUnmergedTree = true).performTouchInput { longClick() }
-        compose.waitUntilAtLeastOneExists(hasTestTag("actionSheet"), 5_000)
+        compose.waitUntilAtLeastOneExists(hasTestTag("contextMenu"), 5_000)
     }
 
     private fun flow(scenario: ActivityScenario<MainActivity>, convId: String, email: String, password: String) {

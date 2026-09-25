@@ -44,6 +44,37 @@ object ImageTools {
         bytes
     }
 
+    /** Imagen para el editor de recorte: reducida a ~[maxSide] px y derecha según EXIF. null si no es imagen. */
+    suspend fun loadForCrop(ctx: Context, uri: Uri, maxSide: Int = 2048): Bitmap? = withContext(Dispatchers.IO) {
+        val cr = ctx.contentResolver
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        runCatching { cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext null
+        val opts = BitmapFactory.Options().apply { inSampleSize = Media.sampleSize(bounds.outWidth, bounds.outHeight, maxSide) }
+        val decoded = runCatching { cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) } }.getOrNull() ?: return@withContext null
+        val orientation = runCatching { cr.openInputStream(uri)?.use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) } }
+            .getOrNull() ?: ExifInterface.ORIENTATION_NORMAL
+        rotate(decoded, orientation)
+    }
+
+    /**
+     * Recorta el cuadrado [left],[top],[side] (px de [src]) y lo guarda como JPEG 512×512,
+     * bajando la calidad hasta que pese ≤ 3 MB (una foto de 512 px siempre cabe).
+     */
+    suspend fun cropJpeg(src: Bitmap, left: Int, top: Int, side: Int): ByteArray = withContext(Dispatchers.Default) {
+        val s = side.coerceIn(1, minOf(src.width, src.height))
+        val x = left.coerceIn(0, src.width - s); val y = top.coerceIn(0, src.height - s)
+        val square = Bitmap.createBitmap(src, x, y, s, s)
+        val out = Bitmap.createScaledBitmap(square, AVATAR_SIDE, AVATAR_SIDE, true)
+        var quality = 90
+        var bytes: ByteArray
+        do {
+            bytes = ByteArrayOutputStream().use { st -> out.compress(Bitmap.CompressFormat.JPEG, quality, st); st.toByteArray() }
+            quality -= 10
+        } while (bytes.size > MAX_AVATAR_BYTES && quality > 20)
+        bytes
+    }
+
     private fun rotate(b: Bitmap, orientation: Int): Bitmap {
         val m = Matrix()
         when (orientation) {

@@ -21,3 +21,6 @@ signing.properties
 *.dex
 # Credenciales de pruebas locales
 fixture*.json
+# Firebase (push): lo pone quien publica, nunca en git
+google-services.json
+app/google-services.json

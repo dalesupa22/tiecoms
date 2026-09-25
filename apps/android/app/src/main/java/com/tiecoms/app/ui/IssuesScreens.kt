@@ -38,6 +38,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -130,35 +133,64 @@ fun IssueRow(i: IssueDTO, data: BootstrapDTO, showWhere: Boolean = true, onOpen:
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun IssuesScreen(onOpen: (String) -> Unit) {
+fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, onBack: (() -> Unit)? = null) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val st by client.state.collectAsStateWithLifecycle()
     val data = st.data ?: return
-    var filter by rememberSaveable { mutableStateOf("mine") }
+    // Míos / Abiertos / Todos (SPEC-v3 §9). Con conversación, empieza en Abiertos.
+    var filter by rememberSaveable { mutableStateOf(if (conversationFilter != null) "open" else "mine") }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) { runCatching { client.loadIssues() }.onFailure { error = errorText(ctx, it) } }
-    val visible = data.conversations.map { it.id }.toSet()
-    val list = st.issues.values.filter { it.conversationId in visible }
-        .filter { if (filter == "closed") it.closed else !it.closed && (filter == "open" || it.ownerId == data.me.id) }
-        .sortedWith(compareByDescending<IssueDTO> { issueFlags(it).stalledDays }.thenBy { it.dueDate ?: "9" })
-    val byWs = list.groupBy { it.workspaceId }
+    LaunchedEffect(conversationFilter) { runCatching { client.loadIssues(conversationId = conversationFilter) }.onFailure { error = errorText(ctx, it) } }
+    val visible = data.conversations.associateBy { it.id }
+    val list = st.issues.values.filter { it.conversationId in visible && (conversationFilter == null || it.conversationId == conversationFilter) }
+        .filter { when (filter) { "all" -> true; "open" -> !it.closed; else -> !it.closed && it.ownerId == data.me.id } }
+        .sortedWith(compareBy<IssueDTO> { it.closed }.thenByDescending { issueFlags(it).stalledDays }.thenBy { it.dueDate ?: "9" })
+    // Empresa → Espacio → Conversación → asuntos, con la misma agrupación que Inicio.
+    val wsById = data.workspaces.associateBy { it.id }
+    val byOrg = list.groupBy { i -> wsById[i.workspaceId]?.let { com.tiecoms.app.core.HomeTree.counterpartOrg(data, it)?.id } ?: "none" }
+    val orgOrder = com.tiecoms.app.core.HomeTree.groupWorkspaces(data).map { it.first?.id ?: "none" }.distinct()
+    val title = conversationFilter?.let { id -> visible[id]?.let { stringResource(R.string.issue_in_conversation, titleOf(ctx, it, data)) } } ?: stringResource(R.string.nav_issues)
     Scaffold(
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.nav_issues), fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() }) },
+        topBar = { TopAppBar(
+            navigationIcon = { if (onBack != null) androidx.compose.material3.IconButton(onClick = onBack, modifier = Modifier.testTag("back")) {
+                androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
+            title = { Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { heading() }) },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)) },
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
     ) { pad ->
         LazyColumn(Modifier.padding(pad).fillMaxSize().padding(horizontal = 16.dp).testTag("issues")) {
             item {
-                Text(stringResource(R.string.issue_page_sub), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                if (conversationFilter == null) Text(stringResource(R.string.issue_page_sub), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.heightIn(min = 12.dp))
-                Segmented(listOf("mine" to stringResource(R.string.issue_mine), "open" to stringResource(R.string.issue_all_open), "closed" to stringResource(R.string.issue_closed)), filter, { filter = it }, Modifier.testTag("issueFilter"))
+                Segmented(listOf("mine" to stringResource(R.string.issue_mine), "open" to stringResource(R.string.issue_all_open), "all" to stringResource(R.string.issue_all)), filter, { filter = it }, Modifier.testTag("issueFilter"))
                 ErrorText(error)
                 if (list.isEmpty()) EmptyNote(stringResource(R.string.issue_empty))
             }
-            byWs.forEach { (wsId, items) ->
-                item(key = "ws$wsId") { SectionHeader(data.workspaces.firstOrNull { it.id == wsId }?.name ?: "", Modifier.padding(top = 16.dp, bottom = 4.dp).semantics { heading() }) }
-                items(items, key = { it.id }) { IssueRow(it, data, onOpen = onOpen) }
+            (orgOrder + byOrg.keys.filter { it !in orgOrder }).forEach { orgId ->
+                val inOrg = byOrg[orgId] ?: return@forEach
+                val org = Names.org(data, orgId.takeIf { it != "none" })
+                item(key = "o$orgId") {
+                    Row(Modifier.padding(top = 18.dp, bottom = 2.dp).semantics(mergeDescendants = true) { heading() }, verticalAlignment = Alignment.CenterVertically) {
+                        OrgMark(org, size = 20.dp); Spacer(Modifier.width(8.dp))
+                        Text(org?.name ?: stringResource(R.string.common_no_company), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                    }
+                }
+                inOrg.groupBy { it.workspaceId }.forEach { (wsId, inWs) ->
+                    item(key = "w$wsId") {
+                        Text(wsById[wsId]?.name ?: "", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(start = 12.dp, top = 6.dp).semantics { heading() })
+                    }
+                    inWs.groupBy { it.conversationId }.forEach { (cid, inConv) ->
+                        item(key = "c$cid") {
+                            Row(Modifier.padding(start = 24.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                visible[cid]?.let { ConversationIcon(it, data, 20.dp) }; Spacer(Modifier.width(6.dp))
+                                Text(visible[cid]?.let { titleOf(ctx, it, data) } ?: "", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        items(inConv, key = { it.id }) { Box(Modifier.padding(start = 24.dp)) { IssueRow(it, data, showWhere = false, onOpen = onOpen) } }
+                    }
+                }
             }
         }
     }
@@ -190,7 +222,8 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
     var comment by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     suspend fun load() { runCatching { events = client.issueDetail(id).events }.onFailure { error = errorText(ctx, it) } }
-    LaunchedEffect(id, live?.updatedAt) { load() }
+    // En vivo: issue.updated trae updatedAt/commentCount nuevos y se recarga el historial.
+    LaunchedEffect(id, live?.updatedAt, live?.commentCount) { load() }
     SimpleScaffold(live?.title ?: stringResource(R.string.nav_issues), onBack) {
         val i = live ?: run { if (error != null) ErrorText(error) else CircularProgressIndicator(Modifier.padding(24.dp)); return@SimpleScaffold }
         val conv = data.conversations.firstOrNull { it.id == i.conversationId }
@@ -240,29 +273,56 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
             item { SectionHeader(stringResource(R.string.issue_history), Modifier.semantics { heading() }) }
             items(events, key = { it.id }) { e ->
                 val who = Names.person(data, e.actorId)
-                Column(Modifier.fillMaxWidth()) {
-                    Text(buildString {
-                        append(who?.name ?: ctx.getString(R.string.common_participant)); append(' ')
-                        if (e.kind != "comment") append(eventText(ctx, data, e))
-                        append(" · "); append(shortDateTime(e.createdAt))
-                    }, style = MaterialTheme.typography.bodySmall)
-                    if (e.kind == "comment") Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) {
-                        Text(e.payload["body"]?.let { runCatching { it.jsonPrimitive.content }.getOrNull() } ?: "", Modifier.padding(8.dp))
+                Row(Modifier.fillMaxWidth().testTag("issueEvent-${e.kind}"), verticalAlignment = Alignment.Top) {
+                    AuthorAvatar(who, e.actorId, 28.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(buildString {
+                            append(who?.name ?: ctx.getString(R.string.common_participant)); append(' ')
+                            if (e.kind != "comment") append(eventText(ctx, data, e))
+                        }, style = MaterialTheme.typography.bodySmall, fontWeight = if (e.kind == "comment") FontWeight.SemiBold else null,
+                            color = if (e.kind == "comment") personColor(e.actorId) else MaterialTheme.colorScheme.onSurface)
+                        if (e.kind == "comment") Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small, modifier = Modifier.padding(top = 2.dp)) {
+                            Text(e.payload["body"]?.let { runCatching { it.jsonPrimitive.content }.getOrNull() } ?: "", Modifier.padding(8.dp).testTag("commentBody"))
+                        }
+                        Text(shortDateTime(e.createdAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
             item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(comment, { comment = it.take(4000) }, placeholder = { Text(stringResource(R.string.issue_comment_ph)) }, modifier = Modifier.weight(1f).testTag("issueComment"))
+                // Un solo compositor: el campo y «Comentar» a la derecha, habilitado con texto (SPEC-v3 §3).
+                var sending by remember { mutableStateOf(false) }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                    OutlinedTextField(comment, { comment = it.take(4000) }, placeholder = { Text(stringResource(R.string.issue_comment_ph3)) }, maxLines = 5,
+                        modifier = Modifier.weight(1f).testTag("issueComment"))
                     Spacer(Modifier.width(8.dp))
-                    Button(enabled = comment.isNotBlank(), onClick = {
+                    Button(enabled = comment.isNotBlank() && !sending, onClick = {
                         val body = comment.trim()
-                        scope.launch { runCatching { client.commentIssue(i.id, body); comment = ""; load() }.onFailure { error = errorText(ctx, it) } }
+                        sending = true; error = null
+                        scope.launch { runCatching { client.commentIssue(i.id, body); comment = ""; load() }.onFailure { error = errorText(ctx, it) }; sending = false }
                     }, modifier = Modifier.testTag("issueCommentSend")) { Text(stringResource(R.string.issue_comment)) }
                 }
                 ErrorText(error)
                 Spacer(Modifier.heightIn(min = 24.dp))
             }
+        }
+    }
+}
+
+/** Barra «Asuntos abiertos (N)» arriba del chat (debajo de fijados): se despliega con los asuntos de la conversación. */
+@Composable
+fun OpenIssuesBar(list: List<IssueDTO>, data: BootstrapDTO, onOpen: (String) -> Unit) {
+    if (list.isEmpty()) return
+    var open by rememberSaveable { mutableStateOf(false) }
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth().testTag("openIssuesBar")) {
+        Column {
+            Row(Modifier.fillMaxWidth().clickable { open = !open }.heightIn(min = 40.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("◆ " + stringResource(R.string.issues_open_bar, list.size), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                androidx.compose.material3.Icon(if (open) androidx.compose.material.icons.Icons.Filled.KeyboardArrowUp else androidx.compose.material.icons.Icons.Filled.KeyboardArrowDown,
+                    stringResource(if (open) R.string.collapse else R.string.expand), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (open) Column(Modifier.padding(horizontal = 16.dp)) { list.forEach { IssueRow(it, data, showWhere = false, onOpen = onOpen) } }
         }
     }
 }

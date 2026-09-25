@@ -30,6 +30,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -68,6 +70,8 @@ import com.tiecoms.app.container
 import com.tiecoms.app.core.DeepLink
 import com.tiecoms.app.core.SessionStatus
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 val LocalSnackbar = staticCompositionLocalOf { SnackbarHostState() }
 
@@ -185,16 +189,27 @@ private fun MainNav() {
     val route = backStack?.destination?.route
     val uiScope = rememberCoroutineScope()
 
-    // Permiso de notificaciones (Android 13+), una sola vez.
+    // Permiso de notificaciones (Android 13+), una sola vez y con una explicación previa (SPEC-v3 §6).
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    var askPush by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= 33 && !container.settings.askedNotificationPermission &&
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            container.settings.askedNotificationPermission = true
-            permission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
+        ) askPush = true
     }
+    if (askPush) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { askPush = false; container.settings.askedNotificationPermission = true },
+        title = { Text(stringResource(R.string.push_why_title)) },
+        text = { Text(stringResource(R.string.push_why_body)) },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = {
+            askPush = false; container.settings.askedNotificationPermission = true
+            permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }, modifier = Modifier.testTag("pushAllow")) { Text(stringResource(R.string.push_allow)) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { askPush = false; container.settings.askedNotificationPermission = true }) { Text(stringResource(R.string.push_later)) } },
+    )
+    // Token de FCM para esta sesión (sin google-services.json el push queda desactivado y no pasa nada).
+    val meId = state.data?.me?.id
+    LaunchedEffect(meId) { if (meId != null) withContext(Dispatchers.IO) { com.tiecoms.app.platform.PushSetup.register(ctx.applicationContext) } }
 
     fun openConv(id: String, seq: Long? = null) = nav.navigate("conv/$id" + (seq?.let { "?m=$it" } ?: "")) { launchSingleTop = true }
     fun tab(r: String) = nav.navigate(r) { popUpTo(nav.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true }
@@ -252,9 +267,14 @@ private fun MainNav() {
                     onOpen = { id -> openConv(id) },
                     onShortcut = { r -> nav.navigate(r) { launchSingleTop = true } },
                     onNewChat = { nav.navigate("newchat") { launchSingleTop = true } },
+                    onIssuesOf = { c -> nav.navigate("issues-of/$c") { launchSingleTop = true } },
+                    onDetails = { c -> nav.navigate("details/$c") { launchSingleTop = true } },
                 )
             }
             composable("issues") { IssuesScreen(onOpen = { nav.navigate("issue/$it") }) }
+            composable("issues-of/{conv}") {
+                IssuesScreen(onOpen = { i -> nav.navigate("issue/$i") }, conversationFilter = it.arguments?.getString("conv"), onBack = { nav.popBackStack() })
+            }
             composable("agenda") { AgendaScreen(onOpenEvent = { nav.navigate("event/$it") }) }
             composable("settings") { SettingsScreen(onNavigate = { r -> nav.navigate(r) { launchSingleTop = true } }) }
             composable("conv/{id}?m={m}", arguments = listOf(navArgument("m") { type = NavType.StringType; nullable = true; defaultValue = null })) {
@@ -267,6 +287,19 @@ private fun MainNav() {
                     onOpenIssue = { nav.navigate("issue/$it") },
                     onOpenEvent = { nav.navigate("event/$it") },
                     onTrazo = { nav.navigate("trazo") { launchSingleTop = true } },
+                    onOpenWorkspace = { w -> nav.navigate("home?ws=$w") { launchSingleTop = true } },
+                    onPrivateReply = { m ->
+                        uiScope.launch {
+                            try {
+                                val author = client.state.value.data?.let { com.tiecoms.app.core.Names.person(it, m.authorId)?.name }
+                                val r = client.createChat(listOf(m.authorId), null)
+                                container.privateReply.value = com.tiecoms.app.AppContainer.PrivateReply(r.id, m, author)
+                                openConv(r.id)
+                            } catch (e: Exception) {
+                                container.toast(if ((e as? com.tiecoms.app.core.ApiException)?.status in setOf(403, 404)) ctx.getString(R.string.reply_private_unreachable) else errorText(ctx, e))
+                            }
+                        }
+                    },
                 )
             }
             composable("details/{id}") {

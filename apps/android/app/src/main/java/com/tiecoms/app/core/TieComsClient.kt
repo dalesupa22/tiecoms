@@ -832,6 +832,58 @@ class TieComsClient(
         return plan.map { it.conversationId }.distinct().size
     }
 
+    // ---------- Foto del grupo (SPEC-v3 §1) ----------
+    /** POST /conversations/:id/avatar con los bytes (JPEG 512×512 ya recortado). Devuelve la ruta relativa. */
+    suspend fun setConversationAvatar(conversationId: String, jpeg: ByteArray): String? = withContext(dispatcher) {
+        if (jpeg.size > MAX_AVATAR_BYTES) throw ApiException(413, "too_large", "La foto pesa más de 3 MB.")
+        val r = request("POST", "/conversations/$conversationId/avatar", null, AvatarResult.serializer(), HttpApi.RawBody(jpeg, "image/jpeg"))
+        patchMeta(conversationId) { copy(avatarUrl = r.avatarUrl) }
+        r.avatarUrl
+    }
+    suspend fun removeConversationAvatar(conversationId: String) = withContext(dispatcher) {
+        req("DELETE", "/conversations/$conversationId/avatar", null, AvatarResult.serializer())
+        patchMeta(conversationId) { copy(avatarUrl = null) }
+    }
+
+    // ---------- Conversaciones laterales (SPEC-v3 §4) ----------
+    /**
+     * POST /conversations/:id/side: consulta privada sobre un mensaje. 403 side_outsider trae en
+     * details.userIds a quienes no se pueden sumar (ver [SideOutsiders.from]).
+     */
+    suspend fun startSide(conversationId: String, messageId: String, userIds: List<String>, question: String?): String = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("messageId", JsonPrimitive(messageId))
+            put("userIds", kotlinx.serialization.json.JsonArray(userIds.distinct().map { JsonPrimitive(it) }))
+            question?.trim()?.takeIf { it.isNotEmpty() }?.let { put("question", JsonPrimitive(it.take(4000))) }
+        }
+        val r = req("POST", "/conversations/$conversationId/side", body, IdResult.serializer()); loadBootstrapInternal(); r.id
+    }
+
+    // ---------- Push (SPEC-v3 §6) ----------
+    /** PUT /push/token de esta sesión (reemplaza el anterior). */
+    suspend fun registerPushToken(token: String, lang: String?) = withContext(dispatcher) {
+        if (accessToken == null) return@withContext
+        val body = buildJsonObject {
+            put("provider", JsonPrimitive("fcm")); put("token", JsonPrimitive(token)); put("environment", JsonPrimitive("production"))
+            lang?.takeIf { it == "es" || it == "en" }?.let { put("lang", JsonPrimitive(it)) }
+        }
+        req("PUT", "/push/token", body, JsonElement.serializer()); Unit
+    }
+    suspend fun unregisterPushToken() = withContext(dispatcher) { runCatching { req("DELETE", "/push/token", null, JsonElement.serializer()) }; Unit }
+
+    /** Badge local = suma de no leídos de las conversaciones no silenciadas (igual que el servidor). */
+    fun badge(): Int = s.data?.conversations?.sumOf { if (it.mutedAt(now())) 0 else it.unread } ?: 0
+
+    // ---------- Espacios ----------
+    /** POST /workspaces: crea un espacio (tema de trabajo) con su grupo general. */
+    suspend fun createWorkspace(name: String, department: String?): IdResult = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("name", JsonPrimitive(name.trim().take(120)))
+            department?.trim()?.takeIf { it.isNotEmpty() }?.let { put("department", JsonPrimitive(it.take(160))) }
+        }
+        val r = req("POST", "/workspaces", body, IdResult.serializer()); loadBootstrapInternal(); r
+    }
+
     // ---------- Chats (directos y grupales entre empresas) ----------
     /** POST /chats: con una persona devuelve el directo; con varias, un chat `multi`. Recarga el snapshot. */
     suspend fun createChat(userIds: List<String>, name: String?): CreateChatResult = withContext(dispatcher) {
@@ -997,6 +1049,16 @@ class TieComsClient(
 }
 
 private const val SSO_KEY = "sso:attempt"
+
+/** Personas que no se pueden sumar a una lateral (403 side_outsider → error.details.userIds). */
+object SideOutsiders {
+    fun from(e: Throwable): Set<String> {
+        val a = e as? ApiException ?: return emptySet()
+        if (a.code != "side_outsider") return emptySet()
+        val d = a.details as? JsonObject ?: return emptySet()
+        return (d["userIds"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }?.toSet() ?: emptySet()
+    }
+}
 
 /** Marcador de «no cambiar» para parámetros anulables. */
 @JvmField val UNCHANGED: String = String(charArrayOf('\u0000'))

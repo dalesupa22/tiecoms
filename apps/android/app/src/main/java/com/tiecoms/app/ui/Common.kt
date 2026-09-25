@@ -78,6 +78,8 @@ fun errorText(ctx: Context, e: Throwable): String = when (e) {
             "account_disabled" -> R.string.err_account_disabled
             "domain_claimed" -> R.string.err_domain_claimed
             "storage_unavailable" -> R.string.err_storage_unavailable
+            "side_outsider" -> R.string.err_side_outsider
+            "blocked_user" -> R.string.err_blocked_user
             else -> null
         }
         when {
@@ -97,9 +99,12 @@ private fun detailPaths(e: ApiException): String {
 }
 
 /** Mensajes de sistema: {"k": clave, ...datos}; los antiguos llegan como texto plano. */
-fun systemText(ctx: Context, body: String): String {
+fun systemText(ctx: Context, body: String, author: String? = null): String {
     if (!body.startsWith("{")) return body
-    val o = runCatching { TcJson.parseToJsonElement(body) as JsonObject }.getOrNull() ?: return body
+    // La vista previa de la lista llega recortada (140 caracteres): si el JSON quedó incompleto se
+    // recuperan los campos de texto que sí alcanzaron a llegar, para nunca mostrar JSON crudo.
+    val o = runCatching { TcJson.parseToJsonElement(body) as JsonObject }.getOrNull() ?: partialSystemJson(body)
+        ?: return ctx.getString(R.string.system_message)
     fun str(k: String): String = when (val v = o[k]) {
         is JsonPrimitive -> v.contentOrNull ?: ""
         is JsonArray -> v.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.joinToString(", ")
@@ -122,6 +127,11 @@ fun systemText(ctx: Context, body: String): String {
         "event.created" -> ctx.getString(R.string.sys_event_created, str("title"), parseInstant(str("startsAt"))?.let { whenText(it) } ?: "")
         "event.moved" -> ctx.getString(R.string.sys_event_moved, str("title"), parseInstant(str("startsAt"))?.let { whenText(it) } ?: "")
         "event.cancelled" -> ctx.getString(R.string.sys_event_cancelled, str("title"))
+        // Sin campos: quién lo hizo es el autor del mensaje de sistema.
+        "group.photo_changed" -> listOfNotNull(author?.takeIf { it.isNotBlank() }, ctx.getString(R.string.sys_group_photo_changed)).joinToString(" · ")
+        "group.photo_removed" -> listOfNotNull(author?.takeIf { it.isNotBlank() }, ctx.getString(R.string.sys_group_photo_removed)).joinToString(" · ")
+        "side.started" -> if (str("parentName").isNotEmpty()) ctx.getString(R.string.sys_side_started_in, str("authorName"), str("parentName"), str("excerpt"))
+            else ctx.getString(R.string.sys_side_started, str("authorName"), str("excerpt"))
         else -> body
     }
 }
@@ -186,6 +196,26 @@ fun Avatar(label: String, bg: Color, fg: Color, size: Dp = 44.dp, square: Boolea
         )
         if (!photo.isNullOrBlank()) RemoteImage(photo, Modifier.matchParentSize(), sizeHint = size)
     }
+}
+
+/** Campos "clave":"texto" de un JSON de sistema recortado. null si ni siquiera trae la clave k. */
+fun partialSystemJson(body: String): JsonObject? {
+    val pairs = Regex("\"(\\w+)\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").findAll(body).associate { it.groupValues[1] to JsonPrimitive(it.groupValues[2]) }
+    if ("k" !in pairs) return null
+    return JsonObject(pairs)
+}
+
+/** Color estable de una persona (paleta de 8 sin naranja), para su avatar y su nombre en los grupos. */
+@Composable
+fun personColor(id: String): Color {
+    val dark = androidx.compose.foundation.isSystemInDarkTheme()
+    return Color(if (dark) com.tiecoms.app.core.PersonColors.dark(id) else com.tiecoms.app.core.PersonColors.light(id))
+}
+
+/** Avatar del autor en las burbujas: su foto o sus iniciales sobre su color estable (texto blanco). */
+@Composable
+fun AuthorAvatar(p: PersonDTO?, id: String, size: Dp = 28.dp, modifier: Modifier = Modifier) {
+    Avatar(p?.name ?: "?", Color(com.tiecoms.app.core.PersonColors.light(id)), Color.White, size = size, photo = p?.avatarUrl, modifier = modifier)
 }
 
 /** Avatar de una persona: su foto o sus iniciales sobre el color de su empresa; opcionalmente con el logo de la empresa en la esquina. */

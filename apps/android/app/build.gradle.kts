@@ -9,6 +9,12 @@ plugins {
 }
 
 /**
+ * Push (FCM): el plugin de Google Services solo se aplica si existe app/google-services.json
+ * (fuera de git). Sin él la app compila igual y el push queda desactivado (PushSetup lo detecta).
+ */
+if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
+
+/**
  * Firma de subida (upload key) de Play. Nada de esto vive en el repo: se lee de
  * propiedades de Gradle (-P / ~/.gradle/gradle.properties) o del entorno.
  *   TIECOMS_UPLOAD_STORE          ruta al .jks
@@ -31,8 +37,8 @@ android {
         applicationId = "com.tiecoms.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "DEFAULT_API_URL", "\"https://app.tiecoms.com\"")
         buildConfigField("String", "CONTRACT_VERSION", "\"2026-09-23\"")
@@ -99,11 +105,13 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.core)
+    implementation(libs.compose.material.icons.extended)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.splashscreen)
+    implementation(libs.firebase.messaging)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
 

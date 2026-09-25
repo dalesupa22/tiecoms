@@ -27,7 +27,7 @@ data class ChatColors(
 )
 
 val LocalChatColors = staticCompositionLocalOf {
-    ChatColors(Brand.Orange, Color.White, Color(0xFFEFEBE7), Brand.Black, Color(0xFF6B6560), Color(0xFFC62828))
+    ChatColors(Color(0xFFE8710A), Color.White, Color(0xFFEFEBE7), Brand.Black, Color(0xFF6B6560), Color(0xFFC62828))
 }
 
 private val Light = lightColorScheme(
@@ -75,9 +75,9 @@ private val Dark = darkColorScheme(
 @Composable
 fun TieComsTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
     val chat = if (dark) {
-        ChatColors(Brand.Orange, Color.White, Color(0xFF2B2826), Color(0xFFEDE7E1), Color(0xFFA59D96), Color(0xFFFF8A80))
+        ChatColors(Color(0xFFC75F08), Color.White, Color(0xFF2B2826), Color(0xFFEDE7E1), Color(0xFFA59D96), Color(0xFFFF8A80))
     } else {
-        ChatColors(Brand.Orange, Color.White, Color(0xFFEFEBE7), Brand.Black, Color(0xFF6B6560), Color(0xFFC62828))
+        ChatColors(Color(0xFFE8710A), Color.White, Color(0xFFEFEBE7), Brand.Black, Color(0xFF6B6560), Color(0xFFC62828))
     }
     androidx.compose.runtime.CompositionLocalProvider(LocalChatColors provides chat) {
         MaterialTheme(colorScheme = if (dark) Dark else Light, content = content)

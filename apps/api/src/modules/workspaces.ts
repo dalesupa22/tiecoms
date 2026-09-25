@@ -7,7 +7,7 @@ import { audit, enqueueOutbox, pool, tx, type Tx } from '../db.ts';
 import { ApiError, badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { randomToken, sha256 } from '../security.ts';
 import { deliverInvitation, prepareInvitationFor } from './invitations.ts';
-import { appendEvent, appendMessage } from './messages.ts';
+import { appendEvent, appendMessage, toMessageDTO } from './messages.ts';
 import { ensureNotBlocked } from './safety.ts';
 import { getSummarizer } from './voice-providers.ts';
 
@@ -391,13 +391,19 @@ export async function deriveConversation(userId: string, parentId: string, input
 export async function returnResult(userId: string, childId: string, summary: string) {
   return tx(async (c) => {
     await conversationAccess(c, userId, childId, 'post', true);
-    const { rows } = await c.query('SELECT name, parent_conversation_id, returned_at FROM conversations WHERE id = $1', [childId]);
+    const { rows } = await c.query('SELECT name, parent_conversation_id, returned_at, derive_kind FROM conversations WHERE id = $1', [childId]);
     const child = rows[0];
     if (!child?.parent_conversation_id) throw badRequest('Esta conversación no se derivó de otra');
     if (child.returned_at) throw conflict('Esta derivada ya devolvió su resultado');
     // Quien devuelve también debe poder escribir en el origen.
     await conversationAccess(c, userId, child.parent_conversation_id, 'post', true);
     const msg = await appendMessage(c, { conversationId: child.parent_conversation_id, authorId: userId, body: summary, mergedFrom: childId });
+    if (child.derive_kind) {
+      // El origen sabe de qué tipo vino (p. ej. «Desde un sidechat») aunque no pueda abrir la conversación.
+      const { rows: up } = await c.query('UPDATE messages SET merged_kind = $2 WHERE id = $1 RETURNING *', [msg.id, child.derive_kind]);
+      const message = toMessageDTO(up[0]);
+      await appendEvent(c, child.parent_conversation_id, { type: 'message.updated', conversationId: child.parent_conversation_id, message }, msg.id);
+    }
     await c.query('UPDATE conversations SET returned_at = now(), returned_message_id = $2 WHERE id = $1', [childId, msg.id]);
     await appendMessage(c, { conversationId: childId, authorId: userId, kind: 'system', body: sys('returned', {}) });
     const members = (await c.query('SELECT user_id FROM conversation_memberships WHERE conversation_id = ANY($1) AND removed_at IS NULL', [[childId, child.parent_conversation_id]])).rows.map((r) => r.user_id);
@@ -469,7 +475,7 @@ export async function createSideConversation(userId: string, parentId: string, i
 
     const parent = (await c.query('SELECT name FROM conversations WHERE id = $1', [parentId])).rows[0];
     const excerpt = clip(String(m.body).replace(/\s+/g, ' ').trim(), 80);
-    const name = `Consulta · ${clip(excerpt.replace(/…$/, ''), 40)}`;
+    const name = `Sidechat · ${clip(excerpt.replace(/…$/, ''), 40)}`;
     const { rows } = await c.query(
       `INSERT INTO conversations (kind, name, created_by, parent_conversation_id, parent_message_id, derive_kind, derived_by)
        VALUES ('multi', $1, $2, $3, $4, 'side', $2) RETURNING id`,

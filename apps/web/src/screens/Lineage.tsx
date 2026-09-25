@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import type { BootstrapDTO, ConversationDTO, DeriveKind, MessageDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
@@ -68,10 +68,20 @@ function ReturnDialog({ conv, parentName, onClose }: { conv: ConversationDTO; pa
   const d = useClient((s) => s.data)!;
   const local = useClient((s) => s.conversations[conv.id]);
   const lastText = [...(local?.messages ?? [])].reverse().find((m) => m.kind === 'text' && !m.deletedAt)?.body ?? '';
-  const [summary, setSummary] = useState(lastText);
+  const side = conv.deriveKind === 'side';
+  const [summary, setSummary] = useState(side ? '' : lastText);
+  const [source, setSource] = useState<'ai' | 'fallback' | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  void d;
+  // Sidechat: resumen sugerido por el API (DeepSeek o las últimas respuestas); editable antes de publicar.
+  useEffect(() => {
+    if (!side) return;
+    let alive = true;
+    client.request<{ summary: string; source: 'ai' | 'fallback' }>(`/conversations/${conv.id}/return/suggest`, { method: 'POST', json: {} })
+      .then((r) => { if (alive) { setSummary((s) => s || r.summary); setSource(r.source); } })
+      .catch(() => { if (alive) { setSummary((s) => s || lastText); setSource('fallback'); } });
+    return () => { alive = false; };
+  }, [conv.id]);
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true); setError(null);
@@ -86,9 +96,19 @@ function ReturnDialog({ conv, parentName, onClose }: { conv: ConversationDTO; pa
     <Modal title={conv.deriveKind === 'side' ? t('side.return') : t('lin.returnTitle')} onClose={onClose}>
       <p className="muted" style={{ margin: 0 }}>{conv.deriveKind === 'side' ? t('side.returnBody', { name: parentName }) : t('lin.returnBody', { name: parentName })}</p>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <textarea className="input" rows={5} required minLength={2} maxLength={4000} value={summary} onChange={(e) => setSummary(e.target.value)} />
+        {side && <div className="small muted">{source === null ? t('side.suggesting') : source === 'ai' ? `✨ ${t('side.suggested')} · ${t('side.returnEdit')}` : `${t('side.suggestedFallback')} · ${t('side.returnEdit')}`}</div>}
+        <textarea className="input" rows={5} required minLength={2} maxLength={4000} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder={side && source === null ? t('side.suggesting') : undefined} />
+        {side && summary.trim() && (
+          <div>
+            <div className="eyebrow" style={{ marginBottom: 6 }}>{t('side.previewInGroup')}</div>
+            <div className="card" style={{ padding: 10 }}>
+              <div className="merged-card"><span>↩ {t('side.fromSidechat')}</span></div>
+              <div className="small" style={{ whiteSpace: 'pre-wrap', marginTop: 6 }}><b>{d.me.name}</b> · {summary.trim()}</div>
+            </div>
+          </div>
+        )}
         {error && <div className="error">{error}</div>}
-        <div className="modal-actions"><button type="button" className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" disabled={busy}>{t('lin.returnSend')}</button></div>
+        <div className="modal-actions"><button type="button" className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" disabled={busy || summary.trim().length < 2}>{side ? t('side.publish') : t('lin.returnSend')}</button></div>
       </form>
     </Modal>
   );
@@ -125,12 +145,13 @@ export function LineageBar({ conv }: { conv: ConversationDTO }) {
 }
 
 /** Tarjeta del mensaje que trae de vuelta el resultado de una derivada. */
-export function MergedCard({ childId }: { childId: string }) {
+export function MergedCard({ childId, kind }: { childId: string; kind?: DeriveKind | null }) {
   const d = useClient((s) => s.data)!;
   const child = d.conversations.find((c) => c.id === childId);
+  const side = kind === 'side' || child?.deriveKind === 'side';
   return (
-    <div className="merged-card">
-      <span>↩ {child ? t('lin.resultOf', { name: conversationTitle(d, child) }) : t('lin.resultHidden')}</span>
+    <div className={`merged-card ${side ? 'is-side' : ''}`}>
+      <span>↩ {side ? t('side.fromSidechat') : child ? t('lin.resultOf', { name: conversationTitle(d, child) }) : t('lin.resultHidden')}</span>
       {child && <button className="btn ghost small" onClick={() => navigate(`/c/${child.id}`)}>{t('lin.open')}</button>}
     </div>
   );

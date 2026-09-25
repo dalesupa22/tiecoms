@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { BootstrapDTO, ConversationDTO, MessageDTO, PersonDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
-import { errorText, t } from '../i18n.ts';
+import { attachmentSummaryText, errorText, t } from '../i18n.ts';
 import { openMenuAt, toast } from '../menu.tsx';
 import { navigate } from '../router.ts';
 import { Avatar, Modal, conversationTitle, orgById, personById } from '../ui.tsx';
@@ -50,6 +50,11 @@ export function SideDialog({ conv, message, onClose, onOpened }: { conv: Convers
   const match = (c: Candidate) => !needle || [c.p.name, c.p.title, c.p.area, orgById(d, c.p.orgId)?.name].some((v) => v?.toLowerCase().includes(needle));
   // Quien no se puede sumar solo aparece al buscarlo (para explicar por qué).
   const list = all.filter((c) => match(c) && (c.group !== 'outsider' || needle));
+  // Sugerencias arriba: el autor del mensaje, la gente mencionada en él y colegas con quienes tengo directos recientes.
+  const body = message.body.toLowerCase();
+  const recentDm = new Set(d.conversations.filter((c) => c.kind === 'direct').sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')).slice(0, 6).flatMap((c) => c.memberIds));
+  const suggested = needle ? [] : all.filter((c) => !c.why && (c.p.id === message.authorId || body.includes(c.p.name.split(' ')[0]!.toLowerCase()) || recentDm.has(c.p.id))).slice(0, 6);
+  const suggestedIds = new Set(suggested.map((c) => c.p.id));
   const author = personById(d, message.authorId);
   const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
@@ -65,7 +70,7 @@ export function SideDialog({ conv, message, onClose, onOpened }: { conv: Convers
   }
 
   const section = (g: Candidate['group'], label: string) => {
-    const rows = list.filter((c) => c.group === g);
+    const rows = list.filter((c) => c.group === g && !suggestedIds.has(c.p.id));
     if (!rows.length) return null;
     return (
       <div>
@@ -91,9 +96,24 @@ export function SideDialog({ conv, message, onClose, onOpened }: { conv: Convers
   return (
     <Modal title={t('side.title')} onClose={onClose}>
       <p className="muted small" style={{ margin: 0 }}>{t('side.body')}</p>
-      <blockquote className="derive-quote"><b>{author?.name}</b> · “{message.body.replace(/\s+/g, ' ').slice(0, 220)}”</blockquote>
+      <div className="side-anchor-bubble">
+        <Avatar person={author} org={orgById(d, author?.orgId)} size={28} />
+        <div><b className="small">{author?.name}</b><div className="side-anchor-text">{message.body}</div></div>
+      </div>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <input className="input" placeholder={t('side.search')} value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+        {suggested.length > 0 && (
+          <div className="side-suggest">
+            <span className="eyebrow">{t('side.suggestions')}</span>
+            <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+              {suggested.map((c) => (
+                <button type="button" key={c.p.id} className={`chip ${picked.includes(c.p.id) ? 'on' : ''}`} onClick={() => toggle(c.p.id)}>
+                  <Avatar person={c.p} org={orgById(d, c.p.orgId)} size={20} />{c.p.name.split(' ')[0]}{picked.includes(c.p.id) ? ' ✓' : ''}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <input className="input" placeholder={t('side.search')} value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="list" style={{ maxHeight: 260, overflow: 'auto' }}>
           {section('chat', t('side.inChat'))}
           {section('colleague', t('side.colleagues'))}
@@ -101,7 +121,8 @@ export function SideDialog({ conv, message, onClose, onOpened }: { conv: Convers
           {!list.length && <div className="hint">{t('chat.nobody')}</div>}
         </div>
         <label className="field"><span>{t('side.question')}</span>
-          <textarea className="input" rows={2} maxLength={4000} placeholder={t('side.questionPh')} value={question} onChange={(e) => setQuestion(e.target.value)} />
+          <textarea className="input" rows={2} maxLength={4000} autoFocus placeholder={t('side.questionPh')} value={question} onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && picked.length === 1 && question.trim()) { e.preventDefault(); void submit(e as unknown as FormEvent); } }} />
         </label>
         <div className="hint">{t('side.private')}</div>
         {error && <div className="error">{error}</div>}
@@ -115,18 +136,88 @@ export function SideDialog({ conv, message, onClose, onOpened }: { conv: Convers
   );
 }
 
-/** Chip bajo el mensaje ancla: abre la lateral (o elige entre varias). */
+/**
+ * Chip-hilo bajo el mensaje ancla (solo para miembros del sidechat): avatares apilados, «Sidechat · N mensajes»,
+ * extracto de lo último y punto si hay no leídos. Varios en el mismo mensaje → «N sidechats» (lista). Devuelto → verde.
+ */
 export function SideChip({ d, sides, onOpen }: { d: BootstrapDTO; sides: ConversationDTO[]; onOpen: (id: string) => void }) {
   if (!sides.length) return null;
-  const unread = sides.reduce((n, c) => n + c.unread, 0);
+  const unread = sides.reduce((n, c) => n + (c.unread > 0 ? c.unread : 0), 0);
+  const one = sides.length === 1 ? sides[0]! : null;
+  const people = [...new Set(sides.flatMap((c) => c.memberIds))].filter((m) => m !== d.me.id).slice(0, 3);
+  const count = one ? Math.max(0, one.lastMessageSeq - 1) : 0;
+  const last = one?.lastHumanPreview;
+  const lastWho = last ? (last.authorId === d.me.id ? t('common.youShort') : personById(d, last.authorId)?.name.split(' ')[0]) : null;
+  const lastText = last ? [last.attachments ? attachmentSummaryText(last.attachments) : '', last.body].filter(Boolean).join(' · ') : '';
   return (
-    <button className={`side-chip ${unread ? 'unread' : ''}`} onClick={(e) => {
-      if (sides.length === 1) return onOpen(sides[0]!.id);
+    <button className={`side-thread ${unread ? 'unread' : ''} ${one?.returnedAt ? 'is-returned' : ''}`} onClick={(e) => {
+      if (one) return onOpen(one.id);
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      openMenuAt(r.left, r.bottom + 4, sides.map((c) => ({ label: conversationTitle(d, c), icon: '💬', hint: c.unread ? String(c.unread) : undefined, onSelect: () => onOpen(c.id) })));
+      openMenuAt(r.left, r.bottom + 4, sides.map((c) => ({ label: conversationTitle(d, c), icon: c.returnedAt ? '✓' : '💬', hint: c.unread ? String(c.unread) : undefined, onSelect: () => onOpen(c.id) })));
     }}>
-      {sides.length > 1 ? t('side.chipN', { n: sides.length }) : t('side.chip')}{unread ? <span className="pill">{unread}</span> : null}
+      <span className="stack" style={{ width: 20 + (people.length - 1) * 11, height: 20 }}>
+        {people.map((m, i) => <span key={m} style={{ left: i * 11, zIndex: 3 - i }}><Avatar person={personById(d, m)} org={null} size={20} /></span>)}
+      </span>
+      <span className="side-thread-text">
+        <b>{one ? (one.returnedAt ? t('side.returnedChip') : t('side.thread', { n: count === 1 ? t('side.replyOne') : t('side.replies', { n: count }) })) : t('side.chipN', { n: sides.length })}</b>
+        {one && lastText && <span className="side-thread-last">{lastWho ? `${lastWho}: ` : ''}{lastText}</span>}
+      </span>
+      {unread > 0 && <span className="side-dot" aria-label={t('home.unreadIn', { n: unread })} />}
     </button>
+  );
+}
+
+/**
+ * Conector curvo del mensaje ancla al panel del sidechat (pantalla ancha). Sigue al ancla al hacer scroll; si el
+ * ancla sale de la vista, apunta al borde superior o inferior del chat.
+ */
+export function SideConnector({ host, anchorId, color }: { host: HTMLElement | null; anchorId: string | null; color: string }) {
+  const [path, setPath] = useState<{ d: string; w: number; h: number; x2: number; y2: number } | null>(null);
+  useEffect(() => {
+    if (!host) return;
+    let raf = 0;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const panel = host.querySelector<HTMLElement>(':scope > .side-panel');
+      const list = host.querySelector<HTMLElement>('.conv-main .msgs');
+      const bubble = anchorId ? host.querySelector<HTMLElement>(`:scope > .conv-main [data-mid="${anchorId}"] .msg-body`) ?? host.querySelector<HTMLElement>(`[data-mid="${anchorId}"]`) : null;
+      if (!panel || !list || getComputedStyle(panel).position === 'fixed') { setPath(null); return; }
+      const hb = host.getBoundingClientRect(), pb = panel.getBoundingClientRect(), lb = list.getBoundingClientRect();
+      let x1: number, y1: number;
+      if (bubble) {
+        // El texto de la burbuja (no el bloque entero): así el conector sale de donde termina el mensaje.
+        const range = document.createRange();
+        range.selectNodeContents(bubble);
+        const tb = range.getBoundingClientRect();
+        const bb = tb.width ? tb : bubble.getBoundingClientRect();
+        x1 = Math.min(bb.right + 10, pb.left - 40) - hb.left;
+        y1 = Math.max(lb.top + 6, Math.min(lb.bottom - 6, bb.top + Math.min(24, bb.height / 2))) - hb.top;
+      } else { x1 = pb.left - 40 - hb.left; y1 = lb.top + 6 - hb.top; }
+      const x2 = pb.left - hb.left + 2, y2 = Math.min(pb.top + 96, pb.bottom - 20) - hb.top;
+      const mid = (x1 + x2) / 2;
+      const d = `M ${x1.toFixed(1)} ${y1.toFixed(1)} C ${mid.toFixed(1)} ${y1.toFixed(1)}, ${mid.toFixed(1)} ${y2.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+      setPath((p) => (p?.d === d ? p : { d, w: hb.width, h: hb.height, x2, y2 }));
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [host, anchorId]);
+  if (!path) return null;
+  return (
+    <svg className="side-connector" width={path.w} height={path.h} aria-hidden>
+      <path d={path.d} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <circle cx={path.x2} cy={path.y2} r={4} fill={color} />
+    </svg>
+  );
+}
+
+/** Respuestas rápidas del compositor de un sidechat. «No sé, pregúntale a…» abre el selector para sumar a alguien. */
+export function QuickReplies({ onSend, onAsk }: { onSend: (text: string) => void; onAsk: () => void }) {
+  return (
+    <div className="quick-replies" role="group" aria-label={t('side.suggestions')}>
+      <button type="button" onClick={() => onSend(t('side.quick.check'))}>{t('side.quick.check')}</button>
+      <button type="button" onClick={onAsk}>{t('side.quick.ask')}</button>
+      <button type="button" onClick={() => onSend(t('side.quick.later'))}>{t('side.quick.later')}</button>
+    </div>
   );
 }
 

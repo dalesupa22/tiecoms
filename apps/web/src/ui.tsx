@@ -95,6 +95,8 @@ export function conversationTitle(d: BootstrapDTO, c: ConversationDTO) {
   }
   // Nombres que crea el sistema por defecto se muestran en el idioma de quien lee.
   if (c.kind === 'internal' && c.name === 'Equipo interno') return t('conv.defaultInternal');
+  // Sidechats creados con el nombre anterior («Consulta · …»).
+  if (c.deriveKind === 'side' && c.name?.startsWith('Consulta · ')) return t('side.defaultName', { excerpt: c.name.slice('Consulta · '.length) });
   return c.name ?? t('chat.aConversation');
 }
 

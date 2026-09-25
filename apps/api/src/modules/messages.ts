@@ -38,6 +38,7 @@ export function toMessageDTO(r: any): MessageDTO {
     body: deleted ? '' : r.body,
     replyTo: r.reply_to,
     mergedFrom: r.merged_from_conversation_id ?? null,
+    ...(r.merged_kind ? { mergedKind: r.merged_kind } : {}),
     forwarded: r.forwarded ?? null,
     linkPreview: deleted ? null : r.link_preview ?? null,
     attachments: deleted ? [] : r.attachments ?? [],

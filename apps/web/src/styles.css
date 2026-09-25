@@ -581,3 +581,27 @@ a.btn { text-decoration: none; color: inherit; } a.btn.primary { color: var(--pa
 .voice-transcript { background: var(--paper-2); border-radius: 10px; padding: 8px 10px; font-size: 13.5px; }
 .voice-transcript p { margin: 0 0 6px; white-space: pre-wrap; }
 .voice-summary { color: var(--ink-2); }
+
+/* ---------- Sidechats ---------- */
+.conv { position: relative; }
+.side-connector { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 5; overflow: visible; }
+.msg.is-anchor { background: rgba(10, 124, 135, .07); box-shadow: inset 3px 0 0 #0A7C87; border-radius: 10px; }
+.side-thread { margin-top: 5px; display: inline-flex; align-items: center; gap: 8px; max-width: 100%; border: 1px solid #b9dde0; background: #eef7f8; border-radius: 12px; padding: 4px 10px 4px 6px; text-align: left; }
+.side-thread:hover { border-color: #0A7C87; }
+.side-thread .stack { flex: none; }
+.side-thread-text { display: grid; min-width: 0; font-size: 12px; line-height: 1.3; }
+.side-thread-text b { color: #08636b; }
+.side-thread-last { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
+.side-thread.is-returned { border-color: #b7dcc4; background: #eef8f1; }
+.side-thread.is-returned b { color: var(--ok); }
+.side-dot { width: 9px; height: 9px; border-radius: 99px; background: #B45309; flex: none; }
+.side-head-people { display: flex; align-items: center; gap: 6px; }
+.side-anchor-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+.side-anchor-bubble { display: flex; gap: 8px; align-items: flex-start; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 8px 12px; }
+.side-anchor-text { font-size: 13.5px; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.side-suggest { display: grid; gap: 6px; }
+.chip.on { border-color: #0A7C87; background: #eef7f8; }
+.side-empty { text-align: center; color: var(--muted); padding: 18px 12px; font-weight: 600; }
+.quick-replies { display: flex; gap: 6px; overflow-x: auto; padding: 4px 14px 0; }
+.quick-replies button { flex: none; border: 1px solid #b9dde0; background: #eef7f8; color: #08636b; border-radius: 99px; padding: 4px 12px; font-size: 12.5px; font-weight: 600; }
+.merged-card.is-side { border-color: #b9dde0; background: #eef7f8; }

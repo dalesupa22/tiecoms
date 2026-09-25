@@ -96,7 +96,7 @@ describe('conversaciones laterales', () => {
     const lb = await boot(laura);
     const side = lb.conversations.find((c: any) => c.id === sideLaura);
     expect(side).toMatchObject({ kind: 'multi', workspaceId: null, parentId: generalId, parentMessageId: anchorId, deriveKind: 'side', avatarUrl: null });
-    expect(side.name).toMatch(/^Consulta · No tengo ni idea/);
+    expect(side.name).toMatch(/^Sidechat · No tengo ni idea/);
     expect(side.memberIds.sort()).toEqual([ana.id, laura.id].sort());
     const msgs = (await call(`/conversations/${sideLaura}/messages`, { token: laura.token })).json.messages;
     const started = JSON.parse(msgs[0].body);
@@ -159,7 +159,7 @@ describe('conversaciones laterales', () => {
     const r = await call(`/conversations/${sideLaura}/return`, { token: ana.token, body: { summary: 'Resuelto: aplica la cláusula 4' } });
     expect(r.status).toBe(200);
     const msgs = (await call(`/conversations/${generalId}/messages`, { token: beto.token })).json.messages;
-    expect(msgs.at(-1)).toMatchObject({ body: 'Resuelto: aplica la cláusula 4', mergedFrom: sideLaura });
+    expect(msgs.at(-1)).toMatchObject({ body: 'Resuelto: aplica la cláusula 4', mergedFrom: sideLaura, mergedKind: 'side' });
   });
 });
 

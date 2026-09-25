@@ -333,6 +333,8 @@ export interface MessageDTO {
   replyTo: string | null;
   /** Si este mensaje trae de vuelta el resultado de una conversación derivada. */
   mergedFrom: string | null;
+  /** Tipo de la conversación que devolvió el resultado ('side' = «Desde un sidechat»). Ausente en mensajes viejos. */
+  mergedKind?: DeriveKind | null;
   /** Mensaje traído desde WhatsApp, Slack, correo u otra conversación. */
   forwarded: ForwardedInfo | null;
   /** Vista previa del primer enlace; llega después con message.updated. Clientes viejos pueden no traerla. */

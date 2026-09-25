@@ -209,3 +209,30 @@ export async function pushEvent(eventId: string) {
   }));
   return targets.length;
 }
+
+/** Aviso «Empieza en 10 min»: a los invitados que calculó el worker (no depende del silencio: es una cita). */
+export async function pushEventSoon(eventId: string, userIds: string[], minutes: number) {
+  if (!userIds?.length) return 0;
+  const { rows } = await pool.query(
+    `SELECT e.id, e.conversation_id, e.title, e.cancelled_at, e.starts_at, c.kind AS conv_kind, c.name AS conv_name
+       FROM calendar_events e JOIN conversations c ON c.id = e.conversation_id WHERE e.id = $1`,
+    [eventId],
+  );
+  const e = rows[0];
+  if (!e || e.cancelled_at || new Date(e.starts_at).getTime() < Date.now() - 60_000) return 0;
+  const { rows: targets } = await pool.query<Target>(
+    `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
+       FROM users u ${ACTIVE_SESSION}
+       JOIN conversation_memberships cm ON cm.conversation_id = $2 AND cm.user_id = u.id AND cm.removed_at IS NULL
+      WHERE u.id = ANY($1) AND u.disabled_at IS NULL`,
+    [userIds, e.conversation_id],
+  );
+  await deliver(targets, (t) => ({
+    title: t.lang === 'en' ? `Starts in ${minutes} min: ${clip(e.title, 100)}` : `Empieza en ${minutes} min: ${clip(e.title, 100)}`,
+    subtitle: e.conv_kind === 'direct' ? null : e.conv_name ?? null,
+    body: new Intl.DateTimeFormat(t.lang === 'en' ? 'en-US' : 'es-CO', { hour: 'numeric', minute: '2-digit' }).format(new Date(e.starts_at)),
+    threadId: e.conversation_id, category: 'TC_EVENT', collapseId: `event-soon-${e.id}`,
+    data: { type: 'event', conversationId: e.conversation_id, eventId: e.id, minutes },
+  }));
+  return targets.length;
+}

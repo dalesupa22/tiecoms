@@ -38,6 +38,16 @@ async function assertMember(c: Tx, conversationId: string, userId: string) {
   if (!rowCount) throw badRequest('El responsable debe participar en la conversación del asunto');
 }
 
+/** «Esperando a»: una empresa del espacio o, en directos y chats grupales, la de algún participante. */
+async function assertWaitingOrg(c: Tx, issue: { workspace_id: string | null; conversation_id: string }, orgId: string) {
+  const { rowCount } = issue.workspace_id
+    ? await c.query('SELECT 1 FROM workspace_organizations WHERE workspace_id = $1 AND org_id = $2 AND left_at IS NULL', [issue.workspace_id, orgId])
+    : await c.query(
+      `SELECT 1 FROM conversation_memberships cm JOIN organization_memberships om ON om.user_id = cm.user_id
+        WHERE cm.conversation_id = $1 AND cm.removed_at IS NULL AND om.org_id = $2 LIMIT 1`, [issue.conversation_id, orgId]);
+  if (!rowCount) throw badRequest('Solo puedes esperar a una empresa que participa en la conversación');
+}
+
 async function publish(c: Tx, issue: IssueDTO) {
   await appendEvent(c, issue.conversationId, { type: 'issue.updated', conversationId: issue.conversationId, issue });
 }
@@ -45,7 +55,6 @@ async function publish(c: Tx, issue: IssueDTO) {
 export async function createIssue(userId: string, conversationId: string, input: z.infer<typeof CreateIssueInput>) {
   return tx(async (c) => {
     const a = await conversationAccess(c, userId, conversationId, 'post', true);
-    if (!a.workspaceId) throw badRequest('Los asuntos viven en conversaciones de un espacio');
     let requestedBy: string | null = null;
     if (input.originMessageId) {
       const m = await c.query('SELECT author_id, seq FROM messages WHERE id = $1 AND conversation_id = $2', [input.originMessageId, conversationId]);
@@ -89,6 +98,7 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
       if (input.dueDate !== prev) { add('due_date', input.dueDate); events.push(['due', { from: prev, to: input.dueDate }]); }
     }
     if (input.waitingOnOrgId !== undefined && input.waitingOnOrgId !== cur.waiting_on_org_id) {
+      if (input.waitingOnOrgId) await assertWaitingOrg(c, cur, input.waitingOnOrgId);
       add('waiting_on_org_id', input.waitingOnOrgId); events.push(['waiting', { to: input.waitingOnOrgId }]);
     }
     if (input.status !== undefined && input.status !== cur.status) {
@@ -143,9 +153,10 @@ export async function listIssues(userId: string, filter: { workspaceId?: string;
   const { rows } = await pool.query(
     `${SELECT}
        JOIN conversation_memberships cm ON cm.conversation_id = i.conversation_id AND cm.user_id = $1 AND cm.removed_at IS NULL
-       JOIN workspace_memberships wm ON wm.workspace_id = i.workspace_id AND wm.user_id = $1 AND wm.revoked_at IS NULL
-                                     AND (wm.expires_at IS NULL OR wm.expires_at > now())
-      WHERE ($2::uuid IS NULL OR i.workspace_id = $2) AND ($3::uuid IS NULL OR i.conversation_id = $3)
+       JOIN conversations cv ON cv.id = i.conversation_id AND cv.archived_at IS NULL
+       LEFT JOIN workspace_memberships wm ON wm.workspace_id = i.workspace_id AND wm.user_id = $1
+      WHERE (i.workspace_id IS NULL OR (wm.user_id IS NOT NULL AND wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())))
+        AND ($2::uuid IS NULL OR i.workspace_id = $2) AND ($3::uuid IS NULL OR i.conversation_id = $3)
         AND (NOT $4 OR i.owner_id = $1) AND (NOT $5 OR i.status NOT IN ('done','cancelled'))
       ORDER BY (i.status IN ('done','cancelled')), i.due_date NULLS LAST, i.created_at DESC
       LIMIT 500`,

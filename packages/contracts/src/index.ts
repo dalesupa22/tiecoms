@@ -247,7 +247,8 @@ export interface ReminderDTO {
 export type Rsvp = 'pending' | 'yes' | 'no' | 'maybe';
 export interface CalendarEventDTO {
   id: string;
-  workspaceId: string;
+  /** null en reuniones de directos y chats grupales (multi, laterales). */
+  workspaceId: string | null;
   conversationId: string;
   originMessageId: string | null;
   title: string;
@@ -268,7 +269,8 @@ export type IssueStatus = 'open' | 'in_progress' | 'waiting' | 'done' | 'cancell
 
 export interface IssueDTO {
   id: string;
-  workspaceId: string;
+  /** null en asuntos de directos y chats grupales (multi, laterales). */
+  workspaceId: string | null;
   conversationId: string;
   originMessageId: string | null;
   originMessageSeq: number | null;
@@ -520,6 +522,8 @@ export interface PushData {
   authorAvatarUrl?: string;
   reminderId?: string;
   eventId?: string;
+  /** Solo en el aviso «empieza pronto» de una reunión (type 'event'): minutos que faltan. */
+  minutes?: number;
 }
 
 // ---------- Archivos (árbol de carpetas) ----------
@@ -619,6 +623,8 @@ export type AccountEvent =
   | { type: 'scope.changed'; reason: string }
   | { type: 'read.updated'; conversationId: string; seq: number }
   | { type: 'reminder.due'; reminder: ReminderDTO }
+  /** Una reunión a la que voy (sí, quizá o sin responder) empieza en `minutes` minutos (10 por defecto). */
+  | { type: 'event.soon'; event: CalendarEventDTO; minutes: number }
   | { type: 'prefs.updated'; conversationId?: string; workspaceId?: string }
   | { type: 'whatsapp.updated'; accountId: string }
   | { type: 'drive.updated'; workspaceId: string | null };

@@ -10,7 +10,8 @@ import { cleanupExpired as cleanupSso } from './modules/sso.ts';
 import { previewMessage } from './modules/link-preview.ts';
 import { deletePersonalObject } from './storage.ts';
 import { notifyReport } from './modules/safety.ts';
-import { pushEvent, pushMessage, pushReminder } from './modules/push.ts';
+import { pushEvent, pushEventSoon, pushMessage, pushReminder } from './modules/push.ts';
+import { fireSoonEvents, soonMinutes } from './modules/calendar.ts';
 import { cleanupPending as cleanupAttachments } from './modules/attachments.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
@@ -28,6 +29,7 @@ const handlers: Record<string, Handler> = {
   async 'push.message'(p) { await pushMessage(p.messageId); },
   async 'push.reminder'(p) { await pushReminder(p.reminderId); },
   async 'push.event'(p) { await pushEvent(p.eventId); },
+  async 'push.event_soon'(p) { await pushEventSoon(p.eventId, p.userIds, soonMinutes()); },
   /** Vista previa del primer enlace de un mensaje. */
   async 'link.preview'(p) { await previewMessage(p.messageId); },
   /** Terceros vencidos: se revoca el acceso y se sacan sus sockets de las salas. */
@@ -113,7 +115,8 @@ async function loop() {
   while (!stop) {
     try {
       // Recordatorios: revisión cada 15 s; el aviso llega por el outbox a los dispositivos de la persona.
-      if (Date.now() - lastReminders > 15_000) { lastReminders = Date.now(); const n = await fireDueReminders(); if (n) console.log(`[worker] recordatorios disparados: ${n}`); }
+      if (Date.now() - lastReminders > 15_000) { lastReminders = Date.now(); const n = await fireDueReminders(); if (n) console.log(`[worker] recordatorios disparados: ${n}`);
+        const s = await fireSoonEvents(); if (s) console.log(`[worker] avisos de reunión: ${s}`); }
       if (Date.now() - lastSchedule > 30_000) { await schedule(); lastSchedule = Date.now(); }
       const worked = await runOne();
       if (!worked) await new Promise((r) => setTimeout(r, 1000));

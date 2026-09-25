@@ -137,4 +137,75 @@ final class ShareUITests: XCTestCase {
         shot("v4-10-visor")
         app.buttons["viewer.close"].tap()
     }
+
+    /// D, E y F en el simulador: Nuevo chat con «Grupo en un espacio», asuntos de chats, nota de voz con transcripción.
+    /// Requiere haber corrido IntegrationV4Tests (deja una nota de voz y un asunto en el directo con B).
+    func testSpaceGroupVoiceAndChatIssues() throws {
+        let f = try fixture()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let app = XCUIApplication()
+        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES",
+                               "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
+        app.launch()
+        let email = app.textFields["login.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 10))
+        email.tap(); email.typeText(f.a.email)
+        let pw = app.secureTextFields["login.password"]
+        pw.tap(); pw.typeText(f.password)
+        app.buttons["login.submit"].tap()
+        let row = app.buttons["conv.row.\(f.conversationId)"]
+        let until = Date().addingTimeInterval(15)
+        while Date() < until && !row.isHittable {
+            if app.buttons["push.later"].exists { app.buttons["push.later"].tap() }
+            dismissSystemPrompts([app, springboard])
+            usleep(300_000)
+        }
+        if app.buttons["push.later"].waitForExistence(timeout: 3) { app.buttons["push.later"].tap() }
+        sleep(1); dismissSystemPrompts([app, springboard])
+        shot("v4-11-inicio-orden")
+
+        // D. Nuevo chat → «Grupo en un espacio».
+        app.buttons["home.newChat"].tap()
+        let mode = app.segmentedControls["newChat.mode"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 5))
+        shot("v4-12-nuevo-chat-persona")
+        mode.buttons.element(boundBy: 1).tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'newChat.space.'")).firstMatch.waitForExistence(timeout: 5))
+        let name = app.textFields["newChat.spaceGroupName"]
+        name.tap(); name.typeText("Comité de lanzamiento")
+        app.swipeUp()
+        shot("v4-13-nuevo-chat-espacio")
+        let member = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'newChat.member.'")).firstMatch
+        if member.exists { member.tap() }
+        app.buttons["newChat.createSpaceGroup"].tap()
+        XCTAssertTrue(app.buttons["composer.mic"].waitForExistence(timeout: 10), "abre el grupo creado; micrófono con el compositor vacío")
+        shot("v4-14-grupo-creado-microfono")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // F. Nota de voz en el directo con B: burbuja, transcripción y chip «Crear asunto».
+        app.buttons["home.tab.chats"].tap()
+        let direct = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'conv.row.' AND label CONTAINS %@", f.b.name)).firstMatch
+        XCTAssertTrue(direct.waitForExistence(timeout: 8))
+        direct.tap()
+        let play = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'voice.play.'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 10), "burbuja de voz")
+        let toggle = app.buttons["voice.transcriptToggle"].firstMatch
+        if toggle.waitForExistence(timeout: 5) { toggle.tap() }
+        sleep(1)
+        shot("v4-15-nota-de-voz")
+        play.tap()
+        sleep(1)
+        shot("v4-16-nota-reproduciendo")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["home.tab.all"].tap()
+
+        // E. Asuntos: sección «Chats» después de las empresas.
+        app.tabBars.buttons.element(boundBy: 1).tap()
+        sleep(2)
+        let seg = app.segmentedControls["issues.filter"]
+        if seg.exists { seg.buttons.element(boundBy: 2).tap() }
+        app.swipeUp()
+        sleep(1)
+        shot("v4-17-asuntos-chats")
+    }
 }

@@ -207,6 +207,35 @@ TEST_RUNNER_TC_DELETE_API=http://localhost:3042 TEST_RUNNER_TC_SHOTS=/tmp/shots 
 Los textos salen de `tiecoms-feedback/apps/web/src/i18n.ts`: `WEB_I18N=<ruta> node tools/gen-strings.mjs`.
 Cuando `mobile-feedback` llegue a main, basta con `node tools/gen-strings.mjs`.
 
+## SPEC-v4 (build 6)
+
+- **Adjuntos**: clip del compositor (Fotos, Cámara, Archivos), vista previa y progreso antes de enviar, cuadrícula de fotos
+  (1–4 + «+N»), visor con zoom, video y Quick Look. Subida `POST /conversations/:id/attachments` + miniatura de 480 px
+  (`/attachments/:id/thumb`); descarga con Bearer y caché (`AttachmentCache`). Máx. 10 por mensaje y 25 MB cada uno.
+- **Compartir en TieComs** (`TieComsShare`): la regla SUBQUERY vive en `ShareItems.activationRule` y en `project.yml`
+  (una prueba compara ambas con el Info.plist compilado). Acepta fotos, videos, archivos, enlaces y texto, hasta 5 destinos.
+  Sugerencias de la fila de arriba: `Donations` (INSendMessageIntent al enviar y al abrir; se borran al cerrar sesión, al
+  eliminar la cuenta y al salir de la conversación).
+- **Inicio**: pestañas Todo · No leídos · Asuntos · Chats · Laterales (`HomeFilter`), orden por no leídos igual que la web
+  (`HomeOrder`, Shell.tsx `compareConversations`/`sortHome`), badge con color de empresa solo si cumple AA; si no, #B45309.
+- **Nuevo chat**: «Persona o chat grupal» o «Grupo en un espacio» (`SpaceGroupForm`, `POST /workspaces/:id/conversations`).
+- **Asuntos y reuniones en directos y multi** (`workspaceId` null) con sección «Chats»; aviso de reunión 10 min antes
+  (`event.soon` y push `TC_EVENT` con `minutes`).
+- **Notas de voz** (`Voice.swift`, `VoiceViews.swift`): mantener pulsado el micrófono (soltar envía, ← cancela, ↑ bloquea),
+  AAC m4a mono 32 kbps 24 kHz, onda de 64 valores (`x-waveform`), burbuja con velocidad, «Ver transcripción», resumen y
+  chip «Crear asunto».
+- **Sesión**: el refresh token se guarda por servidor (`refreshToken@host:puerto`; producción conserva `refreshToken`) y
+  solo un 401 del refresh cierra la sesión (un 5xx o sin red no). En Debug, `-TCApiURL` queda guardado.
+
+Pruebas v4 (API 3043):
+
+```sh
+API_URL=http://localhost:3043 FIXTURE_OUT=/tmp/fx4.json node scripts/mobile-fixture.mjs
+xcrun simctl addmedia <sim> foto.png        # nunca en los simuladores de Danny
+TEST_RUNNER_TC_FIXTURE4=/tmp/fx4.json TEST_RUNNER_TC_SHOTS=/tmp/v4 xcodebuild test -scheme TieComs \
+  -destination 'platform=iOS Simulator,id=<sim>' -only-testing:TieComsTests -only-testing:TieComsUITests/ShareUITests
+```
+
 ## Push (APNs)
 
 - **Registro**:

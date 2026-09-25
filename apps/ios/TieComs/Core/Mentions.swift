@@ -49,6 +49,27 @@ enum MentionText {
         return (out, (mentions.filter { $0.end <= start } + [m]).sorted { $0.start < $1.start })
     }
 
+    /// Inserta «@Nombre » reemplazando [start, end) (la consulta hasta el cursor) en cualquier posición; corre las menciones de después.
+    static func insert(name: String, userId: String, into text: String, replacing start: Int, _ end: Int, mentions: [Mention]) -> (text: String, mentions: [Mention], cursor: Int) {
+        var u = Array(text.utf16)
+        guard start >= 0, start <= end, end <= u.count else { return (text, mentions, end) }
+        let token = Array(("@" + name).utf16), ins = token + Array(" ".utf16)
+        u.replaceSubrange(start..<end, with: ins)
+        let delta = ins.count - (end - start)
+        var out = mentions.filter { $0.end <= start || $0.start >= end }.map { $0.start >= end ? Mention(userId: $0.userId, start: $0.start + delta, length: $0.length) : $0 }
+        out.append(Mention(userId: userId, start: start, length: token.count))
+        return (String(utf16CodeUnits: u, count: u.count), out.sorted { $0.start < $1.start }, start + ins.count)
+    }
+
+    /// Borrar (reemplazo vacío) un tramo que toca un token lo amplía al token entero.
+    static func expandDeletion(_ range: NSRange, mentions: [Mention]) -> NSRange? {
+        guard range.length > 0 else { return nil }
+        var lo = range.location, hi = range.location + range.length
+        var touched = false
+        for m in mentions where m.start < hi && m.end > lo { lo = min(lo, m.start); hi = max(hi, m.end); touched = true }
+        return touched ? NSRange(location: lo, length: hi - lo) : nil
+    }
+
     /// Ajusta las menciones a una edición del texto. Si la edición toca un token, el token se borra entero
     /// (un retroceso sobre «@Laura Gómez» lo quita completo); las menciones después de la edición se corren.
     static func reconcile(old: String, new: String, mentions: [Mention]) -> (text: String, mentions: [Mention]) {

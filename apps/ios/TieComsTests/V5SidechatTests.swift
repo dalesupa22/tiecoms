@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import TieComs
 
@@ -58,6 +59,15 @@ final class V5SidechatTests: XCTestCase {
         XCTAssertEqual(gone.start.y, 794, "el ancla quedó abajo: apunta al borde inferior")
         let above = SideLogic.connector(anchor: CGRect(x: 0, y: -200, width: 100, height: 40), target: target, chatHeight: 800, lastY: nil)
         XCTAssertEqual(above.start.y, 6, "fuera por arriba: borde superior")
+    }
+
+    func testRoutedConnectorStaysInTheLane() {
+        var p = Path()
+        SideLogic.routedPath(&p, start: CGPoint(x: 300, y: 700), end: CGPoint(x: 520, y: 120), laneX: 480)
+        let b = p.boundingRect
+        XCTAssertEqual(b.minX, 300, accuracy: 0.5); XCTAssertEqual(b.maxX, 520, accuracy: 0.5)
+        XCTAssertFalse(p.contains(CGPoint(x: 400, y: 400)), "no cruza el contenido del chat")
+        XCTAssertLessThanOrEqual(p.currentPoint?.y ?? 0, 120.5)
     }
 
     func testSidePush() {

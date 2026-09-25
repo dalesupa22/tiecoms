@@ -54,6 +54,24 @@ enum SideLogic {
     }
 }
 
+extension SideLogic {
+    /// Recorrido del conector del split: horizontal hasta el carril (margen del chat), vertical por el carril con esquinas curvas
+    /// y horizontal hasta el panel.
+    static func routedPath(_ p: inout Path, start: CGPoint, end: CGPoint, laneX: CGFloat, radius: CGFloat = 14) {
+        let x = max(start.x + 2, laneX)
+        let dy = end.y - start.y
+        let r = min(radius, abs(dy) / 2, max(0, x - start.x))
+        p.move(to: start)
+        if abs(dy) < 1 { p.addLine(to: end); return }
+        let dir: CGFloat = dy > 0 ? 1 : -1
+        p.addLine(to: CGPoint(x: x - r, y: start.y))
+        p.addQuadCurve(to: CGPoint(x: x, y: start.y + dir * r), control: CGPoint(x: x, y: start.y))
+        p.addLine(to: CGPoint(x: x, y: end.y - dir * r))
+        p.addQuadCurve(to: CGPoint(x: x + r, y: end.y), control: CGPoint(x: x, y: end.y))
+        p.addLine(to: end)
+    }
+}
+
 /// Posición de la burbuja ancla (para el conector y la línea) y de la tarjeta del ancla en el panel.
 /// "anchor" = burbuja ancla en el chat; "target" = tarjeta del ancla en el panel.
 struct SideAnchorKey: PreferenceKey {
@@ -557,8 +575,9 @@ struct SidePanelPresenter: ViewModifier {
         let geo = SideLogic.connector(anchor: a, target: end, chatHeight: size.height, lastY: memory.lastY)
         let _ = { if let a { memory.lastY = a.midY } }()
         ZStack {
-            Path { p in p.move(to: geo.start); p.addCurve(to: geo.end, control1: geo.c1, control2: geo.c2) }
-                .stroke(anchorColor, style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: geo.visible ? [] : [4, 5]))
+            // Del borde de la burbuja al margen del chat, por el margen (sin cruzar burbujas) y curva hasta la tarjeta del ancla.
+            Path { p in SideLogic.routedPath(&p, start: geo.start, end: geo.end, laneX: panelX - 6) }
+                .stroke(anchorColor, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round, dash: geo.visible ? [] : [4, 5]))
             Circle().fill(anchorColor).frame(width: 7, height: 7).position(geo.start)
             Circle().fill(anchorColor).frame(width: 7, height: 7).position(geo.end)
         }
@@ -578,12 +597,15 @@ struct SidePanelPresenter: ViewModifier {
                         let sheetTop = UIScreen.main.bounds.height * (1 - 0.58) - proxy.frame(in: .global).minY - 6
                         let start = CGPoint(x: x, y: r.midY), end = CGPoint(x: x, y: max(r.midY + 12, sheetTop))
                         ZStack {
+                            // Sale del borde derecho de la burbuja, va al margen y baja (por espacio vacío).
+                            let from = CGPoint(x: min(r.maxX + 4, x - 8), y: start.y)
                             Path { p in
-                                p.move(to: CGPoint(x: x - 7, y: r.midY)); p.addQuadCurve(to: CGPoint(x: x, y: r.midY + 8), control: CGPoint(x: x, y: r.midY))
+                                p.move(to: from); p.addLine(to: CGPoint(x: x - 8, y: r.midY))
+                                p.addQuadCurve(to: CGPoint(x: x, y: r.midY + 8), control: CGPoint(x: x, y: r.midY))
                                 p.addLine(to: end)
                             }
                             .stroke(anchorColor.opacity(0.85), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                            Circle().fill(anchorColor).frame(width: 6, height: 6).position(CGPoint(x: x - 7, y: start.y))
+                            Circle().fill(anchorColor).frame(width: 6, height: 6).position(from)
                             Circle().fill(anchorColor).frame(width: 6, height: 6).position(end)
                         }
                         .accessibilityHidden(true)

@@ -84,6 +84,7 @@ final class SidechatUITests: XCTestCase {
         if app.buttons["push.later"].waitForExistence(timeout: 3) { app.buttons["push.later"].tap() }
         sleep(1)
         for surface in [app, springboard] { for label in ["Not Now", "Ahora no"] where surface.buttons[label].exists { surface.buttons[label].tap() } }
+        if app.buttons["home.tab.all"].exists { app.buttons["home.tab.all"].tap() }   // la pestaña se recuerda entre corridas
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.tap()
 
@@ -177,16 +178,32 @@ final class SidechatUITests: XCTestCase {
         sleep(2)
         shot("v6-03-me-mencionaron")
 
-        // Escribir @ abre el buscador; elegir inserta el token.
-        let field = app.descendants(matching: .any)["composer.field"].firstMatch
+        // Escribir @ abre el buscador; elegir inserta el token (resaltado dentro del campo).
+        let field = app.textViews["composer.field"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "compositor UITextView")
         field.tap(); field.typeText("Listo @")
         XCTAssertTrue(app.descendants(matching: .any)["mention.picker"].waitForExistence(timeout: 5), "buscador de menciones")
-        shot("v6-04-buscador")
+        shot("v6-04b-buscador")
         app.buttons["mention.pick.\(f.b.id)"].tap()
-        field.typeText("te aviso 👍")
+        XCTAssertTrue((field.value as? String ?? "").contains("@\(f.b.name) "), "token insertado")
+        shot("v6-04c-token-en-campo")
+        // Un retroceso tras el espacio y otro sobre el token: se borra entero.
+        field.typeText(XCUIKeyboardKey.delete.rawValue)
+        field.typeText(XCUIKeyboardKey.delete.rawValue)
+        XCTAssertFalse((field.value as? String ?? "").contains(f.b.name), "el token se borró entero")
+        XCTAssertEqual((field.value as? String ?? "").trimmingCharacters(in: .whitespaces), "Listo")
+        // @ en medio del texto: el buscador se abre en la posición del cursor.
+        field.typeText(" te aviso 👍")
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)).tap()
+        field.typeText("@")
+        XCTAssertTrue(app.descendants(matching: .any)["mention.picker"].waitForExistence(timeout: 5), "buscador con @ al inicio (cursor)")
+        app.buttons["mention.pick.\(f.b.id)"].tap()
+        let value = field.value as? String ?? ""
+        XCTAssertTrue(value.hasPrefix("@\(f.b.name) "), "insertado en la posición del cursor: \(value)")
+        XCTAssertTrue(value.contains("te aviso 👍"), "el resto del texto se conserva")
         app.buttons["composer.send"].tap()
         sleep(2)
-        shot("v6-05-mencion-enviada")
+        shot("v6-05b-mencion-enviada")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.buttons["home.tab.all"].tap()
     }

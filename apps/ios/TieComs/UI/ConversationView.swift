@@ -56,7 +56,6 @@ struct ConversationView: View {
     @State private var addingToSide = false
     /// Menciones del borrador (offsets UTF-16) y ficha de una persona mencionada.
     @State private var draftMentions: [Mention] = []
-    @State private var reconcilingDraft = false
     @State private var personCard: String?
     @State private var sideForPerson: String?
     @State private var highlighted: String?
@@ -70,7 +69,9 @@ struct ConversationView: View {
     @State private var confirmDelete: MessageDTO?
     @State private var blockUserId: String?
     @State private var recorder = VoiceRecorder()
-    @FocusState private var composerFocused: Bool
+    @State private var composerFocused = false
+    /// Cursor del compositor (UTF-16).
+    @State private var draftCursor = 0
 
     var body: some View {
         Group {
@@ -84,7 +85,8 @@ struct ConversationView: View {
         .navigationBarTitleDisplayMode(.inline)
         // Cabecera opaca: los mensajes no se ven por detrás del título ni de las pestañas.
         .toolbarBackground(Theme.background, for: .navigationBar)
-        .toolbarBackground(embedded ? .automatic : .visible, for: .navigationBar)
+        // Solo en pantalla ancha (en iPhone el vidrio del sistema se ve bien y el color fijo se oscurecía con el teclado).
+        .toolbarBackground(!embedded && sizeClass == .regular ? .visible : .automatic, for: .navigationBar)
         .onAppear {
             store.openConversationId = conversationId
             let id = conversationId
@@ -344,16 +346,20 @@ struct ConversationView: View {
         }
     }
 
-    /// «@consulta» al final del borrador (no si ese "@" ya es un token).
+    /// «@consulta» justo antes del cursor, en cualquier posición (no si ese "@" ya es un token).
     private var mentionQuery: (start: Int, query: String)? {
-        guard editing == nil || true, let q = MentionText.activeQuery(in: draft), !draftMentions.contains(where: { $0.start == q.start }) else { return nil }
+        let u = Array(draft.utf16)
+        let cur = min(max(0, draftCursor), u.count)
+        let prefix = String(utf16CodeUnits: Array(u[..<cur]), count: cur)
+        guard let q = MentionText.activeQuery(in: prefix), !draftMentions.contains(where: { q.start >= $0.start && q.start < $0.end }) else { return nil }
         return q
     }
 
     private func pickMention(name: String, userId: String, at start: Int) {
-        let r = MentionText.insert(name: name, userId: userId, into: draft, at: start, mentions: draftMentions)
-        reconcilingDraft = true
+        let cur = min(max(start, draftCursor), (draft as NSString).length)
+        let r = MentionText.insert(name: name, userId: userId, into: draft, replacing: start, cur, mentions: draftMentions)
         draftMentions = r.mentions
+        draftCursor = r.cursor
         draft = r.text
         Haptics.tap()
     }
@@ -426,7 +432,8 @@ struct ConversationView: View {
                 attachments: m.deletedAt == nil ? m.attachments : [],
                 messageId: m.id, conversationId: conversationId,
                 mentions: m.deletedAt == nil ? m.mentions : [],
-                mentionsMe: m.deletedAt == nil && MentionText.mentionsMe(m.mentions, me: d.me.id, authorId: m.authorId)
+                mentionsMe: m.deletedAt == nil && MentionText.mentionsMe(m.mentions, me: d.me.id, authorId: m.authorId),
+                sideAnchor: activeAnchor == m.id
             )
             Group {
                 if m.deletedAt == nil {
@@ -438,15 +445,6 @@ struct ConversationView: View {
             }
             .padding(.top, showAuthor ? 6 : 0)
             .background(RoundedRectangle(cornerRadius: 12).fill(Theme.orange.opacity(highlighted == m.id ? 0.18 : 0)))
-            // Ancla del sidechat abierto: halo suave y posición para el conector.
-            .background {
-                if activeAnchor == m.id {
-                    RoundedRectangle(cornerRadius: 20).fill(PersonColor.text(m.authorId).opacity(0.10))
-                        .shadow(color: PersonColor.text(m.authorId).opacity(0.45), radius: 10)
-                        .padding(-4)
-                }
-            }
-            .anchorPreference(key: SideAnchorKey.self, value: .bounds) { activeAnchor == m.id ? ["anchor": $0] : [:] }
             // Deslizar la burbuja a la derecha = «Preguntar en un sidechat» (solo en chats que lo permiten).
             .offset(x: dragging?.id == m.id ? min(90, max(0, dragging!.dx)) : 0)
             .overlay(alignment: .leading) {
@@ -596,7 +594,7 @@ struct ConversationView: View {
         }
         if mine {
             Divider()
-            Button { editing = m; replyTo = nil; reconcilingDraft = true; draft = m.body; draftMentions = m.mentions; composerFocused = true } label: { Label(L("menu.edit"), systemImage: "pencil") }
+            Button { editing = m; replyTo = nil; draftMentions = m.mentions; draftCursor = (m.body as NSString).length; draft = m.body; composerFocused = true } label: { Label(L("menu.edit"), systemImage: "pencil") }
             Button(role: .destructive) { confirmDelete = m } label: { Label(L("menu.delete"), systemImage: "trash") }
         }
     }
@@ -651,22 +649,18 @@ struct ConversationView: View {
                     VoiceRecordingBar(recorder: recorder, onSend: sendVoice, onDiscard: { store.show(L("voice.cancelled")) })
                 } else {
                 if editing == nil { AttachButton(staged: $staged) { store.show($0) } }
-                TextField(composerPlaceholder(d, c), text: $draft, axis: .vertical)
-                    .lineLimit(1...6)
-                    .focused($composerFocused)
-                    .padding(.horizontal, 14).padding(.vertical, 10)
+                // UITextView: tokens resaltados, cursor real y retroceso que borra el token entero.
+                ComposerTextView(text: $draft, mentions: $draftMentions, cursor: $draftCursor, focused: $composerFocused,
+                                 placeholder: composerPlaceholder(d, c), accessibilityLabel: L("chat.composerLabel"),
+                                 onChange: { new in if !new.isEmpty && editing == nil { store.userIsTyping(conversationId) } })
+                    .overlay(alignment: .topLeading) {
+                        if draft.isEmpty {
+                            Text(composerPlaceholder(d, c)).font(.body).foregroundStyle(Theme.textSecondary.opacity(0.8))
+                                .lineLimit(1).padding(.horizontal, 14).padding(.vertical, 10).allowsHitTesting(false).accessibilityHidden(true)
+                        }
+                    }
                     .background(RoundedRectangle(cornerRadius: 20).fill(Theme.background))
                     .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.textSecondary.opacity(0.25)))
-                    .onChange(of: draft) { old, new in
-                        if !new.isEmpty && editing == nil { store.userIsTyping(conversationId) }
-                        // Un token de mención se borra entero; las demás menciones se corren.
-                        if reconcilingDraft { reconcilingDraft = false; return }
-                        let r = MentionText.reconcile(old: old, new: new, mentions: draftMentions)
-                        draftMentions = r.mentions
-                        if r.text != new { reconcilingDraft = true; draft = r.text }
-                    }
-                    .accessibilityLabel(L("chat.composerLabel"))
-                    .accessibilityIdentifier("composer.field")
                 }
                 // Compositor vacío: micrófono (mantener pulsado para grabar). Con texto o adjuntos: enviar.
                 if editing == nil && trimmed.isEmpty && staged.isEmpty && !uploading && recorder.state != .locked {
@@ -858,6 +852,8 @@ struct MessageBubble: View {
     var conversationId: String? = nil
     var mentions: [Mention] = []
     var mentionsMe = false
+    /// Ancla del sidechat abierto: halo y posición exacta de la burbuja para el conector.
+    var sideAnchor = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -901,14 +897,17 @@ struct MessageBubble: View {
                     if !attachments.isEmpty { AttachmentsBlock(attachments: attachments, mine: mine, messageId: messageId, conversationId: conversationId) }
                     if !text.isEmpty || attachments.isEmpty {
                     Group {
-                        if linkify || !mentions.isEmpty {
-                            Text(MentionText.attributed(linkify ? Linkify.attributed(text) : AttributedString(text), text: text, mentions: mentions, mine: mine))
-                        } else { Text(text) }
+                        if !mentions.isEmpty {
+                            // Cada mención con el color de SU persona (y tocable); los enlaces http con el color de enlace.
+                            RichMessageText(text: text, mentions: mentions, mine: mine, linkify: linkify) { id in
+                                if let u = URL(string: "tiecoms-mention://\(id)") { openURL(u) }
+                            }
+                        } else if linkify { Text(Linkify.attributed(text)) } else { Text(text) }
                     }
                     .font(.body)
                     .italic(italic)
                     .foregroundStyle(mine ? Color.white : Theme.textPrimary)
-                    .tint(mine ? Color.white : (mentions.first { !$0.isAll }.map { PersonColor.text($0.userId) } ?? Theme.accentText))  // las menciones son enlaces: toman el color de la persona
+                    .tint(mine ? Color.white : Theme.accentText)
                     .textSelection(.enabled)
                     // Con fotos la burbuja se ciñe a ellas; el texto conserva su margen.
                     .padding(.horizontal, attachments.isEmpty ? 0 : 9).padding(.bottom, attachments.isEmpty ? 0 : 4)
@@ -929,6 +928,14 @@ struct MessageBubble: View {
                     }
                 }
                 .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.red, lineWidth: status == .failed ? 1.5 : 0))
+                .background {
+                    if sideAnchor {
+                        RoundedRectangle(cornerRadius: 22).fill(authorColor?.opacity(0.14) ?? Theme.orange.opacity(0.14))
+                            .shadow(color: (authorColor ?? Theme.orange).opacity(0.5), radius: 10)
+                            .padding(-5)
+                    }
+                }
+                .anchorPreference(key: SideAnchorKey.self, value: .bounds) { sideAnchor ? ["anchor": $0] : [:] }
                 HStack(spacing: 4) {
                     if pinned { Image(systemName: "pin.fill").foregroundStyle(Theme.accentText) }
                     switch status {

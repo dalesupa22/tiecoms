@@ -104,4 +104,51 @@ final class V6MentionTests: XCTestCase {
         XCTAssertFalse(MentionText.allowsAll(d.conversations[1]), "sin @todos en directos")
         XCTAssertEqual(MentionText.outsiders(d, d.conversations[0], query: "luc").map(\.id), ["x"])
     }
+
+    /// Bug: cada mención con el color de SU persona; los enlaces http no toman ese color.
+    func testEachMentionHasItsOwnColorAndLinksKeepAccent() {
+        // Dos ids con colores distintos de la paleta.
+        let a = "00000000-0000-0000-0000-000000000000", b = "3f2b8c1e-9a4d-4e21-8b7a-1c2d3e4f5a6b"
+        XCTAssertNotEqual(PersonColor.index(a), PersonColor.index(b))
+        let text = "@Ana 🎉 y @Bea mira https://tiecoms.com"
+        let ma = Mention(userId: a, start: 0, length: 4)
+        let mb = Mention(userId: b, start: u16("@Ana 🎉 y "), length: 4)
+        let out = RichText.bubble(text, mentions: [ma, mb], mine: false, linkify: true)
+        func rgba(_ c: Any?) -> [Int] {
+            guard let c = (c as? UIColor)?.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light)) else { return [] }
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, al: CGFloat = 0
+            c.getRed(&r, green: &g, blue: &b, alpha: &al)
+            return [r, g, b, al].map { Int(($0 * 255).rounded()) }
+        }
+        let ca = rgba(out.attribute(.foregroundColor, at: ma.start, effectiveRange: nil))
+        let cb = rgba(out.attribute(.foregroundColor, at: mb.start, effectiveRange: nil))
+        XCTAssertEqual(ca, rgba(UIColor(PersonColor.text(a))))
+        XCTAssertEqual(cb, rgba(UIColor(PersonColor.text(b))))
+        XCTAssertNotEqual(ca, cb, "cada mención con su color")
+        let linkAt = u16("@Ana 🎉 y @Bea mira ") + 3
+        XCTAssertEqual(rgba(out.attribute(.foregroundColor, at: linkAt, effectiveRange: nil)), rgba(UIColor(Theme.accentText)), "http con el color de enlace")
+        XCTAssertNotEqual(rgba(out.attribute(.foregroundColor, at: linkAt, effectiveRange: nil)), ca)
+        XCTAssertEqual(out.attribute(.link, at: linkAt, effectiveRange: nil) as? URL, URL(string: "https://tiecoms.com"))
+        XCTAssertEqual(out.attribute(.link, at: mb.start, effectiveRange: nil) as? URL, URL(string: "tiecoms-mention://\(b)"))
+        let bold = out.attribute(.font, at: ma.start, effectiveRange: nil) as? UIFont
+        XCTAssertTrue(bold?.fontDescriptor.symbolicTraits.contains(.traitBold) == true)
+        // En mi burbuja: blanco.
+        XCTAssertEqual(rgba(RichText.bubble(text, mentions: [ma], mine: true, linkify: true).attribute(.foregroundColor, at: 0, effectiveRange: nil)), [255, 255, 255, 255])
+    }
+
+    func testInsertAtCursorAndExpandDeletion() {
+        // Insertar en medio (cursor tras «@Be»): el resto del texto se conserva y la mención de después se corre.
+        let text = "Hola @Be y @Ana 😀"
+        let ana = Mention(userId: "a", start: u16("Hola @Be y "), length: 4)
+        let r = MentionText.insert(name: "Beatriz Núñez", userId: "b", into: text, replacing: 5, 8, mentions: [ana])
+        XCTAssertEqual(r.text, "Hola @Beatriz Núñez  y @Ana 😀")
+        XCTAssertEqual(r.cursor, 5 + u16("@Beatriz Núñez "))
+        XCTAssertEqual(r.mentions.map(\.userId), ["b", "a"])
+        XCTAssertEqual((r.text as NSString).substring(with: NSRange(location: r.mentions[1].start, length: 4)), "@Ana")
+        XCTAssertEqual(MentionText.activeQuery(in: String("Hola @Be y".utf16.prefix(8))!)?.query, "Be", "consulta hasta el cursor")
+        // Retroceso dentro de un token: se amplía al token entero.
+        XCTAssertEqual(MentionText.expandDeletion(NSRange(location: ana.end - 1, length: 1), mentions: [ana]), NSRange(location: ana.start, length: ana.length))
+        XCTAssertNil(MentionText.expandDeletion(NSRange(location: 0, length: 1), mentions: [ana]), "fuera del token: normal")
+        XCTAssertNil(MentionText.expandDeletion(NSRange(location: ana.end, length: 0), mentions: [ana]))
+    }
 }

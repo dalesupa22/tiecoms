@@ -190,6 +190,18 @@ export interface ConversationDTO {
    * últimos 20 visibles, aunque después haya mensajes de sistema. null si no hay ninguno. Clientes viejos: ausente.
    */
   lastHumanPreview?: MessagePreviewDTO | null;
+  /** Menciones a mí (o @todos) sin leer: con seq mayor que lo que ya leí. Clientes viejos: ausente. */
+  unreadMentions?: number;
+}
+
+/** Una entrada de la bandeja «Menciones» (GET /mentions). */
+export interface MentionItemDTO {
+  message: MessageDTO;
+  conversationId: string;
+  /** true si fue @todos y no una mención directa. */
+  all: boolean;
+  read: boolean;
+  createdAt: string;
 }
 
 /** Resumen de adjuntos para vistas previas: «📷 Foto», «📷 3 fotos», «🎬 Video», «📎 nombre». */
@@ -341,6 +353,8 @@ export interface MessageDTO {
   linkPreview?: LinkPreviewDTO | null;
   /** Adjuntos en el orden de envío ([] o ausente si no hay; [] si el mensaje se eliminó). */
   attachments?: AttachmentDTO[];
+  /** Menciones válidas (ya filtradas por el servidor); [] o ausente si no hay. */
+  mentions?: MentionDTO[];
   createdAt: string;
   editedAt: string | null;
   deletedAt: string | null;
@@ -480,6 +494,17 @@ export const ForwardedInput = z.object({
   /** Mensaje original dentro de fromConversationId (exige fromConversationId). */
   messageId: z.uuid().nullable().optional(),
 });
+/**
+ * Mención con @: tramo del body (offsets en unidades UTF-16, como String.length de JS/Kotlin y NSString.length)
+ * que empieza con «@». userId 'all' = @todos / @all.
+ */
+export const MentionInput = z.object({
+  userId: z.union([z.uuid(), z.literal('all')]),
+  start: z.number().int().min(0).max(8000),
+  length: z.number().int().min(2).max(200),
+});
+export interface MentionDTO { userId: string | 'all'; start: number; length: number }
+
 export const SendMessageInput = z.object({
   clientMessageId: z.string().min(8).max(64),
   /** Puede ir vacío ('') si el mensaje lleva adjuntos. */
@@ -490,9 +515,11 @@ export const SendMessageInput = z.object({
   attachmentIds: z.array(z.uuid()).max(10).optional(),
   /** Reenvío: adjuntos de mensajes que puedo leer; el servidor crea copias que apuntan al mismo archivo. */
   forwardAttachmentIds: z.array(z.uuid()).max(10).optional(),
+  /** Menciones sobre el body. Las inválidas se descartan (droppedMentions en la respuesta), no dan error. */
+  mentions: z.array(MentionInput).max(50).optional(),
 }).refine((v) => v.body.length > 0 || !!v.attachmentIds?.length || !!v.forwardAttachmentIds?.length, { message: 'body_or_attachments', path: ['body'] })
   .refine((v) => (v.attachmentIds?.length ?? 0) + (v.forwardAttachmentIds?.length ?? 0) <= 10, { message: 'max_10_attachments', path: ['attachmentIds'] });
-export const EditMessageInput = z.object({ body: z.string().trim().min(1).max(8000) });
+export const EditMessageInput = z.object({ body: z.string().trim().min(1).max(8000), mentions: z.array(MentionInput).max(50).optional() });
 export const ConversationPrefsInput = z.object({ pinned: z.boolean().optional(), mutedUntil: z.iso.datetime().nullable().optional() });
 export const WorkspacePrefsInput = z.object({ pinned: z.boolean() });
 export const MarkUnreadInput = z.object({ seq: z.number().int().min(1) });
@@ -540,7 +567,7 @@ export const PushTokenInput = z.object({
  */
 export interface PushData {
   /** side = mensaje de un sidechat (categoría TC_SIDE; trae sideOf). */
-  type: 'message' | 'reminder' | 'event' | 'side';
+  type: 'message' | 'reminder' | 'event' | 'side' | 'mention';
   conversationId: string;
   messageId?: string;
   authorId?: string;

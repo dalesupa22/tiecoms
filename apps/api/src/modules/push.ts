@@ -32,7 +32,7 @@ export async function removeToken(sessionId: string) {
   return { ok: true };
 }
 
-interface Target { user_id: string; sub_id: string; provider: 'apns' | 'fcm'; token: string; environment: 'sandbox' | 'production'; lang: Lang }
+interface Target { user_id: string; sub_id: string; provider: 'apns' | 'fcm'; token: string; environment: 'sandbox' | 'production'; lang: Lang; mentioned?: boolean }
 
 const ACTIVE_SESSION = `JOIN sessions s ON s.user_id = u.id AND s.revoked_at IS NULL AND s.expires_at > now()
   JOIN push_subscriptions ps ON ps.session_id = s.id AND ps.provider IN ('apns', 'fcm')`;
@@ -139,21 +139,35 @@ export async function pushMessage(messageId: string) {
   const m = rows[0];
   if (!m || m.deleted_at || m.kind !== 'text') return 0;
   const { rows: targets } = await pool.query<Target>(
-    `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
+    `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang, (mm.user_id IS NOT NULL) AS mentioned
        FROM conversation_memberships cm
        JOIN conversations c ON c.id = cm.conversation_id AND c.archived_at IS NULL
        JOIN users u ON u.id = cm.user_id AND u.disabled_at IS NULL
        ${ACTIVE_SESSION}
        LEFT JOIN workspace_memberships wm ON wm.workspace_id = c.workspace_id AND wm.user_id = u.id
        LEFT JOIN conversation_prefs cp ON cp.conversation_id = c.id AND cp.user_id = u.id
+       LEFT JOIN message_mentions mm ON mm.message_id = $4 AND mm.user_id = u.id
       WHERE cm.conversation_id = $1 AND cm.removed_at IS NULL AND cm.user_id <> $2 AND cm.history_from_seq < $3
         AND (c.workspace_id IS NULL OR (wm.user_id IS NOT NULL AND wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())))
-        AND (cp.muted_until IS NULL OR cp.muted_until <= now())
+        -- Silenciada: solo pasa una mención, salvo el silencio «siempre» (más de un año).
+        AND (cp.muted_until IS NULL OR cp.muted_until <= now() OR (mm.user_id IS NOT NULL AND cp.muted_until < now() + interval '366 days'))
         AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = u.id AND b.blocked_id = $2) OR (b.blocker_id = $2 AND b.blocked_id = u.id))`,
-    [m.conversation_id, m.author_id, m.seq],
+    [m.conversation_id, m.author_id, m.seq, m.id],
   );
   const direct = m.conv_kind === 'direct';
   const avatar = m.avatar_file_id ? `/api/v1/avatars/${m.avatar_file_id}` : '';
+  // Mención: «Ana te mencionó» (subtitle = la conversación). Los demás reciben el push normal (o de sidechat).
+  const mentionNote = (t: Target): Note => ({
+    title: t.lang === 'en' ? `${m.author_name} mentioned you` : `${m.author_name} te mencionó`,
+    subtitle: direct ? null : m.conv_name || null,
+    body: messageText(m.body, m.attachments, t.lang),
+    threadId: m.conversation_id, category: 'TC_MESSAGE', collapseId: m.id,
+    data: { type: 'mention', conversationId: m.conversation_id, messageId: m.id, authorId: m.author_id, authorName: m.author_name, authorAvatarUrl: avatar },
+  });
+  const mentionedTargets = targets.filter((t) => t.mentioned);
+  if (mentionedTargets.length) await deliver(mentionedTargets, mentionNote);
+  targets.splice(0, targets.length, ...targets.filter((t) => !t.mentioned));
+  if (!targets.length) return mentionedTargets.length;
   if (m.derive_kind === 'side') {
     // Sidechat: «💬 Sidechat de Ana», «Sobre: «…»» y la pregunta; categoría TC_SIDE con Responder en línea.
     const excerpt = await sideExcerpt(m.conversation_id);

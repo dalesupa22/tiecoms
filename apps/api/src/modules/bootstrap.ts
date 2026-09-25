@@ -30,6 +30,8 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
       `SELECT c.id, c.workspace_id, c.kind, c.level, c.name, c.internal_org_id, c.last_message_seq, c.last_event_seq, c.last_message_at,
               c.parent_conversation_id, c.parent_message_id, (SELECT pm.seq FROM messages pm WHERE pm.id = c.parent_message_id) AS parent_message_seq, c.derive_kind, c.derive_reason, c.returned_at, c.avatar_file_id,
               (SELECT count(*) FROM issues i WHERE i.conversation_id = c.id AND i.status NOT IN ('done','cancelled'))::int AS open_issues,
+              (SELECT count(*) FROM message_mentions mm WHERE mm.user_id = m.user_id AND mm.conversation_id = c.id
+                  AND mm.seq > GREATEST(COALESCE(rc.last_read_seq, 0), m.history_from_seq))::int AS unread_mentions,
               m.can_post, m.can_manage, m.history_from_seq, wm.role AS workspace_role, cp.pinned_at, cp.muted_until,
               COALESCE(rc.last_read_seq, 0) AS last_read_seq,
               ARRAY(SELECT user_id FROM conversation_memberships x WHERE x.conversation_id = c.id AND x.removed_at IS NULL ORDER BY x.joined_at) AS member_ids,
@@ -103,6 +105,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
       pinnedAt: r.pinned_at ? new Date(r.pinned_at).toISOString() : null,
       mutedUntil: r.muted_until && new Date(r.muted_until) > new Date() ? new Date(r.muted_until).toISOString() : null,
       avatarUrl: r.avatar_file_id ? `/api/v1/avatars/${r.avatar_file_id}` : null,
+      unreadMentions: r.unread_mentions ?? 0,
       lastHumanPreview: r.human ? {
         messageId: r.human.id, seq: Number(r.human.seq), authorId: r.human.authorId, body: r.human.body ?? '',
         attachments: summarize(r.human.attachments), createdAt: new Date(r.human.createdAt).toISOString(),

@@ -235,7 +235,7 @@ struct EventEditorSheet: View {
 
     var body: some View {
         let d = store.data
-        let groups = d?.conversations.filter { $0.canPost && $0.workspaceId != nil && $0.kind != .direct } ?? []
+        let groups = d?.conversations.filter { $0.canPost } ?? []
         let humans = d.map { dd in (dd.conversations.first { $0.id == conv }?.memberIds ?? []).compactMap { Naming.person(dd, $0) }.filter { $0.kind == "human" } } ?? []
         let chosen = invitees ?? Set(humans.map(\.id))
         SheetForm(title: event == nil ? L("cal.newTitle") : L("cal.editTitle"), action: event == nil ? L("cal.create") : L("cal.save"),
@@ -244,7 +244,7 @@ struct EventEditorSheet: View {
                 TextField(L("cal.title"), text: $title).accessibilityIdentifier("event.titleField")
                 if event == nil, let d {
                     Picker(L("cal.conversation"), selection: $conv) {
-                        ForEach(groups) { g in Text("\(Naming.title(d, g)) · \(d.workspaces.first { $0.id == g.workspaceId }?.name ?? "")").tag(g.id) }
+                        ForEach(groups) { g in Text([Naming.title(d, g), d.workspaces.first { $0.id == g.workspaceId }?.name].compactMap { $0 }.joined(separator: " · ")).tag(g.id) }
                     }
                     .onChange(of: conv) { _, _ in invitees = nil }
                 }
@@ -271,7 +271,7 @@ struct EventEditorSheet: View {
 
     private func prefill() {
         guard conv.isEmpty else { return }
-        let groups = store.data?.conversations.filter { $0.canPost && $0.workspaceId != nil && $0.kind != .direct } ?? []
+        let groups = store.data?.conversations.filter { $0.canPost } ?? []
         conv = event?.conversationId ?? conversationId ?? groups.first?.id ?? ""
         if let ev = event {
             title = ev.title; tz = ev.timezone; date = ev.start; start = ev.start; endTime = ev.end

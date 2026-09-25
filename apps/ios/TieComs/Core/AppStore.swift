@@ -337,6 +337,15 @@ final class AppStore {
                 feedback?.notifyIncoming(conversationId: r.conversationId, title: L("rem.alert"),
                                          author: conv.map { Naming.title(d, $0) } ?? "", body: r.note ?? "")
             }
+        case .eventSoon(let e, let minutes):
+            events[e.id] = e
+            guard !e.isCancelled, let d = data else { return }
+            let conv = meta(e.conversationId)
+            // Ignora el silencio de la conversación: es un aviso de reunión, como en el push.
+            feedback?.notifyEventSoon(conversationId: e.conversationId, eventId: e.id,
+                                      title: L("cal.soon", ["n": minutes, "title": e.title]),
+                                      subtitle: conv.flatMap { $0.kind == .direct ? nil : Naming.title(d, $0) },
+                                      body: e.start.formatted(date: .omitted, time: .shortened))
         case .prefsUpdated: scheduleBootstrap()
         case .whatsappUpdated: waRevision += 1
         case .driveUpdated: driveRevision += 1

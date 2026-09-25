@@ -85,6 +85,7 @@ struct HomeView: View {
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
+                .animation(.spring(response: 0.45, dampingFraction: 0.9), value: tree.orderSignature)
                 .overlay {
                     if tree.isEmpty && searching { ContentUnavailableView.search(text: query) }
                     else if tree.isEmpty && tab != .all {

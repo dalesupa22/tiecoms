@@ -175,6 +175,10 @@ struct HomeTree {
     var chats: [ConvNode] = []
 
     var isEmpty: Bool { pinned.isEmpty && companies.isEmpty && chats.isEmpty }
+    /// Firma del orden: cuando cambia (llega un mensaje y la fila sube) la lista se anima.
+    var orderSignature: [String] {
+        companies.flatMap { [$0.id] + $0.workspaces.flatMap { [$0.id] + $0.convs.map(\.id) } } + chats.map(\.id)
+    }
 }
 
 extension Naming {
@@ -229,7 +233,7 @@ extension Naming {
         var byOrg: [String: HomeTree.CompanyNode] = [:]
         for ws in d.workspaces where filterWorkspace == nil || ws.id == filterWorkspace {
             let convs = d.conversations.filter { $0.workspaceId == ws.id && $0.kind != .direct && $0.kind != .multi && !sideIds.contains($0.id) }
-                .sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
+                .sorted(by: HomeOrder.before)
                 .compactMap(node)
             let wsMatches = !q.isEmpty && fold(ws.name).contains(q)
             if convs.isEmpty && (tab != .all || !(q.isEmpty || wsMatches)) { continue }
@@ -241,21 +245,55 @@ extension Naming {
         tree.companies = order.compactMap { byOrg[$0] }.map { var c = $0
             c.workspaces.sort { a, b in
                 if (a.ws.pinnedAt != nil) != (b.ws.pinnedAt != nil) { return a.ws.pinnedAt != nil }
-                return a.ws.name.localizedCaseInsensitiveCompare(b.ws.name) == .orderedAscending
+                let ra = HomeOrder.rank(d, a.ws.id), rb = HomeOrder.rank(d, b.ws.id)
+                return ra == rb ? a.ws.id < b.ws.id : HomeOrder.rankBefore(ra, rb)
             }
             return c
+        }
+        .sorted { a, b in
+            let ra = HomeOrder.rank(d.conversations.filter { c in a.workspaces.contains { $0.ws.id == c.workspaceId } })
+            let rb = HomeOrder.rank(d.conversations.filter { c in b.workspaces.contains { $0.ws.id == c.workspaceId } })
+            return ra == rb ? (a.org?.id ?? "") < (b.org?.id ?? "") : HomeOrder.rankBefore(ra, rb)
         }
         if filterWorkspace == nil {
             let wsIds = Set(d.workspaces.map(\.id))
             tree.chats = d.conversations
                 .filter { ($0.kind == .direct || $0.kind == .multi || !($0.workspaceId.map(wsIds.contains) ?? false)) && !sideIds.contains($0.id) }
-                .sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
+                .sorted(by: HomeOrder.before)
                 .compactMap(node)
         }
         return tree
     }
 }
 
+
+/// Orden de Inicio (igual que la web, Shell.tsx `compareConversations` / `sortHome`): primero lo que tiene no leídos
+/// (silenciadas cuentan como leídas), en cada bloque las fijadas arriba y luego por actividad descendente; desempate por id.
+enum HomeOrder {
+    static func activity(_ c: ConversationDTO) -> String { c.lastHumanPreview?.createdAt ?? c.lastMessageAt ?? "" }
+    static func pending(_ c: ConversationDTO) -> Int { c.unread > 0 && !c.isMuted ? c.unread : 0 }
+
+    static func before(_ a: ConversationDTO, _ b: ConversationDTO) -> Bool {
+        let ua = pending(a) > 0, ub = pending(b) > 0
+        if ua != ub { return ua }
+        let pa = a.pinnedAt != nil, pb = b.pinnedAt != nil
+        if pa != pb { return pa }
+        let xa = activity(a), xb = activity(b)
+        return xa == xb ? a.id < b.id : xa > xb
+    }
+
+    struct Rank: Equatable { var unread: Int; var activity: String }
+    static func rank(_ convs: [ConversationDTO]) -> Rank {
+        Rank(unread: convs.reduce(0) { $0 + pending($1) }, activity: convs.map(activity).max() ?? "")
+    }
+    static func rank(_ d: BootstrapDTO, _ workspaceId: String) -> Rank { rank(d.conversations.filter { $0.workspaceId == workspaceId }) }
+    /// Por no leído agregado (con no leídos primero, más no leídos antes) y luego por actividad.
+    static func rankBefore(_ a: Rank, _ b: Rank) -> Bool {
+        if (a.unread > 0) != (b.unread > 0) { return a.unread > 0 }
+        if a.unread != b.unread { return a.unread > b.unread }
+        return a.activity > b.activity
+    }
+}
 
 /// Pestañas grandes de Inicio: Todo · No leídos · Asuntos · Chats · Laterales (home.tab.* de la web).
 enum HomeFilter: String, CaseIterable, Identifiable {

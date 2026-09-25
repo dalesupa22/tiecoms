@@ -194,7 +194,7 @@ struct ConversationView: View {
                     ConversationMenuItems(conv: c, onRemindCustom: { sheet = .reminder(nil) },
                                           onMeeting: c.canPost ? { sheet = .newEvent(nil) } : nil)
                     Divider()
-                    if c.workspaceId != nil && c.kind != .direct {
+                    if c.canPost || c.openIssues > 0 {
                         Button { sheet = .issuesHere } label: { Label("\(L("issue.here")) · \(c.openIssues)", systemImage: "checklist") }
                     }
                     if (store.pins[conversationId]?.count ?? 0) > 0 { Button { sheet = .pins } label: { Label(L("pins.title"), systemImage: "pin") } }
@@ -407,7 +407,8 @@ struct ConversationView: View {
     private func messageMenu(_ d: BootstrapDTO, _ c: ConversationDTO, _ m: MessageDTO) -> some View {
         let mine = m.authorId == d.me.id
         let isPinned = store.pins[conversationId]?.contains(m.id) == true
-        let canWork = c.canPost && c.kind != .direct && c.workspaceId != nil
+        // Asuntos y reuniones también en directos y multi (SPEC-v4 E); derivar sigue siendo de espacios.
+        let canWork = c.canPost
         let myWsRole = d.workspaces.first { $0.id == c.workspaceId }?.myRole
         if c.canPost {
             Button { replyTo = m; editing = nil; composerFocused = true } label: { Label(L("menu.reply"), systemImage: "arrowshape.turn.up.left") }
@@ -436,7 +437,7 @@ struct ConversationView: View {
         }
         if canWork {
             Divider()
-            if myWsRole != "guest" { Button { sheet = .derive(m) } label: { Label(L("menu.derive"), systemImage: "arrow.triangle.branch") } }
+            if c.workspaceId != nil && c.kind != .direct && myWsRole != "guest" { Button { sheet = .derive(m) } label: { Label(L("menu.derive"), systemImage: "arrow.triangle.branch") } }
             Button { sheet = .newIssue(m) } label: { Label(L("menu.issue"), systemImage: "checklist") }
             Button { sheet = .newEvent(m) } label: { Label(L("menu.meeting"), systemImage: "calendar.badge.plus") }
         }

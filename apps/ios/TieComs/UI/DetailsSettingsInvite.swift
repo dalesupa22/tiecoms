@@ -56,7 +56,7 @@ struct ConversationDetailsView: View {
                             }
                         }
                     }
-                    if c.workspaceId != nil && c.kind != .direct { ConversationAgendaSection(conversationId: c.id) }
+                    ConversationAgendaSection(conversationId: c.id)
                     Section(L("details.participants", ["n": regular.count])) {
                         if c.kind == .multi {
                             Button { adding = true } label: { Label(L("dlg.addToGroup"), systemImage: "person.badge.plus") }

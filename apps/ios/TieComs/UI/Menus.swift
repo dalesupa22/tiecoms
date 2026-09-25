@@ -26,7 +26,7 @@ struct ConversationMenuItems: View {
         }
         MuteMenu(conv: conv)
         RemindMenu(conversationId: conv.id, message: nil, onCustom: onRemindCustom)
-        if let onMeeting, conv.workspaceId != nil {
+        if let onMeeting {
             Button(action: onMeeting) { Label(L("menu.meeting"), systemImage: "calendar.badge.plus") }
         }
         Divider()

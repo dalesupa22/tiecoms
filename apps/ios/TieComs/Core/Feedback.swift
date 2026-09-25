@@ -10,6 +10,14 @@ protocol FeedbackSink: AnyObject {
     func playReceive()
     /// Mensaje de otra persona en una conversación que no está abierta (app en primer plano).
     func notifyIncoming(conversationId: String, title: String, author: String, body: String)
+    /// Aviso de reunión 10 min antes (evento de cuenta `event.soon`).
+    func notifyEventSoon(conversationId: String, eventId: String, title: String, subtitle: String?, body: String)
+}
+
+extension FeedbackSink {
+    func notifyEventSoon(conversationId: String, eventId: String, title: String, subtitle: String?, body: String) {
+        notifyIncoming(conversationId: conversationId, title: title, author: subtitle ?? "", body: body)
+    }
 }
 
 enum SoundName: String, CaseIterable { case send = "tc_send", receive = "tc_receive", notify = "tc_notify", splash = "tc_splash" }
@@ -113,6 +121,24 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
         UNUserNotificationCenter.current().add(req)
     }
 
+    func notifyEventSoon(conversationId: String, eventId: String, title: String, subtitle: String?, body: String) {
+        guard Prefs.notificationsEnabled, authorized else {
+            if UIApplication.shared.applicationState == .active { sounds.play(.notify) }
+            return
+        }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        if let subtitle { content.subtitle = subtitle }
+        content.body = body
+        content.threadIdentifier = conversationId
+        content.userInfo = ["conversationId": conversationId, "eventId": eventId, "type": "event", "minutes": 10]
+        content.categoryIdentifier = PushPayload.eventCategory
+        content.interruptionLevel = .timeSensitive
+        if Prefs.soundsEnabled { content.sound = UNNotificationSound(named: UNNotificationSoundName("tc_notify.caf")) }
+        // Mismo id que el push (evento): si llegan los dos, iOS muestra uno.
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "event-soon-\(eventId)", content: content, trigger: nil))
+    }
+
     func clearNotifications(conversationId: String) {
         let center = UNUserNotificationCenter.current()
         center.getDeliveredNotifications { list in
@@ -127,6 +153,10 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
         let conv = notification.request.content.userInfo["conversationId"] as? String
         let isRemote = notification.request.trigger is UNPushNotificationTrigger
         let (open, online) = await MainActor.run { (AppFeedback.shared.openConversationId?(), AppFeedback.shared.socketOnline?() ?? false) }
+        let info = notification.request.content.userInfo
+        let isEventSoon = (info["type"] as? String) == "event" && info["minutes"] != nil
+        // El aviso de reunión se muestra siempre (aunque sea el chat abierto), salvo el push duplicado del aviso local.
+        if isEventSoon { return isRemote && online ? [] : [.banner, .list, .sound] }
         // En primer plano: nada si es la conversación abierta (ya sonó tc_receive).
         if let conv, conv == open { return [] }
         // Con el socket en línea el aviso local ya salió: el push remoto sería un duplicado.

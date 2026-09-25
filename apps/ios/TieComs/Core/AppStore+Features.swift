@@ -269,6 +269,17 @@ extension AppStore {
         return r
     }
 
+    /// «Grupo en un espacio»: POST /workspaces/:id/conversations {name, kind, level, memberIds}.
+    func createWorkspaceConversation(workspaceId: String, name: String, isInternal: Bool, directive: Bool, memberIds: [String]) async throws -> CreateChatResult {
+        let body: [String: Any] = ["name": String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120)),
+                                   "kind": isInternal ? "internal" : "group",
+                                   "level": isInternal ? NSNull() : (directive ? "directivo" : "operativo"),
+                                   "memberIds": memberIds]
+        let r: CreateChatResult = try await api.request("/workspaces/\(workspaceId)/conversations", method: "POST", json: body)
+        try await loadBootstrap()
+        return r
+    }
+
     // MARK: Push
 
     /// PUT /push/token {provider:'apns', token, environment, lang} (reemplaza el token anterior de la sesión).

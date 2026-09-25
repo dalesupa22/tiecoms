@@ -470,6 +470,8 @@ enum AccountEvent: Decodable, Equatable, Sendable {
     case scopeChanged(reason: String)
     case readUpdated(conversationId: String, seq: Int)
     case reminderDue(ReminderDTO)
+    /// Aviso de reunión (10 min antes). SPEC-v4 E.
+    case eventSoon(CalendarEventDTO, minutes: Int)
     case prefsUpdated(conversationId: String?, workspaceId: String?)
     case whatsappUpdated(accountId: String)
     case driveUpdated
@@ -483,6 +485,8 @@ enum AccountEvent: Decodable, Equatable, Sendable {
         case "read.updated": self = .readUpdated(conversationId: c.v("conversationId", ""), seq: c.int("seq"))
         case "reminder.due":
             if let r: ReminderDTO = c.o("reminder") { self = .reminderDue(r) } else { self = .other(type: type) }
+        case "event.soon":
+            if let e: CalendarEventDTO = c.o("event") { self = .eventSoon(e, minutes: c.intOpt("minutes") ?? 10) } else { self = .other(type: type) }
         case "prefs.updated": self = .prefsUpdated(conversationId: c.o("conversationId"), workspaceId: c.o("workspaceId"))
         case "whatsapp.updated": self = .whatsappUpdated(accountId: c.v("accountId", ""))
         case "drive.updated": self = .driveUpdated

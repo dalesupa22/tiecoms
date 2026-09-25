@@ -81,7 +81,11 @@ struct IssueRow: View {
 enum IssueTree {
     struct Conv: Identifiable { var conv: ConversationDTO?; var id: String; var issues: [IssueDTO] }
     struct Ws: Identifiable { var ws: WorkspaceDTO?; var id: String; var convs: [Conv] }
-    struct Company: Identifiable { var org: OrganizationDTO?; var id: String; var workspaces: [Ws] }
+    struct Company: Identifiable {
+        var org: OrganizationDTO?; var id: String; var workspaces: [Ws]
+        var isChats: Bool { id == IssueTree.chatsId }
+    }
+    static let chatsId = "__chats"
 
     enum Filter: String, CaseIterable { case mine, open, all }
 
@@ -97,7 +101,10 @@ enum IssueTree {
         let visible = Set(d.conversations.map(\.id))
         var out: [String: Company] = [:]
         var order: [String] = []
-        let byWs = Dictionary(grouping: issues.filter { visible.contains($0.conversationId) }, by: \.workspaceId)
+        let inScope = issues.filter { visible.contains($0.conversationId) }
+        // Directos, multi y laterales (sin espacio): sección «Chats» después de las empresas.
+        let chatItems = inScope.filter { $0.workspaceId == nil }
+        let byWs = Dictionary(grouping: inScope.filter { $0.workspaceId != nil }, by: { $0.workspaceId ?? "" })
         for (wsId, items) in byWs {
             let ws = d.workspaces.first { $0.id == wsId }
             let org = ws.flatMap { Naming.counterpartOrg(d, $0) }
@@ -110,10 +117,19 @@ enum IssueTree {
             }
             out[key]!.workspaces.append(Ws(ws: ws, id: wsId, convs: convs))
         }
-        return order.compactMap { out[$0] }.map { var c = $0
+        var companies = order.compactMap { out[$0] }.map { var c = $0
             c.workspaces.sort { ($0.ws?.name ?? "").localizedCaseInsensitiveCompare($1.ws?.name ?? "") == .orderedAscending }
             return c
         }.sorted { ($0.org?.name ?? "~").localizedCaseInsensitiveCompare($1.org?.name ?? "~") == .orderedAscending }
+        if !chatItems.isEmpty {
+            let convs = Dictionary(grouping: chatItems, by: \.conversationId).map { cid, list in
+                Conv(conv: d.conversations.first { $0.id == cid }, id: cid, issues: list.sorted(by: IssueSort.order))
+            }.sorted { a, b in
+                (a.conv.map(HomeOrder.activity) ?? "") > (b.conv.map(HomeOrder.activity) ?? "")
+            }
+            companies.append(Company(org: nil, id: chatsId, workspaces: [Ws(ws: nil, id: chatsId, convs: convs)]))
+        }
+        return companies
     }
 }
 
@@ -143,11 +159,11 @@ struct IssuesScreen: View {
                     ForEach(tree) { co in
                         Section {
                             ForEach(co.workspaces) { w in
-                                HStack(spacing: 8) {
+                                if !co.isChats { HStack(spacing: 8) {
                                     Rectangle().fill(Theme.textSecondary.opacity(0.35)).frame(width: 2, height: 16)
                                     Text(w.ws?.name ?? "").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textSecondary)
                                 }
-                                .accessibilityAddTraits(.isHeader)
+                                .accessibilityAddTraits(.isHeader) }
                                 ForEach(w.convs) { cv in
                                     if let conv = cv.conv {
                                         NavigationLink(value: Route.conversation(conv.id)) {
@@ -166,8 +182,13 @@ struct IssuesScreen: View {
                             }
                         } header: {
                             HStack(spacing: 8) {
-                                OrgMark(org: co.org, size: 20)
-                                Text(co.org?.name ?? L("common.noCompany")).font(.subheadline.weight(.bold)).foregroundStyle(Theme.textPrimary).textCase(nil)
+                                if co.isChats {
+                                    Image(systemName: "bubble.left.and.bubble.right").foregroundStyle(Theme.accentText)
+                                    Text(L("issue.chatsSection")).font(.subheadline.weight(.bold)).foregroundStyle(Theme.textPrimary).textCase(nil)
+                                } else {
+                                    OrgMark(org: co.org, size: 20)
+                                    Text(co.org?.name ?? L("common.noCompany")).font(.subheadline.weight(.bold)).foregroundStyle(Theme.textPrimary).textCase(nil)
+                                }
                             }
                         }
                     }

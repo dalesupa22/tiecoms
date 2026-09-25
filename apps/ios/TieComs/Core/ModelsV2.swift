@@ -110,7 +110,8 @@ struct CalendarEventDTO: Codable, Equatable, Identifiable, Sendable {
         }
     }
     var id: String
-    var workspaceId: String
+    /// nil en directos, multi y laterales (SPEC-v4 E).
+    var workspaceId: String?
     var conversationId: String
     var originMessageId: String?
     var title: String
@@ -131,7 +132,7 @@ struct CalendarEventDTO: Codable, Equatable, Identifiable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))
-        workspaceId = c.v("workspaceId", "")
+        workspaceId = c.o("workspaceId")
         conversationId = c.v("conversationId", "")
         originMessageId = c.o("originMessageId")
         title = c.v("title", "")
@@ -154,7 +155,8 @@ enum IssueStatus: String, Codable, CaseIterable, Sendable {
 
 struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
     var id: String
-    var workspaceId: String
+    /// nil en directos, multi y laterales (SPEC-v4 E).
+    var workspaceId: String?
     var conversationId: String
     var originMessageId: String?
     var originMessageSeq: Int?
@@ -174,7 +176,7 @@ struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))
-        workspaceId = c.v("workspaceId", "")
+        workspaceId = c.o("workspaceId")
         conversationId = c.v("conversationId", "")
         originMessageId = c.o("originMessageId")
         originMessageSeq = c.intOpt("originMessageSeq")

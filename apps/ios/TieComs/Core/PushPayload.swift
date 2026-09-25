@@ -14,6 +14,8 @@ struct PushPayload: Equatable {
     var authorAvatarPath: String?
     var reminderId: String?
     var eventId: String?
+    /// Solo en el aviso de 10 min antes (la convocatoria no lo trae).
+    var minutes: Int?
     var title: String
     var subtitle: String?
     var body: String
@@ -40,6 +42,7 @@ struct PushPayload: Equatable {
         authorAvatarPath = str("authorAvatarUrl")
         reminderId = str("reminderId")
         eventId = str("eventId")
+        minutes = str("minutes").flatMap(Int.init)
         let aps = userInfo["aps"] as? [String: Any] ?? [:]
         if let alert = aps["alert"] as? [String: Any] {
             title = alert["title"] as? String ?? ""
@@ -54,6 +57,9 @@ struct PushPayload: Equatable {
         category = aps["category"] as? String ?? str("category")
         badge = (aps["badge"] as? NSNumber)?.intValue
     }
+
+    /// Aviso «Empieza en 10 min» frente a la convocatoria a una reunión.
+    var isEventSoon: Bool { kind == .event && minutes != nil }
 
     /// Grupo (título = nombre del chat, subtítulo = «Autor · Empresa») frente a directo (título = autor, sin subtítulo).
     var isGroup: Bool { subtitle != nil }

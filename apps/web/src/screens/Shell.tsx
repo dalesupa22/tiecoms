@@ -35,6 +35,40 @@ export function groupWorkspaces(d: BootstrapDTO) {
   return [...groups.values()];
 }
 
+// ---------- Orden de Inicio (mismas reglas en web, iOS y Android) ----------
+/** Actividad: el último mensaje de una persona si lo hay; si no, el último mensaje. */
+export const activityOf = (c: ConversationDTO) => c.lastHumanPreview?.createdAt ?? c.lastMessageAt ?? '';
+/** Con no leídos (no silenciada) cuenta como pendiente; silenciada con no leídos cuenta como leída. */
+export const pendingOf = (c: ConversationDTO) => (c.unread > 0 && !isMuted(c) ? c.unread : 0);
+/**
+ * Primero las que tienen no leídos, luego el resto; en cada bloque las fijadas arriba y después por
+ * actividad descendente. Desempate por id para que el orden sea estable.
+ */
+export function compareConversations(a: ConversationDTO, b: ConversationDTO) {
+  const ua = pendingOf(a) > 0 ? 1 : 0, ub = pendingOf(b) > 0 ? 1 : 0;
+  if (ua !== ub) return ub - ua;
+  const pa = a.pinnedAt ? 1 : 0, pb = b.pinnedAt ? 1 : 0;
+  if (pa !== pb) return pb - pa;
+  return activityOf(b).localeCompare(activityOf(a)) || a.id.localeCompare(b.id);
+}
+/** Espacios y empresas: por no leído agregado y luego por la actividad más reciente de sus conversaciones. */
+function groupRank(convs: ConversationDTO[]) {
+  return { unread: convs.reduce((n, c) => n + pendingOf(c), 0), activity: convs.reduce((m, c) => (activityOf(c) > m ? activityOf(c) : m), '') };
+}
+function compareRank(a: { unread: number; activity: string }, b: { unread: number; activity: string }) {
+  if ((a.unread > 0) !== (b.unread > 0)) return a.unread > 0 ? -1 : 1;
+  return b.unread - a.unread || b.activity.localeCompare(a.activity);
+}
+export function sortHome(d: BootstrapDTO, groups: ReturnType<typeof groupWorkspaces>) {
+  const inWs = (id: string) => d.conversations.filter((c) => c.workspaceId === id);
+  return groups
+    .map((g) => {
+      const ws = [...g.workspaces].sort((a, b) => compareRank(groupRank(inWs(a.id)), groupRank(inWs(b.id))) || a.id.localeCompare(b.id));
+      return { ...g, workspaces: ws, rank: groupRank(ws.flatMap((w) => inWs(w.id))) };
+    })
+    .sort((a, b) => compareRank(a.rank, b.rank) || (a.org?.id ?? '').localeCompare(b.org?.id ?? ''));
+}
+
 // ---------- Pestañas de Inicio (mismas reglas en web, iOS y Android) ----------
 export type HomeTab = 'all' | 'unread' | 'issues' | 'chats' | 'sides';
 export const HOME_TABS: HomeTab[] = ['all', 'unread', 'issues', 'chats', 'sides'];
@@ -71,12 +105,12 @@ function Sidebar({ route }: { route: Route }) {
   const [newWs, setNewWs] = useState(false);
   const [tab, setTabState] = useState<HomeTab>(storedTab);
   const setTab = (v: HomeTab) => { setTabState(v); try { localStorage.setItem(TAB_KEY, v); } catch {} };
-  const groups = useMemo(() => groupWorkspaces(d), [d]);
+  const groups = useMemo(() => sortHome(d, groupWorkspaces(d)), [d]);
   // Una conversación se muestra si cumple el filtro o si alguna lateral que cuelga de ella lo cumple.
   const shows = (c: ConversationDTO) => matchesTab(c, tab) || sidesOf(d, c.id).some((x) => matchesTab(x, tab));
   // Las laterales cuelgan de su conversación de origen (si la veo); si no, van con los chats.
   const directs = d.conversations.filter((c) => (c.kind === 'direct' || c.kind === 'multi') && !hangsUnderOrigin(d, c) && shows(c))
-    .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''));
+    .sort(compareConversations);
   const unreadTotal = d.conversations.reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0);
   const pinnedConvs = d.conversations.filter((c) => c.pinnedAt && shows(c)).sort((a, b) => (a.pinnedAt ?? '').localeCompare(b.pinnedAt ?? ''));
   const pinnedWs = tab === 'all' ? d.workspaces.filter((w) => w.pinnedAt) : [];
@@ -123,7 +157,7 @@ function Sidebar({ route }: { route: Route }) {
             <div className="side-org"><OrgMark org={g.org} /><span className="ellipsis">{g.org?.name ?? t('common.noCompany')}</span></div>
             <div className="side-ws">
               {g.workspaces.map((w) => {
-                const convs = d.conversations.filter((c) => c.workspaceId === w.id && shows(c));
+                const convs = d.conversations.filter((c) => c.workspaceId === w.id && shows(c)).sort(compareConversations);
                 return (
                   <div key={w.id}>
                     <WsTitle w={w} active={activeWs === w.id} />

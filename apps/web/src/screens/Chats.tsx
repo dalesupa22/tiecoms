@@ -3,6 +3,9 @@ import type { BootstrapDTO, ConversationDTO, LinkPreviewDTO, MessageDTO, PersonD
 import { apiUrl, client, useClient } from '../app-client.ts';
 import { attachmentSummaryText, errorText, t } from '../i18n.ts';
 import { toast } from '../menu.tsx';
+import { openDialog } from '../actions.tsx';
+import { groupWorkspaces } from './Shell.tsx';
+import { NewWorkspaceDialog } from './Dialogs.tsx';
 import { navigate } from '../router.ts';
 import { Avatar, Modal, OrgMark, conversationTitle, orgById, personById } from '../ui.tsx';
 
@@ -101,6 +104,108 @@ export function PeoplePicker({ picked, onToggle, exclude = [] }: { picked: strin
 
 /** Nuevo chat: una persona abre el directo; varias, un chat grupal (pueden ser de empresas distintas). */
 export function NewChatDialog({ onClose }: { onClose: () => void }) {
+  const [mode, setMode] = useState<'person' | 'space'>('person');
+  return (
+    <Modal title={t('chat.new')} onClose={onClose}>
+      <div className="seg" role="tablist">
+        <button type="button" role="tab" aria-selected={mode === 'person'} className={mode === 'person' ? 'on' : ''} onClick={() => setMode('person')}>{t('chat.mode.person')}</button>
+        <button type="button" role="tab" aria-selected={mode === 'space'} className={mode === 'space' ? 'on' : ''} onClick={() => setMode('space')}>{t('chat.mode.space')}</button>
+      </div>
+      {mode === 'person' ? <PersonChatForm onClose={onClose} /> : <SpaceGroupForm onClose={onClose} />}
+    </Modal>
+  );
+}
+
+/**
+ * «Grupo en un espacio»: espacio (agrupado por empresa, solo donde no soy tercero), nombre obligatorio,
+ * interno (solo mi empresa en ese espacio), nivel directivo opcional y miembros del espacio. Usa POST /workspaces/:id/conversations.
+ */
+function SpaceGroupForm({ onClose }: { onClose: () => void }) {
+  const d = useClient((s) => s.data)!;
+  const groups = groupWorkspaces(d).map((g) => ({ ...g, workspaces: g.workspaces.filter((w) => w.myRole !== 'guest') })).filter((g) => g.workspaces.length);
+  const [wsId, setWsId] = useState<string | null>(groups[0]?.workspaces[0]?.id ?? null);
+  const [name, setName] = useState('');
+  const [internal, setInternal] = useState(false);
+  const [directive, setDirective] = useState(false);
+  const [q, setQ] = useState('');
+  const [picked, setPicked] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ws = d.workspaces.find((w) => w.id === wsId);
+  const myOrgs = new Set(d.organizations.filter((o) => o.myRole).map((o) => o.id));
+  const members = new Set(ws?.memberIds ?? []);
+  const needle = q.trim().toLowerCase();
+  const candidates = d.people
+    .filter((p) => members.has(p.id) && p.id !== d.me.id && (!internal || (!!p.orgId && myOrgs.has(p.orgId))))
+    .filter((p) => !needle || [p.name, p.title, p.area, orgById(d, p.orgId)?.name].some((x) => x?.toLowerCase().includes(needle)))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const toggle = (id: string) => setPicked((x) => (x.includes(id) ? x.filter((y) => y !== id) : [...x, id]));
+  async function create() {
+    if (!ws || name.trim().length < 2) return;
+    setBusy(true); setError(null);
+    try {
+      const r = await client.createConversation(ws.id, {
+        name: name.trim(), kind: internal ? 'internal' : 'group', level: internal ? null : directive ? 'directivo' : 'operativo',
+        memberIds: picked.filter((id) => members.has(id) && (!internal || myOrgs.has(personById(d, id)?.orgId ?? ''))),
+      });
+      onClose();
+      navigate(`/c/${r.id}`);
+    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+  }
+  if (!groups.length) {
+    return (
+      <>
+        <div className="empty">{t('chat.noSpaces')}</div>
+        <div className="modal-actions">
+          <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+          <button className="btn primary" onClick={() => openDialog((close) => <NewWorkspaceDialog onClose={close} />)}>{t('dlg.createSpace')}</button>
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="eyebrow">{t('chat.pickSpace')}</div>
+      <div className="list" style={{ maxHeight: 180, overflow: 'auto', gap: 2, flex: 'none' }}>
+        {groups.map((g) => (
+          <section key={g.org?.id ?? 'none'}>
+            <div className="picker-org"><OrgMark org={g.org} size={20} /><span>{g.org?.name ?? t('common.noCompany')}</span></div>
+            {g.workspaces.map((w) => (
+              <label key={w.id} className={`check ${wsId === w.id ? 'derive-opt is-on' : ''}`}>
+                <input type="radio" name="ws" checked={wsId === w.id} onChange={() => { setWsId(w.id); setPicked([]); }} />
+                <span className="grow ellipsis"><b>{w.name}</b>{w.department ? <span className="small muted"> · {w.department}</span> : null}</span>
+              </label>
+            ))}
+          </section>
+        ))}
+      </div>
+      <label className="field"><span>{t('chat.groupName')}</span><input className="input" required minLength={2} maxLength={120} value={name} onChange={(e) => setName(e.target.value)} /></label>
+      <label className="check"><input type="checkbox" checked={internal} onChange={(e) => { setInternal(e.target.checked); setPicked([]); }} /><span className="grow"><b>{t('chat.internalOnly')}</b><span className="small muted" style={{ display: 'block' }}>{t('chat.internalHint')}</span></span></label>
+      {!internal && <label className="check"><input type="checkbox" checked={directive} onChange={(e) => setDirective(e.target.checked)} /><span className="grow"><b>{t('chat.directive')}</b></span></label>}
+      <div className="eyebrow">{t('chat.spaceMembers')}</div>
+      <input className="input" placeholder={t('chat.searchSpace')} value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="list" style={{ maxHeight: 220, overflow: 'auto', gap: 2, flex: 'none' }}>
+        {candidates.length === 0 && <div className="hint">{needle ? t('chat.nobody') : t('dlg.noCandidates')}</div>}
+        {candidates.map((p) => (
+          <label key={p.id} className={`picker-person ${picked.includes(p.id) ? 'on' : ''}`}>
+            <input type="checkbox" checked={picked.includes(p.id)} onChange={() => toggle(p.id)} />
+            <Avatar person={p} org={orgById(d, p.orgId)} size={30} />
+            <span className="grow" style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{p.name}</b><span className="small muted ellipsis" style={{ display: 'block' }}>{roleLine(p) || orgById(d, p.orgId)?.name}</span></span>
+          </label>
+        ))}
+      </div>
+      {error && <div className="error">{error}</div>}
+      <div className="modal-actions">
+        <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn primary" disabled={busy || !ws || name.trim().length < 2} onClick={create}>
+          {t('chat.createSpaceGroup')}
+        </button>
+      </div>
+    </>
+  );
+}
+
+function PersonChatForm({ onClose }: { onClose: () => void }) {
   const d = useClient((s) => s.data)!;
   const [picked, setPicked] = useState<string[]>([]);
   const [name, setName] = useState('');
@@ -117,7 +222,7 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
     } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
   }
   return (
-    <Modal title={t('chat.new')} onClose={onClose}>
+    <>
       <p className="muted" style={{ margin: 0 }}>{t('chat.newHint')}</p>
       <PeoplePicker picked={picked} onToggle={toggle} />
       {picked.length > 1 && (
@@ -133,7 +238,7 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
         <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
         <button className="btn primary" disabled={!picked.length || busy} onClick={go}>{picked.length > 1 ? t('chat.createGroup', { n: picked.length + 1 }) : t('chat.openDirect')}</button>
       </div>
-    </Modal>
+    </>
   );
 }
 

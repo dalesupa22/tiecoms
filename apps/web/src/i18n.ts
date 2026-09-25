@@ -294,6 +294,12 @@ const es = {
   'share.max5': 'Puedes enviar a 5 conversaciones como máximo.', 'share.signIn': 'Inicia sesión en TieComs para compartir', 'share.openApp': 'Abrir TieComs',
   'share.sentOne': 'Compartido', 'share.sentMany': 'Compartido en {n} conversaciones', 'share.progress': 'Enviando {i} de {n}…', 'share.recent': 'Recientes',
   'share.items': '{n} elementos', 'share.item': '1 elemento', 'share.failed': 'No se pudo compartir', 'share.pick': 'Elige hasta 5 conversaciones',
+  // ---------- SPEC v4 D: Nuevo chat con grupo en un espacio y orden de Inicio ----------
+  'chat.mode.person': 'Persona o chat grupal', 'chat.mode.space': 'Grupo en un espacio', 'chat.pickSpace': 'Elige el espacio',
+  'chat.groupName': 'Nombre del grupo', 'chat.internalOnly': 'Solo mi empresa (interno)', 'chat.internalHint': 'Solo lo verán personas de tu empresa en este espacio.',
+  'chat.directive': 'Nivel directivo', 'chat.createSpaceGroup': 'Crear grupo', 'chat.noSpaces': 'Aún no tienes espacios con otras empresas.',
+  'chat.spaceMembers': 'Participantes del espacio', 'chat.searchSpace': 'Buscar en este espacio',
+  'home.sortHint': 'Primero lo que tiene mensajes sin leer; luego por actividad reciente.',
 };
 
 type Key = keyof typeof es;
@@ -559,6 +565,12 @@ const en: Record<Key, string> = {
   'share.max5': 'You can send to up to 5 conversations.', 'share.signIn': 'Sign in to TieComs to share', 'share.openApp': 'Open TieComs',
   'share.sentOne': 'Shared', 'share.sentMany': 'Shared to {n} conversations', 'share.progress': 'Sending {i} of {n}…', 'share.recent': 'Recent',
   'share.items': '{n} items', 'share.item': '1 item', 'share.failed': 'Could not share', 'share.pick': 'Pick up to 5 conversations',
+  // ---------- SPEC v4 D: New chat with a group in a space, and Home order ----------
+  'chat.mode.person': 'Person or group chat', 'chat.mode.space': 'Group in a space', 'chat.pickSpace': 'Choose the space',
+  'chat.groupName': 'Group name', 'chat.internalOnly': 'Only my company (internal)', 'chat.internalHint': 'Only people from your company in this space will see it.',
+  'chat.directive': 'Directive level', 'chat.createSpaceGroup': 'Create group', 'chat.noSpaces': "You don't have spaces with other companies yet.",
+  'chat.spaceMembers': 'Space participants', 'chat.searchSpace': 'Search this space',
+  'home.sortHint': 'Unread first, then by recent activity.',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };

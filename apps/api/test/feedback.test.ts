@@ -216,6 +216,27 @@ describe('responder en privado', () => {
   });
 });
 
+describe('nuevo grupo en un espacio (POST /workspaces/:id/conversations)', () => {
+  it('interno solo admite a mi empresa; compartido admite a quien participa en el espacio; un tercero no puede crear', async () => {
+    const internal = await call(`/workspaces/${workspaceId}/conversations`, { token: ana.token, body: { name: 'Solo Acme', kind: 'internal', level: null, memberIds: [beto.id] } });
+    expect(internal.status).toBe(400);
+    // Laura es colega pero no está en el espacio: tampoco.
+    expect((await call(`/workspaces/${workspaceId}/conversations`, { token: ana.token, body: { name: 'Solo Acme', kind: 'internal', memberIds: [laura.id] } })).status).toBe(400);
+    const ok = await call(`/workspaces/${workspaceId}/conversations`, { token: ana.token, body: { name: 'Directivo mixto', kind: 'group', level: 'directivo', memberIds: [beto.id] } });
+    expect(ok.status).toBe(200);
+    const c = (await boot(beto)).conversations.find((x: any) => x.id === ok.json.id);
+    expect(c).toMatchObject({ kind: 'group', level: 'directivo', name: 'Directivo mixto', workspaceId });
+    const solo = await call(`/workspaces/${workspaceId}/conversations`, { token: ana.token, body: { name: 'Interno vacío', kind: 'internal' } });
+    expect(solo.status).toBe(200);
+    expect((await boot(beto)).conversations.some((x: any) => x.id === solo.json.id)).toBe(false);
+    // Tercero invitado: no crea grupos.
+    const g = await call(`/workspaces/${workspaceId}/invitations`, { token: ana.token, body: { role: 'guest', conversationIds: [generalId] } });
+    const guest = await signup('Gina');
+    expect((await call(`/invitations/${g.json.token}/accept`, { token: guest.token, body: {} })).status).toBe(200);
+    expect((await call(`/workspaces/${workspaceId}/conversations`, { token: guest.token, body: { name: 'Del tercero', kind: 'group' } })).status).toBe(403);
+  });
+});
+
 describe('comentar asuntos', () => {
   it('cualquier participante comenta y el historial lo muestra con autor y hora', async () => {
     const issue = await call(`/conversations/${generalId}/issues`, { token: ana.token, body: { title: 'Cerrar contrato de logística', originMessageId: anchorId } });

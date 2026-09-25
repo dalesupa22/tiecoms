@@ -4,6 +4,7 @@
  * los ejecuta fuera de ella; reintenta con backoff y deja el fallo inspeccionable.
  */
 import { hostname } from 'node:os';
+import { migrate } from './migrate.ts';
 import { enqueueOutbox, pool, tx } from './db.ts';
 import { fireDueReminders } from './modules/reminders.ts';
 import { cleanupExpired as cleanupSso } from './modules/sso.ts';
@@ -131,4 +132,8 @@ async function loop() {
 process.on('SIGTERM', () => { stop = true; });
 process.on('SIGINT', () => { stop = true; });
 console.log(`[worker] ${WORKER_ID} iniciado`);
-void loop();
+// Igual que el API: aplica migraciones pendientes antes de trabajar (evita consultas a columnas que aún no existen).
+void (async () => {
+  if (process.env.MIGRATE_ON_START !== 'false') await migrate().catch((e) => console.error('[worker] migraciones', e?.message));
+  await loop();
+})();

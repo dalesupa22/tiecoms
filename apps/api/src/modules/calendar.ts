@@ -56,6 +56,8 @@ export async function createEvent(userId: string, conversationId: string, input:
     await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: sys('event.created', { title: input.title, eventId: id, startsAt: input.startsAt, timezone: input.timezone }) });
     const ev = await load(c, id);
     await publish(c, ev);
+    // Convocatoria: push a los invitados (el worker revalida y respeta el silencio).
+    await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('push.event', $1, 2)", [JSON.stringify({ eventId: id })]);
     await audit(c, userId, 'event.created', { type: 'event', id, workspaceId: a.workspaceId });
     return ev;
   });

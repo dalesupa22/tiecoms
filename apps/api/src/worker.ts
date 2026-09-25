@@ -10,6 +10,7 @@ import { cleanupExpired as cleanupSso } from './modules/sso.ts';
 import { previewMessage } from './modules/link-preview.ts';
 import { deletePersonalObject } from './storage.ts';
 import { notifyReport } from './modules/safety.ts';
+import { pushEvent, pushMessage, pushReminder } from './modules/push.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
 const LEASE_SECONDS = 120;
@@ -22,6 +23,10 @@ const handlers: Record<string, Handler> = {
     await pool.query('DELETE FROM files WHERE id = $1 AND deleted_at IS NOT NULL', [p.fileId]);
   },
   async 'safety.notify'(p) { await notifyReport(p.reportId); },
+  /** Notificaciones push (APNs / FCM). Los fallos por token se registran sin reintentar el job (evita duplicados). */
+  async 'push.message'(p) { await pushMessage(p.messageId); },
+  async 'push.reminder'(p) { await pushReminder(p.reminderId); },
+  async 'push.event'(p) { await pushEvent(p.eventId); },
   /** Vista previa del primer enlace de un mensaje. */
   async 'link.preview'(p) { await previewMessage(p.messageId); },
   /** Terceros vencidos: se revoca el acceso y se sacan sus sockets de las salas. */

@@ -4,7 +4,7 @@ import type {
 } from '@tiecoms/contracts';
 import { conversationAccess, workspaceAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Tx } from '../db.ts';
-import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import { ApiError, badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { randomToken, sha256 } from '../security.ts';
 import { deliverInvitation, prepareInvitationFor } from './invitations.ts';
 import { appendEvent, appendMessage } from './messages.ts';
@@ -125,7 +125,13 @@ export async function addMembers(userId: string, conversationId: string, input: 
     if (a.kind === 'direct') throw badRequest('Los directos no admiten más personas');
     await ensureNotBlocked(c, userId, input.userIds);
     let rows: { user_id: string; org_id: string | null; name: string }[];
-    if (a.kind === 'multi') {
+    const side = a.kind === 'multi' ? (await c.query("SELECT parent_conversation_id, parent_message_id FROM conversations WHERE id = $1 AND derive_kind = 'side'", [conversationId])).rows[0] : null;
+    if (side) {
+      // Lateral: la misma regla que al abrirla (participantes del origen o colegas de mis empresas).
+      const { outsiders } = await sideAudience(c, userId, side.parent_conversation_id, side.parent_message_id, [...new Set(input.userIds)]);
+      if (outsiders.length) throw sideOutsider(outsiders);
+      rows = (await c.query('SELECT id AS user_id, primary_org_id AS org_id, name FROM users WHERE id = ANY($1)', [input.userIds])).rows;
+    } else if (a.kind === 'multi') {
       // Chat grupal: basta con que quien suma comparta un espacio o la empresa con cada persona.
       const ok = await reachable(c, userId, [...new Set(input.userIds)]);
       if (ok.length !== new Set(input.userIds).size) throw forbidden('Solo puedes sumar personas con las que compartes un espacio o tu empresa');
@@ -397,5 +403,89 @@ export async function returnResult(userId: string, childId: string, summary: str
     await scopeChanged(c, [...new Set(members)], 'conversation.returned');
     await audit(c, userId, 'conversation.returned', { type: 'conversation', id: childId }, { parentId: child.parent_conversation_id });
     return { parentId: child.parent_conversation_id as string, messageId: msg.id };
+  });
+}
+
+// ---------- Conversaciones laterales ----------
+const sideOutsider = (userIds: string[]) =>
+  new ApiError(403, 'side_outsider', 'Solo puedes sumar a participantes de la conversación de origen o a colegas de tu empresa', { userIds });
+
+/** Recorta un extracto a un límite sin cortar la última palabra (si hace falta recortar). */
+function clip(text: string, max: number) {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max).replace(/\s+\S*$/, '');
+  return `${cut || text.slice(0, max)}…`;
+}
+
+/**
+ * Quién puede entrar a una lateral: participantes del origen que ven el mensaje ancla
+ * y colegas de mis empresas. Nadie más, para que el contenido no pase a otra empresa.
+ */
+async function sideAudience(c: Tx, actorId: string, parentId: string | null, anchorId: string | null, ids: string[]) {
+  const anchorSeq = anchorId ? (await c.query('SELECT seq FROM messages WHERE id = $1', [anchorId])).rows[0]?.seq ?? null : null;
+  const { rows } = await c.query(
+    `SELECT u.id, EXISTS (SELECT 1 FROM organization_memberships a JOIN organization_memberships b ON b.org_id = a.org_id
+                           WHERE a.user_id = $1 AND b.user_id = u.id) AS colleague
+       FROM users u WHERE u.id = ANY($2) AND u.disabled_at IS NULL`,
+    [actorId, ids],
+  );
+  const known = new Map(rows.map((r) => [r.id as string, r.colleague as boolean]));
+  const readsOrigin = new Set<string>();
+  const outsiders: string[] = [];
+  for (const id of ids) {
+    let inOrigin = false;
+    if (parentId && known.has(id)) {
+      try {
+        const acc = await conversationAccess(c, id, parentId, 'read');
+        inOrigin = anchorSeq === null || anchorSeq > acc.historyFromSeq;
+      } catch { inOrigin = false; }
+    }
+    if (inOrigin) readsOrigin.add(id);
+    if (!inOrigin && !known.get(id)) outsiders.push(id);
+  }
+  return { outsiders, readsOrigin };
+}
+
+/**
+ * Abre una conversación lateral desde un mensaje: un chat multi privado con
+ * parentId/parentMessageId del origen y deriveKind 'side'. En el origen no se
+ * publica nada; solo sus miembros la ven (y su cliente pinta el chip bajo el ancla).
+ */
+export async function createSideConversation(userId: string, parentId: string, input: { messageId: string; userIds: string[]; question?: string }) {
+  return tx(async (c) => {
+    const a = await conversationAccess(c, userId, parentId, 'read', true);
+    const { rows: mr } = await c.query(
+      'SELECT m.id, m.author_id, m.body, m.kind, m.seq, m.deleted_at, u.name AS author_name FROM messages m JOIN users u ON u.id = m.author_id WHERE m.id = $1 AND m.conversation_id = $2',
+      [input.messageId, parentId],
+    );
+    const m = mr[0];
+    if (!m || m.seq <= a.historyFromSeq || m.kind !== 'text' || m.deleted_at) throw badRequest('Solo se abre una lateral desde un mensaje visible de esta conversación');
+    const others = [...new Set(input.userIds)].filter((u) => u !== userId);
+    if (!others.length) throw badRequest('Elige al menos a una persona');
+    await ensureNotBlocked(c, userId, others);
+    const { outsiders, readsOrigin } = await sideAudience(c, userId, parentId, m.id, others);
+    if (outsiders.length) throw sideOutsider(outsiders);
+
+    const parent = (await c.query('SELECT name FROM conversations WHERE id = $1', [parentId])).rows[0];
+    const excerpt = clip(String(m.body).replace(/\s+/g, ' ').trim(), 80);
+    const name = `Consulta · ${clip(excerpt.replace(/…$/, ''), 40)}`;
+    const { rows } = await c.query(
+      `INSERT INTO conversations (kind, name, created_by, parent_conversation_id, parent_message_id, derive_kind, derived_by)
+       VALUES ('multi', $1, $2, $3, $4, 'side', $2) RETURNING id`,
+      [name, userId, parentId, m.id],
+    );
+    const id: string = rows[0].id;
+    // Como en los chats grupales: todos pueden sumar a alguien más (con la misma regla de la lateral).
+    await c.query('INSERT INTO conversation_memberships (conversation_id, user_id, can_manage, added_by) VALUES ($1,$2,true,$2)', [id, userId]);
+    for (const uid of others) await c.query('INSERT INTO conversation_memberships (conversation_id, user_id, can_manage, added_by) VALUES ($1,$2,true,$3)', [id, uid, userId]);
+    // El nombre del origen solo se muestra si todos los de la lateral pueden leerlo.
+    const everyoneReads = others.every((u) => readsOrigin.has(u));
+    await appendMessage(c, { conversationId: id, authorId: userId, kind: 'system', body: sys('side.started', {
+      excerpt, authorName: m.author_name, parentName: everyoneReads ? parent?.name ?? null : null, messageId: m.id,
+    }) });
+    if (input.question) await appendMessage(c, { conversationId: id, authorId: userId, body: input.question });
+    await audit(c, userId, 'conversation.side_created', { type: 'conversation', id, workspaceId: a.workspaceId }, { parentId, members: others.length + 1 });
+    await scopeChanged(c, [userId, ...others], 'side.created', { conversationId: id });
+    return { id };
   });
 }

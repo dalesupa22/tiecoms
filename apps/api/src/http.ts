@@ -8,6 +8,7 @@ import {
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
   UpdateProfileInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
+  SideConversationInput, PushTokenInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -28,6 +29,7 @@ import * as wa from './modules/whatsapp.ts';
 import * as profile from './modules/profile.ts';
 import * as drive from './modules/drive.ts';
 import * as safety from './modules/safety.ts';
+import * as push from './modules/push.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
 import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
@@ -175,6 +177,14 @@ export async function buildHttp() {
     priv.post('/api/v1/me/avatar', { bodyLimit: profile.MAX_AVATAR_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
       async (req) => profile.setAvatar(req.userId, req.body as Buffer));
     priv.delete('/api/v1/me/avatar', async (req) => profile.removeAvatar(req.userId));
+    // Foto de grupo (grupos e internos: quien administra; chats grupales y laterales: cualquier participante).
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/avatar', { bodyLimit: profile.MAX_AVATAR_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+      async (req) => profile.setGroupAvatar(req.userId, z.uuid().parse(req.params.id), req.body as Buffer));
+    priv.delete<{ Params: { id: string } }>('/api/v1/conversations/:id/avatar', async (req) => profile.removeGroupAvatar(req.userId, z.uuid().parse(req.params.id)));
+    // Notificaciones push: un token por sesión.
+    priv.put('/api/v1/push/token', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) =>
+      push.registerToken(req.sessionId, PushTokenInput.parse(req.body), String(req.headers['accept-language'] ?? '')));
+    priv.delete('/api/v1/push/token', async (req) => push.removeToken(req.sessionId));
     priv.get<{ Params: { id: string } }>('/api/v1/organizations/:id/domains', async (req) => ({ domains: await domains.listDomains(req.userId, req.params.id) }));
     priv.post<{ Params: { id: string } }>('/api/v1/organizations/:id/domains', async (req) =>
       domains.addDomain(req.userId, req.params.id, AddDomainInput.parse(req.body).domain));
@@ -246,6 +256,8 @@ export async function buildHttp() {
 
     // Bifurcaciones
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/derive', async (req) => ws.deriveConversation(req.userId, req.params.id, DeriveInput.parse(req.body)));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/side', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
+      async (req) => ws.createSideConversation(req.userId, z.uuid().parse(req.params.id), SideConversationInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/return', async (req) => ws.returnResult(req.userId, req.params.id, ReturnResultInput.parse(req.body).summary));
     // Asuntos
     priv.get<{ Querystring: { workspaceId?: string; conversationId?: string; mine?: string; open?: string } }>('/api/v1/issues', async (req) => ({

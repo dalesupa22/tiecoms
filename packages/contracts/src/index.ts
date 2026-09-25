@@ -183,12 +183,15 @@ export interface ConversationDTO {
   /** Preferencias personales. */
   pinnedAt: string | null;
   mutedUntil: string | null;
+  /** Foto del grupo o chat (/api/v1/avatars/…) o null. Clientes viejos pueden no traerla. */
+  avatarUrl?: string | null;
 }
 
 export type ForwardSource = 'whatsapp' | 'slack' | 'email' | 'teams' | 'tiecoms' | 'other';
 /** imageUrl es una ruta del API (/api/v1/previews/…): la miniatura ya está en TieComs. */
 export interface LinkPreviewDTO { url: string; title: string | null; description: string | null; siteName: string | null; imageUrl: string | null }
-export interface ForwardedInfo { source: ForwardSource; author?: string | null; sentAt?: string | null; fromConversationId?: string | null }
+/** messageId: mensaje original (p. ej. «Responder en privado»); el enlace solo abre si el lector puede leer el origen. */
+export interface ForwardedInfo { source: ForwardSource; author?: string | null; sentAt?: string | null; fromConversationId?: string | null; messageId?: string | null }
 
 export interface ReminderDTO {
   id: string;
@@ -219,7 +222,8 @@ export interface CalendarEventDTO {
   updatedAt: string;
 }
 
-export type DeriveKind = 'same' | 'internal' | 'directive';
+/** side = conversación lateral: consulta privada desde un mensaje (chat multi que cuelga de su origen). */
+export type DeriveKind = 'same' | 'internal' | 'directive' | 'side';
 export type IssueStatus = 'open' | 'in_progress' | 'waiting' | 'done' | 'cancelled';
 
 export interface IssueDTO {
@@ -356,6 +360,15 @@ export const DeriveInput = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   reason: z.string().trim().max(300).optional(),
 });
+/**
+ * Conversación lateral desde un mensaje: pregunta en privado a colegas de tu empresa o a
+ * participantes del origen. No publica nada en el origen. Más adelante userIds podrá incluir agentes.
+ */
+export const SideConversationInput = z.object({
+  messageId: z.uuid(),
+  userIds: z.array(z.uuid()).min(1).max(20),
+  question: z.string().trim().min(1).max(4000).optional(),
+});
 export const ReturnResultInput = z.object({ summary: z.string().trim().min(2).max(4000) });
 
 export const AcceptInvitationInput = z.object({ orgId: z.uuid().optional() });
@@ -394,6 +407,8 @@ export const ForwardedInput = z.object({
   author: z.string().trim().max(120).nullable().optional(),
   sentAt: z.string().max(40).nullable().optional(),
   fromConversationId: z.uuid().nullable().optional(),
+  /** Mensaje original dentro de fromConversationId (exige fromConversationId). */
+  messageId: z.uuid().nullable().optional(),
 });
 export const SendMessageInput = z.object({
   clientMessageId: z.string().min(8).max(64),
@@ -432,6 +447,32 @@ export const EventsQuery = z.object({
   after: z.coerce.number().int().min(0),
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
+
+// ---------- Notificaciones push ----------
+/** Token del dispositivo de ESTA sesión (reemplaza el anterior). sandbox = compilación Debug de Xcode. */
+export const PushTokenInput = z.object({
+  provider: z.enum(['apns', 'fcm']),
+  token: z.string().trim().min(8).max(4096),
+  environment: z.enum(['sandbox', 'production']).default('production'),
+  /** Idioma de los textos que arma el servidor (recordatorios, reuniones). Por defecto, Accept-Language. */
+  lang: z.enum(['es', 'en']).optional(),
+});
+
+/**
+ * Datos que acompañan cada push (APNs: junto a `aps`; FCM: mensaje de datos, todos los valores como texto).
+ * type: message | reminder | event. Clientes: ignorar campos y tipos desconocidos.
+ */
+export interface PushData {
+  type: 'message' | 'reminder' | 'event';
+  conversationId: string;
+  messageId?: string;
+  authorId?: string;
+  authorName?: string;
+  /** Ruta relativa (/api/v1/avatars/…) como en los DTO, o vacío. */
+  authorAvatarUrl?: string;
+  reminderId?: string;
+  eventId?: string;
+}
 
 // ---------- Archivos (árbol de carpetas) ----------
 export interface DriveFolderDTO { id: string; parentId: string | null; name: string; createdBy: string; createdAt: string }

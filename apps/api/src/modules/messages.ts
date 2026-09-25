@@ -9,6 +9,19 @@ async function queuePreview(c: Tx, messageId: string, body: string) {
   if (/\bhttps?:\/\//i.test(body)) await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('link.preview', $1, 2)", [JSON.stringify({ messageId })]);
 }
 
+/** Push de un mensaje nuevo: solo si alguien más de la conversación tiene un dispositivo registrado. */
+async function queuePush(c: Tx, messageId: string, conversationId: string, authorId: string) {
+  await c.query(
+    `INSERT INTO jobs (kind, payload, max_attempts)
+     SELECT 'push.message', $1, 2 WHERE EXISTS (
+       SELECT 1 FROM conversation_memberships cm
+         JOIN sessions s ON s.user_id = cm.user_id AND s.revoked_at IS NULL AND s.expires_at > now()
+         JOIN push_subscriptions ps ON ps.session_id = s.id AND ps.provider IN ('apns', 'fcm')
+        WHERE cm.conversation_id = $2 AND cm.removed_at IS NULL AND cm.user_id <> $3)`,
+    [JSON.stringify({ messageId }), conversationId, authorId],
+  );
+}
+
 /** Eventos más antiguos que esto obligan al cliente a pedir un snapshot nuevo. */
 const MAX_CATCHUP_EVENTS = 5000;
 
@@ -60,7 +73,9 @@ export async function appendMessage(c: Tx, p: {
     p.conversationId, p.authorId, p.clientMessageId ?? null, p.kind ?? 'text', p.body, p.replyTo ?? null, p.mergedFrom ?? null,
     p.forwarded ? JSON.stringify(p.forwarded) : null,
   ]);
-  return rows[0].m as MessageDTO;
+  const m = rows[0].m as MessageDTO;
+  if ((p.kind ?? 'text') === 'text') await queuePush(c, m.id, p.conversationId, p.authorId);
+  return m;
 }
 
 async function findByClientId(conversationId: string, authorId: string, clientMessageId: string) {
@@ -97,8 +112,15 @@ export async function sendMessage(userId: string, conversationId: string, input:
       let forwarded: ForwardedInfo | null = null;
       if (input.forwarded) {
         // Reenviar desde otra conversación exige poder leerla: no se puede atribuir contenido ajeno.
-        if (input.forwarded.fromConversationId) await conversationAccess(c, userId, input.forwarded.fromConversationId, 'read');
-        forwarded = { source: input.forwarded.source, author: input.forwarded.author ?? null, sentAt: input.forwarded.sentAt ?? null, fromConversationId: input.forwarded.fromConversationId ?? null };
+        const from = input.forwarded.fromConversationId ?? null;
+        const src = from ? await conversationAccess(c, userId, from, 'read') : null;
+        const originalId = input.forwarded.messageId ?? null;
+        if (originalId) {
+          // «Responder en privado»: el mensaje original debe ser visible para quien responde.
+          const o = src ? (await c.query('SELECT seq FROM messages WHERE id = $1 AND conversation_id = $2', [originalId, from])).rows[0] : null;
+          if (!o || o.seq <= src!.historyFromSeq) throw badRequest('El mensaje original no está en la conversación de origen');
+        }
+        forwarded = { source: input.forwarded.source, author: input.forwarded.author ?? null, sentAt: input.forwarded.sentAt ?? null, fromConversationId: from, messageId: originalId };
       }
       const m = await appendMessage(c, { conversationId, authorId: userId, body: input.body, clientMessageId: input.clientMessageId, replyTo: input.replyTo ?? null, forwarded });
       await queuePreview(c, m.id, input.body);

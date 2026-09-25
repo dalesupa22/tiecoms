@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UserNotifications
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
@@ -7,9 +8,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         return true
     }
 
-    // Punto de extensión para APNs (desactivado: el backend aún no recibe tokens).
+    /// Token APNs → PUT /push/token (lo hace el AppStore).
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        PushRegistration.tokenReceived(deviceToken)
+        MainActor.assumeIsolated { PushRegistration.tokenReceived(deviceToken) }
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
@@ -31,7 +32,21 @@ struct TieComsApp: App {
         _store = State(initialValue: s)
         AppFeedback.shared.openConversationId = { [weak s] in s?.appActive == true ? s?.openConversationId : nil }
         AppFeedback.shared.onOpenConversation = { [weak s] id in s?.handle(.conversation(id)) }
-        s.onReady = { Task { await AppFeedback.shared.requestAuthorizationIfNeeded() } }
+        AppFeedback.shared.onReply = { [weak s] conv, text in await s?.replyFromNotification(conv, text: text) }
+        AppFeedback.shared.onMarkRead = { [weak s] conv in await s?.markReadFromNotification(conv) }
+        AppFeedback.shared.socketOnline = { [weak s] in s?.connection == .online && s?.appActive == true }
+        PushRegistration.onToken = { [weak s] hex in Task { await s?.registerPushToken(hex) } }
+        // Tras entrar: si nunca se pidió el permiso, primero una pantalla que explica por qué; si ya hay permiso, registrar APNs.
+        s.onReady = { [weak s] in
+            Task { @MainActor in
+                let settings = await UNUserNotificationCenter.current().notificationSettings()
+                if settings.authorizationStatus == .notDetermined {
+                    if Prefs.notificationsEnabled && !Prefs.pushPrompted && !AppConfig.launchFlag("TCNoPushPrompt") { s?.showPushPrompt = true }
+                } else {
+                    await AppFeedback.shared.requestAuthorizationIfNeeded()
+                }
+            }
+        }
     }
 
     private let launchedAt = Date()

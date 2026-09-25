@@ -6,6 +6,8 @@ struct ApiRequestError: Error, Equatable, LocalizedError {
     var code: String
     var message: String
     var paths: [String] = []
+    /// details.userIds del error (personas que no se pueden sumar).
+    var userIds: [String] = []
 
     /// Errores que no se arreglan reintentando (permiso, validación, conflicto).
     var permanent: Bool { status >= 400 && status < 500 && status != 408 && status != 429 && status != 401 }
@@ -162,7 +164,7 @@ final class APIClient {
     nonisolated static func parseError(_ data: Data, status: Int) -> ApiRequestError {
         if let body = try? JSONDecoder().decode(ApiErrorBody.self, from: data) {
             return ApiRequestError(status: status, code: body.code.isEmpty ? "http_\(status)" : body.code, message: body.message,
-                                   paths: body.details.compactMap(\.path))
+                                   paths: body.details.compactMap(\.path), userIds: body.userIds)
         }
         return ApiRequestError(status: status, code: "http_\(status)", message: HTTPURLResponse.localizedString(forStatusCode: status))
     }

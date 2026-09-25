@@ -1,1 +1,2 @@
 "CFBundleDisplayName" = "TieComs";
+"NSCameraUsageDescription" = "TieComs usa la cámara solo cuando eliges tomar una foto de perfil o del grupo.";

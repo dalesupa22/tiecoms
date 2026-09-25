@@ -45,7 +45,11 @@ struct ConversationView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
     let conversationId: String
+    /// Dentro del panel de una conversación lateral.
+    var embedded = false
     @State private var draft = ""
+    @State private var sidePanel: String?
+    @State private var askSide: MessageDTO?
     @State private var replyTo: MessageDTO?
     @State private var editing: MessageDTO?
     @State private var sheet: ChatSheet?
@@ -72,6 +76,18 @@ struct ConversationView: View {
             try? await store.loadEvents(from: Date().addingTimeInterval(-30 * 86400), to: Date().addingTimeInterval(90 * 86400), conversationId: conversationId)
         }
         .sheet(item: $sheet) { s in sheetView(s) }
+        .sheet(item: Binding(get: { askSide }, set: { askSide = $0 })) { m in
+            NewSideSheet(conversationId: conversationId, message: m) { id in sidePanel = id }
+        }
+        // iPad / pantalla ancha: panel a la derecha; iPhone: hoja casi completa sobre el chat.
+        .inspector(isPresented: Binding(get: { sidePanel != nil }, set: { if !$0 { sidePanel = nil } })) {
+            if let id = sidePanel {
+                SidePanel(sideId: id)
+                    .inspectorColumnWidth(min: 320, ideal: 380, max: 480)
+                    .presentationDetents([.large])
+            }
+        }
+        .onChange(of: sidePanel) { _, v in if v == nil { store.openConversationId = conversationId } }
         .confirmationDialog(L("safety.blockConfirm"), isPresented: Binding(get: { blockUserId != nil }, set: { if !$0 { blockUserId = nil } }), titleVisibility: .visible) {
             Button(L("safety.block"), role: .destructive) {
                 if let id = blockUserId { act(toast: L("safety.blocked")) { try await store.setUserBlocked(id, blocked: true) } }
@@ -114,7 +130,7 @@ struct ConversationView: View {
                 ConnectionBanner(connection: store.connection).padding(.horizontal, 16).padding(.vertical, 6)
                     .background(Theme.surface)
             }
-            LineageBar(conv: c, onReturn: { sheet = .returnResult })
+            if !embedded { LineageBar(conv: c, onReturn: { sheet = .returnResult }) }
             let pinCount = store.pins[conversationId]?.count ?? 0
             if pinCount > 0 {
                 Button { sheet = .pins } label: {
@@ -127,6 +143,7 @@ struct ConversationView: View {
                 .foregroundStyle(Theme.accentText)
                 .accessibilityIdentifier("chat.pinsBar")
             }
+            OpenIssuesBar(conversationId: conversationId)
             if let state, state.loaded {
                 messages(d, c, state)
             } else if let err = state?.error {
@@ -155,18 +172,20 @@ struct ConversationView: View {
                 NavigationLink(value: Route.details(conversationId)) {
                     VStack(spacing: 1) {
                         HStack(spacing: 4) {
+                            if c.avatarUrl != nil { ConvIcon(d: d, c: c, size: 20) }
                             if c.kind == .internal { Image(systemName: "lock.fill").font(.caption2) }
                             Text(Naming.title(d, c)).font(.headline).lineLimit(1)
                             if c.isMuted { Image(systemName: "bell.slash.fill").font(.caption2).foregroundStyle(Theme.textSecondary) }
                         }
                         .foregroundStyle(Theme.textPrimary)
-                        let sub = Naming.subtitle(d, c)
+                        // Grupos de un espacio: la ruta «Empresa · Espacio»; chats: las empresas.
+                        let sub = Naming.route(d, c) ?? Naming.subtitle(d, c)
                         if !sub.isEmpty { Text(sub).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1).truncationMode(.tail) }
                     }
                     // Sin tope, un subtítulo largo (chat grupal con varias empresas) se recorta por ambos lados.
                     .frame(maxWidth: 250)
                 }
-                .accessibilityLabel([Naming.title(d, c), Naming.subtitle(d, c)].filter { !$0.isEmpty }.joined(separator: ", "))
+                .accessibilityLabel([Naming.title(d, c), Naming.route(d, c) ?? Naming.subtitle(d, c)].filter { !$0.isEmpty }.joined(separator: ", "))
                 .accessibilityHint(L("chat.details"))
                 .accessibilityIdentifier("chat.header")
             }
@@ -205,9 +224,7 @@ struct ConversationView: View {
                 items.append(.system(m))
                 prev = nil
             } else {
-                let grouped = prev?.authorId == m.authorId && m.replyTo == nil && m.forwarded == nil
-                    && prevDate.map { date.timeIntervalSince($0) < 300 } == true
-                items.append(.message(m, showAuthor: !grouped))
+                items.append(.message(m, showAuthor: ChatGrouping.startsRun(previous: prev, current: m)))
                 prev = m
             }
             prevDate = date
@@ -283,8 +300,12 @@ struct ConversationView: View {
         case .message(let m, let showAuthor):
             let mine = m.authorId == d.me.id
             let quoted = m.replyTo.flatMap { byId[$0] }
-            MessageBubble(
+            let author = Naming.person(d, m.authorId)
+            let bubble = MessageBubble(
                 text: m.deletedAt != nil ? L("chat.deleted") : m.body,
+                leading: mine || !ChatGrouping.showsAvatars(c.kind) ? .none
+                    : showAuthor ? .person(name: author?.name ?? "?", photo: author?.avatarUrl, id: m.authorId, agent: author?.kind == "agent") : .spacer,
+                authorColor: PersonColor.text(m.authorId),
                 time: L10n.clock(m.createdAt) + (m.editedAt != nil && m.deletedAt == nil ? " " + L("msg.edited") : ""),
                 mine: mine,
                 author: mine || !showAuthor ? nil : Naming.authorLine(d, m.authorId),
@@ -296,9 +317,30 @@ struct ConversationView: View {
                 linkify: m.deletedAt == nil && m.kind == "text",
                 linkPreview: m.deletedAt == nil ? m.linkPreview : nil
             )
+            Group {
+                if m.deletedAt == nil {
+                    // Pulsación larga como en iPhone: vista previa de la burbuja + menú (sin reacciones: el API no las tiene).
+                    bubble.contextMenu { messageMenu(d, c, m) } preview: {
+                        bubble.frame(width: 340).padding(.vertical, 10).padding(.horizontal, 6).background(Theme.background)
+                    }
+                } else { bubble }
+            }
             .padding(.top, showAuthor ? 6 : 0)
-            .contextMenu { if m.deletedAt == nil { messageMenu(d, c, m) } }
             .accessibilityIdentifier("msg.\(m.id)")
+            let sides = store.sides(of: m.id)
+            if !sides.isEmpty {
+                SideChip(sides: sides) { sidePanel = $0 }
+                    .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
+                    .padding(.horizontal, mine ? 4 : 40)
+            }
+            if let f = m.forwarded, f.messageId != nil, let fromId = f.fromConversationId, store.meta(fromId) != nil {
+                NavigationLink(value: Route.conversation(fromId)) {
+                    Label(L("privateReply.open"), systemImage: "arrow.up.forward").font(.caption2.weight(.semibold))
+                }
+                .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
+                .padding(.horizontal, mine ? 4 : 40)
+                .accessibilityIdentifier("msg.privateOrigin.\(m.id)")
+            }
         case .pending(let p):
             MessageBubble(text: p.body, time: "", mine: true, author: nil, status: p.status == .failed ? .failed : .sending, italic: false,
                           forwardedLabel: p.forwarded.map { forwardedLabel(d, $0) })
@@ -317,6 +359,16 @@ struct ConversationView: View {
     }
 
     private func forwardedLabel(_ d: BootstrapDTO, _ f: ForwardedInfo) -> String {
+        if let mid = f.messageId {
+            // Respuesta en privado: cita del original si lo tengo cargado; si no, la conversación de origen.
+            if let fromId = f.fromConversationId, let orig = store.conversations[fromId]?.messages.first(where: { $0.id == mid }), orig.deletedAt == nil {
+                return L("privateReply.label", ["excerpt": excerpt(orig.body, 80)])
+            }
+            if let from = f.fromConversationId.flatMap({ store.meta($0) }) {
+                return L("privateReply.labelConv", ["name": Naming.title(d, from)])
+            }
+            return L("privateReply.labelHidden")
+        }
         var label: String
         if let from = f.fromConversationId.flatMap({ store.meta($0) }) {
             label = L("fwd.fromConv", ["name": Naming.title(d, from)])
@@ -338,6 +390,14 @@ struct ConversationView: View {
         let myWsRole = d.workspaces.first { $0.id == c.workspaceId }?.myRole
         if c.canPost {
             Button { replyTo = m; editing = nil; composerFocused = true } label: { Label(L("menu.reply"), systemImage: "arrowshape.turn.up.left") }
+        }
+        if !mine && c.kind != .direct {
+            Button {
+                act { try await store.startPrivateReply(to: m) }
+            } label: { Label(L("menu.replyPrivately"), systemImage: "lock.bubble") }
+        }
+        if m.kind == "text" && !Naming.isSide(c) {
+            Button { askSide = m } label: { Label(L("menu.askSide"), systemImage: "bubble.left.and.text.bubble.right") }
         }
         Button { UIPasteboard.general.string = m.body; store.show(L("toast.copied")) } label: { Label(L("menu.copyText"), systemImage: "doc.on.doc") }
         Button { UIPasteboard.general.string = "\(conversationLink(conversationId))?m=\(m.seq)"; store.show(L("toast.linkCopied")) } label: {
@@ -410,6 +470,11 @@ struct ConversationView: View {
     private func composer(_ d: BootstrapDTO, _ c: ConversationDTO) -> some View {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         VStack(spacing: 0) {
+            if let pr = store.privateReplies[conversationId] {
+                ContextBar(icon: "lock.bubble", title: L("privateReply.to", ["name": pr.author ?? ""]),
+                           detail: "«\(excerpt(pr.excerpt, 100))»", cancelLabel: L("reply.cancel")) { store.privateReplies[conversationId] = nil }
+                    .accessibilityIdentifier("composer.privateReplyBar")
+            }
             if let r = replyTo {
                 ContextBar(icon: "arrowshape.turn.up.left", title: L("reply.to", ["name": Naming.person(d, r.authorId)?.name ?? ""]),
                            detail: excerpt(r.body, 100), cancelLabel: L("reply.cancel")) { replyTo = nil }
@@ -456,7 +521,11 @@ struct ConversationView: View {
             if body != e.body { act { try await store.editMessage(e.id, body: body) } }
             return
         }
-        store.send(conversationId, body: draft, replyTo: replyTo?.id)
+        if let pr = store.privateReplies[conversationId] {
+            store.sendPrivateReply(pr, body: draft)
+        } else {
+            store.send(conversationId, body: draft, replyTo: replyTo?.id)
+        }
         replyTo = nil
         draft = ""
     }
@@ -547,7 +616,11 @@ struct EventCard: View {
 
 struct MessageBubble: View {
     enum Status { case sending, failed }
+    /// Columna del avatar a la izquierda de las burbujas ajenas (grupos, chats grupales, laterales).
+    enum Leading { case none, spacer, person(name: String, photo: String?, id: String, agent: Bool) }
     var text: String
+    var leading: Leading = .none
+    var authorColor: Color? = nil
     var time: String
     var mine: Bool
     var author: (name: String, org: String?)?
@@ -563,12 +636,19 @@ struct MessageBubble: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        HStack {
+        HStack(alignment: .top, spacing: 8) {
             if mine { Spacer(minLength: 48) }
+            switch leading {
+            case .none: EmptyView()
+            case .spacer: Color.clear.frame(width: 28, height: 1)
+            case .person(let name, let photo, let id, let agent):
+                Avatar(name: name, org: nil, isAgent: agent, size: 28, photo: photo, fill: PersonColor.fill(id))
+                    .padding(.top, author != nil ? 16 : 0)
+            }
             VStack(alignment: mine ? .trailing : .leading, spacing: 3) {
                 if let author {
                     HStack(spacing: 4) {
-                        Text(author.name).font(.caption.weight(.semibold)).foregroundStyle(Theme.textPrimary)
+                        Text(author.name).font(.caption.weight(.semibold)).foregroundStyle(authorColor ?? Theme.textPrimary)
                         if let org = author.org { Text("· \(org)").font(.caption).foregroundStyle(Theme.textSecondary) }
                     }
                     .lineLimit(1)

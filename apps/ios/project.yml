@@ -12,7 +12,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "1.1.0"
-    CURRENT_PROJECT_VERSION: "4"
+    CURRENT_PROJECT_VERSION: "5"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     LOCALIZATION_PREFERS_STRING_CATALOGS: NO
@@ -26,6 +26,8 @@ targets:
           - "Resources/Info.plist"
     dependencies:
       - target: TieComsShare
+        embed: true
+      - target: TieComsNotifications
         embed: true
     settings:
       base:
@@ -50,6 +52,8 @@ targets:
         CFBundleLocalizations: [en, es]
         CFBundleAllowMixedLocalizations: true
         ITSAppUsesNonExemptEncryption: false
+        NSUserActivityTypes: [INSendMessageIntent]
+        NSCameraUsageDescription: TieComs uses the camera only when you choose to take a profile or group photo.
         LSRequiresIPhoneOS: true
         UILaunchScreen:
           UIColorName: LaunchBackground
@@ -104,6 +108,32 @@ targets:
             NSExtensionActivationRule:
               NSExtensionActivationSupportsText: true
               NSExtensionActivationSupportsWebURLWithMaxCount: 1
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+  TieComsNotifications:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: TieComsNotifications
+        excludes: ["Info.plist"]
+      - TieComs/Core/PushPayload.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tiecoms.app.notifications
+        PRODUCT_NAME: TieComsNotifications
+        INFOPLIST_FILE: TieComsNotifications/Info.plist
+        CODE_SIGN_ENTITLEMENTS: TieComsNotifications/TieComsNotifications.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+        APPLICATION_EXTENSION_API_ONLY: YES
+    info:
+      path: TieComsNotifications/Info.plist
+      properties:
+        CFBundleDisplayName: TieComs
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
   TieComsTests:

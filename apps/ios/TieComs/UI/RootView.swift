@@ -108,6 +108,7 @@ struct MainView: View {
                 .tag(AppTab.settings)
         }
         .overlay(alignment: .bottom) { ToastView() }
+        .sheet(isPresented: $store.showPushPrompt) { PushPromptView() }
         .sheet(isPresented: Binding(get: { store.shareText != nil }, set: { if !$0 { store.shareText = nil } })) {
             ShareIntoTieComsView(text: store.shareText ?? "")
         }
@@ -128,6 +129,7 @@ extension View {
             case .whatsapp: WhatsAppScreen()
             case .domains(let orgId): DomainsScreen(orgId: orgId)
             case .deleteAccount: DeleteAccountView()
+            case .workspace(let id): WorkspaceDetailsView(workspaceId: id)
             case .profile: EditProfileView()
             case .files: FilesRootView()
             case .drive(let ws, let folder): DriveFolderView(workspaceId: ws, folderId: folder)

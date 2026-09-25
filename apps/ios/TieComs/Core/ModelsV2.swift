@@ -43,9 +43,11 @@ struct ForwardedInfo: Codable, Equatable, Sendable {
     var author: String?
     var sentAt: String?
     var fromConversationId: String?
+    /// Respuesta en privado: mensaje original al que se responde.
+    var messageId: String?
 
-    init(source: ForwardSource, author: String? = nil, sentAt: String? = nil, fromConversationId: String? = nil) {
-        self.source = source; self.author = author; self.sentAt = sentAt; self.fromConversationId = fromConversationId
+    init(source: ForwardSource, author: String? = nil, sentAt: String? = nil, fromConversationId: String? = nil, messageId: String? = nil) {
+        self.source = source; self.author = author; self.sentAt = sentAt; self.fromConversationId = fromConversationId; self.messageId = messageId
     }
 
     init(from decoder: Decoder) throws {
@@ -54,6 +56,7 @@ struct ForwardedInfo: Codable, Equatable, Sendable {
         author = c.o("author")
         sentAt = c.o("sentAt")
         fromConversationId = c.o("fromConversationId")
+        messageId = c.o("messageId")
     }
 
     var json: [String: Any] {
@@ -61,6 +64,7 @@ struct ForwardedInfo: Codable, Equatable, Sendable {
         o["author"] = author ?? NSNull()
         o["sentAt"] = sentAt ?? NSNull()
         o["fromConversationId"] = fromConversationId ?? NSNull()
+        if let messageId { o["messageId"] = messageId }
         return o
     }
 }

@@ -161,3 +161,94 @@ enum Naming {
         return (a + b).uppercased()
     }
 }
+
+// MARK: - Jerarquía de Inicio: Empresa → Espacio → Conversaciones (→ laterales) y Chats
+// Misma agrupación que la barra lateral de la web (apps/web/src/screens/Shell.tsx):
+// cada espacio va con su empresa "contraparte" (counterpartOrg) y dentro sus conversaciones.
+
+struct HomeTree {
+    struct ConvNode: Identifiable { var conv: ConversationDTO; var sides: [ConversationDTO]; var id: String { conv.id } }
+    struct WsNode: Identifiable { var ws: WorkspaceDTO; var convs: [ConvNode]; var id: String { ws.id } }
+    struct CompanyNode: Identifiable { var id: String; var org: OrganizationDTO?; var workspaces: [WsNode] }
+    var pinned: [ConversationDTO] = []
+    var companies: [CompanyNode] = []
+    var chats: [ConvNode] = []
+
+    var isEmpty: Bool { pinned.isEmpty && companies.isEmpty && chats.isEmpty }
+}
+
+extension Naming {
+    /// Empresa "contraparte" de un espacio desde mi punto de vista (counterpartOrg de la web).
+    static func counterpartOrg(_ d: BootstrapDTO, _ ws: WorkspaceDTO) -> OrganizationDTO? {
+        let mine = Set(d.organizations.filter { $0.myRole != nil }.map(\.id))
+        let other = ws.organizationIds.first { !mine.contains($0) }
+        return org(d, other ?? ws.owningOrgId)
+    }
+
+    /// Conversación lateral (consulta privada que cuelga de un mensaje).
+    static func isSide(_ c: ConversationDTO) -> Bool { c.deriveKind == "side" }
+
+    /// «Empresa · Espacio» para la cabecera del chat (nil fuera de un espacio).
+    static func route(_ d: BootstrapDTO, _ c: ConversationDTO) -> String? {
+        guard let ws = d.workspaces.first(where: { $0.id == c.workspaceId }) else { return nil }
+        return [counterpartOrg(d, ws)?.name, ws.name].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    static func unreadCount(_ list: [ConversationDTO]) -> Int { list.reduce(0) { $0 + ($1.isMuted ? 0 : $1.unread) } }
+
+    static func homeTree(_ d: BootstrapDTO, query: String = "", filterWorkspace: String? = nil) -> HomeTree {
+        let fold: (String) -> String = { $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
+        let q = fold(query.trimmingCharacters(in: .whitespaces))
+        func matches(_ c: ConversationDTO) -> Bool {
+            guard !q.isEmpty else { return true }
+            var hay = [title(d, c), subtitle(d, c)]
+            if let ws = d.workspaces.first(where: { $0.id == c.workspaceId }) { hay.append(ws.name); if let o = counterpartOrg(d, ws) { hay.append(o.name) } }
+            hay += c.memberIds.compactMap { person(d, $0)?.name }
+            return hay.contains { fold($0).contains(q) }
+        }
+        let visible = Set(d.conversations.map(\.id))
+        // Laterales cuyo origen veo: cuelgan de él; si no, van con los chats.
+        let sides = d.conversations.filter { isSide($0) && $0.parentId.map(visible.contains) == true }
+        let sideIds = Set(sides.map(\.id))
+        func sidesOf(_ id: String) -> [ConversationDTO] {
+            sides.filter { $0.parentId == id }.sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
+        }
+        func node(_ c: ConversationDTO) -> HomeTree.ConvNode? {
+            let s = sidesOf(c.id).filter(matches)
+            guard matches(c) || !s.isEmpty else { return nil }
+            return HomeTree.ConvNode(conv: c, sides: s)
+        }
+        var tree = HomeTree()
+        if filterWorkspace == nil {
+            tree.pinned = d.conversations.filter { $0.pinnedAt != nil && !sideIds.contains($0.id) && matches($0) }.sorted { ($0.pinnedAt ?? "") < ($1.pinnedAt ?? "") }
+        }
+        var order: [String] = []
+        var byOrg: [String: HomeTree.CompanyNode] = [:]
+        for ws in d.workspaces where filterWorkspace == nil || ws.id == filterWorkspace {
+            let convs = d.conversations.filter { $0.workspaceId == ws.id && $0.kind != .direct && $0.kind != .multi && !sideIds.contains($0.id) }
+                .sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
+                .compactMap(node)
+            let wsMatches = !q.isEmpty && fold(ws.name).contains(q)
+            if convs.isEmpty && !(q.isEmpty || wsMatches) { continue }
+            let o = counterpartOrg(d, ws)
+            let key = o?.id ?? "none"
+            if byOrg[key] == nil { order.append(key); byOrg[key] = HomeTree.CompanyNode(id: key, org: o, workspaces: []) }
+            byOrg[key]!.workspaces.append(HomeTree.WsNode(ws: ws, convs: convs))
+        }
+        tree.companies = order.compactMap { byOrg[$0] }.map { var c = $0
+            c.workspaces.sort { a, b in
+                if (a.ws.pinnedAt != nil) != (b.ws.pinnedAt != nil) { return a.ws.pinnedAt != nil }
+                return a.ws.name.localizedCaseInsensitiveCompare(b.ws.name) == .orderedAscending
+            }
+            return c
+        }
+        if filterWorkspace == nil {
+            let wsIds = Set(d.workspaces.map(\.id))
+            tree.chats = d.conversations
+                .filter { ($0.kind == .direct || $0.kind == .multi || !($0.workspaceId.map(wsIds.contains) ?? false)) && !sideIds.contains($0.id) }
+                .sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
+                .compactMap(node)
+        }
+        return tree
+    }
+}

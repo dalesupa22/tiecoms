@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import Observation
+import UserNotifications
 
 /// Estado local de una conversación con mensajes cargados.
 struct ConversationState: Equatable {
@@ -25,6 +26,7 @@ enum Route: Hashable {
     case whatsapp
     case domains(String)
     case deleteAccount
+    case workspace(String)
     case profile
     /// Archivos: raíz (lista de ámbitos) o una carpeta de un ámbito (workspaceId nil = «Mis archivos»).
     case files
@@ -69,6 +71,8 @@ final class AppStore {
     var driveRevision = 0
     /// Aviso breve (toast).
     var toast: String?
+    /// Respuestas en privado pendientes por conversación directa (cita sobre el compositor).
+    var privateReplies: [String: PrivateReplyDraft] = [:]
     /// Texto compartido hacia TieComs (tiecoms://share?text=…).
     var shareText: String?
 
@@ -121,6 +125,11 @@ final class AppStore {
     @ObservationIgnored private(set) var deliveredViaSocket = 0
     @ObservationIgnored private(set) var deliveredViaHTTP = 0
     @ObservationIgnored var remindersDue = 0
+    @ObservationIgnored private var badgeTask: Task<Void, Never>?
+    /// Último token APNs registrado en el API (pruebas y diagnóstico).
+    @ObservationIgnored var registeredPushToken: String?
+    /// Pantalla previa al permiso de notificaciones.
+    var showPushPrompt = false
     @ObservationIgnored var onLiveMessage: ((MessageDTO) -> Void)?
     @ObservationIgnored var onReady: (() -> Void)?
 
@@ -210,6 +219,8 @@ final class AppStore {
     }
 
     func logout() async {
+        // El logout del API ya borra el token de la sesión; se borra antes por si falla la red después.
+        await unregisterPush()
         await api.logout()
         handleSignedOut()
     }
@@ -245,6 +256,7 @@ final class AppStore {
         try await loadBlockedUsers()
         var d: BootstrapDTO = try await api.request("/bootstrap")
         d.conversations.sort { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
+        defer { scheduleBadge() }
         data = d
         // Conversaciones que ya no están en mi alcance se purgan de la caché local.
         let allowed = Set(d.conversations.map(\.id))
@@ -465,6 +477,19 @@ final class AppStore {
     func patchMeta(_ id: String, _ f: (inout ConversationDTO) -> Void) {
         guard let i = data?.conversations.firstIndex(where: { $0.id == id }) else { return }
         f(&data!.conversations[i])
+        scheduleBadge()
+    }
+
+    /// Badge del ícono = no leídos de las conversaciones NO silenciadas (igual que el servidor).
+    var badgeCount: Int { Naming.unreadCount(data?.conversations ?? []) }
+
+    func scheduleBadge() {
+        badgeTask?.cancel()
+        badgeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard let self, !Task.isCancelled else { return }
+            try? await UNUserNotificationCenter.current().setBadgeCount(self.status == .ready ? self.badgeCount : 0)
+        }
     }
 
     func patchWorkspace(_ id: String, _ f: (inout WorkspaceDTO) -> Void) {

@@ -116,6 +116,12 @@ enum Prefs {
         set { defaults.set(newValue, forKey: soundsKey) }
     }
 
+    /// Ya se mostró la pantalla previa al permiso de notificaciones.
+    static var pushPrompted: Bool {
+        get { defaults.bool(forKey: "tc.pushPrompted") }
+        set { defaults.set(newValue, forKey: "tc.pushPrompted") }
+    }
+
     static var notificationsEnabled: Bool {
         get { defaults.object(forKey: notificationsKey) as? Bool ?? true }
         set { defaults.set(newValue, forKey: notificationsKey) }

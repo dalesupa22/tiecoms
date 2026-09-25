@@ -40,9 +40,15 @@ enum L10n {
 
     /// Los mensajes de sistema llegan como {"k": clave, ...datos}; los antiguos, como texto plano.
     static func systemText(_ body: String) -> String {
-        guard body.hasPrefix("{"), let data = body.data(using: .utf8),
-              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let k = obj["k"] as? String else { return body }
+        guard body.hasPrefix("{") else { return body }
+        var obj: [String: Any]
+        if let data = body.data(using: .utf8), let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            obj = o
+        } else if let o = lenientSystemObject(body) {
+            // La vista previa del API viene cortada a 140 caracteres: JSON incompleto.
+            obj = o
+        } else { return body }
+        guard let k = obj["k"] as? String else { return body }
         let key = (k == "members.added" && (obj["history"] as? String) == "all") ? "sys.members.added.all" : "sys.\(k)"
         let s = L(key)
         if s == key { return body }
@@ -58,7 +64,22 @@ enum L10n {
         }
         var out = s
         for (k, v) in vars { out = out.replacingOccurrences(of: "{\(k)}", with: v.description) }
+        // Variables que no llegaron (vista previa cortada): se quitan sin dejar llaves.
+        out = out.replacingOccurrences(of: "\\s*\\{\\w+\\}", with: " …", options: .regularExpression)
         return out
+    }
+
+    /// Pares "clave":"texto" completos de un JSON cortado (el resto se ignora).
+    static func lenientSystemObject(_ body: String) -> [String: Any]? {
+        guard let re = try? NSRegularExpression(pattern: #""(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)""#) else { return nil }
+        let ns = body as NSString
+        var out: [String: Any] = [:]
+        for m in re.matches(in: body, range: NSRange(location: 0, length: ns.length)) {
+            let raw = ns.substring(with: m.range(at: 2))
+            let value = (try? JSONSerialization.jsonObject(with: Data("\"\(raw)\"".utf8), options: .fragmentsAllowed)) as? String ?? raw
+            out[ns.substring(with: m.range(at: 1))] = value
+        }
+        return out["k"] == nil ? nil : out
     }
 
     static func preview(_ body: String?) -> String? { body.map(systemText) }

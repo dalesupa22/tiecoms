@@ -3,9 +3,15 @@ import UserNotifications
 
 struct ConversationDetailsView: View {
     @Environment(AppStore.self) private var store
+    /// Foto del grupo: grupos/internos con canManage o cualquier miembro de un chat grupal; nunca directos.
+    static func canChangePhoto(_ c: ConversationDTO) -> Bool {
+        switch c.kind { case .direct: return false; case .multi: return true; default: return c.canManage }
+    }
     let conversationId: String
     @State private var adding = false
     @State private var confirmLeave = false
+    @State private var choosePhoto = false
+    @State private var confirmRemovePhoto = false
 
     var body: some View {
         Group {
@@ -16,7 +22,8 @@ struct ConversationDetailsView: View {
                 List {
                     Section {
                         VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 6) {
+                            HStack(spacing: 10) {
+                                ConvIcon(d: d, c: c, size: 56)
                                 if c.kind == .internal { Image(systemName: "lock.fill") }
                                 Text(Naming.title(d, c)).font(.title3.weight(.semibold))
                             }
@@ -39,6 +46,15 @@ struct ConversationDetailsView: View {
                         }
                         .padding(.vertical, 4)
                         .accessibilityElement(children: .combine)
+                    }
+                    if Self.canChangePhoto(c) {
+                        Section {
+                            Button { choosePhoto = true } label: { Label(L("group.changePhoto"), systemImage: "camera") }
+                                .accessibilityIdentifier("details.changePhoto")
+                            if c.avatarUrl != nil {
+                                Button(role: .destructive) { confirmRemovePhoto = true } label: { Label(L("group.removePhoto"), systemImage: "trash") }
+                            }
+                        }
                     }
                     if c.workspaceId != nil && c.kind != .direct { ConversationAgendaSection(conversationId: c.id) }
                     Section(L("details.participants", ["n": regular.count])) {
@@ -75,6 +91,14 @@ struct ConversationDetailsView: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle(L("chat.details"))
+        .photoChangeFlow(isPresented: $choosePhoto, title: L("group.changePhoto"),
+                         onSave: { jpeg in try await store.uploadConversationAvatar(conversationId, jpeg: jpeg) },
+                         onSaved: { store.show(L("group.photoSaved")) })
+        .confirmationDialog(L("group.removePhotoConfirm"), isPresented: $confirmRemovePhoto, titleVisibility: .visible) {
+            Button(L("group.removePhoto"), role: .destructive) {
+                Task { do { try await store.removeConversationAvatar(conversationId) } catch { store.show(L10n.errorText(error)) } }
+            }
+        }
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -95,6 +119,12 @@ struct ConversationAgendaSection: View {
 
 private struct PersonRow: View {
     @Environment(AppStore.self) private var store
+    private func message() {
+        Task {
+            do { let r = try await store.createChat(userIds: [p.id], name: nil); store.navigate(to: .conversation(r.id)) }
+            catch { store.show(L10n.errorText(error)) }
+        }
+    }
     @State private var report = false
     @State private var confirmBlock = false
     var d: BootstrapDTO
@@ -117,9 +147,19 @@ private struct PersonRow: View {
                         .background(Capsule().fill(Theme.orange.opacity(0.14)))
                 }
             }
+            Spacer(minLength: 4)
+            if !isMe && p.kind == "human" && !store.blockedUserIds.contains(p.id) {
+                Button { message() } label: { Image(systemName: "message").font(.body.weight(.semibold)) }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(L("person.sendMessage", ["name": p.name]))
+                    .accessibilityIdentifier("person.message.\(p.id)")
+            }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .contextMenu {
+            if !isMe && p.kind == "human" {
+                Button { message() } label: { Label(L("person.sendMessageShort"), systemImage: "message") }
+            }
             if !isMe {
                 Button { report = true } label: { Label(L("safety.reportUser"), systemImage: "flag") }
                 Button(role: .destructive) { confirmBlock = true } label: {

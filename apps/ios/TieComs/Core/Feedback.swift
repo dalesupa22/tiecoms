@@ -60,10 +60,17 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     var openConversationId: (() -> String?)?
     /// Toque en una notificación.
     var onOpenConversation: ((String) -> Void)?
+    /// Acción «Responder» desde la notificación (envía por HTTP).
+    var onReply: ((String, String) async -> Void)?
+    /// Acción «Marcar como leído».
+    var onMarkRead: ((String) async -> Void)?
+    /// El socket está en línea: los push en primer plano sobran (el aviso local ya salió).
+    var socketOnline: (() -> Bool)?
     private(set) var authorized = false
 
     func install() {
         UNUserNotificationCenter.current().delegate = self
+        UNUserNotificationCenter.current().setNotificationCategories(PushRegistration.categories())
         Task { await refreshAuthorization() }
     }
 
@@ -100,6 +107,7 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
         content.body = String(body.prefix(240))
         content.threadIdentifier = conversationId
         content.userInfo = ["conversationId": conversationId]
+        content.categoryIdentifier = PushPayload.messageCategory
         if Prefs.soundsEnabled { content.sound = UNNotificationSound(named: UNNotificationSoundName("tc_notify.caf")) }
         let req = UNNotificationRequest(identifier: "msg-\(conversationId)-\(UUID().uuidString)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req)
@@ -117,36 +125,62 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         let conv = notification.request.content.userInfo["conversationId"] as? String
-        let open = await MainActor.run { AppFeedback.shared.openConversationId?() }
-        // En primer plano: banner solo si el mensaje es de otra conversación.
+        let isRemote = notification.request.trigger is UNPushNotificationTrigger
+        let (open, online) = await MainActor.run { (AppFeedback.shared.openConversationId?(), AppFeedback.shared.socketOnline?() ?? false) }
+        // En primer plano: nada si es la conversación abierta (ya sonó tc_receive).
         if let conv, conv == open { return [] }
+        // Con el socket en línea el aviso local ya salió: el push remoto sería un duplicado.
+        if isRemote && online { return [] }
         return [.banner, .list, .sound]
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         guard let conv = response.notification.request.content.userInfo["conversationId"] as? String else { return }
-        await MainActor.run { AppFeedback.shared.onOpenConversation?(conv) }
+        switch response.actionIdentifier {
+        case PushRegistration.replyAction:
+            let text = (response as? UNTextInputNotificationResponse)?.userText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !text.isEmpty, let reply = await MainActor.run(body: { AppFeedback.shared.onReply }) { await reply(conv, text) }
+        case PushRegistration.markReadAction:
+            if let mark = await MainActor.run(body: { AppFeedback.shared.onMarkRead }) { await mark(conv) }
+        default:
+            await MainActor.run { AppFeedback.shared.onOpenConversation?(conv) }
+        }
     }
 }
 
-/// Punto de extensión para push remoto (APNs).
-///
-/// El backend todavía no acepta tokens de dispositivo. Cuando exista el endpoint
-/// (p. ej. `POST /api/v1/devices/push {platform:"ios", token}`):
-///   1. Activar la capacidad "Push Notifications" (entitlement `aps-environment`).
-///   2. Poner `enabled = true`.
-///   3. Enviar `token` en `tokenReceived` con el APIClient.
+/// Push remoto (APNs): registro del token con el API y categorías con acciones.
+/// El servidor envía por cada mensaje, recordatorio o reunión (ver PushPayload); la Notification
+/// Service Extension (TieComsNotifications) la convierte en notificación de comunicación con la foto del autor.
 enum PushRegistration {
-    static let enabled = false
+    static let enabled = true
     private(set) static var token: String?
+    /// Se llama con el token en hexadecimal (lo registra el AppStore con PUT /push/token).
+    @MainActor static var onToken: ((String) -> Void)?
 
     @MainActor static func registerIfEnabled() {
         guard enabled else { return }
         UIApplication.shared.registerForRemoteNotifications()
     }
 
-    static func tokenReceived(_ data: Data) {
-        token = data.map { String(format: "%02x", $0) }.joined()
-        // Aún no se envía a ningún lado (no hay endpoint en el API).
+    @MainActor static func tokenReceived(_ data: Data) {
+        let hex = PushEnvironment.hex(data)
+        token = hex
+        onToken?(hex)
+    }
+
+    static let replyAction = "TC_REPLY"
+    static let markReadAction = "TC_MARK_READ"
+
+    /// Categorías: TC_MESSAGE con Responder (texto) y Marcar como leído; TC_REMINDER y TC_EVENT abren la conversación.
+    static func categories() -> Set<UNNotificationCategory> {
+        let reply = UNTextInputNotificationAction(identifier: replyAction, title: L("push.reply"), options: [],
+                                                  textInputButtonTitle: L("chat.send"), textInputPlaceholder: L("push.replyPh"))
+        let read = UNNotificationAction(identifier: markReadAction, title: L("menu.markRead"), options: [])
+        return [
+            UNNotificationCategory(identifier: PushPayload.messageCategory, actions: [reply, read], intentIdentifiers: ["INSendMessageIntent"],
+                                   options: [.hiddenPreviewsShowTitle]),
+            UNNotificationCategory(identifier: PushPayload.reminderCategory, actions: [], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: PushPayload.eventCategory, actions: [], intentIdentifiers: [], options: []),
+        ]
     }
 }

@@ -10,15 +10,14 @@ enum Theme {
     /// Fondo general: crema en claro, casi negro en oscuro.
     static let background = Color(light: 0xFDFAF7, dark: 0x141414)
     static let surface = Color(light: 0xFFFFFF, dark: 0x1F1F1F)
-    /// Burbuja de otra persona.
-    static let bubbleOther = Color(light: 0xEFEBE6, dark: 0x2C2C2E)
+    /// Burbuja de otra persona: gris cálido.
+    static let bubbleOther = Color(light: 0xEFEBE6, dark: 0x2E2A27)
     static let textPrimary = Color(light: 0x1F1F1F, dark: 0xF4F1EA)
     static let textSecondary = Color(light: 0x6B645B, dark: 0xA8A29A)
     /// Naranja para texto sobre fondo claro/oscuro con contraste suficiente.
     static let accentText = Color(light: 0xB35500, dark: 0xFF8A1F)
-    /// Burbuja propia: naranja de marca, un tono apenas más oscuro que #FF7A00 para
-    /// ganar contraste con el texto blanco.
-    static let bubbleMine = Color(hex: 0xE96F00)
+    /// Burbuja propia: naranja sobrio (#E8710A en claro, #C75F08 en oscuro), con texto blanco.
+    static let bubbleMine = Color(light: 0xE8710A, dark: 0xC75F08)
 }
 
 extension Color {
@@ -79,6 +78,8 @@ struct Avatar: View {
     var photo: String? = nil
     /// Marca de la empresa en la esquina (como la web con tamaño ≥ 30).
     var badge = false
+    /// Color propio (PersonColor) en vez del de la empresa: iniciales en blanco.
+    var fill: Color? = nil
 
     /// Avatar de una persona del snapshot (foto, iniciales o ◇ si es agente).
     init(person: PersonDTO?, org: OrganizationDTO?, size: CGFloat = 40, badge: Bool = false) {
@@ -90,17 +91,17 @@ struct Avatar: View {
         self.badge = badge
     }
 
-    init(name: String, org: OrganizationDTO?, isAgent: Bool = false, size: CGFloat = 40, photo: String? = nil, badge: Bool = false) {
-        self.name = name; self.org = org; self.isAgent = isAgent; self.size = size; self.photo = photo; self.badge = badge
+    init(name: String, org: OrganizationDTO?, isAgent: Bool = false, size: CGFloat = 40, photo: String? = nil, badge: Bool = false, fill: Color? = nil) {
+        self.name = name; self.org = org; self.isAgent = isAgent; self.size = size; self.photo = photo; self.badge = badge; self.fill = fill
     }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: isAgent ? 10 : size / 2)
         ZStack {
-            shape.fill(isAgent ? Theme.ink : Color(css: org?.colorBg ?? "#E0DACE"))
+            shape.fill(isAgent ? Theme.ink : fill ?? Color(css: org?.colorBg ?? "#E0DACE"))
             Text(isAgent ? "◇" : Naming.initials(name))
                 .font(.system(size: size * 0.36, weight: .semibold))
-                .foregroundStyle(isAgent ? Theme.cream : Color(css: org?.colorFg ?? "#5C554C"))
+                .foregroundStyle(isAgent ? Theme.cream : fill != nil ? Color.white : Color(css: org?.colorFg ?? "#5C554C"))
             if let url = MediaURL.absolute(photo) {
                 RemoteImage(url: url) { img in img.resizable().scaledToFill() }
                     .frame(width: size, height: size)

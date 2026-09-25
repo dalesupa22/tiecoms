@@ -267,6 +267,106 @@ extension AppStore {
         return r
     }
 
+    // MARK: Push
+
+    /// PUT /push/token {provider:'apns', token, environment, lang} (reemplaza el token anterior de la sesión).
+    func registerPushToken(_ hex: String) async {
+        guard status == .ready else { return }
+        do {
+            try await api.requestData("/push/token", method: "PUT",
+                                      json: ["provider": "apns", "token": hex, "environment": PushEnvironment.current, "lang": L10n.lang])
+            registeredPushToken = hex
+        } catch { NSLog("[TieComs] no se pudo registrar el token push: \(error)") }
+    }
+
+    func unregisterPush() async {
+        guard registeredPushToken != nil || PushRegistration.token != nil, api.accessToken != nil else { return }
+        _ = try? await api.requestData("/push/token", method: "DELETE")
+        registeredPushToken = nil
+    }
+
+    /// Acción «Responder» de la notificación: arranca la sesión si hace falta y envía por HTTP.
+    func replyFromNotification(_ conversationId: String, text: String) async {
+        if status != .ready { await start() }
+        guard status == .ready else { return }
+        let body: [String: Any] = ["clientMessageId": UUID().uuidString.lowercased(), "body": String(text.prefix(8000))]
+        if let r: SendResult = try? await api.request("/conversations/\(conversationId)/messages", method: "POST", json: body) {
+            upsertLocal(r.message)
+            try? await markConversationRead(conversationId)
+        }
+    }
+
+    func markReadFromNotification(_ conversationId: String) async {
+        if status != .ready { await start() }
+        guard status == .ready else { return }
+        try? await loadBootstrap()
+        try? await markConversationRead(conversationId)
+        AppFeedback.shared.clearNotifications(conversationId: conversationId)
+    }
+
+    // MARK: Conversaciones laterales
+
+    /// POST /conversations/:id/side → la lateral (multi privada que cuelga del mensaje).
+    /// 403 side_outsider trae en `userIds` a quienes no se pueden sumar.
+    func createSide(_ conversationId: String, messageId: String, userIds: [String], question: String?) async throws -> String {
+        var body: [String: Any] = ["messageId": messageId, "userIds": userIds]
+        if let q = question?.trimmingCharacters(in: .whitespacesAndNewlines), !q.isEmpty { body["question"] = String(q.prefix(4000)) }
+        let r: IdResult = try await api.request("/conversations/\(conversationId)/side", method: "POST", json: body)
+        try await loadBootstrap()
+        return r.id
+    }
+
+    /// Laterales visibles para mí que cuelgan de un mensaje.
+    func sides(of messageId: String) -> [ConversationDTO] {
+        (data?.conversations ?? []).filter { Naming.isSide($0) && $0.parentMessageId == messageId }
+            .sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
+    }
+
+    /// Candidatos para una lateral: miembros del origen + colegas de mis empresas (sin mí, solo humanos).
+    func sideCandidates(_ conversationId: String) -> (members: [PersonDTO], colleagues: [PersonDTO]) {
+        guard let d = data, let c = meta(conversationId) else { return ([], []) }
+        let myOrgs = Set(d.organizations.filter { $0.myRole != nil }.map(\.id)).union([d.me.primaryOrgId].compactMap { $0 })
+        let members = Set(c.memberIds)
+        let byName: (PersonDTO, PersonDTO) -> Bool = { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let m = d.people.filter { members.contains($0.id) && $0.id != d.me.id && $0.kind == "human" }.sorted(by: byName)
+        let col = d.people.filter { !members.contains($0.id) && $0.id != d.me.id && $0.kind == "human" && ($0.orgId.map(myOrgs.contains) ?? false) }.sorted(by: byName)
+        return (m, col)
+    }
+
+    /// Nuevo espacio con un cliente. Devuelve el grupo general para abrirlo.
+    struct CreatedWorkspace: Decodable {
+        var id: String; var generalConversationId: String?
+        init(from d: Decoder) throws { let c = try container(d); id = c.v("id", ""); generalConversationId = c.o("generalConversationId") }
+    }
+
+    func createWorkspace(name: String, department: String) async throws -> String? {
+        var body: [String: Any] = ["name": name]
+        let dep = department.trimmingCharacters(in: .whitespaces)
+        if !dep.isEmpty { body["department"] = dep }
+        let r: CreatedWorkspace = try await api.request("/workspaces", method: "POST", json: body)
+        try await loadBootstrap()
+        return r.generalConversationId
+    }
+
+    /// Responder en privado: abre (o crea) el directo con el autor y deja la cita lista sobre el compositor.
+    /// El envío lleva `forwarded {source:'tiecoms', author, sentAt, fromConversationId, messageId}`.
+    @discardableResult
+    func startPrivateReply(to m: MessageDTO) async throws -> String {
+        guard let d = data, m.authorId != d.me.id else { throw ApiRequestError(status: 400, code: "bad_request", message: "") }
+        let r = try await createChat(userIds: [m.authorId], name: nil)
+        privateReplies[r.id] = PrivateReplyDraft(conversationId: r.id, fromConversationId: m.conversationId, messageId: m.id,
+                                                 author: Naming.person(d, m.authorId)?.name, sentAt: m.createdAt, excerpt: String(m.body.prefix(200)))
+        navigate(to: .conversation(r.id))
+        return r.id
+    }
+
+    /// Envía el texto como respuesta en privado (y limpia la cita).
+    func sendPrivateReply(_ draft: PrivateReplyDraft, body: String) {
+        send(draft.conversationId, body: body, forwarded: ForwardedInfo(source: .tiecoms, author: draft.author, sentAt: draft.sentAt,
+                                                                        fromConversationId: draft.fromConversationId, messageId: draft.messageId))
+        privateReplies[draft.conversationId] = nil
+    }
+
     /// Suma personas a una conversación; ven desde ahora (history 'now').
     func addMembers(_ conversationId: String, userIds: [String]) async throws {
         try await api.requestData("/conversations/\(conversationId)/members", method: "POST", json: ["userIds": userIds, "history": "now"])
@@ -298,6 +398,22 @@ extension AppStore {
         }
         let _: UserDTO = try await api.upload("/me/avatar", body: .init(data: jpeg, contentType: "image/jpeg"))
         try await loadBootstrap()
+    }
+
+    struct AvatarUrlResult: Decodable { var avatarUrl: String?; init(from d: Decoder) throws { avatarUrl = (try container(d)).o("avatarUrl") } }
+
+    /// Foto del grupo: POST /conversations/:id/avatar (bytes, ≤ 3 MB).
+    func uploadConversationAvatar(_ id: String, jpeg: Data) async throws {
+        guard jpeg.count <= AppStore.maxAvatarBytes else { throw ApiRequestError(status: 413, code: "bad_request", message: L("profile.tooBig")) }
+        let r: AvatarUrlResult = try await api.upload("/conversations/\(id)/avatar", body: .init(data: jpeg, contentType: "image/jpeg"))
+        patchMeta(id) { $0.avatarUrl = r.avatarUrl }
+        try? await loadBootstrap()
+    }
+
+    func removeConversationAvatar(_ id: String) async throws {
+        try await api.requestData("/conversations/\(id)/avatar", method: "DELETE")
+        patchMeta(id) { $0.avatarUrl = nil }
+        try? await loadBootstrap()
     }
 
     func removeAvatar() async throws {
@@ -436,4 +552,13 @@ enum QuickTimes {
             Option(key: "monday", labelKey: "when.monday", date: at9(toMonday)),
         ]
     }
+}
+
+struct PrivateReplyDraft: Equatable {
+    var conversationId: String
+    var fromConversationId: String
+    var messageId: String
+    var author: String?
+    var sentAt: String
+    var excerpt: String
 }

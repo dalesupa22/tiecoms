@@ -77,37 +77,98 @@ struct IssueRow: View {
     }
 }
 
+/// Asuntos en la jerarquía: Empresa → Espacio → Conversación → asuntos (como Inicio).
+enum IssueTree {
+    struct Conv: Identifiable { var conv: ConversationDTO?; var id: String; var issues: [IssueDTO] }
+    struct Ws: Identifiable { var ws: WorkspaceDTO?; var id: String; var convs: [Conv] }
+    struct Company: Identifiable { var org: OrganizationDTO?; var id: String; var workspaces: [Ws] }
+
+    enum Filter: String, CaseIterable { case mine, open, all }
+
+    static func filter(_ list: [IssueDTO], _ f: Filter, me: String) -> [IssueDTO] {
+        switch f {
+        case .mine: return list.filter { !$0.status.closed && $0.ownerId == me }
+        case .open: return list.filter { !$0.status.closed }
+        case .all: return list
+        }
+    }
+
+    static func group(_ d: BootstrapDTO, _ issues: [IssueDTO]) -> [Company] {
+        let visible = Set(d.conversations.map(\.id))
+        var out: [String: Company] = [:]
+        var order: [String] = []
+        let byWs = Dictionary(grouping: issues.filter { visible.contains($0.conversationId) }, by: \.workspaceId)
+        for (wsId, items) in byWs {
+            let ws = d.workspaces.first { $0.id == wsId }
+            let org = ws.flatMap { Naming.counterpartOrg(d, $0) }
+            let key = org?.id ?? "none"
+            if out[key] == nil { order.append(key); out[key] = Company(org: org, id: key, workspaces: []) }
+            let convs = Dictionary(grouping: items, by: \.conversationId).map { cid, list in
+                Conv(conv: d.conversations.first { $0.id == cid }, id: cid, issues: list.sorted(by: IssueSort.order))
+            }.sorted { a, b in
+                (a.conv.map { Naming.title(d, $0) } ?? "").localizedCaseInsensitiveCompare(b.conv.map { Naming.title(d, $0) } ?? "") == .orderedAscending
+            }
+            out[key]!.workspaces.append(Ws(ws: ws, id: wsId, convs: convs))
+        }
+        return order.compactMap { out[$0] }.map { var c = $0
+            c.workspaces.sort { ($0.ws?.name ?? "").localizedCaseInsensitiveCompare($1.ws?.name ?? "") == .orderedAscending }
+            return c
+        }.sorted { ($0.org?.name ?? "~").localizedCaseInsensitiveCompare($1.org?.name ?? "~") == .orderedAscending }
+    }
+}
+
 struct IssuesScreen: View {
     @Environment(AppStore.self) private var store
-    @State private var filter = "mine"
+    @State private var filter = IssueTree.Filter.mine
     @State private var error: String?
 
     var body: some View {
         Group {
             if let d = store.data {
-                let visible = Set(d.conversations.map(\.id))
-                let list = store.issues.values.filter { visible.contains($0.conversationId) }
-                    .filter { filter == "closed" ? $0.status.closed : !$0.status.closed && (filter == "open" || $0.ownerId == d.me.id) }
-                    .sorted(by: IssueSort.order)
-                let groups = Dictionary(grouping: list, by: \.workspaceId).sorted { a, b in
-                    (d.workspaces.first { $0.id == a.key }?.name ?? "") < (d.workspaces.first { $0.id == b.key }?.name ?? "")
-                }
+                let list = IssueTree.filter(Array(store.issues.values), filter, me: d.me.id)
+                let tree = IssueTree.group(d, list)
                 List {
                     Section {
                         Text(L("issue.pageSub")).font(.footnote).foregroundStyle(Theme.textSecondary)
                         Picker("", selection: $filter) {
-                            Text(L("issue.mine")).tag("mine")
-                            Text(L("issue.allOpen")).tag("open")
-                            Text(L("issue.closed")).tag("closed")
+                            Text(L("issue.mine")).tag(IssueTree.Filter.mine)
+                            Text(L("issue.allOpen")).tag(IssueTree.Filter.open)
+                            Text(L("issue.all")).tag(IssueTree.Filter.all)
                         }
                         .pickerStyle(.segmented)
                         .accessibilityIdentifier("issues.filter")
                         if let error { Text(error).foregroundStyle(.red).font(.footnote) }
                     }
-                    if list.isEmpty { Text(L("issue.empty")).foregroundStyle(Theme.textSecondary) }
-                    ForEach(groups, id: \.key) { wsId, items in
-                        Section(d.workspaces.first { $0.id == wsId }?.name ?? "") {
-                            ForEach(items) { i in NavigationLink(value: Route.issue(i.id)) { IssueRow(issue: i) } }
+                    if tree.isEmpty { Text(L("issue.empty")).foregroundStyle(Theme.textSecondary) }
+                    ForEach(tree) { co in
+                        Section {
+                            ForEach(co.workspaces) { w in
+                                HStack(spacing: 8) {
+                                    Rectangle().fill(Theme.textSecondary.opacity(0.35)).frame(width: 2, height: 16)
+                                    Text(w.ws?.name ?? "").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                                }
+                                .accessibilityAddTraits(.isHeader)
+                                ForEach(w.convs) { cv in
+                                    if let conv = cv.conv {
+                                        NavigationLink(value: Route.conversation(conv.id)) {
+                                            HStack(spacing: 6) {
+                                                ConvIcon(d: d, c: conv, size: 22)
+                                                Text(Naming.title(d, conv)).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                            }
+                                        }
+                                        .listRowInsets(EdgeInsets(top: 4, leading: 30, bottom: 4, trailing: 12))
+                                    }
+                                    ForEach(cv.issues) { i in
+                                        NavigationLink(value: Route.issue(i.id)) { IssueRow(issue: i, showWhere: false) }
+                                            .listRowInsets(EdgeInsets(top: 6, leading: 48, bottom: 6, trailing: 12))
+                                    }
+                                }
+                            }
+                        } header: {
+                            HStack(spacing: 8) {
+                                OrgMark(org: co.org, size: 20)
+                                Text(co.org?.name ?? L("common.noCompany")).font(.subheadline.weight(.bold)).foregroundStyle(Theme.textPrimary).textCase(nil)
+                            }
                         }
                     }
                 }
@@ -131,6 +192,7 @@ struct IssueDetailView: View {
     let issueId: String
     @State private var events: [IssueEventDTO] = []
     @State private var comment = ""
+    @State private var sending = false
     @State private var error: String?
 
     var body: some View {
@@ -204,29 +266,62 @@ struct IssueDetailView: View {
             Section(L("issue.history")) {
                 ForEach(events) { e in
                     let who = Naming.person(d, e.actorId)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("\(who?.name ?? L("common.participant")) \(e.kind == "comment" ? "" : eventText(d, e))").font(.subheadline)
-                            + Text(" · \(L10n.dateTime(ISODate.parse(e.createdAt) ?? Date()))").font(.caption).foregroundColor(Theme.textSecondary)
-                        if e.kind == "comment", let b = e.payload["body"]?.stringValue {
-                            Text(b).font(.body).padding(8).background(RoundedRectangle(cornerRadius: 10).fill(Theme.bubbleOther))
+                    HStack(alignment: .top, spacing: 10) {
+                        Avatar(name: who?.name ?? "?", org: nil, isAgent: who?.kind == "agent", size: 28, photo: who?.avatarUrl, fill: PersonColor.fill(e.actorId))
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                Text(who?.name ?? L("common.participant")).font(.subheadline.weight(.semibold)).foregroundStyle(PersonColor.text(e.actorId))
+                                Text(L10n.dateTime(ISODate.parse(e.createdAt) ?? Date())).font(.caption).foregroundStyle(Theme.textSecondary)
+                            }
+                            if e.kind == "comment", let b = e.payload["body"]?.stringValue {
+                                Text(b).font(.body).padding(.horizontal, 10).padding(.vertical, 7)
+                                    .background(RoundedRectangle(cornerRadius: 12).fill(Theme.bubbleOther))
+                                    .textSelection(.enabled)
+                            } else {
+                                Text(eventText(d, e)).font(.subheadline).foregroundStyle(Theme.textSecondary)
+                            }
                         }
                     }
                     .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier(e.kind == "comment" ? "issue.comment.\(e.id)" : "issue.event.\(e.id)")
                 }
             }
-            Section {
-                TextField(L("issue.commentPh"), text: $comment, axis: .vertical).lineLimit(1...5).accessibilityIdentifier("issue.commentField")
-                Button(L("issue.comment")) {
-                    let body = comment.trimmingCharacters(in: .whitespacesAndNewlines)
-                    Task {
-                        do { try await store.commentIssue(issueId, body: body); comment = ""; await load() } catch { self.error = L10n.errorText(error) }
-                    }
-                }
-                .disabled(comment.trimmingCharacters(in: .whitespaces).isEmpty)
-                if let error { Text(error).foregroundStyle(.red).font(.footnote) }
-            }
+            if let error { Section { Text(error).foregroundStyle(.red).font(.footnote) } }
         }
         .scrollContentBackground(.hidden)
+        .safeAreaInset(edge: .bottom) { commentComposer }
+    }
+
+    /// Un solo compositor: campo + «Comentar» a la derecha (se habilita con texto).
+    private var commentComposer: some View {
+        let body = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        return HStack(alignment: .bottom, spacing: 8) {
+            TextField(L("issue.commentPh"), text: $comment, axis: .vertical)
+                .lineLimit(1...5)
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 20).fill(Theme.background))
+                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.textSecondary.opacity(0.25)))
+                .accessibilityLabel(L("issue.commentPh"))
+                .accessibilityIdentifier("issue.commentField")
+            Button {
+                sending = true
+                Task {
+                    do { try await store.commentIssue(issueId, body: body); comment = ""; error = nil; await load() }
+                    catch { self.error = L10n.errorText(error) }
+                    sending = false
+                }
+            } label: {
+                if sending { ProgressView().frame(minWidth: 80, minHeight: 40) } else {
+                    Text(L("issue.comment")).font(.subheadline.weight(.semibold)).frame(minWidth: 80, minHeight: 40)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.bubbleMine)
+            .disabled(body.isEmpty || sending)
+            .accessibilityIdentifier("issue.commentSend")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(Theme.surface.ignoresSafeArea(edges: .bottom))
     }
 
     private func eventText(_ d: BootstrapDTO, _ e: IssueEventDTO) -> String {

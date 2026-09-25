@@ -46,6 +46,7 @@ struct EditProfileView: View {
     @State private var busy: Busy?
     @State private var error: String?
     @State private var confirmRemove = false
+    @State private var choosePhoto = false
 
     enum Busy { case save, photo }
 
@@ -57,17 +58,20 @@ struct EditProfileView: View {
                 let photo = me?.avatarUrl ?? d.me.avatarUrl
                 Section {
                     HStack(spacing: 16) {
-                        Group {
-                            if let preview {
-                                Image(uiImage: preview).resizable().scaledToFill().frame(width: 88, height: 88).clipShape(Circle())
-                            } else {
-                                Avatar(name: d.me.name, org: org, size: 88, photo: photo)
-                            }
+                        Button { choosePhoto = true } label: {
+                            Avatar(name: d.me.name, org: org, size: 88, photo: photo)
+                                .overlay(alignment: .bottomTrailing) {
+                                    Image(systemName: "camera.fill").font(.caption).foregroundStyle(.white)
+                                        .padding(6).background(Circle().fill(Theme.bubbleMine))
+                                }
+                                .overlay { if busy == .photo { ProgressView().frame(width: 88, height: 88).background(Circle().fill(.black.opacity(0.25))) } }
                         }
-                        .overlay { if busy == .photo { ProgressView().frame(width: 88, height: 88).background(Circle().fill(.black.opacity(0.25))) } }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(photo != nil ? L("profile.changePhoto") : L("profile.addPhoto"))
+                        .accessibilityIdentifier("profile.photo")
                         VStack(alignment: .leading, spacing: 8) {
-                            PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
-                                Label(photo != nil || preview != nil ? L("profile.changePhoto") : L("profile.addPhoto"), systemImage: "camera")
+                            Button { choosePhoto = true } label: {
+                                Label(photo != nil ? L("profile.changePhoto") : L("profile.addPhoto"), systemImage: "camera")
                             }
                             .disabled(busy != nil)
                             .accessibilityIdentifier("profile.pickPhoto")
@@ -116,7 +120,9 @@ struct EditProfileView: View {
             loaded = true
             name = me.name; title = me.title ?? ""; area = me.area ?? ""
         }
-        .onChange(of: photoItem) { _, item in if let item { Task { await pick(item) } } }
+        .photoChangeFlow(isPresented: $choosePhoto, title: L("profile.changePhoto"),
+                         onSave: { jpeg in try await store.uploadAvatar(jpeg: jpeg) },
+                         onSaved: { store.show(L("profile.photoSaved")) })
         .confirmationDialog(L("profile.removePhoto"), isPresented: $confirmRemove, titleVisibility: .visible) {
             Button(L("profile.removePhoto"), role: .destructive) { removePhoto() }
             Button(L("common.cancel"), role: .cancel) {}

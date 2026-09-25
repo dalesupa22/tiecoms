@@ -186,6 +186,8 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
     var openIssues: Int
     /// Preferencia personal: fijada arriba.
     var pinnedAt: String?
+    /// Foto del grupo (/api/v1/avatars/<id>), si tiene.
+    var avatarUrl: String?
     /// Preferencia personal: silenciada hasta esta fecha (no avisa).
     var mutedUntil: String?
 
@@ -217,6 +219,7 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
         deriveReason = c.o("deriveReason")
         returnedAt = c.o("returnedAt")
         pinnedAt = c.o("pinnedAt")
+        avatarUrl = c.o("avatarUrl")
         openIssues = c.int("openIssues")
         mutedUntil = c.o("mutedUntil")
     }
@@ -508,6 +511,8 @@ struct ApiErrorBody: Decodable {
     var code: String
     var message: String
     var details: [ErrorDetail]
+    /// details.userIds (p. ej. side_outsider: quienes no se pueden sumar).
+    var userIds: [String]
     struct ErrorDetail: Decodable { var path: String? }
     init(from decoder: Decoder) throws {
         let root = try container(decoder)
@@ -515,6 +520,7 @@ struct ApiErrorBody: Decodable {
         code = c.v("code", "")
         message = c.v("message", "")
         details = c.v("details", [])
+        userIds = ((try? c.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey("details")))?.v("userIds", [String]())) ?? []
     }
 }
 

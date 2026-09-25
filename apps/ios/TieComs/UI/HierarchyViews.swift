@@ -107,7 +107,7 @@ struct OpenIssuesBar: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.accentText)
-                .accessibilityValue(open ? L("a11y.expanded") : L("a11y.collapsed"))
+                .accessibilityHint(open ? L("home.collapse") : L("home.expand"))
                 .accessibilityIdentifier("chat.issuesBar")
                 if open {
                     VStack(spacing: 0) {

@@ -89,6 +89,8 @@ struct Avatar: View {
         self.size = size
         self.photo = person?.avatarUrl
         self.badge = badge
+        // Como la web: iniciales blancas sobre el color estable de la persona; la empresa va en la insignia.
+        self.fill = person.map { PersonColor.fill($0.id) }
     }
 
     init(name: String, org: OrganizationDTO?, isAgent: Bool = false, size: CGFloat = 40, photo: String? = nil, badge: Bool = false, fill: Color? = nil) {

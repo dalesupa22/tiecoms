@@ -191,7 +191,8 @@ extension Naming {
     /// «Empresa · Espacio» para la cabecera del chat (nil fuera de un espacio).
     static func route(_ d: BootstrapDTO, _ c: ConversationDTO) -> String? {
         guard let ws = d.workspaces.first(where: { $0.id == c.workspaceId }) else { return nil }
-        return [counterpartOrg(d, ws)?.name, ws.name].compactMap { $0 }.joined(separator: " · ")
+        guard let org = counterpartOrg(d, ws) else { return ws.name }
+        return L("home.path", ["org": org.name, "space": ws.name])
     }
 
     static func unreadCount(_ list: [ConversationDTO]) -> Int { list.reduce(0) { $0 + ($1.isMuted ? 0 : $1.unread) } }

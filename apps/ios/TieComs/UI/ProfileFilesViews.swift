@@ -80,7 +80,7 @@ struct EditProfileView: View {
                                     .disabled(busy != nil)
                                     .accessibilityIdentifier("profile.removePhoto")
                             }
-                            Text(L("profile.photoHintIOS")).font(.caption).foregroundStyle(Theme.textSecondary)
+                            Text(L("photo.tapToChange")).font(.caption).foregroundStyle(Theme.textSecondary)
                         }
                         .buttonStyle(.borderless)
                     }
@@ -120,9 +120,9 @@ struct EditProfileView: View {
             loaded = true
             name = me.name; title = me.title ?? ""; area = me.area ?? ""
         }
-        .photoChangeFlow(isPresented: $choosePhoto, title: L("profile.changePhoto"),
+        .photoChangeFlow(isPresented: $choosePhoto, title: L("photo.cropTitle"),
                          onSave: { jpeg in try await store.uploadAvatar(jpeg: jpeg) },
-                         onSaved: { store.show(L("profile.photoSaved")) })
+                         onSaved: { store.show(L("photo.saved")) })
         .confirmationDialog(L("profile.removePhoto"), isPresented: $confirmRemove, titleVisibility: .visible) {
             Button(L("profile.removePhoto"), role: .destructive) { removePhoto() }
             Button(L("common.cancel"), role: .cancel) {}
@@ -152,12 +152,12 @@ struct EditProfileView: View {
         defer { busy = nil; photoItem = nil }
         guard let raw = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: raw),
               let jpeg = AvatarCrop.squareJPEG(img), let small = UIImage(data: jpeg) else {
-            error = L("profile.notImage"); return
+            error = L("photo.invalid"); return
         }
         preview = small
         do {
             try await store.uploadAvatar(jpeg: jpeg)
-            store.show(L("profile.photoSaved"))
+            store.show(L("photo.saved"))
         } catch {
             preview = nil
             self.error = L10n.errorText(error)

@@ -49,7 +49,7 @@ struct ConversationDetailsView: View {
                     }
                     if Self.canChangePhoto(c) {
                         Section {
-                            Button { choosePhoto = true } label: { Label(L("group.changePhoto"), systemImage: "camera") }
+                            Button { choosePhoto = true } label: { Label(c.avatarUrl == nil ? L("group.addPhoto") : L("group.changePhoto"), systemImage: "camera") }
                                 .accessibilityIdentifier("details.changePhoto")
                             if c.avatarUrl != nil {
                                 Button(role: .destructive) { confirmRemovePhoto = true } label: { Label(L("group.removePhoto"), systemImage: "trash") }
@@ -91,12 +91,12 @@ struct ConversationDetailsView: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle(L("chat.details"))
-        .photoChangeFlow(isPresented: $choosePhoto, title: L("group.changePhoto"),
+        .photoChangeFlow(isPresented: $choosePhoto, title: L("photo.cropGroupTitle"),
                          onSave: { jpeg in try await store.uploadConversationAvatar(conversationId, jpeg: jpeg) },
                          onSaved: { store.show(L("group.photoSaved")) })
-        .confirmationDialog(L("group.removePhotoConfirm"), isPresented: $confirmRemovePhoto, titleVisibility: .visible) {
+        .confirmationDialog(L("group.removeConfirm"), isPresented: $confirmRemovePhoto, titleVisibility: .visible) {
             Button(L("group.removePhoto"), role: .destructive) {
-                Task { do { try await store.removeConversationAvatar(conversationId) } catch { store.show(L10n.errorText(error)) } }
+                Task { do { try await store.removeConversationAvatar(conversationId); store.show(L("group.photoRemoved")) } catch { store.show(L10n.errorText(error)) } }
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -151,14 +151,14 @@ private struct PersonRow: View {
             if !isMe && p.kind == "human" && !store.blockedUserIds.contains(p.id) {
                 Button { message() } label: { Image(systemName: "message").font(.body.weight(.semibold)) }
                     .buttonStyle(.borderless)
-                    .accessibilityLabel(L("person.sendMessage", ["name": p.name]))
+                    .accessibilityLabel("\(L("people.sendMessage")), \(p.name)")
                     .accessibilityIdentifier("person.message.\(p.id)")
             }
         }
         .accessibilityElement(children: .contain)
         .contextMenu {
             if !isMe && p.kind == "human" {
-                Button { message() } label: { Label(L("person.sendMessageShort"), systemImage: "message") }
+                Button { message() } label: { Label(L("people.sendMessage"), systemImage: "message") }
             }
             if !isMe {
                 Button { report = true } label: { Label(L("safety.reportUser"), systemImage: "flag") }

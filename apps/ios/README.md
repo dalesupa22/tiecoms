@@ -3,14 +3,14 @@
 App nativa en SwiftUI (iOS 17+). No usa WebView, Capacitor ni dependencias externas.
 Se comporta igual que la app Android y que la web: la navegación, los textos, los sonidos, los enlaces
 y las reglas de sincronización salen de `packages/client-core` y de `apps/web`.
-Especificación común: `SPEC.md` y `SPEC-v2.md` del coordinador.
+Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de TestFlight) del coordinador.
 
 | | |
 |---|---|
-| Bundle ID | `com.tiecoms.app` (app) · `com.tiecoms.app.share` (extensión Compartir) |
+| Bundle ID | `com.tiecoms.app` (app) · `com.tiecoms.app.share` (Compartir) · `com.tiecoms.app.notifications` (Notification Service Extension) |
 | Team | `B76US7H3L3` (CERTILABOR SAS), firma automática |
 | App Group | `group.com.tiecoms.app`: Keychain compartido y lista de conversaciones para la extensión |
-| Versión | 1.1.0 (build 4), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
+| Versión | 1.1.0 (build 5), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.tiecoms.com` por defecto; `-TCApiURL <url>` al lanzar (pruebas) |
 
@@ -164,6 +164,15 @@ TEST_RUNNER_TC_DELETE_API=http://localhost:3042 TEST_RUNNER_TC_SHOTS=/tmp/shots 
   Luego se siembran la tercera persona, el chat `multi` (`multiId` en el fixture), mensajes con enlaces y una
   carpeta, y se corren `TEST_RUNNER_TC_V3=1` (IntegrationV3Tests) y `TEST_RUNNER_TC_UI_V3=1`
   (`testV3ChatsLinksForwardProfileFiles`, capturas con `TC_SHOTS`).
+- Feedback v3 (API de la rama `mobile-feedback`, puerto 3043):
+  ```bash
+  API_URL=http://localhost:3043 FIXTURE_OUT=/tmp/fx3.json node scripts/mobile-fixture.mjs
+  TEST_RUNNER_TC_FIXTURE3=/tmp/fx3.json TEST_RUNNER_TC_SHOTS=/tmp/v3fb \
+    xcodebuild test -scheme TieComs -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+    -only-testing:TieComsTests -only-testing:TieComsUITests/FeedbackUITests
+  ```
+  Para ver la pantalla previa al permiso, desinstala la app antes (`xcrun simctl uninstall <UDID> com.tiecoms.app`).
+  `-TCDemoPhoto YES` (solo Debug) agrega una foto de prueba al elegir la foto, y `-TCOpenConversation <id>` abre un chat al entrar.
 - `scripts/realtime-peer2.mjs` es propio de iOS v2. `realtime-peer.mjs` no se cambió (lo usa Android).
   El par v2:
   - responde "eco: …" a los mensajes de A;
@@ -181,11 +190,49 @@ TEST_RUNNER_TC_DELETE_API=http://localhost:3042 TEST_RUNNER_TC_SHOTS=/tmp/shots 
   publica el coordinador. Sin AASA y sin firmar con el App ID, un enlace https abre Safari: está
   comprobado en simulador.
 
-## Push remoto
+## Feedback de TestFlight (build 5)
 
-El backend aún no recibe tokens. El punto de extensión es `PushRegistration` en `Core/Feedback.swift`.
-Las notificaciones locales (mensajes de otra conversación, recordatorios y reuniones nuevas) solo se
-disparan mientras la app está viva.
+| # | Qué cambió |
+|---|---|
+| 1 | Foto del grupo: Detalles → «Poner / Cambiar foto del grupo» (grupos con `canManage`, cualquier miembro en chats grupales) y «Quitar foto». Se ve en Inicio, en la cabecera y en Detalles. |
+| 2 | Foto de perfil: se toca la foto y se elige de la galería, la cámara o Archivos. Luego un recorte circular (mover y zoom) con **Cancelar / Guardar**, barra de progreso y «Foto actualizada». El resultado es un JPEG de ≤ 512 px y ≤ 3 MB. Grupo y perfil usan el mismo editor (`UI/PhotoEditor.swift`). |
+| 3 | Asuntos: un solo compositor, con «Escribe una actualización o una pregunta…» y **Comentar** a la derecha. Los comentarios salen con autor, foto o iniciales y hora. |
+| 4 | Conversaciones laterales: en el menú del mensaje, «Preguntar en privado (lateral)». Se eligen personas: miembros y colegas; `side_outsider` las marca como no disponibles. Se abre en una hoja en iPhone o como inspector en iPad. El chip «💬 Consulta lateral» va bajo el ancla, y la lateral cuelga de su origen en Inicio. Tiene «Llevar la respuesta al hilo». |
+| 5 | Autor visible: avatar de 28 pt y nombre con color estable por persona, con el mismo algoritmo y paleta que `personColor()` de la web (FNV-1a sobre el id en minúsculas, % 8). Rachas de menos de 5 min. Burbujas propias en `#E8710A` / `#C75F08`. |
+| 6 | Push: ver la sección siguiente. |
+| 7 | Responder en privado: abre el directo con la cita sobre el compositor y envía `forwarded.messageId`. El servidor agrega `messageSeq` y `excerpt`. «Ver original» salta con `?m=<seq>`. Hay «Enviar mensaje» en Participantes y el lápiz de Inicio abre Nuevo chat. |
+| 8 | Pulsación larga con vista previa de la burbuja (`contextMenu` + `preview`), sin reacciones. |
+| 9 | Inicio igual que la barra lateral de la web: EMPRESAS Y ESPACIOS (empresa → espacio → conversaciones → laterales, plegables, con no leídos agregados) y CHATS, cada uno con su +. Chip «◆ N asuntos», cabecera «Empresa · Espacio» y barra «Asuntos abiertos (N)». La pestaña Asuntos se agrupa Empresa → Espacio → Conversación, con filtros Míos / Abiertos / Todos. La vista previa de los mensajes de sistema es legible aunque llegue cortada. |
+
+Los textos salen de `tiecoms-feedback/apps/web/src/i18n.ts`: `WEB_I18N=<ruta> node tools/gen-strings.mjs`.
+Cuando `mobile-feedback` llegue a main, basta con `node tools/gen-strings.mjs`.
+
+## Push (APNs)
+
+- **Registro**:
+  - Tras el primer login aparece una pantalla previa (`push.primerTitle`) y después el permiso del sistema.
+  - Con el token se hace `PUT /api/v1/push/token {provider:'apns', token, environment, lang}`. `environment` es `sandbox` en Debug y `production` en Release/TestFlight.
+  - Al cerrar sesión se hace `DELETE /push/token`; el logout del API también lo borra.
+- **Notification Service Extension** (`TieComsNotifications`):
+  - Descarga la foto del autor desde `authorAvatarUrl` (relativa, con la URL base guardada en el App Group).
+  - Dona un `INSendMessageIntent` para que salga como **notificación de comunicación** con la foto del remitente y el nombre del grupo, agrupada por `thread-id`.
+  - La lógica está en `Core/CommunicationNotification.swift` (probada en unitarias).
+- **Acciones**: `TC_MESSAGE` tiene Responder (texto, envía por HTTP) y Marcar como leído. `TC_REMINDER` y `TC_EVENT` abren la conversación.
+- **Badge**: no leídos de las conversaciones no silenciadas, igual que el servidor.
+- **En primer plano**: no hay banner si es la conversación abierta; si el socket está en línea, el push remoto se omite porque el aviso local ya salió.
+- **Lo que debe crear Danny**:
+  1. developer.apple.com → Certificates, IDs & Profiles → **Keys** → nueva llave con **Apple Push Notifications service (APNs)**. Descargar el `.p8` (solo una vez) y anotar su Key ID.
+  2. En el servidor: `APNS_KEY_ID=<Key ID>`, `APNS_TEAM_ID=B76US7H3L3`, `APNS_BUNDLE_ID=com.tiecoms.app` y `APNS_KEY_PATH=/opt/tiecoms/.secrets/apns.p8` (o `APNS_KEY` con el contenido). Nunca en git.
+  3. App IDs, con firma automática o a mano:
+     - `com.tiecoms.app`: capacidades **Push Notifications**, **Communication Notifications**, **App Groups** (`group.com.tiecoms.app`) y **Associated Domains**.
+     - `com.tiecoms.app.notifications` y `com.tiecoms.app.share`: **App Groups**.
+  4. No hace falta esperar la aprobación de App Store: en TestFlight funciona en cuanto el servidor tenga la llave (entorno `production`).
+- **Qué se probó y qué no**:
+  - Probado:
+    - Registro y borrado del token contra 3043.
+    - Payload con `xcrun simctl push` (banner, título y subtítulo, badge 3/4, capturas `v3fb/v3-11-*`, `v3-12-*`).
+    - Construcción del intent en unitarias.
+  - No probado: el simulador no ejecutó la Notification Service Extension con `simctl push` (no aparece su proceso en el log), así que la foto del remitente solo se puede ver en un iPhone real con la llave APNs.
 
 ## Checklist de publicación (App Store Connect)
 

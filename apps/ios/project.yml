@@ -117,6 +117,7 @@ targets:
       - path: TieComsNotifications
         excludes: ["Info.plist"]
       - TieComs/Core/PushPayload.swift
+      - TieComs/Core/CommunicationNotification.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tiecoms.app.notifications

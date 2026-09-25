@@ -7,23 +7,17 @@ struct PushPromptView: View {
         VStack(spacing: 20) {
             Spacer()
             Image(systemName: "bell.badge.fill").font(.system(size: 56)).foregroundStyle(Theme.orange).accessibilityHidden(true)
-            Text(L("push.promptTitle")).font(.title2.weight(.bold)).multilineTextAlignment(.center)
-            VStack(alignment: .leading, spacing: 12) {
-                Label(L("push.promptMessages"), systemImage: "bubble.left.and.bubble.right")
-                Label(L("push.promptReminders"), systemImage: "alarm")
-                Label(L("push.promptControl"), systemImage: "bell.slash")
-            }
-            .font(.body)
-            .foregroundStyle(Theme.textPrimary)
-            .padding(.horizontal, 8)
+            Text(L("push.primerTitle")).font(.title2.weight(.bold)).multilineTextAlignment(.center)
+            Text(L("push.primerBody")).font(.body).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
             Spacer()
             Button {
                 Prefs.pushPrompted = true
                 Task { await AppFeedback.shared.requestAuthorizationIfNeeded(); dismiss() }
-            } label: { Text(L("push.promptAllow")) }
+            } label: { Text(L("push.enable")) }
                 .buttonStyle(PrimaryButtonStyle())
                 .accessibilityIdentifier("push.allow")
-            Button(L("push.promptLater")) { Prefs.pushPrompted = true; dismiss() }
+            Button(L("push.later")) { Prefs.pushPrompted = true; dismiss() }
                 .frame(minHeight: 44)
                 .accessibilityIdentifier("push.later")
         }

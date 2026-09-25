@@ -186,8 +186,7 @@ struct CompanyRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel([org?.name ?? L("common.noCompany"), unread > 0 ? L("a11y.unread", ["n": unread]) : nil].compactMap { $0 }.joined(separator: ", "))
-        .accessibilityValue(open ? L("a11y.expanded") : L("a11y.collapsed"))
-        .accessibilityHint(L("a11y.toggleHint"))
+        .accessibilityHint(open ? L("home.collapse") : L("home.expand"))
         .accessibilityIdentifier("home.org.\(org?.id ?? "none")")
     }
 }
@@ -212,7 +211,7 @@ struct WorkspaceRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel([ws.name, unread > 0 ? L("a11y.unread", ["n": unread]) : nil].compactMap { $0 }.joined(separator: ", "))
-        .accessibilityValue(open ? L("a11y.expanded") : L("a11y.collapsed"))
+        .accessibilityHint(open ? L("home.collapse") : L("home.expand"))
         .accessibilityIdentifier("home.ws.\(ws.id)")
     }
 }
@@ -264,7 +263,7 @@ struct HierarchyConvRow: View {
                 }
                 if c.openIssues > 0 {
                     Button(action: onIssues) {
-                        Text("◆ " + (c.openIssues == 1 ? L("issue.countOne") : L("issue.count", ["n": c.openIssues])))
+                        Text(c.openIssues == 1 ? L("issue.chipOne") : L("issue.chipMany", ["n": c.openIssues]))
                             .font(.caption2.weight(.semibold)).foregroundStyle(Theme.accentText)
                             .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(Capsule().fill(Theme.orange.opacity(0.12)))
@@ -276,7 +275,7 @@ struct HierarchyConvRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel([title, c.isMuted ? L("side.muted") : nil, c.unread > 0 ? L("a11y.unread", ["n": c.unread]) : nil, preview, time,
-                             c.openIssues > 0 ? L("issue.count", ["n": c.openIssues]) : nil].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
+                             c.openIssues > 0 ? (c.openIssues == 1 ? L("issue.chipOne") : L("issue.chipMany", ["n": c.openIssues])).replacingOccurrences(of: "◆ ", with: "") : nil].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
     }
 }
 

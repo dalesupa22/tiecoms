@@ -49,6 +49,7 @@ struct ConversationView: View {
     var embedded = false
     @State private var draft = ""
     @State private var sidePanel: String?
+    @State private var highlighted: String?
     @State private var askSide: MessageDTO?
     @State private var replyTo: MessageDTO?
     @State private var editing: MessageDTO?
@@ -80,13 +81,7 @@ struct ConversationView: View {
             NewSideSheet(conversationId: conversationId, message: m) { id in sidePanel = id }
         }
         // iPad / pantalla ancha: panel a la derecha; iPhone: hoja casi completa sobre el chat.
-        .inspector(isPresented: Binding(get: { sidePanel != nil }, set: { if !$0 { sidePanel = nil } })) {
-            if let id = sidePanel {
-                SidePanel(sideId: id)
-                    .inspectorColumnWidth(min: 320, ideal: 380, max: 480)
-                    .presentationDetents([.large])
-            }
-        }
+        .modifier(SidePanelPresenter(sideId: $sidePanel))
         .onChange(of: sidePanel) { _, v in if v == nil { store.openConversationId = conversationId } }
         .confirmationDialog(L("safety.blockConfirm"), isPresented: Binding(get: { blockUserId != nil }, set: { if !$0 { blockUserId = nil } }), titleVisibility: .visible) {
             Button(L("safety.block"), role: .destructive) {
@@ -267,6 +262,18 @@ struct ConversationView: View {
                 .padding(.vertical, 8)
             }
             .defaultScrollAnchor(.bottom)
+            // ?m=<seq>: cargar hacia atrás hasta el mensaje, centrarlo y resaltarlo.
+            .task(id: store.jumpTo[conversationId]) {
+                guard let seq = store.jumpTo[conversationId] else { return }
+                store.jumpTo[conversationId] = nil
+                if let id = await store.ensureMessage(conversationId, seq: seq) {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    withAnimation { proxy.scrollTo(id, anchor: .center) }
+                    highlighted = id
+                    try? await Task.sleep(nanoseconds: 1_800_000_000)
+                    withAnimation { highlighted = nil }
+                }
+            }
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: items.last?.id) { _, _ in
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
@@ -311,7 +318,7 @@ struct ConversationView: View {
                 author: mine || !showAuthor ? nil : Naming.authorLine(d, m.authorId),
                 status: nil, italic: m.deletedAt != nil,
                 quote: m.replyTo == nil ? nil : (quoted.map { q in (Naming.person(d, q.authorId)?.name ?? "", q.deletedAt != nil ? L("chat.deleted") : excerpt(q.body)) } ?? ("", L("reply.quoteMissing"))),
-                forwardedLabel: m.forwarded.map { forwardedLabel(d, $0) },
+                forwardedLabel: m.forwarded.map { forwardedLabel(d, $0, mine: mine, authorName: author?.name) },
                 merged: m.mergedFrom.map { id in store.meta(id).map { L("lin.resultOf", ["name": Naming.title(d, $0)]) } ?? L("lin.resultHidden") },
                 pinned: store.pins[conversationId]?.contains(m.id) == true,
                 linkify: m.deletedAt == nil && m.kind == "text",
@@ -326,6 +333,7 @@ struct ConversationView: View {
                 } else { bubble }
             }
             .padding(.top, showAuthor ? 6 : 0)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Theme.orange.opacity(highlighted == m.id ? 0.18 : 0)))
             .accessibilityIdentifier("msg.\(m.id)")
             let sides = store.sides(of: m.id)
             if !sides.isEmpty {
@@ -334,9 +342,13 @@ struct ConversationView: View {
                     .padding(.horizontal, mine ? 4 : 40)
             }
             if let f = m.forwarded, f.messageId != nil, let fromId = f.fromConversationId, store.meta(fromId) != nil {
-                NavigationLink(value: Route.conversation(fromId)) {
-                    Label(L("privateReply.open"), systemImage: "arrow.up.forward").font(.caption2.weight(.semibold))
+                Button {
+                    if let seq = f.messageSeq { store.jumpTo[fromId] = seq }
+                    store.navigate(to: .conversation(fromId))
+                } label: {
+                    Label(L("preply.open"), systemImage: "arrow.up.forward").font(.caption2.weight(.semibold))
                 }
+                .buttonStyle(.borderless)
                 .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
                 .padding(.horizontal, mine ? 4 : 40)
                 .accessibilityIdentifier("msg.privateOrigin.\(m.id)")
@@ -358,11 +370,14 @@ struct ConversationView: View {
         }
     }
 
-    private func forwardedLabel(_ d: BootstrapDTO, _ f: ForwardedInfo) -> String {
+    private func forwardedLabel(_ d: BootstrapDTO, _ f: ForwardedInfo, mine: Bool = true, authorName: String? = nil) -> String {
         if let mid = f.messageId {
-            // Respuesta en privado: cita del original si lo tengo cargado; si no, la conversación de origen.
+            // Respuesta en privado: el servidor manda el extracto del original.
+            if let ex = f.excerpt, !ex.isEmpty {
+                return mine ? L("preply.you", ["excerpt": excerpt(ex, 80)]) : L("preply.other", ["name": authorName ?? "", "excerpt": excerpt(ex, 80)])
+            }
             if let fromId = f.fromConversationId, let orig = store.conversations[fromId]?.messages.first(where: { $0.id == mid }), orig.deletedAt == nil {
-                return L("privateReply.label", ["excerpt": excerpt(orig.body, 80)])
+                return mine ? L("preply.you", ["excerpt": excerpt(orig.body, 80)]) : L("preply.other", ["name": authorName ?? "", "excerpt": excerpt(orig.body, 80)])
             }
             if let from = f.fromConversationId.flatMap({ store.meta($0) }) {
                 return L("privateReply.labelConv", ["name": Naming.title(d, from)])
@@ -394,10 +409,10 @@ struct ConversationView: View {
         if !mine && c.kind != .direct {
             Button {
                 act { try await store.startPrivateReply(to: m) }
-            } label: { Label(L("menu.replyPrivately"), systemImage: "lock.bubble") }
+            } label: { Label(L("preply.action"), systemImage: "lock.bubble") }
         }
         if m.kind == "text" && !Naming.isSide(c) {
-            Button { askSide = m } label: { Label(L("menu.askSide"), systemImage: "bubble.left.and.text.bubble.right") }
+            Button { askSide = m } label: { Label(L("side.ask"), systemImage: "bubble.left.and.text.bubble.right") }
         }
         Button { UIPasteboard.general.string = m.body; store.show(L("toast.copied")) } label: { Label(L("menu.copyText"), systemImage: "doc.on.doc") }
         Button { UIPasteboard.general.string = "\(conversationLink(conversationId))?m=\(m.seq)"; store.show(L("toast.linkCopied")) } label: {
@@ -471,8 +486,8 @@ struct ConversationView: View {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         VStack(spacing: 0) {
             if let pr = store.privateReplies[conversationId] {
-                ContextBar(icon: "lock.bubble", title: L("privateReply.to", ["name": pr.author ?? ""]),
-                           detail: "«\(excerpt(pr.excerpt, 100))»", cancelLabel: L("reply.cancel")) { store.privateReplies[conversationId] = nil }
+                ContextBar(icon: "lock.bubble", title: L("preply.bar", ["name": pr.author ?? ""]),
+                           detail: "«\(excerpt(pr.excerpt, 100))»", cancelLabel: L("preply.cancel")) { store.privateReplies[conversationId] = nil }
                     .accessibilityIdentifier("composer.privateReplyBar")
             }
             if let r = replyTo {
@@ -743,8 +758,9 @@ struct LineageBar: View {
     var body: some View {
         if let d = store.data {
             let parent = conv.parentId.flatMap { store.meta($0) }
-            let kids = d.conversations.filter { $0.parentId == conv.id }
-            if conv.parentId != nil || !kids.isEmpty {
+            // Las laterales no van en el linaje: tienen su chip bajo el mensaje ancla.
+            let kids = d.conversations.filter { $0.parentId == conv.id && !Naming.isSide($0) }
+            if (conv.parentId != nil && !Naming.isSide(conv)) || !kids.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         Text(L("lin.label")).font(.caption2.weight(.bold)).textCase(.uppercase).foregroundStyle(Theme.textSecondary)

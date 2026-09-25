@@ -615,10 +615,6 @@
   "La foto pesa más de 3 MB.",
   "The photo is larger than 3 MB."
  ],
- "profile.photoHintIOS": [
-  "Toca la foto para elegirla y ajustar el recorte.",
-  "Tap the photo to choose it and adjust the crop."
- ],
  "files.emptyHintIOS": [
   "Usa «Subir archivos» en el botón +. Hasta 25 MB cada uno.",
   "Use “Upload files” in the + button. Up to 25 MB each."
@@ -723,18 +719,6 @@
   "No se permite contenido abusivo, discriminatorio, sexual, violento o ilegal. Puedes reportar mensajes y bloquear personas.",
   "Abusive, discriminatory, sexual, violent or illegal content is not allowed. You can report messages and block people."
  ],
- "menu.replyPrivately": [
-  "Responder en privado",
-  "Reply privately"
- ],
- "privateReply.to": [
-  "Respondiendo en privado a {name}",
-  "Replying privately to {name}"
- ],
- "privateReply.label": [
-  "Respondiste en privado a: «{excerpt}»",
-  "Private reply to: “{excerpt}”"
- ],
  "privateReply.labelConv": [
   "Respuesta en privado a un mensaje de «{name}»",
   "Private reply to a message in “{name}”"
@@ -743,216 +727,20 @@
   "Respuesta en privado a un mensaje",
   "Private reply to a message"
  ],
- "privateReply.open": [
-  "Ver el mensaje original",
-  "View original message"
- ],
- "privateReply.unreachable": [
-  "No puedes escribirle en privado a esta persona.",
-  "You cannot message this person privately."
- ],
- "issue.count": [
-  "{n} asuntos",
-  "{n} issues"
- ],
- "issue.countOne": [
-  "1 asunto",
-  "1 issue"
- ],
- "issue.openBar": [
-  "Asuntos abiertos ({n})",
-  "Open issues ({n})"
- ],
- "issue.all": [
-  "Todos",
-  "All"
- ],
- "a11y.expanded": [
-  "Desplegado",
-  "Expanded"
- ],
- "a11y.collapsed": [
-  "Plegado",
-  "Collapsed"
- ],
- "a11y.toggleHint": [
-  "Toca para desplegar o plegar",
-  "Tap to expand or collapse"
- ],
- "photo.library": [
-  "Elegir de la galería",
-  "Choose from library"
- ],
- "photo.camera": [
-  "Tomar foto",
-  "Take photo"
- ],
- "photo.files": [
-  "Elegir de Archivos",
-  "Choose from Files"
- ],
- "photo.cropHint": [
-  "Arrastra para mover y pellizca para acercar.",
-  "Drag to move and pinch to zoom."
- ],
  "photo.cropA11y": [
   "Recorte de la foto. Desliza arriba o abajo para acercar.",
   "Photo crop. Swipe up or down to zoom."
- ],
- "photo.zoom": [
-  "Zoom",
-  "Zoom"
- ],
- "photo.saving": [
-  "Subiendo foto…",
-  "Uploading photo…"
- ],
- "group.changePhoto": [
-  "Cambiar foto del grupo",
-  "Change group photo"
- ],
- "group.removePhoto": [
-  "Quitar foto",
-  "Remove photo"
- ],
- "group.removePhotoConfirm": [
-  "¿Quitar la foto del grupo?",
-  "Remove the group photo?"
- ],
- "group.photoSaved": [
-  "Foto del grupo actualizada",
-  "Group photo updated"
- ],
- "person.sendMessage": [
-  "Enviar mensaje a {name}",
-  "Send a message to {name}"
- ],
- "person.sendMessageShort": [
-  "Enviar mensaje",
-  "Send message"
- ],
- "menu.askSide": [
-  "Preguntar en privado (lateral)",
-  "Ask privately (side conversation)"
- ],
- "sideq.title": [
-  "Consulta lateral",
-  "Side conversation"
- ],
- "sideq.label": [
-  "Consulta lateral",
-  "Side conversation"
- ],
- "sideq.chip": [
-  "Consulta lateral",
-  "Side conversation"
- ],
- "sideq.body": [
-  "Pregunta en privado sobre este mensaje. En el chat original no se publica nada.",
-  "Ask privately about this message. Nothing is posted in the original chat."
- ],
- "sideq.members": [
-  "En esta conversación",
-  "In this conversation"
- ],
- "sideq.colleagues": [
-  "Tu empresa",
-  "Your company"
- ],
- "sideq.search": [
-  "Buscar persona",
-  "Search people"
  ],
  "sideq.nobody": [
   "No hay nadie más a quien preguntar.",
   "There is nobody else to ask."
  ],
- "sideq.questionPh": [
-  "Tu pregunta (opcional)",
-  "Your question (optional)"
- ],
- "sideq.privacy": [
-  "Solo quienes elijas verán la consulta. Puedes sumar a personas de esta conversación y a colegas de tu empresa.",
-  "Only the people you pick will see it. You can add people from this conversation and colleagues from your company."
- ],
- "sideq.open": [
-  "Preguntar",
-  "Ask"
- ],
- "sideq.blocked": [
-  "Bloqueado",
-  "Blocked"
- ],
- "sideq.outsider": [
-  "Es de otra empresa y no está en esta conversación",
-  "From another company and not in this conversation"
- ],
- "sideq.outsiderError": [
-  "Algunas personas no se pueden sumar: son de otra empresa y no están en la conversación de origen.",
-  "Some people cannot be added: they are from another company and not in the original conversation."
- ],
  "sideq.removeChip": [
   "Quitar a {name}",
   "Remove {name}"
  ],
- "sideq.return": [
-  "Llevar la respuesta al hilo",
-  "Bring the answer to the thread"
- ],
- "sideq.from": [
-  "Consulta lateral de «{name}»",
-  "Side conversation from “{name}”"
- ],
- "sys.side.started": [
-  "{authorName} abrió una consulta lateral sobre «{excerpt}».",
-  "{authorName} started a side conversation about “{excerpt}”."
- ],
- "sys.group.photo_changed": [
-  "Cambió la foto del grupo.",
-  "Changed the group photo."
- ],
- "sys.group.photo_removed": [
-  "Quitó la foto del grupo.",
-  "Removed the group photo."
- ],
- "lin.kind.side": [
-  "Consulta lateral",
-  "Side conversation"
- ],
  "derive.prefix.side": [
   "Consulta",
   "Question"
- ],
- "push.reply": [
-  "Responder",
-  "Reply"
- ],
- "push.replyPh": [
-  "Escribe tu respuesta…",
-  "Write your reply…"
- ],
- "push.promptTitle": [
-  "Entérate cuando te escriban",
-  "Know when someone writes to you"
- ],
- "push.promptMessages": [
-  "Avisos de mensajes nuevos, con la foto de quien escribe.",
-  "Alerts for new messages, with the sender's photo."
- ],
- "push.promptReminders": [
-  "Tus recordatorios y las reuniones que te agendan.",
-  "Your reminders and the meetings you are invited to."
- ],
- "push.promptControl": [
-  "Silencia cualquier conversación cuando quieras.",
-  "Mute any conversation whenever you want."
- ],
- "push.promptAllow": [
-  "Activar notificaciones",
-  "Turn on notifications"
- ],
- "push.promptLater": [
-  "Ahora no",
-  "Not now"
  ]
 }

@@ -5,6 +5,7 @@
  * Si una clave existe en ambos, gana la web: así los textos son los mismos en todas las apps.
  *
  *   node apps/ios/tools/gen-strings.mjs
+ *   WEB_I18N=/ruta/a/otra/rama/apps/web/src/i18n.ts node apps/ios/tools/gen-strings.mjs
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -12,7 +13,8 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..', '..', '..');
-const src = readFileSync(join(root, 'apps/web/src/i18n.ts'), 'utf8');
+// WEB_I18N permite tomar los textos de otra rama (p. ej. el worktree de backend con claves nuevas).
+const src = readFileSync(process.env.WEB_I18N || join(root, 'apps/web/src/i18n.ts'), 'utf8');
 
 function objectLiteral(startToken) {
   const i = src.indexOf(startToken);

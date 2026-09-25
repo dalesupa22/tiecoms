@@ -26,7 +26,7 @@ struct NewSideSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Text(L("sideq.body")).font(.footnote).foregroundStyle(Theme.textSecondary)
+                    Text(L("side.body")).font(.footnote).foregroundStyle(Theme.textSecondary)
                     Text("“\(excerpt(message.body, 220))”").italic()
                 }
                 if !chosen.isEmpty, let d = store.data {
@@ -47,22 +47,22 @@ struct NewSideSheet: View {
                     }
                 }
                 let members = filter(cand.members), colleagues = filter(cand.colleagues)
-                if !members.isEmpty { Section(L("sideq.members")) { ForEach(members) { row($0) } } }
-                if !colleagues.isEmpty { Section(L("sideq.colleagues")) { ForEach(colleagues) { row($0) } } }
+                if !members.isEmpty { Section(L("side.inChat")) { ForEach(members) { row($0) } } }
+                if !colleagues.isEmpty { Section(L("side.colleagues")) { ForEach(colleagues) { row($0) } } }
                 if members.isEmpty && colleagues.isEmpty { Text(L("sideq.nobody")).foregroundStyle(Theme.textSecondary) }
                 Section {
-                    TextField(L("sideq.questionPh"), text: $question, axis: .vertical).lineLimit(2...6).accessibilityIdentifier("side.question")
-                } footer: { Text(L("sideq.privacy")) }
+                    TextField(L("side.questionPh"), text: $question, axis: .vertical).accessibilityLabel(L("side.question")).lineLimit(2...6).accessibilityIdentifier("side.question")
+                } header: { Text(L("side.question")) } footer: { Text(L("side.private") + " " + L("side.aiSoon")) }
                 if let error { Section { Text(error).foregroundStyle(.red).font(.footnote) } }
             }
-            .searchable(text: $query, prompt: L("sideq.search"))
-            .navigationTitle(L("sideq.title"))
+            .searchable(text: $query, prompt: L("side.search"))
+            .navigationTitle(L("side.title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     if busy { ProgressView() } else {
-                        Button(L("sideq.open"), action: submit).disabled(chosen.isEmpty).accessibilityIdentifier("side.submit")
+                        Button(L("side.create"), action: submit).disabled(chosen.isEmpty).accessibilityIdentifier("side.submit")
                     }
                 }
             }
@@ -106,7 +106,7 @@ struct NewSideSheet: View {
             } catch let e as ApiRequestError where e.code == "side_outsider" {
                 outsiders.formUnion(e.userIds)
                 chosen.subtract(e.userIds)
-                error = L("sideq.outsiderError")
+                error = L("err.side_outsider")
             } catch {
                 self.error = L10n.errorText(error)
             }
@@ -131,10 +131,10 @@ struct SidePanel: View {
             }
             .routes()
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(L("common.close")) { dismiss() }.accessibilityIdentifier("side.close") }
+                ToolbarItem(placement: .cancellationAction) { Button(L("common.close")) { dismiss() }.accessibilityLabel(L("side.close")).accessibilityIdentifier("side.close") }
                 ToolbarItem(placement: .primaryAction) {
                     if let c = store.meta(sideId), c.returnedAt == nil, c.parentId.flatMap({ store.meta($0) })?.canPost == true {
-                        Button(L("sideq.return")) { returning = true }.accessibilityIdentifier("side.return")
+                        Button(L("side.return")) { returning = true }.accessibilityIdentifier("side.return")
                     }
                 }
             }
@@ -151,7 +151,7 @@ struct SidePanel: View {
             let text = orig?.body ?? (started?["excerpt"] as? String) ?? ""
             let author = orig.flatMap { Naming.person(d, $0.authorId)?.name } ?? (started?["authorName"] as? String)
             VStack(alignment: .leading, spacing: 4) {
-                Label(parent.map { L("sideq.from", ["name": Naming.title(d, $0)]) } ?? L("sideq.label"), systemImage: "bubble.left.and.text.bubble.right")
+                Label([L("side.anchor"), parent.map { L("preply.in", ["name": Naming.title(d, $0)]) }].compactMap { $0 }.joined(separator: " "), systemImage: "bubble.left.and.text.bubble.right")
                     .font(.caption.weight(.semibold)).foregroundStyle(Theme.accentText)
                 if !text.isEmpty {
                     Text((author.map { "\($0): " } ?? "") + "«\(excerpt(text, 200))»").font(.subheadline).foregroundStyle(Theme.textPrimary).lineLimit(3)
@@ -172,13 +172,13 @@ struct SideChip: View {
     var onOpen: (String) -> Void
     var body: some View {
         if let first = sides.first {
-            let label = "💬 " + L("sideq.chip") + (sides.count > 1 ? " · \(sides.count)" : "")
+            let label = sides.count > 1 ? L("side.chipN", ["n": sides.count]) : L("side.chip")
             Group {
                 if sides.count == 1 {
                     Button { onOpen(first.id) } label: { chip(label) }
                 } else {
                     Menu {
-                        ForEach(sides) { s in Button(s.name ?? L("sideq.label")) { onOpen(s.id) } }
+                        ForEach(sides) { s in Button(s.name ?? L("side.title")) { onOpen(s.id) } }
                     } label: { chip(label) }
                 }
             }
@@ -191,5 +191,23 @@ struct SideChip: View {
         Text(text).font(.caption.weight(.semibold)).foregroundStyle(Theme.accentText)
             .padding(.horizontal, 10).padding(.vertical, 4)
             .background(Capsule().fill(Theme.orange.opacity(0.12)))
+    }
+}
+
+/// Presenta la lateral como panel a la derecha (inspector) en pantalla ancha y como hoja en iPhone.
+struct SidePanelPresenter: ViewModifier {
+    @Binding var sideId: String?
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    func body(content: Content) -> some View {
+        if sizeClass == .regular {
+            content.inspector(isPresented: Binding(get: { sideId != nil }, set: { if !$0 { sideId = nil } })) {
+                if let id = sideId { SidePanel(sideId: id).inspectorColumnWidth(min: 320, ideal: 380, max: 480) }
+            }
+        } else {
+            content.sheet(item: Binding(get: { sideId.map(IdBox.init) }, set: { sideId = $0?.id })) { box in
+                SidePanel(sideId: box.id).presentationDetents([.large]).presentationDragIndicator(.visible)
+            }
+        }
     }
 }

@@ -54,7 +54,7 @@ struct PhotoChangeFlow: ViewModifier {
 
     @State private var source: Source?
     @State private var libraryItem: PhotosPickerItem?
-    @State private var picked: UIImage?
+    @State private var picked: ImageBox?
     @State private var error: String?
 
     enum Source: Identifiable { case library, camera, files; var id: Int { hashValue } }
@@ -62,9 +62,13 @@ struct PhotoChangeFlow: ViewModifier {
     func body(content: Content) -> some View {
         content
             .confirmationDialog(title, isPresented: $isPresented, titleVisibility: .visible) {
-                Button(L("photo.library")) { source = .library }
-                if UIImagePickerController.isSourceTypeAvailable(.camera) { Button(L("photo.camera")) { source = .camera } }
-                Button(L("photo.files")) { source = .files }
+                Button(L("photo.fromGallery")) { source = .library }
+                if UIImagePickerController.isSourceTypeAvailable(.camera) { Button(L("photo.fromCamera")) { source = .camera } }
+                Button(L("photo.fromFiles")) { source = .files }
+                #if DEBUG
+                // Solo pruebas de interfaz (-TCDemoPhoto YES): una imagen generada, sin depender de la galería.
+                if AppConfig.launchFlag("TCDemoPhoto") { Button("Demo") { picked = ImageBox(image: PhotoChangeFlow.demoImage()) } }
+                #endif
                 Button(L("common.cancel"), role: .cancel) {}
             }
             .photosPicker(isPresented: Binding(get: { source == .library }, set: { if !$0 && source == .library { source = nil } }),
@@ -73,11 +77,11 @@ struct PhotoChangeFlow: ViewModifier {
                 guard let item else { return }
                 Task {
                     defer { libraryItem = nil }
-                    if let raw = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: raw) { picked = img } else { error = L("profile.notImage") }
+                    if let raw = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: raw) { picked = ImageBox(image: img) } else { error = L("photo.invalid") }
                 }
             }
             .fullScreenCover(isPresented: Binding(get: { source == .camera }, set: { if !$0 { source = nil } })) {
-                CameraPicker { img in source = nil; if let img { picked = img } }.ignoresSafeArea()
+                CameraPicker { img in source = nil; if let img { picked = ImageBox(image: img) } }.ignoresSafeArea()
             }
             .fileImporter(isPresented: Binding(get: { source == .files }, set: { if !$0 && source == .files { source = nil } }),
                           allowedContentTypes: [.image]) { result in
@@ -85,16 +89,32 @@ struct PhotoChangeFlow: ViewModifier {
                 guard case .success(let url) = result else { return }
                 let ok = url.startAccessingSecurityScopedResource()
                 defer { if ok { url.stopAccessingSecurityScopedResource() } }
-                if let data = try? Data(contentsOf: url), let img = UIImage(data: data) { picked = img } else { error = L("profile.notImage") }
+                if let data = try? Data(contentsOf: url), let img = UIImage(data: data) { picked = ImageBox(image: img) } else { error = L("photo.invalid") }
             }
-            .sheet(item: Binding(get: { picked.map(ImageBox.init) }, set: { if $0 == nil { picked = nil } })) { box in
+            // El id del recuadro es estable: si cambiara en cada render, la hoja se cerraría y abriría sin parar.
+            .sheet(item: $picked) { box in
                 AvatarCropView(image: box.image, title: title, onSave: onSave) { picked = nil; onSaved() }
             }
             .alert(error ?? "", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button(L("common.ok")) {} }
     }
 }
 
-private struct ImageBox: Identifiable { let image: UIImage; let id = UUID() }
+#if DEBUG
+extension PhotoChangeFlow {
+    static func demoImage() -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 1200, height: 900)).image { ctx in
+            let colors = [UIColor(red: 0.15, green: 0.39, blue: 0.92, alpha: 1).cgColor, UIColor(red: 0.49, green: 0.23, blue: 0.93, alpha: 1).cgColor]
+            let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: [0, 1])!
+            ctx.cgContext.drawLinearGradient(g, start: .zero, end: CGPoint(x: 1200, y: 900), options: [])
+            UIColor.white.withAlphaComponent(0.9).setFill()
+            ctx.cgContext.fillEllipse(in: CGRect(x: 450, y: 220, width: 300, height: 300))
+            ctx.cgContext.fillEllipse(in: CGRect(x: 330, y: 560, width: 540, height: 420))
+        }
+    }
+}
+#endif
+
+struct ImageBox: Identifiable { let image: UIImage; let id = UUID() }
 
 extension View {
     func photoChangeFlow(isPresented: Binding<Bool>, title: String, onSave: @escaping (Data) async throws -> Void, onSaved: @escaping () -> Void) -> some View {
@@ -160,6 +180,7 @@ struct AvatarCropView: View {
                         Image(systemName: "minus.magnifyingglass")
                         Slider(value: Binding(get: { zoom }, set: { zoom = $0; lastZoom = $0 }), in: CropMath.minZoom...CropMath.maxZoom)
                             .accessibilityLabel(L("photo.zoom"))
+                            .tint(Theme.orange)
                         Image(systemName: "plus.magnifyingglass")
                     }
                     .foregroundStyle(.white.opacity(0.8))
@@ -177,9 +198,9 @@ struct AvatarCropView: View {
                 }
                 .onChange(of: saving) { _, _ in }
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() }.disabled(saving).accessibilityIdentifier("photo.cancel") }
+                    ToolbarItem(placement: .cancellationAction) { Button(L("photo.cancel")) { dismiss() }.disabled(saving).accessibilityIdentifier("photo.cancel") }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button(L("common.save")) { save(side: side) }.bold().disabled(saving).accessibilityIdentifier("photo.save")
+                        Button(L("photo.save")) { save(side: side) }.bold().disabled(saving).accessibilityIdentifier("photo.save")
                     }
                 }
             }
@@ -194,7 +215,7 @@ struct AvatarCropView: View {
 
     private func save(side: CGFloat) {
         let rect = CropMath.cropRect(image: image.size, side: side, zoom: zoom, offset: offset)
-        guard let jpeg = CropMath.render(image, crop: rect) else { error = L("profile.notImage"); return }
+        guard let jpeg = CropMath.render(image, crop: rect) else { error = L("photo.invalid"); return }
         guard jpeg.count <= AppStore.maxAvatarBytes else { error = L("profile.tooBig"); return }
         saving = true; error = nil
         Task {
@@ -202,7 +223,7 @@ struct AvatarCropView: View {
                 try await onSave(jpeg)
                 dismiss()
                 onDone()
-            } catch { self.error = L10n.errorText(error) }
+            } catch { self.error = (error as? ApiRequestError)?.isNetwork == true ? L("photo.failed") : L10n.errorText(error) }
             saving = false
         }
     }

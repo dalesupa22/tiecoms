@@ -45,6 +45,9 @@ struct ForwardedInfo: Codable, Equatable, Sendable {
     var fromConversationId: String?
     /// Respuesta en privado: mensaje original al que se responde.
     var messageId: String?
+    /// Los agrega el servidor cuando hay messageId: número del mensaje original y extracto (≤ 200). El cliente no los envía.
+    var messageSeq: Int?
+    var excerpt: String?
 
     init(source: ForwardSource, author: String? = nil, sentAt: String? = nil, fromConversationId: String? = nil, messageId: String? = nil) {
         self.source = source; self.author = author; self.sentAt = sentAt; self.fromConversationId = fromConversationId; self.messageId = messageId
@@ -57,6 +60,8 @@ struct ForwardedInfo: Codable, Equatable, Sendable {
         sentAt = c.o("sentAt")
         fromConversationId = c.o("fromConversationId")
         messageId = c.o("messageId")
+        messageSeq = c.intOpt("messageSeq")
+        excerpt = c.o("excerpt")
     }
 
     var json: [String: Any] {

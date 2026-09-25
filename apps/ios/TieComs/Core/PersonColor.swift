@@ -6,26 +6,31 @@ import SwiftUI
 /// el tono claro es el fondo del avatar con iniciales blancas y el texto del nombre en modo claro,
 /// el tono oscuro es el texto del nombre en modo oscuro.
 enum PersonColor {
+    /// Igual que personColor() de la web (apps/web/src/ui.tsx). El tono oscuro (texto del nombre en modo
+    /// oscuro) es el mismo color aclarado un 40 % hacia el blanco.
+    static let hexes: [UInt32] = [0x2F6FDB, 0x1E8E5A, 0x7C4DDB, 0x0B8793, 0xB83280, 0x4C51BF, 0x52606D, 0xC53030]
+    static let fallback: UInt32 = 0x8A8177
+
     struct Pair: Equatable { let light: UInt32; let dark: UInt32 }
+    static let palette: [Pair] = hexes.map { Pair(light: $0, dark: lighten($0, 0.4)) }
 
-    static let palette: [Pair] = [
-        Pair(light: 0x2563EB, dark: 0x7AA7FF), // azul
-        Pair(light: 0x0F766E, dark: 0x4FD1C5), // verde azulado
-        Pair(light: 0x15803D, dark: 0x6BD68B), // verde
-        Pair(light: 0x7C3AED, dark: 0xB794F6), // violeta
-        Pair(light: 0xBE185D, dark: 0xF58FBF), // fucsia
-        Pair(light: 0x4338CA, dark: 0x9FA8FF), // índigo
-        Pair(light: 0x0E7490, dark: 0x5CCFE6), // cian
-        Pair(light: 0x475569, dark: 0xA7B4C8), // pizarra
-    ]
+    static func lighten(_ c: UInt32, _ k: Double) -> UInt32 {
+        func ch(_ v: UInt32) -> UInt32 { UInt32((Double(v) + (255 - Double(v)) * k).rounded()) }
+        return ch((c >> 16) & 0xFF) << 16 | ch((c >> 8) & 0xFF) << 8 | ch(c & 0xFF)
+    }
 
+    /// FNV-1a 32 bits: por cada carácter del id en minúsculas, h ^= código (UTF-16) y h *= 0x01000193.
     static func fnv1a(_ s: String) -> UInt32 {
         var h: UInt32 = 0x811C9DC5
-        for b in s.lowercased().utf8 { h ^= UInt32(b); h = h &* 0x01000193 }
+        for scalar in s.lowercased().unicodeScalars {
+            let code = String(scalar).utf16.first.map(UInt32.init) ?? 0
+            h ^= code
+            h = h &* 0x01000193
+        }
         return h
     }
 
-    static func index(_ id: String) -> Int { Int(fnv1a(id) % UInt32(palette.count)) }
+    static func index(_ id: String) -> Int { Int(fnv1a(id) % UInt32(hexes.count)) }
     static func pair(_ id: String) -> Pair { palette[index(id)] }
     /// Fondo del avatar (iniciales en blanco).
     static func fill(_ id: String) -> Color { Color(hex: pair(id).light) }

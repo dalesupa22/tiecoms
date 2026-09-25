@@ -71,6 +71,8 @@ final class AppStore {
     var driveRevision = 0
     /// Aviso breve (toast).
     var toast: String?
+    /// Salto pendiente a un mensaje (?m=<seq>) por conversación.
+    var jumpTo: [String: Int] = [:]
     /// Respuestas en privado pendientes por conversación directa (cita sobre el compositor).
     var privateReplies: [String: PrivateReplyDraft] = [:]
     /// Texto compartido hacia TieComs (tiecoms://share?text=…).
@@ -214,6 +216,10 @@ final class AppStore {
         startPathMonitor()
         scheduleFlush(0)
         consumePendingLink()
+        #if DEBUG
+        // Solo pruebas/diagnóstico: abrir una conversación al entrar (-TCOpenConversation <id>).
+        if let id = AppConfig.launchValue("TCOpenConversation") { navigate(to: .conversation(id)) }
+        #endif
         Task { try? await loadReminders() }
         onReady?()
     }
@@ -708,6 +714,7 @@ final class AppStore {
     func handle(url: URL) {
         // tiecoms://auth/* es del flujo SSO (lo recibe ASWebAuthenticationSession), no es navegación.
         guard !SSOCallback.isReserved(url), let link = DeepLink.parse(url) else { return }
+        if case .conversation(let id) = link, let seq = DeepLink.messageSeq(url) { jumpTo[id] = seq }
         handle(link)
     }
 

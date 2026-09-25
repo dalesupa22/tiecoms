@@ -175,7 +175,7 @@ enum PushRegistration {
     static func categories() -> Set<UNNotificationCategory> {
         let reply = UNTextInputNotificationAction(identifier: replyAction, title: L("push.reply"), options: [],
                                                   textInputButtonTitle: L("chat.send"), textInputPlaceholder: L("push.replyPh"))
-        let read = UNNotificationAction(identifier: markReadAction, title: L("menu.markRead"), options: [])
+        let read = UNNotificationAction(identifier: markReadAction, title: L("push.markRead"), options: [])
         return [
             UNNotificationCategory(identifier: PushPayload.messageCategory, actions: [reply, read], intentIdentifiers: ["INSendMessageIntent"],
                                    options: [.hiddenPreviewsShowTitle]),

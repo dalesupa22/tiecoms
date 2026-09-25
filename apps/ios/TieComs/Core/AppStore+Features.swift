@@ -316,6 +316,18 @@ extension AppStore {
         return r.id
     }
 
+    /// Carga hacia atrás hasta tener el mensaje con ese seq (ensureMessage de la web). Devuelve su id.
+    func ensureMessage(_ conversationId: String, seq: Int) async -> String? {
+        try? await openConversation(conversationId)
+        for _ in 0..<40 {
+            guard let c = conversations[conversationId], c.loaded else { return nil }
+            if let m = c.messages.first(where: { $0.seq == seq }) { return m.id }
+            if !c.hasMore || (c.messages.first?.seq ?? 0) <= seq { return nil }
+            await loadOlder(conversationId)
+        }
+        return nil
+    }
+
     /// Laterales visibles para mí que cuelgan de un mensaje.
     func sides(of messageId: String) -> [ConversationDTO] {
         (data?.conversations ?? []).filter { Naming.isSide($0) && $0.parentMessageId == messageId }

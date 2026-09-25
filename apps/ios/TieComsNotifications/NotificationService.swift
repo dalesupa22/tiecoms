@@ -25,25 +25,9 @@ final class NotificationService: UNNotificationServiceExtension {
                     image = INImage(imageData: data)
                 }
             }
-            let updated = Self.communication(content, payload: p, authorId: authorId, image: image) ?? content
+            let updated = CommunicationNotification.update(content, payload: p, authorId: authorId, image: image) ?? content
             contentHandler(updated)
         }
-    }
-
-    /// Dona el intent y devuelve el contenido actualizado (nil si el sistema no lo acepta).
-    static func communication(_ content: UNMutableNotificationContent, payload p: PushPayload, authorId: String, image: INImage?) -> UNNotificationContent? {
-        let senderName = p.authorName ?? (p.isGroup ? (p.subtitle ?? "") : p.title)
-        let sender = INPerson(personHandle: INPersonHandle(value: authorId, type: .unknown), nameComponents: nil,
-                              displayName: senderName, image: image, contactIdentifier: nil, customIdentifier: authorId)
-        let me = INPerson(personHandle: INPersonHandle(value: "me", type: .unknown), nameComponents: nil, displayName: nil,
-                          image: nil, contactIdentifier: nil, customIdentifier: nil, isMe: true)
-        let intent = INSendMessageIntent(recipients: p.isGroup ? [me, sender] : [me], outgoingMessageType: .outgoingMessageText,
-                                         content: p.body, speakableGroupName: p.isGroup ? INSpeakableString(spokenPhrase: p.title) : nil,
-                                         conversationIdentifier: p.conversationId, serviceName: "TieComs", sender: sender, attachments: nil)
-        let interaction = INInteraction(intent: intent, response: nil)
-        interaction.direction = .incoming
-        interaction.donate(completion: nil)
-        return try? content.updating(from: intent)
     }
 
     override func serviceExtensionTimeWillExpire() {

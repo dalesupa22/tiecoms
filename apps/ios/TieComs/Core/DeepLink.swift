@@ -14,6 +14,11 @@ enum DeepLink: Equatable, Hashable {
 
     static let hosts: Set<String> = ["app.tiecoms.com", "tiecoms.com", "www.tiecoms.com"]
 
+    /// ?m=<seq> en /c/<id>: saltar a ese mensaje.
+    static func messageSeq(_ url: URL) -> Int? {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "m" }?.value.flatMap(Int.init)
+    }
+
     static func parse(_ url: URL) -> DeepLink? {
         guard let scheme = url.scheme?.lowercased() else { return nil }
         var parts: [String]

@@ -49,7 +49,8 @@ enum L10n {
             obj = o
         } else { return body }
         guard let k = obj["k"] as? String else { return body }
-        let key = (k == "members.added" && (obj["history"] as? String) == "all") ? "sys.members.added.all" : "sys.\(k)"
+        var key = (k == "members.added" && (obj["history"] as? String) == "all") ? "sys.members.added.all" : "sys.\(k)"
+        if k == "side.started", let p = obj["parentName"] as? String, !p.isEmpty { key = "sys.side.startedIn" }
         let s = L(key)
         if s == key { return body }
         var vars: [String: CustomStringConvertible] = [:]

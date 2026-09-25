@@ -7,7 +7,7 @@ package com.tiecoms.app.core
  */
 object PersonColors {
     /** ARGB, idéntica a PERSON_COLORS de la web (apps/web/src/ui.tsx): avatares con iniciales blancas. */
-    val LIGHT = longArrayOf(0xFF2F6FDB, 0xFF1E8E5A, 0xFF7C4DDB, 0xFF0B8793, 0xFFB83280, 0xFF4C51BF, 0xFF52606D, 0xFFC53030)
+    val LIGHT = longArrayOf(0xFF2F6FDB, 0xFF1A7F51, 0xFF7C4DDB, 0xFF0A7C87, 0xFFB83280, 0xFF4C51BF, 0xFF52606D, 0xFFC53030)
     /** Mismo tono aclarado (mezcla 45 % con blanco) para el nombre del autor sobre fondo oscuro. */
     val DARK = LongArray(LIGHT.size) { i -> lighten(LIGHT[i], 0.45) }
 

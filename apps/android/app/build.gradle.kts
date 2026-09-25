@@ -37,8 +37,8 @@ android {
         applicationId = "com.tiecoms.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.2.0"
+        versionCode = 5
+        versionName = "1.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "DEFAULT_API_URL", "\"https://app.tiecoms.com\"")
         buildConfigField("String", "CONTRACT_VERSION", "\"2026-09-23\"")
@@ -100,6 +100,13 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.process)
+    implementation(libs.androidx.work.runtime.ktx)
+    // Direct Share en Android 8–9 (en 10+ lo resuelve el sistema con los atajos).
+    implementation(libs.androidx.sharetarget)
+    // Videos adjuntos: reproductor nativo con Bearer y Range (206) por OkHttp.
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
+    implementation(libs.media3.okhttp)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.tooling.preview)

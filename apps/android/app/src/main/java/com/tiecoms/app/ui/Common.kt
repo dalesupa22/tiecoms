@@ -294,3 +294,10 @@ fun ssoErrorText(ctx: Context, code: String, message: String?): String {
     val mapped = errorText(ctx, e)
     return if (mapped == ctx.getString(R.string.err_generic) && !message.isNullOrBlank()) message else mapped
 }
+
+/** Textos de la vista previa de adjuntos («📷 Foto», «📷 3 fotos»…), de la web (att.*). */
+fun attLabels(ctx: Context): com.tiecoms.app.core.Attachments.Labels {
+    fun f(id: Int) = ctx.getString(id).replace("%1\$d", "%d").replace("%1\$s", "%s")
+    return com.tiecoms.app.core.Attachments.Labels(f(R.string.att_photo), f(R.string.att_photos), f(R.string.att_video), f(R.string.att_videos),
+        f(R.string.att_media), f(R.string.att_file), f(R.string.att_files), f(R.string.voice_preview))
+}

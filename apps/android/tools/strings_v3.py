@@ -138,7 +138,7 @@ def load(path):
 def convert(text, params, name):
     out = text
     for i, p in enumerate(params, 1):
-        fmt = "d" if p == "n" else "s"
+        fmt = "d" if p in ("n", "i", "total") else "s"  # {d} de voice.preview es una duración «0:42»
         if "{" + p + "}" not in out: raise SystemExit(f"{name}: falta {{{p}}} en «{text}»")
         out = out.replace("{" + p + "}", f"%{i}${fmt}")
     left = re.findall(r"\{[a-zA-Z]+\}", out)

@@ -1,5 +1,8 @@
 package com.tiecoms.app.ui
 
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Edit
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -132,12 +135,12 @@ fun LinkPreviewCard(p: LinkPreviewDTO, fg: Color, modifier: Modifier = Modifier)
 // ---------- Personas agrupadas por empresa ----------
 /** PeoplePicker de la web: buscador, chips con los elegidos y personas por empresa (Tu equipo, las demás, terceros). */
 @Composable
-fun PeoplePicker(data: BootstrapDTO, picked: List<String>, onToggle: (String) -> Unit, exclude: Set<String> = emptySet(), modifier: Modifier = Modifier) {
+fun PeoplePicker(data: BootstrapDTO, picked: List<String>, onToggle: (String) -> Unit, exclude: Set<String> = emptySet(), modifier: Modifier = Modifier, placeholder: String? = null) {
     var q by rememberSaveable { mutableStateOf("") }
     val groups = remember(data, q, exclude) { Names.peopleByOrg(data, q, exclude) }
     Column(modifier) {
         OutlinedTextField(
-            q, { q = it }, placeholder = { Text(stringResource(R.string.chat_search_people)) }, singleLine = true,
+            q, { q = it }, placeholder = { Text(placeholder ?: stringResource(R.string.chat_search_people)) }, singleLine = true,
             leadingIcon = { Icon(Icons.Filled.Search, null) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("peopleSearch"),
         )
@@ -198,18 +201,40 @@ private fun PersonPickRow(p: PersonDTO, data: BootstrapDTO, on: Boolean, onToggl
 }
 
 // ---------- Nuevo chat ----------
-/** Nuevo chat: una persona abre su directo; varias crean un chat grupal (pueden ser de empresas distintas). */
+/**
+ * Nuevo chat (SPEC-v4 §D, igual que iOS): selector arriba entre «Persona o chat grupal» (una persona abre su directo;
+ * varias crean un chat grupal, de una o varias empresas) y «Grupo en un espacio» (espacio, nombre, interno, directivo
+ * y participantes de ese espacio).
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun NewChatScreen(onBack: () -> Unit, onOpened: (String) -> Unit) {
+    val data = LocalClient.current.state.collectAsStateWithLifecycle().value.data ?: return
+    var mode by rememberSaveable { mutableStateOf(0) }
+    SimpleScaffold(title = stringResource(R.string.chat_new), onBack = onBack) {
+        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).testTag("chatMode")) {
+            listOf(R.string.chat_mode_person to "chatModePerson", R.string.chat_mode_space to "chatModeSpace").forEachIndexed { i, (label, tag) ->
+                SegmentedButton(
+                    selected = mode == i, onClick = { mode = i },
+                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, 2),
+                    modifier = Modifier.heightIn(min = 48.dp).testTag(tag),
+                ) { Text(stringResource(label), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+        }
+        if (mode == 0) PersonChat(data, onOpened, Modifier.weight(1f)) else SpaceGroup(data, onOpened, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun PersonChat(data: BootstrapDTO, onOpened: (String) -> Unit, modifier: Modifier) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val container = LocalContainer.current
     val scope = rememberCoroutineScope()
-    val data = client.state.collectAsStateWithLifecycle().value.data ?: return
     var picked by rememberSaveable { mutableStateOf(listOf<String>()) }
     var name by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    SimpleScaffold(title = stringResource(R.string.chat_new), onBack = onBack) {
+    Column(modifier) {
         Text(stringResource(R.string.chat_new_hint), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         PeoplePicker(data, picked, { id -> picked = if (id in picked) picked - id else picked + id }, modifier = Modifier.weight(1f))
@@ -230,13 +255,128 @@ fun NewChatScreen(onBack: () -> Unit, onOpened: (String) -> Unit) {
                 onClick = {
                     busy = true
                     scope.launch {
-                        try { onOpened(client.createChat(picked, name).id) }
+                        try { val cid = client.createChat(picked, name).id; kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onOpened(cid) } }
                         catch (e: Exception) { container.toast(errorText(ctx, e)) } finally { busy = false }
                     }
                 },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("createChat"),
             ) { Text(if (picked.size > 1) stringResource(R.string.chat_create_group, picked.size + 1) else stringResource(R.string.chat_open_direct), fontWeight = FontWeight.SemiBold) }
         }
+    }
+}
+
+@Composable
+private fun SpaceGroup(data: BootstrapDTO, onOpened: (String) -> Unit, modifier: Modifier) {
+    val ctx = LocalContext.current
+    val client = LocalClient.current
+    val container = LocalContainer.current
+    val scope = rememberCoroutineScope()
+    val spaces = remember(data) { com.tiecoms.app.core.SpaceGroups.eligible(data) }
+    var wsId by rememberSaveable { mutableStateOf(spaces.singleOrNull()?.second?.singleOrNull()?.id) }
+    var name by rememberSaveable { mutableStateOf("") }
+    var internal by rememberSaveable { mutableStateOf(false) }
+    var directive by rememberSaveable { mutableStateOf(false) }
+    var picked by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var busy by remember { mutableStateOf(false) }
+    var newSpace by rememberSaveable { mutableStateOf(false) }
+    if (newSpace) NewSpaceDialog(onClose = { newSpace = false }, onCreated = { id -> newSpace = false; wsId = id })
+    val ws = data.workspaces.firstOrNull { it.id == wsId }
+    if (spaces.isEmpty()) {
+        Column(modifier.fillMaxWidth().padding(24.dp).testTag("noSpaces"), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(R.string.chat_no_spaces), style = MaterialTheme.typography.bodyLarge)
+            Button(onClick = { newSpace = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("createSpace")) { Text(stringResource(R.string.space_create_space)) }
+        }
+        return
+    }
+    val allowed = remember(data, ws, internal) { ws?.let { com.tiecoms.app.core.SpaceGroups.candidates(data, it, internal) } ?: emptySet() }
+    // Al pasar a interno, fuera las personas de otras empresas.
+    androidx.compose.runtime.LaunchedEffect(allowed) { picked = picked.filter { it in allowed } }
+    Column(modifier) {
+        if (ws == null) {
+            SectionHeader(stringResource(R.string.chat_pick_space), Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp))
+            LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("spaceList")) {
+                spaces.forEach { (org, list) ->
+                    item(key = "o:" + (org?.id ?: "none")) {
+                        Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OrgMark(org, size = 20.dp); Spacer(Modifier.width(8.dp))
+                            Text(org?.name ?: stringResource(R.string.common_no_company), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                        }
+                    }
+                    items(list, key = { "w:" + it.id }) { w ->
+                        Row(Modifier.fillMaxWidth().clickable { wsId = w.id }.heightIn(min = 52.dp).padding(start = 44.dp, end = 16.dp).testTag("spacePick-${w.id}"),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text(w.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+            return@Column
+        }
+        // Un solo listado desplazable: con el teclado abierto, los participantes siguen al alcance.
+        var q by rememberSaveable { mutableStateOf("") }
+        val exclude = remember(data, allowed) { data.people.map { it.id }.filter { it !in allowed }.toSet() }
+        val groups = remember(data, q, exclude) { Names.peopleByOrg(data, q, exclude) }
+        LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("peopleList")) {
+            item(key = "form") {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Espacio elegido (tocar para cambiarlo).
+                    Surface(onClick = { wsId = null; picked = emptyList() }, shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.fillMaxWidth().testTag("spaceChosen")) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OrgMark(com.tiecoms.app.core.HomeTree.counterpartOrg(data, ws), size = 20.dp); Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(R.string.chat_pick_space), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(ws.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            Icon(Icons.Filled.Edit, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    OutlinedTextField(name, { name = it.take(120) }, label = { Text(stringResource(R.string.chat_group_name_label)) }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("spaceGroupName"))
+                    Row(Modifier.fillMaxWidth().toggleable(internal, role = androidx.compose.ui.semantics.Role.Switch) { internal = it }.heightIn(min = 48.dp).testTag("spaceInternal"),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.chat_internal_only), style = MaterialTheme.typography.bodyLarge)
+                            if (internal) Text(stringResource(R.string.chat_internal_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        androidx.compose.material3.Switch(internal, null)
+                    }
+                    // Directivo: la web lo oculta cuando el grupo es interno.
+                    if (!internal) Row(Modifier.fillMaxWidth().toggleable(directive, role = androidx.compose.ui.semantics.Role.Checkbox) { directive = it }.heightIn(min = 48.dp).testTag("spaceDirective"),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.chat_directive), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        androidx.compose.material3.Checkbox(directive, null)
+                    }
+                    SectionHeader(stringResource(R.string.space_members) + if (picked.isNotEmpty()) " · ${picked.size}" else "")
+                    OutlinedTextField(q, { q = it }, placeholder = { Text(stringResource(R.string.space_search)) }, singleLine = true,
+                        leadingIcon = { Icon(Icons.Filled.Search, null) }, modifier = Modifier.fillMaxWidth().testTag("peopleSearch"))
+                }
+            }
+            if (groups.isEmpty()) item(key = "none") { EmptyNote(stringResource(R.string.chat_nobody)) }
+            groups.forEach { g ->
+                item(key = "g:" + g.key) {
+                    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (g.org != null) { OrgMark(g.org, size = 20.dp); Spacer(Modifier.width(8.dp)) }
+                        SectionHeader(g.org?.name ?: stringResource(R.string.common_guests))
+                    }
+                }
+                items(g.people, key = { it.id }) { p -> PersonPickRow(p, data, p.id in picked) { picked = if (p.id in picked) picked - p.id else picked + p.id } }
+            }
+        }
+        Button(
+            enabled = com.tiecoms.app.core.SpaceGroups.valid(name, ws) && !busy,
+            onClick = {
+                busy = true
+                scope.launch {
+                    // La navegación debe correr en el hilo principal (la respuesta puede volver en el hilo del cliente).
+                    try { val gid = client.createSpaceGroup(ws.id, name, internal, directive, picked).id; kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onOpened(gid) } }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (e: Exception) { android.util.Log.w("TieComs", "No se creó el grupo", e); container.toast(errorText(ctx, e)) } finally { busy = false }
+                }
+            },
+            modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(16.dp).heightIn(min = 52.dp).testTag("createSpaceGroup"),
+        ) { Text(stringResource(R.string.space_create_group), fontWeight = FontWeight.SemiBold) }
     }
 }
 

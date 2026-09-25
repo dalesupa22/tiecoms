@@ -118,7 +118,8 @@ fun EventDialog(conversationId: String?, originMessageId: String? = null, defaul
     val container = LocalContainer.current
     val scope = rememberCoroutineScope()
     val data = client.state.collectAsStateWithLifecycle().value.data ?: return
-    val groups = data.conversations.filter { it.canPost && it.workspaceId != null && it.kind != "direct" }
+    // Reuniones también en directos y chats grupales (SPEC-v4 §E).
+    val groups = data.conversations.filter { it.canPost }
     val tz0 = event?.timezone ?: DEVICE_TZ
     val start0 = remember { event?.let { parseInstant(it.startsAt) } ?: LocalDate.now().plusDays(1).atTime(10, 0).atZone(ZoneId.systemDefault()).toInstant() }
     val end0 = remember { event?.let { parseInstant(it.endsAt) } ?: start0.plusSeconds(3600) }
@@ -138,7 +139,7 @@ fun EventDialog(conversationId: String?, originMessageId: String? = null, defaul
     FormSheet(stringResource(if (event != null) R.string.cal_edit_title else R.string.cal_new_title), onClose, tag = "eventDialog") {
         OutlinedTextField(title, { title = it.take(200) }, label = { Text(stringResource(R.string.cal_title)) }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("eventTitle"))
         if (event == null) {
-            Dropdown(stringResource(R.string.cal_conversation), groups.map { it.id to "${titleOf(ctx, it, data)} · ${data.workspaces.firstOrNull { w -> w.id == it.workspaceId }?.name ?: ""}" }, conv, { conv = it })
+            Dropdown(stringResource(R.string.cal_conversation), groups.map { it.id to listOfNotNull(titleOf(ctx, it, data), data.workspaces.firstOrNull { w -> w.id == it.workspaceId }?.name).joinToString(" · ") }, conv, { conv = it })
         }
         DateField(stringResource(R.string.cal_date), LocalDate.parse(date), { it?.let { d -> date = d.toString() } }, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -284,6 +285,7 @@ fun EventRow(ev: CalendarEventDTO, data: BootstrapDTO, showConv: Boolean = true,
         Modifier.fillMaxWidth().clickable { onOpen(ev.id) }.heightIn(min = 56.dp).padding(vertical = 6.dp).testTag("event-${ev.id}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (ev.workspaceId == null && conv != null) { ConversationIcon(conv, data, 32.dp); Spacer(Modifier.width(8.dp)) }
         Box(Modifier.background(bg, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 6.dp).widthIn(min = 56.dp), contentAlignment = Alignment.Center) {
             Text(fmtTime(ev.startsAt), color = fg, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
         }
@@ -371,7 +373,14 @@ fun AgendaScreen(onOpenEvent: (String) -> Unit) {
                     SectionHeader(day.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())) + if (day == LocalDate.now()) " · " + stringResource(R.string.cal_today) else "",
                         Modifier.padding(top = 14.dp, bottom = 4.dp).semantics { heading() })
                 }
-                items(list, key = { it.id }) { EventRow(it, data, onOpen = onOpenEvent) }
+                // Primero las de empresas; luego las de directos y chats grupales (sección «Chats», SPEC-v4 §E).
+                val (inSpaces, inChats) = list.partition { it.workspaceId != null }
+                items(inSpaces, key = { it.id }) { EventRow(it, data, onOpen = onOpenEvent) }
+                if (inChats.isNotEmpty()) {
+                    item(key = "dc$day") { Text(stringResource(R.string.cal_chats_section), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp).testTag("agendaChats")) }
+                    items(inChats, key = { it.id }) { EventRow(it, data, onOpen = onOpenEvent) }
+                }
             }
             item { Spacer(Modifier.heightIn(min = 88.dp)) }
         }

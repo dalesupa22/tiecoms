@@ -96,6 +96,47 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 - **Comentarios de asuntos:** un solo compositor («Escribe una actualización o una pregunta…» + Comentar). El historial muestra autor, avatar y hora, y se actualiza en vivo con `issue.updated`.
 - **Textos:** `tools/strings_v3.py` genera `strings_v3.xml` desde `apps/web/src/i18n.ts` (rama `mobile-feedback`, 86341e1), con 100 claves de la web. Solo 4 textos son propios de Android.
 
+### Compartir, adjuntos, pestañas, chats y voz (SPEC-v4)
+
+- **Compartir hacia TieComs:** `ShareActivity` recibe `ACTION_SEND` y `ACTION_SEND_MULTIPLE` de fotos, videos, archivos, texto y enlaces (`image/*`, `video/*`, `application/*`, `text/*`, `*/*`).
+  - Copia lo recibido a caché mientras tiene el permiso de lectura del URI.
+  - Muestra una vista previa de hasta 10 elementos, un buscador y las conversaciones: primero Recientes y luego agrupadas como Inicio.
+  - Permite elegir hasta 5 conversaciones y agregar «Añadir un mensaje…».
+  - Al tocar Enviar se ve el progreso de cada archivo, sale un aviso y la hoja se cierra.
+  - La subida y el envío corren en WorkManager (`ShareWorker`, en primer plano con una notificación de progreso). Una subida grande sigue aunque se cierre la hoja, y un reintento no duplica.
+  - Sin sesión muestra «Inicia sesión en TieComs para compartir» con un botón para abrir la app.
+  - Si el origen es WhatsApp, Slack, Teams o correo, el mensaje se marca como `forwarded.source`. Las fotos de la galería no son reenvíos.
+- **Direct Share:** `res/xml/shortcuts.xml` declara el `<share-target>` con la categoría `com.tiecoms.app.SHARE_TARGET`.
+  - La app publica como atajos de larga vida las 8 conversaciones recientes (sin silenciadas ni laterales), con `Person`, `LocusId` y la foto del grupo o de la persona. Si no hay foto, usa iniciales sobre el color de la persona.
+  - Son los mismos atajos de las notificaciones y las burbujas. Tocar uno abre la hoja con esa conversación elegida (`EXTRA_SHORTCUT_ID`).
+  - Se borran al cerrar sesión. En Android 8 y 9 funciona con `androidx.sharetarget`.
+- **Adjuntos (contrato `e68dbe8`):** el clip del compositor ofrece Fotos y videos (selector del sistema), Cámara o Archivos.
+  - Antes de enviar se ve una vista previa con «Quitar» y, al enviar, la barra de subida de cada archivo.
+  - El cliente genera la miniatura (JPEG de 480 px, ≤ 512 KB) y la sube a `/attachments/:id/thumb`.
+  - En la burbuja, las fotos van en cuadrícula (1–4 y «+N»). El visor a pantalla completa permite deslizar y hacer zoom (pellizcar o doble toque).
+  - Los videos se reproducen con Media3 y un `OkHttpDataSource` que pasa el Bearer (y admite Range).
+  - Los archivos abren una descarga autenticada con caché y luego «Abrir con…» (`FileProvider`).
+  - Reenviar un mensaje manda `forwardAttachmentIds`.
+- **Pestañas de Inicio:** Todo · No leídos · Asuntos · Chats · Laterales, con contador. La pestaña elegida se recuerda. Al filtrar se mantiene la jerarquía y se ocultan los grupos vacíos; si no queda nada, se muestra un estado vacío por pestaña.
+- **Badges:** usan el color de la empresa solo si el número blanco llega a 4,5:1. Si no, usan `#B45309`; las silenciadas, `#7A7368`.
+- **Vista previa en la lista:** se prefiere `lastHumanPreview` («Ana: 📷 3 fotos»).
+- **Orden (§D):** es el mismo `compareConversations` y `sortHome` de la web: primero con no leídos, luego fijadas, luego por actividad, con desempate por id. Las empresas y los espacios se ordenan por sus no leídos agregados. Las filas se deslizan a su lugar con `animateItem`.
+- **Nuevo chat:** tiene un selector arriba: «Persona o chat grupal» o «Grupo en un espacio».
+  - En «Grupo en un espacio» se elige el espacio (solo los que no son de terceros), un nombre y si es «Solo mi empresa (interno)». La casilla «Nivel directivo» se oculta si el grupo es interno.
+  - Los miembros salen de ese espacio. Si no hay espacios, aparece «Crear espacio».
+- **Chats (§E):** los asuntos, las reuniones y los recordatorios también funcionan en directos y en chats `multi`.
+  - En la pestaña Asuntos y en la Agenda tienen su propia sección «Chats».
+  - El aviso de reunión llega 10 minutos antes: por el socket (`event.soon`) o por push (`type: event` con `minutes`). Tiene su propio canal, «Avisos de reunión», y no se duplica entre las dos vías.
+- **Notas de voz (§F):**
+  - **Grabar:** se mantiene pulsado el micrófono con el compositor vacío. Soltar envía, deslizar a la izquierda cancela y deslizar arriba bloquea (manos libres, con Descartar y Enviar).
+  - **Formato:** AAC m4a mono de 24 kHz a 32 kbps (MediaRecorder), máximo 15 minutos. La grabación se pausa si otra app toma el audio.
+  - **Permiso:** se pide `RECORD_AUDIO` con una explicación previa.
+  - **Subir:** es un adjunto con `x-voice-note`, `x-duration-ms`, `x-waveform` y `Accept-Language`.
+  - **Burbuja:** play/pausa, onda con progreso (se puede tocar para saltar), velocidad 1× / 1,5× / 2×, un punto para «sin escuchar» y reproducción continua de las notas seguidas.
+  - **Transcripción:** «Ver transcripción» (texto copiable) con el resumen si lo hay, «Reintentar» si falló y el chip «Crear asunto: …».
+- **Textos:** `tools/strings_v4.py` los genera desde `apps/web/src/i18n.ts`: 100 de la web y 11 propios de Android (sobre todo la subida en segundo plano y el diálogo del micrófono).
+- **Play Console:** la app ahora pide `RECORD_AUDIO` (notas de voz) y `FOREGROUND_SERVICE_DATA_SYNC` (subidas desde «Compartir»). Hay que declararlos en la ficha y en la sección de seguridad de los datos.
+
 ### Notificaciones push (FCM)
 
 - **Contrato:** mensajes data-only según el contrato de `mobile-feedback`. Llevan `title`, `subtitle`, `body`, `badge`, `type` (message, reminder o event), `conversationId`, `messageId`, `authorId`, `authorName` y `authorAvatarUrl`; ver `core/PushPayload.kt`. El token se registra con `PUT /api/v1/push/token` (`provider: fcm`, `lang`) después del login. Al cerrar sesión el servidor borra el token.
@@ -168,6 +209,7 @@ adb pull /sdcard/Android/data/com.tiecoms.app/files/   # splash-*.png, ui-*.png
   - `FeedbackUiTest` recorre: jerarquía de Inicio → menú de la lista → avatares → menú anclado del mensaje (toque fuera y clic derecho) → lateral → respuesta en privado → barra de asuntos → comentario → foto del grupo → push de FCM simulado con `TcMessagingService.handle` (verifica `MessagingStyle`, atajo, burbuja, acciones y badge) → Responder desde la notificación.
   - `CropEditorUiTest` recorta una foto real y verifica un JPEG de 512 × 512 de ≤ 3 MB.
   - `FeedbackV3Test` corre en la JVM sin servidor.
+- **v4 (3043, `mobile-feedback` 6f58087 / 1fa4c21 / cbeebe7):** `ShareV4Test` corre en la JVM. `LiveV4ShareTest` prueba adjuntos, miniaturas, envío a 2 conversaciones, descarga, reenvío, borrado, `lastHumanPreview`, límites y grupos en espacio. `LiveV4ChatsVoiceTest` prueba asuntos, reuniones y recordatorios en directos, el aviso `event.soon` y las notas de voz. `ShareUiTest` recorre en el emulador la hoja de compartir del sistema con Direct Share, `ShareActivity` con 3 fotos de la galería, la cuadrícula, el visor, las pestañas y «Nuevo chat». `LiveUiTest` ya comparte por `ShareActivity`.
 - **App Links `https://`:** sin un `assetlinks.json` válido, Android 12+ abre Chrome. Para probar sin verificar: `adb shell pm set-app-links-user-selection --user 0 --package com.tiecoms.app true all`.
 
 ## Firmar

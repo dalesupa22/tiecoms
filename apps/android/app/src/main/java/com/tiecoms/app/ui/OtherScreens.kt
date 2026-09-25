@@ -89,7 +89,8 @@ fun DetailsScreen(
             return@SimpleScaffold
         }
         val ws = data.workspaces.firstOrNull { it.id == meta.workspaceId }
-        val canWork = meta.canPost && meta.kind != "direct" && meta.workspaceId != null
+        // Asuntos y reuniones también en directos y chats grupales (SPEC-v4 §E).
+        val canWork = meta.canPost
         val people = meta.memberIds.mapNotNull { Names.person(data, it) }
             .sortedWith(compareBy({ it.guest }, { it.orgId != data.me.primaryOrgId }, { it.name }))
         val (members, guests) = people.partition { !it.guest }

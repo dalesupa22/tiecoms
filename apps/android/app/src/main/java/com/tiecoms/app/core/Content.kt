@@ -27,7 +27,7 @@ object Links {
 }
 
 /** Un mensaje a poner en la cola de envío. */
-data class Outgoing(val conversationId: String, val body: String, val forwarded: ForwardedInfo? = null)
+data class Outgoing(val conversationId: String, val body: String, val forwarded: ForwardedInfo? = null, val forwardAttachments: List<AttachmentDTO> = emptyList())
 
 object Forwarding {
     /**
@@ -39,7 +39,8 @@ object Forwarding {
         val note = comment?.trim().orEmpty()
         val info = ForwardedInfo("tiecoms", author, source.createdAt.ifBlank { null }, source.conversationId.ifBlank { null })
         return targets.distinct().filter { it.isNotBlank() && it != source.conversationId }.take(MAX_FORWARD_TARGETS).flatMap { t ->
-            listOfNotNull(if (note.isNotEmpty()) Outgoing(t, note) else null, Outgoing(t, source.body, info))
+            // Los adjuntos viajan con el original (forwardAttachmentIds: el servidor copia la referencia).
+            listOfNotNull(if (note.isNotEmpty()) Outgoing(t, note) else null, Outgoing(t, source.body, info, source.attachments.take(Attachments.MAX_PER_MESSAGE)))
         }
     }
 }

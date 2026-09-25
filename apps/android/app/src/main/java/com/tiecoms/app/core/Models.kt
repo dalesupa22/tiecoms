@@ -131,6 +131,8 @@ data class ConversationDTO(
     val mutedUntil: String? = null,
     /** Foto del grupo: ruta /api/v1/avatars/<fileId> (null = ícono # / candado / iniciales). */
     val avatarUrl: String? = null,
+    /** Último mensaje de una persona (SPEC-v4 §C): se prefiere sobre lastMessagePreview cuando lo último es de sistema. */
+    val lastHumanPreview: LastHumanPreviewDTO? = null,
 ) {
     /** Directos y chats grupales van juntos en la lista: no pertenecen a un espacio. */
     val isChat: Boolean get() = kind == "direct" || kind == "multi"
@@ -140,6 +142,23 @@ data class ConversationDTO(
     fun mutedAt(nowMs: Long): Boolean =
         mutedUntil?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() > nowMs }.getOrDefault(false) } ?: false
 }
+
+@Serializable
+data class LastHumanPreviewDTO(
+    val messageId: String = "",
+    val seq: Long = 0,
+    val authorId: String = "",
+    /** Puede ser '' si el mensaje solo trae adjuntos. */
+    val body: String = "",
+    val attachments: AttachmentSummaryDTO? = null,
+    val createdAt: String = "",
+)
+
+@Serializable
+data class AttachmentSummaryDTO(
+    val count: Int = 0, val images: Int = 0, val videos: Int = 0, val files: Int = 0, val firstName: String? = null,
+    val voices: Int = 0, val voiceDurationMs: Long? = null,
+)
 
 /** whatsapp | slack | email | teams | tiecoms | other */
 @Serializable
@@ -173,6 +192,42 @@ data class MessageDTO(
     val forwarded: ForwardedInfo? = null,
     /** Vista previa del primer enlace; llega después del envío con `message.updated`. */
     val linkPreview: LinkPreviewDTO? = null,
+    /** Adjuntos (SPEC-v4): vacío o ausente en mensajes viejos. */
+    val attachments: List<AttachmentDTO> = emptyList(),
+)
+
+/** Archivo adjunto a un mensaje. `url` y `thumbUrl` son relativas al API y piden Bearer. */
+@Serializable
+data class AttachmentDTO(
+    val id: String = "",
+    val name: String = "",
+    val contentType: String = "application/octet-stream",
+    val sizeBytes: Long = 0,
+    val width: Int? = null,
+    val height: Int? = null,
+    val url: String = "",
+    val thumbUrl: String? = null,
+    /** file | voice (SPEC-v4 §F); ausente en adjuntos viejos. */
+    val kind: String? = null,
+    val durationMs: Long? = null,
+    /** ≤ 64 valores 0–1 para dibujar la onda. */
+    val waveform: List<Float>? = null,
+    val transcript: TranscriptDTO? = null,
+) {
+    val isVoice: Boolean get() = kind == "voice"
+    val isImage: Boolean get() = !isVoice && contentType.startsWith("image/")
+    val isVideo: Boolean get() = !isVoice && contentType.startsWith("video/")
+}
+
+/** Transcripción de una nota de voz: pending | done | failed | disabled. */
+@Serializable
+data class TranscriptDTO(
+    val status: String = "pending",
+    val text: String? = null,
+    val language: String? = null,
+    val summary: String? = null,
+    /** Posible asunto detectado («Crear asunto: …»), si el servidor lo sugiere. */
+    val suggestedIssue: String? = null,
 )
 
 /** Vista previa de un enlace. `imageUrl` es relativa al API (/api/v1/previews/<uuid>), pública y cacheable. */
@@ -271,12 +326,16 @@ data class SignupBody(
 data class RefreshBody(val refreshToken: String)
 
 @Serializable
-data class SendBody(val clientMessageId: String, val body: String, val replyTo: String? = null, val forwarded: ForwardedInfo? = null)
+data class SendBody(
+    val clientMessageId: String, val body: String, val replyTo: String? = null, val forwarded: ForwardedInfo? = null,
+    val attachmentIds: List<String>? = null, val forwardAttachmentIds: List<String>? = null,
+)
 
 @Serializable
 data class SocketSendBody(
     val conversationId: String, val clientMessageId: String, val body: String,
-    val replyTo: String? = null, val forwarded: ForwardedInfo? = null,
+    val replyTo: String? = null, val forwarded: ForwardedInfo? = null, val attachmentIds: List<String>? = null,
+    val forwardAttachmentIds: List<String>? = null,
 )
 
 @Serializable
@@ -291,6 +350,10 @@ data class PendingMessage(
     val replyTo: String? = null,
     val forwarded: ForwardedInfo? = null,
     val createdAt: String,
+    /** Ya subidos (pendientes en el servidor hasta que este mensaje los use). */
+    val attachments: List<AttachmentDTO> = emptyList(),
+    /** Adjuntos de otro mensaje que se reenvían (el servidor copia la referencia). */
+    val forwardAttachments: List<AttachmentDTO> = emptyList(),
     val attempts: Int = 0,
     /** pending | sending | failed */
     val status: String = "pending",
@@ -317,7 +380,8 @@ data class Invitee(val userId: String = "", val rsvp: String = "pending")
 @Serializable
 data class CalendarEventDTO(
     val id: String = "",
-    val workspaceId: String = "",
+    /** null en directos, chats grupales y laterales (SPEC-v4 §E). */
+    val workspaceId: String? = null,
     val conversationId: String = "",
     val originMessageId: String? = null,
     val title: String = "",
@@ -335,7 +399,8 @@ data class CalendarEventDTO(
 @Serializable
 data class IssueDTO(
     val id: String = "",
-    val workspaceId: String = "",
+    /** null en directos, chats grupales y laterales (SPEC-v4 §E). */
+    val workspaceId: String? = null,
     val conversationId: String = "",
     val originMessageId: String? = null,
     val originMessageSeq: Long? = null,

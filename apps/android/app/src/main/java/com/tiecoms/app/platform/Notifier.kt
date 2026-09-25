@@ -38,6 +38,7 @@ class Notifier(private val context: Context) {
         const val CHANNEL_ID = "messages"
         const val CHANNEL_REMINDERS = "reminders"
         const val CHANNEL_EVENTS = "events"
+        const val CHANNEL_SOON = "event_soon"
         const val ACTION_REPLY = "com.tiecoms.app.REPLY"
         const val ACTION_MARK_READ = "com.tiecoms.app.MARK_READ"
         const val EXTRA_CONVERSATION = "conversationId"
@@ -66,6 +67,7 @@ class Notifier(private val context: Context) {
             channel(CHANNEL_ID, R.string.notif_channel_messages, R.string.notif_channel_messages_desc).apply { if (Build.VERSION.SDK_INT >= 29) setAllowBubbles(true) },
             channel(CHANNEL_REMINDERS, R.string.notif_channel_reminders, R.string.notif_channel_reminders_desc),
             channel(CHANNEL_EVENTS, R.string.notif_channel_events, R.string.notif_channel_events_desc),
+            channel(CHANNEL_SOON, R.string.cal_channel_soon, R.string.cal_channel_soon_desc),
         ))
     }
 
@@ -131,7 +133,7 @@ class Notifier(private val context: Context) {
             .setIntent(Intent(Intent.ACTION_VIEW, Uri.parse(deep), context, MainActivity::class.java))
             .setIcon(shortcutIcon)
             .apply { if (!isGroup) setPerson(Person.Builder().setName(authorName).setKey(authorKey).setIcon(icon(authorIcon, authorName)).build()) }
-            .setCategories(setOf("com.tiecoms.app.category.CONVERSATION"))
+            .setCategories(ConversationShortcuts.CATEGORIES)
             .build()
         runCatching { ShortcutManagerCompat.pushDynamicShortcut(context, shortcut) }
         val bubbleIntent = PendingIntent.getActivity(context, ("bubble$conversationId").hashCode(),
@@ -167,6 +169,7 @@ class Notifier(private val context: Context) {
         if (!enabled()) return
         val uri = "tiecoms://c/$conversationId" + (seq?.let { "?m=$it" } ?: "")
         val channel = when {
+            tag.startsWith("event:soon:") -> CHANNEL_SOON
             tag.startsWith("rem:") || tag.startsWith("reminder:") -> CHANNEL_REMINDERS
             tag.startsWith("cal:") || tag.startsWith("event:") -> CHANNEL_EVENTS
             else -> CHANNEL_ID

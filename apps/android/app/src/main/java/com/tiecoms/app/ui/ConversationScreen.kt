@@ -32,6 +32,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
@@ -206,6 +207,10 @@ fun ConversationScreen(
     var forwarding by remember { mutableStateOf<MessageDTO?>(null) }
     var reminderCustom by remember { mutableStateOf<Pair<Boolean, MessageDTO?>?>(null) }
     var bringing by rememberSaveable { mutableStateOf(false) }
+    /** «Crear asunto: …» sugerido por la transcripción de una nota de voz. */
+    var voiceIssue by remember { mutableStateOf<Pair<String, MessageDTO>?>(null) }
+    /** Visor de fotos y videos abierto: lista del mensaje e índice. */
+    var viewer by remember { mutableStateOf<Pair<List<com.tiecoms.app.core.AttachmentDTO>, Int>?>(null) }
     var showPins by rememberSaveable { mutableStateOf(false) }
     var returning by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<MessageDTO?>(null) }
@@ -262,12 +267,17 @@ fun ConversationScreen(
     }
 
     val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex <= 1 } }
+    // Notas de voz en orden cronológico: al terminar una, sigue la siguiente (SPEC-v4 §F).
+    val voiceOrder = remember(conv?.messages) { conv?.messages.orEmpty().sortedBy { it.seq }.filter { it.deletedAt == null }.flatMap { it.attachments.filter { a -> a.isVoice } } }
+    val voiceQueue: (String) -> List<com.tiecoms.app.core.AttachmentDTO> = remember(voiceOrder) { { aid -> voiceOrder.dropWhile { it.id != aid }.drop(1) } }
     val newest = items.firstOrNull()
     // «Seguir el final»: solo cambia con la lista quieta. Si llega un mensaje durante la animación de otro
     // (mi envío y la respuesta inmediata), atBottom daría falso a mitad de camino y dejaría de seguir.
     var follow by remember(id) { mutableStateOf(true) }
     LaunchedEffect(listState, id) {
-        snapshotFlow { atBottom to listState.isScrollInProgress }.distinctUntilChanged().collect { (b, moving) -> if (!moving) follow = b }
+        // Solo al terminar un desplazamiento (del usuario o animado): si llegan mensajes nuevos arriba del
+        // índice 0, la lista conserva la posición y atBottom cambiaría sin que nadie se haya movido.
+        snapshotFlow { listState.isScrollInProgress }.distinctUntilChanged().collect { moving -> if (!moving) follow = atBottom }
     }
     LaunchedEffect(newest?.key) {
         val mine = newest is ChatItem.Pending || (newest as? ChatItem.Msg)?.mine == true
@@ -287,7 +297,8 @@ fun ConversationScreen(
     val chat = LocalChatColors.current
     val pinned = (state.pins[id] ?: emptyList()).toSet()
     val openHere = state.issues.values.filter { it.conversationId == id && !it.closed }
-    val canWork = meta.canPost && meta.kind != "direct" && meta.workspaceId != null
+    // Asuntos y reuniones también en directos y chats grupales (SPEC-v4 §E).
+    val canWork = meta.canPost
     val myWsRole = data.workspaces.firstOrNull { it.id == meta.workspaceId }?.myRole
 
     fun act(block: suspend () -> Unit) = scope.launch { runCatching { block() }.onFailure { container.toast(errorText(ctx, it)) } }
@@ -391,7 +402,7 @@ fun ConversationScreen(
                     }
                     conv?.loaded != true -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     items.isEmpty() -> Text(stringResource(R.string.no_messages), Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else -> LazyColumn(
+                    else -> androidx.compose.runtime.CompositionLocalProvider(LocalVoiceQueue provides voiceQueue) { LazyColumn(
                         state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize().testTag("messages"),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     ) {
@@ -409,13 +420,16 @@ fun ConversationScreen(
                                     onDismissMenu = { menuFor = null },
                                     onLongPress = { if (item.m.deletedAt == null) menuFor = item.m },
                                     onQuote = { q -> jumpTo(q.seq) }, onIssue = onOpenIssue, onOpenConversation = { c, seq -> onOpenConversation(c, seq) },
+                                    onOpenMedia = { list, i -> viewer = list to i },
+                                    onVoiceIssue = { t -> voiceIssue = t to item.m },
+                                    onOpenFile = { a -> scope.launch { openAttachment(ctx, client, a) } },
                                 )
                                 is ChatItem.Pending -> PendingBubble(item.p, onRetry = { client.retry(item.p.clientMessageId) }, onDiscard = { client.discard(item.p.clientMessageId) })
                                 ChatItem.LateJoin -> Notice(stringResource(R.string.late_join))
                                 ChatItem.Older -> Notice(stringResource(R.string.loading_older))
                             }
                         }
-                    }
+                    } }
                 }
                 if (!atBottom && conv?.loaded == true) {
                     SmallFloatingActionButton(onClick = { scope.launch { listState.animateScrollToItem(0) } }, modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp)) {
@@ -439,13 +453,13 @@ fun ConversationScreen(
                 Composer(
                 id, title, data, replyTo, editing,
                 onCancelReply = { replyTo = null }, onCancelEdit = { editing = null },
-                onSend = { text ->
+                onSend = { text, att ->
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     if (privateHere != null) {
                         val src = privateHere.source
-                        client.send(id, text, null, com.tiecoms.app.core.ForwardedInfo("tiecoms", privateHere.authorName, src.createdAt, src.conversationId, src.id))
+                        client.send(id, text, null, com.tiecoms.app.core.ForwardedInfo("tiecoms", privateHere.authorName, src.createdAt, src.conversationId, src.id), attachments = att)
                         container.privateReply.value = null
-                    } else client.send(id, text, replyTo?.id)
+                    } else client.send(id, text, replyTo?.id, attachments = att)
                     replyTo = null
                 },
                 onSaveEdit = { m, text ->
@@ -476,6 +490,8 @@ fun ConversationScreen(
 
     reportMessage?.let { ReportDialog(it.authorId, it.id, onClose = { reportMessage = null }) }
     if (convMenu) ActionSheet(title, conversationMenu(ctx, meta, data, onMeeting = { meeting = true to null }, onRemindCustom = { reminderCustom = true to null }, onLeave = { confirmLeave = true })) { convMenu = false }
+    viewer?.let { (list, i) -> MediaViewer(list, i) { viewer = null } }
+    voiceIssue?.let { (t, m) -> NewIssueDialog(id, m.id, t, onClose = { voiceIssue = null }, onCreated = onOpenIssue) }
     deriving?.let { m -> DeriveDialog(meta, m, onClose = { deriving = null }, onCreated = { cid -> onOpenConversation(cid, null) }) }
     newIssue?.let { (_, m) -> NewIssueDialog(id, m?.id, m?.let { excerpt(it.body) } ?: "", onClose = { newIssue = null }, onCreated = onOpenIssue) }
     meeting?.let { (_, m) -> EventDialog(id, originMessageId = m?.id, defaultTitle = m?.let { excerpt(it.body, 80) } ?: "", onClose = { meeting = null }) }
@@ -528,7 +544,7 @@ fun conversationMenu(ctx: android.content.Context, conv: ConversationDTO, data: 
             SheetItem(ctx.getString(R.string.mute_forever), tag = "muteForever") { mute(null) },
         )))
         add(remindMenu(ctx, conv, null, onRemindCustom))
-        if (onMeeting != null && conv.workspaceId != null && conv.canPost) add(SheetItem(ctx.getString(R.string.menu_meeting), "📅", onClick = onMeeting))
+        if (onMeeting != null && conv.canPost) add(SheetItem(ctx.getString(R.string.menu_meeting), "📅", onClick = onMeeting))
         add(null)
         add(SheetItem(ctx.getString(R.string.menu_copy_link), "⛓") { copyToClipboard(ctx, convLink(conv.id)); container.toast(ctx.getString(R.string.toast_link_copied)) })
         if (conv.kind != "direct" && onLeave != null) { add(null); add(SheetItem(ctx.getString(R.string.menu_leave), "⎋", danger = true, onClick = onLeave)) }
@@ -571,21 +587,103 @@ private fun LinChip(text: String, onClick: () -> Unit) {
 @Composable
 private fun Composer(
     id: String, title: String, data: BootstrapDTO, replyTo: MessageDTO?, editing: MessageDTO?,
-    onCancelReply: () -> Unit, onCancelEdit: () -> Unit, onSend: (String) -> Unit, onSaveEdit: (MessageDTO, String) -> Unit, onBring: () -> Unit,
+    onCancelReply: () -> Unit, onCancelEdit: () -> Unit, onSend: (String, List<com.tiecoms.app.core.AttachmentDTO>) -> Unit, onSaveEdit: (MessageDTO, String) -> Unit, onBring: () -> Unit,
 ) {
     val client = LocalClient.current
+    val ctx = LocalContext.current
+    val container = LocalContainer.current
+    val scope = rememberCoroutineScope()
     var text by rememberSaveable(id) { mutableStateOf("") }
+    // Adjuntos elegidos (copiados a caché) antes de enviar; se suben al pulsar Enviar (SPEC-v4).
+    var files by remember(id) { mutableStateOf(listOf<com.tiecoms.app.core.Attachments.Shared>()) }
+    var uploading by remember(id) { mutableStateOf<Pair<Int, Float>?>(null) }
+    var attError by remember(id) { mutableStateOf<String?>(null) }
+    var picker by remember { mutableStateOf(false) }
+    // Notas de voz (SPEC-v4 §F): mantener pulsado el micrófono cuando el compositor está vacío.
+    val recorder = remember(id) { com.tiecoms.app.platform.VoiceRecorder(ctx.applicationContext) }
+    val rec by recorder.state.collectAsStateWithLifecycle()
+    var locked by remember(id) { mutableStateOf(false) }
+    var gesture by remember(id) { mutableStateOf(com.tiecoms.app.core.Waveform.Gesture.RECORDING) }
+    var micWhy by remember { mutableStateOf(false) }
+    val micPermission = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
+    androidx.compose.runtime.DisposableEffect(recorder) { onDispose { recorder.cancel() } }
+    fun hasMic() = androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    fun sendVoice() {
+        val r = recorder.stop()
+        locked = false
+        if (r == null) { attError = ctx.getString(R.string.voice_too_short); return }
+        attError = null
+        scope.launch {
+            uploading = 0 to 0f
+            try {
+                val a = client.uploadAttachment(id, r.file, ctx.getString(R.string.voice_note) + ".m4a", "audio/mp4",
+                    voice = com.tiecoms.app.core.TieComsClient.Voice(r.durationMs, r.waveform)) { sent, total -> uploading = 0 to (if (total > 0) sent.toFloat() / total else 0f) }
+                onSend("", listOf(a))
+                r.file.delete()
+            } catch (e: Exception) { attError = errorText(ctx, e) } finally { uploading = null }
+        }
+    }
+    recorder.onLimit = { container.toast(ctx.getString(R.string.voice_too_long)); sendVoice() }
+    if (micWhy) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { micWhy = false },
+        title = { Text(stringResource(R.string.voice_mic_title)) }, text = { Text(stringResource(R.string.voice_mic_body)) },
+        confirmButton = { TextButton(onClick = { micWhy = false; micPermission.launch(android.Manifest.permission.RECORD_AUDIO) }, modifier = Modifier.testTag("micAllow")) { Text(stringResource(R.string.voice_mic_allow)) } },
+        dismissButton = { TextButton(onClick = { micWhy = false }) { Text(stringResource(R.string.cancel)) } },
+    )
+    fun add(uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
+        scope.launch {
+            val copied = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.tiecoms.app.platform.ShareIntake.copyToCache(ctx.applicationContext, uris, null) }
+            val plan = com.tiecoms.app.core.Attachments.plan(files + copied, null)
+            attError = plan.tooLarge.firstOrNull()?.let { ctx.getString(R.string.att_too_large, it.name) }
+                ?: if (plan.dropped > 0) ctx.getString(R.string.att_too_many) else null
+            files = plan.files
+        }
+    }
+    AttachPicker(picker, onDismiss = { picker = false }, onPicked = { add(it) })
+    fun sendNow() {
+        val body = text
+        if (files.isEmpty()) { if (body.isNotBlank()) { onSend(body, emptyList()); text = "" }; return }
+        attError = null
+        scope.launch {
+            val done = mutableListOf<com.tiecoms.app.core.AttachmentDTO>()
+            for ((i, f) in files.withIndex()) {
+                uploading = i to 0f
+                try {
+                    done += com.tiecoms.app.platform.AttachmentUpload.upload(ctx.applicationContext, client, id, java.io.File(f.path), f.name, f.contentType) { sent, total ->
+                        uploading = i to (if (total > 0) sent.toFloat() / total else 0f)
+                    }
+                } catch (e: Exception) {
+                    attError = ctx.getString(R.string.att_upload_failed, f.name) + " · " + errorText(ctx, e)
+                    // Los ya subidos quedan pendientes en el servidor (el worker los borra a las 24 h); se reintenta todo.
+                    uploading = null
+                    return@launch
+                }
+            }
+            uploading = null
+            onSend(body, done)
+            files.forEach { java.io.File(it.path).delete() }
+            files = emptyList(); text = ""
+        }
+    }
     var editText by rememberSaveable(editing?.id) { mutableStateOf(editing?.body ?: "") }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Column {
             if (replyTo != null) Banner(stringResource(R.string.reply_to, Names.person(data, replyTo.authorId)?.name ?: "") + " · " + excerpt(replyTo.body, 100), stringResource(R.string.reply_cancel), onCancelReply, "replyBar")
             if (editing != null) Banner(stringResource(R.string.edit_title), stringResource(R.string.cancel), onCancelEdit, "editBar")
+            if (editing == null && files.isNotEmpty()) PendingFiles(files, uploading, onRemove = { f -> if (uploading == null) { files = files - f; java.io.File(f.path).delete() } })
+            attError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("attError")) }
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
                 val bringLabel = stringResource(R.string.imp_action)
+                val attachLabel = stringResource(R.string.att_attach)
+                if (editing == null) IconButton(onClick = { picker = true }, enabled = uploading == null, modifier = Modifier.size(48.dp).semantics { contentDescription = attachLabel }.testTag("attach")) {
+                    Icon(Icons.Filled.AttachFile, null)
+                }
                 if (editing == null) IconButton(onClick = onBring, modifier = Modifier.size(48.dp).semantics { contentDescription = bringLabel }.testTag("bring")) {
                     Text("⤓", style = MaterialTheme.typography.titleLarge)
                 }
-                OutlinedTextField(
+                if (rec.recording) RecordingBar(rec, locked, gesture, onDelete = { recorder.cancel(); locked = false; container.toast(ctx.getString(R.string.voice_cancelled)) }, onSend = { sendVoice() }, modifier = Modifier.weight(1f))
+                else OutlinedTextField(
                     value = if (editing != null) editText else text,
                     onValueChange = { if (editing != null) editText = it else { text = it; if (it.isNotBlank()) client.typing(id) } },
                     placeholder = { Text(stringResource(R.string.placeholder, title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -599,7 +697,10 @@ private fun Composer(
                     FilledIconButton(onClick = { onSaveEdit(editing, editText.trim()) }, enabled = editText.isNotBlank(), modifier = Modifier.size(52.dp).testTag("saveEdit"),
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary)) { Icon(Icons.Filled.Check, stringResource(R.string.edit_save)) }
                 } else {
-                    FilledIconButton(onClick = { if (text.isNotBlank()) { onSend(text); text = "" } }, enabled = text.isNotBlank(), modifier = Modifier.size(52.dp).testTag("send"),
+                    if (text.isBlank() && files.isEmpty() && uploading == null && !locked) MicButton(
+                        onStart = { if (!hasMic()) { micWhy = true; false } else { gesture = com.tiecoms.app.core.Waveform.Gesture.RECORDING; recorder.start() } },
+                        onRelease = { sendVoice() }, onCancel = { recorder.cancel(); container.toast(ctx.getString(R.string.voice_cancelled)) }, onLock = { locked = true }, onDrag = { gesture = it },
+                    ) else if (!rec.recording) FilledIconButton(onClick = { sendNow() }, enabled = uploading == null && (text.isNotBlank() || files.isNotEmpty()), modifier = Modifier.size(52.dp).testTag("send"),
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary)) { Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.send)) }
                 }
             }
@@ -670,6 +771,8 @@ private fun MessageBubble(
     showAvatars: Boolean, menuOpen: Boolean, menuItems: () -> List<SheetItem?>, onDismissMenu: () -> Unit,
     sides: List<ConversationDTO> = emptyList(), onOpenSide: (String) -> Unit = {},
     onLongPress: () -> Unit, onQuote: (MessageDTO) -> Unit, onIssue: (String) -> Unit, onOpenConversation: (String, Long?) -> Unit,
+    onOpenMedia: (List<com.tiecoms.app.core.AttachmentDTO>, Int) -> Unit = { _, _ -> }, onOpenFile: (com.tiecoms.app.core.AttachmentDTO) -> Unit = {},
+    onVoiceIssue: (String) -> Unit = {},
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val openMenu = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onLongPress() }
@@ -773,8 +876,12 @@ private fun MessageBubble(
                     if (child != null) TextButton(onClick = { onOpenConversation(child.id, null) }) { Text(stringResource(R.string.lin_open), color = fg) }
                 }
             }
+            if (!deleted && m.attachments.isNotEmpty()) {
+                val media = m.attachments.filter { it.isImage || it.isVideo }
+                AttachmentsBlock(m.attachments, fg, onOpenMedia = { i -> onOpenMedia(media, i) }, onOpenFile = onOpenFile, mine = item.mine, onCreateIssue = onVoiceIssue)
+            }
             if (deleted) Text(body, color = fg, style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
-            else LinkifiedText(body, fg, Modifier.testTag("body-${m.seq}"))
+            else if (body.isNotBlank() || m.attachments.isEmpty()) LinkifiedText(body, fg, Modifier.testTag("body-${m.seq}"))
             m.linkPreview?.takeIf { !deleted && it.usable }?.let { LinkPreviewCard(it, fg, Modifier.padding(top = 6.dp)) }
             Text(
                 listOfNotNull(if (pinnedHere && item.mine) "📌" else null, time, if (m.editedAt != null && !deleted) stringResource(R.string.msg_edited) else null).joinToString(" "),
@@ -800,7 +907,11 @@ private fun PendingBubble(p: PendingMessage, onRetry: () -> Unit, onDiscard: () 
             Modifier.widthIn(max = maxW).background(chat.mineBubble.copy(alpha = if (failed) 0.55f else 0.8f), RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp))
                 .then(if (failed) Modifier.clickable(onClick = onRetry).semantics { onClick(retryLabel) { onRetry(); true } } else Modifier)
                 .padding(horizontal = 12.dp, vertical = 8.dp).testTag("pending"),
-        ) { Text(p.body, color = chat.onMine, style = MaterialTheme.typography.bodyLarge) }
+        ) {
+            val all = p.attachments + p.forwardAttachments
+            if (all.isNotEmpty()) Text(com.tiecoms.app.core.Attachments.preview(all, "", attLabels(LocalContext.current)), color = chat.onMine, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            if (p.body.isNotBlank()) Text(p.body, color = chat.onMine, style = MaterialTheme.typography.bodyLarge)
+        }
         if (failed) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onRetry) { Text(stringResource(R.string.not_sent), color = chat.failed, style = MaterialTheme.typography.labelMedium) }

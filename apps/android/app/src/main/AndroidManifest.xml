@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Notas de voz (SPEC-v4 §F): se pide al mantener pulsado el micrófono, con una explicación antes. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Subidas grandes desde «Compartir» (WorkManager en primer plano). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- Custom Tabs para el SSO (Android 11+ exige declarar la consulta al navegador). -->
     <queries>
@@ -53,6 +58,8 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Direct Share: categoría de los atajos de conversación que salen en la hoja de compartir. -->
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
 
             <!-- App Links verificados: requieren /.well-known/assetlinks.json en los tres hosts. -->
             <intent-filter android:autoVerify="true">
@@ -75,13 +82,6 @@
                 <data android:pathPrefix="/ajustes" />
             </intent-filter>
 
-            <!-- Compartir hacia TieComs desde otras apps (texto). -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
-            </intent-filter>
-
             <!-- Retorno del SSO (Google / Microsoft): tiecoms://auth/callback?code=… | ?error=…&message=… -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -98,6 +98,41 @@
                 <data android:scheme="tiecoms" />
             </intent-filter>
         </activity>
+        <!-- Compartir hacia TieComs (SPEC-v4 §B): fotos, videos, archivos, texto y enlaces, uno o varios. -->
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:excludeFromRecents="true"
+            android:taskAffinity="com.tiecoms.app.share"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.TieComs">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="application/*" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="application/*" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <meta-data android:name="android.service.chooser.chooser_target_service" android:value="androidx.sharetarget.ChooserTargetServiceCompat" />
+        </activity>
+
+        <!-- Subidas grandes desde «Compartir»: WorkManager en primer plano con notificación de progreso. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
         <!-- Burbuja de conversación (SPEC-v3 §6) -->
         <activity
             android:name=".BubbleActivity"

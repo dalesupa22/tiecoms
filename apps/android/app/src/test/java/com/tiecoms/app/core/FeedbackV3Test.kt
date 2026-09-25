@@ -15,8 +15,8 @@ class FeedbackV3Test {
         ids.forEach { assertEquals(PersonColors.light(it), PersonColors.light(it)); assertEquals(PersonColors.index(it), PersonColors.index(it)) }
         assertTrue("usa toda la paleta", ids.map { PersonColors.index(it) }.toSet().size == 8)
         // Vectores de la web (apps/web/src/ui.tsx personColor).
-        assertEquals(1, PersonColors.index("00000000-0000-0000-0000-000000000000")); assertEquals(0xFF1E8E5A, PersonColors.light("00000000-0000-0000-0000-000000000000"))
-        assertEquals(3, PersonColors.index("3f2b8c1e-9a4d-4e21-8b7a-1c2d3e4f5a6b")); assertEquals(0xFF0B8793, PersonColors.light("3f2b8c1e-9a4d-4e21-8b7a-1c2d3e4f5a6b"))
+        assertEquals(1, PersonColors.index("00000000-0000-0000-0000-000000000000")); assertEquals(0xFF1A7F51, PersonColors.light("00000000-0000-0000-0000-000000000000"))
+        assertEquals(3, PersonColors.index("3f2b8c1e-9a4d-4e21-8b7a-1c2d3e4f5a6b")); assertEquals(0xFF0A7C87, PersonColors.light("3f2b8c1e-9a4d-4e21-8b7a-1c2d3e4f5a6b"))
         assertEquals(1, PersonColors.index("ffffffff-ffff-ffff-ffff-ffffffffffff"))
         assertEquals("sin distinguir mayúsculas", PersonColors.index("3f2b8c1e-9a4d-4e21-8b7a-1c2d3e4f5a6b"), PersonColors.index("3F2B8C1E-9A4D-4E21-8B7A-1C2D3E4F5A6B"))
         (PersonColors.LIGHT + PersonColors.DARK).forEach { argb ->

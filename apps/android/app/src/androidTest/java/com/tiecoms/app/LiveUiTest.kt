@@ -141,18 +141,18 @@ class LiveUiTest {
         Thread.sleep(500)
         screenshot("ui-04-fijado-editado")
 
-        // 5. Compartir hacia TieComs (ACTION_SEND de otra app) → elegir conversación → Traer.
+        // 5. Compartir hacia TieComs (ACTION_SEND de otra app) → ShareActivity → elegir conversación → Enviar.
         val shared = "Pedido 4411 listo para despacho"
         ins.targetContext.startActivity(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, shared)
-            .setPackage(ins.targetContext.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        compose.waitUntilExactlyOneExists(hasTestTag("share"), 10_000)
-        compose.onNodeWithTag("pick-$convId").performClick()
-        compose.waitUntilAtLeastOneExists(hasTestTag("bringDialog"), 5_000)
-        compose.onNodeWithTag("bringSend").performScrollTo().performClick()
+            .setClassName(ins.targetContext.packageName, "com.tiecoms.app.ShareActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        compose.waitUntilAtLeastOneExists(hasTestTag("shareTarget-$convId"), 15_000)
+        compose.onNodeWithTag("shareTarget-$convId").performScrollTo().performClick()
+        compose.onNodeWithTag("shareSend").performClick()
+        compose.waitUntil(20_000) { compose.onAllNodes(hasTestTag("shareSheet")).fetchSemanticsNodes().isEmpty() }
         compose.waitUntilExactlyOneExists(hasTestTag("composer"), 10_000)
         waitText(shared)
         waitText("eco: $shared")
-        log("compartir → mensaje con origen en la conversación y eco del par")
+        log("compartir → ShareActivity → mensaje en la conversación y eco del par")
 
         // 6. Deep links (con la app viva: sin splash).
         compose.onNodeWithTag("back").performClick()

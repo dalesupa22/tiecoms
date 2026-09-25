@@ -25,7 +25,7 @@ class MainActivity : ComponentActivity() {
         // Arranque en frío: primera actividad del proceso. Con un enlace se muestra la versión corta.
         if (savedInstanceState == null && container.splashPending) {
             container.splashPending = false
-            val linked = intent?.action == Intent.ACTION_VIEW || intent?.action == Intent.ACTION_SEND
+            val linked = intent?.action == Intent.ACTION_VIEW
             container.splashMode.value = if (linked) SplashChoreo.Mode.SHORT else SplashChoreo.Mode.FULL
         }
         // Tras una rotación el intent es el mismo: no se vuelve a abrir el enlace.
@@ -43,11 +43,7 @@ class MainActivity : ComponentActivity() {
         intent ?: return
         // Solo debug: `adb shell am start -n com.tiecoms.app/.MainActivity -e apiUrl http://10.0.2.2:3021`
         if (BuildConfig.DEBUG) intent.getStringExtra("apiUrl")?.let { container.setDebugApiUrl(it) }
-        if (intent.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true) {
-            val text = listOfNotNull(intent.getStringExtra(Intent.EXTRA_SUBJECT), intent.getStringExtra(Intent.EXTRA_TEXT)).joinToString("\n").trim()
-            container.pendingLink.value = DeepLink.Share(text, DeepLinks.sourceForPackage(referrer?.host))
-            return
-        }
+        // «Compartir» desde otras apps llega a ShareActivity (SPEC-v4 §B), no aquí.
         if (intent.action == Intent.ACTION_VIEW) {
             val data = intent.dataString
             // tiecoms://auth/callback es el retorno del SSO, no un destino de navegación.

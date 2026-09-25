@@ -84,6 +84,17 @@ class AppSettings(context: Context) {
     var collapsed: Set<String>
         get() = prefs.getStringSet("collapsed", emptySet()) ?: emptySet()
         set(v) { prefs.edit().putStringSet("collapsed", v).apply() }
+    /** Velocidad de las notas de voz (1, 1,5 o 2) y las ya escuchadas (SPEC-v4 §F). */
+    var voiceSpeed: Float
+        get() = prefs.getFloat("voiceSpeed", 1f)
+        set(v) { prefs.edit().putFloat("voiceSpeed", v).apply() }
+    var listenedVoice: Set<String>
+        get() = prefs.getStringSet("listenedVoice", emptySet()) ?: emptySet()
+        set(v) { prefs.edit().putStringSet("listenedVoice", v).apply() }
+    /** Pestaña de Inicio elegida (SPEC-v4 §C): ALL | UNREAD | ISSUES | CHATS | SIDES. */
+    var homeTab: String
+        get() = prefs.getString("homeTab", "ALL") ?: "ALL"
+        set(v) { prefs.edit().putString("homeTab", v).apply() }
     var soundsEnabled: Boolean
         get() = prefs.getBoolean("sounds", true)
         set(v) { prefs.edit().putBoolean("sounds", v).apply() }

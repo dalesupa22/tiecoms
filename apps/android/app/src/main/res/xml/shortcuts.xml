@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Direct Share (Sharing Shortcuts, SPEC-v4 §B): los atajos dinámicos de conversación con esta categoría
+     salen en la fila de arriba de la hoja de compartir y abren ShareActivity con EXTRA_SHORTCUT_ID. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="com.tiecoms.app.ShareActivity">
+        <data android:mimeType="text/*" />
+        <data android:mimeType="image/*" />
+        <data android:mimeType="video/*" />
+        <data android:mimeType="application/*" />
+        <data android:mimeType="*/*" />
+        <category android:name="com.tiecoms.app.SHARE_TARGET" />
+    </share-target>
+</shortcuts>

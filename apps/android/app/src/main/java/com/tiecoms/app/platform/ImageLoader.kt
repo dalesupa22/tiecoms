@@ -38,13 +38,14 @@ class ImageLoader(context: Context, base: OkHttpClient) {
 
     fun cached(url: String, px: Int): ImageBitmap? = memory.get(key(url, px))
 
-    suspend fun load(url: String, px: Int): ImageBitmap? {
+    /** [bearer]: para imágenes protegidas (adjuntos y sus miniaturas). */
+    suspend fun load(url: String, px: Int, bearer: String? = null): ImageBitmap? {
         val k = key(url, px)
         memory.get(k)?.let { return it }
         failedAt[k]?.let { if (System.currentTimeMillis() - it < 60_000) return null }
         val fresh = scope.async(start = CoroutineStart.LAZY) {
                 try {
-                    val bytes = http.newCall(Request.Builder().url(url).build()).await().use { r -> if (r.isSuccessful) r.body?.bytes() else null }
+                    val bytes = http.newCall(Request.Builder().url(url).apply { if (bearer != null) header("authorization", "Bearer $bearer") }.build()).await().use { r -> if (r.isSuccessful) r.body?.bytes() else null }
                     val img = bytes?.let { decode(it, px) }
                     if (img != null) { memory.put(k, img); failedAt.remove(k) } else failedAt[k] = System.currentTimeMillis()
                     img

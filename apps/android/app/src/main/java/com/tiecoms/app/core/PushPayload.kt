@@ -20,6 +20,8 @@ data class PushMessage(
     val authorAvatarUrl: String?,
     val reminderId: String?,
     val eventId: String?,
+    /** Aviso de reunión «Empieza en 10 min» (null = convocatoria). */
+    val minutes: Int? = null,
 )
 
 object PushPayload {
@@ -45,6 +47,7 @@ object PushPayload {
             authorAvatarUrl = s("authorAvatarUrl"),
             reminderId = s("reminderId"),
             eventId = s("eventId"),
+            minutes = s("minutes")?.toIntOrNull(),
         )
     }
 }

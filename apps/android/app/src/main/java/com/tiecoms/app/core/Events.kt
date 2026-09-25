@@ -27,6 +27,8 @@ sealed interface AccountEvent {
     data class ScopeChanged(val reason: String) : AccountEvent
     data class ReadUpdated(val conversationId: String, val seq: Long) : AccountEvent
     data class ReminderDue(val reminder: ReminderDTO) : AccountEvent
+    /** Aviso de reunión (SPEC-v4 §E): empieza en [minutes] minutos (10). */
+    data class EventSoon(val event: CalendarEventDTO, val minutes: Int) : AccountEvent
     data class PrefsUpdated(val conversationId: String?, val workspaceId: String?) : AccountEvent
     data class WhatsAppUpdated(val accountId: String?) : AccountEvent
     /** Cambió un árbol de archivos (workspaceId null = «Mis archivos»). */
@@ -76,6 +78,8 @@ fun decodeAccountEvent(el: JsonElement): AccountEvent {
             if (c != null && s != null) AccountEvent.ReadUpdated(c, s) else AccountEvent.Unknown(type)
         }
         "reminder.due" -> obj(o, "reminder", ReminderDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { AccountEvent.ReminderDue(it) } ?: AccountEvent.Unknown(type)
+        "event.soon" -> obj(o, "event", CalendarEventDTO.serializer())?.takeIf { it.id.isNotEmpty() }
+            ?.let { AccountEvent.EventSoon(it, (o.long("minutes") ?: 10L).toInt()) } ?: AccountEvent.Unknown(type)
         "prefs.updated" -> AccountEvent.PrefsUpdated(o.str("conversationId"), o.str("workspaceId"))
         "whatsapp.updated" -> AccountEvent.WhatsAppUpdated(o.str("accountId"))
         "drive.updated" -> AccountEvent.DriveUpdated(o.str("workspaceId"))

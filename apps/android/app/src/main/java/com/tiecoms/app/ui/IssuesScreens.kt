@@ -148,7 +148,8 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
         .sortedWith(compareBy<IssueDTO> { it.closed }.thenByDescending { issueFlags(it).stalledDays }.thenBy { it.dueDate ?: "9" })
     // Empresa → Espacio → Conversación → asuntos, con la misma agrupación que Inicio.
     val wsById = data.workspaces.associateBy { it.id }
-    val byOrg = list.groupBy { i -> wsById[i.workspaceId]?.let { com.tiecoms.app.core.HomeTree.counterpartOrg(data, it)?.id } ?: "none" }
+    // Asuntos de directos y chats grupales (sin espacio, SPEC-v4 §E): sección «Chats» después de las empresas.
+    val byOrg = list.groupBy { i -> if (i.workspaceId == null) CHATS_GROUP else wsById[i.workspaceId]?.let { com.tiecoms.app.core.HomeTree.counterpartOrg(data, it)?.id } ?: "none" }
     val orgOrder = com.tiecoms.app.core.HomeTree.groupWorkspaces(data).map { it.first?.id ?: "none" }.distinct()
     val title = conversationFilter?.let { id -> visible[id]?.let { stringResource(R.string.issue_in_conversation, titleOf(ctx, it, data)) } } ?: stringResource(R.string.nav_issues)
     Scaffold(
@@ -167,8 +168,21 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
                 ErrorText(error)
                 if (list.isEmpty()) EmptyNote(stringResource(R.string.issue_empty))
             }
-            (orgOrder + byOrg.keys.filter { it !in orgOrder }).forEach { orgId ->
+            (orgOrder + byOrg.keys.filter { it !in orgOrder && it != CHATS_GROUP } + CHATS_GROUP).forEach { orgId ->
                 val inOrg = byOrg[orgId] ?: return@forEach
+                if (orgId == CHATS_GROUP) {
+                    item(key = "o$orgId") { SectionHeader(stringResource(R.string.issue_chats_section), Modifier.padding(top = 18.dp, bottom = 2.dp).testTag("issuesChats")) }
+                    inOrg.groupBy { it.conversationId }.forEach { (cid, inConv) ->
+                        item(key = "c$cid") {
+                            Row(Modifier.padding(start = 4.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                visible[cid]?.let { ConversationIcon(it, data, 24.dp) }; Spacer(Modifier.width(8.dp))
+                                Text(visible[cid]?.let { titleOf(ctx, it, data) } ?: "", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        items(inConv, key = { it.id }) { Box(Modifier.padding(start = 12.dp)) { IssueRow(it, data, showWhere = false, onOpen = onOpen) } }
+                    }
+                    return@forEach
+                }
                 val org = Names.org(data, orgId.takeIf { it != "none" })
                 item(key = "o$orgId") {
                     Row(Modifier.padding(top = 18.dp, bottom = 2.dp).semantics(mergeDescendants = true) { heading() }, verticalAlignment = Alignment.CenterVertically) {
@@ -347,3 +361,5 @@ fun IssueChips(list: List<IssueDTO>, data: BootstrapDTO, onOpen: (String) -> Uni
     }
 }
 
+
+private const val CHATS_GROUP = "chats"

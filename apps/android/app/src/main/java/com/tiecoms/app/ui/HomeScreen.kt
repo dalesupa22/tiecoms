@@ -60,6 +60,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -89,7 +90,7 @@ fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (Str
     // containing a blocked participant; full conversations filter by author.
     val data = remember(originalData, state.blockedUserIds) {
         originalData.copy(conversations = originalData.conversations.map { c ->
-            if (c.memberIds.any { it in state.blockedUserIds }) c.copy(lastMessagePreview = "") else c
+            if (c.memberIds.any { it in state.blockedUserIds }) c.copy(lastMessagePreview = "", lastHumanPreview = null) else c
         })
     }
     var query by rememberSaveable { mutableStateOf("") }
@@ -101,8 +102,10 @@ fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (Str
     val container = LocalContainer.current
     var collapsed by remember { mutableStateOf(container.settings.collapsed) }
     fun toggle(key: String) { collapsed = if (key in collapsed) collapsed - key else collapsed + key; container.settings.collapsed = collapsed }
-    val rows = remember(data, query, workspaceFilter, collapsed) {
-        com.tiecoms.app.core.HomeTree.build(data, query, workspaceFilter, collapsed, { Names.conversationTitle(it, data, internalFallback, convFallback) })
+    var tab by remember { mutableStateOf(runCatching { com.tiecoms.app.core.HomeTree.Tab.valueOf(container.settings.homeTab) }.getOrDefault(com.tiecoms.app.core.HomeTree.Tab.ALL)) }
+    val counts = remember(data) { com.tiecoms.app.core.HomeTree.counts(data) }
+    val rows = remember(data, query, workspaceFilter, collapsed, tab) {
+        com.tiecoms.app.core.HomeTree.build(data, query, workspaceFilter, collapsed, { Names.conversationTitle(it, data, internalFallback, convFallback) }, tab = tab)
     }
     var newSpace by rememberSaveable { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<ConversationDTO?>(null) }
@@ -137,6 +140,7 @@ fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (Str
                 shape = MaterialTheme.shapes.extraLarge,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("search"),
             )
+            HomeTabs(tab, counts) { tab = it; container.settings.homeTab = it.name }
             // Accesos: recordatorios, trazo y WhatsApp (desde Inicio, como pide la SPEC-v2).
             androidx.compose.foundation.lazy.LazyRow(
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
@@ -181,7 +185,8 @@ fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (Str
                 } else {
                     LazyColumn(Modifier.fillMaxSize().testTag("conversationList")) {
                         items(rows, key = { it.key }) { row ->
-                            when (row) {
+                            // Al cambiar el orden (llega un no leído), la fila se desliza a su lugar en vez de saltar.
+                            Box(Modifier.animateItem()) { when (row) {
                                 is com.tiecoms.app.core.HomeTree.Section -> SectionRow(row.kind, onAdd = when (row.kind) {
                                     com.tiecoms.app.core.HomeTree.Kind.COMPANIES -> ({ newSpace = true })
                                     com.tiecoms.app.core.HomeTree.Kind.CHATS -> onNewChat
@@ -194,12 +199,22 @@ fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (Str
                                     menuItems = { conversationMenu(ctx, row.c, data, onMeeting = { meetingFor = row.c.id }, onRemindCustom = { remindFor = row.c }, onLeave = { leaveFor = row.c }, onOpen = { onOpen(row.c.id) }) + listOf(null, SheetItem(ctx.getString(R.string.details_short), "ⓘ", tag = "menuDetails") { onDetails(row.c.id) }) },
                                     onDismissMenu = { menuFor = null },
                                     onLongPress = { menuFor = row.c; menuKey = row.key }, onIssues = { onIssuesOf(row.c.id) }) { onOpen(row.c.id) }
-                                is com.tiecoms.app.core.HomeTree.Empty -> Text(
+                                is com.tiecoms.app.core.HomeTree.Empty -> if (row.kind == com.tiecoms.app.core.HomeTree.Kind.FILTER) Text(
+                                    stringResource(when (tab) {
+                                        com.tiecoms.app.core.HomeTree.Tab.UNREAD -> R.string.home_tab_caught_up
+                                        com.tiecoms.app.core.HomeTree.Tab.ISSUES -> R.string.home_empty_issues
+                                        com.tiecoms.app.core.HomeTree.Tab.CHATS -> R.string.home_empty_chats
+                                        com.tiecoms.app.core.HomeTree.Tab.SIDES -> R.string.home_empty_sides
+                                        com.tiecoms.app.core.HomeTree.Tab.ALL -> R.string.home_empty_all
+                                    }),
+                                    textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 48.dp).testTag("tabEmpty"),
+                                ) else Text(
                                     stringResource(if (row.kind == com.tiecoms.app.core.HomeTree.Kind.CHATS) R.string.chat_new else R.string.side_empty),
                                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.fillMaxWidth().clickable { if (row.kind == com.tiecoms.app.core.HomeTree.Kind.CHATS) onNewChat() else newSpace = true }.padding(horizontal = 20.dp, vertical = 10.dp),
                                 )
-                            }
+                            } }
                         }
                         item { Spacer(Modifier.heightIn(min = 24.dp)) }
                     }
@@ -248,7 +263,7 @@ private fun SectionRow(kind: com.tiecoms.app.core.HomeTree.Kind, onAdd: (() -> U
     val title = stringResource(when (kind) {
         com.tiecoms.app.core.HomeTree.Kind.PINNED -> R.string.side_pinned
         com.tiecoms.app.core.HomeTree.Kind.COMPANIES -> R.string.side_companies
-        com.tiecoms.app.core.HomeTree.Kind.CHATS -> R.string.side_chats
+        com.tiecoms.app.core.HomeTree.Kind.CHATS, com.tiecoms.app.core.HomeTree.Kind.FILTER -> R.string.side_chats
     })
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 16.dp).testTag("section-" + kind.name), verticalAlignment = Alignment.CenterVertically) {
         SectionHeader((if (kind == com.tiecoms.app.core.HomeTree.Kind.PINNED) "📌 " else "") + title, Modifier.weight(1f).semantics { heading() })
@@ -279,7 +294,7 @@ private fun OrgRow(row: com.tiecoms.app.core.HomeTree.Org, onToggle: () -> Unit)
         OrgMark(row.org, size = 22.dp)
         Spacer(Modifier.width(10.dp))
         Text(name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        if (row.collapsed) UnreadPill(row.unread, parseColor(row.org?.colorBg, MaterialTheme.colorScheme.primary), parseColor(row.org?.colorFg, Color.White))
+        if (row.collapsed) UnreadPill(row.unread, Color(com.tiecoms.app.core.Contrast.badgeBackground(row.org?.colorBg)), Color.White)
         Icon(if (row.collapsed) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -299,7 +314,7 @@ private fun WsRow(row: com.tiecoms.app.core.HomeTree.Ws, inPinned: Boolean, onTo
         Text((if (row.ws.pinnedAt != null) "📌 " else "") + row.ws.name, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         if (!inPinned) {
-            if (row.collapsed) UnreadPill(row.unread, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.onPrimary)
+            if (row.collapsed) UnreadPill(row.unread, Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE), Color.White)
             Icon(if (row.collapsed) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -314,7 +329,14 @@ private fun ConversationRow(
     val ctx = LocalContext.current
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val title = Names.conversationTitle(c, data, internalFallback, convFallback)
-    val preview = c.lastMessagePreview?.takeIf { it.isNotEmpty() }?.let { if (it.startsWith("{")) systemText(ctx, it) else it } ?: stringResource(R.string.no_messages)
+    // SPEC-v4 §C: se prefiere el último mensaje de una persona (lastHumanPreview) sobre los de sistema.
+    val human = c.lastHumanPreview?.let { h ->
+        val text = com.tiecoms.app.core.Attachments.preview(h.attachments, h.body, attLabels(ctx))
+        if (text.isBlank()) null
+        else if (c.kind == "direct" || h.authorId.isBlank()) text
+        else (if (h.authorId == data.me.id) stringResource(R.string.common_you_short) else Names.person(data, h.authorId)?.name?.substringBefore(' ') ?: "") .let { a -> if (a.isBlank()) text else "$a: $text" }
+    }
+    val preview = (human ?: c.lastMessagePreview)?.takeIf { it.isNotEmpty() }?.let { if (it.startsWith("{")) systemText(ctx, it) else it } ?: stringResource(R.string.no_messages)
     val time = relativeTime(ctx, c.lastMessageAt)
     val ws = data.workspaces.firstOrNull { it.id == c.workspaceId }
     val org = if (ws != null) com.tiecoms.app.core.HomeTree.counterpartOrg(data, ws) else null
@@ -357,8 +379,8 @@ private fun ConversationRow(
                 }
             }
             Spacer(Modifier.width(8.dp))
-            UnreadPill(c.unread, if (muted) MaterialTheme.colorScheme.outline else parseColor(org?.colorBg, MaterialTheme.colorScheme.primary),
-                if (muted) Color.White else parseColor(org?.colorFg, MaterialTheme.colorScheme.onPrimary))
+            // Color de la empresa solo si el número blanco pasa AA (4,5:1); si no, naranja sobrio (SPEC-v4 §C).
+            UnreadPill(c.unread, Color(if (muted) com.tiecoms.app.core.Contrast.MUTED else com.tiecoms.app.core.Contrast.badgeBackground(org?.colorBg)), Color.White)
         }
         AnchoredMenu(menuOpen, if (menuOpen) menuItems() else emptyList(), onDismissMenu)
     }
@@ -389,7 +411,7 @@ private fun GlyphBox(g: String, size: androidx.compose.ui.unit.Dp) {
 }
 
 @Composable
-private fun NewSpaceDialog(onClose: () -> Unit, onCreated: (String) -> Unit) {
+internal fun NewSpaceDialog(onClose: () -> Unit, onCreated: (String) -> Unit) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val scope = rememberCoroutineScope()
@@ -421,5 +443,42 @@ fun ConnectionBanner(status: ConnectionStatus) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp).testTag("connBanner"),
         )
+    }
+}
+
+/** Pestañas grandes tipo «pill» bajo el buscador: Todo · No leídos · Asuntos · Chats · Laterales, con contador. */
+@Composable
+private fun HomeTabs(tab: com.tiecoms.app.core.HomeTree.Tab, counts: Map<com.tiecoms.app.core.HomeTree.Tab, Int>, onPick: (com.tiecoms.app.core.HomeTree.Tab) -> Unit) {
+    val labels = mapOf(
+        com.tiecoms.app.core.HomeTree.Tab.ALL to R.string.home_tab_all, com.tiecoms.app.core.HomeTree.Tab.UNREAD to R.string.home_tab_unread,
+        com.tiecoms.app.core.HomeTree.Tab.ISSUES to R.string.home_tab_issues, com.tiecoms.app.core.HomeTree.Tab.CHATS to R.string.home_tab_chats,
+        com.tiecoms.app.core.HomeTree.Tab.SIDES to R.string.home_tab_sides,
+    )
+    androidx.compose.foundation.lazy.LazyRow(
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+        modifier = Modifier.padding(vertical = 6.dp).testTag("homeTabs"),
+    ) {
+        items(com.tiecoms.app.core.HomeTree.Tab.entries.toList()) { t ->
+            val on = t == tab
+            val n = counts[t] ?: 0
+            val label = stringResource(labels.getValue(t))
+            androidx.compose.material3.Surface(
+                onClick = { onPick(t) },
+                shape = CircleShape,
+                color = if (on) MaterialTheme.colorScheme.inverseSurface else MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = if (on) MaterialTheme.colorScheme.inverseOnSurface else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.heightIn(min = 44.dp).semantics { selected = on; contentDescription = "$label, $n" }.testTag("tab-" + t.name),
+            ) {
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    if (t != com.tiecoms.app.core.HomeTree.Tab.ALL && n > 0) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(n.toString(), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
+                            color = if (on) MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
     }
 }

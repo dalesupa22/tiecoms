@@ -61,8 +61,49 @@ class HttpApi(val baseUrl: String, private val client: OkHttpClient) {
         client.newBuilder().writeTimeout(java.time.Duration.ofMinutes(3)).readTimeout(java.time.Duration.ofMinutes(3)).build()
     }
 
-    /** Cuerpo crudo (foto de perfil, archivos) en vez de JSON. */
-    class RawBody(val bytes: ByteArray, val contentType: String, val headers: Map<String, String> = emptyMap())
+    /**
+     * Cuerpo crudo (foto de perfil, archivos) en vez de JSON. Con [file] se transmite desde disco sin cargarlo en
+     * memoria y [onProgress] recibe (enviados, total) mientras sube.
+     */
+    class RawBody(
+        val bytes: ByteArray, val contentType: String, val headers: Map<String, String> = emptyMap(),
+        val file: java.io.File? = null, val onProgress: ((Long, Long) -> Unit)? = null,
+    )
+
+    private class FileBody(private val file: java.io.File, private val type: String, private val onProgress: ((Long, Long) -> Unit)?) : okhttp3.RequestBody() {
+        override fun contentType() = type.toMediaType()
+        override fun contentLength() = file.length()
+        override fun writeTo(sink: okio.BufferedSink) {
+            val total = file.length(); var sent = 0L
+            file.inputStream().use { input ->
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(buf); if (n < 0) break
+                    sink.write(buf, 0, n); sent += n; onProgress?.invoke(sent, total)
+                }
+            }
+        }
+    }
+
+    /** Descarga autenticada a [dest] (adjuntos). Devuelve el código HTTP; el archivo solo queda si fue 2xx. */
+    suspend fun download(path: String, token: String?, dest: java.io.File, onProgress: ((Long, Long) -> Unit)? = null): Int {
+        val b = Request.Builder().url(url(path)).header("x-tiecoms-client", PLATFORM).header("x-tiecoms-contract", CONTRACT_VERSION)
+        if (token != null) b.header("authorization", "Bearer $token")
+        uploadClient.newCall(b.get().build()).await().use { res ->
+            if (!res.isSuccessful) return res.code
+            val body = res.body ?: return res.code
+            val total = body.contentLength()
+            val tmp = java.io.File(dest.parentFile, dest.name + ".part")
+            try {
+                body.byteStream().use { input -> tmp.outputStream().use { out ->
+                    val buf = ByteArray(64 * 1024); var got = 0L
+                    while (true) { val n = input.read(buf); if (n < 0) break; out.write(buf, 0, n); got += n; onProgress?.invoke(got, total) }
+                } }
+            } catch (e: IOException) { tmp.delete(); throw NetworkException(e) }
+            if (!tmp.renameTo(dest)) { tmp.copyTo(dest, overwrite = true); tmp.delete() }
+            return res.code
+        }
+    }
 
     suspend fun exec(method: String, path: String, json: String? = null, token: String? = null, raw: RawBody? = null): HttpResult {
         val b = Request.Builder().url(url(path))
@@ -72,6 +113,7 @@ class HttpApi(val baseUrl: String, private val client: OkHttpClient) {
         if (token != null) b.header("authorization", "Bearer $token")
         raw?.headers?.forEach { (k, v) -> b.header(k, v) }
         val body = when {
+            raw?.file != null -> FileBody(raw.file, raw.contentType, raw.onProgress)
             raw != null -> raw.bytes.toRequestBody(raw.contentType.toMediaType())
             json != null -> json.toRequestBody(JSON_MEDIA)
             method == "POST" -> "{}".toRequestBody(JSON_MEDIA)

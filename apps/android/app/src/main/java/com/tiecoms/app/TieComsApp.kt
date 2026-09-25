@@ -37,6 +37,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -110,6 +113,9 @@ class AppContainer(private val app: Application) {
 
     private fun newClient(url: String) = TieComsClient(url, deviceName, storage, secrets, okHttp)
 
+    /** Notas de voz: un solo reproductor para toda la app (reproducción continua). */
+    val voice by lazy { com.tiecoms.app.platform.VoicePlayer(app, okHttp, settings) }
+
     /** Imágenes remotas (fotos y miniaturas públicas) con caché en memoria y en disco. */
     val images by lazy { com.tiecoms.app.platform.ImageLoader(app, okHttp) }
 
@@ -120,6 +126,20 @@ class AppContainer(private val app: Application) {
         sounds.hashCode() // precarga SoundPool: el sonido del splash debe estar listo en t = 0,3 s
         scope.launch { _client.value.start() }
         scope.launch { client.flatMapLatest { it.signals }.collect { onSignal(it) } }
+        // Direct Share (SPEC-v4 §B): las conversaciones recientes como atajos de la hoja de compartir.
+        scope.launch {
+            client.flatMapLatest { it.state }
+                .map { st -> st.data?.let { d -> com.tiecoms.app.platform.ConversationShortcuts.recent(d).map { c -> Triple(c.id, conversationName(c.id), c.avatarUrl) } } }
+                .distinctUntilChanged()
+                .collectLatest { recent ->
+                    val d = client.value.state.value.data ?: return@collectLatest
+                    if (recent.isNullOrEmpty()) return@collectLatest
+                    kotlinx.coroutines.delay(1_500)
+                    kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        com.tiecoms.app.platform.ConversationShortcuts.publish(app, d, { conversationName(it.id) }) { c -> loadAvatar(conversationPhoto(c, d)) }
+                    }
+                }
+        }
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) { client.value.wake() }
         })
@@ -133,6 +153,10 @@ class AppContainer(private val app: Application) {
             )
         }
     }
+
+    /** Foto de una conversación: la del grupo o, en un directo, la de la otra persona. */
+    fun conversationPhoto(c: com.tiecoms.app.core.ConversationDTO, d: com.tiecoms.app.core.BootstrapDTO): String? =
+        c.avatarUrl ?: if (c.kind == "direct") c.memberIds.firstOrNull { it != d.me.id }?.let { Names.person(d, it)?.avatarUrl } else null
 
     /** Nombre visible de una conversación (para notificaciones). */
     fun conversationName(id: String): String {
@@ -153,7 +177,9 @@ class AppContainer(private val app: Application) {
     fun showPush(p: com.tiecoms.app.core.PushMessage) {
         val c = client.value
         if (foreground && c.state.value.status == com.tiecoms.app.core.SessionStatus.READY && c.state.value.connection == com.tiecoms.app.core.ConnectionStatus.ONLINE) return
-        if (!notifier.firstTime(p.messageId)) return
+        // Aviso de reunión (minutes) vs. convocatoria: claves distintas para no taparse entre sí.
+        val dedupe = if (p.type == "event" && p.minutes != null) "soon:" + p.eventId else p.messageId
+        if (!notifier.firstTime(dedupe)) return
         scope.launch {
             when (p.type) {
                 "message" -> {
@@ -163,7 +189,7 @@ class AppContainer(private val app: Application) {
                         loadAvatar(p.authorAvatarUrl), silent = !settings.soundsEnabled, badge = p.badge, messageId = p.messageId)
                 }
                 else -> notifier.showMessage(p.conversationId, p.title, listOf(p.subtitle, p.body).filter { it.isNotBlank() }.joinToString(" · "),
-                    silent = !settings.soundsEnabled, tag = p.type + ":" + (p.reminderId ?: p.eventId ?: p.messageId))
+                    silent = !settings.soundsEnabled, tag = p.type + ":" + (if (p.minutes != null) "soon:" else "") + (p.reminderId ?: p.eventId ?: p.messageId))
             }
         }
     }
@@ -265,7 +291,21 @@ class AppContainer(private val app: Application) {
                 }.getOrDefault("")
                 notifier.showMessage(ev.conversationId, "📅 $title", whenText, silent = foreground || !settings.soundsEnabled, tag = "cal:" + ev.id)
             }
-            ClientSignal.SignedOut -> Unit
+            // Aviso 10 min antes (SPEC-v4 §E): suena con tc_notify aunque la conversación esté silenciada.
+            is ClientSignal.EventSoon -> {
+                val ev = sig.event
+                if (!notifier.firstTime("soon:" + ev.id)) return
+                if (foreground) sounds.play(Sound.NOTIFY)
+                val whenText = runCatching {
+                    java.time.Instant.parse(ev.startsAt).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT))
+                }.getOrDefault("")
+                val conv = client.value.meta(ev.conversationId)
+                val where = conv?.takeIf { it.kind != "direct" }?.let { conversationName(it.id) }.orEmpty()
+                notifier.showMessage(ev.conversationId, "📅 " + app.getString(R.string.cal_soon, sig.minutes, ev.title), listOf(where, whenText).filter { it.isNotBlank() }.joinToString(" · "),
+                    silent = !settings.soundsEnabled, tag = "event:soon:" + ev.id)
+            }
+            // Sin sesión: fuera sugerencias de Direct Share, burbujas y notificaciones de la cuenta anterior.
+            ClientSignal.SignedOut -> { com.tiecoms.app.platform.ConversationShortcuts.clear(app); notifier.cancelAll() }
         }
     }
 }

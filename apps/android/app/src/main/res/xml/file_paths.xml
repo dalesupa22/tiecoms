@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Fotos tomadas con la cámara antes de recortarlas (se borran al subir). -->
+<!-- photos/: fotos de la cámara antes de recortarlas o adjuntarlas. att/: adjuntos descargados para «Abrir con…». -->
 <paths>
     <cache-path name="photos" path="photos/" />
+    <cache-path name="att" path="att/" />
 </paths>

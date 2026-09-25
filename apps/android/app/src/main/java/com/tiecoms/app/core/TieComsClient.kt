@@ -76,6 +76,8 @@ sealed interface ClientSignal {
     data class ReminderDue(val reminder: ReminderDTO) : ClientSignal
     /** Reunión nueva, movida o cancelada por otra persona, en vivo. kind: created | moved | cancelled */
     data class CalendarChanged(val event: CalendarEventDTO, val kind: String) : ClientSignal
+    /** La reunión empieza pronto (evento de cuenta `event.soon`). */
+    data class EventSoon(val event: CalendarEventDTO, val minutes: Int) : ClientSignal
 }
 
 private enum class RefreshOutcome { OK, UNAUTHORIZED, NETWORK }
@@ -392,6 +394,10 @@ class TieComsClient(
                 setState { copy(reminders = (reminders.filter { it.id != e.reminder.id } + e.reminder).sortedBy { it.remindAt }) }
                 _signals.tryEmit(ClientSignal.ReminderDue(e.reminder))
             }
+            is AccountEvent.EventSoon -> {
+                setState { copy(events = events + (e.event.id to e.event)) }
+                _signals.tryEmit(ClientSignal.EventSoon(e.event, e.minutes))
+            }
             is AccountEvent.PrefsUpdated -> scheduleBootstrap()
             is AccountEvent.WhatsAppUpdated -> setState { copy(waRevision = waRevision + 1) }
             is AccountEvent.DriveUpdated -> setState { copy(driveRevision = driveRevision + 1) }
@@ -550,12 +556,18 @@ class TieComsClient(
     }
 
     // ---------- Envío con cola persistente ----------
-    fun send(conversationId: String, body: String, replyTo: String? = null, forwarded: ForwardedInfo? = null): String? {
+    /** Con [attachments] (ya subidos con [uploadAttachment]) el texto puede ir vacío (SPEC-v4). */
+    fun send(
+        conversationId: String, body: String, replyTo: String? = null, forwarded: ForwardedInfo? = null,
+        attachments: List<AttachmentDTO> = emptyList(), forwardAttachments: List<AttachmentDTO> = emptyList(),
+    ): String? {
         val text = body.trim()
-        if (text.isEmpty()) return null
+        if (text.isEmpty() && attachments.isEmpty() && forwardAttachments.isEmpty()) return null
+        val fwd = forwardAttachments.take((Attachments.MAX_PER_MESSAGE - attachments.size).coerceAtLeast(0))
         val p = PendingMessage(
             clientMessageId = UUID.randomUUID().toString(), conversationId = conversationId, body = text,
             replyTo = replyTo, forwarded = forwarded, createdAt = Instant.ofEpochMilli(now()).toString(),
+            attachments = attachments.take(Attachments.MAX_PER_MESSAGE), forwardAttachments = fwd,
         )
         // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
         scope.launch {
@@ -632,7 +644,8 @@ class TieComsClient(
     private suspend fun deliver(p: PendingMessage): MessageDTO {
         if (socket.connected) {
             try {
-                val payload = TcJson.encodeToJsonElement(SocketSendBody.serializer(), SocketSendBody(p.conversationId, p.clientMessageId, p.body, p.replyTo, p.forwarded))
+                val payload = TcJson.encodeToJsonElement(SocketSendBody.serializer(), SocketSendBody(p.conversationId, p.clientMessageId, p.body, p.replyTo, p.forwarded,
+                    p.attachments.map { it.id }.ifEmpty { null }, p.forwardAttachments.map { it.id }.ifEmpty { null }))
                 val r = socket.emitWithAck("message.send", payload, 8000).firstOrNull() as? JsonObject
                 if ((r?.get("ok") as? JsonPrimitive)?.booleanOrNull == true) {
                     val m = r["message"]?.let { runCatching { TcJson.decodeFromJsonElement(MessageDTO.serializer(), it) }.getOrNull() }
@@ -652,7 +665,8 @@ class TieComsClient(
         }
         val r = request(
             "POST", "/conversations/${p.conversationId}/messages",
-            TcJson.encodeToString(SendBody.serializer(), SendBody(p.clientMessageId, p.body, p.replyTo, p.forwarded)), SendResult.serializer(),
+            TcJson.encodeToString(SendBody.serializer(), SendBody(p.clientMessageId, p.body, p.replyTo, p.forwarded,
+                p.attachments.map { it.id }.ifEmpty { null }, p.forwardAttachments.map { it.id }.ifEmpty { null })), SendResult.serializer(),
         )
         sentViaHttp++
         return r.message ?: throw ApiException(500, "internal", "Respuesta sin mensaje")
@@ -828,8 +842,62 @@ class TieComsClient(
     fun forward(source: MessageDTO, targets: List<String>, comment: String?): Int {
         val author = Names.person(s.data, source.authorId)?.name
         val plan = Forwarding.plan(source, targets, comment, author)
-        plan.forEach { send(it.conversationId, it.body, null, it.forwarded) }
+        plan.forEach { send(it.conversationId, it.body, null, it.forwarded, forwardAttachments = it.forwardAttachments) }
         return plan.map { it.conversationId }.distinct().size
+    }
+
+    // ---------- Adjuntos (SPEC-v4 §A) ----------
+    /**
+     * POST /conversations/:id/attachments con el archivo en crudo (se transmite desde disco). Queda pendiente en el
+     * servidor hasta que un mensaje lo use con [send]. [onProgress] recibe (enviados, total).
+     */
+    suspend fun uploadAttachment(
+        conversationId: String, file: java.io.File, name: String, contentType: String,
+        voice: Voice? = null, onProgress: ((Long, Long) -> Unit)? = null,
+    ): AttachmentDTO =
+        withContext(dispatcher) {
+            if (file.length() > Attachments.MAX_BYTES) throw ApiException(413, "too_large", "El archivo pesa más de 25 MB.")
+            val type = contentType.ifBlank { "application/octet-stream" }
+            val raw = HttpApi.RawBody(ByteArray(0), "application/octet-stream",
+                mapOf("x-file-name" to java.net.URLEncoder.encode(name.ifBlank { "archivo" }, "UTF-8").replace("+", "%20"), "x-file-type" to type) +
+                    (voice?.headers() ?: emptyMap()) +
+                    // Idioma de la transcripción: el de la app.
+                    mapOf("accept-language" to java.util.Locale.getDefault().toLanguageTag()),
+                file = file, onProgress = onProgress)
+            request("POST", "/conversations/$conversationId/attachments", null, AttachmentDTO.serializer(), raw)
+        }
+
+    /** Nota de voz (SPEC-v4 §F): cabeceras x-voice-note, x-duration-ms y x-waveform (≤ 64 valores 0–1). */
+    data class Voice(val durationMs: Long, val waveform: List<Float>) {
+        fun headers(): Map<String, String> = mapOf(
+            "x-voice-note" to "1", "x-duration-ms" to durationMs.toString(),
+            "x-waveform" to Waveform.encode(waveform),
+        )
+    }
+
+    /** Reintento manual de la transcripción (autor o miembros). */
+    suspend fun retranscribe(attachmentId: String): AttachmentDTO = withContext(dispatcher) {
+        request("POST", "/attachments/$attachmentId/transcribe", "{}", AttachmentDTO.serializer())
+    }
+
+    /** POST /attachments/:id/thumb: miniatura JPEG ≤ 512 KB que genera el cliente (solo mientras está pendiente). */
+    suspend fun uploadThumb(attachmentId: String, jpeg: ByteArray): AttachmentDTO? = withContext(dispatcher) {
+        if (jpeg.isEmpty() || jpeg.size > 512 * 1024) return@withContext null
+        runCatching { request("POST", "/attachments/$attachmentId/thumb", null, AttachmentDTO.serializer(), HttpApi.RawBody(jpeg, "application/octet-stream", mapOf("x-file-type" to "image/jpeg"))) }.getOrNull()
+    }
+
+    /** Descarga autenticada de un adjunto (o su miniatura) a [dest]; renueva el token si hace falta. */
+    suspend fun downloadAttachment(path: String, dest: java.io.File, onProgress: ((Long, Long) -> Unit)? = null) = withContext(dispatcher) {
+        if (accessToken != null && now() > accessExp - 30_000) refresh()
+        var code = http.download(path, accessToken, dest, onProgress)
+        if (code == 401 && refresh() == RefreshOutcome.OK) code = http.download(path, accessToken, dest, onProgress)
+        if (code !in 200..299) throw ApiException(code, if (code == 403) "forbidden" else if (code == 404) "not_found" else "http_$code", "HTTP $code")
+    }
+
+    /** Token vigente para cargar imágenes protegidas (miniaturas de adjuntos). */
+    suspend fun bearer(): String? = withContext(dispatcher) {
+        if (accessToken != null && now() > accessExp - 30_000) refresh()
+        accessToken
     }
 
     // ---------- Foto del grupo (SPEC-v3 §1) ----------
@@ -882,6 +950,20 @@ class TieComsClient(
             department?.trim()?.takeIf { it.isNotEmpty() }?.let { put("department", JsonPrimitive(it.take(160))) }
         }
         val r = req("POST", "/workspaces", body, IdResult.serializer()); loadBootstrapInternal(); r
+    }
+
+    /**
+     * POST /workspaces/:id/conversations (SPEC-v4 §D «Grupo en un espacio»): kind group | internal,
+     * level directivo | null, miembros del espacio. Recarga el snapshot para abrir el grupo.
+     */
+    suspend fun createSpaceGroup(workspaceId: String, name: String, internal: Boolean, directive: Boolean, memberIds: List<String>): IdResult = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("name", JsonPrimitive(name.trim().take(120)))
+            put("kind", JsonPrimitive(if (internal) "internal" else "group"))
+            put("level", if (directive && !internal) JsonPrimitive("directivo") else JsonNull)
+            put("memberIds", kotlinx.serialization.json.JsonArray(memberIds.distinct().map { JsonPrimitive(it) }))
+        }
+        val r = req("POST", "/workspaces/$workspaceId/conversations", body, IdResult.serializer()); loadBootstrapInternal(); r
     }
 
     // ---------- Chats (directos y grupales entre empresas) ----------

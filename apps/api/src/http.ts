@@ -6,7 +6,7 @@ import { ZodError } from 'zod';
 import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
-  RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, type AuthResult,
+  RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
   UpdateProfileInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
@@ -15,9 +15,11 @@ import { ApiError, unauthorized } from './errors.ts';
 import * as auth from './modules/auth.ts';
 import * as sso from './modules/sso.ts';
 import * as domains from './modules/domains.ts';
+import { deleteAccount } from './modules/account.ts';
 import { bootstrap } from './modules/bootstrap.ts';
 import { listEvents, listMessages, markRead, sendMessage } from './modules/messages.ts';
 import * as ws from './modules/workspaces.ts';
+import * as invitations from './modules/invitations.ts';
 import * as issues from './modules/issues.ts';
 import * as cal from './modules/calendar.ts';
 import * as prefs from './modules/prefs.ts';
@@ -25,6 +27,7 @@ import * as reminders from './modules/reminders.ts';
 import * as wa from './modules/whatsapp.ts';
 import * as profile from './modules/profile.ts';
 import * as drive from './modules/drive.ts';
+import * as safety from './modules/safety.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
 import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
@@ -53,7 +56,7 @@ export async function buildHttp() {
     origin: [config.publicOrigin, ...config.extraOrigins],
     credentials: true,
     allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract', 'x-file-type'],
-    methods: ['GET', 'POST', 'DELETE', 'PATCH'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     maxAge: 600,
   });
   await app.register(rateLimit, { max: 600, timeWindow: '1 minute', keyGenerator: (r) => r.ip });
@@ -135,6 +138,12 @@ export async function buildHttp() {
       const h = req.headers.authorization;
       if (!h?.startsWith('Bearer ')) throw unauthorized();
       const claims = await verifyAccess(h.slice(7));
+      const active = await pool.query(
+        `SELECT 1 FROM sessions s JOIN users u ON u.id = s.user_id
+          WHERE s.id = $1 AND s.user_id = $2 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.disabled_at IS NULL`,
+        [claims.sid, claims.sub],
+      );
+      if (!active.rowCount) throw unauthorized();
       req.userId = claims.sub;
       req.sessionId = claims.sid;
     });
@@ -144,6 +153,11 @@ export async function buildHttp() {
       reply.clearCookie(REFRESH_COOKIE, { path: COOKIE_PATH });
       return { ok: true };
     });
+    priv.delete('/api/v1/account', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
+      const out = await deleteAccount(req.userId, DeleteAccountInput.parse(req.body ?? {}));
+      reply.clearCookie(REFRESH_COOKIE, { path: COOKIE_PATH });
+      return out;
+    });
     priv.get('/api/v1/sessions', async (req) => ({ sessions: await auth.listSessions(req.userId), current: req.sessionId }));
     priv.delete<{ Params: { id: string } }>('/api/v1/sessions/:id', async (req) => {
       await auth.revokeSession(req.userId, req.params.id);
@@ -151,6 +165,11 @@ export async function buildHttp() {
     });
 
     priv.get('/api/v1/bootstrap', async (req) => bootstrap(req.userId));
+    priv.get('/api/v1/blocks', async (req) => safety.listBlocks(req.userId));
+    priv.put<{ Params: { id: string } }>('/api/v1/blocks/:id', async (req) => safety.setBlock(req.userId, z.uuid().parse(req.params.id), true));
+    priv.delete<{ Params: { id: string } }>('/api/v1/blocks/:id', async (req) => safety.setBlock(req.userId, z.uuid().parse(req.params.id), false));
+    priv.post('/api/v1/reports', { config: { rateLimit: { hook: 'preHandler', max: 10, timeWindow: '1 hour', keyGenerator: (req) => req.userId } } }, async (req) =>
+      safety.report(req.userId, z.object({ userId: z.uuid().optional(), messageId: z.uuid().optional(), reason: z.string().trim().min(5).max(2000) }).parse(req.body)));
     // Perfil propio
     priv.patch('/api/v1/me', async (req) => profile.updateProfile(req.userId, UpdateProfileInput.parse(req.body)));
     priv.post('/api/v1/me/avatar', { bodyLimit: profile.MAX_AVATAR_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
@@ -169,6 +188,16 @@ export async function buildHttp() {
       ws.createConversation(req.userId, req.params.id, CreateConversationInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/workspaces/:id/invitations', async (req) =>
       ws.createInvitation(req.userId, req.params.id, CreateInvitationInput.parse(req.body)));
+
+    // Pendientes con correo: listar, reenviar (enlace nuevo) y revocar. kind = organizations | workspaces.
+    for (const [path, kind] of [['organizations', 'org'], ['workspaces', 'workspace']] as const) {
+      priv.get<{ Params: { id: string } }>(`/api/v1/${path}/:id/invitations`, async (req) =>
+        ({ invitations: await invitations.listPendingInvitations(kind, req.userId, req.params.id) }));
+      priv.post<{ Params: { id: string; invId: string } }>(`/api/v1/${path}/:id/invitations/:invId/resend`, { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+        async (req) => invitations.resendInvitation(kind, req.userId, req.params.id, req.params.invId));
+      priv.delete<{ Params: { id: string; invId: string } }>(`/api/v1/${path}/:id/invitations/:invId`, async (req) =>
+        invitations.revokeInvitation(kind, req.userId, req.params.id, req.params.invId));
+    }
 
     priv.post<{ Params: { token: string } }>('/api/v1/invitations/:token/accept', async (req) =>
       ws.acceptInvitation(req.userId, req.params.token, AcceptInvitationInput.parse(req.body ?? {})));

@@ -6,7 +6,9 @@ import { conversationAccess, workspaceAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Tx } from '../db.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { randomToken, sha256 } from '../security.ts';
+import { deliverInvitation, prepareInvitationFor } from './invitations.ts';
 import { appendEvent, appendMessage } from './messages.ts';
+import { ensureNotBlocked } from './safety.ts';
 
 /** Mensaje de sistema estructurado: cada cliente lo muestra en su idioma. */
 const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, ...p });
@@ -94,6 +96,7 @@ export async function createConversation(userId: string, workspaceId: string, in
     const internalOrgId = input.kind === 'internal' ? wa.orgId : null;
     if (input.kind === 'internal' && !internalOrgId) throw badRequest('No perteneces a una empresa en este espacio');
     const others = [...new Set(input.memberIds.filter((id) => id !== userId))];
+    await ensureNotBlocked(c, userId, others);
     if (others.length) {
       const { rows } = await c.query(
         `SELECT user_id, org_id FROM workspace_memberships
@@ -120,6 +123,7 @@ export async function addMembers(userId: string, conversationId: string, input: 
   return tx(async (c) => {
     const a = await conversationAccess(c, userId, conversationId, 'manage');
     if (a.kind === 'direct') throw badRequest('Los directos no admiten más personas');
+    await ensureNotBlocked(c, userId, input.userIds);
     let rows: { user_id: string; org_id: string | null; name: string }[];
     if (a.kind === 'multi') {
       // Chat grupal: basta con que quien suma comparta un espacio o la empresa con cada persona.
@@ -169,6 +173,7 @@ export async function removeMember(userId: string, conversationId: string, targe
  */
 async function reachable(c: Tx, userId: string, ids: string[]): Promise<string[]> {
   if (!ids.length) return [];
+  await ensureNotBlocked(c, userId, ids);
   const { rows } = await c.query(
     `SELECT DISTINCT u.id FROM users u
       WHERE u.id = ANY($2) AND u.disabled_at IS NULL AND (
@@ -227,7 +232,7 @@ export async function getOrCreateDirect(userId: string, otherId: string) {
 
 // ---------- Invitaciones ----------
 export async function createInvitation(userId: string, workspaceId: string, input: z.infer<typeof CreateInvitationInput>) {
-  return tx(async (c) => {
+  const inv = await tx(async (c) => {
     await workspaceAccess(c, userId, workspaceId, 'nonguest');
     if (input.role === 'admin') await workspaceAccess(c, userId, workspaceId, 'admin');
     if (input.conversationIds.length) {
@@ -240,15 +245,18 @@ export async function createInvitation(userId: string, workspaceId: string, inpu
       if (rows.length !== new Set(input.conversationIds).size) throw badRequest('Solo puedes invitar a grupos compartidos donde participas');
     }
     if (input.role === 'guest' && !input.conversationIds.length) throw badRequest('Un tercero invitado debe entrar a grupos concretos');
+    if (input.email) await prepareInvitationFor(c, 'workspace', workspaceId, input.email);
     const token = randomToken(24);
     const { rows } = await c.query(
-      `INSERT INTO invitations (token_hash, workspace_id, invited_by, email, role, conversation_ids, history, access_until, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + make_interval(days => $9)) RETURNING id, expires_at`,
-      [sha256(token), workspaceId, userId, input.email ?? null, input.role, input.conversationIds, input.history, input.accessUntil ?? null, input.expiresInDays],
+      `INSERT INTO invitations (token_hash, workspace_id, invited_by, email, role, conversation_ids, history, access_until, expires_at, lang)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + make_interval(days => $9), $10) RETURNING id, expires_at`,
+      [sha256(token), workspaceId, userId, input.email ?? null, input.role, input.conversationIds, input.history, input.accessUntil ?? null, input.expiresInDays, input.lang],
     );
     await audit(c, userId, 'invitation.created', { type: 'invitation', id: rows[0].id, workspaceId }, { role: input.role, email: input.email ?? null });
     return { id: rows[0].id as string, token, expiresAt: rows[0].expires_at as Date };
   });
+  const mail = input.email ? await deliverInvitation('workspace', inv.id, inv.token) : null;
+  return { ...inv, emailSent: mail?.status === 'sent', emailStatus: mail?.status ?? null };
 }
 
 export async function previewInvitation(token: string): Promise<InvitationPreviewDTO> {
@@ -351,6 +359,7 @@ export async function deriveConversation(userId: string, parentId: string, input
       ids = [userId, m.author_id, ...leads];
     }
     ids = [...new Set([userId, ...ids])];
+    await ensureNotBlocked(c, userId, ids.filter((id) => id !== userId));
 
     const excerpt = String(m.body).replace(/\s+/g, ' ').trim().slice(0, 80);
     const prefix = input.kind === 'internal' ? 'Diagnóstico' : input.kind === 'directive' ? 'Decisión' : 'Derivada';

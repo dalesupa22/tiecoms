@@ -52,3 +52,11 @@ export async function deleteObject(key: string) {
   if (process.env.S3_ALLOW_DELETE !== 'true') return;
   await client().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }
+
+/** Borrado obligatorio por eliminación de cuenta: nunca convierte un permiso denegado en éxito. */
+export async function deletePersonalObject(key: string) {
+  if (!key.startsWith(objectKey('avatars/')) && !key.startsWith(objectKey('drive/me/'))) {
+    throw new Error('El borrado de cuenta solo admite fotos y archivos personales');
+  }
+  await client().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}

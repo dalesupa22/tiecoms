@@ -68,6 +68,8 @@ export const SsoExchangeInput = z.preprocess(
 );
 export type SsoExchangeInput = z.infer<typeof SsoExchangeInput>;
 
+/** Eliminar la cuenta: se confirma escribiendo el correo; con contraseña, también se pide. */
+export const DeleteAccountInput = z.object({ confirmEmail: email, password: z.string().max(200).optional() });
 export const UpdateProfileInput = z.object({
   name: personName.optional(),
   title: z.string().trim().max(120).nullable().optional(),
@@ -313,12 +315,15 @@ export const CreateInvitationInput = z.object({
   /** Para terceros (guest): fecha de salida del espacio. */
   accessUntil: z.iso.datetime().optional(),
   history: z.enum(['now', 'all']).default('now'),
+  /** Idioma del correo de invitación (si hay `email`). */
+  lang: z.enum(['es', 'en']).default('es'),
 });
 
 export const CreateOrgInvitationInput = z.object({
   email: email.optional(),
   role: z.enum(['member', 'admin']).default('member'),
   expiresInDays: z.number().int().min(1).max(60).default(14),
+  lang: z.enum(['es', 'en']).default('es'),
 });
 
 export interface OrgInvitationPreviewDTO {
@@ -354,6 +359,24 @@ export const DeriveInput = z.object({
 export const ReturnResultInput = z.object({ summary: z.string().trim().min(2).max(4000) });
 
 export const AcceptInvitationInput = z.object({ orgId: z.uuid().optional() });
+
+/** Invitación con correo que aún no se acepta (lista de pendientes para reenviar o revocar). */
+export interface PendingInvitationDTO {
+  id: string;
+  email: string;
+  role: string;
+  invitedById: string;
+  invitedByName: string;
+  createdAt: string;
+  expiresAt: string;
+  expired: boolean;
+  /** Resultado del último envío: null si nunca se intentó. */
+  emailStatus: 'sent' | 'failed' | 'skipped' | null;
+  emailSentAt: string | null;
+  sendCount: number;
+  /** Quien invitó o quien administra puede reenviar y revocar. */
+  canManage: boolean;
+}
 
 export interface InvitationPreviewDTO {
   workspaceName: string;

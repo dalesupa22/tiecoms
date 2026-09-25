@@ -8,6 +8,8 @@ import { enqueueOutbox, pool, tx } from './db.ts';
 import { fireDueReminders } from './modules/reminders.ts';
 import { cleanupExpired as cleanupSso } from './modules/sso.ts';
 import { previewMessage } from './modules/link-preview.ts';
+import { deletePersonalObject } from './storage.ts';
+import { notifyReport } from './modules/safety.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
 const LEASE_SECONDS = 120;
@@ -15,6 +17,11 @@ const LEASE_SECONDS = 120;
 type Handler = (payload: any) => Promise<void>;
 
 const handlers: Record<string, Handler> = {
+  async 'account.delete_file'(p) {
+    await deletePersonalObject(p.key);
+    await pool.query('DELETE FROM files WHERE id = $1 AND deleted_at IS NOT NULL', [p.fileId]);
+  },
+  async 'safety.notify'(p) { await notifyReport(p.reportId); },
   /** Vista previa del primer enlace de un mensaje. */
   async 'link.preview'(p) { await previewMessage(p.messageId); },
   /** Terceros vencidos: se revoca el acceso y se sacan sus sockets de las salas. */
@@ -43,6 +50,8 @@ const handlers: Record<string, Handler> = {
     await pool.query("DELETE FROM jobs WHERE done_at < now() - interval '7 days'");
     await pool.query("DELETE FROM sessions WHERE (revoked_at < now() - interval '30 days') OR (expires_at < now() - interval '30 days')");
     await pool.query("DELETE FROM socket_io_attachments WHERE created_at < now() - interval '1 hour'");
+    await pool.query("DELETE FROM audit_events WHERE created_at < now() - interval '24 months'");
+    await pool.query("DELETE FROM safety_reports WHERE created_at < now() - interval '24 months'");
     await cleanupSso();
   },
 };

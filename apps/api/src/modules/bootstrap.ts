@@ -136,6 +136,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
 
 function legacyAttachmentPreview(list: { contentType: string; name: string }[]) {
   const s = summarize(list as any)!;
+  if (s.voices && s.voices === s.count) return '🎤';
   if (s.images === s.count) return s.count === 1 ? '📷' : `📷 ×${s.count}`;
   if (s.videos === s.count) return s.count === 1 ? '🎬' : `🎬 ×${s.count}`;
   return s.count === 1 ? `📎 ${s.firstName ?? ''}`.trim() : `📎 ×${s.count}`;

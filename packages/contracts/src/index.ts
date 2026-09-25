@@ -193,7 +193,11 @@ export interface ConversationDTO {
 }
 
 /** Resumen de adjuntos para vistas previas: «📷 Foto», «📷 3 fotos», «🎬 Video», «📎 nombre». */
-export interface AttachmentSummaryDTO { count: number; images: number; videos: number; files: number; firstName: string | null }
+export interface AttachmentSummaryDTO {
+  count: number; images: number; videos: number; files: number; firstName: string | null;
+  /** Notas de voz (no cuentan en files) y la duración de la primera. Clientes viejos: ausentes. */
+  voices?: number; voiceDurationMs?: number | null;
+}
 export interface MessagePreviewDTO {
   messageId: string;
   seq: number;
@@ -217,7 +221,27 @@ export interface AttachmentDTO {
   height: number | null;
   url: string;
   thumbUrl: string | null;
+  /** 'voice' = nota de voz. Ausente en adjuntos viejos (= 'file'). */
+  kind?: 'file' | 'voice';
+  durationMs?: number | null;
+  /** ≤ 64 valores entre 0 y 1 para dibujar la onda. */
+  waveform?: number[] | null;
+  transcript?: VoiceTranscriptDTO | null;
 }
+
+/**
+ * Transcripción de una nota de voz. pending: en proceso; disabled: el servidor no tiene transcripción configurada
+ * (la nota se escucha igual); failed: se puede reintentar con POST /attachments/:id/transcribe.
+ * summary: una línea si la nota dura más de 45 s; suggestedIssue: título sugerido si la nota pide algo.
+ */
+export interface VoiceTranscriptDTO {
+  status: 'pending' | 'done' | 'failed' | 'disabled';
+  text?: string | null;
+  language?: string | null;
+  summary?: string | null;
+  suggestedIssue?: string | null;
+}
+export const MAX_VOICE_MS = 15 * 60_000;
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
 

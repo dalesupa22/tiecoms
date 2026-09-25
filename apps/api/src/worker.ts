@@ -14,6 +14,7 @@ import { notifyReport } from './modules/safety.ts';
 import { pushEvent, pushEventSoon, pushMessage, pushReminder } from './modules/push.ts';
 import { fireSoonEvents, soonMinutes } from './modules/calendar.ts';
 import { cleanupPending as cleanupAttachments } from './modules/attachments.ts';
+import { transcribeAttachment } from './modules/voice.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
 const LEASE_SECONDS = 120;
@@ -30,6 +31,8 @@ const handlers: Record<string, Handler> = {
   async 'push.message'(p) { await pushMessage(p.messageId); },
   async 'push.reminder'(p) { await pushReminder(p.reminderId); },
   async 'push.event'(p) { await pushEvent(p.eventId); },
+  /** Nota de voz: variante AAC, transcripción y resumen (Inworld / DeepSeek). */
+  async 'voice.transcribe'(p) { await transcribeAttachment(p.attachmentId); },
   async 'push.event_soon'(p) { await pushEventSoon(p.eventId, p.userIds, soonMinutes()); },
   /** Vista previa del primer enlace de un mensaje. */
   async 'link.preview'(p) { await previewMessage(p.messageId); },

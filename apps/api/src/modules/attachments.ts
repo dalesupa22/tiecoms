@@ -6,7 +6,8 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { AttachmentDTO, AttachmentSummaryDTO } from '@tiecoms/contracts';
-import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE } from '@tiecoms/contracts';
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_VOICE_MS, type VoiceTranscriptDTO } from '@tiecoms/contracts';
+import { transcriptionEnabled } from './voice-providers.ts';
 import { conversationAccess } from '../access.ts';
 import { pool, type Tx } from '../db.ts';
 import { ApiError, badRequest, forbidden, notFound } from '../errors.ts';
@@ -22,10 +23,37 @@ const INLINE_TYPES = new Set([
   'video/mp4', 'video/quicktime', 'video/webm', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/wav', 'application/pdf',
 ]);
 
-export const toDTO = (r: { id: string; name: string; content_type: string; size_bytes: number | string; width: number | null; height: number | null; thumb_key: string | null }): AttachmentDTO => ({
-  id: r.id, name: r.name, contentType: r.content_type, sizeBytes: Number(r.size_bytes), width: r.width ?? null, height: r.height ?? null,
+export const toDTO = (r: any): AttachmentDTO => ({
+  id: r.id, name: r.name,
+  // Si hay variante reproducible (AAC), url la sirve y contentType la describe; ?original=1 da el archivo subido.
+  contentType: r.play_type ?? r.content_type, sizeBytes: Number(r.size_bytes), width: r.width ?? null, height: r.height ?? null,
   url: `/api/v1/attachments/${r.id}`, thumbUrl: r.thumb_key ? `/api/v1/attachments/${r.id}/thumb` : null,
+  ...(r.kind === 'voice' ? {
+    kind: 'voice' as const, durationMs: r.duration_ms ?? null, waveform: r.waveform ?? null,
+    transcript: r.transcript && r.transcript.status !== 'new' ? publicTranscript(r.transcript) : null,
+  } : {}),
 });
+
+function publicTranscript(t: any): VoiceTranscriptDTO {
+  return { status: t.status, text: t.text ?? null, language: t.language ?? null, summary: t.summary ?? null, suggestedIssue: t.suggestedIssue ?? null };
+}
+
+/** Audio por los primeros bytes. */
+export function sniffAudio(b: Buffer): string | null {
+  if (b.length > 12 && b.toString('ascii', 4, 8) === 'ftyp' && /^(M4A |M4B |mp42|isom|iso[2-6]|dash|3gp[4-6])/.test(b.toString('ascii', 8, 12))) return 'audio/mp4';
+  if (b.length > 4 && b.readUInt32BE(0) === 0x1a45dfa3) return 'audio/webm';
+  if (b.length > 4 && b.toString('ascii', 0, 4) === 'OggS') return 'audio/ogg';
+  if (b.length > 12 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WAVE') return 'audio/wav';
+  if (b.length > 4 && b.toString('ascii', 0, 4) === 'fLaC') return 'audio/flac';
+  if (b.length > 3 && (b.toString('ascii', 0, 3) === 'ID3' || (b[0] === 0xff && (b[1]! & 0xe0) === 0xe0))) return 'audio/mpeg';
+  return null;
+}
+
+function parseWaveform(raw: string | undefined): number[] | null {
+  if (!raw) return null;
+  const v = String(raw).split(',').slice(0, 64).map((x) => Number(x)).filter((x) => Number.isFinite(x)).map((x) => Math.round(Math.max(0, Math.min(1, x)) * 100) / 100);
+  return v.length ? v : null;
+}
 
 // ---------- Dimensiones sin librerías ----------
 /** Tipo real por los primeros bytes (solo imágenes conocidas). */
@@ -100,10 +128,13 @@ function cleanName(raw: string | undefined): string {
 }
 
 // ---------- Subir ----------
-export async function upload(userId: string, conversationId: string, input: { body: Buffer; name?: string; type?: string }) {
+export async function upload(userId: string, conversationId: string, input: {
+  body: Buffer; name?: string; type?: string; voice?: boolean; durationMs?: string; waveform?: string; lang?: 'es' | 'en';
+}) {
   if (!Buffer.isBuffer(input.body) || !input.body.length) throw badRequest('Falta el archivo');
   if (input.body.length > MAX_ATTACHMENT_BYTES) throw new ApiError(413, 'too_large', 'El archivo pesa más de 25 MB');
   await conversationAccess(pool, userId, conversationId, 'post');
+  if (input.voice) return uploadVoice(userId, conversationId, input);
   const sniffed = sniffImage(input.body);
   const declared = String(input.type ?? '').toLowerCase().split(';')[0]!.trim();
   // Imágenes: manda el tipo real. Lo declarado como imagen que no lo es se guarda como archivo genérico.
@@ -116,6 +147,28 @@ export async function upload(userId: string, conversationId: string, input: { bo
     `INSERT INTO attachments (id, conversation_id, owner_id, name, content_type, size_bytes, width, height, s3_key)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
     [id, conversationId, userId, cleanName(input.name), contentType, input.body.length, size?.width ?? null, size?.height ?? null, key],
+  );
+  return toDTO(rows[0]);
+}
+
+/** Nota de voz: audio (m4a/AAC, webm/opus, ogg, mp3, wav, flac) de hasta 15 min. La transcripción empieza al enviarla. */
+async function uploadVoice(userId: string, conversationId: string, input: { body: Buffer; name?: string; type?: string; durationMs?: string; waveform?: string; lang?: 'es' | 'en' }) {
+  const declared = String(input.type ?? '').toLowerCase().split(';')[0]!.trim();
+  const sniffed = sniffAudio(input.body);
+  if (!sniffed && !declared.startsWith('audio/')) throw badRequest('Una nota de voz debe ser audio');
+  const contentType = sniffed ?? declared;
+  const durationMs = input.durationMs !== undefined && input.durationMs !== '' ? Math.round(Number(input.durationMs)) : null;
+  if (durationMs !== null && (!Number.isFinite(durationMs) || durationMs < 0)) throw badRequest('x-duration-ms inválido');
+  if (durationMs !== null && durationMs > MAX_VOICE_MS + 5_000) throw badRequest('La nota de voz dura más de 15 minutos');
+  const id = randomUUID();
+  const key = objectKey(`attachments/${conversationId}/${id}`);
+  await putObject(key, input.body, contentType);
+  const ext = contentType === 'audio/mp4' ? 'm4a' : contentType.split('/')[1] ?? 'audio';
+  const { rows } = await pool.query(
+    `INSERT INTO attachments (id, conversation_id, owner_id, name, content_type, size_bytes, s3_key, kind, duration_ms, waveform, transcript)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'voice',$8,$9,$10) RETURNING *`,
+    [id, conversationId, userId, cleanName(input.name || `nota-de-voz.${ext}`), contentType, input.body.length, key, durationMs,
+      JSON.stringify(parseWaveform(input.waveform)), JSON.stringify({ status: 'new', requestedLanguage: input.lang ?? 'es' })],
   );
   return toDTO(rows[0]);
 }
@@ -152,7 +205,15 @@ export async function claimForMessage(c: Tx, userId: string, conversationId: str
     );
     if (rows.length !== own.length) throw badRequest('Algún adjunto no existe, ya se usó o es de otra conversación');
     const byId = new Map(rows.map((r) => [r.id as string, r]));
-    for (const id of own) out.push({ id, dto: toDTO(byId.get(id)) });
+    for (const id of own) {
+      let r = byId.get(id);
+      if (r.kind === 'voice' && (!r.transcript || r.transcript.status === 'new')) {
+        const status = transcriptionEnabled() ? 'pending' : 'disabled';
+        r = (await c.query('UPDATE attachments SET transcript = transcript || $2::jsonb WHERE id = $1 RETURNING *', [id, JSON.stringify({ status })])).rows[0];
+        if (status === 'pending') await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('voice.transcribe', $1, 1)", [JSON.stringify({ attachmentId: id })]);
+      }
+      out.push({ id, dto: toDTO(r) });
+    }
   }
   if (fwd.length) {
     const { rows } = await c.query(
@@ -167,9 +228,11 @@ export async function claimForMessage(c: Tx, userId: string, conversationId: str
       const acc = await conversationAccess(c, userId, r.conversation_id, 'read');
       if (r.message_seq <= acc.historyFromSeq) throw badRequest('Algún adjunto reenviado no existe');
       const copy = await c.query(
-        `INSERT INTO attachments (conversation_id, owner_id, name, content_type, size_bytes, width, height, s3_key, thumb_key, thumb_type)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-        [conversationId, userId, r.name, r.content_type, r.size_bytes, r.width, r.height, r.s3_key, r.thumb_key, r.thumb_type],
+        `INSERT INTO attachments (conversation_id, owner_id, name, content_type, size_bytes, width, height, s3_key, thumb_key, thumb_type,
+                                  kind, duration_ms, waveform, transcript, play_key, play_type)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+        [conversationId, userId, r.name, r.content_type, r.size_bytes, r.width, r.height, r.s3_key, r.thumb_key, r.thumb_type,
+          r.kind, r.duration_ms, JSON.stringify(r.waveform), JSON.stringify(r.transcript), r.play_key, r.play_type],
       );
       out.push({ id: copy.rows[0].id, dto: toDTO(copy.rows[0]) });
     }
@@ -200,25 +263,36 @@ export async function readable(userId: string, attachmentId: string) {
   return a;
 }
 
-export async function fetchFile(userId: string, attachmentId: string, thumb: boolean) {
+export async function fetchFile(userId: string, attachmentId: string, thumb: boolean, original = false) {
   const a = await readable(userId, attachmentId);
   const useThumb = thumb && !!a.thumb_key;
-  const obj = await getObject(useThumb ? a.thumb_key : a.s3_key);
-  const type = useThumb ? a.thumb_type : a.content_type;
+  const usePlay = !thumb && !original && !!a.play_key;
+  const obj = await getObject(useThumb ? a.thumb_key : usePlay ? a.play_key : a.s3_key);
+  const type = useThumb ? a.thumb_type : usePlay ? a.play_type : a.content_type;
   return { body: obj.body, name: a.name as string, contentType: INLINE_TYPES.has(type) ? type : 'application/octet-stream', inline: INLINE_TYPES.has(type) };
 }
 
 // ---------- Resúmenes ----------
 export function summarize(list: AttachmentDTO[] | null | undefined): AttachmentSummaryDTO | null {
   if (!list?.length) return null;
-  const images = list.filter((a) => a.contentType.startsWith('image/')).length;
-  const videos = list.filter((a) => a.contentType.startsWith('video/')).length;
-  return { count: list.length, images, videos, files: list.length - images - videos, firstName: list[0]?.name ?? null };
+  const voice = list.filter((a) => a.kind === 'voice');
+  const rest = list.filter((a) => a.kind !== 'voice');
+  const images = rest.filter((a) => a.contentType.startsWith('image/')).length;
+  const videos = rest.filter((a) => a.contentType.startsWith('video/')).length;
+  return {
+    count: list.length, images, videos, files: rest.length - images - videos, firstName: list[0]?.name ?? null,
+    voices: voice.length, voiceDurationMs: voice[0]?.durationMs ?? null,
+  };
 }
 
 /** Texto corto para vistas previas y push. */
 export function summaryText(s: AttachmentSummaryDTO, lang: 'es' | 'en') {
   const es = lang === 'es';
+  if (s.voices && s.voices === s.count) {
+    const total = Math.round((s.voiceDurationMs ?? 0) / 1000);
+    const dur = `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+    return `🎤 ${es ? 'Nota de voz' : 'Voice note'}${s.voiceDurationMs ? ` (${dur})` : ''}`;
+  }
   if (s.images === s.count) return s.count === 1 ? (es ? '📷 Foto' : '📷 Photo') : `📷 ${s.count} ${es ? 'fotos' : 'photos'}`;
   if (s.videos === s.count) return s.count === 1 ? '🎬 Video' : `🎬 ${s.count} ${es ? 'videos' : 'videos'}`;
   if (s.images + s.videos === s.count) return `🖼 ${s.count} ${es ? 'fotos y videos' : 'photos and videos'}`;

@@ -31,6 +31,7 @@ import * as drive from './modules/drive.ts';
 import * as safety from './modules/safety.ts';
 import * as push from './modules/push.ts';
 import * as attachments from './modules/attachments.ts';
+import * as voice from './modules/voice.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
 import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
@@ -187,15 +188,20 @@ export async function buildHttp() {
       if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube el archivo como application/octet-stream');
       return attachments.upload(req.userId, z.uuid().parse(req.params.id), {
         body: req.body, name: String(req.headers['x-file-name'] ?? ''), type: String(req.headers['x-file-type'] ?? ''),
+        // Nota de voz: x-voice-note: 1, x-duration-ms y x-waveform (≤ 64 valores 0–1 separados por comas).
+        voice: req.headers['x-voice-note'] === '1', durationMs: req.headers['x-duration-ms'] as string | undefined, waveform: req.headers['x-waveform'] as string | undefined,
+        lang: /^\s*en\b/i.test(String(req.headers['accept-language'] ?? '')) ? 'en' : 'es',
       });
     });
     priv.post<{ Params: { id: string } }>('/api/v1/attachments/:id/thumb', { bodyLimit: attachments.MAX_THUMB_BYTES, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => {
       if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube la miniatura como application/octet-stream');
       return attachments.uploadThumb(req.userId, z.uuid().parse(req.params.id), req.body);
     });
+    priv.post<{ Params: { id: string } }>('/api/v1/attachments/:id/transcribe', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+      async (req) => voice.retryTranscription(req.userId, z.uuid().parse(req.params.id)));
     for (const thumb of [false, true]) {
-      priv.get<{ Params: { id: string }; Querystring: { download?: string } }>(`/api/v1/attachments/:id${thumb ? '/thumb' : ''}`, async (req, reply) => {
-        const f = await attachments.fetchFile(req.userId, z.uuid().parse(req.params.id), thumb);
+      priv.get<{ Params: { id: string }; Querystring: { download?: string; original?: string } }>(`/api/v1/attachments/:id${thumb ? '/thumb' : ''}`, async (req, reply) => {
+        const f = await attachments.fetchFile(req.userId, z.uuid().parse(req.params.id), thumb, req.query.original === '1');
         const ascii = f.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
         const disp = f.inline && req.query.download !== '1' ? 'inline' : 'attachment';
         reply.header('content-type', f.contentType)

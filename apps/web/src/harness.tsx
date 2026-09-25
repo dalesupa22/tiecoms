@@ -41,6 +41,7 @@ const g = [
   msg('general', 'laura', 'Les dejo la guía de marca https://www.tiecoms.com/', 100 * 60_000, { linkPreview: { url: 'https://www.tiecoms.com/', title: 'TieComs · Una sola red entre las empresas con las que trabajas', description: 'Conversaciones, asuntos y archivos entre equipos de distintas empresas, cada quien con su alcance.', siteName: 'TieComs', imageUrl: '/tiecoms-mark.svg' } }),
   msg('general', 'ana', 'Mañana llego a las 8 con el diseñador.', 90 * 60_000, { forwarded: { source: 'whatsapp', author: 'Pedro (Estudio Norte)', sentAt: '24/9/26 07:41' } }),
   msg('general', 'mateo', 'Fotos de la visita de hoy', 60 * 60_000, { attachments: [1, 2, 3, 4, 5, 6].map((i) => att(`f${i}`, `visita-${i}.jpg`, 'image/jpeg', 820_000)) }),
+  msg('general', 'ana', '', 45 * 60_000, { attachments: [{ ...att('v1', 'nota-de-voz.m4a', 'audio/mp4', 31_000), kind: 'voice', durationMs: 52_000, waveform: Array.from({ length: 48 }, (_, i) => 0.2 + 0.8 * Math.abs(Math.sin(i / 3))), transcript: { status: 'done', text: 'Hola Danny, el jueves te mando el contrato revisado con los cambios de la cláusula cuatro.', language: 'es-CO', summary: 'Ana confirma a Danny que el jueves le envía el contrato revisado.', suggestedIssue: 'Enviar el contrato revisado el jueves' } }] }),
   msg('general', 'laura', '', 40 * 60_000, { attachments: [att('p1', 'Contrato marco v3.pdf', 'application/pdf', 1_240_000), att('x1', 'Cronograma.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 48_000)] }),
 ];
 seq = 0;

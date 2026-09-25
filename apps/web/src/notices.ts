@@ -25,6 +25,11 @@ export function handleNotice(n: ClientNotice) {
     }
     return;
   }
+  if (n.kind === 'mentionsDropped') {
+    const names = n.userIds.map((id) => (id === 'all' ? t('mention.allLabel') : personById(d, id)?.name ?? '?')).join(', ');
+    toast(t('mention.dropped', { names }));
+    return;
+  }
   if (n.kind === 'eventSoon') {
     const ev = n.event;
     const text = t('cal.soon', { n: n.minutes, title: ev.title });

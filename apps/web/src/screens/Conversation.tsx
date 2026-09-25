@@ -39,7 +39,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const panel = panelPref && !embedded;
   // Conversación lateral abierta como panel a la derecha (o hoja en el teléfono).
   const [sideId, setSideId] = useState<string | null>(null);
-  const [sideFor, setSideFor] = useState<MessageDTO | null>(null);
+  const [sideFor, setSideForState] = useState<{ message: MessageDTO; userIds: string[] } | null>(null);
+  const setSideFor = (v: MessageDTO | { message: MessageDTO; userIds: string[] } | null) => setSideForState(v && 'message' in v ? v : v ? { message: v, userIds: [] } : null);
   const [privateReply, setPrivateReply] = useState<MessageDTO | null>(() => takePrivateDraft(id));
   const [groupCrop, setGroupCrop] = useState<File | null>(null);
   const drafts = useDrafts(id);
@@ -59,6 +60,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const atBottom = useRef(true);
   const prevHeight = useRef(0);
   const input = useRef<HTMLTextAreaElement>(null);
+  const sideAnchorFor = () => replyTo ?? [...(local?.messages ?? [])].reverse().find((m) => m.kind === 'text' && !m.deletedAt && !!m.body) ?? null;
   // Menciones: tokens «@Nombre» del compositor y lista que aparece al escribir «@».
   const [tokens, setTokens] = useState<MentionToken[]>([]);
   const [caret, setCaret] = useState(0);
@@ -73,6 +75,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(pos, pos); });
     },
     onAddPerson: (p) => void client.addMembers(id, [p.id], 'now').then(() => toast(t('toast.sent'))).catch((e) => toast(errorText(e))),
+    // Ancla: el mensaje al que se responde o el último visible con texto; sin ancla no se ofrece.
+    onAskSide: embedded || !sideAnchorFor() ? undefined : (p) => { const anchor = sideAnchorFor(); if (anchor) setSideFor({ message: anchor, userIds: [p.id] }); },
   });
 
   const jumpTo = (seq: number) => {
@@ -477,7 +481,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           )}
         </aside>
       )}
-      {sideFor && <SideDialog conv={conv} message={sideFor} onClose={() => setSideFor(null)} onOpened={setSideId} />}
+      {sideFor && <SideDialog conv={conv} message={sideFor.message} initialUserIds={sideFor.userIds} onClose={() => setSideFor(null)} onOpened={setSideId} />}
       {groupCrop && <PhotoCropDialog file={groupCrop} title={t('photo.cropGroupTitle')} onClose={() => setGroupCrop(null)}
         onSave={async (blob) => { await client.setConversationAvatar(id, blob); }} />}
       {adding && <AddMembersDialog conversationId={id} onClose={() => setAdding(false)} />}

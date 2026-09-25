@@ -36,11 +36,13 @@ export function sideCandidates(d: BootstrapDTO, conv: ConversationDTO, blocked: 
   return out.sort((a, b) => rank[a.group] - rank[b.group] || a.p.name.localeCompare(b.p.name));
 }
 
-export function SideDialog({ conv, message, onClose, onOpened }: { conv: ConversationDTO; message: MessageDTO; onClose: () => void; onOpened: (id: string) => void }) {
+export function SideDialog({ conv, message, initialUserIds = [], onClose, onOpened }: {
+  conv: ConversationDTO; message: MessageDTO; initialUserIds?: string[]; onClose: () => void; onOpened: (id: string) => void;
+}) {
   const d = useClient((s) => s.data)!;
   const [blocked, setBlocked] = useState<Set<string>>(new Set());
   const [q, setQ] = useState('');
-  const [picked, setPicked] = useState<string[]>([]);
+  const [picked, setPicked] = useState<string[]>(initialUserIds);
   const [question, setQuestion] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

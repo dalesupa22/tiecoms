@@ -68,12 +68,16 @@ function options(d: BootstrapDTO, conv: ConversationDTO, messages: MessageDTO[],
  * Lista de mención sobre el compositor. Devuelve un manejador de teclado para ↑/↓/Enter/Tab/Esc.
  * onPick inserta «@Nombre Apellido » en el lugar de la consulta.
  */
-export function useMentionPicker({ conv, text, caret, messages, onPick, onAddPerson }: {
+export function useMentionPicker({ conv, text, caret, messages, onPick, onAddPerson, onAskSide }: {
   conv: ConversationDTO | undefined; text: string; caret: number; messages: MessageDTO[];
   onPick: (range: { start: number; end: number }, token: MentionToken) => void; onAddPerson?: (p: PersonDTO) => void;
+  /** «Preguntarle en un sidechat»: solo si hay un mensaje ancla razonable (el que se responde o el último visible). */
+  onAskSide?: (p: PersonDTO) => void;
 }) {
   const d = useClient((s) => s.data)!;
   const [index, setIndex] = useState(0);
+  // Un sidechat admite colegas de mis empresas aunque no estén en el chat (misma regla del API).
+  const myOrgs = new Set(d.organizations.filter((o) => o.myRole).map((o) => o.id));
   const [closedAt, setClosedAt] = useState<number | null>(null);
   const q = conv ? activeQuery(text, caret) : null;
   const { list, outsiders } = useMemo(() => (q && conv ? options(d, conv, messages, q.query) : { list: [] as Opt[], outsiders: [] as PersonDTO[] }), [d, conv, messages, q?.query, q?.start]);
@@ -113,6 +117,7 @@ export function useMentionPicker({ conv, text, caret, messages, onPick, onAddPer
           <Avatar person={p} org={orgById(d, p.orgId)} size={24} />
           <span className="grow small">{t('mention.notInChat', { name: p.name.split(' ')[0]! })}</span>
           {conv?.canManage && conv.kind !== 'direct' && onAddPerson && <button type="button" className="btn small" onMouseDown={(e) => { e.preventDefault(); onAddPerson(p); }}>{t('mention.addToChat')}</button>}
+          {onAskSide && myOrgs.has(p.orgId ?? '') && <button type="button" className="btn ghost small" onMouseDown={(e) => { e.preventDefault(); onAskSide(p); }}>💬 {t('mention.askSide')}</button>}
         </div>
       ))}
     </div>

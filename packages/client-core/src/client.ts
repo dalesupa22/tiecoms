@@ -59,7 +59,9 @@ export type ClientNotice =
   | { kind: 'message'; conversationId: string; message: MessageDTO }
   | { kind: 'reminder'; reminder: ReminderDTO }
   /** Una reunión a la que voy empieza en `minutes` minutos. */
-  | { kind: 'eventSoon'; event: CalendarEventDTO; minutes: number };
+  | { kind: 'eventSoon'; event: CalendarEventDTO; minutes: number }
+  /** El servidor descartó menciones de un mensaje propio (ids o 'all'). */
+  | { kind: 'mentionsDropped'; conversationId: string; userIds: string[] };
 
 export interface ClientOptions {
   /** Origen del API, p. ej. https://app.tiecoms.com. Vacío = mismo origen (web). */
@@ -529,7 +531,7 @@ export class TieComsClient {
     if (this.socket?.connected) {
       try {
         const r: any = await this.socket.timeout(8000).emitWithAck(SOCKET_EVENTS.send, payload);
-        if (r?.ok) return r.message;
+        if (r?.ok) { this.noteDropped(p.conversationId, r.droppedMentions); return r.message; }
         const status = r?.error?.code === 'forbidden' ? 403 : r?.error?.code === 'not_found' ? 404 : r?.error?.code === 'conflict' ? 409 : r?.error?.code === 'bad_request' ? 400 : 503;
         throw new ApiRequestError(status, r?.error?.code ?? 'error', r?.error?.message ?? 'No se pudo enviar');
       } catch (e) {
@@ -537,10 +539,15 @@ export class TieComsClient {
         // Timeout del socket: se reintenta por HTTP con el mismo identificador.
       }
     }
-    const r = await this.request<{ message: MessageDTO }>(`/conversations/${p.conversationId}/messages`, {
+    const r = await this.request<{ message: MessageDTO; droppedMentions?: string[] }>(`/conversations/${p.conversationId}/messages`, {
       method: 'POST', json: { clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo, forwarded: p.forwarded ?? null, ...files },
     });
+    this.noteDropped(p.conversationId, r.droppedMentions);
     return r.message;
+  }
+
+  private noteDropped(conversationId: string, ids: unknown) {
+    if (Array.isArray(ids) && ids.length) this.opts.onNotice?.({ kind: 'mentionsDropped', conversationId, userIds: ids.map(String) });
   }
 
   // ---------- Asuntos ----------

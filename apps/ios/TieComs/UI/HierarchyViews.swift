@@ -24,7 +24,7 @@ struct WorkspaceDetailsView: View {
     private func list(_ d: BootstrapDTO, _ ws: WorkspaceDTO) -> some View {
         let convs = d.conversations.filter { $0.workspaceId == ws.id && !Naming.isSide($0) }
             .sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
-        let color: Color? = Naming.counterpartOrg(d, ws).map { Color(css: $0.colorBg) }
+        let color: Color? = Naming.counterpartOrg(d, ws).flatMap { Theme.badgeColor($0.colorBg) }
         return List {
             Section { header(d, ws) }
             Section {

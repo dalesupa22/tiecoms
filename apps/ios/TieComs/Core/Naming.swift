@@ -197,7 +197,7 @@ extension Naming {
 
     static func unreadCount(_ list: [ConversationDTO]) -> Int { list.reduce(0) { $0 + ($1.isMuted ? 0 : $1.unread) } }
 
-    static func homeTree(_ d: BootstrapDTO, query: String = "", filterWorkspace: String? = nil) -> HomeTree {
+    static func homeTree(_ d: BootstrapDTO, query: String = "", filterWorkspace: String? = nil, tab: HomeFilter = .all) -> HomeTree {
         let fold: (String) -> String = { $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
         let q = fold(query.trimmingCharacters(in: .whitespaces))
         func matches(_ c: ConversationDTO) -> Bool {
@@ -215,12 +215,14 @@ extension Naming {
             sides.filter { $0.parentId == id }.sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
         }
         func node(_ c: ConversationDTO) -> HomeTree.ConvNode? {
-            let s = sidesOf(c.id).filter(matches)
-            guard matches(c) || !s.isEmpty else { return nil }
+            let s = sidesOf(c.id).filter { matches($0) && tab.includes($0) }
+            // En «Laterales» el origen se muestra solo como contexto de sus laterales.
+            let selfOK = matches(c) && tab.includes(c) && tab != .sides
+            guard selfOK || !s.isEmpty else { return nil }
             return HomeTree.ConvNode(conv: c, sides: s)
         }
         var tree = HomeTree()
-        if filterWorkspace == nil {
+        if filterWorkspace == nil && tab == .all {
             tree.pinned = d.conversations.filter { $0.pinnedAt != nil && !sideIds.contains($0.id) && matches($0) }.sorted { ($0.pinnedAt ?? "") < ($1.pinnedAt ?? "") }
         }
         var order: [String] = []
@@ -230,7 +232,7 @@ extension Naming {
                 .sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
                 .compactMap(node)
             let wsMatches = !q.isEmpty && fold(ws.name).contains(q)
-            if convs.isEmpty && !(q.isEmpty || wsMatches) { continue }
+            if convs.isEmpty && (tab != .all || !(q.isEmpty || wsMatches)) { continue }
             let o = counterpartOrg(d, ws)
             let key = o?.id ?? "none"
             if byOrg[key] == nil { order.append(key); byOrg[key] = HomeTree.CompanyNode(id: key, org: o, workspaces: []) }
@@ -251,5 +253,31 @@ extension Naming {
                 .compactMap(node)
         }
         return tree
+    }
+}
+
+
+/// Pestañas grandes de Inicio: Todo · No leídos · Asuntos · Chats · Laterales (home.tab.* de la web).
+enum HomeFilter: String, CaseIterable, Identifiable {
+    case all, unread, issues, chats, sides
+    var id: String { rawValue }
+    var labelKey: String { "home.tab.\(rawValue)" }
+
+    func includes(_ c: ConversationDTO) -> Bool {
+        switch self {
+        case .all: return true
+        case .unread: return c.unread > 0 && !c.isMuted
+        case .issues: return c.openIssues > 0
+        case .chats: return c.kind == .direct || c.kind == .multi   // como la web: las laterales son multi
+        case .sides: return Naming.isSide(c)
+        }
+    }
+
+    func count(_ d: BootstrapDTO) -> Int { self == .all ? d.conversations.count : d.conversations.filter(includes).count }
+
+    private static let key = "tc.home.tab"
+    static var saved: HomeFilter {
+        get { HomeFilter(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .all }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: key) }
     }
 }

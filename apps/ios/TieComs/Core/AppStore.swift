@@ -239,6 +239,7 @@ final class AppStore {
 
     private func handleSignedOut() {
         ShareTargets.clear()
+        Donations.deleteAll()
         socket.disconnect()
         pathMonitor?.cancel(); pathMonitor = nil
         api.clearCredentials()
@@ -425,7 +426,7 @@ final class AppStore {
         patchMeta(c.id) {
             $0.lastMessageSeq = m.seq
             $0.lastMessageAt = m.createdAt
-            $0.lastMessagePreview = String(m.body.prefix(140))
+            $0.lastMessagePreview = String(L10n.messagePreview(m).prefix(140))
             if mine { $0.lastReadSeq = m.seq }
             $0.unread = max(0, m.seq - max($0.lastReadSeq, $0.historyFromSeq))
         }
@@ -575,11 +576,17 @@ final class AppStore {
 
     @discardableResult
     func send(_ conversationId: String, body: String, replyTo: String? = nil, forwarded: ForwardedInfo? = nil,
+              attachments: [AttachmentDTO] = [], forwardAttachments: [AttachmentDTO] = [],
               clientMessageId: String = UUID().uuidString.lowercased()) -> PendingMessage? {
         let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return nil }
+        // Con adjuntos el texto puede ir vacío.
+        guard !text.isEmpty || !attachments.isEmpty || !forwardAttachments.isEmpty else { return nil }
         let p = PendingMessage(clientMessageId: clientMessageId, conversationId: conversationId, body: String(text.prefix(8000)), replyTo: replyTo,
-                               forwarded: forwarded, createdAt: ISODate.string(), attempts: 0, status: .pending, error: nil, nextAttemptAt: 0)
+                               forwarded: forwarded, attachmentIds: attachments.isEmpty ? nil : attachments.map(\.id),
+                               forwardAttachmentIds: forwardAttachments.isEmpty ? nil : forwardAttachments.map(\.id),
+                               attachments: (attachments + forwardAttachments).isEmpty ? nil : attachments + forwardAttachments,
+                               createdAt: ISODate.string(), attempts: 0, status: .pending, error: nil, nextAttemptAt: 0)
+        Donations.donate(self, conversationId: conversationId)
         // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
         savePending(pending + [p])
         scheduleFlush(0)
@@ -656,8 +663,10 @@ final class AppStore {
 
     /// Socket con ACK si está conectado; HTTP como respaldo. Mismo clientMessageId = idempotente.
     func deliver(_ p: PendingMessage) async throws -> MessageDTO {
-        let payload: [String: Any] = ["conversationId": p.conversationId, "clientMessageId": p.clientMessageId, "body": p.body,
+        var payload: [String: Any] = ["conversationId": p.conversationId, "clientMessageId": p.clientMessageId, "body": p.body,
                                       "replyTo": p.replyTo ?? NSNull(), "forwarded": p.forwarded?.json ?? NSNull()]
+        if let ids = p.attachmentIds, !ids.isEmpty { payload["attachmentIds"] = ids }
+        if let ids = p.forwardAttachmentIds, !ids.isEmpty { payload["forwardAttachmentIds"] = ids }
         if socket.state == .connected {
             do {
                 let r = try await socket.emitWithAck("message.send", payload, timeout: 8) as? [String: Any]

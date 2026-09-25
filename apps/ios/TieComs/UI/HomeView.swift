@@ -7,14 +7,18 @@ struct HomeView: View {
     @State private var newSpace = false
     @State private var issuesFor: String?
     @State private var collapsed = HomeCollapse.load()
+    @State private var tab = HomeFilter.saved
 
     var body: some View {
         @Bindable var store = store
         Group {
             if let d = store.data {
-                let tree = Naming.homeTree(d, query: query, filterWorkspace: store.workspaceFilter)
+                let tree = Naming.homeTree(d, query: query, filterWorkspace: store.workspaceFilter, tab: tab)
                 let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
                 List {
+                    HomeTabs(d: d, selected: $tab)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                     if store.connection != .online {
                         ConnectionBanner(connection: store.connection)
                             .listRowBackground(Color.clear)
@@ -47,7 +51,7 @@ struct HomeView: View {
                                 ForEach(co.workspaces) { w in
                                     let wsOpen = searching || !collapsed.contains("ws:\(w.id)")
                                     let wsAll = w.convs.flatMap { [$0.conv] + $0.sides }
-                                    WorkspaceRow(ws: w.ws, orgColor: co.org.map { Color(css: $0.colorBg) }, open: wsOpen,
+                                    WorkspaceRow(ws: w.ws, orgColor: co.org.flatMap { Theme.badgeColor($0.colorBg) }, open: wsOpen,
                                                  unread: wsOpen ? 0 : Naming.unreadCount(wsAll)) { toggle("ws:\(w.id)") }
                                         .contextMenu {
                                             Button {
@@ -57,7 +61,7 @@ struct HomeView: View {
                                         }
                                     if wsOpen {
                                         ForEach(w.convs) { n in
-                                            convLink(d, n.conv, indent: 1, badgeColor: co.org.map { Color(css: $0.colorBg) })
+                                            convLink(d, n.conv, indent: 1, badgeColor: co.org.flatMap { Theme.badgeColor($0.colorBg) })
                                             ForEach(n.sides) { sc in convLink(d, sc, indent: 2) }
                                         }
                                     }
@@ -83,6 +87,10 @@ struct HomeView: View {
                 .scrollContentBackground(.hidden)
                 .overlay {
                     if tree.isEmpty && searching { ContentUnavailableView.search(text: query) }
+                    else if tree.isEmpty && tab != .all {
+                        ContentUnavailableView(L("home.tab.empty"), systemImage: "checkmark.seal", description: Text(L("home.tab.emptyBody")))
+                            .accessibilityIdentifier("home.tab.emptyState")
+                    }
                 }
                 .refreshable { await store.refreshAll() }
             } else {
@@ -179,7 +187,7 @@ struct CompanyRow: View {
                 OrgMark(org: org, size: 26)
                 Text(org?.name ?? L("common.noCompany")).font(.body.weight(.bold)).foregroundStyle(Theme.textPrimary).lineLimit(1)
                 Spacer()
-                if unread > 0 { UnreadPill(count: unread, color: org.map { Color(css: $0.colorBg) }) }
+                if unread > 0 { UnreadPill(count: unread, color: org.flatMap { Theme.badgeColor($0.colorBg) }) }
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)
                     .rotationEffect(.degrees(open ? 90 : 0))
             }
@@ -224,7 +232,7 @@ struct UnreadPill: View {
         Text(count > 99 ? "99+" : "\(count)")
             .font(.caption2.weight(.bold)).foregroundStyle(.white)
             .padding(.horizontal, 7).padding(.vertical, 2)
-            .background(Capsule().fill(muted ? Theme.textSecondary : (color ?? Theme.bubbleMine)))
+            .background(Capsule().fill(muted ? Theme.badgeMuted : (color ?? Theme.badgeFallback)))
             .accessibilityHidden(true)
     }
 }
@@ -242,7 +250,7 @@ struct HierarchyConvRow: View {
     var body: some View {
         let title = Naming.title(d, c)
         let blocked = c.memberIds.contains(where: { store.blockedUserIds.contains($0) })
-        let preview = blocked ? L("safety.previewHidden") : (L10n.preview(c.lastMessagePreview) ?? L("conv.noMessages"))
+        let preview = blocked ? L("safety.previewHidden") : (L10n.listPreview(c) ?? L("conv.noMessages"))
         let time = L10n.timeLabel(c.lastMessageAt)
         HStack(alignment: .top, spacing: 10) {
             ConvIcon(d: d, c: c, size: 30)
@@ -329,7 +337,7 @@ struct ConversationRow: View {
 
     var body: some View {
         let title = Naming.title(d, c)
-        let preview = c.memberIds.contains(where: { store.blockedUserIds.contains($0) }) ? L("safety.previewHidden") : (L10n.preview(c.lastMessagePreview) ?? L("conv.noMessages"))
+        let preview = c.memberIds.contains(where: { store.blockedUserIds.contains($0) }) ? L("safety.previewHidden") : (L10n.listPreview(c) ?? L("conv.noMessages"))
         let time = L10n.timeLabel(c.lastMessageAt)
         HStack(spacing: 12) {
             icon
@@ -386,5 +394,44 @@ struct ConversationRow: View {
         parts.append(preview)
         if !time.isEmpty { parts.append(time) }
         return parts.joined(separator: ", ")
+    }
+}
+
+
+/// Pestañas grandes tipo «pill» bajo el buscador: Todo · No leídos · Asuntos · Chats · Laterales, con contador.
+struct HomeTabs: View {
+    let d: BootstrapDTO
+    @Binding var selected: HomeFilter
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(HomeFilter.allCases) { t in
+                    let n = t.count(d)
+                    let on = selected == t
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { selected = t }
+                        HomeFilter.saved = t
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(L(t.labelKey)).font(.subheadline.weight(.semibold))
+                            if t != .all || n > 0 {
+                                Text("\(n)").font(.caption.weight(.bold)).monospacedDigit()
+                                    .padding(.horizontal, 7).padding(.vertical, 2)
+                                    .background(Capsule().fill(on ? Color.white.opacity(0.25) : Theme.textSecondary.opacity(0.15)))
+                            }
+                        }
+                        .foregroundStyle(on ? Color.white : Theme.textPrimary)
+                        .padding(.horizontal, 14).frame(minHeight: 40)
+                        .background(Capsule().fill(on ? Theme.bubbleMine : Theme.surface))
+                        .overlay(Capsule().stroke(Theme.textSecondary.opacity(on ? 0 : 0.2)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(L(t.labelKey)), \(n)")
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                    .accessibilityIdentifier("home.tab.\(t.rawValue)")
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 6)
+        }
     }
 }

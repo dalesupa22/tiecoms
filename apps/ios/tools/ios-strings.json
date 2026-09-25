@@ -742,5 +742,125 @@
  "derive.prefix.side": [
   "Consulta",
   "Question"
+ ],
+ "att.photo": [
+  "📷 Foto",
+  "📷 Photo"
+ ],
+ "att.photos": [
+  "📷 {n} fotos",
+  "📷 {n} photos"
+ ],
+ "att.video": [
+  "🎬 Video",
+  "🎬 Video"
+ ],
+ "att.videos": [
+  "🎬 {n} videos",
+  "🎬 {n} videos"
+ ],
+ "att.file": [
+  "📎 {name}",
+  "📎 {name}"
+ ],
+ "att.files": [
+  "📎 {n} archivos",
+  "📎 {n} files"
+ ],
+ "home.tab.all": [
+  "Todo",
+  "All"
+ ],
+ "home.tab.unread": [
+  "No leídos",
+  "Unread"
+ ],
+ "home.tab.issues": [
+  "Asuntos",
+  "Issues"
+ ],
+ "home.tab.chats": [
+  "Chats",
+  "Chats"
+ ],
+ "home.tab.sides": [
+  "Laterales",
+  "Side"
+ ],
+ "home.tab.empty": [
+  "Estás al día 🎉",
+  "You are all caught up 🎉"
+ ],
+ "home.tab.emptyBody": [
+  "No hay nada aquí por ahora.",
+  "Nothing here for now."
+ ],
+ "shareX.signIn": [
+  "Inicia sesión en TieComs para compartir",
+  "Sign in to TieComs to share"
+ ],
+ "shareX.openApp": [
+  "Abrir TieComs",
+  "Open TieComs"
+ ],
+ "shareX.addMessage": [
+  "Añadir un mensaje…",
+  "Add a message…"
+ ],
+ "shareX.suggested": [
+  "Sugerida",
+  "Suggested"
+ ],
+ "shareX.recent": [
+  "Recientes",
+  "Recent"
+ ],
+ "shareX.selected": [
+  "{n} de {max} conversaciones",
+  "{n} of {max} conversations"
+ ],
+ "shareX.maxTargets": [
+  "Puedes enviar a {n} conversaciones a la vez.",
+  "You can send to {n} conversations at once."
+ ],
+ "shareX.sent": [
+  "Enviado a {n} conversaciones",
+  "Sent to {n} conversations"
+ ],
+ "att.tooBig": [
+  "«{name}» pesa más de 25 MB.",
+  "“{name}” is larger than 25 MB."
+ ],
+ "att.max": [
+  "Máximo {n} archivos por mensaje.",
+  "Up to {n} files per message."
+ ],
+ "att.attach": [
+  "Adjuntar",
+  "Attach"
+ ],
+ "att.fromPhotos": [
+  "Fotos y videos",
+  "Photos and videos"
+ ],
+ "att.fromCamera": [
+  "Cámara",
+  "Camera"
+ ],
+ "att.fromFiles": [
+  "Archivos",
+  "Files"
+ ],
+ "att.remove": [
+  "Quitar {name}",
+  "Remove {name}"
+ ],
+ "att.openViewer": [
+  "Abre el visor",
+  "Opens the viewer"
+ ],
+ "att.openFile": [
+  "Abre el archivo",
+  "Opens the file"
  ]
 }

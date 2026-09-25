@@ -449,3 +449,65 @@ struct CreateChatResult: Decodable, Sendable {
         kind = ConversationKind(rawValue: c.v("kind", "multi")) ?? .multi
     }
 }
+
+
+// MARK: Adjuntos
+
+struct AttachmentDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var name: String
+    var contentType: String
+    var sizeBytes: Int
+    var width: Int?
+    var height: Int?
+    /// /api/v1/attachments/<id> (autenticada con Bearer).
+    var url: String
+    var thumbUrl: String?
+
+    var isImage: Bool { contentType.hasPrefix("image/") }
+    var isVideo: Bool { contentType.hasPrefix("video/") }
+    var isMedia: Bool { isImage || isVideo }
+
+    init(id: String, name: String, contentType: String, sizeBytes: Int, width: Int? = nil, height: Int? = nil, url: String, thumbUrl: String? = nil) {
+        self.id = id; self.name = name; self.contentType = contentType; self.sizeBytes = sizeBytes
+        self.width = width; self.height = height; self.url = url; self.thumbUrl = thumbUrl
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        name = c.v("name", "archivo")
+        contentType = c.v("contentType", "application/octet-stream")
+        sizeBytes = c.int("sizeBytes")
+        width = c.intOpt("width")
+        height = c.intOpt("height")
+        url = c.v("url", "/api/v1/attachments/\(id)")
+        thumbUrl = c.o("thumbUrl")
+    }
+}
+
+/// ConversationDTO.lastHumanPreview: el último mensaje de una persona.
+struct HumanPreview: Codable, Equatable, Sendable {
+    struct Counts: Codable, Equatable, Sendable {
+        var count: Int; var images: Int; var videos: Int; var files: Int; var firstName: String?
+        init(count: Int, images: Int, videos: Int, files: Int, firstName: String?) {
+            self.count = count; self.images = images; self.videos = videos; self.files = files; self.firstName = firstName
+        }
+        init(from decoder: Decoder) throws {
+            let c = try container(decoder)
+            count = c.int("count"); images = c.int("images"); videos = c.int("videos"); files = c.int("files"); firstName = c.o("firstName")
+        }
+    }
+    var messageId: String?
+    var seq: Int
+    var authorId: String?
+    var body: String
+    var attachments: Counts?
+    var createdAt: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        messageId = c.o("messageId"); seq = c.int("seq"); authorId = c.o("authorId"); body = c.v("body", "")
+        attachments = c.o("attachments"); createdAt = c.o("createdAt")
+    }
+}

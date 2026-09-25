@@ -20,6 +20,27 @@ enum Theme {
     static let bubbleMine = Color(light: 0xE8710A, dark: 0xC75F08)
 }
 
+extension Theme {
+    /// Contraste WCAG de un color "#RRGGBB" con texto blanco.
+    static func contrastWithWhite(_ css: String) -> Double? {
+        let s = css.trimmingCharacters(in: CharacterSet(charactersIn: "# "))
+        guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
+        func lin(_ c: UInt32) -> Double { let x = Double(c) / 255; return x <= 0.03928 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
+        let l = 0.2126 * lin((v >> 16) & 0xFF) + 0.7152 * lin((v >> 8) & 0xFF) + 0.0722 * lin(v & 0xFF)
+        return 1.05 / (l + 0.05)
+    }
+
+    /// Naranja sobrio de los badges (#B45309, AA con texto blanco en letra chica) y gris del silenciado; igual que la web.
+    static let badgeFallback = Color(hex: 0xB45309)
+    static let badgeMuted = Color(hex: 0x7A7368)
+
+    /// Badge de no leídos: el color de la empresa solo si cumple AA (4,5:1) con texto blanco; si no, el naranja sobrio.
+    static func badgeColor(_ css: String) -> Color? {
+        guard let r = contrastWithWhite(css), r >= 4.5 else { return nil }
+        return Color(css: css)
+    }
+}
+
 extension Color {
     init(hex: UInt32, alpha: Double = 1) {
         self.init(.sRGB, red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255, blue: Double(hex & 0xFF) / 255, opacity: alpha)

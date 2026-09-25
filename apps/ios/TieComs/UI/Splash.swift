@@ -9,7 +9,7 @@ enum SplashTimeline {
     static let nodes: [Node] = [
         Node(x: -0.30, y: -0.22, initials: "SR", color: 0x3B7BF6, org: "Acme"),
         Node(x: 0.28, y: -0.16, initials: "TB", color: 0x5B8DEF, org: "Acme"),
-        Node(x: -0.26, y: 0.06, initials: "LP", color: 0x1E8E5A, org: "Nova"),
+        Node(x: -0.26, y: 0.06, initials: "LP", color: 0x1A7F51, org: "Nova"),
         Node(x: 0.24, y: 0.12, initials: "KA", color: 0x3DAA7F, org: "Nova"),
         Node(x: 0.02, y: 0.28, initials: "MG", color: 0x8B5CF6, org: "Lexa"),
     ]

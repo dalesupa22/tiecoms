@@ -188,6 +188,8 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
     var pinnedAt: String?
     /// Foto del grupo (/api/v1/avatars/<id>), si tiene.
     var avatarUrl: String?
+    /// Último mensaje de una persona (el API lo manda para que la lista no muestre mensajes de sistema).
+    var lastHumanPreview: HumanPreview?
     /// Preferencia personal: silenciada hasta esta fecha (no avisa).
     var mutedUntil: String?
 
@@ -220,6 +222,7 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
         returnedAt = c.o("returnedAt")
         pinnedAt = c.o("pinnedAt")
         avatarUrl = c.o("avatarUrl")
+        lastHumanPreview = c.o("lastHumanPreview")
         openIssues = c.int("openIssues")
         mutedUntil = c.o("mutedUntil")
     }
@@ -238,6 +241,8 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
     var forwarded: ForwardedInfo?
     /// Vista previa del primer enlace; llega después del envío con `message.updated`.
     var linkPreview: LinkPreviewDTO?
+    /// Adjuntos (vacío en mensajes viejos).
+    var attachments: [AttachmentDTO] = []
     var createdAt: String
     var editedAt: String?
     var deletedAt: String?
@@ -262,6 +267,7 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
         mergedFrom = c.o("mergedFrom")
         forwarded = c.o("forwarded")
         linkPreview = c.o("linkPreview")
+        attachments = c.lossyArray("attachments")
         createdAt = c.v("createdAt", "")
         editedAt = c.o("editedAt")
         deletedAt = c.o("deletedAt")

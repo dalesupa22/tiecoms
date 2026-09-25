@@ -29,20 +29,20 @@ final class V3FeedbackTests: XCTestCase {
     func testPersonColorMatchesWeb() {
         // Vectores de la web (apps/web/src/ui.tsx personColor).
         XCTAssertEqual(PersonColor.index("00000000-0000-0000-0000-000000000000"), 1)
-        XCTAssertEqual(PersonColor.pair("00000000-0000-0000-0000-000000000000").light, 0x1E8E5A)
+        XCTAssertEqual(PersonColor.pair("00000000-0000-0000-0000-000000000000").light, 0x1A7F51)
         XCTAssertEqual(PersonColor.index("3f2b8c1e-9a4d-4e21-8b7a-1c2d3e4f5a6b"), 3)
-        XCTAssertEqual(PersonColor.pair("3f2b8c1e-9a4d-4e21-8b7a-1c2d3e4f5a6b").light, 0x0B8793)
+        XCTAssertEqual(PersonColor.pair("3f2b8c1e-9a4d-4e21-8b7a-1c2d3e4f5a6b").light, 0x0A7C87)
         XCTAssertEqual(PersonColor.index("ffffffff-ffff-ffff-ffff-ffffffffffff"), 1)
         XCTAssertEqual(PersonColor.index("FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"), 1, "no depende de mayúsculas")
         XCTAssertEqual(PersonColor.fnv1a(""), 0x811C9DC5)
         XCTAssertEqual(PersonColor.fnv1a("a"), 0xE40C292C)
-        XCTAssertEqual(PersonColor.hexes, [0x2F6FDB, 0x1E8E5A, 0x7C4DDB, 0x0B8793, 0xB83280, 0x4C51BF, 0x52606D, 0xC53030])
+        XCTAssertEqual(PersonColor.hexes, [0x2F6FDB, 0x1A7F51, 0x7C4DDB, 0x0A7C87, 0xB83280, 0x4C51BF, 0x52606D, 0xC53030])
         for p in PersonColor.palette {
             let r = (p.light >> 16) & 0xFF, g = (p.light >> 8) & 0xFF, b = p.light & 0xFF
             XCTAssertFalse(r > 0xC0 && g > 0x50 && g < 0xA0 && b < 0x40, "sin naranja: \(String(p.light, radix: 16))")
             func lin(_ c: UInt32) -> Double { let v = Double(c) / 255; return v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
             let lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
-            XCTAssertGreaterThanOrEqual(1.05 / (lum + 0.05), 3.0, "iniciales blancas legibles: \(String(p.light, radix: 16))")
+            XCTAssertGreaterThanOrEqual(1.05 / (lum + 0.05), 4.5, "iniciales blancas legibles: \(String(p.light, radix: 16))")
         }
     }
 

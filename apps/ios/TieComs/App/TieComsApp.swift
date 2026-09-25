@@ -25,10 +25,11 @@ struct TieComsApp: App {
     @State private var store: AppStore
 
     init() {
-        let secrets = KeychainSecretStore()
+        let base = AppConfig.apiBaseURL
+        let secrets = KeychainSecretStore(apiURL: base)
         // Solo para pruebas de interfaz: empezar sin sesión guardada.
         if AppConfig.launchFlag("TCResetSession") { secrets.set(nil) }
-        let s = AppStore(baseURL: AppConfig.apiBaseURL, secrets: secrets, feedback: AppFeedback.shared)
+        let s = AppStore(baseURL: base, secrets: secrets, feedback: AppFeedback.shared)
         _store = State(initialValue: s)
         AppFeedback.shared.openConversationId = { [weak s] in s?.appActive == true ? s?.openConversationId : nil }
         AppFeedback.shared.onOpenConversation = { [weak s] id in s?.handle(.conversation(id)) }

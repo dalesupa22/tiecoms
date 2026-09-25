@@ -8,7 +8,7 @@ import SwiftUI
 enum PersonColor {
     /// Igual que personColor() de la web (apps/web/src/ui.tsx). El tono oscuro (texto del nombre en modo
     /// oscuro) es el mismo color aclarado un 40 % hacia el blanco.
-    static let hexes: [UInt32] = [0x2F6FDB, 0x1E8E5A, 0x7C4DDB, 0x0B8793, 0xB83280, 0x4C51BF, 0x52606D, 0xC53030]
+    static let hexes: [UInt32] = [0x2F6FDB, 0x1A7F51, 0x7C4DDB, 0x0A7C87, 0xB83280, 0x4C51BF, 0x52606D, 0xC53030]
     static let fallback: UInt32 = 0x8A8177
 
     struct Pair: Equatable { let light: UInt32; let dark: UInt32 }

@@ -50,6 +50,9 @@ struct ConversationView: View {
     @State private var draft = ""
     @State private var sidePanel: String?
     @State private var highlighted: String?
+    @State private var staged: [LocalAttachment] = []
+    @State private var uploadProgress: [UUID: Double] = [:]
+    @State private var uploading = false
     @State private var askSide: MessageDTO?
     @State private var replyTo: MessageDTO?
     @State private var editing: MessageDTO?
@@ -72,6 +75,8 @@ struct ConversationView: View {
         .onDisappear { if store.openConversationId == conversationId { store.openConversationId = nil } }
         .task(id: conversationId) {
             try? await store.openConversation(conversationId)
+            // Sugerencias de la hoja de compartir: abrir una conversación también cuenta (como mucho una vez por hora).
+            Donations.donate(store, conversationId: conversationId, minInterval: 3600)
             try? await store.loadPins(conversationId)
             try? await store.loadIssues(conversationId: conversationId)
             try? await store.loadEvents(from: Date().addingTimeInterval(-30 * 86400), to: Date().addingTimeInterval(90 * 86400), conversationId: conversationId)
@@ -322,7 +327,8 @@ struct ConversationView: View {
                 merged: m.mergedFrom.map { id in store.meta(id).map { L("lin.resultOf", ["name": Naming.title(d, $0)]) } ?? L("lin.resultHidden") },
                 pinned: store.pins[conversationId]?.contains(m.id) == true,
                 linkify: m.deletedAt == nil && m.kind == "text",
-                linkPreview: m.deletedAt == nil ? m.linkPreview : nil
+                linkPreview: m.deletedAt == nil ? m.linkPreview : nil,
+                attachments: m.deletedAt == nil ? m.attachments : []
             )
             Group {
                 if m.deletedAt == nil {
@@ -355,7 +361,7 @@ struct ConversationView: View {
             }
         case .pending(let p):
             MessageBubble(text: p.body, time: "", mine: true, author: nil, status: p.status == .failed ? .failed : .sending, italic: false,
-                          forwardedLabel: p.forwarded.map { forwardedLabel(d, $0) })
+                          forwardedLabel: p.forwarded.map { forwardedLabel(d, $0) }, attachments: p.attachments ?? [])
                 .padding(.top, 4)
                 .onTapGesture { if p.status == .failed { store.retry(p.clientMessageId) } }
                 .contextMenu {
@@ -501,7 +507,9 @@ struct ConversationView: View {
                 }
                 .accessibilityIdentifier("composer.editBar")
             }
+            StagedAttachments(staged: $staged, progress: uploadProgress)
             HStack(alignment: .bottom, spacing: 8) {
+                if editing == nil { AttachButton(staged: $staged) { store.show($0) } }
                 TextField(L("chat.placeholder", ["name": Naming.title(d, c)]), text: $draft, axis: .vertical)
                     .lineLimit(1...6)
                     .focused($composerFocused)
@@ -516,9 +524,9 @@ struct ConversationView: View {
                         .font(.system(size: 17, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 40, height: 40)
-                        .background(Circle().fill(trimmed.isEmpty ? Theme.textSecondary.opacity(0.35) : Theme.bubbleMine))
+                        .background(Circle().fill(trimmed.isEmpty && staged.isEmpty ? Theme.textSecondary.opacity(0.35) : Theme.bubbleMine))
                 }
-                .disabled(trimmed.isEmpty)
+                .disabled((trimmed.isEmpty && staged.isEmpty) || uploading)
                 .accessibilityLabel(editing != nil ? L("edit.save") : L("chat.send"))
                 .accessibilityIdentifier("composer.send")
             }
@@ -529,11 +537,35 @@ struct ConversationView: View {
 
     private func submit() {
         let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty else { return }
+        guard !body.isEmpty || !staged.isEmpty, !uploading else { return }
         if let e = editing {
             editing = nil
             draft = ""
             if body != e.body { act { try await store.editMessage(e.id, body: body) } }
+            return
+        }
+        if !staged.isEmpty {
+            // Adjuntos: se suben (con progreso) y luego se envía el mensaje con sus ids.
+            let files = staged, text = draft, reply = replyTo?.id
+            uploading = true
+            Task {
+                defer { uploading = false; uploadProgress = [:] }
+                var done: [AttachmentDTO] = []
+                for f in files {
+                    uploadProgress[f.id] = 0
+                    do {
+                        let a = try await store.api.uploadAttachment(conversationId, f) { p in Task { @MainActor in uploadProgress[f.id] = p } }
+                        done.append(a)
+                    } catch {
+                        store.show(L10n.errorText(error))
+                        return
+                    }
+                }
+                store.send(conversationId, body: text, replyTo: reply, attachments: done)
+                staged = []
+                draft = ""
+                replyTo = nil
+            }
             return
         }
         if let pr = store.privateReplies[conversationId] {
@@ -544,6 +576,7 @@ struct ConversationView: View {
         replyTo = nil
         draft = ""
     }
+
 }
 
 /// Barra sobre el compositor (respondiendo a / editando).
@@ -648,6 +681,7 @@ struct MessageBubble: View {
     /// Enlaces del texto tocables (solo mensajes de texto no eliminados).
     var linkify = false
     var linkPreview: LinkPreviewDTO? = nil
+    var attachments: [AttachmentDTO] = []
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -688,6 +722,8 @@ struct MessageBubble: View {
                         Label(merged, systemImage: "arrow.uturn.backward").font(.caption.weight(.semibold))
                             .foregroundStyle(mine ? Color.white : Theme.accentText)
                     }
+                    if !attachments.isEmpty { AttachmentsBlock(attachments: attachments, mine: mine) }
+                    if !text.isEmpty || attachments.isEmpty {
                     Group {
                         if linkify { Text(Linkify.attributed(text)) } else { Text(text) }
                     }
@@ -696,6 +732,7 @@ struct MessageBubble: View {
                     .foregroundStyle(mine ? Color.white : Theme.textPrimary)
                     .tint(mine ? Color.white : Theme.accentText)
                     .textSelection(.enabled)
+                    }
                     if let linkPreview { LinkPreviewCard(preview: linkPreview, mine: mine) }
                 }
                 .padding(.horizontal, 13).padding(.vertical, 8)

@@ -240,7 +240,9 @@ extension AppStore {
         guard let d = data else { return }
         if let comment, !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { send(target, body: comment) }
         let author = Naming.person(d, source.authorId)?.name
-        send(target, body: source.body, forwarded: ForwardedInfo(source: .tiecoms, author: author, sentAt: source.createdAt, fromConversationId: source.conversationId))
+        // Con adjuntos, el servidor copia la referencia (forwardAttachmentIds).
+        send(target, body: source.body, forwarded: ForwardedInfo(source: .tiecoms, author: author, sentAt: source.createdAt, fromConversationId: source.conversationId),
+             forwardAttachments: source.attachments)
     }
 
     /// Reenvío a varios chats (hasta 10, como la web). Devuelve cuántos destinos quedaron en cola.
@@ -389,6 +391,7 @@ extension AppStore {
     func leaveConversation(_ conversationId: String) async throws {
         guard let me = me?.id else { return }
         try await api.requestData("/conversations/\(conversationId)/members/\(me)", method: "DELETE")
+        Donations.delete(conversationId: conversationId)
         homePath.removeAll { $0 == .conversation(conversationId) || $0 == .details(conversationId) }
         try await loadBootstrap()
     }

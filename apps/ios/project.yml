@@ -12,7 +12,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "1.1.0"
-    CURRENT_PROJECT_VERSION: "5"
+    CURRENT_PROJECT_VERSION: "6"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     LOCALIZATION_PREFERS_STRING_CATALOGS: NO
@@ -81,6 +81,8 @@ targets:
       - TieComs/Core/L10n.swift
       - TieComs/Core/Naming.swift
       - TieComs/Core/SocketIOProtocol.swift
+      - TieComs/Core/Attachments.swift
+      - TieComs/Core/ShareItems.swift
       - path: TieComs/Resources
         includes: ["*.lproj/Localizable.strings", "PrivacyInfo.xcprivacy"]
         buildPhase: resources
@@ -105,9 +107,9 @@ targets:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
           NSExtensionAttributes:
-            NSExtensionActivationRule:
-              NSExtensionActivationSupportsText: true
-              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+            # Mismo texto que ShareItems.activationRule (una prueba unitaria los compara).
+            NSExtensionActivationRule: 'SUBQUERY (extensionItems, $extensionItem, SUBQUERY ($extensionItem.attachments, $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.image" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.movie" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.data" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.content" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.url" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.plain-text").@count >= 1 AND SUBQUERY ($extensionItem.attachments, $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.item").@count <= 10).@count >= 1'
+            IntentsSupported: [INSendMessageIntent]
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
   TieComsNotifications:

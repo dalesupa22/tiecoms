@@ -43,7 +43,13 @@ enum AppConfig {
     /// Orden: argumento de lanzamiento `-TCApiURL` > URL de depuración guardada > producción.
     static var apiBaseURL: URL {
         if let arg = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)["TCApiURL"] as? String,
-           let u = URL(string: arg), u.scheme != nil { return u }
+           let u = URL(string: arg), u.scheme != nil {
+            #if DEBUG
+            // Depuración: la URL queda fijada para que abrir la app desde el icono siga usando el mismo servidor.
+            if !isRunningUnitTests { Prefs.customAPIURL = u.absoluteString }
+            #endif
+            return u
+        }
         if let custom = Prefs.customAPIURL, let u = URL(string: custom), u.scheme != nil { return u }
         return URL(string: defaultAPI)!
     }
@@ -86,6 +92,16 @@ enum MediaURL {
         if path.hasPrefix("http://") || path.hasPrefix("https://") { return URL(string: path) }
         let origin = base.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return URL(string: origin + (path.hasPrefix("/") ? path : "/" + path))
+    }
+}
+
+/// Progreso de una subida (URLSessionTaskDelegate por tarea).
+final class UploadProgress: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    let onProgress: @Sendable (Double) -> Void
+    init(_ onProgress: @escaping @Sendable (Double) -> Void) { self.onProgress = onProgress }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        onProgress(min(0.99, Double(totalBytesSent) / Double(totalBytesExpectedToSend)))
     }
 }
 
@@ -194,6 +210,9 @@ final class APIClient {
         if res.statusCode == 401 {
             let r = await refresh()
             if r == .ok { (data, res) = try await raw(path, method: method, json: json, body: body) }
+            // Solo se cierra la sesión si el servidor rechaza el refresh; un fallo de red o un 5xx
+            // (API reiniciándose) no la borra.
+            else if r == .network { throw APIClient.parseError(data, status: 401) }
         }
         if res.statusCode == 401 {
             signedOut()
@@ -201,6 +220,44 @@ final class APIClient {
         }
         guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(data, status: res.statusCode) }
         return data
+    }
+
+    /// Subida con progreso (0…1): adjuntos de hasta 25 MB. Reintenta una vez tras renovar el token ante 401.
+    func uploadWithProgress<T: Decodable>(_ path: String, data: Data, contentType: String, headers: [String: String] = [:],
+                                          progress: @escaping @Sendable (Double) -> Void) async throws -> T {
+        if accessToken == nil || Date() > accessExp.addingTimeInterval(-30) { _ = await refresh() }
+        func attempt() async throws -> (Data, HTTPURLResponse) {
+            var req = URLRequest(url: url(path))
+            req.httpMethod = "POST"
+            req.timeoutInterval = 300
+            req.setValue("ios", forHTTPHeaderField: "x-tiecoms-client")
+            req.setValue(Contract.version, forHTTPHeaderField: "x-tiecoms-contract")
+            req.setValue(contentType, forHTTPHeaderField: "content-type")
+            for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
+            if let t = accessToken { req.setValue("Bearer \(t)", forHTTPHeaderField: "authorization") }
+            do {
+                let (body, resp) = try await session.upload(for: req, from: data, delegate: UploadProgress(progress))
+                guard let http = resp as? HTTPURLResponse else { throw ApiRequestError(status: 0, code: "network", message: "Sin respuesta") }
+                return (body, http)
+            } catch let e as ApiRequestError { throw e } catch { throw ApiRequestError.network(error) }
+        }
+        var (body, res) = try await attempt()
+        if res.statusCode == 401 {
+            switch await refresh() {
+            case .ok: (body, res) = try await attempt()
+            case .network: throw APIClient.parseError(body, status: 401)
+            case .unauthorized: break
+            }
+        }
+        if res.statusCode == 401 { signedOut(); throw APIClient.parseError(body, status: 401) }
+        guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(body, status: res.statusCode) }
+        progress(1)
+        return try decode(body)
+    }
+
+    /// Descarga autenticada (adjuntos): Bearer en la cabecera; sigue la redirección firmada si la hay.
+    func download(_ path: String) async throws -> Data {
+        try await requestData(path)
     }
 
     /// Petición pública (sin token).

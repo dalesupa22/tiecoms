@@ -85,6 +85,41 @@ enum L10n {
 
     static func preview(_ body: String?) -> String? { body.map(systemText) }
 
+    /// Vista previa de lista: prefiere el último mensaje de una persona si el último fue de sistema (lastHumanPreview).
+    static func listPreview(_ c: ConversationDTO) -> String? {
+        if let h = c.lastHumanPreview {
+            let text = h.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            let att = h.attachments.flatMap { countsLabel($0) }
+            let out = [att, text.isEmpty ? nil : text].compactMap { $0 }.joined(separator: " · ")
+            if !out.isEmpty { return out }
+        }
+        return preview(c.lastMessagePreview)
+    }
+
+    static func countsLabel(_ a: HumanPreview.Counts) -> String? {
+        guard a.count > 0 else { return nil }
+        if a.images == a.count { return a.count == 1 ? L("att.photo") : L("att.photos", ["n": a.count]) }
+        if a.videos == a.count { return a.count == 1 ? L("att.video") : L("att.videos", ["n": a.count]) }
+        if a.count == 1, let n = a.firstName { return L("att.file", ["name": n]) }
+        return L("att.files", ["n": a.count])
+    }
+
+    /// «📷 Foto», «📷 3 fotos», «🎬 Video», «📎 nombre» (+ el texto si lo hay), como la web y el push.
+    static func attachmentsLabel(_ list: [AttachmentDTO]) -> String? {
+        guard !list.isEmpty else { return nil }
+        let images = list.filter(\.isImage).count, videos = list.filter(\.isVideo).count
+        if images == list.count { return images == 1 ? L("att.photo") : L("att.photos", ["n": images]) }
+        if videos == list.count { return videos == 1 ? L("att.video") : L("att.videos", ["n": videos]) }
+        if list.count == 1 { return L("att.file", ["name": list[0].name]) }
+        return L("att.files", ["n": list.count])
+    }
+
+    static func messagePreview(_ m: MessageDTO) -> String {
+        guard let att = attachmentsLabel(m.attachments) else { return m.body }
+        let text = m.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? att : "\(att) · \(text)"
+    }
+
     // MARK: Fechas
 
     static func timeLabel(_ iso: String?, now: Date = Date()) -> String {

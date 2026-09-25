@@ -14,24 +14,33 @@ protocol SecretStore: AnyObject {
 final class KeychainSecretStore: SecretStore {
     static let sharedGroup = "group.com.tiecoms.app"
     private let service: String
-    private let account = "refreshToken"
+    private static let legacyAccount = "refreshToken"
+    private let account: String
     private let group: String?
 
-    init(service: String = "com.tiecoms.app.session", group: String? = KeychainSecretStore.sharedGroup) {
-        self.service = service
-        self.group = group
+    /// La sesión se guarda por servidor: cambiar de API (producción, 3043, otro puerto) nunca borra
+    /// la sesión de otro. Producción conserva la cuenta histórica "refreshToken".
+    static func account(for apiURL: URL?) -> String {
+        guard let apiURL, let host = apiURL.host?.lowercased(), host != URL(string: AppConfig.defaultAPI)?.host else { return legacyAccount }
+        return "refreshToken@\(host):\(apiURL.port ?? (apiURL.scheme == "http" ? 80 : 443))"
     }
 
-    private func query(group: String?) -> [String: Any] {
+    init(service: String = "com.tiecoms.app.session", group: String? = KeychainSecretStore.sharedGroup, apiURL: URL? = nil) {
+        self.service = service
+        self.group = group
+        self.account = KeychainSecretStore.account(for: apiURL)
+    }
+
+    private func query(group: String?, account: String? = nil) -> [String: Any] {
         var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                 kSecAttrService as String: service,
-                                kSecAttrAccount as String: account]
+                                kSecAttrAccount as String: account ?? self.account]
         if let group { q[kSecAttrAccessGroup as String] = group }
         return q
     }
 
-    private func read(group: String?) -> String? {
-        var q = query(group: group)
+    private func read(group: String?, account: String? = nil) -> String? {
+        var q = query(group: group, account: account)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: AnyObject?
@@ -42,9 +51,16 @@ final class KeychainSecretStore: SecretStore {
     func get() -> String? {
         if let group, let v = read(group: group) { return v }
         // Ítem de la versión 1.0 (sin grupo) o grupo no disponible.
-        guard let legacy = read(group: nil) else { return nil }
-        if group != nil { set(legacy) }
-        return legacy
+        if let legacy = read(group: nil) {
+            if group != nil { set(legacy) }
+            return legacy
+        }
+        // Migración (build 6): antes había una sola cuenta para cualquier servidor. Se copia sin borrarla;
+        // si no era de este servidor, el refresh dará 401 y solo se limpia la copia de este servidor.
+        guard account != Self.legacyAccount else { return nil }
+        let migrated = group.flatMap { read(group: $0, account: Self.legacyAccount) } ?? read(group: nil, account: Self.legacyAccount)
+        if let migrated { set(migrated) }
+        return migrated
     }
 
     func set(_ value: String?) {
@@ -66,13 +82,49 @@ final class KeychainSecretStore: SecretStore {
 /// Lista de conversaciones para la extensión de Compartir (App Group). Solo títulos, sin mensajes.
 enum ShareTargets {
     static let suite = "group.com.tiecoms.app"
-    struct Target: Codable, Equatable, Identifiable { var id: String; var title: String; var subtitle: String }
+    /// Lo que la extensión necesita para agrupar como Inicio (Empresa · Espacio, Chats) y mostrar la foto.
+    struct Target: Codable, Equatable, Identifiable {
+        var id: String
+        var title: String
+        var subtitle: String
+        /// «Empresa · Espacio» o nil (chats).
+        var group: String? = nil
+        var kind: String = "group"
+        var lastMessageAt: String? = nil
+        var avatarPath: String? = nil
+        var isSide: Bool = false
+
+        init(id: String, title: String, subtitle: String, group: String? = nil, kind: String = "group", lastMessageAt: String? = nil,
+             avatarPath: String? = nil, isSide: Bool = false) {
+            self.id = id; self.title = title; self.subtitle = subtitle; self.group = group; self.kind = kind
+            self.lastMessageAt = lastMessageAt; self.avatarPath = avatarPath; self.isSide = isSide
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            id = try c.decode(String.self, forKey: AnyKey("id"))
+            title = c.v("title", "")
+            subtitle = c.v("subtitle", "")
+            group = c.o("group")
+            kind = c.v("kind", "group")
+            lastMessageAt = c.o("lastMessageAt")
+            avatarPath = c.o("avatarPath")
+            isSide = c.v("isSide", false)
+        }
+    }
+
+    static func targets(_ d: BootstrapDTO) -> [Target] {
+        d.conversations.filter(\.canPost).map { c in
+            Target(id: c.id, title: Naming.title(d, c),
+                   subtitle: d.workspaces.first(where: { $0.id == c.workspaceId })?.name ?? Naming.subtitle(d, c),
+                   group: Naming.route(d, c), kind: c.kind.rawValue, lastMessageAt: c.lastMessageAt,
+                   avatarPath: c.avatarUrl ?? (c.kind == .direct ? Naming.otherInDirect(d, c)?.avatarUrl : nil), isSide: Naming.isSide(c))
+        }
+    }
 
     static func save(_ d: BootstrapDTO, apiURL: URL) {
         guard let defaults = UserDefaults(suiteName: suite) else { return }
-        let list = d.conversations.filter(\.canPost).map { c in
-            Target(id: c.id, title: Naming.title(d, c), subtitle: d.workspaces.first(where: { $0.id == c.workspaceId })?.name ?? L("kind.direct"))
-        }
+        let list = targets(d)
         defaults.set(try? JSONEncoder().encode(list), forKey: "targets")
         defaults.set(apiURL.absoluteString, forKey: "apiURL")
         defaults.set(Prefs.deviceId, forKey: "deviceId")
@@ -166,6 +218,12 @@ struct PendingMessage: Codable, Equatable, Identifiable, Sendable {
     var body: String
     var replyTo: String?
     var forwarded: ForwardedInfo?
+    /// Adjuntos ya subidos (pendientes en el servidor hasta que este mensaje los use).
+    var attachmentIds: [String]? = nil
+    /// Reenvío: adjuntos de mensajes que puedo leer (el servidor copia la referencia).
+    var forwardAttachmentIds: [String]? = nil
+    /// Copia local para mostrar la burbuja mientras se envía.
+    var attachments: [AttachmentDTO]? = nil
     var createdAt: String
     var attempts: Int
     var status: Status

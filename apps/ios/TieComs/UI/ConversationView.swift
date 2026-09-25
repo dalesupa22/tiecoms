@@ -77,6 +77,9 @@ struct ConversationView: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        // Cabecera opaca: los mensajes no se ven por detrás del título ni de las pestañas.
+        .toolbarBackground(Theme.background, for: .navigationBar)
+        .toolbarBackground(embedded ? .automatic : .visible, for: .navigationBar)
         .onAppear {
             store.openConversationId = conversationId
             let id = conversationId

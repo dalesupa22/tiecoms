@@ -475,7 +475,8 @@ struct SideChip: View {
         let unread = HomeOrder.pending(s) > 0
         let label = returned ? L("side.returnedChip") : L("side.thread", ["n": n == 1 ? L("side.replyOne") : L("side.replies", ["n": n])])
         return HStack(spacing: 8) {
-            Rectangle().fill(Theme.orange.opacity(0.5)).frame(width: 14, height: 1.5).offset(y: -6)
+            ThreadCurve().stroke(Theme.orange.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, lineCap: .round)).frame(width: 12, height: 16)
+                .offset(y: -8).accessibilityHidden(true)
             StackedAvatars(d: d, c: s, size: 20)
                 .frame(width: 20 + CGFloat(max(0, min(3, Naming.others(d, s).count) - 1)) * 11, alignment: .leading)
             VStack(alignment: .leading, spacing: 1) {
@@ -568,10 +569,21 @@ struct SidePanelPresenter: ViewModifier {
             .overlayPreferenceValue(SideAnchorKey.self) { anchors in
                 GeometryReader { proxy in
                     if sideId != nil, let anchor = anchors["anchor"] {
+                        // Por el margen derecho del chat (sin pasar sobre burbujas) hasta el asa de la hoja, con un punto en cada extremo.
                         let r = proxy[anchor]
-                        Path { p in p.move(to: CGPoint(x: r.midX, y: r.maxY + 2)); p.addLine(to: CGPoint(x: r.midX, y: proxy.size.height + 40)) }
-                            .stroke(anchorColor.opacity(0.8), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                            .accessibilityHidden(true)
+                        let x = proxy.size.width - 5
+                        let sheetTop = UIScreen.main.bounds.height * (1 - 0.58) - proxy.frame(in: .global).minY - 6
+                        let start = CGPoint(x: x, y: r.midY), end = CGPoint(x: x, y: max(r.midY + 12, sheetTop))
+                        ZStack {
+                            Path { p in
+                                p.move(to: CGPoint(x: x - 7, y: r.midY)); p.addQuadCurve(to: CGPoint(x: x, y: r.midY + 8), control: CGPoint(x: x, y: r.midY))
+                                p.addLine(to: end)
+                            }
+                            .stroke(anchorColor.opacity(0.85), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                            Circle().fill(anchorColor).frame(width: 6, height: 6).position(CGPoint(x: x - 7, y: start.y))
+                            Circle().fill(anchorColor).frame(width: 6, height: 6).position(end)
+                        }
+                        .accessibilityHidden(true)
                     }
                 }
                 .allowsHitTesting(false)
@@ -629,5 +641,15 @@ struct FloatingSideBubble: View {
             .accessibilityLabel(L("side.reopen"))
             .accessibilityIdentifier("side.floating")
         }
+    }
+}
+
+/// Curvita del chip-hilo: baja desde la burbuja ancla y entra al chip.
+struct ThreadCurve: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX + 1, y: r.minY))
+        p.addQuadCurve(to: CGPoint(x: r.maxX, y: r.maxY), control: CGPoint(x: r.minX + 1, y: r.maxY))
+        return p
     }
 }

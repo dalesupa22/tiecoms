@@ -90,12 +90,12 @@ final class SidechatUITests: XCTestCase {
         // Chip-hilo bajo el ancla → abre el sidechat (split en iPad, hoja a medias en iPhone).
         let chip = app.buttons["side.chip.\(anchorId)"]
         XCTAssertTrue(chip.waitForExistence(timeout: 10), "chip-hilo bajo el ancla")
-        shot("v5-01-chip-hilo")
+        shot("v5-01b-chip-hilo")
         chip.tap()
         XCTAssertTrue(app.descendants(matching: .any)["side.anchor"].waitForExistence(timeout: 8), "tarjeta del ancla")
         XCTAssertTrue(app.buttons["side.quick.check"].waitForExistence(timeout: 8), "respuestas rápidas para quien recibe")
         sleep(2)
-        shot("v5-02-sidechat-abierto")
+        shot("v5-02b-sidechat-abierto")
         app.buttons["side.quick.check"].tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Déjame reviso'")).firstMatch.waitForExistence(timeout: 8))
         sleep(1)

@@ -34,6 +34,17 @@ export interface Summarizer {
   readonly name: string;
   /** summary: una línea (solo si se pide); suggestedIssue: título corto si el texto pide una tarea concreta, si no null. */
   summarize(text: string, ctx: VoiceContext): Promise<{ summary: string | null; suggestedIssue: string | null }>;
+  /** Resumen para «Llevar al hilo» un sidechat: lo que se publicará en la conversación de origen. */
+  suggestSideReturn?(input: SideReturnInput): Promise<string | null>;
+}
+
+export interface SideReturnInput {
+  language: 'es' | 'en';
+  /** Quien lo publica en el hilo (y en cuyo nombre se escribe). */
+  publisherName: string;
+  anchor: { authorName: string; text: string };
+  originName: string | null;
+  messages: { authorName: string; text: string }[];
 }
 
 // ---------- Inworld STT ----------
@@ -83,6 +94,20 @@ export class DeepSeekSummarizer implements Summarizer {
     const clean = (v: unknown, n: number) => (typeof v === 'string' && v.trim() ? v.trim().replace(/\s+/g, ' ').slice(0, n) : null);
     return { summary: opts.wantSummary ? clean(out.summary, 200) : null, suggestedIssue: clean(out.suggestedIssue, 120) };
   }
+  async suggestSideReturn(input: SideReturnInput) {
+    const res = await fetch(`${this.url.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${this.key}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: this.model, temperature: 0.3, response_format: { type: 'json_object' },
+        messages: [{ role: 'system', content: sideReturnPrompt(input) }, { role: 'user', content: `Sidechat:\n${input.messages.map((m) => `${m.authorName}: ${m.text}`).join('\n').slice(-12_000)}` }],
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const j: any = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`deepseek_${res.status}`);
+    try { const out = JSON.parse(j?.choices?.[0]?.message?.content ?? '{}'); return typeof out.summary === 'string' && out.summary.trim() ? out.summary.trim().slice(0, 4000) : null; } catch { return null; }
+  }
 }
 
 /**
@@ -122,6 +147,26 @@ export function wavFromPcm(pcm: Buffer, sampleRate = PCM_RATE): Buffer {
   h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(sampleRate, 24);
   h.writeUInt32LE(sampleRate * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(pcm.length, 40);
   return Buffer.concat([h, pcm]);
+}
+
+/** Instrucciones para resumir un sidechat antes de llevarlo al hilo del grupo. */
+export function sideReturnPrompt(i: SideReturnInput) {
+  if (i.language === 'es') {
+    return [
+      'Eres el asistente de un chat de trabajo entre empresas. Un «sidechat» es una conversación privada que salió de un mensaje del grupo.',
+      `Quien publicará el resumen en el grupo: ${i.publisherName}. Mensaje del grupo que originó el sidechat (de ${i.anchor.authorName}): «${i.anchor.text.slice(0, 500)}». Grupo: ${i.originName ?? 'chat'}.`,
+      'Escribe el mensaje que se publicará en el grupo como respuesta a ese mensaje: 1 a 3 frases, en primera persona de quien publica, con la conclusión o respuesta concreta.',
+      'No reveles detalles privados innecesarios ni cites textualmente la conversación privada. No inventes nada que no esté en el sidechat.',
+      'Responde SOLO un JSON {"summary": string}. En español.',
+    ].join('\n');
+  }
+  return [
+    'You assist a work chat between companies. A "sidechat" is a private conversation that started from a group message.',
+    `Who will post the summary in the group: ${i.publisherName}. Group message that started the sidechat (by ${i.anchor.authorName}): "${i.anchor.text.slice(0, 500)}". Group: ${i.originName ?? 'chat'}.`,
+    'Write the message to post in the group as the answer to that message: 1 to 3 sentences, first person of the publisher, with the concrete conclusion or answer.',
+    'Do not reveal unnecessary private details or quote the private conversation verbatim. Do not invent anything not in the sidechat.',
+    'Reply ONLY with JSON {"summary": string}. In English.',
+  ].join('\n');
 }
 
 // ---------- Selección por entorno ----------

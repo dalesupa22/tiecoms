@@ -9,6 +9,7 @@ import { randomToken, sha256 } from '../security.ts';
 import { deliverInvitation, prepareInvitationFor } from './invitations.ts';
 import { appendEvent, appendMessage } from './messages.ts';
 import { ensureNotBlocked } from './safety.ts';
+import { getSummarizer } from './voice-providers.ts';
 
 /** Mensaje de sistema estructurado: cada cliente lo muestra en su idioma. */
 const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, ...p });
@@ -488,4 +489,43 @@ export async function createSideConversation(userId: string, parentId: string, i
     await scopeChanged(c, [userId, ...others], 'side.created', { conversationId: id });
     return { id };
   });
+}
+
+/**
+ * Resumen sugerido para «Llevar al hilo» un sidechat. Con DeepSeek: redactado con autor y contexto;
+ * sin llave (o si falla): las últimas respuestas de los demás. No publica nada.
+ */
+export async function suggestSideReturn(userId: string, sideId: string, lang: 'es' | 'en') {
+  await conversationAccess(pool, userId, sideId, 'post');
+  const { rows } = await pool.query(
+    `SELECT c.parent_conversation_id, c.parent_message_id, c.derive_kind, p.name AS parent_name, am.body AS anchor_body, am.deleted_at AS anchor_deleted, au.name AS anchor_author
+       FROM conversations c LEFT JOIN conversations p ON p.id = c.parent_conversation_id
+       LEFT JOIN messages am ON am.id = c.parent_message_id LEFT JOIN users au ON au.id = am.author_id WHERE c.id = $1`,
+    [sideId],
+  );
+  const side = rows[0];
+  if (!side?.parent_conversation_id) throw badRequest('Esta conversación no se derivó de otra');
+  const me = (await pool.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name ?? '';
+  const msgs = (await pool.query(
+    `SELECT m.author_id, m.body, u.name FROM messages m JOIN users u ON u.id = m.author_id
+      WHERE m.conversation_id = $1 AND m.kind = 'text' AND m.deleted_at IS NULL AND m.body <> '' ORDER BY m.seq DESC LIMIT 40`,
+    [sideId],
+  )).rows.reverse();
+  const fallback = () => {
+    const replies = msgs.filter((m) => m.author_id !== userId).slice(-3);
+    const pick = replies.length ? replies : msgs.slice(-3);
+    return pick.map((m) => (pick.every((x) => x.author_id === pick[0]!.author_id) ? m.body : `${m.name}: ${m.body}`)).join('\n').slice(0, 4000);
+  };
+  const ai = getSummarizer();
+  if (ai?.suggestSideReturn && msgs.length) {
+    try {
+      const summary = await ai.suggestSideReturn({
+        language: lang, publisherName: me, originName: side.parent_name ?? null,
+        anchor: { authorName: side.anchor_author ?? '', text: side.anchor_deleted ? '' : String(side.anchor_body ?? '') },
+        messages: msgs.map((m) => ({ authorName: m.name, text: m.body })),
+      });
+      if (summary) return { summary, source: 'ai' as const };
+    } catch (e: any) { console.error('[side] resumen sugerido', e?.message); }
+  }
+  return { summary: fallback(), source: 'fallback' as const };
 }

@@ -63,6 +63,12 @@ function messageText(body: string, atts: any, lang: Lang) {
   return clip(text, 180) || (lang === 'en' ? 'New message' : 'Mensaje nuevo');
 }
 
+/** Extracto del mensaje ancla (≤ 60) tal como lo ven los miembros del sidechat (mensaje side.started). */
+async function sideExcerpt(sideId: string): Promise<string | null> {
+  const { rows } = await pool.query("SELECT body FROM messages WHERE conversation_id = $1 AND kind = 'system' ORDER BY seq LIMIT 1", [sideId]);
+  try { const p = JSON.parse(rows[0]?.body ?? '{}'); return p.k === 'side.started' && p.excerpt ? clip(String(p.excerpt), 60) : null; } catch { return null; }
+}
+
 const clip = (s: string, n: number) => { const t = s.replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 
 interface Note { title: string; subtitle?: string | null; body: string; threadId: string; category: string; data: PushData; collapseId?: string }
@@ -81,7 +87,14 @@ export function apnsPayload(n: Note, badge: number) {
 /** FCM: todos los valores de `data` son texto. */
 export function fcmData(n: Note, badge: number): Record<string, string> {
   const out: Record<string, string> = { title: n.title, subtitle: n.subtitle ?? '', body: n.body, badge: String(badge), threadId: n.threadId, category: n.category };
-  for (const [k, v] of Object.entries(n.data)) if (v !== undefined && v !== null) out[k] = String(v);
+  for (const [k, v] of Object.entries(n.data)) {
+    if (v === undefined || v === null) continue;
+    if (typeof v === 'object') {
+      // FCM solo lleva texto: el objeto va como JSON y además aplanado (sideOf → sideOfConversationId…).
+      out[k] = JSON.stringify(v);
+      for (const [k2, v2] of Object.entries(v)) if (v2 !== undefined && v2 !== null) out[`${k}${k2[0]!.toUpperCase()}${k2.slice(1)}`] = String(v2);
+    } else out[k] = String(v);
+  }
   return out;
 }
 
@@ -117,6 +130,7 @@ async function deliver(targets: Target[], note: (t: Target) => Note) {
 export async function pushMessage(messageId: string) {
   const { rows } = await pool.query(
     `SELECT m.id, m.conversation_id, m.seq, m.author_id, m.body, m.attachments, m.deleted_at, m.kind, c.kind AS conv_kind, c.name AS conv_name,
+            c.derive_kind, c.parent_conversation_id, c.parent_message_id,
             u.name AS author_name, u.avatar_file_id, o.name AS org_name
        FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN users u ON u.id = m.author_id
        LEFT JOIN organizations o ON o.id = u.primary_org_id WHERE m.id = $1`,
@@ -140,6 +154,19 @@ export async function pushMessage(messageId: string) {
   );
   const direct = m.conv_kind === 'direct';
   const avatar = m.avatar_file_id ? `/api/v1/avatars/${m.avatar_file_id}` : '';
+  if (m.derive_kind === 'side') {
+    // Sidechat: «💬 Sidechat de Ana», «Sobre: «…»» y la pregunta; categoría TC_SIDE con Responder en línea.
+    const excerpt = await sideExcerpt(m.conversation_id);
+    const sideOf = { conversationId: m.parent_conversation_id, messageId: m.parent_message_id, excerpt };
+    await deliver(targets, (t) => ({
+      title: t.lang === 'en' ? `💬 Sidechat from ${m.author_name}` : `💬 Sidechat de ${m.author_name}`,
+      subtitle: excerpt ? `${t.lang === 'en' ? 'About' : 'Sobre'}: «${excerpt}»` : null,
+      body: messageText(m.body, m.attachments, t.lang),
+      threadId: m.conversation_id, category: 'TC_SIDE', collapseId: m.id,
+      data: { type: 'side', conversationId: m.conversation_id, messageId: m.id, authorId: m.author_id, authorName: m.author_name, authorAvatarUrl: avatar, sideOf },
+    }));
+    return targets.length;
+  }
   await deliver(targets, (t) => ({
     title: direct ? m.author_name : m.conv_name || m.author_name,
     subtitle: direct ? null : [m.author_name, m.org_name].filter(Boolean).join(' · '),

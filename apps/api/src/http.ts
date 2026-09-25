@@ -299,6 +299,8 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/derive', async (req) => ws.deriveConversation(req.userId, req.params.id, DeriveInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/side', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
       async (req) => ws.createSideConversation(req.userId, z.uuid().parse(req.params.id), SideConversationInput.parse(req.body)));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/return/suggest', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) =>
+      ws.suggestSideReturn(req.userId, z.uuid().parse(req.params.id), /^\s*en\b/i.test(String(req.headers['accept-language'] ?? '')) ? 'en' : 'es'));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/return', async (req) => ws.returnResult(req.userId, req.params.id, ReturnResultInput.parse(req.body).summary));
     // Asuntos
     priv.get<{ Querystring: { workspaceId?: string; conversationId?: string; mine?: string; open?: string } }>('/api/v1/issues', async (req) => ({

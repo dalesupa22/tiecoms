@@ -537,7 +537,8 @@ export const PushTokenInput = z.object({
  * type: message | reminder | event. Clientes: ignorar campos y tipos desconocidos.
  */
 export interface PushData {
-  type: 'message' | 'reminder' | 'event';
+  /** side = mensaje de un sidechat (categoría TC_SIDE; trae sideOf). */
+  type: 'message' | 'reminder' | 'event' | 'side';
   conversationId: string;
   messageId?: string;
   authorId?: string;
@@ -548,6 +549,11 @@ export interface PushData {
   eventId?: string;
   /** Solo en el aviso «empieza pronto» de una reunión (type 'event'): minutos que faltan. */
   minutes?: number;
+  /**
+   * Solo en sidechats: de qué conversación y mensaje cuelga y su extracto (≤ 60). En FCM llega como JSON en `sideOf`
+   * y aplanado en sideOfConversationId, sideOfMessageId y sideOfExcerpt.
+   */
+  sideOf?: { conversationId: string | null; messageId: string | null; excerpt: string | null };
 }
 
 // ---------- Archivos (árbol de carpetas) ----------

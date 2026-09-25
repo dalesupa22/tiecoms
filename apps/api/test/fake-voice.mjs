@@ -3,13 +3,14 @@
 // GET /sent: lo recibido. POST /fail: la próxima transcripción responde 500.
 import http from 'node:http';
 const sent = [];
-let failNext = false;
+let failNext = false, failLlm = false;
 http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/sent') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(sent));
   let data = '';
   req.on('data', (c) => (data += c));
   req.on('end', () => {
     if (req.url === '/fail') { failNext = true; return res.writeHead(204).end(); }
+    if (req.url === '/fail-llm') { failLlm = true; return res.writeHead(204).end(); }
     const body = data ? JSON.parse(data) : {};
     if (req.url === '/stt/v1/transcribe') {
       const audio = Buffer.from(body.audioData?.content ?? '', 'base64');
@@ -24,6 +25,11 @@ http.createServer((req, res) => {
     }
     if (req.url === '/chat/completions') {
       sent.push({ kind: 'llm', auth: req.headers.authorization, model: body.model, messages: body.messages });
+      if (failLlm) { failLlm = false; return res.writeHead(503, { 'content-type': 'application/json' }).end('{"error":"falla simulada"}'); }
+      const sys = body.messages?.find((m) => m.role === 'system')?.content ?? '';
+      if (sys.includes('sidechat')) {
+        return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify({ summary: 'Lo consulté: aplica la cláusula 4 con tope del 10 %.' }) } }] }));
+      }
       const user = body.messages?.find((m) => m.role === 'user')?.content ?? '';
       const content = user.includes('te mando')
         ? JSON.stringify({ summary: null, suggestedIssue: 'Enviar el contrato revisado el jueves' })

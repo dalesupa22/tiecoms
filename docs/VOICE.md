@@ -5,10 +5,14 @@ Una nota de voz es un adjunto (`POST /api/v1/conversations/:id/attachments`) con
 
 1. Si el original no suena en todas partes (webm/ogg/flac), genera una variante **AAC m4a** mono 24 kHz 32 kbps con ffmpeg
    (`-map_metadata -1 -fflags +bitexact -flags:a +bitexact -movflags +faststart`: reproducible, mismos bytes para la misma entrada).
-   `url` sirve esa variante; `?original=1` el archivo subido.
-2. Convierte a PCM LINEAR16 16 kHz mono, lo parte en trozos de ≤ 11 MB (≈ 15 MB en base64) y llama a **Inworld STT**
-   (`inworld/inworld-stt-1`) con el idioma del autor (`es-CO` / `en-US`).
-3. Opcional, **DeepSeek** (`deepseek-chat`): resumen de una línea si dura > 45 s y `suggestedIssue` si pide una tarea.
+   `url` sirve esa variante; `?original=1` el archivo subido. Sin ffmpeg, la nota queda con el original.
+2. **Inworld STT** (`inworld/inworld-stt-1`, síncrono) recibe el ARCHIVO ORIGINAL en base64 con `audioEncoding: 'AUTO_DETECT'`
+   (acepta WAV, MP3, OGG, FLAC, M4A y WebM; PCM crudo no) y el idioma del autor (`es-CO` / `en-US`). Solo si el formato no es
+   de esos o pesa más de 11 MB (≈ 15 MB en base64), ffmpeg lo pasa a WAV 16 kHz mono en trozos. Así las notas m4a de las apps
+   se transcriben aunque no haya ffmpeg. Prueba real (25-sep-2026): m4a AAC 32 kbps de 6,4 s → texto exacto en es-CO.
+3. Opcional, **DeepSeek** (`deepseek-chat`, `response_format: json_object`): recibe autor, participantes y conversación;
+   resumen de una línea en tercera persona con el autor como sujeto si dura > 45 s, y `suggestedIssue` para pedidos y
+   compromisos («el jueves te mando el contrato» → «Enviar el contrato revisado el jueves»).
 4. Guarda `transcript` y emite `message.updated` (sin push).
 
 Proveedores detrás de `Transcriber` y `Summarizer` (`apps/api/src/modules/voice-providers.ts`): otro proveedor implementa la interfaz.

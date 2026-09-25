@@ -670,11 +670,18 @@ export class TieComsClient {
 
   // ---------- Adjuntos ----------
   /** Sube un archivo a una conversación (queda pendiente hasta que un mensaje lo use). ≤ 25 MB. */
-  uploadAttachment(conversationId: string, file: Blob, name: string) {
+  uploadAttachment(conversationId: string, file: Blob, name: string, voice?: { durationMs: number; waveform?: number[] }) {
     return this.request<AttachmentDTO>(`/conversations/${conversationId}/attachments`, {
       method: 'POST', body: file,
-      headers: { 'content-type': 'application/octet-stream', 'x-file-name': encodeURIComponent(name), 'x-file-type': file.type || 'application/octet-stream' },
+      headers: {
+        'content-type': 'application/octet-stream', 'x-file-name': encodeURIComponent(name), 'x-file-type': file.type || 'application/octet-stream',
+        ...(voice ? { 'x-voice-note': '1', 'x-duration-ms': String(Math.round(voice.durationMs)), ...(voice.waveform?.length ? { 'x-waveform': voice.waveform.map((v) => v.toFixed(2)).join(',') } : {}) } : {}),
+      },
     });
+  }
+  /** Vuelve a pedir la transcripción de una nota de voz que falló. */
+  retryTranscription(attachmentId: string) {
+    return this.request<AttachmentDTO>(`/attachments/${attachmentId}/transcribe`, { method: 'POST', json: {} });
   }
   /** Miniatura opcional (JPEG/PNG/WebP ≤ 512 KB) de un adjunto aún pendiente. */
   uploadAttachmentThumb(id: string, thumb: Blob) {

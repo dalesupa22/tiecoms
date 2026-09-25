@@ -4,6 +4,7 @@ import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE } from '@tiecoms/cont
 import { client } from '../app-client.ts';
 import { errorText, t } from '../i18n.ts';
 import { toast } from '../menu.tsx';
+import { VoiceNote } from './Voice.tsx';
 
 // ---------- Descarga autenticada con caché en memoria ----------
 const blobs = new Map<string, Promise<string>>();
@@ -85,13 +86,15 @@ export function FileChip({ a, onRemove, status }: { a: { name: string; contentTy
 }
 
 /** Fotos y videos en cuadrícula (1–4 visibles + «+N») y archivos como fichas con descarga. */
-export function AttachmentsView({ list }: { list: AttachmentDTO[] }) {
+export function AttachmentsView({ list, onCreateIssue }: { list: AttachmentDTO[]; onCreateIssue?: (title: string) => void }) {
   const [viewing, setViewing] = useState<number | null>(null);
-  const visual = list.filter(isVisual);
-  const files = list.filter((a) => !isVisual(a));
+  const voices = list.filter((a) => a.kind === 'voice');
+  const visual = list.filter((a) => a.kind !== 'voice' && isVisual(a));
+  const files = list.filter((a) => a.kind !== 'voice' && !isVisual(a));
   const shown = visual.slice(0, 4);
   return (
     <div className="att-wrap">
+      {voices.map((a) => <VoiceNote key={a.id} a={a} onCreateIssue={onCreateIssue} />)}
       {shown.length > 0 && (
         <div className={`att-grid n${shown.length}`}>
           {shown.map((a, i) => <Tile key={a.id} a={a} more={i === 3 && visual.length > 4 ? visual.length - 4 : undefined} onOpen={() => setViewing(i)} />)}

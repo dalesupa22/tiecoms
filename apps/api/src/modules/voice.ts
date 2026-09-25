@@ -8,7 +8,7 @@ import { ApiError, badRequest, notFound } from '../errors.ts';
 import { getObject, putObject } from '../storage.ts';
 import { readable, toDTO } from './attachments.ts';
 import { appendEvent, toMessageDTO } from './messages.ts';
-import { PCM_RATE, PLAYABLE, chunkPcm, getSummarizer, getTranscriber, toAac, toPcm16, waveformFromPcm } from './voice-providers.ts';
+import { PCM_RATE, PLAYABLE, chunkPcm, getSummarizer, getTranscriber, toAac, toPcm16, wavFromPcm, waveformFromPcm } from './voice-providers.ts';
 
 const SUMMARY_AFTER_MS = 45_000;
 const LOCALE: Record<string, string> = { es: 'es-CO', en: 'en-US' };
@@ -46,6 +46,19 @@ async function authorLang(a: any): Promise<'es' | 'en'> {
   return l === 'en' ? 'en' : 'es';
 }
 
+/** Autor, participantes y nombre de la conversación para el resumen. */
+async function voiceContext(a: any, language: 'es' | 'en', wantSummary: boolean) {
+  const { rows } = await pool.query(
+    `SELECT c.name AS conv_name, c.kind, au.name AS author,
+            ARRAY(SELECT u.name FROM conversation_memberships cm JOIN users u ON u.id = cm.user_id
+                   WHERE cm.conversation_id = c.id AND cm.removed_at IS NULL AND u.id <> $2 ORDER BY u.name LIMIT 20) AS others
+       FROM conversations c JOIN users au ON au.id = $2 WHERE c.id = $1`,
+    [a.conversation_id, a.owner_id],
+  );
+  const r = rows[0] ?? {};
+  return { language, wantSummary, authorName: r.author ?? 'Autor', participants: r.others ?? [], conversationName: r.kind === 'direct' ? null : r.conv_name ?? null };
+}
+
 /** Job del worker. Nunca lanza: los fallos quedan en transcript.status = 'failed' (reintento manual). */
 export async function transcribeAttachment(attachmentId: string) {
   const { rows } = await pool.query("SELECT * FROM attachments WHERE id = $1 AND kind = 'voice' AND deleted_at IS NULL", [attachmentId]);
@@ -64,27 +77,38 @@ export async function transcribeAttachment(attachmentId: string) {
         await putObject(playKey, aac, 'audio/mp4');
       } catch (e: any) { console.error('[voice] sin variante AAC', e?.message); }
     }
-    const pcm = await toPcm16(original);
     const lang = await authorLang(a);
     const parts: string[] = [];
-    let detected: string | null = null;
-    for (const chunk of chunkPcm(pcm)) {
-      const r = await transcriber.transcribe(chunk, PCM_RATE, LOCALE[lang]!);
-      if (r.text) parts.push(r.text);
-      detected ??= r.language;
+    let detected: string | null = null, audioMs = 0;
+    // Camino directo: el archivo tal cual (m4a de las apps, webm de la web…). ffmpeg solo si el formato no se acepta
+    // o si hay que partirlo (entonces WAV 16 kHz mono en trozos).
+    let pcm: Buffer | null = null;
+    if (transcriber.accepts.has(a.content_type) && original.length <= transcriber.maxBytes) {
+      const r = await transcriber.transcribe(original, LOCALE[lang]!);
+      parts.push(r.text); detected = r.language; audioMs = r.audioMs ?? 0;
+    } else {
+      pcm = await toPcm16(original);
+      for (const chunk of chunkPcm(pcm, transcriber.maxBytes - 44)) {
+        const r = await transcriber.transcribe(wavFromPcm(chunk), LOCALE[lang]!);
+        parts.push(r.text); detected ??= r.language; audioMs += r.audioMs ?? 0;
+      }
     }
-    const text = parts.join(' ').replace(/\s+/g, ' ').trim();
-    const durationMs = a.duration_ms ?? Math.round((pcm.length / 2 / PCM_RATE) * 1000);
+    const text = parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    // Onda: la del cliente; si no mandó, se calcula del PCM (si ffmpeg está disponible).
+    if (!a.waveform?.length && !pcm) pcm = await toPcm16(original).catch(() => null);
+    const durationMs = a.duration_ms ?? (audioMs || (pcm ? Math.round((pcm.length / 2 / PCM_RATE) * 1000) : null));
     let summary: string | null = null, suggestedIssue: string | null = null;
     const summarizer = getSummarizer();
     if (summarizer && text.split(/\s+/).length >= 6) {
-      try { ({ summary, suggestedIssue } = await summarizer.summarize(text, { language: lang, wantSummary: durationMs > SUMMARY_AFTER_MS })); }
-      catch (e: any) { console.error('[voice] resumen', e?.message); }
+      try {
+        const ctx = await voiceContext(a, lang, (durationMs ?? 0) > SUMMARY_AFTER_MS);
+        ({ summary, suggestedIssue } = await summarizer.summarize(text, ctx));
+      } catch (e: any) { console.error('[voice] resumen', e?.message); }
     }
-    if (a.duration_ms == null) await pool.query('UPDATE attachments SET duration_ms = $2 WHERE id = $1', [a.id, durationMs]);
+    if (a.duration_ms == null && durationMs) await pool.query('UPDATE attachments SET duration_ms = $2 WHERE id = $1', [a.id, durationMs]);
     await save(a.id, {
       transcript: { status: 'done', text, language: detected ?? LOCALE[lang], summary, suggestedIssue, provider: transcriber.name, error: null },
-      waveform: a.waveform?.length ? null : waveformFromPcm(pcm), playKey, playType: playKey ? 'audio/mp4' : undefined,
+      waveform: a.waveform?.length || !pcm ? null : waveformFromPcm(pcm), playKey, playType: playKey ? 'audio/mp4' : undefined,
     });
   } catch (e: any) {
     console.error(`[voice] transcripción ${a.id} falló`, e?.message);

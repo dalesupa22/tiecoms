@@ -10,6 +10,7 @@ import { navigate, queryParam } from '../router.ts';
 import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, orgById, personById, personColor } from '../ui.tsx';
 import { PhotoCropDialog, pickImage } from './PhotoCrop.tsx';
 import { AttachmentsView, DraftTray, pickFiles, useDrafts } from './Attachments.tsx';
+import { VoiceRecorder } from './Voice.tsx';
 import { SideChip, SideDialog, replyPrivately, sidesOf, takePrivateDraft } from './Side.tsx';
 import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
@@ -45,7 +46,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deriving, setDeriving] = useState<MessageDTO | null>(null);
-  const [newIssue, setNewIssue] = useState<{ origin?: MessageDTO } | null>(null);
+  const [newIssue, setNewIssue] = useState<{ origin?: MessageDTO; title?: string } | null>(null);
   const [openIssue, setOpenIssue] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<number | null>(null);
   const [replyTo, setReplyTo] = useState<MessageDTO | null>(null);
@@ -291,7 +292,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                   ) : (
                     (m.body || m.deletedAt || !m.attachments?.length) && <div className="msg-body">{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <Linkify text={m.body} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
                   )}
-                  {!m.deletedAt && !!m.attachments?.length && <AttachmentsView list={m.attachments} />}
+                  {!m.deletedAt && !!m.attachments?.length && <AttachmentsView list={m.attachments} onCreateIssue={canWork ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
                   {!m.deletedAt && !isEditing && m.linkPreview && <LinkPreviewCard p={m.linkPreview} />}
                   {!embedded && <SideChip d={d} sides={sidesOf(d, id, m.id)} onOpen={setSideId} />}
                   {issueOf(m.id) && <button className="msg-issue" onClick={() => setOpenIssue(issueOf(m.id)!.id)}>◆ {issueOf(m.id)!.title}</button>}
@@ -341,7 +342,10 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                 onKeyDown={onKey} enterKeyHint="send"
                 onPaste={(e) => { const files = [...e.clipboardData.files]; if (files.length) { e.preventDefault(); drafts.add(files); } }}
               />
-              <button className="send" onClick={send} disabled={(!text.trim() && !drafts.ready.length) || drafts.busy} aria-label={t('chat.send')}>➤</button>
+              {/* Con el compositor vacío, el micrófono: mantener pulsado graba una nota de voz. */}
+              {!text.trim() && !drafts.drafts.length && !privateReply
+                ? <VoiceRecorder conversationId={id} onSent={() => { atBottom.current = true; setReplyTo(null); }} />
+                : <button className="send" onClick={send} disabled={(!text.trim() && !drafts.ready.length) || drafts.busy} aria-label={t('chat.send')}>➤</button>}
             </div>
             </>
           ) : <div className="hint" style={{ textAlign: 'center', padding: 8 }}>{t('chat.readOnly')}</div>}
@@ -423,7 +427,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       {deriving && <DeriveDialog conv={conv} message={deriving} onClose={() => setDeriving(null)} />}
       {newIssue && (
         <NewIssueDialog conversationId={id} originMessageId={newIssue.origin?.id}
-          defaultTitle={newIssue.origin ? excerpt(newIssue.origin.body) : ''}
+          defaultTitle={newIssue.title ?? (newIssue.origin ? excerpt(newIssue.origin.body) : '')}
           onClose={() => setNewIssue(null)} onCreated={(i) => setOpenIssue(i.id)} />
       )}
       {openIssue && <IssueDrawer id={openIssue} onClose={() => setOpenIssue(null)} />}

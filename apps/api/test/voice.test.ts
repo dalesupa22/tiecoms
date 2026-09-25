@@ -95,8 +95,17 @@ describe('notas de voz', () => {
     expect(done.contentType).toBe('audio/mp4');
     const reqs = (await (await fetch(`${FAKE}/sent`)).json()) as any[];
     const stt = reqs.filter((r) => r.kind === 'stt').at(-1);
-    expect(stt).toMatchObject({ auth: 'Basic clave-falsa-inworld', config: { modelId: 'inworld/inworld-stt-1', audioEncoding: 'LINEAR16', language: 'es-CO', sampleRateHertz: 16000, numberOfChannels: 1 }, bytes: 64000 });
-    expect(reqs.filter((r) => r.kind === 'llm').at(-1)).toMatchObject({ auth: 'Bearer clave-falsa-deepseek', model: 'deepseek-chat' });
+    // El archivo va tal cual (webm) con AUTO_DETECT, sin sampleRate.
+    expect(stt).toMatchObject({ auth: 'Basic clave-falsa-inworld', config: { modelId: 'inworld/inworld-stt-1', audioEncoding: 'AUTO_DETECT', language: 'es-CO' }, bytes: WEBM.length });
+    expect(stt.config.sampleRateHertz).toBeUndefined();
+    const llm = reqs.filter((r) => r.kind === 'llm').at(-1);
+    expect(llm).toMatchObject({ auth: 'Bearer clave-falsa-deepseek', model: 'deepseek-chat' });
+    const system = llm.messages.find((m: any) => m.role === 'system').content;
+    expect(system).toContain('Autor (quien habla): Ana');
+    expect(system).toContain('Participantes de la conversación: Beto');
+    expect(system).toContain('Conversación: Voz');
+    expect(system).toContain('tercera persona con el autor como sujeto');
+    expect(system).toContain('se compromete');
     // url sirve la variante AAC; ?original=1 el webm subido.
     const play = await call(`/attachments/${up.json.id}`, { token: beto.token });
     expect(play.headers.get('content-type')).toBe('audio/mp4');
@@ -108,14 +117,42 @@ describe('notas de voz', () => {
     expect(conv.lastMessagePreview).toBe('🎤');
   });
 
-  it('m4a ya reproducible: sin variante; nota corta sin resumen', async () => {
-    const up = await voiceUpload(ana, chatId, M4A, 'audio/mp4', { 'x-duration-ms': '8000' });
+  it('m4a de las apps: se transcribe directo aunque ffmpeg falle; sin variante; nota corta sin resumen', async () => {
+    // «romper-ffmpeg» hace fallar al ffmpeg falso: el camino directo no lo necesita.
+    const m4a = Buffer.concat([M4A, Buffer.from('romper-ffmpeg')]);
+    const up = await voiceUpload(ana, chatId, m4a, 'audio/mp4', { 'x-duration-ms': '8000', 'x-waveform': '0.2,0.8,0.4' });
     const m = (await call(`/conversations/${chatId}/messages`, { token: ana.token, body: { clientMessageId: randomUUID(), body: '', attachmentIds: [up.json.id] } })).json.message;
     const done = await waitTranscript(m.id, 'done');
     expect(done.contentType).toBe('audio/mp4');
     expect(done.transcript.summary).toBeNull();
+    expect(done.transcript.text).toContain('contrato');
+    expect(done.waveform).toEqual([0.2, 0.8, 0.4]);
+    expect((await call(`/attachments/${up.json.id}`, { token: beto.token })).buf.equals(m4a)).toBe(true);
+    const stt = ((await (await fetch(`${FAKE}/sent`)).json()) as any[]).filter((r) => r.kind === 'stt').at(-1);
+    expect(stt.bytes).toBe(m4a.length);
+  });
+
+  it('formato no aceptado: ffmpeg lo pasa a WAV 16 kHz y se transcribe; el servidor calcula la onda', async () => {
+    const odd = Buffer.from('audio-raro-sin-cabecera-conocida'.repeat(10));
+    const up = await voiceUpload(ana, chatId, odd, 'audio/x-caf', { 'x-duration-ms': '' });
+    expect(up.json.contentType).toBe('audio/x-caf');
+    const m = (await call(`/conversations/${chatId}/messages`, { token: ana.token, body: { clientMessageId: randomUUID(), body: '', attachmentIds: [up.json.id] } })).json.message;
+    const done = await waitTranscript(m.id, 'done');
+    const stt = ((await (await fetch(`${FAKE}/sent`)).json()) as any[]).filter((r) => r.kind === 'stt').at(-1);
+    expect(stt.head.startsWith('RIFF')).toBe(true);
+    expect(stt.bytes).toBe(44 + 64000);
     expect(done.waveform.length).toBeGreaterThan(10);
-    expect((await call(`/attachments/${up.json.id}`, { token: beto.token })).buf.equals(M4A)).toBe(true);
+    expect(done.durationMs).toBe(2000);
+  });
+
+  it('un compromiso del autor («el jueves te mando…») se sugiere como asunto', async () => {
+    const up = await voiceUpload(ana, chatId, Buffer.concat([M4A, Buffer.from('compromiso')]), 'audio/mp4', { 'x-duration-ms': '6000' });
+    const m = (await call(`/conversations/${chatId}/messages`, { token: ana.token, body: { clientMessageId: randomUUID(), body: '', attachmentIds: [up.json.id] } })).json.message;
+    const done = await waitTranscript(m.id, 'done');
+    expect(done.transcript).toMatchObject({ status: 'done', summary: null, suggestedIssue: 'Enviar el contrato revisado el jueves' });
+    const llm = ((await (await fetch(`${FAKE}/sent`)).json()) as any[]).filter((r) => r.kind === 'llm').at(-1);
+    expect(llm.messages.find((x: any) => x.role === 'user').content).toContain('Hola Beto, el jueves te mando');
+    expect(llm.messages.find((x: any) => x.role === 'system').content).toContain('summary: null.');
   });
 
   it('si Inworld falla queda failed y se reintenta a mano', async () => {

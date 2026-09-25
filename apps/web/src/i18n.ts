@@ -303,6 +303,16 @@ const es = {
   // ---------- SPEC v4 E: asuntos y agenda en directos y chats grupales ----------
   'cal.soon': 'Empieza en {n} min: {title}', 'cal.soonShort': 'En {n} min', 'cal.chatsSection': 'Chats', 'issue.chatsSection': 'Chats',
   'cal.inChat': 'En el chat «{name}»', 'cal.channelSoon': 'Avisos de reunión', 'cal.channelSoonDesc': 'Aviso 10 minutos antes de tus reuniones',
+  // ---------- SPEC v4 F: notas de voz ----------
+  'voice.note': 'Nota de voz', 'voice.preview': '🎤 Nota de voz ({d})', 'voice.previewShort': '🎤 Nota de voz', 'voice.hold': 'Mantén pulsado para grabar',
+  'voice.recording': 'Grabando…', 'voice.slideCancel': '‹ Desliza para cancelar', 'voice.slideLock': 'Desliza arriba para bloquear', 'voice.locked': 'Grabación bloqueada',
+  'voice.send': 'Enviar nota de voz', 'voice.discard': 'Descartar', 'voice.play': 'Reproducir', 'voice.pause': 'Pausar', 'voice.speed': 'Velocidad',
+  'voice.showTranscript': 'Ver transcripción', 'voice.hideTranscript': 'Ocultar transcripción', 'voice.transcribing': 'Transcribiendo…',
+  'voice.failed': 'No se pudo transcribir', 'voice.retry': 'Reintentar', 'voice.copy': 'Copiar transcripción', 'voice.copied': 'Transcripción copiada',
+  'voice.summary': 'Resumen', 'voice.createIssue': 'Crear asunto: {title}', 'voice.micDenied': 'Permite el micrófono para grabar notas de voz.',
+  'voice.micUnavailable': 'Este navegador no puede grabar audio.', 'voice.tooLong': 'Máximo 15 minutos por nota.', 'voice.tooShort': 'La nota es demasiado corta.',
+  'voice.micPermission': 'TieComs usa el micrófono para grabar notas de voz que envías en tus conversaciones.', 'voice.unheard': 'Sin escuchar',
+  'voice.cancelled': 'Nota descartada', 'voice.uploading': 'Enviando nota de voz…',
 };
 
 type Key = keyof typeof es;
@@ -577,6 +587,16 @@ const en: Record<Key, string> = {
   // ---------- SPEC v4 E: issues and calendar in direct and group chats ----------
   'cal.soon': 'Starts in {n} min: {title}', 'cal.soonShort': 'In {n} min', 'cal.chatsSection': 'Chats', 'issue.chatsSection': 'Chats',
   'cal.inChat': 'In the chat “{name}”', 'cal.channelSoon': 'Meeting alerts', 'cal.channelSoonDesc': 'Alert 10 minutes before your meetings',
+  // ---------- SPEC v4 F: voice notes ----------
+  'voice.note': 'Voice note', 'voice.preview': '🎤 Voice note ({d})', 'voice.previewShort': '🎤 Voice note', 'voice.hold': 'Hold to record',
+  'voice.recording': 'Recording…', 'voice.slideCancel': '‹ Slide to cancel', 'voice.slideLock': 'Slide up to lock', 'voice.locked': 'Recording locked',
+  'voice.send': 'Send voice note', 'voice.discard': 'Discard', 'voice.play': 'Play', 'voice.pause': 'Pause', 'voice.speed': 'Speed',
+  'voice.showTranscript': 'Show transcript', 'voice.hideTranscript': 'Hide transcript', 'voice.transcribing': 'Transcribing…',
+  'voice.failed': 'Could not transcribe', 'voice.retry': 'Retry', 'voice.copy': 'Copy transcript', 'voice.copied': 'Transcript copied',
+  'voice.summary': 'Summary', 'voice.createIssue': 'Create issue: {title}', 'voice.micDenied': 'Allow the microphone to record voice notes.',
+  'voice.micUnavailable': 'This browser cannot record audio.', 'voice.tooLong': 'Up to 15 minutes per note.', 'voice.tooShort': 'The note is too short.',
+  'voice.micPermission': 'TieComs uses the microphone to record the voice notes you send in your conversations.', 'voice.unheard': 'Not played',
+  'voice.cancelled': 'Note discarded', 'voice.uploading': 'Sending voice note…',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };
@@ -648,7 +668,12 @@ export function systemText(body: string): string {
 }
 
 /** «📷 3 fotos», «🎬 Video», «📎 contrato.pdf» a partir del resumen del API. */
-export function attachmentSummaryText(a: { count: number; images: number; videos: number; files: number; firstName: string | null }): string {
+export function voiceDuration(ms: number | null | undefined) {
+  const total = Math.round((ms ?? 0) / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+export function attachmentSummaryText(a: { count: number; images: number; videos: number; files: number; firstName: string | null; voices?: number; voiceDurationMs?: number | null }): string {
+  if (a.voices && a.voices === a.count) return a.voiceDurationMs ? t('voice.preview', { d: voiceDuration(a.voiceDurationMs) }) : t('voice.previewShort');
   if (a.images === a.count) return a.count === 1 ? t('att.photo') : t('att.photos', { n: a.count });
   if (a.videos === a.count) return a.count === 1 ? t('att.video') : t('att.videos', { n: a.count });
   if (a.images + a.videos === a.count) return t('att.media', { n: a.count });

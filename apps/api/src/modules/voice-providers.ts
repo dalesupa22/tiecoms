@@ -13,27 +13,47 @@ import { join } from 'node:path';
 
 export interface Transcriber {
   readonly name: string;
-  /** Audio PCM 16 bits little-endian mono (LINEAR16). language: BCP-47 (es-CO, en-US…). */
-  transcribe(pcm: Buffer, sampleRate: number, language: string): Promise<{ text: string; language: string | null; audioMs: number | null }>;
+  /** Formatos que acepta tal cual (el archivo completo). */
+  readonly accepts: ReadonlySet<string>;
+  /** Tamaño máximo por llamada (bytes del archivo, antes de base64). */
+  readonly maxBytes: number;
+  /** audio: archivo completo en un formato de `accepts` (o WAV). language: BCP-47 (es-CO, en-US…). */
+  transcribe(audio: Buffer, language: string): Promise<{ text: string; language: string | null; audioMs: number | null }>;
+}
+
+export interface VoiceContext {
+  language: 'es' | 'en';
+  wantSummary: boolean;
+  /** Quién grabó la nota, con quién habla y dónde: así el resumen no confunde al autor con el destinatario. */
+  authorName: string;
+  participants: string[];
+  conversationName: string | null;
 }
 
 export interface Summarizer {
   readonly name: string;
   /** summary: una línea (solo si se pide); suggestedIssue: título corto si el texto pide una tarea concreta, si no null. */
-  summarize(text: string, opts: { language: 'es' | 'en'; wantSummary: boolean }): Promise<{ summary: string | null; suggestedIssue: string | null }>;
+  summarize(text: string, ctx: VoiceContext): Promise<{ summary: string | null; suggestedIssue: string | null }>;
 }
 
 // ---------- Inworld STT ----------
+/**
+ * Inworld STT síncrono: acepta WAV, MP3, OGG, FLAC, M4A y WebM completos con audioEncoding AUTO_DETECT
+ * (probado el 25-sep-2026: m4a AAC mono 32 kbps de 6 s → 0,6 s, es-CO correcto). PCM crudo sin cabecera no lo acepta.
+ * Límite ≈ 16 MB por petición con base64: se mandan archivos de hasta 11 MB.
+ */
 export class InworldTranscriber implements Transcriber {
   readonly name = 'inworld';
+  readonly accepts = new Set(['audio/wav', 'audio/mpeg', 'audio/ogg', 'audio/flac', 'audio/mp4', 'audio/webm']);
+  readonly maxBytes = 11 * 1024 * 1024;
   constructor(private key: string, private url = process.env.INWORLD_STT_URL || 'https://api.inworld.ai/stt/v1/transcribe', private model = process.env.INWORLD_STT_MODEL || 'inworld/inworld-stt-1') {}
-  async transcribe(pcm: Buffer, sampleRate: number, language: string) {
+  async transcribe(audio: Buffer, language: string) {
     const res = await fetch(this.url, {
       method: 'POST',
       headers: { authorization: `Basic ${this.key}`, 'content-type': 'application/json' },
       body: JSON.stringify({
-        transcribeConfig: { modelId: this.model, audioEncoding: 'LINEAR16', language, sampleRateHertz: sampleRate, numberOfChannels: 1 },
-        audioData: { content: pcm.toString('base64') },
+        transcribeConfig: { modelId: this.model, audioEncoding: 'AUTO_DETECT', language },
+        audioData: { content: audio.toString('base64') },
       }),
       signal: AbortSignal.timeout(120_000),
     });
@@ -47,15 +67,13 @@ export class InworldTranscriber implements Transcriber {
 export class DeepSeekSummarizer implements Summarizer {
   readonly name = 'deepseek';
   constructor(private key: string, private url = process.env.DEEPSEEK_URL || 'https://api.deepseek.com', private model = process.env.DEEPSEEK_MODEL || 'deepseek-chat') {}
-  async summarize(text: string, opts: { language: 'es' | 'en'; wantSummary: boolean }) {
-    const es = opts.language === 'es';
-    const system = es
-      ? 'Eres un asistente de un chat de trabajo entre empresas. Recibes la transcripción de una nota de voz. Responde SOLO un JSON {"summary": string|null, "suggestedIssue": string|null}. summary: una sola línea (≤ 140 caracteres) con lo esencial' + (opts.wantSummary ? '' : ' (devuélvelo null)') + '. suggestedIssue: si la nota pide o compromete una tarea concreta, un título breve e imperativo (≤ 80 caracteres); si no, null. En español.'
-      : 'You assist a work chat between companies. You get a voice note transcript. Reply ONLY with JSON {"summary": string|null, "suggestedIssue": string|null}. summary: one line (≤ 140 chars) with the gist' + (opts.wantSummary ? '' : ' (return null)') + '. suggestedIssue: if the note asks for or commits to a concrete task, a short imperative title (≤ 80 chars); otherwise null. In English.';
+  async summarize(text: string, opts: VoiceContext) {
+    const system = voicePrompt(opts);
+    const user = `${opts.language === 'es' ? 'Transcripción' : 'Transcript'}:\n${text.slice(0, 12_000)}`;
     const res = await fetch(`${this.url.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: { authorization: `Bearer ${this.key}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: this.model, temperature: 0.2, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: text.slice(0, 12_000) }] }),
+      body: JSON.stringify({ model: this.model, temperature: 0.2, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
       signal: AbortSignal.timeout(60_000),
     });
     const j: any = await res.json().catch(() => ({}));
@@ -65,6 +83,45 @@ export class DeepSeekSummarizer implements Summarizer {
     const clean = (v: unknown, n: number) => (typeof v === 'string' && v.trim() ? v.trim().replace(/\s+/g, ' ').slice(0, n) : null);
     return { summary: opts.wantSummary ? clean(out.summary, 200) : null, suggestedIssue: clean(out.suggestedIssue, 120) };
   }
+}
+
+/**
+ * Instrucciones del resumen. El autor es quien HABLA: aunque la nota empiece con «Hola Laura», el sujeto es el autor
+ * y Laura es a quien le habla. suggestedIssue detecta pedidos y también compromisos («el jueves te mando el contrato»).
+ */
+export function voicePrompt(c: VoiceContext) {
+  const who = `Autor (quien habla): ${c.authorName}. Participantes de la conversación: ${c.participants.join(', ') || '—'}. Conversación: ${c.conversationName ?? 'chat directo'}.`;
+  if (c.language === 'es') {
+    return [
+      'Eres el asistente de un chat de trabajo entre empresas. Recibes la transcripción de una nota de voz.',
+      who,
+      'Quien habla es SIEMPRE el autor. Si la nota nombra a alguien al inicio («Hola Laura…»), esa persona es a quien le habla, no quien habla.',
+      'Responde SOLO un JSON {"summary": string|null, "suggestedIssue": string|null}.',
+      c.wantSummary
+        ? `summary: una sola línea (≤ 140 caracteres) en tercera persona con el autor como sujeto, p. ej. «${c.authorName} confirma a Laura que…».`
+        : 'summary: null.',
+      'suggestedIssue: si la nota pide una tarea concreta o el autor se compromete a hacer algo (p. ej. «el jueves te mando el contrato» → «Enviar el contrato el jueves»), un título breve en infinitivo (≤ 80 caracteres); si no hay tarea, null.',
+      'Escribe en español.',
+    ].join('\n');
+  }
+  return [
+    'You assist a work chat between companies. You get a voice note transcript.',
+    `Author (the speaker): ${c.authorName}. Conversation participants: ${c.participants.join(', ') || '—'}. Conversation: ${c.conversationName ?? 'direct chat'}.`,
+    'The speaker is ALWAYS the author. If the note names someone at the start ("Hi Laura…"), that is who they are talking to, not the speaker.',
+    'Reply ONLY with JSON {"summary": string|null, "suggestedIssue": string|null}.',
+    c.wantSummary ? `summary: one line (≤ 140 chars) in third person with the author as subject, e.g. "${c.authorName} confirms to Laura that…".` : 'summary: null.',
+    'suggestedIssue: if the note asks for a concrete task or the author commits to doing something (e.g. "I\'ll send you the contract on Thursday" → "Send the contract on Thursday"), a short imperative title (≤ 80 chars); otherwise null.',
+    'Write in English.',
+  ].join('\n');
+}
+
+/** WAV PCM 16 bits mono a partir de PCM crudo (Inworld no acepta PCM sin cabecera). */
+export function wavFromPcm(pcm: Buffer, sampleRate = PCM_RATE): Buffer {
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0); h.writeUInt32LE(36 + pcm.length, 4); h.write('WAVE', 8); h.write('fmt ', 12);
+  h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(sampleRate, 24);
+  h.writeUInt32LE(sampleRate * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([h, pcm]);
 }
 
 // ---------- Selección por entorno ----------

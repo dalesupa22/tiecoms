@@ -523,7 +523,7 @@ export function ShareInvite({ url, code, groupName, expiresAt }: { url: string; 
       <div className="linkbox"><input className="input" readOnly value={url} onFocus={(e) => e.currentTarget.select()} />
         <button className="btn small" onClick={async () => { await copyText(url); toast(t('toast.linkCopied')); }}>{t('common.copy')}</button>
       </div>
-      {'share' in navigator && <button className="btn" onClick={() => navigator.share({ title: 'TieComs', text }).catch(() => {})}>{t('share.share')}</button>}
+      {'share' in navigator && <button className="btn" onClick={() => navigator.share({ title: 'Chaggu', text }).catch(() => {})}>{t('share.share')}</button>}
       <span className="hint">{expiresAt ? t('share.expires', { date: new Date(expiresAt).toLocaleDateString(locale(), { day: 'numeric', month: 'long' }) }) : t('share.expires14')}</span>
     </div>
   );

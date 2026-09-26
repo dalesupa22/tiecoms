@@ -185,7 +185,7 @@ async function purgeRemoved() {
   for (const r of rows) {
     const s = sessions.get(r.id);
     if (s?.sock) {
-      try { await s.sock.logout('TieComs: cuenta desconectada'); } catch {}
+      try { await s.sock.logout('Chaggu: cuenta desconectada'); } catch {}
     }
     if (s) stopLocal(s);
     await pool.query('DELETE FROM wa_accounts WHERE id = $1', [r.id]);

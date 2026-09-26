@@ -20,7 +20,7 @@ export function handleNotice(n: ClientNotice) {
     const conv = d.conversations.find((c) => c.id === n.conversationId);
     const who = personById(d, n.message.authorId)?.name ?? '';
     if (document.visibilityState !== 'visible' && canNotify) {
-      const note = new Notification(`${who} · ${conv ? conversationTitle(d, conv) : 'TieComs'}`, { body: n.message.body.slice(0, 160), tag: n.conversationId, icon: `${BASE}/icon-192.png` });
+      const note = new Notification(`${who} · ${conv ? conversationTitle(d, conv) : 'Chaggu'}`, { body: n.message.body.slice(0, 160), tag: n.conversationId, icon: `${BASE}/icon-192.png` });
       note.onclick = () => { window.focus(); navigate(`/c/${n.conversationId}?m=${n.message.seq}`); note.close(); };
     }
     return;
@@ -57,7 +57,7 @@ export function handleNotice(n: ClientNotice) {
   }
   const r = n.reminder;
   const conv = d.conversations.find((c) => c.id === r.conversationId);
-  const title = r.note || (conv ? conversationTitle(d, conv) : 'TieComs');
+  const title = r.note || (conv ? conversationTitle(d, conv) : 'Chaggu');
   const go = () => navigate(`/c/${r.conversationId}${r.messageSeq ? `?m=${r.messageSeq}` : ''}`);
   toast(`⏰ ${title}`, { label: t('rem.open'), run: go }, 12_000);
   if (canNotify) {

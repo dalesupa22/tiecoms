@@ -4,7 +4,7 @@
  * Cada sesión es un cliente real: HTTP para enviar y WebSocket para recibir.
  * Mide latencia de entrega y verifica que cada quien reciba solo lo de su alcance.
  *
- *   API_URL=https://app.tiecoms.com DEMO_PASSWORD='...' node scripts/three-sessions.mjs
+ *   API_URL=https://app.chaggu.com DEMO_PASSWORD='...' node scripts/three-sessions.mjs
  */
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';

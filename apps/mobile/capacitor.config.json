@@ -1,6 +1,6 @@
 {
   "appId": "com.tiecoms.app",
-  "appName": "TieComs",
+  "appName": "Chaggu",
   "webDir": "../web/dist",
   "server": { "androidScheme": "https" },
   "ios": { "contentInset": "never" }

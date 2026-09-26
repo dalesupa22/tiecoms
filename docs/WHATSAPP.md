@@ -1,6 +1,6 @@
 # Conectar WhatsApp
 
-Cada persona puede conectar varias cuentas (hasta 5): su WhatsApp personal y su WhatsApp Business. TieComs lee sus grupos, chats y mensajes y los organiza por tema. Todo es privado de su dueño.
+Cada persona puede conectar varias cuentas (hasta 5): su WhatsApp personal y su WhatsApp Business. Chaggu lee sus grupos, chats y mensajes y los organiza por tema. Todo es privado de su dueño.
 
 ## Cómo funciona
 
@@ -9,7 +9,7 @@ Cada persona puede conectar varias cuentas (hasta 5): su WhatsApp personal y su 
 - **Guardado** (`apps/api/src/modules/wa-sync.ts`): credenciales y llaves de Signal cifradas con AES-256-GCM en `wa_auth` (llave `WA_STORE_KEY`, o derivada de `JWT_SECRET` si no está; si cambia, hay que volver a vincular). Chats, contactos y mensajes de texto en `wa_chats`, `wa_contacts`, `wa_messages` (del historial inicial, solo los últimos 120 días). Lo multimedia se guarda como descripción («📷 Foto»), no se descarga.
 - **API** (`apps/api/src/modules/whatsapp.ts`): `/api/v1/whatsapp/accounts` (crear, listar, `relink`, borrar), `/api/v1/whatsapp/chats` (filtros por cuenta, categoría, grupos, búsqueda, ocultos), `PATCH /chats/:accountId/:jid` (categoría, fijar, ocultar, vincular) y `/organize`.
 - **Organizador** (`apps/api/src/modules/wa-organize.ts`): sugiere Trabajo, Clientes, Familia, Amigos, Comunidad u Otros por el nombre del grupo o contacto. Lo que la persona mueve a mano no se vuelve a tocar.
-- **Vincular a TieComs:** un chat puede enviar sus mensajes *nuevos* a una conversación donde la persona puede publicar; llegan como «reenviado de WhatsApp», a su nombre, sin duplicados.
+- **Vincular a Chaggu:** un chat puede enviar sus mensajes *nuevos* a una conversación donde la persona puede publicar; llegan como «reenviado de WhatsApp», a su nombre, sin duplicados.
 - **Solo lectura:** no envía mensajes, no marca como leído y no se pone «en línea».
 
 ## Vincular

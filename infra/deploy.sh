@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Despliegue reproducible de TieComs a la EC2 (ssh ReimaginedClubServer).
+# Despliegue reproducible de Chaggu (antes TieComs) a la EC2 (ssh ReimaginedClubServer).
 # Compila localmente, sube un artefacto versionado, migra, arranca y verifica.
 # Si la verificación falla, vuelve a la versión anterior.
 set -euo pipefail
@@ -20,11 +20,11 @@ python3 apps/landing/build.py >/dev/null
 
 mkdir -p "$STAGE/$REL"
 cp -R apps/api/dist "$STAGE/$REL/api"
-# web/site = landing (www.tiecoms.com) · web/app = app (app.tiecoms.com).
+# web/site = landing (www.chaggu.com) · web/app = app (app.chaggu.com).
 mkdir -p "$STAGE/$REL/web"
 cp -R apps/landing/dist "$STAGE/$REL/web/site"
 cp -R apps/web/dist "$STAGE/$REL/web/app"
-cp infra/Dockerfile.api infra/compose.yml "$STAGE/$REL/"
+cp infra/Dockerfile.api infra/compose.yml infra/tiecoms-cert.sh "$STAGE/$REL/"
 cp -R infra/nginx "$STAGE/$REL/nginx"
 COPYFILE_DISABLE=1 tar --no-xattrs -C "$STAGE" -czf "$STAGE/$REL.tgz" "$REL"
 
@@ -64,17 +64,28 @@ fi
 ln -sfn $BASE/releases/$REL/web $BASE/web/current
 echo "$REL" > $BASE/RELEASE
 # Configuración de nginx versionada con la release (solo archivos de TieComs).
-if [ -e /etc/nginx/tiecoms/tls/fullchain.pem ]; then
+install -m 644 nginx/chaggu-http.conf /etc/nginx/conf.d/chaggu-http.conf
+install -m 755 tiecoms-cert.sh /usr/local/sbin/tiecoms-cert
+nginx -t && systemctl reload nginx
+# Los server de chaggu.com necesitan su certificado (infra/tiecoms-cert.sh). Mientras no
+# exista, se deja la configuración anterior para no romper nginx.
+if [ -e /etc/nginx/tiecoms/tls/fullchain.pem ] && [ -e /etc/nginx/tiecoms/tls-chaggu/fullchain.pem ]; then
   install -m 644 nginx/security-headers.conf /etc/nginx/tiecoms/security-headers.conf
   install -m 644 nginx/api-locations.conf /etc/nginx/tiecoms/api-locations.conf
   install -m 644 nginx/app-links.conf /etc/nginx/tiecoms/app-links.conf
   install -m 644 nginx/app-links-redirect.conf /etc/nginx/tiecoms/app-links-redirect.conf
   install -m 644 nginx/00-tiecoms-cloudflare.conf /etc/nginx/conf.d/00-tiecoms-cloudflare.conf
+  cp /etc/nginx/conf.d/tiecoms.conf /tmp/tiecoms.conf.prev 2>/dev/null || true
   install -m 644 nginx/tiecoms.conf /etc/nginx/conf.d/tiecoms.conf
-  nginx -t && systemctl reload nginx
+  if nginx -t; then systemctl reload nginx; else
+    echo "✗ nginx rechazó la configuración nueva; se restaura la anterior"
+    cp /tmp/tiecoms.conf.prev /etc/nginx/conf.d/tiecoms.conf && nginx -t && systemctl reload nginx
+  fi
+else
+  echo "! falta el certificado de chaggu.com: nginx sigue con la configuración anterior"
 fi
 # Conserva las últimas 5 versiones.
 ls -1dt $BASE/releases/*/ | tail -n +6 | xargs -r rm -rf
 docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^tiecoms-api:' | grep -v ":$REL$" | grep -v ":${PREV:-none}$" | xargs -r docker image rm >/dev/null 2>&1 || true
-echo "✓ TieComs $REL en línea"
+echo "✓ Chaggu $REL en línea"
 REMOTE

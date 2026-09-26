@@ -38,7 +38,7 @@ const g = [
   msg('general', 'danny', JSON.stringify({ k: 'issue.created', title: 'Plantilla final de certificados', issueId: 'i1' }), 2 * D - 2 * H, { kind: 'system' }),
   msg('general', 'danny', 'Era el job de las 10:00: reenviaba a quien no había firmado. Queda en una sola notificación diaria.', 5 * H, { mergedFrom: 'diag' }),
   msg('general', 'mateo', 'Perfecto, gracias. Seguimos con la salida del viernes.', 2 * H, { replyTo: 'general-m7' }),
-  msg('general', 'laura', 'Les dejo la guía de marca https://www.tiecoms.com/', 100 * 60_000, { linkPreview: { url: 'https://www.tiecoms.com/', title: 'TieComs · Una sola red entre las empresas con las que trabajas', description: 'Conversaciones, asuntos y archivos entre equipos de distintas empresas, cada quien con su alcance.', siteName: 'TieComs', imageUrl: '/tiecoms-mark.svg' } }),
+  msg('general', 'laura', 'Les dejo la guía de marca https://www.chaggu.com/', 100 * 60_000, { linkPreview: { url: 'https://www.chaggu.com/', title: 'Chaggu · Una sola red entre las empresas con las que trabajas', description: 'Conversaciones, asuntos y archivos entre equipos de distintas empresas, cada quien con su alcance.', siteName: 'Chaggu', imageUrl: '/chaggu-logo.svg' } }),
   msg('general', 'ana', 'Mañana llego a las 8 con el diseñador.', 90 * 60_000, { forwarded: { source: 'whatsapp', author: 'Pedro (Estudio Norte)', sentAt: '24/9/26 07:41' } }),
   msg('general', 'mateo', 'Fotos de la visita de hoy', 60 * 60_000, { attachments: [1, 2, 3, 4, 5, 6].map((i) => att(`f${i}`, `visita-${i}.jpg`, 'image/jpeg', 820_000)) }),
   msg('general', 'mateo', '@Danny Suárez ¿puedes revisar con @Laura Gómez la plantilla?', 50 * 60_000, { mentions: [{ userId: 'danny', start: 0, length: 13 }, { userId: 'laura', start: 34, length: 12 }] }),
@@ -46,10 +46,10 @@ const g = [
   msg('general', 'laura', '', 40 * 60_000, { attachments: [att('p1', 'Contrato marco v3.pdf', 'application/pdf', 1_240_000), att('x1', 'Cronograma.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 48_000)] }),
   // Reacciones y enlaces (docs/REACCIONES_ENLACES.md)
   msg('general', 'ana', 'Miren esta charla sobre firma digital https://www.youtube.com/watch?v=abc123', 30 * 60_000, {
-    linkPreviews: [{ url: 'https://www.youtube.com/watch?v=abc123', title: 'Firma electrónica en Colombia: lo que cambia en 2026', description: 'Una charla de 20 minutos sobre validez jurídica, OTP y certificados.', siteName: 'YouTube', imageUrl: '/tiecoms-mark.svg', kind: 'video', provider: 'youtube', author: 'Legal Tech Bogotá', durationSec: 1234, linkId: 'l1' }],
+    linkPreviews: [{ url: 'https://www.youtube.com/watch?v=abc123', title: 'Firma electrónica en Colombia: lo que cambia en 2026', description: 'Una charla de 20 minutos sobre validez jurídica, OTP y certificados.', siteName: 'YouTube', imageUrl: '/chaggu-logo.svg', kind: 'video', provider: 'youtube', author: 'Legal Tech Bogotá', durationSec: 1234, linkId: 'l1' }],
     reactions: [{ emoji: '👍', userIds: ['laura', 'mateo'] }, { emoji: '👀', userIds: ['danny'] }, { emoji: '🔥', userIds: [], external: [{ name: 'Pedro', source: 'whatsapp' }] }],
   }),
-  msg('general', 'mateo', 'https://www.tiktok.com/@legaltech/video/1', 20 * 60_000, { linkPreviews: [{ url: 'https://www.tiktok.com/@legaltech/video/1', title: 'Así se firma un contrato en 30 segundos', description: null, siteName: 'TikTok', imageUrl: '/tiecoms-mark.svg', kind: 'short', provider: 'tiktok', author: 'legaltech', linkId: 'l2' }] }),
+  msg('general', 'mateo', 'https://www.tiktok.com/@legaltech/video/1', 20 * 60_000, { linkPreviews: [{ url: 'https://www.tiktok.com/@legaltech/video/1', title: 'Así se firma un contrato en 30 segundos', description: null, siteName: 'TikTok', imageUrl: '/chaggu-logo.svg', kind: 'short', provider: 'tiktok', author: 'legaltech', linkId: 'l2' }] }),
   msg('general', 'mateo', 'https://www.instagram.com/reel/C1abc/', 19 * 60_000, { linkPreviews: [{ url: 'https://www.instagram.com/reel/C1abc/', title: 'Reel: detrás de cámaras del lanzamiento', description: null, siteName: 'Instagram', imageUrl: null, kind: 'short', provider: 'instagram', author: 'estudionorte', linkId: 'l3' }] }),
   msg('general', 'mateo', 'y este https://blog.example.com/guia-microcredenciales', 18 * 60_000, { linkPreviews: [{ url: 'https://blog.example.com/guia-microcredenciales', title: 'Guía práctica de microcredenciales', description: 'Cómo diseñar rutas apilables.', siteName: 'Blog Example', imageUrl: null, kind: 'article', provider: null, linkId: 'l4' }] }),
   msg('general', 'laura', '🎉🙌', 10 * 60_000, { reactions: [{ emoji: '❤️', userIds: ['danny', 'ana'] }] }),
@@ -82,7 +82,7 @@ const data: BootstrapDTO = {
     conv({ id: 'general', name: 'General', pinnedAt: iso(D), memberIds: ['danny', 'laura', 'mateo', 'ana'], lastMessageSeq: g.length, lastEventSeq: g.length, lastReadSeq: g.length - 1, unread: 1, unreadMentions: 1, lastMessagePreview: g[g.length - 1]!.body, openIssues: 2, linkCount: 6 }),
     conv({ id: 'diag', name: 'Diagnóstico · notificaciones duplicadas', kind: 'internal', level: null, internalOrgId: 'xertify', memberIds: ['danny', 'laura'], parentId: 'general', parentMessageId: 'general-m4', parentMessageSeq: 4, deriveKind: 'internal', deriveReason: 'Ana necesita saber si es el job o un reenvío', returnedAt: iso(5 * H), lastMessageSeq: dg.length, lastEventSeq: dg.length, lastReadSeq: dg.length }),
     conv({ id: 'dec', name: 'Decisión · fecha de salida', level: 'directivo', memberIds: ['danny', 'mateo'], parentId: 'general', parentMessageId: 'general-m2', parentMessageSeq: 2, deriveKind: 'directive', lastMessageSeq: 0 }),
-    conv({ id: 'multi1', kind: 'multi', workspaceId: null, level: null, name: 'Equipo mixto', avatarUrl: '/tiecoms-mark.svg', memberIds: ['danny', 'mateo', 'ana', 'laura'], unread: 2, lastMessagePreview: '¿Nos vemos el jueves?' }),
+    conv({ id: 'multi1', kind: 'multi', workspaceId: null, level: null, name: 'Equipo mixto', avatarUrl: '/chaggu-logo.svg', memberIds: ['danny', 'mateo', 'ana', 'laura'], unread: 2, lastMessagePreview: '¿Nos vemos el jueves?' }),
     conv({ id: 'side1', kind: 'multi', workspaceId: null, level: null, name: 'Sidechat · Veo notificaciones duplicadas en las…', memberIds: ['danny', 'laura'], parentId: 'general', parentMessageId: 'general-m4', parentMessageSeq: 4, deriveKind: 'side', lastMessageSeq: sd.length, lastEventSeq: sd.length, lastReadSeq: sd.length - 1, unread: 1, lastMessagePreview: sd[2]!.body }),
     conv({ id: 'dm-ana', kind: 'direct', workspaceId: null, level: null, memberIds: ['danny', 'ana'], lastMessageSeq: dm.length, lastEventSeq: dm.length, lastReadSeq: dm.length, lastMessagePreview: dm[1]!.body }),
     conv({ id: 'internal', name: 'Equipo interno', kind: 'internal', level: null, internalOrgId: 'xertify', memberIds: ['danny', 'laura'] }),
@@ -144,7 +144,7 @@ const waMsgs = [
   { id: 'd', fromMe: false, author: 'Laura Gómez', kind: 'text', body: 'El despliegue quedó listo ✅', sentAt: iso(20 * 60_000) },
 ];
 (client as any).listMentions = async () => ({ hasMore: false, mentions: g.filter((m) => m.mentions?.some((x) => x.userId === 'danny')).map((m) => ({ message: m, conversationId: 'general', all: false, read: false, createdAt: m.createdAt })) });
-(client as any).fetchBlob = async () => (await fetch('/tiecoms-mark.svg')).blob();
+(client as any).fetchBlob = async () => (await fetch('/chaggu-logo.svg')).blob();
 // Subidas simuladas: devuelven un AttachmentDTO y el envío queda en cola (sin backend).
 (client as any).uploadAttachment = async (_c: string, f: File, name: string) => { await new Promise((r) => setTimeout(r, 300)); return att(`up-${Date.now()}`, name, f.type || 'application/octet-stream', f.size); };
 (client as any).uploadAttachmentThumb = async (id: string) => att(id, 'thumb', 'image/jpeg', 1);

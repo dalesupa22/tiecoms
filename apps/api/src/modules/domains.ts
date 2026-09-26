@@ -12,7 +12,9 @@ const PUBLIC_DOMAINS = new Set([
   'fastmail.com', 'yopmail.com', 'mailinator.com', 'example.com',
 ]);
 
-export const TXT_PREFIX = 'tiecoms-verification=';
+export const TXT_PREFIX = 'chaggu-verification=';
+/** Registros creados antes del cambio de nombre: se siguen aceptando. */
+const LEGACY_TXT_PREFIX = 'tiecoms-verification=';
 
 export function emailDomain(email: string): string {
   return email.slice(email.lastIndexOf('@') + 1).toLowerCase();
@@ -66,7 +68,7 @@ export async function addDomain(userId: string, orgId: string, input: string): P
   return tx(async (c) => {
     await requireOrgAdmin(c, userId, orgId);
     const owner = await claimedBy(c, domain);
-    if (owner && owner.orgId !== orgId) throw conflict(`El dominio ${domain} ya pertenece a otra empresa en TieComs`);
+    if (owner && owner.orgId !== orgId) throw conflict(`El dominio ${domain} ya pertenece a otra empresa en Chaggu`);
     const { rows } = await c.query(
       `INSERT INTO org_domains (org_id, domain, token, created_by) VALUES ($1,$2,$3,$4)
        ON CONFLICT (org_id, domain) DO UPDATE SET domain = EXCLUDED.domain RETURNING *`,
@@ -88,7 +90,7 @@ export async function verifyDomain(userId: string, orgId: string, input: string,
   let found = false;
   try {
     const records = await lookup(domain);
-    found = records.some((parts) => parts.join('').trim() === TXT_PREFIX + row.token);
+    found = records.some((parts) => { const v = parts.join('').trim(); return v === TXT_PREFIX + row.token || v === LEGACY_TXT_PREFIX + row.token; });
   } catch { /* NXDOMAIN o sin TXT: sigue pendiente */ }
   return tx(async (c) => {
     if (!found) {

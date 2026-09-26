@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 
-/** Prefijo de rutas: '' en app.tiecoms.com y en las apps nativas; configurable con VITE_BASE. */
+/** Prefijo de rutas: '' en app.chaggu.com y en las apps nativas; configurable con VITE_BASE. */
 export const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
 export const asset = (p: string) => `${BASE}${p}`;
 

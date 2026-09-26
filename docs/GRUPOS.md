@@ -205,3 +205,21 @@ Una fila fija bajo la cabecera del chat, con 4 botones siempre visibles y su cue
 
 El botón de adjuntar pasa a ser **«＋»**, con: Fotos y videos, Archivos, (separador), **Evento** (nueva reunión o fecha del
 chat, para todos) y **Asunto** (no para terceros). Los dos se crean a mano.
+
+## Viralidad: la otra empresa se vuelve coadministradora (25-sep-2026)
+
+- Cuando la **primera persona de una empresa nueva** acepta una invitación (rol de empresa, no tercero) a una relación,
+  queda como **admin del espacio** (`workspace_memberships.role = 'admin'`). Las siguientes de esa empresa entran como
+  miembros. Así Uniandes invita a su gente, arma sus grupos y administra la relación igual que Xertify.
+- **Canal propio en una relación**: `POST /groups` con `internal: true` (target `workspace` o `company`) crea un grupo
+  `kind: 'internal'` solo de mi empresa. La otra empresa no lo ve. No admite invitaciones de fuera ni enlace.
+  En el «+»: casilla «Solo {mi empresa}: nuestro propio canal en esta relación».
+- Para la empresa invitada, la relación aparece sola en «Relaciones → {quien la invitó}», y su «Tu organización»
+  empieza vacía con la invitación a crear su primer grupo interno.
+
+## Entrada automática por dominio
+
+- `PUT /organizations/{id}/join-policy` `{ joinPolicy: 'auto' | 'invite' }`, solo owner/admin; `auto` exige un dominio
+  verificado (por Google Workspace/Microsoft Entra al registrarse, o por TXT).
+- Con `auto`, quien inicia sesión con Google o Microsoft con un correo de ese dominio entra a la empresa sin invitación.
+- `OrganizationDTO.joinPolicy` solo viene para owner/admin. En «Tú»: interruptor «Entrada automática con @dominio».

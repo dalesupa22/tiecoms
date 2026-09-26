@@ -118,3 +118,22 @@ export async function orgVerification(db: Db, orgIds: string[]): Promise<Map<str
   for (const r of rows) out.set(r.org_id, { level: r.status, domain: r.domain });
   return out;
 }
+
+/**
+ * Entrada automática por dominio: con 'auto', quien inicia sesión con Google Workspace o Microsoft Entra de un
+ * dominio verificado de la empresa queda en ella sin invitación. Solo owner/admin, y solo con dominio verificado.
+ */
+export async function setJoinPolicy(userId: string, orgId: string, joinPolicy: 'invite' | 'auto') {
+  const role = await pool.query('SELECT role FROM organization_memberships WHERE org_id = $1 AND user_id = $2', [orgId, userId]);
+  if (!role.rows[0]) throw notFound('Empresa');
+  if (!['owner', 'admin'].includes(role.rows[0].role)) throw forbidden('Solo quien administra la empresa cambia esto');
+  if (joinPolicy === 'auto') {
+    const v = await pool.query("SELECT 1 FROM org_domains WHERE org_id = $1 AND status IN ('idp','dns')", [orgId]);
+    if (!v.rowCount) throw badRequest('Primero verifica el dominio de la empresa');
+  }
+  await tx(async (c) => {
+    await c.query('UPDATE organizations SET join_policy = $2 WHERE id = $1', [orgId, joinPolicy]);
+    await audit(c, userId, 'org.join_policy', { type: 'organization', id: orgId }, { joinPolicy });
+  });
+  return { joinPolicy };
+}

@@ -78,9 +78,19 @@ export async function createGroup(userId: string, input: z.infer<typeof CreateGr
       }
       await joinColleagues(c, workspaceId, orgId, others);
     }
+    // Grupo solo de mi empresa dentro de una relación: su propio canal, que la otra empresa no ve.
+    let internalOrgId: string | null = null;
+    if (input.internal && t.kind !== 'org') {
+      internalOrgId = (await c.query('SELECT org_id FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2', [workspaceId, userId])).rows[0]?.org_id ?? null;
+      if (!internalOrgId) throw badRequest('No perteneces a una empresa en este espacio');
+      if (others.length) {
+        const { rows } = await c.query('SELECT user_id FROM organization_memberships WHERE org_id = $1 AND user_id = ANY($2)', [internalOrgId, others]);
+        if (rows.length !== others.length) throw badRequest('Un grupo solo de tu empresa admite solo a gente de tu empresa');
+      }
+    }
     const conv = await c.query(
-      "INSERT INTO conversations (workspace_id, kind, name, created_by) VALUES ($1,'group',$2,$3) RETURNING id",
-      [workspaceId, input.name, userId],
+      'INSERT INTO conversations (workspace_id, kind, name, internal_org_id, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+      [workspaceId, internalOrgId ? 'internal' : 'group', input.name, internalOrgId, userId],
     );
     const conversationId: string = conv.rows[0].id;
     await addConversationMembers(c, conversationId, [userId], userId, 'all', true);
@@ -93,6 +103,10 @@ export async function createGroup(userId: string, input: z.infer<typeof CreateGr
 
   // Invitaciones por correo (cada una en su transacción, como el diálogo de invitar). En un grupo
   // interno quien viene de fuera entra como tercero; quien ya está en el espacio se suma directo.
+  if (input.internal && t.kind !== 'org' && (input.inviteEmails.length || input.shareLink)) {
+    // Un canal solo de mi empresa no recibe invitaciones de fuera (el API de invitaciones solo admite grupos compartidos).
+    return { ...made, invited: 0 };
+  }
   const role = t.kind === 'org' ? 'guest' : input.inviteRole;
   let invited = 0;
   for (const email of [...new Set(input.inviteEmails)]) {

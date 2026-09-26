@@ -125,7 +125,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   personList.forEach((p) => p.orgId && orgIds.add(p.orgId));
   if (me.primaryOrgId) orgIds.add(me.primaryOrgId);
   const orgs = await pool.query(
-    `SELECT o.id, o.name, o.mark, o.color_bg, o.color_fg, om.role AS my_role FROM organizations o
+    `SELECT o.id, o.name, o.mark, o.color_bg, o.color_fg, o.join_policy, om.role AS my_role FROM organizations o
        LEFT JOIN organization_memberships om ON om.org_id = o.id AND om.user_id = $2 WHERE o.id = ANY($1) ORDER BY o.name`,
     [[...orgIds], userId],
   );
@@ -133,6 +133,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   const organizations: OrganizationDTO[] = orgs.rows.map((r) => ({
     id: r.id, name: r.name, mark: r.mark, colorBg: r.color_bg, colorFg: r.color_fg, ...(r.my_role ? { myRole: r.my_role } : {}),
     verification: verified.get(r.id)?.level ?? 'none', verifiedDomain: verified.get(r.id)?.domain ?? null,
+    ...(['owner', 'admin'].includes(r.my_role) ? { joinPolicy: r.join_policy } : {}),
   }));
 
   return { contract: CONTRACT_VERSION, serverTime: new Date().toISOString(), me, organizations, workspaces, conversations, people: personList };

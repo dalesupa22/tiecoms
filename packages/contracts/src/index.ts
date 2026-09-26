@@ -116,6 +116,11 @@ export interface OrganizationDTO {
   /** none: sin verificar; idp: dominio confirmado por Google Workspace o Microsoft Entra; dns: registro TXT verificado. */
   verification?: 'none' | 'idp' | 'dns';
   verifiedDomain?: string | null;
+  /**
+   * Solo para owner/admin: 'auto' = quien entra con Google Workspace o Microsoft Entra del dominio verificado
+   * queda en la empresa sin invitación; 'invite' = hace falta invitación.
+   */
+  joinPolicy?: 'invite' | 'auto';
 }
 
 export interface OrgDomainDTO {
@@ -414,6 +419,8 @@ export const CreateGroupInput = z.object({
   inviteEmails: z.array(email).max(50).default([]),
   /** guest = tercero a título propio (asesor, mentor): no suma su empresa al espacio. */
   inviteRole: z.enum(['member', 'guest']).default('member'),
+  /** Grupo solo de mi empresa dentro de la relación (su propio canal); no aplica a target org, que ya es interno. */
+  internal: z.boolean().default(false),
   /** Además, un enlace directo con código corto para compartir por WhatsApp o donde sea (varias personas, 14 días). */
   shareLink: z.boolean().default(false),
   lang: z.enum(['es', 'en']).default('es'),
@@ -469,6 +476,8 @@ export const CreateInvitationInput = z.object({
 });
 /** Respuesta de crear una invitación: `url` para compartir y, si no lleva correo, `code` (K7QM-4XPA) para escribir en la app. */
 export interface InvitationCreatedDTO { id: string; token: string; url: string; code: string | null; expiresAt: string; emailSent: boolean; emailStatus: string | null }
+
+export const JoinPolicyInput = z.object({ joinPolicy: z.enum(['invite', 'auto']) });
 
 export const CreateOrgInvitationInput = z.object({
   email: email.optional(),

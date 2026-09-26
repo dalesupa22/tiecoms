@@ -251,7 +251,7 @@ private fun VideoPage(a: AttachmentDTO, active: Boolean) {
 
 /** Clip del compositor: Fotos y videos (selector del sistema, hasta 10), Cámara o Archivos. */
 @Composable
-fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.net.Uri>) -> Unit) {
+fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.net.Uri>) -> Unit, onEvent: (() -> Unit)? = null, onIssue: (() -> Unit)? = null) {
     val ctx = LocalContext.current
     var cameraUri by remember { mutableStateOf<android.net.Uri?>(null) }
     val media = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -260,7 +260,8 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
         cameraUri?.takeIf { ok }?.let { onPicked(listOf(it)) }
     }
     val docs = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { onPicked(it.take(Attachments.MAX_PER_MESSAGE)) }
-    if (open) ActionSheet(stringResource(R.string.att_attach), listOf(
+    // El «＋» del compositor (docs/GRUPOS.md): fotos, cámara y archivos; luego Evento y Asunto, creados a mano.
+    if (open) ActionSheet(stringResource(R.string.bar_plus), listOf<SheetItem?>(
         SheetItem(ctx.getString(R.string.att_photos_pick), "🖼", tag = "attPhotos") {
             media.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo))
         },
@@ -271,6 +272,9 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
             runCatching { camera.launch(uri) }
         },
         SheetItem(ctx.getString(R.string.att_files_pick), "📎", tag = "attFiles") { docs.launch(arrayOf("*/*")) },
+    ) + (if (onEvent != null || onIssue != null) listOf(null) else emptyList()) + listOfNotNull(
+        onEvent?.let { SheetItem(ctx.getString(R.string.bar_new_event), "📅", tag = "plusEvent", onClick = it) },
+        onIssue?.let { SheetItem(ctx.getString(R.string.bar_new_issue), "◆", tag = "plusIssue", onClick = it) },
     ), onDismiss)
 }
 

@@ -198,7 +198,7 @@ class FeedbackUiTest {
 
         // §9 Barra de asuntos abiertos y §3 comentarios.
         val issue = runBlocking { client.createIssue(convId, "Aprobar presupuesto $tag", null, null, null) }
-        compose.waitUntilAtLeastOneExists(hasTestTag("openIssuesBar"), 10_000)
+        compose.waitUntilAtLeastOneExists(hasTestTag("barIssues"), 10_000) // barra de accesos del chat (docs/GRUPOS.md)
         Thread.sleep(400); shot("v3fb-09-barra-asuntos")
         open("tiecoms://asuntos")
         compose.waitUntilAtLeastOneExists(hasTestTag("issue-${issue.id}"), 10_000)

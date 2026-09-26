@@ -323,24 +323,6 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
     }
 }
 
-/** Barra «Asuntos abiertos (N)» arriba del chat (debajo de fijados): se despliega con los asuntos de la conversación. */
-@Composable
-fun OpenIssuesBar(list: List<IssueDTO>, data: BootstrapDTO, onOpen: (String) -> Unit) {
-    if (list.isEmpty()) return
-    var open by rememberSaveable { mutableStateOf(false) }
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth().testTag("openIssuesBar")) {
-        Column {
-            Row(Modifier.fillMaxWidth().clickable { open = !open }.heightIn(min = 40.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("◆ " + stringResource(R.string.issues_open_bar, list.size), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-                androidx.compose.material3.Icon(if (open) androidx.compose.material.icons.Icons.Filled.KeyboardArrowUp else androidx.compose.material.icons.Icons.Filled.KeyboardArrowDown,
-                    stringResource(if (open) R.string.collapse else R.string.expand), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (open) Column(Modifier.padding(horizontal = 16.dp)) { list.forEach { IssueRow(it, data, showWhere = false, onOpen = onOpen) } }
-        }
-    }
-}
-
 /** Fichas «Asuntos aquí» encima del chat. */
 @Composable
 fun IssueChips(list: List<IssueDTO>, data: BootstrapDTO, onOpen: (String) -> Unit) {

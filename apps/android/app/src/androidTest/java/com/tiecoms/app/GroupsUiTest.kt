@@ -105,6 +105,12 @@ class GroupsUiTest {
         Thread.sleep(400); shot("grupos-04-compartir")
         compose.onNodeWithTag("shareDone").performScrollTo().performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("composer"), 15_000)
+        // Dentro del chat: la barra de accesos (Fijados · Asuntos · Hilos · Agenda) y la lista de hilos.
+        compose.waitUntilAtLeastOneExists(hasTestTag("chatBar"), 5_000)
+        compose.onNodeWithTag("barThreads").performClick()
+        compose.waitUntilAtLeastOneExists(hasTestTag("barThreadsSheet"), 5_000)
+        device.pressBack()
+        compose.waitUntil(5_000) { !exists("barThreadsSheet") }
         val created = client.state.value.data!!.conversations.first { it.name == "Grupo de prueba UI" }
         assertEquals(relation.workspaces.first().id, created.workspaceId)
         log("Nuevo grupo en la relación con enlace: código, Listo abre el grupo")

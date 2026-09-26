@@ -40,7 +40,7 @@
     <string name="reply_private_unreachable">No puedes escribirle en privado a esta persona.</string>
     <string name="person_send_message">Enviar mensaje</string>
     <string name="chat_new_button">Nuevo chat</string>
-    <string name="menu_ask_side">Preguntar en un sidechat</string>
+    <string name="menu_ask_side">Sidechat privado</string>
     <string name="side_title">Sidechat</string>
     <string name="side_kind">Sidechat</string>
     <string name="side_chip">💬 %1$d sidechats</string>

@@ -34,6 +34,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
@@ -324,6 +326,10 @@ fun ConversationScreen(
             // Responder en privado (SPEC-v3 §7): en grupos y chats grupales, a mensajes ajenos.
             if (!mine && meta.kind != "direct" && m.kind == "text" && Names.person(data, m.authorId)?.kind == "human")
                 add(SheetItem(ctx.getString(R.string.menu_reply_private), "🔒", tag = "menuReplyPrivate") { onPrivateReply(m) })
+            // Responder aparte sin llenar el chat (docs/GRUPOS.md): hilo con los del chat o sidechat privado, juntos.
+            if (!embedded && canWork && meta.kind != "direct" && myWsRole != "guest" && m.kind == "text" && m.deletedAt == null)
+                add(SheetItem(ctx.getString(R.string.menu_derive), "💬", tag = "menuDerive") { deriving = m })
+            if (!embedded && m.kind == "text" && m.deletedAt == null) add(SheetItem(ctx.getString(R.string.menu_ask_side), "🔒", tag = "menuSide") { sideStart = m })
             add(SheetItem(ctx.getString(R.string.menu_copy_text), "⧉") { copyToClipboard(ctx, m.body); container.toast(ctx.getString(R.string.toast_copied)) })
             add(SheetItem(ctx.getString(R.string.menu_copy_link), "⛓") { copyToClipboard(ctx, messageLink(id, m.seq)); container.toast(ctx.getString(R.string.toast_link_copied)) })
             add(null)
@@ -334,13 +340,10 @@ fun ConversationScreen(
             add(SheetItem(ctx.getString(R.string.menu_mark_unread), "●", tag = "menuUnread") { act { client.markUnread(id, m.seq); container.toast(ctx.getString(R.string.toast_marked_unread)) } })
             if (canWork) {
                 add(null)
-                if (myWsRole != "guest") add(SheetItem(ctx.getString(R.string.menu_derive), "⑂", tag = "menuDerive") { deriving = m })
                 // Los terceros participan en los asuntos pero no los crean (docs/GRUPOS.md).
                 if (myWsRole != "guest") add(SheetItem(ctx.getString(R.string.menu_issue), "◆", tag = "menuIssue") { newIssue = true to m })
                 add(SheetItem(ctx.getString(R.string.menu_meeting), "📅", tag = "menuMeeting") { meeting = true to m })
             }
-            // Conversación lateral (SPEC-v3 §4): preguntar en privado sobre este mensaje.
-            if (m.kind == "text" && m.deletedAt == null) add(SheetItem(ctx.getString(R.string.menu_ask_side), "💬", tag = "menuSide") { sideStart = m })
             if (m.kind == "text") add(SheetItem(ctx.getString(R.string.menu_forward_chat), "↪", tag = "menuForwardChat") { forwarding = m })
             add(forwardMenu(ctx, data, meta, m))
             if (!mine) {
@@ -423,9 +426,6 @@ fun ConversationScreen(
                     }
                 },
                 actions = {
-                    if (pinned.isNotEmpty()) TextButton(onClick = { showPins = true }, modifier = Modifier.testTag("pinsButton")) {
-                        Text("📌 ${pinned.size}", modifier = Modifier.semantics { contentDescription = ctx.getString(R.string.pins_count, pinned.size) })
-                    }
                     IconButton(onClick = { convMenu = true }, modifier = Modifier.testTag("convMenu")) { Icon(Icons.Filled.MoreVert, stringResource(R.string.menu_more)) }
                     IconButton(onClick = onDetails, modifier = Modifier.testTag("details")) { Icon(Icons.Filled.Info, stringResource(R.string.details)) }
                 },
@@ -438,7 +438,10 @@ fun ConversationScreen(
             ConnectionBanner(state.connection)
             // Dentro del panel del sidechat, «Llevar al hilo» ya está en ⋯ y la tarjeta del ancla hace de linaje.
             if (!(embedded && meta.isSide)) LineageBar(meta, data, onOpenConversation, onReturn = { returning = true }, onTrazo = onTrazo)
-            OpenIssuesBar(openHere, data, onOpenIssue)
+            // Barra de accesos (docs/GRUPOS.md): Fijados · Asuntos · Hilos · Agenda. Dentro de un hilo al lado no se muestra.
+            if (!embedded) ChatBar(meta, data, pinned.size, canOpenIssues = canWork && myWsRole != "guest",
+                onPins = { showPins = true }, onOpenIssue = onOpenIssue, onNewIssue = { newIssue = true to null }, onNewEvent = { meeting = true to null },
+                onOpenEvent = onOpenEvent, onOpenThread = { t -> sideOpen = t })
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     conv?.loaded != true && loadError != null -> Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -462,7 +465,8 @@ fun ConversationScreen(
                                     item, data, quoted = item.m.replyTo?.let { byId[it] }, pinnedHere = item.m.id in pinned, highlighted = highlight == item.m.seq,
                                     issue = openHere.firstOrNull { it.originMessageId == item.m.id },
                                     showAvatars = meta.kind != "direct",
-                                    sides = sidesOf(data, id, item.m.id), onOpenSide = { sid -> sideOpen = sid },
+                                    sides = if (embedded) emptyList() else sidesOf(data, id, item.m.id), onOpenSide = { sid -> sideOpen = sid },
+                                    threads = if (embedded) emptyList() else threadsOf(data, id, item.m.id).filter { !it.isSide },
                                     menuOpen = menuFor?.id == item.m.id,
                                     menuItems = { messageMenu(item.m) },
                                     onDismissMenu = { menuFor = null },
@@ -526,6 +530,8 @@ fun ConversationScreen(
                 onAskSide = { pid -> conv?.messages?.lastOrNull { it.kind == "text" && it.deletedAt == null }?.let { last -> sidePreselect = listOf(pid); sideStart = last } },
                 onBring = { bringing = true },
                 placeholderOverride = if (meta.isSide) sidePlaceholder else null,
+                onNewEvent = { meeting = true to null }, onNewIssue = if (myWsRole != "guest") ({ newIssue = true to null }) else null,
+                autoFocus = embedded,
             ) } else ReadOnlyNotice()
         }
     }
@@ -561,7 +567,11 @@ fun ConversationScreen(
     }
     if (sideAdd && sideMeta != null) SideAddPeopleSheet(sideMeta, meta) { sideAdd = false }
     if (sideAddHere && meta.isSide) SideAddPeopleSheet(meta, meta.parentId?.let { p -> data.conversations.firstOrNull { it.id == p } }) { sideAddHere = false }
-    if (sideReturn && sideMeta != null) SideReturnSheet(sideMeta, title, onClose = { sideReturn = false }, onReturned = { _, seq -> sideOpen = null; seq?.let { jumpTo(it) } })
+    if (sideReturn && sideMeta != null) {
+        if (sideMeta.isSide) SideReturnSheet(sideMeta, title, onClose = { sideReturn = false }, onReturned = { _, seq -> sideOpen = null; seq?.let { jumpTo(it) } })
+        // Hilo: «✓ Resolver y dejar el resultado» deja el resumen en este chat.
+        else ReturnDialog(sideMeta, title, onClose = { sideReturn = false }, onReturned = { _, seq -> sideOpen = null; seq?.let { jumpTo(it) } })
+    }
     personCard?.let { pid -> PersonCardSheet(pid, onClose = { personCard = null }, onDirect = { uid -> act { val cid = client.createChat(listOf(uid), null).id; kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onOpenConversation(cid, null) } } }) }
     sideStart?.let { m -> SideStartSheet(meta, m, onClose = { sideStart = null; sidePreselect = emptyList() }, onStarted = { sid -> sideOpen = sid }, preselect = sidePreselect) }
 
@@ -569,7 +579,8 @@ fun ConversationScreen(
     if (convMenu) ActionSheet(title, conversationMenu(ctx, meta, data, onMeeting = { meeting = true to null }, onRemindCustom = { reminderCustom = true to null }, onLeave = { confirmLeave = true })) { convMenu = false }
     viewer?.let { (list, i) -> MediaViewer(list, i) { viewer = null } }
     voiceIssue?.let { (t, m) -> NewIssueDialog(id, m.id, t, onClose = { voiceIssue = null }, onCreated = onOpenIssue) }
-    deriving?.let { m -> DeriveDialog(meta, m, onClose = { deriving = null }, onCreated = { cid -> onOpenConversation(cid, null) }) }
+    // El hilo nuevo se abre al lado, sin salir del chat (como un hilo de Slack).
+    deriving?.let { m -> DeriveDialog(meta, m, onClose = { deriving = null }, onCreated = { cid -> sideOpen = cid }) }
     newIssue?.let { (_, m) -> NewIssueDialog(id, m?.id, m?.let { excerpt(it.body) } ?: "", onClose = { newIssue = null }, onCreated = onOpenIssue) }
     meeting?.let { (_, m) -> EventDialog(id, originMessageId = m?.id, defaultTitle = m?.let { excerpt(it.body, 80) } ?: "", onClose = { meeting = null }) }
     forwarding?.let { m -> ForwardDialog(m, onClose = { forwarding = null }, onSent = {}) }
@@ -635,9 +646,8 @@ fun conversationMenu(ctx: android.content.Context, conv: ConversationDTO, data: 
 private fun LineageBar(conv: ConversationDTO, data: BootstrapDTO, onOpen: (String, Long?) -> Unit, onReturn: () -> Unit, onTrazo: () -> Unit) {
     val ctx = LocalContext.current
     val parent = conv.parentId?.let { pid -> data.conversations.firstOrNull { it.id == pid } }
-    // Las laterales no van en el linaje: cuelgan de su mensaje ancla (chip «Consulta lateral»).
-    val kids = data.conversations.filter { it.parentId == conv.id && !it.isSide }
-    if (conv.parentId == null && kids.isEmpty()) return
+    // Los hilos que salen de aquí se ven en la barra del chat y como chip bajo su mensaje.
+    if (conv.parentId == null) return
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth().testTag("lineage")) {
         FlowRow(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(stringResource(R.string.lin_label).uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterVertically))
@@ -646,8 +656,6 @@ private fun LineageBar(conv: ConversationDTO, data: BootstrapDTO, onOpen: (Strin
                 else Text("↖ " + stringResource(R.string.lin_from_hidden), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             KindBadge(conv.deriveKind)
-            if (kids.isNotEmpty()) Text(stringResource(R.string.lin_kids), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            kids.forEach { k -> LinChip("⑂ " + titleOf(ctx, k, data) + if (k.returnedAt != null) " ✓" else "") { onOpen(k.id, null) } }
             if (conv.returnedAt != null) Text("✓ " + stringResource(R.string.lin_returned), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             if (parent != null && conv.returnedAt == null && conv.canPost) TextButton(onClick = onReturn, modifier = Modifier.testTag("returnButton")) { Text(stringResource(if (conv.isSide) R.string.side_return else R.string.lin_return)) }
             TextButton(onClick = onTrazo) { Text(stringResource(R.string.lin_trazo)) }
@@ -670,6 +678,9 @@ private fun Composer(
     placeholderOverride: String? = null,
     /** «Preguntarle en un sidechat» a alguien que no está en el chat (desde el buscador de menciones). */
     onAskSide: (String) -> Unit = {},
+    /** El «＋»: además de fotos y archivos, Evento y Asunto (null lo oculta, p. ej. Asunto para terceros). */
+    onNewEvent: (() -> Unit)? = null, onNewIssue: (() -> Unit)? = null,
+    autoFocus: Boolean = false,
 ) {
     val client = LocalClient.current
     val ctx = LocalContext.current
@@ -736,7 +747,10 @@ private fun Composer(
             files = plan.files
         }
     }
-    AttachPicker(picker, onDismiss = { picker = false }, onPicked = { add(it) })
+    AttachPicker(picker, onDismiss = { picker = false }, onPicked = { add(it) }, onEvent = onNewEvent, onIssue = onNewIssue)
+    // Un hilo o sidechat abierto al lado recibe el cursor.
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(id, autoFocus) { if (autoFocus) { delay(300); runCatching { focus.requestFocus() } } }
     fun sendNow() {
         val body = text
         val bodyMents = ments
@@ -787,9 +801,9 @@ private fun Composer(
             attError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("attError")) }
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
                 val bringLabel = stringResource(R.string.imp_action)
-                val attachLabel = stringResource(R.string.att_attach)
+                val attachLabel = stringResource(R.string.bar_plus)
                 if (editing == null) IconButton(onClick = { picker = true }, enabled = uploading == null, modifier = Modifier.size(48.dp).semantics { contentDescription = attachLabel }.testTag("attach")) {
-                    Icon(Icons.Filled.AttachFile, null)
+                    Icon(Icons.Filled.Add, null)
                 }
                 if (editing == null) IconButton(onClick = onBring, modifier = Modifier.size(48.dp).semantics { contentDescription = bringLabel }.testTag("bring")) {
                     Text("⤓", style = MaterialTheme.typography.titleLarge)
@@ -812,7 +826,7 @@ private fun Composer(
                     maxLines = 6, shape = RoundedCornerShape(24.dp),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surface, focusedContainerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.weight(1f).testTag("composer"),
+                    modifier = Modifier.weight(1f).focusRequester(focus).testTag("composer"),
                 )
                 Spacer(Modifier.width(8.dp))
                 if (editing != null) {
@@ -868,6 +882,8 @@ internal fun SystemRow(
     val ctx = LocalContext.current
     val chat = LocalChatColors.current
     val p = systemPayload(m.body)
+    // Los hilos no ensucian el chat: el aviso «se abrió un hilo» lo reemplaza el chip bajo su mensaje.
+    if (p?.s("k") == "derived.from") return
     val child = if (p?.s("k") == "derived.from") p.s("childId")?.let { cid -> data.conversations.firstOrNull { it.id == cid } } else null
     val eventId = p?.s("eventId")
     val issueId = p?.s("issueId")
@@ -892,6 +908,8 @@ internal fun MessageBubble(
     item: ChatItem.Msg, data: BootstrapDTO, quoted: MessageDTO?, pinnedHere: Boolean, highlighted: Boolean, issue: IssueDTO?,
     showAvatars: Boolean, menuOpen: Boolean, menuItems: () -> List<SheetItem?>, onDismissMenu: () -> Unit,
     sides: List<ConversationDTO> = emptyList(), onOpenSide: (String) -> Unit = {},
+    /** Hilos (derivadas) que cuelgan de este mensaje: chip como en Slack. */
+    threads: List<ConversationDTO> = emptyList(),
     onLongPress: () -> Unit, onQuote: (MessageDTO) -> Unit, onIssue: (String) -> Unit, onOpenConversation: (String, Long?) -> Unit,
     onOpenMedia: (List<com.tiecoms.app.core.AttachmentDTO>, Int) -> Unit = { _, _ -> }, onOpenFile: (com.tiecoms.app.core.AttachmentDTO) -> Unit = {},
     /** Sugerencia de asunto de una nota de voz; null la oculta (terceros). */
@@ -1037,6 +1055,7 @@ internal fun MessageBubble(
         AnchoredMenu(menuOpen, if (menuOpen) menuItems() else emptyList(), onDismissMenu)
         }
         }
+        ThreadChip(threads, onOpenSide)
         SideChip(sides, onOpenSide)
         if (issue != null) TextButton(onClick = { onIssue(issue.id) }) { Text("◆ " + issue.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium) }
     }

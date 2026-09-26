@@ -45,6 +45,7 @@ import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -320,21 +321,33 @@ fun SidePanelHeader(
             StackedAvatars(side.memberIds, data, 28.dp)
             Spacer(Modifier.width(4.dp))
             Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.side_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Lock, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(" " + stringResource(R.string.side_private_n, side.memberIds.size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.testTag("sidePrivate"))
+                // Un hilo (derivada) usa el mismo panel: «💬 título» y «Con los del chat · N personas» (docs/GRUPOS.md).
+                if (side.isSide) {
+                    Text(stringResource(R.string.side_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Lock, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(" " + stringResource(R.string.side_private_n, side.memberIds.size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("sidePrivate"))
+                    }
+                } else {
+                    Text("💬 " + threadTitle(ctx, side, data), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { heading() }.testTag("threadTitle"))
+                    Text(stringResource(R.string.bar_public) + " · " + stringResource(R.string.bar_people_n, side.memberIds.size), style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+            }
+            // «＋ Personas» dentro de un hilo, si puedo administrarlo.
+            if (!side.isSide && side.canManage) IconButton(onClick = onAddPerson, modifier = Modifier.testTag("threadAddPeople")) {
+                Icon(Icons.Filled.PersonAdd, stringResource(R.string.bar_add_people))
             }
             Box {
                 IconButton(onClick = { menu = true }, modifier = Modifier.testTag("sideMore")) { Icon(Icons.Filled.MoreVert, stringResource(R.string.menu_more)) }
                 AnchoredMenu(menu, listOfNotNull(
-                    SheetItem(ctx.getString(R.string.side_add_person), "＋", tag = "sideAddPerson") { onAddPerson() },
+                    if (side.isSide) SheetItem(ctx.getString(R.string.side_add_person), "＋", tag = "sideAddPerson") { onAddPerson() } else null,
                     SheetItem(ctx.getString(if (side.mutedAt(System.currentTimeMillis())) R.string.menu_unmute else R.string.menu_mute), "🔕", tag = "sideMute") {
                         scope.launch { runCatching { client.setConversationPrefs(side.id, mutedUntil = if (side.mutedAt(System.currentTimeMillis())) null else "2099-12-31T00:00:00Z") } }
                     },
-                    onReturn?.let { r -> SheetItem(ctx.getString(R.string.side_return), "↩", tag = "sideReturn") { r() } },
+                    onReturn?.let { r -> SheetItem(ctx.getString(if (side.isSide) R.string.side_return else R.string.lin_return), "↩", tag = "sideReturn") { r() } },
                     null,
                     SheetItem(ctx.getString(R.string.side_leave), "⎋", danger = true, tag = "sideLeave") { onLeave() },
                 ), onDismiss = { menu = false })

@@ -126,6 +126,42 @@ async function deliver(targets: Target[], note: (t: Target) => Note) {
   }));
 }
 
+/**
+ * Título de un grupo en las notificaciones: «Empresa - Grupo» (p. ej. «Xertify - General»), con la misma regla que
+ * el árbol de Grupos (placeWorkspace): invitado → la empresa anfitriona; si en el espacio hay otra empresa que no
+ * es mía → esa; relación pendiente → su nombre; si no → la empresa dueña (Tu organización). Por persona, porque
+ * cada lado ve a la otra empresa. Directos y chats sin espacio no llevan etiqueta (mapa vacío).
+ */
+export async function groupLabels(conversationId: string, userIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const c = (await pool.query(
+    `SELECT c.name, c.workspace_id, w.owning_org_id, w.counterpart_name, o.name AS owning_name
+       FROM conversations c JOIN workspaces w ON w.id = c.workspace_id JOIN organizations o ON o.id = w.owning_org_id
+      WHERE c.id = $1 AND c.kind <> 'direct'`,
+    [conversationId],
+  )).rows[0];
+  if (!c || !userIds.length) return out;
+  const orgs = (await pool.query(
+    `SELECT wo.org_id, o.name FROM workspace_organizations wo JOIN organizations o ON o.id = wo.org_id
+      WHERE wo.workspace_id = $1 AND wo.left_at IS NULL ORDER BY wo.joined_at, wo.org_id`,
+    [c.workspace_id],
+  )).rows as { org_id: string; name: string }[];
+  const roles = new Map((await pool.query('SELECT user_id, role FROM workspace_memberships WHERE workspace_id = $1 AND user_id = ANY($2)', [c.workspace_id, userIds]))
+    .rows.map((r) => [r.user_id as string, r.role as string]));
+  const mine = new Map<string, Set<string>>();
+  for (const r of (await pool.query('SELECT user_id, org_id FROM organization_memberships WHERE user_id = ANY($1)', [userIds])).rows) {
+    if (!mine.has(r.user_id)) mine.set(r.user_id, new Set());
+    mine.get(r.user_id)!.add(r.org_id);
+  }
+  for (const u of new Set(userIds)) {
+    const my = mine.get(u) ?? new Set<string>();
+    const company = roles.get(u) === 'guest' ? c.owning_name
+      : orgs.find((o) => !my.has(o.org_id))?.name ?? c.counterpart_name ?? c.owning_name;
+    if (company && c.name) out.set(u, `${company} - ${c.name}`);
+  }
+  return out;
+}
+
 /** Mensaje de texto nuevo. */
 export async function pushMessage(messageId: string) {
   const { rows } = await pool.query(
@@ -156,10 +192,12 @@ export async function pushMessage(messageId: string) {
   );
   const direct = m.conv_kind === 'direct';
   const avatar = m.avatar_file_id ? `/api/v1/avatars/${m.avatar_file_id}` : '';
+  const labels = await groupLabels(m.conversation_id, targets.map((t) => t.user_id));
+  const convTitle = (t: Target) => labels.get(t.user_id) ?? m.conv_name ?? null;
   // Mención: «Ana te mencionó» (subtitle = la conversación). Los demás reciben el push normal (o de sidechat).
   const mentionNote = (t: Target): Note => ({
     title: t.lang === 'en' ? `${m.author_name} mentioned you` : `${m.author_name} te mencionó`,
-    subtitle: direct ? null : m.conv_name || null,
+    subtitle: direct ? null : convTitle(t) || null,
     body: messageText(m.body, m.attachments, t.lang),
     threadId: m.conversation_id, category: 'TC_MESSAGE', collapseId: m.id,
     data: { type: 'mention', conversationId: m.conversation_id, messageId: m.id, authorId: m.author_id, authorName: m.author_name, authorAvatarUrl: avatar },
@@ -182,7 +220,7 @@ export async function pushMessage(messageId: string) {
     return targets.length;
   }
   await deliver(targets, (t) => ({
-    title: direct ? m.author_name : m.conv_name || m.author_name,
+    title: direct ? m.author_name : convTitle(t) || m.author_name,
     subtitle: direct ? null : [m.author_name, m.org_name].filter(Boolean).join(' · '),
     body: messageText(m.body, m.attachments, t.lang),
     threadId: m.conversation_id, category: 'TC_MESSAGE', collapseId: m.id,
@@ -207,9 +245,10 @@ export async function pushReminder(reminderId: string) {
     [r.user_id],
   );
   const text = r.note || (r.body && !r.deleted_at ? clip(r.body, 180) : '');
+  const labels = await groupLabels(r.conversation_id, [r.user_id]);
   await deliver(targets, (t) => ({
     title: t.lang === 'en' ? 'Reminder' : 'Recordatorio',
-    subtitle: r.conv_name ?? null,
+    subtitle: labels.get(t.user_id) ?? r.conv_name ?? null,
     body: text || (t.lang === 'en' ? 'You asked to be reminded about this conversation' : 'Pediste que te recordara esta conversación'),
     threadId: r.conversation_id, category: 'TC_REMINDER', collapseId: `reminder-${r.id}`,
     data: { type: 'reminder', conversationId: r.conversation_id, reminderId: r.id, ...(r.message_id ? { messageId: r.message_id } : {}) },
@@ -241,8 +280,9 @@ export async function pushEvent(eventId: string) {
       return new Intl.DateTimeFormat(lang === 'en' ? 'en-US' : 'es-CO', { timeZone: e.timezone, weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(e.starts_at));
     } catch { return new Date(e.starts_at).toISOString(); }
   };
+  const labels = await groupLabels(e.conversation_id, targets.map((t) => t.user_id));
   await deliver(targets, (t) => ({
-    title: e.conv_name || e.organizer_name,
+    title: labels.get(t.user_id) || e.conv_name || e.organizer_name,
     subtitle: e.organizer_name,
     body: `${t.lang === 'en' ? 'New meeting' : 'Nueva reunión'}: ${clip(e.title, 120)} · ${when(t.lang)}`,
     threadId: e.conversation_id, category: 'TC_EVENT', collapseId: `event-${e.id}`,
@@ -268,9 +308,10 @@ export async function pushEventSoon(eventId: string, userIds: string[], minutes:
       WHERE u.id = ANY($1) AND u.disabled_at IS NULL`,
     [userIds, e.conversation_id],
   );
+  const labels = await groupLabels(e.conversation_id, targets.map((t) => t.user_id));
   await deliver(targets, (t) => ({
     title: t.lang === 'en' ? `Starts in ${minutes} min: ${clip(e.title, 100)}` : `Empieza en ${minutes} min: ${clip(e.title, 100)}`,
-    subtitle: e.conv_kind === 'direct' ? null : e.conv_name ?? null,
+    subtitle: e.conv_kind === 'direct' ? null : labels.get(t.user_id) ?? e.conv_name ?? null,
     body: new Intl.DateTimeFormat(t.lang === 'en' ? 'en-US' : 'es-CO', { hour: 'numeric', minute: '2-digit' }).format(new Date(e.starts_at)),
     threadId: e.conversation_id, category: 'TC_EVENT', collapseId: `event-soon-${e.id}`,
     data: { type: 'event', conversationId: e.conversation_id, eventId: e.id, minutes },
@@ -304,13 +345,14 @@ export async function pushReaction(messageId: string) {
   );
   const names = [...new Set(who.map((w) => w.name.split(' ')[0]))];
   const emojis = [...new Set(who.map((w) => w.emoji))].slice(0, 5).join('');
+  const labels = await groupLabels(m.conversation_id, targets.map((t) => t.user_id));
   await deliver(targets, (t) => {
     const en = t.lang === 'en';
     const people = names.length === 1 ? names[0] : names.length === 2 ? `${names[0]} ${en ? 'and' : 'y'} ${names[1]}`
       : `${names[0]} ${en ? `and ${names.length - 1} others` : `y ${names.length - 1} más`}`;
     return {
       title: `${people} ${en ? 'reacted' : names.length === 1 ? 'reaccionó' : 'reaccionaron'} ${emojis}`,
-      subtitle: m.conv_kind === 'direct' ? null : m.conv_name || null,
+      subtitle: m.conv_kind === 'direct' ? null : labels.get(t.user_id) || m.conv_name || null,
       body: `«${messageText(m.body, m.attachments, t.lang)}»`,
       threadId: m.conversation_id, category: 'TC_MESSAGE', collapseId: `react-${m.id}`,
       data: { type: 'reaction', conversationId: m.conversation_id, messageId: m.id },

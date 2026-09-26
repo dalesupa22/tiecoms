@@ -4,6 +4,15 @@ import { t } from './i18n.ts';
 import { toast } from './menu.tsx';
 import { BASE, navigate } from './router.ts';
 import { conversationTitle, personById } from './ui.tsx';
+import { placeWorkspace } from './screens/Groups.tsx';
+import type { BootstrapDTO, ConversationDTO } from '@tiecoms/contracts';
+
+/** «Empresa - Grupo» (p. ej. «Xertify - General») para chats de un espacio; igual que en los push del servidor. */
+export function groupNoticeTitle(d: BootstrapDTO, c: ConversationDTO): string | null {
+  const ws = c.workspaceId ? d.workspaces.find((w) => w.id === c.workspaceId) : null;
+  if (!ws || c.kind === 'direct') return null;
+  return `${placeWorkspace(d, ws).name} - ${conversationTitle(d, c)}`;
+}
 
 /**
  * Mensajes nuevos: notificación del sistema solo si la pestaña no está a la vista
@@ -20,7 +29,10 @@ export function handleNotice(n: ClientNotice) {
     const conv = d.conversations.find((c) => c.id === n.conversationId);
     const who = personById(d, n.message.authorId)?.name ?? '';
     if (document.visibilityState !== 'visible' && canNotify) {
-      const note = new Notification(`${who} · ${conv ? conversationTitle(d, conv) : 'Chaggu'}`, { body: n.message.body.slice(0, 160), tag: n.conversationId, icon: `${BASE}/icon-192.png` });
+      const group = conv ? groupNoticeTitle(d, conv) : null;
+      const note = group
+        ? new Notification(group, { body: `${who}: ${n.message.body.slice(0, 160)}`, tag: n.conversationId, icon: `${BASE}/icon-192.png` })
+        : new Notification(`${who} · ${conv ? conversationTitle(d, conv) : 'Chaggu'}`, { body: n.message.body.slice(0, 160), tag: n.conversationId, icon: `${BASE}/icon-192.png` });
       note.onclick = () => { window.focus(); navigate(`/c/${n.conversationId}?m=${n.message.seq}`); note.close(); };
     }
     return;

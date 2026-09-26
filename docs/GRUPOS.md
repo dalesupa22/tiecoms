@@ -243,3 +243,13 @@ chat, para todos) y **Asunto** (no para terceros). Los dos se crean a mano.
   clientes no lo listan en DMs (solo los sidechats van allí): vive en la barra de hilos del chat.
 - **Web**: «Nuevo chat» arriba de la barra lateral y ⌘K / Ctrl+K desde cualquier pantalla. Trazo, Personas,
   Archivos, Ver después y WhatsApp van bajo «Más» para que los grupos y las relaciones quepan sin scroll.
+
+## Títulos de notificaciones y subidas (26-sep-2026)
+
+- Los push de un chat de un espacio (grupos y sus hilos) llevan como título, o como subtítulo en menciones,
+  recordatorios, reuniones y reacciones, **«Empresa - Grupo»** (p. ej. «Xertify - General»). La empresa se calcula
+  por persona con la regla del árbol: invitado → anfitriona; otra empresa en el espacio → esa; relación pendiente
+  → la contraparte; si no → la dueña. Helper `groupLabels()` en `apps/api/src/modules/push.ts`. Los clientes que
+  arman notificaciones locales (web, iOS, Android en primer plano) usan la misma etiqueta.
+- nginx: `POST /api/v1/conversations/:id/attachments` acepta hasta 26 MB (antes caía en el límite general de 128 KB
+  y fotos de cámara y notas de voz de más de ~30 s respondían 413) y `/attachments/:id/thumb` hasta 1 MB.

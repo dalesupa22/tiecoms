@@ -34,7 +34,7 @@ import org.junit.runner.RunWith
  * La persona debe tener al menos una relación con otra empresa y un sidechat (fixture de Grupos).
  *
  *   adb shell am instrument -w -e apiUrl http://10.0.2.2:3050 -e email … -e password … \
- *     -e class com.tiecoms.app.GroupsUiTest com.tiecoms.app.test/androidx.test.runner.AndroidJUnitRunner
+ *     -e class com.tiecoms.app.GroupsUiTest com.chaggu.app.test/androidx.test.runner.AndroidJUnitRunner
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(AndroidJUnit4::class)

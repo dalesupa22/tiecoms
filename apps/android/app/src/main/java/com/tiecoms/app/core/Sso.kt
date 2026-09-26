@@ -57,11 +57,11 @@ object Sso {
     fun startUrl(baseUrl: String, provider: SsoProvider, deviceId: String, challenge: String, orgInviteToken: String? = null, orgName: String? = null): String {
         fun enc(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
         return "${baseUrl.trimEnd('/')}$AUTH_BASE_PATH/${provider.path}/start" +
-            "?platform=$PLATFORM&device_id=${enc(deviceId)}&code_challenge=${enc(challenge)}&code_challenge_method=S256" +
+            "?platform=$PLATFORM&device_id=${enc(deviceId)}&code_challenge=${enc(challenge)}&code_challenge_method=S256&redirect_scheme=${DeepLinks.SCHEME}" +
             (orgInviteToken?.let { "&org=${enc(it)}" } ?: "") + (orgName?.takeIf { it.isNotBlank() }?.let { "&org_name=${enc(it.trim())}" } ?: "")
     }
 
-    /** tiecoms://auth/callback?code=… | ?error=…&message=… (null si no es un callback de SSO). */
+    /** chaggu://auth/callback?code=… | ?error=…&message=… (null si no es un callback de SSO). */
     fun parseCallback(raw: String?): SsoCallback? {
         if (raw.isNullOrBlank()) return null
         val uri = runCatching { URI(raw.trim()) }.getOrNull() ?: return null

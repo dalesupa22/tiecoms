@@ -32,9 +32,9 @@ val verifyReleaseFirebase = tasks.register("verifyReleaseFirebase") {
         check(project?.get("project_id") == "tiecoms") { "Release Firebase project must be tiecoms." }
         val client = (config?.get("client") as? List<*>)?.filterIsInstance<Map<*, *>>()?.firstOrNull {
             val info = it["client_info"] as? Map<*, *>
-            (info?.get("android_client_info") as? Map<*, *>)?.get("package_name") == "com.tiecoms.app"
+            (info?.get("android_client_info") as? Map<*, *>)?.get("package_name") == "com.chaggu.app"
         }
-        check(client != null) { "Release Firebase config must include package com.tiecoms.app." }
+        check(client != null) { "Release Firebase config must include package com.chaggu.app." }
         val info = client["client_info"] as? Map<*, *>
         val keys = client["api_key"] as? List<*>
         check(!project?.get("project_number")?.toString().isNullOrBlank() &&
@@ -66,10 +66,10 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.tiecoms.app"
+        applicationId = "com.chaggu.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
+        versionCode = 11
         versionName = "1.6.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "DEFAULT_API_URL", "\"https://app.chaggu.com\"")

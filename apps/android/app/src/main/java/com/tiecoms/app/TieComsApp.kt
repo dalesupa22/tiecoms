@@ -204,7 +204,7 @@ class AppContainer(private val app: Application) {
                 // si puedo leerlo (si no, el sidechat a pantalla completa con la tarjeta del ancla).
                 val author = p.authorName?.takeIf { it.isNotBlank() } ?: p.title
                 val origin = p.sideOfConversationId
-                val open = if (origin != null) "tiecoms://c/$origin?side=${p.conversationId}" else null
+                val open = if (origin != null) "chaggu://c/$origin?side=${p.conversationId}" else null
                 notifier.showConversation(p.conversationId, listOf(p.title, p.subtitle).filter { it.isNotBlank() }.joinToString(" · "), true,
                     p.authorId?.takeIf { it.isNotBlank() } ?: author, author, p.body, cachedPushAvatar(p.authorAvatarUrl),
                     silent = !settings.soundsEnabled, badge = p.badge, messageId = p.messageId, openUri = open)
@@ -310,7 +310,7 @@ class AppContainer(private val app: Application) {
                     isGroup -> conversationName(m.conversationId)
                     else -> authorName
                 }
-                val open = side?.parentId?.let { p -> if (c.meta(p) != null) "tiecoms://c/$p?side=${side.id}" else null }
+                val open = side?.parentId?.let { p -> if (c.meta(p) != null) "chaggu://c/$p?side=${side.id}" else null }
                 scope.launch {
                     val icon = loadAvatar(author?.avatarUrl)
                     notifier.showConversation(m.conversationId, chatTitle, isGroup || side != null,

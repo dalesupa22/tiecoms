@@ -105,20 +105,20 @@
                 <data android:pathPrefix="/ajustes" />
             </intent-filter>
 
-            <!-- Retorno del SSO (Google / Microsoft): tiecoms://auth/callback?code=… | ?error=…&message=… -->
+            <!-- Retorno del SSO (Google / Microsoft): chaggu://auth/callback?code=… | ?error=…&message=… -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="tiecoms" android:host="auth" android:pathPrefix="/callback" />
+                <data android:scheme="chaggu" android:host="auth" android:pathPrefix="/callback" />
             </intent-filter>
 
-            <!-- Esquema propio de respaldo (interno, no cambia con la marca): tiecoms://c/<id>, tiecoms://w/<id>, tiecoms://invite/<token>, tiecoms://signup?org=<token> -->
+            <!-- Esquema propio de respaldo (chaggu, para no chocar con la app TieComs instalada): chaggu://c/<id>, chaggu://w/<id>, chaggu://invite/<token>, chaggu://signup?org=<token> -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="tiecoms" />
+                <data android:scheme="chaggu" />
             </intent-filter>
         </activity>
         <!-- Compartir hacia Chaggu (SPEC-v4 §B): fotos, videos, archivos, texto y enlaces, uno o varios. -->
@@ -127,7 +127,7 @@
             android:exported="true"
             android:label="@string/app_name"
             android:excludeFromRecents="true"
-            android:taskAffinity="com.tiecoms.app.share"
+            android:taskAffinity="com.chaggu.app.share"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.TieComs">
             <intent-filter>

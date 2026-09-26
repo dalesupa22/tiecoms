@@ -67,7 +67,7 @@ class VoiceUiTest {
             compose.waitUntil(20_000) { app.container.client.value.state.value.data != null }
             val client = app.container.client.value
             val direct = runBlocking { client.createChat(listOf(peerId), null).id }
-            ins.targetContext.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("tiecoms://c/$direct")).setPackage(ins.targetContext.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            ins.targetContext.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("chaggu://c/$direct")).setPackage(ins.targetContext.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             compose.waitUntilExactlyOneExists(hasTestTag("composer"), 15_000)
             compose.waitUntil(15_000) { client.state.value.conversations[direct]?.loaded == true }
             val voice = client.state.value.conversations[direct]!!.messages.lastOrNull { m -> m.attachments.any { it.isVoice } }?.attachments?.first { it.isVoice }

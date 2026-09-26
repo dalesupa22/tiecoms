@@ -77,11 +77,11 @@ class V2DecodingTest {
 
     @Test fun `enlaces nuevos`() {
         assertEquals(DeepLink.Screen(DeepLinks.SCREEN_ISSUES), DeepLinks.parse("https://app.tiecoms.com/asuntos"))
-        assertEquals(DeepLink.Screen(DeepLinks.SCREEN_AGENDA), DeepLinks.parse("tiecoms://agenda"))
+        assertEquals(DeepLink.Screen(DeepLinks.SCREEN_AGENDA), DeepLinks.parse("chaggu://agenda"))
         assertEquals(DeepLink.Screen(DeepLinks.SCREEN_TRAZO), DeepLinks.parse("https://tiecoms.com/trazo"))
         assertEquals(DeepLink.Screen(DeepLinks.SCREEN_WHATSAPP), DeepLinks.parse("https://www.tiecoms.com/whatsapp"))
         assertEquals(DeepLink.Conversation("c1", 12), DeepLinks.parse("https://app.tiecoms.com/c/c1?m=12"))
-        assertEquals(DeepLink.Conversation("c1", null), DeepLinks.parse("tiecoms://c/c1?m=x"))
+        assertEquals(DeepLink.Conversation("c1", null), DeepLinks.parse("chaggu://c/c1?m=x"))
         assertEquals(DeepLink.Share("hola\nmundo"), DeepLinks.parse("https://app.tiecoms.com/share?title=hola&text=mundo"))
         assertEquals("whatsapp", DeepLinks.sourceForPackage("com.whatsapp.w4b"))
         assertEquals("email", DeepLinks.sourceForPackage("com.google.android.gm"))
@@ -103,6 +103,6 @@ class V2DecodingTest {
         val u = Sso.startUrl("https://app.chaggu.com", SsoProvider.GOOGLE, "d", "c", orgName = "Acme SAS")
         assertTrue(u.endsWith("&org_name=Acme%20SAS"))
         assertTrue(Sso.startUrl("https://app.chaggu.com", SsoProvider.GOOGLE, "d", "c", orgInviteToken = "tok").contains("&org=tok"))
-        assertTrue((Sso.parseCallback("tiecoms://auth/callback?error=sso_cancelled") as SsoCallback.Error).cancelled)
+        assertTrue((Sso.parseCallback("chaggu://auth/callback?error=sso_cancelled") as SsoCallback.Error).cancelled)
     }
 }

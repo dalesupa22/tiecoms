@@ -23,7 +23,7 @@ import kotlin.concurrent.thread
  * Splash animado en frío con reloj real (sin la regla de Compose, que usa un reloj virtual):
  * termina y aparece el login en ≤ 3 s y guarda 3 fotogramas (≈0,7 s, 1,5 s, 2,3 s).
  * Correr como primera prueba del proceso:
- *   adb shell am instrument -w -e apiUrl http://10.0.2.2:3041 -e class com.tiecoms.app.SplashUiTest com.tiecoms.app.test/androidx.test.runner.AndroidJUnitRunner
+ *   adb shell am instrument -w -e apiUrl http://10.0.2.2:3041 -e class com.tiecoms.app.SplashUiTest com.chaggu.app.test/androidx.test.runner.AndroidJUnitRunner
  */
 @RunWith(AndroidJUnit4::class)
 class SplashUiTest {

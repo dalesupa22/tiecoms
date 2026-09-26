@@ -41,12 +41,12 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         intent ?: return
-        // Solo debug: `adb shell am start -n com.tiecoms.app/.MainActivity -e apiUrl http://10.0.2.2:3021`
+        // Solo debug: `adb shell am start -n com.chaggu.app/com.tiecoms.app.MainActivity -e apiUrl http://10.0.2.2:3021`
         if (BuildConfig.DEBUG) intent.getStringExtra("apiUrl")?.let { container.setDebugApiUrl(it) }
         // «Compartir» desde otras apps llega a ShareActivity (SPEC-v4 §B), no aquí.
         if (intent.action == Intent.ACTION_VIEW) {
             val data = intent.dataString
-            // tiecoms://auth/callback es el retorno del SSO, no un destino de navegación.
+            // chaggu://auth/callback es el retorno del SSO, no un destino de navegación.
             Sso.parseCallback(data)?.let { container.handleSsoCallback(it); return }
             DeepLinks.parse(data)?.let { container.pendingLink.value = it }
         }

@@ -93,7 +93,7 @@ class SidechatUiTest {
             val tag = UUID.randomUUID().toString().take(4)
             val anchor = "¿Quién firma el anexo del contrato? $tag"
             b.send(group, anchor)
-            ins.targetContext.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("tiecoms://c/$group")).setPackage(ins.targetContext.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            ins.targetContext.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("chaggu://c/$group")).setPackage(ins.targetContext.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             compose.waitUntilExactlyOneExists(hasTestTag("composer"), 20_000)
             waitText(anchor)
             Thread.sleep(800)

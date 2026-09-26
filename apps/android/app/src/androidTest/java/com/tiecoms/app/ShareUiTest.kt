@@ -49,7 +49,7 @@ import java.util.UUID
  * cuadrícula de fotos y el visor.
  *
  *   adb shell am instrument -w -e apiUrl http://10.0.2.2:3043 -e email … -e password … -e conversationId … -e peerId … \
- *     -e class com.tiecoms.app.ShareUiTest com.tiecoms.app.test/androidx.test.runner.AndroidJUnitRunner
+ *     -e class com.tiecoms.app.ShareUiTest com.chaggu.app.test/androidx.test.runner.AndroidJUnitRunner
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -192,7 +192,7 @@ class ShareUiTest {
         log("§B enviado a 2 conversaciones (3 fotos + mensaje) en ${System.currentTimeMillis() - t0} ms; la hoja se cerró sola")
 
         // La burbuja con la cuadrícula de fotos y el visor a pantalla completa.
-        ins.targetContext.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("tiecoms://c/$convId")).setPackage(ins.targetContext.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        ins.targetContext.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("chaggu://c/$convId")).setPackage(ins.targetContext.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         compose.waitUntilExactlyOneExists(hasTestTag("composer"), 15_000)
         compose.waitUntil(15_000) { client.state.value.conversations[convId]?.messages?.any { it.body == note && it.attachments.size == 3 } == true }
         val m = client.state.value.conversations[convId]!!.messages.first { it.body == note }

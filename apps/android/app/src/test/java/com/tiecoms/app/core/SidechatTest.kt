@@ -51,9 +51,9 @@ class SidechatTest {
     }
 
     @Test fun `enlace al origen con el sidechat desplegado`() {
-        val l = DeepLinks.parse("tiecoms://c/g?side=s") as DeepLink.Conversation
+        val l = DeepLinks.parse("chaggu://c/g?side=s") as DeepLink.Conversation
         assertEquals("g", l.id); assertEquals("s", l.side)
-        assertNull((DeepLinks.parse("tiecoms://c/g?side=../x") as DeepLink.Conversation).side)
+        assertNull((DeepLinks.parse("chaggu://c/g?side=../x") as DeepLink.Conversation).side)
         assertTrue((DeepLinks.parse("https://app.tiecoms.com/c/g?m=5&side=s") as DeepLink.Conversation).let { it.seq == 5L && it.side == "s" })
     }
 }

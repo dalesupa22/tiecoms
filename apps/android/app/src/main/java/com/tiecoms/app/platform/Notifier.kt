@@ -129,7 +129,7 @@ class Notifier(private val context: Context) {
             }
         }
         val shortcutIcon = if (isGroup) IconCompat.createWithResource(context, R.mipmap.ic_launcher_round) else icon(authorIcon, authorName)
-        val deep = "tiecoms://c/$conversationId"
+        val deep = "chaggu://c/$conversationId"
         val shortcut = ShortcutInfoCompat.Builder(context, conversationId)
             .setShortLabel(title.take(40)).setLongLived(true).setLocusId(LocusIdCompat(conversationId))
             .setIntent(Intent(Intent.ACTION_VIEW, Uri.parse(deep), context, MainActivity::class.java))
@@ -169,7 +169,7 @@ class Notifier(private val context: Context) {
     /** Recordatorios y reuniones: notificación simple con el mismo canal. */
     fun showMessage(conversationId: String, title: String, text: String, silent: Boolean, tag: String = conversationId, seq: Long? = null) {
         if (!enabled()) return
-        val uri = "tiecoms://c/$conversationId" + (seq?.let { "?m=$it" } ?: "")
+        val uri = "chaggu://c/$conversationId" + (seq?.let { "?m=$it" } ?: "")
         val channel = when {
             tag.startsWith("event:soon:") -> CHANNEL_SOON
             tag.startsWith("rem:") || tag.startsWith("reminder:") -> CHANNEL_REMINDERS

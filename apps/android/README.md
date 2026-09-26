@@ -4,12 +4,12 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 
 | | |
 |---|---|
-| applicationId | `com.tiecoms.app` |
+| applicationId | `com.chaggu.app` (app nueva en Play desde 1.6.0 / 11; la anterior era `com.tiecoms.app`). El `namespace` y los paquetes Kotlin siguen siendo `com.tiecoms.app`. |
 | minSdk / target / compile | 26 / 36 / 36 |
-| Versión | `versionName 1.6.0`, `versionCode 10`. Sube el `versionCode` en cada envío a Play. |
+| Versión | `versionName 1.6.0`, `versionCode 11`. Sube el `versionCode` en cada envío a Play. |
 | Contrato | `2026-09-25`. Se envía en `x-tiecoms-contract` y en `device.contract`. |
 | API por defecto | `https://app.chaggu.com` (web pública: `https://www.chaggu.com`) |
-| Marca | **Chaggu** desde 1.6.0 (antes TieComs). Cambia solo lo visible: nombre, textos, dominios, ícono, splash y colores (tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`). Lo interno se mantiene para no romper Play, Firebase ni el backend: `applicationId`/paquetes `com.tiecoms.app`, clave de subida `tiecoms-upload`, proyecto Firebase `tiecoms`, esquema `tiecoms://` (retorno del SSO), headers `x-tiecoms-*`, claves de SharedPreferences, IDs de canales y nombres de sonidos. |
+| Marca | **Chaggu** desde 1.6.0 (antes TieComs). Cambia solo lo visible: nombre, textos, dominios, ícono, splash y colores (tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`). Se publica como app nueva: `applicationId` `com.chaggu.app` y esquema propio `chaggu://` (el SSO pide `redirect_scheme=chaggu`), para convivir con la app TieComs instalada. Lo demás interno se mantiene: `namespace`/paquetes Kotlin `com.tiecoms.app`, clave de subida `tiecoms-upload`, proyecto Firebase `tiecoms`, headers `x-tiecoms-*`, claves de SharedPreferences, IDs de canales y nombres de sonidos. |
 | Toolchain | Gradle 8.14.3 (wrapper), AGP 8.13.2, Kotlin 2.3.21 y JDK 17 |
 
 ## Qué hace
@@ -62,7 +62,7 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 - **Eliminar cuenta:** `DELETE /api/v1/account {confirmEmail, password?}`. La pantalla explica qué se borra y qué se conserva. Responde 400 si el correo no coincide y 403 si la contraseña está mal o falta. Al terminar borra las credenciales locales y vuelve al login.
 - **Seguridad de la comunidad:** los detalles de conversación permiten reportar y bloquear/desbloquear participantes; la pulsación larga permite reportar mensajes. El API guarda los reportes para revisión. El bloqueo oculta los mensajes del usuario y sus notificaciones y evita mensajes directos y nuevos chats entre las partes. Los grupos existentes siguen disponibles. El registro requiere aceptar los términos y la política de privacidad, accesibles también desde Login y Ajustes.
 - **Login y registro:** «Continuar con Google / Microsoft» y «o con tu correo». En el registro, el SSO exige antes el nombre de la empresa (`org_name`) o usa la invitación (`org`). Los errores `sso_*` y `domain_claimed` usan los textos de la web.
-- **Deep links:** `/c/<id>` (con `?m=<seq>` salta al mensaje), `/w/<id>`, `/invite/<token>`, `/signup?org=`, `/asuntos`, `/agenda`, `/trazo`, `/whatsapp`, `/ajustes` y `/share?text=`. Funcionan con `autoVerify` en `app.chaggu.com`, `chaggu.com` y `www.chaggu.com`, y también en los tres hosts de `tiecoms.com` (marca anterior, en un intent-filter aparte), y con el esquema `tiecoms://`. Los enlaces que genera la app usan `https://app.chaggu.com`. `tiecoms://auth/*` está reservado para el SSO.
+- **Deep links:** `/c/<id>` (con `?m=<seq>` salta al mensaje), `/w/<id>`, `/invite/<token>`, `/signup?org=`, `/asuntos`, `/agenda`, `/trazo`, `/whatsapp`, `/ajustes` y `/share?text=`. Funcionan con `autoVerify` en `app.chaggu.com`, `chaggu.com` y `www.chaggu.com`, y también en los tres hosts de `tiecoms.com` (marca anterior, en un intent-filter aparte), y con el esquema `chaggu://`. Los enlaces que genera la app usan `https://app.chaggu.com`. `chaggu://auth/*` está reservado para el SSO (`/api/v1/auth/{google|microsoft}/start?…&redirect_scheme=chaggu`).
 
 ### Splash «Un solo hilo» (SPEC-v2 §4)
 
@@ -152,7 +152,7 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
     - En el compositor, el placeholder «Responde a … en privado» y las respuestas rápidas; «No sé, pregúntale a…» abre el diálogo para sumar personas.
   - **Bajo el ancla:** el chip-hilo con «Sidechat · N mensajes» (N = lastMessageSeq − 1, como la web), la última respuesta y un punto de no leídos. Si hay varios sidechats, «N sidechats» abre la lista. Una vez llevado al hilo, el chip se ve en verde: «✓ Llevado al hilo».
   - **Llevar al hilo:** propone un resumen (`POST /return/suggest`, con IA o con las últimas respuestas), editable, con vista previa. En el grupo aparece como «Desde un sidechat» (`mergedKind`).
-  - **Push `TC_SIDE`:** Responder en línea envía al sidechat. Al tocar la notificación se abre el chat de origen con el sidechat desplegado (`tiecoms://c/<origen>?side=<id>`); si el origen no se puede leer, se abre el sidechat a pantalla completa.
+  - **Push `TC_SIDE`:** Responder en línea envía al sidechat. Al tocar la notificación se abre el chat de origen con el sidechat desplegado (`chaggu://c/<origen>?side=<id>`); si el origen no se puede leer, se abre el sidechat a pantalla completa.
   - **Nombres:** los sidechats viejos «Consulta · …» se muestran como «Sidechat · …».
 - **Menciones:**
   - **Buscador:** se abre al escribir «@» al inicio o tras un espacio. Muestra los participantes (primero quienes más escriben ahí), filtra sin tildes y agrega «@todos» en los grupos.
@@ -171,7 +171,7 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 - **Notificación:** usa `MessagingStyle` con la `Person` del autor y su foto. Crea un atajo de conversación de larga duración (`LocusId`), así aparece en la sección Conversaciones y se puede abrir como burbuja (`BubbleActivity`). Trae las acciones Responder (RemoteInput, sin abrir la app) y Marcar como leído. Hay tres canales: Mensajes, Recordatorios y Reuniones, todos con el sonido `tc_notify`. El badge es la suma de no leídos de las conversaciones no silenciadas.
 - **Duplicados:** si el mismo mensaje llega por el socket y por push, se muestra una sola vez (se deduplica por `messageId`). Con la app en primer plano y el socket en vivo, el push se ignora.
 - **Configuración Firebase:** `app/google-services.json` del proyecto `tiecoms` se mantiene fuera de git. `verifyReleaseFirebase` bloquea release si falta el archivo o no corresponde al proyecto/paquete de producción. Debug puede compilar sin el archivo, con push remoto desactivado. Para configurar otra máquina:
-  1. Crear el proyecto de Firebase (o usar el GCP `tiecoms`) y agregar la app Android `com.tiecoms.app`, con los SHA-256 de la clave de subida y de la firma de Play.
+  1. Crear el proyecto de Firebase (o usar el GCP `tiecoms`) y agregar la app Android `com.chaggu.app` (el archivo puede traer también el cliente viejo `com.tiecoms.app`), con los SHA-256 de la clave de subida y de la firma de Play.
   2. Descargar `google-services.json` a `apps/android/app/`. Está en `.gitignore` y no se sube.
   3. En el servidor, configurar la cuenta de servicio de FCM (HTTP v1) según el README del API de `mobile-feedback`.
 - **Antes de pedir el permiso:** en Android 13+ se muestra una explicación («Activa las notificaciones») antes de pedir `POST_NOTIFICATIONS`.
@@ -204,7 +204,7 @@ echo "sdk.dir=/opt/homebrew/share/android-commandlinetools" > local.properties  
 ./gradlew :app:assembleDebug
 ```
 
-**Servidor en debug.** Mantén pulsado el logo en Login o usa `adb shell am start -n com.tiecoms.app/.MainActivity -e apiUrl http://10.0.2.2:3041`. El emulador ve el host en `10.0.2.2`. El HTTP sin cifrar se permite solo en debug.
+**Servidor en debug.** Mantén pulsado el logo en Login o usa `adb shell am start -n com.chaggu.app/com.tiecoms.app.MainActivity -e apiUrl http://10.0.2.2:3041`. El emulador ve el host en `10.0.2.2`. El HTTP sin cifrar se permite solo en debug.
 
 ## Probar
 
@@ -218,11 +218,11 @@ TIECOMS_FIXTURE=/tmp/fx.json TIECOMS_PEER_DIR=<carpeta con scripts/ y node_modul
 
 # 2. UI en el emulador (conviene -gpu host: con swiftshader y la máquina cargada, el splash se traba)
 ./gradlew :app:installDebug :app:installDebugAndroidTest
-adb shell am instrument -w -e apiUrl http://10.0.2.2:3041 -e class com.tiecoms.app.SplashUiTest com.tiecoms.app.test/androidx.test.runner.AndroidJUnitRunner
+adb shell am instrument -w -e apiUrl http://10.0.2.2:3041 -e class com.tiecoms.app.SplashUiTest com.chaggu.app.test/androidx.test.runner.AndroidJUnitRunner
 FIXTURE=/tmp/fx.json API_URL=http://localhost:3041 NODE_ROOT=<carpeta con node_modules> node scripts/realtime-peer2.mjs &
 adb shell am instrument -w -e apiUrl http://10.0.2.2:3041 -e email <a.email> -e password <password> -e conversationId <id> \
-  -e class com.tiecoms.app.LiveUiTest com.tiecoms.app.test/androidx.test.runner.AndroidJUnitRunner
-adb pull /sdcard/Android/data/com.tiecoms.app/files/   # splash-*.png, ui-*.png
+  -e class com.tiecoms.app.LiveUiTest com.chaggu.app.test/androidx.test.runner.AndroidJUnitRunner
+adb pull /sdcard/Android/data/com.chaggu.app/files/   # splash-*.png, ui-*.png
 ```
 
 - **v3** (chats `multi`, vista previa, perfil y archivos) necesita un API con almacenamiento y worker. Se probó con una base propia en el Postgres Docker (`tiecoms-sso-pg`, puerto 55432, base `tiecoms_android_v3`), el S3 falso de main (`node apps/api/test/fake-s3.mjs 59044`) y el API en el 3044 (`S3_BUCKET=local S3_ENDPOINT=http://localhost:59044 AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=y`, con `src/server.ts` y `src/worker.ts`). `V3DecodingTest` y `V3ApiContractTest` corren sin servidor.
@@ -235,14 +235,14 @@ adb pull /sdcard/Android/data/com.tiecoms.app/files/   # splash-*.png, ui-*.png
   TIECOMS_FIXTURE=/tmp/fx3043.json ./gradlew :app:testDebugUnitTest --tests '*LiveV3Feedback*'
   FIXTURE=/tmp/fx3043.json API_URL=http://localhost:3043 NODE_ROOT=<node_modules> node scripts/realtime-peer2.mjs &
   adb shell am instrument -w -e apiUrl http://10.0.2.2:3043 -e email <a.email> -e password <pw> -e conversationId <id> -e peerId <b.id> \
-    -e class com.tiecoms.app.FeedbackUiTest,com.tiecoms.app.CropEditorUiTest com.tiecoms.app.test/androidx.test.runner.AndroidJUnitRunner
+    -e class com.tiecoms.app.FeedbackUiTest,com.tiecoms.app.CropEditorUiTest com.chaggu.app.test/androidx.test.runner.AndroidJUnitRunner
   ```
   - `FeedbackUiTest` recorre: jerarquía de Inicio → menú de la lista → avatares → menú anclado del mensaje (toque fuera y clic derecho) → lateral → respuesta en privado → barra de asuntos → comentario → foto del grupo → push de FCM simulado con `TcMessagingService.handle` (verifica `MessagingStyle`, atajo, burbuja, acciones y badge) → Responder desde la notificación.
   - `CropEditorUiTest` recorta una foto real y verifica un JPEG de 512 × 512 de ≤ 3 MB.
   - `FeedbackV3Test` corre en la JVM sin servidor.
 - **v4 (3043, `mobile-feedback` 6f58087 / 1fa4c21 / cbeebe7):** `ShareV4Test` corre en la JVM. `LiveV4ShareTest` prueba adjuntos, miniaturas, envío a 2 conversaciones, descarga, reenvío, borrado, `lastHumanPreview`, límites y grupos en espacio. `LiveV4ChatsVoiceTest` prueba asuntos, reuniones y recordatorios en directos, el aviso `event.soon` y las notas de voz. `ShareUiTest` recorre en el emulador la hoja de compartir del sistema con Direct Share, `ShareActivity` con 3 fotos de la galería, la cuadrícula, el visor, las pestañas y «Nuevo chat». `LiveUiTest` ya comparte por `ShareActivity`.
 - **§G y §H (3043):** `SidechatTest` y `MentionsTest` corren en la JVM. `LiveSidechatTest` prueba el sidechat, la respuesta, el resumen de IA y «Llevar al hilo» con `mergedKind`. `LiveMentionsTest` prueba offsets con emoji, recorte, `unreadMentions`, la bandeja, `droppedMentions`, @todos y la edición. `SidechatUiTest` corre en teléfono y en pantalla ancha (`adb shell wm size 2560x1600; adb shell wm density 320`). `MentionsUiTest` recorre el buscador, el token, el retroceso, el resaltado, el badge y la bandeja.
-- **App Links `https://`:** sin un `assetlinks.json` válido, Android 12+ abre Chrome. Para probar sin verificar: `adb shell pm set-app-links-user-selection --user 0 --package com.tiecoms.app true all`.
+- **App Links `https://`:** sin un `assetlinks.json` válido, Android 12+ abre Chrome. Para probar sin verificar: `adb shell pm set-app-links-user-selection --user 0 --package com.chaggu.app true all`.
 
 ## Firmar
 

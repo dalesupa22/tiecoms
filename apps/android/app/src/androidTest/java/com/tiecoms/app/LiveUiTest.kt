@@ -39,7 +39,7 @@ import java.io.File
  * llegan como argumentos de instrumentación (nunca están en el código de la app):
  *
  *   adb shell am instrument -w -e apiUrl http://10.0.2.2:3041 -e email … -e password … \
- *     -e conversationId … -e class com.tiecoms.app.LiveUiTest com.tiecoms.app.test/androidx.test.runner.AndroidJUnitRunner
+ *     -e conversationId … -e class com.tiecoms.app.LiveUiTest com.chaggu.app.test/androidx.test.runner.AndroidJUnitRunner
  *
  * Con scripts/realtime-peer2.mjs corriendo como B (eco, «visto editado», «visto fijado»).
  */
@@ -161,26 +161,26 @@ class LiveUiTest {
             ins.targetContext.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).setPackage(ins.targetContext.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
         t0 = System.currentTimeMillis()
-        open("tiecoms://c/$convId")
+        open("chaggu://c/$convId")
         compose.waitUntilExactlyOneExists(hasTestTag("composer"), 10_000)
-        log("deep link tiecoms://c/<id>: ${System.currentTimeMillis() - t0} ms")
+        log("deep link chaggu://c/<id>: ${System.currentTimeMillis() - t0} ms")
         compose.onNodeWithTag("back").performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("conv-$convId"), 10_000)
         t0 = System.currentTimeMillis()
         open("https://app.chaggu.com/c/$convId")
         compose.waitUntilExactlyOneExists(hasTestTag("composer"), 10_000)
         log("deep link https://app.chaggu.com/c/<id>: ${System.currentTimeMillis() - t0} ms")
-        open("tiecoms://asuntos")
+        open("chaggu://asuntos")
         compose.waitUntilExactlyOneExists(hasTestTag("issues"), 10_000)
-        open("tiecoms://agenda")
+        open("chaggu://agenda")
         compose.waitUntilExactlyOneExists(hasTestTag("agenda"), 10_000)
         log("deep links /asuntos y /agenda → pestañas")
-        open("tiecoms://c/00000000-0000-0000-0000-000000000000")
+        open("chaggu://c/00000000-0000-0000-0000-000000000000")
         compose.waitUntil(10_000) { compose.onAllNodes(hasText("No tienes acceso", substring = true) or hasText("have access", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         log("deep link sin acceso → aviso")
 
         // 7. Rotación: el borrador y los mensajes sobreviven.
-        open("tiecoms://c/$convId")
+        open("chaggu://c/$convId")
         compose.waitUntilExactlyOneExists(hasTestTag("composer"), 10_000)
         compose.onNodeWithTag("composer").performTextInput("borrador")
         scenario.onActivity { it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }

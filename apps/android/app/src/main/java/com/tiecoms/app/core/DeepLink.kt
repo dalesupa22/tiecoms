@@ -3,7 +3,7 @@ package com.tiecoms.app.core
 import java.net.URI
 import java.net.URLDecoder
 
-/** Destinos que la app sabe abrir desde un enlace (https o tiecoms://). */
+/** Destinos que la app sabe abrir desde un enlace (https o chaggu://). */
 sealed interface DeepLink {
     /** [seq]: salta a ese mensaje (?m=seq). */
     /** [side]: abre el origen con ese sidechat desplegado (notificación TC_SIDE). */
@@ -23,8 +23,8 @@ object DeepLinks {
     const val WEB_URL = "https://www.chaggu.com"
     /** Chaggu (actual) y TieComs (marca anterior; sus enlaces siguen abriendo la app). */
     val HOSTS = setOf("app.chaggu.com", "chaggu.com", "www.chaggu.com", "app.tiecoms.com", "tiecoms.com", "www.tiecoms.com")
-    /** Esquema propio: se mantiene «tiecoms» porque el SSO nativo del backend redirige a tiecoms://auth/callback. */
-    const val SCHEME = "tiecoms"
+    /** Esquema propio de Chaggu. El SSO pide redirect_scheme=chaggu y el backend vuelve a chaggu://auth/callback. */
+    const val SCHEME = "chaggu"
     const val SCREEN_ISSUES = "issues"
     const val SCREEN_AGENDA = "agenda"
     const val SCREEN_TRAZO = "trazo"
@@ -46,11 +46,11 @@ object DeepLinks {
 
     /**
      * https://app.chaggu.com/c/<id> (también chaggu.com, www. y los hosts tiecoms.com), /w/<id>, /invite/<token>, /signup?org=<token>
-     * tiecoms://c/<id> (el primer segmento llega como host) · tiecoms:///c/<id>
+     * chaggu://c/<id> (el primer segmento llega como host) · chaggu:///c/<id>
      */
     fun parse(raw: String?): DeepLink? {
         if (raw.isNullOrBlank()) return null
-        // tiecoms://auth/* está reservado para el retorno del SSO (ver [Sso.parseCallback]).
+        // chaggu://auth/* está reservado para el retorno del SSO (ver [Sso.parseCallback]).
         if (Sso.isAuthHost(raw)) return null
         val uri = runCatching { URI(raw.trim()) }.getOrNull() ?: return null
         val scheme = uri.scheme?.lowercase() ?: return null

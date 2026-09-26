@@ -46,7 +46,7 @@ object ConversationShortcuts {
             .setIcon(icon).setLongLived(true).setRank(rank)
             .setLocusId(LocusIdCompat(c.id))
             .setCategories(CATEGORIES)
-            .setIntent(Intent(Intent.ACTION_VIEW, Uri.parse("tiecoms://c/${c.id}"), ctx, MainActivity::class.java))
+            .setIntent(Intent(Intent.ACTION_VIEW, Uri.parse("chaggu://c/${c.id}"), ctx, MainActivity::class.java))
             .apply {
                 if (otherId != null) setPerson(Person.Builder().setName(Names.person(d, otherId)?.name ?: title).setKey(otherId).setIcon(icon).build())
                 else setIsConversation()

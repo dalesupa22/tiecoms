@@ -69,7 +69,7 @@ internal fun shot(name: String) {
  * asuntos con comentarios, foto del grupo y la notificación MessagingStyle con Responder.
  *
  *   adb shell am instrument -w -e apiUrl http://10.0.2.2:3043 -e email … -e password … -e conversationId … -e peerId … \
- *     -e class com.tiecoms.app.FeedbackUiTest com.tiecoms.app.test/androidx.test.runner.AndroidJUnitRunner
+ *     -e class com.tiecoms.app.FeedbackUiTest com.chaggu.app.test/androidx.test.runner.AndroidJUnitRunner
  *
  * Con scripts/realtime-peer2.mjs corriendo como el par (responde «eco: …»).
  */
@@ -200,7 +200,7 @@ class FeedbackUiTest {
         val issue = runBlocking { client.createIssue(convId, "Aprobar presupuesto $tag", null, null, null) }
         compose.waitUntilAtLeastOneExists(hasTestTag("barIssues"), 10_000) // barra de accesos del chat (docs/GRUPOS.md)
         Thread.sleep(400); shot("v3fb-09-barra-asuntos")
-        open("tiecoms://asuntos")
+        open("chaggu://asuntos")
         compose.waitUntilAtLeastOneExists(hasTestTag("issue-${issue.id}"), 10_000)
         Thread.sleep(400); shot("v3fb-10-asuntos-agrupados")
         compose.onNodeWithTag("issue-${issue.id}").performScrollTo().performClick()
@@ -213,7 +213,7 @@ class FeedbackUiTest {
         log("§3 comentario publicado y en el historial con autor y hora")
 
         // §1 Foto del grupo: detalles → Poner foto → origen (galería/cámara/archivos).
-        open("tiecoms://c/$convId")
+        open("chaggu://c/$convId")
         compose.waitUntilExactlyOneExists(hasTestTag("details"), 10_000)
         compose.onNodeWithTag("details").performClick()
         compose.waitUntilAtLeastOneExists(hasTestTag("groupPhoto"), 10_000)

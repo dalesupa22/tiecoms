@@ -24,10 +24,10 @@ class DeepLinkTest {
     }
 
     @Test fun `esquema propio`() {
-        assertEquals(DeepLink.Conversation("c1"), DeepLinks.parse("tiecoms://c/c1"))
-        assertEquals(DeepLink.Conversation("c1"), DeepLinks.parse("tiecoms:///c/c1"))
-        assertEquals(DeepLink.Invite("t"), DeepLinks.parse("tiecoms://invite/t"))
-        assertEquals(DeepLink.Signup("o"), DeepLinks.parse("tiecoms://signup?org=o"))
+        assertEquals(DeepLink.Conversation("c1"), DeepLinks.parse("chaggu://c/c1"))
+        assertEquals(DeepLink.Conversation("c1"), DeepLinks.parse("chaggu:///c/c1"))
+        assertEquals(DeepLink.Invite("t"), DeepLinks.parse("chaggu://invite/t"))
+        assertEquals(DeepLink.Signup("o"), DeepLinks.parse("chaggu://signup?org=o"))
     }
 
     @Test fun `hosts o rutas ajenas se rechazan`() {

@@ -1294,5 +1294,49 @@
  "ovs.older": [
   "Ver mensajes anteriores",
   "Show earlier messages"
+ ],
+ "ai.voice.title": [
+  "¿Usar IA en esta nota de voz?",
+  "Use AI for this voice note?"
+ ],
+ "ai.voice.message": [
+  "Si lo permites, TieComs envía esta grabación y su idioma a Inworld para transcribirla. Envía la transcripción, los nombres del autor y los participantes, y el nombre/contexto de la conversación a DeepSeek para generar un resumen y una acción sugerida. Puedes enviar y escuchar la nota sin IA. El permiso aplica solo a esta nota.",
+  "If you allow this, TieComs sends this recording and its language to Inworld for transcription. It sends the transcript, author and participant names, and conversation name/context to DeepSeek for a summary and suggested action. You can send and play the voice note without AI. Permission applies to this note only."
+ ],
+ "ai.voice.allow": [
+  "Permitir IA y enviar",
+  "Allow AI and send"
+ ],
+ "ai.voice.without": [
+  "Enviar sin IA",
+  "Send without AI"
+ ],
+ "ai.voice.retry": [
+  "Permitir IA y reintentar",
+  "Allow AI and retry"
+ ],
+ "ai.side.request": [
+  "Crear un resumen con IA…",
+  "Create a summary with AI…"
+ ],
+ "ai.side.title": [
+  "¿Compartir esta conversación con DeepSeek?",
+  "Share this conversation with DeepSeek?"
+ ],
+ "ai.side.message": [
+  "Para sugerir un resumen, TieComs envía a DeepSeek los mensajes y las transcripciones de esta conversación, los nombres del autor y los participantes, y el nombre/contexto de la conversación. Si lo permites, la sugerencia reemplaza tu borrador. Puedes seguir editando y publicar tu propio resumen sin IA. El permiso aplica solo a esta solicitud.",
+  "To suggest a summary, TieComs sends this conversation's messages and transcripts, author and participant names, and conversation name/context to DeepSeek. Allowing this replaces your draft with the suggestion. You can keep editing and publish your own summary without AI. Permission applies to this request only."
+ ],
+ "ai.side.allow": [
+  "Permitir y crear resumen",
+  "Allow and create summary"
+ ],
+ "ai.side.without": [
+  "Continuar sin IA",
+  "Continue without AI"
+ ],
+ "err.ai_consent_required": [
+  "El procesamiento con IA necesita permiso. Una nota enviada sin IA debe grabarse y enviarse de nuevo con permiso para usar IA.",
+  "AI processing needs permission. A voice note sent without AI must be recorded and sent again with permission to use AI."
  ]
 }

@@ -418,6 +418,8 @@ export const CreateGroupInput = z.object({
   shareLink: z.boolean().default(false),
   lang: z.enum(['es', 'en']).default('es'),
 });
+/** Lo que envía un cliente (los campos con valor por defecto son opcionales). */
+export type CreateGroupRequest = z.input<typeof CreateGroupInput>;
 export interface CreateGroupResultDTO {
   workspaceId: string; conversationId: string; invited: number;
   /** Con shareLink: el enlace y el código para compartir. */

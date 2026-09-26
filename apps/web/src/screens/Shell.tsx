@@ -1,18 +1,15 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { BootstrapDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { asset, navigate, type Route } from '../router.ts';
-import { Avatar, ConvAvatar, OrgMark, badgeColor, conversationTitle, counterpartOrg, orgById, personById } from '../ui.tsx';
-import { hangsUnderOrigin, sidesOf } from './Side.tsx';
+import { Avatar, counterpartOrg, orgById, personById } from '../ui.tsx';
 import { MentionsInbox } from './Mentions.tsx';
-import { InviteDialog, NewGroupDialog, NewWorkspaceDialog } from './Dialogs.tsx';
-import { conversationMenu, openDialog, workspaceMenu } from '../actions.tsx';
-import { menuProps } from '../menu.tsx';
-import { newEvent } from './Calendar.tsx';
-import type { ConversationDTO, WorkspaceDTO } from '@tiecoms/contracts';
+import { openDialog } from '../actions.tsx';
+import type { ConversationDTO } from '@tiecoms/contracts';
 import { t } from '../i18n.ts';
 import { openAccountMenu } from './Profile.tsx';
-import { NewChatDialog, StackedAvatars } from './Chats.tsx';
+import { NewChatDialog } from './Chats.tsx';
+import { ConvItem, GroupsTree, dmConversations } from './Groups.tsx';
 
 const NAV = [
   { name: 'today', label: 'nav.today', ico: '◑', to: '/' },
@@ -75,7 +72,8 @@ export function sortHome(d: BootstrapDTO, groups: ReturnType<typeof groupWorkspa
 
 // ---------- Pestañas de Inicio (mismas reglas en web, iOS y Android) ----------
 export type HomeTab = 'all' | 'unread' | 'mentions' | 'issues' | 'chats' | 'sides';
-export const HOME_TABS: HomeTab[] = ['all', 'unread', 'mentions', 'issues', 'chats', 'sides'];
+/** Chats y sidechats tienen su propia sección (DMs): los filtros de Grupos no los repiten. */
+export const HOME_TABS: HomeTab[] = ['all', 'unread', 'mentions', 'issues'];
 const TAB_KEY = 'tiecoms:homeTab';
 /** No leídos = unread > 0 y no silenciada; Asuntos = openIssues > 0; Chats = direct + multi; Laterales = deriveKind 'side'. */
 export function matchesTab(c: ConversationDTO, tab: HomeTab) {
@@ -107,22 +105,11 @@ function HomeTabs({ d, tab, onTab }: { d: BootstrapDTO; tab: HomeTab; onTab: (t:
 
 function Sidebar({ route }: { route: Route }) {
   const d = useClient((s) => s.data)!;
-  const [newWs, setNewWs] = useState(false);
   const [tab, setTabState] = useState<HomeTab>(storedTab);
   const setTab = (v: HomeTab) => { setTabState(v); try { localStorage.setItem(TAB_KEY, v); } catch {} };
-  const groups = useMemo(() => sortHome(d, groupWorkspaces(d)), [d]);
-  // Una conversación se muestra si cumple el filtro o si alguna lateral que cuelga de ella lo cumple.
-  const shows = (c: ConversationDTO) => matchesTab(c, tab) || sidesOf(d, c.id).some((x) => matchesTab(x, tab));
-  // Las laterales cuelgan de su conversación de origen (si la veo); si no, van con los chats.
-  const directs = d.conversations.filter((c) => (c.kind === 'direct' || c.kind === 'multi') && !hangsUnderOrigin(d, c) && shows(c))
-    .sort(compareConversations);
   const unreadTotal = d.conversations.reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0);
-  const pinnedConvs = d.conversations.filter((c) => c.pinnedAt && shows(c)).sort((a, b) => (a.pinnedAt ?? '').localeCompare(b.pinnedAt ?? ''));
-  const pinnedWs = tab === 'all' ? d.workspaces.filter((w) => w.pinnedAt) : [];
-  const visibleGroups = groups
-    .map((g) => ({ ...g, workspaces: g.workspaces.filter((w) => tab === 'all' || d.conversations.some((c) => c.workspaceId === w.id && shows(c))) }))
-    .filter((g) => g.workspaces.length > 0);
-  const nothing = tab !== 'all' && !visibleGroups.length && !directs.length;
+  const pinnedConvs = d.conversations.filter((c) => c.pinnedAt && matchesTab(c, tab)).sort((a, b) => (a.pinnedAt ?? '').localeCompare(b.pinnedAt ?? ''));
+  const dms = dmConversations(d, tab);
   const me = personById(d, d.me.id);
   const myOrg = orgById(d, d.me.primaryOrgId);
   const activeConv = route.name === 'conversation' ? route.id : null;
@@ -145,41 +132,19 @@ function Sidebar({ route }: { route: Route }) {
       <div className="side-scroll">
         <HomeTabs d={d} tab={tab} onTab={setTab} />
         {tab === 'mentions' ? <MentionsInbox /> : <>
-        {nothing && <div className="home-empty">{t(`home.empty.${tab}` as 'home.empty.all')}</div>}
-        <div className="row" style={{ padding: '6px 10px 2px' }}>
-          <span className="eyebrow grow">{t('side.companies')}</span>
-          <button className="btn ghost small" onClick={() => setNewWs(true)} title={t('side.newSpace')} aria-label={t('side.newSpace')}>＋</button>
-        </div>
-        {(pinnedConvs.length > 0 || pinnedWs.length > 0) && (
+        {pinnedConvs.length > 0 && (
           <div className="side-pinned">
             <div className="eyebrow" style={{ padding: '4px 10px' }}>📌 {t('side.pinned')}</div>
-            {pinnedWs.map((w) => <WsTitle key={w.id} w={w} active={activeWs === w.id} />)}
             {pinnedConvs.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} showWs />)}
           </div>
         )}
-        {groups.length === 0 && <div className="hint" style={{ padding: '6px 10px' }}>{t('side.empty')}</div>}
-        {visibleGroups.map((g) => (
-          <div key={g.org?.id ?? 'none'}>
-            <div className="side-org"><OrgMark org={g.org} /><span className="ellipsis">{g.org?.name ?? t('common.noCompany')}</span></div>
-            <div className="side-ws">
-              {g.workspaces.map((w) => {
-                const convs = d.conversations.filter((c) => c.workspaceId === w.id && shows(c)).sort(compareConversations);
-                return (
-                  <div key={w.id}>
-                    <WsTitle w={w} active={activeWs === w.id} />
-                    {convs.map((c) => <ConvWithSides key={c.id} c={c} activeConv={activeConv} tab={tab} />)}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
+        <GroupsTree tab={tab} activeConv={activeConv} activeWs={activeWs} />
         <div className="row" style={{ padding: '14px 10px 2px' }}>
-          <span className="eyebrow grow">{t('side.directs')}</span>
-          <button className="btn ghost small" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)} title={t('chat.new')} aria-label={t('chat.new')}>＋</button>
+          <span className="eyebrow grow">{t('nav.dms')}</span>
+          <button className="btn ghost small" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)} title={t('dms.new')} aria-label={t('dms.new')}>＋</button>
         </div>
-        {directs.map((c) => <ConvWithSides key={c.id} c={c} activeConv={activeConv} tab={tab} />)}
-        {directs.length === 0 && tab === 'all' && <button className="side-conv" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)}><span className="hash">＋</span><span className="grow muted">{t('chat.new')}</span></button>}
+        {dms.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />)}
+        {dms.length === 0 && tab === 'all' && <button className="side-conv" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)}><span className="hash">＋</span><span className="grow muted">{t('dms.new')}</span></button>}
         </>}
       </div>
       <button className="side-foot" style={{ border: 0, borderTop: '1px solid var(--line)', background: 'transparent', textAlign: 'left' }}
@@ -191,70 +156,30 @@ function Sidebar({ route }: { route: Route }) {
         </span>
         <span className="muted" aria-hidden>⋯</span>
       </button>
-      {newWs && <NewWorkspaceDialog onClose={() => setNewWs(false)} />}
     </aside>
-  );
-}
-
-/** Conversación y, debajo con sangría, sus laterales. */
-function ConvWithSides({ c, activeConv, tab = 'all' }: { c: ConversationDTO; activeConv: string | null; tab?: HomeTab }) {
-  const d = useClient((s) => s.data)!;
-  const sides = sidesOf(d, c.id).filter((x) => tab === 'all' || matchesTab(x, tab));
-  return (
-    <>
-      <ConvItem c={c} active={activeConv === c.id} />
-      {sides.length > 0 && <div className="side-sides">{sides.map((x) => <ConvItem key={x.id} c={x} active={activeConv === x.id} />)}</div>}
-    </>
   );
 }
 
 const isMuted = (c: ConversationDTO) => !!c.mutedUntil && Date.parse(c.mutedUntil) > Date.now();
 
-function ConvItem({ c, active, showWs = false }: { c: ConversationDTO; active: boolean; showWs?: boolean }) {
-  const d = useClient((s) => s.data)!;
-  const muted = isMuted(c);
-  const other = c.kind === 'direct' ? personById(d, c.memberIds.find((m) => m !== d.me.id)) : null;
-  const ws = showWs ? d.workspaces.find((w) => w.id === c.workspaceId) : null;
-  return (
-    <button className={`side-conv ${active ? 'active' : ''} ${c.unread && !muted ? 'unread' : ''} ${muted ? 'is-muted' : ''}`} onClick={() => navigate(`/c/${c.id}`)}
-      {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
-      {other ? <Avatar person={other} org={orgById(d, other.orgId)} size={22} />
-        : <ConvAvatar c={c} size={22} fallback={c.kind === 'multi' && c.deriveKind !== 'side' ? <StackedAvatars c={c} size={20} /> : undefined} />}
-      <span className="grow ellipsis">{conversationTitle(d, c)}{ws ? <span className="muted small"> · {ws.name}</span> : null}</span>
-      {muted && <span className="small" title={t('side.muted')}>🔕</span>}
-      {(c.unreadMentions ?? 0) > 0 && <span className="pill mention-pill" title={t('mention.youMentioned')}>@</span>}
-      {c.unread > 0 && <span className={`pill ${muted ? 'is-muted' : ''}`} style={{ background: badgeColor(c.workspaceId ? counterpartOrg(d, c.workspaceId) : null) }}>{c.unread}</span>}
-    </button>
-  );
-}
-
-function WsTitle({ w, active }: { w: WorkspaceDTO; active: boolean }) {
-  return (
-    <button className="side-ws-title" style={{ width: '100%', background: active ? 'var(--card)' : undefined }} onClick={() => navigate(`/w/${w.id}`)}
-      {...menuProps(() => workspaceMenu(w, {
-        onNewGroup: () => openDialog((close) => <NewGroupDialog workspaceId={w.id} onClose={close} />),
-        onInvite: () => openDialog((close) => <InviteDialog workspaceId={w.id} onClose={close} />),
-      }))}>
-      <span className="grow ellipsis">{w.pinnedAt ? '📌 ' : ''}{w.name}</span>
-    </button>
-  );
-}
-
+/** Barra inferior móvil: 5 pestañas fijas (docs/GRUPOS.md). */
 function MobileTabs({ route }: { route: Route }) {
-  const unread = useClient((s) => s.data?.conversations.reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0) ?? 0);
+  const d = useClient((s) => s.data);
+  const unreadOf = (f: (c: ConversationDTO) => boolean) => d?.conversations.filter(f).reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0) ?? 0;
+  const me = d ? personById(d, d.me.id) : null;
   const tabs = [
-    { name: 'today', label: t('nav.today'), ico: '◑', to: '/' },
-    { name: 'inbox', label: t('nav.chats'), ico: '◍', to: '/conversaciones' },
-    { name: 'agenda', label: t('nav.agenda'), ico: '▤', to: '/agenda' },
-    { name: 'issues', label: t('nav.issues'), ico: '◆', to: '/asuntos' },
-    { name: 'spaces', label: t('nav.spaces'), ico: '▦', to: '/espacios' },
+    { name: 'groups', label: t('nav.groups'), ico: '▦', to: '/grupos', badge: unreadOf((c) => !!c.workspaceId) },
+    { name: 'dms', label: t('nav.dms'), ico: '◍', to: '/dms', badge: unreadOf((c) => c.kind === 'direct' || c.kind === 'multi') },
+    { name: 'issues', label: t('nav.issues'), ico: '◆', to: '/asuntos', badge: 0 },
+    { name: 'agenda', label: t('nav.calendar'), ico: '▤', to: '/agenda', badge: 0 },
+    { name: 'settings', label: t('nav.you'), ico: null, to: '/ajustes', badge: 0 },
   ];
   return (
     <nav className="tabs" aria-label={t('nav.mainNav')}>
-      {tabs.map((t) => (
-        <button key={t.name} className={route.name === t.name ? 'on' : ''} onClick={() => navigate(t.to)}>
-          <span className="ico">{t.ico}</span>{t.label}
-          {t.name === 'inbox' && unread > 0 && <span className="pill">{unread}</span>}
+      {tabs.map((x) => (
+        <button key={x.name} className={route.name === x.name || (x.name === 'groups' && route.name === 'today') ? 'on' : ''} onClick={() => navigate(x.to)}>
+          {x.ico ? <span className="ico">{x.ico}</span> : <span className="ico"><Avatar person={me} org={d ? orgById(d, d.me.primaryOrgId) : null} size={22} /></span>}{x.label}
+          {x.badge > 0 && <span className="pill">{x.badge}</span>}
         </button>
       ))}
     </nav>

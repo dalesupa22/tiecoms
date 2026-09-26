@@ -15,9 +15,10 @@ import { MentionMirror, MessageText, backspaceToken, mentionsFor, mentionsMe, us
 import { QuickReplies, SideChip, SideConnector, SideDialog, replyPrivately, sidesOf, takePrivateDraft } from './Side.tsx';
 import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
-import { AddMembersDialog } from './Dialogs.tsx';
 import { IssueDrawer, IssueRow, NewIssueDialog, isClosed } from './Issues.tsx';
 import { DeriveDialog, LineageBar, MergedCard } from './Lineage.tsx';
+import { ChatBar, ThreadChip, threadsOf } from './ChatBar.tsx';
+import { AddMembersDialog } from './Dialogs.tsx';
 
 type Row =
   | { kind: 'day'; key: string; label: string }
@@ -49,7 +50,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const [error, setError] = useState<string | null>(null);
   const [deriving, setDeriving] = useState<MessageDTO | null>(null);
   const [newIssue, setNewIssue] = useState<{ origin?: MessageDTO; title?: string } | null>(null);
-  const [openIssue, setOpenIssue] = useState<string | null>(null);
+  // ?issue=<id>: se abre directo el asunto (desde el árbol de Grupos).
+  const [openIssue, setOpenIssue] = useState<string | null>(() => queryParam('issue'));
   const [highlight, setHighlight] = useState<number | null>(null);
   const [replyTo, setReplyTo] = useState<MessageDTO | null>(null);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
@@ -60,6 +62,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const atBottom = useRef(true);
   const prevHeight = useRef(0);
   const input = useRef<HTMLTextAreaElement>(null);
+  // Un hilo o sidechat abierto al lado recibe el cursor: se escribe ahí sin tocar el chat principal.
+  useEffect(() => { if (embedded) requestAnimationFrame(() => input.current?.focus()); }, [embedded ? id : null]);
   const sideAnchorFor = () => replyTo ?? [...(local?.messages ?? [])].reverse().find((m) => m.kind === 'text' && !m.deletedAt && !!m.body) ?? null;
   // Menciones: tokens «@Nombre» del compositor y lista que aparece al escribir «@».
   const [tokens, setTokens] = useState<MentionToken[]>([]);
@@ -198,6 +202,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const canWork = conv.canPost;
   const canDerive = canWork && conv.kind !== 'direct' && !!conv.workspaceId;
   const myWsRole = d.workspaces.find((w) => w.id === conv.workspaceId)?.myRole;
+  // Los terceros invitados participan en los asuntos pero no los abren (el API responde 403).
+  const canOpenIssues = canWork && myWsRole !== 'guest';
   const ws = d.workspaces.find((w) => w.id === conv.workspaceId);
   const typers = (typing ?? []).filter((x) => x.until > Date.now()).map((x) => personById(d, x.userId)?.name.split(' ')[0]).filter(Boolean);
   const orgsHere = [...new Set(conv.memberIds.map((m) => personById(d, m)?.orgId).filter(Boolean))].map((o) => orgById(d, o as string));
@@ -221,7 +227,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     return [
       ...(conv.canPost ? [{ label: t('menu.reply'), icon: '↩', onSelect: () => { setReplyTo(m); input.current?.focus(); } }] : []),
       ...(!mine && conv.kind !== 'direct' ? [{ label: t('preply.action'), icon: '✉', onSelect: () => void replyPrivately(m) }] : []),
-      ...(!embedded ? [{ label: t('side.ask'), icon: '💬', onSelect: () => setSideFor(m) }] : []),
+      // Responder aparte, sin llenar el chat: hilo con los del chat o sidechat privado con quien elijas.
+      ...(!embedded && canDerive && myWsRole !== 'guest' ? [{ label: t('menu.derive'), icon: '💬', onSelect: () => setDeriving(m) }] : []),
+      ...(!embedded ? [{ label: t('side.ask'), icon: '🔒', onSelect: () => setSideFor(m) }] : []),
       { label: t('menu.copyText'), icon: '⧉', onSelect: async () => { await copyText(m.body); toast(t('toast.copied')); } },
       { label: t('menu.copyLink'), icon: '⛓', onSelect: async () => { await copyText(messageLink(m)); toast(t('toast.linkCopied')); } },
       { divider: true },
@@ -230,8 +238,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       { label: t('menu.markUnread'), icon: '●', onSelect: () => client.markUnread(id, m.seq).then(() => toast(t('toast.markedUnread'))).catch((e) => toast(errorText(e))) },
       ...(canWork ? [
         { divider: true },
-        ...(canDerive && myWsRole !== 'guest' ? [{ label: t('menu.derive'), icon: '⑂', onSelect: () => setDeriving(m) }] : []),
-        { label: t('menu.issue'), icon: '◆', onSelect: () => setNewIssue({ origin: m }) },
+        ...(canOpenIssues ? [{ label: t('menu.issue'), icon: '◆', onSelect: () => setNewIssue({ origin: m }) }] : []),
         { label: t('menu.meeting'), icon: '📅', onSelect: () => newEvent({ conversationId: id, originMessageId: m.id, defaultTitle: excerpt(m.body, 80) }) },
       ] : []),
       { label: t('menu.forwardChat'), icon: '↪', onSelect: () => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />) },
@@ -262,8 +269,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               : <div className="small muted ellipsis">{conversationSubtitle(d, conv)}{conv.kind !== 'direct' ? ` · ${tn(conv.memberIds.length, 'n.participant', 'n.participants')}` : ''}</div>}
           </div>
           <div className="row only-desktop">{orgsHere.map((o) => o && <OrgMark key={o.id} org={o} size={22} />)}</div>
-          {pinned.size > 0 && <button className="btn ghost small" onClick={() => setShowPins(true)} title={t('pins.title')}>📌 {pinned.size}</button>}
-          {ws && <button className="btn ghost small only-desktop" onClick={() => navigate(`/w/${ws.id}`)}>{t('chat.space')}</button>}
+          {embedded && pinned.size > 0 && <button className="btn ghost small" onClick={() => setShowPins(true)} title={t('pins.title')}>📌 {pinned.size}</button>}
+          {embedded && conv.canManage && conv.kind !== 'direct' && <button className="btn ghost small" onClick={() => openDialog((close) => <AddMembersDialog conversationId={id} onClose={close} />)} title={t('bar.addPeople')}>＋ {t('bar.people')}</button>}
+          {ws && !embedded && <button className="btn ghost small only-desktop" onClick={() => navigate(`/w/${ws.id}`)}>{t('chat.space')}</button>}
           <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) })); }}>⋯</button>
           {embedded ? <>
             <button className="icon-btn" aria-label={t('side.openFull')} title={t('side.openFull')} onClick={() => navigate(`/c/${id}`)}>⤢</button>
@@ -286,19 +294,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           </div>
         )}
         <LineageBar conv={conv} />
-        {openHere.length > 0 && (
-          <div className="issues-here">
-            <span className="eyebrow">{t('issue.here')}</span>
-            {openHere.map((i) => {
-              const owner = personById(d, i.ownerId);
-              return (
-                <button key={i.id} className="issue-chip" onClick={() => setOpenIssue(i.id)}>
-                  <Avatar person={owner} org={orgById(d, owner?.orgId)} size={22} />
-                  <span className="ellipsis">{i.title}</span>
-                </button>
-              );
-            })}
-          </div>
+        {!embedded && (
+          <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)}
+            onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
         )}
 
         <div className="msgs" ref={scroller} onScroll={onScroll} role="log" aria-live="polite">
@@ -344,8 +342,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                   ) : (
                     (m.body || m.deletedAt || !m.attachments?.length) && <div className="msg-body">{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <MessageText d={d} body={m.body} mentions={m.mentions} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
                   )}
-                  {!m.deletedAt && !!m.attachments?.length && <AttachmentsView list={m.attachments} onCreateIssue={canWork ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
+                  {!m.deletedAt && !!m.attachments?.length && <AttachmentsView list={m.attachments} onCreateIssue={canOpenIssues ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
                   {!m.deletedAt && !isEditing && m.linkPreview && <LinkPreviewCard p={m.linkPreview} />}
+                  {!embedded && <ThreadChip d={d} threads={threadsOf(d, id, m.id).filter((c) => c.deriveKind !== 'side')} onOpen={setSideId} />}
                   {!embedded && <SideChip d={d} sides={sidesOf(d, id, m.id)} onOpen={setSideId} />}
                   {issueOf(m.id) && <button className="msg-issue" onClick={() => setOpenIssue(issueOf(m.id)!.id)}>◆ {issueOf(m.id)!.title}</button>}
                   {!m.deletedAt && !isEditing && (
@@ -353,7 +352,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                       {conv.canPost && <button onClick={() => { setReplyTo(m); input.current?.focus(); }}>↩ {t('menu.reply')}</button>}
                       <button onClick={() => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />)}>↪ {t('menu.forward')}</button>
                       {canDerive && myWsRole !== 'guest' && <button onClick={() => setDeriving(m)}>{t('derive.action')}</button>}
-                      {canWork && <button onClick={() => setNewIssue({ origin: m })}>{t('issue.fromMessage')}</button>}
+                      {canOpenIssues && <button onClick={() => setNewIssue({ origin: m })}>{t('issue.fromMessage')}</button>}
                       <button aria-label={t('menu.open')} onClick={(e) => { const rr = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(rr.left, rr.bottom + 4, messageMenu(m)); }}>⋯</button>
                     </div>
                   )}
@@ -384,13 +383,16 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
             <>
             <DraftTray drafts={drafts.drafts} onRemove={drafts.remove} onRetry={drafts.retry} />
             <div className="composer-box">
-              <button className="bring-btn" title={t('att.add')} aria-label={t('att.add')} onClick={(e) => {
+              <button className="bring-btn" title={t('bar.plus')} aria-label={t('bar.plus')} onClick={(e) => {
                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
                 openMenuAt(r.left, r.top - 8, [
                   { label: t('att.fromPhotos'), icon: '🖼', onSelect: () => pickFiles('media', drafts.add) },
                   { label: t('att.fromFiles'), icon: '📎', onSelect: () => pickFiles('any', drafts.add) },
+                  { divider: true },
+                  { label: t('bar.newEvent'), icon: '📅', onSelect: () => newEvent({ conversationId: id }) },
+                  ...(canOpenIssues ? [{ label: t('bar.newIssue'), icon: '◆', onSelect: () => setNewIssue({}) }] : []),
                 ]);
-              }}>📎</button>
+              }}>＋</button>
               <button className="bring-btn" title={t('imp.action')} aria-label={t('imp.action')} onClick={() => openDialog((close) => <BringDialog conversationId={id} onClose={close} />)}>⤓</button>
               <div className="mention-wrap">
               {picker.view}
@@ -439,7 +441,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
             <div>
               <div className="row" style={{ marginBottom: 6 }}>
                 <span className="eyebrow grow">{t('nav.issues')} · {openHere.length}</span>
-                <button className="btn small" onClick={() => setNewIssue({})}>{t('issue.new')}</button>
+                {canOpenIssues && <button className="btn small" onClick={() => setNewIssue({})}>{t('issue.new')}</button>}
               </div>
               {openHere.length === 0 && <div className="hint">{t('issue.noIssues')}</div>}
               <div className="list" style={{ gap: 6 }}>{openHere.map((i) => <IssueRow key={i.id} i={i} showWhere={false} onOpen={setOpenIssue} />)}</div>
@@ -485,7 +487,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       {groupCrop && <PhotoCropDialog file={groupCrop} title={t('photo.cropGroupTitle')} onClose={() => setGroupCrop(null)}
         onSave={async (blob) => { await client.setConversationAvatar(id, blob); }} />}
       {adding && <AddMembersDialog conversationId={id} onClose={() => setAdding(false)} />}
-      {deriving && <DeriveDialog conv={conv} message={deriving} onClose={() => setDeriving(null)} />}
+      {deriving && <DeriveDialog conv={conv} message={deriving} onClose={() => setDeriving(null)} onOpened={setSideId} />}
       {newIssue && (
         <NewIssueDialog conversationId={id} originMessageId={newIssue.origin?.id}
           defaultTitle={newIssue.title ?? (newIssue.origin ? excerpt(newIssue.origin.body) : '')}
@@ -542,6 +544,8 @@ function SystemRow({ m, onIssue }: { m: MessageDTO; onIssue: (id: string) => voi
   let p: any = null;
   try { p = m.body.startsWith('{') ? JSON.parse(m.body) : null; } catch {}
   const child = p?.k === 'derived.from' ? d.conversations.find((c) => c.id === p.childId) : null;
+  // Los hilos no ensucian el chat: el aviso «se abrió un hilo» lo reemplaza el chip bajo su mensaje.
+  if (p?.k === 'derived.from') return null;
   return (
     <div className="msg-sys">
       {systemText(m.body)}

@@ -3,6 +3,7 @@ import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
   type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp,
+  type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -246,6 +247,8 @@ export class TieComsClient {
     this.connect();
     this.scheduleFlush(0);
     void this.loadReminders().catch(() => {});
+    // Grupos muestra los asuntos abiertos bajo cada grupo.
+    void this.loadIssues({ open: true }).catch(() => {});
   }
 
   // ---------- Snapshot ----------
@@ -316,7 +319,7 @@ export class TieComsClient {
   }
 
   private onAccountEvent(e: AccountEvent) {
-    if (e.type === 'scope.changed') this.scheduleBootstrap();
+    if (e.type === 'scope.changed') { this.scheduleBootstrap(); void this.loadIssues({ open: true }).catch(() => {}); }
     if (e.type === 'prefs.updated') this.scheduleBootstrap();
     if (e.type === 'whatsapp.updated') this.set({ waRevision: this.state.waRevision + 1 });
     if (e.type === 'drive.updated') this.set({ driveRevision: this.state.driveRevision + 1 });
@@ -776,8 +779,22 @@ export class TieComsClient {
     await this.loadBootstrap();
     return r;
   }
-  createInvitation(workspaceId: string, input: { email?: string; role: 'member' | 'guest' | 'admin'; conversationIds: string[]; expiresInDays?: number; accessUntil?: string; history?: 'now' | 'all'; lang?: 'es' | 'en' }) {
-    return this.request<{ id: string; token: string; expiresAt: string; emailSent: boolean; emailStatus: 'sent' | 'failed' | 'skipped' | null }>(`/workspaces/${workspaceId}/invitations`, { method: 'POST', json: input });
+  createInvitation(workspaceId: string, input: { email?: string; role: 'member' | 'guest' | 'admin'; conversationIds: string[]; expiresInDays?: number; accessUntil?: string; history?: 'now' | 'all'; lang?: 'es' | 'en'; multiUse?: boolean }) {
+    return this.request<InvitationCreatedDTO>(`/workspaces/${workspaceId}/invitations`, { method: 'POST', json: input });
+  }
+  /** El «+» de Grupos: grupo interno, en una relación existente o en una relación nueva (ver docs/GRUPOS.md). */
+  async createGroup(input: CreateGroupRequest) {
+    const r = await this.request<CreateGroupResultDTO>('/groups', { method: 'POST', json: input });
+    await this.loadBootstrap();
+    return r;
+  }
+  /** Supervisión: grupos donde está la gente de mi empresa (solo owner/admin). */
+  loadOversight(orgId: string) {
+    return this.request<OversightDTO>(`/organizations/${orgId}/oversight`);
+  }
+  /** Mensajes de un grupo en solo lectura (supervisión): no toca la caché de conversaciones. */
+  readOnlyMessages(conversationId: string, before?: number) {
+    return this.request<{ messages: MessageDTO[]; hasMore: boolean }>(`/conversations/${conversationId}/messages?limit=50${before ? `&before=${before}` : ''}`);
   }
   async previewInvitation(token: string): Promise<InvitationPreviewDTO> {
     const res = await this.raw(`/invitations/${encodeURIComponent(token)}`, {}, false);

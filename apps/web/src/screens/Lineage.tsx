@@ -17,7 +17,7 @@ function orgsIn(d: BootstrapDTO, c: ConversationDTO) {
   return [...new Set(c.memberIds.map((id) => personById(d, id)?.orgId).filter(Boolean))].map((o) => orgById(d, o as string)).filter(Boolean);
 }
 
-export function DeriveDialog({ conv, message, onClose }: { conv: ConversationDTO; message: MessageDTO; onClose: () => void }) {
+export function DeriveDialog({ conv, message, onClose, onOpened }: { conv: ConversationDTO; message: MessageDTO; onClose: () => void; onOpened?: (id: string) => void }) {
   const d = useClient((s) => s.data)!;
   const myOrg = orgById(d, d.me.primaryOrgId);
   const excerpt = message.body.replace(/\s+/g, ' ').trim();
@@ -39,7 +39,8 @@ export function DeriveDialog({ conv, message, onClose }: { conv: ConversationDTO
     try {
       const r = await client.derive(conv.id, { messageId: message.id, kind, name, reason: reason || undefined });
       onClose();
-      navigate(`/c/${r.id}`);
+      // Se abre al lado, sin salir del chat (como un hilo de Slack).
+      if (onOpened) onOpened(r.id); else navigate(`/c/${r.id}`);
     } catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
   return (
@@ -132,8 +133,8 @@ export function LineageBar({ conv }: { conv: ConversationDTO }) {
   const [returning, setReturning] = useState(false);
   const parent = conv.parentId ? d.conversations.find((c) => c.id === conv.parentId) : null;
   // Las laterales son privadas y se ven como chip bajo su mensaje ancla, no aquí.
-  const kids = d.conversations.filter((c) => c.parentId === conv.id && c.deriveKind !== 'side');
-  if (!conv.parentId && !kids.length) return null;
+  // Los hilos que salen de aquí se ven en la barra del chat y como chip bajo su mensaje.
+  if (!conv.parentId) return null;
   return (
     <div className="lineage">
       <span className="eyebrow">{t('lin.label')}</span>
@@ -141,10 +142,6 @@ export function LineageBar({ conv }: { conv: ConversationDTO }) {
         ? <button className="lin-chip" onClick={() => navigate(`/c/${parent.id}${conv.parentMessageSeq ? `?m=${conv.parentMessageSeq}` : ''}`)}>↖ {t('lin.from')} «{conversationTitle(d, parent)}»</button>
         : <span className="lin-chip is-muted">↖ {t('lin.fromHidden')}</span>)}
       {conv.deriveKind && <KindBadge kind={conv.deriveKind} />}
-      {kids.length > 0 && <span className="small muted">{t('lin.kids')}</span>}
-      {kids.map((k) => (
-        <button key={k.id} className="lin-chip" onClick={() => navigate(`/c/${k.id}`)}>⑂ {conversationTitle(d, k)}{k.returnedAt ? ' ✓' : ''}</button>
-      ))}
       <span className="grow" />
       {conv.returnedAt && <span className="lin-done">✓ {t('lin.returned')}</span>}
       {conv.parentId && parent && !conv.returnedAt && conv.canPost && (

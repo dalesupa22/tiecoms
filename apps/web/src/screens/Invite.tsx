@@ -3,6 +3,7 @@ import type { InvitationPreviewDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, t } from '../i18n.ts';
 import { asset, navigate } from '../router.ts';
+import { InvitePreviewText } from './Groups.tsx';
 
 export function InviteScreen({ token }: { token: string }) {
   const status = useClient((s) => s.status);
@@ -21,7 +22,6 @@ export function InviteScreen({ token }: { token: string }) {
     } catch (e: any) { setError(errorText(e)); } finally { setBusy(false); }
   }
   const next = `/invite/${encodeURIComponent(token)}`;
-  const role = inv ? t(`role.${inv.role}` as 'role.member') : '';
 
   return (
     <div className="auth">
@@ -32,8 +32,7 @@ export function InviteScreen({ token }: { token: string }) {
         {inv && (
           <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="eyebrow">{t('invite.title')}</div>
-            <div className="serif" style={{ fontSize: 30, lineHeight: 1.1 }}>{inv.workspaceName}</div>
-            <div className="muted">{t('invite.by', { name: inv.invitedByName, org: inv.invitedByOrg ? ` · ${inv.invitedByOrg}` : '', role })}</div>
+            <InvitePreviewText inv={inv} />
             {inv.email && <div className="hint">{t('invite.forEmail', { email: inv.email })}</div>}
             {!inv.valid && <div className="error">{t('invite.invalid')}</div>}
             {inv.valid && status === 'ready' && (

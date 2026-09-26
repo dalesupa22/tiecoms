@@ -20,7 +20,8 @@ export function usePath() {
 }
 
 export type Route =
-  | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' } | { name: 'agenda' } | { name: 'share' } | { name: 'whatsapp' } | { name: 'files' }
+  | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' } | { name: 'agenda' } | { name: 'share' } | { name: 'whatsapp' } | { name: 'files' } | { name: 'groups' } | { name: 'dms' }
+  | { name: 'oversight'; id: string } | { name: 'readonly'; id: string }
   | { name: 'conversation'; id: string } | { name: 'workspace'; id: string }
   | { name: 'login' } | { name: 'signup' } | { name: 'sso' } | { name: 'invite'; token: string };
 
@@ -33,6 +34,10 @@ export function parse(path: string): Route {
   if (a === 'login') return { name: 'login' };
   if (a === 'signup') return { name: 'signup' };
   if (a === 'conversaciones') return { name: 'inbox' };
+  if (a === 'grupos') return { name: 'groups' };
+  if (a === 'dms') return { name: 'dms' };
+  if (a === 'supervision' && b) return { name: 'oversight', id: b };
+  if (a === 'ver' && b) return { name: 'readonly', id: b };
   if (a === 'espacios') return { name: 'spaces' };
   if (a === 'participantes') return { name: 'people' };
   if (a === 'ajustes') return { name: 'settings' };

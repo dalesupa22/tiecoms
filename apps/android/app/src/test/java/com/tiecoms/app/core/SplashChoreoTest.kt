@@ -41,14 +41,16 @@ class SplashChoreoTest {
         assertTrue(SplashChoreo.CANVAS_DP <= 288f)
     }
 
-    @Test fun `la burbuja naranja hace pop 1 a 1,10 a 1 entre 0,20 y 0,55 s`() {
+    @Test fun `la burbuja naranja hace pop 1 a 1,10 a 1 entre 0,20 y 0,55 s anclado en su centro`() {
         assertEquals(1f, f(0.20f).orangeScale, eps)
         val peakT = SplashChoreo.POP_START + SplashChoreo.POP_PEAK_AT * (SplashChoreo.POP_END - SplashChoreo.POP_START)
         assertEquals(1.10f, f(peakT).orangeScale, eps)
         assertTrue((20..55).map { f(it / 100f).orangeScale }.all { it in 1f..1.10f + eps })
         assertEquals(1f, f(0.55f).orangeScale, eps)
         assertEquals(1f, f(1.0f).orangeScale, eps)
-        assertEquals(0.5f, SplashChoreo.POP_PIVOT_X, eps); assertEquals(0.5f, SplashChoreo.POP_PIVOT_Y, eps)
+        // Anclado al centro de la burbuja mandarina (465,125 en unidades del SVG), no al del lienzo.
+        assertEquals((465f + 10f) / 780f, SplashChoreo.POP_PIVOT_X, 0.001f)
+        assertEquals((125f + 140f) / 780f, SplashChoreo.POP_PIVOT_Y, 0.001f)
     }
 
     @Test fun `las rayitas se encienden y crecen de 0,4 a 1 entre 0,35 y 0,70 s con sonido y vibracion`() {

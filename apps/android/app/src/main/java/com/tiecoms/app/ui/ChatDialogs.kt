@@ -198,7 +198,7 @@ private fun ChatOption(c: ConversationDTO, data: BootstrapDTO, on: Boolean, enab
             else -> {
                 val o = Names.org(data, c.internalOrgId ?: ws?.owningOrgId)
                 Avatar(ws?.glyph?.takeIf { it.isNotBlank() } ?: if (c.kind == "internal") "◌" else "#",
-                    parseColor(o?.colorBg, com.tiecoms.app.ui.theme.Brand.Orange), parseColor(o?.colorFg, androidx.compose.ui.graphics.Color.White), size = 34.dp, square = true)
+                    parseColor(o?.colorBg, com.tiecoms.app.ui.theme.Brand.OrangeText), parseColor(o?.colorFg, androidx.compose.ui.graphics.Color.White), size = 34.dp, square = true)
             }
         }
         Spacer(Modifier.width(10.dp))

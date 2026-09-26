@@ -48,15 +48,19 @@ object SplashChoreo {
     /** Arranque por enlace: la coreografía empieza aquí (rayitas ya encendidas). */
     const val SHORT_FROM = 0.70f
 
-    /** Ancla de la burbuja mandarina (centro del lienzo) y de las rayitas, en fracciones del lienzo. */
-    const val POP_PIVOT_X = 0.5f
-    const val POP_PIVOT_Y = 0.5f
+    /**
+     * Ancla del pop: centro de la burbuja mandarina (x 300..630, y 0..250 en el lienzo de 780 u con
+     * origen en -10,-140), para que al crecer no tape la separación con la burbuja papel. Y ancla de
+     * las rayitas. En fracciones del lienzo.
+     */
+    const val POP_PIVOT_X = 0.609f
+    const val POP_PIVOT_Y = 0.340f
     const val SPARKS_PIVOT_X = 0.83f
     const val SPARKS_PIVOT_Y = 0.17f
 
     data class Frame(
         val phase: Phase,
-        /** Escala de la burbuja mandarina (capa 2), anclada en el centro del lienzo. */
+        /** Escala de la burbuja mandarina (capa 2), anclada en el centro de la burbuja ([POP_PIVOT_X], [POP_PIVOT_Y]). */
         val orangeScale: Float,
         /** Rayitas (capa 3): opacidad y escala ancladas en [SPARKS_PIVOT_X], [SPARKS_PIVOT_Y]. */
         val sparksAlpha: Float,

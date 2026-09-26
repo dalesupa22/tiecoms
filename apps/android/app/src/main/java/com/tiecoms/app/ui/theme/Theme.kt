@@ -9,10 +9,15 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
-/** Marca Chaggu: mandarina #FF5A36, tinta #17161F, papel #F6F3EC. */
+/**
+ * Marca Chaggu: mandarina #FF5A36, tinta #17161F, papel #F6F3EC.
+ * Contraste WCAG AA: la mandarina (#FF5A36) queda para lo decorativo (marca, íconos, rayitas) y para
+ * textos/enlaces en tema oscuro (≈5.8:1 sobre tinta; los rellenos mandarina llevan texto tinta). En tema
+ * claro los textos, enlaces y botones rellenos de acento usan [OrangeText] #C73A1A (5.2:1 con blanco).
+ */
 object Brand {
     val Orange = Color(0xFFFF5A36)
-    val OrangeLight = Color(0xFFFF7A5C)
+    val OrangeText = Color(0xFFC73A1A)
     val Black = Color(0xFF17161F)
     val Cream = Color(0xFFFDFAF7)
     val Paper = Color(0xFFF6F3EC)
@@ -29,11 +34,11 @@ data class ChatColors(
 )
 
 val LocalChatColors = staticCompositionLocalOf {
-    ChatColors(Color(0xFFE8502E), Color.White, Color(0xFFEFEBE7), Brand.Black, Color(0xFF6B6560), Color(0xFFC62828))
+    ChatColors(Brand.OrangeText, Color.White, Color(0xFFEFEBE7), Brand.Black, Color(0xFF6B6560), Color(0xFFC62828))
 }
 
 private val Light = lightColorScheme(
-    primary = Brand.Orange,
+    primary = Brand.OrangeText,
     onPrimary = Color.White,
     primaryContainer = Color(0xFFFFDDD4),
     onPrimaryContainer = Color(0xFF4A1203),
@@ -54,8 +59,8 @@ private val Light = lightColorScheme(
 )
 
 private val Dark = darkColorScheme(
-    primary = Brand.OrangeLight,
-    onPrimary = Color(0xFF17161F),
+    primary = Brand.Orange,
+    onPrimary = Brand.Black,
     primaryContainer = Color(0xFF5A1E0E),
     onPrimaryContainer = Color(0xFFFFDAD0),
     secondary = Color(0xFFE8E2DC),
@@ -79,7 +84,7 @@ fun TieComsTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () 
     val chat = if (dark) {
         ChatColors(Color(0xFFC8431F), Color.White, Color(0xFF2B2A34), Color(0xFFEDE7E1), Color(0xFFA59D96), Color(0xFFFF8A80))
     } else {
-        ChatColors(Color(0xFFE8502E), Color.White, Color(0xFFEFEBE7), Brand.Black, Color(0xFF6B6560), Color(0xFFC62828))
+        ChatColors(Brand.OrangeText, Color.White, Color(0xFFEFEBE7), Brand.Black, Color(0xFF6B6560), Color(0xFFC62828))
     }
     androidx.compose.runtime.CompositionLocalProvider(LocalChatColors provides chat) {
         MaterialTheme(colorScheme = if (dark) Dark else Light, content = content)

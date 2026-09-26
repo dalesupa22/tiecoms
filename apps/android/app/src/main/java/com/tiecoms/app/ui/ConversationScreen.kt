@@ -688,23 +688,32 @@ private fun Composer(
     var locked by remember(id) { mutableStateOf(false) }
     var gesture by remember(id) { mutableStateOf(com.tiecoms.app.core.Waveform.Gesture.RECORDING) }
     var micWhy by remember { mutableStateOf(false) }
+    var pendingVoice by remember(id) { mutableStateOf<com.tiecoms.app.platform.VoiceRecorder.Result?>(null) }
     val micPermission = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
-    androidx.compose.runtime.DisposableEffect(recorder) { onDispose { recorder.cancel() } }
+    androidx.compose.runtime.DisposableEffect(recorder) { onDispose { recorder.cancel(); pendingVoice?.file?.delete() } }
     fun hasMic() = androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
-    fun sendVoice() {
-        val r = recorder.stop()
-        locked = false
-        if (r == null) { attError = ctx.getString(R.string.voice_too_short); return }
+    fun uploadVoice(r: com.tiecoms.app.platform.VoiceRecorder.Result, aiConsent: Boolean) {
+        pendingVoice = null
         attError = null
         scope.launch {
             uploading = 0 to 0f
             try {
                 val a = client.uploadAttachment(id, r.file, ctx.getString(R.string.voice_note) + ".m4a", "audio/mp4",
-                    voice = com.tiecoms.app.core.TieComsClient.Voice(r.durationMs, r.waveform)) { sent, total -> uploading = 0 to (if (total > 0) sent.toFloat() / total else 0f) }
+                    voice = com.tiecoms.app.core.TieComsClient.Voice(r.durationMs, r.waveform, aiConsent)) { sent, total -> uploading = 0 to (if (total > 0) sent.toFloat() / total else 0f) }
                 onSend("", listOf(a), emptyList())
                 r.file.delete()
             } catch (e: Exception) { attError = errorText(ctx, e) } finally { uploading = null }
         }
+    }
+    fun sendVoice() {
+        val r = recorder.stop()
+        locked = false
+        if (r == null) { attError = ctx.getString(R.string.voice_too_short); return }
+        pendingVoice = r
+    }
+    pendingVoice?.let { r ->
+        AiConsentDialog(voice = true, onAllow = { uploadVoice(r, true) }, onWithoutAi = { uploadVoice(r, false) },
+            onDismiss = { r.file.delete(); pendingVoice = null })
     }
     recorder.onLimit = { container.toast(ctx.getString(R.string.voice_too_long)); sendVoice() }
     if (micWhy) androidx.compose.material3.AlertDialog(

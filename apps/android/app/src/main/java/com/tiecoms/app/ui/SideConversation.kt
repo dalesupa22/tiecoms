@@ -442,6 +442,17 @@ fun SideReturnSheet(side: ConversationDTO, parentName: String, onClose: () -> Un
     var loading by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var askAiConsent by remember(side.id) { mutableStateOf(false) }
+    if (askAiConsent) AiConsentDialog(voice = false, onAllow = {
+        askAiConsent = false
+        loading = true
+        scope.launch {
+            runCatching { client.suggestReturn(side.id, aiConsent = true) }
+                .onSuccess { summary = it.summary; source = it.source }
+                .onFailure { error = errorText(ctx, it) }
+            loading = false
+        }
+    }, onWithoutAi = { askAiConsent = false }, onDismiss = { askAiConsent = false })
     LaunchedEffect(side.id) {
         runCatching { client.suggestReturn(side.id) }
             .onSuccess { if (summary.isBlank()) summary = it.summary; source = it.source }
@@ -453,6 +464,9 @@ fun SideReturnSheet(side: ConversationDTO, parentName: String, onClose: () -> Un
     }
     FormSheet(stringResource(R.string.side_return), onClose, tag = "returnDialog") {
         Text(stringResource(R.string.side_return_body, parentName), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+        TextButton(onClick = { askAiConsent = true }, enabled = !loading && !busy, modifier = Modifier.testTag("returnAskAi")) {
+            Text(stringResource(R.string.ai_consent_summary))
+        }
         if (loading) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.testTag("returnSuggesting")) {
             CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.side_suggesting), style = MaterialTheme.typography.bodySmall)

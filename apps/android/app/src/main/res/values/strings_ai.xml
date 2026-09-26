@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ai_consent_title">Allow AI processing?</string>
+    <string name="ai_consent_voice">For this voice note, TieComs will send the audio and language to Inworld for transcription. DeepSeek will receive the transcript, author and participant names, and conversation name to suggest a summary and issues. These external services process that content. You can continue without AI: the voice note will still be sent and playable.</string>
+    <string name="ai_consent_side">For this summary, TieComs will send the sidechat messages, participant names, original message and author, group name, and your name to DeepSeek. This external service processes that content to suggest a summary. You can continue without AI and edit the text yourself.</string>
+    <string name="ai_consent_allow">Allow for this request</string>
+    <string name="ai_consent_without">Continue without AI</string>
+    <string name="ai_consent_summary">Suggest with AI</string>
+</resources>

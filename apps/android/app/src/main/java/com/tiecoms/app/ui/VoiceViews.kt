@@ -85,6 +85,12 @@ fun VoiceBubble(a: AttachmentDTO, fg: Color, mine: Boolean, onCreateIssue: (Stri
     val dur = if (current && st.durationMs > 0) st.durationMs else a.durationMs ?: 0
     val progress = if (current && dur > 0) (st.positionMs.toFloat() / dur).coerceIn(0f, 1f) else 0f
     var open by rememberSaveable(a.id) { mutableStateOf(false) }
+    var askAiConsent by remember(a.id) { mutableStateOf(false) }
+    if (askAiConsent) AiConsentDialog(voice = true,
+        onAllow = {
+            askAiConsent = false
+            scope.launch { runCatching { client.retranscribe(a.id, aiConsent = true) }.onFailure { container.toast(errorText(ctx, it)) } }
+        }, onWithoutAi = { askAiConsent = false }, onDismiss = { askAiConsent = false })
     val playLabel = stringResource(if (current && st.playing) R.string.voice_pause else R.string.voice_play)
     fun play() = scope.launch {
         val url = client.mediaUrl(a.url) ?: return@launch
@@ -118,7 +124,7 @@ fun VoiceBubble(a: AttachmentDTO, fg: Color, mine: Boolean, onCreateIssue: (Stri
             "pending" -> Text(stringResource(R.string.voice_transcribing), color = fg.copy(alpha = 0.7f), style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("voicePending"))
             "failed" -> Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.voice_failed), color = fg.copy(alpha = 0.7f), style = MaterialTheme.typography.labelSmall)
-                TextButton(onClick = { scope.launch { runCatching { client.retranscribe(a.id) }.onFailure { container.toast(errorText(ctx, it)) } } }) {
+                TextButton(onClick = { askAiConsent = true }) {
                     Text(stringResource(R.string.voice_retry), color = fg, style = MaterialTheme.typography.labelSmall)
                 }
             }

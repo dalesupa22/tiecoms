@@ -78,6 +78,7 @@ class ShareWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
             .setContentTitle(applicationContext.getString(R.string.share_title))
             .setContentText(applicationContext.getString(R.string.share_upload_progress, (done + 1).coerceAtMost(total), total))
             .setProgress(100, pct, total == 0).setOngoing(true).setOnlyAlertOnce(true).setSilent(true)
+            .addAction(0, applicationContext.getString(R.string.cancel), WorkManager.getInstance(applicationContext).createCancelPendingIntent(id))
             .build()
     }
 

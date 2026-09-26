@@ -6,7 +6,7 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 |---|---|
 | applicationId | `com.tiecoms.app` |
 | minSdk / target / compile | 26 / 36 / 36 |
-| Versión | `versionName 1.1.0`, `versionCode 3`. Sube el `versionCode` en cada envío a Play. |
+| Versión | `versionName 1.4.0`, `versionCode 6`. Sube el `versionCode` en cada envío a Play. |
 | Contrato | `2026-09-23`. Se envía en `x-tiecoms-contract` y en `device.contract`. |
 | API por defecto | `https://app.tiecoms.com` |
 | Toolchain | Gradle 8.14.3 (wrapper), AGP 8.13.2, Kotlin 2.3.21 y JDK 17 |
@@ -133,7 +133,7 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
   - **Permiso:** se pide `RECORD_AUDIO` con una explicación previa.
   - **Subir:** es un adjunto con `x-voice-note`, `x-duration-ms`, `x-waveform` y `Accept-Language`.
   - **Burbuja:** play/pausa, onda con progreso (se puede tocar para saltar), velocidad 1× / 1,5× / 2×, un punto para «sin escuchar» y reproducción continua de las notas seguidas.
-  - **Transcripción:** «Ver transcripción» (texto copiable) con el resumen si lo hay, «Reintentar» si falló y el chip «Crear asunto: …».
+  - **Transcripción:** antes de enviar cada nota se explica qué reciben Inworld (audio e idioma) y DeepSeek (transcripción, nombres y contexto). «Permitir esta solicitud» envía `x-ai-consent: 1`; «Continuar sin IA» envía la nota reproducible sin transcribir. Reintentar también exige permiso para esa solicitud. «Ver transcripción» trae texto copiable, resumen y asuntos sugeridos.
 - **Textos:** `tools/strings_v4.py` los genera desde `apps/web/src/i18n.ts`: 100 de la web y 11 propios de Android (sobre todo la subida en segundo plano y el diálogo del micrófono).
 - **Play Console:** la app ahora pide `RECORD_AUDIO` (notas de voz) y `FOREGROUND_SERVICE_DATA_SYNC` (subidas desde «Compartir»). Hay que declararlos en la ficha y en la sección de seguridad de los datos.
 
@@ -299,7 +299,10 @@ El release lleva R8 y reducción de recursos. Las reglas de serialización está
    | `ACCESS_NETWORK_STATE` | Reconectar al volver la red |
    | `POST_NOTIFICATIONS` | Mensajes, recordatorios y reuniones |
 
-   No se usan cámara, micrófono, contactos ni ubicación. El QR de WhatsApp lo muestra la app; no se escanea con la cámara del teléfono.
+   | `RECORD_AUDIO` | Grabar notas de voz, tras permiso del usuario |
+   | `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_DATA_SYNC` | Subidas iniciadas al compartir, con progreso y Cancelar en la notificación |
+
+   La cámara se abre con la app del sistema; no se pide permiso `CAMERA` propio. No se piden contactos ni ubicación. El QR de WhatsApp lo muestra la app.
 7. **Pruebas internas.** Crea la versión, sube `app-release.aab` y agrega a los testers. Verifica login, SSO, envío, notificaciones, compartir desde WhatsApp y los enlaces `https`, que con la app de Play ya deberían verificar.
 
 ## Pendientes y puntos de extensión

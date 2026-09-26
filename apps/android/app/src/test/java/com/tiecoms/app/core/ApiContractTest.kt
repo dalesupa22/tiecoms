@@ -53,6 +53,8 @@ class ApiContractTest {
                     path == "/api/v1/organizations/o1/domains" -> """{"domain":"acme.co","status":"pending","txtName":"_tiecoms.acme.co","txtValue":"tiecoms-verification=x"}"""
                     path.endsWith("/verify") -> """{"domain":"acme.co","status":"dns","txtName":"_tiecoms.acme.co","txtValue":"tiecoms-verification=x","verifiedAt":"2026-09-24T10:00:00Z"}"""
                     path == "/api/v1/account" -> """{"ok":true}"""
+                    path == "/api/v1/conversations/c1/attachments" || path == "/api/v1/attachments/a1/transcribe" -> """{"id":"a1","kind":"voice","contentType":"audio/mp4","transcript":{"status":"disabled"}}"""
+                    path == "/api/v1/conversations/c1/return/suggest" -> """{"summary":"Manual","source":"fallback"}"""
                     else -> return MockResponse().setResponseCode(404).setBody("""{"error":{"code":"not_found","message":"no"}}""")
                 }
                 return MockResponse().setBody(body)
@@ -114,5 +116,30 @@ class ApiContractTest {
         runCatching { client.setConversationPrefs("c1", pinned = true) }
         val b2 = json(requests.last { it.first.path == "/api/v1/conversations/c1/prefs" }.second)
         assertEquals(JsonPrimitive(true), b2["pinned"]); assertTrue("no toca el silencio", b2["mutedUntil"] == null)
+    }
+
+    @Test fun `audio stays uploadable without AI consent and only affirmative choice sets header`() = runBlocking {
+        val audio = java.io.File.createTempFile("voice-consent", ".m4a").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        try {
+            client.uploadAttachment("c1", audio, "voice.m4a", "audio/mp4", voice = TieComsClient.Voice(1000, listOf(0.5f)))
+            val declined = last("POST", "/api/v1/conversations/c1/attachments").first
+            assertEquals("1", declined.getHeader("x-voice-note"))
+            assertEquals(null, declined.getHeader("x-ai-consent"))
+            client.uploadAttachment("c1", audio, "voice.m4a", "audio/mp4", voice = TieComsClient.Voice(1000, listOf(0.5f), aiConsent = true))
+            assertEquals("1", last("POST", "/api/v1/conversations/c1/attachments").first.getHeader("x-ai-consent"))
+            client.uploadAttachment("c1", audio, "voice.m4a", "audio/mp4", voice = TieComsClient.Voice(1000, listOf(0.5f), aiConsent = false))
+            assertEquals(null, last("POST", "/api/v1/conversations/c1/attachments").first.getHeader("x-ai-consent"))
+        } finally { audio.delete() }
+    }
+
+    @Test fun `AI requests default to fallback and transmit each request choice explicitly`() = runBlocking {
+        client.suggestReturn("c1")
+        assertEquals(JsonPrimitive(false), json(last("POST", "/api/v1/conversations/c1/return/suggest").second)["aiConsent"])
+        client.suggestReturn("c1", aiConsent = true)
+        assertEquals(JsonPrimitive(true), json(last("POST", "/api/v1/conversations/c1/return/suggest").second)["aiConsent"])
+        client.retranscribe("a1")
+        assertEquals(JsonPrimitive(false), json(last("POST", "/api/v1/attachments/a1/transcribe").second)["aiConsent"])
+        client.retranscribe("a1", aiConsent = true)
+        assertEquals(JsonPrimitive(true), json(last("POST", "/api/v1/attachments/a1/transcribe").second)["aiConsent"])
     }
 }

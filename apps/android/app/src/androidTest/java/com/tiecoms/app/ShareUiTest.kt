@@ -60,6 +60,7 @@ class ShareUiTest {
 
     private val args = InstrumentationRegistry.getArguments()
     private fun arg(k: String) = args.getString(k).orEmpty()
+    private val reviewVideo get() = arg("reviewVideo") == "true"
     private fun log(s: String) = Log.i("TieComsUiTest", s).also { println("[v4] $s") }
     private val ins = InstrumentationRegistry.getInstrumentation()
     private val device = UiDevice.getInstance(ins)
@@ -80,6 +81,12 @@ class ShareUiTest {
         Canvas(bmp).apply {
             drawColor(color)
             drawText(label, 80f, 520f, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = 0xFFFFFFFF.toInt(); textSize = 220f; isFakeBoldText = true })
+        }
+        if (reviewVideo) {
+            // Larger synthetic photos make upload progress visible in the review recording.
+            val random = java.util.Random(7)
+            bmp.setPixels(IntArray(1200 * 900) { 0xFF000000.toInt() or random.nextInt(0xFFFFFF) }, 0, 1200, 0, 0, 1200, 900)
+            Canvas(bmp).drawText(label, 80f, 520f, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = 0xFFFFFFFF.toInt(); textSize = 220f; isFakeBoldText = true })
         }
         cr.openOutputStream(uri)!!.use { bmp.compress(Bitmap.CompressFormat.JPEG, 88, it) }
         return uri
@@ -166,9 +173,17 @@ class ShareUiTest {
         Thread.sleep(500); shot("v4-04-compartir-en-tiecoms")
         log("§B ShareActivity: 3 miniaturas, «$title»${if (preselected) " preseleccionada por Direct Share" else ""} + directo, mensaje")
         val t0 = System.currentTimeMillis()
+        if (reviewVideo) Thread.sleep(2_000)
         compose.onNodeWithTag("shareSend").performClick()
         compose.waitUntilAtLeastOneExists(hasTestTag("shareProgress"), 10_000)
         Thread.sleep(150); shot("v4-05-enviando")
+        if (reviewVideo) {
+            device.pressHome()
+            device.openNotification()
+            Thread.sleep(4_000)
+            shot("v4-05-background-upload")
+            device.pressBack()
+        }
         compose.waitUntil(60_000) { !exists("shareSheet") }
         compose.waitUntil(15_000) {
             client.state.value.data?.conversations?.firstOrNull { it.id == direct }?.lastMessageAt != null &&

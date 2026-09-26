@@ -892,22 +892,22 @@ class TieComsClient(
         }
 
     /** Resumen sugerido para «Llevar al hilo» (DeepSeek si hay llave; si no, las últimas respuestas). */
-    suspend fun suggestReturn(sideId: String): ReturnSuggestion = withContext(dispatcher) {
-        val raw = HttpApi.RawBody("{}".toByteArray(), "application/json", mapOf("accept-language" to java.util.Locale.getDefault().toLanguageTag()))
+    suspend fun suggestReturn(sideId: String, aiConsent: Boolean = false): ReturnSuggestion = withContext(dispatcher) {
+        val raw = HttpApi.RawBody("{\"aiConsent\":$aiConsent}".toByteArray(), "application/json", mapOf("accept-language" to java.util.Locale.getDefault().toLanguageTag()))
         request("POST", "/conversations/$sideId/return/suggest", null, ReturnSuggestion.serializer(), raw)
     }
 
     /** Nota de voz (SPEC-v4 §F): cabeceras x-voice-note, x-duration-ms y x-waveform (≤ 64 valores 0–1). */
-    data class Voice(val durationMs: Long, val waveform: List<Float>) {
+    data class Voice(val durationMs: Long, val waveform: List<Float>, val aiConsent: Boolean = false) {
         fun headers(): Map<String, String> = mapOf(
             "x-voice-note" to "1", "x-duration-ms" to durationMs.toString(),
             "x-waveform" to Waveform.encode(waveform),
-        )
+        ) + if (aiConsent) mapOf("x-ai-consent" to "1") else emptyMap()
     }
 
     /** Reintento manual de la transcripción (autor o miembros). */
-    suspend fun retranscribe(attachmentId: String): AttachmentDTO = withContext(dispatcher) {
-        request("POST", "/attachments/$attachmentId/transcribe", "{}", AttachmentDTO.serializer())
+    suspend fun retranscribe(attachmentId: String, aiConsent: Boolean = false): AttachmentDTO = withContext(dispatcher) {
+        request("POST", "/attachments/$attachmentId/transcribe", "{\"aiConsent\":$aiConsent}", AttachmentDTO.serializer())
     }
 
     /** POST /attachments/:id/thumb: miniatura JPEG ≤ 512 KB que genera el cliente (solo mientras está pendiente). */

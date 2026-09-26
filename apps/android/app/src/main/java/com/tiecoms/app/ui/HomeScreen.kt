@@ -29,17 +29,18 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -65,94 +66,104 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tiecoms.app.R
 import com.tiecoms.app.core.BootstrapDTO
 import com.tiecoms.app.core.ConnectionStatus
 import com.tiecoms.app.core.ConversationDTO
+import com.tiecoms.app.core.GroupsTree
 import com.tiecoms.app.core.Names
+import com.tiecoms.app.core.OrganizationDTO
 import com.tiecoms.app.core.WorkspaceDTO
-import com.tiecoms.app.ui.theme.Brand
 import kotlinx.coroutines.launch
 
-
-@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
+/** Snapshot con las vistas previas ocultas en chats con alguien bloqueado (el snapshot no trae el autor). */
 @Composable
-fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (String) -> Unit, onShortcut: (String) -> Unit, onNewChat: () -> Unit = {}, onIssuesOf: (String) -> Unit = {}, onDetails: (String) -> Unit = {},
-               onMentions: () -> Unit = {}) {
-    val client = LocalClient.current
-    val ctx = LocalContext.current
-    val snackbar = LocalSnackbar.current
-    val scope = rememberCoroutineScope()
-    val state by client.state.collectAsStateWithLifecycle()
-    val originalData = state.data ?: return
-    // Bootstrap previews do not expose their author. Hide them in shared chats
-    // containing a blocked participant; full conversations filter by author.
+private fun visibleData(): Pair<BootstrapDTO, com.tiecoms.app.core.ClientState>? {
+    val state by LocalClient.current.state.collectAsStateWithLifecycle()
+    val originalData = state.data ?: return null
     val data = remember(originalData, state.blockedUserIds) {
         originalData.copy(conversations = originalData.conversations.map { c ->
             if (c.memberIds.any { it in state.blockedUserIds }) c.copy(lastMessagePreview = "", lastHumanPreview = null) else c
         })
     }
+    return data to state
+}
+
+/** Hojas y menús que se abren desde Grupos (el «+», invitar, compartir el enlace). */
+private sealed interface GroupsDialog {
+    data class NewGroup(val preset: NewGroupPreset) : GroupsDialog
+    data class Invite(val target: InviteTarget) : GroupsDialog
+    data class Share(val groupName: String, val url: String, val code: String?, val expiresAt: String?, val conversationId: String) : GroupsDialog
+    data class Header(val row: GroupsTree.Row) : GroupsDialog
+    data class NewIssue(val conversationId: String) : GroupsDialog
+    data object JoinCode : GroupsDialog
+}
+
+// ---------- Pestaña Grupos ----------
+/**
+ * Grupos (docs/GRUPOS.md): Tu organización · X, Relaciones e Invitado en, con los asuntos abiertos bajo cada
+ * grupo. Los filtros de Inicio siguen (Todo · No leídos · Asuntos · @ Menciones); Chats y Laterales viven en DMs.
+ */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun GroupsScreen(
+    workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (String) -> Unit, onOpenWorkspace: (String) -> Unit,
+    onIssuesOf: (String) -> Unit, onOpenIssue: (String) -> Unit, onDetails: (String) -> Unit, onMentions: () -> Unit, onJoinCode: (String) -> Unit,
+) {
+    val client = LocalClient.current
+    val ctx = LocalContext.current
+    val snackbar = LocalSnackbar.current
+    val scope = rememberCoroutineScope()
+    val (data, state) = visibleData() ?: return
     var query by rememberSaveable { mutableStateOf("") }
     var refreshing by remember { mutableStateOf(false) }
     val internalFallback = stringResource(R.string.internal_default)
     val convFallback = stringResource(R.string.conversation)
-    val directs = stringResource(R.string.direct_messages)
-
     val container = LocalContainer.current
     var collapsed by remember { mutableStateOf(container.settings.collapsed) }
-    fun toggle(key: String) { collapsed = if (key in collapsed) collapsed - key else collapsed + key; container.settings.collapsed = collapsed }
-    var tab by remember { mutableStateOf(runCatching { com.tiecoms.app.core.HomeTree.Tab.valueOf(container.settings.homeTab) }.getOrDefault(com.tiecoms.app.core.HomeTree.Tab.ALL)) }
-    val counts = remember(data) { com.tiecoms.app.core.HomeTree.counts(data) }
-    val rows = remember(data, query, workspaceFilter, collapsed, tab) {
-        com.tiecoms.app.core.HomeTree.build(data, query, workspaceFilter, collapsed, { Names.conversationTitle(it, data, internalFallback, convFallback) }, tab = tab)
+    fun setCollapsed(v: Set<String>) { collapsed = v; container.settings.collapsed = v }
+    fun toggle(key: String) = setCollapsed(if (key in collapsed) collapsed - key else collapsed + key)
+    var tab by remember { mutableStateOf(runCatching { GroupsTree.Tab.valueOf(container.settings.homeTab) }.getOrDefault(GroupsTree.Tab.ALL)) }
+    val issues = state.issues.values
+    val counts = remember(data, state.issues) { GroupsTree.counts(data, issues) }
+    val rows = remember(data, state.issues, query, workspaceFilter, collapsed, tab) {
+        GroupsTree.build(data, issues, query, workspaceFilter, collapsed, { Names.conversationTitle(it, data, internalFallback, convFallback) }, tab = tab)
     }
-    var newSpace by rememberSaveable { mutableStateOf(false) }
-    var menuFor by remember { mutableStateOf<ConversationDTO?>(null) }
+    var dialog by remember { mutableStateOf<GroupsDialog?>(null) }
     var menuKey by remember { mutableStateOf<String?>(null) }
-    var wsMenu by remember { mutableStateOf<WorkspaceDTO?>(null) }
     var meetingFor by remember { mutableStateOf<String?>(null) }
     var remindFor by remember { mutableStateOf<ConversationDTO?>(null) }
     var leaveFor by remember { mutableStateOf<ConversationDTO?>(null) }
-    val dueReminders = state.reminders.count { r -> parseInstant(r.remindAt)?.isAfter(java.time.Instant.now()) == false }
     val filterWs = workspaceFilter?.let { id -> data.workspaces.firstOrNull { it.id == id } }
+    val myOrg = Names.org(data, data.me.primaryOrgId)
+    val allFold = remember(data) { GroupsTree.allFoldKeys(data) }
+    fun foldAllItem() = if (allFold.isNotEmpty() && collapsed.containsAll(allFold)) SheetItem(ctx.getString(R.string.menu_unfold_all), "▾") { setCollapsed(collapsed - allFold) }
+        else SheetItem(ctx.getString(R.string.menu_fold_all), "▸", tag = "menuFoldAll") { setCollapsed(collapsed + allFold) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.conversations), fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() }) },
+                title = { Text(stringResource(R.string.nav_groups), fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() }) },
                 actions = {
-                    IconButton(onClick = onNewChat, modifier = Modifier.testTag("newChat")) { Icon(Icons.Filled.Edit, stringResource(R.string.chat_new)) }
+                    IconButton(onClick = { dialog = GroupsDialog.NewGroup(NewGroupPreset(company = false)) }, modifier = Modifier.testTag("newGroup")) {
+                        Icon(Icons.Filled.Add, stringResource(R.string.grp_new))
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             ConnectionBanner(state.connection)
-            OutlinedTextField(
-                value = query, onValueChange = { query = it },
-                placeholder = { Text(stringResource(R.string.search)) },
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                trailingIcon = if (query.isNotEmpty()) { { IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Close, stringResource(R.string.clear_search)) } } } else null,
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                shape = MaterialTheme.shapes.extraLarge,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("search"),
-            )
-            HomeTabs(tab, counts, mentions = data.conversations.sumOf { it.unreadMentions }, onMentions = onMentions) { tab = it; container.settings.homeTab = it.name }
-            // Accesos: recordatorios, trazo y WhatsApp (desde Inicio, como pide la SPEC-v2).
-            androidx.compose.foundation.lazy.LazyRow(
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-                modifier = Modifier.padding(vertical = 4.dp).testTag("shortcuts"),
-            ) {
-                item { androidx.compose.material3.AssistChip(onClick = { onShortcut("reminders") }, label = { Text("⏰ " + stringResource(R.string.rem_title) + if (dueReminders > 0) " · $dueReminders" else "") }, modifier = Modifier.testTag("shortcutReminders")) }
-                item { androidx.compose.material3.AssistChip(onClick = { onShortcut("trazo") }, label = { Text("⑂ " + stringResource(R.string.nav_trazo)) }) }
-                item { androidx.compose.material3.AssistChip(onClick = { onShortcut("files") }, label = { Text("📁 " + stringResource(R.string.nav_files)) }, modifier = Modifier.testTag("shortcutFiles")) }
-                item { androidx.compose.material3.AssistChip(onClick = { onShortcut("whatsapp") }, label = { Text("🟢 " + stringResource(R.string.nav_whatsapp)) }, modifier = Modifier.testTag("shortcutWhatsApp")) }
-            }
+            SearchField(query) { query = it }
+            FilterPills(
+                GroupsTree.Tab.entries.map { t -> t.name to when (t) { GroupsTree.Tab.ALL -> R.string.home_tab_all; GroupsTree.Tab.UNREAD -> R.string.home_tab_unread; GroupsTree.Tab.ISSUES -> R.string.home_tab_issues } },
+                tab.name, counts.mapKeys { it.key.name }, mentions = data.conversations.sumOf { it.unreadMentions }, onMentions = onMentions,
+            ) { tab = GroupsTree.Tab.valueOf(it); container.settings.homeTab = it }
             if (filterWs != null) {
                 InputChip(
                     selected = true, onClick = onClearFilter,
@@ -166,111 +177,273 @@ fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (Str
                 onRefresh = {
                     scope.launch {
                         refreshing = true
-                        try { client.loadBootstrap() } catch (e: Exception) { snackbar.showSnackbar(errorText(ctx, e)) } finally { refreshing = false }
+                        try { client.loadBootstrap(); runCatching { client.loadOpenIssues() } } catch (e: Exception) { snackbar.showSnackbar(errorText(ctx, e)) } finally { refreshing = false }
                     }
                 },
                 modifier = Modifier.fillMaxSize(),
             ) {
-                if (rows.isEmpty()) {
-                    // LazyColumn vacía para que el gesto de refrescar siga funcionando.
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        item {
-                            Text(
-                                stringResource(if (query.isNotBlank() || filterWs != null) R.string.home_empty_filter else R.string.home_empty),
-                                textAlign = TextAlign.Center,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.fillMaxWidth().padding(32.dp),
-                            )
-                        }
-                    }
-                } else {
-                    LazyColumn(Modifier.fillMaxSize().testTag("conversationList")) {
-                        items(rows, key = { it.key }) { row ->
-                            // Al cambiar el orden (llega un no leído), la fila se desliza a su lugar en vez de saltar.
-                            Box(Modifier.animateItem()) { when (row) {
-                                is com.tiecoms.app.core.HomeTree.Section -> SectionRow(row.kind, onAdd = when (row.kind) {
-                                    com.tiecoms.app.core.HomeTree.Kind.COMPANIES -> ({ newSpace = true })
-                                    com.tiecoms.app.core.HomeTree.Kind.CHATS -> onNewChat
+                LazyColumn(Modifier.fillMaxSize().testTag("conversationList")) {
+                    items(rows, key = { it.key }) { row ->
+                        // Al cambiar el orden (llega un no leído), la fila se desliza a su lugar en vez de saltar.
+                        Box(Modifier.animateItem()) { when (row) {
+                            is GroupsTree.Section -> SectionRow(row, myOrg,
+                                onToggle = if (row.kind == GroupsTree.Kind.PINNED) null else ({ toggle(sectionKeyOf(row)) }),
+                                onAdd = when (row.kind) {
+                                    GroupsTree.Kind.ORG -> ({ dialog = GroupsDialog.NewGroup(NewGroupPreset(company = false)) })
+                                    GroupsTree.Kind.RELATIONS -> ({ dialog = GroupsDialog.NewGroup(NewGroupPreset(company = true)) })
                                     else -> null
-                                })
-                                is com.tiecoms.app.core.HomeTree.Org -> OrgRow(row) { toggle(com.tiecoms.app.core.HomeTree.orgKey(row.org)) }
-                                is com.tiecoms.app.core.HomeTree.Ws -> WsRow(row, inPinned = row.key.startsWith("pw:"), onToggle = { toggle(com.tiecoms.app.core.HomeTree.wsKey(row.ws)) }, onLongPress = { wsMenu = row.ws }, onOpen = { onShortcut("home?ws=" + row.ws.id) })
-                                is com.tiecoms.app.core.HomeTree.Conv -> ConversationRow(row.c, data, internalFallback, convFallback, depth = row.depth, inChats = row.c.isChat || row.pinnedSection,
-                                    menuOpen = menuFor?.id == row.c.id && menuKey == row.key,
-                                    menuItems = { conversationMenu(ctx, row.c, data, onMeeting = { meetingFor = row.c.id }, onRemindCustom = { remindFor = row.c }, onLeave = { leaveFor = row.c }, onOpen = { onOpen(row.c.id) }) + listOf(null, SheetItem(ctx.getString(R.string.details_short), "ⓘ", tag = "menuDetails") { onDetails(row.c.id) }) },
-                                    onDismissMenu = { menuFor = null },
-                                    onLongPress = { menuFor = row.c; menuKey = row.key }, onIssues = { onIssuesOf(row.c.id) }) { onOpen(row.c.id) }
-                                is com.tiecoms.app.core.HomeTree.Empty -> if (row.kind == com.tiecoms.app.core.HomeTree.Kind.FILTER) Text(
-                                    stringResource(when (tab) {
-                                        com.tiecoms.app.core.HomeTree.Tab.UNREAD -> R.string.home_tab_caught_up
-                                        com.tiecoms.app.core.HomeTree.Tab.ISSUES -> R.string.home_empty_issues
-                                        com.tiecoms.app.core.HomeTree.Tab.CHATS -> R.string.home_empty_chats
-                                        com.tiecoms.app.core.HomeTree.Tab.SIDES -> R.string.home_empty_sides
-                                        com.tiecoms.app.core.HomeTree.Tab.ALL -> R.string.home_empty_all
-                                    }),
-                                    textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 48.dp).testTag("tabEmpty"),
-                                ) else Text(
-                                    stringResource(if (row.kind == com.tiecoms.app.core.HomeTree.Kind.CHATS) R.string.chat_new else R.string.side_empty),
-                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.fillMaxWidth().clickable { if (row.kind == com.tiecoms.app.core.HomeTree.Kind.CHATS) onNewChat() else newSpace = true }.padding(horizontal = 20.dp, vertical = 10.dp),
-                                )
-                            } }
-                        }
-                        item { Spacer(Modifier.heightIn(min = 24.dp)) }
+                                },
+                                onLongPress = if (row.kind == GroupsTree.Kind.ORG || row.kind == GroupsTree.Kind.RELATIONS) ({ dialog = GroupsDialog.Header(row) }) else null)
+                            is GroupsTree.Company -> CompanyRow(row, onToggle = { toggle(GroupsTree.companyKey(row.kind, row.id)) }, onLongPress = { dialog = GroupsDialog.Header(row) })
+                            is GroupsTree.Space -> WsRow(row, onToggle = { toggle(GroupsTree.spaceKey(row.ws)) }, onLongPress = { dialog = GroupsDialog.Header(row) }, onOpen = { onOpenWorkspace(row.ws.id) })
+                            is GroupsTree.Group -> {
+                                val ws = data.workspaces.firstOrNull { it.id == row.c.workspaceId }
+                                val guest = ws?.myRole == "guest"
+                                ConversationRow(row.c, data, internalFallback, convFallback,
+                                    indent = if (row.pinnedSection) 16.dp else (16 + row.level * 20).dp, iconSize = 32.dp, showIssuesChip = row.pinnedSection,
+                                    tagLine = if (row.c.kind == "internal") stringResource(R.string.grp_internal_only, Names.org(data, row.c.internalOrgId ?: ws?.owningOrgId)?.name ?: "") else null,
+                                    menuOpen = menuKey == row.key,
+                                    menuItems = {
+                                        conversationMenu(ctx, row.c, data, onMeeting = { meetingFor = row.c.id }, onRemindCustom = { remindFor = row.c }, onLeave = { leaveFor = row.c }, onOpen = { onOpen(row.c.id) }) +
+                                            listOfNotNull(null,
+                                                if (!guest && row.c.canPost) SheetItem(ctx.getString(R.string.menu_new_issue), "◆", tag = "menuNewIssue") { dialog = GroupsDialog.NewIssue(row.c.id) } else null,
+                                                if (!guest && ws != null) SheetItem(ctx.getString(R.string.menu_invite_group), "✉", tag = "menuInviteGroup") { dialog = GroupsDialog.Invite(InviteTarget.Group(ws, row.c)) } else null,
+                                                SheetItem(ctx.getString(R.string.details_short), "ⓘ", tag = "menuDetails") { onDetails(row.c.id) })
+                                    },
+                                    onDismissMenu = { menuKey = null },
+                                    onLongPress = { menuKey = row.key }, onIssues = { onIssuesOf(row.c.id) }) { onOpen(row.c.id) }
+                            }
+                            is GroupsTree.Issue -> IssueLine(row) { onOpenIssue(row.issue.id) }
+                            is GroupsTree.MoreIssues -> Text(
+                                pluralStringResource(R.plurals.grp_more_issues, row.count, row.count),
+                                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.fillMaxWidth().clickable { onIssuesOf(row.conversationId) }.heightIn(min = 36.dp)
+                                    .padding(start = (28 + row.level * 20).dp, end = 16.dp, top = 8.dp, bottom = 8.dp).testTag("moreIssues-${row.conversationId}"),
+                            )
+                            is GroupsTree.Empty -> if (row.filtered) Text(
+                                stringResource(if (tab == GroupsTree.Tab.UNREAD && query.isBlank()) R.string.home_tab_caught_up else if (tab == GroupsTree.Tab.ISSUES && query.isBlank()) R.string.home_empty_issues else R.string.grp_empty_filter),
+                                textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 48.dp).testTag("tabEmpty"),
+                            ) else GroupsEmpty(onNew = { dialog = GroupsDialog.NewGroup(NewGroupPreset(company = false)) }, onJoin = { dialog = GroupsDialog.JoinCode })
+                        } }
                     }
+                    item { Spacer(Modifier.heightIn(min = 24.dp)) }
                 }
             }
         }
     }
-    if (newSpace) NewSpaceDialog(onClose = { newSpace = false }, onCreated = { onShortcut("home?ws=$it") })
-    HomeMenus(data, menuFor, wsMenu, meetingFor, remindFor, leaveFor, { menuFor = it }, { wsMenu = it }, { meetingFor = it }, { remindFor = it }, { leaveFor = it }, onOpen)
+
+    when (val d = dialog) {
+        null -> Unit
+        is GroupsDialog.NewGroup -> NewGroupSheet(d.preset, onClose = { dialog = null }, onCreated = { r, name ->
+            val url = r.inviteUrl
+            dialog = if (url != null) GroupsDialog.Share(name, url, r.inviteCode, null, r.conversationId) else null
+            if (url == null) onOpen(r.conversationId)
+        })
+        is GroupsDialog.Share -> ShareInviteSheet(d.groupName, d.url, d.code, d.expiresAt, onDone = { dialog = null; onOpen(d.conversationId) })
+        is GroupsDialog.Invite -> InviteSheet(d.target, onClose = { dialog = null })
+        is GroupsDialog.NewIssue -> NewIssueDialog(d.conversationId, null, "", onClose = { dialog = null }, onCreated = onOpenIssue)
+        GroupsDialog.JoinCode -> JoinCodeDialog(onClose = { dialog = null }, onGo = { code -> dialog = null; onJoinCode(code) })
+        is GroupsDialog.Header -> HeaderMenu(data, d.row, foldAll = ::foldAllItem, onDismiss = { if (dialog === d) dialog = null },
+            onNewGroup = { dialog = GroupsDialog.NewGroup(it) }, onInvite = { dialog = GroupsDialog.Invite(it) }, onOpenWorkspace = onOpenWorkspace)
+    }
+    HomeMenus(data, meetingFor, remindFor, leaveFor, { meetingFor = it }, { remindFor = it }, { leaveFor = it })
 }
 
+private fun sectionKeyOf(row: GroupsTree.Section) = GroupsTree.sectionKey(row.kind, if (row.kind == GroupsTree.Kind.ORG) row.key.removePrefix("s:ORG:") else null)
+
+/** Menú de pulsación larga de las cabeceras: empresa o relación, y espacio (carpeta). */
 @Composable
-private fun HomeMenus(
-    data: BootstrapDTO, menuFor: ConversationDTO?, wsMenu: WorkspaceDTO?, meetingFor: String?, remindFor: ConversationDTO?, leaveFor: ConversationDTO?,
-    setMenu: (ConversationDTO?) -> Unit, setWs: (WorkspaceDTO?) -> Unit, setMeeting: (String?) -> Unit, setRemind: (ConversationDTO?) -> Unit, setLeave: (ConversationDTO?) -> Unit,
-    onOpen: (String) -> Unit,
+private fun HeaderMenu(
+    data: BootstrapDTO, row: GroupsTree.Row, foldAll: () -> SheetItem, onDismiss: () -> Unit,
+    onNewGroup: (NewGroupPreset) -> Unit, onInvite: (InviteTarget) -> Unit, onOpenWorkspace: (String) -> Unit,
 ) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val container = LocalContainer.current
-    wsMenu?.let { ws ->
-        val pinned = ws.pinnedAt != null
-        ActionSheet(ws.name, listOf(
-            SheetItem(ctx.getString(if (pinned) R.string.menu_unpin_top else R.string.menu_pin_top), "📌") {
-                container.scope.launch { runCatching { client.setWorkspacePinned(ws.id, !pinned) }.onFailure { container.toast(errorText(ctx, it)) } }
-            },
-            SheetItem(ctx.getString(R.string.menu_copy_link), "⛓") { copyToClipboard(ctx, "https://app.tiecoms.com/w/${ws.id}"); container.toast(ctx.getString(R.string.toast_link_copied)) },
-        )) { setWs(null) }
+    when (row) {
+        is GroupsTree.Section -> {
+            val org = row.org
+            val items = buildList<SheetItem?> {
+                if (row.kind == GroupsTree.Kind.ORG) {
+                    add(SheetItem(ctx.getString(R.string.menu_new_group), "#", tag = "menuNewGroup") { onNewGroup(NewGroupPreset(company = false)) })
+                    if (org != null) add(SheetItem(ctx.getString(R.string.ginv_company), "✉", tag = "menuInviteCompany") { onInvite(InviteTarget.Org(org)) })
+                } else add(SheetItem(ctx.getString(R.string.menu_new_group), "#", tag = "menuNewGroup") { onNewGroup(NewGroupPreset(company = true)) })
+                add(null); add(foldAll())
+            }
+            ActionSheet(if (row.kind == GroupsTree.Kind.ORG) ctx.getString(R.string.grp_your_org, org?.name ?: "") else ctx.getString(R.string.grp_relations), items, onDismiss)
+        }
+        is GroupsTree.Company -> {
+            val name = row.org?.name ?: row.pendingName ?: ctx.getString(R.string.common_no_company)
+            val own = row.workspaces.filter { it.myRole != "guest" }
+            val items = buildList<SheetItem?> {
+                if (row.kind == GroupsTree.Kind.RELATIONS && own.isNotEmpty()) {
+                    add(SheetItem(ctx.getString(R.string.menu_new_group), "#", tag = "menuNewGroup") { onNewGroup(NewGroupPreset(company = true, relationId = row.id)) })
+                    add(SheetItem(ctx.getString(R.string.ginv_company), "✉", tag = "menuInviteCompany") { onInvite(InviteTarget.Space(own.first(), name)) })
+                    add(null)
+                }
+                add(foldAll())
+            }
+            ActionSheet(name, items, onDismiss)
+        }
+        is GroupsTree.Space -> {
+            val ws = row.ws
+            val pinned = ws.pinnedAt != null
+            val guest = ws.myRole == "guest"
+            ActionSheet(ws.name, listOfNotNull(
+                if (!guest) SheetItem(ctx.getString(R.string.menu_new_group_here), "#", tag = "menuNewGroupHere") { onNewGroup(NewGroupPreset(workspaceId = ws.id)) } else null,
+                if (!guest) SheetItem(ctx.getString(R.string.menu_invite), "✉", tag = "menuInviteSpace") { onInvite(InviteTarget.Space(ws, ws.name)) } else null,
+                SheetItem(ctx.getString(if (pinned) R.string.menu_unpin_top else R.string.menu_pin_top), "📌") {
+                    container.scope.launch { runCatching { client.setWorkspacePinned(ws.id, !pinned) }.onFailure { container.toast(errorText(ctx, it)) } }
+                },
+                SheetItem(ctx.getString(R.string.menu_open_space), "↗", tag = "menuOpenSpace") { onOpenWorkspace(ws.id) },
+                SheetItem(ctx.getString(R.string.menu_copy_link), "⛓") { copyToClipboard(ctx, "https://app.tiecoms.com/w/${ws.id}"); container.toast(ctx.getString(R.string.toast_link_copied)) },
+            ), onDismiss)
+        }
+        else -> onDismiss()
     }
+}
+
+@Composable
+private fun GroupsEmpty(onNew: () -> Unit, onJoin: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 40.dp).testTag("groupsEmpty"), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(stringResource(R.string.grp_empty_title), style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center, modifier = Modifier.semantics { heading() })
+        Text(stringResource(R.string.grp_empty_body), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+        Button(onClick = onNew, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("emptyNewGroup")) { Text(stringResource(R.string.grp_new)) }
+        OutlinedButton(onClick = onJoin, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("emptyJoinCode")) { Text(stringResource(R.string.join_title)) }
+    }
+}
+
+// ---------- Pestaña DMs ----------
+/** DMs: directos y chats `multi`, incluidos los sidechats (con su burbuja «Sidechat» y «desde #Grupo»). */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (String) -> Unit, onMentions: () -> Unit) {
+    val client = LocalClient.current
+    val ctx = LocalContext.current
+    val snackbar = LocalSnackbar.current
+    val scope = rememberCoroutineScope()
+    val (data, state) = visibleData() ?: return
+    var query by rememberSaveable { mutableStateOf("") }
+    var unreadOnly by rememberSaveable { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
+    val internalFallback = stringResource(R.string.internal_default)
+    val convFallback = stringResource(R.string.conversation)
+    val list = remember(data, query, unreadOnly) { GroupsTree.dms(data, query, { Names.conversationTitle(it, data, internalFallback, convFallback) }, unreadOnly = unreadOnly) }
+    var menuFor by remember { mutableStateOf<String?>(null) }
+    var meetingFor by remember { mutableStateOf<String?>(null) }
+    var remindFor by remember { mutableStateOf<ConversationDTO?>(null) }
+    var leaveFor by remember { mutableStateOf<ConversationDTO?>(null) }
+    val sidechat = stringResource(R.string.dm_sidechat)
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.nav_dms), fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() }) },
+                actions = {
+                    TextButton(onClick = onNewMessage, modifier = Modifier.testTag("newChat")) {
+                        Icon(Icons.Filled.Edit, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.dm_new))
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+            )
+        },
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+    ) { pad ->
+        Column(Modifier.padding(pad).fillMaxSize()) {
+            ConnectionBanner(state.connection)
+            SearchField(query) { query = it }
+            val all = data.conversations.count { GroupsTree.isDm(data, it) }
+            val unread = data.conversations.count { GroupsTree.isDm(data, it) && com.tiecoms.app.core.HomeTree.pending(it, System.currentTimeMillis()) > 0 }
+            FilterPills(listOf("ALL" to R.string.home_tab_all, "UNREAD" to R.string.home_tab_unread), if (unreadOnly) "UNREAD" else "ALL",
+                mapOf("ALL" to all, "UNREAD" to unread), mentions = data.conversations.sumOf { it.unreadMentions }, onMentions = onMentions) { unreadOnly = it == "UNREAD" }
+            PullToRefreshBox(
+                isRefreshing = refreshing,
+                onRefresh = { scope.launch { refreshing = true; try { client.loadBootstrap() } catch (e: Exception) { snackbar.showSnackbar(errorText(ctx, e)) } finally { refreshing = false } } },
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                LazyColumn(Modifier.fillMaxSize().testTag("dmList")) {
+                    if (list.isEmpty()) item {
+                        Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(stringResource(if (query.isNotBlank() || unreadOnly) R.string.home_empty_filter else R.string.dm_empty), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (query.isBlank() && !unreadOnly) Button(onClick = onNewMessage) { Text(stringResource(R.string.dm_new)) }
+                        }
+                    }
+                    items(list, key = { it.id }) { c ->
+                        val origin = GroupsTree.sideOrigin(data, c)
+                        Box(Modifier.animateItem()) {
+                            ConversationRow(c, data, internalFallback, convFallback, indent = 16.dp, iconSize = 44.dp, showIssuesChip = true,
+                                badge = if (c.isSide) sidechat else null,
+                                tagLine = origin?.let { stringResource(R.string.dm_from, Names.conversationTitle(it, data, internalFallback, convFallback)) },
+                                menuOpen = menuFor == c.id,
+                                menuItems = { conversationMenu(ctx, c, data, onMeeting = { meetingFor = c.id }, onRemindCustom = { remindFor = c }, onLeave = { leaveFor = c }, onOpen = { onOpen(c.id) }) + listOf(null, SheetItem(ctx.getString(R.string.details_short), "ⓘ", tag = "menuDetails") { onDetails(c.id) }) },
+                                onDismissMenu = { menuFor = null }, onLongPress = { menuFor = c.id }, onIssues = {}) { onOpen(c.id) }
+                        }
+                    }
+                    item { Spacer(Modifier.heightIn(min = 24.dp)) }
+                }
+            }
+        }
+    }
+    HomeMenus(data, meetingFor, remindFor, leaveFor, { meetingFor = it }, { remindFor = it }, { leaveFor = it })
+}
+
+// ---------- Piezas compartidas ----------
+@Composable
+private fun SearchField(query: String, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = query, onValueChange = onChange,
+        placeholder = { Text(stringResource(R.string.search)) },
+        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+        trailingIcon = if (query.isNotEmpty()) { { IconButton(onClick = { onChange("") }) { Icon(Icons.Filled.Close, stringResource(R.string.clear_search)) } } } else null,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        shape = MaterialTheme.shapes.extraLarge,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("search"),
+    )
+}
+
+@Composable
+private fun HomeMenus(
+    data: BootstrapDTO, meetingFor: String?, remindFor: ConversationDTO?, leaveFor: ConversationDTO?,
+    setMeeting: (String?) -> Unit, setRemind: (ConversationDTO?) -> Unit, setLeave: (ConversationDTO?) -> Unit,
+) {
+    val ctx = LocalContext.current
+    val client = LocalClient.current
+    val container = LocalContainer.current
     meetingFor?.let { EventDialog(it, onClose = { setMeeting(null) }) }
     remindFor?.let { ReminderDialog(it, null, onClose = { setRemind(null) }) }
     leaveFor?.let { c ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { setLeave(null) }, text = { Text(stringResource(R.string.chat_leave_confirm)) },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = {
+            confirmButton = { TextButton(onClick = {
                 setLeave(null)
                 container.scope.launch { runCatching { client.removeMember(c.id, data.me.id) }.onFailure { container.toast(errorText(ctx, it)) } }
             }) { Text(stringResource(R.string.menu_leave)) } },
-            dismissButton = { androidx.compose.material3.TextButton(onClick = { setLeave(null) }) { Text(stringResource(R.string.cancel)) } },
+            dismissButton = { TextButton(onClick = { setLeave(null) }) { Text(stringResource(R.string.cancel)) } },
         )
     }
 }
 
+/** Cabecera de sección: 📌 Fijados, Tu organización · X, Relaciones, Invitado en. Plegada, suma los no leídos. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun SectionRow(kind: com.tiecoms.app.core.HomeTree.Kind, onAdd: (() -> Unit)?) {
-    val title = stringResource(when (kind) {
-        com.tiecoms.app.core.HomeTree.Kind.PINNED -> R.string.side_pinned
-        com.tiecoms.app.core.HomeTree.Kind.COMPANIES -> R.string.side_companies
-        com.tiecoms.app.core.HomeTree.Kind.CHATS, com.tiecoms.app.core.HomeTree.Kind.FILTER -> R.string.side_chats
-    })
-    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 16.dp).testTag("section-" + kind.name), verticalAlignment = Alignment.CenterVertically) {
-        SectionHeader((if (kind == com.tiecoms.app.core.HomeTree.Kind.PINNED) "📌 " else "") + title, Modifier.weight(1f).semantics { heading() })
-        if (onAdd != null) IconButton(onClick = onAdd, modifier = Modifier.testTag("add-" + kind.name)) {
-            Icon(Icons.Filled.Add, stringResource(if (kind == com.tiecoms.app.core.HomeTree.Kind.CHATS) R.string.chat_new else R.string.side_new_space))
-        }
+private fun SectionRow(row: GroupsTree.Section, myOrg: OrganizationDTO?, onToggle: (() -> Unit)?, onAdd: (() -> Unit)?, onLongPress: (() -> Unit)?) {
+    val title = when (row.kind) {
+        GroupsTree.Kind.PINNED -> "📌 " + stringResource(R.string.side_pinned)
+        GroupsTree.Kind.ORG -> stringResource(R.string.grp_your_org, (row.org ?: myOrg)?.name ?: "")
+        GroupsTree.Kind.RELATIONS -> stringResource(R.string.grp_relations)
+        GroupsTree.Kind.GUEST -> stringResource(R.string.grp_guest_in)
+    }
+    val state = stringResource(if (row.collapsed) R.string.expand else R.string.collapse)
+    val base = Modifier.fillMaxWidth()
+    val click = if (onToggle != null) base.combinedClickable(onClick = onToggle, onLongClick = onLongPress, onClickLabel = state) else base
+    Row(click.padding(start = 16.dp, end = 4.dp, top = 12.dp).heightIn(min = 44.dp).testTag("section-" + row.key.removePrefix("s:")), verticalAlignment = Alignment.CenterVertically) {
+        if (row.kind == GroupsTree.Kind.ORG) { OrgMark(row.org ?: myOrg, size = 20.dp); Spacer(Modifier.width(8.dp)) }
+        SectionHeader(title, Modifier.weight(1f).semantics { heading() })
+        if (row.collapsed) UnreadPill(row.unread, Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE), Color.White)
+        if (onAdd != null) IconButton(onClick = onAdd, modifier = Modifier.testTag("add-" + row.kind.name)) { Icon(Icons.Filled.Add, stringResource(R.string.grp_new)) }
+        if (onToggle != null) Icon(if (row.collapsed) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown, null,
+            Modifier.padding(end = 8.dp).size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -282,32 +455,42 @@ private fun UnreadPill(n: Int, color: Color, fg: Color) {
     }
 }
 
-/** Empresa: su marca y nombre en negrita; se colapsa (con el total de no leídos cuando está colapsada). */
+/** Empresa (relación o anfitriona): su marca y nombre en negrita; una relación pendiente lleva «Invitación pendiente». */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun OrgRow(row: com.tiecoms.app.core.HomeTree.Org, onToggle: () -> Unit) {
-    val name = row.org?.name ?: stringResource(R.string.common_no_company)
+private fun CompanyRow(row: GroupsTree.Company, onToggle: () -> Unit, onLongPress: () -> Unit) {
+    val name = row.org?.name ?: row.pendingName ?: stringResource(R.string.common_no_company)
     val state = stringResource(if (row.collapsed) R.string.expand else R.string.collapse)
     Row(
-        Modifier.fillMaxWidth().clickable(onClickLabel = state, onClick = onToggle).heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 6.dp)
-            .semantics(mergeDescendants = true) { heading() }.testTag("org-" + (row.org?.id ?: "none")),
+        Modifier.fillMaxWidth().combinedClickable(onClickLabel = state, onClick = onToggle, onLongClick = onLongPress).heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 6.dp)
+            .semantics(mergeDescendants = true) { heading() }.testTag("org-" + row.key.removePrefix("o:")),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        OrgMark(row.org, size = 22.dp)
+        OrgMark(row.org ?: OrganizationDTO(name = name, colorBg = "#BDB5AE"), size = 22.dp)
         Spacer(Modifier.width(10.dp))
-        Text(name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        if (row.pendingName != null && row.org == null) {
+            Spacer(Modifier.width(8.dp))
+            Surface(color = Color(0xFFFFEBCC), shape = RoundedCornerShape(8.dp)) {
+                Text(stringResource(R.string.grp_pending), color = Color(0xFF7A4100), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp).testTag("pendingTag"))
+            }
+        }
+        Spacer(Modifier.weight(1f))
         if (row.collapsed) UnreadPill(row.unread, Color(com.tiecoms.app.core.Contrast.badgeBackground(row.org?.colorBg)), Color.White)
         Icon(if (row.collapsed) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
-/** Espacio (tema): gris semibold con la línea de sangría; tocar abre el espacio, la flecha lo colapsa. */
+/** Espacio (carpeta): gris semibold con la línea de sangría; tocar pliega. En Fijados, tocar abre el espacio. */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun WsRow(row: com.tiecoms.app.core.HomeTree.Ws, inPinned: Boolean, onToggle: () -> Unit, onLongPress: () -> Unit, onOpen: () -> Unit) {
+private fun WsRow(row: GroupsTree.Space, onToggle: () -> Unit, onLongPress: () -> Unit, onOpen: () -> Unit) {
+    val inPinned = row.kind == GroupsTree.Kind.PINNED
     val state = stringResource(if (row.collapsed) R.string.expand else R.string.collapse)
     Row(
         Modifier.fillMaxWidth().combinedClickable(onClick = if (inPinned) onOpen else onToggle, onLongClick = onLongPress, onClickLabel = if (inPinned) null else state)
-            .heightIn(min = 40.dp).padding(start = if (inPinned) 16.dp else 27.dp, end = 16.dp).testTag("ws-" + row.ws.id),
+            .heightIn(min = 40.dp).padding(start = if (inPinned) 16.dp else (18 + row.level * 20).dp, end = 16.dp).testTag("ws-" + row.ws.id),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (!inPinned) Box(Modifier.width(2.dp).heightIn(min = 40.dp).background(MaterialTheme.colorScheme.outlineVariant))
@@ -321,11 +504,41 @@ private fun WsRow(row: com.tiecoms.app.core.HomeTree.Ws, inPinned: Boolean, onTo
     }
 }
 
+/** Asunto abierto bajo su grupo: «◆ título», la fecha límite (en rojo si venció) y el estado si está en curso o esperando. */
+@Composable
+private fun IssueLine(row: GroupsTree.Issue, onOpen: () -> Unit) {
+    val ctx = LocalContext.current
+    val i = row.issue
+    val f = issueFlags(i)
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onOpen).heightIn(min = 36.dp).padding(start = (28 + row.level * 20).dp, end = 16.dp, top = 4.dp, bottom = 4.dp)
+            .semantics(mergeDescendants = true) {}.testTag("groupIssue-${i.id}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("◆", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+        Spacer(Modifier.width(8.dp))
+        Text(i.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        if (i.dueDate != null) {
+            Text(" · " + if (f.overdue) stringResource(R.string.issue_overdue) + " " + dueLabel(ctx, i) else if (f.dueToday) stringResource(R.string.issue_today) else dueLabel(ctx, i),
+                style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                color = if (f.overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.weight(1f))
+        if (i.status == "in_progress" || i.status == "waiting") { Spacer(Modifier.width(6.dp)); StatusPill(i.status) }
+    }
+}
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun ConversationRow(
-    c: ConversationDTO, data: BootstrapDTO, internalFallback: String, convFallback: String, depth: Int, inChats: Boolean,
-    menuOpen: Boolean, menuItems: () -> List<SheetItem?>, onDismissMenu: () -> Unit, onLongPress: () -> Unit, onIssues: () -> Unit, onClick: () -> Unit,
+internal fun ConversationRow(
+    c: ConversationDTO, data: BootstrapDTO, internalFallback: String, convFallback: String, indent: Dp, iconSize: Dp,
+    menuOpen: Boolean, menuItems: () -> List<SheetItem?>, onDismissMenu: () -> Unit, onLongPress: () -> Unit, onIssues: () -> Unit,
+    showIssuesChip: Boolean = true,
+    /** Burbuja junto al título («Sidechat»). */
+    badge: String? = null,
+    /** Línea pequeña bajo el título («Solo Acme», «desde #Pagos»). */
+    tagLine: String? = null,
+    onClick: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -345,8 +558,8 @@ private fun ConversationRow(
     val internalCd = stringResource(R.string.internal_cd)
     val muted = c.mutedAt(System.currentTimeMillis())
     val mutedCd = stringResource(R.string.side_muted)
-    val a11y = listOfNotNull(title, if (c.kind == "internal") internalCd else null, if (muted) mutedCd else null, preview, time, unreadText).joinToString(". ")
-    val indent = when { inChats && depth == 0 -> 16.dp; else -> (40 + depth * 20).dp }
+    val a11y = listOfNotNull(title, badge, tagLine, if (c.kind == "internal") internalCd else null, if (muted) mutedCd else null, preview, time, unreadText).joinToString(". ")
+    val big = iconSize >= 40.dp
     Box {
         Row(
             Modifier.fillMaxWidth()
@@ -357,22 +570,30 @@ private fun ConversationRow(
                 .semantics(mergeDescendants = true) { contentDescription = a11y }.testTag("conv-${c.id}"),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ConversationIcon(c, data, if (inChats && depth == 0) 40.dp else 28.dp)
+            ConversationIcon(c, data, iconSize)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        title, style = if (inChats && depth == 0) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        title, style = if (big) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         fontWeight = if (c.unread > 0 && !muted) FontWeight.Bold else FontWeight.Medium, modifier = Modifier.weight(1f, fill = false),
                     )
+                    if (badge != null) {
+                        Spacer(Modifier.width(6.dp))
+                        Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(8.dp)) {
+                            Text(badge, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp).testTag("sideBadge-${c.id}"))
+                        }
+                    }
                     if (muted) Text(" 🔕", style = MaterialTheme.typography.labelMedium)
                 }
+                if (tagLine != null) Text(tagLine, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(preview, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f, fill = false))
                     if (time.isNotEmpty()) Text(" · $time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
-                if (c.openIssues > 0) {
+                if (showIssuesChip && c.openIssues > 0) {
                     val label = if (c.openIssues == 1) stringResource(R.string.issues_count_one) else stringResource(R.string.issues_count, c.openIssues)
                     Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.padding(top = 2.dp).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(10.dp)).clickable(onClick = onIssues)
@@ -451,49 +672,43 @@ fun ConnectionBanner(status: ConnectionStatus) {
     }
 }
 
-/** Pestañas grandes tipo «pill» bajo el buscador: Todo · No leídos · Asuntos · Chats · Laterales, con contador. */
+/** Pestañas grandes tipo «pill» bajo el buscador, con contador, y la pastilla «@ Menciones» que abre la bandeja. */
 @Composable
-private fun HomeTabs(tab: com.tiecoms.app.core.HomeTree.Tab, counts: Map<com.tiecoms.app.core.HomeTree.Tab, Int>, mentions: Int = 0, onMentions: () -> Unit = {},
-                     onPick: (com.tiecoms.app.core.HomeTree.Tab) -> Unit) {
-    val labels = mapOf(
-        com.tiecoms.app.core.HomeTree.Tab.ALL to R.string.home_tab_all, com.tiecoms.app.core.HomeTree.Tab.UNREAD to R.string.home_tab_unread,
-        com.tiecoms.app.core.HomeTree.Tab.ISSUES to R.string.home_tab_issues, com.tiecoms.app.core.HomeTree.Tab.CHATS to R.string.home_tab_chats,
-        com.tiecoms.app.core.HomeTree.Tab.SIDES to R.string.home_tab_sides,
-    )
+private fun FilterPills(options: List<Pair<String, Int>>, selected: String, counts: Map<String, Int>, mentions: Int = 0, onMentions: () -> Unit = {}, onPick: (String) -> Unit) {
     androidx.compose.foundation.lazy.LazyRow(
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
         modifier = Modifier.padding(vertical = 6.dp).testTag("homeTabs"),
     ) {
-        items(com.tiecoms.app.core.HomeTree.Tab.entries.toList(), key = { it.name }) { t ->
-            if (t == com.tiecoms.app.core.HomeTree.Tab.ISSUES) {
-                // «Menciones» (junto a No leídos) abre la bandeja.
-                val label = stringResource(R.string.mention_tab)
-                androidx.compose.material3.Surface(onClick = onMentions, shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.padding(end = 8.dp).heightIn(min = 44.dp).semantics { contentDescription = "$label, $mentions" }.testTag("tab-MENTIONS")) {
-                    Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("@ $label", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        if (mentions > 0) { Spacer(Modifier.width(8.dp)); Text(mentions.toString(), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE)) }
-                    }
-                }
-            }
-            val on = t == tab
+        items(options, key = { it.first }) { (t, labelRes) ->
+            val on = t == selected
             val n = counts[t] ?: 0
-            val label = stringResource(labels.getValue(t))
+            val label = stringResource(labelRes)
             androidx.compose.material3.Surface(
                 onClick = { onPick(t) },
                 shape = CircleShape,
                 color = if (on) MaterialTheme.colorScheme.inverseSurface else MaterialTheme.colorScheme.surfaceContainerHigh,
                 contentColor = if (on) MaterialTheme.colorScheme.inverseOnSurface else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.heightIn(min = 44.dp).semantics { selected = on; contentDescription = "$label, $n" }.testTag("tab-" + t.name),
+                modifier = Modifier.heightIn(min = 44.dp).semantics { this.selected = on; contentDescription = "$label, $n" }.testTag("tab-$t"),
             ) {
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    if (t != com.tiecoms.app.core.HomeTree.Tab.ALL && n > 0) {
+                    if (t != "ALL" && n > 0) {
                         Spacer(Modifier.width(8.dp))
                         Text(n.toString(), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
                             color = if (on) MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                }
+            }
+        }
+        item(key = "mentions") {
+            // «@ Menciones» abre la bandeja (GET /mentions).
+            val label = stringResource(R.string.mention_tab)
+            androidx.compose.material3.Surface(onClick = onMentions, shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.heightIn(min = 44.dp).semantics { contentDescription = "$label, $mentions" }.testTag("tab-MENTIONS")) {
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("@ $label", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    if (mentions > 0) { Spacer(Modifier.width(8.dp)); Text(mentions.toString(), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE)) }
                 }
             }
         }

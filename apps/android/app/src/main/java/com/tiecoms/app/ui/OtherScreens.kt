@@ -91,6 +91,10 @@ fun DetailsScreen(
         val ws = data.workspaces.firstOrNull { it.id == meta.workspaceId }
         // Asuntos y reuniones también en directos y chats grupales (SPEC-v4 §E).
         val canWork = meta.canPost
+        // Los terceros participan en los asuntos pero no los crean ni invitan (docs/GRUPOS.md).
+        val guest = ws?.myRole == "guest"
+        var inviting by rememberSaveable { mutableStateOf(false) }
+        if (inviting && ws != null) InviteSheet(InviteTarget.Group(ws, meta), onClose = { inviting = false })
         val people = meta.memberIds.mapNotNull { Names.person(data, it) }
             .sortedWith(compareBy({ it.guest }, { it.orgId != data.me.primaryOrgId }, { it.name }))
         val (members, guests) = people.partition { !it.guest }
@@ -130,6 +134,9 @@ fun DetailsScreen(
                         SectionHeader(stringResource(R.string.space))
                         Text(ws.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
                     }
+                    if (ws != null && !meta.isSide && !meta.isChat) {
+                        if (!guest) OutlinedButton(onClick = { inviting = true }, modifier = Modifier.padding(bottom = 8.dp).testTag("inviteGroup")) { Text("✉ " + stringResource(R.string.menu_invite_group)) }
+                    }
                     if (meta.kind == "multi") {
                         // Chat grupal: logos de las empresas y «Chat grupal · empresas».
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp).testTag("multiOrgs")) {
@@ -168,7 +175,7 @@ fun DetailsScreen(
                 item {
                     Row(Modifier.padding(horizontal = 16.dp).padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         SectionHeader("${stringResource(R.string.nav_issues)} · ${issues.size}", Modifier.weight(1f).semantics { heading() })
-                        TextButton(onClick = { newIssue = true }) { Text(stringResource(R.string.issue_new)) }
+                        if (!guest) TextButton(onClick = { newIssue = true }, modifier = Modifier.testTag("detailsNewIssue")) { Text(stringResource(R.string.issue_new)) }
                     }
                     if (issues.isEmpty()) Text(stringResource(R.string.issue_no_issues), Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -250,7 +257,10 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
 
-    TabScaffold(title = stringResource(R.string.nav_settings)) {
+    var joinCode by rememberSaveable { mutableStateOf(false) }
+    if (joinCode) JoinCodeDialog(onClose = { joinCode = false }, onGo = { code -> joinCode = false; onNavigate("invite/$code") })
+    // «Tú» (docs/GRUPOS.md): perfil, ajustes y «Unirme con código».
+    TabScaffold(title = stringResource(R.string.nav_you)) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 32.dp).testTag("settingsScreen")) {
             val me = data?.me
             val org = Names.org(data, me?.primaryOrgId)
@@ -268,6 +278,9 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
             }
             HorizontalDivider()
             NavRow("👤 " + stringResource(R.string.profile_edit), null, tag = "rowProfile") { onNavigate("profile") }
+            HorizontalDivider()
+            NavRow("🔑 " + stringResource(R.string.join_title), stringResource(R.string.join_ph), tag = "rowJoinCode") { joinCode = true }
+
             HorizontalDivider()
             NavRow("📁 " + stringResource(R.string.nav_files), null, tag = "rowFiles") { onNavigate("files") }
             HorizontalDivider()
@@ -412,11 +425,18 @@ fun InviteScreen(token: String, signedIn: Boolean, onBack: () -> Unit, onLogin: 
                     ErrorText(error)
                     Button(onClick = { reload++ }) { Text(stringResource(R.string.retry)) }
                 }
-                !p.valid -> Text(stringResource(R.string.invite_invalid), textAlign = TextAlign.Center, modifier = Modifier.testTag("inviteInvalid"))
+                !p.valid -> Text(stringResource(if (p.groupNames.isNotEmpty() || p.multiUse) R.string.invite_expired else R.string.invite_invalid), textAlign = TextAlign.Center, modifier = Modifier.testTag("inviteInvalid"))
                 else -> {
-                    Text(p.workspaceName, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center, modifier = Modifier.semantics { heading() })
+                    Text(p.groupNames.firstOrNull()?.takeIf { p.groupNames.size == 1 } ?: p.workspaceName, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center,
+                        modifier = Modifier.semantics { heading() }.testTag("inviteHeading"))
                     Spacer(Modifier.height(8.dp))
-                    Text(
+                    // «{invitedByName} de {invitedByOrg} te invita a {groupNames} en {workspaceName}» (docs/GRUPOS.md).
+                    if (p.groupNames.isNotEmpty()) Text(
+                        (if (p.invitedByOrg.isNotBlank()) stringResource(R.string.invite_groups_org, p.invitedByName, p.invitedByOrg, p.groupNames.joinToString(", "), p.workspaceName)
+                        else stringResource(R.string.invite_groups, p.invitedByName, p.groupNames.joinToString(", "), p.workspaceName)) +
+                            (if (p.role == "guest") " " + stringResource(R.string.invite_as_guest) else "") + ".",
+                        textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("inviteGroups"),
+                    ) else Text(
                         stringResource(R.string.invite_by, p.invitedByName, if (p.invitedByOrg.isNotBlank()) " (${p.invitedByOrg})" else "", roleText(ctx, p.role)),
                         textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

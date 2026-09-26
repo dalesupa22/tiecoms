@@ -57,8 +57,11 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.foundation.border
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -175,7 +178,8 @@ private fun AuthNav() {
     }
 }
 
-private val TABS = listOf("home?ws={ws}", "issues", "agenda", "settings")
+/** Barra inferior (docs/GRUPOS.md): Grupos · DMs · Asuntos · Calendario · Tú, siempre en este orden. */
+private val TABS = listOf("home?ws={ws}", "dms", "issues", "agenda", "settings")
 
 @Composable
 private fun MainNav() {
@@ -245,17 +249,33 @@ private fun MainNav() {
     Scaffold(
         bottomBar = {
             if (route in TABS) NavigationBar(modifier = Modifier.testTag("tabs")) {
+                val data = state.data
+                val now = System.currentTimeMillis()
+                val groupsBadge = data?.let { com.tiecoms.app.core.GroupsTree.groupsUnread(it, now) } ?: 0
+                val dmsBadge = data?.let { com.tiecoms.app.core.GroupsTree.dmsUnread(it, now) } ?: 0
+                data class Tab(val route: String, val label: Int, val badge: Int, val icon: @Composable () -> Unit)
                 val items = listOf(
-                    Triple("home?ws={ws}", R.string.nav_home, Icons.Filled.Home),
-                    Triple("issues", R.string.nav_issues, Icons.Filled.CheckCircle),
-                    Triple("agenda", R.string.nav_agenda, Icons.Filled.DateRange),
-                    Triple("settings", R.string.nav_settings, Icons.Filled.Settings),
+                    Tab("home?ws={ws}", R.string.nav_groups, groupsBadge) { Icon(Icons.Filled.Groups, null) },
+                    Tab("dms", R.string.nav_dms, dmsBadge) { Icon(Icons.Filled.Forum, null) },
+                    Tab("issues", R.string.nav_issues, 0) { Icon(Icons.Filled.CheckCircle, null) },
+                    Tab("agenda", R.string.nav_calendar, 0) { Icon(Icons.Filled.DateRange, null) },
+                    // «Tú»: la foto de la persona como ícono (como el perfil de Instagram).
+                    Tab("settings", R.string.nav_you, 0) {
+                        val me = data?.me
+                        val org = com.tiecoms.app.core.Names.org(data, me?.primaryOrgId)
+                        Avatar(me?.name ?: "?", parseColor(org?.colorBg, com.tiecoms.app.ui.theme.Brand.Black), parseColor(org?.colorFg, androidx.compose.ui.graphics.Color.White),
+                            size = 26.dp, photo = me?.avatarUrl,
+                            modifier = if (route == "settings") Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, androidx.compose.foundation.shape.CircleShape) else Modifier)
+                    },
                 )
-                items.forEach { (r, label, icon) ->
+                items.forEach { t ->
                     NavigationBarItem(
-                        selected = route == r, onClick = { tab(if (r.startsWith("home")) "home" else r) },
-                        icon = { Icon(icon, null) }, label = { Text(stringResource(label)) },
-                        modifier = Modifier.testTag("tab-" + r.substringBefore('?')),
+                        selected = route == t.route, onClick = { tab(if (t.route.startsWith("home")) "home" else t.route) },
+                        icon = {
+                            if (t.badge > 0) BadgedBox(badge = { Badge { Text(if (t.badge > 99) "99+" else t.badge.toString()) } }) { t.icon() } else t.icon()
+                        },
+                        label = { Text(stringResource(t.label), maxLines = 1) },
+                        modifier = Modifier.testTag("tab-" + t.route.substringBefore('?')),
                     )
                 }
             }
@@ -264,15 +284,24 @@ private fun MainNav() {
     ) { pad ->
         NavHost(nav, startDestination = "home?ws={ws}", modifier = Modifier.padding(pad)) {
             composable("home?ws={ws}", arguments = listOf(navArgument("ws") { type = NavType.StringType; nullable = true; defaultValue = null })) {
-                HomeScreen(
+                GroupsScreen(
                     workspaceFilter = it.arguments?.getString("ws"),
                     onClearFilter = { nav.navigate("home") { popUpTo(0) { inclusive = true } } },
                     onOpen = { id -> openConv(id) },
-                    onShortcut = { r -> nav.navigate(r) { launchSingleTop = true } },
-                    onNewChat = { nav.navigate("newchat") { launchSingleTop = true } },
+                    onOpenWorkspace = { w -> nav.navigate("home?ws=$w") { launchSingleTop = true } },
                     onMentions = { nav.navigate("mentions") { launchSingleTop = true } },
                     onIssuesOf = { c -> nav.navigate("issues-of/$c") { launchSingleTop = true } },
+                    onOpenIssue = { i -> nav.navigate("issue/$i") },
                     onDetails = { c -> nav.navigate("details/$c") { launchSingleTop = true } },
+                    onJoinCode = { code -> nav.navigate("invite/$code") { launchSingleTop = true } },
+                )
+            }
+            composable("dms") {
+                DmsScreen(
+                    onOpen = { id -> openConv(id) },
+                    onNewMessage = { nav.navigate("newchat?person=1") { launchSingleTop = true } },
+                    onDetails = { c -> nav.navigate("details/$c") { launchSingleTop = true } },
+                    onMentions = { nav.navigate("mentions") { launchSingleTop = true } },
                 )
             }
             composable("issues") { IssuesScreen(onOpen = { nav.navigate("issue/$it") }) }
@@ -332,8 +361,9 @@ private fun MainNav() {
                     onDone = { c -> container.shareDraft = null; nav.popBackStack(); openConv(c) })
             }
             composable("mentions") { MentionsInboxScreen(onBack = { nav.popBackStack() }, onOpen = { c, seq -> openConv(c, seq) }) }
-            composable("newchat") {
-                NewChatScreen(onBack = { nav.popBackStack() }, onOpened = { c -> nav.popBackStack(); openConv(c) })
+            composable("newchat?person={person}", arguments = listOf(navArgument("person") { type = NavType.StringType; defaultValue = "" })) {
+                // Desde DMs («Mensaje nuevo»): solo persona o chat grupal (1 persona → directo, 2+ → chat grupal).
+                NewChatScreen(onBack = { nav.popBackStack() }, onOpened = { c -> nav.popBackStack(); openConv(c) }, personOnly = it.arguments?.getString("person") == "1")
             }
             composable("addmembers/{id}") {
                 AddMembersScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() })

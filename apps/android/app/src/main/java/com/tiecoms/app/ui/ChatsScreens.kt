@@ -182,7 +182,7 @@ fun PeoplePicker(data: BootstrapDTO, picked: List<String>, onToggle: (String) ->
 }
 
 @Composable
-private fun PersonPickRow(p: PersonDTO, data: BootstrapDTO, on: Boolean, onToggle: () -> Unit) {
+internal fun PersonPickRow(p: PersonDTO, data: BootstrapDTO, on: Boolean, onToggle: () -> Unit) {
     val org = Names.org(data, p.orgId)
     val line = Names.roleLine(p).ifEmpty { if (p.guest) stringResource(R.string.common_guest) else org?.name ?: "" }
     Row(
@@ -208,11 +208,12 @@ private fun PersonPickRow(p: PersonDTO, data: BootstrapDTO, on: Boolean, onToggl
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun NewChatScreen(onBack: () -> Unit, onOpened: (String) -> Unit) {
+fun NewChatScreen(onBack: () -> Unit, onOpened: (String) -> Unit, personOnly: Boolean = false) {
     val data = LocalClient.current.state.collectAsStateWithLifecycle().value.data ?: return
     var mode by rememberSaveable { mutableStateOf(0) }
-    SimpleScaffold(title = stringResource(R.string.chat_new), onBack = onBack) {
-        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).testTag("chatMode")) {
+    // Desde DMs solo se elige persona o chat grupal: los grupos de un espacio se crean con el «+» de Grupos.
+    SimpleScaffold(title = stringResource(if (personOnly) R.string.dm_new else R.string.chat_new), onBack = onBack) {
+        if (!personOnly) androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).testTag("chatMode")) {
             listOf(R.string.chat_mode_person to "chatModePerson", R.string.chat_mode_space to "chatModeSpace").forEachIndexed { i, (label, tag) ->
                 SegmentedButton(
                     selected = mode == i, onClick = { mode = i },

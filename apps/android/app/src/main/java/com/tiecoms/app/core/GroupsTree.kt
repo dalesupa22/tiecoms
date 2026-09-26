@@ -23,7 +23,7 @@ object GroupsTree {
     /** Cabecera de sección. En ORG lleva la empresa («Tu organización · X»). */
     data class Section(val kind: Kind, val org: OrganizationDTO?, val collapsed: Boolean, val unread: Int, override val key: String) : Row
     /** Empresa de una relación o anfitriona («Invitado en»). [pendingName]: relación cuya empresa aún no entra. */
-    data class Company(val kind: Kind, val org: OrganizationDTO?, val pendingName: String?, val workspaces: List<WorkspaceDTO>,
+    data class Company(val kind: Kind, val id: String, val org: OrganizationDTO?, val pendingName: String?, val workspaces: List<WorkspaceDTO>,
                        val collapsed: Boolean, val unread: Int, override val key: String) : Row
     /** Espacio (la «carpeta» de la relación). [level] = sangría. */
     data class Space(val ws: WorkspaceDTO, val kind: Kind, val level: Int, val collapsed: Boolean, val unread: Int, override val key: String) : Row
@@ -215,7 +215,7 @@ object GroupsTree {
             for (r in list) {
                 val ck = companyKey(kind, r.id)
                 val folded = !searching && ck in collapsed
-                rows += Company(kind, r.org, r.pendingName, r.workspaces, folded, unread(r.workspaces.flatMap { convsOf(it) }), key = "o:" + kind.name + ":" + r.id)
+                rows += Company(kind, r.id, r.org, r.pendingName, r.workspaces, folded, unread(r.workspaces.flatMap { convsOf(it) }), key = "o:" + kind.name + ":" + r.id)
                 if (!folded) addSpaces(kind, r.workspaces, 1)
             }
         }

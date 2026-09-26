@@ -1179,19 +1179,25 @@ class TieComsClient(
     }
 
     /**
-     * POST /workspaces/:id/invitations a un grupo: con [email] es una invitación por correo; sin correo,
-     * un enlace con código para varias personas (multiUse, 14 días).
+     * POST /workspaces/:id/invitations a un grupo (o al espacio, sin [conversationId]): con [email] es una
+     * invitación por correo; sin correo, un enlace con código para varias personas (multiUse, 14 días).
      */
-    suspend fun inviteToGroup(workspaceId: String, conversationId: String, role: String, email: String?, lang: String): InvitationCreatedDTO = withContext(dispatcher) {
+    suspend fun inviteToGroup(workspaceId: String, conversationId: String?, role: String, email: String?, lang: String): InvitationCreatedDTO = withContext(dispatcher) {
         val body = buildJsonObject {
             email?.let { put("email", JsonPrimitive(it.trim())) }
             put("role", JsonPrimitive(role))
-            put("conversationIds", kotlinx.serialization.json.JsonArray(listOf(JsonPrimitive(conversationId))))
+            put("conversationIds", kotlinx.serialization.json.JsonArray(listOfNotNull(conversationId).map { JsonPrimitive(it) }))
             if (email == null) { put("multiUse", JsonPrimitive(true)); put("expiresInDays", JsonPrimitive(14)) }
             put("history", JsonPrimitive("all"))
             put("lang", JsonPrimitive(lang))
         }
         req("POST", "/workspaces/$workspaceId/invitations", body, InvitationCreatedDTO.serializer())
+    }
+
+    /** POST /organizations/:id/invitations: invitar a una colega a mi empresa por correo («Invitar a la empresa…»). */
+    suspend fun inviteToOrg(orgId: String, email: String, lang: String) = withContext(dispatcher) {
+        val body = buildJsonObject { put("email", JsonPrimitive(email.trim())); put("lang", JsonPrimitive(lang)) }
+        req("POST", "/organizations/$orgId/invitations", body, JsonElement.serializer()); Unit
     }
 
     /** Asuntos abiertos de todo mi alcance (se muestran bajo cada grupo). */

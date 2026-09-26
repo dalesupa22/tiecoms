@@ -310,6 +310,13 @@ private fun MainNav() {
             }
             composable("agenda") { AgendaScreen(onOpenEvent = { nav.navigate("event/$it") }) }
             composable("settings") { SettingsScreen(onNavigate = { r -> nav.navigate(r) { launchSingleTop = true } }) }
+            composable("oversight/{org}") {
+                OversightScreen(it.arguments?.getString("org") ?: "", onBack = { nav.popBackStack() }, onOpen = { c -> openConv(c) },
+                    onReadOnly = { c, name -> nav.navigate("readonly/$c?name=" + android.net.Uri.encode(name)) { launchSingleTop = true } })
+            }
+            composable("readonly/{id}?name={name}", arguments = listOf(navArgument("name") { type = NavType.StringType; defaultValue = "" })) {
+                ReadOnlyGroupScreen(it.arguments?.getString("id") ?: "", it.arguments?.getString("name") ?: "", onBack = { nav.popBackStack() })
+            }
             composable("conv/{id}?m={m}&side={side}", arguments = listOf(
                 navArgument("m") { type = NavType.StringType; nullable = true; defaultValue = null },
                 navArgument("side") { type = NavType.StringType; nullable = true; defaultValue = null },

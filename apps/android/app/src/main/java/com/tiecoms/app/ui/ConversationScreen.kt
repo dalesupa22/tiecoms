@@ -125,7 +125,7 @@ import kotlinx.serialization.json.contentOrNull
 import java.time.Instant
 import java.time.LocalDate
 
-private sealed interface ChatItem {
+internal sealed interface ChatItem {
     val key: String
     data class Day(val date: LocalDate) : ChatItem { override val key = "d:$date" }
     data class Msg(val m: MessageDTO, val mine: Boolean, val showAuthor: Boolean) : ChatItem { override val key = "m:" + m.id }
@@ -135,7 +135,7 @@ private sealed interface ChatItem {
 }
 
 /** Cronológico → invertido (índice 0 = lo más nuevo, para reverseLayout). */
-private fun buildItems(messages: List<MessageDTO>, pending: List<PendingMessage>, me: String?, hasMore: Boolean, loading: Boolean, lateJoin: Boolean): List<ChatItem> {
+internal fun buildItems(messages: List<MessageDTO>, pending: List<PendingMessage>, me: String?, hasMore: Boolean, loading: Boolean, lateJoin: Boolean): List<ChatItem> {
     val confirmed = messages.mapNotNull { it.clientMessageId }.toSet()
     val out = mutableListOf<ChatItem>()
     if (hasMore && loading) out += ChatItem.Older
@@ -843,7 +843,7 @@ private fun ReadOnlyNotice() {
 }
 
 @Composable
-private fun DaySeparator(text: String) {
+internal fun DaySeparator(text: String) {
     Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
         Text(
             text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -853,12 +853,12 @@ private fun DaySeparator(text: String) {
 }
 
 @Composable
-private fun Notice(text: String) {
+internal fun Notice(text: String) {
     Text(text, style = MaterialTheme.typography.bodySmall, color = LocalChatColors.current.system, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(12.dp))
 }
 
 @Composable
-private fun SystemRow(
+internal fun SystemRow(
     m: MessageDTO, data: BootstrapDTO, events: Map<String, com.tiecoms.app.core.CalendarEventDTO>,
     onOpenConversation: (String, Long?) -> Unit, onOpenIssue: (String) -> Unit, onOpenEvent: (String) -> Unit,
 ) {
@@ -885,7 +885,7 @@ private fun SystemRow(
 
 @OptIn(ExperimentalFoundationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun MessageBubble(
+internal fun MessageBubble(
     item: ChatItem.Msg, data: BootstrapDTO, quoted: MessageDTO?, pinnedHere: Boolean, highlighted: Boolean, issue: IssueDTO?,
     showAvatars: Boolean, menuOpen: Boolean, menuItems: () -> List<SheetItem?>, onDismissMenu: () -> Unit,
     sides: List<ConversationDTO> = emptyList(), onOpenSide: (String) -> Unit = {},

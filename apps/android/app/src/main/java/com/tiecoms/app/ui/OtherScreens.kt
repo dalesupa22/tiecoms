@@ -136,6 +136,8 @@ fun DetailsScreen(
                     }
                     if (ws != null && !meta.isSide && !meta.isChat) {
                         if (!guest) OutlinedButton(onClick = { inviting = true }, modifier = Modifier.padding(bottom = 8.dp).testTag("inviteGroup")) { Text("✉ " + stringResource(R.string.menu_invite_group)) }
+                        Text(stringResource(R.string.ov_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 12.dp).testTag("oversightNote"))
                     }
                     if (meta.kind == "multi") {
                         // Chat grupal: logos de las empresas y «Chat grupal · empresas».
@@ -259,7 +261,7 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
 
     var joinCode by rememberSaveable { mutableStateOf(false) }
     if (joinCode) JoinCodeDialog(onClose = { joinCode = false }, onGo = { code -> joinCode = false; onNavigate("invite/$code") })
-    // «Tú» (docs/GRUPOS.md): perfil, ajustes y «Unirme con código».
+    // «Tú» (docs/GRUPOS.md): perfil, ajustes, «Unirme con código» y «Supervisión» si administro una empresa.
     TabScaffold(title = stringResource(R.string.nav_you)) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 32.dp).testTag("settingsScreen")) {
             val me = data?.me
@@ -280,7 +282,10 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
             NavRow("👤 " + stringResource(R.string.profile_edit), null, tag = "rowProfile") { onNavigate("profile") }
             HorizontalDivider()
             NavRow("🔑 " + stringResource(R.string.join_title), stringResource(R.string.join_ph), tag = "rowJoinCode") { joinCode = true }
-
+            data?.organizations.orEmpty().filter { it.myRole == "owner" || it.myRole == "admin" }.forEach { o ->
+                HorizontalDivider()
+                NavRow("👁 " + stringResource(R.string.ov_title, o.name), null, tag = "rowOversight-${o.id}") { onNavigate("oversight/${o.id}") }
+            }
             HorizontalDivider()
             NavRow("📁 " + stringResource(R.string.nav_files), null, tag = "rowFiles") { onNavigate("files") }
             HorizontalDivider()

@@ -567,3 +567,33 @@ struct Mention: Codable, Equatable, Hashable, Sendable {
     var json: [String: Any] { ["userId": userId, "start": start, "length": length] }
 }
 
+/// Reacción agregada de un mensaje: quién reaccionó con ese emoji (orden de la primera reacción).
+/// `external`: reacciones que llegaron por el puente de WhatsApp (sin cuenta en Chaggu). docs/REACCIONES_ENLACES.md.
+struct ReactionDTO: Codable, Equatable, Sendable, Identifiable {
+    struct External: Codable, Equatable, Sendable {
+        var name: String
+        var source: ForwardSource
+        init(name: String, source: ForwardSource) { self.name = name; self.source = source }
+        init(from decoder: Decoder) throws {
+            let c = try container(decoder)
+            name = c.v("name", "")
+            source = ForwardSource(rawValue: c.v("source", "other")) ?? .other
+        }
+    }
+    var emoji: String
+    var userIds: [String]
+    var external: [External] = []
+    var id: String { emoji }
+    var count: Int { userIds.count + external.count }
+
+    init(emoji: String, userIds: [String], external: [External] = []) {
+        self.emoji = emoji; self.userIds = userIds; self.external = external
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        emoji = try c.decode(String.self, forKey: AnyKey("emoji"))
+        userIds = c.v("userIds", [])
+        external = c.lossyArray("external")
+    }
+}

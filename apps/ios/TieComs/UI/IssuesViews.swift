@@ -43,6 +43,47 @@ struct StatusPill: View {
     }
 }
 
+/// Menú de pulsación larga de un asunto: Abrir, Completar, En curso, En espera (o Reabrir si ya se cerró).
+/// Cambia el estado con actualización optimista; al completar, el asunto sale de las listas de activos.
+struct IssueStatusMenu: View {
+    @Environment(AppStore.self) private var store
+    let issue: IssueDTO
+    var onOpen: (() -> Void)? = nil
+
+    var body: some View {
+        if let onOpen {
+            Button(action: onOpen) { Label(L("issue.act.open"), systemImage: "arrow.up.forward.square") }
+        }
+        if issue.status.closed {
+            Button { set(.open) } label: { Label(L("issue.act.reopen"), systemImage: "arrow.uturn.backward.circle") }
+                .accessibilityIdentifier("issue.menu.reopen")
+        } else {
+            Button { set(.done) } label: { Label(L("issue.act.complete"), systemImage: "checkmark.circle") }
+                .accessibilityIdentifier("issue.menu.complete")
+            if issue.status != .in_progress {
+                Button { set(.in_progress) } label: { Label(L("issue.act.inProgress"), systemImage: "arrow.triangle.2.circlepath") }
+            }
+            if issue.status != .waiting {
+                Button { set(.waiting) } label: { Label(L("issue.act.waiting"), systemImage: "pause.circle") }
+            }
+            if issue.status != .open {
+                Button { set(.open) } label: { Label(L("issue.act.reopen"), systemImage: "circle") }
+            }
+        }
+    }
+
+    private func set(_ status: IssueStatus) {
+        let id = issue.id, title = issue.title
+        Haptics.tap()
+        Task {
+            do {
+                try await store.setIssueStatus(id, status)
+                store.show(status == .done ? L("issue.toast.done", ["title": title]) : L("issue.toast.status", ["status": L("issue.st.\(status.rawValue)")]))
+            } catch { store.show(L10n.errorText(error)) }
+        }
+    }
+}
+
 struct IssueRow: View {
     @Environment(AppStore.self) private var store
     let issue: IssueDTO
@@ -177,6 +218,7 @@ struct IssuesScreen: View {
                                     ForEach(cv.issues) { i in
                                         NavigationLink(value: Route.issue(i.id)) { IssueRow(issue: i, showWhere: false) }
                                             .listRowInsets(EdgeInsets(top: 6, leading: 48, bottom: 6, trailing: 12))
+                                            .contextMenu { IssueStatusMenu(issue: i) { store.push(.issue(i.id)) } }
                                     }
                                 }
                             }

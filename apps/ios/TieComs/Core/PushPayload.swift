@@ -3,7 +3,8 @@ import Foundation
 /// Payload de un push de Chaggu (APNs): `aps` + datos (PushData del contrato).
 /// Tolerante: campos o tipos desconocidos no rompen; `type` desconocido → .message.
 struct PushPayload: Equatable {
-    enum Kind: String { case message, reminder, event, side, mention }
+    /// reaction = reaccionaron a un mensaje mío: abre la conversación en `messageId`.
+    enum Kind: String { case message, reminder, event, side, mention, reaction }
 
     var kind: Kind
     var conversationId: String

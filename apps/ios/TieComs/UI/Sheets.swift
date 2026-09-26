@@ -66,9 +66,11 @@ struct DeriveSheet: View {
                 Text("“\(excerpt(message.body, 220))”").font(.callout).italic()
             }
             Section {
-                ForEach([("same", L("derive.same"), L("derive.sameNote")),
-                         ("internal", L("derive.internal", ["org": myOrg?.name ?? ""]), L("derive.internalNote")),
-                         ("directive", L("derive.directive"), L("derive.directiveNote"))], id: \.0) { k, label, note in
+                // Fuera de un espacio (directos y chats grupales) solo hay hilo con las mismas personas.
+                let options = [("same", L("derive.same"), L("derive.sameNote")),
+                               ("internal", L("derive.internal", ["org": myOrg?.name ?? ""]), L("derive.internalNote")),
+                               ("directive", L("derive.directive"), L("derive.directiveNote"))]
+                ForEach(store.meta(conversationId)?.workspaceId == nil ? Array(options.prefix(1)) : options, id: \.0) { k, label, note in
                     Button { pick(k) } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
@@ -274,6 +276,7 @@ struct ConversationIssuesSheet: View {
                 if list.isEmpty { Text(L("issue.noIssues")).foregroundStyle(Theme.textSecondary) }
                 ForEach(list) { i in
                     Button { dismiss(); store.push(.issue(i.id)) } label: { IssueRow(issue: i, showWhere: false) }
+                        .contextMenu { IssueStatusMenu(issue: i) { dismiss(); store.push(.issue(i.id)) } }
                 }
             }
             .navigationTitle(L("issue.here"))

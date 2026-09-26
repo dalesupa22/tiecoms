@@ -93,6 +93,9 @@ struct HomeView: View {
                     Button { store.homePath.append(.trazo) } label: { Label(L("nav.trazo"), systemImage: "arrow.triangle.branch") }
                     Button { store.homePath.append(.whatsapp) } label: { Label(L("nav.whatsapp"), systemImage: "message") }
                     Divider()
+                    // Plegar y desplegar: con muchos grupos y asuntos la lista se vuelve larga.
+                    if let d = store.data { foldMenu(Naming.groupsTree(d, filterWorkspace: store.workspaceFilter, tab: tab)) }
+                    Divider()
                     Button { sheet = .joinCode } label: { Label(L("join.title"), systemImage: "ticket") }
                     Button { sheet = .newGroup(.none) } label: { Label(L("grp.new"), systemImage: "plus.bubble") }
                 } label: {
@@ -169,7 +172,7 @@ struct HomeView: View {
                     if s.companies.isEmpty {
                         Text(L("grp.mineEmpty")).font(.footnote).foregroundStyle(Theme.textSecondary)
                     }
-                    ForEach(s.companies) { co in groups(d, co, kind: s.kind, indent: 0, open: open) }
+                    ForEach(s.companies) { co in groups(d, co, kind: s.kind, indent: 0, open: open, searching: searching) }
                 case .relations, .guest:
                     if s.companies.isEmpty {
                         Text(L("grp.relationsEmpty")).font(.footnote).foregroundStyle(Theme.textSecondary)
@@ -179,10 +182,10 @@ struct HomeView: View {
                         let all = co.groups.map(\.conv)
                         CompanyRow(org: co.org, open: coOpen, unread: coOpen ? 0 : Naming.unreadCount(all), name: co.name, pending: co.pending) { toggle("org:\(co.id)") }
                             .contextMenu { companyMenu(co, kind: s.kind, tree: tree) }
-                        if coOpen { groups(d, co, kind: s.kind, indent: 1, open: open) }
+                        if coOpen { groups(d, co, kind: s.kind, indent: 1, open: open, searching: searching) }
                     }
                 case .other:
-                    ForEach(s.orphans) { n in groupRows(d, n, indent: 0, color: nil, guest: false, open: open) }
+                    ForEach(s.orphans) { n in groupRows(d, n, indent: 0, color: nil, guest: false, open: open, searching: searching) }
                 }
             }
         } header: {
@@ -202,33 +205,43 @@ struct HomeView: View {
                     } else if s.kind == .relations {
                         Button { sheet = .newGroup(.company(nil)) } label: { Label(L("grp.new"), systemImage: "plus.bubble") }
                     }
-                    Button { collapseAll(tree) } label: { Label(L("grp.collapseAll"), systemImage: "rectangle.compress.vertical") }
+                    Divider()
+                    foldMenu(tree)
                 }
         }
     }
 
     /// Solo hay grupos y asuntos: los grupos de todos los espacios de la empresa, directo bajo ella.
     @ViewBuilder
-    private func groups(_ d: BootstrapDTO, _ co: GroupsTree.CompanyNode, kind: GroupsTree.Kind, indent: Int, open: [String: [IssueDTO]]) -> some View {
+    private func groups(_ d: BootstrapDTO, _ co: GroupsTree.CompanyNode, kind: GroupsTree.Kind, indent: Int, open: [String: [IssueDTO]], searching: Bool) -> some View {
         let color = co.org.flatMap { Theme.badgeColor($0.colorBg) }
-        ForEach(co.groups) { n in groupRows(d, n, indent: indent, color: color, guest: kind == .guest, open: open) }
+        ForEach(co.groups) { n in groupRows(d, n, indent: indent, color: color, guest: kind == .guest, open: open, searching: searching) }
     }
 
-    /// Un grupo y sus asuntos abiertos (hasta 3 y «+N asuntos»). Sus hilos viven en la barra del chat.
+    /// Un grupo con el chip «◆ N asuntos» y, si están desplegados, sus asuntos activos (hasta 3 y «+N asuntos»).
+    /// Por defecto van plegados; al buscar se despliegan solos los grupos con un asunto que coincide.
     @ViewBuilder
-    private func groupRows(_ d: BootstrapDTO, _ n: GroupsTree.ConvNode, indent: Int, color: Color?, guest: Bool, open: [String: [IssueDTO]]) -> some View {
-        convLink(d, n.conv, indent: indent, badgeColor: color, group: true, guest: guest, label: n.label, threadUnread: n.threadUnread)
-        issueLines(n.conv.id, indent: indent, open: open)
+    private func groupRows(_ d: BootstrapDTO, _ n: GroupsTree.ConvNode, indent: Int, color: Color?, guest: Bool, open: [String: [IssueDTO]], searching: Bool) -> some View {
+        let all = open[n.conv.id] ?? []
+        let hits = searching ? GroupIssues.matching(all, query: query) : []
+        let expanded = !hits.isEmpty || HomeCollapse.issuesOpen(collapsed, n.conv.id)
+        let sum = GroupIssues.summary(all, serverCount: n.conv.openIssues)
+        let chip = sum.count > 0 ? IssuesToggle(count: sum.count, overdue: sum.overdue, expanded: expanded) : nil
+        convLink(d, n.conv, indent: indent, badgeColor: color, group: true, guest: guest, label: n.label, threadUnread: n.threadUnread,
+                 issues: chip, onToggleIssues: { toggle(HomeCollapse.issuesKey(n.conv.id)) })
+        if expanded { issueLines(n.conv.id, indent: indent, list: hits.isEmpty ? all : hits) }
     }
 
     @ViewBuilder
-    private func issueLines(_ conversationId: String, indent: Int, open: [String: [IssueDTO]]) -> some View {
-        let list = open[conversationId] ?? []
+    private func issueLines(_ conversationId: String, indent: Int, list: [IssueDTO]) -> some View {
         let inset = EdgeInsets(top: 2, leading: 16 + CGFloat(indent) * 18 + 40, bottom: 2, trailing: 12)
         ForEach(list.prefix(3)) { i in
             NavigationLink(value: Route.issue(i.id)) { GroupIssueLine(issue: i) }
                 .listRowInsets(inset)
                 .accessibilityIdentifier("grp.issue.\(i.id)")
+                // Mantener presionado: completar o cambiar el estado sin entrar al asunto.
+                .contextMenu { IssueStatusMenu(issue: i) { store.homePath.append(.issue(i.id)) } }
+                .transition(.opacity.combined(with: .move(edge: .top)))
         }
         if list.count > 3 {
             Button { sheet = .issues(conversationId) } label: {
@@ -249,7 +262,25 @@ struct HomeView: View {
                 Button { sheet = .invite(.workspace(ws.id)) } label: { Label(L("grp.inviteCompany"), systemImage: "person.badge.plus") }
             }
         }
-        Button { collapseAll(tree) } label: { Label(L("grp.collapseAll"), systemImage: "rectangle.compress.vertical") }
+        Divider()
+        foldMenu(tree)
+    }
+
+    /// Plegar y desplegar (menú «…», cabeceras de sección y empresas).
+    @ViewBuilder
+    private func foldMenu(_ tree: GroupsTree) -> some View {
+        Button { fold { HomeCollapse.setIssues(&$0, HomeCollapse.groupIds(tree), open: true) } } label: {
+            Label(L("grp.showAllIssues"), systemImage: "list.bullet.indent")
+        }
+        .accessibilityIdentifier("home.fold.showIssues")
+        Button { fold { HomeCollapse.setIssues(&$0, HomeCollapse.groupIds(tree), open: false) } } label: {
+            Label(L("grp.hideAllIssues"), systemImage: "list.dash")
+        }
+        .accessibilityIdentifier("home.fold.hideIssues")
+        Button { fold { HomeCollapse.expandAll(&$0, tree) } } label: { Label(L("grp.expandAll"), systemImage: "rectangle.expand.vertical") }
+            .accessibilityIdentifier("home.fold.expandAll")
+        Button { fold { HomeCollapse.collapseAll(&$0, tree) } } label: { Label(L("grp.collapseAll"), systemImage: "rectangle.compress.vertical") }
+            .accessibilityIdentifier("home.fold.collapseAll")
     }
 
     private func toggle(_ key: String) {
@@ -259,21 +290,17 @@ struct HomeView: View {
         HomeCollapse.save(collapsed)
     }
 
-    /// «Plegar todo»: las empresas de Relaciones e Invitado en.
-    private func collapseAll(_ tree: GroupsTree) {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            for s in tree.sections {
-                if s.kind == .relations || s.kind == .guest { for co in s.companies { collapsed.insert("org:\(co.id)") } }
-            }
-        }
+    private func fold(_ f: (inout Set<String>) -> Void) {
+        withAnimation(.easeInOut(duration: 0.25)) { f(&collapsed) }
         HomeCollapse.save(collapsed)
     }
 
     @ViewBuilder
     private func convLink(_ d: BootstrapDTO, _ c: ConversationDTO, indent: Int, badgeColor: Color? = nil, showWs: Bool = false, group: Bool = false, guest: Bool = false,
-                          label: String? = nil, threadUnread: Int = 0) -> some View {
+                          label: String? = nil, threadUnread: Int = 0, issues: IssuesToggle? = nil, onToggleIssues: (() -> Void)? = nil) -> some View {
         NavigationLink(value: Route.conversation(c.id)) {
-            HierarchyConvRow(d: d, c: c, badgeColor: badgeColor, showWs: showWs, showIssueChip: !group, titleOverride: label, threadUnread: threadUnread) { sheet = .issues(c.id) }
+            HierarchyConvRow(d: d, c: c, badgeColor: badgeColor, showWs: showWs, showIssueChip: !group, titleOverride: label, threadUnread: threadUnread,
+                             issuesToggle: issues, onToggleIssues: onToggleIssues) { sheet = .issues(c.id) }
         }
         .listRowInsets(EdgeInsets(top: 6, leading: 16 + CGFloat(indent) * 18, bottom: 6, trailing: 12))
         .accessibilityIdentifier("conv.row.\(c.id)")
@@ -349,11 +376,63 @@ struct GroupIssueLine: View {
 
 struct IdBox: Identifiable { let id: String }
 
-/// Empresas y espacios plegados (se recuerda en este dispositivo).
+/// Secciones y empresas plegadas (`sec:`, `org:`) y asuntos desplegados por grupo (`iss:`; por defecto plegados).
+/// Se recuerda en este dispositivo.
 enum HomeCollapse {
-    private static let key = "tc.home.collapsed"
-    static func load() -> Set<String> { Set(UserDefaults.standard.stringArray(forKey: key) ?? []) }
-    static func save(_ s: Set<String>) { UserDefaults.standard.set(Array(s).sorted(), forKey: key) }
+    static let key = "tc.home.collapsed"
+    static func load(_ defaults: UserDefaults = .standard) -> Set<String> { Set(defaults.stringArray(forKey: key) ?? []) }
+    static func save(_ s: Set<String>, _ defaults: UserDefaults = .standard) { defaults.set(Array(s).sorted(), forKey: key) }
+
+    static func issuesKey(_ conversationId: String) -> String { "iss:\(conversationId)" }
+    /// ¿Los asuntos del grupo están desplegados?
+    static func issuesOpen(_ s: Set<String>, _ conversationId: String) -> Bool { s.contains(issuesKey(conversationId)) }
+    /// Los grupos del árbol (los que pueden llevar asuntos debajo).
+    static func groupIds(_ tree: GroupsTree) -> [String] { tree.sections.flatMap { $0.allConvs.map(\.id) } }
+
+    static func setIssues(_ s: inout Set<String>, _ ids: [String], open: Bool) {
+        for id in ids { if open { s.insert(issuesKey(id)) } else { s.remove(issuesKey(id)) } }
+    }
+
+    /// «Plegar todo»: las empresas de Relaciones e Invitado en y los asuntos de todos los grupos.
+    static func collapseAll(_ s: inout Set<String>, _ tree: GroupsTree) {
+        for sec in tree.sections where sec.kind == .relations || sec.kind == .guest {
+            for co in sec.companies { s.insert("org:\(co.id)") }
+        }
+        setIssues(&s, groupIds(tree), open: false)
+    }
+
+    /// «Expandir todo»: secciones, empresas y asuntos.
+    static func expandAll(_ s: inout Set<String>, _ tree: GroupsTree) {
+        for sec in tree.sections {
+            s.remove("sec:\(sec.id)")
+            for co in sec.companies { s.remove("org:\(co.id)") }
+        }
+        setIssues(&s, groupIds(tree), open: true)
+    }
+}
+
+/// Chip de asuntos de un grupo en Grupos.
+struct IssuesToggle: Equatable {
+    var count: Int
+    var overdue: Int
+    var expanded: Bool
+}
+
+/// Asuntos activos bajo un grupo: conteo del chip y búsqueda.
+enum GroupIssues {
+    /// Activos que conozco (o el conteo del servidor si aún no los cargué) y cuántos vencieron.
+    static func summary(_ list: [IssueDTO], serverCount: Int, now: Date = Date()) -> (count: Int, overdue: Int) {
+        let active = list.filter { !$0.status.closed }
+        let overdue = active.filter { IssueSort.flags($0, now: now).overdue }.count
+        return (active.isEmpty ? max(0, serverCount) : active.count, overdue)
+    }
+
+    /// Asuntos cuyo título coincide con la búsqueda (sin tildes ni mayúsculas).
+    static func matching(_ list: [IssueDTO], query: String) -> [IssueDTO] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return [] }
+        return list.filter { $0.title.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+    }
 }
 
 /// Encabezado de sección en mayúsculas con botón + opcional (como EMPRESAS Y ESPACIOS / CHATS de la web).
@@ -456,6 +535,9 @@ struct HierarchyConvRow: View {
     var titleOverride: String? = nil
     /// Respuestas sin leer de sus hilos: chip «💬 N».
     var threadUnread = 0
+    /// Grupos: chip «◆ N asuntos · N vencidos ⌄» que despliega o pliega sus asuntos (sin abrir el chat).
+    var issuesToggle: IssuesToggle? = nil
+    var onToggleIssues: (() -> Void)? = nil
     var onIssues: () -> Void
 
     var body: some View {
@@ -483,6 +565,8 @@ struct HierarchyConvRow: View {
                             .background(Capsule().fill(Theme.orange.opacity(0.14)))
                             .accessibilityIdentifier("grp.threadUnread.\(c.id)")
                     }
+                    // En la misma línea que el nombre (como la web): plegado, cada grupo ocupa su fila y nada más.
+                    if let t = issuesToggle { issuesChip(t) }
                     if c.unreadMentions > 0 { MentionBadge() }
                     if c.unread > 0 { UnreadPill(count: c.unread, color: badgeColor, muted: c.isMuted && c.unreadMentions == 0) }
                 }
@@ -520,7 +604,47 @@ struct HierarchyConvRow: View {
                              Naming.sideOrigin(d, c).map { L("dm.fromOrigin", ["name": Naming.title(d, $0)]) },
                              c.isMuted ? L("side.muted") : nil, c.unreadMentions > 0 ? L("mention.youMentioned") : nil,
                              c.unread > 0 ? L("a11y.unread", ["n": c.unread]) : nil, preview, time,
-                             c.openIssues > 0 ? (c.openIssues == 1 ? L("issue.chipOne") : L("issue.chipMany", ["n": c.openIssues])).replacingOccurrences(of: "◆ ", with: "") : nil].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
+                             issueCountLabel].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
+        .accessibilityActions {
+            if let t = issuesToggle, let onToggleIssues {
+                Button(t.expanded ? L("grp.hideIssues") : L("grp.showIssues"), action: onToggleIssues)
+            }
+        }
+    }
+
+    /// Asuntos para VoiceOver: los del chip (con vencidos) o el conteo del servidor.
+    private var issueCountLabel: String? {
+        let n = issuesToggle?.count ?? c.openIssues
+        guard n > 0 else { return nil }
+        var s = (n == 1 ? L("issue.chipOne") : L("issue.chipMany", ["n": n])).replacingOccurrences(of: "◆ ", with: "")
+        if let o = issuesToggle?.overdue, o > 0 { s += ", " + (o == 1 ? L("grp.overdueOne") : L("grp.overdueMany", ["n": o])) }
+        return s
+    }
+
+    private func issuesChip(_ t: IssuesToggle) -> some View {
+        Button { onToggleIssues?() } label: {
+            // «◆ 18 · 2! ›»: el conteo, los vencidos en rojo y el chevron que gira al desplegar.
+            HStack(spacing: 3) {
+                Text("◆ \(t.count)").foregroundStyle(Theme.accentText).monospacedDigit()
+                if t.overdue > 0 { Text("· \(t.overdue)!").foregroundStyle(.red).monospacedDigit() }
+                Image(systemName: "chevron.right").font(.system(size: 8, weight: .heavy)).foregroundStyle(Theme.accentText)
+                    .rotationEffect(.degrees(t.expanded ? 90 : 0))
+            }
+            .font(.caption2.weight(.bold))
+            .lineLimit(1)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(Capsule().fill(Theme.orange.opacity(t.expanded ? 0.22 : 0.12)))
+            // Área táctil más grande que la cápsula (sin agrandar la fila).
+            .padding(.vertical, 6).padding(.horizontal, 2)
+            .contentShape(Rectangle())
+            .padding(.vertical, -6)
+        }
+        .fixedSize()
+        .layoutPriority(1)
+        .buttonStyle(.borderless)
+        .accessibilityLabel(issueCountLabel ?? "")
+        .accessibilityHint(t.expanded ? L("grp.hideIssues") : L("grp.showIssues"))
+        .accessibilityIdentifier("grp.issuesToggle.\(c.id)")
     }
 }
 

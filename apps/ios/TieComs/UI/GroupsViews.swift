@@ -601,6 +601,7 @@ struct DMsView: View {
         Group {
             if let d = store.data {
                 let list = Naming.dms(d, query: query)
+                let threadUnread = Naming.chatThreadUnread(d)
                 List {
                     if store.connection != .online {
                         ConnectionBanner(connection: store.connection)
@@ -610,7 +611,7 @@ struct DMsView: View {
                     Section {
                         ForEach(list) { c in
                             NavigationLink(value: Route.conversation(c.id)) {
-                                HierarchyConvRow(d: d, c: c) { issuesFor = c.id }
+                                HierarchyConvRow(d: d, c: c, threadUnread: threadUnread[c.id] ?? 0) { issuesFor = c.id }
                             }
                             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
                             .accessibilityIdentifier("conv.row.\(c.id)")

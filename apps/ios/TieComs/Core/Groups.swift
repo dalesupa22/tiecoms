@@ -223,10 +223,11 @@ extension Naming {
     // MARK: DMs
 
     /// DMs: directos y chats grupales, incluidos los sidechats, en el orden de Inicio (compareConversations).
+    /// Los hilos de un directo o chat grupal (deriveKind 'same', sin espacio) no se listan: viven en la barra del chat.
     static func dms(_ d: BootstrapDTO, query: String = "") -> [ConversationDTO] {
         let fold: (String) -> String = { $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
         let q = fold(query.trimmingCharacters(in: .whitespaces))
-        return d.conversations.filter { $0.kind.isChat }
+        return d.conversations.filter { $0.kind.isChat && !isThread($0) }
             .filter { c in q.isEmpty || ([title(d, c), subtitle(d, c)] + c.memberIds.compactMap { person(d, $0)?.name }).contains { fold($0).contains(q) } }
             .sorted(by: HomeOrder.before)
     }
@@ -247,7 +248,14 @@ extension Naming {
 
     /// Globo de la pestaña Grupos: no leídos de conversaciones con espacio (no silenciadas).
     static func groupsUnread(_ d: BootstrapDTO) -> Int { unreadCount(d.conversations.filter { $0.workspaceId != nil && !$0.kind.isChat }) }
-    /// Globo de la pestaña DMs: no leídos de directos y chats (sidechats incluidos).
+    /// Respuestas sin leer de los hilos de cada directo o chat grupal (chip «💬 N» en su fila de DMs).
+    static func chatThreadUnread(_ d: BootstrapDTO) -> [String: Int] {
+        var out: [String: Int] = [:]
+        for t in d.conversations where t.kind.isChat && isThread(t) { if let p = t.parentId { out[p, default: 0] += HomeOrder.pending(t) } }
+        return out
+    }
+
+    /// Globo de la pestaña DMs: no leídos de directos y chats (sidechats e hilos de chats incluidos).
     static func dmsUnread(_ d: BootstrapDTO) -> Int { unreadCount(d.conversations.filter { $0.kind.isChat }) }
 }
 

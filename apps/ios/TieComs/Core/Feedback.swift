@@ -69,6 +69,8 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     var onOpenConversation: ((String) -> Void)?
     /// Toque en un push de sidechat: (origen, sidechat).
     var onOpenSide: ((String, String) -> Void)?
+    /// Toque en un push de reacción: (conversación, mensaje).
+    var onOpenMessage: ((String, String) -> Void)?
     /// Acción «Responder» desde la notificación (envía por HTTP).
     var onReply: ((String, String) async -> Void)?
     /// Acción «Marcar como leído».
@@ -177,6 +179,7 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
             let p = PushPayload(userInfo: response.notification.request.content.userInfo)
             await MainActor.run {
                 if p?.kind == .side, let origin = p?.sideOfConversationId { AppFeedback.shared.onOpenSide?(origin, conv) }
+                else if p?.kind == .reaction, let mid = p?.messageId, let open = AppFeedback.shared.onOpenMessage { open(conv, mid) }
                 else { AppFeedback.shared.onOpenConversation?(conv) }
             }
         }

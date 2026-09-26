@@ -79,6 +79,8 @@ final class AppStore {
     var jumpTo: [String: Int] = [:]
     /// Sidechat a desplegar al abrir una conversación de origen (push TC_SIDE).
     var sideToOpen: [String: String] = [:]
+    /// Salto pendiente a un mensaje por id (push de reacción: no trae el seq).
+    var jumpToMessage: [String: String] = [:]
     /// Respuestas en privado pendientes por conversación directa (cita sobre el compositor).
     var privateReplies: [String: PrivateReplyDraft] = [:]
     /// Texto compartido hacia Chaggu (chaggu://share?text=…).
@@ -382,6 +384,7 @@ final class AppStore {
         case .prefsUpdated: scheduleBootstrap()
         case .whatsappUpdated: waRevision += 1
         case .driveUpdated: driveRevision += 1
+        case .remindersChanged: Task { try? await loadReminders() }
         case .other: break
         }
     }
@@ -415,9 +418,24 @@ final class AppStore {
             if live, isNewEvent, ev.organizerId != me?.id, !ev.isCancelled, let d = data, let c = meta(cid), !c.isMuted {
                 feedback?.notifyIncoming(conversationId: cid, title: ev.title, author: Naming.title(d, c), body: L10n.eventWhen(ev))
             }
-        case .messageUpdated(_, _, let m):
+        case .messageUpdated(let cid, _, let m):
+            // Antes de aplicar: se compara con la versión que tenía para avisar de una reacción nueva a un mensaje mío.
+            if live { noticeReaction(conversations[cid]?.messages.first { $0.id == m.id }, m) }
             patchPreviewIfLast(m)
         default: break
+        }
+    }
+
+    /// Aviso breve: alguien reaccionó a un mensaje mío (no si estoy viendo esa conversación). La reacción no suma no leídos.
+    private func noticeReaction(_ before: MessageDTO?, _ after: MessageDTO) {
+        guard let before, let d = data, after.authorId == d.me.id else { return }
+        if after.conversationId == openConversationId && appActive { return }
+        let had = Set(before.reactions.flatMap { r in r.userIds.map { "\(r.emoji)|\($0)" } })
+        for r in after.reactions {
+            for u in r.userIds where u != d.me.id && !blockedUserIds.contains(u) && !had.contains("\(r.emoji)|\(u)") {
+                show(L("react.notice", ["name": Naming.person(d, u)?.name ?? L("common.participant"), "emoji": r.emoji, "excerpt": excerpt(after.body, 60)]))
+                return
+            }
         }
     }
 
@@ -826,6 +844,12 @@ final class AppStore {
         } else {
             navigate(to: .conversation(side))
         }
+    }
+
+    /// Push de reacción: abre la conversación y salta al mensaje (se resuelve su seq al abrir).
+    func openMessage(_ conversationId: String, messageId: String) {
+        jumpToMessage[conversationId] = messageId
+        handle(.conversation(conversationId))
     }
 
     /// Si no hay sesión se guarda y se abre al entrar.

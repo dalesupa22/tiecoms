@@ -84,6 +84,8 @@ struct OrganizationDTO: Codable, Equatable, Identifiable, Sendable {
     /// none | idp | dns
     var verification: String
     var verifiedDomain: String?
+    /// 👀 y ✅ con acción para la gente de esta empresa (docs/REACCIONES_ENLACES.md). Activas por defecto.
+    var reactionActions = true
 
     var canAdmin: Bool { myRole == "owner" || myRole == "admin" }
 
@@ -97,6 +99,7 @@ struct OrganizationDTO: Codable, Equatable, Identifiable, Sendable {
         colorBg = c.v("colorBg", "#E0DACE")
         colorFg = c.v("colorFg", "#5C554C")
         myRole = c.o("myRole")
+        reactionActions = c.v("reactionActions", true)
     }
 }
 
@@ -256,6 +259,8 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
     var attachments: [AttachmentDTO] = []
     /// Menciones válidas, ordenadas por start (offsets UTF-16 sobre body).
     var mentions: [Mention] = []
+    /// Reacciones (orden de la primera). Llegan en vivo con `message.updated`: no suben no leídos ni marcan «editado».
+    var reactions: [ReactionDTO] = []
     var createdAt: String
     var editedAt: String?
     var deletedAt: String?
@@ -283,6 +288,7 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
         linkPreview = c.o("linkPreview")
         attachments = c.lossyArray("attachments")
         mentions = c.lossyArray("mentions")
+        reactions = c.lossyArray("reactions")
         createdAt = c.v("createdAt", "")
         editedAt = c.o("editedAt")
         deletedAt = c.o("deletedAt")
@@ -501,6 +507,8 @@ enum AccountEvent: Decodable, Equatable, Sendable {
     case prefsUpdated(conversationId: String?, workspaceId: String?)
     case whatsappUpdated(accountId: String)
     case driveUpdated
+    /// 👀/✅ en otro dispositivo crearon o cerraron recordatorios: volver a pedir GET /reminders.
+    case remindersChanged
     case other(type: String)
 
     init(from decoder: Decoder) throws {
@@ -516,6 +524,7 @@ enum AccountEvent: Decodable, Equatable, Sendable {
         case "prefs.updated": self = .prefsUpdated(conversationId: c.o("conversationId"), workspaceId: c.o("workspaceId"))
         case "whatsapp.updated": self = .whatsappUpdated(accountId: c.v("accountId", ""))
         case "drive.updated": self = .driveUpdated
+        case "reminders.changed": self = .remindersChanged
         default: self = .other(type: type)
         }
     }

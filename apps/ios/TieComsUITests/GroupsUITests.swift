@@ -17,6 +17,8 @@ final class GroupsUITests: XCTestCase {
         /// Grupo general de la relación con un hilo colgando de un mensaje (fixtures nuevos).
         var generalId: String?
         var threadId: String?
+        /// Asunto vencido de «Pagos» (fixtures nuevos).
+        var overdueIssue: String?
     }
 
     override func setUp() { continueAfterFailure = false }
@@ -46,6 +48,14 @@ final class GroupsUITests: XCTestCase {
         }
     }
 
+    /// El chip de asuntos de un grupo. La fila combina su accesibilidad y XCUITest puede ver el identificador dos veces:
+    /// se toma el elemento más pequeño (el chip, no la fila).
+    private func issuesChip(_ app: XCUIApplication, _ id: String) -> XCUIElement {
+        let q = app.buttons.matching(identifier: "grp.issuesToggle.\(id)")
+        let all = q.allElementsBoundByIndex
+        return all.min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height } ?? q.firstMatch
+    }
+
     private func login(_ f: Fixture) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES",
@@ -61,6 +71,9 @@ final class GroupsUITests: XCTestCase {
         let pw = app.secureTextFields["login.password"]
         pw.tap(); pw.typeText(f.password)
         app.buttons["login.submit"].tap()
+        // «¿Guardar contraseña?» del sistema llega un momento después del login y tapa la lista.
+        let notNow = app.buttons.matching(NSPredicate(format: "label IN %@", ["Not Now", "Ahora no"])).firstMatch
+        if notNow.waitForExistence(timeout: 5) { notNow.tap() }
         return app
     }
 
@@ -77,7 +90,10 @@ final class GroupsUITests: XCTestCase {
         if app.buttons["home.tab.all"].exists { app.buttons["home.tab.all"].tap() }
         XCTAssertTrue(pagos.waitForExistence(timeout: 10), "grupo interno en Tu organización")
         XCTAssertTrue(app.buttons["home.section.mine"].exists)
-        XCTAssertTrue(app.buttons["grp.moreIssues.\(f.pagosId)"].exists, "4 asuntos: se ven 3 y «+1 asuntos»")
+        // Los asuntos van plegados: el chip «◆ 4» en la fila los despliega (3 y «+1 asuntos»).
+        XCTAssertTrue(app.buttons["grp.issuesToggle.\(f.pagosId)"].firstMatch.waitForExistence(timeout: 5), "chip de asuntos en la fila del grupo")
+        if !app.buttons["grp.moreIssues.\(f.pagosId)"].exists { issuesChip(app, f.pagosId).tap() }
+        XCTAssertTrue(app.buttons["grp.moreIssues.\(f.pagosId)"].waitForExistence(timeout: 3), "4 asuntos: se ven 3 y «+1 asuntos»")
         sleep(1)
         shot("01-grupos")
         // Más abajo: Relaciones (con la pendiente) e Invitado en.
@@ -145,6 +161,99 @@ final class GroupsUITests: XCTestCase {
         XCTAssertFalse(app.textViews["composer.field"].exists, "sin compositor")
         sleep(1)
         shot("08-solo-lectura")
+    }
+
+    /// 1.6.1: los asuntos de cada grupo se pliegan con su chip (recordado al volver a abrir la app), se muestran o
+    /// contraen todos desde «…», y mantener presionado un asunto lo completa (sale al instante) o lo reabre en Asuntos.
+    func testIssuesFoldPersistAndQuickComplete() throws {
+        let f = try fixture()
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "no se prueba contra producción")
+        var app = login(f)
+        let toggle = app.buttons["grp.issuesToggle.\(f.pagosId)"].firstMatch
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !toggle.exists { dismissSystemPrompts(app); usleep(300_000) }
+        dismissSystemPrompts(app)
+        if app.buttons["home.tab.all"].exists { app.buttons["home.tab.all"].tap() }
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        // Punto de partida: todo contraído desde el menú «…».
+        app.buttons["home.more"].tap()
+        XCTAssertTrue(app.buttons["home.fold.hideIssues"].waitForExistence(timeout: 3))
+        app.buttons["home.fold.hideIssues"].tap()
+        let more = app.buttons["grp.moreIssues.\(f.pagosId)"]
+        XCTAssertFalse(more.waitForExistence(timeout: 1), "contraídos: ni asuntos ni «+N»")
+        sleep(1)
+        shot("15-grupos-asuntos-plegados")
+        // Tocar el chip despliega sin entrar al chat.
+        issuesChip(app, f.pagosId).tap()
+        XCTAssertTrue(more.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.descendants(matching: .any)["chat.header"].exists, "el chip no abre el chat")
+        shot("16-grupos-asuntos-abiertos")
+        // Se recuerda en el dispositivo.
+        app.terminate()
+        app = login(f)
+        XCTAssertTrue(app.buttons["grp.moreIssues.\(f.pagosId)"].waitForExistence(timeout: 20), "sigue desplegado tras reabrir la app")
+        issuesChip(app, f.pagosId).tap()
+        XCTAssertFalse(app.buttons["grp.moreIssues.\(f.pagosId)"].waitForExistence(timeout: 1))
+        // «Mostrar todos los asuntos».
+        app.buttons["home.more"].tap()
+        app.buttons["home.fold.showIssues"].tap()
+        XCTAssertTrue(app.buttons["grp.moreIssues.\(f.pagosId)"].waitForExistence(timeout: 3))
+        // Mantener presionado el asunto vencido → Completar: sale al instante (quedan 3, sin «+N») y baja el chip.
+        guard let overdue = f.overdueIssue else { throw XCTSkip("Fixture sin asunto vencido") }
+        let line = app.buttons["grp.issue.\(overdue)"]
+        XCTAssertTrue(line.waitForExistence(timeout: 5))
+        line.press(forDuration: 1.2)
+        XCTAssertTrue(app.buttons["issue.menu.complete"].waitForExistence(timeout: 4), "«Completar» en la pulsación larga")
+        shot("17-completar-asunto")
+        app.buttons["issue.menu.complete"].tap()
+        XCTAssertTrue(line.waitForNonExistence(timeout: 5), "el asunto completado sale de Grupos")
+        XCTAssertFalse(app.buttons["grp.moreIssues.\(f.pagosId)"].exists, "3 activos: ya no hay «+N asuntos»")
+        // Deshacer desde Asuntos › Todos: Reabrir.
+        app.tabBars.buttons["Asuntos"].tap()
+        let seg = app.segmentedControls["issues.filter"]
+        XCTAssertTrue(seg.waitForExistence(timeout: 5))
+        seg.buttons.element(boundBy: 2).tap()
+        let row = app.descendants(matching: .any).matching(identifier: "issue.row.\(overdue)").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 8))
+        row.press(forDuration: 1.2)
+        XCTAssertTrue(app.buttons["issue.menu.reopen"].waitForExistence(timeout: 4))
+        app.buttons["issue.menu.reopen"].tap()
+        app.tabBars.buttons["Grupos"].tap()
+        XCTAssertTrue(app.buttons["grp.moreIssues.\(f.pagosId)"].waitForExistence(timeout: 5), "reabierto: vuelve bajo el grupo")
+        // Deja el estado por defecto para las demás pruebas.
+        app.buttons["home.more"].tap()
+        app.buttons["home.fold.hideIssues"].tap()
+    }
+
+    /// Reacciones: chips bajo la burbuja (con las del fixture) y la barra rápida de la pulsación larga.
+    func testReactionChipsAndQuickBar() throws {
+        let f = try fixture()
+        guard let general = f.generalId else { throw XCTSkip("Fixture sin grupo general") }
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")))
+        let app = login(f)
+        let row = app.buttons["conv.row.\(general)"]
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !row.exists { dismissSystemPrompts(app); usleep(300_000) }
+        dismissSystemPrompts(app)
+        for _ in 0..<4 where !row.isHittable { app.swipeUp() }
+        row.tap()
+        let anyChip = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "react.chip.")).firstMatch
+        guard anyChip.waitForExistence(timeout: 8) else { throw XCTSkip("El fixture no trae reacciones (sembrarlas con react-probe)") }
+        sleep(1)
+        shot("18-reacciones")
+        // Barra rápida: mantener presionado un mensaje.
+        app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Movemos la mentoría")).firstMatch.press(forDuration: 1.0)
+        XCTAssertTrue(app.buttons["menu.thread"].waitForExistence(timeout: 5))
+        sleep(1)
+        shot("19-barra-rapida")
+        let thumbs = app.buttons["👍"].firstMatch
+        if thumbs.exists {
+            thumbs.tap()
+            let mine = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "react.chip.", "👍"))
+            XCTAssertTrue(mine.firstMatch.waitForExistence(timeout: 5), "el 👍 aparece bajo el mensaje")
+        } else {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.55)).tap()
+        }
     }
 
     /// Dentro del chat: barra de accesos, chip del hilo bajo su mensaje, el hilo al lado y el «＋» del compositor.

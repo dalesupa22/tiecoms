@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Funciones de paridad con la web (packages/client-core): edición, fijados,
 /// preferencias, asuntos, agenda, recordatorios, bifurcaciones, dominios,
@@ -175,6 +176,28 @@ extension AppStore {
         issues[i.id] = i
         recountIssues(i.conversationId)
         return i
+    }
+
+    /// Cambia el estado de un asunto (pulsación larga en Grupos y en las listas): optimista y animado; si el API
+    /// falla se revierte. Un asunto cerrado sale de las listas de activos y del conteo del grupo al instante.
+    func setIssueStatus(_ id: String, _ status: IssueStatus) async throws {
+        guard let prev = issues[id], prev.status != status else { return }
+        var next = prev
+        next.status = status
+        next.statusSince = ISODate.string()
+        withAnimation(.easeInOut(duration: 0.25)) {
+            issues[id] = next
+            recountIssues(prev.conversationId)
+        }
+        do {
+            try await updateIssue(id, ["status": status.rawValue])
+        } catch {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                issues[id] = prev
+                recountIssues(prev.conversationId)
+            }
+            throw error
+        }
     }
 
     func issueDetail(_ id: String) async throws -> IssueDetail {
@@ -407,6 +430,18 @@ extension AppStore {
             guard let c = conversations[conversationId], c.loaded else { return nil }
             if let m = c.messages.first(where: { $0.seq == seq }) { return m.id }
             if !c.hasMore || (c.messages.first?.seq ?? 0) <= seq { return nil }
+            await loadOlder(conversationId)
+        }
+        return nil
+    }
+
+    /// Carga hacia atrás (hasta 10 páginas) hasta tener el mensaje con ese id. Devuelve su seq.
+    func ensureMessage(_ conversationId: String, id: String) async -> Int? {
+        try? await openConversation(conversationId)
+        for _ in 0..<10 {
+            guard let c = conversations[conversationId], c.loaded else { return nil }
+            if let m = c.messages.first(where: { $0.id == id }) { return m.seq }
+            if !c.hasMore { return nil }
             await loadOlder(conversationId)
         }
         return nil

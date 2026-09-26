@@ -1330,5 +1330,81 @@
  "err.ai_consent_required": [
   "El procesamiento con IA necesita permiso. Una nota enviada sin IA debe grabarse y enviarse de nuevo con permiso para usar IA.",
   "AI processing needs permission. A voice note sent without AI must be recorded and sent again with permission to use AI."
+ ],
+ "grp.showAllIssues": [
+  "Mostrar todos los asuntos",
+  "Show all issues"
+ ],
+ "grp.hideAllIssues": [
+  "Contraer todos los asuntos",
+  "Collapse all issues"
+ ],
+ "grp.expandAll": [
+  "Expandir todo",
+  "Expand all"
+ ],
+ "grp.showIssues": [
+  "Mostrar asuntos",
+  "Show issues"
+ ],
+ "grp.hideIssues": [
+  "Ocultar asuntos",
+  "Hide issues"
+ ],
+ "grp.overdueOne": [
+  "1 vencido",
+  "1 overdue"
+ ],
+ "grp.overdueMany": [
+  "{n} vencidos",
+  "{n} overdue"
+ ],
+ "issue.act.open": [
+  "Abrir",
+  "Open"
+ ],
+ "issue.act.complete": [
+  "Completar",
+  "Complete"
+ ],
+ "issue.act.inProgress": [
+  "En curso",
+  "In progress"
+ ],
+ "issue.act.waiting": [
+  "En espera",
+  "On hold"
+ ],
+ "issue.act.reopen": [
+  "Reabrir",
+  "Reopen"
+ ],
+ "issue.toast.done": [
+  "Asunto completado: {title}",
+  "Issue completed: {title}"
+ ],
+ "issue.toast.status": [
+  "Asunto: {status}",
+  "Issue: {status}"
+ ],
+ "react.limit": [
+  "Ese mensaje ya tiene 20 reacciones distintas.",
+  "That message already has 20 different reactions."
+ ],
+ "react.invalid": [
+  "Elige un solo emoji.",
+  "Pick a single emoji."
+ ],
+ "react.typeOne": [
+  "O escribe un emoji con el teclado",
+  "Or type an emoji with the keyboard"
+ ],
+ "react.remove": [
+  "Quitar mi reacción",
+  "Remove my reaction"
+ ],
+ "react.addThis": [
+  "Reaccionar igual",
+  "React the same"
  ]
 }

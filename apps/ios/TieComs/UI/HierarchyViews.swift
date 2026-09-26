@@ -114,6 +114,7 @@ struct OpenIssuesBar: View {
                         ForEach(list.prefix(6)) { i in
                             NavigationLink(value: Route.issue(i.id)) { IssueRow(issue: i, showWhere: false).padding(.horizontal, 16).padding(.vertical, 6) }
                                 .buttonStyle(.plain)
+                                .contextMenu { IssueStatusMenu(issue: i) }
                             Divider().padding(.leading, 16)
                         }
                     }

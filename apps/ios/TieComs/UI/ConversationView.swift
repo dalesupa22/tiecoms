@@ -26,7 +26,7 @@ private struct PendingVoiceSend {
 /// Hojas que se abren desde el menú de un mensaje o de la conversación.
 enum ChatSheet: Identifiable {
     case derive(MessageDTO), returnResult, newIssue(MessageDTO?), newEvent(MessageDTO?), forward(MessageDTO)
-    case reminder(MessageDTO?), pins, issuesHere, report(MessageDTO), threads, agenda
+    case reminder(MessageDTO?), pins, issuesHere, report(MessageDTO), threads, agenda, react(MessageDTO)
     var id: String {
         switch self {
         case .derive(let m): return "derive-\(m.id)"
@@ -40,6 +40,7 @@ enum ChatSheet: Identifiable {
         case .issuesHere: return "issues"
         case .threads: return "threads"
         case .agenda: return "agenda"
+        case .react(let m): return "react-\(m.id)"
         }
     }
 }
@@ -83,6 +84,8 @@ struct ConversationView: View {
     @State private var composerFocused = false
     /// Cursor del compositor (UTF-16).
     @State private var draftCursor = 0
+    /// ✅ sobre un mensaje que abrió un asunto aún abierto: «¿Cerrar también el asunto?».
+    @State private var closeIssuePrompt: String?
 
     var body: some View {
         Group {
@@ -151,6 +154,13 @@ struct ConversationView: View {
             }
             Button(L("common.cancel"), role: .cancel) {}
         }
+        .confirmationDialog(L("react.closeIssue", ["title": closeIssuePrompt.flatMap { store.issues[$0]?.title } ?? ""]),
+                            isPresented: Binding(get: { closeIssuePrompt != nil }, set: { if !$0 { closeIssuePrompt = nil } }), titleVisibility: .visible) {
+            Button(L("react.closeIssueBtn")) {
+                if let id = closeIssuePrompt { act(toast: L("react.issueClosed")) { try await store.setIssueStatus(id, .done) } }
+            }
+            Button(L("common.cancel"), role: .cancel) {}
+        }
         .alert(L("ai.voice.title"), isPresented: $showingVoiceAIConsent, presenting: pendingVoice) { voice in
             Button(L("ai.voice.allow")) { uploadVoice(voice, aiConsent: true) }
             Button(L("ai.voice.without")) { uploadVoice(voice, aiConsent: false) }
@@ -171,6 +181,7 @@ struct ConversationView: View {
         case .pins: PinsSheet(conversationId: conversationId)
         case .issuesHere: ConversationIssuesSheet(conversationId: conversationId)
         case .threads: ChatThreadsSheet(conversationId: conversationId) { id in openThread(id) }
+        case .react(let m): EmojiPickerSheet(actions: store.data.map(Reactions.actionsEnabled) ?? true) { e in react(m, e) }
         case .agenda:
             let c = store.meta(conversationId)
             ChatAgendaSheet(conversationId: conversationId,
@@ -188,6 +199,30 @@ struct ConversationView: View {
     /// Abre un hilo o sidechat al lado; espera a que se cierre la hoja que lo pidió.
     private func openThread(_ id: String) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { sidePanel = id }
+    }
+
+    /// Pone o quita mi reacción (optimista). 👀 avisa cuándo lo recuerda; ✅ cierra recordatorios y ofrece cerrar el asunto.
+    private func react(_ m: MessageDTO, _ raw: String) {
+        guard let d = store.data else { return }
+        guard let emoji = Reactions.normalize(raw) else { store.show(L("react.invalid")); return }
+        let current = store.conversations[conversationId]?.messages.first { $0.id == m.id } ?? m
+        let on = !current.reactions.contains { $0.emoji == emoji && $0.userIds.contains(d.me.id) }
+        Haptics.tap()
+        Task {
+            do {
+                let r = try await store.react(current, emoji: emoji, on: on)
+                if let rem = r.reminder, let at = ISODate.parse(rem.remindAt) {
+                    store.show(L("react.lookDone", ["time": at.formatted(Date.FormatStyle().weekday(.abbreviated).hour().minute().locale(L10n.locale))]))
+                } else if on && emoji == Reactions.done && !r.closedReminderIds.isEmpty {
+                    store.show(L("react.doneReminders"))
+                }
+                if let issue = r.openIssueId { closeIssuePrompt = issue }
+            } catch let e as ApiRequestError where e.status == 409 {
+                store.show(L("react.limit"))
+            } catch {
+                store.show(L10n.errorText(error))
+            }
+        }
     }
 
     private func act(toast: String? = nil, _ f: @escaping () async throws -> Void) {
@@ -354,6 +389,12 @@ struct ConversationView: View {
                     withAnimation { highlighted = nil }
                 }
             }
+            // Push de reacción: se conoce el id del mensaje, no su seq.
+            .task(id: store.jumpToMessage[conversationId]) {
+                guard let mid = store.jumpToMessage[conversationId] else { return }
+                store.jumpToMessage[conversationId] = nil
+                if let seq = await store.ensureMessage(conversationId, id: mid) { store.jumpTo[conversationId] = seq }
+            }
             .onChange(of: reveal) { _, id in
                 guard let id else { return }
                 reveal = nil
@@ -469,8 +510,14 @@ struct ConversationView: View {
             )
             Group {
                 if m.deletedAt == nil {
-                    // Pulsación larga como en iPhone: vista previa de la burbuja + menú (sin reacciones: el API no las tiene).
-                    bubble.contextMenu { messageMenu(d, c, m) } preview: {
+                    // Pulsación larga como en iPhone: vista previa de la burbuja + barra rápida de reacciones + menú.
+                    bubble.contextMenu {
+                        if c.canPost && !m.isSystem {
+                            QuickReactionBar(mineEmojis: Set(m.reactions.filter { $0.userIds.contains(d.me.id) }.map(\.emoji)),
+                                             actions: Reactions.actionsEnabled(d), onPick: { react(m, $0) }, onMore: { sheet = .react(m) })
+                        }
+                        messageMenu(d, c, m)
+                    } preview: {
                         bubble.frame(width: 340).padding(.vertical, 10).padding(.horizontal, 6).background(Theme.background)
                     }
                 } else { bubble }
@@ -496,6 +543,13 @@ struct ConversationView: View {
                     withAnimation(.spring(response: 0.3)) { dragging = nil }
                 } : nil)
             .accessibilityIdentifier("msg.\(m.id)")
+            if m.deletedAt == nil && !m.reactions.isEmpty {
+                ReactionChips(d: d, message: m, mine: mine, canReact: c.canPost, onToggle: { react(m, $0) }, onMore: { sheet = .react(m) })
+                    .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
+                    .padding(.leading, mine ? 48 : (ChatGrouping.showsAvatars(c.kind) ? 40 : 4))
+                    .padding(.trailing, mine ? 4 : 48)
+                    .padding(.top, -1)
+            }
             if !embedded {
                 let threads = store.data.map { ChatThreads.of($0, conversationId, messageId: m.id).filter { !Naming.isSide($0) } } ?? []
                 if !threads.isEmpty {
@@ -586,7 +640,8 @@ struct ConversationView: View {
             }
             .accessibilityIdentifier("menu.privateReply")
         }
-        let canThread = canWork && !embedded && c.workspaceId != nil && c.kind != .direct && myWsRole != "guest"
+        // Hilos también en directos y chats grupales (solo «same»); un hilo o sidechat de un chat no se deriva otra vez.
+        let canThread = canWork && !embedded && myWsRole != "guest" && (c.workspaceId != nil ? c.kind != .direct : c.parentId == nil)
         if canThread || canAskSide(c, m) {
             Divider()
             if canThread {
@@ -973,7 +1028,8 @@ struct MessageBubble: View {
                             }
                         } else if linkify { Text(Linkify.attributed(text)) } else { Text(text) }
                     }
-                    .font(.body)
+                    // Solo emojis (1 a 3): grandes, como en la web (isJumbo).
+                    .font(jumbo ? .system(size: 40) : .body)
                     .italic(italic)
                     .foregroundStyle(mine ? Color.white : Theme.textPrimary)
                     .tint(mine ? Color.white : Theme.accentText)
@@ -1032,6 +1088,8 @@ struct MessageBubble: View {
             }
         }
     }
+
+    private var jumbo: Bool { !italic && attachments.isEmpty && mentions.isEmpty && Reactions.isJumbo(text) }
 
     private var a11yLabel: String {
         var parts: [String] = []

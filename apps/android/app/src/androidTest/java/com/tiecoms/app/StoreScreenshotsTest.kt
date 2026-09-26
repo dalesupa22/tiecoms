@@ -53,7 +53,7 @@ class StoreScreenshotsTest {
         assertTrue("Only a local test API", api.startsWith("http://10.0.2.2:"))
         val app = ins.targetContext.applicationContext as TieComsApp
         ins.runOnMainSync {
-            ins.targetContext.getSystemService(LocaleManager::class.java).applicationLocales = LocaleList.forLanguageTags("es")
+            ins.targetContext.getSystemService(LocaleManager::class.java).applicationLocales = LocaleList.forLanguageTags(arg("language").ifBlank { "es" })
             app.container.setDebugApiUrl(api)
         }
         runBlocking {
@@ -68,6 +68,7 @@ class StoreScreenshotsTest {
             compose.onNodeWithTag("password").performTextInput(arg("password"))
             compose.onNodeWithTag("login").performScrollTo().performClick()
             compose.waitUntilExactlyOneExists(hasTestTag("conv-${arg("conversationId")}"),20000)
+            compose.waitUntilDoesNotExist(hasTestTag("connBanner"),20000)
             shot("01-inicio")
             compose.onNodeWithTag("conv-${arg("conversationId")}").performClick()
             compose.waitUntilExactlyOneExists(hasTestTag("composer"),10000)

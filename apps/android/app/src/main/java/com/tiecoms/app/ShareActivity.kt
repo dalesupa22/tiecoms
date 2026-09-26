@@ -14,6 +14,8 @@ import com.tiecoms.app.platform.ShareIntake
 import com.tiecoms.app.ui.LocalClient
 import com.tiecoms.app.ui.LocalContainer
 import com.tiecoms.app.ui.ShareSheet
+import androidx.compose.foundation.layout.fillMaxSize
+import com.tiecoms.app.ui.dismissKeyboardOnOutsideInteraction
 import com.tiecoms.app.ui.theme.TieComsTheme
 
 /**
@@ -31,10 +33,12 @@ class ShareActivity : ComponentActivity() {
             TieComsTheme {
                 val client by container.client.collectAsStateWithLifecycle()
                 CompositionLocalProvider(LocalClient provides client, LocalContainer provides container) {
-                    ShareSheet(incoming, onClose = { finish() }, onOpenApp = {
-                        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        finish()
-                    })
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().dismissKeyboardOnOutsideInteraction()) {
+                        ShareSheet(incoming, onClose = { finish() }, onOpenApp = {
+                            startActivity(Intent(this@ShareActivity, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                            finish()
+                        })
+                    }
                 }
             }
         }

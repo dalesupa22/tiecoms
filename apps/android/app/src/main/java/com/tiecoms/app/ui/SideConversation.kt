@@ -381,7 +381,7 @@ fun SideSheetHost(onMinimize: () -> Unit, content: @Composable () -> Unit) {
         @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
         val ime = androidx.compose.foundation.layout.WindowInsets.isImeVisible
         LaunchedEffect(ime) { if (ime && state.currentValue != SheetValue.Expanded) runCatching { state.expand() } }
-        Column(Modifier.fillMaxWidth().fillMaxHeight(if (state.currentValue == SheetValue.Expanded) 0.94f else 0.9f)) { content() }
+        Column(Modifier.fillMaxWidth().fillMaxHeight(if (state.currentValue == SheetValue.Expanded) 0.94f else 0.9f).dismissKeyboardOnOutsideInteraction()) { content() }
     }
 }
 

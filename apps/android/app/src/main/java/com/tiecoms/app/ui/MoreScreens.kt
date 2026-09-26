@@ -261,7 +261,7 @@ fun DeleteAccountScreen(onBack: () -> Unit) {
             Text(stringResource(R.string.del_what_goes))
             Text(stringResource(R.string.del_what_stays), color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(email, { email = it }, label = { Text(stringResource(R.string.del_email)) }, singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), modifier = Modifier.fillMaxWidth().testTag("delEmail"))
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next), modifier = Modifier.fillMaxWidth().testTag("delEmail"))
             PasswordField(password, { password = it }, stringResource(R.string.del_password), ImeAction.Done, {}, stringResource(R.string.del_password_hint), tag = "delPassword")
             ErrorText(error)
             Button(

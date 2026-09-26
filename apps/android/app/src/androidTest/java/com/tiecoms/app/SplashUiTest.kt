@@ -20,8 +20,8 @@ import java.io.File
 import kotlin.concurrent.thread
 
 /**
- * Splash de ignición en frío con reloj real (sin la regla de Compose, que usa un reloj virtual):
- * termina y aparece el login en ≤ 3 s y guarda 3 fotogramas (≈0,15 s, 0,45 s y 1,0 s).
+ * Splash de puntitos en frío con reloj real (sin la regla de Compose, que usa un reloj virtual):
+ * termina y aparece el login en ≤ 3,5 s y guarda 3 fotogramas (≈0,3 s, 1,1 s y 1,75 s).
  * Correr como primera prueba del proceso:
  *   adb shell am instrument -w -e apiUrl http://10.0.2.2:3041 -e class com.tiecoms.app.SplashUiTest com.chaggu.app.test/androidx.test.runner.AndroidJUnitRunner
  */
@@ -58,7 +58,7 @@ class SplashUiTest {
             val start = app.container.splashStartedAt
             assertTrue("Se mostró el splash", start > 0)
             val shots = thread {
-                for ((ms, name) in listOf(150L to "splash-1-0150ms", 450L to "splash-2-0450ms", 1000L to "splash-3-1000ms")) {
+                for ((ms, name) in listOf(300L to "splash-1-0300ms", 1100L to "splash-2-1100ms", 1750L to "splash-3-1750ms")) {
                     val wait = start + ms - android.os.SystemClock.uptimeMillis()
                     if (wait > 0) Thread.sleep(wait)
                     screenshot(name)
@@ -70,7 +70,7 @@ class SplashUiTest {
             val loginAt = android.os.SystemClock.uptimeMillis()
             log("proceso→primer fotograma del splash: ${start - launchAt} ms · splash→fin: ${end - start} ms · splash→login visible (UiAutomator): ${loginAt - start} ms")
             assertNotNull("Aparece el login", login)
-            assertTrue("El splash termina en ≤ 3 s (fue ${end - start} ms)", end > 0 && end - start <= 3_000)
+            assertTrue("El splash termina en ≤ 3,5 s (fue ${end - start} ms)", end > 0 && end - start <= 3_500)
             screenshot("splash-4-login")
         } finally { runCatching { scenario.close() } }
     }

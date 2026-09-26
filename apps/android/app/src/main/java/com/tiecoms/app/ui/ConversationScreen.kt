@@ -461,7 +461,7 @@ fun ConversationScreen(
                     conv?.loaded != true -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     items.isEmpty() -> Text(stringResource(if (meta.isSide) R.string.side_empty_chat else R.string.no_messages), Modifier.align(Alignment.Center).testTag("sideEmpty"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else -> androidx.compose.runtime.CompositionLocalProvider(LocalVoiceQueue provides voiceQueue) { LazyColumn(
-                        state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize().onGloballyPositioned { listRect = it.boundsInRoot() }.testTag("messages"),
+                        state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize().onGloballyPositioned { listRect = it.boundsInRoot() }.dismissKeyboardOnTouch().testTag("messages"),
                         // Con la hoja del sidechat a medias (teléfono), el relleno deja el ancla por encima de la hoja.
                         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp,
                             bottom = if (showPanel && !wide) (LocalConfiguration.current.screenHeightDp * 0.45f).dp else 8.dp),

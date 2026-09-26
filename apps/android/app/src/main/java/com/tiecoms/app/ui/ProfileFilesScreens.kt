@@ -118,11 +118,11 @@ fun ProfileScreen(onBack: () -> Unit) {
                 }
             }
             if (busy == "photo") LinearProgressIndicator(Modifier.fillMaxWidth())
-            OutlinedTextField(name, { name = it.take(120) }, label = { Text(stringResource(R.string.auth_name)) }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("profileName"))
+            OutlinedTextField(name, { name = it.take(120) }, label = { Text(stringResource(R.string.auth_name)) }, singleLine = true, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Next), modifier = Modifier.fillMaxWidth().testTag("profileName"))
             OutlinedTextField(title, { title = it.take(120) }, label = { Text(stringResource(R.string.profile_job_title)) }, placeholder = { Text(stringResource(R.string.profile_job_title_ph)) },
-                singleLine = true, modifier = Modifier.fillMaxWidth().testTag("profileTitle"))
+                singleLine = true, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Next), modifier = Modifier.fillMaxWidth().testTag("profileTitle"))
             OutlinedTextField(area, { area = it.take(120) }, label = { Text(stringResource(R.string.profile_area)) }, placeholder = { Text(stringResource(R.string.profile_area_ph)) },
-                singleLine = true, modifier = Modifier.fillMaxWidth().testTag("profileArea"))
+                singleLine = true, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done), modifier = Modifier.fillMaxWidth().testTag("profileArea"))
             ErrorText(error)
             Button(
                 enabled = busy == null && name.trim().length >= 2 && changed,

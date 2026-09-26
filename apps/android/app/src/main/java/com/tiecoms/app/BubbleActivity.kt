@@ -16,6 +16,7 @@ import com.tiecoms.app.core.SessionStatus
 import com.tiecoms.app.ui.ConversationScreen
 import com.tiecoms.app.ui.LocalClient
 import com.tiecoms.app.ui.LocalContainer
+import com.tiecoms.app.ui.dismissKeyboardOnOutsideInteraction
 import com.tiecoms.app.ui.theme.TieComsTheme
 
 /** Burbuja de conversación (Android 11+): el chat flotante que abre la notificación. */
@@ -28,7 +29,7 @@ class BubbleActivity : ComponentActivity() {
                 val client by container.client.collectAsStateWithLifecycle()
                 val state by client.state.collectAsStateWithLifecycle()
                 CompositionLocalProvider(LocalClient provides client, LocalContainer provides container) {
-                    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    Surface(Modifier.fillMaxSize().dismissKeyboardOnOutsideInteraction(), color = MaterialTheme.colorScheme.background) {
                         if (state.status == SessionStatus.READY) ConversationScreen(
                             id = id, onBack = { finish() }, onDetails = {}, onOpenConversation = { _, _ -> },
                             onOpenIssue = {}, onOpenEvent = {}, onTrazo = {}, embedded = true,

@@ -319,7 +319,7 @@ fun FormSheet(title: String, onDismiss: () -> Unit, tag: String? = null, content
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state, modifier = if (tag != null) Modifier.testTag(tag) else Modifier) {
         Column(
-            Modifier.fillMaxWidth().widthIn(max = 640.dp).navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().widthIn(max = 640.dp).dismissKeyboardOnOutsideInteraction().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })

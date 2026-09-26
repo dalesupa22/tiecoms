@@ -137,7 +137,7 @@ fun EventDialog(conversationId: String?, originMessageId: String? = null, defaul
     var error by remember { mutableStateOf<String?>(null) }
 
     FormSheet(stringResource(if (event != null) R.string.cal_edit_title else R.string.cal_new_title), onClose, tag = "eventDialog") {
-        OutlinedTextField(title, { title = it.take(200) }, label = { Text(stringResource(R.string.cal_title)) }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("eventTitle"))
+        OutlinedTextField(title, { title = it.take(200) }, label = { Text(stringResource(R.string.cal_title)) }, singleLine = true, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Next), modifier = Modifier.fillMaxWidth().testTag("eventTitle"))
         if (event == null) {
             Dropdown(stringResource(R.string.cal_conversation), groups.map { it.id to listOfNotNull(titleOf(ctx, it, data), data.workspaces.firstOrNull { w -> w.id == it.workspaceId }?.name).joinToString(" · ") }, conv, { conv = it })
         }
@@ -147,7 +147,7 @@ fun EventDialog(conversationId: String?, originMessageId: String? = null, defaul
             TimeField(stringResource(R.string.cal_end), LocalTime.parse(end), { end = it.toString() }, Modifier.weight(1f))
         }
         Dropdown(stringResource(R.string.cal_tz), tzList().map { it to it.replace('_', ' ') }, tz, { tz = it })
-        OutlinedTextField(loc, { loc = it.take(500) }, label = { Text(stringResource(R.string.cal_location)) }, placeholder = { Text(stringResource(R.string.cal_location_ph)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(loc, { loc = it.take(500) }, label = { Text(stringResource(R.string.cal_location)) }, placeholder = { Text(stringResource(R.string.cal_location_ph)) }, singleLine = true, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Next), modifier = Modifier.fillMaxWidth())
         SectionHeader("${stringResource(R.string.cal_invitees)} · ${invitees.size}")
         humans.forEach { p ->
             val on = p.id in invitees

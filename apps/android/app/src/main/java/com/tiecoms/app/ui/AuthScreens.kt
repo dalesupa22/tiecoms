@@ -42,6 +42,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
@@ -87,26 +89,32 @@ fun ErrorText(text: String?) {
 }
 
 @Composable
-fun PasswordField(value: String, onChange: (String) -> Unit, label: String, imeAction: ImeAction, onDone: () -> Unit, supporting: String? = null, tag: String = "password") {
+fun PasswordField(
+    value: String, onChange: (String) -> Unit, label: String, imeAction: ImeAction, onDone: () -> Unit, supporting: String? = null, tag: String = "password",
+    focusRequester: androidx.compose.ui.focus.FocusRequester? = null,
+) {
     var visible by rememberSaveable { mutableStateOf(false) }
     OutlinedTextField(
         value = value, onValueChange = onChange, label = { Text(label) }, singleLine = true,
         visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = imeAction),
-        keyboardActions = KeyboardActions(onDone = { onDone() }, onGo = { onDone() }),
+        keyboardActions = KeyboardActions(onDone = { onDone() }, onGo = { onDone() }, onNext = { onDone() }),
         supportingText = supporting?.let { { Text(it) } },
         trailingIcon = {
-            TextButton(onClick = { visible = !visible }) {
+            // Fuera del recorrido de foco: «Siguiente» desde el campo anterior debe caer en la contraseña,
+            // no en este botón (el teclado se cerraría sin dejar escribir).
+            TextButton(onClick = { visible = !visible }, modifier = Modifier.focusProperties { canFocus = false }) {
                 Text(stringResource(if (visible) R.string.hide_password else R.string.show_password), style = MaterialTheme.typography.labelSmall)
             }
         },
-        modifier = Modifier.fillMaxWidth().testTag(tag),
+        modifier = Modifier.fillMaxWidth().then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier).testTag(tag),
     )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun LoginScreen(onSignup: () -> Unit) {
+    val passwordFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     val client = LocalClient.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -167,11 +175,11 @@ fun LoginScreen(onSignup: () -> Unit) {
         OutlinedTextField(
             value = email, onValueChange = { email = it }, label = { Text(stringResource(R.string.email)) }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
-            keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) }),
+            keyboardActions = KeyboardActions(onNext = { passwordFocus.requestFocus() }),
             modifier = Modifier.fillMaxWidth().testTag("email"),
         )
         Spacer(Modifier.height(12.dp))
-        PasswordField(password, { password = it }, stringResource(R.string.password), ImeAction.Go, ::submit)
+        PasswordField(password, { password = it }, stringResource(R.string.password), ImeAction.Go, ::submit, focusRequester = passwordFocus)
         ErrorText(error)
         Spacer(Modifier.height(12.dp))
         Button(onClick = ::submit, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("login")) {
@@ -293,7 +301,12 @@ fun SignupScreen(orgToken: String?, onLogin: () -> Unit) {
             Spacer(Modifier.height(16.dp))
         }
         val fieldMod = Modifier.fillMaxWidth()
-        val next = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) })
+        // «Siguiente» salta de campo en campo explícitamente (entre empresa y nombre hay enlaces, casilla y botones SSO).
+        val nameFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+        val emailFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+        val passwordFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+        val titleFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+        fun nextTo(r: androidx.compose.ui.focus.FocusRequester) = KeyboardActions(onNext = { r.requestFocus() })
         // En las apps el SSO va por el navegador del sistema. Para crear empresa hace falta su nombre.
         val container = LocalContainer.current
         val sso by container.sso.collectAsStateWithLifecycle()
@@ -305,7 +318,7 @@ fun SignupScreen(orgToken: String?, onLogin: () -> Unit) {
         }
         if (!joining) {
             OutlinedTextField(company, { company = it }, label = { Text(stringResource(R.string.company)) }, singleLine = true, modifier = fieldMod.testTag("company"),
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next), keyboardActions = next)
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next), keyboardActions = nextTo(nameFocus))
             Spacer(Modifier.height(10.dp))
         }
         LegalLinks()
@@ -322,15 +335,15 @@ fun SignupScreen(orgToken: String?, onLogin: () -> Unit) {
             Text(stringResource(R.string.auth_or_email), Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             HorizontalDivider(Modifier.weight(1f))
         }
-        OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.name)) }, singleLine = true, modifier = fieldMod.testTag("name"),
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next), keyboardActions = next)
+        OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.name)) }, singleLine = true, modifier = fieldMod.focusRequester(nameFocus).testTag("name"),
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next), keyboardActions = nextTo(emailFocus))
         Spacer(Modifier.height(10.dp))
-        OutlinedTextField(email, { email = it }, label = { Text(stringResource(R.string.email)) }, singleLine = true, modifier = fieldMod.testTag("email"),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next), keyboardActions = next)
+        OutlinedTextField(email, { email = it }, label = { Text(stringResource(R.string.email)) }, singleLine = true, modifier = fieldMod.focusRequester(emailFocus).testTag("email"),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next), keyboardActions = nextTo(passwordFocus))
         Spacer(Modifier.height(10.dp))
-        PasswordField(password, { password = it }, stringResource(R.string.password), ImeAction.Next, { focus.moveFocus(FocusDirection.Down) }, stringResource(R.string.password_hint))
+        PasswordField(password, { password = it }, stringResource(R.string.password), ImeAction.Next, { titleFocus.requestFocus() }, stringResource(R.string.password_hint), focusRequester = passwordFocus)
         Spacer(Modifier.height(6.dp))
-        OutlinedTextField(title, { title = it }, label = { Text(stringResource(R.string.role_title)) }, singleLine = true, modifier = fieldMod.testTag("title"),
+        OutlinedTextField(title, { title = it }, label = { Text(stringResource(R.string.role_title)) }, singleLine = true, modifier = fieldMod.focusRequester(titleFocus).testTag("title"),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { submit() }))
         ErrorText(error)

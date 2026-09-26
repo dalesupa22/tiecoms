@@ -5,15 +5,18 @@ import kotlin.math.min
 import kotlin.math.pow
 
 /**
- * Coreografía del splash de «ignición» como funciones puras del tiempo (segundos desde el
- * primer fotograma). Arranca exactamente como termina el splash del sistema: el símbolo sin
- * rayitas, en el mismo lienzo de [CANVAS_DP] centrado en la pantalla. Todo lo visual se deriva
- * de [frame]; la vista solo dibuja.
+ * Coreografía del splash de «puntitos» como funciones puras del tiempo (segundos desde el primer
+ * fotograma). Arranca exactamente como termina el splash del sistema (el símbolo sin rayitas, en el
+ * mismo lienzo de [CANVAS_DP] centrado en la pantalla): los tres puntitos de la burbuja papel titilan
+ * como escribiendo, luego los de la mandarina, y luego las tres rayitas aparecen ¡pum!.
  *
- * Capas (todas en el mismo lienzo cuadrado): 1 burbuja papel, 2 burbuja mandarina, 3 rayitas.
+ * Capas (todas en el mismo lienzo cuadrado): 1b burbuja papel y 2b burbuja mandarina SIN los huecos
+ * de los puntos (la separación sí va recortada) y 3 rayitas. Los seis puntos se dibujan encima como
+ * círculos tinta ([DOT_R], [DOT_Y], [WHITE_DOTS_X], [ORANGE_DOTS_X]): llenos se ven igual que los huecos.
+ * Todo lo visual se deriva de [frame]; la vista solo dibuja.
  */
 object SplashChoreo {
-    enum class Phase { STILL, IGNITION, SLOGAN, EXIT, DONE }
+    enum class Phase { STILL, TYPING_WHITE, TYPING_ORANGE, PUM, SLOGAN, EXIT, DONE }
     enum class Mode { FULL, SHORT, REDUCED }
 
     /**
@@ -23,44 +26,62 @@ object SplashChoreo {
      */
     const val CANVAS_DP = 176f
 
+    // Puntitos (fracciones del lienzo, de capas-splash/puntitos.txt).
+    const val DOT_R = 0.02949f
+    const val DOT_Y = 0.33974f
+    val WHITE_DOTS_X = listOf(0.14744f, 0.22436f, 0.30128f)
+    val ORANGE_DOTS_X = listOf(0.53205f, 0.60897f, 0.68590f)
+
     // Tabla de tiempos (s).
-    const val STILL_END = 0.25f
-    const val POP_START = 0.20f
-    const val POP_END = 0.55f
-    const val POP_PEAK_SCALE = 1.10f
-    /** Fracción del pop en la que se alcanza el máximo. */
-    const val POP_PEAK_AT = 0.4f
-    const val SPARKS_START = 0.35f
-    const val SPARKS_END = 0.70f
-    const val SPARKS_FROM_SCALE = 0.4f
-    /** Sonido `tc_splash` y vibración corta: cuando aparecen las rayitas. */
-    const val FEEDBACK_AT = SPARKS_START
-    const val SLOGAN_START = 0.55f
-    const val SLOGAN_END = 0.95f
+    const val STILL_END = 0.15f
+    const val WHITE_TYPING_START = 0.15f
+    const val ORANGE_TYPING_START = 0.85f
+    /** El punto i de una burbuja pulsa en start + [DOT_STAGGER]·i + [WAVE_GAP]·k, k < [WAVES]. */
+    const val DOT_STAGGER = 0.13f
+    const val WAVE_GAP = 0.40f
+    const val WAVES = 2
+    const val PULSE_DUR = 0.30f
+    const val PULSE_MIN_ALPHA = 0.25f
+    /** Cuánto sube el punto (en radios) en la mitad del pulso. */
+    const val PULSE_LIFT_R = 0.35f
+    const val PUM_START = 1.65f
+    const val PUM_END = 1.85f
+    const val SPARKS_FADE = 0.08f
+    const val SPARKS_FROM_SCALE = 0.3f
+    const val SPARKS_PEAK_SCALE = 1.15f
+    /** Fracción del ¡pum! en la que las rayitas llegan a su escala máxima. */
+    const val SPARKS_PEAK_AT = 0.5f
+    const val TAP_PEAK_SCALE = 1.04f
+    const val TAP_PEAK_AT = 0.4f
+    /** Sonido `tc_splash` y vibración corta: con el ¡pum!. */
+    const val FEEDBACK_AT = PUM_START
+    const val SLOGAN_START = 1.80f
+    const val SLOGAN_END = 2.15f
     const val SLOGAN_RISE_DP = 8f
     const val SLOGAN_MAX_ALPHA = 0.8f
-    const val EXIT_START = 1.30f
-    const val EXIT_END = 1.60f
+    const val EXIT_START = 2.35f
+    const val EXIT_END = 2.65f
     const val EXIT_SCALE = 1.06f
     const val TOTAL = EXIT_END
     /** Si la app no está lista, el splash espera en el último cuadro como mucho esto (tiempo real). */
     const val MAX_WAIT = 6.0f
-    /** Arranque por enlace: la coreografía empieza aquí (rayitas ya encendidas). */
-    const val SHORT_FROM = 0.70f
+    /** Arranque por enlace: la coreografía empieza aquí (justo antes del ¡pum!). */
+    const val SHORT_FROM = 1.55f
 
-    /**
-     * Ancla del pop: centro de la burbuja mandarina (x 300..630, y 0..250 en el lienzo de 780 u con
-     * origen en -10,-140), para que al crecer no tape la separación con la burbuja papel. Y ancla de
-     * las rayitas. En fracciones del lienzo.
-     */
-    const val POP_PIVOT_X = 0.609f
-    const val POP_PIVOT_Y = 0.340f
+    /** Ancla del golpecito: centro de la burbuja mandarina. Ancla de las rayitas. En fracciones del lienzo. */
+    const val TAP_PIVOT_X = 0.609f
+    const val TAP_PIVOT_Y = 0.340f
     const val SPARKS_PIVOT_X = 0.83f
     const val SPARKS_PIVOT_Y = 0.17f
 
     data class Frame(
         val phase: Phase,
-        /** Escala de la burbuja mandarina (capa 2), anclada en el centro de la burbuja ([POP_PIVOT_X], [POP_PIVOT_Y]). */
+        /** Por punto (0..2) de cada burbuja: opacidad del punto tinta y cuánto sube, en radios. */
+        val whiteDotAlpha: List<Float>,
+        val whiteDotLift: List<Float>,
+        val orangeDotAlpha: List<Float>,
+        val orangeDotLift: List<Float>,
+        /** Golpecito de la burbuja mandarina (con sus puntos), anclado en [TAP_PIVOT_X], [TAP_PIVOT_Y]. */
         val orangeScale: Float,
         /** Rayitas (capa 3): opacidad y escala ancladas en [SPARKS_PIVOT_X], [SPARKS_PIVOT_Y]. */
         val sparksAlpha: Float,
@@ -78,33 +99,57 @@ object SplashChoreo {
     fun easeOut(x: Float) = 1 - (1 - x).pow(3)
     fun easeInOut(x: Float) = if (x < 0.5f) 4 * x * x * x else 1 - (-2 * x + 2).pow(3) / 2
 
-    /** Pop 1 → [POP_PEAK_SCALE] → 1 durante [POP_START]..[POP_END]. */
-    fun popScale(t: Float): Float {
-        val p = progress(t, POP_START, POP_END)
-        val up = POP_PEAK_SCALE - 1f
-        return if (p <= POP_PEAK_AT) 1f + up * easeOut(p / POP_PEAK_AT)
-        else 1f + up * (1f - easeInOut((p - POP_PEAK_AT) / (1f - POP_PEAK_AT)))
+    /** Pulso de un punto que empieza en [start]: 0 → 1 (en la mitad) → 0, ease in-out; 0 fuera del pulso. */
+    fun pulse(t: Float, start: Float): Float {
+        val p = (t - start) / PULSE_DUR
+        if (p <= 0f || p >= 1f) return 0f
+        return if (p < 0.5f) easeInOut(p * 2f) else easeInOut((1f - p) * 2f)
+    }
+
+    /** Intensidad del «escribiendo» del punto [i] de una burbuja cuya ola empieza en [typingStart]. */
+    fun dotPulse(t: Float, typingStart: Float, i: Int): Float =
+        (0 until WAVES).maxOf { k -> pulse(t, typingStart + DOT_STAGGER * i + WAVE_GAP * k) }
+
+    /** Subida y bajada entre 1 y [peak] durante [a]..[b], con el máximo en la fracción [peakAt]. */
+    fun bump(t: Float, a: Float, b: Float, peak: Float, peakAt: Float): Float {
+        val p = progress(t, a, b)
+        val up = peak - 1f
+        return if (p <= peakAt) 1f + up * easeOut(p / peakAt) else 1f + up * (1f - easeInOut((p - peakAt) / (1f - peakAt)))
+    }
+
+    /** Escala de las rayitas en el ¡pum!: [SPARKS_FROM_SCALE] → [SPARKS_PEAK_SCALE] → 1. */
+    fun sparksScale(t: Float): Float {
+        val p = progress(t, PUM_START, PUM_END)
+        return if (p <= SPARKS_PEAK_AT) SPARKS_FROM_SCALE + (SPARKS_PEAK_SCALE - SPARKS_FROM_SCALE) * easeOut(p / SPARKS_PEAK_AT)
+        else SPARKS_PEAK_SCALE - (SPARKS_PEAK_SCALE - 1f) * easeInOut((p - SPARKS_PEAK_AT) / (1f - SPARKS_PEAK_AT))
     }
 
     /** Cuadro de la coreografía en el tiempo [t] (ya en tiempo de coreografía, ver [step]). */
     fun frame(t: Float, mode: Mode = Mode.FULL): Frame {
         val reduced = mode == Mode.REDUCED
-        val sparksP = easeOut(progress(t, SPARKS_START, SPARKS_END))
+        val white = List(3) { dotPulse(t, WHITE_TYPING_START, it) }
+        val orange = List(3) { dotPulse(t, ORANGE_TYPING_START, it) }
         val sloganP = easeOut(progress(t, SLOGAN_START, SLOGAN_END))
         val exitP = easeInOut(progress(t, EXIT_START, EXIT_END))
         val phase = when {
             t < STILL_END -> Phase.STILL
-            t < SLOGAN_START -> Phase.IGNITION
+            t < ORANGE_TYPING_START -> Phase.TYPING_WHITE
+            t < PUM_START -> Phase.TYPING_ORANGE
+            t < SLOGAN_START -> Phase.PUM
             t < EXIT_START -> Phase.SLOGAN
             t < EXIT_END -> Phase.EXIT
             else -> Phase.DONE
         }
-        // Con animaciones reducidas: sin escalas, solo fundidos (mismos tiempos).
+        // Con animaciones reducidas: los puntos solo cambian de opacidad, las rayitas se funden y no hay escalas.
         return Frame(
             phase = phase,
-            orangeScale = if (reduced) 1f else popScale(t),
-            sparksAlpha = sparksP,
-            sparksScale = if (reduced) 1f else SPARKS_FROM_SCALE + (1f - SPARKS_FROM_SCALE) * sparksP,
+            whiteDotAlpha = white.map { 1f - (1f - PULSE_MIN_ALPHA) * it },
+            whiteDotLift = white.map { if (reduced) 0f else PULSE_LIFT_R * it },
+            orangeDotAlpha = orange.map { 1f - (1f - PULSE_MIN_ALPHA) * it },
+            orangeDotLift = orange.map { if (reduced) 0f else PULSE_LIFT_R * it },
+            orangeScale = if (reduced) 1f else bump(t, PUM_START, PUM_END, TAP_PEAK_SCALE, TAP_PEAK_AT),
+            sparksAlpha = if (reduced) easeInOut(progress(t, PUM_START, PUM_END)) else progress(t, PUM_START, PUM_START + SPARKS_FADE),
+            sparksScale = if (reduced) 1f else sparksScale(t),
             sloganAlpha = SLOGAN_MAX_ALPHA * sloganP,
             sloganOffsetDp = if (reduced) 0f else SLOGAN_RISE_DP * (1f - sloganP),
             exitAlpha = 1f - exitP,

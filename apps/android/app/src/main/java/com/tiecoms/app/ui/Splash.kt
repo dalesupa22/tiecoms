@@ -53,7 +53,7 @@ private val Ink = Color(0xFF17161F)
 private val Paper = Color(0xFFF6F3EC)
 
 /**
- * Splash animado de «ignición» sobre la app, siempre en tinta. Empieza con el mismo símbolo, tamaño
+ * Splash animado de «puntitos» sobre la app, siempre en tinta. Empieza con el mismo símbolo, tamaño
  * y posición que el splash del sistema (lienzo de [SplashChoreo.CANVAS_DP] centrado en la pantalla)
  * y lo dibuja a partir de la función pura [SplashChoreo.frame]. [ready] indica que la app ya puede mostrarse.
  */
@@ -123,12 +123,15 @@ fun SplashOverlay(mode: Mode, ready: Boolean, onFinished: () -> Unit) {
     ) {
         val side = SplashChoreo.CANVAS_DP.dp
         Canvas(Modifier.size(side).align(Alignment.Center).graphicsLayer { scaleX = frame.exitScale; scaleY = frame.exitScale }) {
+            val w = size.width; val h = size.height
             drawLayer(paper)
-            scale(frame.orangeScale, pivot = Offset(size.width * SplashChoreo.POP_PIVOT_X, size.height * SplashChoreo.POP_PIVOT_Y)) {
+            drawDots(SplashChoreo.WHITE_DOTS_X, frame.whiteDotAlpha, frame.whiteDotLift)
+            scale(frame.orangeScale, pivot = Offset(w * SplashChoreo.TAP_PIVOT_X, h * SplashChoreo.TAP_PIVOT_Y)) {
                 drawLayer(orange)
+                drawDots(SplashChoreo.ORANGE_DOTS_X, frame.orangeDotAlpha, frame.orangeDotLift)
             }
             if (frame.sparksAlpha > 0f) {
-                scale(frame.sparksScale, pivot = Offset(size.width * SplashChoreo.SPARKS_PIVOT_X, size.height * SplashChoreo.SPARKS_PIVOT_Y)) {
+                scale(frame.sparksScale, pivot = Offset(w * SplashChoreo.SPARKS_PIVOT_X, h * SplashChoreo.SPARKS_PIVOT_Y)) {
                     drawLayer(sparks, frame.sparksAlpha)
                 }
             }
@@ -143,6 +146,14 @@ fun SplashOverlay(mode: Mode, ready: Boolean, onFinished: () -> Unit) {
             modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 32.dp)
                 .offset(y = maxHeight / 2 + side / 2 + frame.sloganOffsetDp.dp),
         )
+    }
+}
+
+/** Puntitos tinta encima de las burbujas sin huecos: llenos se ven igual que los huecos del splash del sistema. */
+private fun DrawScope.drawDots(xs: List<Float>, alpha: List<Float>, lift: List<Float>) {
+    val r = size.width * SplashChoreo.DOT_R
+    xs.forEachIndexed { i, x ->
+        drawCircle(Ink.copy(alpha = alpha[i]), radius = r, center = Offset(size.width * x, size.height * SplashChoreo.DOT_Y - lift[i] * r))
     }
 }
 

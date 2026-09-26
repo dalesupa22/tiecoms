@@ -395,6 +395,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
 // ---------- Piezas compartidas ----------
 @Composable
 private fun SearchField(query: String, onChange: (String) -> Unit) {
+    val searchFocus = androidx.compose.ui.platform.LocalFocusManager.current
     OutlinedTextField(
         value = query, onValueChange = onChange,
         placeholder = { Text(stringResource(R.string.search)) },
@@ -402,6 +403,8 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
         trailingIcon = if (query.isNotEmpty()) { { IconButton(onClick = { onChange("") }) { Icon(Icons.Filled.Close, stringResource(R.string.clear_search)) } } } else null,
         singleLine = true,
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        // La tecla «buscar» no tiene acción por defecto: sin esto el teclado se quedaría abierto.
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { searchFocus.clearFocus() }),
         shape = MaterialTheme.shapes.extraLarge,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("search"),
     )
@@ -641,8 +644,8 @@ internal fun NewSpaceDialog(onClose: () -> Unit, onCreated: (String) -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     FormSheet(stringResource(R.string.dlg_new_space), onClose, tag = "newSpaceDialog") {
         Text(stringResource(R.string.dlg_new_space_body), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-        OutlinedTextField(name, { name = it.take(120) }, label = { Text(stringResource(R.string.dlg_space_name)) }, placeholder = { Text(stringResource(R.string.dlg_space_name_ph)) }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("spaceName"))
-        OutlinedTextField(dept, { dept = it.take(160) }, label = { Text(stringResource(R.string.dlg_department)) }, placeholder = { Text(stringResource(R.string.dlg_department_ph)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(name, { name = it.take(120) }, label = { Text(stringResource(R.string.dlg_space_name)) }, placeholder = { Text(stringResource(R.string.dlg_space_name_ph)) }, singleLine = true, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Next), modifier = Modifier.fillMaxWidth().testTag("spaceName"))
+        OutlinedTextField(dept, { dept = it.take(160) }, label = { Text(stringResource(R.string.dlg_department)) }, placeholder = { Text(stringResource(R.string.dlg_department_ph)) }, singleLine = true, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done), modifier = Modifier.fillMaxWidth())
         ErrorText(error)
         DialogButtons(onClose, stringResource(R.string.dlg_create_space), enabled = !busy && name.trim().length >= 2, confirmTag = "createSpace") {
             busy = true; error = null

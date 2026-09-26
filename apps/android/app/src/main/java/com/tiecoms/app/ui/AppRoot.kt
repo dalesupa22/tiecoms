@@ -90,7 +90,7 @@ fun AppRoot() {
     CompositionLocalProvider(LocalClient provides client, LocalContainer provides container, LocalSnackbar provides snackbar) {
         // En debug las etiquetas de prueba se exponen como resource-id (UiAutomator del test del splash).
         val rootMod = if (com.tiecoms.app.BuildConfig.DEBUG) Modifier.semantics { testTagsAsResourceId = true } else Modifier
-        Surface(Modifier.fillMaxSize().then(rootMod), color = MaterialTheme.colorScheme.background) {
+        Surface(Modifier.fillMaxSize().then(rootMod).dismissKeyboardOnOutsideInteraction(), color = MaterialTheme.colorScheme.background) {
             Box(Modifier.fillMaxSize()) {
                 when (state.status) {
                     SessionStatus.LOADING -> Splash()

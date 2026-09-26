@@ -119,12 +119,17 @@ class SidechatUiTest {
             Thread.sleep(1_000)
             if (wide) {
                 compose.waitUntilAtLeastOneExists(hasTestTag("sideConnector"), 5_000)
-                shot("02-split-conector")
+                shot("02b")
                 log("§G split: chat 60 % + sidechat 40 % con conector curvo desde el ancla (halo) al panel")
             } else {
-                shot("02-hoja")
+                shot("02b")
                 log("§G teléfono: hoja con tarjeta del ancla, avatares, «Privado · solo ustedes 2», respuestas rápidas")
             }
+            // Una sola persona más en el sidechat: «Responde a Beto en privado…».
+            val first = com.tiecoms.app.core.Names.person(a.state.value.data, peerId)!!.name.substringBefore(' ')
+            val ph = ins.targetContext.getString(R.string.side_placeholder, first)
+            waitText(ph, 10_000)
+            log("§G placeholder con una persona: «$ph»")
             compose.onNodeWithTag("quickCheck").performClick()
             compose.waitUntil(15_000) { a.state.value.conversations[sideId]?.messages?.any { it.body == ins.targetContext.getString(R.string.side_quick_check) } == true }
             log("§G respuesta rápida «Déjame reviso» enviada")

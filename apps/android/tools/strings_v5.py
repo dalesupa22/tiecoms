@@ -18,8 +18,8 @@ S = [
 ("side_placeholder", "side.placeholder", ["name"], "", ""),
 ("side_placeholder_many", "side.placeholderMany", [], "", ""),
 ("side_quick_check", "side.quick.check", [], "", ""),
-("side_quick_ask", "side.quick.ask", [], "No sé, pregúntale a…", "I don’t know, ask…"),        # la web aún no tiene la versión en inglés
-("side_quick_later", "side.quick.later", [], "Te respondo en un rato", "I’ll get back to you soon"),
+("side_quick_ask", "side.quick.ask", [], "", ""),
+("side_quick_later", "side.quick.later", [], "", ""),
 ("side_empty_chat", "side.emptyChat", [], "", ""),
 ("side_see_in_chat", "side.seeInChat", [], "", ""),
 ("side_publish", "side.publish", [], "", ""),

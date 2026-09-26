@@ -11,8 +11,8 @@
     <string name="side_placeholder">Reply to %1$s privately…</string>
     <string name="side_placeholder_many">Reply privately…</string>
     <string name="side_quick_check">Let me check</string>
-    <string name="side_quick_ask">I don’t know, ask…</string>
-    <string name="side_quick_later">I’ll get back to you soon</string>
+    <string name="side_quick_ask">I don\'t know, ask…</string>
+    <string name="side_quick_later">I\'ll get back to you soon</string>
     <string name="side_empty_chat">Ask without the group seeing it</string>
     <string name="side_see_in_chat">View in chat</string>
     <string name="side_publish">Post in the thread</string>

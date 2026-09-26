@@ -66,7 +66,7 @@
     <string name="chat_internal_only">Only my company (internal)</string>
     <string name="chat_internal_hint">Only people from your company in this space will see it.</string>
     <string name="chat_directive">Directive level</string>
-    <string name="chat_no_spaces"></string>
+    <string name="chat_no_spaces">You don\'t have spaces with other companies yet.</string>
     <string name="space_create_group">Create group</string>
     <string name="space_members">Space participants</string>
     <string name="space_search">Search this space</string>

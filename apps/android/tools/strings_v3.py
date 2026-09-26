@@ -125,11 +125,13 @@ S = [
 
 
 def load(path):
-    """El archivo tiene dos diccionarios, es primero y en después: la segunda aparición de una clave es la inglesa."""
+    """El archivo tiene dos diccionarios, es primero y en después: la segunda aparición de una clave es la inglesa.
+    Acepta valores con comillas simples o dobles (las dobles se usan cuando el texto lleva apóstrofo)."""
     src = open(path, encoding="utf-8").read()
     es, en = {}, {}
-    for k, v in re.findall(r"'([a-zA-Z0-9_.]+)':\s*'((?:[^'\\]|\\.)*)'", src):
-        v = v.replace("\\'", "'")
+    pat = r"""'([a-zA-Z0-9_.]+)':\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")"""
+    for k, v1, v2 in re.findall(pat, src):
+        v = (v1 if v1 or not v2 else v2).replace("\\'", "'").replace('\\"', '"')
         if k not in es: es[k] = v
         elif k not in en: en[k] = v
     return es, en

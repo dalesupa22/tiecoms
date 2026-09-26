@@ -56,6 +56,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -307,6 +309,7 @@ fun SidePanelHeader(
     side: ConversationDTO, anchor: SideAnchor?, data: BootstrapDTO,
     onFull: () -> Unit, onClose: () -> Unit, onMinimize: (() -> Unit)? = null,
     onSeeInChat: (() -> Unit)? = null, onAddPerson: () -> Unit = {}, onReturn: (() -> Unit)? = null, onLeave: () -> Unit = {},
+    onCardBounds: (androidx.compose.ui.geometry.Rect) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val client = LocalClient.current
@@ -340,7 +343,8 @@ fun SidePanelHeader(
             else IconButton(onClick = onFull, modifier = Modifier.testTag("sideFull")) { Icon(Icons.Filled.OpenInFull, stringResource(R.string.side_open_full)) }
             IconButton(onClick = onClose, modifier = Modifier.testTag("sideClose")) { Icon(Icons.Filled.Close, stringResource(R.string.side_close)) }
         }
-        if (anchor != null) Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 6.dp).testTag("sideAnchor")) {
+        if (anchor != null) Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 6.dp)
+            .onGloballyPositioned { onCardBounds(it.boundsInRoot()) }.testTag("sideAnchor")) {
             Column(Modifier.padding(10.dp)) {
                 AnchorBubble(anchor.authorId?.let { Names.person(data, it) }, anchor.authorId, anchor.authorName, anchor.text, anchor.createdAt, data, maxLines = 3)
                 if (onSeeInChat != null) TextButton(onClick = onSeeInChat, contentPadding = PaddingValues(horizontal = 0.dp), modifier = Modifier.padding(start = 36.dp).testTag("sideSeeInChat")) {
@@ -487,51 +491,78 @@ fun SidechatContent(
     onAddPerson: () -> Unit, onReturn: () -> Unit, onLeave: () -> Unit,
     onDetails: () -> Unit, onOpenConversation: (String, Long?) -> Unit, onOpenIssue: (String) -> Unit, onOpenEvent: (String) -> Unit,
     onTrazo: () -> Unit, onOpenWorkspace: (String) -> Unit, onPrivateReply: (MessageDTO) -> Unit,
+    onCardBounds: (androidx.compose.ui.geometry.Rect) -> Unit = {},
 ) {
     val st = LocalClient.current.state.collectAsStateWithLifecycle().value
     val anchor = sideAnchor(data, side, anchorMsg, st.conversations[side.id]?.messages.orEmpty())
     SidePanelHeader(side, anchor, data, onFull = onFull, onClose = onClose, onMinimize = onMinimize, onSeeInChat = onSeeInChat,
-        onAddPerson = onAddPerson, onReturn = if (side.parentId != null && data.conversations.any { it.id == side.parentId }) onReturn else null, onLeave = onLeave)
+        onAddPerson = onAddPerson, onReturn = if (side.parentId != null && data.conversations.any { it.id == side.parentId }) onReturn else null, onLeave = onLeave,
+        onCardBounds = onCardBounds)
     ConversationScreen(side.id, null, onBack = onClose, onDetails = onDetails, onOpenConversation = onOpenConversation, onOpenIssue = onOpenIssue,
         onOpenEvent = onOpenEvent, onTrazo = onTrazo, onOpenWorkspace = onOpenWorkspace, onPrivateReply = onPrivateReply, embedded = true)
 }
 
 /**
- * Conector curvo (pantalla ancha): sale del borde derecho de la burbuja ancla y entra al panel a la altura de la tarjeta
- * del ancla; sigue al ancla al desplazar y, si sale de la vista, apunta al borde de la lista.
+ * Recorrido del conector por el margen (como iOS): sale del borde derecho de la burbuja ancla, va al margen derecho de la
+ * columna del chat, sube o baja por él con esquinas redondeadas y entra en horizontal hasta [ex]. Nunca cruza burbujas.
+ */
+fun gutterPath(sx: Float, sy: Float, gx: Float, ey: Float, ex: Float, r: Float): androidx.compose.ui.graphics.Path =
+    androidx.compose.ui.graphics.Path().apply {
+        moveTo(sx, sy)
+        val dy = ey - sy
+        val rr = minOf(r, kotlin.math.abs(dy) / 2f, kotlin.math.abs(gx - sx).coerceAtLeast(0.1f))
+        if (kotlin.math.abs(dy) < 1f) { lineTo(ex, ey); return@apply }
+        val dir = if (dy > 0) 1f else -1f
+        lineTo(gx - rr, sy)
+        quadraticTo(gx, sy, gx, sy + dir * rr)
+        lineTo(gx, ey - dir * rr)
+        quadraticTo(gx, ey, gx + rr, ey)
+        lineTo(ex, ey)
+    }
+
+/**
+ * Conector (pantalla ancha): del borde exacto de la burbuja ancla, por el margen derecho de la columna del chat, a la
+ * tarjeta del ancla del panel. Un punto en cada extremo; punteado si el ancla salió de la vista (apunta al borde).
  */
 @Composable
-fun SideConnector(anchor: androidx.compose.ui.geometry.Rect?, list: androidx.compose.ui.geometry.Rect?, panel: androidx.compose.ui.geometry.Rect?,
+fun SideConnector(anchor: androidx.compose.ui.geometry.Rect?, list: androidx.compose.ui.geometry.Rect?, card: androidx.compose.ui.geometry.Rect?,
                   origin: androidx.compose.ui.geometry.Offset, authorId: String?) {
-    val p = panel ?: return
+    val c = card ?: return
     val l = list ?: return
     val color = authorId?.let { personColor(it) } ?: com.tiecoms.app.ui.theme.Brand.Orange
     androidx.compose.foundation.Canvas(Modifier.fillMaxSize().testTag("sideConnector")) {
         val stroke = 2.dp.toPx()
         val visible = anchor != null && anchor.bottom > l.top && anchor.top < l.bottom
-        val sx = (if (visible) anchor!!.right else l.right - 12.dp.toPx()) - origin.x
+        val gx = l.right - 6.dp.toPx() - origin.x
+        val sx = (if (visible) anchor!!.right else l.right - 6.dp.toPx()) - origin.x
         val sy = (if (visible) anchor!!.center.y.coerceIn(l.top + 8.dp.toPx(), l.bottom - 8.dp.toPx())
                   else if (anchor != null && anchor.center.y >= l.bottom) l.bottom - 4.dp.toPx() else l.top + 4.dp.toPx()) - origin.y
-        val ex = p.left - origin.x + 1f
-        val ey = p.top + 110.dp.toPx() - origin.y
-        val dx = (ex - sx).coerceAtLeast(24.dp.toPx())
-        val path = androidx.compose.ui.graphics.Path().apply {
-            moveTo(sx, sy)
-            cubicTo(sx + dx * 0.55f, sy, ex - dx * 0.55f, ey, ex, ey)
-        }
-        drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round))
-        drawCircle(color, radius = stroke * 1.8f, center = androidx.compose.ui.geometry.Offset(sx, sy))
-        drawCircle(color, radius = stroke * 1.8f, center = androidx.compose.ui.geometry.Offset(ex, ey))
+        val ex = c.left - origin.x
+        val ey = c.center.y - origin.y
+        drawPath(gutterPath(sx, sy, gx, ey, ex, 12.dp.toPx()), color, style = androidx.compose.ui.graphics.drawscope.Stroke(
+            width = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round,
+            pathEffect = if (visible) null else androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx()))))
+        drawCircle(color, radius = stroke * 2f, center = androidx.compose.ui.geometry.Offset(sx, sy))
+        drawCircle(color, radius = stroke * 2f, center = androidx.compose.ui.geometry.Offset(ex, ey))
     }
 }
 
-/** Teléfono: línea vertical fina del ancla al borde de la hoja (el chat de fondo se ve con la hoja a medias). */
+/** Teléfono: del borde de la burbuja ancla, por el margen derecho, hasta el borde de la hoja (sin cruzar burbujas). */
 @Composable
-fun SideTether(anchor: androidx.compose.ui.geometry.Rect?, origin: androidx.compose.ui.geometry.Offset) {
+fun SideTether(anchor: androidx.compose.ui.geometry.Rect?, list: androidx.compose.ui.geometry.Rect?, origin: androidx.compose.ui.geometry.Offset) {
     val a = anchor ?: return
+    val l = list ?: return
     androidx.compose.foundation.Canvas(Modifier.fillMaxSize().testTag("sideTether")) {
-        val x = a.center.x - origin.x
-        drawLine(com.tiecoms.app.ui.theme.Brand.Orange.copy(alpha = 0.8f), androidx.compose.ui.geometry.Offset(x, a.bottom - origin.y),
-            androidx.compose.ui.geometry.Offset(x, size.height), strokeWidth = 1.5.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        val color = com.tiecoms.app.ui.theme.Brand.Orange.copy(alpha = 0.85f)
+        val stroke = 1.5.dp.toPx()
+        val gx = l.right - 6.dp.toPx() - origin.x
+        val sx = a.right - origin.x
+        val sy = a.center.y - origin.y
+        val path = androidx.compose.ui.graphics.Path().apply {
+            val r = minOf(10.dp.toPx(), kotlin.math.abs(gx - sx).coerceAtLeast(0.1f))
+            moveTo(sx, sy); lineTo(gx - r, sy); quadraticTo(gx, sy, gx, sy + r); lineTo(gx, size.height)
+        }
+        drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+        drawCircle(color, radius = stroke * 2.2f, center = androidx.compose.ui.geometry.Offset(sx, sy))
     }
 }

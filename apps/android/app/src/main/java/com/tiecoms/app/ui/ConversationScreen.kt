@@ -72,6 +72,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.foundation.border
@@ -360,15 +361,25 @@ fun ConversationScreen(
     var anchorRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     var listRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     var panelRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    var cardRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     var overlayOrigin by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     var sideAdd by remember { mutableStateOf(false) }
     var sideReturn by remember { mutableStateOf(false) }
     val showPanel = sideMeta != null && !embedded && !sideMin
+    // Teléfono: con la hoja a medias, el ancla queda visible en la mitad de arriba (se desplaza el chat de fondo).
+    LaunchedEffect(showPanel, wide, sideMeta?.parentMessageId, items.size) {
+        if (!showPanel || wide) return@LaunchedEffect
+        val idx = items.indexOfFirst { (it as? ChatItem.Msg)?.m?.id == sideMeta?.parentMessageId }
+        if (idx < 0) return@LaunchedEffect
+        kotlinx.coroutines.delay(50) // a que se aplique el relleno inferior de la hoja
+        listState.animateScrollToItem(idx)
+    }
     // Dentro de un sidechat: «Responde a <quien preguntó> en privado…» y «No sé, pregúntale a…» suma personas.
     var sideAddHere by remember { mutableStateOf(false) }
     val sidePlaceholder = if (meta.isSide) {
-        val asker = conv?.messages?.firstOrNull { it.kind == "text" }?.authorId ?: meta.memberIds.firstOrNull { it != me }
-        if (asker != null && asker != me && meta.memberIds.size <= 2) stringResource(R.string.side_placeholder, Names.person(data, asker)?.name?.substringBefore(' ') ?: "")
+        // Con una sola persona más: «Responde a Beto en privado…»; con varias: «Responde en privado…».
+        val others = meta.memberIds.filter { it != me }
+        if (others.size == 1) stringResource(R.string.side_placeholder, Names.person(data, others[0])?.name?.substringBefore(' ') ?: "")
         else stringResource(R.string.side_placeholder_many)
     } else null
     val sideAnchorMsg = sideMeta?.let { sm -> conv?.messages?.firstOrNull { it.id == sm.parentMessageId } }
@@ -435,7 +446,9 @@ fun ConversationScreen(
                     items.isEmpty() -> Text(stringResource(if (meta.isSide) R.string.side_empty_chat else R.string.no_messages), Modifier.align(Alignment.Center).testTag("sideEmpty"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else -> androidx.compose.runtime.CompositionLocalProvider(LocalVoiceQueue provides voiceQueue) { LazyColumn(
                         state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize().onGloballyPositioned { listRect = it.boundsInRoot() }.testTag("messages"),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        // Con la hoja del sidechat a medias (teléfono), el relleno deja el ancla por encima de la hoja.
+                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp,
+                            bottom = if (showPanel && !wide) (LocalConfiguration.current.screenHeightDp * 0.45f).dp else 8.dp),
                     ) {
                         items(items, key = { it.key }) { item ->
                             when (item) {
@@ -523,13 +536,13 @@ fun ConversationScreen(
                 onAddPerson = { sideAdd = true }, onReturn = { sideReturn = true },
                 onLeave = { act { client.removeMember(sideMeta.id, me); sideOpen = null } },
                 onDetails = onDetails, onOpenConversation = onOpenConversation, onOpenIssue = onOpenIssue, onOpenEvent = onOpenEvent,
-                onTrazo = onTrazo, onOpenWorkspace = onOpenWorkspace, onPrivateReply = onPrivateReply)
+                onTrazo = onTrazo, onOpenWorkspace = onOpenWorkspace, onPrivateReply = onPrivateReply, onCardBounds = { cardRect = it })
         }
     }
     }
-    if (showPanel && wide) SideConnector(anchorRect, listRect, panelRect, overlayOrigin, sideAnchorMsg?.authorId)
+    if (showPanel && wide) SideConnector(anchorRect, listRect, cardRect, overlayOrigin, sideAnchorMsg?.authorId)
     // Teléfono: línea fina que une el ancla con el borde de la hoja (chat de fondo visible con la hoja a medias).
-    if (showPanel && !wide) SideTether(anchorRect, overlayOrigin)
+    if (showPanel && !wide) SideTether(anchorRect, listRect, overlayOrigin)
     if (sideMeta != null && sideMin && !embedded) FloatingSideBubble(sideMeta, data, onOpen = { sideMin = false }, onDrop = { sideOpen = null },
         modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 96.dp))
     }

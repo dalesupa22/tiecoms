@@ -788,6 +788,12 @@ export class TieComsClient {
     await this.loadBootstrap();
     return r;
   }
+  /** Archivar un grupo (quien lo administra). Si era el último de un espacio, el espacio también se archiva. */
+  async archiveGroup(conversationId: string) {
+    const r = await this.request<{ archived: boolean; workspaceArchived: boolean }>(`/conversations/${conversationId}/archive`, { method: 'POST', json: {} });
+    await this.loadBootstrap();
+    return r;
+  }
   /** Entrada automática por dominio verificado (solo owner/admin). */
   async setJoinPolicy(orgId: string, joinPolicy: 'invite' | 'auto') {
     await this.request(`/organizations/${orgId}/join-policy`, { method: 'PUT', json: { joinPolicy } });

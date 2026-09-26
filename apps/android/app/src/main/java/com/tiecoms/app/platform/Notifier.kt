@@ -112,6 +112,8 @@ class Notifier(private val context: Context) {
         authorIcon: Bitmap?, silent: Boolean, badge: Int, messageId: String? = null, seq: Long? = null,
         /** Al tocar: otro destino (sidechat → su conversación de origen con el sidechat desplegado). */
         openUri: String? = null,
+        /** Nombre del atajo y de la burbuja («Empresa - Grupo»); por defecto el título. */
+        shortcutLabel: String = title,
     ) {
         if (!enabled()) return
         val lines = history.getOrPut(conversationId) { ArrayDeque() }
@@ -131,7 +133,7 @@ class Notifier(private val context: Context) {
         val shortcutIcon = if (isGroup) IconCompat.createWithResource(context, R.mipmap.ic_launcher_round) else icon(authorIcon, authorName)
         val deep = "chaggu://c/$conversationId"
         val shortcut = ShortcutInfoCompat.Builder(context, conversationId)
-            .setShortLabel(title.take(40)).setLongLived(true).setLocusId(LocusIdCompat(conversationId))
+            .setShortLabel(shortcutLabel.take(40)).setLongLabel(shortcutLabel.take(80)).setLongLived(true).setLocusId(LocusIdCompat(conversationId))
             .setIntent(Intent(Intent.ACTION_VIEW, Uri.parse(deep), context, MainActivity::class.java))
             .setIcon(shortcutIcon)
             .apply { if (!isGroup) setPerson(Person.Builder().setName(authorName).setKey(authorKey).setIcon(icon(authorIcon, authorName)).build()) }

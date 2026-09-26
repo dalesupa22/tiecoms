@@ -732,30 +732,56 @@ private fun Composer(
     var micWhy by remember { mutableStateOf(false) }
     var pendingVoice by remember(id) { mutableStateOf<com.tiecoms.app.platform.VoiceRecorder.Result?>(null) }
     val micPermission = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
-    androidx.compose.runtime.DisposableEffect(recorder) { onDispose { recorder.cancel(); pendingVoice?.file?.delete() } }
+    // Nota grabada sin enviar (envío fallido o grabación cortada): se ofrece Reintentar / Borrar sobre el compositor.
+    val drafts by com.tiecoms.app.platform.VoiceDrafts.drafts.collectAsStateWithLifecycle()
+    val draft = drafts[id]
+    LaunchedEffect(Unit) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.tiecoms.app.platform.VoiceRecorder.sweep(ctx.applicationContext) } }
+    /** Salir del chat, apagar la pantalla o pasar a segundo plano: lo grabado no se pierde, queda como nota por enviar. */
+    fun keepRecording() {
+        if (recorder.isRecording) recorder.stop()?.let { com.tiecoms.app.platform.VoiceDrafts.put(id, com.tiecoms.app.platform.VoiceDrafts.Draft(it)) }
+        locked = false
+        pendingVoice?.let { com.tiecoms.app.platform.VoiceDrafts.put(id, com.tiecoms.app.platform.VoiceDrafts.Draft(it)); pendingVoice = null }
+    }
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(recorder, owner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_STOP && recorder.isRecording) keepRecording() }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs); keepRecording() }
+    }
     fun hasMic() = androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
     fun uploadVoice(r: com.tiecoms.app.platform.VoiceRecorder.Result, aiConsent: Boolean) {
         pendingVoice = null
         attError = null
-        scope.launch {
+        com.tiecoms.app.platform.VoiceDrafts.take(id)
+        // En el scope de la app: salir del chat no corta la subida; si falla, la nota queda para reintentar.
+        container.scope.launch {
             uploading = 0 to 0f
             try {
                 val a = client.uploadAttachment(id, r.file, ctx.getString(R.string.voice_note) + ".m4a", "audio/mp4",
                     voice = com.tiecoms.app.core.TieComsClient.Voice(r.durationMs, r.waveform, aiConsent)) { sent, total -> uploading = 0 to (if (total > 0) sent.toFloat() / total else 0f) }
                 onSend("", listOf(a), emptyList())
                 r.file.delete()
-            } catch (e: Exception) { attError = errorText(ctx, e) } finally { uploading = null }
+            } catch (e: Exception) {
+                val msg = when (com.tiecoms.app.core.VoiceRules.uploadError(e)) {
+                    com.tiecoms.app.core.VoiceRules.UploadError.TOO_LARGE -> ctx.getString(R.string.voice_err_too_large)
+                    com.tiecoms.app.core.VoiceRules.UploadError.NETWORK -> ctx.getString(R.string.voice_err_network)
+                    com.tiecoms.app.core.VoiceRules.UploadError.OTHER -> errorText(ctx, e)
+                }
+                com.tiecoms.app.platform.VoiceDrafts.put(id, com.tiecoms.app.platform.VoiceDrafts.Draft(r, aiConsent, msg))
+            } finally { uploading = null }
         }
     }
     fun sendVoice() {
         val r = recorder.stop()
         locked = false
         if (r == null) { attError = ctx.getString(R.string.voice_too_short); return }
+        attError = null
         pendingVoice = r
     }
     pendingVoice?.let { r ->
+        // Cerrar el diálogo no borra la nota: queda por enviar.
         AiConsentDialog(voice = true, onAllow = { uploadVoice(r, true) }, onWithoutAi = { uploadVoice(r, false) },
-            onDismiss = { r.file.delete(); pendingVoice = null })
+            onDismiss = { com.tiecoms.app.platform.VoiceDrafts.put(id, com.tiecoms.app.platform.VoiceDrafts.Draft(r)); pendingVoice = null })
     }
     recorder.onLimit = { container.toast(ctx.getString(R.string.voice_too_long)); sendVoice() }
     if (micWhy) androidx.compose.material3.AlertDialog(
@@ -768,6 +794,7 @@ private fun Composer(
         if (uris.isEmpty()) return
         scope.launch {
             val copied = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.tiecoms.app.platform.ShareIntake.copyToCache(ctx.applicationContext, uris, null) }
+                .map { com.tiecoms.app.platform.ImageTools.prepareForUpload(ctx.applicationContext, it) }
             val plan = com.tiecoms.app.core.Attachments.plan(files + copied, null)
             attError = plan.tooLarge.firstOrNull()?.let { ctx.getString(R.string.att_too_large, it.name) }
                 ?: if (plan.dropped > 0) ctx.getString(R.string.att_too_many) else null
@@ -829,6 +856,9 @@ private fun Composer(
                 } }, onAskSide = { p -> onAskSide(p.id) })
             }
             if (editing == null && files.isNotEmpty()) PendingFiles(files, uploading, onRemove = { f -> if (uploading == null) { files = files - f; java.io.File(f.path).delete() } })
+            if (editing == null && draft != null && !rec.recording) VoiceDraftBar(draft, busy = uploading != null,
+                onRetry = { if (draft.aiConsent != null) uploadVoice(draft.result, draft.aiConsent) else { com.tiecoms.app.platform.VoiceDrafts.take(id); pendingVoice = draft.result } },
+                onDelete = { com.tiecoms.app.platform.VoiceDrafts.discard(id); container.toast(ctx.getString(R.string.voice_cancelled)) })
             attError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("attError")) }
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
                 val bringLabel = stringResource(R.string.imp_action)
@@ -866,7 +896,9 @@ private fun Composer(
                 } else {
                     if (text.isBlank() && files.isEmpty() && uploading == null && !locked) MicButton(
                         onStart = { if (!hasMic()) { micWhy = true; false } else { gesture = com.tiecoms.app.core.Waveform.Gesture.RECORDING; recorder.start() } },
-                        onRelease = { sendVoice() }, onCancel = { recorder.cancel(); container.toast(ctx.getString(R.string.voice_cancelled)) }, onLock = { locked = true }, onDrag = { gesture = it },
+                        // Un toque rápido no descarta: deja la grabación bloqueada (manos libres) con Borrar y Enviar.
+                        onRelease = { held -> if (com.tiecoms.app.core.VoiceRules.onRelease(held) == com.tiecoms.app.core.VoiceRules.Release.LOCK) locked = true else sendVoice() },
+                        onCancel = { recorder.cancel(); container.toast(ctx.getString(R.string.voice_cancelled)) }, onLock = { locked = true }, onDrag = { gesture = it },
                     ) else if (!rec.recording) FilledIconButton(onClick = { sendNow() }, enabled = uploading == null && (text.isNotBlank() || files.isNotEmpty()), modifier = Modifier.size(52.dp).testTag("send"),
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary)) { Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.send)) }
                 }
@@ -1078,7 +1110,8 @@ internal fun MessageBubble(
             }
             if (!deleted && m.attachments.isNotEmpty()) {
                 val media = m.attachments.filter { it.isImage || it.isVideo }
-                AttachmentsBlock(m.attachments, fg, onOpenMedia = { i -> onOpenMedia(media, i) }, onOpenFile = onOpenFile, mine = item.mine, onCreateIssue = onVoiceIssue)
+                AttachmentsBlock(m.attachments, fg, onOpenMedia = { i -> onOpenMedia(media, i) }, onOpenFile = onOpenFile, mine = item.mine, onCreateIssue = onVoiceIssue,
+                    onLongPress = openMenu)
             }
             if (deleted) Text(body, color = fg, style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
             // Solo emojis (1 a 3): grandes, como en la web (isJumbo).

@@ -98,6 +98,7 @@ fun ShareSheet(incoming: ShareIntake.Incoming?, onClose: () -> Unit, onOpenApp: 
     val plan by produceState<Attachments.Plan?>(null, incoming) {
         value = incoming?.let { inc ->
             val files = withContext(Dispatchers.IO) { ShareIntake.copyToCache(ctx.applicationContext, inc.uris, inc.mime) }
+                .map { com.tiecoms.app.platform.ImageTools.prepareForUpload(ctx.applicationContext, it) }
             Attachments.plan(files, inc.text)
         } ?: Attachments.plan(emptyList(), "")
     }

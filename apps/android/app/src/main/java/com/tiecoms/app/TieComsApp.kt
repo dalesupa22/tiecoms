@@ -178,11 +178,11 @@ class AppContainer(private val app: Application) {
     fun conversationPhoto(c: com.tiecoms.app.core.ConversationDTO, d: com.tiecoms.app.core.BootstrapDTO): String? =
         c.avatarUrl ?: if (c.kind == "direct") c.memberIds.firstOrNull { it != d.me.id }?.let { Names.person(d, it)?.avatarUrl } else null
 
-    /** Nombre visible de una conversación (para notificaciones). */
+    /** Nombre visible de una conversación en notificaciones, burbujas y atajos: «Empresa - Grupo» en los grupos. */
     fun conversationName(id: String): String {
         val c = client.value
         val conv = c.meta(id) ?: return ""
-        return Names.conversationTitle(conv, c.state.value.data, app.getString(R.string.internal_default), app.getString(R.string.conversation))
+        return Names.notificationTitle(conv, c.state.value.data, app.getString(R.string.internal_default), app.getString(R.string.conversation))
     }
 
     private suspend fun loadAvatar(path: String?): android.graphics.Bitmap? {
@@ -217,8 +217,10 @@ class AppContainer(private val app: Application) {
             "message", "mention" -> {
                 val isGroup = p.subtitle.isNotBlank()
                 val author = p.authorName?.takeIf { it.isNotBlank() } ?: p.title
+                // El servidor manda «Empresa - Grupo» en title; el atajo usa la misma etiqueta local si ya hay snapshot.
                 notifier.showConversation(p.conversationId, p.title, isGroup, p.authorId?.takeIf { it.isNotBlank() } ?: author, author, p.body,
-                    cachedPushAvatar(p.authorAvatarUrl), silent = !settings.soundsEnabled, badge = p.badge, messageId = p.messageId)
+                    cachedPushAvatar(p.authorAvatarUrl), silent = !settings.soundsEnabled, badge = p.badge, messageId = p.messageId,
+                    shortcutLabel = if (isGroup) conversationName(p.conversationId).ifBlank { p.title } else p.title)
             }
             // «Laura reaccionó 👍» (TC_MESSAGE, collapseId react-<id>): tocar abre la conversación en ese mensaje.
             "reaction" -> notifier.showMessage(p.conversationId, p.title, listOf(p.subtitle, p.body).filter { it.isNotBlank() }.joinToString(" · "),
@@ -323,14 +325,15 @@ class AppContainer(private val app: Application) {
                 scope.launch {
                     val icon = loadAvatar(author?.avatarUrl)
                     notifier.showConversation(m.conversationId, chatTitle, isGroup || side != null,
-                        m.authorId ?: "?", authorName, m.body.take(300), icon, silent = fg || !settings.soundsEnabled, badge = c.badge(), messageId = m.id, seq = m.seq, openUri = open)
+                        m.authorId ?: "?", authorName, m.body.take(300), icon, silent = fg || !settings.soundsEnabled, badge = c.badge(), messageId = m.id, seq = m.seq, openUri = open,
+                        shortcutLabel = if (isGroup && side == null) conversationName(m.conversationId) else chatTitle)
                 }
             }
             is ClientSignal.ReminderDue -> {
                 val r = sig.reminder
                 val c = client.value
                 val conv = c.meta(r.conversationId)
-                val name = conv?.let { Names.conversationTitle(it, c.state.value.data, app.getString(R.string.internal_default), app.getString(R.string.conversation)) } ?: ""
+                val name = conv?.let { conversationName(it.id) } ?: ""
                 if (foreground) sounds.play(Sound.NOTIFY)
                 notifier.showMessage(r.conversationId, "⏰ " + app.getString(R.string.rem_alert), listOf(r.note, name).filter { !it.isNullOrBlank() }.joinToString(" · "),
                     silent = foreground || !settings.soundsEnabled, tag = "rem:" + r.id, seq = r.messageSeq)

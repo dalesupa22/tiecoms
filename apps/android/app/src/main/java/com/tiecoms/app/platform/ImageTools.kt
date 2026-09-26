@@ -90,6 +90,35 @@ object ImageTools {
         return Bitmap.createBitmap(b, 0, 0, b.width, b.height, m, true)
     }
 
+    /** Lado mayor de las fotos que se adjuntan (una foto de cámara de 4000×3000 baja a ~2000 px). */
+    const val UPLOAD_SIDE = 2560
+    /** Por debajo de esto una foto se sube tal cual (si además no pasa de [UPLOAD_SIDE]). */
+    const val UPLOAD_KEEP_BYTES = 1_500_000L
+
+    /**
+     * Foto lista para subir: las de cámara (5–12 MB) se reducen a ≤ [UPLOAD_SIDE] px, derechas según EXIF, en JPEG 85
+     * (sin EXIF: sin GPS). GIF, videos, archivos y fotos ya livianas pasan tal cual; si no se puede decodificar, también.
+     */
+    suspend fun prepareForUpload(ctx: Context, f: com.tiecoms.app.core.Attachments.Shared): com.tiecoms.app.core.Attachments.Shared = withContext(Dispatchers.IO) {
+        val type = f.contentType.lowercase()
+        if (f.path.isEmpty() || !type.startsWith("image/") || type == "image/gif" || type == "image/svg+xml") return@withContext f
+        val src = java.io.File(f.path)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        runCatching { BitmapFactory.decodeFile(src.absolutePath, bounds) }
+        if (bounds.outWidth <= 0) return@withContext f
+        val side = maxOf(bounds.outWidth, bounds.outHeight)
+        if (src.length() <= UPLOAD_KEEP_BYTES && side <= UPLOAD_SIDE) return@withContext f
+        val bmp = loadForCrop(ctx, Uri.fromFile(src), UPLOAD_SIDE) ?: return@withContext f
+        val scale = UPLOAD_SIDE.toFloat() / maxOf(bmp.width, bmp.height)
+        val out = if (scale < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt().coerceAtLeast(1), (bmp.height * scale).toInt().coerceAtLeast(1), true) else bmp
+        val name = f.name.substringBeforeLast('.').ifBlank { "foto" } + ".jpg"
+        val dest = java.io.File(src.parentFile, "up-" + name)
+        runCatching { dest.outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, 85, it) } }.getOrNull() ?: return@withContext f
+        if (dest.length() <= 0 || dest.length() >= src.length()) { dest.delete(); return@withContext f }
+        src.delete()
+        com.tiecoms.app.core.Attachments.Shared(name, "image/jpeg", dest.length(), dest.absolutePath)
+    }
+
     /** Archivo elegido para subir: nombre visible, tamaño declarado (o -1) y tipo MIME. */
     data class Picked(val uri: Uri, val name: String, val size: Long, val type: String?)
 

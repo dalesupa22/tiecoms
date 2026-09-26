@@ -41,4 +41,11 @@
     <string name="react_issue_closed">Asunto cerrado</string>
     <string name="react_max">Este mensaje ya tiene 20 emojis distintos. Súmate a uno de los que hay.</string>
     <string name="common_and">y</string>
+    <!-- 1.6.2: notas de voz -->
+    <string name="voice_err_too_large">La nota no se envió: el servidor la rechazó por tamaño. Intenta de nuevo en un momento.</string>
+    <string name="voice_err_network">La nota no se envió: sin conexión. Queda aquí para reintentar.</string>
+    <string name="voice_draft">Nota de voz sin enviar · %1$s</string>
+    <string name="voice_retry_send">Reintentar</string>
+    <string name="att_camera_unavailable">No se pudo abrir la cámara.</string>
+    <string name="err_payload_too_large">El servidor rechazó el archivo por tamaño (413). Intenta de nuevo en un momento.</string>
 </resources>

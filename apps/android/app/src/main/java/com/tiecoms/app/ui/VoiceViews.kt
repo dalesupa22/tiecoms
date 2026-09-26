@@ -1,5 +1,7 @@
 package com.tiecoms.app.ui
 
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -92,12 +94,14 @@ fun VoiceBubble(a: AttachmentDTO, fg: Color, mine: Boolean, onCreateIssue: ((Str
             scope.launch { runCatching { client.retranscribe(a.id, aiConsent = true) }.onFailure { container.toast(errorText(ctx, it)) } }
         }, onWithoutAi = { askAiConsent = false }, onDismiss = { askAiConsent = false })
     val playLabel = stringResource(if (current && st.playing) R.string.voice_pause else R.string.voice_play)
-    fun play() = scope.launch {
+    fun play(at: Float? = null) = scope.launch {
         val url = client.mediaUrl(a.url) ?: return@launch
         val token = client.bearer() ?: return@launch
         val next = queueOf(a.id).mapNotNull { n -> client.mediaUrl(n.url)?.let { n.asItem(it) } }
-        container.voice.play(a.asItem(url), next, token)
+        container.voice.play(a.asItem(url), next, token, at)
     }
+    // Arrastrar la onda: la posición se muestra mientras se arrastra y se salta al soltar.
+    var dragFraction by remember(a.id) { mutableStateOf<Float?>(null) }
     Column(Modifier.widthIn(min = 220.dp, max = 280.dp).padding(bottom = 4.dp).testTag("voice-${a.id}")) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             FilledIconButton(onClick = { play() }, modifier = Modifier.size(40.dp).semantics { contentDescription = playLabel }.testTag("voicePlay-${a.id}"),
@@ -106,10 +110,17 @@ fun VoiceBubble(a: AttachmentDTO, fg: Color, mine: Boolean, onCreateIssue: ((Str
             }
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
-                WaveBars(a.waveform.orEmpty(), progress, fg, Modifier.fillMaxWidth().height(28.dp)
-                    .pointerInput(a.id, current) { detectTapGestures { o -> if (current) container.voice.seek(o.x / size.width) } }.testTag("voiceWave-${a.id}"))
+                WaveBars(a.waveform.orEmpty(), dragFraction ?: progress, fg, Modifier.fillMaxWidth().height(28.dp)
+                    .pointerInput(a.id, current) { detectTapGestures { o -> val f = (o.x / size.width).coerceIn(0f, 1f); if (current) container.voice.seek(f) else play(f) } }
+                    .pointerInput(a.id, current) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { o -> dragFraction = (o.x / size.width).coerceIn(0f, 1f) },
+                            onDragEnd = { dragFraction?.let { f -> if (current) container.voice.seek(f) else play(f) }; dragFraction = null },
+                            onDragCancel = { dragFraction = null },
+                        ) { c, _ -> dragFraction = (c.position.x / size.width).coerceIn(0f, 1f) }
+                    }.testTag("voiceWave-${a.id}"))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(Waveform.clock(if (current) st.positionMs else dur), color = fg.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("voiceTime-${a.id}"))
+                    Text(Waveform.clock(dragFraction?.let { (dur * it).toLong() } ?: if (current) st.positionMs else dur), color = fg.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("voiceTime-${a.id}"))
                     val unheard = stringResource(R.string.voice_unheard)
                     if (!mine && a.id !in listened) Box(Modifier.padding(start = 6.dp).size(6.dp).background(MaterialTheme.colorScheme.primary, CircleShape).semantics { contentDescription = unheard })
                 }
@@ -169,19 +180,21 @@ fun WaveBars(levels: List<Float>, progress: Float, color: Color, modifier: Modif
 
 /**
  * Micrófono del compositor (vacío): mantener pulsado graba, soltar envía, deslizar a la izquierda cancela, arriba bloquea.
+ * Un toque rápido (soltar antes de [com.tiecoms.app.core.VoiceRules.TAP_MS]) también bloquea: sigue grabando manos libres.
  * [onStart] devuelve false si no hay permiso (entonces se pide y no graba).
  */
 @Composable
-fun MicButton(onStart: () -> Boolean, onRelease: () -> Unit, onCancel: () -> Unit, onLock: () -> Unit, onDrag: (Waveform.Gesture) -> Unit, modifier: Modifier = Modifier) {
+fun MicButton(onStart: () -> Boolean, onRelease: (heldMs: Long) -> Unit, onCancel: () -> Unit, onLock: () -> Unit, onDrag: (Waveform.Gesture) -> Unit, modifier: Modifier = Modifier) {
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
     val label = stringResource(R.string.voice_record)
     Box(modifier.size(52.dp).background(MaterialTheme.colorScheme.primary, CircleShape)
-        .semantics { contentDescription = label; onLongClick(label) { onStart() } }
+        .semantics { contentDescription = label; onLongClick(label) { onStart().also { if (it) onLock() } } }
         .pointerInput(Unit) {
             awaitEachGesture {
                 val down = awaitFirstDown()
                 if (!onStart()) return@awaitEachGesture
+                val downAt = down.uptimeMillis
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 while (true) {
                     val ev = awaitPointerEvent()
@@ -192,7 +205,7 @@ fun MicButton(onStart: () -> Boolean, onRelease: () -> Unit, onCancel: () -> Uni
                     when {
                         g == Waveform.Gesture.CANCEL -> { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onCancel(); break }
                         g == Waveform.Gesture.LOCK -> { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onLock(); break }
-                        !c.pressed -> { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onRelease(); break }
+                        !c.pressed -> { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onRelease(c.uptimeMillis - downAt); break }
                     }
                     c.consume()
                 }
@@ -225,6 +238,24 @@ fun RecordingBar(st: com.tiecoms.app.platform.VoiceRecorder.State, locked: Boole
                 Text(stringResource(if (gesture == Waveform.Gesture.CANCEL) R.string.voice_delete else R.string.voice_slide_cancel), style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+    }
+}
+
+/** Nota grabada sin enviar: duración, el motivo si falló, Reintentar (o Enviar) y Borrar. */
+@Composable
+fun VoiceDraftBar(d: com.tiecoms.app.platform.VoiceDrafts.Draft, busy: Boolean, onRetry: () -> Unit, onDelete: () -> Unit) {
+    Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 16.dp, end = 4.dp).heightIn(min = 52.dp).testTag("voiceDraft"),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Filled.Mic, null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(R.string.voice_draft, Waveform.clock(d.result.durationMs)), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            d.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("voiceDraftError")) }
+        }
+        IconButton(onClick = onDelete, enabled = !busy, modifier = Modifier.testTag("voiceDraftDelete")) { Icon(Icons.Filled.Delete, stringResource(R.string.voice_delete), tint = MaterialTheme.colorScheme.error) }
+        TextButton(onClick = onRetry, enabled = !busy, modifier = Modifier.testTag("voiceDraftRetry")) {
+            Text(stringResource(if (d.error != null) R.string.voice_retry_send else R.string.voice_send), fontWeight = FontWeight.SemiBold)
         }
     }
 }

@@ -4,9 +4,11 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.MediaMetadataRetriever
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.SystemClock
+import com.tiecoms.app.core.VoiceRules
 import com.tiecoms.app.core.Waveform
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +25,8 @@ import java.util.UUID
 /**
  * Grabación de notas de voz (SPEC-v4 §F): AAC en m4a (MPEG_4/AAC), mono, 24 kHz, 32 kbps, como iOS. Muestrea la amplitud
  * cada 80 ms para la onda en vivo, corta a los 15 min y se pausa si otra app (una llamada) toma el audio.
+ * 1.6.2: la duración que se manda es la del archivo (MediaMetadataRetriever), y el archivo vive en filesDir/voice
+ * para poder reintentar el envío si falla (no en caché, que el sistema puede vaciar).
  */
 class VoiceRecorder(private val ctx: Context) {
     data class State(val recording: Boolean = false, val paused: Boolean = false, val elapsedMs: Long = 0, val levels: List<Float> = emptyList())
@@ -45,7 +49,7 @@ class VoiceRecorder(private val ctx: Context) {
 
     fun start(): Boolean {
         if (recorder != null) return true
-        val out = File(ctx.cacheDir, "voice/nota-" + UUID.randomUUID().toString().take(8) + ".m4a").apply { parentFile?.mkdirs() }
+        val out = File(dir(ctx), "nota-" + UUID.randomUUID().toString().take(8) + ".m4a").apply { parentFile?.mkdirs() }
         val r = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(ctx) else @Suppress("DEPRECATION") MediaRecorder()
         return try {
             r.setAudioSource(MediaRecorder.AudioSource.MIC)
@@ -97,21 +101,49 @@ class VoiceRecorder(private val ctx: Context) {
         _state.value = _state.value.copy(paused = false)
     }
 
-    /** Termina y devuelve el archivo (null si fue demasiado corta o falló). */
-    fun stop(minMs: Long = 700): Result? {
+    /** Termina y devuelve el archivo con su duración real (null si hubo menos de medio segundo de audio o falló). */
+    fun stop(): Result? {
         val r = recorder ?: return null
-        val dur = elapsed()
+        val clock = elapsed()
         ticker?.cancel(); recorder = null
         val ok = runCatching { r.stop() }.isSuccess
         runCatching { r.release() }
         abandonFocus()
         _state.value = State()
         val f = file ?: return null
-        if (!ok || dur < minMs || f.length() == 0L) { f.delete(); return null }
-        return Result(f, dur, Waveform.downsample(samples.toList()))
+        file = null
+        return when (val fin = VoiceRules.finish(if (ok) fileDurationMs(f) else null, clock, f.length(), ok)) {
+            is VoiceRules.Finish.Ok -> Result(f, fin.durationMs, Waveform.downsample(samples.toList()))
+            VoiceRules.Finish.TooShort -> { f.delete(); null }
+        }
     }
 
-    fun cancel() { stop(Long.MAX_VALUE) }
+    /** Descarta lo que se esté grabando. */
+    fun cancel() {
+        val r = recorder ?: return
+        ticker?.cancel(); recorder = null
+        runCatching { r.stop() }; runCatching { r.release() }
+        abandonFocus()
+        _state.value = State()
+        file?.delete(); file = null
+    }
+
+    val isRecording: Boolean get() = recorder != null
+
+    companion object {
+        fun dir(ctx: Context) = File(ctx.filesDir, "voice")
+
+        /** Duración real del m4a grabado; null si no se pudo leer. */
+        fun fileDurationMs(f: File): Long? = runCatching {
+            val m = MediaMetadataRetriever()
+            try { m.setDataSource(f.absolutePath); m.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() } finally { runCatching { m.release() } }
+        }.getOrNull()
+
+        /** Notas de hace más de 3 días que nadie reintentó: se borran al abrir el grabador. */
+        fun sweep(ctx: Context, now: Long = System.currentTimeMillis()) {
+            dir(ctx).listFiles()?.filter { now - it.lastModified() > 3L * 86_400_000 }?.forEach { it.delete() }
+        }
+    }
 
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
         when (change) {
@@ -130,4 +162,18 @@ class VoiceRecorder(private val ctx: Context) {
     }
 
     private fun abandonFocus() { focus?.let { f -> runCatching { audio.abandonAudioFocusRequest(f) } }; focus = null }
+}
+
+/**
+ * Notas grabadas que aún no se enviaron, por conversación: el envío falló (413, sin red) o la grabación se cortó al
+ * salir del chat, apagar la pantalla o pasar a segundo plano. Se muestran sobre el compositor con Reintentar y Borrar.
+ * Viven mientras viva el proceso; el archivo queda en filesDir/voice.
+ */
+object VoiceDrafts {
+    data class Draft(val result: VoiceRecorder.Result, val aiConsent: Boolean? = null, val error: String? = null)
+    private val _drafts = MutableStateFlow<Map<String, Draft>>(emptyMap())
+    val drafts: StateFlow<Map<String, Draft>> = _drafts
+    fun put(conversationId: String, d: Draft) { _drafts.value = _drafts.value + (conversationId to d) }
+    fun take(conversationId: String): Draft? = _drafts.value[conversationId]?.also { _drafts.value = _drafts.value - conversationId }
+    fun discard(conversationId: String) { take(conversationId)?.result?.file?.delete() }
 }

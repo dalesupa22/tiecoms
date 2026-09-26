@@ -43,6 +43,25 @@ object Names {
         return if (c.isSide) sideName(t, labels) else t
     }
 
+    /**
+     * Título de las notificaciones: «Empresa - Grupo» (p. ej. «Xertify - General») para las conversaciones de un
+     * espacio; directos y chats grupales (y sus sidechats) llevan su título de siempre. La empresa es la misma que
+     * en el árbol de Grupos (GroupsTree.place / placeWorkspace de la web): tercero → la anfitriona; si no, una empresa
+     * del espacio que no es mía; si no, la relación pendiente (counterpartName); si no, la dueña (la mía).
+     */
+    fun notificationTitle(c: ConversationDTO, data: BootstrapDTO?, internalFallback: String, directFallback: String, labels: Labels = this.labels): String {
+        val title = conversationTitle(c, data, internalFallback, directFallback, labels)
+        return companyOf(c, data)?.let { "$it - $title" } ?: title
+    }
+
+    /** Empresa que va delante del grupo en las notificaciones; null si no es de un espacio conocido. */
+    fun companyOf(c: ConversationDTO, data: BootstrapDTO?): String? {
+        if (data == null || c.isChat || c.workspaceId == null) return null
+        val ws = data.workspaces.firstOrNull { it.id == c.workspaceId } ?: return null
+        val p = GroupsTree.place(data, ws)
+        return (p.pendingName ?: org(data, p.orgId)?.name)?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
     /** Chat grupal sin nombre: primeros nombres de los demás («Mateo, Ana, Laura y 2 más»). */
     fun multiTitle(c: ConversationDTO, data: BootstrapDTO?, labels: Labels = this.labels): String {
         val names = others(c, data).mapNotNull { p -> p.name.trim().split(Regex("\\s+")).firstOrNull()?.takeIf { it.isNotEmpty() } }

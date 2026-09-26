@@ -59,6 +59,8 @@ fun isSpanish(): Boolean = Locale.getDefault().language == "es"
 /** Texto legible de un error del API (el servidor responde en español). */
 fun errorText(ctx: Context, e: Throwable): String = when (e) {
     is NetworkException -> ctx.getString(R.string.err_network)
+    // 413 del proxy (nginx) o del API: el cuerpo no es JSON y el mensaje sería «HTTP 413».
+    is ApiException if e.status == 413 -> ctx.getString(R.string.err_payload_too_large)
     is ApiException -> {
         val key = when (e.code) {
             "unauthorized" -> R.string.err_unauthorized

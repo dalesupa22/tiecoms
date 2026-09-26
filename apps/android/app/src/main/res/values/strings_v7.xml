@@ -38,4 +38,10 @@
     <string name="react_issue_closed">Issue closed</string>
     <string name="react_max">This message already has 20 different emoji. Join one of them.</string>
     <string name="common_and">and</string>
+    <string name="voice_err_too_large">The note wasn’t sent: the server rejected its size. Try again in a moment.</string>
+    <string name="voice_err_network">The note wasn’t sent: no connection. It stays here so you can retry.</string>
+    <string name="voice_draft">Unsent voice note · %1$s</string>
+    <string name="voice_retry_send">Retry</string>
+    <string name="att_camera_unavailable">Couldn’t open the camera.</string>
+    <string name="err_payload_too_large">The server rejected the file size (413). Try again in a moment.</string>
 </resources>

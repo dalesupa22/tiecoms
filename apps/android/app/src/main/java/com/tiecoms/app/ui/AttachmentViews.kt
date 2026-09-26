@@ -1,5 +1,7 @@
 package com.tiecoms.app.ui
 
+import androidx.compose.foundation.combinedClickable
+
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -101,7 +103,9 @@ fun rememberAttachmentImage(a: AttachmentDTO, full: Boolean, px: Int): ImageBitm
  */
 @Composable
 fun AttachmentsBlock(list: List<AttachmentDTO>, fg: Color, onOpenMedia: (Int) -> Unit, onOpenFile: (AttachmentDTO) -> Unit,
-                     mine: Boolean = false, onCreateIssue: ((String) -> Unit)? = {}) {
+                     mine: Boolean = false, onCreateIssue: ((String) -> Unit)? = {},
+                     /** Mantener una foto, video o archivo abre el menú del mensaje (reacciones), como el resto de la burbuja. */
+                     onLongPress: (() -> Unit)? = null) {
     if (list.isEmpty()) return
     val media = list.filter { it.isImage || it.isVideo }
     val voices = list.filter { it.isVoice }
@@ -111,7 +115,7 @@ fun AttachmentsBlock(list: List<AttachmentDTO>, fg: Color, onOpenMedia: (Int) ->
         if (media.size == 1) {
             val a = media[0]
             val ratio = if ((a.width ?: 0) > 0 && (a.height ?: 0) > 0) (a.width!!.toFloat() / a.height!!).coerceIn(0.6f, 1.8f) else 4f / 3f
-            MediaTile(a, Modifier.widthIn(max = 260.dp).fillMaxWidth().aspectRatio(ratio), null) { onOpenMedia(0) }
+            MediaTile(a, Modifier.widthIn(max = 260.dp).fillMaxWidth().aspectRatio(ratio), null, onLongPress) { onOpenMedia(0) }
         } else if (media.size > 1) {
             val shown = media.take(4)
             val extra = media.size - shown.size
@@ -119,21 +123,22 @@ fun AttachmentsBlock(list: List<AttachmentDTO>, fg: Color, onOpenMedia: (Int) ->
                 Row(Modifier.widthIn(max = 260.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     pair.forEachIndexed { c, a ->
                         val i = r * 2 + c
-                        MediaTile(a, Modifier.weight(1f).aspectRatio(1f), if (i == shown.lastIndex && extra > 0) extra else null) { onOpenMedia(i) }
+                        MediaTile(a, Modifier.weight(1f).aspectRatio(1f), if (i == shown.lastIndex && extra > 0) extra else null, onLongPress) { onOpenMedia(i) }
                     }
                     if (pair.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         }
-        files.forEach { FileChip(it, fg) { onOpenFile(it) } }
+        files.forEach { FileChip(it, fg, onLongPress) { onOpenFile(it) } }
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun MediaTile(a: AttachmentDTO, modifier: Modifier, more: Int?, onClick: () -> Unit) {
+private fun MediaTile(a: AttachmentDTO, modifier: Modifier, more: Int?, onLongPress: (() -> Unit)?, onClick: () -> Unit) {
     val img = rememberAttachmentImage(a, full = false, px = 480)
     val label = if (a.isVideo) stringResource(R.string.att_video) else stringResource(R.string.att_photo)
-    Box(modifier.clip(RoundedCornerShape(12.dp)).background(Color(0x22000000)).clickable(onClick = onClick)
+    Box(modifier.clip(RoundedCornerShape(12.dp)).background(Color(0x22000000)).combinedClickable(onClick = onClick, onLongClick = onLongPress)
         .semantics { contentDescription = "$label ${a.name}" }.testTag("att-${a.id}"), contentAlignment = Alignment.Center) {
         if (img != null) Image(img, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         else if (!a.isVideo) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
@@ -144,10 +149,11 @@ private fun MediaTile(a: AttachmentDTO, modifier: Modifier, more: Int?, onClick:
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun FileChip(a: AttachmentDTO, fg: Color, onClick: () -> Unit) {
+private fun FileChip(a: AttachmentDTO, fg: Color, onLongPress: (() -> Unit)?, onClick: () -> Unit) {
     Surface(color = fg.copy(alpha = 0.10f), shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.widthIn(max = 280.dp).clickable(onClick = onClick).testTag("attFile-${a.id}")) {
+        modifier = Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(onClick = onClick, onLongClick = onLongPress).testTag("attFile-${a.id}")) {
         Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp).heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.Description, null, tint = fg)
             Spacer(Modifier.width(8.dp))
@@ -253,11 +259,18 @@ private fun VideoPage(a: AttachmentDTO, active: Boolean) {
 @Composable
 fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.net.Uri>) -> Unit, onEvent: (() -> Unit)? = null, onIssue: (() -> Unit)? = null) {
     val ctx = LocalContext.current
-    var cameraUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    // Saveable: si el sistema recrea la actividad mientras la cámara está abierta, la foto no se pierde.
+    var cameraUri by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<android.net.Uri?>(null) }
+    var cameraFile by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    val container = LocalContainer.current
     val media = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(Attachments.MAX_PER_MESSAGE)) { onPicked(it) }
     val camera = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.TakePicture()) { ok ->
-        cameraUri?.takeIf { ok }?.let { onPicked(listOf(it)) }
+        // Algunas apps de cámara devuelven «cancelado» aunque guardaron la foto: vale si el archivo tiene contenido.
+        val wrote = cameraFile?.let { File(it).length() > 0 } == true
+        cameraUri?.takeIf { ok || wrote }?.let { onPicked(listOf(it)) }
+        if (!ok && !wrote) cameraFile?.let { File(it).delete() }
+        cameraUri = null; cameraFile = null
     }
     val docs = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { onPicked(it.take(Attachments.MAX_PER_MESSAGE)) }
     // El «＋» del compositor (docs/GRUPOS.md): fotos, cámara y archivos; luego Evento y Asunto, creados a mano.
@@ -268,8 +281,8 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
         SheetItem(ctx.getString(R.string.att_camera), "📷", tag = "attCamera") {
             val f = File(ctx.cacheDir, "photos/att-" + java.util.UUID.randomUUID().toString().take(8) + ".jpg").apply { parentFile?.mkdirs() }
             val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
-            cameraUri = uri
-            runCatching { camera.launch(uri) }
+            cameraUri = uri; cameraFile = f.absolutePath
+            runCatching { camera.launch(uri) }.onFailure { container.toast(ctx.getString(R.string.att_camera_unavailable)) }
         },
         SheetItem(ctx.getString(R.string.att_files_pick), "📎", tag = "attFiles") { docs.launch(arrayOf("*/*")) },
     ) + (if (onEvent != null || onIssue != null) listOf(null) else emptyList()) + listOfNotNull(

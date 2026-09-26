@@ -85,6 +85,24 @@ class ReactionsTest {
         assertEquals(ZonedDateTime.of(2026, 9, 27, 9, 0, 0, 0, z), Reactions.lookRemindAt(ZonedDateTime.of(2026, 9, 26, 22, 0, 0, 0, z)))
     }
 
+    @Test fun `reaccionar a una foto sin texto conserva los adjuntos`() {
+        // Regresión «reaccioné a una imagen y se crasheó»: cuerpo vacío, varias fotos, reenviada.
+        val m = TcJson.decodeFromString(MessageDTO.serializer(), """{"id":"m9","conversationId":"c1","seq":9,"authorId":"u2","body":"",
+            "forwarded":{"source":"whatsapp","author":"Pedro"},
+            "attachments":[{"id":"a1","name":"IMG.jpg","contentType":"image/jpeg","sizeBytes":1200,"width":800,"height":600,"url":"/api/v1/attachments/a1"},
+                           {"id":"a2","name":"IMG2.jpg","contentType":"image/jpeg","sizeBytes":1300,"url":"/api/v1/attachments/a2"}],
+            "reactions":[{"emoji":"👍","userIds":["u2"]}]}""")
+        val next = m.copy(reactions = Reactions.toggle(m.reactions, "❤️", "u1", true))
+        val list = upsertMessage(listOf(m), next)
+        assertEquals(1, list.size); assertEquals(2, list[0].attachments.size); assertEquals("", list[0].body)
+        assertEquals(listOf("👍", "❤️"), list[0].reactions.map { it.emoji })
+        assertFalse(Reactions.isJumbo(list[0].body))
+        assertNull(Reactions.clusters(""))
+        // Respuesta del servidor para una foto (message.updated o PUT): se decodifica con sus adjuntos.
+        val r = TcJson.decodeFromString(ReactResult.serializer(), """{"message":{"id":"m9","body":"","attachments":[{"id":"a1","contentType":"image/jpeg"}],"reactions":[{"emoji":"❤️","userIds":["u1"]}]}}""")
+        assertEquals(1, r.message!!.attachments.size)
+    }
+
     // ---------- Decodificación tolerante ----------
     @Test fun `reacciones y reactionActions opcionales`() {
         val old = TcJson.decodeFromString(MessageDTO.serializer(), """{"id":"m","body":"x"}""")

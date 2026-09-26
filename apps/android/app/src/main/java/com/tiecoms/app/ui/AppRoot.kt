@@ -138,10 +138,10 @@ private fun Unreachable() {
 
 @Composable
 fun Logo(modifier: Modifier = Modifier) {
-    // Wordmark transparente; en modo oscuro, la versión con tinta crema.
-    val dark = androidx.compose.foundation.isSystemInDarkTheme()
+    // Logo completo con transparencia real (huecos incluidos): letras tinta en claro (drawable-nodpi)
+    // y letras papel en oscuro (drawable-night-nodpi).
     Box(modifier.padding(4.dp)) {
-        Image(painterResource(if (dark) R.drawable.wordmark_light else R.drawable.wordmark), contentDescription = stringResource(R.string.cd_logo), modifier = Modifier.fillMaxWidth())
+        Image(painterResource(R.drawable.chaggu_logo), contentDescription = stringResource(R.string.cd_logo), modifier = Modifier.fillMaxWidth())
     }
 }
 

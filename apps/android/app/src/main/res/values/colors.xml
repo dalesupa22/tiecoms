@@ -4,7 +4,7 @@
     <color name="ic_launcher_background">#17161F</color>
     <color name="brand_orange">#FF5A36</color>
     <color name="cream">#FDFAF7</color>
-    <color name="ink">#17161F</color>
     <color name="paper">#F6F3EC</color>
-    <color name="splash_bg">#FDFAF7</color>
+    <!-- Splash (sistema y animado): tinta en claro y en oscuro. -->
+    <color name="splash_bg">#17161F</color>
 </resources>

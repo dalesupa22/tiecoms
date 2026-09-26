@@ -15,9 +15,17 @@ import com.tiecoms.app.ui.theme.TieComsTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Splash del sistema (crema con el TC) → splash animado en Compose, con un fundido rápido.
+        // Splash del sistema (símbolo sin rayitas sobre tinta) → splash animado de ignición en Compose,
+        // que arranca con el mismo símbolo en el mismo sitio; el del sistema se quita con un fundido rápido.
         val system = installSplashScreen()
         super.onCreate(savedInstanceState)
+        // Solo depuración (capturas): `--ez holdSystemSplash true` deja el splash del sistema en pantalla;
+        // `--ef splashFreeze 0.45` congela el splash animado en ese segundo (tocar lo cierra).
+        if (BuildConfig.DEBUG && savedInstanceState == null) {
+            container.holdSystemSplash = intent?.getBooleanExtra("holdSystemSplash", false) == true
+            container.splashFreezeAt = intent?.takeIf { it.hasExtra("splashFreeze") }?.getFloatExtra("splashFreeze", 0f)
+            if (container.holdSystemSplash) system.setKeepOnScreenCondition { container.holdSystemSplash }
+        }
         system.setOnExitAnimationListener { v ->
             v.view.animate().alpha(0f).setDuration(150).withEndAction { v.remove() }.start()
         }

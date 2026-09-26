@@ -95,6 +95,10 @@ class AppContainer(private val app: Application) {
     /** Diagnóstico (pruebas): reloj de uptime al primer fotograma del splash y al terminar. */
     @Volatile var splashStartedAt = 0L
     @Volatile var splashEndedAt = 0L
+    /** Solo depuración: congela el splash animado en este segundo de la coreografía (capturas). */
+    @Volatile var splashFreezeAt: Float? = null
+    /** Solo depuración: mantiene el splash del sistema en pantalla (capturas). */
+    @Volatile var holdSystemSplash = false
 
     /** Texto compartido desde otra app, a la espera de elegir conversación. */
     @Volatile var shareDraft: DeepLink.Share? = null
@@ -124,7 +128,7 @@ class AppContainer(private val app: Application) {
         // Títulos de chats grupales sin nombre, en el idioma del teléfono (código puro de core/Names).
         Names.labels = Names.Labels(app.getString(R.string.chat_group_chat), app.getString(R.string.chat_and_more), app.getString(R.string.side_default_name))
         notifier.ensureChannel()
-        sounds.hashCode() // precarga SoundPool: el sonido del splash debe estar listo en t = 0,3 s
+        sounds.hashCode() // precarga SoundPool: el sonido del splash debe estar listo en t = 0,35 s
         scope.launch { _client.value.start() }
         scope.launch { client.flatMapLatest { it.signals }.collect { onSignal(it) } }
         // Direct Share (SPEC-v4 §B): las conversaciones recientes como atajos de la hoja de compartir.

@@ -6,11 +6,12 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 
-    <!-- Splash del sistema (Android 12+ y compat): símbolo de Chaggu sobre círculo tinta; da paso al splash animado. -->
+    <!-- Splash del sistema (Android 12+ y compat): símbolo de Chaggu sin rayitas sobre tinta, sin círculo de color.
+         splash_icon es el lienzo de 288 dp con la capa (176 dp) centrada: las burbujas caben en el círculo de 192 dp.
+         Da paso al splash animado, que empieza con el mismo símbolo en el mismo sitio. -->
     <style name="Theme.TieComs.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_bg</item>
-        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
-        <item name="windowSplashScreenIconBackgroundColor">@color/ink</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
         <item name="windowSplashScreenAnimationDuration">200</item>
         <item name="postSplashScreenTheme">@style/Theme.TieComs</item>
     </style>

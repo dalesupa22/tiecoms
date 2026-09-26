@@ -1,9 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Generado con tools/strings_v2.py: textos de la web (apps/web/src/i18n.ts). -->
 <resources>
-    <string name="splash_line1">Connects humans, companies &amp; bots</string>
-    <string name="splash_line2">Every company. Every channel.</string>
-    <string name="splash_line3">One thread.</string>
+    <string name="splash_slogan">Connects humans, companies &amp; bots</string>
     <string name="splash_a11y">Chaggu. Tap to continue.</string>
     <string name="nav_home">Home</string>
     <string name="nav_issues">Issues</string>

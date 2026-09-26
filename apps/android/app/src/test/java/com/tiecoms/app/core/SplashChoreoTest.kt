@@ -3,101 +3,124 @@ package com.tiecoms.app.core
 import com.tiecoms.app.core.SplashChoreo.Mode
 import com.tiecoms.app.core.SplashChoreo.Phase
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.hypot
 
-/** La coreografía del splash es una función pura del tiempo (SPEC-v2 §4): se prueba fase a fase. */
+/** La coreografía del splash de «ignición» es una función pura del tiempo: se prueba tramo a tramo. */
 class SplashChoreoTest {
-    private fun f(t: Float, ready: Boolean = true, mode: Mode = Mode.FULL) = SplashChoreo.frame(t, ready, 0f, mode)
+    private fun f(t: Float, mode: Mode = Mode.FULL) = SplashChoreo.frame(t, mode)
     private val eps = 1e-3f
 
-    @Test fun `fases en los tiempos de la SPEC`() {
-        assertEquals(Phase.PEOPLE, f(0.10f).phase)
-        assertEquals(Phase.THREAD, f(0.50f).phase)
-        assertEquals(Phase.KNOT, f(1.10f).phase)
-        assertEquals(Phase.LOGO, f(1.50f).phase)
-        assertEquals(Phase.SLOGAN, f(2.00f).phase)
-        assertEquals(Phase.EXIT, f(2.50f).phase)
-        assertEquals(Phase.DONE, f(2.80f).phase)
+    @Test fun `fases en los tiempos de la tabla`() {
+        assertEquals(Phase.STILL, f(0.10f).phase)
+        assertEquals(Phase.IGNITION, f(0.40f).phase)
+        assertEquals(Phase.SLOGAN, f(1.00f).phase)
+        assertEquals(Phase.EXIT, f(1.45f).phase)
+        assertEquals(Phase.DONE, f(1.60f).phase)
     }
 
-    @Test fun `personas aparecen con 70 ms de retraso y resorte`() {
-        val t = 0.05f
-        val fr = f(t)
-        assertTrue(fr.nodeScale[0] > fr.nodeScale[1])
-        assertEquals(0f, f(0.0f).nodeScale[0], eps)
-        assertEquals(0f, f(0.069f).nodeScale[1], eps)
-        assertTrue(f(0.45f).nodeScale.all { it > 0.95f })
-        // El resorte rebota por encima de 1 antes de asentarse.
-        assertTrue((0..45).map { f(it / 100f).nodeScale[0] }.max() > 1.0f)
-        assertEquals(5, SplashChoreo.PEOPLE.size)
-        assertEquals(listOf("SR", "TB", "LP", "KA", "MG"), SplashChoreo.PEOPLE.map { it.initials })
+    @Test fun `el primer cuadro es identico al splash del sistema`() {
+        val first = f(SplashChoreo.startTime(Mode.FULL))
+        assertEquals(0f, SplashChoreo.startTime(Mode.FULL), eps)
+        assertEquals(1f, first.orangeScale, eps)
+        assertEquals(0f, first.sparksAlpha, eps)
+        assertEquals(0f, first.sloganAlpha, eps)
+        assertEquals(1f, first.exitAlpha, eps)
+        assertEquals(1f, first.exitScale, eps)
+        // Quieto hasta que empieza el pop.
+        assertEquals(1f, f(0.199f).orangeScale, eps)
     }
 
-    @Test fun `el hilo se dibuja entre 300 y 1000 ms y anilla cada nodo al pasar`() {
-        assertEquals(0f, f(0.29f).rope, eps)
-        assertEquals(0.5f, f(0.65f).rope, 0.01f) // ease-in-out: mitad del recorrido a mitad de tiempo
-        assertEquals(1f, f(1.0f).rope, eps)
-        val reach = (0 until 5).map { SplashChoreo.nodeReachedAt(it) }
-        assertEquals(SplashChoreo.ROPE_START, reach.first(), 0.01f)
-        assertEquals(SplashChoreo.ROPE_END, reach.last(), 0.01f)
-        assertTrue(reach.zipWithNext().all { (a, b) -> b > a })
-        assertEquals(0f, f(reach[2] - 0.01f).ringScale[2], eps)
-        assertEquals(1.25f, f(reach[2] + 0.001f).ringScale[2], 0.02f)
-        assertEquals(1f, f(reach[2] + 0.3f).ringScale[2], 0.02f)
-        assertEquals(0.30f, SplashChoreo.SOUND_AT, eps)
+    @Test fun `el lienzo cabe en el icono del sistema con las burbujas dentro del circulo de 192 dp`() {
+        // Geometría del SVG (lienzo de 780 u con origen en -10,-140): la esquina redondeada de la burbuja
+        // papel (centro 118,118, radio 118) es el punto más lejano del centro del lienzo (380,250).
+        val farthest = (hypot(380.0 - 118.0, 250.0 - 118.0) + 118.0) / 780.0
+        assertTrue(farthest * SplashChoreo.CANVAS_DP <= 96.0)
+        assertTrue(SplashChoreo.CANVAS_DP <= 288f)
     }
 
-    @Test fun `se amarra girando 20 grados y los nodos se desvanecen`() {
-        assertEquals(0f, f(1.0f).gather, eps)
-        assertEquals(1f, f(1.35f).gather, eps)
-        assertEquals(20f, f(1.40f).rotationDeg, eps)
-        assertTrue(f(1.35f).nodeAlpha.all { it <= eps })
-        assertEquals(0f, f(1.40f).rope, eps)
-        assertEquals(1.02f, SplashChoreo.HAPTIC_AT, eps)
+    @Test fun `la burbuja naranja hace pop 1 a 1,10 a 1 entre 0,20 y 0,55 s`() {
+        assertEquals(1f, f(0.20f).orangeScale, eps)
+        val peakT = SplashChoreo.POP_START + SplashChoreo.POP_PEAK_AT * (SplashChoreo.POP_END - SplashChoreo.POP_START)
+        assertEquals(1.10f, f(peakT).orangeScale, eps)
+        assertTrue((20..55).map { f(it / 100f).orangeScale }.all { it in 1f..1.10f + eps })
+        assertEquals(1f, f(0.55f).orangeScale, eps)
+        assertEquals(1f, f(1.0f).orangeScale, eps)
+        assertEquals(0.5f, SplashChoreo.POP_PIVOT_X, eps); assertEquals(0.5f, SplashChoreo.POP_PIVOT_Y, eps)
     }
 
-    @Test fun `nace el logo con pulso, chispas, resorte y tinta de izquierda a derecha`() {
-        assertEquals(0f, f(1.29f).orangeAlpha, eps)
-        assertTrue(f(1.40f).pulseAlpha > 0f)
-        assertTrue(f(1.50f).sparks > 0f)
-        assertEquals(0f, f(1.96f).sparks, eps)
-        assertEquals(0.8f, f(1.30f).orangeScale, 0.01f)
-        assertEquals(1f, f(1.85f).orangeScale, 0.01f)
-        assertEquals(0f, f(1.40f).inkReveal, eps)
-        assertEquals(1f, f(1.95f).inkReveal, eps)
-        assertTrue(f(1.70f).inkReveal in 0.3f..0.8f)
-        assertEquals(10, SplashChoreo.SPARKS)
-        assertEquals(0.728f, SplashChoreo.KNOT_FX, eps); assertEquals(0.474f, SplashChoreo.KNOT_FY, eps)
+    @Test fun `las rayitas se encienden y crecen de 0,4 a 1 entre 0,35 y 0,70 s con sonido y vibracion`() {
+        assertEquals(0f, f(0.35f).sparksAlpha, eps)
+        assertEquals(0.4f, f(0.35f).sparksScale, eps)
+        val mid = f(0.50f)
+        assertTrue(mid.sparksAlpha in 0.1f..0.99f && mid.sparksScale in 0.41f..0.99f)
+        assertEquals(1f, f(0.70f).sparksAlpha, eps)
+        assertEquals(1f, f(0.70f).sparksScale, eps)
+        assertEquals(0.83f, SplashChoreo.SPARKS_PIVOT_X, eps); assertEquals(0.17f, SplashChoreo.SPARKS_PIVOT_Y, eps)
+        assertEquals(0.35f, SplashChoreo.FEEDBACK_AT, eps)
+        assertTrue(SplashChoreo.crossed(0.34f, 0.36f, SplashChoreo.FEEDBACK_AT))
+        assertFalse(SplashChoreo.crossed(0.36f, 0.40f, SplashChoreo.FEEDBACK_AT))
     }
 
-    @Test fun `eslogan sube 8 pt y aparece`() {
-        assertEquals(0f, f(1.84f).sloganAlpha[0], eps)
-        assertEquals(8f, f(1.85f).sloganOffset[0], eps)
-        assertEquals(1f, f(2.40f).sloganAlpha[2], eps)
-        assertEquals(0f, f(2.40f).sloganOffset[2], eps)
+    @Test fun `el eslogan aparece al 80 por ciento subiendo 8 dp entre 0,55 y 0,95 s`() {
+        assertEquals(0f, f(0.55f).sloganAlpha, eps)
+        assertEquals(8f, f(0.55f).sloganOffsetDp, eps)
+        assertEquals(0.8f, f(0.95f).sloganAlpha, eps)
+        assertEquals(0f, f(0.95f).sloganOffsetDp, eps)
+        assertEquals(0.8f, f(1.29f).sloganAlpha, eps)
     }
 
-    @Test fun `sale solo si la app ya cargo y si no espera con un punto que late`() {
-        val out = f(2.60f)
-        assertTrue(out.exitScale > 1f && out.exitScale <= 1.06f)
-        assertTrue(out.exitAlpha < 1f)
-        val wait = SplashChoreo.frame(2.40f, ready = false, waited = 0.2f)
-        assertEquals(Phase.SLOGAN, wait.phase)
-        assertEquals(1f, wait.exitAlpha, eps)
-        assertTrue(wait.waitingDot > 0f)
-        assertEquals(1.06f, f(2.75f).exitScale, eps)
-        assertEquals(6f, SplashChoreo.MAX_WAIT, eps)
+    @Test fun `sale entre 1,30 y 1,60 s con fundido`() {
+        assertEquals(1f, f(1.30f).exitAlpha, eps)
+        val out = f(1.45f)
+        assertTrue(out.exitAlpha in 0.01f..0.99f)
+        assertTrue(out.exitScale > 1f && out.exitScale < SplashChoreo.EXIT_SCALE)
+        assertEquals(0f, f(1.60f).exitAlpha, eps)
     }
 
-    @Test fun `version corta para deep link en frio y reducida`() {
-        assertEquals(SplashChoreo.LOGO_START, SplashChoreo.timelineTime(0f, Mode.SHORT), eps)
-        assertEquals(SplashChoreo.TOTAL, SplashChoreo.timelineTime(1.2f, Mode.SHORT), eps)
-        assertTrue(SplashChoreo.duration(Mode.SHORT) <= 1.2f)
-        val r = f(0.2f, mode = Mode.REDUCED)
-        assertEquals(0f, r.sparks, eps); assertEquals(0f, r.rope, eps)
-        assertTrue(r.nodeAlpha.all { it == 0f })
-        assertEquals(0.5f, r.orangeAlpha, 0.01f)
-        assertEquals(Phase.DONE, f(1.3f, mode = Mode.REDUCED).phase)
+    @Test fun `si la app no esta lista espera en el ultimo cuadro hasta 6 s`() {
+        var t = 0f
+        repeat(200) { t = SplashChoreo.step(t, 0.016f, canExit = false) }
+        assertEquals(SplashChoreo.EXIT_START, t, eps)
+        assertEquals(Phase.EXIT, f(t).phase)
+        assertEquals(1f, f(t).exitAlpha, eps) // último cuadro, todavía sin salir
+        assertFalse(SplashChoreo.canExit(ready = false, real = 5.9f))
+        assertTrue(SplashChoreo.canExit(ready = false, real = 6.0f))
+        assertTrue(SplashChoreo.canExit(ready = true, real = 0.1f))
+        // Al cargar, la salida arranca desde donde esperaba.
+        assertEquals(SplashChoreo.EXIT_START + 0.1f, SplashChoreo.step(t, 0.1f, canExit = true), eps)
+    }
+
+    @Test fun `tocar adelanta a la salida`() {
+        assertEquals(SplashChoreo.EXIT_START + 0.016f, SplashChoreo.step(0.3f, 0.016f, canExit = true, skip = true), eps)
+        assertEquals(SplashChoreo.EXIT_START, SplashChoreo.step(0.3f, 0.016f, canExit = false, skip = true), eps)
+        // Ya saliendo, tocar no retrocede.
+        assertEquals(1.51f, SplashChoreo.step(1.5f, 0.01f, canExit = true, skip = true), eps)
+    }
+
+    @Test fun `arranque por enlace empieza en 0,7 s sin volver a sonar`() {
+        assertEquals(0.70f, SplashChoreo.startTime(Mode.SHORT), eps)
+        val s = f(SplashChoreo.startTime(Mode.SHORT), Mode.SHORT)
+        assertEquals(1f, s.sparksAlpha, eps)
+        assertFalse(SplashChoreo.crossed(0.70f, 0.72f, SplashChoreo.FEEDBACK_AT))
+        // Dura 0,9 s en total.
+        var t = SplashChoreo.startTime(Mode.SHORT); var n = 0
+        while (f(t, Mode.SHORT).phase != Phase.DONE) { t = SplashChoreo.step(t, 0.01f, canExit = true); n++ }
+        assertEquals(90f, n.toFloat(), 1.5f)
+    }
+
+    @Test fun `con animaciones reducidas no hay escalas, solo fundidos`() {
+        for (i in 0..160) {
+            val r = f(i / 100f, Mode.REDUCED)
+            assertEquals(1f, r.orangeScale, eps)
+            assertEquals(1f, r.sparksScale, eps)
+            assertEquals(1f, r.exitScale, eps)
+            assertEquals(0f, r.sloganOffsetDp, eps)
+        }
+        assertEquals(f(0.5f).sparksAlpha, f(0.5f, Mode.REDUCED).sparksAlpha, eps)
+        assertEquals(f(0.8f).sloganAlpha, f(0.8f, Mode.REDUCED).sloganAlpha, eps)
+        assertEquals(f(1.45f).exitAlpha, f(1.45f, Mode.REDUCED).exitAlpha, eps)
     }
 }

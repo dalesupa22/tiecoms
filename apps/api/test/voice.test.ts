@@ -40,7 +40,7 @@ async function signup(name: string, orgInviteToken?: string): Promise<Actor> {
 const WEBM = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.from('webm-opus-falso-'.repeat(20))]);
 const M4A = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypM4A \0\0\0\0M4A mp42isom', 'latin1'), Buffer.from('aac'.repeat(50))]);
 const voiceUpload = (a: Actor, conv: string, body: Buffer, type: string, extra: Record<string, string> = {}) =>
-  call(`/conversations/${conv}/attachments`, { token: a.token, raw: body, headers: { 'x-file-name': 'nota.webm', 'x-file-type': type, 'x-voice-note': '1', 'x-duration-ms': '52000', ...extra } });
+  call(`/conversations/${conv}/attachments`, { token: a.token, raw: body, headers: { 'x-file-name': 'nota.webm', 'x-file-type': type, 'x-voice-note': '1', 'x-ai-consent': '1', 'x-duration-ms': '52000', ...extra } });
 
 describe('utilidades de voz', () => {
   it('reconoce formatos de audio, arma la onda y parte el PCM', () => {
@@ -162,12 +162,26 @@ describe('notas de voz', () => {
     const failed = await waitTranscript(m.id, 'failed');
     expect(failed.transcript.text).toBeNull();
     expect((await call(`/attachments/${up.json.id}/transcribe`, { token: extra.token, body: {} })).status).toBe(404);
-    const retry = await call(`/attachments/${up.json.id}/transcribe`, { token: beto.token, body: {} });
+    expect((await call(`/attachments/${up.json.id}/transcribe`, { token: beto.token, body: {} })).status).toBe(403);
+    const retry = await call(`/attachments/${up.json.id}/transcribe`, { token: beto.token, body: { aiConsent: true } });
     expect(retry.status).toBe(200);
     expect(retry.json.transcript.status).toBe('pending');
     const again = updates.length;
     await waitTranscript(m.id, 'done');
     expect(updates.length).toBeGreaterThan(again);
+  });
+
+  it('sin consentimiento envía y convierte el audio localmente sin transferirlo a IA; ni un participante puede habilitarlo al reintentar', async () => {
+    const before = ((await (await fetch(`${FAKE}/sent`)).json()) as any[]).length;
+    const up = await voiceUpload(ana, chatId, WEBM, 'audio/webm', { 'x-ai-consent': '0' });
+    const m = (await call(`/conversations/${chatId}/messages`, { token: ana.token, body: { clientMessageId: randomUUID(), body: '', attachmentIds: [up.json.id] } })).json.message;
+    expect(m.attachments[0].transcript.status).toBe('disabled');
+    const converted = await waitTranscript(m.id, 'disabled');
+    expect(converted.contentType).toBe('audio/mp4');
+    expect((await call(`/attachments/${up.json.id}?original=1`, { token: beto.token })).buf.equals(WEBM)).toBe(true);
+    expect((await call(`/attachments/${up.json.id}/transcribe`, { token: beto.token, body: { aiConsent: true } })).status).toBe(403);
+    expect((await call(`/attachments/${up.json.id}/transcribe`, { token: ana.token, body: { aiConsent: true } })).status).toBe(403);
+    expect(((await (await fetch(`${FAKE}/sent`)).json()) as any[]).length).toBe(before);
   });
 
   it('valida el audio y la duración', async () => {

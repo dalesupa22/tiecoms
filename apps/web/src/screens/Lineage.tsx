@@ -71,17 +71,25 @@ function ReturnDialog({ conv, parentName, onClose }: { conv: ConversationDTO; pa
   const side = conv.deriveKind === 'side';
   const [summary, setSummary] = useState(side ? '' : lastText);
   const [source, setSource] = useState<'ai' | 'fallback' | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Sidechat: resumen sugerido por el API (DeepSeek o las últimas respuestas); editable antes de publicar.
+  // La apertura solo obtiene el respaldo local. La IA necesita una acción explícita.
   useEffect(() => {
     if (!side) return;
     let alive = true;
-    client.request<{ summary: string; source: 'ai' | 'fallback' }>(`/conversations/${conv.id}/return/suggest`, { method: 'POST', json: {} })
+    client.request<{ summary: string; source: 'ai' | 'fallback' }>(`/conversations/${conv.id}/return/suggest`, { method: 'POST', json: { aiConsent: false } })
       .then((r) => { if (alive) { setSummary((s) => s || r.summary); setSource(r.source); } })
       .catch(() => { if (alive) { setSummary((s) => s || lastText); setSource('fallback'); } });
     return () => { alive = false; };
   }, [conv.id]);
+  async function suggestWithAi() {
+    setAiBusy(true); setError(null);
+    try {
+      const r = await client.request<{ summary: string; source: 'ai' | 'fallback' }>(`/conversations/${conv.id}/return/suggest`, { method: 'POST', json: { aiConsent: true } });
+      setSummary(r.summary); setSource(r.source);
+    } catch (e) { setError(errorText(e)); } finally { setAiBusy(false); }
+  }
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true); setError(null);
@@ -96,8 +104,12 @@ function ReturnDialog({ conv, parentName, onClose }: { conv: ConversationDTO; pa
     <Modal title={conv.deriveKind === 'side' ? t('side.return') : t('lin.returnTitle')} onClose={onClose}>
       <p className="muted" style={{ margin: 0 }}>{conv.deriveKind === 'side' ? t('side.returnBody', { name: parentName }) : t('lin.returnBody', { name: parentName })}</p>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {side && <div className="card" style={{ padding: 10 }}>
+          <p className="small" style={{ marginTop: 0 }}>{t('ai.sideDisclosure')}</p>
+          <button type="button" className="btn small" disabled={busy || aiBusy || source === null} onClick={() => void suggestWithAi()}>{aiBusy ? t('side.suggesting') : t('ai.allowSummary')}</button>
+        </div>}
         {side && <div className="small muted">{source === null ? t('side.suggesting') : source === 'ai' ? `✨ ${t('side.suggested')} · ${t('side.returnEdit')}` : `${t('side.suggestedFallback')} · ${t('side.returnEdit')}`}</div>}
-        <textarea className="input" rows={5} required minLength={2} maxLength={4000} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder={side && source === null ? t('side.suggesting') : undefined} />
+        <textarea className="input" rows={5} disabled={aiBusy} required minLength={2} maxLength={4000} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder={side && source === null ? t('side.suggesting') : undefined} />
         {side && summary.trim() && (
           <div>
             <div className="eyebrow" style={{ marginBottom: 6 }}>{t('side.previewInGroup')}</div>
@@ -108,7 +120,7 @@ function ReturnDialog({ conv, parentName, onClose }: { conv: ConversationDTO; pa
           </div>
         )}
         {error && <div className="error">{error}</div>}
-        <div className="modal-actions"><button type="button" className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" disabled={busy || summary.trim().length < 2}>{side ? t('side.publish') : t('lin.returnSend')}</button></div>
+        <div className="modal-actions"><button type="button" className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" disabled={busy || aiBusy || summary.trim().length < 2}>{side ? t('side.publish') : t('lin.returnSend')}</button></div>
       </form>
     </Modal>
   );

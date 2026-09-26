@@ -60,7 +60,7 @@ export async function buildHttp() {
   await app.register(cors, {
     origin: [config.publicOrigin, ...config.extraOrigins],
     credentials: true,
-    allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract', 'x-file-type'],
+    allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract', 'x-file-type', 'x-file-name', 'x-voice-note', 'x-duration-ms', 'x-waveform', 'x-ai-consent'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     maxAge: 600,
   });
@@ -190,7 +190,7 @@ export async function buildHttp() {
       return attachments.upload(req.userId, z.uuid().parse(req.params.id), {
         body: req.body, name: String(req.headers['x-file-name'] ?? ''), type: String(req.headers['x-file-type'] ?? ''),
         // Nota de voz: x-voice-note: 1, x-duration-ms y x-waveform (≤ 64 valores 0–1 separados por comas).
-        voice: req.headers['x-voice-note'] === '1', durationMs: req.headers['x-duration-ms'] as string | undefined, waveform: req.headers['x-waveform'] as string | undefined,
+        voice: req.headers['x-voice-note'] === '1', aiConsent: req.headers['x-ai-consent'] === '1', durationMs: req.headers['x-duration-ms'] as string | undefined, waveform: req.headers['x-waveform'] as string | undefined,
         lang: /^\s*en\b/i.test(String(req.headers['accept-language'] ?? '')) ? 'en' : 'es',
       });
     });
@@ -199,7 +199,7 @@ export async function buildHttp() {
       return attachments.uploadThumb(req.userId, z.uuid().parse(req.params.id), req.body);
     });
     priv.post<{ Params: { id: string } }>('/api/v1/attachments/:id/transcribe', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
-      async (req) => voice.retryTranscription(req.userId, z.uuid().parse(req.params.id)));
+      async (req) => voice.retryTranscription(req.userId, z.uuid().parse(req.params.id), z.object({ aiConsent: z.boolean().optional() }).parse(req.body ?? {}).aiConsent === true));
     for (const thumb of [false, true]) {
       priv.get<{ Params: { id: string }; Querystring: { download?: string; original?: string } }>(`/api/v1/attachments/:id${thumb ? '/thumb' : ''}`, async (req, reply) => {
         const f = await attachments.fetchFile(req.userId, z.uuid().parse(req.params.id), thumb, req.query.original === '1');
@@ -306,7 +306,7 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/side', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
       async (req) => ws.createSideConversation(req.userId, z.uuid().parse(req.params.id), SideConversationInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/return/suggest', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) =>
-      ws.suggestSideReturn(req.userId, z.uuid().parse(req.params.id), /^\s*en\b/i.test(String(req.headers['accept-language'] ?? '')) ? 'en' : 'es'));
+      ws.suggestSideReturn(req.userId, z.uuid().parse(req.params.id), /^\s*en\b/i.test(String(req.headers['accept-language'] ?? '')) ? 'en' : 'es', z.object({ aiConsent: z.boolean().optional() }).parse(req.body ?? {}).aiConsent === true));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/return', async (req) => ws.returnResult(req.userId, req.params.id, ReturnResultInput.parse(req.body).summary));
     // Asuntos
     priv.get<{ Querystring: { workspaceId?: string; conversationId?: string; mine?: string; open?: string } }>('/api/v1/issues', async (req) => ({

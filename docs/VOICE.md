@@ -27,3 +27,9 @@ Sin `INWORLD_API_KEY`: `transcript.status = 'disabled'` y la nota se envía y se
 Local: el coordinador copia `.secrets/inworld_api_key` y `.secrets/deepseek_api_key` al `.env` de pruebas.
 
 Errores → `failed`; reintento con `POST /api/v1/attachments/:id/transcribe` (autor o quien pueda escribir en la conversación).
+
+## Consentimiento de IA
+
+La app explica los proveedores y los datos antes de cada nota. Solo una aceptación explícita añade `x-ai-consent: 1` a la subida. El servidor guarda esa decisión por adjunto; sin ella (incluidos clientes anteriores) no envía audio ni texto a Inworld o DeepSeek. El audio se envía y puede convertirse a AAC localmente sin IA. El consentimiento no se hereda al reenviar un adjunto.
+
+El reintento `POST /api/v1/attachments/:id/transcribe` exige `{ "aiConsent": true }` y que el autor autorizara IA en la subida original; no permite que otra persona convierta una negativa en aceptación. `POST /api/v1/conversations/:id/return/suggest` solo usa DeepSeek con `{ "aiConsent": true }`; sin ello devuelve las últimas respuestas para editar manualmente.

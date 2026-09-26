@@ -129,7 +129,7 @@ function cleanName(raw: string | undefined): string {
 
 // ---------- Subir ----------
 export async function upload(userId: string, conversationId: string, input: {
-  body: Buffer; name?: string; type?: string; voice?: boolean; durationMs?: string; waveform?: string; lang?: 'es' | 'en';
+  body: Buffer; name?: string; type?: string; voice?: boolean; durationMs?: string; waveform?: string; lang?: 'es' | 'en'; aiConsent?: boolean;
 }) {
   if (!Buffer.isBuffer(input.body) || !input.body.length) throw badRequest('Falta el archivo');
   if (input.body.length > MAX_ATTACHMENT_BYTES) throw new ApiError(413, 'too_large', 'El archivo pesa más de 25 MB');
@@ -152,7 +152,7 @@ export async function upload(userId: string, conversationId: string, input: {
 }
 
 /** Nota de voz: audio (m4a/AAC, webm/opus, ogg, mp3, wav, flac) de hasta 15 min. La transcripción empieza al enviarla. */
-async function uploadVoice(userId: string, conversationId: string, input: { body: Buffer; name?: string; type?: string; durationMs?: string; waveform?: string; lang?: 'es' | 'en' }) {
+async function uploadVoice(userId: string, conversationId: string, input: { body: Buffer; name?: string; type?: string; durationMs?: string; waveform?: string; lang?: 'es' | 'en'; aiConsent?: boolean }) {
   const declared = String(input.type ?? '').toLowerCase().split(';')[0]!.trim();
   const sniffed = sniffAudio(input.body);
   if (!sniffed && !declared.startsWith('audio/')) throw badRequest('Una nota de voz debe ser audio');
@@ -168,7 +168,7 @@ async function uploadVoice(userId: string, conversationId: string, input: { body
     `INSERT INTO attachments (id, conversation_id, owner_id, name, content_type, size_bytes, s3_key, kind, duration_ms, waveform, transcript)
      VALUES ($1,$2,$3,$4,$5,$6,$7,'voice',$8,$9,$10) RETURNING *`,
     [id, conversationId, userId, cleanName(input.name || `nota-de-voz.${ext}`), contentType, input.body.length, key, durationMs,
-      JSON.stringify(parseWaveform(input.waveform)), JSON.stringify({ status: 'new', requestedLanguage: input.lang ?? 'es' })],
+      JSON.stringify(parseWaveform(input.waveform)), JSON.stringify({ status: 'new', requestedLanguage: input.lang ?? 'es', aiConsent: input.aiConsent === true, ...(input.aiConsent === true ? { aiConsentAt: new Date().toISOString() } : {}) })],
   );
   return toDTO(rows[0]);
 }
@@ -208,9 +208,10 @@ export async function claimForMessage(c: Tx, userId: string, conversationId: str
     for (const id of own) {
       let r = byId.get(id);
       if (r.kind === 'voice' && (!r.transcript || r.transcript.status === 'new')) {
-        const status = transcriptionEnabled() ? 'pending' : 'disabled';
+        const status = r.transcript?.aiConsent === true && transcriptionEnabled() ? 'pending' : 'disabled';
         r = (await c.query('UPDATE attachments SET transcript = transcript || $2::jsonb WHERE id = $1 RETURNING *', [id, JSON.stringify({ status })])).rows[0];
-        if (status === 'pending') await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('voice.transcribe', $1, 1)", [JSON.stringify({ attachmentId: id })]);
+        // Siempre prepara la variante AAC local; el worker verifica el consentimiento antes de llamar a IA.
+        await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('voice.transcribe', $1, 1)", [JSON.stringify({ attachmentId: id })]);
       }
       out.push({ id, dto: toDTO(r) });
     }
@@ -232,7 +233,7 @@ export async function claimForMessage(c: Tx, userId: string, conversationId: str
                                   kind, duration_ms, waveform, transcript, play_key, play_type)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
         [conversationId, userId, r.name, r.content_type, r.size_bytes, r.width, r.height, r.s3_key, r.thumb_key, r.thumb_type,
-          r.kind, r.duration_ms, JSON.stringify(r.waveform), JSON.stringify(r.transcript), r.play_key, r.play_type],
+          r.kind, r.duration_ms, JSON.stringify(r.waveform), JSON.stringify(r.transcript ? { ...r.transcript, status: r.transcript.status === 'done' ? 'done' : 'disabled', aiConsent: false, aiConsentAt: null } : null), r.play_key, r.play_type],
       );
       out.push({ id: copy.rows[0].id, dto: toDTO(copy.rows[0]) });
     }

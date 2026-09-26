@@ -85,7 +85,14 @@ describe('sidechats', () => {
   });
 
   it('return/suggest: resumen de DeepSeek con contexto, respaldo si falla, y solo miembros', async () => {
-    const r = await call(`/conversations/${sideId}/return/suggest`, { token: ana.token, body: {} });
+    const before = ((await (await fetch(`${FAKE_AI}/sent`)).json()) as any[]).length;
+    for (const body of [{}, { aiConsent: false }]) {
+      const manual = await call(`/conversations/${sideId}/return/suggest`, { token: ana.token, body });
+      expect(manual.status).toBe(200);
+      expect(manual.json).toEqual({ summary: 'La cláusula 4, tope del 10 %.', source: 'fallback' });
+    }
+    expect(((await (await fetch(`${FAKE_AI}/sent`)).json()) as any[]).length).toBe(before);
+    const r = await call(`/conversations/${sideId}/return/suggest`, { token: ana.token, body: { aiConsent: true } });
     expect(r.status).toBe(200);
     expect(r.json).toEqual({ summary: 'Lo consulté: aplica la cláusula 4 con tope del 10 %.', source: 'ai' });
     const llm = ((await (await fetch(`${FAKE_AI}/sent`)).json()) as any[]).filter((x) => x.kind === 'llm').at(-1);
@@ -95,7 +102,7 @@ describe('sidechats', () => {
     expect(sys).toContain('Grupo: General');
     expect(llm.messages.find((m: any) => m.role === 'user').content).toContain('Laura: La cláusula 4, tope del 10 %.');
     await fetch(`${FAKE_AI}/fail-llm`, { method: 'POST' });
-    const fb = await call(`/conversations/${sideId}/return/suggest`, { token: ana.token, body: {} });
+    const fb = await call(`/conversations/${sideId}/return/suggest`, { token: ana.token, body: { aiConsent: true } });
     expect(fb.json).toEqual({ summary: 'La cláusula 4, tope del 10 %.', source: 'fallback' });
     expect((await call(`/conversations/${sideId}/return/suggest`, { token: beto.token, body: {} })).status).toBe(404);
     expect((await call(`/conversations/${generalId}/return/suggest`, { token: ana.token, body: {} })).status).toBe(400);

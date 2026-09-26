@@ -64,8 +64,6 @@ export async function transcribeAttachment(attachmentId: string) {
   const { rows } = await pool.query("SELECT * FROM attachments WHERE id = $1 AND kind = 'voice' AND deleted_at IS NULL", [attachmentId]);
   const a = rows[0];
   if (!a) return;
-  const transcriber = getTranscriber();
-  if (!transcriber) { await save(a.id, { transcript: { status: 'disabled' } }); return; }
   try {
     const original = (await getObject(a.s3_key)).body;
     // Variante reproducible (webm/ogg no suenan en todas partes). Si falla, la nota sigue con el original.
@@ -76,6 +74,13 @@ export async function transcribeAttachment(attachmentId: string) {
         playKey = `${a.s3_key}.m4a`;
         await putObject(playKey, aac, 'audio/mp4');
       } catch (e: any) { console.error('[voice] sin variante AAC', e?.message); }
+    }
+    // El audio puede convertirse localmente sin transferirlo a proveedores.
+    // Registros anteriores, reenvíos y consentimientos omitidos son siempre opt-out.
+    const transcriber = a.transcript?.aiConsent === true ? getTranscriber() : null;
+    if (!transcriber) {
+      await save(a.id, { transcript: { status: 'disabled' }, playKey, playType: playKey ? 'audio/mp4' : undefined });
+      return;
     }
     const lang = await authorLang(a);
     const parts: string[] = [];
@@ -117,11 +122,12 @@ export async function transcribeAttachment(attachmentId: string) {
 }
 
 /** Reintento manual: el autor o cualquiera que pueda escribir en la conversación. */
-export async function retryTranscription(userId: string, attachmentId: string) {
+export async function retryTranscription(userId: string, attachmentId: string, aiConsent = false) {
   const a = await readable(userId, attachmentId);
   if (a.kind !== 'voice') throw badRequest('Solo las notas de voz se transcriben');
   if (!a.message_id) throw badRequest('Envía la nota antes de transcribirla');
   await conversationAccess(pool, userId, a.conversation_id, 'post');
+  if (!aiConsent || a.transcript?.aiConsent !== true) throw new ApiError(403, 'ai_consent_required', 'El autor debe autorizar el uso de IA al enviar esta nota');
   if (!getTranscriber()) throw new ApiError(503, 'transcription_disabled', 'La transcripción no está configurada en el servidor');
   if (a.transcript?.status === 'pending') return toDTO(a);
   await tx(async (c) => {

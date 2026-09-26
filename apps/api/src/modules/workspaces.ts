@@ -501,7 +501,7 @@ export async function createSideConversation(userId: string, parentId: string, i
  * Resumen sugerido para «Llevar al hilo» un sidechat. Con DeepSeek: redactado con autor y contexto;
  * sin llave (o si falla): las últimas respuestas de los demás. No publica nada.
  */
-export async function suggestSideReturn(userId: string, sideId: string, lang: 'es' | 'en') {
+export async function suggestSideReturn(userId: string, sideId: string, lang: 'es' | 'en', aiConsent = false) {
   await conversationAccess(pool, userId, sideId, 'post');
   const { rows } = await pool.query(
     `SELECT c.parent_conversation_id, c.parent_message_id, c.derive_kind, p.name AS parent_name, am.body AS anchor_body, am.deleted_at AS anchor_deleted, au.name AS anchor_author
@@ -522,7 +522,7 @@ export async function suggestSideReturn(userId: string, sideId: string, lang: 'e
     const pick = replies.length ? replies : msgs.slice(-3);
     return pick.map((m) => (pick.every((x) => x.author_id === pick[0]!.author_id) ? m.body : `${m.name}: ${m.body}`)).join('\n').slice(0, 4000);
   };
-  const ai = getSummarizer();
+  const ai = aiConsent ? getSummarizer() : null;
   if (ai?.suggestSideReturn && msgs.length) {
     try {
       const summary = await ai.suggestSideReturn({

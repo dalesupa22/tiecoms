@@ -5,6 +5,7 @@ import { client } from '../app-client.ts';
 import { errorText, t, voiceDuration } from '../i18n.ts';
 import { copyText, toast } from '../menu.tsx';
 import { blobUrl } from './Attachments.tsx';
+import { Modal } from '../ui.tsx';
 
 // ---------- Grabar ----------
 const MIME = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus'];
@@ -37,6 +38,7 @@ export function VoiceRecorder({ conversationId, onSent }: { conversationId: stri
   const [elapsed, setElapsed] = useState(0);
   const [live, setLive] = useState<number[]>([]);
   const [cancelHint, setCancelHint] = useState(false);
+  const [pending, setPending] = useState<{ blob: Blob; durationMs: number; waveform: number[] } | null>(null);
 
   useEffect(() => () => { void stop(true); }, []);
 
@@ -93,10 +95,18 @@ export function VoiceRecorder({ conversationId, onSent }: { conversationId: stri
     if (!out) { setState('idle'); return; }
     if (out.durationMs < 700) { setState('idle'); toast(t('voice.tooShort')); return; }
     navigator.vibrate?.(10);
+    setPending(out);
+    setState('idle');
+  }
+
+  async function sendPending(aiConsent: boolean) {
+    const out = pending;
+    if (!out || state === 'sending') return;
+    setPending(null);
     setState('sending');
     try {
       const ext = out.blob.type.includes('mp4') ? 'm4a' : out.blob.type.includes('ogg') ? 'ogg' : 'webm';
-      const att = await client.uploadAttachment(conversationId, out.blob, `nota-de-voz.${ext}`, { durationMs: out.durationMs, waveform: out.waveform });
+      const att = await client.uploadAttachment(conversationId, out.blob, `nota-de-voz.${ext}`, { durationMs: out.durationMs, waveform: out.waveform, aiConsent });
       await client.send(conversationId, '', null, null, { attachments: [att] });
       onSent?.();
     } catch (e) { toast(errorText(e)); } finally { setState('idle'); }
@@ -119,6 +129,17 @@ export function VoiceRecorder({ conversationId, onSent }: { conversationId: stri
   };
   const onUp = () => { if (state === 'holding') void finish(); };
 
+  if (pending) return (
+    <Modal title={t('ai.voiceTitle')} onClose={() => setPending(null)}>
+      <p>{t('ai.voiceDisclosure')}</p>
+      <p className="small muted">{t('ai.voiceChoice')}</p>
+      <div className="modal-actions">
+        <button className="btn ghost" onClick={() => setPending(null)}>{t('voice.discard')}</button>
+        <button className="btn" onClick={() => void sendPending(false)}>{t('ai.sendWithout')}</button>
+        <button className="btn primary" onClick={() => void sendPending(true)}>{t('ai.allowSend')}</button>
+      </div>
+    </Modal>
+  );
   if (state === 'locked' || state === 'holding') {
     return (
       <div className={`voice-rec ${cancelHint ? 'is-cancel' : ''}`} role="status" aria-live="polite">
@@ -207,8 +228,9 @@ export function VoiceNote({ a, onCreateIssue }: { a: AttachmentDTO; onCreateIssu
   const nextSpeed = () => { const s = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]!; setSpeed(s); if (audio.current) audio.current.playbackRate = s; };
   const progress = dur ? Math.min(1, pos / dur) : 0;
   async function retry() {
+    if (!window.confirm(t('ai.voiceDisclosure') + '\n\n' + t('ai.retryChoice'))) return;
     setBusy(true);
-    try { await client.retryTranscription(a.id); } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
+    try { await client.retryTranscription(a.id, true); } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
   }
 
   return (

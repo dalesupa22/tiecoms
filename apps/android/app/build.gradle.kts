@@ -37,8 +37,8 @@ android {
         applicationId = "com.tiecoms.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.4.0"
+        versionCode = 8
+        versionName = "1.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "DEFAULT_API_URL", "\"https://app.tiecoms.com\"")
         buildConfigField("String", "CONTRACT_VERSION", "\"2026-09-23\"")

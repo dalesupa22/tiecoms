@@ -6,7 +6,7 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 |---|---|
 | applicationId | `com.tiecoms.app` |
 | minSdk / target / compile | 26 / 36 / 36 |
-| Versión | `versionName 1.4.0`, `versionCode 7`. Sube el `versionCode` en cada envío a Play. |
+| Versión | `versionName 1.5.0`, `versionCode 8`. Sube el `versionCode` en cada envío a Play. |
 | Contrato | `2026-09-25`. Se envía en `x-tiecoms-contract` y en `device.contract`. |
 | API por defecto | `https://app.tiecoms.com` |
 | Toolchain | Gradle 8.14.3 (wrapper), AGP 8.13.2, Kotlin 2.3.21 y JDK 17 |

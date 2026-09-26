@@ -31,6 +31,7 @@ const es = {
   'role.Lead': 'Lidera', 'role.Admin': 'Administra', 'role.Member': 'Participa', 'role.Guest': 'Tercero',
   // Navegación
   // Barra del chat e hilos (docs/GRUPOS.md)
+  'menu.hintDm': 'Por DM a {name}', 'menu.hintThread': 'Con los del chat', 'menu.hintSide': 'Solo con quien elijas',
   'bar.label': 'Accesos del chat',
   'bar.pins': 'Fijados',
   'bar.issues': 'Asuntos',
@@ -466,6 +467,7 @@ const en: Record<Key, string> = {
   'role.member': 'participant', 'role.admin': 'admin', 'role.guest': 'guest', 'role.lead': 'lead',
   'role.Lead': 'Lead', 'role.Admin': 'Admin', 'role.Member': 'Member', 'role.Guest': 'Guest',
   // Chat bar and threads (docs/GRUPOS.md)
+  'menu.hintDm': 'By DM to {name}', 'menu.hintThread': 'With the chat', 'menu.hintSide': 'Only with who you pick',
   'bar.label': 'Chat shortcuts',
   'bar.pins': 'Pinned',
   'bar.issues': 'Issues',

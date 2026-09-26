@@ -1,22 +1,39 @@
 import SwiftUI
 
+/// Hojas que se abren desde Grupos (botones «+», menús de pulsación larga y estado vacío).
+enum GroupsSheet: Identifiable {
+    case newGroup(NewGroupPreset), invite(InviteTarget), newIssue(String), issues(String), joinCode
+    var id: String {
+        switch self {
+        case .newGroup(let p): return "new-\(p)"
+        case .invite(let t): return "inv-\(t)"
+        case .newIssue(let c): return "issue-\(c)"
+        case .issues(let c): return "issues-\(c)"
+        case .joinCode: return "join"
+        }
+    }
+}
+
+/// Pestaña Grupos: Tu organización · Relaciones · Invitado en, con los asuntos abiertos bajo cada grupo
+/// (docs/GRUPOS.md). Los directos, chats y sidechats viven en la pestaña DMs.
 struct HomeView: View {
     @Environment(AppStore.self) private var store
     @State private var query = ""
-    @State private var newChat = false
-    @State private var newSpace = false
-    @State private var issuesFor: String?
+    @State private var sheet: GroupsSheet?
     @State private var collapsed = HomeCollapse.load()
-    @State private var tab = HomeFilter.saved
+    @State private var tab = HomeFilter.savedGroups
 
     var body: some View {
         @Bindable var store = store
         Group {
             if let d = store.data {
-                let tree = Naming.homeTree(d, query: query, filterWorkspace: store.workspaceFilter, tab: tab)
+                let tree = Naming.groupsTree(d, query: query, filterWorkspace: store.workspaceFilter, tab: tab)
                 let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
+                // Asuntos abiertos por conversación (se muestran bajo cada grupo).
+                let open = Dictionary(grouping: store.issues.values.filter { !$0.status.closed }, by: \.conversationId)
+                    .mapValues { $0.sorted(by: IssueSort.order) }
                 List {
-                    HomeTabs(d: d, selected: $tab)
+                    HomeTabs(d: d, selected: $tab, cases: HomeFilter.groupCases, groupsOnly: true)
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                     if store.connection != .online {
@@ -37,54 +54,13 @@ struct HomeView: View {
                     if tab == .mentions {
                         MentionsInboxSection()
                     } else {
-                    if !tree.pinned.isEmpty {
-                        Section {
-                            ForEach(tree.pinned) { c in convLink(d, c, indent: 0, showWs: true) }
-                        } header: { HomeHeader(title: "📌 " + L("side.pinned")) }
-                    }
-                    Section {
-                        if tree.companies.isEmpty && !searching {
-                            Text(L("side.empty")).font(.footnote).foregroundStyle(Theme.textSecondary)
+                        if !tree.hasGroups && !searching && tab == .all && store.workspaceFilter == nil { emptyState }
+                        if !tree.pinned.isEmpty {
+                            Section {
+                                ForEach(tree.pinned) { c in convLink(d, c, indent: 0, showWs: true) }
+                            } header: { HomeHeader(title: "📌 " + L("side.pinned")) }
                         }
-                        ForEach(tree.companies) { co in
-                            let isOpen = searching || !collapsed.contains("org:\(co.id)")
-                            let all = co.workspaces.flatMap { $0.convs.flatMap { [$0.conv] + $0.sides } }
-                            CompanyRow(org: co.org, open: isOpen, unread: isOpen ? 0 : Naming.unreadCount(all)) { toggle("org:\(co.id)") }
-                            if isOpen {
-                                ForEach(co.workspaces) { w in
-                                    let wsOpen = searching || !collapsed.contains("ws:\(w.id)")
-                                    let wsAll = w.convs.flatMap { [$0.conv] + $0.sides }
-                                    WorkspaceRow(ws: w.ws, orgColor: co.org.flatMap { Theme.badgeColor($0.colorBg) }, open: wsOpen,
-                                                 unread: wsOpen ? 0 : Naming.unreadCount(wsAll)) { toggle("ws:\(w.id)") }
-                                        .contextMenu {
-                                            Button {
-                                                Task { do { try await store.setWorkspacePinned(w.ws.id, w.ws.pinnedAt == nil) } catch { store.show(L10n.errorText(error)) } }
-                                            } label: { Label(w.ws.pinnedAt == nil ? L("menu.pinTop") : L("menu.unpinTop"), systemImage: "pin") }
-                                            Button { store.homePath.append(.workspace(w.ws.id)) } label: { Label(L("menu.openSpace"), systemImage: "square.stack.3d.up") }
-                                        }
-                                    if wsOpen {
-                                        ForEach(w.convs) { n in
-                                            convLink(d, n.conv, indent: 1, badgeColor: co.org.flatMap { Theme.badgeColor($0.colorBg) })
-                                            ForEach(n.sides) { sc in convLink(d, sc, indent: 2) }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } header: {
-                        HomeHeader(title: L("side.companies"), action: (L("side.newSpace"), { newSpace = true }), identifier: "home.newSpace")
-                    }
-                    Section {
-                        if tree.chats.isEmpty && !searching {
-                            Button { newChat = true } label: { Label(L("chat.new"), systemImage: "plus") }
-                        }
-                        ForEach(tree.chats) { n in
-                            convLink(d, n.conv, indent: 0)
-                            ForEach(n.sides) { sc in convLink(d, sc, indent: 1) }
-                        }
-                    } header: {
-                        HomeHeader(title: L("side.directs"), action: (L("chat.new"), { newChat = true }), identifier: "home.newChatSection")
-                    }
+                        ForEach(tree.sections) { s in section(d, s, tree: tree, open: open, searching: searching) }
                     }
                 }
                 .listStyle(.insetGrouped)
@@ -92,7 +68,7 @@ struct HomeView: View {
                 .animation(.spring(response: 0.45, dampingFraction: 0.9), value: tree.orderSignature)
                 .overlay {
                     if tree.isEmpty && searching { ContentUnavailableView.search(text: query) }
-                    else if tree.isEmpty && tab != .all && tab != .mentions {
+                    else if !tree.hasGroups && tab != .all && tab != .mentions {
                         ContentUnavailableView(L("home.empty.\(tab.rawValue)"), systemImage: tab == .unread ? "checkmark.seal" : "tray")
                             .accessibilityIdentifier("home.tab.emptyState")
                     }
@@ -103,8 +79,8 @@ struct HomeView: View {
             }
         }
         .background(Theme.background.ignoresSafeArea())
-        .navigationTitle(L("nav.inbox"))
-        .searchable(text: $query, prompt: L("inbox.search"))
+        .navigationTitle(L("tab.groups"))
+        .searchable(text: $query, prompt: L("grp.search"))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -114,7 +90,9 @@ struct HomeView: View {
                     Button { store.homePath.append(.files) } label: { Label(L("nav.files"), systemImage: "folder") }
                     Button { store.homePath.append(.trazo) } label: { Label(L("nav.trazo"), systemImage: "arrow.triangle.branch") }
                     Button { store.homePath.append(.whatsapp) } label: { Label(L("nav.whatsapp"), systemImage: "message") }
-                    Button { newSpace = true } label: { Label(L("side.newSpace"), systemImage: "square.stack.3d.up.badge.plus") }
+                    Divider()
+                    Button { sheet = .joinCode } label: { Label(L("join.title"), systemImage: "ticket") }
+                    Button { sheet = .newGroup(.none) } label: { Label(L("grp.new"), systemImage: "plus.bubble") }
                 } label: {
                     Image(systemName: store.reminders.contains { (ISODate.parse($0.remindAt) ?? .distantFuture) <= Date() } ? "bell.badge" : "ellipsis.circle")
                 }
@@ -122,16 +100,172 @@ struct HomeView: View {
                 .accessibilityIdentifier("home.more")
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button { newChat = true } label: { Image(systemName: "square.and.pencil") }
-                    .accessibilityLabel(L("chat.new"))
-                    .accessibilityIdentifier("home.newChat")
+                Button { sheet = .newGroup(.none) } label: { Image(systemName: "plus") }
+                    .accessibilityLabel(L("grp.new"))
+                    .accessibilityIdentifier("home.newGroup")
             }
         }
-        .sheet(isPresented: $newChat) { NewChatSheet() }
-        .sheet(isPresented: $newSpace) { NewWorkspaceSheet() }
-        .sheet(item: Binding(get: { issuesFor.map(IdBox.init) }, set: { issuesFor = $0?.id })) { box in
-            ConversationIssuesSheet(conversationId: box.id)
+        .sheet(item: $sheet) { s in
+            switch s {
+            case .newGroup(let p): NewGroupSheet(preset: p)
+            case .invite(let t): InviteSheet(target: t)
+            case .newIssue(let c): NewIssueSheet(conversationId: c, origin: nil)
+            case .issues(let c): ConversationIssuesSheet(conversationId: c)
+            case .joinCode: JoinWithCodeSheet()
+            }
         }
+    }
+
+    /// Sin grupos: crear el primero o entrar con un código.
+    private var emptyState: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L("grp.emptyTitle")).font(.headline).foregroundStyle(Theme.textPrimary)
+                Text(L("grp.emptyBody")).font(.footnote).foregroundStyle(Theme.textSecondary)
+                HStack(spacing: 10) {
+                    Button { sheet = .newGroup(.none) } label: { Label(L("grp.new"), systemImage: "plus") }
+                        .buttonStyle(.borderedProminent).tint(Theme.bubbleMine)
+                        .accessibilityIdentifier("groups.empty.new")
+                    Button { sheet = .joinCode } label: { Label(L("join.title"), systemImage: "ticket") }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("groups.joinCode")
+                }
+            }
+            .padding(.vertical, 6)
+        }
+    }
+
+    // MARK: Secciones
+
+    private func sectionTitle(_ s: GroupsTree.Section) -> String {
+        switch s.kind {
+        case .mine: return L("grp.yourOrg", ["org": s.org?.name ?? ""])
+        case .relations: return L("grp.relations")
+        case .guest: return L("grp.guestIn")
+        case .other: return L("home.other")
+        }
+    }
+
+    @ViewBuilder
+    private func section(_ d: BootstrapDTO, _ s: GroupsTree.Section, tree: GroupsTree, open: [String: [IssueDTO]], searching: Bool) -> some View {
+        let key = "sec:\(s.id)"
+        let isOpen = searching || !collapsed.contains(key)
+        Section {
+            if isOpen {
+                switch s.kind {
+                case .mine:
+                    if s.companies.isEmpty {
+                        Text(L("grp.mineEmpty")).font(.footnote).foregroundStyle(Theme.textSecondary)
+                    }
+                    ForEach(s.companies) { co in workspaces(d, co, kind: s.kind, indent: 0, open: open, searching: searching) }
+                case .relations, .guest:
+                    if s.companies.isEmpty {
+                        Text(L("grp.relationsEmpty")).font(.footnote).foregroundStyle(Theme.textSecondary)
+                    }
+                    ForEach(s.companies) { co in
+                        let coOpen = searching || !collapsed.contains("org:\(co.id)")
+                        let all = co.workspaces.flatMap { $0.convs.flatMap { [$0.conv] + $0.derived } }
+                        CompanyRow(org: co.org, open: coOpen, unread: coOpen ? 0 : Naming.unreadCount(all), name: co.name, pending: co.pending) { toggle("org:\(co.id)") }
+                            .contextMenu { companyMenu(co, kind: s.kind, tree: tree) }
+                        if coOpen { workspaces(d, co, kind: s.kind, indent: 1, open: open, searching: searching) }
+                    }
+                case .other:
+                    ForEach(s.orphans) { n in groupRows(d, n, indent: 0, color: nil, guest: false, open: open) }
+                }
+            }
+        } header: {
+            let add: (() -> Void)? = switch s.kind {
+            case .mine: { sheet = .newGroup(.org(s.org?.id)) }
+            case .relations: { sheet = .newGroup(.company(nil)) }
+            default: nil
+            }
+            GroupSectionHeader(title: sectionTitle(s), open: isOpen, unread: isOpen ? 0 : Naming.unreadCount(s.allConvs),
+                               onToggle: { toggle(key) }, onAdd: add, identifier: "home.section.\(s.kind.rawValue)")
+                .contextMenu {
+                    if s.kind == .mine {
+                        Button { sheet = .newGroup(.org(s.org?.id)) } label: { Label(L("grp.new"), systemImage: "plus.bubble") }
+                        if let org = s.org, org.canAdmin {
+                            Button { sheet = .invite(.org(org.id)) } label: { Label(L("grp.inviteCompany"), systemImage: "person.badge.plus") }
+                        }
+                    } else if s.kind == .relations {
+                        Button { sheet = .newGroup(.company(nil)) } label: { Label(L("grp.new"), systemImage: "plus.bubble") }
+                    }
+                    Button { collapseAll(tree) } label: { Label(L("grp.collapseAll"), systemImage: "rectangle.compress.vertical") }
+                }
+        }
+    }
+
+    /// Espacios de una empresa: con cabecera (la carpeta) o sus grupos directo (espacio casa o relación de un solo espacio).
+    @ViewBuilder
+    private func workspaces(_ d: BootstrapDTO, _ co: GroupsTree.CompanyNode, kind: GroupsTree.Kind, indent: Int, open: [String: [IssueDTO]], searching: Bool) -> some View {
+        let color = co.org.flatMap { Theme.badgeColor($0.colorBg) }
+        let guest = kind == .guest
+        ForEach(co.workspaces) { w in
+            let wsOpen = !w.showHeader || searching || !collapsed.contains("ws:\(w.id)")
+            if w.showHeader {
+                let wsAll = w.convs.flatMap { [$0.conv] + $0.derived }
+                WorkspaceRow(ws: w.ws, orgColor: color, open: wsOpen, unread: wsOpen ? 0 : Naming.unreadCount(wsAll)) { toggle("ws:\(w.id)") }
+                    .contextMenu { workspaceMenu(w.ws, guest: guest) }
+            }
+            if wsOpen {
+                // Bajo la empresa (o la carpeta) los grupos van con sangría; los del espacio casa, directo en la sección.
+                ForEach(w.convs) { n in groupRows(d, n, indent: w.showHeader ? indent + (kind == .mine ? 1 : 0) : indent, color: color, guest: guest, open: open) }
+            }
+        }
+    }
+
+    /// Un grupo, sus asuntos abiertos (hasta 3 y «+N asuntos») y sus derivadas con sangría.
+    @ViewBuilder
+    private func groupRows(_ d: BootstrapDTO, _ n: GroupsTree.ConvNode, indent: Int, color: Color?, guest: Bool, open: [String: [IssueDTO]]) -> some View {
+        convLink(d, n.conv, indent: indent, badgeColor: color, group: true, guest: guest)
+        issueLines(n.conv.id, indent: indent, open: open)
+        ForEach(n.derived) { c in
+            convLink(d, c, indent: indent + 1, badgeColor: color, group: true, guest: guest)
+            issueLines(c.id, indent: indent + 1, open: open)
+        }
+    }
+
+    @ViewBuilder
+    private func issueLines(_ conversationId: String, indent: Int, open: [String: [IssueDTO]]) -> some View {
+        let list = open[conversationId] ?? []
+        let inset = EdgeInsets(top: 2, leading: 16 + CGFloat(indent) * 18 + 40, bottom: 2, trailing: 12)
+        ForEach(list.prefix(3)) { i in
+            NavigationLink(value: Route.issue(i.id)) { GroupIssueLine(issue: i) }
+                .listRowInsets(inset)
+                .accessibilityIdentifier("grp.issue.\(i.id)")
+        }
+        if list.count > 3 {
+            Button { sheet = .issues(conversationId) } label: {
+                Text(L("grp.moreIssues", ["n": list.count - 3])).font(.caption.weight(.semibold)).foregroundStyle(Theme.accentText)
+            }
+            .listRowInsets(inset)
+            .accessibilityIdentifier("grp.moreIssues.\(conversationId)")
+        }
+    }
+
+    // MARK: Menús (mantener presionado)
+
+    @ViewBuilder
+    private func companyMenu(_ co: GroupsTree.CompanyNode, kind: GroupsTree.Kind, tree: GroupsTree) -> some View {
+        if kind == .relations {
+            Button { sheet = .newGroup(.company(co.id)) } label: { Label(L("grp.new"), systemImage: "plus.bubble") }
+            if let ws = co.workspaces.first?.ws {
+                Button { sheet = .invite(.workspace(ws.id)) } label: { Label(L("grp.inviteCompany"), systemImage: "person.badge.plus") }
+            }
+        }
+        Button { collapseAll(tree) } label: { Label(L("grp.collapseAll"), systemImage: "rectangle.compress.vertical") }
+    }
+
+    @ViewBuilder
+    private func workspaceMenu(_ ws: WorkspaceDTO, guest: Bool) -> some View {
+        if !guest {
+            Button { sheet = .newGroup(.workspace(ws.id)) } label: { Label(L("grp.newHere"), systemImage: "plus.bubble") }
+            Button { sheet = .invite(.workspace(ws.id)) } label: { Label(L("grp.invite"), systemImage: "person.badge.plus") }
+        }
+        Button {
+            Task { do { try await store.setWorkspacePinned(ws.id, ws.pinnedAt == nil) } catch { store.show(L10n.errorText(error)) } }
+        } label: { Label(ws.pinnedAt == nil ? L("menu.pinTop") : L("menu.unpinTop"), systemImage: "pin") }
+        Button { store.homePath.append(.workspace(ws.id)) } label: { Label(L("menu.openSpace"), systemImage: "square.stack.3d.up") }
     }
 
     private func toggle(_ key: String) {
@@ -141,14 +275,86 @@ struct HomeView: View {
         HomeCollapse.save(collapsed)
     }
 
+    /// «Plegar todo»: empresas y espacios con cabecera.
+    private func collapseAll(_ tree: GroupsTree) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            for s in tree.sections {
+                if s.kind == .relations || s.kind == .guest { for co in s.companies { collapsed.insert("org:\(co.id)") } }
+                for co in s.companies { for w in co.workspaces where w.showHeader { collapsed.insert("ws:\(w.id)") } }
+            }
+        }
+        HomeCollapse.save(collapsed)
+    }
+
     @ViewBuilder
-    private func convLink(_ d: BootstrapDTO, _ c: ConversationDTO, indent: Int, badgeColor: Color? = nil, showWs: Bool = false) -> some View {
+    private func convLink(_ d: BootstrapDTO, _ c: ConversationDTO, indent: Int, badgeColor: Color? = nil, showWs: Bool = false, group: Bool = false, guest: Bool = false) -> some View {
         NavigationLink(value: Route.conversation(c.id)) {
-            HierarchyConvRow(d: d, c: c, badgeColor: badgeColor, showWs: showWs) { issuesFor = c.id }
+            HierarchyConvRow(d: d, c: c, badgeColor: badgeColor, showWs: showWs, showIssueChip: !group) { sheet = .issues(c.id) }
         }
         .listRowInsets(EdgeInsets(top: 6, leading: 16 + CGFloat(indent) * 18, bottom: 6, trailing: 12))
         .accessibilityIdentifier("conv.row.\(c.id)")
-        .contextMenu { ConversationMenuItems(conv: c) }
+        .contextMenu {
+            ConversationMenuItems(conv: c)
+            // Los terceros participan en los asuntos pero no los crean, ni invitan.
+            if !(guest || Naming.isGuest(d, c)) {
+                Divider()
+                Button { sheet = .newIssue(c.id) } label: { Label(L("grp.newIssue"), systemImage: "checklist") }
+                Button { sheet = .invite(.group(c.id)) } label: { Label(L("grp.inviteToGroup"), systemImage: "person.badge.plus") }
+            }
+        }
+    }
+}
+
+/// Cabecera de sección de Grupos: plegable (tocar el título), con la suma de no leídos plegada y «+» opcional.
+struct GroupSectionHeader: View {
+    var title: String
+    var open: Bool
+    var unread: Int
+    var onToggle: () -> Void
+    var onAdd: (() -> Void)?
+    var identifier: String
+    var body: some View {
+        HStack(spacing: 6) {
+            Button(action: onToggle) {
+                HStack(spacing: 6) {
+                    Text(title).font(.caption.weight(.bold)).textCase(.uppercase).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                    Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(Theme.textSecondary)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                    if unread > 0 { UnreadPill(count: unread) }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityLabel([title, unread > 0 ? L("a11y.unread", ["n": unread]) : nil].compactMap { $0 }.joined(separator: ", "))
+            .accessibilityHint(open ? L("home.collapse") : L("home.expand"))
+            .accessibilityIdentifier(identifier)
+            Spacer()
+            if let onAdd {
+                Button(action: onAdd) { Image(systemName: "plus").font(.subheadline.weight(.bold)) }
+                    .accessibilityLabel(L("grp.new"))
+                    .accessibilityIdentifier("\(identifier).add")
+                    .frame(minWidth: 44, minHeight: 32)
+            }
+        }
+    }
+}
+
+/// Asunto abierto bajo su grupo: «◆ título», fecha límite (roja si venció) y el estado si está en curso o esperando.
+struct GroupIssueLine: View {
+    let issue: IssueDTO
+    var body: some View {
+        let f = IssueSort.flags(issue)
+        HStack(spacing: 6) {
+            Text("◆ " + issue.title).font(.caption).foregroundStyle(Theme.textPrimary).lineLimit(1)
+            Spacer(minLength: 4)
+            if issue.dueDate != nil {
+                Text(f.overdue ? L("issue.overdue") : f.dueToday ? L("issue.today") : IssueSort.dueLabel(issue))
+                    .font(.caption2.weight(f.overdue ? .semibold : .regular)).foregroundStyle(f.overdue ? .red : Theme.textSecondary)
+            }
+            if issue.status == .in_progress || issue.status == .waiting { StatusPill(status: issue.status) }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -185,12 +391,31 @@ struct CompanyRow: View {
     var org: OrganizationDTO?
     var open: Bool
     var unread: Int
+    /// Nombre a mostrar (una relación pendiente no tiene organización: su `counterpartName`).
+    var name: String? = nil
+    /// «Invitación pendiente»: la otra empresa aún no entra.
+    var pending = false
     var onToggle: () -> Void
     var body: some View {
+        let title = name ?? org?.name ?? L("common.noCompany")
         Button(action: onToggle) {
             HStack(spacing: 10) {
-                OrgMark(org: org, size: 26)
-                Text(org?.name ?? L("common.noCompany")).font(.body.weight(.bold)).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                if pending {
+                    Image(systemName: "hourglass").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.textSecondary)
+                        .frame(width: 26, height: 26)
+                        .background(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.textSecondary.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [3])))
+                        .accessibilityHidden(true)
+                } else {
+                    OrgMark(org: org, size: 26)
+                }
+                Text(title).font(.body.weight(.bold)).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                if pending {
+                    Text(L("grp.pending")).font(.caption2.weight(.semibold)).foregroundStyle(Theme.accentText)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Capsule().fill(Theme.orange.opacity(0.14)))
+                        .lineLimit(1).fixedSize()
+                        .accessibilityIdentifier("home.pending")
+                }
                 Spacer()
                 if unread > 0 { UnreadPill(count: unread, color: org.flatMap { Theme.badgeColor($0.colorBg) }) }
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)
@@ -198,9 +423,9 @@ struct CompanyRow: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel([org?.name ?? L("common.noCompany"), unread > 0 ? L("a11y.unread", ["n": unread]) : nil].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel([title, pending ? L("grp.pending") : nil, unread > 0 ? L("a11y.unread", ["n": unread]) : nil].compactMap { $0 }.joined(separator: ", "))
         .accessibilityHint(open ? L("home.collapse") : L("home.expand"))
-        .accessibilityIdentifier("home.org.\(org?.id ?? "none")")
+        .accessibilityIdentifier("home.org.\(org?.id ?? (pending ? "pending" : "none"))")
     }
 }
 
@@ -261,10 +486,12 @@ struct HierarchyConvRow: View {
     var c: ConversationDTO
     var badgeColor: Color? = nil
     var showWs = false
+    /// En Grupos los asuntos van en filas bajo el grupo: sin chip.
+    var showIssueChip = true
     var onIssues: () -> Void
 
     var body: some View {
-        let title = Naming.title(d, c)
+        let title = Naming.sideRowTitle(d, c)
         let blocked = c.memberIds.contains(where: { store.blockedUserIds.contains($0) })
         let preview = blocked ? L("safety.previewHidden") : (L10n.listPreview(c) ?? L("conv.noMessages"))
         let time = L10n.timeLabel(c.lastMessageAt)
@@ -276,17 +503,33 @@ struct HierarchyConvRow: View {
                     if showWs, let ws = d.workspaces.first(where: { $0.id == c.workspaceId }) {
                         Text("· \(ws.name)").font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
                     }
+                    // Un grupo interno lleva candado y «Solo {empresa}».
+                    if c.kind == .internal, let o = Naming.org(d, c.internalOrgId) {
+                        Text(L("grp.onlyOrg", ["org": o.name])).font(.caption2.weight(.semibold)).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                    }
                     if c.isMuted { Image(systemName: "bell.slash.fill").font(.caption2).foregroundStyle(Theme.textSecondary).accessibilityHidden(true) }
                     Spacer(minLength: 4)
                     if c.unreadMentions > 0 { MentionBadge() }
                     if c.unread > 0 { UnreadPill(count: c.unread, color: badgeColor, muted: c.isMuted && c.unreadMentions == 0) }
+                }
+                if Naming.isSide(c) {
+                    // DMs: el sidechat se distingue con su burbuja y, si veo el origen, «desde #Grupo».
+                    HStack(spacing: 6) {
+                        Text(L("dm.side")).font(.caption2.weight(.bold)).foregroundStyle(Theme.accentText)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Capsule().fill(Theme.orange.opacity(0.14)))
+                            .accessibilityIdentifier("dm.sideTag")
+                        if let origin = Naming.sideOrigin(d, c) {
+                            Text(L("dm.fromOrigin", ["name": Naming.title(d, origin)])).font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                        }
+                    }
                 }
                 HStack(spacing: 6) {
                     Text(preview).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
                     Spacer(minLength: 4)
                     Text(time).font(.caption2).foregroundStyle(Theme.textSecondary)
                 }
-                if c.openIssues > 0 {
+                if showIssueChip && c.openIssues > 0 {
                     Button(action: onIssues) {
                         Text(c.openIssues == 1 ? L("issue.chipOne") : L("issue.chipMany", ["n": c.openIssues]))
                             .font(.caption2.weight(.semibold)).foregroundStyle(Theme.accentText)
@@ -299,7 +542,9 @@ struct HierarchyConvRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel([title, c.isMuted ? L("side.muted") : nil, c.unreadMentions > 0 ? L("mention.youMentioned") : nil,
+        .accessibilityLabel([title, Naming.isSide(c) ? L("dm.side") : nil,
+                             Naming.sideOrigin(d, c).map { L("dm.fromOrigin", ["name": Naming.title(d, $0)]) },
+                             c.isMuted ? L("side.muted") : nil, c.unreadMentions > 0 ? L("mention.youMentioned") : nil,
                              c.unread > 0 ? L("a11y.unread", ["n": c.unread]) : nil, preview, time,
                              c.openIssues > 0 ? (c.openIssues == 1 ? L("issue.chipOne") : L("issue.chipMany", ["n": c.openIssues])).replacingOccurrences(of: "◆ ", with: "") : nil].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
     }
@@ -422,11 +667,14 @@ struct ConversationRow: View {
 struct HomeTabs: View {
     let d: BootstrapDTO
     @Binding var selected: HomeFilter
+    var cases: [HomeFilter] = HomeFilter.allCases
+    /// Grupos: los contadores cuentan solo grupos.
+    var groupsOnly = false
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(HomeFilter.allCases) { t in
-                    let n = t.count(d)
+                ForEach(cases) { t in
+                    let n = groupsOnly ? t.groupCount(d) : t.count(d)
                     let on = selected == t
                     Button {
                         withAnimation(.easeInOut(duration: 0.15)) { selected = t }

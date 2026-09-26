@@ -85,33 +85,65 @@ struct UnreachableView: View {
     }
 }
 
-/// Con sesión: pestañas Inicio · Asuntos · Agenda · Ajustes, cada una con su pila.
+/// Con sesión: 5 pestañas fijas (docs/GRUPOS.md) Grupos · DMs · Asuntos · Calendario · Tú, cada una con su pila.
 struct MainView: View {
     @Environment(AppStore.self) private var store
+    /// Mi foto para el ícono de «Tú» (se carga una vez por URL).
+    @State private var myPhoto: UIImage?
 
     var body: some View {
         @Bindable var store = store
+        let d = store.data
         TabView(selection: $store.tab) {
             NavigationStack(path: $store.homePath) { HomeView().routes() }
-                .tabItem { Label(L("tab.home"), systemImage: "bubble.left.and.bubble.right") }
+                .tabItem { Label(L("tab.groups"), systemImage: "person.3") }
                 .tag(AppTab.home)
+                .badge(d.map(Naming.groupsUnread) ?? 0)
                 .accessibilityIdentifier("tab.home")
+            NavigationStack(path: $store.dmsPath) { DMsView().routes() }
+                .tabItem { Label(L("tab.dms"), systemImage: "bubble.left.and.bubble.right") }
+                .tag(AppTab.dms)
+                .badge(d.map(Naming.dmsUnread) ?? 0)
             NavigationStack(path: $store.issuesPath) { IssuesScreen().routes() }
-                .tabItem { Label(L("nav.issues"), systemImage: "checklist") }
+                .tabItem { Label(L("tab.issues"), systemImage: "checklist") }
                 .tag(AppTab.issues)
                 .badge(store.myOpenIssues)
             NavigationStack(path: $store.agendaPath) { AgendaScreen().routes() }
-                .tabItem { Label(L("nav.agenda"), systemImage: "calendar") }
+                .tabItem { Label(L("tab.calendar"), systemImage: "calendar") }
                 .tag(AppTab.agenda)
             NavigationStack(path: $store.settingsPath) { SettingsView().routes() }
-                .tabItem { Label(L("settings.nav"), systemImage: "gearshape") }
+                .tabItem {
+                    Label {
+                        Text(L("tab.you"))
+                    } icon: {
+                        Image(uiImage: TabAvatar.image(name: d?.me.name ?? "", photo: myPhoto,
+                                                       fill: UIColor(d.map { PersonColor.fill($0.me.id) } ?? Theme.bubbleMine),
+                                                       selected: store.tab == .settings))
+                    }
+                }
                 .tag(AppTab.settings)
+        }
+        .task(id: myPhotoURL) {
+            guard let url = myPhotoURL else { myPhoto = nil; return }
+            if let hit = RemoteImageCache.shared.object(forKey: url as NSURL) { myPhoto = hit; return }
+            guard let (data, resp) = try? await RemoteImageCache.session.data(from: url),
+                  (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
+                  let img = UIImage(data: data) else { return }
+            RemoteImageCache.shared.setObject(img, forKey: url as NSURL)
+            myPhoto = img
         }
         .overlay(alignment: .bottom) { ToastView() }
         .sheet(isPresented: $store.showPushPrompt) { PushPromptView() }
         .sheet(isPresented: Binding(get: { store.shareText != nil }, set: { if !$0 { store.shareText = nil } })) {
             ShareIntoTieComsView(text: store.shareText ?? "")
         }
+    }
+}
+
+extension MainView {
+    fileprivate var myPhotoURL: URL? {
+        guard let d = store.data else { return nil }
+        return MediaURL.absolute(Naming.person(d, d.me.id)?.avatarUrl ?? d.me.avatarUrl)
     }
 }
 
@@ -133,6 +165,8 @@ extension View {
             case .profile: EditProfileView()
             case .files: FilesRootView()
             case .drive(let ws, let folder): DriveFolderView(workspaceId: ws, folderId: folder)
+            case .oversight(let orgId): OversightView(orgId: orgId)
+            case .oversightReader(let id, let name): OversightReaderView(conversationId: id, name: name)
             }
         }
     }

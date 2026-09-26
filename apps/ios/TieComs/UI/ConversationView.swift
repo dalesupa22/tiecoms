@@ -575,7 +575,8 @@ struct ConversationView: View {
         if canWork {
             Divider()
             if c.workspaceId != nil && c.kind != .direct && myWsRole != "guest" { Button { sheet = .derive(m) } label: { Label(L("menu.derive"), systemImage: "arrow.triangle.branch") } }
-            Button { sheet = .newIssue(m) } label: { Label(L("menu.issue"), systemImage: "checklist") }
+            // Los terceros participan en los asuntos, pero no los crean (docs/GRUPOS.md).
+            if !Naming.isGuest(d, c) { Button { sheet = .newIssue(m) } label: { Label(L("menu.issue"), systemImage: "checklist") } }
             Button { sheet = .newEvent(m) } label: { Label(L("menu.meeting"), systemImage: "calendar.badge.plus") }
         }
         Button { sheet = .forward(m) } label: { Label(L("menu.forwardChat"), systemImage: "arrowshape.turn.up.right") }

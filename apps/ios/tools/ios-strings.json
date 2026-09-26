@@ -886,5 +886,413 @@
  "side.fromSidechat": [
   "Desde un sidechat",
   "From a sidechat"
+ ],
+ "tab.groups": [
+  "Grupos",
+  "Groups"
+ ],
+ "tab.dms": [
+  "DMs",
+  "DMs"
+ ],
+ "tab.issues": [
+  "Asuntos",
+  "Issues"
+ ],
+ "tab.calendar": [
+  "Calendario",
+  "Calendar"
+ ],
+ "tab.you": [
+  "Tú",
+  "You"
+ ],
+ "grp.search": [
+  "Buscar grupos, empresas o personas",
+  "Search groups, companies or people"
+ ],
+ "grp.new": [
+  "Nuevo grupo",
+  "New group"
+ ],
+ "grp.newHere": [
+  "Nuevo grupo aquí",
+  "New group here"
+ ],
+ "grp.newIssue": [
+  "Nuevo asunto",
+  "New issue"
+ ],
+ "grp.newTitle": [
+  "Nuevo grupo",
+  "New group"
+ ],
+ "grp.create": [
+  "Crear",
+  "Create"
+ ],
+ "grp.emptyTitle": [
+  "Aún no tienes grupos",
+  "You have no groups yet"
+ ],
+ "grp.emptyBody": [
+  "Crea un grupo con tu equipo o con otra empresa, o entra con el código que te compartieron.",
+  "Create a group with your team or with another company, or join with the code someone shared with you."
+ ],
+ "grp.yourOrg": [
+  "Tu organización · {org}",
+  "Your organization · {org}"
+ ],
+ "grp.relations": [
+  "Relaciones",
+  "Relationships"
+ ],
+ "grp.guestIn": [
+  "Invitado en",
+  "Guest in"
+ ],
+ "grp.mineEmpty": [
+  "Aún no hay grupos internos. Toca + para crear uno.",
+  "No internal groups yet. Tap + to create one."
+ ],
+ "grp.relationsEmpty": [
+  "Crea un grupo con un cliente, proveedor o aliado con +.",
+  "Create a group with a client, supplier or partner with +."
+ ],
+ "grp.pending": [
+  "Invitación pendiente",
+  "Invitation pending"
+ ],
+ "grp.inviteCompany": [
+  "Invitar a la empresa…",
+  "Invite the company…"
+ ],
+ "grp.invite": [
+  "Invitar",
+  "Invite"
+ ],
+ "grp.inviteToGroup": [
+  "Invitar a este grupo",
+  "Invite to this group"
+ ],
+ "grp.collapseAll": [
+  "Plegar todo",
+  "Collapse all"
+ ],
+ "grp.moreIssues": [
+  "+{n} asuntos",
+  "+{n} issues"
+ ],
+ "grp.forWhom": [
+  "¿Para quién es?",
+  "Who is it for?"
+ ],
+ "grp.onlyOrg": [
+  "Solo {org}",
+  "Only {org}"
+ ],
+ "grp.withOther": [
+  "Con otra empresa",
+  "With another company"
+ ],
+ "grp.onlyOrgHint": [
+  "Equipo interno de {org}.",
+  "An internal {org} team."
+ ],
+ "grp.withOtherHint": [
+  "Cliente, proveedor o aliado.",
+  "Client, supplier or partner."
+ ],
+ "grp.inSpace": [
+  "En {name}",
+  "In {name}"
+ ],
+ "grp.myCompany": [
+  "mi empresa",
+  "my company"
+ ],
+ "grp.otherCompany": [
+  "la otra empresa",
+  "the other company"
+ ],
+ "grp.company": [
+  "Empresa",
+  "Company"
+ ],
+ "grp.newCompany": [
+  "Empresa nueva…",
+  "New company…"
+ ],
+ "grp.companyName": [
+  "Nombre de la empresa",
+  "Company name"
+ ],
+ "grp.companyNamePh": [
+  "Nombre de la empresa (ej. Nestlé)",
+  "Company name (e.g. Nestlé)"
+ ],
+ "grp.space": [
+  "Espacio",
+  "Space"
+ ],
+ "grp.name": [
+  "Nombre del grupo",
+  "Group name"
+ ],
+ "grp.namePh": [
+  "Ej. Pagos y facturación",
+  "E.g. Payments and billing"
+ ],
+ "grp.people": [
+  "Personas de {org}",
+  "People from {org}"
+ ],
+ "grp.peopleSpace": [
+  "Personas del espacio",
+  "People in the space"
+ ],
+ "grp.noColleagues": [
+  "Aún no hay más personas de tu empresa en TieComs.",
+  "There are no other people from your company on TieComs yet."
+ ],
+ "grp.inviteOutside": [
+  "Invitar de fuera (opcional)",
+  "Invite from outside (optional)"
+ ],
+ "grp.inviteOutsideHint": [
+  "Correos separados por coma o espacio. Les llega una invitación a este grupo.",
+  "Emails separated by comma or space. They get an invitation to this group."
+ ],
+ "grp.emailsPh": [
+  "ana@empresa.com, luis@empresa.com",
+  "ana@company.com, luis@company.com"
+ ],
+ "grp.badEmails": [
+  "Revisa estos correos: {list}",
+  "Check these emails: {list}"
+ ],
+ "grp.roleMember": [
+  "De {org}",
+  "From {org}"
+ ],
+ "grp.roleGuest": [
+  "Tercero a título propio (asesor, mentor…)",
+  "Independent third party (advisor, mentor…)"
+ ],
+ "grp.guestsNotice": [
+  "Entrarán como invitados de fuera.",
+  "They will join as outside guests."
+ ],
+ "grp.shareLink": [
+  "Crear enlace para compartir",
+  "Create a link to share"
+ ],
+ "grp.shareLinkHint": [
+  "Un enlace y un código que sirven a varias personas durante 14 días (WhatsApp, correo o donde quieras).",
+  "A link and a code that work for several people for 14 days (WhatsApp, email or anywhere)."
+ ],
+ "grp.adminsCanRead": [
+  "Los administradores de las empresas participantes pueden leer este grupo.",
+  "Administrators of the participating companies can read this group."
+ ],
+ "inv.title": [
+  "Invitar a {name}",
+  "Invite to {name}"
+ ],
+ "inv.role": [
+  "Rol",
+  "Role"
+ ],
+ "inv.roleMember": [
+  "Persona de otra empresa",
+  "Person from another company"
+ ],
+ "inv.roleGuest": [
+  "Tercero (asesor, mentor…)",
+  "Third party (advisor, mentor…)"
+ ],
+ "inv.orgHomeGuests": [
+  "En los grupos de tu organización, las personas de fuera entran como invitadas.",
+  "In your organization's groups, people from outside join as guests."
+ ],
+ "inv.how": [
+  "Cómo",
+  "How"
+ ],
+ "inv.byEmail": [
+  "Por correo",
+  "By email"
+ ],
+ "inv.byLink": [
+  "Enlace y código",
+  "Link and code"
+ ],
+ "inv.emails": [
+  "Correos",
+  "Emails"
+ ],
+ "inv.linkHint": [
+  "Crea un enlace y un código para compartir por WhatsApp o donde quieras. Sirve para varias personas durante 14 días.",
+  "Create a link and a code to share on WhatsApp or anywhere. It works for several people for 14 days."
+ ],
+ "inv.send": [
+  "Enviar",
+  "Send"
+ ],
+ "inv.createLink": [
+  "Crear enlace",
+  "Create link"
+ ],
+ "inv.sent": [
+  "Invitaciones enviadas: {n}",
+  "Invitations sent: {n}"
+ ],
+ "ishare.title": [
+  "Compartir invitación",
+  "Share invitation"
+ ],
+ "ishare.done": [
+  "Listo",
+  "Done"
+ ],
+ "ishare.inviteTo": [
+  "Invita a {name}",
+  "Invite people to {name}"
+ ],
+ "ishare.code": [
+  "Código",
+  "Code"
+ ],
+ "ishare.copy": [
+  "Copiar",
+  "Copy"
+ ],
+ "ishare.link": [
+  "Enlace",
+  "Link"
+ ],
+ "ishare.copyLink": [
+  "Copiar enlace",
+  "Copy link"
+ ],
+ "ishare.share": [
+  "Compartir",
+  "Share"
+ ],
+ "ishare.text": [
+  "Te invito a {name} en TieComs: {url} (código {code})",
+  "Join {name} on TieComs: {url} (code {code})"
+ ],
+ "ishare.textNoCode": [
+  "Te invito a {name} en TieComs: {url}",
+  "Join {name} on TieComs: {url}"
+ ],
+ "ishare.expires": [
+  "Vence el {date}. Sirve para varias personas.",
+  "Expires on {date}. Works for several people."
+ ],
+ "join.title": [
+  "Unirme con código",
+  "Join with code"
+ ],
+ "join.codeLabel": [
+  "Código de invitación",
+  "Invitation code"
+ ],
+ "join.placeholder": [
+  "XXXX-XXXX",
+  "XXXX-XXXX"
+ ],
+ "join.hint": [
+  "Escríbelo como te llegó; también puedes pegar el enlace.",
+  "Type it as you got it; you can also paste the link."
+ ],
+ "join.youHint": [
+  "¿Te compartieron un código? Úsalo para entrar al grupo.",
+  "Did someone share a code with you? Use it to join the group."
+ ],
+ "join.notFound": [
+  "No encontramos una invitación con ese código.",
+  "We could not find an invitation with that code."
+ ],
+ "join.fromOrg": [
+  " de {org}",
+  " from {org}"
+ ],
+ "join.preview": [
+  "{name}{org} te invita a {groups} en {space}.",
+  "{name}{org} invites you to {groups} in {space}."
+ ],
+ "join.previewSpace": [
+  "{name}{org} te invita a {space}.",
+  "{name}{org} invites you to {space}."
+ ],
+ "join.asGuest": [
+  "Entrarás como invitado de fuera.",
+  "You will join as an outside guest."
+ ],
+ "join.multiUse": [
+  "Invitación para varias personas.",
+  "Invitation for several people."
+ ],
+ "join.invalid": [
+  "Esta invitación venció o ya no está disponible.",
+  "This invitation has expired or is no longer available."
+ ],
+ "invite.groups": [
+  "Grupos: {groups}",
+  "Groups: {groups}"
+ ],
+ "dm.side": [
+  "Sidechat",
+  "Sidechat"
+ ],
+ "dm.fromOrigin": [
+  "desde #{name}",
+  "from #{name}"
+ ],
+ "dm.new": [
+  "Mensaje nuevo",
+  "New message"
+ ],
+ "dm.search": [
+  "Buscar personas o chats",
+  "Search people or chats"
+ ],
+ "dm.empty": [
+  "Sin mensajes directos",
+  "No direct messages"
+ ],
+ "dm.emptyBody": [
+  "Escríbele a una persona o arma un chat con varias.",
+  "Message one person or start a chat with several."
+ ],
+ "ovs.title": [
+  "Supervisión de {org}",
+  "{org} oversight"
+ ],
+ "ovs.hint": [
+  "Los grupos donde participa gente de tu empresa. Los que no son tuyos se abren en solo lectura.",
+  "Groups where people from your company take part. The ones you are not in open read-only."
+ ],
+ "ovs.empty": [
+  "Aún no hay grupos con gente de tu empresa.",
+  "There are no groups with people from your company yet."
+ ],
+ "ovs.members": [
+  "{n} personas",
+  "{n} people"
+ ],
+ "ovs.readOnly": [
+  "Solo lectura",
+  "Read only"
+ ],
+ "ovs.banner": [
+  "Solo lectura · supervisión de administrador",
+  "Read only · administrator oversight"
+ ],
+ "ovs.older": [
+  "Ver mensajes anteriores",
+  "Show earlier messages"
  ]
 }

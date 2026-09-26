@@ -97,7 +97,7 @@ struct DeriveSheet: View {
             do {
                 let id = try await store.derive(conversationId, messageId: message.id, kind: kind, name: name, reason: reason)
                 dismiss()
-                store.homePath.append(.conversation(id))
+                store.push(.conversation(id))
             } catch { self.error = L10n.errorText(error) }
             busy = false
         }
@@ -188,7 +188,7 @@ struct ReturnResultSheet: View {
             do {
                 let parentId = try await store.returnResult(conversationId, summary: summary)
                 dismiss()
-                store.homePath = [.conversation(parentId)]
+                store.navigate(to: .conversation(parentId))
             } catch { self.error = L10n.errorText(error) }
             busy = false
         }
@@ -269,14 +269,17 @@ struct ConversationIssuesSheet: View {
             List {
                 if list.isEmpty { Text(L("issue.noIssues")).foregroundStyle(Theme.textSecondary) }
                 ForEach(list) { i in
-                    Button { dismiss(); store.homePath.append(.issue(i.id)) } label: { IssueRow(issue: i, showWhere: false) }
+                    Button { dismiss(); store.push(.issue(i.id)) } label: { IssueRow(issue: i, showWhere: false) }
                 }
             }
             .navigationTitle(L("issue.here"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("common.close")) { dismiss() } }
-                ToolbarItem(placement: .primaryAction) { Button(L("issue.new")) { creating = true } }
+                // Los terceros participan en los asuntos, pero no los crean.
+                if !store.isGuest(conversationId) {
+                    ToolbarItem(placement: .primaryAction) { Button(L("issue.new")) { creating = true }.accessibilityIdentifier("issues.here.new") }
+                }
             }
             .sheet(isPresented: $creating) { NewIssueSheet(conversationId: conversationId, origin: nil) }
         }

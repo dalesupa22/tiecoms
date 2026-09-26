@@ -166,23 +166,27 @@ struct PeoplePicker: View {
 /// Nuevo chat con selector arriba (como la web): «Persona o chat grupal» o «Grupo en un espacio».
 struct NewChatSheet: View {
     enum Mode: String, CaseIterable, Identifiable { case person, space; var id: String { rawValue } }
+    /// «Mensaje nuevo» de DMs: solo personas (1 → directo, 2+ → chat grupal); los grupos se crean en Grupos.
+    var personOnly = false
     @State private var mode: Mode = .person
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker(L("chat.new"), selection: $mode) {
-                    ForEach(Mode.allCases) { m in Text(L("chat.mode.\(m.rawValue)")).tag(m) }
+                if !personOnly {
+                    Picker(L("chat.new"), selection: $mode) {
+                        ForEach(Mode.allCases) { m in Text(L("chat.mode.\(m.rawValue)")).tag(m) }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .accessibilityIdentifier("newChat.mode")
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16).padding(.vertical, 8)
-                .accessibilityIdentifier("newChat.mode")
-                switch mode {
+                switch personOnly ? .person : mode {
                 case .person: PersonChatForm()
                 case .space: SpaceGroupForm()
                 }
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle(L("chat.new"))
+            .navigationTitle(personOnly ? L("dm.new") : L("chat.new"))
             .navigationBarTitleDisplayMode(.inline)
         }
     }

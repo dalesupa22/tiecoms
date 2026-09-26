@@ -122,7 +122,7 @@ struct VoiceNoteView: View {
                             .accessibilityIdentifier("voice.transcript")
                     }
                 }
-                if let issue = t.suggestedIssue, !issue.isEmpty, conversationId != nil {
+                if let issue = t.suggestedIssue, !issue.isEmpty, let cid = conversationId, !store.isGuest(cid) {
                     Button { createIssue(issue) } label: {
                         Label(L("voice.createIssue", ["title": issue]), systemImage: "checklist")
                             .font(.caption.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)

@@ -12,6 +12,7 @@ struct ConversationDetailsView: View {
     @State private var confirmLeave = false
     @State private var choosePhoto = false
     @State private var confirmRemovePhoto = false
+    @State private var inviting = false
 
     var body: some View {
         Group {
@@ -56,6 +57,14 @@ struct ConversationDetailsView: View {
                             }
                         }
                     }
+                    if c.kind == .group || c.kind == .internal {
+                        Section {
+                            if !Naming.isGuest(d, c) && c.workspaceId != nil {
+                                Button { inviting = true } label: { Label(L("grp.inviteToGroup"), systemImage: "person.badge.plus") }
+                                    .accessibilityIdentifier("details.inviteGroup")
+                            }
+                        } footer: { Text(L("grp.adminsCanRead")).accessibilityIdentifier("details.oversightNote") }
+                    }
                     ConversationAgendaSection(conversationId: c.id)
                     Section(L("details.participants", ["n": regular.count])) {
                         if c.kind == .multi {
@@ -78,6 +87,7 @@ struct ConversationDetailsView: View {
                 }
                 .listStyle(.insetGrouped)
                 .sheet(isPresented: $adding) { AddMembersSheet(conversationId: c.id) }
+                .sheet(isPresented: $inviting) { InviteSheet(target: .group(c.id)) }
                 .confirmationDialog(L("chat.leaveConfirm"), isPresented: $confirmLeave, titleVisibility: .visible) {
                     Button(L("chat.leave"), role: .destructive) {
                         Task { do { try await store.leaveConversation(c.id) } catch { store.show(L10n.errorText(error)) } }
@@ -187,6 +197,7 @@ struct SettingsView: View {
     @State private var notifications = Prefs.notificationsEnabled
     @State private var systemDenied = false
     @State private var confirmLogout = false
+    @State private var joining = false
 
     var body: some View {
         List {
@@ -207,6 +218,15 @@ struct SettingsView: View {
                     NavigationLink(value: Route.profile) { Label(L("profile.edit"), systemImage: "person.crop.circle") }
                         .accessibilityIdentifier("settings.editProfile")
                 }
+                Section {
+                    Button { joining = true } label: { Label(L("join.title"), systemImage: "ticket") }
+                        .accessibilityIdentifier("you.joinCode")
+                    // Supervisión: una por cada empresa donde soy owner/admin.
+                    ForEach(d.organizations.filter(\.canAdmin)) { org in
+                        NavigationLink(value: Route.oversight(org.id)) { Label(L("ovs.title", ["org": org.name]), systemImage: "eye") }
+                            .accessibilityIdentifier("you.oversight.\(org.id)")
+                    }
+                } footer: { Text(L("join.youHint")) }
             }
             Section {
                 Toggle(L("settings.sounds"), isOn: $sounds)
@@ -270,8 +290,9 @@ struct SettingsView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Theme.background.ignoresSafeArea())
-        .navigationTitle(L("settings.nav"))
+        .navigationTitle(L("tab.you"))
         .task { await checkSystem() }
+        .sheet(isPresented: $joining) { JoinWithCodeSheet() }
         .confirmationDialog(L("settings.logoutConfirm"), isPresented: $confirmLogout, titleVisibility: .visible) {
             Button(L("settings.logout"), role: .destructive) { Task { await store.logout() } }
             Button(L("common.cancel"), role: .cancel) {}
@@ -305,6 +326,13 @@ struct InviteView: View {
                         Text(inv.workspaceName).font(.largeTitle.weight(.semibold)).foregroundStyle(Theme.textPrimary)
                         Text(L("invite.by", ["name": inv.invitedByName, "org": inv.invitedByOrg.isEmpty ? "" : " · \(inv.invitedByOrg)", "role": L("role.\(inv.role)")]))
                             .foregroundStyle(Theme.textSecondary)
+                        if !inv.groupNames.isEmpty {
+                            Label(inv.groupNames.joined(separator: ", "), systemImage: "number")
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textPrimary)
+                                .accessibilityLabel(L("invite.groups", ["groups": inv.groupNames.joined(separator: ", ")]))
+                                .accessibilityIdentifier("invite.groups")
+                        }
+                        if inv.role == "guest" { Text(L("join.asGuest")).font(.footnote).foregroundStyle(Theme.textSecondary) }
                         if let email = inv.email { Text(L("invite.forEmail", ["email": email])).font(.footnote).foregroundStyle(Theme.textSecondary) }
                         if !inv.valid {
                             ErrorBanner(text: L("invite.invalid"))

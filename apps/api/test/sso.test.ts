@@ -162,6 +162,16 @@ describeDb('flujo SSO con la base de pruebas', () => {
     expect(ub.user.id).toBe(ua.user.id);
   });
 
+  it('las apps nuevas vuelven a chaggu:// y las anteriores a tiecoms://', async () => {
+    const nuevo = await roundTrip('google', google(`nuevo.${run}@gmail.com`), { redirect_scheme: 'chaggu' });
+    expect(`${nuevo.target.protocol}//${nuevo.target.host}${nuevo.target.pathname}`).toBe('chaggu://auth/callback');
+    expect(nuevo.target.searchParams.get('code')).toBeTruthy();
+    const viejo = await roundTrip('google', google(`viejo.${run}@gmail.com`));
+    expect(`${viejo.target.protocol}//${viejo.target.host}${viejo.target.pathname}`).toBe('tiecoms://auth/callback');
+    const { challenge } = pkce();
+    await expect(sso.start('google', { platform: 'ios', code_challenge: challenge, code_challenge_method: 'S256', redirect_scheme: 'https' })).rejects.toThrow();
+  });
+
   it('el state debe volver al mismo navegador', async () => {
     const { challenge } = pkce();
     const { state } = await sso.start('google', { platform: 'ios', code_challenge: challenge, code_challenge_method: 'S256' });

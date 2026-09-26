@@ -56,7 +56,8 @@ export type SsoProvider = z.infer<typeof SsoProvider>;
  * 1. El cliente abre en el navegador del sistema
  *    GET /api/v1/auth/{provider}/start?platform=&code_challenge=&code_challenge_method=S256[&org=<token>][&org_name=][&next=]
  * 2. El servidor habla con Google/Microsoft y redirige a
- *    web: {origen}/auth/sso?code=…   nativas y escritorio: tiecoms://auth/callback?code=…
+ *    web: {origen}/auth/sso?code=…   nativas y escritorio: chaggu://auth/callback?code=… si /start recibe
+ *    redirect_scheme=chaggu (apps com.chaggu.app); sin ese parámetro, tiecoms://auth/callback (apps anteriores).
  *    (si falla: …?error=<código>&message=<texto>)
  * 3. El cliente canjea el código (60 s, un solo uso) con su code_verifier.
  */

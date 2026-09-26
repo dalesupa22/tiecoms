@@ -121,13 +121,15 @@ const StartQuery = z.object({
   org_name: z.string().trim().min(2).max(120).optional(),
   next: z.string().max(300).regex(/^\/(?!\/)[^\s\\]*$/).optional(),
   device_id: z.string().max(64).optional(),
+  /** Apps nuevas: 'chaggu' (chaggu://auth/callback). Sin valor: config.nativeRedirect (apps anteriores). */
+  redirect_scheme: z.enum(['chaggu', 'tiecoms']).optional(),
 });
 
 const redirectUri = (p: SsoProvider) => `${config.apiPublicOrigin}/api/v1/auth/${p}/callback`;
 const s256 = (v: string) => createHash('sha256').update(v).digest('base64url');
 
-function clientTarget(platform: string, params: Record<string, string>) {
-  const base = platform === 'web' ? `${config.publicOrigin}/auth/sso` : config.nativeRedirect;
+function clientTarget(platform: string, params: Record<string, string>, scheme?: string | null) {
+  const base = platform === 'web' ? `${config.publicOrigin}/auth/sso` : scheme ? `${scheme}://auth/callback` : config.nativeRedirect;
   return `${base}?${new URLSearchParams(params)}`;
 }
 
@@ -145,9 +147,9 @@ export async function start(provider: SsoProvider, query: unknown): Promise<{ ur
   const nonce = randomToken(16);
   const verifier = randomToken(48);
   await pool.query(
-    `INSERT INTO sso_flows (state_hash, provider, nonce, idp_verifier, client_challenge, platform, org_invite_token, org_name, next_path, expires_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now() + make_interval(mins => $10))`,
-    [sha256(state), provider, nonce, verifier, q.code_challenge, q.platform, q.org ?? null, q.org_name ?? null, q.next ?? null, FLOW_TTL_MIN],
+    `INSERT INTO sso_flows (state_hash, provider, nonce, idp_verifier, client_challenge, platform, org_invite_token, org_name, next_path, native_scheme, expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now() + make_interval(mins => $11))`,
+    [sha256(state), provider, nonce, verifier, q.code_challenge, q.platform, q.org ?? null, q.org_name ?? null, q.next ?? null, q.redirect_scheme ?? null, FLOW_TTL_MIN],
   );
   const params = new URLSearchParams({
     client_id: def.clientId(), response_type: 'code', redirect_uri: redirectUri(provider), scope: def.scope,
@@ -162,7 +164,7 @@ export async function callback(provider: SsoProvider, query: Record<string, stri
   const { rows } = await pool.query('DELETE FROM sso_flows WHERE state_hash = $1 AND provider = $2 RETURNING *', [sha256(state), provider]);
   const flow = rows[0];
   if (!flow) return clientTarget('web', { error: 'sso_expired', message: 'El inicio de sesión venció. Inténtalo de nuevo.' });
-  const fail = (code: string, message: string) => clientTarget(flow.platform, { error: code, message });
+  const fail = (code: string, message: string) => clientTarget(flow.platform, { error: code, message }, flow.native_scheme);
   if (new Date(flow.expires_at) < new Date()) return fail('sso_expired', 'El inicio de sesión venció. Inténtalo de nuevo.');
   // El vuelo debe terminar en el mismo navegador que lo empezó.
   if (!stateCookie || stateCookie !== state) return fail('sso_state', 'No pudimos confirmar el inicio de sesión en este navegador. Inténtalo de nuevo.');
@@ -182,7 +184,7 @@ export async function callback(provider: SsoProvider, query: Record<string, stri
        VALUES ($1,$2,$3,$4,$5, now() + make_interval(secs => $6))`,
       [sha256(code), userId, provider, flow.client_challenge, flow.platform, CODE_TTL_SEC],
     );
-    return clientTarget(flow.platform, { code, ...(flow.next_path ? { next: flow.next_path } : {}) });
+    return clientTarget(flow.platform, { code, ...(flow.next_path ? { next: flow.next_path } : {}) }, flow.native_scheme);
   } catch (e: any) {
     if (e instanceof ApiError) return fail(e.code, e.message);
     console.error('[sso] callback', provider, e?.code ?? e?.message);

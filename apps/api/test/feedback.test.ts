@@ -286,7 +286,7 @@ describe('notificaciones push', () => {
     const m = (await send(ana, generalId, 'Hola Beto, ¿revisaste la propuesta?')).json.message;
     const hit = await waitFor((s) => s.token === betoApns && s.body.messageId === m.id);
     expect(hit).toBeTruthy();
-    expect(hit.topic).toBe('com.tiecoms.app');
+    expect(hit.topic).toBe(process.env.APNS_BUNDLE_ID ?? 'com.chaggu.app');
     expect(hit.pushType).toBe('alert');
     const unread = (await boot(beto)).conversations.filter((c: any) => !c.mutedUntil).reduce((n: number, c: any) => n + c.unread, 0);
     expect(hit.body).toMatchObject({

@@ -28,7 +28,7 @@ Microsoft viven solo en el servidor; los clientes nunca los ven.
    | Plataforma | Éxito | Error |
    |---|---|---|
    | web | `{origen}/auth/sso?code=…[&next=…]` | `{origen}/auth/sso?error=…&message=…` |
-   | ios, android, macos, windows | `tiecoms://auth/callback?code=…[&next=…]` | `tiecoms://auth/callback?error=…&message=…` |
+   | ios, android, macos, windows | `chaggu://auth/callback?code=…[&next=…]` con `redirect_scheme=chaggu` en `/start` (apps com.chaggu.app); sin él, `tiecoms://…` (apps anteriores) | igual, con `?error=…&message=…` |
 
    `message` viene en español y se puede mostrar tal cual. Códigos de error:
    `sso_expired`, `sso_state`, `sso_cancelled`, `sso_failed`, `sso_unavailable`,

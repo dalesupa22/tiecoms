@@ -798,7 +798,11 @@ private fun Composer(
                     else { val (t, m, c) = com.tiecoms.app.core.Mentions.insert(text, ments, q.first, cursor, name, uid); text = t; ments = m; sel = androidx.compose.ui.text.TextRange(c) }
                 }, onAddToChat = { p -> scope.launch {
                     runCatching { client.addMembers(id, listOf(p.id)) }.onSuccess {
-                        val (t, m, c) = com.tiecoms.app.core.Mentions.insert(text, ments, q.first, cursor, p.name, p.id); text = t; ments = m; sel = androidx.compose.ui.text.TextRange(c)
+                        // Tras la red el texto pudo cambiar: la búsqueda se recalcula sobre el texto y el cursor de ahora.
+                        val now = com.tiecoms.app.core.Mentions.query(text, sel.start, ments)
+                        if (now != null) {
+                            val (t, m, c) = com.tiecoms.app.core.Mentions.insert(text, ments, now.first, sel.start, p.name, p.id); text = t; ments = m; sel = androidx.compose.ui.text.TextRange(c)
+                        }
                     }.onFailure { attError = errorText(ctx, it) }
                 } }, onAskSide = { p -> onAskSide(p.id) })
             }

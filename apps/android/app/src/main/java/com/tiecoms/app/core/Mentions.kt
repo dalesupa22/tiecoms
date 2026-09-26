@@ -60,8 +60,23 @@ object Mentions {
         return d.people.firstOrNull { p -> p.id != d.me.id && p.id !in c.memberIds && p.kind == "human" && fold(p.name).split(' ').any { it.startsWith(f) } }
     }
 
+    /**
+     * Tokens que caben en [text]: dentro del rango, sin solaparse y ordenados. Un token viejo (de un borrador restaurado,
+     * de un mensaje editado o de un toque que llegó después de que cambió el texto) nunca debe provocar un substring fuera
+     * de rango.
+     */
+    fun sanitize(text: String, mentions: List<MentionDTO>): List<MentionDTO> {
+        var end = 0
+        return mentions.filter { it.start >= 0 && it.length > 0 && it.start + it.length <= text.length }.sortedBy { it.start }
+            .filter { m -> (m.start >= end).also { ok -> if (ok) end = m.start + m.length } }
+    }
+
     /** Elegir un candidato: reemplaza «@consulta» por «@Nombre » y agrega el token; corre los que vienen después. */
-    fun insert(text: String, mentions: List<MentionDTO>, at: Int, cursor: Int, name: String, userId: String): Triple<String, List<MentionDTO>, Int> {
+    fun insert(text: String, mentions0: List<MentionDTO>, at0: Int, cursor0: Int, name: String, userId: String): Triple<String, List<MentionDTO>, Int> {
+        // El toque puede llegar con posiciones de una composición anterior (se siguió escribiendo o se borró): se acotan.
+        val cursor = cursor0.coerceIn(0, text.length)
+        val at = at0.coerceIn(0, cursor)
+        val mentions = sanitize(text, mentions0)
         val token = "@$name"
         val insert = "$token "
         val next = text.substring(0, at) + insert + text.substring(cursor)
@@ -74,8 +89,9 @@ object Mentions {
      * Cambio de texto con tokens: un retroceso dentro de un token lo borra entero; escribir dentro de un token lo quita (vuelve
      * a ser texto). Devuelve (texto, tokens, cursor).
      */
-    fun edit(old: String, new: String, mentions: List<MentionDTO>, cursor: Int): Triple<String, List<MentionDTO>, Int> {
-        if (old == new || mentions.isEmpty()) return Triple(new, mentions, cursor)
+    fun edit(old: String, new: String, mentions0: List<MentionDTO>, cursor: Int): Triple<String, List<MentionDTO>, Int> {
+        val mentions = sanitize(old, mentions0)
+        if (old == new || mentions.isEmpty()) return Triple(new, sanitize(new, mentions), cursor.coerceIn(0, new.length))
         var p = 0
         while (p < old.length && p < new.length && old[p] == new[p]) p++
         var so = old.length; var sn = new.length

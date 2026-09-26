@@ -45,6 +45,7 @@ import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -375,6 +376,11 @@ fun SideSheetHost(onMinimize: () -> Unit, content: @Composable () -> Unit) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     LaunchedEffect(Unit) { runCatching { state.partialExpand() } }
     ModalBottomSheet(onDismissRequest = onMinimize, sheetState = state, scrimColor = Color.Black.copy(alpha = 0.18f), modifier = Modifier.testTag("sidePanel")) {
+        // Con el teclado abierto (el compositor recibe el cursor, o se escribe «@»), la hoja a medias dejaría el compositor
+        // y el buscador de menciones detrás del teclado: se abre entera.
+        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+        val ime = androidx.compose.foundation.layout.WindowInsets.isImeVisible
+        LaunchedEffect(ime) { if (ime && state.currentValue != SheetValue.Expanded) runCatching { state.expand() } }
         Column(Modifier.fillMaxWidth().fillMaxHeight(if (state.currentValue == SheetValue.Expanded) 0.94f else 0.9f)) { content() }
     }
 }

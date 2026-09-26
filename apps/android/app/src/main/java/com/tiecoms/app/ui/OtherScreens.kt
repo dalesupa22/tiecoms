@@ -1,5 +1,8 @@
 package com.tiecoms.app.ui
 
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
@@ -330,9 +333,7 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
                 )
             }
             HorizontalDivider()
-            SettingsSection(stringResource(R.string.language)) {
-                Text(stringResource(R.string.language_desc), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            SettingsSection(stringResource(R.string.language_title)) { LanguagePicker() }
             if (BuildConfig.DEBUG) {
                 HorizontalDivider()
                 SettingsSection(stringResource(R.string.server)) {
@@ -471,6 +472,45 @@ fun InviteScreen(token: String, signedIn: Boolean, onBack: () -> Unit, onLogin: 
                         Spacer(Modifier.height(8.dp))
                         OutlinedButton(onClick = onSignup, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text(stringResource(R.string.create_account)) }
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * «Idioma / Language»: Automático (el del sistema), Español, English. Aplica a toda la app, se recuerda entre
+ * reinicios y vuelve a registrar el token push con el nuevo `lang` para que los avisos lleguen en ese idioma.
+ */
+@Composable
+private fun LanguagePicker() {
+    val ctx = LocalContext.current
+    val container = LocalContainer.current
+    var choice by remember { mutableStateOf(com.tiecoms.app.platform.AppLocale.current(ctx)) }
+    val options = listOf(
+        com.tiecoms.app.core.AppLanguage.SYSTEM to stringResource(R.string.language_auto),
+        com.tiecoms.app.core.AppLanguage.ES to "Español",
+        com.tiecoms.app.core.AppLanguage.EN to "English",
+    )
+    androidx.compose.foundation.layout.Column(Modifier.selectableGroup().testTag("languagePicker")) {
+        options.forEach { (lang, label) ->
+            androidx.compose.foundation.layout.Row(
+                Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    .selectable(choice == lang, role = androidx.compose.ui.semantics.Role.RadioButton) {
+                        if (choice == lang) return@selectable
+                        choice = lang
+                        com.tiecoms.app.platform.AppLocale.set(ctx.applicationContext, lang)
+                        container.retryPushRegistration()
+                        // Android 8–12: la actividad se recrea con el idioma nuevo (en 13+ lo hace el sistema).
+                        if (android.os.Build.VERSION.SDK_INT < 33) (ctx as? android.app.Activity)?.recreate()
+                    }.testTag("lang-" + lang.name),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.RadioButton(choice == lang, onClick = null)
+                androidx.compose.foundation.layout.Spacer(Modifier.width(12.dp))
+                androidx.compose.foundation.layout.Column {
+                    Text(label, style = MaterialTheme.typography.bodyLarge)
+                    if (lang == com.tiecoms.app.core.AppLanguage.SYSTEM) Text(stringResource(R.string.language_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

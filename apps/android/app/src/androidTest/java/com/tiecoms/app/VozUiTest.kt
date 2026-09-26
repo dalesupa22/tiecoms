@@ -84,7 +84,7 @@ class VozUiTest {
             compose.onNodeWithTag("email").performTextInput(email)
             compose.onNodeWithTag("password").performTextInput(password)
             compose.onNodeWithTag("login").performScrollTo().performClick()
-            compose.waitUntilAtLeastOneExists(hasTestTag("newGroup"), 20_000)
+            compose.waitUntilAtLeastOneExists(hasTestTag("newGroup"), 45_000)
             openChat()
             val only = arg("only")
             if (only != "photos") scenario = voice(scenario)
@@ -98,7 +98,8 @@ class VozUiTest {
         compose.waitUntilAtLeastOneExists(hasTestTag("mic"), 15_000)
     }
 
-    /** Toque al micrófono → grabación bloqueada; espera [ms] reales; Enviar; consentimiento; devuelve la nota enviada. */
+    /** Toque al micrófono → grabación bloqueada; espera [ms] reales; Enviar; consentimiento; devuelve la nota enviada.
+     *  La nota dura [ms] más lo que tarda la prueba entre el toque y Enviar (~0,5–1,5 s). */
     private fun record(ms: Long, name: String): MessageDTO? {
         val before = lastVoice()?.id
         compose.onNodeWithTag("mic").performClick()
@@ -122,11 +123,11 @@ class VozUiTest {
 
         val short = record(3_000, "3s")!!.attachments.first { it.isVoice }
         log("Nota de 3 s: durationMs=${short.durationMs}")
-        assertTrue("duración del archivo ≈ 3 s: ${short.durationMs}", (short.durationMs ?: 0) in 2_300..3_700)
+        assertTrue("duración del archivo ≈ 3 s: ${short.durationMs}", (short.durationMs ?: 0) in 2_700..4_800)
 
         val mid = record(35_000, "35s")!!.attachments.first { it.isVoice }
         log("Nota de 35 s: durationMs=${mid.durationMs}, ${mid.sizeBytes} bytes")
-        assertTrue("≈ 35 s: ${mid.durationMs}", (mid.durationMs ?: 0) in 33_500..36_500)
+        assertTrue("≈ 35 s: ${mid.durationMs}", (mid.durationMs ?: 0) in 34_700..36_800)
 
         // Reproducir la de 35 s y saltar al 80 %.
         compose.waitUntilAtLeastOneExists(hasTestTag("voicePlay-${mid.id}"), 10_000)
@@ -142,7 +143,7 @@ class VozUiTest {
 
         val long = record(190_000, "3min")!!.attachments.first { it.isVoice }
         log("Nota de 3 min 10 s: durationMs=${long.durationMs}, ${long.sizeBytes} bytes")
-        assertTrue("≈ 190 s: ${long.durationMs}", (long.durationMs ?: 0) in 187_000..193_000)
+        assertTrue("≈ 190 s: ${long.durationMs}", (long.durationMs ?: 0) in 189_700..192_000)
         compose.onNodeWithTag("voicePlay-${long.id}", useUnmergedTree = true).performClick()
         compose.waitUntil(15_000) { app.container.voice.state.value.let { it.currentId == long.id && it.playing } }
         compose.onNodeWithTag("voiceWave-${long.id}", useUnmergedTree = true).performTouchInput { click(androidx.compose.ui.geometry.Offset(width * 0.95f, height / 2f)) }

@@ -14,6 +14,8 @@ import com.tiecoms.app.ui.AppRoot
 import com.tiecoms.app.ui.theme.TieComsTheme
 
 class MainActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: android.content.Context) { super.attachBaseContext(com.tiecoms.app.platform.AppLocale.wrap(newBase)) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Splash del sistema (símbolo sin rayitas sobre tinta) → splash animado de ignición en Compose,
         // que arranca con el mismo símbolo en el mismo sitio; el del sistema se quita con un fundido rápido.

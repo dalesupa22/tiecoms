@@ -21,6 +21,8 @@ import com.tiecoms.app.ui.theme.TieComsTheme
 
 /** Burbuja de conversación (Android 11+): el chat flotante que abre la notificación. */
 class BubbleActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: android.content.Context) { super.attachBaseContext(com.tiecoms.app.platform.AppLocale.wrap(newBase)) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val id = (DeepLinks.parse(intent?.dataString) as? DeepLink.Conversation)?.id ?: run { finish(); return }

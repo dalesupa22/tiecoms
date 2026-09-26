@@ -48,4 +48,7 @@
     <string name="voice_retry_send">Reintentar</string>
     <string name="att_camera_unavailable">No se pudo abrir la cámara.</string>
     <string name="err_payload_too_large">El servidor rechazó el archivo por tamaño (413). Intenta de nuevo en un momento.</string>
+    <string name="language_title">Idioma / Language</string>
+    <string name="language_auto">Automático</string>
+    <string name="splash_security">Conexión cifrada para proteger tu información</string>
 </resources>

@@ -2,23 +2,23 @@
 <!-- 1.6.1: collapsible issues in Groups, long-press to complete and emoji reactions (docs/REACCIONES_ENLACES.md). -->
 <resources>
     <plurals name="grp_issues_chip">
-        <item quantity="one">◆ %1$d issue</item>
-        <item quantity="other">◆ %1$d issues</item>
+        <item quantity="one">◆ %1$d subject</item>
+        <item quantity="other">◆ %1$d subjects</item>
     </plurals>
     <plurals name="grp_overdue_chip">
         <item quantity="one">%1$d overdue</item>
         <item quantity="other">%1$d overdue</item>
     </plurals>
-    <string name="grp_issues_show">Show issues</string>
-    <string name="grp_issues_hide">Hide issues</string>
+    <string name="grp_issues_show">Show subjects</string>
+    <string name="grp_issues_hide">Hide subjects</string>
     <string name="menu_expand_all">Expand all</string>
-    <string name="menu_show_all_issues">Show all issues</string>
-    <string name="menu_hide_all_issues">Collapse all issues</string>
+    <string name="menu_show_all_issues">Show all subjects</string>
+    <string name="menu_hide_all_issues">Collapse all subjects</string>
 
     <string name="issue_act_done">Complete</string>
     <string name="issue_act_in_progress">Mark in progress</string>
     <string name="issue_act_waiting">Mark waiting</string>
-    <string name="issue_done_toast">Issue completed: “%1$s”</string>
+    <string name="issue_done_toast">Subject completed: “%1$s”</string>
     <string name="issue_status_toast">“%1$s” → %2$s</string>
 
     <string name="react_add">Add reaction</string>
@@ -33,9 +33,9 @@
     <string name="react_done_hint">✅ Done: closes your reminder</string>
     <string name="react_look_done">👀 I’ll remind you %1$s</string>
     <string name="react_done_reminders">✅ Reminder closed</string>
-    <string name="react_close_issue">Also close the issue “%1$s”?</string>
-    <string name="react_close_issue_btn">Close issue</string>
-    <string name="react_issue_closed">Issue closed</string>
+    <string name="react_close_issue">Also close the subject “%1$s”?</string>
+    <string name="react_close_issue_btn">Close subject</string>
+    <string name="react_issue_closed">Subject closed</string>
     <string name="react_max">This message already has 20 different emoji. Join one of them.</string>
     <string name="common_and">and</string>
     <string name="voice_err_too_large">The note wasn’t sent: the server rejected its size. Try again in a moment.</string>
@@ -44,4 +44,7 @@
     <string name="voice_retry_send">Retry</string>
     <string name="att_camera_unavailable">Couldn’t open the camera.</string>
     <string name="err_payload_too_large">The server rejected the file size (413). Try again in a moment.</string>
+    <string name="language_title">Idioma / Language</string>
+    <string name="language_auto">Automatic</string>
+    <string name="splash_security">Encrypted connection to help protect your information</string>
 </resources>

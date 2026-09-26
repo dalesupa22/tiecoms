@@ -55,8 +55,15 @@ class VoicePlayer(private val ctx: Context, private val okHttp: OkHttpClient, pr
         }
     }
 
+    /** ExoPlayer solo acepta el hilo principal: quien llame desde otro hilo (una corrutina que volvió en un worker) se pasa a main. */
+    private inline fun onMain(crossinline block: () -> Unit) {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) block() else scope.launch { block() }
+    }
+
     /** Toca play en [item]; [following] son las notas que vienen después en la conversación (reproducción continua). */
-    fun play(item: Item, following: List<Item>, bearer: String, startFraction: Float? = null) {
+    fun play(item: Item, following: List<Item>, bearer: String, startFraction: Float? = null): Unit = onMain { playOnMain(item, following, bearer, startFraction) }
+
+    private fun playOnMain(item: Item, following: List<Item>, bearer: String, startFraction: Float?) {
         val p = ensure(bearer)
         if (_state.value.currentId == item.id) { if (startFraction != null) seek(startFraction) else if (p.isPlaying) p.pause() else p.play(); return }
         queue = following
@@ -85,7 +92,9 @@ class VoicePlayer(private val ctx: Context, private val okHttp: OkHttpClient, pr
     }
 
     /** Salta a [fraction] de la nota; si el reproductor aún no sabe la duración (nota larga cargando), usa la del mensaje. */
-    fun seek(fraction: Float) {
+    fun seek(fraction: Float): Unit = onMain { seekOnMain(fraction) }
+
+    private fun seekOnMain(fraction: Float) {
         val p = player ?: return
         val d = p.duration.takeIf { it > 0 } ?: _state.value.durationMs.takeIf { it > 0 } ?: return
         val to = (d * fraction.coerceIn(0f, 1f)).toLong()
@@ -107,5 +116,6 @@ class VoicePlayer(private val ctx: Context, private val okHttp: OkHttpClient, pr
         settings.listenedVoice = _listened.value
     }
 
-    fun stop() { player?.stop(); queue = emptyList(); _state.value = _state.value.copy(currentId = null, playing = false, positionMs = 0) }
+    fun stop(): Unit = onMain { stopOnMain() }
+    private fun stopOnMain() { player?.stop(); queue = emptyList(); _state.value = _state.value.copy(currentId = null, playing = false, positionMs = 0) }
 }

@@ -111,7 +111,7 @@ fun SplashOverlay(mode: Mode, ready: Boolean, onFinished: () -> Unit) {
     val orange = ImageBitmap.imageResource(R.drawable.splash_layer_orange)
     val sparks = ImageBitmap.imageResource(R.drawable.splash_layer_sparks)
     val slogan = stringResource(R.string.splash_slogan)
-    val a11y = stringResource(R.string.splash_a11y)
+    val a11y = stringResource(R.string.splash_a11y) + " " + stringResource(R.string.splash_security) + "."
 
     BoxWithConstraints(
         Modifier.fillMaxSize()
@@ -137,15 +137,20 @@ fun SplashOverlay(mode: Mode, ready: Boolean, onFinished: () -> Unit) {
             }
         }
         // Eslogan debajo del símbolo (el borde inferior del lienzo queda ~38 dp bajo las burbujas).
-        Text(
-            slogan,
-            color = Paper.copy(alpha = frame.sloganAlpha),
-            fontSize = 17.sp,
-            lineHeight = 22.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 32.dp)
+        // Debajo, pequeña, la línea de seguridad (1.6.2): solo lo verificado (TLS en tránsito), sin «extremo a extremo».
+        // Mismo tiempo que el eslogan; papel al 80 % sobre tinta ≈ 12:1 (AA de sobra).
+        androidx.compose.foundation.layout.Column(
+            Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 32.dp)
                 .offset(y = maxHeight / 2 + side / 2 + frame.sloganOffsetDp.dp),
-        )
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(slogan, color = Paper.copy(alpha = frame.sloganAlpha), fontSize = 17.sp, lineHeight = 22.sp, textAlign = TextAlign.Center)
+            Text(
+                stringResource(R.string.splash_security),
+                color = Paper.copy(alpha = 0.8f * frame.sloganAlpha), fontSize = 12.sp, lineHeight = 16.sp, textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 10.dp).testTag("splashSecurity"),
+            )
+        }
     }
 }
 

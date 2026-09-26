@@ -48,7 +48,7 @@ object PushSetup {
                         }
                     }
                     if (!container.notifier.enabled() || container.client.value.state.value.status != SessionStatus.READY) return@withTimeout
-                    val lang = if (java.util.Locale.getDefault().language == "es") "es" else "en"
+                    val lang = AppLocale.effective(ctx)
                     container.push.onToken(token)
                     container.client.value.registerPushToken(token, lang)
                 }

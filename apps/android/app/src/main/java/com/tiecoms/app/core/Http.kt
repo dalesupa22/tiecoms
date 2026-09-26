@@ -110,6 +110,8 @@ class HttpApi(val baseUrl: String, private val client: OkHttpClient) {
             .header("x-tiecoms-client", PLATFORM)
             .header("x-tiecoms-contract", CONTRACT_VERSION)
             .header("accept", "application/json")
+            // Idioma de la app (el elegido en Tú o el del sistema): mensajes de error y textos del servidor.
+            .header("accept-language", java.util.Locale.getDefault().toLanguageTag())
         if (token != null) b.header("authorization", "Bearer $token")
         raw?.headers?.forEach { (k, v) -> b.header(k, v) }
         val body = when {

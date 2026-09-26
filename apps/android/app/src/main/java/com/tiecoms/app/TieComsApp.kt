@@ -49,6 +49,8 @@ class TieComsApp : Application() {
     lateinit var container: AppContainer
         private set
 
+    override fun attachBaseContext(base: Context) { super.attachBaseContext(com.tiecoms.app.platform.AppLocale.wrap(base)) }
+
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)

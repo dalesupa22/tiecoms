@@ -16,9 +16,9 @@
     <string name="expand">Expand</string>
     <string name="collapse">Collapse</string>
     <string name="home_unread_in">%1$d unread</string>
-    <string name="issues_count_one">◆ 1 issue</string>
-    <string name="issues_count">◆ %1$d issues</string>
-    <string name="issues_open_bar">Open issues (%1$d)</string>
+    <string name="issues_count_one">◆ 1 subject</string>
+    <string name="issues_count">◆ %1$d subjects</string>
+    <string name="issues_open_bar">Open subjects (%1$d)</string>
     <string name="issue_all">All</string>
     <string name="issue_comment_ph3">Write an update or a question…</string>
     <string name="issue_no_comments">No comments yet.</string>
@@ -27,7 +27,7 @@
     <string name="common_saving">Saving…</string>
     <string name="common_saved">Saved</string>
     <string name="system_message">System message</string>
-    <string name="issue_in_conversation">Issues in “%1$s”</string>
+    <string name="issue_in_conversation">Subjects in “%1$s”</string>
     <string name="details_short">Details</string>
     <string name="notif_you">You</string>
     <string name="menu_reply_private">Reply privately</string>

@@ -5,7 +5,7 @@ import { attachmentSummaryText, errorText, t } from '../i18n.ts';
 import { toast } from '../menu.tsx';
 import { openDialog } from '../actions.tsx';
 import { groupWorkspaces } from './Shell.tsx';
-import { NewWorkspaceDialog } from './Dialogs.tsx';
+import { CreateGroupDialog } from './Groups.tsx';
 import { navigate } from '../router.ts';
 import { Avatar, Modal, OrgMark, conversationTitle, orgById, personById } from '../ui.tsx';
 
@@ -158,7 +158,7 @@ function SpaceGroupForm({ onClose }: { onClose: () => void }) {
         <div className="empty">{t('chat.noSpaces')}</div>
         <div className="modal-actions">
           <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
-          <button className="btn primary" onClick={() => openDialog((close) => <NewWorkspaceDialog onClose={close} />)}>{t('dlg.createSpace')}</button>
+          <button className="btn primary" onClick={() => openDialog((close) => <CreateGroupDialog preset={{ kind: 'company' }} onClose={close} />)}>{t('dlg.createSpace')}</button>
         </div>
       </>
     );

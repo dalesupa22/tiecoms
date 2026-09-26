@@ -234,8 +234,8 @@ struct SettingsView: View {
                     .accessibilityIdentifier("settings.sounds")
                 Toggle(L("settings.notifications"), isOn: $notifications)
                     .onChange(of: notifications) { _, v in
-                        Prefs.notificationsEnabled = v
-                        if v { Task { await AppFeedback.shared.requestAuthorizationIfNeeded(); await checkSystem() } }
+                        let update = store.setNotificationsEnabled(v)
+                        Task { await update.value; await checkSystem() }
                     }
                     .accessibilityIdentifier("settings.notifications")
                 if systemDenied && notifications {

@@ -326,18 +326,47 @@ extension AppStore {
 
     /// PUT /push/token {provider:'apns', token, environment, lang} (reemplaza el token anterior de la sesión).
     func registerPushToken(_ hex: String) async {
-        guard status == .ready else { return }
-        do {
-            try await api.requestData("/push/token", method: "PUT",
-                                      json: ["provider": "apns", "token": hex, "environment": PushEnvironment.current, "lang": L10n.lang])
-            registeredPushToken = hex
-        } catch { NSLog("[TieComs] no se pudo registrar el token push: \(error)") }
+        pushTokenSync.receive(hex)
+        guard status == .ready, !pushSigningOut else { return }
+        pushTokenSync.setEnabled(Prefs.notificationsEnabled && AppFeedback.shared.authorized)
+        await pushTokenSync.synchronize()
     }
 
     func unregisterPush() async {
-        guard registeredPushToken != nil || PushRegistration.token != nil, api.accessToken != nil else { return }
-        _ = try? await api.requestData("/push/token", method: "DELETE")
-        registeredPushToken = nil
+        PushRegistration.unregister()
+        pushTokenSync.setEnabled(false)
+        guard api.accessToken != nil else { return }
+        await pushTokenSync.synchronize()
+    }
+
+    /// Se llama al entrar, volver a primer plano y recuperar conectividad. No muestra el permiso.
+    func retryPushRegistration() async {
+        guard status == .ready, !pushSigningOut else { return }
+        await AppFeedback.shared.refreshAuthorization()
+        guard status == .ready, !pushSigningOut else { return }
+        let enabled = Prefs.notificationsEnabled && AppFeedback.shared.authorized
+        pushTokenSync.setEnabled(enabled)
+        if enabled {
+            if let token = PushRegistration.token { pushTokenSync.receive(token) }
+            PushRegistration.registerIfEnabled()
+        } else {
+            PushRegistration.unregister()
+        }
+        await pushTokenSync.synchronize()
+    }
+
+    /// Aplica OFF inmediatamente, incluso si todavía se está enviando el token anterior.
+    @discardableResult
+    func setNotificationsEnabled(_ enabled: Bool) -> Task<Void, Never> {
+        Prefs.notificationsEnabled = enabled
+        if !enabled {
+            pushTokenSync.setEnabled(false)
+            PushRegistration.unregister()
+        }
+        return Task {
+            if enabled && Prefs.notificationsEnabled { await AppFeedback.shared.requestAuthorizationIfNeeded() }
+            await retryPushRegistration()
+        }
     }
 
     /// Acción «Responder» de la notificación: arranca la sesión si hace falta y envía por HTTP.

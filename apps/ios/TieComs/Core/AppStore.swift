@@ -137,14 +137,26 @@ final class AppStore {
     @ObservationIgnored var remindersDue = 0
     @ObservationIgnored private var badgeTask: Task<Void, Never>?
     /// Último token APNs registrado en el API (pruebas y diagnóstico).
-    @ObservationIgnored var registeredPushToken: String?
+    var registeredPushToken: String? { pushTokenSync.registeredToken }
+    @ObservationIgnored let pushTokenSync: PushTokenSync
+    @ObservationIgnored var pushSigningOut = false
     /// Pantalla previa al permiso de notificaciones.
     var showPushPrompt = false
     @ObservationIgnored var onLiveMessage: ((MessageDTO) -> Void)?
     @ObservationIgnored var onReady: (() -> Void)?
 
     init(baseURL: URL, secrets: SecretStore, outbox: OutboxStore = OutboxStore(), feedback: FeedbackSink?, session: URLSession? = nil) {
-        api = APIClient(baseURL: baseURL, secrets: secrets, session: session)
+        let api = APIClient(baseURL: baseURL, secrets: secrets, session: session)
+        self.api = api
+        pushTokenSync = PushTokenSync { operation in
+            switch operation {
+            case .register(let token):
+                try await api.requestData("/push/token", method: "PUT",
+                                          json: ["provider": "apns", "token": token, "environment": PushEnvironment.current, "lang": L10n.lang])
+            case .unregister:
+                try await api.requestData("/push/token", method: "DELETE")
+            }
+        }
         socket = SocketIOClient(baseURL: baseURL)
         self.outbox = outbox
         self.feedback = feedback
@@ -218,6 +230,8 @@ final class AppStore {
         guard let me = data?.me.id else { return }
         pending = outbox.load(userId: me).map { var p = $0; if p.status == .sending { p.status = .pending }; return p }
         status = .ready
+        pushSigningOut = false
+        pushTokenSync.startSession()
         showSignup = false
         signupOrgToken = nil
         socket.connect()
@@ -231,9 +245,11 @@ final class AppStore {
         Task { try? await loadReminders() }
         Task { await loadOpenIssues() }
         onReady?()
+        Task { await retryPushRegistration() }
     }
 
     func logout() async {
+        pushSigningOut = true
         // El logout del API ya borra el token de la sesión; se borra antes por si falla la red después.
         await unregisterPush()
         await api.logout()
@@ -247,6 +263,9 @@ final class AppStore {
     }
 
     private func handleSignedOut() {
+        pushSigningOut = true
+        pushTokenSync.endSession()
+        PushRegistration.unregister()
         ShareTargets.clear()
         Donations.deleteAll()
         socket.disconnect()
@@ -847,6 +866,7 @@ final class AppStore {
             return
         }
         socket.reconnectNow()
+        Task { await retryPushRegistration() }
         Task { await resync() }
     }
 
@@ -859,8 +879,12 @@ final class AppStore {
             let ok = path.status == .satisfied
             Task { @MainActor in
                 guard let self else { return }
-                if ok && !self.lastPathSatisfied { self.socket.reconnectNow() }
+                let recovered = ok && !self.lastPathSatisfied
                 self.lastPathSatisfied = ok
+                if recovered {
+                    self.socket.reconnectNow()
+                    await self.retryPushRegistration()
+                }
             }
         }
         m.start(queue: DispatchQueue(label: "tiecoms.path"))

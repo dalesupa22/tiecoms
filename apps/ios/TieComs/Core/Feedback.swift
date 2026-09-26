@@ -58,8 +58,7 @@ final class SoundPlayer {
     }
 }
 
-/// Sonidos + notificaciones locales. Push remoto (APNs) aún no existe en el
-/// backend: ver `PushRegistration`.
+/// Sonidos y presentación de notificaciones locales y remotas.
 @MainActor
 final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegate {
     static let shared = AppFeedback()
@@ -98,7 +97,6 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
         } else {
             await refreshAuthorization()
         }
-        PushRegistration.registerIfEnabled()
     }
 
     func playSend() { sounds.play(.send); Haptics.tap() }
@@ -154,7 +152,8 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         let conv = notification.request.content.userInfo["conversationId"] as? String
         let isRemote = notification.request.trigger is UNPushNotificationTrigger
-        let (open, online) = await MainActor.run { (AppFeedback.shared.openConversationId?(), AppFeedback.shared.socketOnline?() ?? false) }
+        let (enabled, open, online) = await MainActor.run { (Prefs.notificationsEnabled, AppFeedback.shared.openConversationId?(), AppFeedback.shared.socketOnline?() ?? false) }
+        guard enabled else { return [] }
         let info = notification.request.content.userInfo
         let isEventSoon = (info["type"] as? String) == "event" && info["minutes"] != nil
         // El aviso de reunión se muestra siempre (aunque sea el chat abierto), salvo el push duplicado del aviso local.
@@ -194,8 +193,12 @@ enum PushRegistration {
     @MainActor static var onToken: ((String) -> Void)?
 
     @MainActor static func registerIfEnabled() {
-        guard enabled else { return }
+        guard enabled, Prefs.notificationsEnabled, AppFeedback.shared.authorized else { return }
         UIApplication.shared.registerForRemoteNotifications()
+    }
+
+    @MainActor static func unregister() {
+        UIApplication.shared.unregisterForRemoteNotifications()
     }
 
     @MainActor static func tokenReceived(_ data: Data) {
@@ -221,5 +224,85 @@ enum PushRegistration {
             UNNotificationCategory(identifier: PushPayload.sideCategory, actions: [reply, read], intentIdentifiers: ["INSendMessageIntent"],
                                    options: [.hiddenPreviewsShowTitle]),
         ]
+    }
+}
+
+/// Serializa PUT/DELETE: un apagado durante un PUT siempre termina en DELETE.
+/// Los fallos conservan el estado pendiente para el siguiente intento, sin un bucle de red.
+@MainActor
+final class PushTokenSync {
+    enum Operation: Equatable { case register(String), unregister }
+    private let send: (Operation) async throws -> Void
+    private var active = false
+    private var generation = 0
+    private var enabled = false
+    private var token: String?
+    private var serverCleared = false
+    private var dirty = false
+    private var task: Task<Void, Never>?
+    private(set) var registeredToken: String?
+
+    init(send: @escaping (Operation) async throws -> Void) { self.send = send }
+
+    func startSession() {
+        generation += 1
+        active = true
+        enabled = false
+        registeredToken = nil
+        serverCleared = false
+        dirty = true
+    }
+
+    func endSession() {
+        generation += 1
+        active = false
+        registeredToken = nil
+        serverCleared = false
+    }
+
+    func setEnabled(_ value: Bool) {
+        if enabled != value { enabled = value; dirty = true }
+    }
+
+    func receive(_ value: String) {
+        if token != value { token = value; dirty = true }
+    }
+
+    func synchronize() async {
+        guard active else { return }
+        dirty = true
+        if let task { await task.value; return }
+        let next = Task { await run() }
+        task = next
+        await next.value
+    }
+
+    private func run() async {
+        defer { task = nil }
+        while active && dirty {
+            dirty = false
+            let operation: Operation
+            if enabled {
+                guard let token, token != registeredToken else { continue }
+                operation = .register(token)
+                // Una respuesta perdida no prueba que el servidor no guardó el token.
+                serverCleared = false
+                registeredToken = nil
+            } else {
+                guard !serverCleared else { continue }
+                operation = .unregister
+            }
+            let currentGeneration = generation
+            do {
+                try await send(operation)
+                guard active, generation == currentGeneration else { continue }
+                switch operation {
+                case .register(let token): registeredToken = token
+                case .unregister: registeredToken = nil; serverCleared = true
+                }
+            } catch {
+                NSLog("[TieComs] registro push pendiente; se reintentará al volver o recuperar la red")
+            }
+        }
     }
 }

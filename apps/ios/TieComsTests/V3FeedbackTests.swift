@@ -3,6 +3,175 @@ import XCTest
 
 private func dec<T: Decodable>(_ t: T.Type, _ s: String) throws -> T { try JSONDecoder().decode(T.self, from: Data(s.utf8)) }
 
+@MainActor
+final class PushRegistrationTests: XCTestCase {
+    private enum Failure: Error { case offline }
+
+    func testFailedRegistrationRetriesAndConfirmedTokenIsNotUploadedAgain() async {
+        var calls: [PushTokenSync.Operation] = []
+        let sync = PushTokenSync { operation in
+            calls.append(operation)
+            if calls.count == 1 { throw Failure.offline }
+        }
+        sync.startSession()
+        sync.setEnabled(true)
+        sync.receive("token-a")
+        await sync.synchronize()
+        XCTAssertNil(sync.registeredToken)
+        XCTAssertEqual(calls, [.register("token-a")], "no retry loop while offline")
+        await sync.synchronize() // foreground/network recovery
+        await sync.synchronize()
+        XCTAssertEqual(sync.registeredToken, "token-a")
+        XCTAssertEqual(calls, [.register("token-a"), .register("token-a")])
+        sync.receive("token-b")
+        await sync.synchronize()
+        XCTAssertEqual(calls.last, .register("token-b"))
+    }
+
+    func testOptOutDeletesPriorLaunchRegistrationEvenWithoutLocalTokenAndRetriesFailure() async {
+        var calls: [PushTokenSync.Operation] = []
+        let sync = PushTokenSync { operation in
+            calls.append(operation)
+            if calls.count == 1 { throw Failure.offline }
+        }
+        sync.startSession()
+        await sync.synchronize()
+        await sync.synchronize()
+        sync.receive("late-apns-callback")
+        await sync.synchronize()
+        XCTAssertEqual(calls, [.unregister, .unregister])
+        XCTAssertNil(sync.registeredToken)
+        sync.setEnabled(true)
+        await sync.synchronize()
+        XCTAssertEqual(calls.last, .register("late-apns-callback"), "ON re-registers the current device token")
+    }
+
+    func testOptOutDuringRegistrationFinishesWithDelete() async throws {
+        var calls: [PushTokenSync.Operation] = []
+        var pending: CheckedContinuation<Void, Never>?
+        let sync = PushTokenSync { operation in
+            calls.append(operation)
+            if calls.count == 1 { await withCheckedContinuation { pending = $0 } }
+        }
+        sync.startSession()
+        sync.setEnabled(true)
+        sync.receive("token-a")
+        let upload = Task { await sync.synchronize() }
+        try await waitUntil(2, "in-flight PUT") { pending != nil }
+        sync.setEnabled(false)
+        let disable = Task { await sync.synchronize() }
+        pending?.resume()
+        await upload.value
+        await disable.value
+        XCTAssertEqual(calls, [.register("token-a"), .unregister])
+        XCTAssertNil(sync.registeredToken)
+    }
+
+    func testFailedPutAfterReenableStillNeedsDelete() async throws {
+        var calls: [PushTokenSync.Operation] = []
+        var pending: CheckedContinuation<Void, Never>?
+        let sync = PushTokenSync { operation in
+            calls.append(operation)
+            if case .register = operation {
+                await withCheckedContinuation { pending = $0 }
+                throw Failure.offline // response lost after the server may have saved it
+            }
+        }
+        sync.startSession()
+        await sync.synchronize()
+        sync.setEnabled(true)
+        sync.receive("token-a")
+        let upload = Task { await sync.synchronize() }
+        try await waitUntil(2, "in-flight PUT") { pending != nil }
+        sync.setEnabled(false)
+        pending?.resume()
+        await upload.value
+        XCTAssertEqual(calls, [.unregister, .register("token-a"), .unregister])
+    }
+
+    func testTokenArrivingBeforeLoginIsBoundToEveryNewSession() async {
+        var calls: [PushTokenSync.Operation] = []
+        let sync = PushTokenSync { calls.append($0) }
+        sync.receive("device-token")
+        await sync.synchronize()
+        XCTAssertTrue(calls.isEmpty)
+        sync.startSession()
+        sync.setEnabled(true)
+        await sync.synchronize()
+        sync.endSession()
+        XCTAssertNil(sync.registeredToken)
+        sync.startSession()
+        sync.setEnabled(true)
+        await sync.synchronize()
+        XCTAssertEqual(calls, [.register("device-token"), .register("device-token")])
+    }
+
+    func testPreviousSessionResponseCannotConfirmNewSessionRegistration() async throws {
+        var calls: [PushTokenSync.Operation] = []
+        var pending: CheckedContinuation<Void, Never>?
+        let sync = PushTokenSync { operation in
+            calls.append(operation)
+            if calls.count == 1 { await withCheckedContinuation { pending = $0 } }
+        }
+        sync.startSession()
+        sync.setEnabled(true)
+        sync.receive("device-token")
+        let upload = Task { await sync.synchronize() }
+        try await waitUntil(2, "old session PUT") { pending != nil }
+        sync.endSession()
+        sync.startSession()
+        sync.setEnabled(true)
+        pending?.resume()
+        await upload.value
+        XCTAssertEqual(calls, [.register("device-token"), .register("device-token")])
+        XCTAssertEqual(sync.registeredToken, "device-token")
+    }
+
+    func testEnabledWithoutAPNsTokenWaitsForCallback() async {
+        var calls: [PushTokenSync.Operation] = []
+        let sync = PushTokenSync { calls.append($0) }
+        sync.startSession()
+        sync.setEnabled(true)
+        await sync.synchronize()
+        XCTAssertTrue(calls.isEmpty)
+        sync.receive("new-token")
+        await sync.synchronize()
+        XCTAssertEqual(calls, [.register("new-token")])
+    }
+
+    func testAppStoreLateCallbackHonorsOptOutAndUsesExistingEndpoint() async throws {
+        let oldPreference = Prefs.notificationsEnabled
+        defer { Prefs.notificationsEnabled = oldPreference }
+        Prefs.notificationsEnabled = false
+        MockURLProtocol.routes = [
+            AuthRoutes.ssoExchange: (200, #"{"accessToken":"acc","accessExpiresAt":"2099-01-01T00:00:00.000Z","refreshToken":"ref","sessionId":"s1","user":{"id":"u1","name":"Ana","kind":"human","primaryOrgId":null}}"#),
+            "/api/v1/push/token": (200, #"{"ok":true}"#)
+        ]
+        MockURLProtocol.requests = []
+        MockURLProtocol.httpRequests = []
+        let store = AppStore(baseURL: URL(string: "https://mock.tiecoms.test")!, secrets: MemorySecretStore(), feedback: nil, session: MockURLProtocol.session())
+        _ = try await store.api.ssoExchange(code: "fake", verifier: "fake")
+        store.seedForTesting(try dec(BootstrapDTO.self, #"{"contract":"x","serverTime":"","me":{"id":"u1","name":"Ana","kind":"human","primaryOrgId":null},"organizations":[],"workspaces":[],"conversations":[],"people":[]}"#))
+        store.pushTokenSync.startSession()
+        await store.registerPushToken("late-token")
+        let deletion = try XCTUnwrap(MockURLProtocol.httpRequests.last)
+        XCTAssertEqual(deletion.url?.path, "/api/v1/push/token")
+        XCTAssertEqual(deletion.httpMethod, "DELETE")
+        XCTAssertNil(store.registeredPushToken)
+        // Inject the authorized state to verify the transport without a system permission prompt.
+        store.pushTokenSync.setEnabled(true)
+        await store.pushTokenSync.synchronize()
+        let registration = try XCTUnwrap(MockURLProtocol.requests.last)
+        XCTAssertEqual(MockURLProtocol.httpRequests.last?.httpMethod, "PUT")
+        XCTAssertEqual(registration.body["provider"] as? String, "apns")
+        XCTAssertEqual(registration.body["environment"] as? String, PushEnvironment.current)
+        XCTAssertEqual(registration.body["token"] as? String, "late-token")
+        await store.unregisterPush()
+        XCTAssertEqual(MockURLProtocol.httpRequests.last?.httpMethod, "DELETE")
+        XCTAssertNil(store.registeredPushToken)
+    }
+}
+
 /// Feedback de TestFlight (SPEC-v3): campos nuevos, color por persona, rachas, push, jerarquía, recorte.
 final class V3FeedbackTests: XCTestCase {
     func testNewFieldsDecode() throws {

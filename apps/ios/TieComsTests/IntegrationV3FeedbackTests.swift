@@ -171,7 +171,11 @@ final class IntegrationV3FeedbackTests: XCTestCase {
     func test5_PushToken() async throws {
         let (s, _) = try await storeA()
         let token = (0..<32).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
-        await s.registerPushToken(token)
+        // El simulador no concede permiso APNs: esta prueba cubre el contrato del API.
+        await s.retryPushRegistration()
+        s.pushTokenSync.receive(token)
+        s.pushTokenSync.setEnabled(true)
+        await s.pushTokenSync.synchronize()
         XCTAssertEqual(s.registeredPushToken, token)
         let (st, j) = try await http("PUT", "/push/token", token: s.api.accessToken,
                                      body: ["provider": "apns", "token": token, "environment": "sandbox", "lang": "es"])

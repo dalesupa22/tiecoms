@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Pantalla previa al permiso del sistema: explica para qué son las notificaciones.
 struct PushPromptView: View {
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(spacing: 20) {
@@ -13,7 +14,11 @@ struct PushPromptView: View {
             Spacer()
             Button {
                 Prefs.pushPrompted = true
-                Task { await AppFeedback.shared.requestAuthorizationIfNeeded(); dismiss() }
+                Task {
+                    await AppFeedback.shared.requestAuthorizationIfNeeded()
+                    await store.retryPushRegistration()
+                    dismiss()
+                }
             } label: { Text(L("push.enable")) }
                 .buttonStyle(PrimaryButtonStyle())
                 .accessibilityIdentifier("push.allow")

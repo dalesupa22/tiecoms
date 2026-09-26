@@ -44,8 +44,6 @@ struct TieComsApp: App {
                 let settings = await UNUserNotificationCenter.current().notificationSettings()
                 if settings.authorizationStatus == .notDetermined {
                     if Prefs.notificationsEnabled && !Prefs.pushPrompted && !AppConfig.launchFlag("TCNoPushPrompt") { s?.showPushPrompt = true }
-                } else {
-                    await AppFeedback.shared.requestAuthorizationIfNeeded()
                 }
             }
         }

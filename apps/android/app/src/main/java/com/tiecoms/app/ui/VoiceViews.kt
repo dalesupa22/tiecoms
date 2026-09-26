@@ -73,7 +73,7 @@ private fun AttachmentDTO.asItem(url: String) = VoicePlayer.Item(id, url, durati
 
 /** Burbuja de voz: play/pausa, onda con progreso (tocar para saltar), duración, velocidad y la transcripción plegable. */
 @Composable
-fun VoiceBubble(a: AttachmentDTO, fg: Color, mine: Boolean, onCreateIssue: (String) -> Unit = {}) {
+fun VoiceBubble(a: AttachmentDTO, fg: Color, mine: Boolean, onCreateIssue: ((String) -> Unit)? = {}) {
     val client = LocalClient.current
     val container = LocalContainer.current
     val scope = rememberCoroutineScope()
@@ -141,7 +141,7 @@ fun VoiceBubble(a: AttachmentDTO, fg: Color, mine: Boolean, onCreateIssue: (Stri
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) { Text(stringResource(R.string.voice_copy), color = fg, style = MaterialTheme.typography.labelSmall) }
                     }
                 }
-                t.suggestedIssue?.takeIf { it.isNotBlank() }?.let { s ->
+                if (onCreateIssue != null) t.suggestedIssue?.takeIf { it.isNotBlank() }?.let { s ->
                     Surface(onClick = { onCreateIssue(s) }, shape = RoundedCornerShape(12.dp), color = fg.copy(alpha = 0.14f), modifier = Modifier.padding(top = 4.dp).testTag("voiceIssue")) {
                         Text("◆ " + stringResource(R.string.voice_create_issue, s), color = fg, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
                     }

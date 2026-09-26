@@ -335,7 +335,8 @@ fun ConversationScreen(
             if (canWork) {
                 add(null)
                 if (myWsRole != "guest") add(SheetItem(ctx.getString(R.string.menu_derive), "⑂", tag = "menuDerive") { deriving = m })
-                add(SheetItem(ctx.getString(R.string.menu_issue), "◆", tag = "menuIssue") { newIssue = true to m })
+                // Los terceros participan en los asuntos pero no los crean (docs/GRUPOS.md).
+                if (myWsRole != "guest") add(SheetItem(ctx.getString(R.string.menu_issue), "◆", tag = "menuIssue") { newIssue = true to m })
                 add(SheetItem(ctx.getString(R.string.menu_meeting), "📅", tag = "menuMeeting") { meeting = true to m })
             }
             // Conversación lateral (SPEC-v3 §4): preguntar en privado sobre este mensaje.
@@ -465,7 +466,7 @@ fun ConversationScreen(
                                     onLongPress = { if (item.m.deletedAt == null) menuFor = item.m },
                                     onQuote = { q -> jumpTo(q.seq) }, onIssue = onOpenIssue, onOpenConversation = { c, seq -> onOpenConversation(c, seq) },
                                     onOpenMedia = { list, i -> viewer = list to i },
-                                    onVoiceIssue = { t -> voiceIssue = t to item.m },
+                                    onVoiceIssue = if (myWsRole != "guest") ({ t -> voiceIssue = t to item.m }) else null,
                                     isAnchor = sideMeta?.parentMessageId == item.m.id && !embedded,
                                     onAnchorBounds = { r -> anchorRect = r },
                                     onPerson = { pid -> personCard = pid },
@@ -890,7 +891,8 @@ private fun MessageBubble(
     sides: List<ConversationDTO> = emptyList(), onOpenSide: (String) -> Unit = {},
     onLongPress: () -> Unit, onQuote: (MessageDTO) -> Unit, onIssue: (String) -> Unit, onOpenConversation: (String, Long?) -> Unit,
     onOpenMedia: (List<com.tiecoms.app.core.AttachmentDTO>, Int) -> Unit = { _, _ -> }, onOpenFile: (com.tiecoms.app.core.AttachmentDTO) -> Unit = {},
-    onVoiceIssue: (String) -> Unit = {},
+    /** Sugerencia de asunto de una nota de voz; null la oculta (terceros). */
+    onVoiceIssue: ((String) -> Unit)? = {},
     /** Ancla del sidechat abierto: halo y su posición para el conector (SPEC-v4 §G.2). */
     isAnchor: Boolean = false,
     onAnchorBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {},

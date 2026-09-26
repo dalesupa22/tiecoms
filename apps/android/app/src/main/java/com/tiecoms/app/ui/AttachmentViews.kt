@@ -101,7 +101,7 @@ fun rememberAttachmentImage(a: AttachmentDTO, full: Boolean, px: Int): ImageBitm
  */
 @Composable
 fun AttachmentsBlock(list: List<AttachmentDTO>, fg: Color, onOpenMedia: (Int) -> Unit, onOpenFile: (AttachmentDTO) -> Unit,
-                     mine: Boolean = false, onCreateIssue: (String) -> Unit = {}) {
+                     mine: Boolean = false, onCreateIssue: ((String) -> Unit)? = {}) {
     if (list.isEmpty()) return
     val media = list.filter { it.isImage || it.isVideo }
     val voices = list.filter { it.isVoice }

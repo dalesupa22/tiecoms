@@ -23,6 +23,7 @@
 		20D1A10E2B92D7322DBF5B14 /* SSO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B359F9C564097CEE34D2A05 /* SSO.swift */; };
 		244A2B97C05B69418D6C313B /* AgendaViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A0096904EBC6C5EB1BA1A1 /* AgendaViews.swift */; };
 		252B7B0B0F9F47FF693A5FD0 /* Attachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E9802F016F0B0A5FD993D1 /* Attachments.swift */; };
+		26A9E63652B219D905A66975 /* MentionSafetyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 065ECF12C5C02AC734D2F725 /* MentionSafetyTests.swift */; };
 		2ACFB2451080E499FAA6C162 /* ChatsProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 701807F5A1694A914A001927 /* ChatsProfileTests.swift */; };
 		2C052710A26ACBF9CA2D6F62 /* HierarchyViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8660E1C19B2B2260C1BB5CC2 /* HierarchyViews.swift */; };
 		2D6C298E45855A3A5510F347 /* IntegrationV4Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9761D73C8074AD793EEE221 /* IntegrationV4Tests.swift */; };
@@ -76,6 +77,7 @@
 		9101C70508E75A68FE571B6E /* Voice.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2EF5FA7383307CC6AF4E8F7 /* Voice.swift */; };
 		91C244FFC2747DB60736CE3C /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7B7D04AEB3A584685873097 /* Theme.swift */; };
 		A047E88E4473FEA16C6B437E /* PushPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A059E228D363070DFB05BB /* PushPayload.swift */; };
+		A87CE4499CDB317D13154324 /* ComposerMarkedTextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A8701945EDAF84C9FA27BFC /* ComposerMarkedTextTests.swift */; };
 		A913BA0E653F0DBAD93280AC /* TestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744AE6DDB5ABBFD7B89901B0 /* TestSupport.swift */; };
 		B0A1A021264C4E4F5C8C4EEE /* DecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 083932E17F3BCA024B4EBFD6 /* DecodingTests.swift */; };
 		B338BAD46AB5369FB2AE7CCE /* PushPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69213C7511D9460826E73827 /* PushPromptView.swift */; };
@@ -156,6 +158,7 @@
 
 /* Begin PBXFileReference section */
 		00A0096904EBC6C5EB1BA1A1 /* AgendaViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgendaViews.swift; sourceTree = "<group>"; };
+		065ECF12C5C02AC734D2F725 /* MentionSafetyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MentionSafetyTests.swift; sourceTree = "<group>"; };
 		083932E17F3BCA024B4EBFD6 /* DecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecodingTests.swift; sourceTree = "<group>"; };
 		0952105F81FFF3E626279A80 /* ShareUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareUITests.swift; sourceTree = "<group>"; };
 		10AC2E537D2E9D5B93E325A9 /* IntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationTests.swift; sourceTree = "<group>"; };
@@ -164,6 +167,7 @@
 		1F1FB42FA08DF6BC0C3115C7 /* CommunicationNotification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunicationNotification.swift; sourceTree = "<group>"; };
 		22A6408E25FEDBF97D17364D /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
 		23FEF82583783355CABE69D6 /* Feedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Feedback.swift; sourceTree = "<group>"; };
+		2A8701945EDAF84C9FA27BFC /* ComposerMarkedTextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerMarkedTextTests.swift; sourceTree = "<group>"; };
 		2E948A0F8D7FB9B6478EEC20 /* TieComsTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TieComsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		2E9619170C3B944C0E08D058 /* PhotoEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEditor.swift; sourceTree = "<group>"; };
 		310CB4DC9C904F41CD395304 /* SocketIOClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketIOClient.swift; sourceTree = "<group>"; };
@@ -415,6 +419,7 @@
 			children = (
 				55C8B19C2103FA286D289157 /* ChatBarTests.swift */,
 				701807F5A1694A914A001927 /* ChatsProfileTests.swift */,
+				2A8701945EDAF84C9FA27BFC /* ComposerMarkedTextTests.swift */,
 				083932E17F3BCA024B4EBFD6 /* DecodingTests.swift */,
 				57E4213BD30CF814CD853450 /* GroupsTests.swift */,
 				10AC2E537D2E9D5B93E325A9 /* IntegrationTests.swift */,
@@ -422,6 +427,7 @@
 				AA7972D69011152D6EB29295 /* IntegrationV3FeedbackTests.swift */,
 				79F11C1668BB980DEBC703A6 /* IntegrationV3Tests.swift */,
 				D9761D73C8074AD793EEE221 /* IntegrationV4Tests.swift */,
+				065ECF12C5C02AC734D2F725 /* MentionSafetyTests.swift */,
 				6BBA4C886B6327B84516EA02 /* SafetyTests.swift */,
 				58CF969C93A44DD76EE4EE0B /* SocketIOProtocolTests.swift */,
 				79A9581A136556B589C7E824 /* SSOTests.swift */,
@@ -707,6 +713,7 @@
 			files = (
 				87B86A5253581DFFC1523AB7 /* ChatBarTests.swift in Sources */,
 				2ACFB2451080E499FAA6C162 /* ChatsProfileTests.swift in Sources */,
+				A87CE4499CDB317D13154324 /* ComposerMarkedTextTests.swift in Sources */,
 				B0A1A021264C4E4F5C8C4EEE /* DecodingTests.swift in Sources */,
 				DC9B9B1BFE194309ADC252BB /* GroupsTests.swift in Sources */,
 				C6E3F8CBA1099F05CBEC7F95 /* IntegrationTests.swift in Sources */,
@@ -714,6 +721,7 @@
 				53BB942CEB7656F911EC27F1 /* IntegrationV3FeedbackTests.swift in Sources */,
 				364D144461099A53D0778965 /* IntegrationV3Tests.swift in Sources */,
 				2D6C298E45855A3A5510F347 /* IntegrationV4Tests.swift in Sources */,
+				26A9E63652B219D905A66975 /* MentionSafetyTests.swift in Sources */,
 				59508C7C91EA2B02ACAD615B /* SSOTests.swift in Sources */,
 				76C5C689B36884A3C54C59B3 /* SafetyTests.swift in Sources */,
 				304A7ED6BCE177CE9A54BD8D /* SocketIOProtocolTests.swift in Sources */,

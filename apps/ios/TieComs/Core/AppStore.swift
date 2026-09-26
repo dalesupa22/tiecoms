@@ -514,7 +514,12 @@ final class AppStore {
 
     func patchMeta(_ id: String, _ f: (inout ConversationDTO) -> Void) {
         guard let i = data?.conversations.firstIndex(where: { $0.id == id }) else { return }
-        f(&data!.conversations[i])
+        // Copia, cambio y escritura: el closure puede leer el store (`me`, `data`) sin abrir un acceso exclusivo a `data`
+        // (leerlo dentro de `f(&data!…)` aborta por exclusividad de Swift).
+        var c = data!.conversations[i]
+        f(&c)
+        guard let j = data?.conversations.firstIndex(where: { $0.id == id }) else { return }
+        data!.conversations[j] = c
         scheduleBadge()
     }
 
@@ -532,7 +537,10 @@ final class AppStore {
 
     func patchWorkspace(_ id: String, _ f: (inout WorkspaceDTO) -> Void) {
         guard let i = data?.workspaces.firstIndex(where: { $0.id == id }) else { return }
-        f(&data!.workspaces[i])
+        var w = data!.workspaces[i]
+        f(&w)
+        guard let j = data?.workspaces.firstIndex(where: { $0.id == id }) else { return }
+        data!.workspaces[j] = w
     }
 
     /// Mensaje local ya conocido (actualiza la lista y la vista previa).

@@ -122,6 +122,9 @@ struct ComposerTextView: UIViewRepresentable {
         v.textContainerInset = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
         v.textContainer.lineFragmentPadding = 4
         v.allowsEditingTextAttributes = false   // pegar = texto plano
+        // Sin predicción en línea (iOS 17+): en el iPhone la muestra como texto marcado, y al reemplazar el texto
+        // desde fuera (elegir una mención) el teclado seguía con rangos del texto anterior.
+        v.inlinePredictionType = .no
         v.typingAttributes = [.font: RichText.baseFont(), .foregroundColor: UIColor(Theme.textPrimary)]
         v.delegate = context.coordinator
         v.accessibilityIdentifier = "composer.field"
@@ -136,6 +139,9 @@ struct ComposerTextView: UIViewRepresentable {
         c.parent = self
         if v.text != text {
             c.applying = true
+            // Texto que llega de fuera (elegir una mención, enviar, editar): primero se cierra el texto marcado
+            // (predicción, dictado) para que el teclado no siga con rangos del texto anterior.
+            if v.markedTextRange != nil { v.unmarkText() }
             v.text = text
             RichText.applyComposerStyle(v.textStorage, mentions: mentions)
             let end = min(cursor, (text as NSString).length)
@@ -175,8 +181,11 @@ struct ComposerTextView: UIViewRepresentable {
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText t: String) -> Bool {
             // Retroceso (o borrar una selección) sobre un token: se borra el token entero.
-            guard t.isEmpty, textView.markedTextRange == nil, let full = MentionText.expandDeletion(range, mentions: parent.mentions), full != range else { return true }
             let old = textView.text ?? ""
+            let length = (old as NSString).length
+            guard t.isEmpty, textView.markedTextRange == nil,
+                  let full = MentionText.expandDeletion(range, mentions: MentionText.clamped(parent.mentions, length: length), length: length),
+                  full != range, full.location + full.length <= length else { return true }
             let new = (old as NSString).replacingCharacters(in: full, with: "")
             let r = MentionText.reconcile(old: old, new: new, mentions: parent.mentions)
             applying = true
@@ -191,8 +200,12 @@ struct ComposerTextView: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             guard !applying else { return }
             let new = textView.text ?? ""
-            // Dictado / teclados con texto marcado: se espera a que termine para ajustar menciones y estilos.
-            if textView.markedTextRange != nil { publish(textView, text: new, mentions: parent.mentions); return }
+            // Dictado / teclados con texto marcado: el texto no se toca hasta que termine, pero las menciones se corren
+            // (si no, quedan desfasadas y un retroceso posterior usaría rangos fuera del texto).
+            if textView.markedTextRange != nil {
+                publish(textView, text: new, mentions: MentionText.shift(old: parent.text, new: new, mentions: parent.mentions))
+                return
+            }
             let r = MentionText.reconcile(old: parent.text, new: new, mentions: parent.mentions)
             if r.text != new {
                 let sel = textView.selectedRange

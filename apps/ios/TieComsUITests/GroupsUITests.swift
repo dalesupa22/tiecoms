@@ -189,4 +189,47 @@ final class GroupsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["composer.plus.issue"].waitForExistence(timeout: 5), "«＋» con evento y asunto")
         shot("12-mas")
     }
+
+    /// Mencionar dentro de un sidechat abierto en hoja (el caso del choque en el iPhone): «@», elegir, seguir escribiendo,
+    /// borrar sobre el token, emojis y tildes antes del «@».
+    func testMentionInsideSidechatSheet() throws {
+        let f = try fixture()
+        guard let general = f.generalId else { throw XCTSkip("Fixture sin grupo general") }
+        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"))
+        let app = login(f)
+        let row = app.buttons["conv.row.\(general)"]
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !row.exists { dismissSystemPrompts(app); usleep(300_000) }
+        dismissSystemPrompts(app)
+        for _ in 0..<4 where !row.isHittable { app.swipeUp() }
+        row.tap()
+        let chip = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "side.chip.")).firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 8))
+        chip.tap()
+        XCTAssertTrue(app.otherElements["side.panel"].waitForExistence(timeout: 8) || app.descendants(matching: .any)["side.anchor"].waitForExistence(timeout: 4))
+        // El del sidechat (la hoja) es el primero; el del chat de atrás, el segundo.
+        let field = app.textViews.matching(identifier: "composer.field").element(boundBy: 0)
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        sleep(1)
+        field.typeText("@")
+        XCTAssertTrue(app.descendants(matching: .any)["mention.picker"].waitForExistence(timeout: 5), "buscador de menciones")
+        shot("13-sidechat-mencion")
+        let pick = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier != %@", "mention.pick.", "mention.pick.all")).firstMatch
+        XCTAssertTrue(pick.waitForExistence(timeout: 3))
+        pick.tap()
+        field.typeText("¿llegas a tiempo? 😀 ")
+        field.typeText(XCUIKeyboardKey.delete.rawValue)
+        field.typeText("é @")
+        if app.buttons["mention.pick.all"].waitForExistence(timeout: 3) { app.buttons["mention.pick.all"].tap() }
+        // Retroceso sobre el token recién puesto: se borra entero.
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3))
+        field.typeText("ñ@Br")
+        sleep(1)
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 40))
+        field.typeText("@")
+        sleep(1)
+        XCTAssertTrue(app.state == .runningForeground, "la app sigue viva")
+        shot("14-sidechat-mencion-despues")
+    }
 }

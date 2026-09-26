@@ -684,7 +684,7 @@ struct ConversationView: View {
             }
             if let e = editing {
                 ContextBar(icon: "pencil", title: L("menu.edit"), detail: excerpt(e.body, 100), cancelLabel: L("common.cancel")) {
-                    editing = nil; draft = ""
+                    editing = nil; draft = ""; draftMentions = []
                 }
                 .accessibilityIdentifier("composer.editBar")
             }

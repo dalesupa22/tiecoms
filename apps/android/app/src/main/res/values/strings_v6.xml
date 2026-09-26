@@ -120,6 +120,9 @@
     <string name="bar_add_people">Add people to this thread</string>
     <string name="bar_people">People</string>
     <string name="bar_thread">Thread</string>
+    <string name="menu_reply_private_sub">By DM to %1$s</string>
+    <string name="menu_derive_sub">With the chat</string>
+    <string name="menu_ask_side_sub">Only with who you pick</string>
     <plurals name="grp_more_issues">
         <item quantity="one">+%1$d issue</item>
         <item quantity="other">+%1$d issues</item>

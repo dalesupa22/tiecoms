@@ -120,6 +120,9 @@
     <string name="bar_add_people">Sumar personas a este hilo</string>
     <string name="bar_people">Personas</string>
     <string name="bar_thread">Hilo</string>
+    <string name="menu_reply_private_sub">Por DM a %1$s</string>
+    <string name="menu_derive_sub">Con los del chat</string>
+    <string name="menu_ask_side_sub">Solo con quien elijas</string>
     <plurals name="grp_more_issues">
         <item quantity="one">+%1$d asunto</item>
         <item quantity="other">+%1$d asuntos</item>

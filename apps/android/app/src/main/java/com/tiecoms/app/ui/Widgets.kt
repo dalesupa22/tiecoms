@@ -109,6 +109,8 @@ data class SheetItem(
     val hint: String? = null,
     val tag: String? = null,
     val children: List<SheetItem>? = null,
+    /** Pista bajo el texto («Por DM a Laura», «Con los del chat»). */
+    val subtitle: String? = null,
     val onClick: (() -> Unit)? = null,
 )
 
@@ -143,10 +145,13 @@ fun ActionSheet(title: String?, items: List<SheetItem?>, onDismiss: () -> Unit) 
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(Modifier.width(32.dp).clearAndSetSemantics {}) { Text(it.glyph, style = MaterialTheme.typography.titleMedium) }
-                    Text(
-                        it.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
-                        color = when { !it.enabled -> MaterialTheme.colorScheme.outline; it.danger -> MaterialTheme.colorScheme.error; else -> MaterialTheme.colorScheme.onSurface },
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            it.label, style = MaterialTheme.typography.bodyLarge,
+                            color = when { !it.enabled -> MaterialTheme.colorScheme.outline; it.danger -> MaterialTheme.colorScheme.error; else -> MaterialTheme.colorScheme.onSurface },
+                        )
+                        it.subtitle?.let { sub -> Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
                     it.hint?.let { h -> Text(h, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     if (it.children != null) Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
                 }
@@ -386,7 +391,12 @@ fun AnchoredMenu(expanded: Boolean, items: List<SheetItem?>, onDismiss: () -> Un
             if (it == null) { if (i > 0 && i < list.lastIndex && list[i - 1] != null) HorizontalDivider(Modifier.padding(vertical = 2.dp)); return@forEachIndexed }
             val color = when { !it.enabled -> MaterialTheme.colorScheme.outline; it.danger -> MaterialTheme.colorScheme.error; else -> MaterialTheme.colorScheme.onSurface }
             androidx.compose.material3.DropdownMenuItem(
-                text = { Text(it.label, color = color) },
+                text = {
+                    Column {
+                        Text(it.label, color = color)
+                        it.subtitle?.let { sub -> Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
+                },
                 leadingIcon = {
                     val icon = iconForGlyph(it.glyph)
                     if (icon != null) Icon(icon, null, tint = if (it.danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)

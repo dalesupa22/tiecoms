@@ -323,13 +323,18 @@ fun ConversationScreen(
         val isPinned = m.id in pinned
         return buildList {
             if (meta.canPost) add(SheetItem(ctx.getString(R.string.menu_reply), "↩", tag = "menuReply") { replyTo = m; editing = null })
-            // Responder en privado (SPEC-v3 §7): en grupos y chats grupales, a mensajes ajenos.
-            if (!mine && meta.kind != "direct" && m.kind == "text" && Names.person(data, m.authorId)?.kind == "human")
-                add(SheetItem(ctx.getString(R.string.menu_reply_private), "🔒", tag = "menuReplyPrivate") { onPrivateReply(m) })
-            // Responder aparte sin llenar el chat (docs/GRUPOS.md): hilo con los del chat o sidechat privado, juntos.
+            // Bloque 1 (docs/GRUPOS.md): responder aquí o en privado por DM al autor (SPEC-v3 §7, en grupos y chats grupales).
+            val author = Names.person(data, m.authorId)
+            if (!mine && meta.kind != "direct" && m.kind == "text" && author?.kind == "human")
+                add(SheetItem(ctx.getString(R.string.menu_reply_private), "✉", tag = "menuReplyPrivate",
+                    subtitle = ctx.getString(R.string.menu_reply_private_sub, author.name.substringBefore(' '))) { onPrivateReply(m) })
+            // Bloque 2: responder aparte sin llenar el chat. Hilo con los del chat o sidechat privado; no se juntan con el DM.
+            add(null)
             if (!embedded && canWork && meta.kind != "direct" && myWsRole != "guest" && m.kind == "text" && m.deletedAt == null)
-                add(SheetItem(ctx.getString(R.string.menu_derive), "💬", tag = "menuDerive") { deriving = m })
-            if (!embedded && m.kind == "text" && m.deletedAt == null) add(SheetItem(ctx.getString(R.string.menu_ask_side), "🔒", tag = "menuSide") { sideStart = m })
+                add(SheetItem(ctx.getString(R.string.menu_derive), "💬", tag = "menuDerive", subtitle = ctx.getString(R.string.menu_derive_sub)) { deriving = m })
+            if (!embedded && m.kind == "text" && m.deletedAt == null)
+                add(SheetItem(ctx.getString(R.string.menu_ask_side), "🔒", tag = "menuSide", subtitle = ctx.getString(R.string.menu_ask_side_sub)) { sideStart = m })
+            add(null)
             add(SheetItem(ctx.getString(R.string.menu_copy_text), "⧉") { copyToClipboard(ctx, m.body); container.toast(ctx.getString(R.string.toast_copied)) })
             add(SheetItem(ctx.getString(R.string.menu_copy_link), "⛓") { copyToClipboard(ctx, messageLink(id, m.seq)); container.toast(ctx.getString(R.string.toast_link_copied)) })
             add(null)

@@ -241,11 +241,13 @@ private struct CircleHole: Shape {
 
 /// Cámara (UIImagePickerController).
 struct CameraPicker: UIViewControllerRepresentable {
+    /// Selfie para foto de perfil o de grupo; la de atrás para adjuntar.
+    var front = true
     var onPick: (UIImage?) -> Void
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let p = UIImagePickerController()
         p.sourceType = .camera
-        p.cameraDevice = .front
+        p.cameraDevice = front && UIImagePickerController.isCameraDeviceAvailable(.front) ? .front : .rear
         p.delegate = context.coordinator
         return p
     }

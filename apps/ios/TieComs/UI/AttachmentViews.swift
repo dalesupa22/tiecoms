@@ -321,21 +321,30 @@ struct AttachButton: View {
             Task {
                 for item in items {
                     let type = item.supportedContentTypes.first { $0.conforms(to: .movie) || $0.conforms(to: .image) } ?? .jpeg
-                    if let data = try? await item.loadTransferable(type: Data.self) {
-                        let ext = type.preferredFilenameExtension ?? "jpg"
-                        add(LocalAttachment(name: "\(type.conforms(to: .movie) ? "video" : "foto")-\(staged.count + 1).\(ext)",
-                                            contentType: AttachmentRules.mimeType(for: type), data: data))
+                    guard let data = try? await item.loadTransferable(type: Data.self) else {
+                        // Foto en iCloud sin descargar, formato no soportado…: se avisa en vez de perderla en silencio.
+                        onError(L("att.loadFailed")); continue
+                    }
+                    let ext = type.preferredFilenameExtension ?? "jpg"
+                    let name = "\(type.conforms(to: .movie) ? "video" : "foto")-\(staged.count + 1).\(ext)"
+                    if type.conforms(to: .image) {
+                        guard let img = ImagePrep.prepare(data, name: name, contentType: AttachmentRules.mimeType(for: type)) else { onError(L("att.loadFailed")); continue }
+                        add(img)
+                    } else {
+                        add(LocalAttachment(name: name, contentType: AttachmentRules.mimeType(for: type), data: data))
                     }
                 }
                 photos = []
             }
         }
         .fullScreenCover(isPresented: $showCamera) {
-            CameraPicker { img in
+            CameraPicker(front: false) { img in
                 showCamera = false
-                if let img, let d = img.jpegData(compressionQuality: 0.85) {
+                guard let img else { return }
+                // Foto de la cámara: derecha, ≤ 2560 px y JPEG liviano (no los 5–12 MB del original).
+                if let d = ImagePrep.jpeg(img) {
                     add(LocalAttachment(name: "foto-\(staged.count + 1).jpg", contentType: "image/jpeg", data: d))
-                }
+                } else { onError(L("att.loadFailed")) }
             }
             .ignoresSafeArea()
         }
@@ -344,9 +353,11 @@ struct AttachButton: View {
             for url in urls {
                 let ok = url.startAccessingSecurityScopedResource()
                 defer { if ok { url.stopAccessingSecurityScopedResource() } }
-                if let d = try? Data(contentsOf: url) {
-                    add(LocalAttachment(name: url.lastPathComponent, contentType: AttachmentRules.mimeType(for: url), data: d))
-                }
+                guard let d = try? Data(contentsOf: url) else { onError(L("att.loadFailed")); continue }
+                let type = AttachmentRules.mimeType(for: url)
+                // HEIC u otras fotos grandes desde Archivos: igual que desde Fotos.
+                if type.hasPrefix("image/"), type != "image/svg+xml", let img = ImagePrep.prepare(d, name: url.lastPathComponent, contentType: type) { add(img) }
+                else { add(LocalAttachment(name: url.lastPathComponent, contentType: type, data: d)) }
             }
         }
     }

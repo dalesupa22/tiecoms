@@ -81,6 +81,24 @@ extension Naming {
         return .mine(orgId: w.owningOrgId)
     }
 
+    /// Empresa con la que se nombra un espacio (la misma del árbol): anfitriona si soy tercero, la otra empresa de
+    /// la relación, `counterpartName` si aún no entra, o la mía.
+    static func companyName(_ d: BootstrapDTO, _ w: WorkspaceDTO) -> String? {
+        switch placement(d, w) {
+        case .mine(let id), .relation(let id), .guest(let id): return org(d, id)?.name
+        case .pending(let name): return name
+        }
+    }
+
+    /// Título de los avisos (notificaciones locales, sugerencias de compartir): «Empresa - Grupo» para las
+    /// conversaciones de un espacio, igual que el push del servidor; el título normal en directos y chats grupales.
+    static func notificationTitle(_ d: BootstrapDTO, _ c: ConversationDTO) -> String {
+        let name = title(d, c)
+        guard let wid = c.workspaceId, !c.kind.isChat, let w = d.workspaces.first(where: { $0.id == wid }),
+              let company = companyName(d, w)?.trimmingCharacters(in: .whitespaces), !company.isEmpty else { return name }
+        return "\(company) - \(name)"
+    }
+
     /// Mi espacio casa de una empresa (si ya existe).
     static func orgHome(_ d: BootstrapDTO, orgId: String) -> WorkspaceDTO? {
         d.workspaces.first { $0.isOrgHome && $0.owningOrgId == orgId && $0.myRole != "guest" }

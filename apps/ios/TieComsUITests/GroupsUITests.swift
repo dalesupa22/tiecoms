@@ -256,6 +256,96 @@ final class GroupsUITests: XCTestCase {
         }
     }
 
+    /// 1.6.2: un toque en el micrófono no descarta («La nota es demasiado corta»): graba en manos libres; enviar
+    /// pasa por el permiso de IA y la nota llega al chat con su reproductor.
+    func testVoiceTapRecordsHandsFreeAndSends() throws {
+        let f = try fixture()
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")))
+        let app = login(f)
+        addUIInterruptionMonitor(withDescription: "micrófono") { alert in
+            for l in ["Allow", "Permitir", "OK"] where alert.buttons[l].exists { alert.buttons[l].tap(); return true }
+            return false
+        }
+        let row = app.buttons["conv.row.\(f.pagosId)"]
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !row.exists { dismissSystemPrompts(app); usleep(300_000) }
+        let mic = app.descendants(matching: .any)["composer.mic"]
+        for _ in 0..<3 where !mic.exists {
+            sleep(1); dismissSystemPrompts(app)
+            if row.isHittable { row.tap() }
+            _ = mic.waitForExistence(timeout: 4)
+        }
+        XCTAssertTrue(mic.waitForExistence(timeout: 8))
+        // Permiso del micrófono concedido antes (xcrun simctl privacy <sim> grant microphone com.chaggu.app).
+        mic.tap()
+        let send = app.buttons["voice.send"]
+        XCTAssertTrue(send.waitForExistence(timeout: 8), "el toque deja la grabación en manos libres (enviar / borrar)")
+        XCTAssertFalse(app.staticTexts[L10nUI.tooShort].exists, "sin «demasiado corta»")
+        sleep(3)
+        shot("20-voz-manos-libres")
+        send.tap()
+        let without = app.buttons["Enviar sin IA"]
+        XCTAssertTrue(without.waitForExistence(timeout: 5), "permiso de IA de la nota")
+        without.tap()
+        let note = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "voice.note.")).firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 15), "la nota llega al chat")
+        XCTAssertFalse(app.staticTexts[L10nUI.tooShort].exists)
+        sleep(1)
+        shot("21-voz-enviada")
+    }
+
+    /// Mantener presionada una burbuja (su parte visible si la tapa la barra del chat) hasta que aparezca `until`.
+    private func openMenu(_ target: XCUIElement, until: XCUIElement) {
+        for _ in 0..<3 where !until.exists {
+            sleep(1)
+            let dy: CGFloat = target.frame.minY < 250 ? 0.9 : 0.5
+            target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: dy)).press(forDuration: 1.2)
+            _ = until.waitForExistence(timeout: 3)
+        }
+    }
+
+    /// Reaccionar a mensajes con imágenes (sin texto, con texto, varias; míos y ajenos) no debe cerrar la app:
+    /// barra rápida, cambiar de emoji, quitar con el chip. Ids por TEST_RUNNER_TC_IMAGES (seed-images.mjs).
+    func testReactToImageMessagesDoesNotCrash() throws {
+        let f = try fixture()
+        guard let general = f.generalId, let path = ProcessInfo.processInfo.environment["TC_IMAGES"], !path.isEmpty else { throw XCTSkip("Sin TC_IMAGES") }
+        let ids = try JSONDecoder().decode([String: String].self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        let app = login(f)
+        let row = app.buttons["conv.row.\(general)"]
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !row.exists { dismissSystemPrompts(app); usleep(300_000) }
+        for _ in 0..<4 where !row.isHittable { app.swipeUp() }
+        let header = app.descendants(matching: .any)["chat.header"]
+        for _ in 0..<3 where !header.exists { sleep(1); dismissSystemPrompts(app); if row.isHittable { row.tap() }; _ = header.waitForExistence(timeout: 4) }
+        for key in ["bFile", "bMany", "aImage", "bCaption", "bImage"] {
+            guard let id = ids[key] else { continue }
+            let msg = app.descendants(matching: .any).matching(identifier: "msg.\(id)").firstMatch
+            for _ in 0..<6 where !msg.isHittable { app.swipeDown(velocity: .slow) }
+            XCTAssertTrue(msg.waitForExistence(timeout: 5), key)
+            let media = msg.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "att.media.")).firstMatch
+            let target = media.exists ? media : msg
+            let thumbs = app.buttons["👍"].firstMatch
+            openMenu(target, until: thumbs)
+            XCTAssertTrue(thumbs.exists, "barra rápida sobre \(key)")
+            thumbs.tap()
+            XCTAssertEqual(app.state, .runningForeground, "no se cierra al reaccionar a \(key)")
+            let chip = app.buttons.matching(identifier: "react.chip.\(id).👍").firstMatch
+            XCTAssertTrue(chip.waitForExistence(timeout: 6), "chip 👍 bajo \(key)")
+            // Cambiar a otro emoji y quitarlo con el chip.
+            sleep(1)
+            let heart = app.buttons["❤️"].firstMatch
+            openMenu(target, until: heart)
+            XCTAssertTrue(heart.exists, "barra rápida otra vez sobre \(key)")
+            heart.tap()
+            XCTAssertTrue(app.buttons.matching(identifier: "react.chip.\(id).❤️").firstMatch.waitForExistence(timeout: 6))
+            sleep(2)   // que termine de cerrarse el menú
+            app.buttons.matching(identifier: "react.chip.\(id).❤️").firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            XCTAssertTrue(app.buttons.matching(identifier: "react.chip.\(id).❤️").firstMatch.waitForNonExistence(timeout: 6), "se quita con el chip")
+            XCTAssertEqual(app.state, .runningForeground)
+        }
+        shot("22-reacciones-imagenes")
+    }
+
     /// Dentro del chat: barra de accesos, chip del hilo bajo su mensaje, el hilo al lado y el «＋» del compositor.
     func testChatBarThreadsAndPlus() throws {
         let f = try fixture()
@@ -342,3 +432,5 @@ final class GroupsUITests: XCTestCase {
         shot("14-sidechat-mencion-despues")
     }
 }
+
+private enum L10nUI { static let tooShort = "La nota es demasiado corta." }

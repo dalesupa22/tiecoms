@@ -21,6 +21,8 @@ private struct PendingVoiceSend {
     let durationMs: Int
     let waveform: [Double]
     let replyTo: String?
+    /// Permiso de IA elegido para esta nota (se conserva al reintentar la subida).
+    var aiConsent = false
 }
 
 /// Hojas que se abren desde el menú de un mensaje o de la conversación.
@@ -80,6 +82,8 @@ struct ConversationView: View {
     @State private var blockUserId: String?
     @State private var recorder = VoiceRecorder()
     @State private var pendingVoice: PendingVoiceSend?
+    /// Nota cuya subida falló (413, red…): se conserva para reintentar, no se pierde en silencio.
+    @State private var failedVoice: PendingVoiceSend?
     @State private var showingVoiceAIConsent = false
     @State private var composerFocused = false
     /// Cursor del compositor (UTF-16).
@@ -105,6 +109,8 @@ struct ConversationView: View {
             // Un hilo o sidechat abierto al lado recibe el cursor.
             if embedded { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { composerFocused = true } }
             store.openConversationId = conversationId
+            // A los 15 min la grabación se detiene sola: se envía lo grabado (pasa por el permiso de IA).
+            recorder.onAutoStop = { if let r = recorder.finish() { sendVoice(r.data, r.durationMs, r.waveform) } }
             let id = conversationId
             VoicePlayer.shared.nextProvider = { [weak store] finished in
                 VoicePlayer.next(after: finished, in: store?.conversations[id]?.messages ?? [])
@@ -521,7 +527,11 @@ struct ConversationView: View {
                         }
                         messageMenu(d, c, m)
                     } preview: {
+                        // La vista previa vive en otro contenedor y NO hereda el entorno: sin `.environment(store)` las
+                        // burbujas con fotos, archivos o voz (AttachmentImage, VoiceNoteView leen AppStore) cerraban la app
+                        // al mantenerlas presionadas (EXC_BREAKPOINT en EnvironmentValues.subscript.getter).
                         bubble.frame(width: 340).padding(.vertical, 10).padding(.horizontal, 6).background(Theme.background)
+                            .environment(store)
                     }
                 } else { bubble }
             }
@@ -761,9 +771,25 @@ struct ConversationView: View {
                 SideQuickReplies(onSend: { store.send(conversationId, body: $0) }, onAskOther: { addingToSide = true })
             }
             StagedAttachments(staged: $staged, progress: uploadProgress)
+            if let v = failedVoice {
+                // La nota no se subió: queda aquí para reintentar o descartar.
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
+                    Text(L("voice.unsent", ["d": L10n.duration(v.durationMs)])).font(.footnote).foregroundStyle(Theme.textPrimary).lineLimit(2)
+                    Spacer(minLength: 4)
+                    Button(L("voice.retry")) { failedVoice = nil; uploadVoice(v, aiConsent: v.aiConsent) }
+                        .font(.footnote.weight(.semibold)).disabled(uploading)
+                        .accessibilityIdentifier("voice.retryUpload")
+                    Button(role: .destructive) { failedVoice = nil; store.show(L("voice.cancelled")) } label: { Image(systemName: "trash") }
+                        .accessibilityLabel(L("voice.discard"))
+                        .accessibilityIdentifier("voice.discardUnsent")
+                }
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .accessibilityIdentifier("voice.unsentBar")
+            }
             HStack(alignment: .bottom, spacing: 8) {
                 if recorder.isActive {
-                    VoiceRecordingBar(recorder: recorder, onSend: sendVoice, onDiscard: { store.show(L("voice.cancelled")) })
+                    VoiceRecordingBar(recorder: recorder, onSend: sendVoice, onDiscard: { store.show(L("voice.cancelled")) }, onError: { store.show($0) })
                 } else {
                 // «＋»: fotos, archivos y, aparte, evento o asunto del chat.
                 if editing == nil {
@@ -814,13 +840,18 @@ struct ConversationView: View {
     private func uploadVoice(_ voice: PendingVoiceSend, aiConsent: Bool) {
         pendingVoice = nil
         uploading = true
+        var voice = voice
+        voice.aiConsent = aiConsent
         Task {
             defer { uploading = false }
             do {
                 let a = try await store.api.uploadVoiceNote(conversationId, data: voice.data, durationMs: voice.durationMs, waveform: voice.waveform, aiConsent: aiConsent)
                 store.send(conversationId, body: "", replyTo: voice.replyTo, attachments: [a])
                 replyTo = nil
-            } catch { store.show(L10n.errorText(error)) }
+            } catch {
+                failedVoice = voice
+                store.show(VoiceRules.uploadErrorText(error))
+            }
         }
     }
 
@@ -848,7 +879,8 @@ struct ConversationView: View {
                         let a = try await store.api.uploadAttachment(conversationId, f) { p in Task { @MainActor in uploadProgress[f.id] = p } }
                         done.append(a)
                     } catch {
-                        store.show(L10n.errorText(error))
+                        // Los adjuntos siguen en el compositor para reintentar; el aviso dice por qué.
+                        store.show(AttachmentRules.uploadErrorText(error, name: f.name))
                         return
                     }
                 }

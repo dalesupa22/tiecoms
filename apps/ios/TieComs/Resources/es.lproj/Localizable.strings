@@ -31,6 +31,7 @@
 "att.fromCamera" = "Cámara";
 "att.fromFiles" = "Archivos";
 "att.fromPhotos" = "Fotos y videos";
+"att.loadFailed" = "No se pudo abrir esa foto o archivo. Intenta de nuevo.";
 "att.max" = "Máximo 10 adjuntos por mensaje";
 "att.media" = "🖼 {n} fotos y videos";
 "att.more" = "+{n}";
@@ -46,6 +47,8 @@
 "att.retry" = "Reintentar";
 "att.tooBig" = "«{name}» pesa más de 25 MB";
 "att.unavailable" = "Adjunto no disponible";
+"att.uploadNetwork" = "Sin conexión: «{name}» no se subió. Sigue en el mensaje para reintentar.";
+"att.uploadTooLarge" = "No se pudo subir «{name}»: el servidor la rechazó por tamaño. Sigue en el mensaje para reintentar.";
 "att.uploading" = "Subiendo…";
 "att.uploadingN" = "Subiendo {i} de {n}…";
 "att.video" = "🎬 Video";
@@ -1232,10 +1235,12 @@
 "voice.micUnavailable" = "Este navegador no puede grabar audio.";
 "voice.note" = "Nota de voz";
 "voice.pause" = "Pausar";
+"voice.paused" = "En pausa";
 "voice.play" = "Reproducir";
 "voice.preview" = "🎤 Nota de voz ({d})";
 "voice.previewShort" = "🎤 Nota de voz";
 "voice.recording" = "Grabando…";
+"voice.resume" = "Continuar grabando";
 "voice.retry" = "Reintentar";
 "voice.send" = "Enviar nota de voz";
 "voice.showTranscript" = "Ver transcripción";
@@ -1247,6 +1252,11 @@
 "voice.tooShort" = "La nota es demasiado corta.";
 "voice.transcribing" = "Transcribiendo…";
 "voice.unheard" = "Sin escuchar";
+"voice.unreadable" = "No se pudo leer la grabación. Intenta grabar de nuevo.";
+"voice.unsent" = "Nota de voz sin enviar ({d})";
+"voice.uploadFailed" = "La nota no se envió ({reason}). Sigue aquí para reintentar.";
+"voice.uploadNetwork" = "Sin conexión: la nota no se envió. Sigue aquí para reintentar.";
+"voice.uploadTooLarge" = "No se pudo enviar la nota: el servidor la rechazó por tamaño. Sigue aquí para reintentar.";
 "voice.uploading" = "Enviando nota de voz…";
 "wa.account" = "Cuenta";
 "wa.allAccounts" = "Todas las cuentas";

@@ -23,7 +23,7 @@ enum Donations {
                               displayName: me?.name ?? d.me.name, image: nil, contactIdentifier: nil, customIdentifier: d.me.id, isMe: true)
         let isGroup = c.kind != .direct
         let intent = INSendMessageIntent(recipients: Array(recipients), outgoingMessageType: .outgoingMessageText, content: nil,
-                                         speakableGroupName: isGroup ? INSpeakableString(spokenPhrase: Naming.title(d, c)) : nil,
+                                         speakableGroupName: isGroup ? INSpeakableString(spokenPhrase: Naming.notificationTitle(d, c)) : nil,
                                          conversationIdentifier: c.id, serviceName: "Chaggu", sender: sender, attachments: nil)
         if isGroup, let image { intent.setImage(image, forParameterNamed: \.speakableGroupName) }
         return intent

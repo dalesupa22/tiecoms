@@ -152,6 +152,8 @@ struct QuickReactionBar: View {
                 .accessibilityIdentifier("react.quick.more")
         }
         .controlGroupStyle(.palette)
+        // En una paleta el menú se queda abierto al elegir (pensado para etiquetas): al reaccionar se cierra.
+        .menuActionDismissBehavior(.enabled)
     }
 }
 

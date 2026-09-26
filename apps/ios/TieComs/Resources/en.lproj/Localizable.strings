@@ -31,6 +31,7 @@
 "att.fromCamera" = "Camera";
 "att.fromFiles" = "Files";
 "att.fromPhotos" = "Photos and videos";
+"att.loadFailed" = "Couldn't open that photo or file. Try again.";
 "att.max" = "Up to 10 attachments per message";
 "att.media" = "🖼 {n} photos and videos";
 "att.more" = "+{n}";
@@ -46,6 +47,8 @@
 "att.retry" = "Retry";
 "att.tooBig" = "“{name}” is larger than 25 MB";
 "att.unavailable" = "Attachment not available";
+"att.uploadNetwork" = "No connection: “{name}” wasn't uploaded. It's still in the message to retry.";
+"att.uploadTooLarge" = "Couldn't upload “{name}”: the server rejected its size. It's still in the message to retry.";
 "att.uploading" = "Uploading…";
 "att.uploadingN" = "Uploading {i} of {n}…";
 "att.video" = "🎬 Video";
@@ -1232,10 +1235,12 @@
 "voice.micUnavailable" = "This browser cannot record audio.";
 "voice.note" = "Voice note";
 "voice.pause" = "Pause";
+"voice.paused" = "Paused";
 "voice.play" = "Play";
 "voice.preview" = "🎤 Voice note ({d})";
 "voice.previewShort" = "🎤 Voice note";
 "voice.recording" = "Recording…";
+"voice.resume" = "Resume recording";
 "voice.retry" = "Retry";
 "voice.send" = "Send voice note";
 "voice.showTranscript" = "Show transcript";
@@ -1247,6 +1252,11 @@
 "voice.tooShort" = "The note is too short.";
 "voice.transcribing" = "Transcribing…";
 "voice.unheard" = "Not played";
+"voice.unreadable" = "Couldn't read the recording. Try recording again.";
+"voice.unsent" = "Voice note not sent ({d})";
+"voice.uploadFailed" = "The note wasn't sent ({reason}). It's still here to retry.";
+"voice.uploadNetwork" = "No connection: the note wasn't sent. It's still here to retry.";
+"voice.uploadTooLarge" = "Couldn't send the note: the server rejected its size. It's still here to retry.";
 "voice.uploading" = "Sending voice note…";
 "wa.account" = "Account";
 "wa.allAccounts" = "All accounts";

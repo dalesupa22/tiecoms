@@ -1406,5 +1406,45 @@
  "react.addThis": [
   "Reaccionar igual",
   "React the same"
+ ],
+ "voice.uploadTooLarge": [
+  "No se pudo enviar la nota: el servidor la rechazó por tamaño. Sigue aquí para reintentar.",
+  "Couldn't send the note: the server rejected its size. It's still here to retry."
+ ],
+ "voice.uploadNetwork": [
+  "Sin conexión: la nota no se envió. Sigue aquí para reintentar.",
+  "No connection: the note wasn't sent. It's still here to retry."
+ ],
+ "voice.uploadFailed": [
+  "La nota no se envió ({reason}). Sigue aquí para reintentar.",
+  "The note wasn't sent ({reason}). It's still here to retry."
+ ],
+ "voice.unreadable": [
+  "No se pudo leer la grabación. Intenta grabar de nuevo.",
+  "Couldn't read the recording. Try recording again."
+ ],
+ "voice.resume": [
+  "Continuar grabando",
+  "Resume recording"
+ ],
+ "voice.paused": [
+  "En pausa",
+  "Paused"
+ ],
+ "voice.unsent": [
+  "Nota de voz sin enviar ({d})",
+  "Voice note not sent ({d})"
+ ],
+ "att.loadFailed": [
+  "No se pudo abrir esa foto o archivo. Intenta de nuevo.",
+  "Couldn't open that photo or file. Try again."
+ ],
+ "att.uploadTooLarge": [
+  "No se pudo subir «{name}»: el servidor la rechazó por tamaño. Sigue en el mensaje para reintentar.",
+  "Couldn't upload “{name}”: the server rejected its size. It's still in the message to retry."
+ ],
+ "att.uploadNetwork": [
+  "Sin conexión: «{name}» no se subió. Sigue en el mensaje para reintentar.",
+  "No connection: “{name}” wasn't uploaded. It's still in the message to retry."
  ]
 }

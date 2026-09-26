@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UIKit
 
@@ -58,7 +59,10 @@ struct VoiceNoteView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(isCurrent && player.playing ? L("voice.pause") : L("voice.play"))
                 .accessibilityIdentifier("voice.play.\(att.id)")
-                Waveform(values: att.waveform ?? [], progress: isCurrent ? player.progress : 0, tint: tint) { f in player.seek(att, to: f) }
+                Waveform(values: att.waveform ?? [], progress: isCurrent ? player.progress : 0, tint: tint) { f in
+                    // Tocar la onda de una nota que no suena la empieza en ese punto.
+                    if player.currentId == att.id { player.seek(att, to: f) } else { Task { await player.toggle(att, api: store.api); player.seek(att, to: f) } }
+                }
                     .frame(width: 150, height: 30)
                     .accessibilityHidden(true)
                 VStack(alignment: .trailing, spacing: 2) {
@@ -163,6 +167,7 @@ struct VoiceNoteView: View {
 
 /// Botón de micrófono del compositor (cuando está vacío): mantener pulsado graba, soltar envía,
 /// deslizar a la izquierda cancela y deslizar arriba bloquea (manos libres con enviar/borrar).
+/// Un toque (soltar enseguida sin arrastrar) no descarta: deja la grabación en manos libres, como WhatsApp.
 struct VoiceRecordButton: View {
     @Environment(AppStore.self) private var store
     let recorder: VoiceRecorder
@@ -170,6 +175,9 @@ struct VoiceRecordButton: View {
     @State private var drag: CGSize = .zero
     @State private var pressing = false
     @State private var denied = false
+    @State private var pressedAt: Date?
+    /// Soltó (toque) antes de que arrancara la grabación: al arrancar queda en manos libres.
+    @State private var lockWhenStarted = false
 
     static let cancelDistance: CGFloat = 110
     static let lockDistance: CGFloat = 80
@@ -192,9 +200,16 @@ struct VoiceRecordButton: View {
                         if v.translation.width < -Self.cancelDistance { cancel() }
                         else if v.translation.height < -Self.lockDistance { recorder.lock(); pressing = false; Haptics.tap() }
                     }
-                    .onEnded { _ in
-                        if recorder.state == .recording { send() }
-                        pressing = false; drag = .zero
+                    .onEnded { v in
+                        let heldMs = pressedAt.map { Int(Date().timeIntervalSince($0) * 1000) } ?? 0
+                        let still = abs(v.translation.width) < 20 && abs(v.translation.height) < 20
+                        let tap = still && heldMs < VoiceRules.tapMs
+                        if recorder.state == .recording {
+                            if tap { recorder.lock(); Haptics.tap() } else { send() }
+                        } else if recorder.state == .idle && pressing && tap {
+                            lockWhenStarted = true
+                        }
+                        pressing = false; drag = .zero; pressedAt = nil
                     }
             )
             .accessibilityLabel(L("voice.hold"))
@@ -211,13 +226,20 @@ struct VoiceRecordButton: View {
 
     private func begin(locked: Bool = false) {
         pressing = !locked
+        pressedAt = Date()
+        lockWhenStarted = false
+        // Con permiso ya dado, la sesión se activa al tocar (antes del contador) y la ruta Bluetooth tiene tiempo de cambiar.
+        if AVAudioApplication.shared.recordPermission == .granted { VoiceRecorder.prewarm() }
         Task {
-            guard await VoiceRecorder.requestPermission() else { pressing = false; denied = true; return }
-            // Si soltó mientras se pedía permiso, no se graba.
-            guard pressing || locked else { return }
+            guard await VoiceRecorder.requestPermission() else { pressing = false; lockWhenStarted = false; denied = true; return }
+            // Si soltó arrastrando mientras se pedía permiso, no se graba; si fue un toque, graba en manos libres.
+            guard pressing || locked || lockWhenStarted else {
+                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+                return
+            }
             do {
                 try recorder.start()
-                if locked { recorder.lock() }
+                if locked || lockWhenStarted { recorder.lock(); lockWhenStarted = false }
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             } catch { pressing = false; store.show(L("voice.micUnavailable")) }
         }
@@ -231,9 +253,13 @@ struct VoiceRecordButton: View {
     }
 
     private func send() {
-        guard let r = recorder.finish() else { store.show(L("voice.tooShort")); return }
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        onSend(r.data, r.durationMs, r.waveform)
+        switch recorder.finishOutcome() {
+        case .success(let r):
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            onSend(r.data, r.durationMs, r.waveform)
+        case .failure(let e):
+            store.show(e == .tooShort ? L("voice.tooShort") : L("voice.unreadable"))
+        }
     }
 }
 
@@ -242,6 +268,7 @@ struct VoiceRecordingBar: View {
     let recorder: VoiceRecorder
     var onSend: (Data, Int, [Double]) -> Void
     var onDiscard: () -> Void
+    var onError: (String) -> Void = { _ in }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -254,12 +281,25 @@ struct VoiceRecordingBar: View {
             } else {
                 Circle().fill(.red).frame(width: 10, height: 10).padding(.leading, 6)
             }
+            if recorder.paused && recorder.canResume {
+                // En pausa (llamada, pantalla bloqueada o app al fondo): continuar grabando.
+                Button { recorder.resume() } label: {
+                    Image(systemName: "mic.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(.red).frame(width: 32, height: 40)
+                }
+                .accessibilityLabel(L("voice.resume"))
+                .accessibilityIdentifier("voice.resume")
+            }
             Text(L10n.duration(recorder.elapsedMs)).font(.body.monospacedDigit()).foregroundStyle(Theme.textPrimary)
-                .accessibilityLabel("\(L("voice.recording")) \(L10n.duration(recorder.elapsedMs))")
+                .accessibilityLabel("\(recorder.paused ? L("voice.paused") : L("voice.recording")) \(L10n.duration(recorder.elapsedMs))")
+                .accessibilityIdentifier("voice.elapsed")
+            if recorder.paused { Text(L("voice.paused")).font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary).lineLimit(1) }
             Waveform(values: Array(recorder.samples.suffix(40)), progress: 1, tint: Theme.orange).frame(height: 26).accessibilityHidden(true)
             if recorder.state == .locked {
                 Button {
-                    if let r = recorder.finish() { onSend(r.data, r.durationMs, r.waveform) } else { onDiscard() }
+                    switch recorder.finishOutcome() {
+                    case .success(let r): onSend(r.data, r.durationMs, r.waveform)
+                    case .failure(let e): onError(e == .tooShort ? L("voice.tooShort") : L("voice.unreadable"))
+                    }
                 } label: {
                     Image(systemName: "arrow.up").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
                         .frame(width: 40, height: 40).background(Circle().fill(Theme.bubbleMine))

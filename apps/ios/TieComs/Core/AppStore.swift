@@ -370,7 +370,7 @@ final class AppStore {
             if let d = data {
                 let conv = meta(r.conversationId)
                 feedback?.notifyIncoming(conversationId: r.conversationId, title: L("rem.alert"),
-                                         author: conv.map { Naming.title(d, $0) } ?? "", body: r.note ?? "")
+                                         author: conv.map { Naming.notificationTitle(d, $0) } ?? "", body: r.note ?? "")
             }
         case .eventSoon(let e, let minutes):
             events[e.id] = e
@@ -379,7 +379,7 @@ final class AppStore {
             // Ignora el silencio de la conversación: es un aviso de reunión, como en el push.
             feedback?.notifyEventSoon(conversationId: e.conversationId, eventId: e.id,
                                       title: L("cal.soon", ["n": minutes, "title": e.title]),
-                                      subtitle: conv.flatMap { $0.kind == .direct ? nil : Naming.title(d, $0) },
+                                      subtitle: conv.flatMap { $0.kind == .direct ? nil : Naming.notificationTitle(d, $0) },
                                       body: e.start.formatted(date: .omitted, time: .shortened))
         case .prefsUpdated: scheduleBootstrap()
         case .whatsappUpdated: waRevision += 1
@@ -416,7 +416,7 @@ final class AppStore {
             events[ev.id] = ev
             // Reunión nueva de otra persona en vivo → aviso con tc_notify (salvo silenciada).
             if live, isNewEvent, ev.organizerId != me?.id, !ev.isCancelled, let d = data, let c = meta(cid), !c.isMuted {
-                feedback?.notifyIncoming(conversationId: cid, title: ev.title, author: Naming.title(d, c), body: L10n.eventWhen(ev))
+                feedback?.notifyIncoming(conversationId: cid, title: ev.title, author: Naming.notificationTitle(d, c), body: L10n.eventWhen(ev))
             }
         case .messageUpdated(let cid, _, let m):
             // Antes de aplicar: se compara con la versión que tenía para avisar de una reacción nueva a un mensaje mío.
@@ -477,9 +477,9 @@ final class AppStore {
             let author = Naming.person(d, msg.authorId)?.name ?? L("common.participant")
             // Una mención a mí avisa aunque la conversación esté silenciada (salvo el silencio «siempre»).
             if MentionText.mentionsMe(msg.mentions, me: d.me.id, authorId: msg.authorId), !MentionText.mutedForever(c) {
-                feedback?.notifyIncoming(conversationId: c.id, title: L("mention.mentionedYou", ["name": author]), author: Naming.title(d, c), body: msg.body)
+                feedback?.notifyIncoming(conversationId: c.id, title: L("mention.mentionedYou", ["name": author]), author: Naming.notificationTitle(d, c), body: msg.body)
             } else if !c.isMuted {
-                feedback?.notifyIncoming(conversationId: c.id, title: Naming.title(d, c), author: author, body: msg.body)
+                feedback?.notifyIncoming(conversationId: c.id, title: Naming.notificationTitle(d, c), author: author, body: msg.body)
             }
         }
     }

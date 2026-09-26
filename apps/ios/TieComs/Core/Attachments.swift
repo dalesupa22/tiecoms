@@ -19,6 +19,16 @@ enum AttachmentRules {
         ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .file)
     }
 
+    /// Error al subir un adjunto: 413 (límite del servidor) y red con su propio texto; siguen en el compositor.
+    static func uploadErrorText(_ error: Error, name: String) -> String {
+        if let e = error as? ApiRequestError {
+            if e.code == "too_large", !e.message.isEmpty, e.status == 413, e.message.contains(name) { return e.message }
+            if e.status == 413 || e.code == "http_413" { return L("att.uploadTooLarge", ["name": name]) }
+            if e.isNetwork { return L("att.uploadNetwork", ["name": name]) }
+        }
+        return L("att.failed", ["name": name]) + ": " + L10n.errorText(error)
+    }
+
     /// Icono por tipo (SF Symbols).
     static func icon(_ contentType: String, _ name: String) -> String {
         if contentType.hasPrefix("image/") { return "photo" }
@@ -41,6 +51,39 @@ struct LocalAttachment: Identifiable, Equatable {
     var isImage: Bool { contentType.hasPrefix("image/") }
     var isVideo: Bool { contentType.hasPrefix("video/") }
     var tooBig: Bool { data.count > AttachmentRules.maxBytes }
+}
+
+/// Fotos listas para enviar: orientación aplicada, lado mayor ≤ 2560 px y JPEG de ≤ ~2 MB (una foto de la cámara
+/// sale de 3–12 MB). HEIC/HEIF y otros formatos pasan a JPEG para que se vean en web y Android. GIF y PNG pequeños no cambian.
+enum ImagePrep {
+    static let maxSide: CGFloat = 2560
+    static let targetBytes = 2 * 1024 * 1024
+
+    /// JPEG de una imagen (cámara o convertida). nil si no se puede codificar.
+    static func jpeg(_ image: UIImage) -> Data? {
+        guard image.size.width > 0, image.size.height > 0 else { return nil }
+        let k = min(1, maxSide / max(image.size.width, image.size.height))
+        let size = CGSize(width: (image.size.width * k).rounded(), height: (image.size.height * k).rounded())
+        let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 1; fmt.opaque = true
+        // Dibujar aplica la orientación EXIF: el resultado queda derecho en cualquier visor.
+        let out = UIGraphicsImageRenderer(size: size, format: fmt).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+        var q: CGFloat = 0.82
+        var d = out.jpegData(compressionQuality: q)
+        while let x = d, x.count > targetBytes, q > 0.4 { q -= 0.12; d = out.jpegData(compressionQuality: q) }
+        return d
+    }
+
+    /// Una imagen elegida (Fotos, Archivos): la deja lista para subir. nil si los bytes no son una imagen legible.
+    static func prepare(_ data: Data, name: String, contentType: String) -> LocalAttachment? {
+        let type = contentType.lowercased()
+        let base = (name as NSString).deletingPathExtension
+        if type == "image/gif" { return LocalAttachment(name: name, contentType: type, data: data) }
+        guard let img = UIImage(data: data) else { return nil }
+        let small = max(img.size.width, img.size.height) <= maxSide && data.count <= targetBytes && img.imageOrientation == .up
+        if small && (type == "image/jpeg" || type == "image/png") { return LocalAttachment(name: name, contentType: type, data: data) }
+        guard let jpg = jpeg(img) else { return nil }
+        return LocalAttachment(name: "\(base.isEmpty ? "foto" : base).jpg", contentType: "image/jpeg", data: jpg)
+    }
 }
 
 enum Thumbnails {

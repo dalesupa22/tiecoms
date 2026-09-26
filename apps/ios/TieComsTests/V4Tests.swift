@@ -166,7 +166,7 @@ final class V4Tests: XCTestCase {
         let d = try boot()
         let group = Donations.intent(d, d.conversations[0], image: nil)
         XCTAssertEqual(group.conversationIdentifier, "c1")
-        XCTAssertEqual(group.speakableGroupName?.spokenPhrase, "Comité directivo")
+        XCTAssertEqual(group.speakableGroupName?.spokenPhrase, "Estudio Norte - Comité directivo", "«Empresa - Grupo», como el push")
         XCTAssertEqual(group.recipients?.map(\.customIdentifier), ["bob"], "sin incluirme")
         XCTAssertEqual(group.sender?.isMe, true)
         XCTAssertEqual(group.serviceName, "Chaggu")

@@ -1,12 +1,47 @@
 import AVFoundation
 import Foundation
 import Observation
+import UIKit
 
 /// Notas de voz (SPEC-v4 F): grabación AAC m4a mono 32 kbps 24 kHz, onda de hasta 64 valores y subida como adjunto.
 enum VoiceRules {
     static let maxMs = 15 * 60 * 1000
-    static let minMs = 700
+    /// Audio real grabado (medido en el archivo, no con el reloj del grabador) por debajo del cual la nota se descarta.
+    static let minMs = 500
+    /// Soltar antes de esto (sin arrastrar) es un toque: la grabación sigue en manos libres, como en WhatsApp.
+    static let tapMs = 400
     static let waveformBars = 64
+
+    /// Resultado de terminar una grabación.
+    enum Outcome: Equatable {
+        case clip(durationMs: Int)
+        /// El audio grabado de verdad no llega al mínimo.
+        case tooShort
+        /// El archivo no se pudo leer (grabador detenido por el sistema, disco, formato).
+        case unreadable
+    }
+
+    /// Decide con la duración medida en el archivo (nil = no se pudo leer) y los bytes del archivo.
+    static func outcome(fileDurationMs: Int?, bytes: Int) -> Outcome {
+        guard let ms = fileDurationMs, bytes > 0 else { return .unreadable }
+        guard ms >= minMs else { return .tooShort }
+        return .clip(durationMs: min(ms, maxMs))
+    }
+
+    /// Duración real de un archivo de audio (AVAudioFile: frames / frecuencia). nil si no se puede leer.
+    static func fileDurationMs(_ url: URL) -> Int? {
+        guard let f = try? AVAudioFile(forReading: url), f.fileFormat.sampleRate > 0 else { return nil }
+        return Int((Double(f.length) / f.fileFormat.sampleRate * 1000).rounded())
+    }
+
+    /// Texto de un error al subir la nota: 413 (límite del servidor) y red con su propio mensaje, nunca «demasiado corta».
+    static func uploadErrorText(_ error: Error) -> String {
+        if let e = error as? ApiRequestError {
+            if e.status == 413 || e.code == "too_large" || e.code == "http_413" { return L("voice.uploadTooLarge") }
+            if e.isNetwork { return L("voice.uploadNetwork") }
+        }
+        return L("voice.uploadFailed", ["reason": L10n.errorText(error)])
+    }
 
     /// Reduce las muestras de nivel (0…1) a `bars` valores (máximo por tramo), como pide `x-waveform`.
     static func downsample(_ samples: [Double], bars: Int = waveformBars) -> [Double] {
@@ -35,15 +70,32 @@ final class VoiceRecorder: NSObject, AVAudioRecorderDelegate {
     private(set) var state: State = .idle
     private(set) var elapsedMs = 0
     private(set) var samples: [Double] = []
+    /// En pausa: llamada entrante, pantalla bloqueada o app en segundo plano (sin modo de audio en segundo plano).
+    /// La grabación no se pierde: queda bloqueada para enviarla o continuarla.
+    private(set) var paused = false
+    /// Se puede continuar (no si el sistema detuvo el grabador: grabar de nuevo sobrescribiría el archivo).
+    private(set) var canResume = false
     var onAutoStop: (() -> Void)?
     private var recorder: AVAudioRecorder?
     private var timer: Timer?
     private var url: URL?
+    /// Reloj propio (solo para el contador): AVAudioRecorder.currentTime se queda en ~0 mientras el sistema
+    /// activa la sesión o cambia la ruta a Bluetooth (AirPods, HFP).
+    private var startedAt: Date?
+    private var accumulatedMs = 0
 
     var isActive: Bool { state != .idle }
 
     static func requestPermission() async -> Bool {
         await AVAudioApplication.requestRecordPermission()
+    }
+
+    /// Configura y activa la sesión de audio al tocar el micrófono (antes de pedir permiso y de arrancar el contador),
+    /// para que el primer segundo no se pierda mientras el sistema prepara la ruta.
+    static func prewarm() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetoothHFP])
+        try? session.setActive(true)
     }
 
     func start() throws {
@@ -56,33 +108,66 @@ final class VoiceRecorder: NSObject, AVAudioRecorderDelegate {
         let r = try AVAudioRecorder(url: file, settings: settings)
         r.delegate = self
         r.isMeteringEnabled = true
+        r.prepareToRecord()
         guard r.record(forDuration: TimeInterval(VoiceRules.maxMs) / 1000) else { throw ApiRequestError(status: 0, code: "mic", message: L("voice.micDenied")) }
-        recorder = r; url = file; samples = []; elapsedMs = 0; state = .recording
+        recorder = r; url = file; samples = []; elapsedMs = 0; accumulatedMs = 0; paused = false; startedAt = Date(); state = .recording
         NotificationCenter.default.addObserver(self, selector: #selector(interrupted), name: AVAudioSession.interruptionNotification, object: nil)
+        // Sin UIBackgroundModes «audio» el sistema cortaría la grabación: al salir de la app se pausa y queda bloqueada.
+        NotificationCenter.default.addObserver(self, selector: #selector(resigned), name: UIApplication.willResignActiveNotification, object: nil)
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
     }
 
+    private var wallMs: Int { accumulatedMs + (startedAt.map { Int(Date().timeIntervalSince($0) * 1000) } ?? 0) }
+
     private func tick() {
         guard let r = recorder, r.isRecording else { return }
         r.updateMeters()
         samples.append(VoiceRules.level(db: r.averagePower(forChannel: 0)))
-        elapsedMs = Int(r.currentTime * 1000)
+        elapsedMs = max(Int(r.currentTime * 1000), wallMs)
     }
 
     func lock() { if state == .recording { state = .locked } }
 
-    /// Detiene y devuelve el archivo; nil si es demasiado corto o se canceló.
+    /// Pausa sin perder lo grabado (queda bloqueada: enviar, borrar o continuar).
+    func pause() {
+        guard state != .idle, !paused else { return }
+        recorder?.pause()
+        accumulatedMs = wallMs; startedAt = nil
+        paused = true; canResume = true
+        state = .locked
+    }
+
+    /// Continúa una grabación en pausa.
+    func resume() {
+        guard paused, canResume, let r = recorder else { return }
+        try? AVAudioSession.sharedInstance().setActive(true)
+        if r.record() { paused = false; startedAt = Date() }
+    }
+
+    /// Detiene y mide el audio real en el archivo. Se descarta solo si de verdad dura menos del mínimo.
     func finish() -> (data: Data, durationMs: Int, waveform: [Double])? {
-        let ms = Int((recorder?.currentTime ?? 0) * 1000)
+        switch finishOutcome() {
+        case .success(let clip): return clip
+        case .failure: return nil
+        }
+    }
+
+    enum FinishError: Error, Equatable { case tooShort, unreadable }
+
+    func finishOutcome() -> Result<(data: Data, durationMs: Int, waveform: [Double]), FinishError> {
         let file = url
+        let waveform = VoiceRules.downsample(samples)
         stop()
-        guard let file, let data = try? Data(contentsOf: file) else { return nil }
-        try? FileManager.default.removeItem(at: file)
-        let duration = max(ms, elapsedMs)
-        guard duration >= VoiceRules.minMs else { return nil }
-        return (data, min(duration, VoiceRules.maxMs), VoiceRules.downsample(samples))
+        guard let file else { return .failure(.unreadable) }
+        defer { try? FileManager.default.removeItem(at: file) }
+        let data = (try? Data(contentsOf: file)) ?? Data()
+        switch VoiceRules.outcome(fileDurationMs: VoiceRules.fileDurationMs(file), bytes: data.count) {
+        case .clip(let ms): return .success((data, ms, waveform))
+        case .tooShort: return .failure(.tooShort)
+        case .unreadable: return .failure(.unreadable)
+        }
     }
 
     func cancel() {
@@ -95,6 +180,8 @@ final class VoiceRecorder: NSObject, AVAudioRecorderDelegate {
         timer?.invalidate(); timer = nil
         recorder?.stop(); recorder = nil
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
+        startedAt = nil; accumulatedMs = 0; paused = false; canResume = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         state = .idle
     }
@@ -102,12 +189,20 @@ final class VoiceRecorder: NSObject, AVAudioRecorderDelegate {
     /// Una llamada entrante pausa la grabación; se bloquea para que la persona decida al volver.
     @objc nonisolated private func interrupted(_ n: Notification) {
         guard let raw = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt, AVAudioSession.InterruptionType(rawValue: raw) == .began else { return }
-        Task { @MainActor in self.recorder?.pause(); self.state = .locked }
+        Task { @MainActor in self.pause() }
     }
 
-    /// Llegó al máximo de 15 min.
+    /// Pantalla bloqueada o app al fondo: pausa (el archivo queda válido) y bloqueada para enviar al volver.
+    @objc nonisolated private func resigned(_ n: Notification) {
+        Task { @MainActor in self.pause() }
+    }
+
+    /// Llegó al máximo de 15 min (o el sistema detuvo el grabador): lo grabado se conserva.
     nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-        Task { @MainActor in if self.state != .idle { self.onAutoStop?() } }
+        Task { @MainActor in
+            guard self.state != .idle, self.recorder === recorder else { return }
+            if flag && self.wallMs >= VoiceRules.maxMs - 1500 { self.onAutoStop?() } else { self.accumulatedMs = self.wallMs; self.startedAt = nil; self.paused = true; self.canResume = false; self.state = .locked }
+        }
     }
 }
 

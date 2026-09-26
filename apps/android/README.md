@@ -7,13 +7,15 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 | applicationId | `com.tiecoms.app` |
 | minSdk / target / compile | 26 / 36 / 36 |
 | Versión | `versionName 1.4.0`, `versionCode 7`. Sube el `versionCode` en cada envío a Play. |
-| Contrato | `2026-09-23`. Se envía en `x-tiecoms-contract` y en `device.contract`. |
+| Contrato | `2026-09-25`. Se envía en `x-tiecoms-contract` y en `device.contract`. |
 | API por defecto | `https://app.tiecoms.com` |
 | Toolchain | Gradle 8.14.3 (wrapper), AGP 8.13.2, Kotlin 2.3.21 y JDK 17 |
 
 ## Qué hace
 
-- **Pestañas:** Inicio · Asuntos · Agenda · Ajustes. WhatsApp, Trazo y Recordatorios se abren desde los accesos de Inicio y desde Ajustes.
+- **Pestañas (docs/GRUPOS.md):** Grupos · DMs · Asuntos · Calendario · Tú (la foto como ícono). WhatsApp, Trazo, Archivos y Recordatorios se abren desde Tú.
+- **Grupos:** Tu organización · X (el espacio casa sin cabecera), Relaciones (con «Invitación pendiente») e Invitado en, con los asuntos abiertos bajo cada grupo (3 y «+N asuntos»). El «+» abre Nuevo grupo (`POST /groups`) y, con enlace, la pantalla de compartir con el código. Invitar a un grupo por correo o con enlace y código; Unirme con código en Tú. Los terceros no crean asuntos. Supervisión (owner/admin) con visor de solo lectura. `GroupsTree` tiene la regla y `GroupsTreeTest` la prueba; `GroupsUiTest` recorre la interfaz contra el API de pruebas.
+- **DMs:** directos y chats `multi`, incluidos los sidechats («Sidechat», «desde #Grupo»), con «Mensaje nuevo».
 - **Menú del mensaje** (pulsación larga; es el clic derecho de la web):
   - Responder, con la cita visible.
   - Copiar texto y copiar enlace.

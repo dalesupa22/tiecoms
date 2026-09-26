@@ -468,6 +468,7 @@ private fun CompanyRow(row: GroupsTree.Company, onToggle: () -> Unit, onLongPres
     ) {
         OrgMark(row.org ?: OrganizationDTO(name = name, colorBg = "#BDB5AE"), size = 22.dp)
         Spacer(Modifier.width(10.dp))
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
         Text(name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         if (row.pendingName != null && row.org == null) {
             Spacer(Modifier.width(8.dp))
@@ -476,7 +477,7 @@ private fun CompanyRow(row: GroupsTree.Company, onToggle: () -> Unit, onLongPres
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp).testTag("pendingTag"))
             }
         }
-        Spacer(Modifier.weight(1f))
+        }
         if (row.collapsed) UnreadPill(row.unread, Color(com.tiecoms.app.core.Contrast.badgeBackground(row.org?.colorBg)), Color.White)
         Icon(if (row.collapsed) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -523,7 +524,6 @@ private fun IssueLine(row: GroupsTree.Issue, onOpen: () -> Unit) {
                 style = MaterialTheme.typography.labelSmall, maxLines = 1,
                 color = if (f.overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Spacer(Modifier.weight(1f))
         if (i.status == "in_progress" || i.status == "waiting") { Spacer(Modifier.width(6.dp)); StatusPill(i.status) }
     }
 }

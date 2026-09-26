@@ -118,10 +118,11 @@ class FeedbackUiTest {
         val client = app.container.client.value
         val data = client.state.value.data!!
         val ws = data.conversations.first { it.id == convId }.workspaceId!!
-        assertTrue("fila del espacio", exists("ws-$ws"))
-        assertTrue("sección Empresas y espacios", exists("add-COMPANIES"))
+        // Grupos (docs/GRUPOS.md): el espacio compartido es una relación de un solo espacio, sin cabecera propia.
+        assertTrue("sección Relaciones", exists("add-RELATIONS"))
+        assertTrue("sin cabecera de espacio en una relación de un espacio", !exists("ws-$ws"))
         Thread.sleep(600); shot("v3fb-01-inicio-jerarquia")
-        log("§9 Inicio: Empresas y espacios → empresa → espacio → conversaciones; Chats")
+        log("Grupos: Relaciones → empresa → grupos; Chats en DMs")
 
         // §8 Pulsación larga en la lista → menú anclado (fijar, silenciar, no leído, detalles).
         compose.onNodeWithTag("conv-$convId").performTouchInput { longClick() }

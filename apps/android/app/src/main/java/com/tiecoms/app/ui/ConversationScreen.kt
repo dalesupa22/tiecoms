@@ -405,7 +405,10 @@ fun ConversationScreen(
                         val ws = data.workspaces.firstOrNull { it.id == meta.workspaceId }
                         if (ws != null) {
                             val org = com.tiecoms.app.core.HomeTree.counterpartOrg(data, ws)
-                            Text(listOfNotNull(org?.name, ws.name).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            // Relación pendiente: el nombre que se escribió; el espacio casa se llama como la empresa.
+                            val place = com.tiecoms.app.core.GroupsTree.place(data, ws)
+                            val orgName = place.pendingName ?: org?.name
+                            Text(listOfNotNull(orgName, ws.name).distinct().joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable { onOpenWorkspace(ws.id) }.testTag("chatPath"))
                         } else {
                             val parent = meta.parentId?.let { pid -> data.conversations.firstOrNull { it.id == pid } }

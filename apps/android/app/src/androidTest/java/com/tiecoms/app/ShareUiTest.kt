@@ -207,31 +207,34 @@ class ShareUiTest {
         log("§B/§A burbuja con cuadrícula (3 fotos, miniaturas del cliente) y visor «2 de 3»")
         compose.waitUntil(5_000) { !exists("mediaViewer") }
 
-        // §D Inicio ordenado por no leídos y «Nuevo chat» con el selector arriba.
+        // §D Grupos ordenado por no leídos; «Mensaje nuevo» vive en DMs (docs/GRUPOS.md).
         compose.onNodeWithTag("back").performClick()
-        compose.waitUntilAtLeastOneExists(hasTestTag("newChat"), 10_000)
+        compose.waitUntilAtLeastOneExists(hasTestTag("newGroup"), 10_000)
         Thread.sleep(600); shot("v4-08-inicio-orden")
+        compose.onNodeWithTag("tab-dms").performClick()
+        compose.waitUntilAtLeastOneExists(hasTestTag("newChat"), 10_000)
         compose.onNodeWithTag("newChat").performClick()
-        compose.waitUntilAtLeastOneExists(hasTestTag("chatModePerson"), 10_000)
+        compose.waitUntilAtLeastOneExists(hasTestTag("createChat"), 10_000)
+        assertTrue("desde DMs, solo persona o chat grupal", !exists("chatModeSpace"))
         Thread.sleep(400); shot("v4-09-nuevo-chat-persona")
-        compose.onNodeWithTag("chatModeSpace").performClick()
+        compose.onNodeWithTag("back").performClick()
+        // Grupo en un espacio: el «+» de Grupos con la relación elegida (POST /groups).
+        compose.onNodeWithTag("tab-home").performClick()
+        compose.waitUntilAtLeastOneExists(hasTestTag("newGroup"), 10_000)
+        compose.onNodeWithTag("newGroup").performClick()
+        compose.waitUntilAtLeastOneExists(hasTestTag("forCompany"), 5_000)
+        compose.onNodeWithTag("forCompany").performClick()
         val ws = client.meta(convId)!!.workspaceId!!
-        compose.waitUntilAtLeastOneExists(hasTestTag("spacePick-$ws") or hasTestTag("spaceChosen"), 10_000)
-        if (exists("spacePick-$ws")) compose.onNodeWithTag("spacePick-$ws").performClick()
-        compose.waitUntilAtLeastOneExists(hasTestTag("spaceGroupName"), 5_000)
-        compose.onNodeWithTag("spaceGroupName").performTextInput("Pagos del proyecto")
-        compose.onNodeWithTag("spaceDirective").performClick()
-        pickPeer(peerId)
+        val relation = com.tiecoms.app.core.GroupsTree.companyChoices(client.state.value.data!!).first { r -> r.workspaces.any { it.id == ws } }
+        compose.onNodeWithTag("company-" + relation.id).performScrollTo().performClick()
+        compose.onNodeWithTag("groupName").performScrollTo().performTextInput("Pagos del proyecto")
+        compose.onNodeWithTag("person-$peerId").performScrollTo().performClick()
         Thread.sleep(400); shot("v4-10-nuevo-chat-espacio")
-        compose.onNodeWithTag("spaceInternal").performClick()
-        compose.waitUntil(5_000) { !exists("spaceDirective") }
-        Thread.sleep(300); shot("v4-11-nuevo-chat-interno")
-        compose.onNodeWithTag("spaceInternal").performClick()
-        pickPeer(peerId) // interno la había quitado
-        compose.onNodeWithTag("createSpaceGroup").performClick()
+        compose.onNodeWithTag("groupShareLink").performScrollTo().performClick() // sin enlace: abre el grupo directo
+        compose.onNodeWithTag("createGroup").performScrollTo().performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("composer"), 15_000)
         val created = client.state.value.data!!.conversations.first { it.name == "Pagos del proyecto" }
-        assertEquals("directivo", created.level); assertTrue(peerId in created.memberIds)
-        log("§D Nuevo chat → Grupo en un espacio: selector, espacio, nombre, directivo (se oculta si es interno), miembros; crea y abre el grupo")
+        assertTrue(peerId in created.memberIds)
+        log("§D Nuevo grupo en una relación: ¿Para quién es?, empresa, nombre y personas; crea y abre el grupo")
     }
 }

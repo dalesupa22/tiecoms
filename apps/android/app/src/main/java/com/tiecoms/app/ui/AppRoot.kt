@@ -387,7 +387,8 @@ private fun MainNav() {
                     onBack = { if (!nav.popBackStack()) tab("home") },
                     onLogin = {}, onSignup = {},
                     onJoined = { ws, conv ->
-                        if (conv != null) openConv(conv)
+                        // La vista previa sale de la pila: Atrás desde el grupo vuelve a donde estaba.
+                        if (conv != null) { nav.popBackStack(); openConv(conv) }
                         else nav.navigate("home?ws=$ws") { popUpTo(0) { inclusive = true } }
                     },
                 )

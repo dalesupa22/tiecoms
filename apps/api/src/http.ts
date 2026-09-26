@@ -4,7 +4,7 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { ZodError } from 'zod';
 import {
-  AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput, CreateGroupInput,
+  AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput, CreateGroupInput, JoinPolicyInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
   UpdateProfileInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
@@ -239,6 +239,7 @@ export async function buildHttp() {
     priv.post('/api/v1/workspaces', async (req) => ws.createWorkspace(req.userId, CreateWorkspaceInput.parse(req.body)));
     priv.post('/api/v1/groups', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => groups.createGroup(req.userId, CreateGroupInput.parse(req.body)));
     priv.get<{ Params: { id: string } }>('/api/v1/organizations/:id/oversight', async (req) => groups.listOversight(req.userId, z.uuid().parse(req.params.id)));
+    priv.put<{ Params: { id: string } }>('/api/v1/organizations/:id/join-policy', async (req) => domains.setJoinPolicy(req.userId, z.uuid().parse(req.params.id), JoinPolicyInput.parse(req.body).joinPolicy));
     priv.post<{ Params: { id: string } }>('/api/v1/workspaces/:id/conversations', async (req) =>
       ws.createConversation(req.userId, req.params.id, CreateConversationInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/workspaces/:id/invitations', async (req) =>

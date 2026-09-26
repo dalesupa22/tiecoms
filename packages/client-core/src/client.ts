@@ -788,6 +788,11 @@ export class TieComsClient {
     await this.loadBootstrap();
     return r;
   }
+  /** Entrada automática por dominio verificado (solo owner/admin). */
+  async setJoinPolicy(orgId: string, joinPolicy: 'invite' | 'auto') {
+    await this.request(`/organizations/${orgId}/join-policy`, { method: 'PUT', json: { joinPolicy } });
+    await this.loadBootstrap();
+  }
   /** Supervisión: grupos donde está la gente de mi empresa (solo owner/admin). */
   loadOversight(orgId: string) {
     return this.request<OversightDTO>(`/organizations/${orgId}/oversight`);

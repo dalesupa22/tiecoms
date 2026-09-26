@@ -320,6 +320,8 @@ export function CreateGroupDialog({ preset, onClose }: { preset?: Preset; onClos
   const [emails, setEmails] = useState('');
   const [role, setRole] = useState<'member' | 'guest'>('member');
   const [share, setShare] = useState(preset ? preset.kind !== 'org' : false);
+  // Canal propio: un grupo solo de mi empresa dentro de la relación (la otra empresa no lo ve).
+  const [ownOnly, setOwnOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ conversationId: string; url: string; code: string | null } | null>(null);
@@ -327,8 +329,11 @@ export function CreateGroupDialog({ preset, onClose }: { preset?: Preset; onClos
   const orgName = orgById(d, orgId)?.name ?? '';
   const target: CreateGroupRequest['target'] = forWhom === 'org' ? { kind: 'org', orgId }
     : relation === 'new' ? { kind: 'company', companyName: company.trim(), orgId } : { kind: 'workspace', workspaceId: relation };
+  const internal = forWhom === 'other' && ownOnly;
   const wsMembers = target.kind === 'workspace' ? new Set(d.workspaces.find((w) => w.id === target.workspaceId)?.memberIds ?? []) : null;
-  const candidates = d.people.filter((p) => p.id !== d.me.id && p.kind === 'human' && (wsMembers ? wsMembers.has(p.id) : p.orgId === orgId));
+  // En una relación existente: su gente; si es canal propio, solo mis colegas que ya están en ella. Si no, mis colegas.
+  const candidates = d.people.filter((p) => p.id !== d.me.id && p.kind === 'human'
+    && (wsMembers ? wsMembers.has(p.id) && (!internal || p.orgId === orgId) : p.orgId === orgId));
   const list = splitEmails(emails);
   const bad = list.filter((e) => !looksEmail(e));
   const inviteRole = forWhom === 'org' ? 'guest' : role;
@@ -337,7 +342,7 @@ export function CreateGroupDialog({ preset, onClose }: { preset?: Preset; onClos
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setBusy(true); setError(null);
-    client.createGroup({ name: name.trim(), target, memberIds: picked.filter((p) => candidates.some((c) => c.id === p)), inviteEmails: list, inviteRole, shareLink: share, lang: getLang() })
+    client.createGroup({ name: name.trim(), target, internal, memberIds: picked.filter((p) => candidates.some((c) => c.id === p)), inviteEmails: internal ? [] : list, inviteRole, shareLink: share && !internal, lang: getLang() })
       .then((r) => { if (r.inviteUrl) setDone({ conversationId: r.conversationId, url: r.inviteUrl, code: r.inviteCode ?? null }); else { onClose(); navigate(`/c/${r.conversationId}`); } })
       .catch((err) => setError(errorText(err)))
       .finally(() => setBusy(false));
@@ -381,6 +386,11 @@ export function CreateGroupDialog({ preset, onClose }: { preset?: Preset; onClos
             )}
           </>
         )}
+        {forWhom === 'other' && (
+          <label className="check"><input type="checkbox" checked={ownOnly} onChange={(e) => setOwnOnly(e.target.checked)} />
+            <span className="grow">{t('groups.ownOnly', { org: orgName })}<span className="small muted" style={{ display: 'block' }}>{t('groups.ownOnlyHint')}</span></span>
+          </label>
+        )}
         <label className="field"><span>{t('groups.name')}</span>
           <input className="input" required minLength={2} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('groups.namePh')} />
         </label>
@@ -396,6 +406,7 @@ export function CreateGroupDialog({ preset, onClose }: { preset?: Preset; onClos
             ))}
           </div>
         </div>
+        {!internal && <>
         <label className="field"><span>{t('groups.inviteOutside')}</span>
           <textarea className="input" rows={2} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder={t('groups.emailsPh')} />
           {bad.length > 0 && <span className="error">{t('groups.badEmails', { list: bad.join(', ') })}</span>}
@@ -404,6 +415,7 @@ export function CreateGroupDialog({ preset, onClose }: { preset?: Preset; onClos
           ? <RolePicker role={role} setRole={setRole} company={relation === 'new' ? company.trim() : relations.find((r) => r.id === relation)?.label ?? ''} />
           : <span className="hint">{t('groups.guestOnlyHint')}</span>}
         <label className="check"><input type="checkbox" checked={share} onChange={(e) => setShare(e.target.checked)} /><span className="grow">{t('groups.shareLink')}<span className="small muted" style={{ display: 'block' }}>{t('groups.shareLinkHint')}</span></span></label>
+        </>}
         {error && <div className="error">{error}</div>}
         <div className="modal-actions"><button type="button" className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" disabled={busy || bad.length > 0}>{busy ? t('common.wait') : t('groups.create')}</button></div>
       </form>

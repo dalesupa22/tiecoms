@@ -313,6 +313,11 @@ export async function acceptInvitation(userId: string, token: string, input: z.i
     }
     const { orgId } = await primaryOrg(c, userId, input.orgId);
     const existing = await c.query('SELECT role, revoked_at FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2', [inv.workspace_id, userId]);
+    // Viralidad: la primera persona de una empresa nueva en la relación queda como coadministradora, para que su
+    // empresa invite a su gente y arme sus propios grupos sin depender de quien la invitó.
+    const firstOfOrg = inv.role !== 'guest' && !(await c.query(
+      'SELECT 1 FROM workspace_organizations WHERE workspace_id = $1 AND org_id = $2 AND left_at IS NULL', [inv.workspace_id, orgId])).rowCount;
+    const role = firstOfOrg && inv.role === 'member' ? 'admin' : inv.role;
     if (existing.rows[0] && !existing.rows[0].revoked_at && existing.rows[0].role !== 'guest' && inv.role === 'guest') {
       // Ya es participante pleno: no se degrada a tercero.
     } else {
@@ -320,7 +325,7 @@ export async function acceptInvitation(userId: string, token: string, input: z.i
         `INSERT INTO workspace_memberships (workspace_id, user_id, org_id, role, sponsor_id, expires_at) VALUES ($1,$2,$3,$4,$5,$6)
          ON CONFLICT (workspace_id, user_id) DO UPDATE SET org_id = EXCLUDED.org_id, role = EXCLUDED.role, sponsor_id = EXCLUDED.sponsor_id,
            expires_at = EXCLUDED.expires_at, revoked_at = NULL, joined_at = CASE WHEN workspace_memberships.revoked_at IS NULL THEN workspace_memberships.joined_at ELSE now() END`,
-        [inv.workspace_id, userId, inv.role === 'guest' ? null : orgId, inv.role, inv.invited_by, inv.role === 'guest' ? inv.access_until : null],
+        [inv.workspace_id, userId, inv.role === 'guest' ? null : orgId, role, inv.invited_by, inv.role === 'guest' ? inv.access_until : null],
       );
     }
     // Un tercero no suma su empresa al espacio: participa a título propio.

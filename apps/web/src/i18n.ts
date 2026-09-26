@@ -32,6 +32,8 @@ const es = {
   // Navegación
   // Barra del chat e hilos (docs/GRUPOS.md)
   'menu.hintDm': 'Por DM a {name}', 'menu.hintThread': 'Con los del chat', 'menu.hintSide': 'Solo con quien elijas',
+  'groups.ownOnly': 'Solo {org}: nuestro propio canal en esta relación', 'groups.ownOnlyHint': 'La otra empresa no lo ve. Sirve para coordinarse por dentro.',
+  'org.autoJoin': 'Entrada automática con @{domain}', 'org.autoJoinHint': 'Quien inicie sesión con Google o Microsoft con un correo de ese dominio entra a {org} sin invitación.',
   'bar.label': 'Accesos del chat',
   'bar.pins': 'Fijados',
   'bar.issues': 'Asuntos',
@@ -468,6 +470,8 @@ const en: Record<Key, string> = {
   'role.Lead': 'Lead', 'role.Admin': 'Admin', 'role.Member': 'Member', 'role.Guest': 'Guest',
   // Chat bar and threads (docs/GRUPOS.md)
   'menu.hintDm': 'By DM to {name}', 'menu.hintThread': 'With the chat', 'menu.hintSide': 'Only with who you pick',
+  'groups.ownOnly': 'Only {org}: our own channel in this relationship', 'groups.ownOnlyHint': 'The other company can’t see it. Use it to coordinate internally.',
+  'org.autoJoin': 'Automatic sign-in with @{domain}', 'org.autoJoinHint': 'Anyone who signs in with Google or Microsoft using that domain joins {org} without an invitation.',
   'bar.label': 'Chat shortcuts',
   'bar.pins': 'Pinned',
   'bar.issues': 'Issues',

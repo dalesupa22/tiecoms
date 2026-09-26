@@ -1,72 +1,108 @@
 import SwiftUI
 
-/// Splash de Chaggu: la «ignición» del símbolo sobre tinta (#17161F).
-/// Empieza idéntico a la Launch Screen del sistema (símbolo sin rayitas, 200 pt, centrado),
-/// la burbuja mandarina hace un «pop», aparecen las rayitas y luego el eslogan.
+/// Splash de Chaggu sobre tinta (#17161F): «los puntitos escriben y la marca se enciende».
+/// Empieza idéntico a la Launch Screen del sistema (`LaunchSymbol` = símbolo sin rayitas, 200 pt, centrado).
+/// Las burbujas van sin huecos (capas 1b/2b) y los 6 puntos se dibujan encima como círculos de tinta:
+/// primero titilan los 3 de la burbuja papel (como «escribiendo»), luego los de la mandarina y
+/// luego aparecen las rayitas ¡pum! con un golpecito de la burbuja mandarina.
 /// Los tiempos son funciones puras (segundos) para poder probarlos.
 enum SplashTimeline {
     /// Lado del símbolo en puntos (igual que `LaunchSymbol` en la Launch Screen).
     static let symbolSide = 200.0
-    /// 0–0,25 s: quieto (capas 1 y 2, como la Launch Screen).
-    static let holdEnd = 0.25
-    /// «Pop» de la burbuja mandarina: 1 → 1,10 → 1, anclado en el centro de la propia burbuja
-    /// (así no tapa la separación con la burbuja papel).
-    static let popStart = 0.20
-    static let popEnd = 0.55
-    static let popPeak = 0.10
-    /// Centro de la burbuja mandarina en coordenadas unitarias del lienzo.
-    static let popAnchor = (x: 0.609, y: 0.340)
-    /// Rayitas: opacidad 0→1 y escala 0,4→1 ancladas en su punto de origen.
-    static let sparksStart = 0.35
-    static let sparksEnd = 0.70
-    /// Punto de origen de las rayitas en coordenadas unitarias del lienzo (esquina superior derecha).
+
+    // MARK: Puntitos (coordenadas unitarias del lienzo; chaggu-marca/definitivo/capas-splash/puntitos.txt)
+    enum Bubble: CaseIterable { case white, orange }
+    static let dotRadius = 0.02949
+    static let dotY = 0.33974
+    static let whiteDotsX = [0.14744, 0.22436, 0.30128]
+    static let orangeDotsX = [0.53205, 0.60897, 0.68590]
+    static func dotsX(_ b: Bubble) -> [Double] { b == .white ? whiteDotsX : orangeDotsX }
+
+    /// 0–0,15 s: quieto, puntos llenos.
+    static let holdEnd = 0.15
+    /// Inicio de los pulsos de cada burbuja.
+    static let whiteStart = 0.15
+    static let orangeStart = 0.85
+    /// Desfase entre puntos, entre olas, número de olas y duración de cada pulso.
+    static let dotStagger = 0.13
+    static let waveGap = 0.40
+    static let waves = 2
+    static let pulseDuration = 0.30
+    /// En la mitad del pulso: opacidad del punto 0,25 (se aclara hacia la burbuja) y sube 0,35 radios.
+    static let pulseMinOpacity = 0.25
+    static let pulseRise = 0.35
+
+    /// Instantes en que empieza cada pulso del punto `index` de la burbuja.
+    static func pulseStarts(_ b: Bubble, index: Int) -> [Double] {
+        let base = (b == .white ? whiteStart : orangeStart) + dotStagger * Double(index)
+        return (0..<waves).map { base + waveGap * Double($0) }
+    }
+
+    /// Forma del pulso: 0 → 1 (mitad) → 0, con ease in-out en cada tramo.
+    static func bump(_ p: Double) -> Double {
+        guard p > 0, p < 1 else { return 0 }
+        return p < 0.5 ? easeInOut(p * 2) : easeInOut(2 - p * 2)
+    }
+
+    /// Punto `index` de la burbuja: opacidad del círculo de tinta y cuánto sube (en radios).
+    static func dot(_ t: Double, _ b: Bubble, index: Int, reduced: Bool = false) -> (opacity: Double, rise: Double) {
+        let k = pulseStarts(b, index: index).map { bump((t - $0) / pulseDuration) }.max() ?? 0
+        return (1 - (1 - pulseMinOpacity) * k, reduced ? 0 : pulseRise * k)
+    }
+
+    // MARK: ¡Pum!
+    static let pumStart = 1.65
+    static let pumEnd = 1.85
+    /// Las rayitas aparecen del todo en los primeros 0,08 s.
+    static let sparksFade = 0.08
+    /// Punto de origen de las rayitas (esquina superior derecha del lienzo).
     static let sparksAnchor = (x: 0.83, y: 0.17)
-    /// Sonido `tc_splash` y háptico ligero: cuando aparecen las rayitas.
-    static let soundAt = 0.35
-    static let hapticAt = 0.35
-    /// Eslogan: sube 8 pt y llega a opacidad 0,8.
-    static let taglineStart = 0.55
-    static let taglineEnd = 0.95
+    /// Centro de la burbuja mandarina: ancla del golpecito.
+    static let orangeAnchor = (x: 0.609, y: 0.340)
+    static let tapPeak = 0.04
+    /// Sonido `tc_splash` y háptico ligero: en el ¡pum!
+    static let soundAt = 1.65
+    static let hapticAt = 1.65
+
+    /// Rayitas: opacidad 0→1 en 0,08 s y escala 0,3 → 1,15 → 1,0. Reduce Motion: fundido de 0,2 s, sin escala.
+    static func sparks(_ t: Double, reduced: Bool = false) -> (opacity: Double, scale: Double) {
+        if reduced { return (easeInOut(progress(t, pumStart, pumEnd)), 1) }
+        let u = progress(t, pumStart, pumEnd)
+        let scale = u < 0.6 ? 0.3 + 0.85 * easeOut(u / 0.6) : 1.15 - 0.15 * easeInOut((u - 0.6) / 0.4)
+        return (progress(t, pumStart, pumStart + sparksFade), scale)
+    }
+
+    /// Golpecito de la burbuja mandarina: 1 → 1,04 → 1 durante el ¡pum!
+    static func orangeTap(_ t: Double, reduced: Bool = false) -> Double {
+        reduced ? 1 : 1 + tapPeak * sin(.pi * progress(t, pumStart, pumEnd))
+    }
+
+    // MARK: Eslogan y salida
+    static let taglineStart = 1.80
+    static let taglineEnd = 2.15
     static let taglineOpacity = 0.8
     static let taglineRise = 8.0
-    /// Salida (fundido + leve escala), solo cuando la app está lista.
-    static let exitStart = 1.30
-    static let total = 1.60
+    static let exitStart = 2.35
+    static let total = 2.65
     /// Arranque en frío por un enlace: versión corta.
-    static let shortStart = 0.70
+    static let shortStart = 1.55
     static let maxWait = 6.0
 
     static func clamp(_ x: Double) -> Double { min(1, max(0, x)) }
     static func progress(_ t: Double, _ a: Double, _ b: Double) -> Double { clamp((t - a) / (b - a)) }
     static func easeOut(_ x: Double) -> Double { 1 - pow(1 - x, 3) }
     static func easeInOut(_ x: Double) -> Double { x < 0.5 ? 4 * x * x * x : 1 - pow(-2 * x + 2, 3) / 2 }
-    /// Ease out «back»: pasa un poco de 1 y regresa (sin rebote en los extremos: 0→0, 1→1).
-    static func easeOutBack(_ x: Double) -> Double {
-        let c1 = 1.70158, c3 = c1 + 1
-        return 1 + c3 * pow(x - 1, 3) + c1 * pow(x - 1, 2)
-    }
 
-    /// Escala de la burbuja mandarina: 1 → 1,10 → 1.
-    static func pop(_ t: Double) -> Double {
-        let p = progress(t, popStart, popEnd)
-        return 1 + popPeak * sin(.pi * easeOut(p))
-    }
-
-    /// Rayitas: opacidad y escala (0,4 → 1 con un leve «back»).
-    static func sparks(_ t: Double) -> (opacity: Double, scale: Double) {
-        let p = progress(t, sparksStart, sparksEnd)
-        return (easeOut(p), 0.4 + 0.6 * easeOutBack(p))
-    }
-
-    /// Eslogan: opacidad (0 → 0,8) y desplazamiento vertical (8 → 0 pt).
-    static func tagline(_ t: Double) -> (opacity: Double, offset: Double) {
+    /// Eslogan: opacidad (0 → 0,8) y desplazamiento vertical (8 → 0 pt; 0 con Reduce Motion).
+    static func tagline(_ t: Double, reduced: Bool = false) -> (opacity: Double, offset: Double) {
         let p = easeOut(progress(t, taglineStart, taglineEnd))
-        return (taglineOpacity * p, taglineRise * (1 - p))
+        return (taglineOpacity * p, reduced ? 0 : taglineRise * (1 - p))
     }
 
-    static func exit(_ t: Double) -> (scale: Double, opacity: Double) {
+    /// Salida: fundido + leve escala (sin escala con Reduce Motion).
+    static func exit(_ t: Double, reduced: Bool = false) -> (scale: Double, opacity: Double) {
         let p = easeInOut(progress(t, exitStart, total))
-        return (1 + 0.04 * p, 1 - p)
+        return (reduced ? 1 : 1 + 0.04 * p, 1 - p)
     }
 
     /// Reloj del splash (función pura).
@@ -82,25 +118,6 @@ enum SplashTimeline {
         guard raw > exitStart else { return raw }
         guard let release else { return exitStart }
         return exitStart + max(0, elapsed - release)
-    }
-
-    // MARK: Reduce Motion: sin escalas; solo fundido del eslogan (y rayitas) y salida.
-    static let reducedTaglineStart = 0.15
-    static let reducedTaglineEnd = 0.55
-    static let reducedMinShown = 0.9
-    static let reducedExit = 0.3
-
-    /// Opacidad del eslogan (0 → 0,8) con Reduce Motion, según el tiempo real.
-    static func reducedTagline(_ elapsed: Double) -> Double {
-        taglineOpacity * progress(elapsed, reducedTaglineStart, reducedTaglineEnd)
-    }
-
-    /// Opacidad de salida con Reduce Motion: se desvanece cuando la app está lista
-    /// (nunca antes de `reducedMinShown`) o a los 6 s.
-    static func reducedExitOpacity(elapsed: Double, readyAt: Double?) -> Double {
-        let release = readyAt.map { max($0, reducedMinShown) } ?? (elapsed >= maxWait ? maxWait : nil)
-        guard let release else { return 1 }
-        return 1 - clamp((elapsed - release) / reducedExit)
     }
 }
 
@@ -130,18 +147,24 @@ struct LaunchSplashView: View {
             let elapsed = freeze ?? ctx.date.timeIntervalSince(start)
             let t = freeze ?? T.clock(elapsed: elapsed, short: short, readyAt: readyAt, skip: skip)
             let side = CGFloat(T.symbolSide)
-            let reduced = reduceMotion && freeze == nil
-            let pop = reduced ? 1 : T.pop(t)
-            let sparks = reduced ? (opacity: T.reducedTagline(elapsed) / T.taglineOpacity, scale: 1.0) : T.sparks(t)
-            let tag = reduced ? (opacity: T.reducedTagline(elapsed), offset: 0.0) : T.tagline(t)
-            let exit = reduced ? (scale: 1.0, opacity: T.reducedExitOpacity(elapsed: elapsed, readyAt: readyAt)) : T.exit(t)
+            let reduced = reduceMotion
+            let tap = T.orangeTap(t, reduced: reduced)
+            let sparks = T.sparks(t, reduced: reduced)
+            let tag = T.tagline(t, reduced: reduced)
+            let exit = T.exit(t, reduced: reduced)
             ZStack {
                 Theme.ink
-                // Las tres capas comparten el mismo lienzo cuadrado: se apilan con el mismo frame.
+                // Todas las capas comparten el mismo lienzo cuadrado: se apilan con el mismo frame.
                 ZStack {
-                    Image("SplashBubbleWhite").resizable()
-                    Image("SplashBubbleOrange").resizable()
-                        .scaleEffect(pop, anchor: UnitPoint(x: T.popAnchor.x, y: T.popAnchor.y))
+                    ZStack {
+                        Image("SplashBubbleWhite").resizable()
+                        dots(.white, t: t, side: side, reduced: reduced)
+                    }
+                    ZStack {
+                        Image("SplashBubbleOrange").resizable()
+                        dots(.orange, t: t, side: side, reduced: reduced)
+                    }
+                    .scaleEffect(tap, anchor: UnitPoint(x: T.orangeAnchor.x, y: T.orangeAnchor.y))
                     Image("SplashSparks").resizable()
                         .scaleEffect(sparks.scale, anchor: UnitPoint(x: T.sparksAnchor.x, y: T.sparksAnchor.y))
                         .opacity(sparks.opacity)
@@ -181,14 +204,28 @@ struct LaunchSplashView: View {
         }
     }
 
+    /// Los 3 puntos de una burbuja: círculos de tinta (se ven como los huecos del símbolo del sistema).
+    private func dots(_ b: SplashTimeline.Bubble, t: Double, side: CGFloat, reduced: Bool) -> some View {
+        let r = CGFloat(T.dotRadius) * side
+        return ZStack(alignment: .topLeading) {
+            ForEach(Array(T.dotsX(b).enumerated()), id: \.offset) { i, x in
+                let d = T.dot(t, b, index: i, reduced: reduced)
+                Circle().fill(Theme.ink)
+                    .frame(width: r * 2, height: r * 2)
+                    .opacity(d.opacity)
+                    .position(x: CGFloat(x) * side, y: CGFloat(T.dotY) * side - CGFloat(d.rise) * r)
+            }
+        }
+        .frame(width: side, height: side)
+    }
+
     private func tick(t: Double, elapsed: Double) {
         guard freeze == nil, !finished else { return }
         if ready && readyAt == nil { readyAt = elapsed }
-        // La ignición (sonido + háptico) solo en el arranque normal: la versión corta empieza después.
-        if !reduceMotion, !short, !soundPlayed, t >= T.soundAt { soundPlayed = true; AppFeedback.shared.playSplash() }
-        if !reduceMotion, !short, !hapticDone, t >= T.hapticAt { hapticDone = true; Haptics.tap() }
-        let done = reduceMotion ? T.reducedExitOpacity(elapsed: elapsed, readyAt: readyAt) <= 0
-                                : t >= T.total || elapsed > T.maxWait + 0.4
+        // ¡Pum! (sonido + háptico). La versión corta (enlace) empieza en 1,55 s, antes del ¡pum!, así que también suena.
+        if !reduceMotion, !soundPlayed, t >= T.soundAt { soundPlayed = true; AppFeedback.shared.playSplash() }
+        if !reduceMotion, !hapticDone, t >= T.hapticAt { hapticDone = true; Haptics.tap() }
+        let done = t >= T.total || elapsed > T.maxWait + 0.4
         if done { finished = true; onFinish(elapsed) }
     }
 }

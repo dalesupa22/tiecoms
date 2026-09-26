@@ -149,9 +149,9 @@ final class ChatFlowUITests: XCTestCase {
         }
     }
 
-    /// Fotogramas del splash (0,1 s, 0,6 s, 1,0 s) congelados con -TCSplashFreeze.
+    /// Fotogramas del splash (0,3 s, 1,1 s, 1,75 s) congelados con -TCSplashFreeze.
     func testSplashFrames() throws {
-        for t in ["0.1", "0.6", "1.0"] {
+        for t in ["0.3", "1.1", "1.75"] {
             let app = XCUIApplication()
             app.launchArguments = ["-TCSplashFreeze", t, "-TCResetSession", "YES", "-TCApiURL", "http://127.0.0.1:9", "-AppleLanguages", "(es)"]
             app.launch()

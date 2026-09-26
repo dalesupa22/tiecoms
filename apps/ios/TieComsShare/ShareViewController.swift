@@ -11,7 +11,7 @@ final class ShareViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         let model = ShareModel(context: extensionContext, opener: { [weak self] url in self?.openContainingApp(url) })
-        let host = UIHostingController(rootView: ShareExtensionView(model: model))
+        let host = UIHostingController(rootView: ShareExtensionView(model: model).keyboardDismissable())
         addChild(host)
         host.view.frame = view.bounds
         host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]

@@ -74,17 +74,21 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
   - "Continuar con Google" y "Continuar con Microsoft" abren `ASWebAuthenticationSession` con PKCE S256.
   - En el registro, el nombre de la empresa (`org_name`) o la invitación (`org`) se pasan al `/start`.
   - Los errores del SSO usan los mismos textos que la web (`err.sso_*`, `err.domain_claimed`).
-- **Splash** (arranque en frío, `UI/Splash.swift`): «ignición» del símbolo sobre tinta `#17161F`.
-  - Empieza idéntico a la Launch Screen (símbolo sin rayitas, 200 pt, centrado) y apila tres capas
-    con el mismo lienzo cuadrado: `SplashBubbleWhite`, `SplashBubbleOrange`, `SplashSparks`.
-  - 0–0,25 s quieto; 0,20–0,55 s «pop» de la burbuja mandarina (1 → 1,10 → 1, anclado en el centro de la burbuja, x=0,609, y=0,340);
-    0,35–0,70 s aparecen las rayitas (opacidad y escala 0,4 → 1 ancladas en x=0,83, y=0,17), con
-    sonido `tc_splash` (respeta el interruptor de Sonidos y el modo silencio) y háptico ligero;
-    0,55–0,95 s el eslogan (`splash.tagline`, papel al 80 %, sube 8 pt); 1,30–1,60 s salida.
-  - Si la sesión aún carga, se queda en el último cuadro (máx. 6 s). Un toque adelanta. Con un enlace
-    en frío empieza en 0,7 s. Con Reduce Motion no hay escalas: solo fundido del eslogan y salida.
-    Los tiempos son funciones puras (`SplashTimeline`).
+- **Splash** (arranque en frío, `UI/Splash.swift`): «los puntitos escriben y la marca se enciende», sobre tinta `#17161F`.
+  - Empieza idéntico a la Launch Screen (`LaunchSymbol` = símbolo sin rayitas, 200 pt, centrado). Capas con el
+    mismo lienzo: `SplashBubbleWhite`/`SplashBubbleOrange` (burbujas sin huecos, 1b/2b) y `SplashSparks`; los 6 puntos
+    se dibujan como círculos de tinta (posiciones de `capas-splash/puntitos.txt`).
+  - 0–0,15 s quieto; puntos papel «escribiendo» (dos olas, cada punto pulsa en 0,15 + 0,13·i + 0,40·k durante 0,30 s:
+    opacidad 1 → 0,25 → 1 y sube 0,35 radios); desde 0,85 s lo mismo con los mandarina; 1,65–1,85 s ¡pum!: rayitas
+    (opacidad en 0,08 s, escala 0,3 → 1,15 → 1 desde x=0,83, y=0,17) y golpecito de la mandarina (1 → 1,04 → 1 en su
+    centro), con sonido `tc_splash` y háptico; 1,80–2,15 s eslogan (`splash.tagline`, papel al 80 %); 2,35–2,65 s salida.
+  - Si la sesión aún carga, se queda en el último cuadro (máx. 6 s). Un toque adelanta. Enlace en frío: desde 1,55 s.
+    Reduce Motion: puntos solo con opacidad, rayitas con fundido, sin escalas. Tiempos puros en `SplashTimeline`.
   - Launch Screen: tinta `#17161F` (claro y oscuro) con `LaunchSymbol` (200 pt) centrado.
+- **Teclado** (`Core/Keyboard.swift`, también en la extensión): se cierra al deslizar cualquier lista
+  (`.scrollDismissesKeyboard(.interactively)` en la raíz), al tocar fuera de un campo (reconocedor en la ventana que no
+  roba toques) y con «Listo» en la barra del teclado de los formularios. En el chat, la lista de mensajes lo cierra al
+  tocar o deslizar (enviar o elegir una mención no lo cierra) y el compositor solo reenfoca cuando cambia `focused`.
 - **Marca**: Chaggu (antes TieComs). Tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`.
   Contraste AA: en claro, textos/enlaces de acento y botones rellenos usan `#C73A1A` (texto blanco);
   en oscuro, mandarina `#FF5A36` para textos y botones rellenos con texto tinta (`Theme.accentText`,

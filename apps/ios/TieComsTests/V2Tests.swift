@@ -104,94 +104,132 @@ final class DecodingV2Tests: XCTestCase {
     }
 }
 
-/// Splash de Chaggu («ignición» del símbolo + eslogan) como función pura del tiempo.
+/// Splash de Chaggu (puntitos que escriben + ¡pum!) como función pura del tiempo.
 final class SplashTimelineTests: XCTestCase {
     typealias T = SplashTimeline
 
+    private func allDots(_ t: Double, reduced: Bool = false) -> [(opacity: Double, rise: Double)] {
+        T.Bubble.allCases.flatMap { b in (0..<3).map { T.dot(t, b, index: $0, reduced: reduced) } }
+    }
+
     func testStartsLikeSystemLaunchScreen() {
-        // t = 0: solo capas 1 y 2 a escala 1, sin rayitas ni eslogan, sin salida.
         XCTAssertEqual(T.symbolSide, 200)
-        XCTAssertEqual(T.pop(0), 1, accuracy: 0.0001)
-        XCTAssertEqual(T.sparks(0).opacity, 0)
+        for t in stride(from: 0.0, through: T.holdEnd, by: 0.05) {
+            for d in allDots(t) { XCTAssertEqual(d.opacity, 1); XCTAssertEqual(d.rise, 0) }
+            XCTAssertEqual(T.sparks(t).opacity, 0)
+            XCTAssertEqual(T.orangeTap(t), 1, accuracy: 0.0001)
+        }
         XCTAssertEqual(T.tagline(0).opacity, 0)
         XCTAssertEqual(T.exit(0).opacity, 1)
-        XCTAssertEqual(T.exit(0).scale, 1, accuracy: 0.0001)
-        // Quieto hasta 0,20 s (el «pop» arranca antes de que termine la pausa de 0,25 s).
-        for t in stride(from: 0.0, through: 0.20, by: 0.05) {
-            XCTAssertEqual(T.pop(t), 1, accuracy: 0.0001)
-            XCTAssertEqual(T.sparks(t).opacity, 0)
+        // Puntitos en las posiciones de puntitos.txt.
+        XCTAssertEqual(T.dotRadius, 0.02949, accuracy: 0.00001)
+        XCTAssertEqual(T.whiteDotsX, [0.14744, 0.22436, 0.30128])
+        XCTAssertEqual(T.orangeDotsX, [0.53205, 0.60897, 0.68590])
+    }
+
+    func testWhiteDotsTypeInTwoWaves() {
+        XCTAssertEqual(T.pulseStarts(.white, index: 0), [0.15, 0.55])
+        XCTAssertEqual(T.pulseStarts(.white, index: 1)[0], 0.28, accuracy: 0.0001)
+        XCTAssertEqual(T.pulseStarts(.white, index: 2)[1], 0.81, accuracy: 0.0001)
+        // Mitad del primer pulso del punto 0: 0,25 de opacidad y sube 0,35 radios.
+        let mid = T.dot(0.15 + 0.15, .white, index: 0)
+        XCTAssertEqual(mid.opacity, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(mid.rise, 0.35, accuracy: 0.0001)
+        // Final del pulso: vuelve a lleno.
+        XCTAssertEqual(T.dot(0.45, .white, index: 0).opacity, 1, accuracy: 0.0001)
+        // En secuencia: en t = 0,30 el punto 0 está en su mitad y el 2 aún no empieza.
+        XCTAssertLessThan(T.dot(0.30, .white, index: 0).opacity, T.dot(0.30, .white, index: 1).opacity)
+        XCTAssertEqual(T.dot(0.30, .white, index: 2).opacity, 1)
+        // Segunda ola del punto 1 en 0,68 + 0,15.
+        XCTAssertEqual(T.dot(0.83, .white, index: 1).opacity, 0.25, accuracy: 0.0001)
+        // Los naranjas siguen quietos mientras escribe la blanca.
+        for t in stride(from: 0.0, through: 0.85, by: 0.05) {
+            for i in 0..<3 { XCTAssertEqual(T.dot(t, .orange, index: i).opacity, 1) }
         }
-        XCTAssertLessThanOrEqual(T.popStart, T.holdEnd)
     }
 
-    func testPop() {
-        XCTAssertEqual(T.pop(T.popStart), 1, accuracy: 0.0001)
-        XCTAssertEqual(T.pop(T.popEnd), 1, accuracy: 0.0001)
-        XCTAssertEqual(T.pop(1.0), 1, accuracy: 0.0001)
-        let peak = stride(from: T.popStart, through: T.popEnd, by: 0.005).map(T.pop).max() ?? 0
-        XCTAssertEqual(peak, 1.10, accuracy: 0.002)
-        XCTAssertGreaterThan(T.pop(0.30), 1.05, "ease out: sube rápido")
-        // Anclado al centro de la burbuja mandarina, no al del lienzo.
-        XCTAssertEqual(T.popAnchor.x, 0.609, accuracy: 0.001)
-        XCTAssertEqual(T.popAnchor.y, 0.340, accuracy: 0.001)
+    func testOrangeDotsFollow() {
+        XCTAssertEqual(T.pulseStarts(.orange, index: 0), [0.85, 1.25])
+        XCTAssertEqual(T.dot(1.0, .orange, index: 0).opacity, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(T.dot(1.0, .orange, index: 0).rise, 0.35, accuracy: 0.0001)
+        XCTAssertEqual(T.dot(0.98 + 0.40 + 0.15, .orange, index: 1).opacity, 0.25, accuracy: 0.0001)
+        // Los blancos ya terminaron cuando la naranja va por la mitad.
+        for i in 0..<3 { XCTAssertEqual(T.dot(1.2, .white, index: i).opacity, 1, accuracy: 0.0001) }
     }
 
-    func testSparks() {
-        XCTAssertEqual(T.sparks(T.sparksStart).opacity, 0)
-        XCTAssertEqual(T.sparks(T.sparksStart).scale, 0.4, accuracy: 0.0001)
-        XCTAssertEqual(T.sparks(T.sparksEnd).opacity, 1)
-        XCTAssertEqual(T.sparks(T.sparksEnd).scale, 1, accuracy: 0.0001)
-        XCTAssertEqual(T.sparks(1.2).scale, 1, accuracy: 0.0001)
-        let mid = T.sparks((T.sparksStart + T.sparksEnd) / 2)
-        XCTAssertTrue(mid.opacity > 0 && mid.opacity < 1)
+    func testPum() {
+        XCTAssertEqual(T.sparks(T.pumStart).opacity, 0)
+        XCTAssertEqual(T.sparks(T.pumStart).scale, 0.3, accuracy: 0.0001)
+        XCTAssertEqual(T.sparks(T.pumStart + 0.08).opacity, 1)
+        let peak = stride(from: T.pumStart, through: T.pumEnd, by: 0.002).map { T.sparks($0).scale }.max() ?? 0
+        XCTAssertEqual(peak, 1.15, accuracy: 0.001)
+        XCTAssertEqual(T.sparks(T.pumEnd).scale, 1, accuracy: 0.0001)
+        XCTAssertEqual(T.sparks(2.5).scale, 1, accuracy: 0.0001)
+        let tapPeak = stride(from: T.pumStart, through: T.pumEnd, by: 0.002).map { T.orangeTap($0) }.max() ?? 0
+        XCTAssertEqual(tapPeak, 1.04, accuracy: 0.001)
+        XCTAssertEqual(T.orangeTap(T.pumEnd), 1, accuracy: 0.0001)
+        XCTAssertEqual(T.orangeAnchor.x, 0.609, accuracy: 0.001)
+        XCTAssertEqual(T.orangeAnchor.y, 0.340, accuracy: 0.001)
         XCTAssertEqual(T.sparksAnchor.x, 0.83, accuracy: 0.001)
         XCTAssertEqual(T.sparksAnchor.y, 0.17, accuracy: 0.001)
-        XCTAssertEqual(T.soundAt, T.sparksStart)
-        XCTAssertEqual(T.hapticAt, T.sparksStart)
+        XCTAssertEqual(T.soundAt, 1.65)
+        XCTAssertEqual(T.hapticAt, 1.65)
     }
 
     func testTaglineAndExit() {
-        XCTAssertEqual(T.tagline(0.5).opacity, 0)
+        XCTAssertEqual(T.tagline(1.79).opacity, 0)
         XCTAssertEqual(T.tagline(T.taglineStart).offset, 8, accuracy: 0.0001)
-        XCTAssertEqual(T.tagline(T.taglineEnd).opacity, 0.8, accuracy: 0.0001)
-        XCTAssertEqual(T.tagline(T.taglineEnd).offset, 0, accuracy: 0.0001)
-        XCTAssertEqual(T.exit(T.exitStart).opacity, 1)
-        XCTAssertEqual(T.exit(T.total).opacity, 0)
-        XCTAssertEqual(T.exit(T.total).scale, 1.04, accuracy: 0.001)
-        XCTAssertEqual(T.exitStart, 1.30)
-        XCTAssertEqual(T.total, 1.60)
-        // Todo el símbolo está completo antes de la salida.
-        XCTAssertLessThan(T.taglineEnd, T.exitStart)
+        XCTAssertEqual(T.tagline(2.15).opacity, 0.8, accuracy: 0.0001)
+        XCTAssertEqual(T.tagline(2.15).offset, 0, accuracy: 0.0001)
+        XCTAssertEqual(T.exit(2.35).opacity, 1)
+        XCTAssertEqual(T.exit(2.65).opacity, 0)
+        XCTAssertEqual(T.exit(2.65).scale, 1.04, accuracy: 0.001)
     }
 
     func testClockHoldsUntilReadyAndShortMode() {
-        // Lista desde el principio: el reloj es el tiempo real.
         XCTAssertEqual(T.clock(elapsed: 0.5, short: false, readyAt: 0.2), 0.5)
-        XCTAssertEqual(T.clock(elapsed: 1.5, short: false, readyAt: 0.2), 1.5, accuracy: 0.001)
-        // Aún cargando: se queda en el último cuadro (inicio de la salida).
+        XCTAssertEqual(T.clock(elapsed: 2.5, short: false, readyAt: 0.2), 2.5, accuracy: 0.001)
+        // Aún cargando: último cuadro.
         XCTAssertEqual(T.clock(elapsed: 3.5, short: false, readyAt: nil), T.exitStart)
-        // Lista a los 4 s: la salida arranca entonces.
         XCTAssertEqual(T.clock(elapsed: 4.1, short: false, readyAt: 4.0), T.exitStart + 0.1, accuracy: 0.001)
-        // Máximo 6 s esperando: sigue sin estar lista y sale igual.
+        // Máximo 6 s.
         XCTAssertEqual(T.clock(elapsed: 6.2, short: false, readyAt: nil), T.exitStart + 0.2, accuracy: 0.001)
-        // Enlace en frío: empieza en 0,7 s (rayitas ya completas) y termina en ≤ 0,9 s.
-        XCTAssertEqual(T.clock(elapsed: 0, short: true, readyAt: 0), 0.7, accuracy: 0.0001)
-        XCTAssertEqual(T.sparks(T.clock(elapsed: 0, short: true, readyAt: 0)).opacity, 1)
-        XCTAssertGreaterThanOrEqual(T.clock(elapsed: 0.9, short: true, readyAt: 0), T.total - 0.001)
+        // Enlace en frío: desde 1,55 s (antes del ¡pum!) y termina en 1,1 s.
+        XCTAssertEqual(T.clock(elapsed: 0, short: true, readyAt: 0), 1.55, accuracy: 0.0001)
+        XCTAssertLessThan(T.clock(elapsed: 0, short: true, readyAt: 0), T.pumStart)
+        XCTAssertGreaterThanOrEqual(T.clock(elapsed: 1.1, short: true, readyAt: 0), T.total - 0.001)
         // Toque: salta a la salida.
         XCTAssertEqual(T.clock(elapsed: 0.3, short: false, readyAt: 0, skip: T.exitStart - 0.3), T.exitStart, accuracy: 0.001)
     }
 
     func testReduceMotion() {
-        XCTAssertEqual(T.reducedTagline(0), 0)
-        XCTAssertEqual(T.reducedTagline(T.reducedTaglineEnd), 0.8, accuracy: 0.0001)
-        // Lista pronto: se muestra al menos 0,9 s y luego se desvanece en 0,3 s.
-        XCTAssertEqual(T.reducedExitOpacity(elapsed: 0.5, readyAt: 0.1), 1)
-        XCTAssertEqual(T.reducedExitOpacity(elapsed: 1.05, readyAt: 0.1), 0.5, accuracy: 0.001)
-        XCTAssertEqual(T.reducedExitOpacity(elapsed: 1.3, readyAt: 0.1), 0, accuracy: 0.0001)
-        // Sin estar lista: espera hasta 6 s.
-        XCTAssertEqual(T.reducedExitOpacity(elapsed: 5, readyAt: nil), 1)
-        XCTAssertEqual(T.reducedExitOpacity(elapsed: 6.3, readyAt: nil), 0, accuracy: 0.0001)
+        // Puntos solo con opacidad.
+        XCTAssertEqual(T.dot(0.30, .white, index: 0, reduced: true).opacity, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(T.dot(0.30, .white, index: 0, reduced: true).rise, 0)
+        // Rayitas con fundido, sin escala; sin golpecito ni escalas de salida.
+        XCTAssertEqual(T.sparks(T.pumStart, reduced: true).scale, 1)
+        XCTAssertEqual(T.sparks(T.pumStart + 0.1, reduced: true).opacity, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(T.sparks(T.pumEnd, reduced: true).opacity, 1)
+        XCTAssertEqual(T.orangeTap(1.75, reduced: true), 1)
+        XCTAssertEqual(T.tagline(1.9, reduced: true).offset, 0)
+        XCTAssertEqual(T.exit(2.5, reduced: true).scale, 1)
+    }
+}
+
+/// Cierre del teclado: cuándo un toque lo cierra y qué campos llevan «Listo».
+final class KeyboardPolicyTests: XCTestCase {
+    func testTapOutside() {
+        XCTAssertTrue(KeyboardPolicy.shouldDismissOnTap(editing: true, editorIsComposer: false, touchInTextInput: false))
+        XCTAssertFalse(KeyboardPolicy.shouldDismissOnTap(editing: false, editorIsComposer: false, touchInTextInput: false))
+        XCTAssertFalse(KeyboardPolicy.shouldDismissOnTap(editing: true, editorIsComposer: false, touchInTextInput: true), "tocar otro campo no cierra")
+        XCTAssertFalse(KeyboardPolicy.shouldDismissOnTap(editing: true, editorIsComposer: true, touchInTextInput: false), "el chat lo maneja su lista")
+    }
+
+    func testDoneBar() {
+        XCTAssertTrue(KeyboardPolicy.wantsDoneBar(isSearchField: false, isComposer: false, isEditable: true))
+        XCTAssertFalse(KeyboardPolicy.wantsDoneBar(isSearchField: true, isComposer: false, isEditable: true))
+        XCTAssertFalse(KeyboardPolicy.wantsDoneBar(isSearchField: false, isComposer: true, isEditable: true))
+        XCTAssertEqual(KeyboardPolicy.composerId, "composer.field")
     }
 }
 

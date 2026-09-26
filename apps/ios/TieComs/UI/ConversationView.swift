@@ -364,6 +364,8 @@ struct ConversationView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            // Tocar el área de mensajes cierra el teclado (simultáneo: no quita el toque a mensajes, menciones ni menús).
+            .simultaneousGesture(TapGesture().onEnded { if composerFocused { composerFocused = false } })
             .onChange(of: items.last?.id) { _, _ in
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
                 markReadIfVisible()

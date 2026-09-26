@@ -60,6 +60,7 @@ struct TieComsApp: App {
         WindowGroup {
             RootView()
                 .environment(store)
+                .keyboardDismissable()
                 .task {
                     // Las pruebas unitarias se alojan en la app: no se arranca la sesión real.
                     guard !AppConfig.isRunningUnitTests else { return }

@@ -155,8 +155,14 @@ struct ComposerTextView: UIViewRepresentable {
         c.styledMentions = mentions
         v.typingAttributes = [.font: RichText.baseFont(), .foregroundColor: UIColor(Theme.textPrimary)]
         v.accessibilityValue = text.isEmpty ? placeholder : nil
-        if focused && !v.isFirstResponder { DispatchQueue.main.async { v.becomeFirstResponder() } }
-        if !focused && v.isFirstResponder { DispatchQueue.main.async { v.resignFirstResponder() } }
+        // Solo en el CAMBIO de `focused` (flanco): si el teclado se cerró por fuera (deslizar la lista, tocar fuera)
+        // `focused` sigue en true un instante hasta que llega textViewDidEndEditing; reenfocar por nivel volvía a
+        // abrir el teclado y no había forma de cerrarlo.
+        if focused != c.lastFocused {
+            c.lastFocused = focused
+            if focused && !v.isFirstResponder { DispatchQueue.main.async { v.becomeFirstResponder() } }
+            if !focused && v.isFirstResponder { DispatchQueue.main.async { v.resignFirstResponder() } }
+        }
         let lineH = (v.font ?? RichText.baseFont()).lineHeight
         let maxH = lineH * Self.maxLines + v.textContainerInset.top + v.textContainerInset.bottom
         let wantsScroll = v.contentSize.height > maxH + 1
@@ -177,6 +183,8 @@ struct ComposerTextView: UIViewRepresentable {
         var parent: ComposerTextView
         var applying = false
         var styledMentions: [Mention] = []
+        /// Último valor de `focused` aplicado al UITextView (para reaccionar solo a cambios).
+        var lastFocused = false
         init(_ p: ComposerTextView) { parent = p }
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText t: String) -> Bool {
@@ -226,8 +234,14 @@ struct ComposerTextView: UIViewRepresentable {
             if parent.cursor != loc { DispatchQueue.main.async { self.parent.cursor = loc } }
         }
 
-        func textViewDidBeginEditing(_ textView: UITextView) { if !parent.focused { DispatchQueue.main.async { self.parent.focused = true } } }
-        func textViewDidEndEditing(_ textView: UITextView) { if parent.focused { DispatchQueue.main.async { self.parent.focused = false } } }
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            lastFocused = true
+            if !parent.focused { DispatchQueue.main.async { self.parent.focused = true } }
+        }
+        func textViewDidEndEditing(_ textView: UITextView) {
+            lastFocused = false
+            if parent.focused { DispatchQueue.main.async { self.parent.focused = false } }
+        }
 
         private func publish(_ textView: UITextView, text: String, mentions: [Mention]) {
             styledMentions = mentions

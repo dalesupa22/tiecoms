@@ -155,3 +155,50 @@ Español e inglés, en el archivo de textos de cada cliente. Nombres: Grupos / G
 Calendario / Calendar, Tú / You, Tu organización / Your organization, Relaciones / Relationships,
 Invitado en / Guest in, Invitación pendiente / Invitation pending, Sidechat, Unirme con código / Join with code,
 Supervisión / Oversight, Solo lectura / Read only.
+
+## Dentro del chat: barra de accesos, hilos y el «+» (25-sep-2026)
+
+Tres ideas distintas, sin mezclarlas:
+
+| | Qué es | Quién lo ve |
+|---|---|---|
+| **Asunto ◆** | Algo por resolver: responsable, estado y a veces fecha límite | Los del chat |
+| **Hilo 💬** | Una conversación que cuelga de un mensaje, como un hilo de Slack (por dentro es una derivada, `deriveKind` same/internal/directive) | Los del chat, o solo mi equipo |
+| **Sidechat 🔒** | Un hilo **privado** (`deriveKind === 'side'`): con quien yo elija, incluso un bot, o para validar algo solo | Solo quienes están en él |
+
+La respuesta citada («Responder») sigue igual y no tiene acceso propio.
+
+### Barra de accesos (reemplaza las franjas de fijados, asuntos y ramas)
+
+Una fila fija bajo la cabecera del chat, con 4 botones siempre visibles y su cuenta (en gris si es 0):
+
+`📌 Fijados · ◆ Asuntos · 💬 Hilos · 📅 Agenda`
+
+- **Fijados**: la lista de fijados que ya existe.
+- **Asuntos**: los asuntos abiertos del chat (con fecha límite primero) y «＋ Asunto». Se marca en naranja si hay uno vencido.
+- **Hilos**: los hilos y sidechats que salen de esta conversación (`parentId === conv.id`). Cada fila muestra el ícono
+  (💬 o 🔒), el título sin prefijo («Hilo ·», «Sidechat ·», «Thread ·»…), «Con los del chat» o «🔒 Privado», el
+  número de personas, las respuestas (`lastMessageSeq - 1`), la última actividad y el estado «Abierto» o «✓ Resuelto»
+  (`returnedAt`). La cuenta es de los abiertos. Se marca si alguno tiene no leídos.
+- **Agenda**: por fecha, las reuniones del chat (`GET /events?conversationId=`), las fechas límite de sus asuntos
+  abiertos y mis recordatorios en ese chat (solo yo los veo). Tiene «＋ Evento» y «＋ Asunto». Se marca si hay una reunión hoy.
+- Dentro de un hilo abierto al lado no se muestra la barra.
+
+### Hilos como en Slack
+
+- En el menú de un mensaje, juntas: **«💬 Responder en un hilo»** (no en directos ni para terceros) y **«🔒 Sidechat privado»**.
+- «Responder en un hilo» usa el diálogo de derivar, con los textos nuevos: «Todos los del chat» (same), «Solo mi
+  equipo · {empresa}» (internal), «Con quien dirige» (directive). Nombre por defecto: «Hilo · {extracto}». Botón «Abrir hilo».
+- «Sidechat privado» usa el diálogo de sidechat que ya existe (elegir personas o un bot).
+- Al crearlo, **se abre al lado** (la misma vista dividida del sidechat), con el cursor en su compositor. No se sale del chat.
+- **Los hilos no ensucian el chat**: no se muestra el aviso de sistema `derived.from`. Bajo su mensaje queda un chip
+  como en Slack: «💬 3 respuestas · Laura: ya va» (o «💬 ✓ título» si está resuelto). Tocar el chip abre el hilo al lado.
+  El sidechat privado sigue con su chip propio.
+- Dentro del hilo: «＋ Personas» en la cabecera (si puedo administrarlo) para sumar a quien quiera, y el botón
+  «✓ Resolver y dejar el resultado» (antes «Devolver el resultado»), que deja el resumen en el chat.
+- Donde decía «Derivar», «Rama» o «⑂», ahora dice **Hilo** (ícono 💬).
+
+### El «+» del compositor
+
+El botón de adjuntar pasa a ser **«＋»**, con: Fotos y videos, Archivos, (separador), **Evento** (nueva reunión o fecha del
+chat, para todos) y **Asunto** (no para terceros). Los dos se crean a mano.

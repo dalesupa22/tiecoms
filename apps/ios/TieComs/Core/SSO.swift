@@ -26,15 +26,19 @@ struct PKCE: Equatable {
     }
 }
 
-/// Resultado del callback `tiecoms://auth/callback?...`.
+/// Resultado del callback `chaggu://auth/callback?...`.
 enum SSOCallback: Equatable {
     case code(String)
     case error(code: String, message: String?)
 
-    static let scheme = "tiecoms"
+    /// Esquema que registra la app (CFBundleURLSchemes) y que se pide al backend con `redirect_scheme`.
+    static let scheme = "chaggu"
+    /// Esquemas aceptados en el callback: el propio y, por si acaso, el de la app anterior (TieComs),
+    /// que el backend usa cuando no recibe `redirect_scheme`.
+    static let acceptedSchemes: Set<String> = [scheme, "tiecoms"]
 
     static func parse(_ url: URL) -> SSOCallback? {
-        guard url.scheme?.lowercased() == scheme, url.host?.lowercased() == "auth",
+        guard let s = url.scheme?.lowercased(), acceptedSchemes.contains(s), url.host?.lowercased() == "auth",
               url.pathComponents.filter({ $0 != "/" }).first == "callback",
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return nil }
         let q = Dictionary(items.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { a, _ in a })
@@ -45,7 +49,7 @@ enum SSOCallback: Equatable {
 
     /// El host `auth` del esquema propio queda reservado para SSO.
     static func isReserved(_ url: URL) -> Bool {
-        url.scheme?.lowercased() == scheme && url.host?.lowercased() == "auth"
+        url.scheme.map { acceptedSchemes.contains($0.lowercased()) } == true && url.host?.lowercased() == "auth"
     }
 }
 
@@ -69,6 +73,8 @@ final class SSOAuthenticator: NSObject, ASWebAuthenticationPresentationContextPr
             URLQueryItem(name: "device_id", value: deviceId),
             URLQueryItem(name: "code_challenge", value: pkce.challenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
+            // El backend redirige a chaggu://auth/callback?code=… (sin esto usaría tiecoms://).
+            URLQueryItem(name: "redirect_scheme", value: SSOCallback.scheme),
         ]
         // Registro con SSO: unirse a una empresa por invitación o crear una nueva con este nombre.
         if let orgInviteToken { c.queryItems?.append(URLQueryItem(name: "org", value: orgInviteToken)) }

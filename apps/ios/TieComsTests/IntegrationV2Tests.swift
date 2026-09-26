@@ -224,7 +224,7 @@ final class IntegrationV2Tests: XCTestCase {
         let location = http.value(forHTTPHeaderField: "location") ?? ""
         print("[resultado] SSO /start en 3041: HTTP \(http.statusCode) location=\(location.prefix(90)) cuerpo=\(String(decoding: data.prefix(160), as: UTF8.self))")
         XCTAssertTrue((300..<400).contains(http.statusCode) || (400..<600).contains(http.statusCode), "redirect o error controlado")
-        if (300..<400).contains(http.statusCode), location.hasPrefix("tiecoms://") {
+        if (300..<400).contains(http.statusCode), (location.hasPrefix("chaggu://") || location.hasPrefix("tiecoms://")) {
             XCTAssertNotNil(SSOCallback.parse(URL(string: location)!), "el callback nativo se entiende")
         }
     }

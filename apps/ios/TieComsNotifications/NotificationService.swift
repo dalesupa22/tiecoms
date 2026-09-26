@@ -15,7 +15,7 @@ final class NotificationService: UNNotificationServiceExtension {
         guard let p = PushPayload(userInfo: request.content.userInfo) else { contentHandler(content); return }
         content.threadIdentifier = p.threadId ?? p.conversationId
         guard p.kind == .message || p.kind == .side || p.kind == .mention, let authorId = p.authorId else { contentHandler(content); return }
-        let base = UserDefaults(suiteName: "group.com.tiecoms.app")?.string(forKey: "apiURL").flatMap(URL.init(string:))
+        let base = UserDefaults(suiteName: "group.com.chaggu.app")?.string(forKey: "apiURL").flatMap(URL.init(string:))
         Task {
             var image: INImage?
             if let url = p.avatarURL(base: base) {

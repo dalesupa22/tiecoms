@@ -220,7 +220,7 @@ final class V4Tests: XCTestCase {
     // MARK: Sesión
 
     func testSessionIsScopedPerServer() {
-        XCTAssertEqual(KeychainSecretStore.account(for: URL(string: "https://app.chaggu.com")), "refreshToken", "producción conserva la cuenta histórica")
+        XCTAssertEqual(KeychainSecretStore.account(for: URL(string: "https://app.chaggu.com")), "refreshToken", "producción usa la cuenta refreshToken")
         XCTAssertEqual(KeychainSecretStore.account(for: URL(string: "https://app.tiecoms.com")), "refreshToken", "el dominio anterior comparte la sesión de producción")
         XCTAssertEqual(KeychainSecretStore.account(for: nil), "refreshToken")
         XCTAssertEqual(KeychainSecretStore.account(for: URL(string: "http://localhost:3043")), "refreshToken@localhost:3043")
@@ -248,18 +248,22 @@ final class V4Tests: XCTestCase {
         XCTAssertTrue(signedOut)
     }
 
-    /// Migración real en el Keychain del simulador: el ítem de la build 5 (cuenta única) pasa al servidor actual.
-    func testKeychainMigrationFromBuild5() {
-        let service = "com.tiecoms.test.\(UUID().uuidString)"
-        let legacy = KeychainSecretStore(service: service)
-        legacy.set("rt-legacy")
-        XCTAssertEqual(legacy.get(), "rt-legacy")
+    /// Keychain real del simulador: cada servidor tiene su propia sesión y no se copia la de producción
+    /// (Chaggu es una app nueva; ya no existe la migración de la build 6 de TieComs).
+    func testKeychainSessionsPerServerAreIsolated() {
+        let service = "com.chaggu.test.\(UUID().uuidString)"
+        let prod = KeychainSecretStore(service: service)
+        prod.set("rt-prod")
+        XCTAssertEqual(prod.get(), "rt-prod")
         let dev = KeychainSecretStore(service: service, apiURL: URL(string: "http://localhost:3043"))
-        XCTAssertEqual(dev.get(), "rt-legacy", "se copia al servidor actual")
+        XCTAssertNil(dev.get(), "no hereda la sesión de producción")
         dev.set("rt-dev")
         XCTAssertEqual(dev.get(), "rt-dev")
-        XCTAssertEqual(legacy.get(), "rt-legacy", "no toca la de producción")
-        dev.set(nil); legacy.set(nil)
+        XCTAssertEqual(prod.get(), "rt-prod", "no toca la de producción")
+        dev.set(nil)
+        XCTAssertNil(dev.get())
+        XCTAssertEqual(prod.get(), "rt-prod")
+        prod.set(nil)
     }
 
     // MARK: D. Orden y «Grupo en un espacio»

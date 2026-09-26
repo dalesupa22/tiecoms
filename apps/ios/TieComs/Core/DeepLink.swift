@@ -1,6 +1,7 @@
 import Foundation
 
-/// Enlaces que abre la app: https://{app.,www.,}chaggu.com/..., los viejos de tiecoms.com y tiecoms://...
+/// Enlaces que abre la app: https://{app.,www.,}chaggu.com/..., los viejos de tiecoms.com y chaggu://...
+/// (también se entiende tiecoms://..., aunque la app ya no registra ese esquema).
 enum DeepLink: Equatable, Hashable {
     case conversation(String)
     case workspace(String)
@@ -16,6 +17,9 @@ enum DeepLink: Equatable, Hashable {
                                      // Dominio anterior de la marca: los enlaces ya compartidos siguen abriendo la app.
                                      "app.tiecoms.com", "tiecoms.com", "www.tiecoms.com"]
 
+    /// Esquema propio (registrado en Info.plist) y el de la app anterior.
+    static let customSchemes: Set<String> = ["chaggu", "tiecoms"]
+
     /// ?m=<seq> en /c/<id>: saltar a ese mensaje.
     static func messageSeq(_ url: URL) -> Int? {
         URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "m" }?.value.flatMap(Int.init)
@@ -24,10 +28,10 @@ enum DeepLink: Equatable, Hashable {
     static func parse(_ url: URL) -> DeepLink? {
         guard let scheme = url.scheme?.lowercased() else { return nil }
         var parts: [String]
-        if scheme == "tiecoms" {
+        if customSchemes.contains(scheme) {
             // El host `auth` está reservado para el callback de SSO.
             if url.host?.lowercased() == "auth" { return nil }
-            // tiecoms://c/<id> → host "c", ruta "/<id>". También se acepta tiecoms:///c/<id>.
+            // chaggu://c/<id> → host "c", ruta "/<id>". También se acepta chaggu:///c/<id>.
             parts = (url.host.map { [$0] } ?? []) + url.pathComponents.filter { $0 != "/" }
         } else if scheme == "https" || scheme == "http" {
             guard let host = url.host?.lowercased(), hosts.contains(host) else { return nil }

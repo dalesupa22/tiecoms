@@ -111,9 +111,9 @@ final class ChatFlowUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         // Por el sistema (como un enlace tocado en otra app): XCUIApplication.open relanzaría la app
         // con -TCResetSession y perdería la sesión.
-        XCUIDevice.shared.system.open(URL(string: "tiecoms://c/\(f.conversationId)")!)
+        XCUIDevice.shared.system.open(URL(string: "chaggu://c/\(f.conversationId)")!)
         confirmOpenIfAsked()
-        XCTAssertTrue(app.descendants(matching: .any)["composer.field"].waitForExistence(timeout: 10), "tiecoms://c/<id> abre la conversación")
+        XCTAssertTrue(app.descendants(matching: .any)["composer.field"].waitForExistence(timeout: 10), "chaggu://c/<id> abre la conversación")
         shot(app, "04-deeplink-esquema")
 
         // 5. Enlace universal https (sin verificación de dominio en el simulador)

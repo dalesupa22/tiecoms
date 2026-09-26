@@ -70,25 +70,32 @@ final class SSOTests: XCTestCase {
         XCTAssertEqual(c.path, "\(AuthRoutes.base)/microsoft/start")
         XCTAssertEqual(c.path, "/api/v1/auth/microsoft/start")
         let q = Dictionary(uniqueKeysWithValues: (c.queryItems ?? []).map { ($0.name, $0.value ?? "") })
-        XCTAssertEqual(q, ["platform": "ios", "device_id": "dev-1", "code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", "code_challenge_method": "S256"])
+        XCTAssertEqual(q, ["platform": "ios", "device_id": "dev-1", "code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", "code_challenge_method": "S256", "redirect_scheme": "chaggu"])
         XCTAssertTrue(SSOAuthenticator.startURL(base: base, provider: .google, deviceId: "d", pkce: pkce).path.hasSuffix("/auth/google/start"))
     }
 
     func testCallbackParsing() {
-        XCTAssertEqual(SSOCallback.parse(URL(string: "tiecoms://auth/callback?code=abc123")!), .code("abc123"))
-        XCTAssertEqual(SSOCallback.parse(URL(string: "tiecoms://auth/callback?error=access_denied&message=Cuenta%20no%20permitida")!),
+        XCTAssertEqual(SSOCallback.scheme, "chaggu")
+        XCTAssertEqual(SSOCallback.parse(URL(string: "chaggu://auth/callback?code=abc123")!), .code("abc123"))
+        XCTAssertEqual(SSOCallback.parse(URL(string: "chaggu://auth/callback?error=access_denied&message=Cuenta%20no%20permitida")!),
                        .error(code: "access_denied", message: "Cuenta no permitida"))
-        XCTAssertEqual(SSOCallback.parse(URL(string: "tiecoms://auth/callback?error=x")!), .error(code: "x", message: nil))
-        XCTAssertEqual(SSOCallback.parse(URL(string: "tiecoms://auth/callback")!), nil)
-        XCTAssertNil(SSOCallback.parse(URL(string: "tiecoms://c/abc")!))
-        XCTAssertNil(SSOCallback.parse(URL(string: "https://app.tiecoms.com/auth/callback?code=x")!))
+        XCTAssertEqual(SSOCallback.parse(URL(string: "chaggu://auth/callback?error=x")!), .error(code: "x", message: nil))
+        XCTAssertEqual(SSOCallback.parse(URL(string: "chaggu://auth/callback")!), nil)
+        XCTAssertNil(SSOCallback.parse(URL(string: "chaggu://c/abc")!))
+        XCTAssertNil(SSOCallback.parse(URL(string: "https://app.chaggu.com/auth/callback?code=x")!))
+        XCTAssertNil(SSOCallback.parse(URL(string: "otra://auth/callback?code=x")!))
+        // El esquema anterior se sigue entendiendo por si el backend no recibe redirect_scheme.
+        XCTAssertEqual(SSOCallback.parse(URL(string: "tiecoms://auth/callback?code=abc123")!), .code("abc123"))
     }
 
     func testDeepLinkRouterIgnoresAuthHost() {
-        XCTAssertNil(DeepLink.parse(URL(string: "tiecoms://auth/callback?code=abc")!))
-        XCTAssertNil(DeepLink.parse(URL(string: "tiecoms://auth/c/abc")!))
-        XCTAssertTrue(SSOCallback.isReserved(URL(string: "tiecoms://auth/whatever")!))
-        XCTAssertFalse(SSOCallback.isReserved(URL(string: "tiecoms://c/abc")!))
+        for scheme in ["chaggu", "tiecoms"] {
+            XCTAssertNil(DeepLink.parse(URL(string: "\(scheme)://auth/callback?code=abc")!))
+            XCTAssertNil(DeepLink.parse(URL(string: "\(scheme)://auth/c/abc")!))
+            XCTAssertTrue(SSOCallback.isReserved(URL(string: "\(scheme)://auth/whatever")!))
+            XCTAssertFalse(SSOCallback.isReserved(URL(string: "\(scheme)://c/abc")!))
+        }
+        XCTAssertFalse(SSOCallback.isReserved(URL(string: "otra://auth/x")!))
     }
 
     private let authJSON = #"{"accessToken":"acc","accessExpiresAt":"2099-01-01T00:00:00.000Z","refreshToken":"ref-sso","sessionId":"s1","user":{"id":"u1","name":"Ana","kind":"human","primaryOrgId":null}}"#

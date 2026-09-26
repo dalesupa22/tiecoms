@@ -87,7 +87,7 @@ final class V6MentionTests: XCTestCase {
         let out = MentionText.attributed(AttributedString(text), text: text, mentions: [m], mine: false)
         let linked = out.runs.filter { $0.link != nil }.map { String(out[$0.range].characters) }
         XCTAssertEqual(linked, ["@Ana"])
-        XCTAssertEqual(out.runs.first { $0.link != nil }?.link, URL(string: "tiecoms-mention://a"))
+        XCTAssertEqual(out.runs.first { $0.link != nil }?.link, URL(string: "chaggu-mention://a"))
     }
 
     func testPickerCandidatesAndAll() throws {
@@ -129,7 +129,7 @@ final class V6MentionTests: XCTestCase {
         XCTAssertEqual(rgba(out.attribute(.foregroundColor, at: linkAt, effectiveRange: nil)), rgba(UIColor(Theme.accentText)), "http con el color de enlace")
         XCTAssertNotEqual(rgba(out.attribute(.foregroundColor, at: linkAt, effectiveRange: nil)), ca)
         XCTAssertEqual(out.attribute(.link, at: linkAt, effectiveRange: nil) as? URL, URL(string: "https://tiecoms.com"))
-        XCTAssertEqual(out.attribute(.link, at: mb.start, effectiveRange: nil) as? URL, URL(string: "tiecoms-mention://\(b)"))
+        XCTAssertEqual(out.attribute(.link, at: mb.start, effectiveRange: nil) as? URL, URL(string: "chaggu-mention://\(b)"))
         let bold = out.attribute(.font, at: ma.start, effectiveRange: nil) as? UIFont
         XCTAssertTrue(bold?.fontDescriptor.symbolicTraits.contains(.traitBold) == true)
         // En mi burbuja: blanco.

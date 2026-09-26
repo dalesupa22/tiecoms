@@ -14,7 +14,7 @@ enum RichText {
         return UIColor(m.isAll ? Theme.accentText : PersonColor.text(m.userId))
     }
 
-    /// Texto de la burbuja: http subrayado con el color de enlace; menciones en negrita y color de su persona (link tiecoms-mention://).
+    /// Texto de la burbuja: http subrayado con el color de enlace; menciones en negrita y color de su persona (link chaggu-mention://).
     static func bubble(_ text: String, mentions: [Mention], mine: Bool, linkify: Bool) -> NSAttributedString {
         let out = NSMutableAttributedString(string: text, attributes: [.font: baseFont(), .foregroundColor: mine ? UIColor.white : UIColor(Theme.textPrimary)])
         if linkify {
@@ -27,7 +27,7 @@ enum RichText {
             let nr = NSRange(location: m.start, length: m.length)
             out.addAttributes([.font: boldFont(), .foregroundColor: mentionColor(m, mine: mine)], range: nr)
             out.removeAttribute(.underlineStyle, range: nr)
-            if !m.isAll, let u = URL(string: "tiecoms-mention://\(m.userId)") { out.addAttribute(.link, value: u, range: nr) } else { out.removeAttribute(.link, range: nr) }
+            if !m.isAll, let u = URL(string: "chaggu-mention://\(m.userId)") { out.addAttribute(.link, value: u, range: nr) } else { out.removeAttribute(.link, range: nr) }
         }
         return out
     }
@@ -92,7 +92,7 @@ struct RichMessageText: UIViewRepresentable {
         func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
             guard case .link(let url) = textItem.content else { return defaultAction }
             return UIAction { [parent] _ in
-                if url.scheme == "tiecoms-mention", let id = url.host { parent.onMention(id) } else { parent.openURL(url) }
+                if url.scheme == "chaggu-mention", let id = url.host { parent.onMention(id) } else { parent.openURL(url) }
             }
         }
         // Sin menú de edición/selección larga: el menú del mensaje lo da la burbuja.

@@ -81,7 +81,7 @@ final class AppStore {
     var sideToOpen: [String: String] = [:]
     /// Respuestas en privado pendientes por conversación directa (cita sobre el compositor).
     var privateReplies: [String: PrivateReplyDraft] = [:]
-    /// Texto compartido hacia Chaggu (tiecoms://share?text=…).
+    /// Texto compartido hacia Chaggu (chaggu://share?text=…).
     var shareText: String?
 
     var tab: AppTab = .home
@@ -794,7 +794,7 @@ final class AppStore {
     // MARK: - Enlaces
 
     func handle(url: URL) {
-        // tiecoms://auth/* es del flujo SSO (lo recibe ASWebAuthenticationSession), no es navegación.
+        // chaggu://auth/* es del flujo SSO (lo recibe ASWebAuthenticationSession), no es navegación.
         guard !SSOCallback.isReserved(url), let link = DeepLink.parse(url) else { return }
         if case .conversation(let id) = link, let seq = DeepLink.messageSeq(url) { jumpTo[id] = seq }
         handle(link)

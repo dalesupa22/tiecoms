@@ -87,11 +87,11 @@ final class DecodingV2Tests: XCTestCase {
 
     func testNewDeepLinks() {
         XCTAssertEqual(DeepLink.parse(URL(string: "https://app.tiecoms.com/asuntos")!), .issues)
-        XCTAssertEqual(DeepLink.parse(URL(string: "tiecoms://agenda")!), .agenda)
+        XCTAssertEqual(DeepLink.parse(URL(string: "chaggu://agenda")!), .agenda)
         XCTAssertEqual(DeepLink.parse(URL(string: "https://tiecoms.com/trazo")!), .trazo)
-        XCTAssertEqual(DeepLink.parse(URL(string: "tiecoms://whatsapp")!), .whatsapp)
+        XCTAssertEqual(DeepLink.parse(URL(string: "chaggu://whatsapp")!), .whatsapp)
         XCTAssertEqual(DeepLink.parse(URL(string: "https://app.tiecoms.com/share?title=Hola&text=mundo")!), .share(text: "Hola\nmundo"))
-        XCTAssertEqual(DeepLink.parse(URL(string: "tiecoms://share")!), .share(text: nil))
+        XCTAssertEqual(DeepLink.parse(URL(string: "chaggu://share")!), .share(text: nil))
     }
 
     func testErrorCodesFromWeb() {

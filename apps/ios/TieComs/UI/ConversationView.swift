@@ -135,7 +135,7 @@ struct ConversationView: View {
         }
         // Tocar una mención abre la ficha de la persona.
         .environment(\.openURL, OpenURLAction { url in
-            if url.scheme == "tiecoms-mention", let id = url.host { personCard = id; return .handled }
+            if url.scheme == "chaggu-mention", let id = url.host { personCard = id; return .handled }
             return .systemAction
         })
         .onChange(of: sidePanel) { _, v in if v == nil { store.openConversationId = conversationId } }
@@ -967,7 +967,7 @@ struct MessageBubble: View {
                         if !mentions.isEmpty {
                             // Cada mención con el color de SU persona (y tocable); los enlaces http con el color de enlace.
                             RichMessageText(text: text, mentions: mentions, mine: mine, linkify: linkify) { id in
-                                if let u = URL(string: "tiecoms-mention://\(id)") { openURL(u) }
+                                if let u = URL(string: "chaggu-mention://\(id)") { openURL(u) }
                             }
                         } else if linkify { Text(Linkify.attributed(text)) } else { Text(text) }
                     }

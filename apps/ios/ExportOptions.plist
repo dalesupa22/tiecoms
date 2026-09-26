@@ -11,9 +11,9 @@
     <key>uploadSymbols</key><true/>
     <key>provisioningProfiles</key>
     <dict>
-        <key>com.tiecoms.app</key><string>TieComs Release 6 AppStore</string>
-        <key>com.tiecoms.app.share</key><string>TieComsShare Release 6 AppStore</string>
-        <key>com.tiecoms.app.notifications</key><string>TieComsNotifications Release 6 AppStore</string>
+        <key>com.chaggu.app</key><string>Chaggu App Store</string>
+        <key>com.chaggu.app.share</key><string>Chaggu Share App Store</string>
+        <key>com.chaggu.app.notifications</key><string>Chaggu Notifications App Store</string>
     </dict>
 </dict>
 </plist>

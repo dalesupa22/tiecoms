@@ -796,6 +796,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				CHAGGU_APPSTORE_PROFILE = "Chaggu Share App Store";
 				CODE_SIGN_ENTITLEMENTS = TieComsShare/TieComsShare.entitlements;
 				INFOPLIST_FILE = TieComsShare/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -803,7 +804,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app.share;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chaggu.app.share;
 				PRODUCT_NAME = TieComsShare;
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) SHARE_EXTENSION";
@@ -815,6 +816,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				CHAGGU_APPSTORE_PROFILE = "Chaggu Share App Store";
 				CODE_SIGN_ENTITLEMENTS = TieComsShare/TieComsShare.entitlements;
 				INFOPLIST_FILE = TieComsShare/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -822,7 +824,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app.share;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chaggu.app.share;
 				PRODUCT_NAME = TieComsShare;
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) SHARE_EXTENSION";
@@ -834,6 +836,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				CHAGGU_APPSTORE_PROFILE = "Chaggu Notifications App Store";
 				CODE_SIGN_ENTITLEMENTS = TieComsNotifications/TieComsNotifications.entitlements;
 				INFOPLIST_FILE = TieComsNotifications/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -841,7 +844,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app.notifications;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chaggu.app.notifications;
 				PRODUCT_NAME = TieComsNotifications;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -858,7 +861,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chaggu.app.uitests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = TieComs;
@@ -875,7 +878,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chaggu.app.uitests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = TieComs;
@@ -886,6 +889,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				CHAGGU_APPSTORE_PROFILE = "Chaggu Notifications App Store";
 				CODE_SIGN_ENTITLEMENTS = TieComsNotifications/TieComsNotifications.entitlements;
 				INFOPLIST_FILE = TieComsNotifications/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -893,7 +897,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app.notifications;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chaggu.app.notifications;
 				PRODUCT_NAME = TieComsNotifications;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -910,7 +914,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chaggu.app.tests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TieComs.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TieComs";
@@ -952,7 +956,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = B76US7H3L3;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -996,7 +1000,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chaggu.app.tests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TieComs.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TieComs";
@@ -1007,6 +1011,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CHAGGU_APPSTORE_PROFILE = "Chaggu App Store";
 				CODE_SIGN_ENTITLEMENTS = TieComs/Resources/TieComs.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_PREVIEWS = YES;
@@ -1015,7 +1020,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chaggu.app;
 				PRODUCT_NAME = TieComs;
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
@@ -1060,7 +1065,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = B76US7H3L3;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -1091,6 +1096,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CHAGGU_APPSTORE_PROFILE = "Chaggu App Store";
 				CODE_SIGN_ENTITLEMENTS = TieComs/Resources/TieComs.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_PREVIEWS = YES;
@@ -1099,7 +1105,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.tiecoms.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chaggu.app;
 				PRODUCT_NAME = TieComs;
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;

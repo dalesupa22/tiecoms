@@ -4,7 +4,7 @@ import UIKit
 import UniformTypeIdentifiers
 
 /// Extensión «Compartir en Chaggu»: fotos, videos, archivos, enlaces o texto desde cualquier app hacia
-/// una o varias conversaciones (máx. 5). Usa la sesión de la app (Keychain del grupo group.com.tiecoms.app)
+/// una o varias conversaciones (máx. 5). Usa la sesión de la app (Keychain del grupo group.com.chaggu.app)
 /// y la lista de conversaciones que la app deja en el App Group. Si el usuario tocó una sugerencia de la fila
 /// de arriba (INSendMessageIntent donado por la app), esa conversación llega preseleccionada.
 final class ShareViewController: UIViewController {
@@ -151,8 +151,8 @@ final class ShareModel {
         sending = false
     }
 
-    func cancel() { context?.cancelRequest(withError: NSError(domain: "com.tiecoms.share", code: 0)) }
-    func openApp() { opener(URL(string: "tiecoms://")!) }
+    func cancel() { context?.cancelRequest(withError: NSError(domain: "com.chaggu.share", code: 0)) }
+    func openApp() { opener(URL(string: "chaggu://")!) }
 
     /// Secciones como Inicio: sugerida, recientes y luego por «Empresa · Espacio»; chats al final.
     func sections(query: String) -> [(title: String, items: [ShareTargets.Target])] {

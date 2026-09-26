@@ -7,10 +7,10 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 
 | | |
 |---|---|
-| Bundle ID | `com.tiecoms.app` (app) · `com.tiecoms.app.share` (Compartir) · `com.tiecoms.app.notifications` (Notification Service Extension) |
+| Bundle ID | `com.chaggu.app` (app) · `com.chaggu.app.share` (Compartir) · `com.chaggu.app.notifications` (Notification Service Extension) · pruebas `com.chaggu.app.tests` / `com.chaggu.app.uitests` |
 | Team | `B76US7H3L3` (CERTILABOR SAS), firma automática |
-| App Group | `group.com.tiecoms.app`: Keychain compartido y lista de conversaciones para la extensión |
-| Versión | 1.6.0 (build 8), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
+| App Group | `group.com.chaggu.app`: Keychain compartido (servicio `com.chaggu.app.session`) y lista de conversaciones para la extensión |
+| Versión | 1.6.0 (build 9), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.chaggu.com` por defecto (web: `https://www.chaggu.com`); `-TCApiURL <url>` al lanzar (pruebas) |
 
@@ -69,7 +69,7 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
   - El origen se detecta por el formato: un chat de WhatsApp se separa en mensajes con su autor; un
     correo toma De/Asunto; en otro caso queda como "otra app".
   - La extensión usa la sesión de la app (Keychain del grupo). En la app, lo mismo funciona con
-    `tiecoms://share?text=…`.
+    `chaggu://share?text=…`.
 - **Login y registro**:
   - "Continuar con Google" y "Continuar con Microsoft" abren `ASWebAuthenticationSession` con PKCE S256.
   - En el registro, el nombre de la empresa (`org_name`) o la invitación (`org`) se pasan al `/start`.
@@ -84,9 +84,27 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
   - Launch Screen: tinta `#17161F` lisa (claro y oscuro).
 - **Marca**: Chaggu (antes TieComs). Tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`. Ícono y
   logos salen de `chaggu-marca/definitivo` (`AppIcon-1024.png` = `chaggu-appstore-1024.png`, sin alfa;
-  `Logo` = logo claro/oscuro transparente renderizado con `rsvg-convert -w 1300`). Los identificadores
-  internos (bundle IDs, App Group, Keychain, esquema `tiecoms://`, headers `x-tiecoms-*`, targets)
-  conservan el nombre anterior a propósito.
+  `Logo` = logo claro/oscuro transparente renderizado con `rsvg-convert -w 1300`). Desde la build 9
+  (1.6.0) se publica como **app nueva** en App Store Connect: bundle IDs `com.chaggu.app*`, App Group
+  `group.com.chaggu.app`, Keychain `com.chaggu.app.session` y esquema `chaggu://` (ver
+  «Cambio de identificadores»). Los targets, carpetas y clases Swift (`TieComs…`) y los headers
+  `x-tiecoms-*` del API conservan el nombre anterior a propósito.
+
+### Cambio de identificadores (build 9)
+
+- Antes (builds 1–8, app TieComs en App Store Connect): bundle IDs y App Group con el prefijo anterior
+  (`…tiecoms.app`) y esquema `tiecoms://`. Esa app queda publicada aparte; Chaggu no comparte con
+  ella ni Keychain ni App Group, así que no hay migración de sesión: al instalar Chaggu hay que
+  iniciar sesión otra vez. Se quitó la migración de la build 6 (cuenta única del Keychain), que solo
+  servía para la app anterior.
+- El esquema registrado (CFBundleURLSchemes) es solo `chaggu`, para no chocar con la app anterior si
+  las dos están instaladas. El código sigue entendiendo `tiecoms://` (callback de SSO y enlaces) por si
+  llega uno.
+- SSO: `GET /api/v1/auth/{google|microsoft}/start` lleva `redirect_scheme=chaggu` y el backend
+  redirige a `chaggu://auth/callback?code=…`.
+- Menciones dentro de la app: `chaggu-mention://<userId>` (solo interno).
+- Pendiente fuera de este repo: en el servidor, `APNS_BUNDLE_ID=com.chaggu.app` (el topic de APNs es el
+  bundle ID) y el AASA de los dominios debe incluir `B76US7H3L3.com.chaggu.app` en `applinks`.
 
 ## Estructura
 
@@ -105,7 +123,7 @@ apps/ios/
       AppStore.swift          estado y sincronización (cursores, catch-up, cola, eventos nuevos, pestañas y enlaces)
       AppStore+Features.swift edición, fijados, prefs, asuntos, agenda, recordatorios, derivar, reenviar, chats, perfil, archivos, dominios, WhatsApp, eliminar cuenta
       SSO.swift, SharedText.swift, Storage.swift (Keychain del grupo, ShareTargets), Feedback.swift (sonidos, hápticos, avisos)
-      DeepLink.swift          /c /w /invite /signup /asuntos /agenda /trazo /whatsapp /share (tiecoms://auth/* reservado al SSO)
+      DeepLink.swift          /c /w /invite /signup /asuntos /agenda /trazo /whatsapp /share (chaggu://auth/* reservado al SSO)
     UI/                       RootView (pestañas, splash, toast), Home, Conversation, Menus, Sheets, IssuesViews,
                               AgendaViews, MoreViews (Trazo, Recordatorios, WhatsApp, Dominios, Eliminar cuenta), Splash,
                               ChatsViews (nuevo chat, sumar personas, reenviar, vista previa), ProfileFilesViews (perfil, archivos)
@@ -174,7 +192,7 @@ TEST_RUNNER_TC_DELETE_API=http://localhost:3042 TEST_RUNNER_TC_SHOTS=/tmp/shots 
     xcodebuild test -scheme TieComs -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
     -only-testing:TieComsTests -only-testing:TieComsUITests/FeedbackUITests
   ```
-  Para ver la pantalla previa al permiso, desinstala la app antes (`xcrun simctl uninstall <UDID> com.tiecoms.app`).
+  Para ver la pantalla previa al permiso, desinstala la app antes (`xcrun simctl uninstall <UDID> com.chaggu.app`).
   `-TCDemoPhoto YES` (solo Debug) agrega una foto de prueba al elegir la foto, y `-TCOpenConversation <id>` abre un chat al entrar.
 - `scripts/realtime-peer2.mjs` es propio de iOS v2. `realtime-peer.mjs` no se cambió (lo usa Android).
   El par v2:
@@ -187,7 +205,7 @@ TEST_RUNNER_TC_DELETE_API=http://localhost:3042 TEST_RUNNER_TC_SHOTS=/tmp/shots 
 
 ## Enlaces
 
-- Esquema propio: `tiecoms://c/<id>`, `/w/<id>`, `/invite/<token>`, `/signup?org=`, `/asuntos`, `/agenda`, `/trazo`,
+- Esquema propio: `chaggu://c/<id>`, `/w/<id>`, `/invite/<token>`, `/signup?org=`, `/asuntos`, `/agenda`, `/trazo`,
   `/whatsapp`, `/share?text=`.
 - Enlaces universales: `applinks:` para app.chaggu.com, chaggu.com y www.chaggu.com, y también los
   del dominio anterior (app.tiecoms.com, tiecoms.com, www.tiecoms.com) para enlaces viejos. El AASA lo
@@ -277,10 +295,10 @@ TEST_RUNNER_TC_FIXTURE4=/tmp/fx4.json TEST_RUNNER_TC_SHOTS=/tmp/v4 xcodebuild te
 - **En primer plano**: no hay banner si es la conversación abierta; si el socket está en línea, el push remoto se omite porque el aviso local ya salió.
 - **Lo que debe crear Danny**:
   1. developer.apple.com → Certificates, IDs & Profiles → **Keys** → nueva llave con **Apple Push Notifications service (APNs)**. Descargar el `.p8` (solo una vez) y anotar su Key ID.
-  2. En el servidor: `APNS_KEY_ID=<Key ID>`, `APNS_TEAM_ID=B76US7H3L3`, `APNS_BUNDLE_ID=com.tiecoms.app` y `APNS_KEY_PATH=/opt/tiecoms/.secrets/apns.p8` (o `APNS_KEY` con el contenido). Nunca en git.
+  2. En el servidor: `APNS_KEY_ID=<Key ID>`, `APNS_TEAM_ID=B76US7H3L3`, `APNS_BUNDLE_ID=com.chaggu.app` y `APNS_KEY_PATH=/opt/tiecoms/.secrets/apns.p8` (o `APNS_KEY` con el contenido). Nunca en git.
   3. App IDs, con firma automática o a mano:
-     - `com.tiecoms.app`: capacidades **Push Notifications**, **Communication Notifications**, **App Groups** (`group.com.tiecoms.app`) y **Associated Domains**.
-     - `com.tiecoms.app.notifications` y `com.tiecoms.app.share`: **App Groups**.
+     - `com.chaggu.app`: capacidades **Push Notifications**, **Communication Notifications**, **App Groups** (`group.com.chaggu.app`) y **Associated Domains**.
+     - `com.chaggu.app.notifications` y `com.chaggu.app.share`: **App Groups**.
   4. No hace falta esperar la aprobación de App Store: en TestFlight funciona en cuanto el servidor tenga la llave (entorno `production`).
 - **Qué se probó y qué no**:
   - Probado:
@@ -305,11 +323,12 @@ TEST_RUNNER_TC_FIXTURE4=/tmp/fx4.json TEST_RUNNER_TC_SHOTS=/tmp/v4 xcodebuild te
 
 - También se puede archivar sin iniciar sesión en Xcode si el llavero contiene el certificado
   Apple Distribution y su clave privada, y están instalados los perfiles de distribución
-  `TieComs Release 6 AppStore`, `TieComsShare Release 6 AppStore` y `TieComsNotifications Release 6 AppStore`:
+  `Chaggu App Store`, `Chaggu Share App Store` y `Chaggu Notifications App Store` (cada target los
+  tiene en `CHAGGU_APPSTORE_PROFILE` de `project.yml`):
   ```bash
   xcodebuild -scheme TieComs -configuration Release -destination 'generic/platform=iOS' \
     -archivePath build/TieComs.xcarchive CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY='Apple Distribution' \
-    'PROVISIONING_PROFILE_SPECIFIER=$(TARGET_NAME) Release 6 AppStore' archive
+    'PROVISIONING_PROFILE_SPECIFIER=$(CHAGGU_APPSTORE_PROFILE)' archive
   xcodebuild -exportArchive -archivePath build/TieComs.xcarchive -exportPath build/export \
     -exportOptionsPlist ExportOptions.plist
   ```
@@ -317,12 +336,25 @@ TEST_RUNNER_TC_FIXTURE4=/tmp/fx4.json TEST_RUNNER_TC_SHOTS=/tmp/v4 xcodebuild te
   claves privadas ni credenciales de App Store Connect.
 
 **Portal de desarrollo**
-- App IDs `com.tiecoms.app` (Associated Domains + App Groups) y `com.tiecoms.app.share` (App Groups).
-- App Group `group.com.tiecoms.app`.
-- La firma automática los crea con `-allowProvisioningUpdates`.
+Chaggu es una app nueva: hay que crear en developer.apple.com › Certificates, IDs & Profiles (team
+`B76US7H3L3`) lo siguiente. Aún no existe nada de esto.
+1. **App Group** (Identifiers › App Groups): `group.com.chaggu.app` (descripción «Chaggu»).
+2. **App IDs** (Identifiers › App IDs, explícitos):
+   - `com.chaggu.app` («Chaggu»): **App Groups** (`group.com.chaggu.app`), **Associated Domains**,
+     **Push Notifications** y **Communication Notifications**.
+   - `com.chaggu.app.share` («Chaggu Share»): **App Groups** (`group.com.chaggu.app`).
+   - `com.chaggu.app.notifications` («Chaggu Notifications»): **App Groups** (`group.com.chaggu.app`).
+3. **Perfiles** (Profiles › Distribution › App Store Connect, certificado Apple Distribution), con
+   estos nombres exactos, que son los de `ExportOptions.plist`:
+   - `Chaggu App Store` → `com.chaggu.app`
+   - `Chaggu Share App Store` → `com.chaggu.app.share`
+   - `Chaggu Notifications App Store` → `com.chaggu.app.notifications`
+- Con firma automática y `-allowProvisioningUpdates`, Xcode puede crear los App IDs y perfiles de
+  desarrollo; los de App Store con esos nombres se crean a mano.
+- `com.chaggu.app.tests` y `com.chaggu.app.uitests` no necesitan App ID ni perfil de distribución.
 
 **App Store Connect**
-- Nueva app iOS "Chaggu", idioma principal español, bundle `com.tiecoms.app`, SKU `tiecoms-ios`.
+- Nueva app iOS "Chaggu", idioma principal español, bundle `com.chaggu.app`, SKU `chaggu-ios`.
 - Categoría Negocios (secundaria Productividad), clasificación 4+.
 
 **Capturas sugeridas** (6,9", iPhone 17 Pro Max 1320×2868; sale de `TieComsUITests` con `TC_SHOTS`)

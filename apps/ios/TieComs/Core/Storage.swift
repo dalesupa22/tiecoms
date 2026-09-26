@@ -8,24 +8,25 @@ protocol SecretStore: AnyObject {
 }
 
 /// Refresh token en el Keychain, solo en este dispositivo y tras el primer desbloqueo.
-/// Se guarda en el grupo compartido `group.com.tiecoms.app` para que la extensión de
+/// Se guarda en el grupo compartido `group.com.chaggu.app` para que la extensión de
 /// Compartir use la misma sesión. Si el grupo no está disponible (build sin firma),
-/// se usa el Keychain propio de la app. Lee y migra el ítem antiguo sin grupo.
+/// se usa el Keychain propio de la app, y el ítem sin grupo se pasa al grupo cuando vuelve a estarlo.
+/// Chaggu (com.chaggu.app) es una app nueva: no lee ni migra el Keychain de la app anterior (TieComs).
 final class KeychainSecretStore: SecretStore {
-    static let sharedGroup = "group.com.tiecoms.app"
+    static let sharedGroup = "group.com.chaggu.app"
     private let service: String
     private static let legacyAccount = "refreshToken"
     private let account: String
     private let group: String?
 
     /// La sesión se guarda por servidor: cambiar de API (producción, 3043, otro puerto) nunca borra
-    /// la sesión de otro. Producción conserva la cuenta histórica "refreshToken".
+    /// la sesión de otro. Producción usa la cuenta "refreshToken".
     static func account(for apiURL: URL?) -> String {
         guard let apiURL, let host = apiURL.host?.lowercased(), !AppConfig.productionHosts.contains(host) else { return legacyAccount }
         return "refreshToken@\(host):\(apiURL.port ?? (apiURL.scheme == "http" ? 80 : 443))"
     }
 
-    init(service: String = "com.tiecoms.app.session", group: String? = KeychainSecretStore.sharedGroup, apiURL: URL? = nil) {
+    init(service: String = "com.chaggu.app.session", group: String? = KeychainSecretStore.sharedGroup, apiURL: URL? = nil) {
         self.service = service
         self.group = group
         self.account = KeychainSecretStore.account(for: apiURL)
@@ -50,20 +51,16 @@ final class KeychainSecretStore: SecretStore {
 
     func get() -> String? {
         if let group, let v = read(group: group) { return v }
-        // Ítem de la versión 1.0 (sin grupo) o grupo no disponible.
-        if let legacy = read(group: nil) {
-            if group != nil { set(legacy) }
-            return legacy
+        // Grupo no disponible cuando se guardó (se usó el Keychain propio de la app).
+        if let local = read(group: nil) {
+            if group != nil { set(local) }
+            return local
         }
-        // Migración (build 6): antes había una sola cuenta para cualquier servidor. Se copia sin borrarla;
-        // si no era de este servidor, el refresh dará 401 y solo se limpia la copia de este servidor.
         #if DEBUG
-        if let v = debugFallbackValue() { return v }
+        return debugFallbackValue()
+        #else
+        return nil
         #endif
-        guard account != Self.legacyAccount else { return nil }
-        let migrated = group.flatMap { read(group: $0, account: Self.legacyAccount) } ?? read(group: nil, account: Self.legacyAccount)
-        if let migrated { set(migrated) }
-        return migrated
     }
 
     func set(_ value: String?) {
@@ -106,7 +103,7 @@ final class KeychainSecretStore: SecretStore {
 
 /// Lista de conversaciones para la extensión de Compartir (App Group). Solo títulos, sin mensajes.
 enum ShareTargets {
-    static let suite = "group.com.tiecoms.app"
+    static let suite = "group.com.chaggu.app"
     /// Lo que la extensión necesita para agrupar como Inicio (Empresa · Espacio, Chats) y mostrar la foto.
     struct Target: Codable, Equatable, Identifiable {
         var id: String

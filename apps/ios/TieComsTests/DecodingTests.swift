@@ -129,7 +129,7 @@ final class DecodingTests: XCTestCase {
     }
 
     func testDeepLinks() {
-        XCTAssertEqual(DeepLink.parse(URL(string: "tiecoms://c/abc-123")!), .conversation("abc-123"))
+        XCTAssertEqual(DeepLink.parse(URL(string: "chaggu://c/abc-123")!), .conversation("abc-123"))
         XCTAssertEqual(DeepLink.parse(URL(string: "https://app.chaggu.com/c/abc-123")!), .conversation("abc-123"))
         XCTAssertEqual(DeepLink.parse(URL(string: "https://www.chaggu.com/w/w1")!), .workspace("w1"))
         XCTAssertEqual(DeepLink.parse(URL(string: "https://chaggu.com/invite/tok_en-1")!), .invite("tok_en-1"))
@@ -140,11 +140,14 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(DeepLink.parse(URL(string: "https://app.tiecoms.com/c/abc-123")!), .conversation("abc-123"))
         XCTAssertEqual(DeepLink.parse(URL(string: "https://www.tiecoms.com/w/w1")!), .workspace("w1"))
         XCTAssertEqual(DeepLink.parse(URL(string: "https://tiecoms.com/invite/tok_en-1")!), .invite("tok_en-1"))
-        XCTAssertEqual(DeepLink.parse(URL(string: "tiecoms://invite/tok")!), .invite("tok"))
+        XCTAssertEqual(DeepLink.parse(URL(string: "chaggu://invite/tok")!), .invite("tok"))
         XCTAssertEqual(DeepLink.parse(URL(string: "https://app.tiecoms.com/signup?org=ORG123")!), .signup(orgToken: "ORG123"))
-        XCTAssertEqual(DeepLink.parse(URL(string: "tiecoms://signup?org=ORG123")!), .signup(orgToken: "ORG123"))
+        XCTAssertEqual(DeepLink.parse(URL(string: "chaggu://signup?org=ORG123")!), .signup(orgToken: "ORG123"))
         XCTAssertNil(DeepLink.parse(URL(string: "https://evil.example.com/c/abc")!))
         XCTAssertNil(DeepLink.parse(URL(string: "https://app.tiecoms.com/")!))
-        XCTAssertNil(DeepLink.parse(URL(string: "tiecoms://c/")!))
+        XCTAssertNil(DeepLink.parse(URL(string: "chaggu://c/")!))
+        // Esquema de la app anterior: ya no se registra, pero se sigue entendiendo.
+        XCTAssertEqual(DeepLink.parse(URL(string: "tiecoms://c/abc-123")!), .conversation("abc-123"))
+        XCTAssertNil(DeepLink.parse(URL(string: "otra://c/abc-123")!))
     }
 }

@@ -103,7 +103,7 @@ final class ShareUITests: XCTestCase {
         // (Chaggu es el segundo ícono de la fila de apps, visible en la captura v4-05).
         let tie = [photos, springboard].map { $0.buttons.matching(NSPredicate(format: "label == 'Chaggu'")).firstMatch }.first { $0.exists }
         if let tie { tie.tap() } else { photos.coordinate(withNormalizedOffset: CGVector(dx: 0.386, dy: 0.55)).tap() }
-        let ext = XCUIApplication(bundleIdentifier: "com.tiecoms.app.share")
+        let ext = XCUIApplication(bundleIdentifier: "com.chaggu.app.share")
         func q(_ id: String) -> XCUIElement {
             for surface in [photos, ext, springboard] { let e = surface.descendants(matching: .any)[id]; if e.exists { return e } }
             return photos.descendants(matching: .any)[id]

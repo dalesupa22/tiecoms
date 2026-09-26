@@ -161,7 +161,7 @@ enum MentionText {
         authorId != me && mentions.contains { $0.userId == me || $0.isAll }
     }
 
-    /// Texto con las menciones en negrita y el color de cada persona (link tiecoms-mention://<userId>).
+    /// Texto con las menciones en negrita y el color de cada persona (link chaggu-mention://<userId>).
     static func attributed(_ base: AttributedString, text: String, mentions: [Mention], mine: Bool, links: Bool = true) -> AttributedString {
         var out = base
         let u16 = text.utf16
@@ -172,7 +172,7 @@ enum MentionText {
                   let alo = AttributedString.Index(lo, within: out), let ahi = AttributedString.Index(hi, within: out) else { continue }
             out[alo..<ahi].font = .body.bold()
             out[alo..<ahi].foregroundColor = mine ? .white : (m.isAll ? Theme.accentText : PersonColor.text(m.userId))
-            if links && !m.isAll { out[alo..<ahi].link = URL(string: "tiecoms-mention://\(m.userId)") }
+            if links && !m.isAll { out[alo..<ahi].link = URL(string: "chaggu-mention://\(m.userId)") }
         }
         return out
     }

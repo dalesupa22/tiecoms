@@ -2,7 +2,7 @@ import Foundation
 
 /// Versión del contrato que habla esta app (ver packages/contracts).
 enum Contract {
-    static let version = "2026-09-23"
+    static let version = "2026-09-25"
 }
 
 // MARK: - Decodificación tolerante
@@ -137,10 +137,16 @@ struct WorkspaceDTO: Codable, Equatable, Identifiable, Sendable {
     var myRole: String
     var createdAt: String
     var pinnedAt: String?
+    /// Espacio casa de la empresa («Tu organización»): sus grupos van sin cabecera de espacio. API viejo: false.
+    var isOrgHome: Bool = false
+    /// Empresa invitada que aún no entra: la relación se muestra con este nombre y como pendiente.
+    var counterpartName: String?
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))
+        isOrgHome = c.v("isOrgHome", false)
+        counterpartName = c.o("counterpartName")
         name = c.v("name", "")
         department = c.o("department")
         glyph = c.o("glyph")
@@ -388,8 +394,17 @@ struct InvitationPreviewDTO: Decodable, Equatable, Sendable {
     var email: String?
     var expiresAt: String
     var valid: Bool
+    /// Grupos a los que entra la persona (API viejo: vacío).
+    var groupNames: [String] = []
+    /// Enlace o código para varias personas.
+    var multiUse = false
+    /// Invitación a un grupo interno de una empresa (se entra como invitado de fuera).
+    var orgHome = false
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
+        groupNames = c.v("groupNames", [String]()).filter { !$0.isEmpty }
+        multiUse = c.v("multiUse", false)
+        orgHome = c.v("orgHome", false)
         workspaceName = c.v("workspaceName", "")
         invitedByName = c.v("invitedByName", "")
         invitedByOrg = c.v("invitedByOrg", "")

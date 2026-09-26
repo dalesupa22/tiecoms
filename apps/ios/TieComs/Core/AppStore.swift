@@ -31,9 +31,13 @@ enum Route: Hashable {
     /// Archivos: raíz (lista de ámbitos) o una carpeta de un ámbito (workspaceId nil = «Mis archivos»).
     case files
     case drive(workspaceId: String?, folderId: String?)
+    /// Supervisión de una empresa (owner/admin) y visor de solo lectura de un grupo donde no soy miembro.
+    case oversight(String)
+    case oversightReader(conversationId: String, name: String)
 }
 
-enum AppTab: Hashable { case home, issues, agenda, settings }
+/// Barra inferior (docs/GRUPOS.md): Grupos (`home`) · DMs · Asuntos · Calendario · Tú (`settings`).
+enum AppTab: Hashable { case home, dms, issues, agenda, settings }
 
 struct AppAlert: Identifiable, Equatable {
     let id = UUID()
@@ -86,6 +90,7 @@ final class AppStore {
     var myOpenIssues: Int { guard let me = me?.id else { return 0 }; return issues.values.filter { $0.ownerId == me && !$0.status.closed }.count }
     func show(_ message: String) { toast = message }
     var homePath: [Route] = []
+    var dmsPath: [Route] = []
     var issuesPath: [Route] = []
     var agendaPath: [Route] = []
     var settingsPath: [Route] = []
@@ -94,6 +99,7 @@ final class AppStore {
     func push(_ r: Route) {
         switch tab {
         case .home: homePath.append(r)
+        case .dms: dmsPath.append(r)
         case .issues: issuesPath.append(r)
         case .agenda: agendaPath.append(r)
         case .settings: settingsPath.append(r)
@@ -223,6 +229,7 @@ final class AppStore {
         if let id = AppConfig.launchValue("TCOpenConversation") { navigate(to: .conversation(id)) }
         #endif
         Task { try? await loadReminders() }
+        Task { await loadOpenIssues() }
         onReady?()
     }
 
@@ -253,7 +260,7 @@ final class AppStore {
         typing = [:]
         issues = [:]; pins = [:]; reminders = []; events = [:]
         blockedUserIds = []
-        homePath = []; issuesPath = []; agendaPath = []; settingsPath = []
+        homePath = []; dmsPath = []; issuesPath = []; agendaPath = []; settingsPath = []
         tab = .home
         workspaceFilter = nil
         openConversationId = nil
@@ -274,6 +281,7 @@ final class AppStore {
             p.filter { if case .conversation(let id) = $0 { return allowed.contains(id) }; if case .details(let id) = $0 { return allowed.contains(id) }; return true }
         }
         if keep(homePath) != homePath { homePath = keep(homePath) }
+        if keep(dmsPath) != dmsPath { dmsPath = keep(dmsPath) }
         if keep(issuesPath) != issuesPath { issuesPath = keep(issuesPath) }
         if keep(agendaPath) != agendaPath { agendaPath = keep(agendaPath) }
         ShareTargets.save(d, apiURL: api.baseURL)
@@ -317,6 +325,7 @@ final class AppStore {
         guard status == .ready else { return }
         do {
             try await loadBootstrap()
+            Task { await loadOpenIssues() }
             for c in data?.conversations ?? [] {
                 guard let local = conversations[c.id], local.loaded else { continue }
                 if c.lastEventSeq > local.lastEventSeq || c.id == openConversationId { await catchUp(c.id) }
@@ -327,7 +336,10 @@ final class AppStore {
 
     private func onAccountEvent(_ e: AccountEvent) {
         switch e {
-        case .scopeChanged: scheduleBootstrap()
+        case .scopeChanged:
+            scheduleBootstrap()
+            // Grupos nuevos o invitaciones aceptadas: sus asuntos abiertos van bajo cada grupo.
+            Task { await loadOpenIssues() }
         case .readUpdated(let id, let seq):
             guard let c = meta(id), seq > c.lastReadSeq else { return }
             patchMeta(id) { $0.lastReadSeq = seq; $0.unread = max(0, $0.lastMessageSeq - max(seq, $0.historyFromSeq)) }
@@ -802,12 +814,12 @@ final class AppStore {
         guard status == .ready, let d = data else { pendingLink = link; return }
         switch link {
         case .conversation(let id):
-            guard d.conversations.contains(where: { $0.id == id }) else {
+            guard let c = d.conversations.first(where: { $0.id == id }) else {
                 alert = AppAlert(title: L("link.noAccess"), message: nil)
                 return
             }
-            tab = .home
-            homePath = [.conversation(id)]
+            // Directos, chats y sidechats viven en DMs; los grupos, en Grupos.
+            if c.kind.isChat { tab = .dms; dmsPath = [.conversation(id)] } else { tab = .home; homePath = [.conversation(id)] }
         case .workspace(let id):
             guard d.workspaces.contains(where: { $0.id == id }) else {
                 alert = AppAlert(title: L("link.noAccessSpace"), message: nil)

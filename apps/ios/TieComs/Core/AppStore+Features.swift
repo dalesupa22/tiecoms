@@ -446,6 +446,7 @@ extension AppStore {
         try await api.requestData("/conversations/\(conversationId)/members/\(me)", method: "DELETE")
         Donations.delete(conversationId: conversationId)
         homePath.removeAll { $0 == .conversation(conversationId) || $0 == .details(conversationId) }
+        dmsPath.removeAll { $0 == .conversation(conversationId) || $0 == .details(conversationId) }
         try await loadBootstrap()
     }
 

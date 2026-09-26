@@ -54,6 +54,13 @@ object Names {
         return companyOf(c, data)?.let { "$it - $title" } ?: title
     }
 
+    /**
+     * Dónde es una reunión, para sus avisos locales: «Empresa - Grupo» si la conversación es de un espacio;
+     * null en directos y chats grupales (no se inventa un grupo).
+     */
+    fun meetingPlace(c: ConversationDTO?, data: BootstrapDTO?, internalFallback: String, directFallback: String): String? =
+        c?.takeIf { companyOf(it, data) != null }?.let { notificationTitle(it, data, internalFallback, directFallback) }
+
     /** Empresa que va delante del grupo en las notificaciones; null si no es de un espacio conocido. */
     fun companyOf(c: ConversationDTO, data: BootstrapDTO?): String? {
         if (data == null || c.isChat || c.workspaceId == null) return null

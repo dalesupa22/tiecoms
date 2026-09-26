@@ -111,12 +111,10 @@ object ImageTools {
         val bmp = loadForCrop(ctx, Uri.fromFile(src), UPLOAD_SIDE) ?: return@withContext f
         val scale = UPLOAD_SIDE.toFloat() / maxOf(bmp.width, bmp.height)
         val out = if (scale < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt().coerceAtLeast(1), (bmp.height * scale).toInt().coerceAtLeast(1), true) else bmp
-        val name = f.name.substringBeforeLast('.').ifBlank { "foto" } + ".jpg"
-        val dest = java.io.File(src.parentFile, "up-" + name)
-        runCatching { dest.outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, 85, it) } }.getOrNull() ?: return@withContext f
-        if (dest.length() <= 0 || dest.length() >= src.length()) { dest.delete(); return@withContext f }
-        src.delete()
-        com.tiecoms.app.core.Attachments.Shared(name, "image/jpeg", dest.length(), dest.absolutePath)
+        // Temporal único por conversión y movimiento atómico (UploadConversion): el nombre visible no decide el archivo.
+        com.tiecoms.app.core.UploadConversion.convert(f, com.tiecoms.app.core.UploadConversion.jpgName(f.name), "image/jpeg") { tmp ->
+            tmp.outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+        }
     }
 
     /** Archivo elegido para subir: nombre visible, tamaño declarado (o -1) y tipo MIME. */

@@ -187,6 +187,12 @@ class AppContainer(private val app: Application) {
         return Names.notificationTitle(conv, c.state.value.data, app.getString(R.string.internal_default), app.getString(R.string.conversation))
     }
 
+    /** «Empresa - Grupo» de la conversación de una reunión; null en directos y chats. */
+    private fun meetingPlace(conversationId: String): String? {
+        val c = client.value
+        return Names.meetingPlace(c.meta(conversationId), c.state.value.data, app.getString(R.string.internal_default), app.getString(R.string.conversation))
+    }
+
     private suspend fun loadAvatar(path: String?): android.graphics.Bitmap? {
         val url = client.value.mediaUrl(path?.takeIf { it.isNotBlank() }) ?: return null
         return runCatching { images.load(url, 128)?.let { it.asAndroidBitmap() } }.getOrNull()
@@ -348,7 +354,10 @@ class AppContainer(private val app: Application) {
                     java.time.Instant.parse(ev.startsAt).atZone(java.time.ZoneId.systemDefault())
                         .format(java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM, java.time.format.FormatStyle.SHORT))
                 }.getOrDefault("")
-                notifier.showMessage(ev.conversationId, "📅 $title", whenText, silent = foreground || !settings.soundsEnabled, tag = "cal:" + ev.id)
+                // Reunión de un grupo: «Empresa - Grupo · fecha»; en directos y chats, solo la fecha.
+                val where = meetingPlace(ev.conversationId)
+                notifier.showMessage(ev.conversationId, "📅 $title", listOfNotNull(where, whenText.ifBlank { null }).joinToString(" · "),
+                    silent = foreground || !settings.soundsEnabled, tag = "cal:" + ev.id)
             }
             // Menciones descartadas por el servidor (no participan): aviso sutil con los nombres.
             is ClientSignal.MentionsDropped -> {
@@ -364,8 +373,7 @@ class AppContainer(private val app: Application) {
                 val whenText = runCatching {
                     java.time.Instant.parse(ev.startsAt).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT))
                 }.getOrDefault("")
-                val conv = client.value.meta(ev.conversationId)
-                val where = conv?.takeIf { it.kind != "direct" }?.let { conversationName(it.id) }.orEmpty()
+                val where = meetingPlace(ev.conversationId).orEmpty()
                 notifier.showMessage(ev.conversationId, "📅 " + app.getString(R.string.cal_soon, sig.minutes, ev.title), listOf(where, whenText).filter { it.isNotBlank() }.joinToString(" · "),
                     silent = !settings.soundsEnabled, tag = "event:soon:" + ev.id)
             }

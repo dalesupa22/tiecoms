@@ -36,4 +36,13 @@ class NotificationTitleTest {
         assertEquals("Suelto", t(ConversationDTO(id = "x", workspaceId = "w-otro", kind = "group", name = "Suelto")))
         assertEquals("Suelto", Names.notificationTitle(ConversationDTO(id = "x", workspaceId = "w-home", kind = "group", name = "Suelto"), null, "", ""))
     }
+
+    @Test fun `reuniones con su grupo y sin inventar grupo en chats`() {
+        fun p(c: ConversationDTO?) = Names.meetingPlace(c, d, "Interno", "Conversación")
+        assertEquals("Uniandes - Pagos", p(ConversationDTO(id = "b", workspaceId = "w-rel", kind = "group", name = "Pagos")))
+        assertEquals("Xertify - General", p(ConversationDTO(id = "a", workspaceId = "w-home", kind = "group", name = "General")))
+        assertEquals(null, p(ConversationDTO(id = "d", kind = "direct", memberIds = listOf("u1", "u2"))))
+        assertEquals(null, p(ConversationDTO(id = "m", kind = "multi", name = "Obra")))
+        assertEquals(null, p(null))
+    }
 }

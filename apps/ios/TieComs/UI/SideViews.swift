@@ -415,7 +415,7 @@ struct SidePanel: View {
                 } else if c.parentId.flatMap({ store.meta($0) })?.canPost == true && c.canPost {
                     Button(L("lin.return")) { returning = true }
                         .font(.caption.weight(.semibold))
-                        .buttonStyle(.borderedProminent).tint(Theme.bubbleMine)
+                        .primaryProminent()
                         .accessibilityIdentifier("thread.resolve")
                 }
                 if c.canManage {

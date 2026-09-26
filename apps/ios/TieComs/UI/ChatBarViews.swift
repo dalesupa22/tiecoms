@@ -89,7 +89,7 @@ struct ChatBar: View {
     }
 
     private func button(_ key: String, _ icon: String, _ label: String, _ n: Int, alert: Bool, action: @escaping () -> Void) -> some View {
-        let tint: Color = alert ? Theme.orange : n > 0 ? Theme.accentText : Theme.textSecondary.opacity(0.7)
+        let tint: Color = alert ? Theme.accentText : n > 0 ? Theme.accentText : Theme.textSecondary.opacity(0.7)
         return Button(action: action) {
             HStack(spacing: 4) {
                 Image(systemName: icon).font(.system(size: 11, weight: .semibold))

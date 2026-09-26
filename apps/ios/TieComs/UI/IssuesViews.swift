@@ -336,8 +336,7 @@ struct IssueDetailView: View {
                     Text(L("issue.comment")).font(.subheadline.weight(.semibold)).frame(minWidth: 80, minHeight: 40)
                 }
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Theme.bubbleMine)
+            .primaryProminent()
             .disabled(body.isEmpty || sending)
             .accessibilityIdentifier("issue.commentSend")
         }

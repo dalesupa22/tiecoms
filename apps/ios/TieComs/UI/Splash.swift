@@ -9,10 +9,13 @@ enum SplashTimeline {
     static let symbolSide = 200.0
     /// 0–0,25 s: quieto (capas 1 y 2, como la Launch Screen).
     static let holdEnd = 0.25
-    /// «Pop» de la burbuja mandarina: 1 → 1,10 → 1, anclado en el centro del lienzo.
+    /// «Pop» de la burbuja mandarina: 1 → 1,10 → 1, anclado en el centro de la propia burbuja
+    /// (así no tapa la separación con la burbuja papel).
     static let popStart = 0.20
     static let popEnd = 0.55
     static let popPeak = 0.10
+    /// Centro de la burbuja mandarina en coordenadas unitarias del lienzo.
+    static let popAnchor = (x: 0.609, y: 0.340)
     /// Rayitas: opacidad 0→1 y escala 0,4→1 ancladas en su punto de origen.
     static let sparksStart = 0.35
     static let sparksEnd = 0.70
@@ -138,7 +141,7 @@ struct LaunchSplashView: View {
                 ZStack {
                     Image("SplashBubbleWhite").resizable()
                     Image("SplashBubbleOrange").resizable()
-                        .scaleEffect(pop, anchor: .center)
+                        .scaleEffect(pop, anchor: UnitPoint(x: T.popAnchor.x, y: T.popAnchor.y))
                     Image("SplashSparks").resizable()
                         .scaleEffect(sparks.scale, anchor: UnitPoint(x: T.sparksAnchor.x, y: T.sparksAnchor.y))
                         .opacity(sparks.opacity)

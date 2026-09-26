@@ -113,8 +113,7 @@ struct PersonCardSheet: View {
                     } label: {
                         Label(L("chat.openDirect"), systemImage: "bubble.left.fill").frame(maxWidth: .infinity).padding(.vertical, 6)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.bubbleMine)
+                    .primaryProminent()
                     .disabled(busy)
                     .padding(.horizontal, 30)
                     .accessibilityIdentifier("person.sendMessage")

@@ -16,8 +16,13 @@ enum Theme {
     static let bubbleOther = Color(light: 0xEFEBE6, dark: 0x2E2A27)
     static let textPrimary = Color(light: 0x1F1F1F, dark: 0xF4F1EA)
     static let textSecondary = Color(light: 0x6B645B, dark: 0xA8A29A)
-    /// Mandarina para texto sobre fondo claro/oscuro con contraste AA (4,9:1 en claro, 7,2:1 en oscuro).
-    static let accentText = Color(light: 0xC93A1B, dark: 0xFF7B5E)
+    /// Mandarina para textos y enlaces con contraste AA: #C73A1A en claro (≈5:1 sobre crema) y la
+    /// mandarina pura #FF5A36 en oscuro (≈5,8:1 sobre tinta). La mandarina pura en claro queda para lo decorativo.
+    static let accentText = Color(light: 0xC73A1A, dark: 0xFF5A36)
+    /// Relleno de los botones principales: #C73A1A en claro (texto blanco) y mandarina #FF5A36 en oscuro (texto tinta).
+    static let primaryFill = Color(light: 0xC73A1A, dark: 0xFF5A36)
+    /// Texto sobre `primaryFill`: blanco en claro, tinta #17161F en oscuro.
+    static let onPrimary = Color(light: 0xFFFFFF, dark: 0x17161F)
     /// Burbuja propia: mandarina sobria (#E8472A en claro, #C73E24 en oscuro), con texto blanco.
     static let bubbleMine = Color(light: 0xE8472A, dark: 0xC73E24)
 }
@@ -71,10 +76,17 @@ struct PrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.headline)
-            .foregroundStyle(.white)
+            .foregroundStyle(Theme.onPrimary)
             .frame(maxWidth: .infinity, minHeight: 50)
-            .background(RoundedRectangle(cornerRadius: 14).fill(Theme.bubbleMine.opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)))
+            .background(RoundedRectangle(cornerRadius: 14).fill(Theme.primaryFill.opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)))
             .contentShape(Rectangle())
+    }
+}
+
+extension View {
+    /// Botón relleno del sistema con la regla AA de Chaggu (`primaryFill` + `onPrimary`).
+    func primaryProminent() -> some View {
+        buttonStyle(.borderedProminent).tint(Theme.primaryFill).foregroundStyle(Theme.onPrimary)
     }
 }
 

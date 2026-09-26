@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+import UIKit
 @testable import TieComs
 
 private func dec<T: Decodable>(_ t: T.Type, _ s: String) throws -> T { try JSONDecoder().decode(T.self, from: Data(s.utf8)) }
@@ -129,6 +131,9 @@ final class SplashTimelineTests: XCTestCase {
         let peak = stride(from: T.popStart, through: T.popEnd, by: 0.005).map(T.pop).max() ?? 0
         XCTAssertEqual(peak, 1.10, accuracy: 0.002)
         XCTAssertGreaterThan(T.pop(0.30), 1.05, "ease out: sube rápido")
+        // Anclado al centro de la burbuja mandarina, no al del lienzo.
+        XCTAssertEqual(T.popAnchor.x, 0.609, accuracy: 0.001)
+        XCTAssertEqual(T.popAnchor.y, 0.340, accuracy: 0.001)
     }
 
     func testSparks() {
@@ -187,6 +192,21 @@ final class SplashTimelineTests: XCTestCase {
         // Sin estar lista: espera hasta 6 s.
         XCTAssertEqual(T.reducedExitOpacity(elapsed: 5, readyAt: nil), 1)
         XCTAssertEqual(T.reducedExitOpacity(elapsed: 6.3, readyAt: nil), 0, accuracy: 0.0001)
+    }
+}
+
+/// Contraste AA del acento mandarina en modo claro.
+final class AccentContrastTests: XCTestCase {
+    func testPrimaryFillLightIsAAWithWhite() {
+        XCTAssertGreaterThanOrEqual(Theme.contrastWithWhite("#C73A1A") ?? 0, 4.5)
+        XCTAssertLessThan(Theme.contrastWithWhite("#FF5A36") ?? 9, 4.5, "la mandarina pura no sirve para texto blanco")
+        let light = UIColor(Theme.primaryFill).resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+        let dark = UIColor(Theme.primaryFill).resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        light.getRed(&r, green: &g, blue: &b, alpha: &a)
+        XCTAssertEqual(Int((r * 255).rounded()), 0xC7); XCTAssertEqual(Int((g * 255).rounded()), 0x3A)
+        dark.getRed(&r, green: &g, blue: &b, alpha: &a)
+        XCTAssertEqual(Int((r * 255).rounded()), 0xFF); XCTAssertEqual(Int((g * 255).rounded()), 0x5A)
     }
 }
 

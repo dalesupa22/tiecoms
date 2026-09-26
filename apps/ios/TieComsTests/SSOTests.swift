@@ -109,7 +109,8 @@ final class SSOTests: XCTestCase {
         XCTAssertEqual(r.user.id, "u1")
         XCTAssertEqual(secrets.get(), "ref-sso", "el refresh del SSO se guarda igual que en login")
         XCTAssertEqual(api.accessToken, "acc")
-        let req = try XCTUnwrap(MockURLProtocol.requests.last)
+        // Otras pruebas pueden dejar tareas en vuelo (p. ej. PUT /push/token): se busca la del canje.
+        let req = try XCTUnwrap(MockURLProtocol.requests.last { $0.path == AuthRoutes.ssoExchange })
         XCTAssertEqual(req.path, AuthRoutes.ssoExchange)
         XCTAssertEqual(req.body["code"] as? String, "one-time")
         XCTAssertEqual((req.body["code_verifier"] as? String)?.count, 64)

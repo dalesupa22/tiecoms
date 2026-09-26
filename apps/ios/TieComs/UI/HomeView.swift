@@ -136,7 +136,7 @@ struct HomeView: View {
                 Text(L("grp.emptyBody")).font(.footnote).foregroundStyle(Theme.textSecondary)
                 HStack(spacing: 10) {
                     Button { sheet = .newGroup(.none) } label: { Label(L("grp.new"), systemImage: "plus") }
-                        .buttonStyle(.borderedProminent).tint(Theme.bubbleMine)
+                        .primaryProminent()
                         .accessibilityIdentifier("groups.empty.new")
                     Button { sheet = .joinCode } label: { Label(L("join.title"), systemImage: "ticket") }
                         .buttonStyle(.bordered)
@@ -662,9 +662,9 @@ struct HomeTabs: View {
                                     .background(Capsule().fill(on ? Color.white.opacity(0.25) : Theme.textSecondary.opacity(0.15)))
                             }
                         }
-                        .foregroundStyle(on ? Color.white : Theme.textPrimary)
+                        .foregroundStyle(on ? Theme.onPrimary : Theme.textPrimary)
                         .padding(.horizontal, 14).frame(minHeight: 40)
-                        .background(Capsule().fill(on ? Theme.bubbleMine : Theme.surface))
+                        .background(Capsule().fill(on ? Theme.primaryFill : Theme.surface))
                         .overlay(Capsule().stroke(Theme.textSecondary.opacity(on ? 0 : 0.2)))
                     }
                     .buttonStyle(.plain)

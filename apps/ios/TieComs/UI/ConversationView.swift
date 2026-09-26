@@ -1073,7 +1073,7 @@ struct LineageBar: View {
                         if parent != nil, conv.returnedAt == nil, conv.canPost {
                             Button(L("lin.return"), action: onReturn)
                                 .font(.caption.weight(.semibold))
-                                .buttonStyle(.borderedProminent).tint(Theme.bubbleMine)
+                                .primaryProminent()
                                 .accessibilityIdentifier("lineage.return")
                         }
                         NavigationLink(value: Route.trazo) { Text(L("lin.trazo")).font(.caption) }

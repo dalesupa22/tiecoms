@@ -627,7 +627,7 @@ struct DMsView: View {
                             ContentUnavailableView {
                                 Label(L("dm.empty"), systemImage: "bubble.left.and.bubble.right")
                             } description: { Text(L("dm.emptyBody")) } actions: {
-                                Button(L("dm.new")) { newChat = true }.buttonStyle(.borderedProminent).tint(Theme.bubbleMine)
+                                Button(L("dm.new")) { newChat = true }.primaryProminent()
                             }
                         } else { ContentUnavailableView.search(text: query) }
                     }

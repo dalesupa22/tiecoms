@@ -77,7 +77,7 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 - **Splash** (arranque en frío, `UI/Splash.swift`): «ignición» del símbolo sobre tinta `#17161F`.
   - Empieza idéntico a la Launch Screen (símbolo sin rayitas, 200 pt, centrado) y apila tres capas
     con el mismo lienzo cuadrado: `SplashBubbleWhite`, `SplashBubbleOrange`, `SplashSparks`.
-  - 0–0,25 s quieto; 0,20–0,55 s «pop» de la burbuja mandarina (1 → 1,10 → 1, centro del lienzo);
+  - 0–0,25 s quieto; 0,20–0,55 s «pop» de la burbuja mandarina (1 → 1,10 → 1, anclado en el centro de la burbuja, x=0,609, y=0,340);
     0,35–0,70 s aparecen las rayitas (opacidad y escala 0,4 → 1 ancladas en x=0,83, y=0,17), con
     sonido `tc_splash` (respeta el interruptor de Sonidos y el modo silencio) y háptico ligero;
     0,55–0,95 s el eslogan (`splash.tagline`, papel al 80 %, sube 8 pt); 1,30–1,60 s salida.
@@ -85,7 +85,10 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
     en frío empieza en 0,7 s. Con Reduce Motion no hay escalas: solo fundido del eslogan y salida.
     Los tiempos son funciones puras (`SplashTimeline`).
   - Launch Screen: tinta `#17161F` (claro y oscuro) con `LaunchSymbol` (200 pt) centrado.
-- **Marca**: Chaggu (antes TieComs). Tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`. Ícono y
+- **Marca**: Chaggu (antes TieComs). Tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`.
+  Contraste AA: en claro, textos/enlaces de acento y botones rellenos usan `#C73A1A` (texto blanco);
+  en oscuro, mandarina `#FF5A36` para textos y botones rellenos con texto tinta (`Theme.accentText`,
+  `Theme.primaryFill`/`onPrimary`, `primaryProminent()`). La mandarina pura queda para lo decorativo. Ícono y
   logos salen de `chaggu-marca/definitivo` (`AppIcon-1024.png` = `chaggu-appstore-1024.png`, sin alfa;
   `Logo` = `chaggu-logo-para-claro`/`-para-oscuro` con transparencia real, sin placa, @1x/@2x/@3x con
   `rsvg-convert -w 250/500/750`; capas del splash desde `capas-splash/` a 200/400/600 px). Desde la build 9

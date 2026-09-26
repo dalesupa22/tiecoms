@@ -226,3 +226,20 @@ chat, para todos) y **Asunto** (no para terceros). Los dos se crean a mano.
   verificado (por Google Workspace/Microsoft Entra al registrarse, o por TXT).
 - Con `auto`, quien inicia sesión con Google o Microsoft con un correo de ese dominio entra a la empresa sin invitación.
 - `OrganizationDTO.joinPolicy` solo viene para owner/admin. En «Tú»: interruptor «Entrada automática con @dominio».
+
+## Plegado de asuntos, completar rápido e hilos en directos (26-sep-2026)
+
+- **Asuntos contraídos por defecto.** La fila del grupo lleva un chip «◆ N» (y «· M!» si hay vencidos). Tocarlo
+  muestra u oculta los asuntos activos de ese grupo (hasta 3 y «+N asuntos») sin entrar al chat. Se recuerda por
+  dispositivo (web: `localStorage['tiecoms:issuesOpen']`, la lista de grupos abiertos).
+- Las **secciones** (Tu organización, Relaciones, Invitado en) se pliegan tocando su título. Su menú (clic derecho o
+  pulsación larga) trae «Mostrar todos los asuntos», «Contraer todos los asuntos», «Plegar todo» y «Expandir todo».
+- **Completar sin abrir**: clic derecho o pulsación larga sobre un asunto (en Grupos y en la lista de Asuntos) ofrece
+  Completar, Marcar en curso, Marcar en espera y Abrir. Bajo los grupos solo se ven los activos (open, in_progress,
+  waiting); al completarse sale de inmediato y baja el conteo.
+- **Hilos en directos y chats grupales**: `POST /conversations/:id/derive` con `kind: 'same'` funciona también fuera
+  de un espacio. Crea un chat `multi` con las mismas personas, `parentId` y `parentMessageId` del mensaje y
+  `deriveKind: 'same'`. Allí no hay `internal` ni `directive` (400), y un hilo no se deriva otra vez (400). Los
+  clientes no lo listan en DMs (solo los sidechats van allí): vive en la barra de hilos del chat.
+- **Web**: «Nuevo chat» arriba de la barra lateral y ⌘K / Ctrl+K desde cualquier pantalla. Trazo, Personas,
+  Archivos, Ver después y WhatsApp van bajo «Más» para que los grupos y las relaciones quepan sin scroll.

@@ -8,7 +8,7 @@ import { conversationMenu, openDialog, workspaceMenu } from '../actions.tsx';
 import { copyText, menuProps, toast, type MenuItem } from '../menu.tsx';
 import { newEvent } from './Calendar.tsx';
 import { InviteDialog } from './Dialogs.tsx';
-import { NewIssueDialog, isClosed } from './Issues.tsx';
+import { NewIssueDialog, isClosed, issueQuickMenu } from './Issues.tsx';
 import { MessageText } from './Mentions.tsx';
 import { NewChatDialog, StackedAvatars } from './Chats.tsx';
 import { compareConversations, matchesTab, pendingOf, activityOf, type HomeTab } from './Shell.tsx';
@@ -97,9 +97,9 @@ export function buildGroupTree(d: BootstrapDTO, issues: Record<string, IssueDTO>
   return sections;
 }
 
-/** DMs: directos y chats grupales, incluidos los sidechats (con su burbuja). */
+/** DMs: directos y chats grupales, incluidos los sidechats (con su burbuja). Los hilos de un chat viven en su barra. */
 export function dmConversations(d: BootstrapDTO, tab: HomeTab = 'all') {
-  return d.conversations.filter((c) => (c.kind === 'direct' || c.kind === 'multi') && matchesTab(c, tab)).sort(compareConversations);
+  return d.conversations.filter((c) => (c.kind === 'direct' || c.kind === 'multi') && !(c.parentId && c.deriveKind !== 'side') && matchesTab(c, tab)).sort(compareConversations);
 }
 
 // ---------- Plegado (por dispositivo) ----------
@@ -112,6 +112,22 @@ function useFolded() {
     folded,
     toggle: (k: string) => { const n = new Set(folded); if (n.has(k)) n.delete(k); else n.add(k); save(n); },
     foldAll: (keys: string[]) => save(new Set([...folded, ...keys])),
+    unfoldAll: () => save(new Set()),
+  };
+}
+
+// Asuntos bajo cada grupo: contraídos por defecto; se recuerdan los que la persona abre (por dispositivo).
+const ISSUES_KEY = 'tiecoms:issuesOpen';
+type IssuesOpen = { open: Set<string>; toggle: (id: string) => void; setAll: (ids: string[] | null) => void };
+function readIssuesOpen(): Set<string> { try { return new Set(JSON.parse(localStorage.getItem(ISSUES_KEY) ?? '[]')); } catch { return new Set(); } }
+function useIssuesOpen(): IssuesOpen {
+  const [open, setOpen] = useState(readIssuesOpen);
+  const save = (next: Set<string>) => { setOpen(next); try { localStorage.setItem(ISSUES_KEY, JSON.stringify([...next])); } catch {} };
+  return {
+    open,
+    toggle: (id) => { const n = new Set(open); if (n.has(id)) n.delete(id); else n.add(id); save(n); },
+    /** null contrae todos; una lista los muestra. */
+    setAll: (ids) => save(new Set(ids ?? [])),
   };
 }
 
@@ -120,8 +136,16 @@ export function GroupsTree({ tab = 'all', activeConv = null, activeWs = null }: 
   const d = useClient((s) => s.data)!;
   const issues = useClient((s) => s.issues);
   const sections = useMemo(() => buildGroupTree(d, issues, tab), [d, issues, tab]);
-  const { folded, toggle, foldAll } = useFolded();
+  const { folded, toggle, foldAll, unfoldAll } = useFolded();
+  const issuesOpen = useIssuesOpen();
   const allKeys = sections.flatMap((s) => s.companies.flatMap((c) => [c.key, ...c.workspaces.map((w) => `ws:${w.ws.id}`)]));
+  const withIssues = sections.flatMap((s) => s.companies.flatMap((c) => c.workspaces.flatMap((w) => w.groups.filter((g) => g.issues.length).map((g) => g.conv.id))));
+  const treeMenu: TreeMenu = {
+    foldAll: () => { foldAll(allKeys); issuesOpen.setAll(null); },
+    unfoldAll: () => { unfoldAll(); issuesOpen.setAll(withIssues); },
+    showIssues: () => issuesOpen.setAll(withIssues),
+    hideIssues: () => issuesOpen.setAll(null),
+  };
 
   return (
     <div className="groups-tree">
@@ -129,24 +153,31 @@ export function GroupsTree({ tab = 'all', activeConv = null, activeWs = null }: 
         const title = s.kind === 'org' ? t('groups.yourOrg', { org: s.org?.name ?? '' }) : s.kind === 'relations' ? t('groups.relations') : t('groups.guestIn');
         const plus = s.kind === 'org' ? () => openCreateGroup({ kind: 'org', orgId: s.org?.id }) : s.kind === 'relations' ? () => openCreateGroup({ kind: 'company' }) : null;
         const empty = s.companies.every((c) => c.workspaces.every((w) => !w.groups.length));
+        const sKey = `sec:${s.key}`;
+        const sFold = folded.has(sKey);
+        const sUnread = s.companies.reduce((n, c) => n + convsOfCompany(c).reduce((m, x) => m + (isMuted(x) ? 0 : x.unread), 0), 0);
         return (
           <section key={s.key} className="groups-section">
             <div className="row groups-section-head">
-              <span className="eyebrow grow">{title}</span>
+              <button className="groups-section-toggle grow" aria-expanded={!sFold} onClick={() => toggle(sKey)} {...menuProps(() => treeMenuItems(treeMenu))}>
+                <span className="eyebrow">{title}</span>
+                <span className="muted small" aria-hidden>{sFold ? '›' : '⌄'}</span>
+                {sFold && sUnread > 0 && <span className="pill">{sUnread}</span>}
+              </button>
               {plus && <button className="btn ghost small" onClick={plus} title={t('groups.new')} aria-label={`${t('groups.new')} · ${title}`}>＋</button>}
             </div>
-            {empty && tab === 'all' && <div className="hint" style={{ padding: '2px 10px 8px' }}>{s.kind === 'org' ? t('groups.emptyOrg') : t('groups.emptyRelations')}</div>}
-            {s.companies.map((c) => {
+            {!sFold && empty && tab === 'all' && <div className="hint" style={{ padding: '2px 10px 8px' }}>{s.kind === 'org' ? t('groups.emptyOrg') : t('groups.emptyRelations')}</div>}
+            {!sFold && s.companies.map((c) => {
               const cKey = c.key;
               const fold = folded.has(cKey);
               const unread = convsOfCompany(c).reduce((n, x) => n + (isMuted(x) ? 0 : x.unread), 0);
-              const body = c.workspaces.map((w) => <WsBlock key={w.ws.id} w={w} folded={folded} toggle={toggle} activeConv={activeConv} activeWs={activeWs} />);
+              const body = c.workspaces.map((w) => <WsBlock key={w.ws.id} w={w} folded={folded} toggle={toggle} issuesOpen={issuesOpen} activeConv={activeConv} activeWs={activeWs} />);
               // Tu organización: los grupos van directo, sin cabecera de empresa.
               if (s.kind === 'org') return <div key={cKey}>{body}</div>;
               return (
                 <div key={cKey} className="groups-company">
                   <button className="side-org groups-company-head" aria-expanded={!fold} onClick={() => toggle(cKey)}
-                    {...menuProps(() => companyMenu(c, () => foldAll(allKeys)))}>
+                    {...menuProps(() => companyMenu(c, treeMenu))}>
                     <OrgMark org={c.org} /><span className="grow ellipsis">{c.name}</span>
                     {c.pending && <span className="tag">{t('groups.pending')}</span>}
                     {fold && unread > 0 && <span className="pill">{unread}</span>}
@@ -163,7 +194,7 @@ export function GroupsTree({ tab = 'all', activeConv = null, activeWs = null }: 
   );
 }
 
-function WsBlock({ w, folded, toggle, activeConv, activeWs }: { w: WsNode; folded: Set<string>; toggle: (k: string) => void; activeConv: string | null; activeWs: string | null }) {
+function WsBlock({ w, folded, toggle, issuesOpen, activeConv, activeWs }: { w: WsNode; folded: Set<string>; toggle: (k: string) => void; issuesOpen: IssuesOpen; activeConv: string | null; activeWs: string | null }) {
   const key = `ws:${w.ws.id}`;
   const fold = w.header && folded.has(key);
   const unread = convsOfWs(w).reduce((n, x) => n + (isMuted(x) ? 0 : x.unread), 0);
@@ -182,22 +213,28 @@ function WsBlock({ w, folded, toggle, activeConv, activeWs }: { w: WsNode; folde
       )}
       {!fold && w.groups.map((g) => (
         <div key={g.conv.id}>
-          <GroupRow c={g.conv} ws={w.ws} label={g.label} threadUnread={g.derived.reduce((n, x) => n + x.unread, 0)} active={activeConv === g.conv.id} />
-          {g.issues.length > 0 && <IssueLines g={g} />}
+          <GroupRow c={g.conv} ws={w.ws} label={g.label} threadUnread={g.derived.reduce((n, x) => n + x.unread, 0)} active={activeConv === g.conv.id}
+            issues={{ count: g.issues.length, overdue: overdueCount(g.issues), open: issuesOpen.open.has(g.conv.id), onToggle: () => issuesOpen.toggle(g.conv.id) }} />
+          {g.issues.length > 0 && issuesOpen.open.has(g.conv.id) && <IssueLines g={g} />}
         </div>
       ))}
     </div>
   );
 }
 
-/** Asuntos abiertos bajo el grupo: hasta 3 y «+N asuntos». */
+const overdueCount = (list: IssueDTO[]) => { const today = new Date().toISOString().slice(0, 10); return list.filter((i) => i.dueDate && i.dueDate < today).length; };
+
+/**
+ * Asuntos activos bajo el grupo, cuando la persona los abre con el chip ◆ de la fila: hasta 3 y «+N asuntos».
+ * Clic derecho o pulsación larga en un asunto: completarlo o cambiar su estado.
+ */
 function IssueLines({ g }: { g: GroupNode }) {
   const today = new Date().toISOString().slice(0, 10);
   const shown = g.issues.slice(0, 3);
   return (
     <div className="group-issues">
       {shown.map((i) => (
-        <button key={i.id} className="group-issue" onClick={() => navigate(`/c/${g.conv.id}?issue=${i.id}`)}>
+        <button key={i.id} className="group-issue" onClick={() => navigate(`/c/${g.conv.id}?issue=${i.id}`)} {...menuProps(() => issueQuickMenu(i))}>
           <span className="diamond" aria-hidden>◆</span>
           <span className="grow ellipsis">{i.title}</span>
           {(i.status === 'in_progress' || i.status === 'waiting') && <span className="tag">{t(`issue.st.${i.status}`)}</span>}
@@ -212,8 +249,8 @@ function IssueLines({ g }: { g: GroupNode }) {
 }
 
 /** Los hilos del grupo no se listan aquí (viven en su chat); si tienen respuestas sin leer, el grupo lo avisa con 💬. */
-function GroupRow({ c, ws, label, threadUnread, active }: { c: ConversationDTO; ws: WorkspaceDTO; label?: string; threadUnread: number; active: boolean }) {
-  return <ConvItem c={c} active={active} label={label} threadUnread={threadUnread} extraMenu={groupMenuExtra(c, ws)} />;
+function GroupRow({ c, ws, label, threadUnread, active, issues }: { c: ConversationDTO; ws: WorkspaceDTO; label?: string; threadUnread: number; active: boolean; issues: IssuesChip }) {
+  return <ConvItem c={c} active={active} label={label} threadUnread={threadUnread} extraMenu={groupMenuExtra(c, ws)} issues={issues} />;
 }
 
 function groupMenuExtra(c: ConversationDTO, ws: WorkspaceDTO): MenuItem[] {
@@ -228,14 +265,25 @@ function groupMenuExtra(c: ConversationDTO, ws: WorkspaceDTO): MenuItem[] {
   ];
 }
 
-function companyMenu(c: CompanyNode, foldAll: () => void): MenuItem[] {
+interface TreeMenu { foldAll: () => void; unfoldAll: () => void; showIssues: () => void; hideIssues: () => void }
+function treeMenuItems(m: TreeMenu): MenuItem[] {
+  return [
+    { label: t('groups.showAllIssues'), icon: '◆', onSelect: m.showIssues },
+    { label: t('groups.hideAllIssues'), icon: '◇', onSelect: m.hideIssues },
+    { divider: true },
+    { label: t('groups.foldAll'), icon: '⌃', onSelect: m.foldAll },
+    { label: t('groups.unfoldAll'), icon: '⌄', onSelect: m.unfoldAll },
+  ];
+}
+
+function companyMenu(c: CompanyNode, m: TreeMenu): MenuItem[] {
   const first = c.workspaces[0]?.ws;
   const canCreate = first && first.myRole !== 'guest';
   return [
     ...(canCreate ? [{ label: t('groups.newWith', { name: c.name }), icon: '#', onSelect: () => openCreateGroup({ kind: 'workspace', workspaceId: first.id }) }] : []),
     ...(canCreate ? [{ label: t('groups.inviteCompany', { name: c.name }), icon: '＋', onSelect: () => openDialog((close) => <InviteDialog workspaceId={first.id} onClose={close} />) }] : []),
     { divider: true },
-    { label: t('groups.foldAll'), icon: '⌃', onSelect: foldAll },
+    ...treeMenuItems(m),
   ];
 }
 
@@ -243,7 +291,10 @@ function companyMenu(c: CompanyNode, foldAll: () => void): MenuItem[] {
 const sideTitle = (title: string) => title.replace(/^(Sidechat|Consulta)\s*·\s*/i, '');
 
 /** Fila de conversación de la barra lateral (grupos y DMs). */
-export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, extraMenu = [] }: { c: ConversationDTO; active: boolean; showWs?: boolean; label?: string; threadUnread?: number; extraMenu?: MenuItem[] }) {
+/** Chip de asuntos en la fila del grupo: contraídos cada grupo ocupa una sola línea; el chip los muestra u oculta. */
+export interface IssuesChip { count: number; overdue: number; open: boolean; onToggle: () => void }
+
+export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, extraMenu = [], issues }: { c: ConversationDTO; active: boolean; showWs?: boolean; label?: string; threadUnread?: number; extraMenu?: MenuItem[]; issues?: IssuesChip }) {
   const d = useClient((s) => s.data)!;
   const muted = isMuted(c);
   const other = c.kind === 'direct' ? personById(d, c.memberIds.find((m) => m !== d.me.id)) : null;
@@ -264,6 +315,15 @@ export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, e
         {ws ? <span className="muted small"> · {ws.name}</span> : null}
       </span>
       {threadUnread > 0 && <span className="chip-side" title={t('bar.threads')}>💬 {threadUnread}</span>}
+      {issues && issues.count > 0 && (
+        // Va dentro del botón de la fila: un span con rol de botón (no se anidan botones).
+        <span role="button" tabIndex={0} aria-expanded={issues.open} className={`chip-issues ${issues.open ? 'on' : ''} ${issues.overdue ? 'is-late' : ''}`}
+          title={`${issues.open ? t('groups.hideIssues') : t('groups.showIssues')} · ${issues.count === 1 ? t('groups.issuesCountOne') : t('groups.issuesCount', { n: issues.count })}${issues.overdue ? ` · ${t('groups.issuesOverdue', { n: issues.overdue })}` : ''}`}
+          onClick={(e) => { e.stopPropagation(); issues.onToggle(); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); issues.onToggle(); } }}>
+          ◆ {issues.count}{issues.overdue > 0 && <b> · {issues.overdue}!</b>} <span aria-hidden>{issues.open ? '⌄' : '›'}</span>
+        </span>
+      )}
       {muted && <span className="small" title={t('side.muted')}>🔕</span>}
       {(c.unreadMentions ?? 0) > 0 && <span className="pill mention-pill" title={t('mention.youMentioned')}>@</span>}
       {c.unread > 0 && <span className={`pill ${muted ? 'is-muted' : ''}`} style={{ background: badgeColor(orgOfWs) }}>{c.unread}</span>}

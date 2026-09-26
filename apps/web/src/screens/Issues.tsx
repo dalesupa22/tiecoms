@@ -4,6 +4,7 @@ import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
 import { navigate } from '../router.ts';
 import { Avatar, Modal, conversationTitle, orgById, personById } from '../ui.tsx';
+import { menuProps, toast, type MenuItem } from '../menu.tsx';
 
 export const ISSUE_STATUSES: IssueStatus[] = ['open', 'in_progress', 'waiting', 'done', 'cancelled'];
 const CLOSED = new Set<IssueStatus>(['done', 'cancelled']);
@@ -35,13 +36,27 @@ function membersOf(d: BootstrapDTO, conversationId: string) {
   return (c?.memberIds ?? []).map((id) => personById(d, id)).filter((p): p is NonNullable<typeof p> => !!p && p.kind === 'human');
 }
 
+/** Completar o cambiar el estado de un asunto sin abrirlo. Al completarse sale de la lista (solo se ven los activos). */
+export function issueQuickMenu(i: IssueDTO): MenuItem[] {
+  const set = (status: IssueDTO['status']) => client.updateIssue(i.id, { status })
+    .then(() => { if (status === 'done') toast(t('issue.completed')); })
+    .catch((e) => toast(errorText(e)));
+  return [
+    { label: t('issue.complete'), icon: '✓', onSelect: () => void set('done') },
+    ...(i.status !== 'in_progress' ? [{ label: t('issue.markInProgress'), icon: '▶', onSelect: () => void set('in_progress') }] : []),
+    ...(i.status !== 'waiting' ? [{ label: t('issue.markWaiting'), icon: '⏸', onSelect: () => void set('waiting') }] : []),
+    { divider: true },
+    { label: t('issue.open'), icon: '◆', onSelect: () => navigate(`/c/${i.conversationId}?issue=${i.id}`) },
+  ];
+}
+
 export function IssueRow({ i, showWhere = true, onOpen }: { i: IssueDTO; showWhere?: boolean; onOpen: (id: string) => void }) {
   const d = useClient((s) => s.data)!;
   const owner = personById(d, i.ownerId);
   const conv = d.conversations.find((c) => c.id === i.conversationId);
   const f = issueFlags(i);
   return (
-    <button className={`card issue-row ${f.stalledDays || f.overdue ? 'is-jam' : ''}`} onClick={() => onOpen(i.id)}>
+    <button className={`card issue-row ${f.stalledDays || f.overdue ? 'is-jam' : ''}`} onClick={() => onOpen(i.id)} {...(isClosed(i) ? {} : menuProps(() => issueQuickMenu(i)))}>
       <Avatar person={owner} org={orgById(d, owner?.orgId)} size={30} />
       <span className="grow" style={{ minWidth: 0 }}>
         <b className="ellipsis" style={{ display: 'block' }}>{i.title}</b>

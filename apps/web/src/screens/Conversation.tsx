@@ -224,9 +224,10 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const title = conversationTitle(d, conv);
   const openHere = Object.values(allIssues).filter((i: IssueDTO) => i.conversationId === id && !isClosed(i));
   const issueOf = (mid: string) => openHere.find((i) => i.originMessageId === mid);
-  // Asuntos y reuniones en todas (también directos y chats grupales); derivar sigue siendo de espacios.
+  // Asuntos, reuniones e hilos en todas (también directos y chats grupales). Fuera de un espacio el hilo es con
+  // las mismas personas, y un hilo no se deriva otra vez.
   const canWork = conv.canPost;
-  const canDerive = canWork && conv.kind !== 'direct' && !!conv.workspaceId;
+  const canDerive = canWork && (!!conv.workspaceId ? conv.kind !== 'direct' : !conv.parentId);
   const myWsRole = d.workspaces.find((w) => w.id === conv.workspaceId)?.myRole;
   // Los terceros invitados participan en los asuntos pero no los abren (el API responde 403).
   const canOpenIssues = canWork && myWsRole !== 'guest';

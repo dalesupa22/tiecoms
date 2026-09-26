@@ -363,11 +363,11 @@ export async function acceptInvitation(userId: string, token: string, input: z.i
 export async function deriveConversation(userId: string, parentId: string, input: { messageId: string; kind: 'same' | 'internal' | 'directive'; name?: string; reason?: string }) {
   return tx(async (c) => {
     const a = await conversationAccess(c, userId, parentId, 'post', true);
-    if (!a.workspaceId) throw badRequest('Solo se deriva desde conversaciones de un espacio');
-    const wa = await workspaceAccess(c, userId, a.workspaceId, 'nonguest');
     const msg = await c.query('SELECT id, author_id, body, kind, seq FROM messages WHERE id = $1 AND conversation_id = $2', [input.messageId, parentId]);
     const m = msg.rows[0];
     if (!m || m.seq <= a.historyFromSeq || m.kind !== 'text') throw badRequest('Solo se deriva desde un mensaje visible de esta conversación');
+    if (!a.workspaceId) return threadOutsideWorkspace(c, userId, parentId, m, input);
+    const wa = await workspaceAccess(c, userId, a.workspaceId, 'nonguest');
     const parent = (await c.query('SELECT name, level FROM conversations WHERE id = $1', [parentId])).rows[0];
 
     const members = (await c.query(
@@ -411,6 +411,39 @@ export async function deriveConversation(userId: string, parentId: string, input
     await audit(c, userId, 'conversation.derived', { type: 'conversation', id: childId, workspaceId: a.workspaceId }, { parentId, kind: input.kind });
     return { id: childId };
   });
+}
+
+/**
+ * Hilo desde un directo o un chat grupal (sin espacio): un chat grupal con las mismas personas, colgado del
+ * mensaje (como en Slack). Solo existe el tipo «same»: sin espacio no hay empresa ni líderes a quienes llevarlo.
+ */
+async function threadOutsideWorkspace(c: Tx, userId: string, parentId: string, m: { id: string; body: string },
+  input: { kind: 'same' | 'internal' | 'directive'; name?: string; reason?: string }) {
+  if (input.kind !== 'same') throw badRequest('En un chat fuera de un espacio el hilo es con las mismas personas');
+  const parent = (await c.query('SELECT name, parent_conversation_id FROM conversations WHERE id = $1', [parentId])).rows[0];
+  if (parent?.parent_conversation_id) throw badRequest('Un hilo no se deriva otra vez: responde dentro del mismo hilo');
+  const ids = (await c.query('SELECT user_id FROM conversation_memberships WHERE conversation_id = $1 AND removed_at IS NULL', [parentId])).rows
+    .map((r) => r.user_id as string);
+  const others = [...new Set(ids)].filter((u) => u !== userId);
+  await ensureNotBlocked(c, userId, others);
+  const excerpt = String(m.body).replace(/\s+/g, ' ').trim().slice(0, 80);
+  const name = input.name ?? `Hilo · ${excerpt.slice(0, 40).replace(/\s+\S*$/, '')}`;
+  const { rows } = await c.query(
+    `INSERT INTO conversations (kind, name, created_by, parent_conversation_id, parent_message_id, derive_kind, derive_reason, derived_by)
+     VALUES ('multi', $1, $2, $3, $4, 'same', $5, $2) RETURNING id`,
+    [name, userId, parentId, m.id, input.reason ?? null],
+  );
+  const childId: string = rows[0].id;
+  await c.query('INSERT INTO conversation_memberships (conversation_id, user_id, can_manage, added_by) VALUES ($1,$2,true,$2)', [childId, userId]);
+  for (const uid of others) await c.query('INSERT INTO conversation_memberships (conversation_id, user_id, can_manage, added_by) VALUES ($1,$2,true,$3)', [childId, uid, userId]);
+  // Un directo no tiene nombre: el origen se nombra con las personas del chat.
+  const names = parent?.name ? null : (await c.query('SELECT name FROM users WHERE id = ANY($1) ORDER BY name', [[userId, ...others]])).rows.map((r) => r.name as string);
+  const parentName: string = parent?.name ?? names!.join(' · ');
+  await appendMessage(c, { conversationId: childId, authorId: userId, kind: 'system', body: sys('derived.here', { parent: parentName, excerpt, reason: input.reason ?? null }) });
+  await appendMessage(c, { conversationId: parentId, authorId: userId, kind: 'system', body: sys('derived.from', { kind: 'same', childId, messageId: m.id }) });
+  await audit(c, userId, 'conversation.derived', { type: 'conversation', id: childId, workspaceId: null }, { parentId, kind: 'same' });
+  await scopeChanged(c, [userId, ...others], 'side.created', { conversationId: childId });
+  return { id: childId };
 }
 
 /** Devuelve el resultado de una derivada a su origen: publica el cierre allí y marca el reencuentro. */

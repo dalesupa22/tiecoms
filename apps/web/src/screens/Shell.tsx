@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { BootstrapDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { asset, navigate, type Route } from '../router.ts';
@@ -22,6 +22,9 @@ const NAV = [
   { name: 'saved', label: 'nav.saved', ico: '🔖', to: '/ver-despues' },
   { name: 'whatsapp', label: 'nav.whatsapp', ico: '✆', to: '/whatsapp' },
 ] as const;
+/** Today, Conversaciones, Calendario y Asuntos siempre; el resto bajo «Más». */
+const NAV_MAIN = 4;
+const NAV_MORE_KEY = 'tiecoms:navMore';
 
 export function groupWorkspaces(d: BootstrapDTO) {
   const groups = new Map<string, { org: ReturnType<typeof orgById>; workspaces: BootstrapDTO['workspaces'] }>();
@@ -104,9 +107,35 @@ function HomeTabs({ d, tab, onTab }: { d: BootstrapDTO; tab: HomeTab; onTab: (t:
   );
 }
 
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+const openNewChat = () => openDialog((close) => <NewChatDialog onClose={close} />);
+
+/** Acceso rápido para iniciar un chat: botón arriba de la barra y ⌘K / Ctrl+K desde cualquier pantalla. */
+function QuickChat() {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+        if (document.querySelector('.modal')) return;
+        e.preventDefault(); openNewChat();
+      }
+    };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, []);
+  const key = isMac ? '⌘K' : 'Ctrl+K';
+  return (
+    <button className="quick-chat" onClick={openNewChat} title={t('chat.quickHint', { key })} aria-keyshortcuts={isMac ? 'Meta+K' : 'Control+K'}>
+      <span aria-hidden>✎</span><span className="grow">{t('chat.quick')}</span><kbd>{key}</kbd>
+    </button>
+  );
+}
+
 function Sidebar({ route }: { route: Route }) {
   const d = useClient((s) => s.data)!;
   const [tab, setTabState] = useState<HomeTab>(storedTab);
+  // Las secciones menos usadas van bajo «Más» para que los grupos y las relaciones quepan sin scroll.
+  const [navMore, setNavMore] = useState(() => { try { return localStorage.getItem(NAV_MORE_KEY) === '1'; } catch { return false; } });
+  const toggleNavMore = () => { const v = !navMore; setNavMore(v); try { localStorage.setItem(NAV_MORE_KEY, v ? '1' : '0'); } catch {} };
   const setTab = (v: HomeTab) => { setTabState(v); try { localStorage.setItem(TAB_KEY, v); } catch {} };
   const unreadTotal = d.conversations.reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0);
   const pinnedConvs = d.conversations.filter((c) => c.pinnedAt && matchesTab(c, tab)).sort((a, b) => (a.pinnedAt ?? '').localeCompare(b.pinnedAt ?? ''));
@@ -122,13 +151,17 @@ function Sidebar({ route }: { route: Route }) {
         <img src={asset("/chaggu-logo.svg")} alt="Chaggu" width={78} height={34} />
         <span className="eyebrow" style={{ fontSize: 10 }}>{t('brand.network')}</span>
       </div>
+      <QuickChat />
       <nav className="nav">
-        {NAV.map((n) => (
+        {NAV.filter((n, i) => i < NAV_MAIN || navMore || route.name === n.name).map((n) => (
           <button key={n.name} className={`nav-item ${route.name === n.name ? 'active' : ''}`} onClick={() => navigate(n.to)}>
             <span className="ico">{n.ico}</span><span className="grow">{t(n.label)}</span>
             {n.name === 'today' && unreadTotal > 0 && <span className="pill">{unreadTotal}</span>}
           </button>
         ))}
+        <button className="nav-item nav-more" aria-expanded={navMore} onClick={toggleNavMore}>
+          <span className="ico">{navMore ? '⌃' : '⋯'}</span><span className="grow">{navMore ? t('nav.less') : t('nav.more')}</span>
+        </button>
       </nav>
       <div className="side-scroll">
         <HomeTabs d={d} tab={tab} onTab={setTab} />
@@ -142,7 +175,7 @@ function Sidebar({ route }: { route: Route }) {
         <GroupsTree tab={tab} activeConv={activeConv} activeWs={activeWs} />
         <div className="row" style={{ padding: '14px 10px 2px' }}>
           <span className="eyebrow grow">{t('nav.dms')}</span>
-          <button className="btn ghost small" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)} title={t('dms.new')} aria-label={t('dms.new')}>＋</button>
+          <button className="btn ghost small" onClick={openNewChat} title={t('dms.new')} aria-label={t('dms.new')}>＋</button>
         </div>
         {dms.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />)}
         {dms.length === 0 && tab === 'all' && <button className="side-conv" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)}><span className="hash">＋</span><span className="grow muted">{t('dms.new')}</span></button>}

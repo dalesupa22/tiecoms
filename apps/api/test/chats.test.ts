@@ -28,7 +28,7 @@ async function signup(name: string, orgInviteToken?: string) {
 
 describe('lector de enlaces', () => {
   it('toma el primer enlace sin la puntuación final', () => {
-    expect(firstUrl('mira https://tiecoms.com/c/123, ¿sí?')).toBe('https://tiecoms.com/c/123');
+    expect(firstUrl('mira https://chaggu.com/c/123, ¿sí?')).toBe('https://chaggu.com/c/123');
     expect(firstUrl('(ver https://es.wikipedia.org/wiki/Bogot%C3%A1_(ciudad))')).toBe('https://es.wikipedia.org/wiki/Bogot%C3%A1_(ciudad)');
     expect(firstUrl('sin enlace')).toBeNull();
     expect(firstUrl('javascript:alert(1)')).toBeNull();
@@ -42,9 +42,9 @@ describe('lector de enlaces', () => {
   });
   it('lee Open Graph con comillas simples, entidades y título de respaldo', () => {
     const m = parseMeta(`<html><head><title>Respaldo &amp; más</title>
-      <meta property='og:title' content='Hola &quot;TieComs&quot;'><meta name="description" content="Una red &#x2014; entre empresas">
+      <meta property='og:title' content='Hola &quot;Chaggu&quot;'><meta name="description" content="Una red &#x2014; entre empresas">
       <meta property="og:image" content="/img/c.png"></head></html>`);
-    expect(m).toMatchObject({ title: 'Hola "TieComs"', description: 'Una red — entre empresas', image: '/img/c.png' });
+    expect(m).toMatchObject({ title: 'Hola "Chaggu"', description: 'Una red — entre empresas', image: '/img/c.png' });
     expect(parseMeta('<title>Solo título</title>').title).toBe('Solo título');
   });
   it('arma la vista previa de una página real', async () => {

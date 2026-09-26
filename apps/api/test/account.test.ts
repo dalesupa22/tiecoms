@@ -59,7 +59,7 @@ describe('eliminar cuenta', () => {
     expect((await call('/me', { method: 'PATCH', token: a.accessToken, body: { name: 'Cuenta resucitada' } })).status).toBe(401);
     expect((await call('/workspaces', { token: a.accessToken, body: { name: 'No permitido' } })).status).toBe(401);
     expect((await fetch(`${API}${avatar.json.avatarUrl}`)).status).toBe(404);
-    // El worker elimina el objeto, no solo el enlace de TieComs (S3 falso local).
+    // El worker elimina el objeto, no solo el enlace de Chaggu (S3 falso local).
     await expect.poll(async () => (await fetch(oldDownload)).status, { timeout: 10_000 }).toBe(404);
     // Se puede volver a registrar con el mismo correo.
     expect((await call('/auth/signup', { body: { name: 'Nueva', email, password: PASSWORD, orgName: `Otra ${run}`, device: device() } })).status).toBe(200);

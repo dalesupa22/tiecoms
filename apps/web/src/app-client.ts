@@ -32,11 +32,11 @@ const en = browserLang() === 'en';
 const mobile = navigator.userAgent.includes('Mobile');
 const DEVICE_NAMES: Record<Platform, string> = {
   web: en ? (mobile ? 'Mobile browser' : 'Browser') : (mobile ? 'Navegador móvil' : 'Navegador'),
-  macos: en ? 'TieComs for Mac' : 'TieComs para Mac', windows: en ? 'TieComs for Windows' : 'TieComs para Windows',
-  android: 'TieComs Android', ios: 'TieComs iPhone', agent: en ? 'Agent' : 'Agente',
+  macos: en ? 'Chaggu for Mac' : 'Chaggu para Mac', windows: en ? 'Chaggu for Windows' : 'Chaggu para Windows',
+  android: 'Chaggu Android', ios: 'Chaggu iPhone', agent: en ? 'Agent' : 'Agente',
 };
 
-// En web, API en el mismo origen. En apps, la variable de build apunta a https://app.tiecoms.com.
+// En web, API en el mismo origen. En apps, la variable de build apunta a https://app.chaggu.com.
 const baseUrl = (import.meta.env.VITE_API_ORIGIN as string | undefined) ?? '';
 /** Rutas del API usadas directamente por la interfaz (p. ej. fotos en <img>). */
 export const apiUrl = (path: string) => `${baseUrl}${path}`;

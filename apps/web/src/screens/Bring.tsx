@@ -108,7 +108,7 @@ async function readShared(): Promise<{ text: string; files: File[] }> {
 }
 
 /**
- * «Compartir en TieComs»: vista previa, buscador, hasta 5 conversaciones (recientes primero),
+ * «Compartir en Chaggu»: vista previa, buscador, hasta 5 conversaciones (recientes primero),
  * mensaje opcional y envío con progreso. Mismo diseño que la extensión de iOS y la actividad de Android.
  */
 export function ShareScreen() {

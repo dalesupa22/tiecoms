@@ -4,7 +4,7 @@
  * empresas, grupos (compartido, directivo, interno, con tercero) y directos.
  * Todo pasa por el API público, así que se aplican los mismos permisos que en uso real.
  *
- *   API_URL=https://app.tiecoms.com DEMO_PASSWORD='...' node scripts/seed-demo.mjs
+ *   API_URL=https://app.chaggu.com DEMO_PASSWORD='...' node scripts/seed-demo.mjs
  *
  * No es idempotente a propósito: si la primera cuenta ya existe, se detiene.
  */

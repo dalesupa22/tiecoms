@@ -19,7 +19,7 @@ try {
     console.log(JSON.stringify({ requeued: rowCount }));
   } else if (command === 'probe') {
     const key = objectKey(`avatars/deletion-probe-${randomUUID()}.txt`);
-    await putObject(key, Buffer.from('TieComs storage deletion verification'), 'text/plain');
+    await putObject(key, Buffer.from('Chaggu storage deletion verification'), 'text/plain');
     try { await deletePersonalObject(key); }
     catch (e) { console.error(`Objeto de diagnóstico pendiente de borrar: ${key}`); throw e; }
     let deleted = false;

@@ -268,7 +268,7 @@ function ChatRow({ c, active, multi, onOpen, onPatch }: { c: WaChatDTO; active: 
           <span className="row" style={{ gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
             {multi && <span className="tag">{c.accountLabel}</span>}
             {c.isGroup && c.participants ? <span className="tag">{t('wa.members', { n: c.participants })}</span> : null}
-            {c.linkedConversationId && <span className="tag wa-linked">⇄ TieComs</span>}
+            {c.linkedConversationId && <span className="tag wa-linked">⇄ Chaggu</span>}
           </span>
         </span>
         {c.unread > 0 && <span className="pill">{c.unread}</span>}

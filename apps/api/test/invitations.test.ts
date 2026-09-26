@@ -36,14 +36,14 @@ beforeAll(async () => {
 });
 
 describe('invitación a la empresa por correo', () => {
-  it('envía el correo desde admin@tiecoms.com con un enlace que sirve para registrarse', async () => {
+  it('envía el correo desde admin@chaggu.com con un enlace que sirve para registrarse', async () => {
     const r = await call(`/organizations/${ana.orgId}/invitations`, { token: ana.token, body: { email: mailOf('colega'), lang: 'en' } });
     expect(r.status).toBe(200);
     expect(r.json).toMatchObject({ emailSent: true, emailStatus: 'sent' });
     const [m] = await sentTo(mailOf('colega'));
-    expect(m.sender.email).toBe('admin@tiecoms.com');
+    expect(m.sender.email).toBe('admin@chaggu.com');
     expect(m.replyTo.email).toBe(mailOf('ana'));
-    expect(m.subject).toBe(`ana invited you to Proveedor ${run} on TieComs`);
+    expect(m.subject).toBe(`ana invited you to Proveedor ${run} on Chaggu`);
     const token = tokenIn(m.htmlContent, /signup\?org=([^"&]+)/);
     expect(token).toBe(r.json.token);
     const pending = await call(`/organizations/${ana.orgId}/invitations`, { token: ana.token });
@@ -114,7 +114,7 @@ describe('invitación a un espacio por correo', () => {
     const r = await call(`/workspaces/${workspaceId}/invitations`, { token: ana.token, body: { email: mailOf('beto'), role: 'member', conversationIds: [] } });
     expect(r.json.emailSent).toBe(true);
     const [m] = await sentTo(mailOf('beto'));
-    expect(m.subject).toBe(`ana te invitó a Proyecto ${run} en TieComs`);
+    expect(m.subject).toBe(`ana te invitó a Proyecto ${run} en Chaggu`);
     expect(tokenIn(m.htmlContent, /\/invite\/([^"&]+)/)).toBe(r.json.token);
     const pending = (await call(`/workspaces/${workspaceId}/invitations`, { token: ana.token })).json.invitations;
     expect(pending).toHaveLength(1);

@@ -2,7 +2,7 @@
 
 Las apps permiten reportar mensajes/personas y bloquear contacto. El bloqueo impide nuevos directos, envíos directos en ambos sentidos y nuevos chats grupales iniciados con esa persona. Las apps ocultan sus mensajes en grupos compartidos. Se puede desbloquear desde Ajustes.
 
-`POST /api/v1/reports` guarda el reporte antes de responder. Un trabajo con reintentos avisa a `admin@tiecoms.com` (configurable con `MODERATION_EMAIL`); el correo contiene únicamente la referencia, no el mensaje privado. El operador debe revisar y responder a los reportes, incluidos los trabajos de notificación fallidos. No hay moderación automática ni garantía de plazo de respuesta implementada.
+`POST /api/v1/reports` guarda el reporte antes de responder. Un trabajo con reintentos avisa a `admin@chaggu.com` (configurable con `MODERATION_EMAIL`); el correo contiene únicamente la referencia, no el mensaje privado. El operador debe revisar y responder a los reportes, incluidos los trabajos de notificación fallidos. No hay moderación automática ni garantía de plazo de respuesta implementada.
 
 La cola y las acciones requieren acceso SSH al servidor:
 
@@ -20,7 +20,7 @@ Retirar un mensaje elimina el texto servido y publica la actualización. Suspend
 
 `DELETE /api/v1/account` confirma el correo y, si la cuenta tiene contraseña, la vuelve a pedir. Anonimiza el perfil, elimina las identidades SSO, preferencias, recordatorios, carpetas personales y suscripciones push, revoca sesiones, retira membresías y desconecta WhatsApp (el puente borra sus credenciales/chats privados). Los mensajes y archivos ya compartidos permanecen como registro del espacio; también pueden existir datos personales escritos voluntariamente dentro de ese contenido.
 
-Fotos y archivos personales dejan de estar disponibles en TieComs inmediatamente. Los trabajos `account.delete_file` eliminan después sus objetos S3 con reintentos y borran su registro. El permiso `s3:DeleteObject` debe estar habilitado en los prefijos `tiecoms/avatars/*` y `tiecoms/drive/me/*` del bucket configurado. El worker NO trata permisos denegados como un borrado exitoso. Antes de publicar, comprobar esa autorización y la ausencia de trabajos fallidos. No se borran archivos de espacios compartidos por esta vía. Las copias locales, cachés y backups se rigen por sus políticas de retención.
+Fotos y archivos personales dejan de estar disponibles en Chaggu inmediatamente. Los trabajos `account.delete_file` eliminan después sus objetos S3 con reintentos y borran su registro. El permiso `s3:DeleteObject` debe estar habilitado en los prefijos `tiecoms/avatars/*` y `tiecoms/drive/me/*` del bucket configurado. El worker NO trata permisos denegados como un borrado exitoso. Antes de publicar, comprobar esa autorización y la ausencia de trabajos fallidos. No se borran archivos de espacios compartidos por esta vía. Las copias locales, cachés y backups se rigen por sus políticas de retención.
 
 ## Permiso de almacenamiento pendiente al preparar esta release
 

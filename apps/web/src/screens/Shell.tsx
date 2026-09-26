@@ -119,7 +119,7 @@ function Sidebar({ route }: { route: Route }) {
   return (
     <aside className="side">
       <div className="side-brand">
-        <img src={asset("/tiecoms-mark.svg")} alt="TieComs" width={118} height={26} />
+        <img src={asset("/chaggu-logo.svg")} alt="Chaggu" width={78} height={34} />
         <span className="eyebrow" style={{ fontSize: 10 }}>{t('brand.network')}</span>
       </div>
       <nav className="nav">

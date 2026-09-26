@@ -30,33 +30,33 @@ afterAll(() => server.close());
 
 const invite = () => mail.invitationMail({
   lang: 'es', to: 'lucia@nexo.co', inviterName: 'Ana <b>', inviterEmail: 'ana@xertify.co', targetName: 'Andes & Co',
-  kind: 'workspace', url: 'https://app.tiecoms.com/invite/tok"en', expiresAt: new Date('2026-10-01T12:00:00Z'),
+  kind: 'workspace', url: 'https://app.chaggu.com/invite/tok"en', expiresAt: new Date('2026-10-01T12:00:00Z'),
 });
 
 describe('mail', () => {
-  it('envía con la llave, el remitente admin@tiecoms.com y responder-a de quien invita', async () => {
+  it('envía con la llave, el remitente admin@chaggu.com y responder-a de quien invita', async () => {
     const id = await mail.sendMail(invite());
     expect(id).toBe('<abc@smtp-relay.mailin.fr>');
     expect(last!.headers['api-key']).toBe('xkeysib-test');
-    expect(last!.body.sender).toEqual({ email: 'admin@tiecoms.com', name: 'TieComs' });
+    expect(last!.body.sender).toEqual({ email: 'admin@chaggu.com', name: 'Chaggu' });
     expect(last!.body.to).toEqual([{ email: 'lucia@nexo.co' }]);
     expect(last!.body.replyTo).toEqual({ email: 'ana@xertify.co', name: 'Ana <b>' });
     expect(last!.body.tags).toEqual(['workspace-invitation']);
-    expect(last!.body.subject).toBe('Ana <b> te invitó a Andes & Co en TieComs');
+    expect(last!.body.subject).toBe('Ana <b> te invitó a Andes & Co en Chaggu');
   });
 
   it('escapa el HTML de nombres y enlaces', () => {
     const m = invite();
     expect(m.html).toContain('Ana &lt;b&gt;');
     expect(m.html).toContain('Andes &amp; Co');
-    expect(m.html).toContain('href="https://app.tiecoms.com/invite/tok&quot;en"');
+    expect(m.html).toContain('href="https://app.chaggu.com/invite/tok&quot;en"');
     expect(m.html).not.toContain('<b>Ana <b>');
-    expect(m.text).toContain('https://app.tiecoms.com/invite/tok"en');
+    expect(m.text).toContain('https://app.chaggu.com/invite/tok"en');
   });
 
   it('en inglés cambia asunto y botón', () => {
     const m = mail.invitationMail({ ...{ lang: 'en', to: 'a@b.co', inviterName: 'Ana', inviterEmail: 'a@x.co', targetName: 'Xertify', kind: 'org', url: 'https://x', expiresAt: new Date() } });
-    expect(m.subject).toBe('Ana invited you to Xertify on TieComs');
+    expect(m.subject).toBe('Ana invited you to Xertify on Chaggu');
     expect(m.html).toContain('Accept invitation');
     expect(m.tags).toEqual(['org-invitation']);
   });

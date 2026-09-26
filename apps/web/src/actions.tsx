@@ -86,21 +86,21 @@ function forwardText(d: BootstrapDTO, conv: ConversationDTO, m: MessageDTO) {
 
 export function forwardMenu(d: BootstrapDTO, conv: ConversationDTO, m: MessageDTO, openInternal: () => void): MenuItem {
   const f = forwardText(d, conv, m);
-  const plain = `${f.author}: ${f.body}\n\n— ${f.title} · TieComs\n${f.link}`;
+  const plain = `${f.author}: ${f.body}\n\n— ${f.title} · Chaggu\n${f.link}`;
   return {
     label: t('menu.forward'), icon: '↪',
     items: [
       { label: t('fwd.tiecoms'), icon: '◍', onSelect: openInternal },
       { divider: true },
       { label: t('fwd.whatsapp'), icon: '🟢', onSelect: () => window.open(`https://wa.me/?text=${encodeURIComponent(plain)}`, '_blank', 'noopener') },
-      { label: t('fwd.slack'), icon: '#', onSelect: async () => { await copyText(`>${f.body.split('\n').join('\n>')}\n— *${f.author}* · ${f.title} · <${f.link}|TieComs>`); toast(t('toast.slackCopied')); } },
+      { label: t('fwd.slack'), icon: '#', onSelect: async () => { await copyText(`>${f.body.split('\n').join('\n>')}\n— *${f.author}* · ${f.title} · <${f.link}|Chaggu>`); toast(t('toast.slackCopied')); } },
       { label: t('fwd.teams'), icon: 'T', onSelect: async () => { await copyText(plain); toast(t('toast.teamsCopied')); } },
-      { label: t('fwd.email'), icon: '✉', onSelect: () => { location.href = `mailto:?subject=${encodeURIComponent(`${f.title} · TieComs`)}&body=${encodeURIComponent(plain)}`; } },
+      { label: t('fwd.email'), icon: '✉', onSelect: () => { location.href = `mailto:?subject=${encodeURIComponent(`${f.title} · Chaggu`)}&body=${encodeURIComponent(plain)}`; } },
     ],
   };
 }
 
-/** Reenviar un mensaje a otra conversación de TieComs, conservando autor y origen. */
+/** Reenviar un mensaje a otra conversación de Chaggu, conservando autor y origen. */
 export function ForwardDialog({ source, onClose }: { source: MessageDTO; onClose: () => void }) {
   const d = client.getState().data!;
   const [q, setQ] = useState('');

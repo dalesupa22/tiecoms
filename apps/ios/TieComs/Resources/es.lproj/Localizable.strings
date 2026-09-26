@@ -423,6 +423,9 @@
 "group.photoSaved" = "Foto del grupo actualizada";
 "group.removeConfirm" = "¿Quitar la foto del grupo?";
 "group.removePhoto" = "Quitar foto";
+"groups.archive" = "Archivar grupo";
+"groups.archiveConfirm" = "¿Archivar «{name}»? Sale de la lista de todos sus participantes.";
+"groups.archived" = "Grupo archivado";
 "groups.asOrg" = "Como parte de";
 "groups.badEmails" = "Revisa estos correos: {list}";
 "groups.company" = "Empresa";
@@ -449,6 +452,8 @@
 "groups.newWith" = "Nuevo grupo con {name}";
 "groups.onlyOrg" = "Solo {org}";
 "groups.onlyOrgHint" = "Equipo interno: nadie de fuera lo ve, salvo quien invites como tercero.";
+"groups.ownOnly" = "Solo {org}: nuestro propio canal en esta relación";
+"groups.ownOnlyHint" = "La otra empresa no lo ve. Sirve para coordinarse por dentro.";
 "groups.pending" = "Invitación pendiente";
 "groups.peopleHere" = "Personas del espacio";
 "groups.peopleOf" = "Personas de {org}";
@@ -780,6 +785,8 @@
 "notif.enable" = "Activar notificaciones del navegador";
 "notif.on" = "Notificaciones activadas en este navegador";
 "notif.title" = "Notificaciones";
+"org.autoJoin" = "Entrada automática con @{domain}";
+"org.autoJoinHint" = "Quien inicie sesión con Google o Microsoft con un correo de ese dominio entra a {org} sin invitación.";
 "over.banner" = "Solo lectura · supervisión de administrador";
 "over.body" = "Los grupos donde participa gente de tu empresa. Los que no son tuyos se abren en solo lectura.";
 "over.empty" = "Nadie de tu empresa está en grupos todavía.";

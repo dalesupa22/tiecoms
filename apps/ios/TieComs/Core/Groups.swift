@@ -10,10 +10,11 @@ import Foundation
 
 struct GroupsTree {
     enum Kind: String { case mine, relations, guest, other }
-    /// Grupo con sus derivadas (same/internal/directive) con sangría debajo.
-    struct ConvNode: Identifiable { var conv: ConversationDTO; var derived: [ConversationDTO]; var id: String { conv.id } }
-    /// Espacio (la «carpeta» de una relación). `showHeader` false: sus grupos van directo bajo la empresa.
-    struct WsNode: Identifiable { var ws: WorkspaceDTO; var convs: [ConvNode]; var showHeader: Bool; var id: String { ws.id } }
+    /// Fila de grupo. `label`: «{espacio} · {grupo}» si otro grupo de la misma empresa se llama igual.
+    /// `threadUnread`: respuestas sin leer de sus hilos (los hilos no se listan: viven en la barra del chat).
+    struct ConvNode: Identifiable { var conv: ConversationDTO; var label: String? = nil; var threadUnread: Int = 0; var id: String { conv.id } }
+    /// Espacio de una empresa: no se muestra (solo hay grupos y asuntos); sirve para «Nuevo grupo» e «Invitar».
+    struct WsNode: Identifiable { var ws: WorkspaceDTO; var id: String { ws.id } }
     struct CompanyNode: Identifiable {
         /// id de la empresa, o "pending:<nombre>" para una relación cuya empresa aún no entra.
         var id: String
@@ -22,6 +23,8 @@ struct GroupsTree {
         /// «Invitación pendiente»: la otra empresa aún no entra (solo `counterpartName`).
         var pending: Bool
         var workspaces: [WsNode]
+        /// Los grupos de todos sus espacios, directo bajo la empresa.
+        var groups: [ConvNode] = []
     }
     struct Section: Identifiable {
         /// "mine:<orgId>", "relations", "guest" u "other".
@@ -33,9 +36,7 @@ struct GroupsTree {
         /// Grupos cuyo espacio no está en el snapshot (sección «Otros»).
         var orphans: [ConvNode] = []
 
-        var allConvs: [ConversationDTO] {
-            companies.flatMap { $0.workspaces.flatMap { $0.convs.flatMap { [$0.conv] + $0.derived } } } + orphans.flatMap { [$0.conv] + $0.derived }
-        }
+        var allConvs: [ConversationDTO] { companies.flatMap { $0.groups.map(\.conv) } + orphans.map(\.conv) }
     }
     var pinned: [ConversationDTO] = []
     var sections: [Section] = []
@@ -45,7 +46,7 @@ struct GroupsTree {
     var hasGroups: Bool { !pinned.isEmpty || sections.contains { !$0.allConvs.isEmpty } }
     /// Firma del orden: cuando cambia (llega un mensaje y la fila sube) la lista se anima.
     var orderSignature: [String] {
-        sections.flatMap { s in [s.id] + s.companies.flatMap { [$0.id] + $0.workspaces.flatMap { [$0.id] + $0.convs.map(\.id) } } + s.orphans.map(\.id) }
+        sections.flatMap { s in [s.id] + s.companies.flatMap { [$0.id] + $0.groups.map(\.id) } + s.orphans.map(\.id) }
     }
 }
 
@@ -113,7 +114,7 @@ extension Naming {
             }
             let key = p.companyKey
             if map[key] == nil { order.append(key); map[key] = .init(id: key, org: org, name: name, pending: org == nil, workspaces: []) }
-            map[key]!.workspaces.append(.init(ws: w, convs: [], showHeader: true))
+            map[key]!.workspaces.append(.init(ws: w))
         }
         return order.compactMap { map[$0] }
             .map { var c = $0; c.workspaces.sort { $0.ws.name.localizedCaseInsensitiveCompare($1.ws.name) == .orderedAscending }; return c }
@@ -121,6 +122,9 @@ extension Naming {
     }
 
     /// Grupos: Tu organización (una por cada empresa mía) · Relaciones · Invitado en (+ Otros).
+    /// `tab` es el filtro de chips (Todo/No leídos/Menciones/Asuntos); chats y sidechats viven en DMs.
+    /// Grupos: Tu organización (una por cada empresa mía) · Relaciones · Invitado en (+ Otros).
+    /// Solo hay grupos y asuntos: ningún espacio se muestra; los grupos de todos los espacios van bajo su empresa.
     /// `tab` es el filtro de chips (Todo/No leídos/Menciones/Asuntos); chats y sidechats viven en DMs.
     static func groupsTree(_ d: BootstrapDTO, query: String = "", filterWorkspace: String? = nil, tab: HomeFilter = .all) -> GroupsTree {
         let fold: (String) -> String = { $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
@@ -137,18 +141,14 @@ extension Naming {
             hay += c.memberIds.compactMap { person(d, $0)?.name }
             return hay.contains { fold($0).contains(q) }
         }
-        let rows = d.conversations.filter(isGroupRow)
-        let rowIds = Set(rows.map(\.id))
-        // Derivadas cuyo origen es un grupo visible del mismo espacio: con sangría bajo él.
-        let nested = rows.filter { c in
-            guard let p = c.parentId, rowIds.contains(p) else { return false }
-            return d.conversations.first { $0.id == p }?.workspaceId == c.workspaceId
-        }
-        let nestedIds = Set(nested.map(\.id))
+        let rows = d.conversations.filter { isGroupRow($0) && !isThread($0) }
+        // Respuestas sin leer de los hilos de cada grupo («💬 N» en su fila).
+        var threadUnread: [String: Int] = [:]
+        for t in d.conversations where isThread(t) { if let p = t.parentId { threadUnread[p, default: 0] += HomeOrder.pending(t) } }
         func node(_ c: ConversationDTO) -> GroupsTree.ConvNode? {
-            let kids = nested.filter { $0.parentId == c.id && matches($0) && tab.includes($0) }.sorted(by: HomeOrder.before)
-            guard (matches(c) && tab.includes(c)) || !kids.isEmpty else { return nil }
-            return .init(conv: c, derived: kids)
+            let tu = threadUnread[c.id] ?? 0
+            guard matches(c) && (tab.includes(c) || (tab == .unread && tu > 0)) else { return nil }
+            return .init(conv: c, threadUnread: tu)
         }
         var tree = GroupsTree()
         let showEmpty = filterWorkspace == nil && tab == .all && q.isEmpty
@@ -159,42 +159,43 @@ extension Naming {
         var companies: [GroupsTree.Kind: [String: GroupsTree.CompanyNode]] = [:]
         var mineOrder: [String] = []
         for ws in d.workspaces where filterWorkspace == nil || ws.id == filterWorkspace {
-            let convs = rows.filter { $0.workspaceId == ws.id && !nestedIds.contains($0.id) }.sorted(by: HomeOrder.before).compactMap(node)
-            let wsMatches = !q.isEmpty && (fold(ws.name).contains(q) || fold(ws.counterpartName ?? "").contains(q))
-            if convs.isEmpty && (tab != .all || !(q.isEmpty || wsMatches)) { continue }
+            let convs = rows.filter { $0.workspaceId == ws.id }.compactMap(node)
             let p = placement(d, ws, myOrgs: mine)
             let kind: GroupsTree.Kind
             let org: OrganizationDTO?
             var name: String
+            var pending = false
             switch p {
             case .mine(let id): kind = .mine; org = self.org(d, id); name = org?.name ?? ""
                 if !mineOrder.contains(id) { mineOrder.append(id) }
             case .relation(let id): kind = .relations; org = self.org(d, id); name = org?.name ?? L("common.noCompany")
-            case .pending(let n): kind = .relations; org = nil; name = n
+            case .pending(let n): kind = .relations; org = nil; name = n; pending = true
             case .guest(let id): kind = .guest; org = self.org(d, id); name = org?.name ?? L("common.noCompany")
             }
+            // Un espacio sin grupos no aparece; una relación pendiente sin grupos sí (con Todo y sin buscar, o si su nombre coincide).
+            if convs.isEmpty && !(pending && tab == .all && (q.isEmpty || fold(name).contains(q))) { continue }
             let key = p.companyKey
             // Un pendiente con el mismo nombre que otro: se muestra con el nombre tal como se escribió la primera vez.
             if let prev = companies[kind]?[key] { name = prev.name }
-            var co = companies[kind]?[key] ?? .init(id: key, org: org, name: name, pending: { if case .pending = p { return true }; return false }(), workspaces: [])
-            co.workspaces.append(.init(ws: ws, convs: convs, showHeader: !ws.isOrgHome))
+            var co = companies[kind]?[key] ?? .init(id: key, org: org, name: name, pending: pending, workspaces: [])
+            co.workspaces.append(.init(ws: ws))
+            co.groups += convs
             companies[kind, default: [:]][key] = co
         }
-        func sortCompanies(_ list: [GroupsTree.CompanyNode], singleWithoutHeader: Bool) -> [GroupsTree.CompanyNode] {
+        func finish(_ list: [GroupsTree.CompanyNode]) -> [GroupsTree.CompanyNode] {
             list.map { var c = $0
-                c.workspaces.sort { a, b in
-                    if a.ws.isOrgHome != b.ws.isOrgHome { return a.ws.isOrgHome }
-                    if (a.ws.pinnedAt != nil) != (b.ws.pinnedAt != nil) { return a.ws.pinnedAt != nil }
-                    let ra = HomeOrder.rank(d, a.ws.id), rb = HomeOrder.rank(d, b.ws.id)
-                    return ra == rb ? a.ws.id < b.ws.id : HomeOrder.rankBefore(ra, rb)
+                c.groups.sort { HomeOrder.before($0.conv, $1.conv) }
+                // Dos grupos de la misma empresa con el mismo nombre: «{espacio} · {grupo}» (nunca en el espacio casa).
+                let counts = Dictionary(grouping: c.groups, by: { fold(title(d, $0.conv)) }).mapValues(\.count)
+                for i in c.groups.indices where (counts[fold(title(d, c.groups[i].conv))] ?? 0) > 1 {
+                    if let ws = d.workspaces.first(where: { $0.id == c.groups[i].conv.workspaceId }), !ws.isOrgHome {
+                        c.groups[i].label = "\(ws.name) · \(title(d, c.groups[i].conv))"
+                    }
                 }
-                // En Relaciones e Invitado en, una empresa con un solo espacio no muestra la cabecera del espacio (como la web).
-                if singleWithoutHeader && c.workspaces.count == 1 { c.workspaces[0].showHeader = false }
                 return c
             }
             .sorted { a, b in
-                let ra = HomeOrder.rank(d.conversations.filter { c in a.workspaces.contains { $0.ws.id == c.workspaceId } })
-                let rb = HomeOrder.rank(d.conversations.filter { c in b.workspaces.contains { $0.ws.id == c.workspaceId } })
+                let ra = HomeOrder.rank(a.groups.map(\.conv)), rb = HomeOrder.rank(b.groups.map(\.conv))
                 return ra == rb ? a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending : HomeOrder.rankBefore(ra, rb)
             }
         }
@@ -205,17 +206,15 @@ extension Naming {
         for id in mineIds {
             let co = mineMap[id]
             if co == nil && !showEmpty { continue }
-            let org = self.org(d, id)
-            tree.sections.append(.init(id: "mine:\(id)", kind: .mine, org: org,
-                                       companies: co.map { sortCompanies([$0], singleWithoutHeader: false) } ?? []))
+            tree.sections.append(.init(id: "mine:\(id)", kind: .mine, org: self.org(d, id), companies: co.map { finish([$0]) } ?? []))
         }
-        let rel = sortCompanies(Array((companies[.relations] ?? [:]).values), singleWithoutHeader: true)
+        let rel = finish(Array((companies[.relations] ?? [:]).values))
         if !rel.isEmpty || showEmpty { tree.sections.append(.init(id: "relations", kind: .relations, org: nil, companies: rel)) }
-        let guest = sortCompanies(Array((companies[.guest] ?? [:]).values), singleWithoutHeader: true)
+        let guest = finish(Array((companies[.guest] ?? [:]).values))
         if !guest.isEmpty { tree.sections.append(.init(id: "guest", kind: .guest, org: nil, companies: guest)) }
         if filterWorkspace == nil {
             let wsIds = Set(d.workspaces.map(\.id))
-            let orphans = rows.filter { !($0.workspaceId.map(wsIds.contains) ?? false) && !nestedIds.contains($0.id) }.sorted(by: HomeOrder.before).compactMap(node)
+            let orphans = rows.filter { !($0.workspaceId.map(wsIds.contains) ?? false) }.sorted(by: HomeOrder.before).compactMap(node)
             if !orphans.isEmpty { tree.sections.append(.init(id: "other", kind: .other, org: nil, companies: [], orphans: orphans)) }
         }
         return tree
@@ -423,6 +422,20 @@ extension AppStore {
     /// Invitar a mi empresa por correo (owner/admin).
     func createOrgInvitation(orgId: String, email: String) async throws {
         try await api.requestData("/organizations/\(orgId)/invitations", method: "POST", json: ["email": email, "role": "member", "lang": L10n.lang])
+    }
+
+    struct ArchiveResult: Decodable {
+        var archived: Bool; var workspaceArchived: Bool
+        init(from d: Decoder) throws { let c = try container(d); archived = c.v("archived", false); workspaceArchived = c.v("workspaceArchived", false) }
+    }
+
+    /// Archivar grupo (canManage): sale de la lista de todos; si era el último de un espacio que no es casa, el espacio también.
+    @discardableResult
+    func archiveGroup(_ conversationId: String) async throws -> ArchiveResult {
+        let r: ArchiveResult = try await api.request("/conversations/\(conversationId)/archive", method: "POST", json: [:])
+        homePath.removeAll { $0 == .conversation(conversationId) || $0 == .details(conversationId) }
+        try await loadBootstrap()
+        return r
     }
 
     func loadOversight(orgId: String) async throws -> OversightDTO {

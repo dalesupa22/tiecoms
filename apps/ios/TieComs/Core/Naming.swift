@@ -197,6 +197,9 @@ extension Naming {
     /// Filas de la pestaña Grupos: conversaciones de un espacio con kind group o internal (los sidechats van a DMs).
     static func isGroupRow(_ c: ConversationDTO) -> Bool { !c.kind.isChat && !isSide(c) }
 
+    /// Hilo con los del chat (derivada same/internal/directive): no va en el árbol de Grupos, vive en la barra de su chat.
+    static func isThread(_ c: ConversationDTO) -> Bool { c.parentId != nil && !isSide(c) && ["same", "internal", "directive"].contains(c.deriveKind ?? "") }
+
     /// «Empresa · Espacio» para la cabecera del chat (nil fuera de un espacio).
     static func route(_ d: BootstrapDTO, _ c: ConversationDTO) -> String? {
         guard let ws = d.workspaces.first(where: { $0.id == c.workspaceId }) else { return nil }
@@ -323,7 +326,7 @@ enum HomeFilter: String, CaseIterable, Identifiable {
     /// Chips de Grupos: chats y sidechats viven en la pestaña DMs.
     static let groupCases: [HomeFilter] = [.all, .unread, .mentions, .issues]
     /// Cuenta solo filas de grupo (conversaciones de un espacio).
-    func groupCount(_ d: BootstrapDTO) -> Int { d.conversations.filter { Naming.isGroupRow($0) && includes($0) }.count }
+    func groupCount(_ d: BootstrapDTO) -> Int { d.conversations.filter { Naming.isGroupRow($0) && !Naming.isThread($0) && includes($0) }.count }
     static var savedGroups: HomeFilter { groupCases.contains(saved) ? saved : .all }
 
     private static let key = "tc.home.tab"

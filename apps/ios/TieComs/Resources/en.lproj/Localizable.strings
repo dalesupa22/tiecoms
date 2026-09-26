@@ -423,6 +423,9 @@
 "group.photoSaved" = "Group photo updated";
 "group.removeConfirm" = "Remove the group photo?";
 "group.removePhoto" = "Remove photo";
+"groups.archive" = "Archive group";
+"groups.archiveConfirm" = "Archive “{name}”? It leaves the list of everyone in it.";
+"groups.archived" = "Group archived";
 "groups.asOrg" = "As part of";
 "groups.badEmails" = "Check these emails: {list}";
 "groups.company" = "Company";
@@ -449,6 +452,8 @@
 "groups.newWith" = "New group with {name}";
 "groups.onlyOrg" = "Only {org}";
 "groups.onlyOrgHint" = "Internal team: nobody outside sees it, except people you invite as guests.";
+"groups.ownOnly" = "Only {org}: our own channel in this relationship";
+"groups.ownOnlyHint" = "The other company can’t see it. Use it to coordinate internally.";
 "groups.pending" = "Invitation pending";
 "groups.peopleHere" = "People in the space";
 "groups.peopleOf" = "People from {org}";
@@ -780,6 +785,8 @@
 "notif.enable" = "Turn on browser notifications";
 "notif.on" = "Notifications are on in this browser";
 "notif.title" = "Notifications";
+"org.autoJoin" = "Automatic sign-in with @{domain}";
+"org.autoJoinHint" = "Anyone who signs in with Google or Microsoft using that domain joins {org} without an invitation.";
 "over.banner" = "Read only · admin oversight";
 "over.body" = "Groups where people from your company take part. Groups you are not in open read-only.";
 "over.empty" = "Nobody from your company is in a group yet.";

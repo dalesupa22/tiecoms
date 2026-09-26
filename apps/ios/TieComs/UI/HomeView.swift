@@ -22,6 +22,8 @@ struct HomeView: View {
     @State private var sheet: GroupsSheet?
     @State private var collapsed = HomeCollapse.load()
     @State private var tab = HomeFilter.savedGroups
+    /// Grupo por archivar (confirmación).
+    @State private var archiving: ConversationDTO?
 
     var body: some View {
         @Bindable var store = store
@@ -105,6 +107,16 @@ struct HomeView: View {
                     .accessibilityIdentifier("home.newGroup")
             }
         }
+        .confirmationDialog(archiving.flatMap { c in store.data.map { L("groups.archiveConfirm", ["name": Naming.title($0, c)]) } } ?? "",
+                            isPresented: Binding(get: { archiving != nil }, set: { if !$0 { archiving = nil } }), titleVisibility: .visible) {
+            Button(L("groups.archive"), role: .destructive) {
+                guard let c = archiving else { return }
+                Task {
+                    do { try await store.archiveGroup(c.id); store.show(L("groups.archived")) } catch { store.show(L10n.errorText(error)) }
+                }
+            }
+            Button(L("common.cancel"), role: .cancel) { archiving = nil }
+        }
         .sheet(item: $sheet) { s in
             switch s {
             case .newGroup(let p): NewGroupSheet(preset: p)
@@ -157,17 +169,17 @@ struct HomeView: View {
                     if s.companies.isEmpty {
                         Text(L("grp.mineEmpty")).font(.footnote).foregroundStyle(Theme.textSecondary)
                     }
-                    ForEach(s.companies) { co in workspaces(d, co, kind: s.kind, indent: 0, open: open, searching: searching) }
+                    ForEach(s.companies) { co in groups(d, co, kind: s.kind, indent: 0, open: open) }
                 case .relations, .guest:
                     if s.companies.isEmpty {
                         Text(L("grp.relationsEmpty")).font(.footnote).foregroundStyle(Theme.textSecondary)
                     }
                     ForEach(s.companies) { co in
                         let coOpen = searching || !collapsed.contains("org:\(co.id)")
-                        let all = co.workspaces.flatMap { $0.convs.flatMap { [$0.conv] + $0.derived } }
+                        let all = co.groups.map(\.conv)
                         CompanyRow(org: co.org, open: coOpen, unread: coOpen ? 0 : Naming.unreadCount(all), name: co.name, pending: co.pending) { toggle("org:\(co.id)") }
                             .contextMenu { companyMenu(co, kind: s.kind, tree: tree) }
-                        if coOpen { workspaces(d, co, kind: s.kind, indent: 1, open: open, searching: searching) }
+                        if coOpen { groups(d, co, kind: s.kind, indent: 1, open: open) }
                     }
                 case .other:
                     ForEach(s.orphans) { n in groupRows(d, n, indent: 0, color: nil, guest: false, open: open) }
@@ -195,34 +207,18 @@ struct HomeView: View {
         }
     }
 
-    /// Espacios de una empresa: con cabecera (la carpeta) o sus grupos directo (espacio casa o relación de un solo espacio).
+    /// Solo hay grupos y asuntos: los grupos de todos los espacios de la empresa, directo bajo ella.
     @ViewBuilder
-    private func workspaces(_ d: BootstrapDTO, _ co: GroupsTree.CompanyNode, kind: GroupsTree.Kind, indent: Int, open: [String: [IssueDTO]], searching: Bool) -> some View {
+    private func groups(_ d: BootstrapDTO, _ co: GroupsTree.CompanyNode, kind: GroupsTree.Kind, indent: Int, open: [String: [IssueDTO]]) -> some View {
         let color = co.org.flatMap { Theme.badgeColor($0.colorBg) }
-        let guest = kind == .guest
-        ForEach(co.workspaces) { w in
-            let wsOpen = !w.showHeader || searching || !collapsed.contains("ws:\(w.id)")
-            if w.showHeader {
-                let wsAll = w.convs.flatMap { [$0.conv] + $0.derived }
-                WorkspaceRow(ws: w.ws, orgColor: color, open: wsOpen, unread: wsOpen ? 0 : Naming.unreadCount(wsAll)) { toggle("ws:\(w.id)") }
-                    .contextMenu { workspaceMenu(w.ws, guest: guest) }
-            }
-            if wsOpen {
-                // Bajo la empresa (o la carpeta) los grupos van con sangría; los del espacio casa, directo en la sección.
-                ForEach(w.convs) { n in groupRows(d, n, indent: w.showHeader ? indent + (kind == .mine ? 1 : 0) : indent, color: color, guest: guest, open: open) }
-            }
-        }
+        ForEach(co.groups) { n in groupRows(d, n, indent: indent, color: color, guest: kind == .guest, open: open) }
     }
 
-    /// Un grupo, sus asuntos abiertos (hasta 3 y «+N asuntos») y sus derivadas con sangría.
+    /// Un grupo y sus asuntos abiertos (hasta 3 y «+N asuntos»). Sus hilos viven en la barra del chat.
     @ViewBuilder
     private func groupRows(_ d: BootstrapDTO, _ n: GroupsTree.ConvNode, indent: Int, color: Color?, guest: Bool, open: [String: [IssueDTO]]) -> some View {
-        convLink(d, n.conv, indent: indent, badgeColor: color, group: true, guest: guest)
+        convLink(d, n.conv, indent: indent, badgeColor: color, group: true, guest: guest, label: n.label, threadUnread: n.threadUnread)
         issueLines(n.conv.id, indent: indent, open: open)
-        ForEach(n.derived) { c in
-            convLink(d, c, indent: indent + 1, badgeColor: color, group: true, guest: guest)
-            issueLines(c.id, indent: indent + 1, open: open)
-        }
     }
 
     @ViewBuilder
@@ -256,18 +252,6 @@ struct HomeView: View {
         Button { collapseAll(tree) } label: { Label(L("grp.collapseAll"), systemImage: "rectangle.compress.vertical") }
     }
 
-    @ViewBuilder
-    private func workspaceMenu(_ ws: WorkspaceDTO, guest: Bool) -> some View {
-        if !guest {
-            Button { sheet = .newGroup(.workspace(ws.id)) } label: { Label(L("grp.newHere"), systemImage: "plus.bubble") }
-            Button { sheet = .invite(.workspace(ws.id)) } label: { Label(L("grp.invite"), systemImage: "person.badge.plus") }
-        }
-        Button {
-            Task { do { try await store.setWorkspacePinned(ws.id, ws.pinnedAt == nil) } catch { store.show(L10n.errorText(error)) } }
-        } label: { Label(ws.pinnedAt == nil ? L("menu.pinTop") : L("menu.unpinTop"), systemImage: "pin") }
-        Button { store.homePath.append(.workspace(ws.id)) } label: { Label(L("menu.openSpace"), systemImage: "square.stack.3d.up") }
-    }
-
     private func toggle(_ key: String) {
         withAnimation(.easeInOut(duration: 0.2)) {
             if collapsed.contains(key) { collapsed.remove(key) } else { collapsed.insert(key) }
@@ -275,21 +259,21 @@ struct HomeView: View {
         HomeCollapse.save(collapsed)
     }
 
-    /// «Plegar todo»: empresas y espacios con cabecera.
+    /// «Plegar todo»: las empresas de Relaciones e Invitado en.
     private func collapseAll(_ tree: GroupsTree) {
         withAnimation(.easeInOut(duration: 0.2)) {
             for s in tree.sections {
                 if s.kind == .relations || s.kind == .guest { for co in s.companies { collapsed.insert("org:\(co.id)") } }
-                for co in s.companies { for w in co.workspaces where w.showHeader { collapsed.insert("ws:\(w.id)") } }
             }
         }
         HomeCollapse.save(collapsed)
     }
 
     @ViewBuilder
-    private func convLink(_ d: BootstrapDTO, _ c: ConversationDTO, indent: Int, badgeColor: Color? = nil, showWs: Bool = false, group: Bool = false, guest: Bool = false) -> some View {
+    private func convLink(_ d: BootstrapDTO, _ c: ConversationDTO, indent: Int, badgeColor: Color? = nil, showWs: Bool = false, group: Bool = false, guest: Bool = false,
+                          label: String? = nil, threadUnread: Int = 0) -> some View {
         NavigationLink(value: Route.conversation(c.id)) {
-            HierarchyConvRow(d: d, c: c, badgeColor: badgeColor, showWs: showWs, showIssueChip: !group) { sheet = .issues(c.id) }
+            HierarchyConvRow(d: d, c: c, badgeColor: badgeColor, showWs: showWs, showIssueChip: !group, titleOverride: label, threadUnread: threadUnread) { sheet = .issues(c.id) }
         }
         .listRowInsets(EdgeInsets(top: 6, leading: 16 + CGFloat(indent) * 18, bottom: 6, trailing: 12))
         .accessibilityIdentifier("conv.row.\(c.id)")
@@ -300,6 +284,11 @@ struct HomeView: View {
                 Divider()
                 Button { sheet = .newIssue(c.id) } label: { Label(L("grp.newIssue"), systemImage: "checklist") }
                 Button { sheet = .invite(.group(c.id)) } label: { Label(L("grp.inviteToGroup"), systemImage: "person.badge.plus") }
+            }
+            if group && c.canManage {
+                Divider()
+                Button(role: .destructive) { archiving = c } label: { Label(L("groups.archive"), systemImage: "archivebox") }
+                    .accessibilityIdentifier("grp.archive.\(c.id)")
             }
         }
     }
@@ -429,31 +418,6 @@ struct CompanyRow: View {
     }
 }
 
-struct WorkspaceRow: View {
-    var ws: WorkspaceDTO
-    var orgColor: Color?
-    var open: Bool
-    var unread: Int
-    var onToggle: () -> Void
-    var body: some View {
-        Button(action: onToggle) {
-            HStack(spacing: 8) {
-                Rectangle().fill(Theme.textSecondary.opacity(0.35)).frame(width: 2, height: 18).accessibilityHidden(true)
-                Text((ws.pinnedAt != nil ? "📌 " : "") + ws.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textSecondary).lineLimit(1)
-                Spacer()
-                if unread > 0 { UnreadPill(count: unread, color: orgColor) }
-                Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(Theme.textSecondary)
-                    .rotationEffect(.degrees(open ? 90 : 0))
-            }
-            .padding(.leading, 8)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel([ws.name, unread > 0 ? L("a11y.unread", ["n": unread]) : nil].compactMap { $0 }.joined(separator: ", "))
-        .accessibilityHint(open ? L("home.collapse") : L("home.expand"))
-        .accessibilityIdentifier("home.ws.\(ws.id)")
-    }
-}
-
 /// Badge «@» junto a los no leídos cuando me mencionaron.
 struct MentionBadge: View {
     var body: some View {
@@ -488,10 +452,14 @@ struct HierarchyConvRow: View {
     var showWs = false
     /// En Grupos los asuntos van en filas bajo el grupo: sin chip.
     var showIssueChip = true
+    /// «{espacio} · {grupo}» cuando dos grupos de la misma empresa se llaman igual.
+    var titleOverride: String? = nil
+    /// Respuestas sin leer de sus hilos: chip «💬 N».
+    var threadUnread = 0
     var onIssues: () -> Void
 
     var body: some View {
-        let title = Naming.sideRowTitle(d, c)
+        let title = titleOverride ?? Naming.sideRowTitle(d, c)
         let blocked = c.memberIds.contains(where: { store.blockedUserIds.contains($0) })
         let preview = blocked ? L("safety.previewHidden") : (L10n.listPreview(c) ?? L("conv.noMessages"))
         let time = L10n.timeLabel(c.lastMessageAt)
@@ -509,6 +477,12 @@ struct HierarchyConvRow: View {
                     }
                     if c.isMuted { Image(systemName: "bell.slash.fill").font(.caption2).foregroundStyle(Theme.textSecondary).accessibilityHidden(true) }
                     Spacer(minLength: 4)
+                    if threadUnread > 0 {
+                        Text("💬 \(threadUnread)").font(.caption2.weight(.bold)).foregroundStyle(Theme.accentText)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Capsule().fill(Theme.orange.opacity(0.14)))
+                            .accessibilityIdentifier("grp.threadUnread.\(c.id)")
+                    }
                     if c.unreadMentions > 0 { MentionBadge() }
                     if c.unread > 0 { UnreadPill(count: c.unread, color: badgeColor, muted: c.isMuted && c.unreadMentions == 0) }
                 }

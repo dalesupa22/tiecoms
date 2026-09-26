@@ -10,7 +10,12 @@ object Names {
      * Textos que dependen del idioma y se usan desde código puro (títulos de chats grupales).
      * La app los fija al arrancar con los recursos; por defecto, español.
      */
-    data class Labels(val groupChat: String = "Chat grupal", val andMore: String = "y %1\$d más")
+    data class Labels(val groupChat: String = "Chat grupal", val andMore: String = "y %1\$d más", val sideName: String = "Sidechat · %1\$s")
+
+    /** Sidechats viejos se llamaban «Consulta · …»: se muestran como «Sidechat · …» (side.defaultName). */
+    val OLD_SIDE_PREFIXES = listOf("Consulta · ", "Consulta lateral · ", "Side conversation · ")
+    fun sideName(name: String, labels: Labels): String =
+        OLD_SIDE_PREFIXES.firstOrNull { name.startsWith(it) }?.let { labels.sideName.replace("%1\$s", name.removePrefix(it)) } ?: name
     @Volatile var labels = Labels()
 
     fun person(data: BootstrapDTO?, id: String): PersonDTO? = data?.people?.firstOrNull { it.id == id }
@@ -28,11 +33,14 @@ object Names {
     }
 
     /** group → name; internal → name (con candado en la interfaz); direct → la otra persona; multi → name o primeros nombres. */
-    fun conversationTitle(c: ConversationDTO, data: BootstrapDTO?, internalFallback: String, directFallback: String, labels: Labels = this.labels): String = when (c.kind) {
-        "direct" -> otherInDirect(c, data)?.name ?: c.name ?: directFallback
-        "internal" -> c.name?.takeIf { it.isNotBlank() } ?: internalFallback
-        "multi" -> c.name?.takeIf { it.isNotBlank() } ?: multiTitle(c, data, labels)
-        else -> c.name?.takeIf { it.isNotBlank() } ?: directFallback
+    fun conversationTitle(c: ConversationDTO, data: BootstrapDTO?, internalFallback: String, directFallback: String, labels: Labels = this.labels): String {
+        val t = when (c.kind) {
+            "direct" -> otherInDirect(c, data)?.name ?: c.name ?: directFallback
+            "internal" -> c.name?.takeIf { it.isNotBlank() } ?: internalFallback
+            "multi" -> c.name?.takeIf { it.isNotBlank() } ?: multiTitle(c, data, labels)
+            else -> c.name?.takeIf { it.isNotBlank() } ?: directFallback
+        }
+        return if (c.isSide) sideName(t, labels) else t
     }
 
     /** Chat grupal sin nombre: primeros nombres de los demás («Mateo, Ana, Laura y 2 más»). */

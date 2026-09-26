@@ -121,7 +121,7 @@ class AppContainer(private val app: Application) {
 
     fun init() {
         // Títulos de chats grupales sin nombre, en el idioma del teléfono (código puro de core/Names).
-        Names.labels = Names.Labels(app.getString(R.string.chat_group_chat), app.getString(R.string.chat_and_more))
+        Names.labels = Names.Labels(app.getString(R.string.chat_group_chat), app.getString(R.string.chat_and_more), app.getString(R.string.side_default_name))
         notifier.ensureChannel()
         sounds.hashCode() // precarga SoundPool: el sonido del splash debe estar listo en t = 0,3 s
         scope.launch { _client.value.start() }
@@ -182,7 +182,17 @@ class AppContainer(private val app: Application) {
         if (!notifier.firstTime(dedupe)) return
         scope.launch {
             when (p.type) {
-                "message" -> {
+                "side" -> {
+                    // TC_SIDE: Responder (RemoteInput) escribe en el sidechat; tocar abre el origen con el sidechat desplegado
+                    // si puedo leerlo (si no, el sidechat a pantalla completa con la tarjeta del ancla).
+                    val author = p.authorName?.takeIf { it.isNotBlank() } ?: p.title
+                    val origin = p.sideOfConversationId
+                    val open = if (origin != null) "tiecoms://c/$origin?side=${p.conversationId}" else null
+                    notifier.showConversation(p.conversationId, listOf(p.title, p.subtitle).filter { it.isNotBlank() }.joinToString(" · "), true,
+                        p.authorId?.takeIf { it.isNotBlank() } ?: author, author, p.body, loadAvatar(p.authorAvatarUrl),
+                        silent = !settings.soundsEnabled, badge = p.badge, messageId = p.messageId, openUri = open)
+                }
+                "message", "mention" -> {
                     val isGroup = p.subtitle.isNotBlank()
                     val author = p.authorName?.takeIf { it.isNotBlank() } ?: p.title
                     notifier.showConversation(p.conversationId, p.title, isGroup, p.authorId?.takeIf { it.isNotBlank() } ?: author, author, p.body,
@@ -266,10 +276,14 @@ class AppContainer(private val app: Application) {
                 val author = Names.person(data, m.authorId)
                 val authorName = author?.name ?: app.getString(R.string.former_participant)
                 val isGroup = conv != null && conv.kind != "direct"
+                // Sidechat: «💬 Sidechat de <autor>» y, al tocar, el chat de origen con el sidechat desplegado.
+                val side = conv?.takeIf { it.isSide }
+                val chatTitle = if (side != null) app.getString(R.string.side_notif_title, authorName) else if (isGroup) conversationName(m.conversationId) else authorName
+                val open = side?.parentId?.let { p -> if (c.meta(p) != null) "tiecoms://c/$p?side=${side.id}" else null }
                 scope.launch {
                     val icon = loadAvatar(author?.avatarUrl)
-                    notifier.showConversation(m.conversationId, if (isGroup) conversationName(m.conversationId) else authorName, isGroup,
-                        m.authorId ?: "?", authorName, m.body.take(300), icon, silent = fg || !settings.soundsEnabled, badge = c.badge(), messageId = m.id, seq = m.seq)
+                    notifier.showConversation(m.conversationId, chatTitle, isGroup || side != null,
+                        m.authorId ?: "?", authorName, m.body.take(300), icon, silent = fg || !settings.soundsEnabled, badge = c.badge(), messageId = m.id, seq = m.seq, openUri = open)
                 }
             }
             is ClientSignal.ReminderDue -> {

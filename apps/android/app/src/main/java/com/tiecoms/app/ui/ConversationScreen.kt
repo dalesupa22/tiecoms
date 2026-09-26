@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -71,6 +72,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -170,6 +176,8 @@ fun ConversationScreen(
     onPrivateReply: (MessageDTO) -> Unit = {},
     /** Dentro del panel de una lateral: sin barra superior propia. */
     embedded: Boolean = false,
+    /** Sidechat a desplegar al abrir (notificación TC_SIDE: …/c/<origen>?side=<sidechat>). */
+    openSide: String? = null,
 ) {
     val client = LocalClient.current
     val container = LocalContainer.current
@@ -197,7 +205,7 @@ fun ConversationScreen(
     var highlight by remember { mutableStateOf<Long?>(null) }
     var menuFor by remember { mutableStateOf<MessageDTO?>(null) }
     var sideStart by remember { mutableStateOf<MessageDTO?>(null) }
-    var sideOpen by rememberSaveable { mutableStateOf<String?>(null) }
+    var sideOpen by rememberSaveable(openSide) { mutableStateOf(openSide) }
     var convMenu by rememberSaveable { mutableStateOf(false) }
     var replyTo by remember { mutableStateOf<MessageDTO?>(null) }
     var editing by remember { mutableStateOf<MessageDTO?>(null) }
@@ -343,8 +351,26 @@ fun ConversationScreen(
 
     val wide = LocalConfiguration.current.screenWidthDp >= 840
     val sideMeta = sideOpen?.let { sid -> data.conversations.firstOrNull { it.id == sid } }
+    // Sidechat (SPEC-v4 §G): minimizado a burbuja flotante, posición del ancla, de la lista y del panel (conector).
+    var sideMin by rememberSaveable(sideOpen) { mutableStateOf(false) }
+    var anchorRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    var listRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    var panelRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    var overlayOrigin by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    var sideAdd by remember { mutableStateOf(false) }
+    var sideReturn by remember { mutableStateOf(false) }
+    val showPanel = sideMeta != null && !embedded && !sideMin
+    // Dentro de un sidechat: «Responde a <quien preguntó> en privado…» y «No sé, pregúntale a…» suma personas.
+    var sideAddHere by remember { mutableStateOf(false) }
+    val sidePlaceholder = if (meta.isSide) {
+        val asker = conv?.messages?.firstOrNull { it.kind == "text" }?.authorId ?: meta.memberIds.firstOrNull { it != me }
+        if (asker != null && asker != me && meta.memberIds.size <= 2) stringResource(R.string.side_placeholder, Names.person(data, asker)?.name?.substringBefore(' ') ?: "")
+        else stringResource(R.string.side_placeholder_many)
+    } else null
+    val sideAnchorMsg = sideMeta?.let { sm -> conv?.messages?.firstOrNull { it.id == sm.parentMessageId } }
+    Box(Modifier.fillMaxSize().onGloballyPositioned { overlayOrigin = it.positionInRoot() }) {
     Row(Modifier.fillMaxSize()) {
-    Box(Modifier.weight(1f)) {
+    Box(Modifier.weight(if (showPanel && wide) 0.6f else 1f)) {
     Scaffold(
         topBar = { if (!embedded)
             TopAppBar(
@@ -391,7 +417,8 @@ fun ConversationScreen(
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize().navigationBarsPadding().imePadding()) {
             ConnectionBanner(state.connection)
-            LineageBar(meta, data, onOpenConversation, onReturn = { returning = true }, onTrazo = onTrazo)
+            // Dentro del panel del sidechat, «Llevar al hilo» ya está en ⋯ y la tarjeta del ancla hace de linaje.
+            if (!(embedded && meta.isSide)) LineageBar(meta, data, onOpenConversation, onReturn = { returning = true }, onTrazo = onTrazo)
             OpenIssuesBar(openHere, data, onOpenIssue)
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
@@ -401,9 +428,9 @@ fun ConversationScreen(
                         Button(onClick = { reloadKey++ }) { Text(stringResource(R.string.retry)) }
                     }
                     conv?.loaded != true -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                    items.isEmpty() -> Text(stringResource(R.string.no_messages), Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    items.isEmpty() -> Text(stringResource(if (meta.isSide) R.string.side_empty_chat else R.string.no_messages), Modifier.align(Alignment.Center).testTag("sideEmpty"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else -> androidx.compose.runtime.CompositionLocalProvider(LocalVoiceQueue provides voiceQueue) { LazyColumn(
-                        state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize().testTag("messages"),
+                        state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize().onGloballyPositioned { listRect = it.boundsInRoot() }.testTag("messages"),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     ) {
                         items(items, key = { it.key }) { item ->
@@ -422,6 +449,9 @@ fun ConversationScreen(
                                     onQuote = { q -> jumpTo(q.seq) }, onIssue = onOpenIssue, onOpenConversation = { c, seq -> onOpenConversation(c, seq) },
                                     onOpenMedia = { list, i -> viewer = list to i },
                                     onVoiceIssue = { t -> voiceIssue = t to item.m },
+                                    isAnchor = sideMeta?.parentMessageId == item.m.id && !embedded,
+                                    onAnchorBounds = { r -> anchorRect = r },
+                                    onSwipeSide = if (!embedded && item.m.kind == "text" && item.m.deletedAt == null && meta.canPost) ({ sideStart = item.m }) else null,
                                     onOpenFile = { a -> scope.launch { openAttachment(ctx, client, a) } },
                                 )
                                 is ChatItem.Pending -> PendingBubble(item.p, onRetry = { client.retry(item.p.clientMessageId) }, onDiscard = { client.discard(item.p.clientMessageId) })
@@ -450,6 +480,11 @@ fun ConversationScreen(
                     stringResource(R.string.reply_private_to, privateHere.authorName ?: "") + " · «" + excerpt(privateHere.source.body, 100) + "»",
                     stringResource(R.string.reply_cancel), { container.privateReply.value = null }, "privateReplyBar",
                 )
+                // Sidechat: respuestas rápidas del lado de quien recibe (la última palabra no es mía).
+                if (meta.isSide) {
+                    val lastHuman = conv?.messages?.lastOrNull { it.kind == "text" && it.deletedAt == null }
+                    if (lastHuman != null && lastHuman.authorId != me) SideQuickReplies(onSend = { t -> client.send(id, t) }, onAsk = { sideAddHere = true })
+                }
                 Composer(
                 id, title, data, replyTo, editing,
                 onCancelReply = { replyTo = null }, onCancelEdit = { editing = null },
@@ -467,25 +502,43 @@ fun ConversationScreen(
                     if (text.isNotBlank() && text != m.body) act { client.editMessage(m.id, text) }
                 },
                 onBring = { bringing = true },
+                placeholderOverride = if (meta.isSide) sidePlaceholder else null,
             ) } else ReadOnlyNotice()
         }
     }
     }
-    // Panel de la lateral: a la derecha en pantalla ancha (iPad/tableta), hoja casi completa en teléfono.
-    if (sideMeta != null && wide && !embedded) {
+    // Sidechat: split a la derecha (~40 %) en pantalla ancha con conector curvo; hoja con detents en teléfono.
+    if (showPanel && wide) {
         androidx.compose.material3.VerticalDivider()
-        Column(Modifier.width(420.dp).fillMaxSize().testTag("sidePanel")) {
-            SidePanelHeader(sideMeta, conv?.messages?.firstOrNull { it.id == sideMeta.parentMessageId }, data, onFull = { sideOpen = null; onOpenConversation(sideMeta.id, null) }, onClose = { sideOpen = null })
-            ConversationScreen(sideMeta.id, null, onBack = { sideOpen = null }, onDetails = onDetails, onOpenConversation = onOpenConversation, onOpenIssue = onOpenIssue,
-                onOpenEvent = onOpenEvent, onTrazo = onTrazo, onOpenWorkspace = onOpenWorkspace, onPrivateReply = onPrivateReply, embedded = true)
+        Column(Modifier.weight(0.4f).fillMaxHeight().onGloballyPositioned { panelRect = it.boundsInRoot() }.testTag("sidePanel")) {
+            SidechatContent(sideMeta!!, sideAnchorMsg, data, onClose = { sideOpen = null }, onMinimize = null,
+                onFull = { sideOpen = null; onOpenConversation(sideMeta.id, null) },
+                onSeeInChat = { sideMeta.parentMessageSeq?.let { jumpTo(it) } },
+                onAddPerson = { sideAdd = true }, onReturn = { sideReturn = true },
+                onLeave = { act { client.removeMember(sideMeta.id, me); sideOpen = null } },
+                onDetails = onDetails, onOpenConversation = onOpenConversation, onOpenIssue = onOpenIssue, onOpenEvent = onOpenEvent,
+                onTrazo = onTrazo, onOpenWorkspace = onOpenWorkspace, onPrivateReply = onPrivateReply)
         }
     }
     }
-    if (sideMeta != null && !wide && !embedded) SideSheetHost(onClose = { sideOpen = null }) {
-        SidePanelHeader(sideMeta, conv?.messages?.firstOrNull { it.id == sideMeta.parentMessageId }, data, onFull = { sideOpen = null; onOpenConversation(sideMeta.id, null) }, onClose = { sideOpen = null })
-        ConversationScreen(sideMeta.id, null, onBack = { sideOpen = null }, onDetails = onDetails, onOpenConversation = onOpenConversation, onOpenIssue = onOpenIssue,
-            onOpenEvent = onOpenEvent, onTrazo = onTrazo, onOpenWorkspace = onOpenWorkspace, onPrivateReply = onPrivateReply, embedded = true)
+    if (showPanel && wide) SideConnector(anchorRect, listRect, panelRect, overlayOrigin, sideAnchorMsg?.authorId)
+    // Teléfono: línea fina que une el ancla con el borde de la hoja (chat de fondo visible con la hoja a medias).
+    if (showPanel && !wide) SideTether(anchorRect, overlayOrigin)
+    if (sideMeta != null && sideMin && !embedded) FloatingSideBubble(sideMeta, data, onOpen = { sideMin = false }, onDrop = { sideOpen = null },
+        modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 96.dp))
     }
+    if (showPanel && !wide) SideSheetHost(onMinimize = { sideMin = true }) {
+        SidechatContent(sideMeta!!, sideAnchorMsg, data, onClose = { sideOpen = null }, onMinimize = { sideMin = true },
+            onFull = { sideOpen = null; onOpenConversation(sideMeta.id, null) },
+            onSeeInChat = { sideMin = true; sideMeta.parentMessageSeq?.let { jumpTo(it) } },
+            onAddPerson = { sideAdd = true }, onReturn = { sideReturn = true },
+            onLeave = { act { client.removeMember(sideMeta.id, me); sideOpen = null } },
+            onDetails = onDetails, onOpenConversation = onOpenConversation, onOpenIssue = onOpenIssue, onOpenEvent = onOpenEvent,
+            onTrazo = onTrazo, onOpenWorkspace = onOpenWorkspace, onPrivateReply = onPrivateReply)
+    }
+    if (sideAdd && sideMeta != null) SideAddPeopleSheet(sideMeta, meta) { sideAdd = false }
+    if (sideAddHere && meta.isSide) SideAddPeopleSheet(meta, meta.parentId?.let { p -> data.conversations.firstOrNull { it.id == p } }) { sideAddHere = false }
+    if (sideReturn && sideMeta != null) SideReturnSheet(sideMeta, title, onClose = { sideReturn = false }, onReturned = { _, seq -> sideOpen = null; seq?.let { jumpTo(it) } })
     sideStart?.let { m -> SideStartSheet(meta, m, onClose = { sideStart = null }, onStarted = { sid -> sideOpen = sid }) }
 
     reportMessage?.let { ReportDialog(it.authorId, it.id, onClose = { reportMessage = null }) }
@@ -501,7 +554,8 @@ fun ConversationScreen(
     if (showPins) PinsSheet(meta, onJump = { seq -> showPins = false; jumpTo(seq) }, onClose = { showPins = false })
     if (returning) {
         val parent = meta.parentId?.let { pid -> data.conversations.firstOrNull { it.id == pid } }
-        if (parent != null) ReturnDialog(meta, titleOf(ctx, parent, data), onClose = { returning = false }, onReturned = { pid, seq -> onOpenConversation(pid, seq) })
+        if (parent != null && meta.isSide) SideReturnSheet(meta, titleOf(ctx, parent, data), onClose = { returning = false }, onReturned = { pid, seq -> onOpenConversation(pid, seq) })
+        else if (parent != null) ReturnDialog(meta, titleOf(ctx, parent, data), onClose = { returning = false }, onReturned = { pid, seq -> onOpenConversation(pid, seq) })
     }
     confirmDelete?.let { m ->
         AlertDialog(
@@ -588,6 +642,7 @@ private fun LinChip(text: String, onClick: () -> Unit) {
 private fun Composer(
     id: String, title: String, data: BootstrapDTO, replyTo: MessageDTO?, editing: MessageDTO?,
     onCancelReply: () -> Unit, onCancelEdit: () -> Unit, onSend: (String, List<com.tiecoms.app.core.AttachmentDTO>) -> Unit, onSaveEdit: (MessageDTO, String) -> Unit, onBring: () -> Unit,
+    placeholderOverride: String? = null,
 ) {
     val client = LocalClient.current
     val ctx = LocalContext.current
@@ -686,7 +741,7 @@ private fun Composer(
                 else OutlinedTextField(
                     value = if (editing != null) editText else text,
                     onValueChange = { if (editing != null) editText = it else { text = it; if (it.isNotBlank()) client.typing(id) } },
-                    placeholder = { Text(stringResource(R.string.placeholder, title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    placeholder = { Text(placeholderOverride ?: stringResource(R.string.placeholder, title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     maxLines = 6, shape = RoundedCornerShape(24.dp),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surface, focusedContainerColor = MaterialTheme.colorScheme.surface),
@@ -773,6 +828,11 @@ private fun MessageBubble(
     onLongPress: () -> Unit, onQuote: (MessageDTO) -> Unit, onIssue: (String) -> Unit, onOpenConversation: (String, Long?) -> Unit,
     onOpenMedia: (List<com.tiecoms.app.core.AttachmentDTO>, Int) -> Unit = { _, _ -> }, onOpenFile: (com.tiecoms.app.core.AttachmentDTO) -> Unit = {},
     onVoiceIssue: (String) -> Unit = {},
+    /** Ancla del sidechat abierto: halo y su posición para el conector (SPEC-v4 §G.2). */
+    isAnchor: Boolean = false,
+    onAnchorBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
+    /** Deslizar la burbuja a la derecha: «Preguntar en un sidechat». */
+    onSwipeSide: (() -> Unit)? = null,
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val openMenu = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onLongPress() }
@@ -812,10 +872,21 @@ private fun MessageBubble(
             if (item.showAuthor) AuthorAvatar(author, m.authorId, 28.dp, Modifier.testTag("avatar-${m.seq}")) else Spacer(Modifier.width(28.dp))
             Spacer(Modifier.width(6.dp))
         }
+        var swipe by remember(m.id) { androidx.compose.runtime.mutableFloatStateOf(0f) }
+        val swipeMax = with(androidx.compose.ui.platform.LocalDensity.current) { 96.dp.toPx() }
+        if (isAnchor) androidx.compose.runtime.DisposableEffect(m.id) { onDispose { onAnchorBounds(null) } }
         Box {
         Column(
             Modifier.widthIn(max = maxW)
-                .graphicsLayer { val s = 1f + 0.03f * lift; scaleX = s; scaleY = s; shadowElevation = 12f * lift * density; this.shape = shape; clip = false }
+                .then(if (isAnchor) Modifier.onGloballyPositioned { onAnchorBounds(it.boundsInRoot()) } else Modifier)
+                .then(if (onSwipeSide != null) Modifier.pointerInput(m.id) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = { if (swipe >= swipeMax * 0.8f) { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onSwipeSide() }; swipe = 0f },
+                        onDragCancel = { swipe = 0f },
+                    ) { _, dx -> swipe = (swipe + dx).coerceIn(0f, swipeMax) }
+                } else Modifier)
+                .graphicsLayer { val s = 1f + 0.03f * lift; scaleX = s; scaleY = s; translationX = swipe; shadowElevation = 12f * lift * density; this.shape = shape; clip = false }
+                .then(if (isAnchor) Modifier.border(2.dp, Brand.Orange.copy(alpha = 0.55f), shape) else Modifier)
                 .background(if (item.mine) chat.mineBubble else chat.otherBubble, shape)
                 .combinedClickable(onClick = {}, onLongClick = openMenu, onLongClickLabel = menuLabel)
                 // Clic derecho con ratón o panel táctil: el mismo menú.
@@ -871,7 +942,9 @@ private fun MessageBubble(
             m.mergedFrom?.let { cid ->
                 val child = data.conversations.firstOrNull { it.id == cid }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 2.dp)) {
-                    Text("↩ " + (child?.let { stringResource(R.string.lin_result_of, titleOf(ctx, it, data)) } ?: stringResource(R.string.lin_result_hidden)),
+                    // Lo que vuelve de un sidechat se muestra como «Desde un sidechat», sin revelar más que el resumen.
+                    Text("↩ " + (if (m.mergedKind == "side") stringResource(R.string.side_from_sidechat)
+                        else child?.let { stringResource(R.string.lin_result_of, titleOf(ctx, it, data)) } ?: stringResource(R.string.lin_result_hidden)),
                         style = MaterialTheme.typography.labelSmall, color = fg, fontWeight = FontWeight.SemiBold)
                     if (child != null) TextButton(onClick = { onOpenConversation(child.id, null) }) { Text(stringResource(R.string.lin_open), color = fg) }
                 }

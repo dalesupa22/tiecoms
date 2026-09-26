@@ -189,12 +189,20 @@ data class MessageDTO(
     val editedAt: String? = null,
     val deletedAt: String? = null,
     val mergedFrom: String? = null,
+    /** side | same | internal | directive: de qué tipo de derivada volvió («Desde un sidechat»). */
+    val mergedKind: String? = null,
     val forwarded: ForwardedInfo? = null,
     /** Vista previa del primer enlace; llega después del envío con `message.updated`. */
     val linkPreview: LinkPreviewDTO? = null,
     /** Adjuntos (SPEC-v4): vacío o ausente en mensajes viejos. */
     val attachments: List<AttachmentDTO> = emptyList(),
+    /** Menciones con @ (SPEC-v4 §H): solo las válidas, ordenadas por start (UTF-16 sobre body). */
+    val mentions: List<MentionDTO> = emptyList(),
 )
+
+/** Mención: userId o 'all', y el tramo [start, start + length) de body, que empieza con «@». */
+@Serializable
+data class MentionDTO(val userId: String = "", val start: Int = 0, val length: Int = 0)
 
 /** Archivo adjunto a un mensaje. `url` y `thumbUrl` son relativas al API y piden Bearer. */
 @Serializable
@@ -440,6 +448,7 @@ data class IssueEventDTO(
 @Serializable data class PinnedMessages(val messages: List<MessageDTO> = emptyList())
 @Serializable data class ReadResult(val lastReadSeq: Long = 0)
 @Serializable data class IdResult(val id: String = "")
+@Serializable data class ReturnSuggestion(val summary: String = "", val source: String = "fallback")
 @Serializable data class ReturnResult(val parentId: String = "", val messageId: String = "")
 
 @Serializable

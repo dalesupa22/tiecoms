@@ -110,6 +110,8 @@ class Notifier(private val context: Context) {
     fun showConversation(
         conversationId: String, title: String, isGroup: Boolean, authorKey: String, authorName: String, text: String,
         authorIcon: Bitmap?, silent: Boolean, badge: Int, messageId: String? = null, seq: Long? = null,
+        /** Al tocar: otro destino (sidechat → su conversación de origen con el sidechat desplegado). */
+        openUri: String? = null,
     ) {
         if (!enabled()) return
         val lines = history.getOrPut(conversationId) { ArrayDeque() }
@@ -159,7 +161,7 @@ class Notifier(private val context: Context) {
             .setAutoCancel(true)
             .setOnlyAlertOnce(false)
             .setSilent(silent)
-            .setContentIntent(openIntent(deep + (seq?.let { "?m=$it" } ?: ""), conversationId.hashCode()))
+            .setContentIntent(openIntent(openUri ?: (deep + (seq?.let { "?m=$it" } ?: "")), conversationId.hashCode()))
             .build()
         notify(conversationId.hashCode(), n)
     }

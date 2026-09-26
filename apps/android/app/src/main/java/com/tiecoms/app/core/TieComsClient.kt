@@ -867,6 +867,12 @@ class TieComsClient(
             request("POST", "/conversations/$conversationId/attachments", null, AttachmentDTO.serializer(), raw)
         }
 
+    /** Resumen sugerido para «Llevar al hilo» (DeepSeek si hay llave; si no, las últimas respuestas). */
+    suspend fun suggestReturn(sideId: String): ReturnSuggestion = withContext(dispatcher) {
+        val raw = HttpApi.RawBody("{}".toByteArray(), "application/json", mapOf("accept-language" to java.util.Locale.getDefault().toLanguageTag()))
+        request("POST", "/conversations/$sideId/return/suggest", null, ReturnSuggestion.serializer(), raw)
+    }
+
     /** Nota de voz (SPEC-v4 §F): cabeceras x-voice-note, x-duration-ms y x-waveform (≤ 64 valores 0–1). */
     data class Voice(val durationMs: Long, val waveform: List<Float>) {
         fun headers(): Map<String, String> = mapOf(

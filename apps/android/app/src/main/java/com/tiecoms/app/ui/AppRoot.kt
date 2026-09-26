@@ -211,7 +211,8 @@ private fun MainNav() {
     val meId = state.data?.me?.id
     LaunchedEffect(meId) { if (meId != null) withContext(Dispatchers.IO) { com.tiecoms.app.platform.PushSetup.register(ctx.applicationContext) } }
 
-    fun openConv(id: String, seq: Long? = null) = nav.navigate("conv/$id" + (seq?.let { "?m=$it" } ?: "")) { launchSingleTop = true }
+    fun openConv(id: String, seq: Long? = null, side: String? = null) =
+        nav.navigate("conv/$id?m=${seq ?: ""}&side=${side ?: ""}") { launchSingleTop = true }
     fun tab(r: String) = nav.navigate(r) { popUpTo(nav.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true }
 
     // El aviso se lanza en un scope propio: al consumir el enlace cambia la clave del efecto y lo cancelaría.
@@ -221,7 +222,9 @@ private fun MainNav() {
         container.pendingLink.value = null
         when (p) {
             is DeepLink.Conversation ->
-                if (data.conversations.any { it.id == p.id }) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.id, p.seq) }
+                if (data.conversations.any { it.id == p.id }) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.id, p.seq, p.side) }
+                // Sidechat de un chat que no puedo leer (colega que no está en el grupo): el sidechat a pantalla completa.
+                else if (p.side != null && data.conversations.any { it.id == p.side }) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.side) }
                 else uiScope.launch { container.toast(ctx.getString(R.string.no_access)) }
             is DeepLink.Workspace ->
                 if (data.workspaces.any { it.id == p.id }) nav.navigate("home?ws=${p.id}") { popUpTo(0) { inclusive = true } }
@@ -277,10 +280,14 @@ private fun MainNav() {
             }
             composable("agenda") { AgendaScreen(onOpenEvent = { nav.navigate("event/$it") }) }
             composable("settings") { SettingsScreen(onNavigate = { r -> nav.navigate(r) { launchSingleTop = true } }) }
-            composable("conv/{id}?m={m}", arguments = listOf(navArgument("m") { type = NavType.StringType; nullable = true; defaultValue = null })) {
+            composable("conv/{id}?m={m}&side={side}", arguments = listOf(
+                navArgument("m") { type = NavType.StringType; nullable = true; defaultValue = null },
+                navArgument("side") { type = NavType.StringType; nullable = true; defaultValue = null },
+            )) {
                 val id = it.arguments?.getString("id") ?: ""
                 ConversationScreen(
                     id = id, jumpSeq = it.arguments?.getString("m")?.toLongOrNull(),
+                    openSide = it.arguments?.getString("side")?.takeIf { s -> s.isNotBlank() },
                     onBack = { if (!nav.popBackStack()) tab("home") },
                     onDetails = { nav.navigate("details/$id") { launchSingleTop = true } },
                     onOpenConversation = { cid, seq -> openConv(cid, seq) },

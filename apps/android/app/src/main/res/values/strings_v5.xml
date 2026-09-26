@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generado con tools/strings_v5.py desde apps/web/src/i18n.ts (SPEC-v4 §G, §H). -->
+<resources>
+    <string name="side_replies">%1$d messages</string>
+    <string name="side_reply_one">1 message</string>
+    <string name="side_thread">Sidechat · %1$d</string>
+    <string name="side_chip_one">💬 Sidechat</string>
+    <string name="side_returned_chip">✓ Brought to the thread</string>
+    <string name="side_from_sidechat">From a sidechat</string>
+    <string name="side_private_n">Private · just you %1$d</string>
+    <string name="side_placeholder">Reply to %1$s privately…</string>
+    <string name="side_placeholder_many">Reply privately…</string>
+    <string name="side_quick_check">Let me check</string>
+    <string name="side_quick_ask">I don’t know, ask…</string>
+    <string name="side_quick_later">I’ll get back to you soon</string>
+    <string name="side_empty_chat">Ask without the group seeing it</string>
+    <string name="side_see_in_chat">View in chat</string>
+    <string name="side_publish">Post in the thread</string>
+    <string name="side_preview_in_group">How it will look in the group</string>
+    <string name="side_suggested">Suggested summary</string>
+    <string name="side_suggested_fallback">Latest replies</string>
+    <string name="side_suggesting">Preparing a summary…</string>
+    <string name="side_add_person">Add person</string>
+    <string name="side_leave">Leave sidechat</string>
+    <string name="side_minimize">Minimize</string>
+    <string name="side_pick_people">With whom</string>
+    <string name="side_suggestions">Suggestions</string>
+    <string name="side_enter_sends">Enter sends</string>
+    <string name="side_default_name">Sidechat · %1$s</string>
+    <string name="side_return_edit">You can edit it before posting.</string>
+    <string name="side_return_body">It is posted in “%1$s” as the answer. Everyone there will see it.</string>
+    <string name="side_returned">The answer is already in the thread</string>
+    <string name="side_list">Sidechats</string>
+    <string name="side_selected">%1$d selected</string>
+    <string name="side_selected_one">1 selected</string>
+    <string name="side_why_blocked">There is an active block</string>
+    <string name="side_why_history">Cannot see this message</string>
+    <string name="side_from_message">Sidechat about a message from %1$s</string>
+    <string name="side_notif_title">💬 Sidechat from %1$s</string>
+    <string name="mention_all">all</string>
+    <string name="mention_all_hint">Notify everyone in this chat</string>
+    <string name="mention_you_mentioned">You were mentioned</string>
+    <string name="mention_mentioned_you">%1$s mentioned you</string>
+    <string name="mention_inbox">Mentions</string>
+    <string name="mention_empty">Nobody has mentioned you yet.</string>
+    <string name="mention_tab">Mentions</string>
+    <string name="mention_badge">@</string>
+    <string name="mention_not_in_chat">%1$s is not in this chat</string>
+    <string name="mention_add_to_chat">Add</string>
+    <string name="mention_ask_side">Ask them in a sidechat</string>
+    <string name="mention_dropped">Could not mention: %1$s</string>
+    <string name="mention_picker">Mention someone</string>
+    <string name="mention_no_match">Nobody in this chat matches.</string>
+    <string name="mention_load_more">Load more</string>
+    <string name="mention_in_conv">in %1$s</string>
+    <string name="mention_all_label">@all</string>
+</resources>

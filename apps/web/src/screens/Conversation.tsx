@@ -226,10 +226,13 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     const isPinned = pinned.has(m.id);
     return [
       ...(conv.canPost ? [{ label: t('menu.reply'), icon: '↩', onSelect: () => { setReplyTo(m); input.current?.focus(); } }] : []),
-      ...(!mine && conv.kind !== 'direct' ? [{ label: t('preply.action'), icon: '✉', onSelect: () => void replyPrivately(m) }] : []),
+      // Responder en privado: por DM al autor. Es distinto del sidechat (un hilo privado con quien elijas).
+      ...(!mine && conv.kind !== 'direct' ? [{ label: t('preply.action'), icon: '✉', hint: t('menu.hintDm', { name: personById(d, m.authorId)?.name.split(' ')[0] ?? '' }), onSelect: () => void replyPrivately(m) }] : []),
+      { divider: true },
       // Responder aparte, sin llenar el chat: hilo con los del chat o sidechat privado con quien elijas.
-      ...(!embedded && canDerive && myWsRole !== 'guest' ? [{ label: t('menu.derive'), icon: '💬', onSelect: () => setDeriving(m) }] : []),
-      ...(!embedded ? [{ label: t('side.ask'), icon: '🔒', onSelect: () => setSideFor(m) }] : []),
+      ...(!embedded && canDerive && myWsRole !== 'guest' ? [{ label: t('menu.derive'), icon: '💬', hint: t('menu.hintThread'), onSelect: () => setDeriving(m) }] : []),
+      ...(!embedded ? [{ label: t('side.ask'), icon: '🔒', hint: t('menu.hintSide'), onSelect: () => setSideFor(m) }] : []),
+      { divider: true },
       { label: t('menu.copyText'), icon: '⧉', onSelect: async () => { await copyText(m.body); toast(t('toast.copied')); } },
       { label: t('menu.copyLink'), icon: '⛓', onSelect: async () => { await copyText(messageLink(m)); toast(t('toast.linkCopied')); } },
       { divider: true },

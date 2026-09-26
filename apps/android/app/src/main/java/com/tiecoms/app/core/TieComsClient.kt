@@ -304,6 +304,8 @@ class TieComsClient(
         socket.start()
         scheduleFlush(0)
         scope.launch { runCatching { loadRemindersInternal() } }
+        // Asuntos abiertos bajo cada grupo (docs/GRUPOS.md); luego llegan por issue.updated.
+        scope.launch { runCatching { loadOpenIssues() } }
     }
 
     // ---------- Snapshot ----------
@@ -384,7 +386,7 @@ class TieComsClient(
     private fun onAccountEvent(e: AccountEvent) {
         when (e) {
             is AccountEvent.ScopeChanged -> {
-                scope.launch { runCatching { loadBlocks() }; scheduleBootstrap() }
+                scope.launch { runCatching { loadBlocks() }; scheduleBootstrap(); runCatching { loadOpenIssues() } }
             }
             is AccountEvent.ReadUpdated -> {
                 val c = meta(e.conversationId) ?: return
@@ -1139,6 +1141,73 @@ class TieComsClient(
         val r = request("POST", "/invitations/${enc(token)}/accept", "{}", AcceptInvitationResult.serializer())
         loadBootstrapInternal()
         r
+    }
+
+    // ---------- Grupos, invitaciones con enlace y supervisión (docs/GRUPOS.md) ----------
+    /** Destino del «+» de Grupos: grupo interno, grupo en una relación existente o relación nueva. */
+    sealed interface GroupTarget {
+        data class Org(val orgId: String? = null) : GroupTarget
+        data class Workspace(val workspaceId: String) : GroupTarget
+        data class Company(val companyName: String, val orgId: String? = null) : GroupTarget
+    }
+
+    /** POST /groups; después refresca el snapshot para poder abrir el grupo. */
+    suspend fun createGroup(
+        name: String, target: GroupTarget, memberIds: List<String>, inviteEmails: List<String>,
+        inviteRole: String, shareLink: Boolean, lang: String,
+    ): CreateGroupResultDTO = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("name", JsonPrimitive(name.trim().take(120)))
+            put("target", buildJsonObject {
+                when (target) {
+                    is GroupTarget.Org -> { put("kind", JsonPrimitive("org")); target.orgId?.let { put("orgId", JsonPrimitive(it)) } }
+                    is GroupTarget.Workspace -> { put("kind", JsonPrimitive("workspace")); put("workspaceId", JsonPrimitive(target.workspaceId)) }
+                    is GroupTarget.Company -> {
+                        put("kind", JsonPrimitive("company")); put("companyName", JsonPrimitive(target.companyName.trim().take(120)))
+                        target.orgId?.let { put("orgId", JsonPrimitive(it)) }
+                    }
+                }
+            })
+            put("memberIds", kotlinx.serialization.json.JsonArray(memberIds.distinct().map { JsonPrimitive(it) }))
+            put("inviteEmails", kotlinx.serialization.json.JsonArray(inviteEmails.distinct().map { JsonPrimitive(it) }))
+            put("inviteRole", JsonPrimitive(inviteRole))
+            put("shareLink", JsonPrimitive(shareLink))
+            put("lang", JsonPrimitive(lang))
+        }
+        val r = req("POST", "/groups", body, CreateGroupResultDTO.serializer())
+        loadBootstrapInternal(); r
+    }
+
+    /**
+     * POST /workspaces/:id/invitations a un grupo: con [email] es una invitación por correo; sin correo,
+     * un enlace con código para varias personas (multiUse, 14 días).
+     */
+    suspend fun inviteToGroup(workspaceId: String, conversationId: String, role: String, email: String?, lang: String): InvitationCreatedDTO = withContext(dispatcher) {
+        val body = buildJsonObject {
+            email?.let { put("email", JsonPrimitive(it.trim())) }
+            put("role", JsonPrimitive(role))
+            put("conversationIds", kotlinx.serialization.json.JsonArray(listOf(JsonPrimitive(conversationId))))
+            if (email == null) { put("multiUse", JsonPrimitive(true)); put("expiresInDays", JsonPrimitive(14)) }
+            put("history", JsonPrimitive("all"))
+            put("lang", JsonPrimitive(lang))
+        }
+        req("POST", "/workspaces/$workspaceId/invitations", body, InvitationCreatedDTO.serializer())
+    }
+
+    /** Asuntos abiertos de todo mi alcance (se muestran bajo cada grupo). */
+    suspend fun loadOpenIssues(): List<IssueDTO> = loadIssues(open = true)
+
+    /** GET /organizations/:id/oversight (solo owner/admin de esa empresa). */
+    suspend fun oversight(orgId: String): OversightDTO = withContext(dispatcher) {
+        req("GET", "/organizations/$orgId/oversight", null, OversightDTO.serializer())
+    }
+
+    /**
+     * Mensajes de un grupo en solo lectura (supervisión): no pasa por la caché de conversaciones porque
+     * el grupo no está en mi snapshot. [before] = seq más antigua ya cargada.
+     */
+    suspend fun readOnlyMessages(conversationId: String, before: Long? = null): MessagesPage = withContext(dispatcher) {
+        request("GET", "/conversations/$conversationId/messages?limit=50" + (before?.let { "&before=$it" } ?: ""), null, MessagesPage.serializer())
     }
 
     suspend fun previewOrgInvitation(token: String): OrgInvitationPreviewDTO = withContext(dispatcher) {

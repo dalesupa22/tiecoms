@@ -5,7 +5,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
 /** Versión del contrato que habla esta app (packages/contracts CONTRACT_VERSION). */
-const val CONTRACT_VERSION = "2026-09-23"
+const val CONTRACT_VERSION = "2026-09-25"
 const val PLATFORM = "android"
 
 @Serializable
@@ -93,6 +93,10 @@ data class WorkspaceDTO(
     val myRole: String = "member",
     val createdAt: String = "",
     val pinnedAt: String? = null,
+    /** Espacio casa de una empresa («Tu organización»): sus grupos van sin cabecera de espacio. Ausente = false. */
+    val isOrgHome: Boolean = false,
+    /** Relación nueva cuya empresa aún no entra: se muestra en «Relaciones» con este nombre, como pendiente. */
+    val counterpartName: String? = null,
 )
 
 @Serializable
@@ -303,6 +307,12 @@ data class InvitationPreviewDTO(
     val email: String? = null,
     val expiresAt: String = "",
     val valid: Boolean = false,
+    /** Grupos a los que entra la persona (docs/GRUPOS.md). Ausente en servidores viejos. */
+    val groupNames: List<String> = emptyList(),
+    /** Enlace o código para varias personas. */
+    val multiUse: Boolean = false,
+    /** Invitación a un grupo interno de una empresa: se entra como invitado de fuera. */
+    val orgHome: Boolean = false,
 )
 
 @Serializable
@@ -313,6 +323,50 @@ data class OrgInvitationPreviewDTO(
     val expiresAt: String = "",
     val valid: Boolean = false,
 )
+
+/** Respuesta de POST /workspaces/:id/invitations: `url` para compartir y, sin correo, `code` (K7QM-4XPA). */
+@Serializable
+data class InvitationCreatedDTO(
+    val id: String = "",
+    val token: String = "",
+    val url: String = "",
+    val code: String? = null,
+    val expiresAt: String = "",
+    val emailSent: Boolean = false,
+    val emailStatus: String? = null,
+)
+
+/** Respuesta de POST /groups (el «+» de Grupos). Con shareLink trae el enlace y el código. */
+@Serializable
+data class CreateGroupResultDTO(
+    val workspaceId: String = "",
+    val conversationId: String = "",
+    val invited: Int = 0,
+    val inviteUrl: String? = null,
+    val inviteCode: String? = null,
+)
+
+/** Supervisión: un grupo donde participa gente de mi empresa (solo owner/admin). */
+@Serializable
+data class OversightGroupDTO(
+    val conversationId: String = "",
+    val name: String? = null,
+    /** group | internal */
+    val kind: String = "group",
+    val workspaceId: String = "",
+    val workspaceName: String = "",
+    val owningOrgId: String = "",
+    val organizationIds: List<String> = emptyList(),
+    val memberCount: Int = 0,
+    /** Personas de mi empresa en el grupo. */
+    val myOrgMemberIds: List<String> = emptyList(),
+    val lastMessageAt: String? = null,
+    /** Si ya soy miembro; si no, se abre en solo lectura. */
+    val iAmMember: Boolean = false,
+)
+
+@Serializable
+data class OversightDTO(val orgId: String = "", val groups: List<OversightGroupDTO> = emptyList())
 
 @Serializable
 data class AcceptInvitationResult(val workspaceId: String = "", val conversationIds: List<String> = emptyList())

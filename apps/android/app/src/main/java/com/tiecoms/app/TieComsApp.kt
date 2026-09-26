@@ -27,6 +27,7 @@ import com.tiecoms.app.platform.AppSettings
 import com.tiecoms.app.platform.KeystoreSecretStore
 import com.tiecoms.app.platform.NoopPushRegistrar
 import com.tiecoms.app.platform.Notifier
+import com.tiecoms.app.platform.PushSetup
 import com.tiecoms.app.platform.PrefsStorage
 import com.tiecoms.app.platform.Sound
 import com.tiecoms.app.platform.SoundPlayer
@@ -140,15 +141,30 @@ class AppContainer(private val app: Application) {
                     }
                 }
         }
+        // A token can arrive before login or while restoring a saved session.
+        scope.launch {
+            client.flatMapLatest { it.state }
+                .map { it.status to it.data?.me?.id }
+                .distinctUntilChanged()
+                .collect { (status, meId) ->
+                    if (status == com.tiecoms.app.core.SessionStatus.READY && meId != null) retryPushRegistration()
+                }
+        }
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) { client.value.wake() }
+            override fun onStart(owner: LifecycleOwner) {
+                client.value.wake()
+                retryPushRegistration()
+            }
         })
         val cm = app.getSystemService(ConnectivityManager::class.java)
         runCatching {
             cm.registerNetworkCallback(
                 NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(),
                 object : ConnectivityManager.NetworkCallback() {
-                    override fun onAvailable(network: Network) { client.value.wake(forceReconnect = false) }
+                    override fun onAvailable(network: Network) {
+                        client.value.wake(forceReconnect = false)
+                        retryPushRegistration()
+                    }
                 },
             )
         }
@@ -180,28 +196,37 @@ class AppContainer(private val app: Application) {
         // Aviso de reunión (minutes) vs. convocatoria: claves distintas para no taparse entre sí.
         val dedupe = if (p.type == "event" && p.minutes != null) "soon:" + p.eventId else p.messageId
         if (!notifier.firstTime(dedupe)) return
-        scope.launch {
-            when (p.type) {
-                "side" -> {
-                    // TC_SIDE: Responder (RemoteInput) escribe en el sidechat; tocar abre el origen con el sidechat desplegado
-                    // si puedo leerlo (si no, el sidechat a pantalla completa con la tarjeta del ancla).
-                    val author = p.authorName?.takeIf { it.isNotBlank() } ?: p.title
-                    val origin = p.sideOfConversationId
-                    val open = if (origin != null) "tiecoms://c/$origin?side=${p.conversationId}" else null
-                    notifier.showConversation(p.conversationId, listOf(p.title, p.subtitle).filter { it.isNotBlank() }.joinToString(" · "), true,
-                        p.authorId?.takeIf { it.isNotBlank() } ?: author, author, p.body, loadAvatar(p.authorAvatarUrl),
-                        silent = !settings.soundsEnabled, badge = p.badge, messageId = p.messageId, openUri = open)
-                }
-                "message", "mention" -> {
-                    val isGroup = p.subtitle.isNotBlank()
-                    val author = p.authorName?.takeIf { it.isNotBlank() } ?: p.title
-                    notifier.showConversation(p.conversationId, p.title, isGroup, p.authorId?.takeIf { it.isNotBlank() } ?: author, author, p.body,
-                        loadAvatar(p.authorAvatarUrl), silent = !settings.soundsEnabled, badge = p.badge, messageId = p.messageId)
-                }
-                else -> notifier.showMessage(p.conversationId, p.title, listOf(p.subtitle, p.body).filter { it.isNotBlank() }.joinToString(" · "),
-                    silent = !settings.soundsEnabled, tag = p.type + ":" + (if (p.minutes != null) "soon:" else "") + (p.reminderId ?: p.eventId ?: p.messageId))
+        // FCM owns the process only until its callback returns. Post immediately; a remote
+        // avatar must never delay the notification or escape into an untracked coroutine.
+        when (p.type) {
+            "side" -> {
+                // TC_SIDE: Responder (RemoteInput) escribe en el sidechat; tocar abre el origen con el sidechat desplegado
+                // si puedo leerlo (si no, el sidechat a pantalla completa con la tarjeta del ancla).
+                val author = p.authorName?.takeIf { it.isNotBlank() } ?: p.title
+                val origin = p.sideOfConversationId
+                val open = if (origin != null) "tiecoms://c/$origin?side=${p.conversationId}" else null
+                notifier.showConversation(p.conversationId, listOf(p.title, p.subtitle).filter { it.isNotBlank() }.joinToString(" · "), true,
+                    p.authorId?.takeIf { it.isNotBlank() } ?: author, author, p.body, cachedPushAvatar(p.authorAvatarUrl),
+                    silent = !settings.soundsEnabled, badge = p.badge, messageId = p.messageId, openUri = open)
             }
+            "message", "mention" -> {
+                val isGroup = p.subtitle.isNotBlank()
+                val author = p.authorName?.takeIf { it.isNotBlank() } ?: p.title
+                notifier.showConversation(p.conversationId, p.title, isGroup, p.authorId?.takeIf { it.isNotBlank() } ?: author, author, p.body,
+                    cachedPushAvatar(p.authorAvatarUrl), silent = !settings.soundsEnabled, badge = p.badge, messageId = p.messageId)
+            }
+            else -> notifier.showMessage(p.conversationId, p.title, listOf(p.subtitle, p.body).filter { it.isNotBlank() }.joinToString(" · "),
+                silent = !settings.soundsEnabled, tag = p.type + ":" + (if (p.minutes != null) "soon:" else "") + (p.reminderId ?: p.eventId ?: p.messageId))
         }
+    }
+
+    private fun cachedPushAvatar(path: String?): android.graphics.Bitmap? {
+        val url = client.value.mediaUrl(path?.takeIf { it.isNotBlank() }) ?: return null
+        return images.cached(url, 128)?.asAndroidBitmap()
+    }
+
+    fun retryPushRegistration() {
+        scope.launch(Dispatchers.IO) { PushSetup.register(app) }
     }
 
     // ---------- SSO ----------

@@ -1,5 +1,6 @@
 import java.io.File
 import java.util.Properties
+import groovy.json.JsonSlurper
 
 plugins {
     alias(libs.plugins.android.application)
@@ -10,9 +11,40 @@ plugins {
 
 /**
  * Push (FCM): el plugin de Google Services solo se aplica si existe app/google-services.json
- * (fuera de git). Sin él la app compila igual y el push queda desactivado (PushSetup lo detecta).
+ * (fuera de git). Debug puede compilar sin él; release exige la configuración de producción.
  */
 if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
+
+val verifyReleaseFirebase = tasks.register("verifyReleaseFirebase") {
+    group = "verification"
+    description = "Require the production Firebase configuration before packaging a release."
+    val configFile = layout.projectDirectory.file("google-services.json")
+    doLast {
+        val source = configFile.asFile
+        check(source.isFile) { "Release push requires app/google-services.json from Firebase project tiecoms." }
+        val config = try {
+            JsonSlurper().parse(source) as? Map<*, *>
+        } catch (_: Exception) {
+            // JSON parser errors can quote API keys from the source; keep diagnostics generic.
+            error("Invalid Firebase JSON. Download app/google-services.json again from project tiecoms.")
+        }
+        val project = config?.get("project_info") as? Map<*, *>
+        check(project?.get("project_id") == "tiecoms") { "Release Firebase project must be tiecoms." }
+        val client = (config?.get("client") as? List<*>)?.filterIsInstance<Map<*, *>>()?.firstOrNull {
+            val info = it["client_info"] as? Map<*, *>
+            (info?.get("android_client_info") as? Map<*, *>)?.get("package_name") == "com.tiecoms.app"
+        }
+        check(client != null) { "Release Firebase config must include package com.tiecoms.app." }
+        val info = client["client_info"] as? Map<*, *>
+        val keys = client["api_key"] as? List<*>
+        check(!project?.get("project_number")?.toString().isNullOrBlank() &&
+            !info?.get("mobilesdk_app_id")?.toString().isNullOrBlank() &&
+            keys?.filterIsInstance<Map<*, *>>()?.any { !it["current_key"]?.toString().isNullOrBlank() } == true
+        ) { "Release Firebase config is incomplete; download the original Android config from project tiecoms." }
+    }
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(verifyReleaseFirebase) }
 
 /**
  * Firma de subida (upload key) de Play. Nada de esto vive en el repo: se lee de
@@ -37,8 +69,8 @@ android {
         applicationId = "com.tiecoms.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.5.0"
+        versionCode = 9
+        versionName = "1.5.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "DEFAULT_API_URL", "\"https://app.tiecoms.com\"")
         buildConfigField("String", "CONTRACT_VERSION", "\"2026-09-23\"")

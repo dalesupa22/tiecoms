@@ -6,7 +6,7 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 |---|---|
 | applicationId | `com.tiecoms.app` |
 | minSdk / target / compile | 26 / 36 / 36 |
-| Versión | `versionName 1.5.0`, `versionCode 8`. Sube el `versionCode` en cada envío a Play. |
+| Versión | `versionName 1.5.1`, `versionCode 9`. Sube el `versionCode` en cada envío a Play. |
 | Contrato | `2026-09-25`. Se envía en `x-tiecoms-contract` y en `device.contract`. |
 | API por defecto | `https://app.tiecoms.com` |
 | Toolchain | Gradle 8.14.3 (wrapper), AGP 8.13.2, Kotlin 2.3.21 y JDK 17 |
@@ -169,11 +169,14 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 - **Contrato:** mensajes data-only según el contrato de `mobile-feedback`. Llevan `title`, `subtitle`, `body`, `badge`, `type` (message, reminder o event), `conversationId`, `messageId`, `authorId`, `authorName` y `authorAvatarUrl`; ver `core/PushPayload.kt`. El token se registra con `PUT /api/v1/push/token` (`provider: fcm`, `lang`) después del login. Al cerrar sesión el servidor borra el token.
 - **Notificación:** usa `MessagingStyle` con la `Person` del autor y su foto. Crea un atajo de conversación de larga duración (`LocusId`), así aparece en la sección Conversaciones y se puede abrir como burbuja (`BubbleActivity`). Trae las acciones Responder (RemoteInput, sin abrir la app) y Marcar como leído. Hay tres canales: Mensajes, Recordatorios y Reuniones, todos con el sonido `tc_notify`. El badge es la suma de no leídos de las conversaciones no silenciadas.
 - **Duplicados:** si el mismo mensaje llega por el socket y por push, se muestra una sola vez (se deduplica por `messageId`). Con la app en primer plano y el socket en vivo, el push se ignora.
-- **Sin `google-services.json` (estado actual):** el build compila igual, pero Firebase no se inicializa y el push remoto queda desactivado. Las notificaciones locales del socket siguen funcionando. **Para activarlo, Danny debe:**
+- **Configuración Firebase:** `app/google-services.json` del proyecto `tiecoms` se mantiene fuera de git. `verifyReleaseFirebase` bloquea release si falta el archivo o no corresponde al proyecto/paquete de producción. Debug puede compilar sin el archivo, con push remoto desactivado. Para configurar otra máquina:
   1. Crear el proyecto de Firebase (o usar el GCP `tiecoms`) y agregar la app Android `com.tiecoms.app`, con los SHA-256 de la clave de subida y de la firma de Play.
   2. Descargar `google-services.json` a `apps/android/app/`. Está en `.gitignore` y no se sube.
   3. En el servidor, configurar la cuenta de servicio de FCM (HTTP v1) según el README del API de `mobile-feedback`.
 - **Antes de pedir el permiso:** en Android 13+ se muestra una explicación («Activa las notificaciones») antes de pedir `POST_NOTIFICATIONS`.
+- **Entrega en segundo plano:** el callback FCM publica la notificación antes de retornar, usando el avatar de caché o el ícono local. No espera descargas ni depende de una coroutine fuera del ciclo de vida del servicio.
+- **Registro fiable:** al restaurar la sesión, volver al primer plano, recuperar conexión o conceder el permiso, se registra el token con hasta tres intentos. Se respeta el permiso de notificaciones y se interrumpe el reintento si ya no hay sesión.
+- **Verificación:** `PushDeliveryTest` bloquea el hilo principal y usa un avatar inaccesible para comprobar publicación dentro del callback, acciones y deduplicación. `PushRegistrationTest` cubre reintentos, cancelación y sesión/permiso. `FcmProvisioningTest` se ejecuta explícitamente para obtener un token real del proyecto de Firebase y lo guarda solo en el archivo privado `files/fcm-test-token`, sin imprimirlo.
 
 ## Estructura
 

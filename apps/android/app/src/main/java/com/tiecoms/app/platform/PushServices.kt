@@ -11,8 +11,10 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.tiecoms.app.container
 import com.tiecoms.app.core.PushPayload
+import com.tiecoms.app.core.PushRegistrationCoordinator
 import com.tiecoms.app.core.SessionStatus
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
@@ -25,15 +27,33 @@ import kotlinx.coroutines.withTimeoutOrNull
 object PushSetup {
     fun available(ctx: Context): Boolean = runCatching { FirebaseApp.getApps(ctx).isNotEmpty() || FirebaseApp.initializeApp(ctx) != null }.getOrDefault(false)
 
-    /** Pide el token de FCM y lo registra en el servidor para esta sesión. */
+    private val registration = PushRegistrationCoordinator()
+
+    /** Retry briefly; session restoration, foreground and network recovery trigger later attempts. */
     suspend fun register(ctx: Context) {
+        val container = ctx.container
+        if (!container.notifier.enabled() || container.client.value.state.value.status != SessionStatus.READY) return
         if (!available(ctx)) { Log.i("TieComs", "Push desactivado: falta google-services.json"); return }
-        val token = runCatching {
-            suspendCancellableCoroutine<String?> { k -> FirebaseMessaging.getInstance().token.addOnCompleteListener { t -> k.resume(if (t.isSuccessful) t.result else null) } }
-        }.getOrNull() ?: return
-        val lang = if (java.util.Locale.getDefault().language == "es") "es" else "en"
-        ctx.container.push.onToken(token)
-        runCatching { ctx.container.client.value.registerPushToken(token, lang) }.onFailure { Log.w("TieComs", "No se registró el token push: ${it.message}") }
+        registration.synchronize(
+            allowed = { container.notifier.enabled() && container.client.value.state.value.status == SessionStatus.READY },
+            reportFailure = { Log.w("TieComs", "No se registró el token push; se reintentará") },
+            attempt = {
+                withTimeout(10_000) {
+                    val token = suspendCancellableCoroutine<String> { continuation ->
+                        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                            if (continuation.isActive) {
+                                if (task.isSuccessful) continuation.resume(task.result)
+                                else continuation.resumeWith(Result.failure(task.exception ?: IllegalStateException("FCM token unavailable")))
+                            }
+                        }
+                    }
+                    if (!container.notifier.enabled() || container.client.value.state.value.status != SessionStatus.READY) return@withTimeout
+                    val lang = if (java.util.Locale.getDefault().language == "es") "es" else "en"
+                    container.push.onToken(token)
+                    container.client.value.registerPushToken(token, lang)
+                }
+            },
+        )
     }
 }
 
@@ -41,7 +61,7 @@ object PushSetup {
 class TcMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
         container.push.onToken(token)
-        CoroutineScope(Dispatchers.IO).launch { runCatching { container.client.value.registerPushToken(token, if (java.util.Locale.getDefault().language == "es") "es" else "en") } }
+        container.retryPushRegistration()
     }
 
     override fun onMessageReceived(message: RemoteMessage) = handle(applicationContext, message.data)

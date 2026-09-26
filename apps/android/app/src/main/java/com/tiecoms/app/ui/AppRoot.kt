@@ -194,7 +194,9 @@ private fun MainNav() {
     val uiScope = rememberCoroutineScope()
 
     // Permiso de notificaciones (Android 13+), una sola vez y con una explicación previa (SPEC-v3 §6).
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) container.retryPushRegistration()
+    }
     var askPush by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= 33 && !container.settings.askedNotificationPermission &&
@@ -211,9 +213,6 @@ private fun MainNav() {
         }, modifier = Modifier.testTag("pushAllow")) { Text(stringResource(R.string.push_allow)) } },
         dismissButton = { androidx.compose.material3.TextButton(onClick = { askPush = false; container.settings.askedNotificationPermission = true }) { Text(stringResource(R.string.push_later)) } },
     )
-    // Token de FCM para esta sesión (sin google-services.json el push queda desactivado y no pasa nada).
-    val meId = state.data?.me?.id
-    LaunchedEffect(meId) { if (meId != null) withContext(Dispatchers.IO) { com.tiecoms.app.platform.PushSetup.register(ctx.applicationContext) } }
 
     fun openConv(id: String, seq: Long? = null, side: String? = null) =
         nav.navigate("conv/$id?m=${seq ?: ""}&side=${side ?: ""}") { launchSingleTop = true }

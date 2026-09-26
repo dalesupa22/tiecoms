@@ -1,0 +1,137 @@
+import XCTest
+
+/// Grupos (docs/GRUPOS.md) contra el API de PRUEBAS: 5 pestañas, árbol de Grupos, DMs, Nuevo grupo con
+/// pantalla de compartir, «Tú», unirme con código y supervisión.
+///
+/// Fixture (JSON) por `TEST_RUNNER_TC_FIXTURE_GRUPOS`; con `TEST_RUNNER_TC_SHOTS=/dir` guarda capturas PNG.
+final class GroupsUITests: XCTestCase {
+    struct Fixture: Decodable {
+        struct Person: Decodable { var email: String; var id: String }
+        var apiUrl: String
+        var password: String
+        var a: Person
+        var orgA: String
+        var pagosId: String
+        var ventasId: String
+        var joinCode: String
+    }
+
+    override func setUp() { continueAfterFailure = false }
+
+    private func fixture() throws -> Fixture {
+        guard let path = ProcessInfo.processInfo.environment["TC_FIXTURE_GRUPOS"], !path.isEmpty else { throw XCTSkip("Sin TC_FIXTURE_GRUPOS") }
+        return try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+    }
+
+    private func shot(_ name: String) {
+        let s = XCUIScreen.main.screenshot()
+        let a = XCTAttachment(screenshot: s)
+        a.name = name
+        a.lifetime = .keepAlways
+        add(a)
+        if let dir = ProcessInfo.processInfo.environment["TC_SHOTS"], !dir.isEmpty {
+            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            try? s.pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
+        }
+    }
+
+    private func dismissSystemPrompts(_ app: XCUIApplication) {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        if app.buttons["push.later"].exists { app.buttons["push.later"].tap() }
+        for surface in [app, springboard] {
+            for label in ["Not Now", "Ahora no"] where surface.buttons[label].exists { surface.buttons[label].tap() }
+        }
+    }
+
+    func testGroupsTabsNewGroupShareAndYou() throws {
+        let f = try fixture()
+        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"), "no se prueba contra producción")
+        let app = XCUIApplication()
+        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES",
+                               "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
+        app.launch()
+        let email = app.textFields["login.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 15))
+        email.tap(); email.typeText(f.a.email)
+        let pw = app.secureTextFields["login.password"]
+        pw.tap(); pw.typeText(f.password)
+        app.buttons["login.submit"].tap()
+
+        // 1. Grupos: Tu organización · Relaciones · Invitado en, con los asuntos bajo cada grupo.
+        let pagos = app.buttons["conv.row.\(f.pagosId)"]
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !pagos.exists { dismissSystemPrompts(app); usleep(300_000) }
+        dismissSystemPrompts(app)
+        if app.buttons["home.tab.all"].exists { app.buttons["home.tab.all"].tap() }
+        XCTAssertTrue(pagos.waitForExistence(timeout: 10), "grupo interno en Tu organización")
+        XCTAssertTrue(app.buttons["home.section.mine"].exists)
+        XCTAssertTrue(app.buttons["grp.moreIssues.\(f.pagosId)"].exists, "4 asuntos: se ven 3 y «+1 asuntos»")
+        sleep(1)
+        shot("01-grupos")
+        // Más abajo: Relaciones (con la pendiente) e Invitado en.
+        let pending = app.descendants(matching: .any)["home.pending"]
+        for _ in 0..<4 where !pending.exists { app.swipeUp() }
+        XCTAssertTrue(pending.exists, "relación pendiente con Nestlé")
+        XCTAssertTrue(app.buttons["home.section.relations"].exists)
+        for _ in 0..<2 where !app.buttons["home.section.guest"].exists { app.swipeUp() }
+        XCTAssertTrue(app.buttons["home.section.guest"].exists, "Invitado en")
+        sleep(1)
+        shot("01b-grupos-relaciones")
+        app.swipeDown(); app.swipeDown(); app.swipeDown()
+
+        // 2. DMs: directos y el sidechat con su burbuja.
+        app.tabBars.buttons["DMs"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["dm.sideTag"].waitForExistence(timeout: 8), "sidechat en DMs")
+        sleep(1)
+        shot("02-dms")
+
+        // 3. Nuevo grupo con otra empresa (relación existente) y enlace para compartir.
+        app.tabBars.buttons["Grupos"].tap()
+        app.buttons["home.newGroup"].tap()
+        XCTAssertTrue(app.textFields["grp.name"].waitForExistence(timeout: 5))
+        app.segmentedControls["grp.forWhom"].buttons["Con otra empresa"].tap()
+        let name = app.textFields["grp.name"]
+        name.tap(); name.typeText("Pagos y facturación Q4")
+        app.swipeDown(velocity: .slow)
+        sleep(1)
+        shot("03-nuevo-grupo")
+        app.buttons["sheet.submit"].tap()
+
+        // 4. Pantalla de compartir: el código en grande.
+        XCTAssertTrue(app.staticTexts["share.code"].waitForExistence(timeout: 10), "código para compartir")
+        sleep(1)
+        shot("04-compartir")
+        app.buttons["share.done"].tap()
+        XCTAssertTrue(app.navigationBars.buttons.firstMatch.waitForExistence(timeout: 8))
+
+        // 5. Tú: perfil, unirme con código y supervisión.
+        app.tabBars.buttons["Tú"].tap()
+        XCTAssertTrue(app.buttons["you.joinCode"].waitForExistence(timeout: 8))
+        sleep(1)
+        shot("05-tu")
+
+        // 6. Unirme con código (en minúsculas y sin guion) → abre el grupo.
+        app.buttons["you.joinCode"].tap()
+        let code = app.textFields["join.code"]
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        code.tap(); code.typeText(f.joinCode.lowercased().replacingOccurrences(of: "-", with: ""))
+        XCTAssertTrue(app.descendants(matching: .any)["join.preview"].waitForExistence(timeout: 8), "vista previa con los grupos")
+        shot("06-unirme-codigo")
+        app.buttons["join.accept"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["chat.header"].waitForExistence(timeout: 10), "abre el grupo de la invitación")
+
+        // 7. Supervisión: el grupo de Carlos se abre en solo lectura.
+        app.tabBars.buttons["Tú"].tap()
+        let ovs = app.buttons["you.oversight.\(f.orgA)"]
+        XCTAssertTrue(ovs.waitForExistence(timeout: 5))
+        ovs.tap()
+        let ventas = app.buttons["ovs.group.\(f.ventasId)"]
+        XCTAssertTrue(ventas.waitForExistence(timeout: 8))
+        shot("07-supervision")
+        ventas.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["ovs.banner"].waitForExistence(timeout: 8), "franja de solo lectura")
+        XCTAssertFalse(app.textViews["composer.field"].exists, "sin compositor")
+        sleep(1)
+        shot("08-solo-lectura")
+    }
+}

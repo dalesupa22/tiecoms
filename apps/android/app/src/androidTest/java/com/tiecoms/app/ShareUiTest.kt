@@ -68,11 +68,20 @@ class ShareUiTest {
     // Sin ventanas de Compose (la hoja se cerró y la app está en segundo plano) cuenta como «no está».
     private fun exists(tag: String) = runCatching { compose.onAllNodes(hasTestTag(tag), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }.getOrDefault(false)
 
+    private fun expandUploadNotification() {
+        var node = device.wait(Until.findObject(By.text("Share to Chaggu")), 5_000)
+        repeat(5) {
+            val expand = node?.findObject(By.res(java.util.regex.Pattern.compile(".*:id/expand_button")))
+            if (expand != null) { expand.click(); return }
+            node = node?.parent
+        }
+    }
+
     /** Foto en la galería (MediaStore, Pictures/Chaggu), como si viniera de la cámara. */
     private fun galleryPhoto(label: String, color: Int): Uri {
         val cr = ins.targetContext.contentResolver
         val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "tiecoms-$label-${UUID.randomUUID().toString().take(4)}.jpg")
+            put(MediaStore.Images.Media.DISPLAY_NAME, "chaggu-$label-${UUID.randomUUID().toString().take(4)}.jpg")
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
             if (Build.VERSION.SDK_INT >= 29) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Chaggu")
         }
@@ -138,7 +147,7 @@ class ShareUiTest {
         assertTrue(shortcuts.all { ConversationShortcuts.SHARE_CATEGORY in (it.categories ?: emptySet()) })
 
         // La hoja de compartir del SISTEMA con 3 fotos de la galería: Chaggu y sus conversaciones.
-        val photos = listOf(galleryPhoto("Uno", 0xFF2F6FDB.toInt()), galleryPhoto("Dos", 0xFF1A7F51.toInt()), galleryPhoto("Tres", 0xFFB45309.toInt()))
+        val photos = listOf(galleryPhoto(if (reviewVideo) "One" else "Uno", 0xFF2F6FDB.toInt()), galleryPhoto(if (reviewVideo) "Two" else "Dos", 0xFF1A7F51.toInt()), galleryPhoto(if (reviewVideo) "Three" else "Tres", 0xFFB45309.toInt()))
         device.pressHome()
         val send = Intent(Intent.ACTION_SEND_MULTIPLE).setType("image/jpeg")
             .putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(photos))
@@ -148,16 +157,18 @@ class ShareUiTest {
         val title = Names.conversationTitle(client.meta(convId)!!, client.state.value.data, "Interno", "Conversación")
         device.wait(Until.hasObject(By.text("Chaggu")), 10_000)
         Thread.sleep(1_500)
-        val directShare = device.hasObject(By.textContains(title.take(12)))
+        // The old TieComs app can have a shortcut with the same conversation title.
+        // Select the exact Chaggu app tile; shortcut publication was asserted above.
+        val directShare = false
         shot("v4-03-hoja-sistema")
         log("§B hoja del sistema: Chaggu ${if (device.hasObject(By.text("Chaggu"))) "aparece" else "NO aparece"}; conversación «$title» en Direct Share: $directShare")
-        // Tocar la conversación de Direct Share (si el sistema la muestra) o la app.
-        val target = device.findObject(By.textContains(title.take(12))) ?: device.findObject(By.text("Chaggu"))
+        val target = device.findObject(By.text("Chaggu"))
         assertNotNull("Chaggu en la hoja de compartir", target)
         target!!.click()
 
         // ShareActivity: vista previa de las 3 fotos y la conversación preseleccionada (si vino por Direct Share).
-        compose.waitUntilAtLeastOneExists(hasTestTag("sharePreview"), 15_000)
+        // The system chooser briefly leaves no Compose window while ShareActivity is starting.
+        compose.waitUntil(15_000) { exists("sharePreview") }
         compose.waitUntilAtLeastOneExists(hasTestTag("shareRecent-$convId") or hasTestTag("shareTarget-$convId"), 10_000)
         val direct = runBlocking { client.createChat(listOf(peerId), null).id }
         compose.waitUntilAtLeastOneExists(hasTestTag("shareTarget-$direct") or hasTestTag("shareRecent-$direct"), 10_000)
@@ -168,7 +179,7 @@ class ShareUiTest {
         compose.onNodeWithTag(convNode).assertIsOn()
         val directNode = if (exists("shareRecent-$direct")) "shareRecent-$direct" else "shareTarget-$direct"
         compose.onNodeWithTag(directNode).performScrollTo().performClick()
-        val note = "Fotos de la visita ${UUID.randomUUID().toString().take(4)}"
+        val note = if (reviewVideo) "Project photos · Demo ${System.currentTimeMillis() % 10_000}" else "Fotos de la visita ${UUID.randomUUID().toString().take(4)}"
         compose.onNodeWithTag("shareMessage").performTextInput(note)
         Thread.sleep(500); shot("v4-04-compartir-en-tiecoms")
         log("§B ShareActivity: 3 miniaturas, «$title»${if (preselected) " preseleccionada por Direct Share" else ""} + directo, mensaje")
@@ -180,8 +191,11 @@ class ShareUiTest {
         if (reviewVideo) {
             device.pressHome()
             device.openNotification()
+            expandUploadNotification()
             Thread.sleep(4_000)
             shot("v4-05-background-upload")
+            val manager = ins.targetContext.getSystemService(android.app.NotificationManager::class.java)
+            compose.waitUntil(60_000) { manager.activeNotifications.none { it.id == 7301 } }
             device.pressBack()
         }
         compose.waitUntil(60_000) { !exists("shareSheet") }
@@ -193,7 +207,7 @@ class ShareUiTest {
 
         // La burbuja con la cuadrícula de fotos y el visor a pantalla completa.
         ins.targetContext.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("chaggu://c/$convId")).setPackage(ins.targetContext.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        compose.waitUntilExactlyOneExists(hasTestTag("composer"), 15_000)
+        compose.waitUntil(15_000) { exists("composer") }
         compose.waitUntil(15_000) { client.state.value.conversations[convId]?.messages?.any { it.body == note && it.attachments.size == 3 } == true }
         val m = client.state.value.conversations[convId]!!.messages.first { it.body == note }
         compose.waitUntilAtLeastOneExists(hasTestTag("att-${m.attachments[0].id}"), 10_000)
@@ -206,6 +220,44 @@ class ShareUiTest {
         device.pressBack()
         log("§B/§A burbuja con cuadrícula (3 fotos, miniaturas del cliente) y visor «2 de 3»")
         compose.waitUntil(5_000) { !exists("mediaViewer") }
+
+        if (reviewVideo) {
+            // A second real share demonstrates the foreground notification's Cancel action.
+            ins.targetContext.startActivity(Intent(send).setClass(ins.targetContext, ShareActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            compose.waitUntil(15_000) { exists("sharePreview") }
+            val cancelTarget = if (exists("shareRecent-$convId")) "shareRecent-$convId" else "shareTarget-$convId"
+            compose.onNodeWithTag(cancelTarget).performScrollTo().performClick()
+            val cancelPeer = if (exists("shareRecent-$direct")) "shareRecent-$direct" else "shareTarget-$direct"
+            compose.onNodeWithTag(cancelPeer).performScrollTo().performClick()
+            compose.onNodeWithTag("shareMessage").performTextInput("Cancelled upload · Demo")
+            Thread.sleep(1_000)
+            compose.onNodeWithTag("shareSend").performClick()
+            compose.waitUntil(10_000) { exists("shareProgress") }
+            device.pressHome()
+            device.openNotification()
+            expandUploadNotification()
+            val workManager = androidx.work.WorkManager.getInstance(ins.targetContext)
+            val upload = workManager.getWorkInfosByTag(com.tiecoms.app.platform.ShareWorker::class.java.name).get()
+                .single { it.state == androidx.work.WorkInfo.State.RUNNING }
+            val cancel = device.wait(Until.findObject(By.text("Cancel")), 10_000)
+            assertNotNull("Upload notification exposes Cancel", cancel)
+            Thread.sleep(1_500); shot("v4-11-cancel-upload")
+            // Progress replaces the notification row; resolve the action again after the screenshot.
+            compose.waitUntil(15_000) {
+                if (workManager.getWorkInfoById(upload.id).get()?.state == androidx.work.WorkInfo.State.CANCELLED) true
+                else {
+                    runCatching { device.findObject(By.text("Cancel"))?.click() }
+                    false
+                }
+            }
+            val manager = ins.targetContext.getSystemService(android.app.NotificationManager::class.java)
+            compose.waitUntil(15_000) { manager.activeNotifications.none { it.id == 7301 } }
+            assertEquals(androidx.work.WorkInfo.State.CANCELLED, workManager.getWorkInfoById(upload.id).get()?.state)
+            Thread.sleep(1_500); shot("v4-12-upload-cancelled")
+            log("FGS review: user-initiated upload, background progress, delivery, and notification cancellation verified")
+            return
+        }
 
         // §D Grupos ordenado por no leídos; «Mensaje nuevo» vive en DMs (docs/GRUPOS.md).
         compose.onNodeWithTag("back").performClick()

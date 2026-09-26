@@ -80,6 +80,45 @@ final class V8VoiceNotificationTests: XCTestCase {
         XCTAssertNil(VoiceRules.fileDurationMs(FileManager.default.temporaryDirectory.appendingPathComponent("no-existe.m4a")))
     }
 
+    /// Solo con TEST_RUNNER_TC_REAL_MIC=1 y permiso: en un simulador sin entrada de audio `record()` tarda minutos en fallar.
+    private func requireRealMic() throws {
+        guard ProcessInfo.processInfo.environment["TC_REAL_MIC"] == "1" else { throw XCTSkip("Sin TC_REAL_MIC") }
+        guard AVAudioApplication.shared.recordPermission == .granted else { throw XCTSkip("Sin permiso de micrófono") }
+    }
+
+    /// Grabación real con el micrófono del simulador (el del Mac): 2 s, pausa (como al bloquear la pantalla), 1 s más.
+    /// Requiere `xcrun simctl privacy <sim> grant microphone com.chaggu.app`; sin permiso se omite.
+    func testRealRecordingPauseResumeAndFinishMeasuresTheFile() async throws {
+        try requireRealMic()
+        let r = VoiceRecorder()
+        do { try r.start() } catch { throw XCTSkip("Este simulador no puede grabar (sin entrada de audio del Mac)") }
+        XCTAssertEqual(r.state, .recording)
+        try await Task.sleep(nanoseconds: 2_000_000_000)
+        r.pause()
+        XCTAssertTrue(r.paused && r.canResume)
+        XCTAssertEqual(r.state, .locked, "en pausa queda bloqueada para enviar o continuar")
+        try await Task.sleep(nanoseconds: 1_000_000_000)   // la pausa no cuenta
+        r.resume()
+        XCTAssertFalse(r.paused)
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+        guard case .success(let clip) = r.finishOutcome() else { return XCTFail("la nota debe quedar") }
+        XCTAssertEqual(Double(clip.durationMs), 3_000, accuracy: 450, "≈ 3 s de audio real, sin la pausa")
+        XCTAssertGreaterThan(clip.data.count, 1_000)
+        XCTAssertEqual(r.state, .idle)
+    }
+
+    /// Un toque corto (≈ 0,2 s) sin audio suficiente: «demasiado corta» solo si el archivo de verdad dura < 0,5 s.
+    func testVeryShortRealRecordingIsTooShort() async throws {
+        try requireRealMic()
+        let r = VoiceRecorder()
+        do { try r.start() } catch { throw XCTSkip("Este simulador no puede grabar (sin entrada de audio del Mac)") }
+        try await Task.sleep(nanoseconds: 150_000_000)
+        switch r.finishOutcome() {
+        case .failure(let e): XCTAssertEqual(e, .tooShort)
+        case .success(let c): XCTAssertGreaterThanOrEqual(c.durationMs, VoiceRules.minMs, "si pasó, es porque de verdad duró ≥ 0,5 s")
+        }
+    }
+
     func testFinishWithoutRecordingIsUnreadableNotTooShort() {
         let r = VoiceRecorder()
         guard case .failure(let e) = r.finishOutcome() else { return XCTFail("sin grabación no hay nota") }

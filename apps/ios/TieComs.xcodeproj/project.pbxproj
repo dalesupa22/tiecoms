@@ -44,6 +44,7 @@
 		46B2FEB8B2EDC92A44C57169 /* ShareItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB29A1A5F72FAF013E3473A /* ShareItems.swift */; };
 		46B7BBCD1ABD2B119DBC9044 /* Naming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38C26BEA687D356B4765DDC8 /* Naming.swift */; };
 		4861AC62C42CF71D8AEF1453 /* TieComsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CDA44DC6302797DC800B44D /* TieComsApp.swift */; };
+		4CF0EA01DA1BF95D7F94BB30 /* V9LanguageSubjectsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC9F4FC91E577352D1412556 /* V9LanguageSubjectsTests.swift */; };
 		4E2E49A1EBCDEC5A426728AA /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0EE4F0835A244D173D5CE5E /* APIClient.swift */; };
 		4E59CFA741A2A59474D6B018 /* ChatBarViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E3C4FF55AD5EFBB6F904775 /* ChatBarViews.swift */; };
 		4FEFD3F104B5B20D25F7EBDB /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEABA7548C1667E663D4C70E /* Models.swift */; };
@@ -240,6 +241,7 @@
 		B27D458CCA260DEF9234EB80 /* ModelsV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsV2.swift; sourceTree = "<group>"; };
 		B2EF5FA7383307CC6AF4E8F7 /* Voice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Voice.swift; sourceTree = "<group>"; };
 		B3068A6F5B7DE8788B944476 /* Storage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage.swift; sourceTree = "<group>"; };
+		BC9F4FC91E577352D1412556 /* V9LanguageSubjectsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V9LanguageSubjectsTests.swift; sourceTree = "<group>"; };
 		C0EE4F0835A244D173D5CE5E /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		C9588E3F5C22848C8993510F /* TieComs.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TieComs.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CCF75E43B44050980EEF21D7 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
@@ -460,6 +462,7 @@
 				8CAC11B8FB41588155418642 /* V6MentionTests.swift */,
 				D94B329C8348CD833113A1BE /* V7GroupsReactionsTests.swift */,
 				1951BFBA02D7E02999833CBE /* V8VoiceNotificationTests.swift */,
+				BC9F4FC91E577352D1412556 /* V9LanguageSubjectsTests.swift */,
 			);
 			path = TieComsTests;
 			sourceTree = "<group>";
@@ -762,6 +765,7 @@
 				0A1116171E601D7AC10B51C4 /* V6MentionTests.swift in Sources */,
 				861EA21E2E60E6D7315D5532 /* V7GroupsReactionsTests.swift in Sources */,
 				72A28E3062B5B14C8BB13983 /* V8VoiceNotificationTests.swift in Sources */,
+				4CF0EA01DA1BF95D7F94BB30 /* V9LanguageSubjectsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

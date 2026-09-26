@@ -272,8 +272,17 @@ struct SettingsView: View {
                 Link(L("safety.privacy"), destination: URL(string: L10n.lang == "es" ? AppConfig.website + "/privacidad/" : AppConfig.website + "/en/privacy/")!)
             }
             Section {
-                LabeledContent(L("settings.language"), value: L10n.lang == "es" ? "Español" : "English")
-            } footer: { Text(L("settings.languageHint")) }
+                Picker(selection: Binding(get: { L10n.choice }, set: { store.setLanguage($0) })) {
+                    Text(L("settings.langSystem")).tag(L10n.Choice.system)
+                    // Cada idioma con su propio nombre, para encontrarlo aunque no se entienda el actual.
+                    Text("Español").tag(L10n.Choice.es)
+                    Text("English").tag(L10n.Choice.en)
+                } label: {
+                    Label(L("settings.languageBoth"), systemImage: "globe")
+                }
+                .pickerStyle(.navigationLink)
+                .accessibilityIdentifier("settings.language")
+            } footer: { Text(L("settings.languageHintApp")) }
             Section {
                 Button(L("settings.logout"), role: .destructive) { confirmLogout = true }
                     .accessibilityIdentifier("settings.logout")

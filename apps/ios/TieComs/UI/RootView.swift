@@ -41,6 +41,10 @@ struct RootView: View {
             }
         }
         .tint(Theme.accentText)
+        // Idioma elegido en la app: se redibuja todo (las rutas viven en el store y se conservan) y los formatos del
+        // sistema (fechas de DatePicker, etc.) usan ese idioma.
+        .id(store.languageRevision)
+        .environment(\.locale, L10n.locale)
         .sheet(isPresented: Binding(get: { store.inviteToken != nil }, set: { if !$0 { store.inviteToken = nil } })) {
             if let token = store.inviteToken { InviteView(token: token) }
         }

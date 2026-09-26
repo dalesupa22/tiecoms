@@ -172,8 +172,15 @@ struct LaunchSplashView: View {
                 .frame(width: side, height: side)
                 // El eslogan va debajo sin mover el símbolo (sigue centrado como en la Launch Screen).
                 .overlay(alignment: .top) {
-                    Text(L("splash.tagline"))
-                        .font(.system(size: 17, weight: .medium))
+                    VStack(spacing: 10) {
+                        Text(L("splash.tagline"))
+                            .font(.system(size: 17, weight: .medium))
+                        // Lo que de verdad hay: conexión cifrada (TLS). Sin «de extremo a extremo» ni promesas absolutas.
+                        Label(L("splash.secure"), systemImage: "lock.fill")
+                            .font(.system(size: 12, weight: .regular))
+                            .labelStyle(.titleAndIcon)
+                            .accessibilityIdentifier("splash.secure")
+                    }
                         .foregroundStyle(Color(hex: 0xF6F3EC))
                         .multilineTextAlignment(.center)
                         .dynamicTypeSize(...DynamicTypeSize.xxLarge)
@@ -195,7 +202,7 @@ struct LaunchSplashView: View {
             if t < T.exitStart { skip += T.exitStart - t }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Chaggu. " + L("splash.tagline"))
+        .accessibilityLabel("Chaggu. " + L("splash.tagline") + ". " + L("splash.secure"))
         .accessibilityIdentifier("splash")
         .onAppear {
             start = Date()

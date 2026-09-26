@@ -29,6 +29,8 @@ struct TieComsApp: App {
         let secrets = KeychainSecretStore(apiURL: base)
         // Solo para pruebas de interfaz: empezar sin sesión guardada.
         if AppConfig.launchFlag("TCResetSession") { secrets.set(nil) }
+        // Solo pruebas de interfaz: empezar con el idioma del sistema.
+        if AppConfig.launchFlag("TCResetLanguage") { L10n.choice = .system }
         let s = AppStore(baseURL: base, secrets: secrets, feedback: AppFeedback.shared)
         _store = State(initialValue: s)
         AppFeedback.shared.openConversationId = { [weak s] in s?.appActive == true ? s?.openConversationId : nil }

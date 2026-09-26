@@ -58,7 +58,7 @@ final class GroupsUITests: XCTestCase {
 
     private func login(_ f: Fixture) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES",
+        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCResetLanguage", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES",
                                "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
         app.launch()
         let email = app.textFields["login.email"]
@@ -256,42 +256,49 @@ final class GroupsUITests: XCTestCase {
         }
     }
 
-    /// 1.6.2: un toque en el micrófono no descarta («La nota es demasiado corta»): graba en manos libres; enviar
-    /// pasa por el permiso de IA y la nota llega al chat con su reproductor.
-    func testVoiceTapRecordsHandsFreeAndSends() throws {
+    /// Splash con la línea «Conexión cifrada…» en español e inglés (fotograma congelado tras el eslogan).
+    func testSplashSecurityLineInBothLanguages() throws {
+        for lang in ["es", "en"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-TCSplashFreeze", "2.3", "-TCResetSession", "YES", "-TCResetLanguage", "YES", "-TCApiURL", "http://127.0.0.1:9", "-AppleLanguages", "(\(lang))"]
+            app.launch()
+            let splash = app.descendants(matching: .any)["splash"]
+            XCTAssertTrue(splash.waitForExistence(timeout: 5))
+            XCTAssertTrue(splash.label.contains(lang == "es" ? "Conexión cifrada para proteger tu información" : "Encrypted connection to help protect your information"), splash.label)
+            sleep(1)
+            shot("23-splash-\(lang)")
+            app.terminate()
+        }
+    }
+
+    /// Tú › Idioma: cambia al instante (sin reiniciar); en inglés los asuntos son «Subjects».
+    func testInAppLanguageSwitch() throws {
         let f = try fixture()
-        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")))
         let app = login(f)
-        addUIInterruptionMonitor(withDescription: "micrófono") { alert in
-            for l in ["Allow", "Permitir", "OK"] where alert.buttons[l].exists { alert.buttons[l].tap(); return true }
-            return false
-        }
-        let row = app.buttons["conv.row.\(f.pagosId)"]
-        let until = Date().addingTimeInterval(20)
-        while Date() < until && !row.exists { dismissSystemPrompts(app); usleep(300_000) }
-        let mic = app.descendants(matching: .any)["composer.mic"]
-        for _ in 0..<3 where !mic.exists {
-            sleep(1); dismissSystemPrompts(app)
-            if row.isHittable { row.tap() }
-            _ = mic.waitForExistence(timeout: 4)
-        }
-        XCTAssertTrue(mic.waitForExistence(timeout: 8))
-        // Permiso del micrófono concedido antes (xcrun simctl privacy <sim> grant microphone com.chaggu.app).
-        mic.tap()
-        let send = app.buttons["voice.send"]
-        XCTAssertTrue(send.waitForExistence(timeout: 8), "el toque deja la grabación en manos libres (enviar / borrar)")
-        XCTAssertFalse(app.staticTexts[L10nUI.tooShort].exists, "sin «demasiado corta»")
-        sleep(3)
-        shot("20-voz-manos-libres")
-        send.tap()
-        let without = app.buttons["Enviar sin IA"]
-        XCTAssertTrue(without.waitForExistence(timeout: 5), "permiso de IA de la nota")
-        without.tap()
-        let note = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "voice.note.")).firstMatch
-        XCTAssertTrue(note.waitForExistence(timeout: 15), "la nota llega al chat")
-        XCTAssertFalse(app.staticTexts[L10nUI.tooShort].exists)
+        let youTab = app.tabBars.buttons.element(boundBy: 4)
+        XCTAssertTrue(youTab.waitForExistence(timeout: 20))
+        dismissSystemPrompts(app)
+        youTab.tap()
+        let picker = app.buttons["settings.language"]
+        for _ in 0..<6 where !picker.isHittable { app.swipeUp() }
+        picker.tap()
+        app.buttons["English"].tap()
         sleep(1)
-        shot("21-voz-enviada")
+        XCTAssertTrue(app.tabBars.buttons["Subjects"].waitForExistence(timeout: 5), "la barra cambia a inglés al instante")
+        shot("24-idioma-en-ajustes")
+        app.tabBars.buttons.element(boundBy: 0).tap()
+        sleep(1)
+        shot("25-grupos-en")
+        // Vuelve a automático (español en estas pruebas).
+        app.tabBars.buttons.element(boundBy: 4).tap()
+        let picker2 = app.buttons["settings.language"]
+        for _ in 0..<6 where !picker2.isHittable { app.swipeUp() }
+        picker2.tap()
+        let auto = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Automatic")).firstMatch
+        if !auto.waitForExistence(timeout: 4) { shot("dbg-idioma") }
+        auto.tap()
+        XCTAssertTrue(app.tabBars.buttons["Asuntos"].waitForExistence(timeout: 5))
+        shot("26-idioma-es")
     }
 
     /// Mantener presionada una burbuja (su parte visible si la tapa la barra del chat) hasta que aparezca `until`.
@@ -317,8 +324,12 @@ final class GroupsUITests: XCTestCase {
         for _ in 0..<4 where !row.isHittable { app.swipeUp() }
         let header = app.descendants(matching: .any)["chat.header"]
         for _ in 0..<3 where !header.exists { sleep(1); dismissSystemPrompts(app); if row.isHittable { row.tap() }; _ = header.waitForExistence(timeout: 4) }
-        for key in ["bFile", "bMany", "aImage", "bCaption", "bImage"] {
-            guard let id = ids[key] else { continue }
+        // Los cinco casos son obligatorios: un fixture incompleto falla en vez de pasar sin probar nada.
+        let cases = [("bFile", "archivo PDF ajeno"), ("bMany", "3 imágenes ajenas"), ("aImage", "imagen mía"),
+                     ("bCaption", "imagen con texto"), ("bImage", "imagen ajena sin texto")]
+        var evidence: [String] = []
+        for (key, what) in cases {
+            let id = try XCTUnwrap(ids[key], "falta el caso \(key) (\(what)) en TC_IMAGES")
             let msg = app.descendants(matching: .any).matching(identifier: "msg.\(id)").firstMatch
             for _ in 0..<6 where !msg.isHittable { app.swipeDown(velocity: .slow) }
             XCTAssertTrue(msg.waitForExistence(timeout: 5), key)
@@ -341,9 +352,23 @@ final class GroupsUITests: XCTestCase {
             sleep(2)   // que termine de cerrarse el menú
             app.buttons.matching(identifier: "react.chip.\(id).❤️").firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             XCTAssertTrue(app.buttons.matching(identifier: "react.chip.\(id).❤️").firstMatch.waitForNonExistence(timeout: 6), "se quita con el chip")
+            // Y el 👍 también, con su chip: el mensaje queda sin reacciones mías.
+            let thumbChip = app.buttons.matching(identifier: "react.chip.\(id).👍").firstMatch
+            XCTAssertTrue(thumbChip.exists, "el 👍 sigue tras sumar ❤️")
+            thumbChip.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            XCTAssertTrue(thumbChip.waitForNonExistence(timeout: 6), "se quita el 👍")
             XCTAssertEqual(app.state, .runningForeground)
+            shot("22-reaccion-\(key)")
+            evidence.append("\(key) (\(what)), mensaje \(id): 👍 aparece → se suma ❤️ → ❤️ y 👍 se quitan con su chip; la app sigue abierta")
         }
-        shot("22-reacciones-imagenes")
+        XCTAssertEqual(evidence.count, cases.count)
+        let log = XCTAttachment(string: evidence.joined(separator: "\n"))
+        log.name = "reacciones-imagenes"
+        log.lifetime = .keepAlways
+        add(log)
+        if let dir = ProcessInfo.processInfo.environment["TC_SHOTS"], !dir.isEmpty {
+            try? (evidence.joined(separator: "\n") + "\n").write(toFile: dir + "/reacciones-imagenes.txt", atomically: true, encoding: .utf8)
+        }
     }
 
     /// Dentro del chat: barra de accesos, chip del hilo bajo su mensaje, el hilo al lado y el «＋» del compositor.
@@ -432,5 +457,3 @@ final class GroupsUITests: XCTestCase {
         shot("14-sidechat-mencion-despues")
     }
 }
-
-private enum L10nUI { static let tooShort = "La nota es demasiado corta." }

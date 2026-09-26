@@ -36,11 +36,15 @@ const ios = JSON.parse(readFileSync(join(here, 'ios-strings.json'), 'utf8'));
 // dominio anterior, aquí se reemplazan para que la app nunca los muestre. Solo cambia valores, no claves.
 const brand = (s) => s.replace(/app\.tiecoms\.com/g, 'app.chaggu.com').replace(/www\.tiecoms\.com/g, 'www.chaggu.com')
   .replace(/\btiecoms\.com\b/g, 'chaggu.com').replace(/TieComs/g, 'Chaggu');
+// Producto (26-sep-2026): en inglés los «asuntos» se llaman «Subjects», no «Issues». Solo el texto visible en inglés;
+// las claves, rutas y campos del API siguen diciendo issue.
+const subjects = (s) => s.replace(/\bIssues\b/g, 'Subjects').replace(/\bissues\b/g, 'subjects')
+  .replace(/\bIssue\b/g, 'Subject').replace(/\bissue\b/g, 'subject').replace(/\bISSUES\b/g, 'SUBJECTS');
 const esc = (s) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 
 for (const [i, lang] of ['es', 'en'].entries()) {
   const out = { ...Object.fromEntries(Object.entries(ios).map(([k, v]) => [k, v[i]])), ...web[lang] };
-  const lines = Object.keys(out).sort().map((k) => `"${k}" = "${esc(brand(out[k]))}";`);
+  const lines = Object.keys(out).sort().map((k) => `"${k}" = "${esc(lang === 'en' ? subjects(brand(out[k])) : brand(out[k]))}";`);
   const header = `/* Generado por apps/ios/tools/gen-strings.mjs desde apps/web/src/i18n.ts + ios-strings.json. No editar a mano. */\n\n`;
   writeFileSync(join(here, '..', 'TieComs/Resources', `${lang}.lproj/Localizable.strings`), header + lines.join('\n') + '\n');
   console.log(lang, lines.length, 'claves');

@@ -1,9 +1,9 @@
 import Foundation
 
-/// Texto localizado (es/en según el idioma del sistema; en cualquier otro idioma, inglés).
+/// Texto localizado (es/en: el que eligió la persona en Tú › Idioma, o el del sistema; en otro idioma, inglés).
 /// Las variables van como `{nombre}` igual que en la web (apps/web/src/i18n.ts).
 func L(_ key: String, _ vars: [String: CustomStringConvertible] = [:]) -> String {
-    var s = Bundle.main.localizedString(forKey: key, value: nil, table: nil)
+    var s = L10n.bundle.localizedString(forKey: key, value: nil, table: nil)
     if s == key, let en = L10n.englishBundle { s = en.localizedString(forKey: key, value: key, table: nil) }
     for (k, v) in vars { s = s.replacingOccurrences(of: "{\(k)}", with: v.description) }
     return s
@@ -12,8 +12,43 @@ func L(_ key: String, _ vars: [String: CustomStringConvertible] = [:]) -> String
 enum L10n {
     static let englishBundle: Bundle? = Bundle.main.path(forResource: "en", ofType: "lproj").flatMap(Bundle.init(path:))
 
+    static let spanishBundle: Bundle? = Bundle.main.path(forResource: "es", ofType: "lproj").flatMap(Bundle.init(path:))
+
+    /// Idioma elegido en la app: automático (el del sistema), español o inglés.
+    enum Choice: String, CaseIterable, Identifiable { case system, es, en; var id: String { rawValue } }
+
+    /// Se guarda en el grupo compartido: la extensión Compartir usa el mismo idioma.
+    static let choiceKey = "tc.lang"
+    static var defaults: UserDefaults { UserDefaults(suiteName: "group.com.chaggu.app") ?? .standard }
+
+    static var choice: Choice {
+        get { Choice(rawValue: defaults.string(forKey: choiceKey) ?? "") ?? .system }
+        set {
+            defaults.set(newValue == .system ? nil : newValue.rawValue, forKey: choiceKey)
+            // Los textos del sistema (permisos, «Copiar»…) siguen AppleLanguages desde el próximo arranque.
+            if newValue == .system { UserDefaults.standard.removeObject(forKey: "AppleLanguages") }
+            else { UserDefaults.standard.set([newValue == .es ? "es" : "en"], forKey: "AppleLanguages") }
+        }
+    }
+
+    /// Idioma del sistema para esta app ("es" o "en"), sin la elección propia.
+    static var systemLang: String {
+        let preferred = Bundle.preferredLocalizations(from: ["es", "en"], forPreferences: Locale.preferredLanguages).first
+        return preferred?.hasPrefix("es") == true ? "es" : "en"
+    }
+
     /// Idioma efectivo de la interfaz ("es" o "en").
-    static var lang: String { Bundle.main.preferredLocalizations.first?.hasPrefix("es") == true ? "es" : "en" }
+    static var lang: String { resolve(choice, system: systemLang) }
+    static func resolve(_ c: Choice, system: String) -> String {
+        switch c {
+        case .system: return system
+        case .es: return "es"
+        case .en: return "en"
+        }
+    }
+
+    /// Tabla de textos del idioma efectivo (cambia al instante, sin reiniciar).
+    static var bundle: Bundle { (lang == "es" ? spanishBundle : englishBundle) ?? .main }
     static var locale: Locale { Locale(identifier: lang == "es" ? "es-CO" : "en-US") }
 
     /// Mensaje legible a partir del código de error del API.

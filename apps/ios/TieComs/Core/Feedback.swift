@@ -267,6 +267,12 @@ final class PushTokenSync {
         if enabled != value { enabled = value; dirty = true }
     }
 
+    /// Vuelve a mandar el mismo token (p. ej. cambió el idioma: el servidor arma los avisos en ese `lang`).
+    func resendToken() {
+        registeredToken = nil
+        dirty = true
+    }
+
     func receive(_ value: String) {
         if token != value { token = value; dirty = true }
     }

@@ -140,6 +140,18 @@ final class AppStore {
     @ObservationIgnored private var badgeTask: Task<Void, Never>?
     /// Último token APNs registrado en el API (pruebas y diagnóstico).
     var registeredPushToken: String? { pushTokenSync.registeredToken }
+    /// Sube al cambiar el idioma en Tú › Idioma: la interfaz se vuelve a dibujar con los textos nuevos.
+    var languageRevision = 0
+
+    /// Cambia el idioma de la app al instante, lo recuerda y avisa al servidor (push en ese idioma; Accept-Language
+    /// ya sale de L10n.lang en cada petición).
+    func setLanguage(_ choice: L10n.Choice) {
+        guard choice != L10n.choice else { return }
+        L10n.choice = choice
+        languageRevision += 1
+        pushTokenSync.resendToken()
+        Task { await pushTokenSync.synchronize() }
+    }
     @ObservationIgnored let pushTokenSync: PushTokenSync
     @ObservationIgnored var pushSigningOut = false
     /// Pantalla previa al permiso de notificaciones.

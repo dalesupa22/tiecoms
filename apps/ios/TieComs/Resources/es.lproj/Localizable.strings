@@ -1034,8 +1034,11 @@
 "settings.inviteColleagueHint" = "Le llega un correo para crear su cuenta dentro de {org}. El enlace es de un solo uso y vence en 14 días.";
 "settings.inviteEmailPh" = "correo@tuempresa.com";
 "settings.langAuto" = "Automático (navegador)";
+"settings.langSystem" = "Automático (idioma del sistema)";
 "settings.language" = "Idioma";
+"settings.languageBoth" = "Idioma / Language";
 "settings.languageHint" = "Chaggu sigue el idioma del sistema (español o inglés). Cámbialo en Ajustes › General › Idioma.";
+"settings.languageHintApp" = "Cambia al instante en toda la app y en los avisos. Algunos textos del sistema (permisos, «Copiar») cambian al volver a abrir Chaggu.";
 "settings.lastSeen" = "Última actividad {date}";
 "settings.logout" = "Cerrar sesión";
 "settings.logoutConfirm" = "¿Cerrar sesión en este dispositivo?";
@@ -1154,6 +1157,7 @@
 "spaces.back" = "‹ Espacios";
 "spaces.empty" = "Aún no tienes espacios.";
 "spaces.new" = "＋ Nuevo";
+"splash.secure" = "Conexión cifrada para proteger tu información";
 "splash.tagline" = "Conecta humanos, empresas y bots";
 "src.email" = "correo";
 "src.other" = "otra app";

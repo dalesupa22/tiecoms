@@ -1446,5 +1446,21 @@
  "att.uploadNetwork": [
   "Sin conexión: «{name}» no se subió. Sigue en el mensaje para reintentar.",
   "No connection: “{name}” wasn't uploaded. It's still in the message to retry."
+ ],
+ "splash.secure": [
+  "Conexión cifrada para proteger tu información",
+  "Encrypted connection to help protect your information"
+ ],
+ "settings.langSystem": [
+  "Automático (idioma del sistema)",
+  "Automatic (system language)"
+ ],
+ "settings.languageBoth": [
+  "Idioma / Language",
+  "Idioma / Language"
+ ],
+ "settings.languageHintApp": [
+  "Cambia al instante en toda la app y en los avisos. Algunos textos del sistema (permisos, «Copiar») cambian al volver a abrir Chaggu.",
+  "Changes right away across the app and its notifications. Some system texts (permissions, “Copy”) change the next time you open Chaggu."
  ]
 }

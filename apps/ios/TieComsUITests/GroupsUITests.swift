@@ -315,7 +315,12 @@ final class GroupsUITests: XCTestCase {
     /// barra rápida, cambiar de emoji, quitar con el chip. Ids por TEST_RUNNER_TC_IMAGES (seed-images.mjs).
     func testReactToImageMessagesDoesNotCrash() throws {
         let f = try fixture()
-        guard let general = f.generalId, let path = ProcessInfo.processInfo.environment["TC_IMAGES"], !path.isEmpty else { throw XCTSkip("Sin TC_IMAGES") }
+        let env = ProcessInfo.processInfo.environment
+        guard let general = f.generalId, let path = env["TC_IMAGES"], !path.isEmpty else {
+            // Para una entrega (TC_REQUIRE_IMAGES=1) no vale omitirla: tiene que correr.
+            if env["TC_REQUIRE_IMAGES"] == "1" { XCTFail("TC_REQUIRE_IMAGES=1 sin TC_IMAGES o sin grupo general"); return }
+            throw XCTSkip("Sin TC_IMAGES")
+        }
         let ids = try JSONDecoder().decode([String: String].self, from: Data(contentsOf: URL(fileURLWithPath: path)))
         let app = login(f)
         let row = app.buttons["conv.row.\(general)"]

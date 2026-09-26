@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.material.icons.automirrored.outlined.Forward
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
@@ -361,6 +362,7 @@ fun iconForGlyph(glyph: String): androidx.compose.ui.graphics.vector.ImageVector
         "#" -> I.Tag
         "T" -> I.Groups
         "⊘" -> I.Block
+        "🗄" -> I.Archive
         else -> null
     }
 }

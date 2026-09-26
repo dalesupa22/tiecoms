@@ -67,31 +67,59 @@ class GroupsTreeTest {
         assertEquals(GroupsTree.Placement(GroupsTree.Kind.GUEST, "beta", null), GroupsTree.place(data, data.workspaces[6]))
     }
 
-    @Test fun `arbol completo en orden`() {
+    @Test fun `arbol completo en orden, solo grupos y asuntos`() {
         assertEquals(listOf(
-            "s:ORG:mine", "c:g-home", "i:i7", "w:w-old", "c:g-old",
+            "s:ORG:mine", "c:g-home", "i:i7", "c:g-old",
             "s:RELATIONS",
-            "o:RELATIONS:acme", "w:w-a1", "c:g-a1", "i:i3", "i:i5", "i:i4", "mi:g-a1", "c:g-der", "w:w-a2", "c:g-a2",
+            "o:RELATIONS:acme", "c:g-a1", "i:i3", "i:i5", "i:i4", "mi:g-a1", "c:g-a2",
             "o:RELATIONS:beta", "c:g-b",
             "o:RELATIONS:pending:nestlé", "c:g-p",
-            "s:GUEST", "o:GUEST:beta", "w:w-g", "c:g-g",
+            "s:GUEST", "o:GUEST:beta", "c:g-g",
         ), build().map { it.key })
     }
 
-    @Test fun `espacio casa sin cabecera, relacion de un espacio sin cabecera y pendiente marcada`() {
+    @Test fun `sin cabeceras de espacio, hilos fuera del arbol y pendiente marcada`() {
         val rows = build()
+        // Ningún espacio como cabecera: los grupos de todos los espacios van directo bajo la empresa.
+        assertFalse(rows.any { it.key.startsWith("w:") || it.key.startsWith("pw:") })
         assertEquals(0, (rows.first { it.key == "c:g-home" } as GroupsTree.Group).level)
-        assertEquals(1, (rows.first { it.key == "c:g-old" } as GroupsTree.Group).level)
-        // Beta tiene un solo espacio en Relaciones: el grupo cuelga directo de la empresa.
-        assertFalse(rows.any { it.key == "w:w-b" })
-        assertEquals(1, (rows.first { it.key == "c:g-b" } as GroupsTree.Group).level)
+        assertEquals(0, (rows.first { it.key == "c:g-old" } as GroupsTree.Group).level)
+        assertEquals(1, (rows.first { it.key == "c:g-a2" } as GroupsTree.Group).level)
+        assertEquals(1, (rows.first { it.key == "c:g-g" } as GroupsTree.Group).level)
         val p = rows.first { it.key == "o:RELATIONS:pending:nestlé" } as GroupsTree.Company
         assertNull(p.org); assertEquals("Nestlé", p.pendingName)
-        // En «Invitado en» el espacio sí lleva cabecera.
-        assertTrue(rows.any { it.key == "w:w-g" })
-        // La derivada cuelga de su origen con sangría.
-        assertEquals(3, (rows.first { it.key == "c:g-der" } as GroupsTree.Group).level)
+        // La derivada no se lista: vive en la barra del chat.
+        assertFalse(rows.any { it.key == "c:g-der" })
         assertEquals(2, (rows.first { it.key == "mi:g-a1" } as GroupsTree.MoreIssues).count)
+    }
+
+    @Test fun `hilos con no leidos dan el chip en su grupo`() {
+        val d = data.copy(conversations = data.conversations.map { if (it.id == "g-der") it.copy(unread = 4) else it })
+        val row = GroupsTree.build(d, issues, "", null, emptySet(), { it.name ?: it.id }, nowMs = 0).first { it.key == "c:g-a1" } as GroupsTree.Group
+        assertEquals(4, row.threadUnread)
+        // Un sidechat no cuenta como hilo del árbol (va a DMs con su propio no leído).
+        assertEquals(0, (build().first { it.key == "c:g-a1" } as GroupsTree.Group).threadUnread)
+    }
+
+    @Test fun `mismo nombre en la misma empresa lleva el espacio, nunca en el espacio casa`() {
+        val d = data.copy(conversations = data.conversations.map {
+            when (it.id) { "g-a2", "g-a1", "g-home", "g-old" -> it.copy(name = "General"); else -> it }
+        })
+        val rows = GroupsTree.build(d, issues, "", null, emptySet(), { it.name ?: it.id }, nowMs = 0)
+        fun label(k: String) = (rows.first { it.key == k } as GroupsTree.Group).label
+        assertEquals("W-A1 · General", label("c:g-a1")); assertEquals("W-A2 · General", label("c:g-a2"))
+        assertNull(label("c:g-home")); assertEquals("W-OLD · General", label("c:g-old"))
+        assertNull(label("c:g-b"))
+    }
+
+    @Test fun `espacio sin grupos no aparece, relacion pendiente sin grupos si`() {
+        val d = data.copy(
+            workspaces = data.workspaces + ws("w-empty", "mine", listOf("mine", "zeta")) + ws("w-p2", "mine", listOf("mine"), pending = "Bimbo"),
+            organizations = data.organizations + OrganizationDTO(id = "zeta", name = "Zeta"),
+        )
+        val keys = GroupsTree.build(d, issues, "", null, emptySet(), { it.name ?: it.id }, nowMs = 0).map { it.key }
+        assertFalse("o:RELATIONS:zeta" in keys)
+        assertTrue("o:RELATIONS:pending:bimbo" in keys)
     }
 
     @Test fun `sidechats, directos y chats van a DMs`() {
@@ -108,7 +136,7 @@ class GroupsTreeTest {
 
     @Test fun `plegar, buscar y filtrar`() {
         val folded = build(collapsed = setOf(GroupsTree.companyKey(GroupsTree.Kind.RELATIONS, "acme"))).map { it.key }
-        assertTrue("o:RELATIONS:acme" in folded); assertFalse("w:w-a1" in folded); assertFalse("c:g-a1" in folded)
+        assertTrue("o:RELATIONS:acme" in folded); assertFalse("c:g-a1" in folded)
         val acme = build(collapsed = setOf(GroupsTree.companyKey(GroupsTree.Kind.RELATIONS, "acme"))).first { it.key == "o:RELATIONS:acme" } as GroupsTree.Company
         assertTrue(acme.collapsed); assertEquals(2, acme.unread)
         val sec = build(collapsed = setOf(GroupsTree.sectionKey(GroupsTree.Kind.RELATIONS))).map { it.key }
@@ -116,9 +144,9 @@ class GroupsTreeTest {
         // Buscar abre todo y oculta lo vacío.
         assertEquals(listOf("s:RELATIONS", "o:RELATIONS:beta", "c:g-b"),
             build(q = "g-b", collapsed = setOf(GroupsTree.sectionKey(GroupsTree.Kind.RELATIONS))).map { it.key })
-        assertEquals(listOf("s:RELATIONS", "o:RELATIONS:acme", "w:w-a1", "c:g-a1", "i:i3", "i:i5", "i:i4", "mi:g-a1"),
+        assertEquals(listOf("s:RELATIONS", "o:RELATIONS:acme", "c:g-a1", "i:i3", "i:i5", "i:i4", "mi:g-a1"),
             build(tab = GroupsTree.Tab.UNREAD).map { it.key })
-        assertEquals(listOf("s:ORG:mine", "c:g-home", "i:i7", "s:RELATIONS", "o:RELATIONS:acme", "w:w-a1", "c:g-a1", "i:i3", "i:i5", "i:i4", "mi:g-a1"),
+        assertEquals(listOf("s:ORG:mine", "c:g-home", "i:i7", "s:RELATIONS", "o:RELATIONS:acme", "c:g-a1", "i:i3", "i:i5", "i:i4", "mi:g-a1"),
             build(tab = GroupsTree.Tab.ISSUES).map { it.key })
         assertEquals(listOf("s:RELATIONS", "o:RELATIONS:pending:nestlé", "c:g-p"), build(ws = "w-p").map { it.key })
         assertEquals(listOf<GroupsTree.Row>(GroupsTree.Empty(filtered = true)), build(q = "nada"))

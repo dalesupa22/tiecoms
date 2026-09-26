@@ -4,9 +4,10 @@ package com.tiecoms.app.core
  * Pestañas Grupos y DMs (docs/GRUPOS.md; misma regla en web e iOS).
  *
  * Grupos:
- *   Tu organización · X   una sección por empresa mía; el espacio casa (isOrgHome) va sin cabecera
+ *   Tu organización · X   una sección por empresa mía, con los grupos de todos sus espacios
  *   Relaciones            espacios compartidos, bajo la empresa contraparte (o su counterpartName, pendiente)
  *   Invitado en           espacios donde soy tercero (myRole guest), bajo la empresa anfitriona
+ * Solo grupos y asuntos: ningún espacio se muestra como cabecera; los hilos (derivadas) viven en la barra del chat.
  * Bajo cada grupo van sus asuntos abiertos (hasta 3 y «+N asuntos»). Directos, chats y sidechats van a DMs.
  * El orden de siempre (compareConversations / sortHome de la web) se mantiene dentro de cada sección.
  */
@@ -25,9 +26,11 @@ object GroupsTree {
     /** Empresa de una relación o anfitriona («Invitado en»). [pendingName]: relación cuya empresa aún no entra. */
     data class Company(val kind: Kind, val id: String, val org: OrganizationDTO?, val pendingName: String?, val workspaces: List<WorkspaceDTO>,
                        val collapsed: Boolean, val unread: Int, override val key: String) : Row
-    /** Espacio (la «carpeta» de la relación). [level] = sangría. */
-    data class Space(val ws: WorkspaceDTO, val kind: Kind, val level: Int, val collapsed: Boolean, val unread: Int, override val key: String) : Row
-    data class Group(val c: ConversationDTO, val level: Int, val pinnedSection: Boolean = false, override val key: String) : Row
+    /**
+     * Grupo. [label]: «{espacio} · {grupo}» cuando dos grupos de la empresa se llaman igual; [threadUnread]: no leídos
+     * de sus hilos (no se listan en el árbol, viven en la barra del chat).
+     */
+    data class Group(val c: ConversationDTO, val level: Int, val pinnedSection: Boolean = false, val label: String? = null, val threadUnread: Int = 0, override val key: String) : Row
     data class Issue(val issue: IssueDTO, val level: Int, override val key: String) : Row
     data class MoreIssues(val conversationId: String, val count: Int, val level: Int, override val key: String) : Row
     /** Sin nada que mostrar: [filtered] = por búsqueda o filtro (si no, es el estado vacío de Grupos). */
@@ -36,7 +39,6 @@ object GroupsTree {
     // ---------- Claves de plegado (se guardan en los ajustes) ----------
     fun sectionKey(kind: Kind, orgId: String? = null) = "gs:" + kind.name + (orgId?.let { ":$it" } ?: "")
     fun companyKey(kind: Kind, id: String) = "gc:" + kind.name + ":" + id
-    fun spaceKey(ws: WorkspaceDTO) = HomeTree.wsKey(ws)
 
     // ---------- Regla del árbol ----------
     /** Dónde va un espacio: sección y empresa (id de la organización o, si está pendiente, el nombre escrito). */
@@ -139,84 +141,72 @@ object GroupsTree {
         val groupsByWs = d.conversations.filter { isGroup(d, it) }.groupBy { it.workspaceId!! }
         fun convsOf(w: WorkspaceDTO) = groupsByWs[w.id].orEmpty()
         fun unread(list: List<ConversationDTO>) = list.sumOf { HomeTree.pending(it, nowMs) }
+        // Los hilos (derivadas) no se listan: viven en la barra de su chat; su no leído va como «💬 N» en el grupo.
+        val threadUnread = d.conversations.filter { it.parentId != null && !it.isSide }.groupBy { it.parentId!! }
+            .mapValues { (_, l) -> unread(l) }
+        fun listed(w: WorkspaceDTO) = convsOf(w).filter { it.parentId == null }
         val rows = mutableListOf<Row>()
 
-        /** Grupos de un espacio: las derivadas (no sidechats) cuelgan de su origen si está en el mismo espacio. */
-        fun addGroups(w: WorkspaceDTO, level: Int) {
-            val all = convsOf(w)
-            val ids = all.map { it.id }.toSet()
-            val kids = all.filter { it.parentId != null && it.parentId in ids }.groupBy { it.parentId!! }
-            val hanging = kids.values.flatten().map { it.id }.toSet()
-            fun visible(c: ConversationDTO): Boolean = matches(c) || kids[c.id].orEmpty().any { visible(it) }
-            fun add(c: ConversationDTO, lv: Int, depth: Int) {
-                rows += Group(c, lv, key = "c:" + c.id)
+        /**
+         * Solo grupos y asuntos (26-sep-2026): los grupos de todos los espacios de la empresa, sin cabecera de espacio.
+         * Si dos se llaman igual, «{espacio} · {grupo}» (nunca en el espacio casa).
+         */
+        fun addGroups(spaces: List<WorkspaceDTO>, level: Int) {
+            val byWs = spaces.associateBy { it.id }
+            val all = spaces.flatMap { listed(it) }
+            val dup = all.groupingBy { title(it).trim().lowercase() }.eachCount().filterValues { it > 1 }.keys
+            HomeTree.order(all.filter { matches(it) }, nowMs).forEach { c ->
+                val ws = byWs[c.workspaceId]
+                val label = if (ws != null && !ws.isOrgHome && title(c).trim().lowercase() in dup) ws.name + " · " + title(c) else null
+                rows += Group(c, level, label = label, threadUnread = threadUnread[c.id] ?: 0, key = "c:" + c.id)
                 val open = openIssues(issues, c.id)
-                open.take(MAX_ISSUES).forEach { rows += Issue(it, lv + 1, key = "i:" + it.id) }
-                if (open.size > MAX_ISSUES) rows += MoreIssues(c.id, open.size - MAX_ISSUES, lv + 1, key = "mi:" + c.id)
-                if (depth < 8) HomeTree.order(kids[c.id].orEmpty(), nowMs).filter { visible(it) }.forEach { add(it, lv + 1, depth + 1) }
+                open.take(MAX_ISSUES).forEach { rows += Issue(it, level + 1, key = "i:" + it.id) }
+                if (open.size > MAX_ISSUES) rows += MoreIssues(c.id, open.size - MAX_ISSUES, level + 1, key = "mi:" + c.id)
             }
-            HomeTree.order(all.filter { it.id !in hanging }, nowMs).filter { visible(it) }.forEach { add(it, level, 0) }
         }
-        fun hasVisible(w: WorkspaceDTO) = convsOf(w).any { matches(it) }
-        fun wsSort(list: List<WorkspaceDTO>) = list.sortedWith { a, b ->
-            HomeTree.compareRank(HomeTree.rank(convsOf(a), nowMs), HomeTree.rank(convsOf(b), nowMs)).takeIf { it != 0 } ?: a.id.compareTo(b.id)
-        }
+        fun hasVisible(r: Relation) = r.workspaces.any { w -> listed(w).any { matches(it) } }
+        fun hasGroups(r: Relation) = r.workspaces.any { listed(it).isNotEmpty() }
 
-        // 📌 Fijados (espacios y grupos), como Inicio.
+        // 📌 Fijados (grupos), como Inicio.
         if (wsFilter == null && !searching) {
-            val pinned = d.conversations.filter { it.pinnedAt != null && isGroup(d, it) }.sortedBy { it.pinnedAt }
-            val pinnedWs = d.workspaces.filter { it.pinnedAt != null }
-            if (pinned.isNotEmpty() || pinnedWs.isNotEmpty()) {
+            val pinned = d.conversations.filter { it.pinnedAt != null && isGroup(d, it) && it.parentId == null }.sortedBy { it.pinnedAt }
+            if (pinned.isNotEmpty()) {
                 rows += Section(Kind.PINNED, null, false, 0, key = "s:PINNED")
-                pinnedWs.forEach { rows += Space(it, Kind.PINNED, 0, collapsed = true, unread = 0, key = "pw:" + it.id) }
-                pinned.forEach { rows += Group(it, 0, pinnedSection = true, key = "pc:" + it.id) }
+                pinned.forEach { rows += Group(it, 0, pinnedSection = true, threadUnread = threadUnread[it.id] ?: 0, key = "pc:" + it.id) }
             }
         }
 
-        val all = relations(d).map { r -> r.copy(workspaces = r.workspaces.filter { wsFilter == null || it.id == wsFilter }) }.filter { it.workspaces.isNotEmpty() }
+        // Un espacio sin grupos no aparece; una relación pendiente sin grupos sí.
+        val all = relations(d).map { r -> r.copy(workspaces = r.workspaces.filter { wsFilter == null || it.id == wsFilter }) }
+            .filter { it.workspaces.isNotEmpty() && (hasGroups(it) || it.pending) }
         val primary = d.me.primaryOrgId
         val orgOrder = d.organizations.filter { it.myRole != null }.map { it.id }.sortedBy { if (it == primary) 0 else 1 }
-
-        /** Espacios de una empresa: el espacio casa sin cabecera; en Relaciones, con uno solo también se omite. */
-        fun addSpaces(kind: Kind, list: List<WorkspaceDTO>, level: Int) {
-            val shown = wsSort(list).filter { !searching || hasVisible(it) }
-            val single = kind == Kind.RELATIONS && list.size == 1
-            for (w in shown) {
-                if (w.isOrgHome || single) { addGroups(w, level); continue }
-                val k = spaceKey(w)
-                val folded = !searching && k in collapsed
-                rows += Space(w, kind, level, folded, unread(convsOf(w)), key = "w:" + w.id)
-                if (!folded) addGroups(w, level + 1)
-            }
-        }
+        fun convs(r: Relation) = r.workspaces.flatMap { convsOf(it) }
 
         // Tu organización · X (una por cada empresa mía, la principal primero).
         val orgSections = all.filter { it.kind == Kind.ORG }.sortedBy { r -> orgOrder.indexOf(r.id).let { if (it < 0) Int.MAX_VALUE else it } }
         for (r in orgSections) {
-            if (searching && r.workspaces.none { hasVisible(it) }) continue
+            if (searching && !hasVisible(r)) continue
             val k = sectionKey(Kind.ORG, r.id)
             val folded = !searching && k in collapsed
-            rows += Section(Kind.ORG, r.org, folded, unread(r.workspaces.flatMap { convsOf(it) }), key = "s:ORG:" + r.id)
-            if (!folded) addSpaces(Kind.ORG, r.workspaces, 0)
+            rows += Section(Kind.ORG, r.org, folded, unread(convs(r)), key = "s:ORG:" + r.id)
+            if (!folded) addGroups(r.workspaces, 0)
         }
 
         // Relaciones e Invitado en: empresas por no leído agregado y actividad.
         for (kind in listOf(Kind.RELATIONS, Kind.GUEST)) {
-            val list = all.filter { it.kind == kind }.filter { r -> !searching || r.workspaces.any { hasVisible(it) } }
-                .sortedWith { a, b ->
-                    HomeTree.compareRank(HomeTree.rank(a.workspaces.flatMap { convsOf(it) }, nowMs), HomeTree.rank(b.workspaces.flatMap { convsOf(it) }, nowMs)).takeIf { it != 0 }
-                        ?: a.id.compareTo(b.id)
-                }
+            val list = all.filter { it.kind == kind }.filter { r -> !searching || hasVisible(r) }
+                .sortedWith { a, b -> HomeTree.compareRank(HomeTree.rank(convs(a), nowMs), HomeTree.rank(convs(b), nowMs)).takeIf { it != 0 } ?: a.id.compareTo(b.id) }
             if (list.isEmpty()) continue
             val sk = sectionKey(kind)
             val sFolded = !searching && sk in collapsed
-            rows += Section(kind, null, sFolded, unread(list.flatMap { r -> r.workspaces.flatMap { convsOf(it) } }), key = "s:" + kind.name)
+            rows += Section(kind, null, sFolded, unread(list.flatMap { convs(it) }), key = "s:" + kind.name)
             if (sFolded) continue
             for (r in list) {
                 val ck = companyKey(kind, r.id)
                 val folded = !searching && ck in collapsed
-                rows += Company(kind, r.id, r.org, r.pendingName, r.workspaces, folded, unread(r.workspaces.flatMap { convsOf(it) }), key = "o:" + kind.name + ":" + r.id)
-                if (!folded) addSpaces(kind, r.workspaces, 1)
+                rows += Company(kind, r.id, r.org, r.pendingName, r.workspaces, folded, unread(convs(r)), key = "o:" + kind.name + ":" + r.id)
+                if (!folded) addGroups(r.workspaces, 1)
             }
         }
 
@@ -229,7 +219,7 @@ object GroupsTree {
     fun allFoldKeys(d: BootstrapDTO): Set<String> =
         relations(d).flatMap { r ->
             val base = if (r.kind == Kind.ORG) listOf(sectionKey(Kind.ORG, r.id)) else listOf(companyKey(r.kind, r.id))
-            base + r.workspaces.map { spaceKey(it) }
+            base
         }.toSet()
 }
 

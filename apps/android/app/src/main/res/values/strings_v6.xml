@@ -123,6 +123,9 @@
     <string name="menu_reply_private_sub">By DM to %1$s</string>
     <string name="menu_derive_sub">With the chat</string>
     <string name="menu_ask_side_sub">Only with who you pick</string>
+    <string name="grp_archive">Archive group</string>
+    <string name="grp_archive_confirm">Archive “%1$s”? It leaves the list of everyone in it.</string>
+    <string name="grp_archived">Group archived</string>
     <plurals name="grp_more_issues">
         <item quantity="one">+%1$d issue</item>
         <item quantity="other">+%1$d issues</item>

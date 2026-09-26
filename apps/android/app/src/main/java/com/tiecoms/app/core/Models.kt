@@ -365,6 +365,10 @@ data class OversightGroupDTO(
     val iAmMember: Boolean = false,
 )
 
+/** Respuesta de archivar un grupo: si era el último de un espacio que no es casa, el espacio también se archiva. */
+@Serializable
+data class ArchiveResult(val archived: Boolean = false, val workspaceArchived: Boolean = false)
+
 @Serializable
 data class OversightDTO(val orgId: String = "", val groups: List<OversightGroupDTO> = emptyList())
 

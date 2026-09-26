@@ -288,7 +288,6 @@ private fun MainNav() {
                     workspaceFilter = it.arguments?.getString("ws"),
                     onClearFilter = { nav.navigate("home") { popUpTo(0) { inclusive = true } } },
                     onOpen = { id -> openConv(id) },
-                    onOpenWorkspace = { w -> nav.navigate("home?ws=$w") { launchSingleTop = true } },
                     onMentions = { nav.navigate("mentions") { launchSingleTop = true } },
                     onIssuesOf = { c -> nav.navigate("issues-of/$c") { launchSingleTop = true } },
                     onOpenIssue = { i -> nav.navigate("issue/$i") },

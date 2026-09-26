@@ -123,6 +123,9 @@
     <string name="menu_reply_private_sub">Por DM a %1$s</string>
     <string name="menu_derive_sub">Con los del chat</string>
     <string name="menu_ask_side_sub">Solo con quien elijas</string>
+    <string name="grp_archive">Archivar grupo</string>
+    <string name="grp_archive_confirm">¿Archivar «%1$s»? Sale de la lista de todos sus participantes.</string>
+    <string name="grp_archived">Grupo archivado</string>
     <plurals name="grp_more_issues">
         <item quantity="one">+%1$d asunto</item>
         <item quantity="other">+%1$d asuntos</item>

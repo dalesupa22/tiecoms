@@ -1200,6 +1200,11 @@ class TieComsClient(
         req("POST", "/organizations/$orgId/invitations", body, JsonElement.serializer()); Unit
     }
 
+    /** POST /conversations/:id/archive (solo quien administra el grupo); luego refresca el snapshot. */
+    suspend fun archiveConversation(id: String): ArchiveResult = withContext(dispatcher) {
+        val r = req("POST", "/conversations/$id/archive", buildJsonObject {}, ArchiveResult.serializer()); loadBootstrapInternal(); r
+    }
+
     /** Asuntos abiertos de todo mi alcance (se muestran bajo cada grupo). */
     suspend fun loadOpenIssues(): List<IssueDTO> = loadIssues(open = true)
 

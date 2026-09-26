@@ -110,7 +110,7 @@ private sealed interface GroupsDialog {
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun GroupsScreen(
-    workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (String) -> Unit, onOpenWorkspace: (String) -> Unit,
+    workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (String) -> Unit,
     onIssuesOf: (String) -> Unit, onOpenIssue: (String) -> Unit, onDetails: (String) -> Unit, onMentions: () -> Unit, onJoinCode: (String) -> Unit,
 ) {
     val client = LocalClient.current
@@ -137,6 +137,7 @@ fun GroupsScreen(
     var meetingFor by remember { mutableStateOf<String?>(null) }
     var remindFor by remember { mutableStateOf<ConversationDTO?>(null) }
     var leaveFor by remember { mutableStateOf<ConversationDTO?>(null) }
+    var archiveFor by remember { mutableStateOf<ConversationDTO?>(null) }
     val filterWs = workspaceFilter?.let { id -> data.workspaces.firstOrNull { it.id == id } }
     val myOrg = Names.org(data, data.me.primaryOrgId)
     val allFold = remember(data) { GroupsTree.allFoldKeys(data) }
@@ -195,12 +196,12 @@ fun GroupsScreen(
                                 },
                                 onLongPress = if (row.kind == GroupsTree.Kind.ORG || row.kind == GroupsTree.Kind.RELATIONS) ({ dialog = GroupsDialog.Header(row) }) else null)
                             is GroupsTree.Company -> CompanyRow(row, onToggle = { toggle(GroupsTree.companyKey(row.kind, row.id)) }, onLongPress = { dialog = GroupsDialog.Header(row) })
-                            is GroupsTree.Space -> WsRow(row, onToggle = { toggle(GroupsTree.spaceKey(row.ws)) }, onLongPress = { dialog = GroupsDialog.Header(row) }, onOpen = { onOpenWorkspace(row.ws.id) })
                             is GroupsTree.Group -> {
                                 val ws = data.workspaces.firstOrNull { it.id == row.c.workspaceId }
                                 val guest = ws?.myRole == "guest"
                                 ConversationRow(row.c, data, internalFallback, convFallback,
                                     indent = if (row.pinnedSection) 16.dp else (16 + row.level * 20).dp, iconSize = 32.dp, showIssuesChip = row.pinnedSection,
+                                    titleOverride = row.label, threadUnread = row.threadUnread,
                                     tagLine = if (row.c.kind == "internal") stringResource(R.string.grp_internal_only, Names.org(data, row.c.internalOrgId ?: ws?.owningOrgId)?.name ?: "") else null,
                                     menuOpen = menuKey == row.key,
                                     menuItems = {
@@ -208,7 +209,9 @@ fun GroupsScreen(
                                             listOfNotNull(null,
                                                 if (!guest && row.c.canPost) SheetItem(ctx.getString(R.string.menu_new_issue), "◆", tag = "menuNewIssue") { dialog = GroupsDialog.NewIssue(row.c.id) } else null,
                                                 if (!guest && ws != null) SheetItem(ctx.getString(R.string.menu_invite_group), "✉", tag = "menuInviteGroup") { dialog = GroupsDialog.Invite(InviteTarget.Group(ws, row.c)) } else null,
-                                                SheetItem(ctx.getString(R.string.details_short), "ⓘ", tag = "menuDetails") { onDetails(row.c.id) })
+                                                SheetItem(ctx.getString(R.string.details_short), "ⓘ", tag = "menuDetails") { onDetails(row.c.id) },
+                                                // Archivar (solo si puedo administrarlo), con confirmación.
+                                                if (row.c.canManage) SheetItem(ctx.getString(R.string.grp_archive), "🗄", danger = true, tag = "menuArchive") { archiveFor = row.c } else null)
                                     },
                                     onDismissMenu = { menuKey = null },
                                     onLongPress = { menuKey = row.key }, onIssues = { onIssuesOf(row.c.id) }) { onOpen(row.c.id) }
@@ -245,7 +248,23 @@ fun GroupsScreen(
         is GroupsDialog.NewIssue -> NewIssueDialog(d.conversationId, null, "", onClose = { dialog = null }, onCreated = onOpenIssue)
         GroupsDialog.JoinCode -> JoinCodeDialog(onClose = { dialog = null }, onGo = { code -> dialog = null; onJoinCode(code) })
         is GroupsDialog.Header -> HeaderMenu(data, d.row, foldAll = ::foldAllItem, onDismiss = { if (dialog === d) dialog = null },
-            onNewGroup = { dialog = GroupsDialog.NewGroup(it) }, onInvite = { dialog = GroupsDialog.Invite(it) }, onOpenWorkspace = onOpenWorkspace)
+            onNewGroup = { dialog = GroupsDialog.NewGroup(it) }, onInvite = { dialog = GroupsDialog.Invite(it) })
+    }
+    archiveFor?.let { c ->
+        val name = Names.conversationTitle(c, data, internalFallback, convFallback)
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { archiveFor = null }, text = { Text(stringResource(R.string.grp_archive_confirm, name)) },
+            confirmButton = { TextButton(onClick = {
+                archiveFor = null
+                // POST /conversations/:id/archive y refrescar el snapshot; si era el último grupo, el espacio también se archiva.
+                container.scope.launch {
+                    runCatching { client.archiveConversation(c.id) }
+                        .onSuccess { container.toast(ctx.getString(R.string.grp_archived)) }
+                        .onFailure { container.toast(errorText(ctx, it)) }
+                }
+            }, modifier = Modifier.testTag("confirmArchive")) { Text(stringResource(R.string.grp_archive), color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { archiveFor = null }) { Text(stringResource(R.string.cancel)) } },
+        )
     }
     HomeMenus(data, meetingFor, remindFor, leaveFor, { meetingFor = it }, { remindFor = it }, { leaveFor = it })
 }
@@ -256,7 +275,7 @@ private fun sectionKeyOf(row: GroupsTree.Section) = GroupsTree.sectionKey(row.ki
 @Composable
 private fun HeaderMenu(
     data: BootstrapDTO, row: GroupsTree.Row, foldAll: () -> SheetItem, onDismiss: () -> Unit,
-    onNewGroup: (NewGroupPreset) -> Unit, onInvite: (InviteTarget) -> Unit, onOpenWorkspace: (String) -> Unit,
+    onNewGroup: (NewGroupPreset) -> Unit, onInvite: (InviteTarget) -> Unit,
 ) {
     val ctx = LocalContext.current
     val client = LocalClient.current
@@ -285,20 +304,6 @@ private fun HeaderMenu(
                 add(foldAll())
             }
             ActionSheet(name, items, onDismiss)
-        }
-        is GroupsTree.Space -> {
-            val ws = row.ws
-            val pinned = ws.pinnedAt != null
-            val guest = ws.myRole == "guest"
-            ActionSheet(ws.name, listOfNotNull(
-                if (!guest) SheetItem(ctx.getString(R.string.menu_new_group_here), "#", tag = "menuNewGroupHere") { onNewGroup(NewGroupPreset(workspaceId = ws.id)) } else null,
-                if (!guest) SheetItem(ctx.getString(R.string.menu_invite), "✉", tag = "menuInviteSpace") { onInvite(InviteTarget.Space(ws, ws.name)) } else null,
-                SheetItem(ctx.getString(if (pinned) R.string.menu_unpin_top else R.string.menu_pin_top), "📌") {
-                    container.scope.launch { runCatching { client.setWorkspacePinned(ws.id, !pinned) }.onFailure { container.toast(errorText(ctx, it)) } }
-                },
-                SheetItem(ctx.getString(R.string.menu_open_space), "↗", tag = "menuOpenSpace") { onOpenWorkspace(ws.id) },
-                SheetItem(ctx.getString(R.string.menu_copy_link), "⛓") { copyToClipboard(ctx, "https://app.tiecoms.com/w/${ws.id}"); container.toast(ctx.getString(R.string.toast_link_copied)) },
-            ), onDismiss)
         }
         else -> onDismiss()
     }
@@ -483,28 +488,6 @@ private fun CompanyRow(row: GroupsTree.Company, onToggle: () -> Unit, onLongPres
     }
 }
 
-/** Espacio (carpeta): gris semibold con la línea de sangría; tocar pliega. En Fijados, tocar abre el espacio. */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-@Composable
-private fun WsRow(row: GroupsTree.Space, onToggle: () -> Unit, onLongPress: () -> Unit, onOpen: () -> Unit) {
-    val inPinned = row.kind == GroupsTree.Kind.PINNED
-    val state = stringResource(if (row.collapsed) R.string.expand else R.string.collapse)
-    Row(
-        Modifier.fillMaxWidth().combinedClickable(onClick = if (inPinned) onOpen else onToggle, onLongClick = onLongPress, onClickLabel = if (inPinned) null else state)
-            .heightIn(min = 40.dp).padding(start = if (inPinned) 16.dp else (18 + row.level * 20).dp, end = 16.dp).testTag("ws-" + row.ws.id),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (!inPinned) Box(Modifier.width(2.dp).heightIn(min = 40.dp).background(MaterialTheme.colorScheme.outlineVariant))
-        Spacer(Modifier.width(10.dp))
-        Text((if (row.ws.pinnedAt != null) "📌 " else "") + row.ws.name, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        if (!inPinned) {
-            if (row.collapsed) UnreadPill(row.unread, Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE), Color.White)
-            Icon(if (row.collapsed) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
 /** Asunto abierto bajo su grupo: «◆ título», la fecha límite (en rojo si venció) y el estado si está en curso o esperando. */
 @Composable
 private fun IssueLine(row: GroupsTree.Issue, onOpen: () -> Unit) {
@@ -538,11 +521,15 @@ internal fun ConversationRow(
     badge: String? = null,
     /** Línea pequeña bajo el título («Solo Acme», «desde #Pagos»). */
     tagLine: String? = null,
+    /** «{espacio} · {grupo}» cuando dos grupos de la empresa se llaman igual. */
+    titleOverride: String? = null,
+    /** No leídos de sus hilos: chip «💬 N» (los hilos no se listan en el árbol). */
+    threadUnread: Int = 0,
     onClick: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    val title = Names.conversationTitle(c, data, internalFallback, convFallback)
+    val title = titleOverride ?: Names.conversationTitle(c, data, internalFallback, convFallback)
     // SPEC-v4 §C: se prefiere el último mensaje de una persona (lastHumanPreview) sobre los de sistema.
     val human = c.lastHumanPreview?.let { h ->
         val text = com.tiecoms.app.core.Attachments.preview(h.attachments, h.body, attLabels(ctx))
@@ -586,6 +573,13 @@ internal fun ConversationRow(
                         }
                     }
                     if (muted) Text(" 🔕", style = MaterialTheme.typography.labelMedium)
+                    if (threadUnread > 0) {
+                        Spacer(Modifier.width(6.dp))
+                        Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(8.dp)) {
+                            Text("💬 $threadUnread", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp).testTag("threadUnread-${c.id}"))
+                        }
+                    }
                 }
                 if (tagLine != null) Text(tagLine, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {

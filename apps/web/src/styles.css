@@ -625,3 +625,22 @@ a.btn { text-decoration: none; color: inherit; } a.btn.primary { color: var(--pa
 .mention-item:hover { background: var(--card); }
 .mention-item.unread b { color: var(--ink); }
 .mention-item.unread { background: rgba(180, 83, 9, .06); }
+
+/* ---------- Grupos: secciones, asuntos bajo cada grupo, invitaciones ---------- */
+.groups-section { margin-top: 6px; }
+.groups-section-head { padding: 8px 10px 2px; }
+.groups-company-head { width: 100%; border: 0; background: transparent; text-align: left; border-radius: 8px; cursor: pointer; }
+.groups-company-head:hover { background: var(--paper-3); }
+.group-issues { display: flex; flex-direction: column; margin: 0 0 4px 30px; }
+.group-issue { display: flex; align-items: center; gap: 6px; border: 0; background: transparent; text-align: left; padding: 3px 8px; border-radius: 6px; font-size: 12.5px; color: var(--ink-2); min-height: 26px; }
+.group-issue:hover { background: var(--paper-3); }
+.group-issue .diamond { color: var(--accent, #d9731a); font-size: 10px; }
+.group-issue.more { color: var(--muted); font-weight: 600; }
+.group-issue .overdue { color: #c0392b; font-weight: 700; }
+.chip-side { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--paper-3); color: var(--ink-2); white-space: nowrap; }
+.share-invite { display: flex; flex-direction: column; gap: 12px; }
+.code-box { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; border: 1px dashed var(--line); border-radius: 14px; background: var(--paper-2); }
+.code-big { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 34px; font-weight: 800; letter-spacing: 0.08em; }
+.code-input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 22px; letter-spacing: 0.12em; text-transform: uppercase; text-align: center; }
+.readonly-banner { margin: 12px 0 4px; padding: 10px 14px; border-radius: 12px; background: var(--paper-3); font-weight: 700; font-size: 13px; }
+@media (max-width: 860px) { .group-issue { min-height: 36px; font-size: 14px; } .tabs .ico .avatar, .tabs .ico img { vertical-align: middle; } }

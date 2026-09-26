@@ -14,6 +14,7 @@ import { AgendaScreen } from './screens/Calendar.tsx';
 import { ShareScreen } from './screens/Bring.tsx';
 import { WhatsAppScreen } from './screens/WhatsApp.tsx';
 import { FilesScreen } from './screens/Files.tsx';
+import { DmsScreen, GroupsScreen, OversightScreen, ReadOnlyConversationScreen } from './screens/Groups.tsx';
 import { DialogHost } from './actions.tsx';
 import { MenuHost, ToastHost } from './menu.tsx';
 
@@ -55,6 +56,10 @@ export function App() {
       {route.name === 'share' && <ShareScreen />}
       {route.name === 'whatsapp' && <WhatsAppScreen />}
       {route.name === 'files' && <FilesScreen />}
+      {route.name === 'groups' && <GroupsScreen />}
+      {route.name === 'dms' && <DmsScreen />}
+      {route.name === 'oversight' && <OversightScreen key={route.id} orgId={route.id} />}
+      {route.name === 'readonly' && <ReadOnlyConversationScreen key={route.id} id={route.id} />}
       {route.name === 'settings' && <SettingsScreen />}
       {route.name === 'workspace' && <WorkspaceScreen key={route.id} id={route.id} />}
       {route.name === 'conversation' && <ConversationScreen key={route.id + location.search} id={route.id} />}

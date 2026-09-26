@@ -49,7 +49,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const [error, setError] = useState<string | null>(null);
   const [deriving, setDeriving] = useState<MessageDTO | null>(null);
   const [newIssue, setNewIssue] = useState<{ origin?: MessageDTO; title?: string } | null>(null);
-  const [openIssue, setOpenIssue] = useState<string | null>(null);
+  // ?issue=<id>: se abre directo el asunto (desde el árbol de Grupos).
+  const [openIssue, setOpenIssue] = useState<string | null>(() => queryParam('issue'));
   const [highlight, setHighlight] = useState<number | null>(null);
   const [replyTo, setReplyTo] = useState<MessageDTO | null>(null);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
@@ -198,6 +199,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const canWork = conv.canPost;
   const canDerive = canWork && conv.kind !== 'direct' && !!conv.workspaceId;
   const myWsRole = d.workspaces.find((w) => w.id === conv.workspaceId)?.myRole;
+  // Los terceros invitados participan en los asuntos pero no los abren (el API responde 403).
+  const canOpenIssues = canWork && myWsRole !== 'guest';
   const ws = d.workspaces.find((w) => w.id === conv.workspaceId);
   const typers = (typing ?? []).filter((x) => x.until > Date.now()).map((x) => personById(d, x.userId)?.name.split(' ')[0]).filter(Boolean);
   const orgsHere = [...new Set(conv.memberIds.map((m) => personById(d, m)?.orgId).filter(Boolean))].map((o) => orgById(d, o as string));
@@ -231,7 +234,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       ...(canWork ? [
         { divider: true },
         ...(canDerive && myWsRole !== 'guest' ? [{ label: t('menu.derive'), icon: '⑂', onSelect: () => setDeriving(m) }] : []),
-        { label: t('menu.issue'), icon: '◆', onSelect: () => setNewIssue({ origin: m }) },
+        ...(canOpenIssues ? [{ label: t('menu.issue'), icon: '◆', onSelect: () => setNewIssue({ origin: m }) }] : []),
         { label: t('menu.meeting'), icon: '📅', onSelect: () => newEvent({ conversationId: id, originMessageId: m.id, defaultTitle: excerpt(m.body, 80) }) },
       ] : []),
       { label: t('menu.forwardChat'), icon: '↪', onSelect: () => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />) },
@@ -344,7 +347,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                   ) : (
                     (m.body || m.deletedAt || !m.attachments?.length) && <div className="msg-body">{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <MessageText d={d} body={m.body} mentions={m.mentions} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
                   )}
-                  {!m.deletedAt && !!m.attachments?.length && <AttachmentsView list={m.attachments} onCreateIssue={canWork ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
+                  {!m.deletedAt && !!m.attachments?.length && <AttachmentsView list={m.attachments} onCreateIssue={canOpenIssues ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
                   {!m.deletedAt && !isEditing && m.linkPreview && <LinkPreviewCard p={m.linkPreview} />}
                   {!embedded && <SideChip d={d} sides={sidesOf(d, id, m.id)} onOpen={setSideId} />}
                   {issueOf(m.id) && <button className="msg-issue" onClick={() => setOpenIssue(issueOf(m.id)!.id)}>◆ {issueOf(m.id)!.title}</button>}
@@ -353,7 +356,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                       {conv.canPost && <button onClick={() => { setReplyTo(m); input.current?.focus(); }}>↩ {t('menu.reply')}</button>}
                       <button onClick={() => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />)}>↪ {t('menu.forward')}</button>
                       {canDerive && myWsRole !== 'guest' && <button onClick={() => setDeriving(m)}>{t('derive.action')}</button>}
-                      {canWork && <button onClick={() => setNewIssue({ origin: m })}>{t('issue.fromMessage')}</button>}
+                      {canOpenIssues && <button onClick={() => setNewIssue({ origin: m })}>{t('issue.fromMessage')}</button>}
                       <button aria-label={t('menu.open')} onClick={(e) => { const rr = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(rr.left, rr.bottom + 4, messageMenu(m)); }}>⋯</button>
                     </div>
                   )}
@@ -439,7 +442,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
             <div>
               <div className="row" style={{ marginBottom: 6 }}>
                 <span className="eyebrow grow">{t('nav.issues')} · {openHere.length}</span>
-                <button className="btn small" onClick={() => setNewIssue({})}>{t('issue.new')}</button>
+                {canOpenIssues && <button className="btn small" onClick={() => setNewIssue({})}>{t('issue.new')}</button>}
               </div>
               {openHere.length === 0 && <div className="hint">{t('issue.noIssues')}</div>}
               <div className="list" style={{ gap: 6 }}>{openHere.map((i) => <IssueRow key={i.id} i={i} showWhere={false} onOpen={setOpenIssue} />)}</div>

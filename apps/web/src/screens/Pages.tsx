@@ -6,7 +6,7 @@ import { navigate } from '../router.ts';
 import { openProfile } from './Profile.tsx';
 import { NewChatDialog, StackedAvatars } from './Chats.tsx';
 import { Avatar, ConvAvatar, OrgMark, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, conversationPreview, timeLabel } from '../ui.tsx';
-import { InviteDialog, NewGroupDialog, NewWorkspaceDialog } from './Dialogs.tsx';
+import { InviteDialog, NewGroupDialog } from './Dialogs.tsx';
 import { InviteResult, PendingInvitations } from './Invitations.tsx';
 import { IssueDrawer, IssueRow, isClosed } from './Issues.tsx';
 import { TodayAgenda, newEvent } from './Calendar.tsx';
@@ -14,6 +14,7 @@ import { RemindersSection } from './Bring.tsx';
 import { askNotifications, conversationMenu, openDialog, personMenu } from '../actions.tsx';
 import { menuProps, toast } from '../menu.tsx';
 import { SignOutButton, groupWorkspaces } from './Shell.tsx';
+import { JoinWithCodeDialog, openCreateGroup } from './Groups.tsx';
 
 function greeting() {
   const h = new Date().getHours();
@@ -41,7 +42,6 @@ export function TodayScreen() {
   const d = useClient((s) => s.data)!;
   const pending = useClient((s) => s.pending);
   const issues = useClient((s) => s.issues);
-  const [newWs, setNewWs] = useState(false);
   const [openIssue, setOpenIssue] = useState<string | null>(null);
   useEffect(() => { client.loadIssues({ mine: true, open: true }).catch(() => {}); }, []);
   const visible = new Set(d.conversations.map((c) => c.id));
@@ -73,7 +73,7 @@ export function TodayScreen() {
         <div className="card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
           <div className="serif" style={{ fontSize: 30 }}>{t('today.startTitle')}</div>
           <div className="muted">{t('today.startBody')}</div>
-          <button className="btn primary" onClick={() => setNewWs(true)}>{t('today.newSpace')}</button>
+          <button className="btn primary" onClick={() => openCreateGroup()}>{t('today.newSpace')}</button>
         </div>
       ) : (
         <div className="cols">
@@ -92,11 +92,10 @@ export function TodayScreen() {
             </div>
             <div className="row" style={{ marginBottom: 10 }}><span className="eyebrow grow">{t('today.recent')}</span></div>
             <div className="list">{recent.map((c) => <ConvCard key={c.id} c={c} />)}</div>
-            <button className="btn" style={{ marginTop: 12, width: '100%' }} onClick={() => setNewWs(true)}>{t('today.newSpace')}</button>
+            <button className="btn" style={{ marginTop: 12, width: '100%' }} onClick={() => openCreateGroup()}>{t('today.newSpace')}</button>
           </section>
         </div>
       )}
-      {newWs && <NewWorkspaceDialog onClose={() => setNewWs(false)} />}
       {openIssue && <IssueDrawer id={openIssue} onClose={() => setOpenIssue(null)} />}
       {pending.length > 0 && <div className="hint" style={{ marginTop: 16 }}>{t('today.queued')}: {pending.length}</div>}
     </div></div>
@@ -126,11 +125,10 @@ export function InboxScreen() {
 
 export function SpacesScreen() {
   const d = useClient((s) => s.data)!;
-  const [newWs, setNewWs] = useState(false);
   const groups = useMemo(() => groupWorkspaces(d), [d]);
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 760 }}>
-      <div className="row"><h1 className="grow">{t('nav.spaces')}</h1><button className="btn small" onClick={() => navigate('/participantes')}>{t('nav.people')}</button><button className="btn primary small" onClick={() => setNewWs(true)}>{t('spaces.new')}</button></div>
+      <div className="row"><h1 className="grow">{t('nav.spaces')}</h1><button className="btn small" onClick={() => navigate('/participantes')}>{t('nav.people')}</button><button className="btn primary small" onClick={() => openCreateGroup({ kind: 'company' })}>{t('spaces.new')}</button></div>
       {groups.length === 0 && <div className="empty">{t('spaces.empty')}</div>}
       {groups.map((g) => (
         <section key={g.org?.id ?? 'none'} style={{ marginTop: 18 }}>
@@ -145,7 +143,6 @@ export function SpacesScreen() {
           </div>
         </section>
       ))}
-      {newWs && <NewWorkspaceDialog onClose={() => setNewWs(false)} />}
     </div></div>
   );
 }
@@ -303,13 +300,27 @@ export function SettingsScreen() {
   const langOptions: [Lang | null, string][] = [[null, t('settings.langAuto')], ['es', 'Español'], ['en', 'English']];
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 720 }}>
-      <h1>{t('settings.title')}</h1>
+      <h1>{t('nav.you')}</h1>
       <div className="card" style={{ padding: 18, display: 'flex', gap: 14, alignItems: 'center', margin: '14px 0 24px', flexWrap: 'wrap' }}>
         <Avatar person={personById(d, d.me.id)} org={myOrg} size={48} />
         <div className="grow"><b>{d.me.name}</b><div className="small muted">{d.me.email} · {[d.me.title, myOrg?.name].filter(Boolean).join(' · ')}</div></div>
         <button className="btn" onClick={openProfile}>{t('profile.edit')}</button>
         <SignOutButton />
       </div>
+
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{t('join.title')}</div>
+      <button className="card conv-card" style={{ marginBottom: 24 }} onClick={() => openDialog((close) => <JoinWithCodeDialog onClose={close} />)}>
+        <span style={{ fontSize: 22 }} aria-hidden>⌗</span>
+        <span className="grow"><b>{t('join.title')}</b><span className="small muted" style={{ display: 'block' }}>{t('join.hint')}</span></span>
+        <span className="muted">›</span>
+      </button>
+      {d.organizations.filter((o) => o.myRole === 'owner' || o.myRole === 'admin').map((o) => (
+        <button key={o.id} className="card conv-card" style={{ marginBottom: 24 }} onClick={() => navigate(`/supervision/${o.id}`)}>
+          <span style={{ fontSize: 22 }} aria-hidden>◉</span>
+          <span className="grow"><b>{t('over.title', { org: o.name })}</b><span className="small muted" style={{ display: 'block' }}>{t('over.entryHint')}</span></span>
+          <span className="muted">›</span>
+        </button>
+      ))}
 
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('settings.whatsapp')}</div>
       <button className="card conv-card" style={{ marginBottom: 24 }} onClick={() => navigate('/whatsapp')}>

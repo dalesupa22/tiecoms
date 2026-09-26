@@ -1004,3 +1004,16 @@
 "ws.onlyYours" = "Solo ves los grupos en los que participas; los demás no revelan su nombre.";
 "ws.participants" = "Participantes";
 "ws.yourGroups" = "Tus grupos en este espacio";
+
+/* Consentimiento nativo para IA de terceros. Conservar junto a las traducciones generadas. */
+"ai.voice.title" = "¿Usar IA en esta nota de voz?";
+"ai.voice.message" = "Si lo permites, TieComs envía esta grabación y su idioma a Inworld para transcribirla. Envía la transcripción, los nombres del autor y los participantes, y el nombre/contexto de la conversación a DeepSeek para generar un resumen y una acción sugerida. Puedes enviar y escuchar la nota sin IA. El permiso aplica solo a esta nota.";
+"ai.voice.allow" = "Permitir IA y enviar";
+"ai.voice.without" = "Enviar sin IA";
+"ai.voice.retry" = "Permitir IA y reintentar";
+"ai.side.request" = "Crear un resumen con IA…";
+"ai.side.title" = "¿Compartir esta conversación con DeepSeek?";
+"ai.side.message" = "Para sugerir un resumen, TieComs envía a DeepSeek los mensajes y las transcripciones de esta conversación, los nombres del autor y los participantes, y el nombre/contexto de la conversación. Si lo permites, la sugerencia reemplaza tu borrador. Puedes seguir editando y publicar tu propio resumen sin IA. El permiso aplica solo a esta solicitud.";
+"ai.side.allow" = "Permitir y crear resumen";
+"ai.side.without" = "Continuar sin IA";
+"err.ai_consent_required" = "El procesamiento con IA necesita permiso. Una nota enviada sin IA debe grabarse y enviarse de nuevo con permiso para usar IA.";

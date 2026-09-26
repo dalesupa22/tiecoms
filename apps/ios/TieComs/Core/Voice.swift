@@ -114,19 +114,24 @@ final class VoiceRecorder: NSObject, AVAudioRecorderDelegate {
 extension APIClient {
     /// Nota de voz: adjunto con x-voice-note, x-duration-ms, x-waveform y Accept-Language (idioma de la transcripción).
     func uploadVoiceNote(_ conversationId: String, data: Data, durationMs: Int, waveform: [Double],
+                         aiConsent: Bool = false,
                          progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> AttachmentDTO {
         guard data.count <= AttachmentRules.maxBytes else { throw ApiRequestError(status: 413, code: "too_large", message: L("voice.tooLong")) }
         let stamp = ISO8601DateFormatter().string(from: Date()).prefix(19).replacingOccurrences(of: ":", with: "-")
+        var headers = ["x-file-name": "nota-de-voz-\(stamp).m4a", "x-file-type": "audio/mp4", "x-voice-note": "1",
+                       "x-duration-ms": String(durationMs), "x-waveform": VoiceRules.waveformHeader(waveform),
+                       "accept-language": L10n.lang]
+        // Consent belongs to this recording; silence/default never authorizes third-party AI.
+        if aiConsent { headers["x-ai-consent"] = "1" }
         return try await uploadWithProgress("/conversations/\(conversationId)/attachments", data: data, contentType: "application/octet-stream",
-                                            headers: ["x-file-name": "nota-de-voz-\(stamp).m4a", "x-file-type": "audio/mp4", "x-voice-note": "1",
-                                                      "x-duration-ms": String(durationMs), "x-waveform": VoiceRules.waveformHeader(waveform),
-                                                      "accept-language": L10n.lang],
+                                            headers: headers,
                                             progress: progress)
     }
 
     /// Reintento de la transcripción (503 transcription_disabled si no hay llave).
-    func retryTranscription(_ attachmentId: String) async throws {
-        try await requestData("/attachments/\(attachmentId)/transcribe", method: "POST", json: [:])
+    func retryTranscription(_ attachmentId: String, aiConsent: Bool = false) async throws {
+        guard aiConsent else { throw ApiRequestError(status: 403, code: "ai_consent_required", message: L("err.ai_consent_required")) }
+        try await requestData("/attachments/\(attachmentId)/transcribe", method: "POST", json: ["aiConsent": true])
     }
 }
 

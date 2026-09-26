@@ -6,6 +6,49 @@ private func dec<T: Decodable>(_ t: T.Type, _ s: String) throws -> T { try JSOND
 
 /// SPEC-v4 G: Sidechats (sugerencias, conector, conteo de respuestas, push TC_SIDE) y reproducción continua de voz.
 final class V5SidechatTests: XCTestCase {
+    @MainActor
+    func testVoiceUploadRequiresAffirmativeConsentHeader() async throws {
+        MockURLProtocol.routes = ["/api/v1/conversations/c1/attachments": (201, #"{"id":"voice-1","name":"note.m4a","contentType":"audio/mp4","sizeBytes":3,"url":"/audio","kind":"voice"}"#)]
+        MockURLProtocol.httpRequests = []
+        let api = APIClient(baseURL: URL(string: "https://mock.tiecoms.test")!, secrets: MemorySecretStore(), session: MockURLProtocol.session())
+        let audio = Data([1, 2, 3])
+        _ = try await api.uploadVoiceNote("c1", data: audio, durationMs: 1000, waveform: [0.5])
+        let withoutConsent = try XCTUnwrap(MockURLProtocol.httpRequests.last)
+        XCTAssertNil(withoutConsent.value(forHTTPHeaderField: "x-ai-consent"))
+        XCTAssertEqual(withoutConsent.value(forHTTPHeaderField: "x-voice-note"), "1", "Declining AI still uploads a playable voice note")
+        _ = try await api.uploadVoiceNote("c1", data: audio, durationMs: 1000, waveform: [0.5], aiConsent: true)
+        XCTAssertEqual(MockURLProtocol.httpRequests.last?.value(forHTTPHeaderField: "x-ai-consent"), "1")
+        _ = try await api.uploadVoiceNote("c1", data: audio, durationMs: 1000, waveform: [0.5], aiConsent: false)
+        XCTAssertNil(MockURLProtocol.httpRequests.last?.value(forHTTPHeaderField: "x-ai-consent"), "Permission must not carry over to the next recording")
+    }
+
+    @MainActor
+    func testReturnSuggestionDefaultsToNoAIAndSendsExplicitChoice() async throws {
+        MockURLProtocol.routes = ["/api/v1/conversations/s1/return/suggest": (200, #"{"summary":"Local draft","source":"fallback"}"#)]
+        MockURLProtocol.requests = []
+        let store = AppStore(baseURL: URL(string: "https://mock.tiecoms.test")!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: nil, session: MockURLProtocol.session())
+        _ = try await store.suggestReturn("s1")
+        XCTAssertEqual(MockURLProtocol.requests.last?.body["aiConsent"] as? Bool, false)
+        _ = try await store.suggestReturn("s1", aiConsent: true)
+        XCTAssertEqual(MockURLProtocol.requests.last?.body["aiConsent"] as? Bool, true)
+    }
+
+    @MainActor
+    func testTranscriptionRetryCannotSendWithoutConsent() async throws {
+        MockURLProtocol.routes = ["/api/v1/attachments/v1/transcribe": (200, #"{"ok":true}"#)]
+        MockURLProtocol.requests = []
+        let api = APIClient(baseURL: URL(string: "https://mock.tiecoms.test")!, secrets: MemorySecretStore(), session: MockURLProtocol.session())
+        do {
+            try await api.retryTranscription("v1")
+            XCTFail("No consent must not retry transcription")
+        } catch let error as ApiRequestError {
+            XCTAssertEqual(error.code, "ai_consent_required")
+        }
+        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+        try await api.retryTranscription("v1", aiConsent: true)
+        XCTAssertEqual(MockURLProtocol.requests.last?.body["aiConsent"] as? Bool, true)
+    }
+
     private func boot() throws -> BootstrapDTO {
         try dec(BootstrapDTO.self, #"""
         {"contract":"x","serverTime":"","me":{"id":"me","name":"Ana","kind":"human","primaryOrgId":"oA"},

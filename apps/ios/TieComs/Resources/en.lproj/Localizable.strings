@@ -1004,3 +1004,16 @@
 "ws.onlyYours" = "You only see the groups you are in; the others do not reveal their name.";
 "ws.participants" = "Participants";
 "ws.yourGroups" = "Your groups in this space";
+
+/* Native third-party AI consent. Keep alongside generated translations. */
+"ai.voice.title" = "Use AI for this voice note?";
+"ai.voice.message" = "If you allow this, TieComs sends this recording and its language to Inworld for transcription. It sends the transcript, author and participant names, and conversation name/context to DeepSeek for a summary and suggested action. You can send and play the voice note without AI. Permission applies to this note only.";
+"ai.voice.allow" = "Allow AI and send";
+"ai.voice.without" = "Send without AI";
+"ai.voice.retry" = "Allow AI and retry";
+"ai.side.request" = "Create a summary with AI…";
+"ai.side.title" = "Share this conversation with DeepSeek?";
+"ai.side.message" = "To suggest a summary, TieComs sends this conversation's messages and transcripts, author and participant names, and conversation name/context to DeepSeek. Allowing this replaces your draft with the suggestion. You can keep editing and publish your own summary without AI. Permission applies to this request only.";
+"ai.side.allow" = "Allow and create summary";
+"ai.side.without" = "Continue without AI";
+"err.ai_consent_required" = "AI processing needs permission. A voice note sent without AI must be recorded and sent again with permission to use AI.";

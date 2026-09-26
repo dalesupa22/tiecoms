@@ -38,6 +38,7 @@ struct VoiceNoteView: View {
     @State private var showTranscript = false
     @State private var creatingIssue = false
     @State private var retrying = false
+    @State private var showingAIConsent = false
 
     private var player: VoicePlayer { VoicePlayer.shared }
 
@@ -83,6 +84,10 @@ struct VoiceNoteView: View {
         .padding(.vertical, 2)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("voice.note.\(att.id)")
+        .alert(L("ai.voice.title"), isPresented: $showingAIConsent) {
+            Button(L("ai.voice.retry")) { retry() }
+            Button(L("common.cancel"), role: .cancel) {}
+        } message: { Text(L("ai.voice.message")) }
     }
 
     @ViewBuilder private func transcriptArea(fg: Color) -> some View {
@@ -93,7 +98,7 @@ struct VoiceNoteView: View {
             case .failed:
                 HStack(spacing: 8) {
                     Text(L("voice.failed")).font(.caption).foregroundStyle(fg.opacity(0.8))
-                    Button(L("voice.retry")) { retry() }.font(.caption.weight(.semibold)).foregroundStyle(mine ? .white : Theme.accentText).disabled(retrying)
+                    Button(L("voice.retry")) { showingAIConsent = true }.font(.caption.weight(.semibold)).foregroundStyle(mine ? .white : Theme.accentText).disabled(retrying)
                 }
             case .disabled:
                 Text(L("voice.disabled")).font(.caption).foregroundStyle(fg.opacity(0.7)).accessibilityIdentifier("voice.disabled")
@@ -136,7 +141,7 @@ struct VoiceNoteView: View {
     private func retry() {
         retrying = true
         Task {
-            do { try await store.api.retryTranscription(att.id) } catch let e as ApiRequestError where e.code == "transcription_disabled" {
+            do { try await store.api.retryTranscription(att.id, aiConsent: true) } catch let e as ApiRequestError where e.code == "transcription_disabled" {
                 store.show(L("voice.disabled"))
             } catch { store.show(L10n.errorText(error)) }
             retrying = false

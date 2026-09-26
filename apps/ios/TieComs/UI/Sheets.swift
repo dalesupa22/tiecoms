@@ -104,7 +104,7 @@ struct DeriveSheet: View {
     }
 }
 
-/// «Llevar al hilo»: resumen editable (sugerido por IA si el servidor tiene DeepSeek; si no, las últimas respuestas),
+/// «Llevar al hilo»: resumen local editable, con DeepSeek opcional tras consentimiento explícito,
 /// vista previa de cómo se verá en el grupo y «Publicar en el hilo».
 struct ReturnResultSheet: View {
     @Environment(AppStore.self) private var store
@@ -113,6 +113,7 @@ struct ReturnResultSheet: View {
     @State private var summary = ""
     @State private var source: String?
     @State private var suggesting = false
+    @State private var showingAIConsent = false
     @State private var busy = false
     @State private var error: String?
 
@@ -120,11 +121,11 @@ struct ReturnResultSheet: View {
         let d = store.data
         let parent = store.meta(conversationId)?.parentId.flatMap { store.meta($0) }
         let parentName = parent.flatMap { p in d.map { Naming.title($0, p) } } ?? ""
-        SheetForm(title: L("side.return"), action: L("side.publish"), busy: busy, disabled: summary.trimmingCharacters(in: .whitespaces).count < 2, error: error, onSubmit: submit) {
+        SheetForm(title: L("side.return"), action: L("side.publish"), busy: busy || suggesting, disabled: summary.trimmingCharacters(in: .whitespaces).count < 2, error: error, onSubmit: submit) {
             Section {
                 Text(L("lin.returnBody", ["name": parentName])).font(.footnote).foregroundStyle(Theme.textSecondary)
                 ZStack(alignment: .topLeading) {
-                    TextField("", text: $summary, axis: .vertical).lineLimit(4...12).accessibilityIdentifier("return.summary")
+                    TextField("", text: $summary, axis: .vertical).lineLimit(4...12).disabled(suggesting).accessibilityIdentifier("return.summary")
                     if suggesting { ProgressView().frame(maxWidth: .infinity, alignment: .trailing) }
                 }
                 if suggesting { Text(L("side.suggesting")).font(.caption).foregroundStyle(Theme.textSecondary) }
@@ -134,6 +135,11 @@ struct ReturnResultSheet: View {
                         .font(.caption).foregroundStyle(Theme.textSecondary)
                         .accessibilityIdentifier("return.source.\(source)")
                 }
+                Button { showingAIConsent = true } label: {
+                    Label(L("ai.side.request"), systemImage: "sparkles")
+                }
+                .disabled(suggesting || busy)
+                .accessibilityIdentifier("return.requestAI")
             }
             Section(L("side.previewInGroup")) {
                 if let d, let me = Naming.person(d, d.me.id) {
@@ -155,11 +161,24 @@ struct ReturnResultSheet: View {
         .task {
             guard summary.isEmpty else { return }
             summary = store.localReturnSummary(conversationId)
-            suggesting = true
-            if let s = try? await store.suggestReturn(conversationId), !s.summary.isEmpty {
-                summary = s.summary; source = s.source
-            } else { source = "fallback" }
-            suggesting = false
+            source = "fallback"
+        }
+        .alert(L("ai.side.title"), isPresented: $showingAIConsent) {
+            Button(L("ai.side.allow")) { suggestWithAI() }
+            Button(L("ai.side.without"), role: .cancel) {}
+        } message: { Text(L("ai.side.message")) }
+    }
+
+    private func suggestWithAI() {
+        guard !suggesting else { return }
+        suggesting = true
+        error = nil
+        Task {
+            defer { suggesting = false }
+            do {
+                let result = try await store.suggestReturn(conversationId, aiConsent: true)
+                if !result.summary.isEmpty { summary = result.summary; source = result.source }
+            } catch { self.error = L10n.errorText(error) }
         }
     }
 

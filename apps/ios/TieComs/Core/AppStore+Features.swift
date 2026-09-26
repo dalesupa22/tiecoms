@@ -258,9 +258,9 @@ extension AppStore {
         init(from decoder: Decoder) throws { let c = try container(decoder); summary = c.v("summary", ""); source = c.v("source", "fallback") }
     }
 
-    /// Resumen sugerido para «Llevar al hilo» (IA si hay DeepSeek; si no, source 'fallback').
-    func suggestReturn(_ sideId: String) async throws -> ReturnSuggestion {
-        try await api.request("/conversations/\(sideId)/return/suggest", method: "POST", json: [:])
+    /// DeepSeek only receives conversation data after an explicit choice for this request.
+    func suggestReturn(_ sideId: String, aiConsent: Bool = false) async throws -> ReturnSuggestion {
+        try await api.request("/conversations/\(sideId)/return/suggest", method: "POST", json: ["aiConsent": aiConsent])
     }
 
     /// Resumen de respaldo local: las últimas respuestas (sin la pregunta inicial).

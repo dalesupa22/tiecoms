@@ -5,6 +5,7 @@ import XCTest
 final class MockURLProtocol: URLProtocol {
     nonisolated(unsafe) static var routes: [String: (Int, String)] = [:]
     nonisolated(unsafe) static var requests: [(path: String, body: [String: Any])] = []
+    nonisolated(unsafe) static var httpRequests: [URLRequest] = []
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -22,6 +23,7 @@ final class MockURLProtocol: URLProtocol {
         }
         let body = bodyData.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
         MockURLProtocol.requests.append((path, body))
+        MockURLProtocol.httpRequests.append(request)
         let (status, json) = MockURLProtocol.routes[path] ?? (404, #"{"error":{"code":"not_found","message":"no"}}"#)
         let res = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["content-type": "application/json"])!
         client?.urlProtocol(self, didReceive: res, cacheStoragePolicy: .notAllowed)

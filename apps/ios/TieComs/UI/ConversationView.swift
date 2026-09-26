@@ -16,6 +16,13 @@ private enum ChatItem: Identifiable {
     }
 }
 
+private struct PendingVoiceSend {
+    let data: Data
+    let durationMs: Int
+    let waveform: [Double]
+    let replyTo: String?
+}
+
 /// Hojas que se abren desde el menú de un mensaje o de la conversación.
 enum ChatSheet: Identifiable {
     case derive(MessageDTO), returnResult, newIssue(MessageDTO?), newEvent(MessageDTO?), forward(MessageDTO)
@@ -69,6 +76,8 @@ struct ConversationView: View {
     @State private var confirmDelete: MessageDTO?
     @State private var blockUserId: String?
     @State private var recorder = VoiceRecorder()
+    @State private var pendingVoice: PendingVoiceSend?
+    @State private var showingVoiceAIConsent = false
     @State private var composerFocused = false
     /// Cursor del compositor (UTF-16).
     @State private var draftCursor = 0
@@ -138,6 +147,11 @@ struct ConversationView: View {
             }
             Button(L("common.cancel"), role: .cancel) {}
         }
+        .alert(L("ai.voice.title"), isPresented: $showingVoiceAIConsent, presenting: pendingVoice) { voice in
+            Button(L("ai.voice.allow")) { uploadVoice(voice, aiConsent: true) }
+            Button(L("ai.voice.without")) { uploadVoice(voice, aiConsent: false) }
+            Button(L("common.cancel"), role: .cancel) { pendingVoice = nil }
+        } message: { _ in Text(L("ai.voice.message")) }
     }
 
     @ViewBuilder private func sheetView(_ s: ChatSheet) -> some View {
@@ -683,15 +697,21 @@ struct ConversationView: View {
         .background(Theme.surface.ignoresSafeArea(edges: .bottom))
     }
 
-    /// Nota de voz: se sube (x-voice-note) y se envía con body '' y su attachmentId.
+    /// Keep the recording on-device until the person chooses whether to use third-party AI.
     private func sendVoice(_ data: Data, _ durationMs: Int, _ waveform: [Double]) {
-        let reply = replyTo?.id
+        guard !uploading, pendingVoice == nil else { return }
+        pendingVoice = PendingVoiceSend(data: data, durationMs: durationMs, waveform: waveform, replyTo: replyTo?.id)
+        showingVoiceAIConsent = true
+    }
+
+    private func uploadVoice(_ voice: PendingVoiceSend, aiConsent: Bool) {
+        pendingVoice = nil
         uploading = true
         Task {
             defer { uploading = false }
             do {
-                let a = try await store.api.uploadVoiceNote(conversationId, data: data, durationMs: durationMs, waveform: waveform)
-                store.send(conversationId, body: "", replyTo: reply, attachments: [a])
+                let a = try await store.api.uploadVoiceNote(conversationId, data: voice.data, durationMs: voice.durationMs, waveform: voice.waveform, aiConsent: aiConsent)
+                store.send(conversationId, body: "", replyTo: voice.replyTo, attachments: [a])
                 replyTo = nil
             } catch { store.show(L10n.errorText(error)) }
         }

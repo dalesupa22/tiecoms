@@ -4,7 +4,7 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { ZodError } from 'zod';
 import {
-  AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput,
+  AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput, CreateGroupInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
   UpdateProfileInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
@@ -20,6 +20,7 @@ import { deleteAccount } from './modules/account.ts';
 import { bootstrap } from './modules/bootstrap.ts';
 import { listEvents, listMessages, markRead, sendMessage } from './modules/messages.ts';
 import * as ws from './modules/workspaces.ts';
+import * as groups from './modules/groups.ts';
 import * as invitations from './modules/invitations.ts';
 import * as issues from './modules/issues.ts';
 import * as cal from './modules/calendar.ts';
@@ -236,6 +237,8 @@ export async function buildHttp() {
       auth.createOrgInvitation(req.userId, req.params.id, CreateOrgInvitationInput.parse(req.body ?? {})));
 
     priv.post('/api/v1/workspaces', async (req) => ws.createWorkspace(req.userId, CreateWorkspaceInput.parse(req.body)));
+    priv.post('/api/v1/groups', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => groups.createGroup(req.userId, CreateGroupInput.parse(req.body)));
+    priv.get<{ Params: { id: string } }>('/api/v1/organizations/:id/oversight', async (req) => groups.listOversight(req.userId, z.uuid().parse(req.params.id)));
     priv.post<{ Params: { id: string } }>('/api/v1/workspaces/:id/conversations', async (req) =>
       ws.createConversation(req.userId, req.params.id, CreateConversationInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/workspaces/:id/invitations', async (req) =>

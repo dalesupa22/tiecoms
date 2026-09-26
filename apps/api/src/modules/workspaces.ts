@@ -5,8 +5,8 @@ import type {
 import { conversationAccess, workspaceAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Tx } from '../db.ts';
 import { ApiError, badRequest, conflict, forbidden, notFound } from '../errors.ts';
-import { randomToken, sha256 } from '../security.ts';
-import { deliverInvitation, prepareInvitationFor } from './invitations.ts';
+import { inviteCodeHash, normalizeInviteCode, randomInviteCode, randomToken, sha256 } from '../security.ts';
+import { deliverInvitation, invitationUrl, prepareInvitationFor } from './invitations.ts';
 import { appendEvent, appendMessage, toMessageDTO } from './messages.ts';
 import { ensureNotBlocked } from './safety.ts';
 import { getSummarizer } from './voice-providers.ts';
@@ -14,7 +14,7 @@ import { getSummarizer } from './voice-providers.ts';
 /** Mensaje de sistema estructurado: cada cliente lo muestra en su idioma. */
 const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, ...p });
 
-async function primaryOrg(c: Tx, userId: string, orgId?: string) {
+export async function primaryOrg(c: Tx, userId: string, orgId?: string) {
   const { rows } = await c.query(
     `SELECT om.org_id, u.name FROM organization_memberships om JOIN users u ON u.id = om.user_id
       WHERE om.user_id = $1 AND ($2::uuid IS NULL OR om.org_id = $2)
@@ -31,14 +31,14 @@ async function activeMemberIds(c: Tx, conversationId: string): Promise<string[]>
 }
 
 /** Avisa a los sockets de estos usuarios que entren a la sala y que refresquen su alcance. */
-async function scopeChanged(c: Tx, userIds: string[], reason: string, join?: { conversationId: string }, leave?: { conversationId: string }) {
+export async function scopeChanged(c: Tx, userIds: string[], reason: string, join?: { conversationId: string }, leave?: { conversationId: string }) {
   if (!userIds.length) return;
   if (join) await enqueueOutbox(c, 'rooms.join', { userIds, conversationId: join.conversationId });
   if (leave) await enqueueOutbox(c, 'rooms.leave', { userIds, conversationId: leave.conversationId });
   await enqueueOutbox(c, 'account.event', { userIds, event: { type: 'scope.changed', reason } });
 }
 
-async function addConversationMembers(c: Tx, conversationId: string, userIds: string[], addedBy: string, history: 'now' | 'all', manage = false) {
+export async function addConversationMembers(c: Tx, conversationId: string, userIds: string[], addedBy: string, history: 'now' | 'all', manage = false) {
   const { rows } = await c.query('SELECT last_message_seq FROM conversations WHERE id = $1 FOR UPDATE', [conversationId]);
   const from = history === 'all' ? 0 : rows[0].last_message_seq;
   const added: string[] = [];
@@ -252,42 +252,61 @@ export async function createInvitation(userId: string, workspaceId: string, inpu
       if (rows.length !== new Set(input.conversationIds).size) throw badRequest('Solo puedes invitar a grupos compartidos donde participas');
     }
     if (input.role === 'guest' && !input.conversationIds.length) throw badRequest('Un tercero invitado debe entrar a grupos concretos');
+    // «Tu organización» no suma otras empresas: quien viene de fuera entra como tercero invitado.
+    const home = await c.query('SELECT 1 FROM workspaces WHERE id = $1 AND is_org_home', [workspaceId]);
+    if (home.rowCount && input.role !== 'guest') throw badRequest('En los grupos de tu organización, las personas de fuera entran como invitadas');
     if (input.email) await prepareInvitationFor(c, 'workspace', workspaceId, input.email);
+    if (input.multiUse && input.email) throw badRequest('Un enlace para varias personas no lleva correo');
     const token = randomToken(24);
+    // Sin correo es un enlace para compartir: también lleva un código corto para escribirlo en la app.
+    const code = input.email ? null : randomInviteCode();
     const { rows } = await c.query(
-      `INSERT INTO invitations (token_hash, workspace_id, invited_by, email, role, conversation_ids, history, access_until, expires_at, lang)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + make_interval(days => $9), $10) RETURNING id, expires_at`,
-      [sha256(token), workspaceId, userId, input.email ?? null, input.role, input.conversationIds, input.history, input.accessUntil ?? null, input.expiresInDays, input.lang],
+      `INSERT INTO invitations (token_hash, workspace_id, invited_by, email, role, conversation_ids, history, access_until, expires_at, lang, code_hash, multi_use)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + make_interval(days => $9), $10, $11, $12) RETURNING id, expires_at`,
+      [sha256(token), workspaceId, userId, input.email ?? null, input.role, input.conversationIds, input.history, input.accessUntil ?? null, input.expiresInDays, input.lang,
+        code ? inviteCodeHash(normalizeInviteCode(code)!) : null, Boolean(input.multiUse && !input.email)],
     );
-    await audit(c, userId, 'invitation.created', { type: 'invitation', id: rows[0].id, workspaceId }, { role: input.role, email: input.email ?? null });
-    return { id: rows[0].id as string, token, expiresAt: rows[0].expires_at as Date };
+    await audit(c, userId, 'invitation.created', { type: 'invitation', id: rows[0].id, workspaceId }, { role: input.role, email: input.email ?? null, multiUse: Boolean(input.multiUse) });
+    return { id: rows[0].id as string, token, code, expiresAt: rows[0].expires_at as Date };
   });
   const mail = input.email ? await deliverInvitation('workspace', inv.id, inv.token) : null;
-  return { ...inv, emailSent: mail?.status === 'sent', emailStatus: mail?.status ?? null };
+  return { ...inv, url: invitationUrl('workspace', inv.token), emailSent: mail?.status === 'sent', emailStatus: mail?.status ?? null };
 }
+
+/** El enlace trae el token; en la app también se puede escribir el código corto. Ambos se buscan por hash. */
+const INVITE_MATCH = '(i.token_hash = $1 OR i.code_hash = $2)';
+function inviteKeys(tokenOrCode: string): [Buffer, Buffer | null] {
+  const code = normalizeInviteCode(tokenOrCode);
+  return [sha256(tokenOrCode), code ? inviteCodeHash(code) : null];
+}
+const inviteValid = (r: { accepted_at: Date | null; revoked_at: Date | null; expires_at: Date; multi_use: boolean }) =>
+  (r.multi_use || !r.accepted_at) && !r.revoked_at && new Date(r.expires_at) > new Date();
 
 export async function previewInvitation(token: string): Promise<InvitationPreviewDTO> {
   const { rows } = await pool.query(
-    `SELECT i.role, i.email, i.expires_at, i.accepted_at, i.revoked_at, w.name AS workspace_name, u.name AS inviter, o.name AS inviter_org
+    `SELECT i.role, i.email, i.expires_at, i.accepted_at, i.revoked_at, i.multi_use, w.name AS workspace_name, w.is_org_home,
+            u.name AS inviter, o.name AS inviter_org,
+            ARRAY(SELECT c.name FROM conversations c WHERE c.id = ANY(i.conversation_ids) AND c.archived_at IS NULL ORDER BY c.created_at) AS group_names
        FROM invitations i JOIN workspaces w ON w.id = i.workspace_id JOIN users u ON u.id = i.invited_by
-       LEFT JOIN organizations o ON o.id = u.primary_org_id WHERE i.token_hash = $1`,
-    [sha256(token)],
+       LEFT JOIN organizations o ON o.id = u.primary_org_id WHERE ${INVITE_MATCH}`,
+    inviteKeys(token),
   );
   const r = rows[0];
   if (!r) throw notFound('Invitación');
   return {
     workspaceName: r.workspace_name, invitedByName: r.inviter, invitedByOrg: r.inviter_org ?? '', role: r.role, email: r.email,
     expiresAt: new Date(r.expires_at).toISOString(),
-    valid: !r.accepted_at && !r.revoked_at && new Date(r.expires_at) > new Date(),
+    valid: inviteValid(r),
+    groupNames: r.group_names.filter(Boolean), multiUse: r.multi_use, orgHome: r.is_org_home,
   };
 }
 
 export async function acceptInvitation(userId: string, token: string, input: z.infer<typeof AcceptInvitationInput>) {
   return tx(async (c) => {
-    const { rows } = await c.query('SELECT * FROM invitations WHERE token_hash = $1 FOR UPDATE', [sha256(token)]);
+    const { rows } = await c.query(`SELECT * FROM invitations i WHERE ${INVITE_MATCH} FOR UPDATE`, inviteKeys(token));
     const inv = rows[0];
     if (!inv) throw notFound('Invitación');
-    if (inv.accepted_at || inv.revoked_at || new Date(inv.expires_at) < new Date()) throw conflict('La invitación ya no es válida');
+    if (!inviteValid(inv)) throw conflict('La invitación ya no es válida');
     const me = await c.query('SELECT email, name FROM users WHERE id = $1', [userId]);
     if (inv.email && inv.email.toLowerCase() !== String(me.rows[0].email).toLowerCase()) {
       throw forbidden('Esta invitación es para otro correo');
@@ -315,7 +334,9 @@ export async function acceptInvitation(userId: string, token: string, input: z.i
       const added = await addConversationMembers(c, convId, [userId], inv.invited_by, inv.history);
       if (added.length) await appendMessage(c, { conversationId: convId, authorId: userId, kind: 'system', body: sys('member.joined', { name: me.rows[0].name }) });
     }
-    await c.query('UPDATE invitations SET accepted_by = $2, accepted_at = now() WHERE id = $1', [inv.id, userId]);
+    // Un enlace para varias personas sigue vigente: solo cuenta los usos.
+    if (inv.multi_use) await c.query('UPDATE invitations SET uses = uses + 1 WHERE id = $1', [inv.id]);
+    else await c.query('UPDATE invitations SET accepted_by = $2, accepted_at = now() WHERE id = $1', [inv.id, userId]);
     // Los demás participantes del espacio ven a la persona nueva en su directorio.
     const others = await c.query('SELECT user_id FROM workspace_memberships WHERE workspace_id = $1 AND revoked_at IS NULL', [inv.workspace_id]);
     await scopeChanged(c, others.rows.map((r) => r.user_id), 'workspace.member_joined');

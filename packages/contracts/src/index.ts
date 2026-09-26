@@ -9,7 +9,7 @@
 import { z } from 'zod';
 
 export const API_VERSION = 1;
-export const CONTRACT_VERSION = '2026-09-23';
+export const CONTRACT_VERSION = '2026-09-25';
 /** Clientes con un contrato anterior a este deben actualizarse. */
 export const MIN_CLIENT_CONTRACT = '2026-09-23';
 
@@ -152,6 +152,16 @@ export interface WorkspaceDTO {
   myRole: WorkspaceRole;
   createdAt: string;
   pinnedAt: string | null;
+  /**
+   * Espacio casa de una empresa: sus grupos internos se muestran en «Tu organización» sin cabecera de espacio.
+   * Clientes viejos: ausente (se trata como false).
+   */
+  isOrgHome?: boolean;
+  /**
+   * Empresa invitada que aún no entra (el nombre que escribió quien creó la relación). Mientras el espacio
+   * no tenga otra empresa, se muestra en «Relaciones» con este nombre y como pendiente. Clientes viejos: ausente.
+   */
+  counterpartName?: string | null;
 }
 
 export interface ConversationDTO {
@@ -385,6 +395,53 @@ export const CreateConversationInput = z.object({
   memberIds: z.array(z.uuid()).max(500).default([]),
 });
 
+/**
+ * Nuevo grupo (el «+» de Grupos). Tres destinos:
+ *  - org: grupo interno de mi empresa (va al espacio casa de la empresa; se crea si falta).
+ *  - workspace: grupo dentro de una relación existente (espacio con otra empresa).
+ *  - company: relación nueva: crea el espacio con esa empresa, el grupo y las invitaciones.
+ * Un tercero invitado (guest) no puede crear grupos.
+ */
+export const CreateGroupInput = z.object({
+  name: z.string().trim().min(2).max(120),
+  target: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('org'), orgId: z.uuid().optional() }),
+    z.object({ kind: z.literal('workspace'), workspaceId: z.uuid() }),
+    z.object({ kind: z.literal('company'), companyName: z.string().trim().min(2).max(120), orgId: z.uuid().optional() }),
+  ]),
+  memberIds: z.array(z.uuid()).max(500).default([]),
+  /** Correos a invitar al grupo (personas de la otra empresa o terceros). */
+  inviteEmails: z.array(email).max(50).default([]),
+  /** guest = tercero a título propio (asesor, mentor): no suma su empresa al espacio. */
+  inviteRole: z.enum(['member', 'guest']).default('member'),
+  /** Además, un enlace directo con código corto para compartir por WhatsApp o donde sea (varias personas, 14 días). */
+  shareLink: z.boolean().default(false),
+  lang: z.enum(['es', 'en']).default('es'),
+});
+export interface CreateGroupResultDTO {
+  workspaceId: string; conversationId: string; invited: number;
+  /** Con shareLink: el enlace y el código para compartir. */
+  inviteUrl?: string; inviteCode?: string | null;
+}
+
+/** Supervisión: los grupos donde participa gente de mi empresa (solo owner/admin de la empresa). */
+export interface OversightGroupDTO {
+  conversationId: string;
+  name: string | null;
+  kind: 'group' | 'internal';
+  workspaceId: string;
+  workspaceName: string;
+  owningOrgId: string;
+  organizationIds: string[];
+  memberCount: number;
+  /** Personas de mi empresa en el grupo. */
+  myOrgMemberIds: string[];
+  lastMessageAt: string | null;
+  /** Si ya soy miembro; si no, lo abro en solo lectura. */
+  iAmMember: boolean;
+}
+export interface OversightDTO { orgId: string; groups: OversightGroupDTO[] }
+
 export const AddMembersInput = z.object({
   userIds: z.array(z.uuid()).min(1).max(200),
   /** 'now' = ven solo lo nuevo (por defecto); 'all' = concesión explícita del historial. */
@@ -405,7 +462,11 @@ export const CreateInvitationInput = z.object({
   history: z.enum(['now', 'all']).default('now'),
   /** Idioma del correo de invitación (si hay `email`). */
   lang: z.enum(['es', 'en']).default('es'),
+  /** Sin correo: el enlace (y su código corto) sirve a varias personas hasta vencer. */
+  multiUse: z.boolean().optional(),
 });
+/** Respuesta de crear una invitación: `url` para compartir y, si no lleva correo, `code` (K7QM-4XPA) para escribir en la app. */
+export interface InvitationCreatedDTO { id: string; token: string; url: string; code: string | null; expiresAt: string; emailSent: boolean; emailStatus: string | null }
 
 export const CreateOrgInvitationInput = z.object({
   email: email.optional(),
@@ -483,6 +544,12 @@ export interface InvitationPreviewDTO {
   email: string | null;
   expiresAt: string;
   valid: boolean;
+  /** Grupos a los que entra la persona. Clientes viejos: ausente. */
+  groupNames?: string[];
+  /** Enlace o código para varias personas. */
+  multiUse?: boolean;
+  /** Invitación a un grupo interno de una empresa (se entra como invitado de fuera). */
+  orgHome?: boolean;
 }
 
 // ---------- Mensajes ----------

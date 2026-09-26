@@ -2,7 +2,7 @@ import type { z } from 'zod';
 import type { CreateIssueInput, IssueDTO, IssueEventDTO, UpdateIssueInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { audit, pool, tx, type Db, type Tx } from '../db.ts';
-import { badRequest, notFound } from '../errors.ts';
+import { badRequest, forbidden, notFound } from '../errors.ts';
 import { appendEvent, appendMessage } from './messages.ts';
 
 /** Mensaje de sistema estructurado: cada cliente lo muestra en su idioma. */
@@ -55,6 +55,8 @@ async function publish(c: Tx, issue: IssueDTO) {
 export async function createIssue(userId: string, conversationId: string, input: z.infer<typeof CreateIssueInput>) {
   return tx(async (c) => {
     const a = await conversationAccess(c, userId, conversationId, 'post', true);
+    // Los terceros invitados participan en los asuntos (comentan, cambian estado, pueden ser responsables) pero no los abren.
+    if (a.workspaceRole === 'guest') throw forbidden('Las personas invitadas de fuera participan en los asuntos, pero no pueden crearlos');
     let requestedBy: string | null = null;
     if (input.originMessageId) {
       const m = await c.query('SELECT author_id, seq FROM messages WHERE id = $1 AND conversation_id = $2', [input.originMessageId, conversationId]);

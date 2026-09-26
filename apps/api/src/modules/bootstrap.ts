@@ -16,7 +16,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
 
   const [ws, convs, people] = await Promise.all([
     pool.query(
-      `SELECT w.id, w.name, w.department, w.glyph, w.owning_org_id, w.created_at, wm.role,
+      `SELECT w.id, w.name, w.department, w.glyph, w.owning_org_id, w.created_at, wm.role, w.is_org_home, w.counterpart_name,
               (SELECT wp.pinned_at FROM workspace_prefs wp WHERE wp.workspace_id = w.id AND wp.user_id = wm.user_id) AS pinned_at,
               ARRAY(SELECT org_id FROM workspace_organizations wo WHERE wo.workspace_id = w.id AND wo.left_at IS NULL ORDER BY wo.joined_at) AS org_ids,
               CASE WHEN wm.role = 'guest' THEN '{}'::uuid[] ELSE ARRAY(SELECT o.user_id FROM workspace_memberships o WHERE o.workspace_id = w.id
@@ -85,6 +85,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
     id: r.id, name: r.name, department: r.department, glyph: r.glyph, owningOrgId: r.owning_org_id,
     organizationIds: r.org_ids, memberIds: r.member_ids, myRole: r.role, createdAt: new Date(r.created_at).toISOString(),
     pinnedAt: r.pinned_at ? new Date(r.pinned_at).toISOString() : null,
+    isOrgHome: r.is_org_home, counterpartName: r.counterpart_name,
   }));
 
   const conversations: ConversationDTO[] = convs.rows.map((r) => {

@@ -27,6 +27,20 @@ export async function verifyPassword(pw: string, stored: string | null): Promise
 }
 
 export const randomToken = (bytes = 32) => randomBytes(bytes).toString('base64url');
+
+/** Código corto de invitación (K7QM-4XPA): 8 caracteres sin los que se confunden (0/O, 1/I/L). */
+const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+export function randomInviteCode() {
+  const b = randomBytes(8);
+  const s = [...b].map((x) => CODE_ALPHABET[x % CODE_ALPHABET.length]).join('');
+  return `${s.slice(0, 4)}-${s.slice(4)}`;
+}
+/** Normaliza lo que la persona escribió (minúsculas, guion, espacios). null si no parece un código. */
+export function normalizeInviteCode(raw: string): string | null {
+  const s = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return s.length === 8 && [...s].every((ch) => CODE_ALPHABET.includes(ch)) ? s : null;
+}
+export const inviteCodeHash = (normalized: string) => sha256(`invite-code:${normalized}`);
 export const sha256 = (s: string) => createHash('sha256').update(s).digest();
 
 const secret = new TextEncoder().encode(config.jwtSecret);

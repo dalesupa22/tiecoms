@@ -186,7 +186,10 @@ Una fila fija bajo la cabecera del chat, con 4 botones siempre visibles y su cue
 
 ### Hilos como en Slack
 
-- En el menú de un mensaje, juntas: **«💬 Responder en un hilo»** (no en directos ni para terceros) y **«🔒 Sidechat privado»**.
+- En el menú de un mensaje, dos bloques separados por una línea:
+  1. «↩ Responder» y «✉ Responder en privado» (por DM al autor; pista «Por DM a {nombre}»).
+  2. «💬 Responder en un hilo» (pista «Con los del chat»; no en directos ni para terceros) y «🔒 Sidechat privado»
+     (pista «Solo con quien elijas»). Responder en privado y el sidechat son opciones distintas y no se juntan.
 - «Responder en un hilo» usa el diálogo de derivar, con los textos nuevos: «Todos los del chat» (same), «Solo mi
   equipo · {empresa}» (internal), «Con quien dirige» (directive). Nombre por defecto: «Hilo · {extracto}». Botón «Abrir hilo».
 - «Sidechat privado» usa el diálogo de sidechat que ya existe (elegir personas o un bot).

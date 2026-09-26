@@ -9,7 +9,7 @@
 import { z } from 'zod';
 
 export const API_VERSION = 1;
-export const CONTRACT_VERSION = '2026-09-25';
+export const CONTRACT_VERSION = '2026-09-26';
 /** Clientes con un contrato anterior a este deben actualizarse. */
 export const MIN_CLIENT_CONTRACT = '2026-09-23';
 
@@ -74,6 +74,8 @@ export const UpdateProfileInput = z.object({
   name: personName.optional(),
   title: z.string().trim().max(120).nullable().optional(),
   area: z.string().trim().max(120).nullable().optional(),
+  /** Resumen semanal de enlaces por correo (opt-in). */
+  linkDigest: z.boolean().optional(),
 });
 export const AddDomainInput = z.object({ domain: z.string().trim().min(3).max(253) });
 
@@ -103,6 +105,8 @@ export interface UserDTO {
   primaryOrgId: string | null;
   /** Ruta de la foto (/api/v1/avatars/…) o null. */
   avatarUrl?: string | null;
+  /** Solo en bootstrap.me: recibe el resumen semanal de enlaces por correo. */
+  linkDigest?: boolean;
 }
 
 export interface OrganizationDTO {
@@ -121,6 +125,11 @@ export interface OrganizationDTO {
    * queda en la empresa sin invitación; 'invite' = hace falta invitación.
    */
   joinPolicy?: 'invite' | 'auto';
+  /**
+   * Reacciones con acción para la gente de esta empresa (👀 = «lo reviso» crea un recordatorio personal,
+   * ✅ = «hecho» lo cierra). Solo presente para miembros. Clientes viejos: ausente (= true).
+   */
+  reactionActions?: boolean;
 }
 
 export interface OrgDomainDTO {
@@ -207,6 +216,10 @@ export interface ConversationDTO {
   lastHumanPreview?: MessagePreviewDTO | null;
   /** Menciones a mí (o @todos) sin leer: con seq mayor que lo que ya leí. Clientes viejos: ausente. */
   unreadMentions?: number;
+  /** Preferencia personal de vista previa de enlaces en esta conversación (ausente = 'large'). */
+  linkPreviews?: LinkPreviewMode;
+  /** Enlaces compartidos en la conversación (visibles para mí). Clientes viejos: ausente. */
+  linkCount?: number;
 }
 
 /** Una entrada de la bandeja «Menciones» (GET /mentions). */
@@ -273,8 +286,98 @@ export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
 
 export type ForwardSource = 'whatsapp' | 'slack' | 'email' | 'teams' | 'tiecoms' | 'other';
-/** imageUrl es una ruta del API (/api/v1/previews/…): la miniatura ya está en TieComs. */
-export interface LinkPreviewDTO { url: string; title: string | null; description: string | null; siteName: string | null; imageUrl: string | null }
+/** Qué es el enlace (lo decide el servidor por dominio y ruta; 'link' si no se sabe). */
+export type LinkKind = 'video' | 'short' | 'post' | 'article' | 'audio' | 'image' | 'doc' | 'code' | 'link';
+export type LinkProvider = 'youtube' | 'tiktok' | 'instagram' | 'x' | 'linkedin' | 'facebook' | 'vimeo' | 'spotify' | 'google' | 'github';
+export type LinkPreviewMode = 'large' | 'compact' | 'none';
+/**
+ * imageUrl es una ruta del API (/api/v1/previews/…): la miniatura ya está en TieComs.
+ * kind, provider, author y durationSec son aditivos (clientes viejos los ignoran).
+ */
+export interface LinkPreviewDTO {
+  url: string; title: string | null; description: string | null; siteName: string | null; imageUrl: string | null;
+  kind?: LinkKind; provider?: LinkProvider | null;
+  /** Canal o cuenta que publicó (YouTube, TikTok, Instagram, X). */
+  author?: string | null;
+  /** Duración del video o audio en segundos, si la página la declara. */
+  durationSec?: number | null;
+  /** Solo en MessageDTO.linkPreview(s): id del enlace en la biblioteca (PUT /links/:id/state, POST /links/:id/summary). */
+  linkId?: string;
+}
+
+/** Reacción agregada: quién reaccionó con ese emoji (orden de la primera reacción). */
+export interface ReactionDTO {
+  emoji: string;
+  userIds: string[];
+  /** Reacciones que llegaron por un puente (WhatsApp): nombre visible, sin cuenta en TieComs. */
+  external?: { name: string; source: ForwardSource }[];
+}
+/** Máximo de emojis distintos por mensaje. */
+export const MAX_REACTIONS_PER_MESSAGE = 20;
+/** Barra rápida (mismo orden en web, iOS y Android). 👀 y ✅ tienen acción si la empresa la tiene activa. */
+export const QUICK_REACTIONS = ['👍', '❤️', '😂', '👀', '✅', '🙏'] as const;
+export const REACTION_ACTIONS = { look: '👀', done: '✅' } as const;
+
+/**
+ * Forma canónica de un emoji para reaccionar: sin selectores de variación sobrantes y con U+FE0F
+ * donde hace falta para verse como emoji (❤ → ❤️, 👍️ → 👍). null si no es exactamente un emoji.
+ * Web, iOS y Android deben mandar esta forma; el servidor la vuelve a aplicar de todos modos.
+ */
+export function normalizeEmoji(input: string): string | null {
+  const raw = input.trim();
+  if (!raw || raw.length > 32) return null;
+  const parts = raw.replace(/\uFE0F/g, '').split('\u200D').map((part) => {
+    if (/^[0-9#*]\u20E3$/u.test(part)) return `${part[0]}\uFE0F\u20E3`;
+    const first = String.fromCodePoint(part.codePointAt(0)!);
+    const rest = part.slice(first.length);
+    const needs = /\p{Extended_Pictographic}/u.test(first) && !/\p{Emoji_Presentation}/u.test(first) && !/^[\u{1F3FB}-\u{1F3FF}]/u.test(rest);
+    return needs ? `${first}\uFE0F${rest}` : part;
+  });
+  const out = parts.join('\u200D');
+  const Seg = (Intl as any).Segmenter;
+  if (Seg && [...new Seg(undefined, { granularity: 'grapheme' }).segment(out)].length !== 1) return null;
+  if (!/\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u.test(out)) return null;
+  return out;
+}
+
+/** Un enlace de la biblioteca del chat (GET /conversations/:id/links, GET /links/saved). */
+export interface LinkItemDTO {
+  id: string;
+  conversationId: string;
+  messageId: string;
+  messageSeq: number;
+  authorId: string | null;
+  url: string;
+  host: string;
+  kind: LinkKind;
+  provider: LinkProvider | null;
+  preview: LinkPreviewDTO | null;
+  createdAt: string;
+  /** Estado personal (solo mío). */
+  savedAt: string | null;
+  seenAt: string | null;
+}
+export interface LinksPageDTO { links: LinkItemDTO[]; hasMore: boolean }
+export const LinkKindFilter = z.enum(['all', 'video', 'social', 'article', 'doc', 'other']);
+export const LinksQuery = z.object({
+  kind: LinkKindFilter.default('all'),
+  q: z.string().trim().max(120).optional(),
+  /** createdAt del último que ya tienes. */
+  before: z.iso.datetime().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(40),
+});
+export const SavedLinksQuery = z.object({
+  state: z.enum(['pending', 'seen', 'all']).default('pending'),
+  before: z.iso.datetime().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+export const LinkStateInput = z.object({ saved: z.boolean().optional(), seen: z.boolean().optional() })
+  .refine((v) => v.saved !== undefined || v.seen !== undefined, { message: 'saved_or_seen' });
+/** PUT /messages/:id/reactions/:emoji (cuerpo opcional). remindAt: hora del recordatorio de 👀 (el cliente sabe la zona horaria). */
+export const ReactInput = z.object({ remindAt: z.iso.datetime().optional() });
+export const ReactionActionsInput = z.object({ reactionActions: z.boolean() });
+/** Resumen con IA bajo pedido. basis = de qué salió: el texto del artículo o solo la descripción (videos, redes). */
+export interface LinkSummaryDTO { summary: string; basis: 'article' | 'description'; lang: 'es' | 'en' }
 /**
  * messageId: mensaje original (p. ej. «Responder en privado»); el enlace solo abre si el lector puede leer el origen.
  * messageSeq y excerpt (≤ 200) los pone el servidor a partir del original cuando llega messageId.
@@ -366,6 +469,10 @@ export interface MessageDTO {
   forwarded: ForwardedInfo | null;
   /** Vista previa del primer enlace; llega después con message.updated. Clientes viejos pueden no traerla. */
   linkPreview?: LinkPreviewDTO | null;
+  /** Vistas previas de hasta 3 enlaces (la primera = linkPreview). Ausente en mensajes viejos. */
+  linkPreviews?: LinkPreviewDTO[];
+  /** Reacciones (llegan con message.updated; no cuentan como no leído ni editan el mensaje). */
+  reactions?: ReactionDTO[];
   /** Adjuntos en el orden de envío ([] o ausente si no hay; [] si el mensaje se eliminó). */
   attachments?: AttachmentDTO[];
   /** Menciones válidas (ya filtradas por el servidor); [] o ausente si no hay. */
@@ -598,7 +705,7 @@ export const SendMessageInput = z.object({
 }).refine((v) => v.body.length > 0 || !!v.attachmentIds?.length || !!v.forwardAttachmentIds?.length, { message: 'body_or_attachments', path: ['body'] })
   .refine((v) => (v.attachmentIds?.length ?? 0) + (v.forwardAttachmentIds?.length ?? 0) <= 10, { message: 'max_10_attachments', path: ['attachmentIds'] });
 export const EditMessageInput = z.object({ body: z.string().trim().min(1).max(8000), mentions: z.array(MentionInput).max(50).optional() });
-export const ConversationPrefsInput = z.object({ pinned: z.boolean().optional(), mutedUntil: z.iso.datetime().nullable().optional() });
+export const ConversationPrefsInput = z.object({ pinned: z.boolean().optional(), mutedUntil: z.iso.datetime().nullable().optional(), linkPreviews: z.enum(['large', 'compact', 'none']).optional() });
 export const WorkspacePrefsInput = z.object({ pinned: z.boolean() });
 export const MarkUnreadInput = z.object({ seq: z.number().int().min(1) });
 export const CreateReminderInput = z.object({
@@ -644,8 +751,8 @@ export const PushTokenInput = z.object({
  * type: message | reminder | event. Clientes: ignorar campos y tipos desconocidos.
  */
 export interface PushData {
-  /** side = mensaje de un sidechat (categoría TC_SIDE; trae sideOf). */
-  type: 'message' | 'reminder' | 'event' | 'side' | 'mention';
+  /** side = mensaje de un sidechat (categoría TC_SIDE; trae sideOf). reaction = reaccionaron a mi mensaje (abre el mensaje). */
+  type: 'message' | 'reminder' | 'event' | 'side' | 'mention' | 'reaction';
   conversationId: string;
   messageId?: string;
   authorId?: string;
@@ -741,7 +848,7 @@ export interface WaChatDTO {
   archivedInWhatsApp: boolean;
   linkedConversationId: string | null;
 }
-export interface WaMessageDTO { id: string; fromMe: boolean; author: string | null; kind: string; body: string; sentAt: string }
+export interface WaMessageDTO { id: string; fromMe: boolean; author: string | null; kind: string; body: string; sentAt: string; reactions?: { emoji: string; name: string }[] }
 
 // ---------- Eventos en tiempo real ----------
 /** Evento durable de una conversación, ordenado por eventSeq. */
@@ -760,6 +867,8 @@ export type AccountEvent =
   | { type: 'scope.changed'; reason: string }
   | { type: 'read.updated'; conversationId: string; seq: number }
   | { type: 'reminder.due'; reminder: ReminderDTO }
+  /** Mis recordatorios cambiaron desde otro dispositivo (p. ej. una reacción 👀): volver a pedirlos. */
+  | { type: 'reminders.changed' }
   /** Una reunión a la que voy (sí, quizá o sin responder) empieza en `minutes` minutos (10 por defecto). */
   | { type: 'event.soon'; event: CalendarEventDTO; minutes: number }
   | { type: 'prefs.updated'; conversationId?: string; workspaceId?: string }

@@ -27,6 +27,11 @@ http.createServer((req, res) => {
       sent.push({ kind: 'llm', auth: req.headers.authorization, model: body.model, messages: body.messages });
       if (failLlm) { failLlm = false; return res.writeHead(503, { 'content-type': 'application/json' }).end('{"error":"falla simulada"}'); }
       const sys = body.messages?.find((m) => m.role === 'system')?.content ?? '';
+      if (sys.includes('Resumes enlaces') || sys.includes('You summarize links')) {
+        const u = body.messages?.find((m) => m.role === 'user')?.content ?? '';
+        const summary = u.includes('Texto:') ? `Artículo: ${u.split('Texto:')[1].trim().slice(0, 60)}` : `Descripción: ${u.split('\n')[0]}`;
+        return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify({ summary }) } }] }));
+      }
       if (sys.includes('sidechat')) {
         return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify({ summary: 'Lo consulté: aplica la cláusula 4 con tope del 10 %.' }) } }] }));
       }

@@ -213,6 +213,7 @@ export async function listChatMessages(userId: string, accountId: string, jid: s
   const messages: WaMessageDTO[] = rows.reverse().map((r) => ({
     id: r.id, fromMe: r.from_me, author: r.from_me ? null : (r.author_name ?? r.author_jid?.split('@')[0] ?? null),
     kind: r.kind, body: r.body, sentAt: new Date(r.sent_at).toISOString(),
+    ...(r.reactions ? { reactions: Object.values(r.reactions as Record<string, { emoji: string; name: string }>) } : {}),
   }));
   await pool.query('UPDATE wa_chats SET unread = 0 WHERE account_id = $1 AND jid = $2 AND unread > 0', [accountId, jid]);
   return { messages, hasMore: rows.length === limit };

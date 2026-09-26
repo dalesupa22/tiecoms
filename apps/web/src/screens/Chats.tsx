@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import type { BootstrapDTO, ConversationDTO, LinkPreviewDTO, MessageDTO, PersonDTO } from '@tiecoms/contracts';
-import { apiUrl, client, useClient } from '../app-client.ts';
+import type { BootstrapDTO, ConversationDTO, MessageDTO, PersonDTO } from '@tiecoms/contracts';
+import { client, useClient } from '../app-client.ts';
 import { attachmentSummaryText, errorText, t } from '../i18n.ts';
 import { toast } from '../menu.tsx';
 import { openDialog } from '../actions.tsx';
@@ -23,21 +23,6 @@ export function Linkify({ text }: { text: string }) {
 }
 
 // ---------- Vista previa de enlaces ----------
-export function LinkPreviewCard({ p }: { p: LinkPreviewDTO }) {
-  let host = p.siteName ?? '';
-  try { host = p.siteName ?? new URL(p.url).hostname.replace(/^www\./, ''); } catch {}
-  return (
-    <a className={`link-card ${p.imageUrl ? '' : 'no-img'}`} href={p.url} target="_blank" rel="noopener noreferrer nofollow">
-      {p.imageUrl && <img src={apiUrl(p.imageUrl)} alt="" loading="lazy" draggable={false} />}
-      <span className="link-card-text">
-        <span className="link-card-site">{host}</span>
-        {p.title && <b className="link-card-title">{p.title}</b>}
-        {p.description && <span className="link-card-desc">{p.description}</span>}
-      </span>
-    </a>
-  );
-}
-
 // ---------- Personas agrupadas por empresa ----------
 function groupByOrg(d: BootstrapDTO, people: PersonDTO[]) {
   const mine = d.me.primaryOrgId;

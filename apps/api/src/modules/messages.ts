@@ -5,6 +5,7 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { sha256 } from '../security.ts';
 import { claimForMessage, hideForMessage, linkToMessage } from './attachments.ts';
 import { markMentionsRead, normalizeMentions, saveMentions } from './mentions.ts';
+import { dropLinks, indexLinks } from './links.ts';
 
 /** Si el texto trae un enlace, el worker arma su vista previa (fuera de la transacción del envío). */
 async function queuePreview(c: Tx, messageId: string, body: string) {
@@ -42,6 +43,8 @@ export function toMessageDTO(r: any): MessageDTO {
     ...(r.merged_kind ? { mergedKind: r.merged_kind } : {}),
     forwarded: r.forwarded ?? null,
     linkPreview: deleted ? null : r.link_preview ?? null,
+    linkPreviews: deleted ? [] : r.link_previews ?? (r.link_preview ? [r.link_preview] : []),
+    reactions: deleted ? [] : r.reactions ?? [],
     attachments: deleted ? [] : r.attachments ?? [],
     mentions: deleted ? [] : r.mentions ?? [],
     createdAt: new Date(r.created_at).toISOString(),
@@ -148,6 +151,7 @@ export async function sendMessage(userId: string, conversationId: string, input:
       });
       if (claimed.length) await linkToMessage(c, m.id, claimed.map((x) => x.id));
       if (mentions.userIds.length) await saveMentions(c, m.id, conversationId, m.seq, mentions);
+      await indexLinks(c, { id: m.id, conversation_id: conversationId, seq: m.seq, author_id: userId, body: input.body, created_at: m.createdAt });
       await queuePreview(c, m.id, input.body);
       return m;
     });
@@ -190,7 +194,7 @@ export async function listEvents(userId: string, conversationId: string, after: 
     }
     // Un mensaje eliminado después no reenvía su contenido anterior al ponerse al día.
     if (r.message_deleted_at && r.payload.message) {
-      return { ...r.payload, message: { ...r.payload.message, body: '', attachments: [], mentions: [], linkPreview: null, deletedAt: new Date(r.message_deleted_at).toISOString() } } as ConversationEvent;
+      return { ...r.payload, message: { ...r.payload.message, body: '', attachments: [], mentions: [], linkPreview: null, linkPreviews: [], reactions: [], deletedAt: new Date(r.message_deleted_at).toISOString() } } as ConversationEvent;
     }
     return r.payload as ConversationEvent;
   });
@@ -233,8 +237,9 @@ export async function editMessage(userId: string, messageId: string, body: strin
     const mentions = await normalizeMentions(c, m.conversation_id, userId, body, mentionsInput ?? (body === m.body ? m.mentions ?? [] : []), m.access);
     await saveMentions(c, messageId, m.conversation_id, m.seq, mentions);
     // Otro texto, otra vista previa: se quita la anterior y el worker lee el enlace nuevo.
-    const { rows } = await c.query('UPDATE messages SET body = $2, body_sha256 = $3, edited_at = now(), link_preview = NULL, mentions = $4 WHERE id = $1 RETURNING *',
+    const { rows } = await c.query('UPDATE messages SET body = $2, body_sha256 = $3, edited_at = now(), link_preview = NULL, link_previews = NULL, mentions = $4 WHERE id = $1 RETURNING *',
       [messageId, body, sha256(body), mentions.mentions.length ? JSON.stringify(mentions.mentions) : null]);
+    await indexLinks(c, rows[0]);
     await queuePreview(c, messageId, body);
     const message = toMessageDTO(rows[0]);
     await appendEvent(c, m.conversation_id, { type: 'message.updated', conversationId: m.conversation_id, message }, messageId);
@@ -246,8 +251,10 @@ export async function deleteMessage(userId: string, messageId: string) {
   return tx(async (c) => {
     const m = await ownMessage(c, userId, messageId);
     // Borrado lógico: se conserva el orden y queda la marca; el contenido deja de servirse.
-    const { rows } = await c.query("UPDATE messages SET body = '', attachments = NULL, mentions = NULL, deleted_at = now() WHERE id = $1 RETURNING *", [messageId]);
+    const { rows } = await c.query("UPDATE messages SET body = '', attachments = NULL, mentions = NULL, link_preview = NULL, link_previews = NULL, reactions = NULL, external_reactions = NULL, deleted_at = now() WHERE id = $1 RETURNING *", [messageId]);
     await c.query('DELETE FROM message_mentions WHERE message_id = $1', [messageId]);
+    await c.query('DELETE FROM message_reactions WHERE message_id = $1', [messageId]);
+    await dropLinks(c, messageId);
     await hideForMessage(c, messageId);
     await c.query('DELETE FROM message_pins WHERE message_id = $1', [messageId]);
     const message = toMessageDTO(rows[0]);

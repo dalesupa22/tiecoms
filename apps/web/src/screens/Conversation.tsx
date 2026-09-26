@@ -2,7 +2,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import type { BootstrapDTO, ConversationDTO, IssueDTO, MessageDTO } from '@tiecoms/contracts';
 import type { PendingMessage } from '@tiecoms/client-core';
 import { client, useClient } from '../app-client.ts';
-import { ForwardToChatsDialog, LinkPreviewCard, Linkify, StackedAvatars } from './Chats.tsx';
+import { ForwardToChatsDialog, Linkify, StackedAvatars } from './Chats.tsx';
+import { QUICK_REACTIONS } from '@tiecoms/contracts';
+import { ReactionBar, isJumbo, openEmojiPicker, toggleReaction, useEmojiAutocomplete } from './Reactions.tsx';
+import { LinkGroup, LinksPane, MessageLinks, isLinkOnly } from './Links.tsx';
 import { conversationMenu, forwardMenu, messageLink, openDialog, remindMenu } from '../actions.tsx';
 import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
@@ -23,6 +26,8 @@ import { AddMembersDialog } from './Dialogs.tsx';
 type Row =
   | { kind: 'day'; key: string; label: string }
   | { kind: 'msg'; key: string; m: MessageDTO; cont: boolean }
+  /** Varios mensajes seguidos de la misma persona que son solo enlaces: «Laura compartió 5 enlaces». */
+  | { kind: 'links'; key: string; msgs: MessageDTO[] }
   | { kind: 'pending'; key: string; p: PendingMessage };
 
 const draftKey = (id: string) => `tiecoms:draft:${id}`;
@@ -56,6 +61,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const [replyTo, setReplyTo] = useState<MessageDTO | null>(null);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [showPins, setShowPins] = useState(false);
+  const [showLinks, setShowLinks] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   const [text, setText] = useState(() => { try { return localStorage.getItem(draftKey(id)) ?? ''; } catch { return ''; } });
   const scroller = useRef<HTMLDivElement>(null);
   const [host, setHost] = useState<HTMLDivElement | null>(null);
@@ -83,6 +90,24 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     onAskSide: embedded || !sideAnchorFor() ? undefined : (p) => { const anchor = sideAnchorFor(); if (anchor) setSideFor({ message: anchor, userIds: [p.id] }); },
   });
 
+  // «:» en el compositor: lista de emojis (Enter o Tab lo inserta).
+  const emoji = useEmojiAutocomplete({
+    text, caret,
+    onPick: (range, e) => {
+      const next = text.slice(0, range.start) + e + text.slice(range.end);
+      const pos = range.start + e.length;
+      setText(next); setCaret(pos);
+      requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(pos, pos); });
+    },
+  });
+  const insertEmoji = (e: string) => {
+    const el = input.current;
+    const a = el?.selectionStart ?? text.length, b = el?.selectionEnd ?? text.length;
+    const next = text.slice(0, a) + e + text.slice(b);
+    setText(next);
+    const pos = a + e.length;
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(pos, pos); setCaret(pos); });
+  };
   const jumpTo = (seq: number) => {
     atBottom.current = false;
     void client.ensureMessage(id, seq).then((found) => {
@@ -122,8 +147,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     }
     const sentIds = new Set((local?.messages ?? []).map((m) => m.clientMessageId));
     for (const p of pending) if (!sentIds.has(p.clientMessageId)) out.push({ kind: 'pending', key: p.clientMessageId, p });
-    return out;
-  }, [local?.messages, pending]);
+    return groupLinkRuns(out, expandedGroups, highlight);
+  }, [local?.messages, pending, expandedGroups, highlight]);
 
   // Mantiene la vista abajo al llegar mensajes, y la posición al cargar historial antiguo.
   useLayoutEffect(() => {
@@ -166,6 +191,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     input.current?.focus();
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (emoji.onKeyDown(e)) return;
     if (picker.onKeyDown(e)) return;
     if (e.key === 'Backspace' && tokens.length) {
       const el = e.currentTarget;
@@ -221,10 +247,24 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     try { const p = first ? JSON.parse(first.body) : null; return p?.k === 'side.started' ? `${p.authorName}: ${p.excerpt}` : null; } catch { return null; }
   })();
 
+  const reactionActions = orgById(d, d.me.primaryOrgId)?.reactionActions !== false;
+  const react = (m: MessageDTO, emoji: string) => {
+    const mine = (m.reactions ?? []).some((r) => r.emoji === emoji && r.userIds.includes(d.me.id));
+    void toggleReaction(m, emoji, !mine, { actions: reactionActions });
+  };
+  const pickReaction = (m: MessageDTO, x: number, y: number) => openEmojiPicker(x, y, (emoji) => react(m, emoji), { quick: true, actions: reactionActions });
   const messageMenu = (m: MessageDTO): MenuItem[] => {
     const mine = m.authorId === d.me.id;
     const isPinned = pinned.has(m.id);
     return [
+      ...(conv.canPost ? [{
+        label: t('react.menu'), icon: '☺',
+        items: [
+          ...QUICK_REACTIONS.map((e) => ({ label: e, hint: reactionActions && e === '👀' ? t('react.lookHint') : reactionActions && e === '✅' ? t('react.doneHint') : undefined, onSelect: () => react(m, e) })),
+          { divider: true },
+          { label: t('react.more'), icon: '＋', onSelect: () => { const el = document.querySelector(`[data-mid="${m.id}"]`)?.getBoundingClientRect(); pickReaction(m, (el?.left ?? 80) + 48, (el?.bottom ?? 200) - 4); } },
+        ],
+      }] : []),
       ...(conv.canPost ? [{ label: t('menu.reply'), icon: '↩', onSelect: () => { setReplyTo(m); input.current?.focus(); } }] : []),
       // Responder en privado: por DM al autor. Es distinto del sidechat (un hilo privado con quien elijas).
       ...(!mine && conv.kind !== 'direct' ? [{ label: t('preply.action'), icon: '✉', hint: t('menu.hintDm', { name: personById(d, m.authorId)?.name.split(' ')[0] ?? '' }), onSelect: () => void replyPrivately(m) }] : []),
@@ -298,7 +338,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
         )}
         <LineageBar conv={conv} />
         {!embedded && (
-          <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)}
+          <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)} onLinks={() => setShowLinks(true)}
             onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
         )}
 
@@ -309,6 +349,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           {error && <div className="error" style={{ textAlign: 'center' }}>{error}</div>}
           {rows.map((r) => {
             if (r.kind === 'day') return <div key={r.key} className="day">{r.label}</div>;
+            if (r.kind === 'links') return <LinkGroup key={r.key} d={d} msgs={r.msgs} onExpand={() => setExpandedGroups((g) => new Set(g).add(r.key))} />;
             if (r.kind === 'pending') return <PendingRow key={r.key} p={r.p} />;
             const m = r.m;
             if (m.kind === 'system') return <SystemRow key={r.key} m={m} onIssue={setOpenIssue} />;
@@ -343,15 +384,18 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                       <div className="row small"><span className="muted grow">{t('edit.hint')}</span><button className="btn ghost small" onClick={() => setEditing(null)}>{t('common.cancel')}</button><button className="btn primary small" onClick={saveEdit}>{t('edit.save')}</button></div>
                     </div>
                   ) : (
-                    (m.body || m.deletedAt || !m.attachments?.length) && <div className="msg-body">{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <MessageText d={d} body={m.body} mentions={m.mentions} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
+                    (m.body || m.deletedAt || !m.attachments?.length) && <div className={`msg-body ${!m.deletedAt && isJumbo(m.body) ? 'is-jumbo' : ''}`}>{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <MessageText d={d} body={m.body} mentions={m.mentions} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
                   )}
                   {!m.deletedAt && !!m.attachments?.length && <AttachmentsView list={m.attachments} onCreateIssue={canOpenIssues ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
-                  {!m.deletedAt && !isEditing && m.linkPreview && <LinkPreviewCard p={m.linkPreview} />}
+                  {!m.deletedAt && !isEditing && <MessageLinks m={m} mode={conv.linkPreviews ?? 'large'} onIssue={canOpenIssues ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
+                  {!m.deletedAt && <ReactionBar d={d} m={m} canReact={conv.canPost} actions={reactionActions} onIssue={setOpenIssue} />}
                   {!embedded && <ThreadChip d={d} threads={threadsOf(d, id, m.id).filter((c) => c.deriveKind !== 'side')} onOpen={setSideId} />}
                   {!embedded && <SideChip d={d} sides={sidesOf(d, id, m.id)} onOpen={setSideId} />}
                   {issueOf(m.id) && <button className="msg-issue" onClick={() => setOpenIssue(issueOf(m.id)!.id)}>◆ {issueOf(m.id)!.title}</button>}
                   {!m.deletedAt && !isEditing && (
                     <div className="msg-actions">
+                      {conv.canPost && <button className="msg-act-react" aria-label={t('react.add')} title={t('react.add')} onClick={(e) => { const rr = (e.currentTarget as HTMLElement).getBoundingClientRect(); pickReaction(m, rr.left, rr.bottom + 6); }}>☺</button>}
+                      {conv.canPost && QUICK_REACTIONS.slice(0, 3).map((e) => <button key={e} className="msg-act-quick" aria-label={e} onClick={() => react(m, e)}>{e}</button>)}
                       {conv.canPost && <button onClick={() => { setReplyTo(m); input.current?.focus(); }}>↩ {t('menu.reply')}</button>}
                       <button onClick={() => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />)}>↪ {t('menu.forward')}</button>
                       {canDerive && myWsRole !== 'guest' && <button onClick={() => setDeriving(m)}>{t('derive.action')}</button>}
@@ -397,8 +441,10 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                 ]);
               }}>＋</button>
               <button className="bring-btn" title={t('imp.action')} aria-label={t('imp.action')} onClick={() => openDialog((close) => <BringDialog conversationId={id} onClose={close} />)}>⤓</button>
+              <button className="bring-btn composer-emoji" title={t('react.insert')} aria-label={t('react.insert')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openEmojiPicker(r.left, r.top - 8, insertEmoji); }}>☺</button>
               <div className="mention-wrap">
               {picker.view}
+              {emoji.view}
               <MentionMirror text={text} tokens={tokens} taRef={input} />
               <textarea
                 ref={input} rows={1} value={text} placeholder={isSide ? (sideOthers.length === 1 ? t('side.placeholder', { name: personById(d, sideOthers[0])?.name.split(' ')[0] ?? '' }) : t('side.placeholderMany')) : t('chat.placeholder', { name: title })} aria-label={t('common.message')}
@@ -497,6 +543,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           onClose={() => setNewIssue(null)} onCreated={(i) => setOpenIssue(i.id)} />
       )}
       {openIssue && <IssueDrawer id={openIssue} onClose={() => setOpenIssue(null)} />}
+      {showLinks && <LinksPane conv={conv} onJump={jumpTo} onClose={() => setShowLinks(false)} />}
       {showPins && <PinsDialog conv={conv} onJump={(seq) => { setShowPins(false); jumpTo(seq); }} onClose={() => setShowPins(false)} />}
     </div>
   );
@@ -582,4 +629,29 @@ function PendingRow({ p }: { p: PendingMessage }) {
       </div>
     </div>
   );
+}
+
+/**
+ * Tres o más mensajes seguidos de la misma persona (en 10 minutos) que son solo enlaces se muestran como un
+ * grupo compacto. No se agrupan los que tienen reacciones o el mensaje al que se está saltando.
+ */
+function groupLinkRuns(rows: Row[], expanded: Set<string>, highlight: number | null): Row[] {
+  const out: Row[] = [];
+  let run: Extract<Row, { kind: 'msg' }>[] = [];
+  const flush = () => {
+    const key = run.length ? `lg${run[0]!.m.id}` : '';
+    if (run.length >= 3 && !expanded.has(key) && !run.some((r) => r.m.seq === highlight)) out.push({ kind: 'links', key, msgs: run.map((r) => r.m) });
+    else out.push(...run);
+    run = [];
+  };
+  for (const r of rows) {
+    const ok = r.kind === 'msg' && isLinkOnly(r.m) && !r.m.reactions?.length;
+    const prev = run[run.length - 1];
+    if (ok && prev && (prev.m.authorId !== r.m.authorId || Date.parse(r.m.createdAt) - Date.parse(prev.m.createdAt) > 10 * 60_000)) flush();
+    if (ok) { run.push(r as Extract<Row, { kind: 'msg' }>); continue; }
+    flush();
+    out.push(r);
+  }
+  flush();
+  return out;
 }

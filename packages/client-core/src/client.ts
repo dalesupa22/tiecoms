@@ -4,6 +4,7 @@ import {
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
   type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
+  type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type UserDTO, normalizeEmoji,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -62,7 +63,9 @@ export type ClientNotice =
   /** Una reunión a la que voy empieza en `minutes` minutos. */
   | { kind: 'eventSoon'; event: CalendarEventDTO; minutes: number }
   /** El servidor descartó menciones de un mensaje propio (ids o 'all'). */
-  | { kind: 'mentionsDropped'; conversationId: string; userIds: string[] };
+  | { kind: 'mentionsDropped'; conversationId: string; userIds: string[] }
+  /** Alguien reaccionó a un mensaje mío (conversación abierta en este dispositivo). */
+  | { kind: 'reaction'; conversationId: string; message: MessageDTO; userId: string; emoji: string };
 
 export interface ClientOptions {
   /** Origen del API, p. ej. https://app.tiecoms.com. Vacío = mismo origen (web). */
@@ -321,6 +324,7 @@ export class TieComsClient {
   private onAccountEvent(e: AccountEvent) {
     if (e.type === 'scope.changed') { this.scheduleBootstrap(); void this.loadIssues({ open: true }).catch(() => {}); }
     if (e.type === 'prefs.updated') this.scheduleBootstrap();
+    if (e.type === 'reminders.changed') void this.loadReminders().catch(() => {});
     if (e.type === 'whatsapp.updated') this.set({ waRevision: this.state.waRevision + 1 });
     if (e.type === 'drive.updated') this.set({ driveRevision: this.state.driveRevision + 1 });
     if (e.type === 'reminder.due') {
@@ -364,6 +368,8 @@ export class TieComsClient {
     const lastReadSeq = mine ? m.seq : c.lastReadSeq;
     this.patchConversationMeta(c.id, {
       lastMessageSeq: m.seq, lastMessageAt: m.createdAt, lastMessagePreview: m.body.slice(0, 140), lastReadSeq,
+      // La pestaña «Enlaces» suma los enlaces nuevos sin esperar otro bootstrap.
+      ...(m.kind === 'text' && c.linkCount !== undefined ? { linkCount: c.linkCount + new Set(m.body.match(/\bhttps?:\/\/[^\s<>"'`]+/gi) ?? []).size } : {}),
       unread: Math.max(0, m.seq - Math.max(lastReadSeq, c.historyFromSeq)),
     });
     // Reordena para que la conversación con actividad suba.
@@ -374,6 +380,7 @@ export class TieComsClient {
   private applyEvent(e: ConversationEvent) {
     const local = this.state.conversations[e.conversationId]!;
     let messages = local.messages;
+    if (e.type === 'message.updated') this.noticeReaction(local.messages.find((m) => m.id === e.message.id), e.message);
     if (e.type === 'message.created' || e.type === 'message.updated') messages = upsertMessage(messages, e.message);
     if (e.type === 'members.changed') { this.patchConversationMeta(e.conversationId, { memberIds: e.memberIds }); this.scheduleBootstrap(); }
     if (e.type === 'issue.updated') this.putIssues([e.issue]);
@@ -642,6 +649,77 @@ export class TieComsClient {
     const r = await this.request<{ messages: MessageDTO[] }>(`/conversations/${conversationId}/pins`);
     this.set({ pins: { ...this.state.pins, [conversationId]: r.messages.map((m) => m.id) } });
     return r.messages;
+  }
+
+  // ---------- Reacciones ----------
+  /** Aviso local: una reacción nueva de otra persona a un mensaje mío. */
+  private noticeReaction(before: MessageDTO | undefined, after: MessageDTO) {
+    const me = this.state.data?.me.id;
+    if (!before || !me || after.authorId !== me) return;
+    const had = new Set((before.reactions ?? []).flatMap((r) => r.userIds.map((u) => `${r.emoji}|${u}`)));
+    for (const r of after.reactions ?? []) for (const u of r.userIds) {
+      if (u !== me && !had.has(`${r.emoji}|${u}`)) { this.opts.onNotice?.({ kind: 'reaction', conversationId: after.conversationId, message: after, userId: u, emoji: r.emoji }); return; }
+    }
+  }
+  /**
+   * Pone o quita mi reacción (optimista). remindAt: hora del recordatorio de 👀 en la zona horaria local.
+   * Devuelve lo que hizo el servidor (recordatorio creado, recordatorios cerrados, asunto que se puede cerrar).
+   */
+  async react(m: MessageDTO, rawEmoji: string, on: boolean, opts: { remindAt?: string } = {}) {
+    const emoji = normalizeEmoji(rawEmoji);
+    const me = this.state.data?.me.id;
+    if (!emoji || !me) throw new Error('invalid_emoji');
+    const prev = m.reactions ?? [];
+    let next: ReactionDTO[] = prev.map((r) => ({ ...r, userIds: r.userIds.filter((u) => u !== me || r.emoji !== emoji) }));
+    if (on) {
+      const hit = next.find((r) => r.emoji === emoji);
+      if (hit) hit.userIds = [...hit.userIds, me]; else next = [...next, { emoji, userIds: [me] }];
+    }
+    next = next.filter((r) => r.userIds.length || r.external?.length);
+    this.upsertLocal({ ...m, reactions: next });
+    try {
+      const r = await this.request<{ message: MessageDTO; reminder?: ReminderDTO; closedReminderIds?: string[]; openIssueId?: string }>(
+        `/messages/${m.id}/reactions/${encodeURIComponent(emoji)}`, { method: on ? 'PUT' : 'DELETE', ...(on && opts.remindAt ? { json: { remindAt: opts.remindAt } } : {}) });
+      this.upsertLocal(r.message);
+      if (r.reminder || r.closedReminderIds?.length) {
+        const closed = new Set(r.closedReminderIds ?? []);
+        this.set({ reminders: [...this.state.reminders.filter((x) => !closed.has(x.id)), ...(r.reminder ? [r.reminder] : [])].sort((a, b) => a.remindAt.localeCompare(b.remindAt)) });
+      }
+      return r;
+    } catch (e) { this.upsertLocal({ ...m, reactions: prev }); throw e; }
+  }
+  /** Reacciones con acción (👀/✅) para la gente de la empresa (solo owner/admin). */
+  async setReactionActions(orgId: string, enabled: boolean) {
+    await this.request(`/organizations/${orgId}/reaction-actions`, { method: 'PUT', json: { reactionActions: enabled } });
+    await this.loadBootstrap();
+  }
+
+  // ---------- Enlaces ----------
+  listLinks(conversationId: string, q: { kind?: string; q?: string; before?: string; limit?: number } = {}) {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== '') p.set(k, String(v));
+    return this.request<LinksPageDTO>(`/conversations/${conversationId}/links${p.size ? `?${p}` : ''}`);
+  }
+  listSavedLinks(state: 'pending' | 'seen' | 'all' = 'pending', before?: string) {
+    return this.request<LinksPageDTO & { pending: number }>(`/links/saved?state=${state}${before ? `&before=${encodeURIComponent(before)}` : ''}`);
+  }
+  setLinkState(linkId: string, state: { saved?: boolean; seen?: boolean }) {
+    return this.request<LinkItemDTO>(`/links/${linkId}/state`, { method: 'PUT', json: state });
+  }
+  summarizeLink(linkId: string, lang: 'es' | 'en') {
+    return this.request<LinkSummaryDTO>(`/links/${linkId}/summary`, { method: 'POST', json: { lang } });
+  }
+  async setLinkPreviewMode(conversationId: string, mode: LinkPreviewMode) {
+    this.patchConversationMeta(conversationId, { linkPreviews: mode });
+    await this.request(`/conversations/${conversationId}/prefs`, { method: 'PUT', json: { linkPreviews: mode } });
+  }
+  /** Resumen semanal de enlaces por correo (opt-in). */
+  async setLinkDigest(on: boolean) {
+    const d = this.state.data;
+    if (d) this.set({ data: { ...d, me: { ...d.me, linkDigest: on } } });
+    const me = await this.request<UserDTO>('/me', { method: 'PATCH', json: { linkDigest: on } });
+    const d2 = this.state.data;
+    if (d2) this.set({ data: { ...d2, me: { ...d2.me, ...me } } });
   }
 
   // ---------- Recordatorios ----------

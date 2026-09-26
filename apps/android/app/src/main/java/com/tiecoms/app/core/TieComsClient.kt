@@ -76,6 +76,8 @@ sealed interface ClientSignal {
     data class ReminderDue(val reminder: ReminderDTO) : ClientSignal
     /** Reunión nueva, movida o cancelada por otra persona, en vivo. kind: created | moved | cancelled */
     data class CalendarChanged(val event: CalendarEventDTO, val kind: String) : ClientSignal
+    /** El servidor descartó menciones (no participan en la conversación): se avisa sutilmente. */
+    data class MentionsDropped(val conversationId: String, val userIds: List<String>) : ClientSignal
     /** La reunión empieza pronto (evento de cuenta `event.soon`). */
     data class EventSoon(val event: CalendarEventDTO, val minutes: Int) : ClientSignal
 }
@@ -387,7 +389,7 @@ class TieComsClient(
             is AccountEvent.ReadUpdated -> {
                 val c = meta(e.conversationId) ?: return
                 if (e.seq > c.lastReadSeq) patchMeta(c.id) {
-                    copy(lastReadSeq = e.seq, unread = maxOf(0L, lastMessageSeq - maxOf(e.seq, historyFromSeq)).toInt())
+                    copy(lastReadSeq = e.seq, unread = maxOf(0L, lastMessageSeq - maxOf(e.seq, historyFromSeq)).toInt(), unreadMentions = if (e.seq >= lastMessageSeq) 0 else unreadMentions)
                 }
             }
             is AccountEvent.ReminderDue -> {
@@ -435,7 +437,9 @@ class TieComsClient(
             // con mensajes escritos mientras estábamos desconectados, eso cuenta como recuperación.
             val createdAt = runCatching { Instant.parse(e.message.createdAt).toEpochMilli() }.getOrDefault(Long.MAX_VALUE)
             // Silenciada: sin sonido ni notificación.
-            if (fresh && !muted && e.message.authorId != myId && e.message.authorId !in s.blockedUserIds && e.message.kind != "system" && createdAt >= liveSince) _signals.tryEmit(ClientSignal.Incoming(e.message))
+            // Una mención a mí (o @todos) avisa aunque esté silenciada, salvo el silencio «siempre».
+            val mentioned = Mentions.mentionsMe(e.message, myId) && !(meta(e.conversationId)?.mutedUntil?.startsWith("2099") ?: false)
+            if (fresh && (!muted || mentioned) && e.message.authorId != myId && e.message.authorId !in s.blockedUserIds && e.message.kind != "system" && createdAt >= liveSince) _signals.tryEmit(ClientSignal.Incoming(e.message))
         }
         val local = s.conversations[e.conversationId]
         if (local?.loaded != true) {
@@ -457,6 +461,10 @@ class TieComsClient(
             copy(
                 lastMessageSeq = m.seq, lastMessageAt = m.createdAt, lastMessagePreview = m.body.take(140), lastReadSeq = lastRead,
                 unread = maxOf(0L, m.seq - maxOf(lastRead, historyFromSeq)).toInt(),
+                unreadMentions = if (mine) 0 else unreadMentions + if (Mentions.mentionsMe(m, myId)) 1 else 0,
+                lastHumanPreview = if (m.kind == "system") lastHumanPreview else LastHumanPreviewDTO(m.id, m.seq, m.authorId, m.body,
+                    m.attachments.takeIf { it.isNotEmpty() }?.let { a -> AttachmentSummaryDTO(a.size, a.count { it.isImage }, a.count { it.isVideo }, a.count { !it.isImage && !it.isVideo && !it.isVoice },
+                        a.firstOrNull()?.name, a.count { it.isVoice }, a.firstOrNull { it.isVoice }?.durationMs) }, m.createdAt),
             )
         }
         setState { copy(data = data?.copy(conversations = data.conversations.sortedByDescending { it.lastMessageAt ?: "" })) }
@@ -535,7 +543,7 @@ class TieComsClient(
         scope.launch {
             val c = meta(id) ?: return@launch
             if (c.lastMessageSeq <= c.lastReadSeq && c.unread == 0) return@launch
-            patchMeta(id) { copy(lastReadSeq = lastMessageSeq, unread = 0) }
+            patchMeta(id) { copy(lastReadSeq = lastMessageSeq, unread = 0, unreadMentions = 0) }
             readJobs[id]?.cancel()
             readJobs[id] = scope.launch {
                 delay(400)
@@ -560,14 +568,16 @@ class TieComsClient(
     fun send(
         conversationId: String, body: String, replyTo: String? = null, forwarded: ForwardedInfo? = null,
         attachments: List<AttachmentDTO> = emptyList(), forwardAttachments: List<AttachmentDTO> = emptyList(),
+        mentions: List<MentionDTO> = emptyList(),
     ): String? {
-        val text = body.trim()
+        // El servidor recorta el body: se recorta aquí y se corren los offsets de las menciones.
+        val (text, ments) = Mentions.trim(body, mentions)
         if (text.isEmpty() && attachments.isEmpty() && forwardAttachments.isEmpty()) return null
         val fwd = forwardAttachments.take((Attachments.MAX_PER_MESSAGE - attachments.size).coerceAtLeast(0))
         val p = PendingMessage(
             clientMessageId = UUID.randomUUID().toString(), conversationId = conversationId, body = text,
             replyTo = replyTo, forwarded = forwarded, createdAt = Instant.ofEpochMilli(now()).toString(),
-            attachments = attachments.take(Attachments.MAX_PER_MESSAGE), forwardAttachments = fwd,
+            attachments = attachments.take(Attachments.MAX_PER_MESSAGE), forwardAttachments = fwd, mentions = ments,
         )
         // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
         scope.launch {
@@ -645,10 +655,12 @@ class TieComsClient(
         if (socket.connected) {
             try {
                 val payload = TcJson.encodeToJsonElement(SocketSendBody.serializer(), SocketSendBody(p.conversationId, p.clientMessageId, p.body, p.replyTo, p.forwarded,
-                    p.attachments.map { it.id }.ifEmpty { null }, p.forwardAttachments.map { it.id }.ifEmpty { null }))
+                    p.attachments.map { it.id }.ifEmpty { null }, p.forwardAttachments.map { it.id }.ifEmpty { null }, p.mentions.ifEmpty { null }))
                 val r = socket.emitWithAck("message.send", payload, 8000).firstOrNull() as? JsonObject
                 if ((r?.get("ok") as? JsonPrimitive)?.booleanOrNull == true) {
                     val m = r["message"]?.let { runCatching { TcJson.decodeFromJsonElement(MessageDTO.serializer(), it) }.getOrNull() }
+                    val dropped = (r["droppedMentions"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
+                    if (dropped.isNotEmpty()) _signals.tryEmit(ClientSignal.MentionsDropped(p.conversationId, dropped))
                     if (m != null && m.id.isNotEmpty()) { sentViaSocket++; return m }
                 } else if (r != null) {
                     val err = r["error"] as? JsonObject
@@ -666,9 +678,10 @@ class TieComsClient(
         val r = request(
             "POST", "/conversations/${p.conversationId}/messages",
             TcJson.encodeToString(SendBody.serializer(), SendBody(p.clientMessageId, p.body, p.replyTo, p.forwarded,
-                p.attachments.map { it.id }.ifEmpty { null }, p.forwardAttachments.map { it.id }.ifEmpty { null })), SendResult.serializer(),
+                p.attachments.map { it.id }.ifEmpty { null }, p.forwardAttachments.map { it.id }.ifEmpty { null }, p.mentions.ifEmpty { null })), SendResult.serializer(),
         )
         sentViaHttp++
+        if (r.droppedMentions.isNotEmpty()) _signals.tryEmit(ClientSignal.MentionsDropped(p.conversationId, r.droppedMentions))
         return r.message ?: throw ApiException(500, "internal", "Respuesta sin mensaje")
     }
 
@@ -738,11 +751,11 @@ class TieComsClient(
     suspend fun markUnread(conversationId: String, seq: Long) = withContext(dispatcher) {
         val r = req("POST", "/conversations/$conversationId/unread", buildJsonObject { put("seq", JsonPrimitive(seq)) }, ReadResult.serializer())
         readJobs[conversationId]?.cancel()
-        patchMeta(conversationId) { copy(lastReadSeq = r.lastReadSeq, unread = maxOf(0L, lastMessageSeq - maxOf(r.lastReadSeq, historyFromSeq)).toInt()) }
+        patchMeta(conversationId) { copy(lastReadSeq = r.lastReadSeq, unread = maxOf(0L, lastMessageSeq - maxOf(r.lastReadSeq, historyFromSeq)).toInt(), unreadMentions = if (r.lastReadSeq >= lastMessageSeq) 0 else unreadMentions) }
     }
     suspend fun markConversationRead(conversationId: String) = withContext(dispatcher) {
         val c = meta(conversationId) ?: return@withContext
-        patchMeta(conversationId) { copy(lastReadSeq = lastMessageSeq, unread = 0) }
+        patchMeta(conversationId) { copy(lastReadSeq = lastMessageSeq, unread = 0, unreadMentions = 0) }
         req("POST", "/conversations/$conversationId/read", buildJsonObject { put("seq", JsonPrimitive(c.lastMessageSeq)) }, JsonElement.serializer()); Unit
     }
     private fun patchPreviewIfLast(m: MessageDTO) {
@@ -753,8 +766,19 @@ class TieComsClient(
         if (s.conversations[m.conversationId]?.loaded == true) setConv(m.conversationId) { copy(messages = upsertMessage(messages, m)) }
         patchPreviewIfLast(m)
     }
-    suspend fun editMessage(id: String, body: String): MessageDTO = withContext(dispatcher) {
-        req("PATCH", "/messages/$id", buildJsonObject { put("body", JsonPrimitive(body)) }, MessageDTO.serializer()).also { upsertLocal(it) }
+    /** Siempre manda las menciones (con mentions reemplaza las anteriores; sin ellas se quitarían al cambiar el texto). */
+    suspend fun editMessage(id: String, body: String, mentions: List<MentionDTO> = emptyList()): MessageDTO = withContext(dispatcher) {
+        val (text, ments) = Mentions.trim(body, mentions)
+        val payload = buildJsonObject {
+            put("body", JsonPrimitive(text))
+            put("mentions", TcJson.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(MentionDTO.serializer()), ments))
+        }
+        req("PATCH", "/messages/$id", payload, MessageDTO.serializer()).also { upsertLocal(it) }
+    }
+
+    /** Bandeja «Menciones»: mis menciones recientes; para paginar, before = createdAt de la última. */
+    suspend fun loadMentions(before: String? = null, limit: Int = 30): MentionsPage = withContext(dispatcher) {
+        req("GET", "/mentions" + q("before" to before, "limit" to limit.toString()), null, MentionsPage.serializer())
     }
     suspend fun deleteMessage(id: String): MessageDTO = withContext(dispatcher) {
         req("DELETE", "/messages/$id", null, MessageDTO.serializer()).also { upsertLocal(it) }

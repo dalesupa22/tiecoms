@@ -270,6 +270,7 @@ private fun MainNav() {
                     onOpen = { id -> openConv(id) },
                     onShortcut = { r -> nav.navigate(r) { launchSingleTop = true } },
                     onNewChat = { nav.navigate("newchat") { launchSingleTop = true } },
+                    onMentions = { nav.navigate("mentions") { launchSingleTop = true } },
                     onIssuesOf = { c -> nav.navigate("issues-of/$c") { launchSingleTop = true } },
                     onDetails = { c -> nav.navigate("details/$c") { launchSingleTop = true } },
                 )
@@ -330,6 +331,7 @@ private fun MainNav() {
                 ShareScreen(draft?.text ?: "", draft?.source ?: "other", onBack = { container.shareDraft = null; if (!nav.popBackStack()) tab("home") },
                     onDone = { c -> container.shareDraft = null; nav.popBackStack(); openConv(c) })
             }
+            composable("mentions") { MentionsInboxScreen(onBack = { nav.popBackStack() }, onOpen = { c, seq -> openConv(c, seq) }) }
             composable("newchat") {
                 NewChatScreen(onBack = { nav.popBackStack() }, onOpened = { c -> nav.popBackStack(); openConv(c) })
             }

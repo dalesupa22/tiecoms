@@ -137,6 +137,31 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 - **Textos:** `tools/strings_v4.py` los genera desde `apps/web/src/i18n.ts`: 100 de la web y 11 propios de Android (sobre todo la subida en segundo plano y el diálogo del micrófono).
 - **Play Console:** la app ahora pide `RECORD_AUDIO` (notas de voz) y `FOREGROUND_SERVICE_DATA_SYNC` (subidas desde «Compartir»). Hay que declararlos en la ficha y en la sección de seguridad de los datos.
 
+### Sidechats y menciones (SPEC-v4 §G, §H)
+
+- **Sidechats:**
+  - **Iniciar:** desde el menú del mensaje o deslizando la burbuja hacia la derecha. La hoja muestra el ancla como burbuja, las sugerencias (el autor, los mencionados y quienes más escriben), chips con avatar y «¿Qué quieres preguntar?» con foco. Con una sola persona, Enter envía.
+  - **Pantalla ancha (≥ 840 dp):** split 60/40 con un conector curvo que sale de la burbuja ancla (con halo) y llega a la tarjeta del ancla; sigue al hacer scroll.
+  - **Teléfono:** hoja con detents medio y grande, más una línea fina hasta el ancla. Se minimiza a una burbuja flotante con los avatares y los no leídos.
+  - **Panel:**
+    - La cabecera lleva avatares apilados, «Privado · solo ustedes N» y ⋯ (añadir persona, silenciar, llevar al hilo, salir).
+    - Debajo va la tarjeta del ancla con «Ver en el chat».
+    - En el compositor, el placeholder «Responde a … en privado» y las respuestas rápidas; «No sé, pregúntale a…» abre el diálogo para sumar personas.
+  - **Bajo el ancla:** el chip-hilo con «Sidechat · N mensajes» (N = lastMessageSeq − 1, como la web), la última respuesta y un punto de no leídos. Si hay varios sidechats, «N sidechats» abre la lista. Una vez llevado al hilo, el chip se ve en verde: «✓ Llevado al hilo».
+  - **Llevar al hilo:** propone un resumen (`POST /return/suggest`, con IA o con las últimas respuestas), editable, con vista previa. En el grupo aparece como «Desde un sidechat» (`mergedKind`).
+  - **Push `TC_SIDE`:** Responder en línea envía al sidechat. Al tocar la notificación se abre el chat de origen con el sidechat desplegado (`tiecoms://c/<origen>?side=<id>`); si el origen no se puede leer, se abre el sidechat a pantalla completa.
+  - **Nombres:** los sidechats viejos «Consulta · …» se muestran como «Sidechat · …».
+- **Menciones:**
+  - **Buscador:** se abre al escribir «@» al inicio o tras un espacio. Muestra los participantes (primero quienes más escriben ahí), filtra sin tildes y agrega «@todos» en los grupos.
+  - **Alguien de fuera:** «Laura no está en este chat · Añadir / Preguntarle en un sidechat».
+  - **Token:** al elegir se inserta un token resaltado (`VisualTransformation`). Un retroceso lo borra entero y escribir dentro lo vuelve texto normal.
+  - **Offsets:** son UTF-16, como los `String` de Kotlin (un emoji ocupa 2 o 4 unidades). El body se recorta antes de enviar y se corren los offsets. Al editar se mandan siempre las menciones.
+  - **`droppedMentions`:** llega en el ACK o en la respuesta HTTP y se muestra como un aviso sutil.
+  - **Burbuja:** cada mención va en negrita con el color de la persona. Si me mencionan a mí o a @todos, lleva fondo naranja suave y la burbuja una barra de acento. Tocar una mención abre la tarjeta de la persona con «Enviar mensaje».
+  - **Inicio:** badge «@» junto a los no leídos, y la conversación sube en el orden aunque esté silenciada. La pastilla «@ Menciones N» abre la bandeja (`GET /mentions`, paginada con `before`).
+  - **Notificaciones:** la mención llega aunque la conversación esté silenciada, salvo con el silencio «siempre». El título es «<autor> te mencionó».
+- **Textos:** `tools/strings_v5.py` los genera desde la web: 50 claves. Solo 3 son propios de Android: dos respuestas rápidas que en la web aún no tienen versión en inglés y el título local de la notificación.
+
 ### Notificaciones push (FCM)
 
 - **Contrato:** mensajes data-only según el contrato de `mobile-feedback`. Llevan `title`, `subtitle`, `body`, `badge`, `type` (message, reminder o event), `conversationId`, `messageId`, `authorId`, `authorName` y `authorAvatarUrl`; ver `core/PushPayload.kt`. El token se registra con `PUT /api/v1/push/token` (`provider: fcm`, `lang`) después del login. Al cerrar sesión el servidor borra el token.
@@ -210,6 +235,7 @@ adb pull /sdcard/Android/data/com.tiecoms.app/files/   # splash-*.png, ui-*.png
   - `CropEditorUiTest` recorta una foto real y verifica un JPEG de 512 × 512 de ≤ 3 MB.
   - `FeedbackV3Test` corre en la JVM sin servidor.
 - **v4 (3043, `mobile-feedback` 6f58087 / 1fa4c21 / cbeebe7):** `ShareV4Test` corre en la JVM. `LiveV4ShareTest` prueba adjuntos, miniaturas, envío a 2 conversaciones, descarga, reenvío, borrado, `lastHumanPreview`, límites y grupos en espacio. `LiveV4ChatsVoiceTest` prueba asuntos, reuniones y recordatorios en directos, el aviso `event.soon` y las notas de voz. `ShareUiTest` recorre en el emulador la hoja de compartir del sistema con Direct Share, `ShareActivity` con 3 fotos de la galería, la cuadrícula, el visor, las pestañas y «Nuevo chat». `LiveUiTest` ya comparte por `ShareActivity`.
+- **§G y §H (3043):** `SidechatTest` y `MentionsTest` corren en la JVM. `LiveSidechatTest` prueba el sidechat, la respuesta, el resumen de IA y «Llevar al hilo» con `mergedKind`. `LiveMentionsTest` prueba offsets con emoji, recorte, `unreadMentions`, la bandeja, `droppedMentions`, @todos y la edición. `SidechatUiTest` corre en teléfono y en pantalla ancha (`adb shell wm size 2560x1600; adb shell wm density 320`). `MentionsUiTest` recorre el buscador, el token, el retroceso, el resaltado, el badge y la bandeja.
 - **App Links `https://`:** sin un `assetlinks.json` válido, Android 12+ abre Chrome. Para probar sin verificar: `adb shell pm set-app-links-user-selection --user 0 --package com.tiecoms.app true all`.
 
 ## Firmar

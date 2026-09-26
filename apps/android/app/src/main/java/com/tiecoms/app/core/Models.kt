@@ -133,6 +133,8 @@ data class ConversationDTO(
     val avatarUrl: String? = null,
     /** Último mensaje de una persona (SPEC-v4 §C): se prefiere sobre lastMessagePreview cuando lo último es de sistema. */
     val lastHumanPreview: LastHumanPreviewDTO? = null,
+    /** Menciones a mí (o @todos) sin leer (SPEC-v4 §H). */
+    val unreadMentions: Int = 0,
 ) {
     /** Directos y chats grupales van juntos en la lista: no pertenecen a un espacio. */
     val isChat: Boolean get() = kind == "direct" || kind == "multi"
@@ -284,7 +286,13 @@ data class EventsPageRaw(
 )
 
 @Serializable
-data class SendResult(val message: MessageDTO? = null, val duplicate: Boolean = false)
+data class SendResult(val message: MessageDTO? = null, val duplicate: Boolean = false, val droppedMentions: List<String> = emptyList())
+
+/** Bandeja de menciones: GET /api/v1/mentions?before&limit. */
+@Serializable
+data class MentionItemDTO(val message: MessageDTO = MessageDTO(), val conversationId: String = "", val all: Boolean = false, val read: Boolean = false, val createdAt: String = "")
+@Serializable
+data class MentionsPage(val mentions: List<MentionItemDTO> = emptyList(), val hasMore: Boolean = false)
 
 @Serializable
 data class InvitationPreviewDTO(
@@ -336,14 +344,14 @@ data class RefreshBody(val refreshToken: String)
 @Serializable
 data class SendBody(
     val clientMessageId: String, val body: String, val replyTo: String? = null, val forwarded: ForwardedInfo? = null,
-    val attachmentIds: List<String>? = null, val forwardAttachmentIds: List<String>? = null,
+    val attachmentIds: List<String>? = null, val forwardAttachmentIds: List<String>? = null, val mentions: List<MentionDTO>? = null,
 )
 
 @Serializable
 data class SocketSendBody(
     val conversationId: String, val clientMessageId: String, val body: String,
     val replyTo: String? = null, val forwarded: ForwardedInfo? = null, val attachmentIds: List<String>? = null,
-    val forwardAttachmentIds: List<String>? = null,
+    val forwardAttachmentIds: List<String>? = null, val mentions: List<MentionDTO>? = null,
 )
 
 @Serializable
@@ -362,6 +370,7 @@ data class PendingMessage(
     val attachments: List<AttachmentDTO> = emptyList(),
     /** Adjuntos de otro mensaje que se reenvían (el servidor copia la referencia). */
     val forwardAttachments: List<AttachmentDTO> = emptyList(),
+    val mentions: List<MentionDTO> = emptyList(),
     val attempts: Int = 0,
     /** pending | sending | failed */
     val status: String = "pending",

@@ -278,7 +278,13 @@ class AppContainer(private val app: Application) {
                 val isGroup = conv != null && conv.kind != "direct"
                 // Sidechat: «💬 Sidechat de <autor>» y, al tocar, el chat de origen con el sidechat desplegado.
                 val side = conv?.takeIf { it.isSide }
-                val chatTitle = if (side != null) app.getString(R.string.side_notif_title, authorName) else if (isGroup) conversationName(m.conversationId) else authorName
+                val mentioned = com.tiecoms.app.core.Mentions.mentionsMe(m, data?.me?.id)
+                val chatTitle = when {
+                    mentioned -> app.getString(R.string.mention_mentioned_you, authorName) + (if (isGroup) " · " + conversationName(m.conversationId) else "")
+                    side != null -> app.getString(R.string.side_notif_title, authorName)
+                    isGroup -> conversationName(m.conversationId)
+                    else -> authorName
+                }
                 val open = side?.parentId?.let { p -> if (c.meta(p) != null) "tiecoms://c/$p?side=${side.id}" else null }
                 scope.launch {
                     val icon = loadAvatar(author?.avatarUrl)
@@ -304,6 +310,12 @@ class AppContainer(private val app: Application) {
                         .format(java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM, java.time.format.FormatStyle.SHORT))
                 }.getOrDefault("")
                 notifier.showMessage(ev.conversationId, "📅 $title", whenText, silent = foreground || !settings.soundsEnabled, tag = "cal:" + ev.id)
+            }
+            // Menciones descartadas por el servidor (no participan): aviso sutil con los nombres.
+            is ClientSignal.MentionsDropped -> {
+                val d = client.value.state.value.data
+                val names = sig.userIds.map { id -> if (id == "all") app.getString(R.string.mention_all_label) else Names.person(d, id)?.name ?: "?" }.joinToString(", ")
+                toast(app.getString(R.string.mention_dropped, names))
             }
             // Aviso 10 min antes (SPEC-v4 §E): suena con tc_notify aunque la conversación esté silenciada.
             is ClientSignal.EventSoon -> {

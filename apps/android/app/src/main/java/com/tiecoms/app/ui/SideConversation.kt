@@ -142,7 +142,7 @@ fun sideTitle(ctx: android.content.Context, c: ConversationDTO, d: BootstrapDTO?
 // ---------- Iniciar ----------
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SideStartSheet(origin: ConversationDTO, anchor: MessageDTO, onClose: () -> Unit, onStarted: (String) -> Unit) {
+fun SideStartSheet(origin: ConversationDTO, anchor: MessageDTO, onClose: () -> Unit, onStarted: (String) -> Unit, preselect: List<String> = emptyList()) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val scope = rememberCoroutineScope()
@@ -150,7 +150,7 @@ fun SideStartSheet(origin: ConversationDTO, anchor: MessageDTO, onClose: () -> U
     val data = st.data ?: return
     val candidates = remember(data, origin) { sideCandidates(data, origin) }
     val suggestions = remember(data, origin, anchor) { sideSuggestions(data, origin, anchor, st.conversations[origin.id]?.messages.orEmpty().takeLast(200)) }
-    var picked by rememberSaveable { mutableStateOf(listOfNotNull(suggestions.firstOrNull()?.id?.takeIf { it == anchor.authorId })) }
+    var picked by rememberSaveable { mutableStateOf(preselect.ifEmpty { listOfNotNull(suggestions.firstOrNull()?.id?.takeIf { it == anchor.authorId }) }) }
     var question by rememberSaveable { mutableStateOf("") }
     var q by rememberSaveable { mutableStateOf("") }
     var outsiders by remember { mutableStateOf(setOf<String>()) }

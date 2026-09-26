@@ -79,7 +79,8 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (String) -> Unit, onShortcut: (String) -> Unit, onNewChat: () -> Unit = {}, onIssuesOf: (String) -> Unit = {}, onDetails: (String) -> Unit = {}) {
+fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (String) -> Unit, onShortcut: (String) -> Unit, onNewChat: () -> Unit = {}, onIssuesOf: (String) -> Unit = {}, onDetails: (String) -> Unit = {},
+               onMentions: () -> Unit = {}) {
     val client = LocalClient.current
     val ctx = LocalContext.current
     val snackbar = LocalSnackbar.current
@@ -140,7 +141,7 @@ fun HomeScreen(workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (Str
                 shape = MaterialTheme.shapes.extraLarge,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("search"),
             )
-            HomeTabs(tab, counts) { tab = it; container.settings.homeTab = it.name }
+            HomeTabs(tab, counts, mentions = data.conversations.sumOf { it.unreadMentions }, onMentions = onMentions) { tab = it; container.settings.homeTab = it.name }
             // Accesos: recordatorios, trazo y WhatsApp (desde Inicio, como pide la SPEC-v2).
             androidx.compose.foundation.lazy.LazyRow(
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
@@ -380,6 +381,10 @@ private fun ConversationRow(
             }
             Spacer(Modifier.width(8.dp))
             // Color de la empresa solo si el número blanco pasa AA (4,5:1); si no, naranja sobrio (SPEC-v4 §C).
+            // Badge «@» junto a los no leídos cuando me mencionaron (SPEC-v4 §H).
+            if (c.unreadMentions > 0) Surface(shape = CircleShape, color = Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE), modifier = Modifier.padding(end = 4.dp).testTag("mentionBadge-${c.id}")) {
+                Text(stringResource(R.string.mention_badge), color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp))
+            }
             UnreadPill(c.unread, Color(if (muted) com.tiecoms.app.core.Contrast.MUTED else com.tiecoms.app.core.Contrast.badgeBackground(org?.colorBg)), Color.White)
         }
         AnchoredMenu(menuOpen, if (menuOpen) menuItems() else emptyList(), onDismissMenu)
@@ -448,7 +453,8 @@ fun ConnectionBanner(status: ConnectionStatus) {
 
 /** Pestañas grandes tipo «pill» bajo el buscador: Todo · No leídos · Asuntos · Chats · Laterales, con contador. */
 @Composable
-private fun HomeTabs(tab: com.tiecoms.app.core.HomeTree.Tab, counts: Map<com.tiecoms.app.core.HomeTree.Tab, Int>, onPick: (com.tiecoms.app.core.HomeTree.Tab) -> Unit) {
+private fun HomeTabs(tab: com.tiecoms.app.core.HomeTree.Tab, counts: Map<com.tiecoms.app.core.HomeTree.Tab, Int>, mentions: Int = 0, onMentions: () -> Unit = {},
+                     onPick: (com.tiecoms.app.core.HomeTree.Tab) -> Unit) {
     val labels = mapOf(
         com.tiecoms.app.core.HomeTree.Tab.ALL to R.string.home_tab_all, com.tiecoms.app.core.HomeTree.Tab.UNREAD to R.string.home_tab_unread,
         com.tiecoms.app.core.HomeTree.Tab.ISSUES to R.string.home_tab_issues, com.tiecoms.app.core.HomeTree.Tab.CHATS to R.string.home_tab_chats,
@@ -459,7 +465,18 @@ private fun HomeTabs(tab: com.tiecoms.app.core.HomeTree.Tab, counts: Map<com.tie
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
         modifier = Modifier.padding(vertical = 6.dp).testTag("homeTabs"),
     ) {
-        items(com.tiecoms.app.core.HomeTree.Tab.entries.toList()) { t ->
+        items(com.tiecoms.app.core.HomeTree.Tab.entries.toList(), key = { it.name }) { t ->
+            if (t == com.tiecoms.app.core.HomeTree.Tab.ISSUES) {
+                // «Menciones» (junto a No leídos) abre la bandeja.
+                val label = stringResource(R.string.mention_tab)
+                androidx.compose.material3.Surface(onClick = onMentions, shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.padding(end = 8.dp).heightIn(min = 44.dp).semantics { contentDescription = "$label, $mentions" }.testTag("tab-MENTIONS")) {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("@ $label", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        if (mentions > 0) { Spacer(Modifier.width(8.dp)); Text(mentions.toString(), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE)) }
+                    }
+                }
+            }
             val on = t == tab
             val n = counts[t] ?: 0
             val label = stringResource(labels.getValue(t))

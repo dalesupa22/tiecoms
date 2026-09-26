@@ -62,7 +62,8 @@ object HomeTree {
      * luego por actividad descendente; desempate por id para que el orden no salte.
      */
     fun comparator(nowMs: Long): Comparator<ConversationDTO> = Comparator { a, b ->
-        val ua = if (pending(a, nowMs) > 0) 1 else 0; val ub = if (pending(b, nowMs) > 0) 1 else 0
+        // Una mención sin leer sube la conversación aunque esté silenciada (SPEC-v4 §H).
+        val ua = if (pending(a, nowMs) > 0 || a.unreadMentions > 0) 1 else 0; val ub = if (pending(b, nowMs) > 0 || b.unreadMentions > 0) 1 else 0
         if (ua != ub) return@Comparator ub - ua
         val pa = if (a.pinnedAt != null) 1 else 0; val pb = if (b.pinnedAt != null) 1 else 0
         if (pa != pb) return@Comparator pb - pa
@@ -73,7 +74,7 @@ object HomeTree {
 
     /** groupRank + compareRank de la web: con no leídos primero, luego más no leídos, luego actividad más reciente. */
     data class Rank(val unread: Int, val activity: String)
-    fun rank(convs: List<ConversationDTO>, nowMs: Long) = Rank(convs.sumOf { pending(it, nowMs) }, convs.maxOfOrNull { activity(it) } ?: "")
+    fun rank(convs: List<ConversationDTO>, nowMs: Long) = Rank(convs.sumOf { pending(it, nowMs) + it.unreadMentions }, convs.maxOfOrNull { activity(it) } ?: "")
     fun compareRank(a: Rank, b: Rank): Int {
         if ((a.unread > 0) != (b.unread > 0)) return if (a.unread > 0) -1 else 1
         return (b.unread - a.unread).takeIf { it != 0 } ?: b.activity.compareTo(a.activity)

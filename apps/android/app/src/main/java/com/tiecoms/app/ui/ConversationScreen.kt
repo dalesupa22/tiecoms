@@ -72,6 +72,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -205,6 +206,9 @@ fun ConversationScreen(
     var highlight by remember { mutableStateOf<Long?>(null) }
     var menuFor by remember { mutableStateOf<MessageDTO?>(null) }
     var sideStart by remember { mutableStateOf<MessageDTO?>(null) }
+    var sidePreselect by remember { mutableStateOf(listOf<String>()) }
+    /** Tarjeta de la persona al tocar una mención. */
+    var personCard by remember { mutableStateOf<String?>(null) }
     var sideOpen by rememberSaveable(openSide) { mutableStateOf(openSide) }
     var convMenu by rememberSaveable { mutableStateOf(false) }
     var replyTo by remember { mutableStateOf<MessageDTO?>(null) }
@@ -451,6 +455,7 @@ fun ConversationScreen(
                                     onVoiceIssue = { t -> voiceIssue = t to item.m },
                                     isAnchor = sideMeta?.parentMessageId == item.m.id && !embedded,
                                     onAnchorBounds = { r -> anchorRect = r },
+                                    onPerson = { pid -> personCard = pid },
                                     onSwipeSide = if (!embedded && item.m.kind == "text" && item.m.deletedAt == null && meta.canPost) ({ sideStart = item.m }) else null,
                                     onOpenFile = { a -> scope.launch { openAttachment(ctx, client, a) } },
                                 )
@@ -488,19 +493,20 @@ fun ConversationScreen(
                 Composer(
                 id, title, data, replyTo, editing,
                 onCancelReply = { replyTo = null }, onCancelEdit = { editing = null },
-                onSend = { text, att ->
+                onSend = { text, att, mentions ->
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     if (privateHere != null) {
                         val src = privateHere.source
-                        client.send(id, text, null, com.tiecoms.app.core.ForwardedInfo("tiecoms", privateHere.authorName, src.createdAt, src.conversationId, src.id), attachments = att)
+                        client.send(id, text, null, com.tiecoms.app.core.ForwardedInfo("tiecoms", privateHere.authorName, src.createdAt, src.conversationId, src.id), attachments = att, mentions = mentions)
                         container.privateReply.value = null
-                    } else client.send(id, text, replyTo?.id, attachments = att)
+                    } else client.send(id, text, replyTo?.id, attachments = att, mentions = mentions)
                     replyTo = null
                 },
-                onSaveEdit = { m, text ->
+                onSaveEdit = { m, text, mentions ->
                     editing = null
-                    if (text.isNotBlank() && text != m.body) act { client.editMessage(m.id, text) }
+                    if (text.isNotBlank() && (text.trim() != m.body || mentions != m.mentions)) act { client.editMessage(m.id, text, mentions) }
                 },
+                onAskSide = { pid -> conv?.messages?.lastOrNull { it.kind == "text" && it.deletedAt == null }?.let { last -> sidePreselect = listOf(pid); sideStart = last } },
                 onBring = { bringing = true },
                 placeholderOverride = if (meta.isSide) sidePlaceholder else null,
             ) } else ReadOnlyNotice()
@@ -539,7 +545,8 @@ fun ConversationScreen(
     if (sideAdd && sideMeta != null) SideAddPeopleSheet(sideMeta, meta) { sideAdd = false }
     if (sideAddHere && meta.isSide) SideAddPeopleSheet(meta, meta.parentId?.let { p -> data.conversations.firstOrNull { it.id == p } }) { sideAddHere = false }
     if (sideReturn && sideMeta != null) SideReturnSheet(sideMeta, title, onClose = { sideReturn = false }, onReturned = { _, seq -> sideOpen = null; seq?.let { jumpTo(it) } })
-    sideStart?.let { m -> SideStartSheet(meta, m, onClose = { sideStart = null }, onStarted = { sid -> sideOpen = sid }) }
+    personCard?.let { pid -> PersonCardSheet(pid, onClose = { personCard = null }, onDirect = { uid -> act { val cid = client.createChat(listOf(uid), null).id; kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onOpenConversation(cid, null) } } }) }
+    sideStart?.let { m -> SideStartSheet(meta, m, onClose = { sideStart = null; sidePreselect = emptyList() }, onStarted = { sid -> sideOpen = sid }, preselect = sidePreselect) }
 
     reportMessage?.let { ReportDialog(it.authorId, it.id, onClose = { reportMessage = null }) }
     if (convMenu) ActionSheet(title, conversationMenu(ctx, meta, data, onMeeting = { meeting = true to null }, onRemindCustom = { reminderCustom = true to null }, onLeave = { confirmLeave = true })) { convMenu = false }
@@ -641,14 +648,22 @@ private fun LinChip(text: String, onClick: () -> Unit) {
 @Composable
 private fun Composer(
     id: String, title: String, data: BootstrapDTO, replyTo: MessageDTO?, editing: MessageDTO?,
-    onCancelReply: () -> Unit, onCancelEdit: () -> Unit, onSend: (String, List<com.tiecoms.app.core.AttachmentDTO>) -> Unit, onSaveEdit: (MessageDTO, String) -> Unit, onBring: () -> Unit,
+    onCancelReply: () -> Unit, onCancelEdit: () -> Unit, onSend: (String, List<com.tiecoms.app.core.AttachmentDTO>, List<com.tiecoms.app.core.MentionDTO>) -> Unit,
+    onSaveEdit: (MessageDTO, String, List<com.tiecoms.app.core.MentionDTO>) -> Unit, onBring: () -> Unit,
     placeholderOverride: String? = null,
+    /** «Preguntarle en un sidechat» a alguien que no está en el chat (desde el buscador de menciones). */
+    onAskSide: (String) -> Unit = {},
 ) {
     val client = LocalClient.current
     val ctx = LocalContext.current
     val container = LocalContainer.current
     val scope = rememberCoroutineScope()
     var text by rememberSaveable(id) { mutableStateOf("") }
+    // Menciones con @ (SPEC-v4 §H): tokens sobre el texto (UTF-16) y el cursor para el buscador.
+    var ments by remember(id) { mutableStateOf(listOf<com.tiecoms.app.core.MentionDTO>()) }
+    var sel by remember(id) { mutableStateOf(androidx.compose.ui.text.TextRange(0)) }
+    var editMents by remember(editing?.id) { mutableStateOf(editing?.mentions.orEmpty()) }
+    var editSel by remember(editing?.id) { mutableStateOf(androidx.compose.ui.text.TextRange(editing?.body?.length ?: 0)) }
     // Adjuntos elegidos (copiados a caché) antes de enviar; se suben al pulsar Enviar (SPEC-v4).
     var files by remember(id) { mutableStateOf(listOf<com.tiecoms.app.core.Attachments.Shared>()) }
     var uploading by remember(id) { mutableStateOf<Pair<Int, Float>?>(null) }
@@ -673,7 +688,7 @@ private fun Composer(
             try {
                 val a = client.uploadAttachment(id, r.file, ctx.getString(R.string.voice_note) + ".m4a", "audio/mp4",
                     voice = com.tiecoms.app.core.TieComsClient.Voice(r.durationMs, r.waveform)) { sent, total -> uploading = 0 to (if (total > 0) sent.toFloat() / total else 0f) }
-                onSend("", listOf(a))
+                onSend("", listOf(a), emptyList())
                 r.file.delete()
             } catch (e: Exception) { attError = errorText(ctx, e) } finally { uploading = null }
         }
@@ -698,7 +713,8 @@ private fun Composer(
     AttachPicker(picker, onDismiss = { picker = false }, onPicked = { add(it) })
     fun sendNow() {
         val body = text
-        if (files.isEmpty()) { if (body.isNotBlank()) { onSend(body, emptyList()); text = "" }; return }
+        val bodyMents = ments
+        if (files.isEmpty()) { if (body.isNotBlank()) { onSend(body, emptyList(), bodyMents); text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0) }; return }
         attError = null
         scope.launch {
             val done = mutableListOf<com.tiecoms.app.core.AttachmentDTO>()
@@ -716,9 +732,9 @@ private fun Composer(
                 }
             }
             uploading = null
-            onSend(body, done)
+            onSend(body, done, bodyMents)
             files.forEach { java.io.File(it.path).delete() }
-            files = emptyList(); text = ""
+            files = emptyList(); text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0)
         }
     }
     var editText by rememberSaveable(editing?.id) { mutableStateOf(editing?.body ?: "") }
@@ -726,6 +742,21 @@ private fun Composer(
         Column {
             if (replyTo != null) Banner(stringResource(R.string.reply_to, Names.person(data, replyTo.authorId)?.name ?: "") + " · " + excerpt(replyTo.body, 100), stringResource(R.string.reply_cancel), onCancelReply, "replyBar")
             if (editing != null) Banner(stringResource(R.string.edit_title), stringResource(R.string.cancel), onCancelEdit, "editBar")
+            // Buscador de menciones sobre el compositor.
+            run {
+                val cur = if (editing != null) editText else text
+                val cursor = (if (editing != null) editSel else sel).start
+                val q = com.tiecoms.app.core.Mentions.query(cur, cursor, if (editing != null) editMents else ments)
+                val convMeta = client.meta(id)
+                if (q != null && convMeta != null) MentionPicker(q.second, convMeta, data, onPick = { uid, name ->
+                    if (editing != null) { val (t, m, c) = com.tiecoms.app.core.Mentions.insert(editText, editMents, q.first, cursor, name, uid); editText = t; editMents = m; editSel = androidx.compose.ui.text.TextRange(c) }
+                    else { val (t, m, c) = com.tiecoms.app.core.Mentions.insert(text, ments, q.first, cursor, name, uid); text = t; ments = m; sel = androidx.compose.ui.text.TextRange(c) }
+                }, onAddToChat = { p -> scope.launch {
+                    runCatching { client.addMembers(id, listOf(p.id)) }.onSuccess {
+                        val (t, m, c) = com.tiecoms.app.core.Mentions.insert(text, ments, q.first, cursor, p.name, p.id); text = t; ments = m; sel = androidx.compose.ui.text.TextRange(c)
+                    }.onFailure { attError = errorText(ctx, it) }
+                } }, onAskSide = { p -> onAskSide(p.id) })
+            }
             if (editing == null && files.isNotEmpty()) PendingFiles(files, uploading, onRemove = { f -> if (uploading == null) { files = files - f; java.io.File(f.path).delete() } })
             attError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("attError")) }
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
@@ -739,8 +770,18 @@ private fun Composer(
                 }
                 if (rec.recording) RecordingBar(rec, locked, gesture, onDelete = { recorder.cancel(); locked = false; container.toast(ctx.getString(R.string.voice_cancelled)) }, onSend = { sendVoice() }, modifier = Modifier.weight(1f))
                 else OutlinedTextField(
-                    value = if (editing != null) editText else text,
-                    onValueChange = { if (editing != null) editText = it else { text = it; if (it.isNotBlank()) client.typing(id) } },
+                    value = if (editing != null) androidx.compose.ui.text.input.TextFieldValue(editText, editSel) else androidx.compose.ui.text.input.TextFieldValue(text, sel),
+                    onValueChange = { v ->
+                        if (editing != null) {
+                            val (t, m, c) = com.tiecoms.app.core.Mentions.edit(editText, v.text, editMents, v.selection.start)
+                            editText = t; editMents = m; editSel = if (t != v.text) androidx.compose.ui.text.TextRange(c) else v.selection
+                        } else {
+                            val (t, m, c) = com.tiecoms.app.core.Mentions.edit(text, v.text, ments, v.selection.start)
+                            text = t; ments = m; sel = if (t != v.text) androidx.compose.ui.text.TextRange(c) else v.selection
+                            if (t.isNotBlank()) client.typing(id)
+                        }
+                    },
+                    visualTransformation = MentionHighlight(if (editing != null) editMents else ments, MaterialTheme.colorScheme.primary),
                     placeholder = { Text(placeholderOverride ?: stringResource(R.string.placeholder, title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     maxLines = 6, shape = RoundedCornerShape(24.dp),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
@@ -749,7 +790,7 @@ private fun Composer(
                 )
                 Spacer(Modifier.width(8.dp))
                 if (editing != null) {
-                    FilledIconButton(onClick = { onSaveEdit(editing, editText.trim()) }, enabled = editText.isNotBlank(), modifier = Modifier.size(52.dp).testTag("saveEdit"),
+                    FilledIconButton(onClick = { onSaveEdit(editing, editText, editMents) }, enabled = editText.isNotBlank(), modifier = Modifier.size(52.dp).testTag("saveEdit"),
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary)) { Icon(Icons.Filled.Check, stringResource(R.string.edit_save)) }
                 } else {
                     if (text.isBlank() && files.isEmpty() && uploading == null && !locked) MicButton(
@@ -833,6 +874,7 @@ private fun MessageBubble(
     onAnchorBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
     /** Deslizar la burbuja a la derecha: «Preguntar en un sidechat». */
     onSwipeSide: (() -> Unit)? = null,
+    onPerson: (String) -> Unit = {},
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val openMenu = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onLongPress() }
@@ -887,6 +929,10 @@ private fun MessageBubble(
                 } else Modifier)
                 .graphicsLayer { val s = 1f + 0.03f * lift; scaleX = s; scaleY = s; translationX = swipe; shadowElevation = 12f * lift * density; this.shape = shape; clip = false }
                 .then(if (isAnchor) Modifier.border(2.dp, Brand.Orange.copy(alpha = 0.55f), shape) else Modifier)
+                // Me mencionan: barra lateral de acento naranja.
+                .then(if (com.tiecoms.app.core.Mentions.mentionsMe(m, data.me.id)) Modifier.drawBehind {
+                    drawRoundRect(Brand.Orange, size = androidx.compose.ui.geometry.Size(4.dp.toPx(), size.height), cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()))
+                }.testTag("mentionedMe-${m.seq}") else Modifier)
                 .background(if (item.mine) chat.mineBubble else chat.otherBubble, shape)
                 .combinedClickable(onClick = {}, onLongClick = openMenu, onLongClickLabel = menuLabel)
                 // Clic derecho con ratón o panel táctil: el mismo menú.
@@ -954,7 +1000,7 @@ private fun MessageBubble(
                 AttachmentsBlock(m.attachments, fg, onOpenMedia = { i -> onOpenMedia(media, i) }, onOpenFile = onOpenFile, mine = item.mine, onCreateIssue = onVoiceIssue)
             }
             if (deleted) Text(body, color = fg, style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
-            else if (body.isNotBlank() || m.attachments.isEmpty()) LinkifiedText(body, fg, Modifier.testTag("body-${m.seq}"))
+            else if (body.isNotBlank() || m.attachments.isEmpty()) MessageText(body, m.mentions, fg, data, onPerson = onPerson, modifier = Modifier.testTag("body-${m.seq}"))
             m.linkPreview?.takeIf { !deleted && it.usable }?.let { LinkPreviewCard(it, fg, Modifier.padding(top = 6.dp)) }
             Text(
                 listOfNotNull(if (pinnedHere && item.mine) "📌" else null, time, if (m.editedAt != null && !deleted) stringResource(R.string.msg_edited) else null).joinToString(" "),

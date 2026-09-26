@@ -14,7 +14,8 @@ import { NewChatDialog, StackedAvatars } from './Chats.tsx';
 import { compareConversations, matchesTab, pendingOf, activityOf, type HomeTab } from './Shell.tsx';
 
 // ---------- Árbol de Grupos (mismas reglas en web, iOS y Android: docs/GRUPOS.md) ----------
-export interface GroupNode { conv: ConversationDTO; derived: ConversationDTO[]; issues: IssueDTO[] }
+/** label: el nombre a mostrar; si dos grupos de la misma empresa se llaman igual, lleva delante el espacio de donde viene. */
+export interface GroupNode { conv: ConversationDTO; derived: ConversationDTO[]; issues: IssueDTO[]; label?: string }
 export interface WsNode { ws: WorkspaceDTO; header: boolean; groups: GroupNode[] }
 export interface CompanyNode { key: string; org: OrganizationDTO | null; name: string; pending: boolean; workspaces: WsNode[] }
 export interface GroupSection { key: string; kind: 'org' | 'relations' | 'guest'; org: OrganizationDTO | null; companies: CompanyNode[] }
@@ -69,7 +70,8 @@ export function buildGroupTree(d: BootstrapDTO, issues: Record<string, IssueDTO>
       .map((conv) => ({ conv, derived: inWs.filter((x) => x.parentId === conv.id && isChild(x)).sort(compareConversations), issues: openIssuesOf(issues, conv.id) }))
       .filter((g) => tab === 'all' || shows(g.conv, g.derived))
       .sort((a, b) => compareConversations(a.conv, b.conv));
-    if (tab !== 'all' && !groups.length) continue;
+    // Solo hay grupos y asuntos: un espacio sin grupos (archivado o vacío) no aparece.
+    if (!groups.length && !(tab === 'all' && w.counterpartName)) continue;
     const p = placeWorkspace(d, w);
     if (!companies.has(p.companyKey)) companies.set(p.companyKey, { key: p.companyKey, org: p.org, name: p.name, pending: p.pending, workspaces: [], section: p.section });
     companies.get(p.companyKey)!.workspaces.push({ ws: w, header: !w.isOrgHome, groups });
@@ -77,8 +79,14 @@ export function buildGroupTree(d: BootstrapDTO, issues: Record<string, IssueDTO>
   const list = [...companies.values()];
   for (const c of list) {
     c.workspaces.sort((a, b) => Number(!!b.ws.isOrgHome) - Number(!!a.ws.isOrgHome) || byRank(rankOf(convsOfWs(a)), rankOf(convsOfWs(b))) || a.ws.id.localeCompare(b.ws.id));
-    // En Relaciones, una empresa con un solo espacio no repite la cabecera del espacio.
-    if (c.section !== 'org' && c.workspaces.length === 1) c.workspaces[0]!.header = false;
+    // Solo grupos y asuntos: nunca cabecera de espacio. Si dos grupos de la empresa se llaman igual
+    // (p. ej. dos «General»), el nombre lleva delante el espacio de donde viene.
+    const count = new Map<string, number>();
+    for (const w of c.workspaces) { w.header = false; for (const g of w.groups) { const k = conversationTitle(d, g.conv).toLowerCase(); count.set(k, (count.get(k) ?? 0) + 1); } }
+    for (const w of c.workspaces) for (const g of w.groups) {
+      const title = conversationTitle(d, g.conv);
+      g.label = (count.get(title.toLowerCase()) ?? 0) > 1 && !w.ws.isOrgHome ? `${w.ws.name} · ${title}` : title;
+    }
   }
   const sorted = (xs: typeof list) => xs.sort((a, b) => byRank(rankOf(convsOfCompany(a)), rankOf(convsOfCompany(b))) || a.key.localeCompare(b.key));
   const myOrgs = d.organizations.filter((o) => o.myRole);
@@ -174,9 +182,8 @@ function WsBlock({ w, folded, toggle, activeConv, activeWs }: { w: WsNode; folde
       )}
       {!fold && w.groups.map((g) => (
         <div key={g.conv.id}>
-          <GroupRow c={g.conv} ws={w.ws} active={activeConv === g.conv.id} />
+          <GroupRow c={g.conv} ws={w.ws} label={g.label} threadUnread={g.derived.reduce((n, x) => n + x.unread, 0)} active={activeConv === g.conv.id} />
           {g.issues.length > 0 && <IssueLines g={g} />}
-          {g.derived.length > 0 && <div className="side-sides">{g.derived.map((x) => <ConvItem key={x.id} c={x} active={activeConv === x.id} />)}</div>}
         </div>
       ))}
     </div>
@@ -204,8 +211,9 @@ function IssueLines({ g }: { g: GroupNode }) {
   );
 }
 
-function GroupRow({ c, ws, active }: { c: ConversationDTO; ws: WorkspaceDTO; active: boolean }) {
-  return <ConvItem c={c} active={active} extraMenu={groupMenuExtra(c, ws)} />;
+/** Los hilos del grupo no se listan aquí (viven en su chat); si tienen respuestas sin leer, el grupo lo avisa con 💬. */
+function GroupRow({ c, ws, label, threadUnread, active }: { c: ConversationDTO; ws: WorkspaceDTO; label?: string; threadUnread: number; active: boolean }) {
+  return <ConvItem c={c} active={active} label={label} threadUnread={threadUnread} extraMenu={groupMenuExtra(c, ws)} />;
 }
 
 function groupMenuExtra(c: ConversationDTO, ws: WorkspaceDTO): MenuItem[] {
@@ -213,6 +221,10 @@ function groupMenuExtra(c: ConversationDTO, ws: WorkspaceDTO): MenuItem[] {
     { divider: true },
     ...(ws.myRole !== 'guest' && c.canPost ? [{ label: t('issue.new'), icon: '◆', onSelect: () => openDialog((close) => <NewIssueDialog conversationId={c.id} onClose={close} onCreated={(i) => navigate(`/c/${c.id}?issue=${i.id}`)} />) }] : []),
     ...(ws.myRole !== 'guest' && c.kind === 'group' ? [{ label: t('groups.inviteToGroup'), icon: '＋', onSelect: () => openDialog((close) => <InviteToGroupDialog conversationId={c.id} onClose={close} />) }] : []),
+    ...(c.canManage ? [{ divider: true }, { label: t('groups.archive'), icon: '🗄', danger: true, onSelect: () => {
+      if (!confirm(t('groups.archiveConfirm', { name: conversationTitle(client.getState().data!, c) }))) return;
+      client.archiveGroup(c.id).then(() => toast(t('groups.archived'))).catch((e) => toast(errorText(e)));
+    } }] : []),
   ];
 }
 
@@ -231,7 +243,7 @@ function companyMenu(c: CompanyNode, foldAll: () => void): MenuItem[] {
 const sideTitle = (title: string) => title.replace(/^(Sidechat|Consulta)\s*·\s*/i, '');
 
 /** Fila de conversación de la barra lateral (grupos y DMs). */
-export function ConvItem({ c, active, showWs = false, extraMenu = [] }: { c: ConversationDTO; active: boolean; showWs?: boolean; extraMenu?: MenuItem[] }) {
+export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, extraMenu = [] }: { c: ConversationDTO; active: boolean; showWs?: boolean; label?: string; threadUnread?: number; extraMenu?: MenuItem[] }) {
   const d = useClient((s) => s.data)!;
   const muted = isMuted(c);
   const other = c.kind === 'direct' ? personById(d, c.memberIds.find((m) => m !== d.me.id)) : null;
@@ -248,9 +260,10 @@ export function ConvItem({ c, active, showWs = false, extraMenu = [] }: { c: Con
       {side && <span className="chip-side">{t('groups.sidechat')}</span>}
       <span className="grow ellipsis">
         {origin && <span className="muted small">{t('groups.fromOrigin', { name: conversationTitle(d, origin) })} · </span>}
-        {side ? sideTitle(conversationTitle(d, c)) : conversationTitle(d, c)}
+        {label ?? (side ? sideTitle(conversationTitle(d, c)) : conversationTitle(d, c))}
         {ws ? <span className="muted small"> · {ws.name}</span> : null}
       </span>
+      {threadUnread > 0 && <span className="chip-side" title={t('bar.threads')}>💬 {threadUnread}</span>}
       {muted && <span className="small" title={t('side.muted')}>🔕</span>}
       {(c.unreadMentions ?? 0) > 0 && <span className="pill mention-pill" title={t('mention.youMentioned')}>@</span>}
       {c.unread > 0 && <span className={`pill ${muted ? 'is-muted' : ''}`} style={{ background: badgeColor(orgOfWs) }}>{c.unread}</span>}

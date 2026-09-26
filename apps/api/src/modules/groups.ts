@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import type { CreateGroupInput, CreateGroupResultDTO, OversightDTO } from '@tiecoms/contracts';
-import { workspaceAccess } from '../access.ts';
+import { conversationAccess, workspaceAccess } from '../access.ts';
 import { audit, pool, tx, type Tx } from '../db.ts';
 import { badRequest, forbidden } from '../errors.ts';
 import { appendMessage } from './messages.ts';
@@ -158,4 +158,28 @@ export async function listOversight(userId: string, orgId: string): Promise<Over
       lastMessageAt: r.last_message_at ? new Date(r.last_message_at).toISOString() : null, iAmMember: r.i_am_member,
     })),
   };
+}
+
+/**
+ * Archivar un grupo (lo puede quien lo administra: su creador o quien lidera/administra el espacio). Sale de las
+ * listas de todos. Si era el último grupo de un espacio que no es casa, el espacio también se archiva.
+ */
+export async function archiveGroup(userId: string, conversationId: string) {
+  return tx(async (c) => {
+    const a = await conversationAccess(c, userId, conversationId, 'manage', true);
+    if (a.kind !== 'group' && a.kind !== 'internal') throw badRequest('Solo se archivan grupos');
+    const members = (await c.query('SELECT user_id FROM conversation_memberships WHERE conversation_id = $1 AND removed_at IS NULL', [conversationId])).rows.map((r) => r.user_id as string);
+    await c.query('UPDATE conversations SET archived_at = now() WHERE id = $1', [conversationId]);
+    let workspaceArchived = false;
+    if (a.workspaceId) {
+      const left = await c.query('SELECT 1 FROM conversations WHERE workspace_id = $1 AND archived_at IS NULL LIMIT 1', [a.workspaceId]);
+      if (!left.rowCount) {
+        const w = await c.query('UPDATE workspaces SET archived_at = now() WHERE id = $1 AND NOT is_org_home AND archived_at IS NULL RETURNING id', [a.workspaceId]);
+        workspaceArchived = !!w.rowCount;
+      }
+    }
+    await scopeChanged(c, members, 'group.archived', undefined, { conversationId });
+    await audit(c, userId, 'conversation.archived', { type: 'conversation', id: conversationId, workspaceId: a.workspaceId }, { workspaceArchived });
+    return { archived: true, workspaceArchived };
+  });
 }

@@ -172,6 +172,23 @@ describe('grupos', () => {
     expect(asMember.joinPolicy).toBeUndefined();
   });
 
+  it('archivar un grupo: quien lo administra; con el último grupo se va también el espacio', async () => {
+    const r = (await call('/groups', { token: danny.token, body: { name: 'QA viejo', target: { kind: 'company', companyName: 'Prueba QA' }, memberIds: [laura.id] } })).json;
+    expect((await call(`/conversations/${r.conversationId}/archive`, { method: 'POST', token: laura.token, body: {} })).status).toBe(403);
+    const a = await call(`/conversations/${r.conversationId}/archive`, { method: 'POST', token: danny.token, body: {} });
+    expect(a.status).toBe(200);
+    expect(a.json).toMatchObject({ archived: true, workspaceArchived: true });
+    for (const u of [danny, laura]) {
+      const b = (await call('/bootstrap', { token: u.token })).json;
+      expect(b.conversations.some((c: any) => c.id === r.conversationId)).toBe(false);
+      expect(b.workspaces.some((w: any) => w.id === r.workspaceId)).toBe(false);
+    }
+    // En el espacio casa, archivar un grupo no archiva la casa.
+    const h = (await call('/groups', { token: danny.token, body: { name: 'Temporal', target: { kind: 'org' } } })).json;
+    const ha = await call(`/conversations/${h.conversationId}/archive`, { method: 'POST', token: danny.token, body: {} });
+    expect(ha.json.workspaceArchived).toBe(false);
+  });
+
   it('un tercero no crea grupos en la relación donde está invitado', async () => {
     const boot = (await call('/bootstrap', { token: asesor.token })).json;
     const home = boot.workspaces.find((w: any) => w.myRole === 'guest');

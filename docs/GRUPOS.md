@@ -54,12 +54,16 @@ para cada workspace w:
 
 - Orden de secciones fijo: Tu organización (una por cada empresa mía), Relaciones, Invitado en. Dentro de cada
   una, las reglas de orden de siempre (no leídos primero, luego actividad).
-- Dentro de una empresa, un espacio con `isOrgHome` no muestra cabecera: sus grupos van directo. Los demás
-  espacios muestran su nombre como cabecera (la carpeta). En Relaciones, si la empresa tiene un solo espacio,
-  se omite la cabecera del espacio.
+- **Solo hay grupos y asuntos** (26-sep-2026): ningún espacio se muestra como cabecera o carpeta. Bajo «Tu organización»
+  y bajo cada empresa de Relaciones / Invitado en van directamente sus grupos, de todos sus espacios. Si dos grupos de
+  la misma empresa se llaman igual (p. ej. dos «General» de espacios viejos), se muestran como «{espacio} · {grupo}»
+  (nunca en el espacio casa). Un espacio sin grupos no aparece. Una relación pendiente sin grupos sí aparece.
 - Una relación pendiente muestra la marca **«Invitación pendiente»** junto al nombre.
 - Filas de grupo: conversaciones del espacio con `kind` `group` o `internal`. Un `internal` lleva candado y
-  «Solo {empresa}». Las derivadas (same/internal/directive) siguen con sangría bajo su origen, como hoy.
+  «Solo {empresa}». **Los hilos (derivadas) no se listan en el árbol**: viven en la barra de su chat. Si tienen
+  respuestas sin leer, la fila del grupo muestra «💬 N».
+- **Archivar grupo** (menú del grupo, solo si `canManage`): `POST /conversations/{id}/archive`, con confirmación. Si era
+  el último grupo de un espacio que no es casa, el espacio también se archiva y desaparece.
 - **Bajo cada grupo, sus asuntos abiertos** (status distinto de done/cancelled): «◆ título», fecha límite si
   tiene (en rojo si ya venció) y el estado si es «en curso» o «esperando». Se ven hasta 3 y luego una fila
   «+N asuntos» que abre los asuntos de ese grupo. Tocar un asunto abre su detalle.
@@ -70,8 +74,7 @@ para cada workspace w:
   marcado; el de Relaciones lo abre con «Con otra empresa» marcado.
 - Mantener presionado (clic derecho en la web):
   - **Empresa o relación**: Nuevo grupo (con la empresa ya puesta), Invitar a la empresa…, Plegar todo.
-  - **Espacio (carpeta)**: Nuevo grupo aquí, Invitar, Fijar, Abrir espacio.
-  - **Grupo**: el menú de conversación de siempre + «Nuevo asunto» (no para terceros) + «Invitar a este grupo».
+  - **Grupo**: el menú de conversación de siempre + «Nuevo asunto» (no para terceros) + «Invitar a este grupo» + «Archivar grupo».
 
 ## Nuevo grupo (el «+»)
 

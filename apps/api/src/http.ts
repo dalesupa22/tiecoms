@@ -8,7 +8,7 @@ import {
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
   UpdateProfileInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
-  SideConversationInput, PushTokenInput,
+  SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -35,6 +35,8 @@ import * as attachments from './modules/attachments.ts';
 import * as voice from './modules/voice.ts';
 import * as mentions from './modules/mentions.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
+import * as reactions from './modules/reactions.ts';
+import * as links from './modules/links.ts';
 import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
 import { z } from 'zod';
@@ -290,6 +292,22 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/messages/:id/pin', async (req) => setPin(req.userId, req.params.id, true));
     priv.delete<{ Params: { id: string } }>('/api/v1/messages/:id/pin', async (req) => setPin(req.userId, req.params.id, false));
     priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/pins', async (req) => ({ messages: await listPins(req.userId, req.params.id) }));
+    // Reacciones: el emoji va en la ruta (URL-encoded). No suben no leídos; llegan a todos con message.updated.
+    priv.put<{ Params: { id: string; emoji: string } }>('/api/v1/messages/:id/reactions/:emoji', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) =>
+      reactions.react(req.userId, z.uuid().parse(req.params.id), req.params.emoji, true, ReactInput.parse(req.body ?? {})));
+    priv.delete<{ Params: { id: string; emoji: string } }>('/api/v1/messages/:id/reactions/:emoji', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) =>
+      reactions.react(req.userId, z.uuid().parse(req.params.id), req.params.emoji, false));
+    priv.put<{ Params: { id: string } }>('/api/v1/organizations/:id/reaction-actions', async (req) =>
+      reactions.setReactionActions(req.userId, z.uuid().parse(req.params.id), ReactionActionsInput.parse(req.body).reactionActions));
+    // Enlaces: biblioteca del chat, «Ver después» personal y resumen con IA bajo pedido.
+    priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/links', async (req) => links.listLinks(req.userId, z.uuid().parse(req.params.id), LinksQuery.parse(req.query)));
+    priv.get('/api/v1/links/saved', async (req) => links.listSaved(req.userId, SavedLinksQuery.parse(req.query)));
+    priv.put<{ Params: { id: string } }>('/api/v1/links/:id/state', async (req) => links.setLinkState(req.userId, z.uuid().parse(req.params.id), LinkStateInput.parse(req.body)));
+    priv.post<{ Params: { id: string } }>('/api/v1/links/:id/summary', { config: { rateLimit: { hook: 'preHandler', max: 20, timeWindow: '1 minute', keyGenerator: (req) => req.userId } } }, async (req) => {
+      const lang = z.object({ lang: z.enum(['es', 'en']).optional() }).parse(req.body ?? {}).lang
+        ?? (/^\s*en\b/i.test(String(req.headers['accept-language'] ?? '')) ? 'en' : 'es');
+      return links.summarizeLink(req.userId, z.uuid().parse(req.params.id), lang);
+    });
     // Recordatorios
     priv.get('/api/v1/reminders', async (req) => ({ reminders: await reminders.listReminders(req.userId) }));
     priv.post('/api/v1/reminders', async (req) => reminders.createReminder(req.userId, CreateReminderInput.parse(req.body)));

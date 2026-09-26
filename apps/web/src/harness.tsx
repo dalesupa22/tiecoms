@@ -44,6 +44,15 @@ const g = [
   msg('general', 'mateo', '@Danny Suárez ¿puedes revisar con @Laura Gómez la plantilla?', 50 * 60_000, { mentions: [{ userId: 'danny', start: 0, length: 13 }, { userId: 'laura', start: 34, length: 12 }] }),
   msg('general', 'ana', '', 45 * 60_000, { attachments: [{ ...att('v1', 'nota-de-voz.m4a', 'audio/mp4', 31_000), kind: 'voice', durationMs: 52_000, waveform: Array.from({ length: 48 }, (_, i) => 0.2 + 0.8 * Math.abs(Math.sin(i / 3))), transcript: { status: 'done', text: 'Hola Danny, el jueves te mando el contrato revisado con los cambios de la cláusula cuatro.', language: 'es-CO', summary: 'Ana confirma a Danny que el jueves le envía el contrato revisado.', suggestedIssue: 'Enviar el contrato revisado el jueves' } }] }),
   msg('general', 'laura', '', 40 * 60_000, { attachments: [att('p1', 'Contrato marco v3.pdf', 'application/pdf', 1_240_000), att('x1', 'Cronograma.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 48_000)] }),
+  // Reacciones y enlaces (docs/REACCIONES_ENLACES.md)
+  msg('general', 'ana', 'Miren esta charla sobre firma digital https://www.youtube.com/watch?v=abc123', 30 * 60_000, {
+    linkPreviews: [{ url: 'https://www.youtube.com/watch?v=abc123', title: 'Firma electrónica en Colombia: lo que cambia en 2026', description: 'Una charla de 20 minutos sobre validez jurídica, OTP y certificados.', siteName: 'YouTube', imageUrl: '/tiecoms-mark.svg', kind: 'video', provider: 'youtube', author: 'Legal Tech Bogotá', durationSec: 1234, linkId: 'l1' }],
+    reactions: [{ emoji: '👍', userIds: ['laura', 'mateo'] }, { emoji: '👀', userIds: ['danny'] }, { emoji: '🔥', userIds: [], external: [{ name: 'Pedro', source: 'whatsapp' }] }],
+  }),
+  msg('general', 'mateo', 'https://www.tiktok.com/@legaltech/video/1', 20 * 60_000, { linkPreviews: [{ url: 'https://www.tiktok.com/@legaltech/video/1', title: 'Así se firma un contrato en 30 segundos', description: null, siteName: 'TikTok', imageUrl: '/tiecoms-mark.svg', kind: 'short', provider: 'tiktok', author: 'legaltech', linkId: 'l2' }] }),
+  msg('general', 'mateo', 'https://www.instagram.com/reel/C1abc/', 19 * 60_000, { linkPreviews: [{ url: 'https://www.instagram.com/reel/C1abc/', title: 'Reel: detrás de cámaras del lanzamiento', description: null, siteName: 'Instagram', imageUrl: null, kind: 'short', provider: 'instagram', author: 'estudionorte', linkId: 'l3' }] }),
+  msg('general', 'mateo', 'y este https://blog.example.com/guia-microcredenciales', 18 * 60_000, { linkPreviews: [{ url: 'https://blog.example.com/guia-microcredenciales', title: 'Guía práctica de microcredenciales', description: 'Cómo diseñar rutas apilables.', siteName: 'Blog Example', imageUrl: null, kind: 'article', provider: null, linkId: 'l4' }] }),
+  msg('general', 'laura', '🎉🙌', 10 * 60_000, { reactions: [{ emoji: '❤️', userIds: ['danny', 'ana'] }] }),
 ];
 seq = 0;
 const dg = [
@@ -70,7 +79,7 @@ const data: BootstrapDTO = {
   organizations: [org('xertify', 'Xertify', 'X', '#dcd0f2', '#3b2a5a', true), org('norte', 'Estudio Norte', 'EN', '#e8d5a8', '#4a3a14')],
   workspaces: [{ id: 'ws1', name: 'Lanzamiento · Estudio Norte', department: 'Portal de certificados', glyph: null, owningOrgId: 'xertify', organizationIds: ['xertify', 'norte'], memberIds: ['danny', 'laura', 'mateo', 'ana'], myRole: 'lead', createdAt: iso(4 * D), pinnedAt: null }],
   conversations: [
-    conv({ id: 'general', name: 'General', pinnedAt: iso(D), memberIds: ['danny', 'laura', 'mateo', 'ana'], lastMessageSeq: g.length, lastEventSeq: g.length, lastReadSeq: g.length - 1, unread: 1, unreadMentions: 1, lastMessagePreview: g[g.length - 1]!.body, openIssues: 2 }),
+    conv({ id: 'general', name: 'General', pinnedAt: iso(D), memberIds: ['danny', 'laura', 'mateo', 'ana'], lastMessageSeq: g.length, lastEventSeq: g.length, lastReadSeq: g.length - 1, unread: 1, unreadMentions: 1, lastMessagePreview: g[g.length - 1]!.body, openIssues: 2, linkCount: 6 }),
     conv({ id: 'diag', name: 'Diagnóstico · notificaciones duplicadas', kind: 'internal', level: null, internalOrgId: 'xertify', memberIds: ['danny', 'laura'], parentId: 'general', parentMessageId: 'general-m4', parentMessageSeq: 4, deriveKind: 'internal', deriveReason: 'Ana necesita saber si es el job o un reenvío', returnedAt: iso(5 * H), lastMessageSeq: dg.length, lastEventSeq: dg.length, lastReadSeq: dg.length }),
     conv({ id: 'dec', name: 'Decisión · fecha de salida', level: 'directivo', memberIds: ['danny', 'mateo'], parentId: 'general', parentMessageId: 'general-m2', parentMessageSeq: 2, deriveKind: 'directive', lastMessageSeq: 0 }),
     conv({ id: 'multi1', kind: 'multi', workspaceId: null, level: null, name: 'Equipo mixto', avatarUrl: '/tiecoms-mark.svg', memberIds: ['danny', 'mateo', 'ana', 'laura'], unread: 2, lastMessagePreview: '¿Nos vemos el jueves?' }),

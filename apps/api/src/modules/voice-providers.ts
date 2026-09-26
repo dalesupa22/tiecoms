@@ -36,6 +36,8 @@ export interface Summarizer {
   summarize(text: string, ctx: VoiceContext): Promise<{ summary: string | null; suggestedIssue: string | null }>;
   /** Resumen para «Llevar al hilo» un sidechat: lo que se publicará en la conversación de origen. */
   suggestSideReturn?(input: SideReturnInput): Promise<string | null>;
+  /** Llamada genérica en modo JSON (resumen de enlaces): devuelve el contenido tal cual. */
+  complete?(system: string, user: string): Promise<string>;
 }
 
 export interface SideReturnInput {
@@ -93,6 +95,17 @@ export class DeepSeekSummarizer implements Summarizer {
     try { out = JSON.parse(j?.choices?.[0]?.message?.content ?? '{}'); } catch { out = {}; }
     const clean = (v: unknown, n: number) => (typeof v === 'string' && v.trim() ? v.trim().replace(/\s+/g, ' ').slice(0, n) : null);
     return { summary: opts.wantSummary ? clean(out.summary, 200) : null, suggestedIssue: clean(out.suggestedIssue, 120) };
+  }
+  async complete(system: string, user: string) {
+    const res = await fetch(`${this.url.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${this.key}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: this.model, temperature: 0.2, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+      signal: AbortSignal.timeout(45_000),
+    });
+    const j: any = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`deepseek_${res.status}`);
+    return String(j?.choices?.[0]?.message?.content ?? '');
   }
   async suggestSideReturn(input: SideReturnInput) {
     const res = await fetch(`${this.url.replace(/\/$/, '')}/chat/completions`, {

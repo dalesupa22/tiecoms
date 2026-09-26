@@ -277,3 +277,44 @@ export async function pushEventSoon(eventId: string, userIds: string[], minutes:
   }));
   return targets.length;
 }
+
+/**
+ * Reacciones a mi mensaje: un solo aviso agrupado al autor («Ana y Beto reaccionaron 👍❤️ a «…»»).
+ * No cambia el globo (no son mensajes) y respeta el silencio de la conversación y los bloqueos.
+ */
+export async function pushReaction(messageId: string) {
+  const { rows } = await pool.query(
+    `SELECT m.id, m.conversation_id, m.author_id, m.body, m.attachments, m.deleted_at, c.kind AS conv_kind, c.name AS conv_name
+       FROM messages m JOIN conversations c ON c.id = m.conversation_id AND c.archived_at IS NULL WHERE m.id = $1`,
+    [messageId],
+  );
+  const m = rows[0];
+  if (!m || m.deleted_at || !m.author_id) return 0;
+  const { recentReactions } = await import('./reactions.ts');
+  const who = (await recentReactions(messageId)).filter((r) => r.user_id !== m.author_id);
+  if (!who.length) return 0;
+  const { rows: targets } = await pool.query<Target>(
+    `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
+       FROM users u ${ACTIVE_SESSION}
+       JOIN conversation_memberships cm ON cm.conversation_id = $2 AND cm.user_id = u.id AND cm.removed_at IS NULL
+       LEFT JOIN conversation_prefs cp ON cp.conversation_id = $2 AND cp.user_id = u.id
+      WHERE u.id = $1 AND u.disabled_at IS NULL AND (cp.muted_until IS NULL OR cp.muted_until <= now())
+        AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = u.id AND b.blocked_id = ANY($3)) OR (b.blocked_id = u.id AND b.blocker_id = ANY($3)))`,
+    [m.author_id, m.conversation_id, [...new Set(who.map((w) => w.user_id))]],
+  );
+  const names = [...new Set(who.map((w) => w.name.split(' ')[0]))];
+  const emojis = [...new Set(who.map((w) => w.emoji))].slice(0, 5).join('');
+  await deliver(targets, (t) => {
+    const en = t.lang === 'en';
+    const people = names.length === 1 ? names[0] : names.length === 2 ? `${names[0]} ${en ? 'and' : 'y'} ${names[1]}`
+      : `${names[0]} ${en ? `and ${names.length - 1} others` : `y ${names.length - 1} más`}`;
+    return {
+      title: `${people} ${en ? 'reacted' : names.length === 1 ? 'reaccionó' : 'reaccionaron'} ${emojis}`,
+      subtitle: m.conv_kind === 'direct' ? null : m.conv_name || null,
+      body: `«${messageText(m.body, m.attachments, t.lang)}»`,
+      threadId: m.conversation_id, category: 'TC_MESSAGE', collapseId: `react-${m.id}`,
+      data: { type: 'reaction', conversationId: m.conversation_id, messageId: m.id },
+    };
+  });
+  return targets.length;
+}

@@ -25,6 +25,20 @@ export function handleNotice(n: ClientNotice) {
     }
     return;
   }
+  if (n.kind === 'reaction') {
+    // Reacción a un mensaje mío: toast si estoy en otra pantalla; notificación del sistema si la pestaña no está a la vista.
+    const current = location.pathname === `${BASE}/c/${n.conversationId}`;
+    if (document.visibilityState === 'visible' && current) return;
+    const who = personById(d, n.userId)?.name.split(' ')[0] ?? '';
+    const text = t('react.notice', { name: who, emoji: n.emoji, excerpt: n.message.body.replace(/\s+/g, ' ').slice(0, 60) });
+    const go = () => navigate(`/c/${n.conversationId}?m=${n.message.seq}`);
+    if (document.visibilityState === 'visible') toast(text, { label: t('rem.open'), run: go }, 5000);
+    else if (canNotify) {
+      const note = new Notification(text, { tag: `react-${n.message.id}`, icon: `${BASE}/icon-192.png` });
+      note.onclick = () => { window.focus(); go(); note.close(); };
+    }
+    return;
+  }
   if (n.kind === 'mentionsDropped') {
     const names = n.userIds.map((id) => (id === 'all' ? t('mention.allLabel') : personById(d, id)?.name ?? '?')).join(', ');
     toast(t('mention.dropped', { names }));

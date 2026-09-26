@@ -10,17 +10,22 @@ import { lookup } from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import type { LinkPreviewDTO } from '@tiecoms/contracts';
+import type { LinkKind, LinkPreviewDTO, LinkProvider } from '@tiecoms/contracts';
 import { pool, tx } from '../db.ts';
 import { objectKey, putObject, storageEnabled } from '../storage.ts';
 import { appendEvent, toMessageDTO } from './messages.ts';
+import { classifyUrl, extractUrls } from './links.ts';
 
 const URL_RE = /\bhttps?:\/\/[^\s<>"'`]+/i;
-const HTML_MAX = 768 * 1024;
+// YouTube pone og:type y la duración pasados los 700 KB del HTML.
+const HTML_MAX = 1024 * 1024;
 const IMAGE_MAX = 2 * 1024 * 1024;
 const TIMEOUT_MS = 6000;
 const CACHE_HOURS = 24;
 const UA = 'Mozilla/5.0 (compatible; TieComsBot/1.0; +https://www.tiecoms.com)';
+/** Redes que solo sirven etiquetas og: a los rastreadores de vistas previas conocidos. */
+const CRAWLER_UA = 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)';
+const MAX_PREVIEWS = 3;
 
 /** Primer enlace del texto, sin la puntuación que suele ir pegada al final. */
 export function firstUrl(text: string): string | null {
@@ -68,7 +73,7 @@ const safeLookup: net.LookupFunction = (hostname, options, cb) => {
 
 interface Got { url: string; status: number; type: string; body: Buffer }
 
-function getOnce(target: URL, accept: string, max: number): Promise<Got & { location?: string }> {
+function getOnce(target: URL, accept: string, max: number, ua = UA): Promise<Got & { location?: string }> {
   return new Promise((resolve, reject) => {
     if (target.protocol !== 'http:' && target.protocol !== 'https:') return reject(new Error('Protocolo no permitido'));
     if (target.port && !['80', '443'].includes(target.port)) return reject(new Error('Puerto no permitido'));
@@ -77,7 +82,7 @@ function getOnce(target: URL, accept: string, max: number): Promise<Got & { loca
     const mod = target.protocol === 'https:' ? https : http;
     const req = mod.get(target, {
       lookup: safeLookup, timeout: TIMEOUT_MS,
-      headers: { 'user-agent': UA, accept, 'accept-language': 'es,en;q=0.8', 'accept-encoding': 'identity' },
+      headers: { 'user-agent': ua, accept, 'accept-language': 'es,en;q=0.8', 'accept-encoding': 'identity' },
     }, (res) => {
       const status = res.statusCode ?? 0;
       if (status >= 300 && status < 400 && res.headers.location) { res.resume(); return resolve({ url: target.toString(), status, type: '', body: Buffer.alloc(0), location: res.headers.location }); }
@@ -98,10 +103,10 @@ function getOnce(target: URL, accept: string, max: number): Promise<Got & { loca
   });
 }
 
-async function safeGet(url: string, accept: string, max: number): Promise<Got> {
+async function safeGet(url: string, accept: string, max: number, ua = UA): Promise<Got> {
   let target = new URL(url);
   for (let hop = 0; hop < 4; hop++) {
-    const r = await getOnce(target, accept, max);
+    const r = await getOnce(target, accept, max, ua);
     if (!r.location) return r;
     target = new URL(r.location, target);
   }
@@ -117,7 +122,7 @@ const decode = (s: string) => s
   .replace(/\s+/g, ' ').trim();
 
 export function parseMeta(html: string) {
-  const head = html.slice(0, 300_000);
+  const head = html.slice(0, 1_000_000);
   const meta = new Map<string, string>();
   for (const tag of head.match(/<meta\b[^>]*>/gi) ?? []) {
     const attr = (n: string) => tag.match(new RegExp(`\\b${n}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i'));
@@ -132,7 +137,68 @@ export function parseMeta(html: string) {
     description: pick('og:description', 'twitter:description', 'description'),
     siteName: pick('og:site_name', 'application-name', 'twitter:site'),
     image: pick('og:image:secure_url', 'og:image', 'og:image:url', 'twitter:image', 'twitter:image:src', 'image'),
+    type: pick('og:type'),
+    author: pick('article:author', 'author', 'twitter:creator'),
+    duration: pick('video:duration', 'og:video:duration', 'duration', 'music:duration') ?? head.match(/"lengthSeconds":"(\d+)"/)?.[1] ?? null,
   };
+}
+
+/** «PT4M13S», «253» → segundos. */
+export function parseDuration(v: string | null | undefined): number | null {
+  if (!v) return null;
+  if (/^\d+$/.test(v)) { const n = Number(v); return n > 0 && n < 86_400 * 2 ? n : null; }
+  const m = /^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/i.exec(v.trim());
+  if (!m || !m.slice(1).some(Boolean)) return null;
+  const s = Number(m[1] ?? 0) * 86_400 + Number(m[2] ?? 0) * 3600 + Number(m[3] ?? 0) * 60 + Math.round(Number(m[4] ?? 0));
+  return s > 0 ? s : null;
+}
+
+/** og:type → tipo, cuando el dominio no lo dice. */
+function kindFromOg(type: string | null): LinkKind | null {
+  if (!type) return null;
+  const t = type.toLowerCase();
+  if (t.startsWith('video')) return 'video';
+  if (t.startsWith('music')) return 'audio';
+  if (t === 'article' || t.startsWith('article')) return 'article';
+  return null;
+}
+
+// ---------- oEmbed de las plataformas ----------
+interface OEmbed { title: string | null; author: string | null; thumbnail: string | null; description: string | null }
+
+/** Endpoint oEmbed público por plataforma (Instagram exige un token de app de Meta: META_OEMBED_TOKEN). */
+export function oembedEndpoint(provider: LinkProvider | null, url: string): string | null {
+  const q = encodeURIComponent(url);
+  switch (provider) {
+    case 'youtube': return `https://www.youtube.com/oembed?format=json&url=${q}`;
+    case 'tiktok': return `https://www.tiktok.com/oembed?url=${q}`;
+    case 'vimeo': return `https://vimeo.com/api/oembed.json?url=${q}`;
+    case 'spotify': return `https://open.spotify.com/oembed?url=${q}`;
+    case 'x': return `https://publish.twitter.com/oembed?omit_script=1&dnt=true&url=${q}`;
+    case 'instagram': return process.env.META_OEMBED_TOKEN ? `https://graph.facebook.com/v21.0/instagram_oembed?omitscript=true&url=${q}&access_token=${encodeURIComponent(process.env.META_OEMBED_TOKEN)}` : null;
+    default: return null;
+  }
+}
+
+async function oembed(provider: LinkProvider | null, url: string): Promise<OEmbed | null> {
+  const endpoint = oembedEndpoint(provider, url);
+  if (!endpoint) return null;
+  try {
+    const r = await safeGet(endpoint, 'application/json', 256 * 1024);
+    if (r.status >= 400) return null;
+    const j: any = JSON.parse(r.body.toString('utf8'));
+    const str = (v: unknown) => (typeof v === 'string' && v.trim() ? decode(v) : null);
+    // X solo trae el HTML del tuit: el texto va como descripción.
+    const tweet = provider === 'x' && typeof j.html === 'string' ? decode(String(j.html.match(/<p[^>]*>([\s\S]*?)<\/p>/i)?.[1] ?? '').replace(/<[^>]+>/g, ' ')) : null;
+    return { title: str(j.title), author: str(j.author_name), thumbnail: str(j.thumbnail_url), description: tweet || null };
+  } catch (e: any) { console.log(`[preview] oembed ${provider}: ${e?.message}`); return null; }
+}
+
+/** HTML de una página (para el resumen con IA). null si no es HTML. */
+export async function fetchPage(url: string): Promise<string | null> {
+  const page = await safeGet(url, 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', HTML_MAX);
+  if (page.status >= 400 || !(/html|xml/.test(page.type) || !page.type)) return null;
+  return charsetOf(page.type, page.body).decode(page.body);
 }
 
 function charsetOf(type: string, body: Buffer) {
@@ -152,67 +218,102 @@ function sniffImage(b: Buffer): { type: string; ext: string } | null {
 
 const clip = (s: string | null, n: number) => (s ? (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s) : null);
 
-/** Lee la página y arma la vista previa (null si no hay nada que mostrar). */
-export async function buildPreview(url: string): Promise<LinkPreviewDTO | null> {
-  const page = await safeGet(url, 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', HTML_MAX);
-  const finalUrl = page.url;
-  const host = new URL(finalUrl).hostname.replace(/^www\./, '');
-  if (page.status >= 400) return null;
-  let meta: ReturnType<typeof parseMeta>;
-  if (/^image\//.test(page.type)) meta = { title: null, description: null, siteName: host, image: finalUrl };
-  else if (/html|xml/.test(page.type) || !page.type) meta = parseMeta(charsetOf(page.type, page.body).decode(page.body));
-  else return null;
+async function storeImage(imageUrl: string, base: string, reuse?: Got): Promise<string | null> {
+  if (!storageEnabled()) return null;
+  try {
+    const imgUrl = new URL(imageUrl, base).toString();
+    const img = reuse ?? await safeGet(imgUrl, 'image/avif,image/webp,image/png,image/jpeg,image/gif;q=0.8', IMAGE_MAX);
+    const kind = img.status < 400 && img.body.length < IMAGE_MAX ? sniffImage(img.body) : null;
+    if (!kind) return null;
+    const id = randomUUID();
+    const key = objectKey(`previews/${id}.${kind.ext}`);
+    await putObject(key, img.body, kind.type);
+    await pool.query("INSERT INTO files (id, owner_id, purpose, s3_key, content_type, size_bytes) VALUES ($1, NULL, 'preview', $2, $3, $4)", [id, key, kind.type, img.body.length]);
+    return `/api/v1/previews/${id}`;
+  } catch (e: any) { console.log(`[preview] sin imagen para ${new URL(base).hostname}: ${e?.message}`); return null; }
+}
 
-  let imageUrl: string | null = null;
-  if (meta.image && storageEnabled()) {
+/**
+ * Lee la página (y el oEmbed de la plataforma si lo hay) y arma la vista previa (null si no hay nada que mostrar).
+ * TikTok e Instagram suelen bloquear a los bots: el oEmbed oficial y el agente de vistas previas de Facebook
+ * son lo que sí responden.
+ */
+export async function buildPreview(url: string): Promise<LinkPreviewDTO | null> {
+  const cls = classifyUrl(url);
+  const oe = await oembed(cls.provider, url);
+  let finalUrl = url;
+  let meta: ReturnType<typeof parseMeta> = { title: null, description: null, siteName: null, image: null, type: null, author: null, duration: null };
+  let imagePage: Got | undefined;
+  // TikTok con oEmbed ya trae todo (su página es una app de JavaScript).
+  if (!(cls.provider === 'tiktok' && oe?.title)) {
     try {
-      const imgUrl = new URL(meta.image, finalUrl).toString();
-      const img = /^image\//.test(page.type) ? page : await safeGet(imgUrl, 'image/avif,image/webp,image/png,image/jpeg,image/gif;q=0.8', IMAGE_MAX);
-      const kind = img.status < 400 && img.body.length < IMAGE_MAX ? sniffImage(img.body) : null;
-      if (kind) {
-        const id = randomUUID();
-        const key = objectKey(`previews/${id}.${kind.ext}`);
-        await putObject(key, img.body, kind.type);
-        await pool.query("INSERT INTO files (id, owner_id, purpose, s3_key, content_type, size_bytes) VALUES ($1, NULL, 'preview', $2, $3, $4)", [id, key, kind.type, img.body.length]);
-        imageUrl = `/api/v1/previews/${id}`;
-      }
-    } catch (e: any) { console.log(`[preview] sin imagen para ${host}: ${e?.message}`); }
+      const ua = ['instagram', 'facebook', 'tiktok', 'x', 'linkedin'].includes(cls.provider ?? '') ? CRAWLER_UA : UA;
+      const page = await safeGet(url, 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', HTML_MAX, ua);
+      finalUrl = page.url;
+      if (page.status < 400) {
+        if (/^image\//.test(page.type)) { meta = { ...meta, siteName: cls.host, image: finalUrl }; imagePage = page; }
+        else if (/html|xml/.test(page.type) || !page.type) meta = parseMeta(charsetOf(page.type, page.body).decode(page.body));
+        else if (!oe) return null;
+      } else if (!oe) return null;
+    } catch (e) { if (!oe) throw e; }
   }
-  const title = clip(meta.title, 200);
-  const description = clip(meta.description, 300);
+  const host = new URL(finalUrl).hostname.replace(/^www\./, '');
+  const image = oe?.thumbnail ?? meta.image;
+  const imageUrl = image ? await storeImage(image, finalUrl, imagePage) : null;
+  // Una red que no sirve la publicación devuelve su propio nombre como título: eso no es una vista previa.
+  const generic = !oe?.title && cls.provider && meta.title && /^(instagram|tiktok|x|twitter|facebook|linkedin|youtube)$/i.test(meta.title.trim()) && !meta.description;
+  const title = clip(oe?.title ?? (generic ? null : meta.title), 200);
+  const description = clip(oe?.description ?? meta.description, 300);
   if (!title && !description && !imageUrl) return null;
-  return { url: finalUrl, title, description, siteName: clip(meta.siteName, 80) ?? host, imageUrl };
+  const kind: LinkKind = cls.kind !== 'link' ? cls.kind : kindFromOg(meta.type) ?? (imagePage ? 'image' : 'link');
+  const author = clip(oe?.author ?? (meta.author && !/^https?:/.test(meta.author) ? meta.author : null), 80);
+  return {
+    url: finalUrl, title, description, siteName: clip(meta.siteName, 80) ?? host, imageUrl,
+    kind, provider: cls.provider, author, durationSec: parseDuration(meta.duration),
+  };
 }
 
 const hashUrl = (u: string) => createHash('sha256').update(u).digest();
 
-/** Job del worker: resuelve (o toma de la caché) la vista previa del mensaje y avisa a la conversación. */
+/** Vista previa de una URL, desde la caché de 24 h o leyendo la página. */
+async function previewFor(url: string): Promise<LinkPreviewDTO | null> {
+  const cached = await pool.query(`SELECT status, data FROM link_previews WHERE url_hash = $1 AND fetched_at > now() - make_interval(hours => $2)`, [hashUrl(url), CACHE_HOURS]);
+  if (cached.rows[0]) return cached.rows[0].status === 'ok' ? cached.rows[0].data : null;
+  let status: 'ok' | 'empty' | 'failed' = 'empty';
+  let data: LinkPreviewDTO | null = null;
+  try { data = await buildPreview(url); status = data ? 'ok' : 'empty'; } catch (e: any) { status = 'failed'; console.log(`[preview] ${new URL(url).hostname}: ${e?.message}`); }
+  await pool.query(
+    `INSERT INTO link_previews (url_hash, url, status, data) VALUES ($1,$2,$3,$4)
+     ON CONFLICT (url_hash) DO UPDATE SET status = EXCLUDED.status, data = EXCLUDED.data, fetched_at = now()`,
+    [hashUrl(url), url, status, data ? JSON.stringify(data) : null],
+  );
+  return data;
+}
+
+/** Job del worker: vistas previas de los primeros 3 enlaces del mensaje; avisa a la conversación y completa la biblioteca. */
 export async function previewMessage(messageId: string) {
   const { rows } = await pool.query("SELECT id, body, kind, deleted_at FROM messages WHERE id = $1", [messageId]);
   const m = rows[0];
   if (!m || m.kind !== 'text' || m.deleted_at) return;
-  const url = firstUrl(m.body);
-  let data: LinkPreviewDTO | null = null;
-  if (url) {
-    const cached = await pool.query(`SELECT status, data FROM link_previews WHERE url_hash = $1 AND fetched_at > now() - make_interval(hours => $2)`, [hashUrl(url), CACHE_HOURS]);
-    if (cached.rows[0]) data = cached.rows[0].status === 'ok' ? cached.rows[0].data : null;
-    else {
-      let status: 'ok' | 'empty' | 'failed' = 'empty';
-      try { data = await buildPreview(url); status = data ? 'ok' : 'empty'; } catch (e: any) { status = 'failed'; console.log(`[preview] ${new URL(url).hostname}: ${e?.message}`); }
-      await pool.query(
-        `INSERT INTO link_previews (url_hash, url, status, data) VALUES ($1,$2,$3,$4)
-         ON CONFLICT (url_hash) DO UPDATE SET status = EXCLUDED.status, data = EXCLUDED.data, fetched_at = now()`,
-        [hashUrl(url), url, status, data ? JSON.stringify(data) : null],
-      );
-    }
-  }
+  const urls = extractUrls(m.body, MAX_PREVIEWS);
+  const found: (LinkPreviewDTO | null)[] = [];
+  for (const url of urls) found.push(await previewFor(url));
   await tx(async (c) => {
-    // El texto pudo cambiar mientras se leía la página: solo se guarda si sigue siendo el mismo enlace.
+    // El texto pudo cambiar mientras se leía la página: solo se guarda si siguen siendo los mismos enlaces.
     const cur = await c.query('SELECT * FROM messages WHERE id = $1 FOR UPDATE', [messageId]);
     const row = cur.rows[0];
-    if (!row || row.deleted_at || firstUrl(row.body) !== url) return;
-    if (JSON.stringify(row.link_preview ?? null) === JSON.stringify(data)) return;
-    const up = await c.query('UPDATE messages SET link_preview = $2 WHERE id = $1 RETURNING *', [messageId, data ? JSON.stringify(data) : null]);
+    if (!row || row.deleted_at || JSON.stringify(extractUrls(row.body, MAX_PREVIEWS)) !== JSON.stringify(urls)) return;
+    const ids = new Map<number, string>();
+    for (const [i, url] of urls.entries()) {
+      const u = await c.query('UPDATE message_links SET preview = $3 WHERE message_id = $1 AND url = $2 AND position = $4 RETURNING id', [messageId, url, found[i] ? JSON.stringify(found[i]) : null, i]);
+      if (u.rows[0]) ids.set(i, u.rows[0].id);
+    }
+    // En el mensaje, cada vista previa lleva su id de la biblioteca (para «Ver después» y el resumen desde la tarjeta).
+    const withId = found.map((p, i) => (p ? { ...p, ...(ids.has(i) ? { linkId: ids.get(i) } : {}) } : null));
+    const first = withId[0] ?? null;
+    const list = withId.filter(Boolean) as LinkPreviewDTO[];
+    if (JSON.stringify(row.link_preview ?? null) === JSON.stringify(first) && JSON.stringify(row.link_previews ?? []) === JSON.stringify(list)) return;
+    const up = await c.query('UPDATE messages SET link_preview = $2, link_previews = $3 WHERE id = $1 RETURNING *', [messageId, first ? JSON.stringify(first) : null, list.length ? JSON.stringify(list) : null]);
     await appendEvent(c, row.conversation_id, { type: 'message.updated', conversationId: row.conversation_id, message: toMessageDTO(up.rows[0]) }, messageId);
   });
 }

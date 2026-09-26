@@ -13,6 +13,8 @@ const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expire
  */
 export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   const me = await loadUser(pool, userId);
+  const digest = await pool.query('SELECT link_digest FROM users WHERE id = $1', [userId]);
+  me.linkDigest = !!digest.rows[0]?.link_digest;
 
   const [ws, convs, people] = await Promise.all([
     pool.query(
@@ -32,7 +34,8 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
               (SELECT count(*) FROM issues i WHERE i.conversation_id = c.id AND i.status NOT IN ('done','cancelled'))::int AS open_issues,
               (SELECT count(*) FROM message_mentions mm WHERE mm.user_id = m.user_id AND mm.conversation_id = c.id
                   AND mm.seq > GREATEST(COALESCE(rc.last_read_seq, 0), m.history_from_seq))::int AS unread_mentions,
-              m.can_post, m.can_manage, m.history_from_seq, wm.role AS workspace_role, cp.pinned_at, cp.muted_until,
+              m.can_post, m.can_manage, m.history_from_seq, wm.role AS workspace_role, cp.pinned_at, cp.muted_until, cp.link_previews,
+              (SELECT count(*) FROM message_links ml WHERE ml.conversation_id = c.id AND ml.seq > m.history_from_seq)::int AS link_count,
               COALESCE(rc.last_read_seq, 0) AS last_read_seq,
               ARRAY(SELECT user_id FROM conversation_memberships x WHERE x.conversation_id = c.id AND x.removed_at IS NULL ORDER BY x.joined_at) AS member_ids,
               (SELECT CASE WHEN lm.deleted_at IS NULL THEN left(lm.body, 140) ELSE '' END FROM messages lm
@@ -107,6 +110,8 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
       mutedUntil: r.muted_until && new Date(r.muted_until) > new Date() ? new Date(r.muted_until).toISOString() : null,
       avatarUrl: r.avatar_file_id ? `/api/v1/avatars/${r.avatar_file_id}` : null,
       unreadMentions: r.unread_mentions ?? 0,
+      ...(r.link_previews ? { linkPreviews: r.link_previews } : {}),
+      linkCount: r.link_count ?? 0,
       lastHumanPreview: r.human ? {
         messageId: r.human.id, seq: Number(r.human.seq), authorId: r.human.authorId, body: r.human.body ?? '',
         attachments: summarize(r.human.attachments), createdAt: new Date(r.human.createdAt).toISOString(),
@@ -125,7 +130,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   personList.forEach((p) => p.orgId && orgIds.add(p.orgId));
   if (me.primaryOrgId) orgIds.add(me.primaryOrgId);
   const orgs = await pool.query(
-    `SELECT o.id, o.name, o.mark, o.color_bg, o.color_fg, o.join_policy, om.role AS my_role FROM organizations o
+    `SELECT o.id, o.name, o.mark, o.color_bg, o.color_fg, o.join_policy, o.reaction_actions, om.role AS my_role FROM organizations o
        LEFT JOIN organization_memberships om ON om.org_id = o.id AND om.user_id = $2 WHERE o.id = ANY($1) ORDER BY o.name`,
     [[...orgIds], userId],
   );
@@ -134,6 +139,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
     id: r.id, name: r.name, mark: r.mark, colorBg: r.color_bg, colorFg: r.color_fg, ...(r.my_role ? { myRole: r.my_role } : {}),
     verification: verified.get(r.id)?.level ?? 'none', verifiedDomain: verified.get(r.id)?.domain ?? null,
     ...(['owner', 'admin'].includes(r.my_role) ? { joinPolicy: r.join_policy } : {}),
+    ...(r.my_role ? { reactionActions: r.reaction_actions } : {}),
   }));
 
   return { contract: CONTRACT_VERSION, serverTime: new Date().toISOString(), me, organizations, workspaces, conversations, people: personList };

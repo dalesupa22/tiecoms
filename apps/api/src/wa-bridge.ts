@@ -15,6 +15,7 @@ import { pool } from './db.ts';
 import {
   bridgeToTieComs, chatFromWa, dbAuthState, groupRow, msgRow, notifyOwner, organizeAccount, setStatus, skipJid, storeMessages, tsOf,
   upsertChats, upsertContacts, type ChatRow, type MsgRow, type Session,
+  storeReaction,
 } from './modules/wa-sync.ts';
 
 const BRIDGE_ID = `${hostname()}:${process.pid}`;
@@ -146,6 +147,7 @@ async function connect(s: Session) {
   }))).then(() => notifyOwner(s)).catch(() => {}));
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     try {
+      for (const m of messages) if (m.message?.reactionMessage) await storeReaction(s, m).catch((e) => console.error(`[wa] ${s.id} reacción`, e?.message));
       const rows = messages.map((m) => msgRow(s, m)).filter(Boolean) as MsgRow[];
       const inserted = await storeMessages(s, rows, type === 'notify');
       if (inserted.length) notifyOwner(s);

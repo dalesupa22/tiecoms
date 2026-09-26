@@ -328,6 +328,23 @@ export function SettingsScreen() {
         </button>
       ))}
 
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{t('link.settingsTitle')}</div>
+      <label className="card conv-card check" style={{ marginBottom: 12 }}>
+        <input type="checkbox" checked={!!d.me.linkDigest} onChange={(e) => client.setLinkDigest(e.target.checked).catch((err) => toast(errorText(err)))} />
+        <span className="grow"><b>{t('link.digest')}</b><span className="small muted" style={{ display: 'block' }}>{t('link.digestHint')}</span></span>
+      </label>
+      {d.organizations.filter((o) => o.myRole === 'owner' || o.myRole === 'admin').map((o) => (
+        <label key={`ra-${o.id}`} className="card conv-card check" style={{ marginBottom: 12 }}>
+          <input type="checkbox" checked={o.reactionActions !== false} onChange={(e) => client.setReactionActions(o.id, e.target.checked).catch((err) => toast(errorText(err)))} />
+          <span className="grow"><b>{t('react.actionsSetting', { org: o.name })}</b><span className="small muted" style={{ display: 'block' }}>{t('react.actionsSettingHint')}</span></span>
+        </label>
+      ))}
+      <button className="card conv-card" style={{ marginBottom: 24 }} onClick={() => navigate('/ver-despues')}>
+        <span style={{ fontSize: 22 }} aria-hidden>🔖</span>
+        <span className="grow"><b>{t('nav.saved')}</b><span className="small muted" style={{ display: 'block' }}>{t('link.savedIntro')}</span></span>
+        <span className="muted">›</span>
+      </button>
+
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('settings.whatsapp')}</div>
       <button className="card conv-card" style={{ marginBottom: 24 }} onClick={() => navigate('/whatsapp')}>
         <span style={{ fontSize: 22 }} aria-hidden>✆</span>

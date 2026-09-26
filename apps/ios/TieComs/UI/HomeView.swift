@@ -565,7 +565,7 @@ struct ConvIcon: View {
         } else if c.kind == .multi {
             StackedAvatars(d: d, c: c, box: size)
         } else {
-            glyph(c.parentId != nil ? "arrow.triangle.branch" : c.kind == .internal ? "lock.fill" : "number")
+            glyph(c.parentId != nil ? "bubble.left.and.bubble.right" : c.kind == .internal ? "lock.fill" : "number")
         }
     }
 

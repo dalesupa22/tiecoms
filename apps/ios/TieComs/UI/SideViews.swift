@@ -340,7 +340,9 @@ struct SidePanel: View {
     }
 
     @ViewBuilder private var header: some View {
-        if let d = store.data, let c = store.meta(sideId) {
+        if let d = store.data, let c = store.meta(sideId), !Naming.isSide(c) {
+            threadHeader(d, c)
+        } else if let d = store.data, let c = store.meta(sideId) {
             HStack(spacing: 10) {
                 StackedAvatars(d: d, c: c, size: 28)
                     .frame(width: 28 + CGFloat(max(0, min(3, Naming.others(d, c).count) - 1)) * 15, alignment: .leading)
@@ -377,6 +379,54 @@ struct SidePanel: View {
             }
             .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 8)
         }
+    }
+
+    /// Hilo con los del chat (derivada): título, «Con los del chat · N personas», «＋ Personas» y «✓ Resolver y dejar el resultado».
+    private func threadHeader(_ d: BootstrapDTO, _ c: ConversationDTO) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.accentText)
+                    .frame(width: 32, height: 32).background(Circle().fill(Theme.orange.opacity(0.14))).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(ChatThreads.title(d, c)).font(.headline).lineLimit(1)
+                    Text("\(c.deriveKind == "internal" ? L("lin.kind.internal") : L("bar.public")) · \(L("bar.peopleN", ["n": c.memberIds.count]))")
+                        .font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                }
+                Spacer()
+                Menu {
+                    MuteMenu(conv: c)
+                    Button { UIPasteboard.general.string = conversationLink(c.id); store.show(L("toast.linkCopied")) } label: { Label(L("menu.copyLink"), systemImage: "link") }
+                } label: {
+                    Image(systemName: "ellipsis").font(.system(size: 16, weight: .semibold)).frame(width: 36, height: 36)
+                        .background(Circle().fill(Theme.surface))
+                }
+                .accessibilityLabel(L("menu.open"))
+                Button(action: onClose) {
+                    Image(systemName: "xmark").font(.system(size: 14, weight: .bold)).frame(width: 36, height: 36)
+                        .background(Circle().fill(Theme.surface))
+                }
+                .foregroundStyle(Theme.textPrimary)
+                .accessibilityLabel(L("side.close"))
+                .accessibilityIdentifier("side.close")
+            }
+            HStack(spacing: 8) {
+                if c.returnedAt != nil {
+                    Label(L("lin.returned"), systemImage: "checkmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(.green)
+                } else if c.parentId.flatMap({ store.meta($0) })?.canPost == true && c.canPost {
+                    Button(L("lin.return")) { returning = true }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.borderedProminent).tint(Theme.bubbleMine)
+                        .accessibilityIdentifier("thread.resolve")
+                }
+                if c.canManage {
+                    Button { adding = true } label: { Label(L("bar.people"), systemImage: "plus").font(.caption.weight(.semibold)) }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel(L("bar.addPeople"))
+                        .accessibilityIdentifier("thread.addPeople")
+                }
+            }
+        }
+        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 8)
     }
 
     /// Tarjeta del ancla: del origen si está cargado; si no, el extracto del mensaje de sistema side.started.

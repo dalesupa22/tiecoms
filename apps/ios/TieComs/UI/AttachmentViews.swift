@@ -293,6 +293,9 @@ struct AttachButton: View {
     @State private var showPhotos = false
     @State private var showCamera = false
     @State private var showFiles = false
+    /// El «＋» del compositor también crea un evento o un asunto del chat (nil = no se ofrece).
+    var onEvent: (() -> Void)? = nil
+    var onIssue: (() -> Void)? = nil
     var onError: (String) -> Void
 
     var body: some View {
@@ -302,11 +305,14 @@ struct AttachButton: View {
                 Button { showCamera = true } label: { Label(L("att.fromCamera"), systemImage: "camera") }
             }
             Button { showFiles = true } label: { Label(L("att.fromFiles"), systemImage: "folder") }
+            if onEvent != nil || onIssue != nil { Divider() }
+            if let onEvent { Button(action: onEvent) { Label(L("bar.newEvent"), systemImage: "calendar.badge.plus") }.accessibilityIdentifier("composer.plus.event") }
+            if let onIssue { Button(action: onIssue) { Label(L("bar.newIssue"), systemImage: "diamond") }.accessibilityIdentifier("composer.plus.issue") }
         } label: {
-            Image(systemName: "paperclip").font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.accentText)
+            Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accentText)
                 .frame(width: 36, height: 40)
         }
-        .accessibilityLabel(L("att.attach"))
+        .accessibilityLabel(onEvent != nil || onIssue != nil ? L("bar.plus") : L("att.attach"))
         .accessibilityIdentifier("composer.attach")
         .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: AttachmentRules.maxPerMessage,
                       matching: .any(of: [.images, .videos]), photoLibrary: .shared())

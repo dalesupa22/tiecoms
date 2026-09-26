@@ -26,7 +26,7 @@ private struct PendingVoiceSend {
 /// Hojas que se abren desde el menú de un mensaje o de la conversación.
 enum ChatSheet: Identifiable {
     case derive(MessageDTO), returnResult, newIssue(MessageDTO?), newEvent(MessageDTO?), forward(MessageDTO)
-    case reminder(MessageDTO?), pins, issuesHere, report(MessageDTO)
+    case reminder(MessageDTO?), pins, issuesHere, report(MessageDTO), threads, agenda
     var id: String {
         switch self {
         case .derive(let m): return "derive-\(m.id)"
@@ -38,6 +38,8 @@ enum ChatSheet: Identifiable {
         case .report(let m): return "report-\(m.id)"
         case .pins: return "pins"
         case .issuesHere: return "issues"
+        case .threads: return "threads"
+        case .agenda: return "agenda"
         }
     }
 }
@@ -97,6 +99,8 @@ struct ConversationView: View {
         // Solo en pantalla ancha (en iPhone el vidrio del sistema se ve bien y el color fijo se oscurecía con el teclado).
         .toolbarBackground(!embedded && sizeClass == .regular ? .visible : .automatic, for: .navigationBar)
         .onAppear {
+            // Un hilo o sidechat abierto al lado recibe el cursor.
+            if embedded { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { composerFocused = true } }
             store.openConversationId = conversationId
             let id = conversationId
             VoicePlayer.shared.nextProvider = { [weak store] finished in
@@ -156,7 +160,8 @@ struct ConversationView: View {
 
     @ViewBuilder private func sheetView(_ s: ChatSheet) -> some View {
         switch s {
-        case .derive(let m): DeriveSheet(conversationId: conversationId, message: m)
+        // El hilo nuevo se abre al lado, sin salir del chat (como en Slack).
+        case .derive(let m): DeriveSheet(conversationId: conversationId, message: m) { id in openThread(id) }
         case .returnResult: ReturnResultSheet(conversationId: conversationId)
         case .newIssue(let m): NewIssueSheet(conversationId: conversationId, origin: m)
         case .newEvent(let m): EventEditorSheet(conversationId: conversationId, origin: m, event: nil)
@@ -165,7 +170,24 @@ struct ConversationView: View {
         case .report(let m): ReportContentSheet(userId: m.authorId, messageId: m.id)
         case .pins: PinsSheet(conversationId: conversationId)
         case .issuesHere: ConversationIssuesSheet(conversationId: conversationId)
+        case .threads: ChatThreadsSheet(conversationId: conversationId) { id in openThread(id) }
+        case .agenda:
+            let c = store.meta(conversationId)
+            ChatAgendaSheet(conversationId: conversationId,
+                            onNewEvent: c?.canPost == true ? { sheet = .newEvent(nil) } : nil,
+                            onNewIssue: canOpenIssues ? { sheet = .newIssue(nil) } : nil)
         }
+    }
+
+    /// Asuntos: solo quien puede escribir y no es tercero (el API responde 403 a los terceros).
+    private var canOpenIssues: Bool {
+        guard let d = store.data, let c = store.meta(conversationId) else { return false }
+        return c.canPost && !Naming.isGuest(d, c)
+    }
+
+    /// Abre un hilo o sidechat al lado; espera a que se cierre la hoja que lo pidió.
+    private func openThread(_ id: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { sidePanel = id }
     }
 
     private func act(toast: String? = nil, _ f: @escaping () async throws -> Void) {
@@ -183,19 +205,11 @@ struct ConversationView: View {
                     .background(Theme.surface)
             }
             if !embedded { LineageBar(conv: c, onReturn: { sheet = .returnResult }) }
-            let pinCount = store.pins[conversationId]?.count ?? 0
-            if pinCount > 0 {
-                Button { sheet = .pins } label: {
-                    Label(L("pins.count", ["n": pinCount]), systemImage: "pin.fill")
-                        .font(.footnote.weight(.semibold))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16).padding(.vertical, 8)
-                        .background(Theme.orange.opacity(0.10))
-                }
-                .foregroundStyle(Theme.accentText)
-                .accessibilityIdentifier("chat.pinsBar")
+            // Barra de accesos: reemplaza las franjas de fijados, asuntos y ramas. Dentro de un hilo al lado no va.
+            if !embedded {
+                ChatBar(conv: c, onPins: { sheet = .pins }, onIssues: { sheet = .issuesHere },
+                        onThreads: { sheet = .threads }, onAgenda: { sheet = .agenda })
             }
-            OpenIssuesBar(conversationId: conversationId)
             if let state, state.loaded {
                 messages(d, c, state)
             } else if let err = state?.error {
@@ -276,6 +290,8 @@ struct ConversationView: View {
                 prev = nil
             }
             if m.isSystem {
+                // Los hilos no ensucian el chat: el aviso «se abrió un hilo» lo reemplaza el chip bajo su mensaje.
+                if (m.systemPayload?["k"] as? String) == "derived.from" { continue }
                 items.append(.system(m))
                 prev = nil
             } else {
@@ -478,6 +494,14 @@ struct ConversationView: View {
                     withAnimation(.spring(response: 0.3)) { dragging = nil }
                 } : nil)
             .accessibilityIdentifier("msg.\(m.id)")
+            if !embedded {
+                let threads = store.data.map { ChatThreads.of($0, conversationId, messageId: m.id).filter { !Naming.isSide($0) } } ?? []
+                if !threads.isEmpty {
+                    ThreadChip(threads: threads) { sidePanel = $0 }
+                        .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
+                        .padding(.horizontal, mine ? 4 : 40)
+                }
+            }
             let sides = store.sides(of: m.id)
             if !sides.isEmpty {
                 SideChip(sides: sides) { sidePanel = $0 }
@@ -547,17 +571,36 @@ struct ConversationView: View {
         // Asuntos y reuniones también en directos y multi (SPEC-v4 E); derivar sigue siendo de espacios.
         let canWork = c.canPost
         let myWsRole = d.workspaces.first { $0.id == c.workspaceId }?.myRole
+        // Bloque 1: responder aquí o por DM al autor. Bloque 2: responder aparte en un hilo o en un sidechat privado.
+        // «Responder en privado» y el sidechat son opciones distintas (docs/GRUPOS.md).
         if c.canPost {
             Button { replyTo = m; editing = nil; composerFocused = true } label: { Label(L("menu.reply"), systemImage: "arrowshape.turn.up.left") }
         }
         if !mine && c.kind != .direct {
             Button {
                 act { try await store.startPrivateReply(to: m) }
-            } label: { Label(L("preply.action"), systemImage: "lock.bubble") }
+            } label: {
+                Text(L("preply.action")); Text(L("menu.hintDm", ["name": Naming.person(d, m.authorId)?.name ?? ""])); Image(systemName: "envelope")
+            }
+            .accessibilityIdentifier("menu.privateReply")
         }
-        if canAskSide(c, m) {
-            Button { askSide = m } label: { Label(L("side.ask"), systemImage: "bubble.left.and.text.bubble.right") }
+        let canThread = canWork && !embedded && c.workspaceId != nil && c.kind != .direct && myWsRole != "guest"
+        if canThread || canAskSide(c, m) {
+            Divider()
+            if canThread {
+                Button { sheet = .derive(m) } label: {
+                    Text(L("menu.derive")); Text(L("menu.hintThread")); Image(systemName: "bubble.left.and.bubble.right")
+                }
+                .accessibilityIdentifier("menu.thread")
+            }
+            if canAskSide(c, m) {
+                Button { askSide = m } label: {
+                    Text(L("side.ask")); Text(L("menu.hintSide")); Image(systemName: "lock")
+                }
+                .accessibilityIdentifier("menu.sidechat")
+            }
         }
+        Divider()
         Button { UIPasteboard.general.string = m.body; store.show(L("toast.copied")) } label: { Label(L("menu.copyText"), systemImage: "doc.on.doc") }
         Button { UIPasteboard.general.string = "\(conversationLink(conversationId))?m=\(m.seq)"; store.show(L("toast.linkCopied")) } label: {
             Label(L("menu.copyLink"), systemImage: "link")
@@ -574,7 +617,6 @@ struct ConversationView: View {
         }
         if canWork {
             Divider()
-            if c.workspaceId != nil && c.kind != .direct && myWsRole != "guest" { Button { sheet = .derive(m) } label: { Label(L("menu.derive"), systemImage: "arrow.triangle.branch") } }
             // Los terceros participan en los asuntos, pero no los crean (docs/GRUPOS.md).
             if !Naming.isGuest(d, c) { Button { sheet = .newIssue(m) } label: { Label(L("menu.issue"), systemImage: "checklist") } }
             Button { sheet = .newEvent(m) } label: { Label(L("menu.meeting"), systemImage: "calendar.badge.plus") }
@@ -663,7 +705,11 @@ struct ConversationView: View {
                 if recorder.isActive {
                     VoiceRecordingBar(recorder: recorder, onSend: sendVoice, onDiscard: { store.show(L("voice.cancelled")) })
                 } else {
-                if editing == nil { AttachButton(staged: $staged) { store.show($0) } }
+                // «＋»: fotos, archivos y, aparte, evento o asunto del chat.
+                if editing == nil {
+                    AttachButton(staged: $staged, onEvent: embedded ? nil : { sheet = .newEvent(nil) },
+                                 onIssue: embedded || !canOpenIssues ? nil : { sheet = .newIssue(nil) }) { store.show($0) }
+                }
                 // UITextView: tokens resaltados, cursor real y retroceso que borra el token entero.
                 ComposerTextView(text: $draft, mentions: $draftMentions, cursor: $draftCursor, focused: $composerFocused,
                                  placeholder: composerPlaceholder(d, c), accessibilityLabel: L("chat.composerLabel"),
@@ -804,7 +850,7 @@ struct SystemRow: View {
                 .font(.footnote).foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
             if let child, let d = store.data {
-                NavigationLink(value: Route.conversation(child.id)) { Text("⑂ \(Naming.title(d, child))").font(.footnote.weight(.semibold)) }
+                NavigationLink(value: Route.conversation(child.id)) { Text("💬 \(ChatThreads.title(d, child))").font(.footnote.weight(.semibold)) }
             }
             if let issueId {
                 NavigationLink(value: Route.issue(issueId)) { Text(L("lin.open")).font(.footnote.weight(.semibold)) }
@@ -1012,9 +1058,8 @@ struct LineageBar: View {
     var body: some View {
         if let d = store.data {
             let parent = conv.parentId.flatMap { store.meta($0) }
-            // Las laterales no van en el linaje: tienen su chip bajo el mensaje ancla.
-            let kids = d.conversations.filter { $0.parentId == conv.id && !Naming.isSide($0) }
-            if (conv.parentId != nil && !Naming.isSide(conv)) || !kids.isEmpty {
+            // Los hilos que salen de aquí se ven en la barra del chat y como chip bajo su mensaje; aquí, solo de dónde viene.
+            if conv.parentId != nil && !Naming.isSide(conv) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         Text(L("lin.label")).font(.caption2.weight(.bold)).textCase(.uppercase).foregroundStyle(Theme.textSecondary)
@@ -1024,10 +1069,6 @@ struct LineageBar: View {
                             } else { chip("↖ \(L("lin.fromHidden"))").opacity(0.7) }
                         }
                         if let k = conv.deriveKind { chip(L("lin.kind.\(k)"), tint: true) }
-                        if !kids.isEmpty { Text(L("lin.kids")).font(.caption).foregroundStyle(Theme.textSecondary) }
-                        ForEach(kids) { k in
-                            NavigationLink(value: Route.conversation(k.id)) { chip("⑂ \(Naming.title(d, k))\(k.returnedAt != nil ? " ✓" : "")") }
-                        }
                         if conv.returnedAt != nil { Text("✓ \(L("lin.returned"))").font(.caption.weight(.semibold)).foregroundStyle(.green) }
                         if parent != nil, conv.returnedAt == nil, conv.canPost {
                             Button(L("lin.return"), action: onReturn)

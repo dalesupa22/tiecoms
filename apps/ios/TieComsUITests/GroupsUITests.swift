@@ -14,6 +14,9 @@ final class GroupsUITests: XCTestCase {
         var pagosId: String
         var ventasId: String
         var joinCode: String
+        /// Grupo general de la relación con un hilo colgando de un mensaje (fixtures nuevos).
+        var generalId: String?
+        var threadId: String?
     }
 
     override func setUp() { continueAfterFailure = false }
@@ -43,19 +46,28 @@ final class GroupsUITests: XCTestCase {
         }
     }
 
-    func testGroupsTabsNewGroupShareAndYou() throws {
-        let f = try fixture()
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"), "no se prueba contra producción")
+    private func login(_ f: Fixture) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES",
                                "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
         app.launch()
         let email = app.textFields["login.email"]
-        XCTAssertTrue(email.waitForExistence(timeout: 15))
+        // En un build sin firmar el Keychain del simulador puede conservar la sesión de la prueba anterior (misma persona).
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline && !email.exists && !app.tabBars.firstMatch.exists { usleep(300_000) }
+        if app.tabBars.firstMatch.exists && !email.exists { return app }
+        XCTAssertTrue(email.waitForExistence(timeout: 2))
         email.tap(); email.typeText(f.a.email)
         let pw = app.secureTextFields["login.password"]
         pw.tap(); pw.typeText(f.password)
         app.buttons["login.submit"].tap()
+        return app
+    }
+
+    func testGroupsTabsNewGroupShareAndYou() throws {
+        let f = try fixture()
+        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"), "no se prueba contra producción")
+        let app = login(f)
 
         // 1. Grupos: Tu organización · Relaciones · Invitado en, con los asuntos bajo cada grupo.
         let pagos = app.buttons["conv.row.\(f.pagosId)"]
@@ -133,5 +145,48 @@ final class GroupsUITests: XCTestCase {
         XCTAssertFalse(app.textViews["composer.field"].exists, "sin compositor")
         sleep(1)
         shot("08-solo-lectura")
+    }
+
+    /// Dentro del chat: barra de accesos, chip del hilo bajo su mensaje, el hilo al lado y el «＋» del compositor.
+    func testChatBarThreadsAndPlus() throws {
+        let f = try fixture()
+        guard let general = f.generalId, let thread = f.threadId else { throw XCTSkip("Fixture sin hilo") }
+        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"))
+        let app = login(f)
+        let row = app.buttons["conv.row.\(general)"]
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !row.exists { dismissSystemPrompts(app); usleep(300_000) }
+        dismissSystemPrompts(app)
+        for _ in 0..<4 where !row.isHittable { app.swipeUp() }
+        row.tap()
+        XCTAssertTrue(app.buttons["chat.bar.threads"].waitForExistence(timeout: 8), "barra de accesos")
+        let chip = app.buttons["thread.chip.\(thread)"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 8), "chip del hilo bajo su mensaje")
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "derivó")).firstMatch.exists)
+        sleep(1)
+        shot("09-chat-barra")
+        // Menú del mensaje: responder / en privado, y aparte, hilo / sidechat privado.
+        app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Movemos la mentoría")).firstMatch.press(forDuration: 1.0)
+        XCTAssertTrue(app.buttons["menu.thread"].waitForExistence(timeout: 5), "«Responder en un hilo»")
+        XCTAssertTrue(app.buttons["menu.sidechat"].exists, "«Sidechat privado»")
+        XCTAssertTrue(app.buttons["menu.privateReply"].exists, "«Responder en privado» aparte")
+        sleep(1)
+        shot("09b-menu-mensaje")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.55)).tap()
+        sleep(1)
+        chip.tap()
+        XCTAssertTrue(app.buttons["thread.resolve"].waitForExistence(timeout: 8), "el hilo se abre al lado con «Resolver»")
+        sleep(1)
+        shot("10-hilo-al-lado")
+        app.buttons["side.close"].firstMatch.tap()
+        sleep(1)
+        app.buttons["chat.bar.threads"].tap()
+        XCTAssertTrue(app.buttons["thread.row.\(thread)"].waitForExistence(timeout: 5))
+        shot("11-hilos")
+        app.buttons["Cerrar"].firstMatch.tap()
+        sleep(1)
+        app.buttons["composer.attach"].tap()
+        XCTAssertTrue(app.buttons["composer.plus.issue"].waitForExistence(timeout: 5), "«＋» con evento y asunto")
+        shot("12-mas")
     }
 }

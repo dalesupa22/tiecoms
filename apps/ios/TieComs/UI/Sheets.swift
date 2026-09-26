@@ -42,6 +42,8 @@ struct DeriveSheet: View {
     @Environment(\.dismiss) private var dismiss
     let conversationId: String
     let message: MessageDTO
+    /// El hilo nuevo se abre al lado del chat; sin esto, en su propia pantalla.
+    var onOpened: ((String) -> Void)? = nil
     @State private var kind = "same"
     @State private var name = ""
     @State private var reason = ""
@@ -97,7 +99,7 @@ struct DeriveSheet: View {
             do {
                 let id = try await store.derive(conversationId, messageId: message.id, kind: kind, name: name, reason: reason)
                 dismiss()
-                store.push(.conversation(id))
+                if let onOpened { onOpened(id) } else { store.push(.conversation(id)) }
             } catch { self.error = L10n.errorText(error) }
             busy = false
         }
@@ -265,7 +267,9 @@ struct ConversationIssuesSheet: View {
     @State private var creating = false
     var body: some View {
         NavigationStack {
-            let list = store.issues.values.filter { $0.conversationId == conversationId && !$0.status.closed }.sorted(by: IssueSort.order)
+            // Con fecha límite primero (la más cercana arriba).
+            let list = store.issues.values.filter { $0.conversationId == conversationId && !$0.status.closed }
+                .sorted { ($0.dueDate ?? "9999", $0.createdAt) < ($1.dueDate ?? "9999", $1.createdAt) }
             List {
                 if list.isEmpty { Text(L("issue.noIssues")).foregroundStyle(Theme.textSecondary) }
                 ForEach(list) { i in

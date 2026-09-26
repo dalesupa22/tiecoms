@@ -10,7 +10,7 @@ import { newEvent } from './Calendar.tsx';
 import { InviteDialog } from './Dialogs.tsx';
 import { NewIssueDialog, isClosed } from './Issues.tsx';
 import { MessageText } from './Mentions.tsx';
-import { StackedAvatars } from './Chats.tsx';
+import { NewChatDialog, StackedAvatars } from './Chats.tsx';
 import { compareConversations, matchesTab, pendingOf, activityOf, type HomeTab } from './Shell.tsx';
 
 // ---------- Árbol de Grupos (mismas reglas en web, iOS y Android: docs/GRUPOS.md) ----------
@@ -283,7 +283,7 @@ export function DmsScreen() {
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 760 }}>
       <div className="row"><h1 className="grow">{t('nav.dms')}</h1>
-        <button className="btn primary small" onClick={() => import('./Chats.tsx').then(({ NewChatDialog }) => openDialog((close) => <NewChatDialog onClose={close} />))}>＋ {t('dms.new')}</button>
+        <button className="btn primary small" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)}>＋ {t('dms.new')}</button>
       </div>
       <div className="card" style={{ padding: 6, marginTop: 14 }}>
         {n ? <DmsList /> : <div className="empty">{t('dms.empty')}</div>}

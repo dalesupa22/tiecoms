@@ -1,34 +1,64 @@
 import SwiftUI
 
-/// Splash de Chaggu: el logo sobre tinta (#17161F) con un fundido corto y el eslogan.
-/// Estático y simple; los tiempos son funciones puras (segundos) para poder probarlos.
+/// Splash de Chaggu: la «ignición» del símbolo sobre tinta (#17161F).
+/// Empieza idéntico a la Launch Screen del sistema (símbolo sin rayitas, 200 pt, centrado),
+/// la burbuja mandarina hace un «pop», aparecen las rayitas y luego el eslogan.
+/// Los tiempos son funciones puras (segundos) para poder probarlos.
 enum SplashTimeline {
-    /// Entrada del logo (fundido + leve escala).
-    static let logoIn = 0.35
-    /// Entrada del eslogan.
-    static let taglineStart = 0.20
-    static let taglineEnd = 0.60
-    static let soundAt = 0.10
+    /// Lado del símbolo en puntos (igual que `LaunchSymbol` en la Launch Screen).
+    static let symbolSide = 200.0
+    /// 0–0,25 s: quieto (capas 1 y 2, como la Launch Screen).
+    static let holdEnd = 0.25
+    /// «Pop» de la burbuja mandarina: 1 → 1,10 → 1, anclado en el centro del lienzo.
+    static let popStart = 0.20
+    static let popEnd = 0.55
+    static let popPeak = 0.10
+    /// Rayitas: opacidad 0→1 y escala 0,4→1 ancladas en su punto de origen.
+    static let sparksStart = 0.35
+    static let sparksEnd = 0.70
+    /// Punto de origen de las rayitas en coordenadas unitarias del lienzo (esquina superior derecha).
+    static let sparksAnchor = (x: 0.83, y: 0.17)
+    /// Sonido `tc_splash` y háptico ligero: cuando aparecen las rayitas.
+    static let soundAt = 0.35
     static let hapticAt = 0.35
-    static let exitStart = 1.10
-    static let total = 1.40
-    /// Arranque en frío por un enlace: se salta la entrada (dura ≤ 1,1 s).
-    static let shortStart = 0.35
+    /// Eslogan: sube 8 pt y llega a opacidad 0,8.
+    static let taglineStart = 0.55
+    static let taglineEnd = 0.95
+    static let taglineOpacity = 0.8
+    static let taglineRise = 8.0
+    /// Salida (fundido + leve escala), solo cuando la app está lista.
+    static let exitStart = 1.30
+    static let total = 1.60
+    /// Arranque en frío por un enlace: versión corta.
+    static let shortStart = 0.70
     static let maxWait = 6.0
 
     static func clamp(_ x: Double) -> Double { min(1, max(0, x)) }
     static func progress(_ t: Double, _ a: Double, _ b: Double) -> Double { clamp((t - a) / (b - a)) }
     static func easeOut(_ x: Double) -> Double { 1 - pow(1 - x, 3) }
     static func easeInOut(_ x: Double) -> Double { x < 0.5 ? 4 * x * x * x : 1 - pow(-2 * x + 2, 3) / 2 }
-
-    static func logo(_ t: Double) -> (scale: Double, opacity: Double) {
-        let p = easeOut(progress(t, 0, logoIn))
-        return (0.92 + 0.08 * p, p)
+    /// Ease out «back»: pasa un poco de 1 y regresa (sin rebote en los extremos: 0→0, 1→1).
+    static func easeOutBack(_ x: Double) -> Double {
+        let c1 = 1.70158, c3 = c1 + 1
+        return 1 + c3 * pow(x - 1, 3) + c1 * pow(x - 1, 2)
     }
 
+    /// Escala de la burbuja mandarina: 1 → 1,10 → 1.
+    static func pop(_ t: Double) -> Double {
+        let p = progress(t, popStart, popEnd)
+        return 1 + popPeak * sin(.pi * easeOut(p))
+    }
+
+    /// Rayitas: opacidad y escala (0,4 → 1 con un leve «back»).
+    static func sparks(_ t: Double) -> (opacity: Double, scale: Double) {
+        let p = progress(t, sparksStart, sparksEnd)
+        return (easeOut(p), 0.4 + 0.6 * easeOutBack(p))
+    }
+
+    /// Eslogan: opacidad (0 → 0,8) y desplazamiento vertical (8 → 0 pt).
     static func tagline(_ t: Double) -> (opacity: Double, offset: Double) {
         let p = easeOut(progress(t, taglineStart, taglineEnd))
-        return (p, 8 * (1 - p))
+        return (taglineOpacity * p, taglineRise * (1 - p))
     }
 
     static func exit(_ t: Double) -> (scale: Double, opacity: Double) {
@@ -37,9 +67,9 @@ enum SplashTimeline {
     }
 
     /// Reloj del splash (función pura).
-    /// - short: arranque en frío por un enlace → empieza con el logo ya visible.
+    /// - short: arranque en frío por un enlace → empieza en `shortStart`.
     /// - readyAt: segundo (del reloj real) en que la app quedó lista; nil = aún carga →
-    ///   se detiene al inicio de la salida hasta que esté lista (máx. 6 s).
+    ///   se queda en el último cuadro (inicio de la salida) hasta que esté lista (máx. 6 s).
     /// - skip: adelanto por un toque del usuario.
     static func clock(elapsed: Double, short: Bool, readyAt: Double?, skip: Double = 0) -> Double {
         let offset = short ? shortStart : 0
@@ -51,11 +81,27 @@ enum SplashTimeline {
         return exitStart + max(0, elapsed - release)
     }
 
-    /// Reduce Motion: solo el logo con fundido de 0,4 s.
-    static func reducedOpacity(_ elapsed: Double) -> Double { clamp(elapsed / 0.4) }
+    // MARK: Reduce Motion: sin escalas; solo fundido del eslogan (y rayitas) y salida.
+    static let reducedTaglineStart = 0.15
+    static let reducedTaglineEnd = 0.55
+    static let reducedMinShown = 0.9
+    static let reducedExit = 0.3
+
+    /// Opacidad del eslogan (0 → 0,8) con Reduce Motion, según el tiempo real.
+    static func reducedTagline(_ elapsed: Double) -> Double {
+        taglineOpacity * progress(elapsed, reducedTaglineStart, reducedTaglineEnd)
+    }
+
+    /// Opacidad de salida con Reduce Motion: se desvanece cuando la app está lista
+    /// (nunca antes de `reducedMinShown`) o a los 6 s.
+    static func reducedExitOpacity(elapsed: Double, readyAt: Double?) -> Double {
+        let release = readyAt.map { max($0, reducedMinShown) } ?? (elapsed >= maxWait ? maxWait : nil)
+        guard let release else { return 1 }
+        return 1 - clamp((elapsed - release) / reducedExit)
+    }
 }
 
-/// Splash de arranque en frío (sin GIF ni video): logo de Chaggu y eslogan sobre tinta.
+/// Splash de arranque en frío: ignición del símbolo de Chaggu y eslogan sobre tinta.
 struct LaunchSplashView: View {
     /// true cuando ya hay algo que mostrar (sesión cargada o login).
     var ready: Bool
@@ -74,53 +120,56 @@ struct LaunchSplashView: View {
     /// Solo pruebas: congela el fotograma en este instante (argumento -TCSplashFreeze <s>).
     private let freeze: Double? = AppConfig.launchValue("TCSplashFreeze").flatMap(Double.init)
 
+    private typealias T = SplashTimeline
+
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 60, paused: finished)) { ctx in
-            let elapsed = ctx.date.timeIntervalSince(start)
-            let t = freeze ?? SplashTimeline.clock(elapsed: elapsed, short: short, readyAt: readyAt, skip: skip)
-            let logo = SplashTimeline.logo(t)
-            let tag = SplashTimeline.tagline(t)
-            let exit = SplashTimeline.exit(t)
-            GeometryReader { geo in
+            let elapsed = freeze ?? ctx.date.timeIntervalSince(start)
+            let t = freeze ?? T.clock(elapsed: elapsed, short: short, readyAt: readyAt, skip: skip)
+            let side = CGFloat(T.symbolSide)
+            let reduced = reduceMotion && freeze == nil
+            let pop = reduced ? 1 : T.pop(t)
+            let sparks = reduced ? (opacity: T.reducedTagline(elapsed) / T.taglineOpacity, scale: 1.0) : T.sparks(t)
+            let tag = reduced ? (opacity: T.reducedTagline(elapsed), offset: 0.0) : T.tagline(t)
+            let exit = reduced ? (scale: 1.0, opacity: T.reducedExitOpacity(elapsed: elapsed, readyAt: readyAt)) : T.exit(t)
+            ZStack {
+                Theme.ink
+                // Las tres capas comparten el mismo lienzo cuadrado: se apilan con el mismo frame.
                 ZStack {
-                    Theme.ink
-                    VStack(spacing: 0) {
-                        Image("Logo").resizable().scaledToFit()
-                            .frame(width: min(geo.size.width * 0.7, 380))
-                            .scaleEffect(reduceMotion ? 1 : logo.scale)
-                            .opacity(reduceMotion ? SplashTimeline.reducedOpacity(elapsed) : logo.opacity)
-                        VStack(spacing: 6) {
-                            Text(L("splash.tagline")).font(.system(size: 15)).foregroundStyle(Color(hex: 0xA8A29A))
-                            VStack(spacing: 2) {
-                                Text(L("splash.line1")).font(.system(size: 22, weight: .semibold)).foregroundStyle(Color(hex: 0xF6F3EC))
-                                Text(L("splash.line2")).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.orange)
-                            }
-                            .padding(.top, 10)
-                            if !ready && t >= SplashTimeline.exitStart { WaitingDot().padding(.top, 14) }
-                        }
-                        .opacity(reduceMotion ? 1 : tag.opacity).offset(y: reduceMotion ? 0 : tag.offset)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 20)
-                        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-                    }
+                    Image("SplashBubbleWhite").resizable()
+                    Image("SplashBubbleOrange").resizable()
+                        .scaleEffect(pop, anchor: .center)
+                    Image("SplashSparks").resizable()
+                        .scaleEffect(sparks.scale, anchor: UnitPoint(x: T.sparksAnchor.x, y: T.sparksAnchor.y))
+                        .opacity(sparks.opacity)
                 }
-                .scaleEffect(reduceMotion ? 1 : exit.scale)
-                .opacity(reduceMotion ? (ready && elapsed > 0.8 ? max(0, 1 - (elapsed - 0.8) / 0.3) : 1) : exit.opacity)
+                .frame(width: side, height: side)
+                // El eslogan va debajo sin mover el símbolo (sigue centrado como en la Launch Screen).
+                .overlay(alignment: .top) {
+                    Text(L("splash.tagline"))
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(Color(hex: 0xF6F3EC))
+                        .multilineTextAlignment(.center)
+                        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                        .frame(width: 320)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .opacity(tag.opacity)
+                        .offset(y: side + 4 + tag.offset)
+                }
             }
+            .scaleEffect(exit.scale)
+            .opacity(exit.opacity)
             .onChange(of: ctx.date) { _, _ in tick(t: t, elapsed: elapsed) }
         }
-        // El splash siempre va sobre tinta: se usan las variantes oscuras de los recursos.
-        .environment(\.colorScheme, .dark)
         .ignoresSafeArea()
         .contentShape(Rectangle())
         .onTapGesture {
             let now = Date().timeIntervalSince(start)
-            let t = SplashTimeline.clock(elapsed: now, short: short, readyAt: readyAt, skip: skip)
-            if t < SplashTimeline.exitStart { skip += SplashTimeline.exitStart - t }
+            let t = T.clock(elapsed: now, short: short, readyAt: readyAt, skip: skip)
+            if t < T.exitStart { skip += T.exitStart - t }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Chaggu. " + L("splash.line1") + " " + L("splash.line2"))
+        .accessibilityLabel("Chaggu. " + L("splash.tagline"))
         .accessibilityIdentifier("splash")
         .onAppear {
             start = Date()
@@ -132,21 +181,11 @@ struct LaunchSplashView: View {
     private func tick(t: Double, elapsed: Double) {
         guard freeze == nil, !finished else { return }
         if ready && readyAt == nil { readyAt = elapsed }
-        if !reduceMotion, !short, !soundPlayed, t >= SplashTimeline.soundAt { soundPlayed = true; AppFeedback.shared.playSplash() }
-        if !reduceMotion, !hapticDone, t >= SplashTimeline.hapticAt { hapticDone = true; Haptics.tap() }
-        let done = reduceMotion ? (ready && elapsed > 1.1) || elapsed > SplashTimeline.maxWait
-                                : t >= SplashTimeline.total || elapsed > SplashTimeline.maxWait + 0.4
+        // La ignición (sonido + háptico) solo en el arranque normal: la versión corta empieza después.
+        if !reduceMotion, !short, !soundPlayed, t >= T.soundAt { soundPlayed = true; AppFeedback.shared.playSplash() }
+        if !reduceMotion, !short, !hapticDone, t >= T.hapticAt { hapticDone = true; Haptics.tap() }
+        let done = reduceMotion ? T.reducedExitOpacity(elapsed: elapsed, readyAt: readyAt) <= 0
+                                : t >= T.total || elapsed > T.maxWait + 0.4
         if done { finished = true; onFinish(elapsed) }
-    }
-}
-
-/// Punto mandarina que late mientras la app termina de cargar.
-private struct WaitingDot: View {
-    @State private var on = false
-    var body: some View {
-        Circle().fill(Theme.orange).frame(width: 10, height: 10)
-            .scaleEffect(on ? 1.35 : 0.8).opacity(on ? 1 : 0.5)
-            .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: on)
-            .onAppear { on = true }
     }
 }

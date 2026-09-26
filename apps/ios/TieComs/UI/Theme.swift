@@ -233,8 +233,8 @@ enum RemoteImageCache {
     }()
 }
 
-/// Logo de Chaggu sobre su placa: blanca en claro (letras en tinta) y tinta en oscuro (letras en papel).
-/// Los recortes del logo son del color de la placa, así se ve igual sobre cualquier fondo.
+/// Logo de Chaggu con transparencia real: letras en tinta en claro y en papel en oscuro
+/// (variantes del imageset `Logo`). Va directo sobre el fondo, sin placa.
 struct LogoView: View {
     var width: CGFloat = 220
     var body: some View {
@@ -242,8 +242,6 @@ struct LogoView: View {
             .resizable()
             .scaledToFit()
             .frame(width: width)
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 20).fill(Color(light: 0xFFFFFF, dark: 0x17161F)))
             .accessibilityLabel("Chaggu")
     }
 }

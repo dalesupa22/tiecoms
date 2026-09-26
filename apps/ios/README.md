@@ -74,17 +74,21 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
   - "Continuar con Google" y "Continuar con Microsoft" abren `ASWebAuthenticationSession` con PKCE S256.
   - En el registro, el nombre de la empresa (`org_name`) o la invitación (`org`) se pasan al `/start`.
   - Los errores del SSO usan los mismos textos que la web (`err.sso_*`, `err.domain_claimed`).
-- **Splash** (arranque en frío, `UI/Splash.swift`):
-  - Logo de Chaggu sobre tinta `#17161F` con un fundido corto (0,35 s) y el eslogan debajo; sale a
-    los 1,4 s. Sin video ni animación por capas. Los tiempos son funciones puras (`SplashTimeline`).
-  - Sonido `tc_splash` en t = 0,10 s (respeta el interruptor de Sonidos y el modo silencio) y háptico
-    ligero a los 0,35 s.
-  - Un toque salta al final. Con Reduce Motion solo hace un fundido del logo. Con un enlace en frío
-    empieza con el logo ya visible (≤ 1,1 s). Si la sesión aún carga, un punto late hasta 6 s.
-  - Launch Screen: tinta `#17161F` lisa (claro y oscuro).
+- **Splash** (arranque en frío, `UI/Splash.swift`): «ignición» del símbolo sobre tinta `#17161F`.
+  - Empieza idéntico a la Launch Screen (símbolo sin rayitas, 200 pt, centrado) y apila tres capas
+    con el mismo lienzo cuadrado: `SplashBubbleWhite`, `SplashBubbleOrange`, `SplashSparks`.
+  - 0–0,25 s quieto; 0,20–0,55 s «pop» de la burbuja mandarina (1 → 1,10 → 1, centro del lienzo);
+    0,35–0,70 s aparecen las rayitas (opacidad y escala 0,4 → 1 ancladas en x=0,83, y=0,17), con
+    sonido `tc_splash` (respeta el interruptor de Sonidos y el modo silencio) y háptico ligero;
+    0,55–0,95 s el eslogan (`splash.tagline`, papel al 80 %, sube 8 pt); 1,30–1,60 s salida.
+  - Si la sesión aún carga, se queda en el último cuadro (máx. 6 s). Un toque adelanta. Con un enlace
+    en frío empieza en 0,7 s. Con Reduce Motion no hay escalas: solo fundido del eslogan y salida.
+    Los tiempos son funciones puras (`SplashTimeline`).
+  - Launch Screen: tinta `#17161F` (claro y oscuro) con `LaunchSymbol` (200 pt) centrado.
 - **Marca**: Chaggu (antes TieComs). Tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`. Ícono y
   logos salen de `chaggu-marca/definitivo` (`AppIcon-1024.png` = `chaggu-appstore-1024.png`, sin alfa;
-  `Logo` = logo claro/oscuro transparente renderizado con `rsvg-convert -w 1300`). Desde la build 9
+  `Logo` = `chaggu-logo-para-claro`/`-para-oscuro` con transparencia real, sin placa, @1x/@2x/@3x con
+  `rsvg-convert -w 250/500/750`; capas del splash desde `capas-splash/` a 200/400/600 px). Desde la build 9
   (1.6.0) se publica como **app nueva** en App Store Connect: bundle IDs `com.chaggu.app*`, App Group
   `group.com.chaggu.app`, Keychain `com.chaggu.app.session` y esquema `chaggu://` (ver
   «Cambio de identificadores»). Los targets, carpetas y clases Swift (`TieComs…`) y los headers

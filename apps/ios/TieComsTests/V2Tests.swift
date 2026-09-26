@@ -102,42 +102,91 @@ final class DecodingV2Tests: XCTestCase {
     }
 }
 
-/// Splash de Chaggu (logo + eslogan) como función pura del tiempo.
+/// Splash de Chaggu («ignición» del símbolo + eslogan) como función pura del tiempo.
 final class SplashTimelineTests: XCTestCase {
     typealias T = SplashTimeline
 
-    func testLogoTaglineExit() {
-        XCTAssertEqual(T.logo(0).opacity, 0)
-        XCTAssertEqual(T.logo(0).scale, 0.92, accuracy: 0.001)
-        XCTAssertEqual(T.logo(T.logoIn).opacity, 1)
-        XCTAssertEqual(T.logo(T.logoIn).scale, 1, accuracy: 0.001)
-        XCTAssertEqual(T.tagline(0.1).opacity, 0)
-        XCTAssertEqual(T.tagline(0.6).opacity, 1)
-        XCTAssertEqual(T.tagline(0.6).offset, 0, accuracy: 0.001)
+    func testStartsLikeSystemLaunchScreen() {
+        // t = 0: solo capas 1 y 2 a escala 1, sin rayitas ni eslogan, sin salida.
+        XCTAssertEqual(T.symbolSide, 200)
+        XCTAssertEqual(T.pop(0), 1, accuracy: 0.0001)
+        XCTAssertEqual(T.sparks(0).opacity, 0)
+        XCTAssertEqual(T.tagline(0).opacity, 0)
+        XCTAssertEqual(T.exit(0).opacity, 1)
+        XCTAssertEqual(T.exit(0).scale, 1, accuracy: 0.0001)
+        // Quieto hasta 0,20 s (el «pop» arranca antes de que termine la pausa de 0,25 s).
+        for t in stride(from: 0.0, through: 0.20, by: 0.05) {
+            XCTAssertEqual(T.pop(t), 1, accuracy: 0.0001)
+            XCTAssertEqual(T.sparks(t).opacity, 0)
+        }
+        XCTAssertLessThanOrEqual(T.popStart, T.holdEnd)
+    }
+
+    func testPop() {
+        XCTAssertEqual(T.pop(T.popStart), 1, accuracy: 0.0001)
+        XCTAssertEqual(T.pop(T.popEnd), 1, accuracy: 0.0001)
+        XCTAssertEqual(T.pop(1.0), 1, accuracy: 0.0001)
+        let peak = stride(from: T.popStart, through: T.popEnd, by: 0.005).map(T.pop).max() ?? 0
+        XCTAssertEqual(peak, 1.10, accuracy: 0.002)
+        XCTAssertGreaterThan(T.pop(0.30), 1.05, "ease out: sube rápido")
+    }
+
+    func testSparks() {
+        XCTAssertEqual(T.sparks(T.sparksStart).opacity, 0)
+        XCTAssertEqual(T.sparks(T.sparksStart).scale, 0.4, accuracy: 0.0001)
+        XCTAssertEqual(T.sparks(T.sparksEnd).opacity, 1)
+        XCTAssertEqual(T.sparks(T.sparksEnd).scale, 1, accuracy: 0.0001)
+        XCTAssertEqual(T.sparks(1.2).scale, 1, accuracy: 0.0001)
+        let mid = T.sparks((T.sparksStart + T.sparksEnd) / 2)
+        XCTAssertTrue(mid.opacity > 0 && mid.opacity < 1)
+        XCTAssertEqual(T.sparksAnchor.x, 0.83, accuracy: 0.001)
+        XCTAssertEqual(T.sparksAnchor.y, 0.17, accuracy: 0.001)
+        XCTAssertEqual(T.soundAt, T.sparksStart)
+        XCTAssertEqual(T.hapticAt, T.sparksStart)
+    }
+
+    func testTaglineAndExit() {
+        XCTAssertEqual(T.tagline(0.5).opacity, 0)
+        XCTAssertEqual(T.tagline(T.taglineStart).offset, 8, accuracy: 0.0001)
+        XCTAssertEqual(T.tagline(T.taglineEnd).opacity, 0.8, accuracy: 0.0001)
+        XCTAssertEqual(T.tagline(T.taglineEnd).offset, 0, accuracy: 0.0001)
         XCTAssertEqual(T.exit(T.exitStart).opacity, 1)
         XCTAssertEqual(T.exit(T.total).opacity, 0)
         XCTAssertEqual(T.exit(T.total).scale, 1.04, accuracy: 0.001)
-        XCTAssertLessThan(T.soundAt, T.hapticAt)
-        XCTAssertLessThanOrEqual(T.total, 1.5, "splash corto")
+        XCTAssertEqual(T.exitStart, 1.30)
+        XCTAssertEqual(T.total, 1.60)
+        // Todo el símbolo está completo antes de la salida.
+        XCTAssertLessThan(T.taglineEnd, T.exitStart)
     }
 
     func testClockHoldsUntilReadyAndShortMode() {
         // Lista desde el principio: el reloj es el tiempo real.
         XCTAssertEqual(T.clock(elapsed: 0.5, short: false, readyAt: 0.2), 0.5)
-        XCTAssertEqual(T.clock(elapsed: 1.3, short: false, readyAt: 0.2), 1.3, accuracy: 0.001)
-        // Aún cargando: se detiene al inicio de la salida.
+        XCTAssertEqual(T.clock(elapsed: 1.5, short: false, readyAt: 0.2), 1.5, accuracy: 0.001)
+        // Aún cargando: se queda en el último cuadro (inicio de la salida).
         XCTAssertEqual(T.clock(elapsed: 3.5, short: false, readyAt: nil), T.exitStart)
         // Lista a los 4 s: la salida arranca entonces.
         XCTAssertEqual(T.clock(elapsed: 4.1, short: false, readyAt: 4.0), T.exitStart + 0.1, accuracy: 0.001)
         // Máximo 6 s esperando: sigue sin estar lista y sale igual.
         XCTAssertEqual(T.clock(elapsed: 6.2, short: false, readyAt: nil), T.exitStart + 0.2, accuracy: 0.001)
-        // Enlace en frío: el logo ya está visible y termina en ≤ 1,2 s.
-        XCTAssertEqual(T.clock(elapsed: 0, short: true, readyAt: 0), T.shortStart)
-        XCTAssertEqual(T.logo(T.clock(elapsed: 0, short: true, readyAt: 0)).opacity, 1)
-        XCTAssertGreaterThanOrEqual(T.clock(elapsed: 1.2, short: true, readyAt: 0), T.total - 0.001)
+        // Enlace en frío: empieza en 0,7 s (rayitas ya completas) y termina en ≤ 0,9 s.
+        XCTAssertEqual(T.clock(elapsed: 0, short: true, readyAt: 0), 0.7, accuracy: 0.0001)
+        XCTAssertEqual(T.sparks(T.clock(elapsed: 0, short: true, readyAt: 0)).opacity, 1)
+        XCTAssertGreaterThanOrEqual(T.clock(elapsed: 0.9, short: true, readyAt: 0), T.total - 0.001)
         // Toque: salta a la salida.
         XCTAssertEqual(T.clock(elapsed: 0.3, short: false, readyAt: 0, skip: T.exitStart - 0.3), T.exitStart, accuracy: 0.001)
-        XCTAssertEqual(T.reducedOpacity(0.2), 0.5, accuracy: 0.001)
+    }
+
+    func testReduceMotion() {
+        XCTAssertEqual(T.reducedTagline(0), 0)
+        XCTAssertEqual(T.reducedTagline(T.reducedTaglineEnd), 0.8, accuracy: 0.0001)
+        // Lista pronto: se muestra al menos 0,9 s y luego se desvanece en 0,3 s.
+        XCTAssertEqual(T.reducedExitOpacity(elapsed: 0.5, readyAt: 0.1), 1)
+        XCTAssertEqual(T.reducedExitOpacity(elapsed: 1.05, readyAt: 0.1), 0.5, accuracy: 0.001)
+        XCTAssertEqual(T.reducedExitOpacity(elapsed: 1.3, readyAt: 0.1), 0, accuracy: 0.0001)
+        // Sin estar lista: espera hasta 6 s.
+        XCTAssertEqual(T.reducedExitOpacity(elapsed: 5, readyAt: nil), 1)
+        XCTAssertEqual(T.reducedExitOpacity(elapsed: 6.3, readyAt: nil), 0, accuracy: 0.0001)
     }
 }
 

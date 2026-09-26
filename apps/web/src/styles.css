@@ -8,9 +8,9 @@
   --ink-2: #5c554c;
   --muted: #7a7368;
   --faint: #9a938a;
-  --accent: #b8623f;
-  --accent-ink: #8f4527;
-  --orange: #e8883a;
+  --accent: #c73a1a;
+  --accent-ink: #8e2a12;
+  --orange: #ff5a36;
   --ok: #3d7a4f;
   --danger: #a33a2a;
   --serif: 'Instrument Serif', Georgia, serif;
@@ -271,7 +271,7 @@ a:hover { color: var(--accent-ink); }
 .trazo-rail { width: 22px; flex: none; border-left: 1.5px solid #cdc5b7; border-bottom: 1.5px solid #cdc5b7; border-radius: 0 0 0 12px; height: 26px; margin-top: -10px; }
 .trazo-node { flex: 1; min-width: 0; text-align: left; border: 1px solid var(--line); background: #fff; border-radius: 12px; padding: 10px 14px; }
 .trazo-node:hover { border-color: var(--ink); }
-.trazo-node.is-open { border-left: 3px solid #e8883a; }
+.trazo-node.is-open { border-left: 3px solid var(--orange); }
 .trazo-node.is-back { border-left: 3px solid #3d7a4f; }
 @media (max-width: 860px) {
   .tabs button { font-size: 10px; }

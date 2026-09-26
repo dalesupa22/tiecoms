@@ -100,12 +100,18 @@ class VozUiTest {
 
     /** Toque al micrófono → grabación bloqueada; espera [ms] reales; Enviar; consentimiento; devuelve la nota enviada.
      *  La nota dura [ms] más lo que tarda la prueba entre el toque y Enviar (~0,5–1,5 s). */
+    /** Tiempo real entre el toque al micrófono y Enviar en la última grabación (lo que debe durar el archivo). */
+    private var lastWindow = 0L
+    // El reloj del audio emulado (-no-audio) se desvía ~1 %: margen de 1,5 s o 2 % de la ventana.
+    private fun ok(d: Long?): Boolean { val m = maxOf(1_500L, lastWindow / 50); return (d ?: 0) in (lastWindow - m)..(lastWindow + m) }
     private fun record(ms: Long, name: String): MessageDTO? {
         val before = lastVoice()?.id
+        val t0 = android.os.SystemClock.elapsedRealtime()
         compose.onNodeWithTag("mic").performClick()
         compose.waitUntilAtLeastOneExists(hasTestTag("recordSend"), 5_000) // el toque dejó la grabación bloqueada
         Thread.sleep(ms)
         if (ms > 1_000) shot("$name-grabando")
+        lastWindow = android.os.SystemClock.elapsedRealtime() - t0
         compose.onNodeWithTag("recordSend").performClick()
         if (ms < 500) return null
         compose.waitUntilAtLeastOneExists(hasTestTag("aiConsentDecline"), 5_000)
@@ -122,12 +128,12 @@ class VozUiTest {
         log("Toque + enviar enseguida: «La nota es demasiado corta»")
 
         val short = record(3_000, "3s")!!.attachments.first { it.isVoice }
-        log("Nota de 3 s: durationMs=${short.durationMs}")
-        assertTrue("duración del archivo ≈ 3 s: ${short.durationMs}", (short.durationMs ?: 0) in 2_700..4_800)
+        log("Nota de 3 s: durationMs=${short.durationMs} (ventana real $lastWindow ms)")
+        assertTrue("duración del archivo ≈ ventana $lastWindow ms: ${short.durationMs}", ok(short.durationMs))
 
         val mid = record(35_000, "35s")!!.attachments.first { it.isVoice }
-        log("Nota de 35 s: durationMs=${mid.durationMs}, ${mid.sizeBytes} bytes")
-        assertTrue("≈ 35 s: ${mid.durationMs}", (mid.durationMs ?: 0) in 34_700..36_800)
+        log("Nota de 35 s: durationMs=${mid.durationMs} (ventana $lastWindow ms), ${mid.sizeBytes} bytes")
+        assertTrue("≈ ventana $lastWindow ms: ${mid.durationMs}", ok(mid.durationMs))
 
         // Reproducir la de 35 s y saltar al 80 %.
         compose.waitUntilAtLeastOneExists(hasTestTag("voicePlay-${mid.id}"), 10_000)
@@ -142,8 +148,8 @@ class VozUiTest {
         ins.runOnMainSync { app.container.voice.stop() }
 
         val long = record(190_000, "3min")!!.attachments.first { it.isVoice }
-        log("Nota de 3 min 10 s: durationMs=${long.durationMs}, ${long.sizeBytes} bytes")
-        assertTrue("≈ 190 s: ${long.durationMs}", (long.durationMs ?: 0) in 189_700..192_000)
+        log("Nota de 3 min 10 s: durationMs=${long.durationMs} (ventana $lastWindow ms), ${long.sizeBytes} bytes")
+        assertTrue("≈ ventana $lastWindow ms: ${long.durationMs}", ok(long.durationMs))
         compose.onNodeWithTag("voicePlay-${long.id}", useUnmergedTree = true).performClick()
         compose.waitUntil(15_000) { app.container.voice.state.value.let { it.currentId == long.id && it.playing } }
         compose.onNodeWithTag("voiceWave-${long.id}", useUnmergedTree = true).performTouchInput { click(androidx.compose.ui.geometry.Offset(width * 0.95f, height / 2f)) }

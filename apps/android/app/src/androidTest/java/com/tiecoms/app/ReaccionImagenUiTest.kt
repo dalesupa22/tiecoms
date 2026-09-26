@@ -31,7 +31,6 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -40,9 +39,12 @@ import java.io.File
 /**
  * Regresión «reaccioné a una imagen y se crasheó» (1.6.2) contra el API de pruebas: mensajes con foto sin texto,
  * foto con texto, varias fotos, video, archivo, reenviada; míos y recibidos; en el grupo y en un directo.
+ * No cubre video ni nota de voz recibida (no hay archivos de prueba de esos tipos en el fixture).
+ * Es obligatoria: sin los argumentos del fixture falla (no se omite).
  * Para cada uno: mantener la foto (y la burbuja) → barra rápida → poner, cambiar y quitar; selector completo; y una
  * reacción en vivo de la otra persona (message.updated). La otra persona es un segundo cliente en el mismo proceso.
  *
+ *   API_URL=http://localhost:<puerto con almacenamiento> FIXTURE_OUT=/tmp/fx.json node scripts/mobile-fixture.mjs
  *   adb shell am instrument -w -e apiUrl http://10.0.2.2:3050 -e email <a> -e peerEmail <b> -e password … -e conversationId … \
  *     -e class com.tiecoms.app.ReaccionImagenUiTest com.chaggu.app.test/androidx.test.runner.AndroidJUnitRunner
  */
@@ -124,7 +126,7 @@ class ReaccionImagenUiTest {
     @Test
     fun reaccionarAImagenesYAdjuntos() {
         val apiUrl = arg("apiUrl"); val email = arg("email"); val peerEmail = arg("peerEmail"); val password = arg("password"); val group = arg("conversationId")
-        assumeTrue("Faltan argumentos del fixture", listOf(apiUrl, email, peerEmail, password, group).all { it.isNotBlank() })
+        assertTrue("Faltan argumentos del fixture (scripts/mobile-fixture.mjs): apiUrl, email, peerEmail, password, conversationId", listOf(apiUrl, email, peerEmail, password, group).all { it.isNotBlank() })
         assertFalse("Nunca contra producción", apiUrl.contains("app.tiecoms.com") || apiUrl.contains("app.chaggu.com"))
         ins.runOnMainSync { app.container.setDebugApiUrl(apiUrl) }
         runBlocking {

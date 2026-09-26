@@ -33,6 +33,8 @@ sealed interface AccountEvent {
     data class WhatsAppUpdated(val accountId: String?) : AccountEvent
     /** Cambió un árbol de archivos (workspaceId null = «Mis archivos»). */
     data class DriveUpdated(val workspaceId: String?) : AccountEvent
+    /** Mis recordatorios cambiaron en otro dispositivo (👀 / ✅): volver a pedir GET /reminders. */
+    data object RemindersChanged : AccountEvent
     data class Unknown(val type: String) : AccountEvent
 }
 
@@ -83,6 +85,7 @@ fun decodeAccountEvent(el: JsonElement): AccountEvent {
         "prefs.updated" -> AccountEvent.PrefsUpdated(o.str("conversationId"), o.str("workspaceId"))
         "whatsapp.updated" -> AccountEvent.WhatsAppUpdated(o.str("accountId"))
         "drive.updated" -> AccountEvent.DriveUpdated(o.str("workspaceId"))
+        "reminders.changed" -> AccountEvent.RemindersChanged
         else -> AccountEvent.Unknown(type)
     }
 }

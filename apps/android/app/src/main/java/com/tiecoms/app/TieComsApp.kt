@@ -198,7 +198,8 @@ class AppContainer(private val app: Application) {
         val c = client.value
         if (foreground && c.state.value.status == com.tiecoms.app.core.SessionStatus.READY && c.state.value.connection == com.tiecoms.app.core.ConnectionStatus.ONLINE) return
         // Aviso de reunión (minutes) vs. convocatoria: claves distintas para no taparse entre sí.
-        val dedupe = if (p.type == "event" && p.minutes != null) "soon:" + p.eventId else p.messageId
+        // Una reacción comparte el messageId con el aviso del mensaje: no se deduplica (la etiqueta la reemplaza).
+        val dedupe = if (p.type == "event" && p.minutes != null) "soon:" + p.eventId else if (p.type == "reaction") null else p.messageId
         if (!notifier.firstTime(dedupe)) return
         // FCM owns the process only until its callback returns. Post immediately; a remote
         // avatar must never delay the notification or escape into an untracked coroutine.
@@ -219,6 +220,10 @@ class AppContainer(private val app: Application) {
                 notifier.showConversation(p.conversationId, p.title, isGroup, p.authorId?.takeIf { it.isNotBlank() } ?: author, author, p.body,
                     cachedPushAvatar(p.authorAvatarUrl), silent = !settings.soundsEnabled, badge = p.badge, messageId = p.messageId)
             }
+            // «Laura reaccionó 👍» (TC_MESSAGE, collapseId react-<id>): tocar abre la conversación en ese mensaje.
+            "reaction" -> notifier.showMessage(p.conversationId, p.title, listOf(p.subtitle, p.body).filter { it.isNotBlank() }.joinToString(" · "),
+                silent = !settings.soundsEnabled, tag = "react-" + (p.messageId ?: p.conversationId),
+                openUri = "chaggu://c/${p.conversationId}" + (p.messageId?.let { "?mid=$it" } ?: ""))
             else -> notifier.showMessage(p.conversationId, p.title, listOf(p.subtitle, p.body).filter { it.isNotBlank() }.joinToString(" · "),
                 silent = !settings.soundsEnabled, tag = p.type + ":" + (if (p.minutes != null) "soon:" else "") + (p.reminderId ?: p.eventId ?: p.messageId))
         }

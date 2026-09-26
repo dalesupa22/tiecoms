@@ -28,6 +28,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -62,6 +63,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -140,9 +144,26 @@ fun GroupsScreen(
     var archiveFor by remember { mutableStateOf<ConversationDTO?>(null) }
     val filterWs = workspaceFilter?.let { id -> data.workspaces.firstOrNull { it.id == id } }
     val myOrg = Names.org(data, data.me.primaryOrgId)
-    val allFold = remember(data) { GroupsTree.allFoldKeys(data) }
-    fun foldAllItem() = if (allFold.isNotEmpty() && collapsed.containsAll(allFold)) SheetItem(ctx.getString(R.string.menu_unfold_all), "▾") { setCollapsed(collapsed - allFold) }
-        else SheetItem(ctx.getString(R.string.menu_fold_all), "▸", tag = "menuFoldAll") { setCollapsed(collapsed + allFold) }
+    /** Grupo cuyos asuntos se acaban de desplegar: solo esos entran animados (no al volver a verlos con scroll). */
+    var justExpanded by remember { mutableStateOf<String?>(null) }
+    fun toggleIssues(conversationId: String) {
+        val k = GroupsTree.issuesKey(conversationId)
+        justExpanded = if (k in collapsed) null else conversationId
+        toggle(k)
+    }
+    var overflow by remember { mutableStateOf(false) }
+    /** Plegar todo · Expandir todo · Mostrar / Contraer todos los asuntos (menú ⋮ y pulsación larga de las cabeceras). */
+    fun foldItems(): List<SheetItem?> {
+        val issueKeys = GroupsTree.allIssueKeys(data, issues)
+        val shown = issueKeys.count { it in collapsed }
+        return listOfNotNull(
+            SheetItem(ctx.getString(R.string.menu_fold_all), "▸", tag = "menuFoldAll") { justExpanded = null; setCollapsed(GroupsTree.foldAll(collapsed, data)) },
+            SheetItem(ctx.getString(R.string.menu_expand_all), "▾", tag = "menuExpandAll") { justExpanded = null; setCollapsed(GroupsTree.expandAll(collapsed, data, issues)) },
+            if (issueKeys.isNotEmpty() && shown < issueKeys.size) SheetItem(ctx.getString(R.string.menu_show_all_issues), "◆", tag = "menuShowAllIssues") { justExpanded = null; setCollapsed(GroupsTree.showAllIssues(collapsed, data, issues)) } else null,
+            if (shown > 0) SheetItem(ctx.getString(R.string.menu_hide_all_issues), "◇", tag = "menuHideAllIssues") { setCollapsed(GroupsTree.hideAllIssues(collapsed)) } else null,
+        )
+    }
+    val setIssueStatus = rememberIssueStatusSetter()
 
     Scaffold(
         topBar = {
@@ -151,6 +172,10 @@ fun GroupsScreen(
                 actions = {
                     IconButton(onClick = { dialog = GroupsDialog.NewGroup(NewGroupPreset(company = false)) }, modifier = Modifier.testTag("newGroup")) {
                         Icon(Icons.Filled.Add, stringResource(R.string.grp_new))
+                    }
+                    Box {
+                        IconButton(onClick = { overflow = true }, modifier = Modifier.testTag("groupsMenu")) { Icon(Icons.Filled.MoreVert, stringResource(R.string.menu_more)) }
+                        AnchoredMenu(overflow, if (overflow) foldItems() else emptyList(), { overflow = false })
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
@@ -201,6 +226,8 @@ fun GroupsScreen(
                                 val guest = ws?.myRole == "guest"
                                 ConversationRow(row.c, data, internalFallback, convFallback,
                                     indent = if (row.pinnedSection) 16.dp else (16 + row.level * 20).dp, iconSize = 32.dp, showIssuesChip = row.pinnedSection,
+                                    issuesFold = if (row.pinnedSection || row.issueCount <= 0) null
+                                        else IssuesFold(row.issueCount, row.overdueCount, row.issuesExpanded) { toggleIssues(row.c.id) },
                                     titleOverride = row.label, threadUnread = row.threadUnread,
                                     tagLine = if (row.c.kind == "internal") stringResource(R.string.grp_internal_only, Names.org(data, row.c.internalOrgId ?: ws?.owningOrgId)?.name ?: "") else null,
                                     menuOpen = menuKey == row.key,
@@ -216,13 +243,16 @@ fun GroupsScreen(
                                     onDismissMenu = { menuKey = null },
                                     onLongPress = { menuKey = row.key }, onIssues = { onIssuesOf(row.c.id) }) { onOpen(row.c.id) }
                             }
-                            is GroupsTree.Issue -> IssueLine(row) { onOpenIssue(row.issue.id) }
-                            is GroupsTree.MoreIssues -> Text(
+                            is GroupsTree.Issue -> Unfold(row.issue.conversationId == justExpanded) {
+                                IssueLine(row, menuOpen = menuKey == row.key, onLongPress = { menuKey = row.key }, onDismissMenu = { menuKey = null },
+                                    menuItems = { issueQuickMenu(ctx, row.issue, onOpen = { onOpenIssue(row.issue.id) }, onStatus = { st -> setIssueStatus(row.issue, st) }) }) { onOpenIssue(row.issue.id) }
+                            }
+                            is GroupsTree.MoreIssues -> Unfold(row.conversationId == justExpanded) { Text(
                                 pluralStringResource(R.plurals.grp_more_issues, row.count, row.count),
                                 style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.fillMaxWidth().clickable { onIssuesOf(row.conversationId) }.heightIn(min = 36.dp)
                                     .padding(start = (28 + row.level * 20).dp, end = 16.dp, top = 8.dp, bottom = 8.dp).testTag("moreIssues-${row.conversationId}"),
-                            )
+                            ) }
                             is GroupsTree.Empty -> if (row.filtered) Text(
                                 stringResource(if (tab == GroupsTree.Tab.UNREAD && query.isBlank()) R.string.home_tab_caught_up else if (tab == GroupsTree.Tab.ISSUES && query.isBlank()) R.string.home_empty_issues else R.string.grp_empty_filter),
                                 textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -247,7 +277,7 @@ fun GroupsScreen(
         is GroupsDialog.Invite -> InviteSheet(d.target, onClose = { dialog = null })
         is GroupsDialog.NewIssue -> NewIssueDialog(d.conversationId, null, "", onClose = { dialog = null }, onCreated = onOpenIssue)
         GroupsDialog.JoinCode -> JoinCodeDialog(onClose = { dialog = null }, onGo = { code -> dialog = null; onJoinCode(code) })
-        is GroupsDialog.Header -> HeaderMenu(data, d.row, foldAll = ::foldAllItem, onDismiss = { if (dialog === d) dialog = null },
+        is GroupsDialog.Header -> HeaderMenu(data, d.row, foldItems = ::foldItems, onDismiss = { if (dialog === d) dialog = null },
             onNewGroup = { dialog = GroupsDialog.NewGroup(it) }, onInvite = { dialog = GroupsDialog.Invite(it) })
     }
     archiveFor?.let { c ->
@@ -274,7 +304,7 @@ private fun sectionKeyOf(row: GroupsTree.Section) = GroupsTree.sectionKey(row.ki
 /** Menú de pulsación larga de las cabeceras: empresa o relación, y espacio (carpeta). */
 @Composable
 private fun HeaderMenu(
-    data: BootstrapDTO, row: GroupsTree.Row, foldAll: () -> SheetItem, onDismiss: () -> Unit,
+    data: BootstrapDTO, row: GroupsTree.Row, foldItems: () -> List<SheetItem?>, onDismiss: () -> Unit,
     onNewGroup: (NewGroupPreset) -> Unit, onInvite: (InviteTarget) -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -288,7 +318,7 @@ private fun HeaderMenu(
                     add(SheetItem(ctx.getString(R.string.menu_new_group), "#", tag = "menuNewGroup") { onNewGroup(NewGroupPreset(company = false)) })
                     if (org != null) add(SheetItem(ctx.getString(R.string.ginv_company), "✉", tag = "menuInviteCompany") { onInvite(InviteTarget.Org(org)) })
                 } else add(SheetItem(ctx.getString(R.string.menu_new_group), "#", tag = "menuNewGroup") { onNewGroup(NewGroupPreset(company = true)) })
-                add(null); add(foldAll())
+                add(null); addAll(foldItems())
             }
             ActionSheet(if (row.kind == GroupsTree.Kind.ORG) ctx.getString(R.string.grp_your_org, org?.name ?: "") else ctx.getString(R.string.grp_relations), items, onDismiss)
         }
@@ -301,7 +331,7 @@ private fun HeaderMenu(
                     add(SheetItem(ctx.getString(R.string.ginv_company), "✉", tag = "menuInviteCompany") { onInvite(InviteTarget.Space(own.first(), name)) })
                     add(null)
                 }
-                add(foldAll())
+                addAll(foldItems())
             }
             ActionSheet(name, items, onDismiss)
         }
@@ -335,6 +365,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
     val internalFallback = stringResource(R.string.internal_default)
     val convFallback = stringResource(R.string.conversation)
     val list = remember(data, query, unreadOnly) { GroupsTree.dms(data, query, { Names.conversationTitle(it, data, internalFallback, convFallback) }, unreadOnly = unreadOnly) }
+    val threadUnread = remember(data) { GroupsTree.threadUnread(data) }
     var menuFor by remember { mutableStateOf<String?>(null) }
     var meetingFor by remember { mutableStateOf<String?>(null) }
     var remindFor by remember { mutableStateOf<ConversationDTO?>(null) }
@@ -377,7 +408,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                         val origin = GroupsTree.sideOrigin(data, c)
                         Box(Modifier.animateItem()) {
                             ConversationRow(c, data, internalFallback, convFallback, indent = 16.dp, iconSize = 44.dp, showIssuesChip = true,
-                                badge = if (c.isSide) sidechat else null,
+                                badge = if (c.isSide) sidechat else null, threadUnread = threadUnread[c.id] ?: 0,
                                 tagLine = origin?.let { stringResource(R.string.dm_from, Names.conversationTitle(it, data, internalFallback, convFallback)) },
                                 menuOpen = menuFor == c.id,
                                 menuItems = { conversationMenu(ctx, c, data, onMeeting = { meetingFor = c.id }, onRemindCustom = { remindFor = c }, onLeave = { leaveFor = c }, onOpen = { onOpen(c.id) }) + listOf(null, SheetItem(ctx.getString(R.string.details_short), "ⓘ", tag = "menuDetails") { onDetails(c.id) }) },
@@ -491,14 +522,58 @@ private fun CompanyRow(row: GroupsTree.Company, onToggle: () -> Unit, onLongPres
     }
 }
 
-/** Asunto abierto bajo su grupo: «◆ título», la fecha límite (en rojo si venció) y el estado si está en curso o esperando. */
+/** Los asuntos que se acaban de desplegar entran con animación; los demás (scroll, recarga) aparecen tal cual. */
 @Composable
-private fun IssueLine(row: GroupsTree.Issue, onOpen: () -> Unit) {
+private fun Unfold(animate: Boolean, content: @Composable () -> Unit) {
+    val visible = remember { androidx.compose.animation.core.MutableTransitionState(!animate).apply { targetState = true } }
+    androidx.compose.animation.AnimatedVisibility(visible, enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn()) { content() }
+}
+
+/** Datos del chip «◆ N asuntos · N vencidos» que pliega los asuntos de un grupo. */
+internal data class IssuesFold(val count: Int, val overdue: Int, val expanded: Boolean, val onToggle: () -> Unit)
+
+/**
+ * Chip «◆ 18 · 2!» en la línea del título del grupo: pliega o despliega sus asuntos sin abrir el chat.
+ * La flecha › gira hacia abajo al desplegar. TalkBack lee «18 asuntos, 2 vencidos».
+ */
+@Composable
+private fun IssuesFoldChip(f: IssuesFold, conversationId: String) {
+    val turn by androidx.compose.animation.core.animateFloatAsState(if (f.expanded) 90f else 0f, label = "issuesChevron")
+    val count = pluralStringResource(R.plurals.grp_issues_chip, f.count, f.count)
+    val overdue = if (f.overdue > 0) pluralStringResource(R.plurals.grp_overdue_chip, f.overdue, f.overdue) else null
+    val action = stringResource(if (f.expanded) R.string.grp_issues_hide else R.string.grp_issues_show)
+    val bg = if (f.expanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else MaterialTheme.colorScheme.primaryContainer
+    Row(
+        Modifier.clip(RoundedCornerShape(10.dp)).background(bg)
+            .clickable(onClickLabel = action, onClick = f.onToggle).heightIn(min = 32.dp).padding(start = 8.dp, end = 2.dp)
+            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(count.removePrefix("◆ "), overdue).joinToString(", "); stateDescription = action }
+            .testTag("issuesFold-$conversationId"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("◆ ${f.count}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        if (f.overdue > 0) Text(" · ${f.overdue}!", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold, maxLines = 1,
+            modifier = Modifier.testTag("issuesOverdue-$conversationId"))
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(18.dp).rotate(turn), tint = MaterialTheme.colorScheme.primary)
+    }
+}
+
+/**
+ * Asunto activo bajo su grupo: «◆ título», la fecha límite (en rojo si venció) y el estado si está en curso o esperando.
+ * Pulsación larga: Completar, En curso, En espera, Abrir.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun IssueLine(row: GroupsTree.Issue, menuOpen: Boolean, onLongPress: () -> Unit, onDismissMenu: () -> Unit, menuItems: () -> List<SheetItem?>, onOpen: () -> Unit) {
     val ctx = LocalContext.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val i = row.issue
     val f = issueFlags(i)
+    Box {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onOpen).heightIn(min = 36.dp).padding(start = (28 + row.level * 20).dp, end = 16.dp, top = 4.dp, bottom = 4.dp)
+        Modifier.fillMaxWidth().background(if (menuOpen) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+            .combinedClickable(onClick = onOpen, onLongClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onLongPress() },
+                onLongClickLabel = stringResource(R.string.menu_more))
+            .heightIn(min = 36.dp).padding(start = (28 + row.level * 20).dp, end = 16.dp, top = 4.dp, bottom = 4.dp)
             .semantics(mergeDescendants = true) {}.testTag("groupIssue-${i.id}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -511,6 +586,8 @@ private fun IssueLine(row: GroupsTree.Issue, onOpen: () -> Unit) {
                 color = if (f.overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (i.status == "in_progress" || i.status == "waiting") { Spacer(Modifier.width(6.dp)); StatusPill(i.status) }
+    }
+    AnchoredMenu(menuOpen, if (menuOpen) menuItems() else emptyList(), onDismissMenu)
     }
 }
 
@@ -528,6 +605,8 @@ internal fun ConversationRow(
     titleOverride: String? = null,
     /** No leídos de sus hilos: chip «💬 N» (los hilos no se listan en el árbol). */
     threadUnread: Int = 0,
+    /** Grupos: chip que pliega sus asuntos (reemplaza al chip «◆ N asuntos» que abre la lista). */
+    issuesFold: IssuesFold? = null,
     onClick: () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -583,6 +662,8 @@ internal fun ConversationRow(
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp).testTag("threadUnread-${c.id}"))
                         }
                     }
+                    // En la misma línea del título (como la web): plegado, cada grupo ocupa su fila de siempre.
+                    if (issuesFold != null) { Spacer(Modifier.width(6.dp)); IssuesFoldChip(issuesFold, c.id) }
                 }
                 if (tagLine != null) Text(tagLine, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -590,7 +671,7 @@ internal fun ConversationRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f, fill = false))
                     if (time.isNotEmpty()) Text(" · $time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
-                if (showIssuesChip && c.openIssues > 0) {
+                if (issuesFold == null && showIssuesChip && c.openIssues > 0) {
                     val label = if (c.openIssues == 1) stringResource(R.string.issues_count_one) else stringResource(R.string.issues_count, c.openIssues)
                     Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.padding(top = 2.dp).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(10.dp)).clickable(onClick = onIssues)

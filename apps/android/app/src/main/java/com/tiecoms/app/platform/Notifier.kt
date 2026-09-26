@@ -167,9 +167,9 @@ class Notifier(private val context: Context) {
     }
 
     /** Recordatorios y reuniones: notificación simple con el mismo canal. */
-    fun showMessage(conversationId: String, title: String, text: String, silent: Boolean, tag: String = conversationId, seq: Long? = null) {
+    fun showMessage(conversationId: String, title: String, text: String, silent: Boolean, tag: String = conversationId, seq: Long? = null, openUri: String? = null) {
         if (!enabled()) return
-        val uri = "chaggu://c/$conversationId" + (seq?.let { "?m=$it" } ?: "")
+        val uri = openUri ?: ("chaggu://c/$conversationId" + (seq?.let { "?m=$it" } ?: ""))
         val channel = when {
             tag.startsWith("event:soon:") -> CHANNEL_SOON
             tag.startsWith("rem:") || tag.startsWith("reminder:") -> CHANNEL_REMINDERS

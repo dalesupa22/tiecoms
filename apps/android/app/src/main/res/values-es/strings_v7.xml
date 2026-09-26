@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.1: asuntos plegables en Grupos, completar con pulsación larga y reacciones con emoji (docs/REACCIONES_ENLACES.md). -->
+<resources>
+    <!-- Asuntos plegables bajo cada grupo -->
+    <plurals name="grp_issues_chip">
+        <item quantity="one">◆ %1$d asunto</item>
+        <item quantity="other">◆ %1$d asuntos</item>
+    </plurals>
+    <plurals name="grp_overdue_chip">
+        <item quantity="one">%1$d vencido</item>
+        <item quantity="other">%1$d vencidos</item>
+    </plurals>
+    <string name="grp_issues_show">Mostrar asuntos</string>
+    <string name="grp_issues_hide">Ocultar asuntos</string>
+    <string name="menu_expand_all">Expandir todo</string>
+    <string name="menu_show_all_issues">Mostrar todos los asuntos</string>
+    <string name="menu_hide_all_issues">Contraer todos los asuntos</string>
+
+    <!-- Completar un asunto con pulsación larga -->
+    <string name="issue_act_done">Completar</string>
+    <string name="issue_act_in_progress">Marcar en curso</string>
+    <string name="issue_act_waiting">Marcar en espera</string>
+    <string name="issue_done_toast">Asunto completado: «%1$s»</string>
+    <string name="issue_status_toast">«%1$s» → %2$s</string>
+
+    <!-- Reacciones -->
+    <string name="react_add">Agregar reacción</string>
+    <string name="react_more">Más emojis…</string>
+    <string name="react_picker">Reaccionar</string>
+    <string name="react_type">O escribe un emoji</string>
+    <string name="react_invalid">Escribe un solo emoji.</string>
+    <string name="react_chip_label">%1$s %2$d: %3$s</string>
+    <string name="react_mine_on">Quitar mi reacción</string>
+    <string name="react_mine_off">Reaccionar con %1$s</string>
+    <string name="react_look_hint">👀 Lo reviso: te lo recuerda más tarde</string>
+    <string name="react_done_hint">✅ Hecho: cierra tu recordatorio</string>
+    <string name="react_look_done">👀 Te lo recuerdo el %1$s</string>
+    <string name="react_done_reminders">✅ Recordatorio cerrado</string>
+    <string name="react_close_issue">¿Cerrar también el asunto «%1$s»?</string>
+    <string name="react_close_issue_btn">Cerrar asunto</string>
+    <string name="react_issue_closed">Asunto cerrado</string>
+    <string name="react_max">Este mensaje ya tiene 20 emojis distintos. Súmate a uno de los que hay.</string>
+    <string name="common_and">y</string>
+</resources>

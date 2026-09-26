@@ -29,7 +29,8 @@ data class PushMessage(
 )
 
 object PushPayload {
-    val TYPES = setOf("message", "reminder", "event", "side", "mention")
+    /** reaction: reaccionaron a un mensaje mío (un aviso agrupado por mensaje; abre la conversación en él). */
+    val TYPES = setOf("message", "reminder", "event", "side", "mention", "reaction")
 
     fun parse(data: Map<String, String?>): PushMessage? {
         fun s(k: String) = data[k]?.trim()?.takeIf { it.isNotEmpty() }

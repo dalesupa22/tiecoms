@@ -8,7 +8,9 @@ package com.tiecoms.app.core
  *   Relaciones            espacios compartidos, bajo la empresa contraparte (o su counterpartName, pendiente)
  *   Invitado en           espacios donde soy tercero (myRole guest), bajo la empresa anfitriona
  * Solo grupos y asuntos: ningún espacio se muestra como cabecera; los hilos (derivadas) viven en la barra del chat.
- * Bajo cada grupo van sus asuntos abiertos (hasta 3 y «+N asuntos»). Directos, chats y sidechats van a DMs.
+ * Bajo cada grupo, un chip «◆ N asuntos» (y «N vencidos») pliega sus asuntos activos, plegados por defecto
+ * (26-sep-2026: con 7 grupos de 7 a 18 asuntos la lista era eterna). Desplegados: hasta 3 y «+N asuntos».
+ * Buscar o el filtro Asuntos los muestran todos desplegados. Directos, chats y sidechats van a DMs.
  * El orden de siempre (compareConversations / sortHome de la web) se mantiene dentro de cada sección.
  */
 object GroupsTree {
@@ -30,7 +32,11 @@ object GroupsTree {
      * Grupo. [label]: «{espacio} · {grupo}» cuando dos grupos de la empresa se llaman igual; [threadUnread]: no leídos
      * de sus hilos (no se listan en el árbol, viven en la barra del chat).
      */
-    data class Group(val c: ConversationDTO, val level: Int, val pinnedSection: Boolean = false, val label: String? = null, val threadUnread: Int = 0, override val key: String) : Row
+    data class Group(val c: ConversationDTO, val level: Int, val pinnedSection: Boolean = false, val label: String? = null, val threadUnread: Int = 0,
+                     /** Asuntos activos (open, in_progress, waiting), contados aquí: el openIssues del servidor puede ir atrasado. */
+                     val issueCount: Int = 0, val overdueCount: Int = 0,
+                     /** Sus asuntos están desplegados (clave [issuesKey] en los ajustes, o buscando). */
+                     val issuesExpanded: Boolean = false, override val key: String) : Row
     data class Issue(val issue: IssueDTO, val level: Int, override val key: String) : Row
     data class MoreIssues(val conversationId: String, val count: Int, val level: Int, override val key: String) : Row
     /** Sin nada que mostrar: [filtered] = por búsqueda o filtro (si no, es el estado vacío de Grupos). */
@@ -39,6 +45,9 @@ object GroupsTree {
     // ---------- Claves de plegado (se guardan en los ajustes) ----------
     fun sectionKey(kind: Kind, orgId: String? = null) = "gs:" + kind.name + (orgId?.let { ":$it" } ?: "")
     fun companyKey(kind: Kind, id: String) = "gc:" + kind.name + ":" + id
+    /** Al revés que las demás: la clave presente significa asuntos DESPLEGADOS (plegados por defecto). */
+    fun issuesKey(conversationId: String) = ISSUES_PREFIX + conversationId
+    const val ISSUES_PREFIX = "iss:"
 
     // ---------- Regla del árbol ----------
     /** Dónde va un espacio: sección y empresa (id de la organización o, si está pendiente, el nombre escrito). */
@@ -89,12 +98,23 @@ object GroupsTree {
     fun isGroup(d: BootstrapDTO, c: ConversationDTO): Boolean =
         c.workspaceId != null && !c.isChat && !c.isSide && d.workspaces.any { it.id == c.workspaceId }
 
-    /** DMs: directos y chats `multi`, incluidos los sidechats (y cualquier conversación sin espacio conocido). */
-    fun isDm(d: BootstrapDTO, c: ConversationDTO): Boolean = !isGroup(d, c)
+    /**
+     * DMs: directos y chats `multi`, incluidos los sidechats (y cualquier conversación sin espacio conocido).
+     * Los hilos de un directo o chat grupal (derive same fuera de un espacio, 26-sep-2026) no: viven en la barra
+     * de hilos de su chat, como los de los grupos; su no leído va como «💬 N» en el chat.
+     */
+    fun isDm(d: BootstrapDTO, c: ConversationDTO): Boolean = !isGroup(d, c) && !isChatThread(d, c)
+
+    /** Hilo de un directo o chat grupal: tiene padre, no es sidechat y no es de un grupo. */
+    fun isChatThread(d: BootstrapDTO, c: ConversationDTO): Boolean = c.parentId != null && !c.isSide && !isGroup(d, c)
+
+    /** No leídos de los hilos (no sidechats) de cada conversación: el chip «💬 N». */
+    fun threadUnread(d: BootstrapDTO, nowMs: Long = System.currentTimeMillis()): Map<String, Int> =
+        d.conversations.filter { it.parentId != null && !it.isSide }.groupBy { it.parentId!! }.mapValues { (_, l) -> l.sumOf { HomeTree.pending(it, nowMs) } }
 
     /** Globo de Grupos y de DMs: no leídos que cuentan (sin silenciadas). */
     fun groupsUnread(d: BootstrapDTO, nowMs: Long = System.currentTimeMillis()): Int = d.conversations.filter { isGroup(d, it) }.sumOf { HomeTree.pending(it, nowMs) }
-    fun dmsUnread(d: BootstrapDTO, nowMs: Long = System.currentTimeMillis()): Int = d.conversations.filter { isDm(d, it) }.sumOf { HomeTree.pending(it, nowMs) }
+    fun dmsUnread(d: BootstrapDTO, nowMs: Long = System.currentTimeMillis()): Int = d.conversations.filter { isDm(d, it) || isChatThread(d, it) }.sumOf { HomeTree.pending(it, nowMs) }
 
     /** DMs en el orden de Inicio (compareConversations), con búsqueda por título, vista previa o personas. */
     fun dms(d: BootstrapDTO, query: String, title: (ConversationDTO) -> String, nowMs: Long = System.currentTimeMillis(), unreadOnly: Boolean = false): List<ConversationDTO> {
@@ -108,9 +128,13 @@ object GroupsTree {
     fun sideOrigin(d: BootstrapDTO, c: ConversationDTO): ConversationDTO? =
         if (c.isSide) d.conversations.firstOrNull { it.id == c.parentId } else null
 
-    /** Asuntos abiertos de un grupo: primero los que tienen fecha (la más cercana), luego los más nuevos. */
+    /** Estados activos: los únicos que se listan y cuentan bajo los grupos (ni done ni cancelled). */
+    val ACTIVE_STATUSES = setOf("open", "in_progress", "waiting")
+    fun isActive(i: IssueDTO) = i.status in ACTIVE_STATUSES
+
+    /** Asuntos activos de un grupo: primero los que tienen fecha (la más cercana), luego los más nuevos. */
     fun openIssues(issues: Collection<IssueDTO>, conversationId: String): List<IssueDTO> =
-        issues.filter { it.conversationId == conversationId && !it.closed }
+        issues.filter { it.conversationId == conversationId && isActive(it) }
             .sortedWith(compareBy<IssueDTO> { it.dueDate == null }.thenBy { it.dueDate ?: "" }.thenByDescending { it.createdAt }.thenBy { it.id })
 
     private fun matchesText(d: BootstrapDTO, c: ConversationDTO, q: String, title: (ConversationDTO) -> String): Boolean {
@@ -122,7 +146,7 @@ object GroupsTree {
     fun inTab(tab: Tab, c: ConversationDTO, issues: Collection<IssueDTO>, nowMs: Long): Boolean = when (tab) {
         Tab.ALL -> true
         Tab.UNREAD -> HomeTree.pending(c, nowMs) > 0 || c.unreadMentions > 0
-        Tab.ISSUES -> c.openIssues > 0 || issues.any { it.conversationId == c.id && !it.closed }
+        Tab.ISSUES -> if (issues.isEmpty()) c.openIssues > 0 else issues.any { it.conversationId == c.id && isActive(it) }
     }
 
     /** Contador de cada filtro (Todo = todos los grupos). */
@@ -134,16 +158,21 @@ object GroupsTree {
     fun build(
         d: BootstrapDTO, issues: Collection<IssueDTO>, query: String, wsFilter: String?, collapsed: Set<String>,
         title: (ConversationDTO) -> String, nowMs: Long = System.currentTimeMillis(), tab: Tab = Tab.ALL,
+        /** Hoy (AAAA-MM-DD) para contar los vencidos. */
+        today: String = java.time.LocalDate.now().toString(),
     ): List<Row> {
         val q = query.trim().lowercase()
         val searching = q.isNotEmpty() || tab != Tab.ALL
+        // Buscar y el filtro Asuntos muestran los asuntos desplegados; si no, cada grupo recuerda el suyo.
+        val showAllIssues = q.isNotEmpty() || tab == Tab.ISSUES
+        // Sin asuntos cargados todavía, el chip usa el openIssues del servidor.
+        val issuesLoaded = issues.isNotEmpty()
         fun matches(c: ConversationDTO) = (q.isEmpty() || matchesText(d, c, q, title)) && inTab(tab, c, issues, nowMs)
         val groupsByWs = d.conversations.filter { isGroup(d, it) }.groupBy { it.workspaceId!! }
         fun convsOf(w: WorkspaceDTO) = groupsByWs[w.id].orEmpty()
         fun unread(list: List<ConversationDTO>) = list.sumOf { HomeTree.pending(it, nowMs) }
         // Los hilos (derivadas) no se listan: viven en la barra de su chat; su no leído va como «💬 N» en el grupo.
-        val threadUnread = d.conversations.filter { it.parentId != null && !it.isSide }.groupBy { it.parentId!! }
-            .mapValues { (_, l) -> unread(l) }
+        val threadUnread = threadUnread(d, nowMs)
         fun listed(w: WorkspaceDTO) = convsOf(w).filter { it.parentId == null }
         val rows = mutableListOf<Row>()
 
@@ -158,10 +187,14 @@ object GroupsTree {
             HomeTree.order(all.filter { matches(it) }, nowMs).forEach { c ->
                 val ws = byWs[c.workspaceId]
                 val label = if (ws != null && !ws.isOrgHome && title(c).trim().lowercase() in dup) ws.name + " · " + title(c) else null
-                rows += Group(c, level, label = label, threadUnread = threadUnread[c.id] ?: 0, key = "c:" + c.id)
                 val open = openIssues(issues, c.id)
+                val count = if (open.isNotEmpty() || issuesLoaded) open.size else c.openIssues
+                val expanded = count > 0 && (showAllIssues || issuesKey(c.id) in collapsed)
+                rows += Group(c, level, label = label, threadUnread = threadUnread[c.id] ?: 0,
+                    issueCount = count, overdueCount = open.count { it.dueDate != null && it.dueDate < today }, issuesExpanded = expanded, key = "c:" + c.id)
+                if (!expanded) return@forEach
                 open.take(MAX_ISSUES).forEach { rows += Issue(it, level + 1, key = "i:" + it.id) }
-                if (open.size > MAX_ISSUES) rows += MoreIssues(c.id, open.size - MAX_ISSUES, level + 1, key = "mi:" + c.id)
+                if (count > MAX_ISSUES) rows += MoreIssues(c.id, count - minOf(open.size, MAX_ISSUES), level + 1, key = "mi:" + c.id)
             }
         }
         fun hasVisible(r: Relation) = r.workspaces.any { w -> listed(w).any { matches(it) } }
@@ -215,12 +248,29 @@ object GroupsTree {
         return rows
     }
 
-    /** Todas las claves plegables del árbol («Plegar todo»). */
+    /** Todas las claves plegables del árbol («Plegar todo»): empresas mías y empresas de Relaciones e Invitado en. */
     fun allFoldKeys(d: BootstrapDTO): Set<String> =
         relations(d).flatMap { r ->
             val base = if (r.kind == Kind.ORG) listOf(sectionKey(Kind.ORG, r.id)) else listOf(companyKey(r.kind, r.id))
             base
         }.toSet()
+
+    /** Claves «asuntos desplegados» de todos los grupos con asuntos activos («Mostrar todos los asuntos»). */
+    fun allIssueKeys(d: BootstrapDTO, issues: Collection<IssueDTO>): Set<String> =
+        d.conversations.filter { isGroup(d, it) && it.parentId == null }
+            .filter { c -> if (issues.isEmpty()) c.openIssues > 0 else issues.any { it.conversationId == c.id && isActive(it) } }
+            .map { issuesKey(it.id) }.toSet()
+
+    // ---------- Acciones de los menús (Plegar todo, Expandir todo, asuntos) ----------
+    /** «Plegar todo»: pliega empresas y secciones y también los asuntos de cada grupo. */
+    fun foldAll(collapsed: Set<String>, d: BootstrapDTO): Set<String> = (collapsed + allFoldKeys(d)).filterNot { it.startsWith(ISSUES_PREFIX) }.toSet()
+    /** «Expandir todo»: despliega empresas, secciones y los asuntos de todos los grupos. */
+    fun expandAll(collapsed: Set<String>, d: BootstrapDTO, issues: Collection<IssueDTO>): Set<String> =
+        collapsed.filterNot { it.startsWith("gs:") || it.startsWith("gc:") }.toSet() + allIssueKeys(d, issues)
+    fun showAllIssues(collapsed: Set<String>, d: BootstrapDTO, issues: Collection<IssueDTO>): Set<String> = collapsed + allIssueKeys(d, issues)
+    fun hideAllIssues(collapsed: Set<String>): Set<String> = collapsed.filterNot { it.startsWith(ISSUES_PREFIX) }.toSet()
+    /** ¿Está todo plegado? (para decidir si el menú ofrece «Expandir todo»). */
+    fun allFolded(collapsed: Set<String>, d: BootstrapDTO): Boolean = allFoldKeys(d).let { it.isNotEmpty() && collapsed.containsAll(it) } && collapsed.none { it.startsWith(ISSUES_PREFIX) }
 }
 
 /** Código de invitación que escribe la persona (K7QM-4XPA): acepta minúsculas, espacios y sin guion. */

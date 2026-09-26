@@ -5,7 +5,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
 /** Versión del contrato que habla esta app (packages/contracts CONTRACT_VERSION). */
-const val CONTRACT_VERSION = "2026-09-25"
+const val CONTRACT_VERSION = "2026-09-26"
 const val PLATFORM = "android"
 
 @Serializable
@@ -65,6 +65,8 @@ data class OrganizationDTO(
     /** none | idp | dns */
     val verification: String = "none",
     val verifiedDomain: String? = null,
+    /** 👀 y ✅ con acción (recordatorio) para la gente de esta empresa; ausente = activas. */
+    val reactionActions: Boolean = true,
 )
 
 @Serializable
@@ -204,6 +206,29 @@ data class MessageDTO(
     val attachments: List<AttachmentDTO> = emptyList(),
     /** Menciones con @ (SPEC-v4 §H): solo las válidas, ordenadas por start (UTF-16 sobre body). */
     val mentions: List<MentionDTO> = emptyList(),
+    /** Reacciones (contrato 2026-09-26), en el orden de la primera reacción; ausente en servidores viejos. */
+    val reactions: List<ReactionDTO> = emptyList(),
+)
+
+/** Reacción agregada: quién reaccionó con [emoji]; [external] llegó por un puente (WhatsApp), sin cuenta en Chaggu. */
+@Serializable
+data class ReactionDTO(val emoji: String = "", val userIds: List<String> = emptyList(), val external: List<ExternalReactor> = emptyList()) {
+    val count: Int get() = userIds.size + external.size
+}
+
+@Serializable
+data class ExternalReactor(val name: String = "", val source: String = "other")
+
+/** Respuesta de PUT/DELETE /messages/:id/reactions/:emoji. */
+@Serializable
+data class ReactResult(
+    val message: MessageDTO? = null,
+    /** 👀 con acción: el recordatorio que se creó. */
+    val reminder: ReminderDTO? = null,
+    /** ✅ (o quitar 👀): recordatorios que se cerraron. */
+    val closedReminderIds: List<String> = emptyList(),
+    /** ✅ sobre un mensaje que abrió un asunto todavía abierto: el cliente ofrece cerrarlo. */
+    val openIssueId: String? = null,
 )
 
 /** Mención: userId o 'all', y el tramo [start, start + length) de body, que empieza con «@». */

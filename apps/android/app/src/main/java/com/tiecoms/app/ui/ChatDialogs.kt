@@ -272,10 +272,11 @@ fun DeriveDialog(conv: ConversationDTO, message: MessageDTO, onClose: () -> Unit
     var reason by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val options = listOf(
+    // Fuera de un espacio (directos y chats grupales) solo hay hilo con los del chat: internal y directive dan 400.
+    val options = listOfNotNull(
         Triple("same", stringResource(R.string.derive_same), stringResource(R.string.derive_same_note)),
-        Triple("internal", stringResource(R.string.derive_internal, myOrg?.name ?: ""), stringResource(R.string.derive_internal_note)),
-        Triple("directive", stringResource(R.string.derive_directive), stringResource(R.string.derive_directive_note)),
+        if (conv.workspaceId != null) Triple("internal", stringResource(R.string.derive_internal, myOrg?.name ?: ""), stringResource(R.string.derive_internal_note)) else null,
+        if (conv.workspaceId != null) Triple("directive", stringResource(R.string.derive_directive), stringResource(R.string.derive_directive_note)) else null,
     )
     FormSheet(stringResource(R.string.derive_title), onClose, tag = "deriveDialog") {
         Text(stringResource(R.string.derive_body), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)

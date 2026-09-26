@@ -3,6 +3,7 @@ package com.tiecoms.app.ui
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -106,13 +107,64 @@ fun StatusPill(status: String) {
     }
 }
 
+/**
+ * Menú de pulsación larga de un asunto activo (Grupos, asuntos de un grupo y pestaña Asuntos): Completar,
+ * Marcar en curso, Marcar en espera (sin el estado que ya tiene) y Abrir (issueQuickMenu de la web).
+ * Los cerrados no tienen menú: se reabren desde el detalle.
+ */
+fun issueQuickMenu(ctx: Context, i: IssueDTO, onOpen: () -> Unit, onStatus: (String) -> Unit): List<SheetItem?> = buildList {
+    add(SheetItem(ctx.getString(R.string.issue_act_done), "✔", tag = "issueActDone") { onStatus("done") })
+    if (i.status != "in_progress") add(SheetItem(ctx.getString(R.string.issue_act_in_progress), "▶", tag = "issueActInProgress") { onStatus("in_progress") })
+    if (i.status != "waiting") add(SheetItem(ctx.getString(R.string.issue_act_waiting), "⏳", tag = "issueActWaiting") { onStatus("waiting") })
+    add(null)
+    add(SheetItem(ctx.getString(R.string.menu_open), "↗", tag = "issueActOpen") { onOpen() })
+}
+
+/**
+ * Cambiar el estado desde el menú: optimista (el asunto se va de Grupos y el conteo baja al instante), con
+ * «Deshacer» en el aviso; si el API falla, vuelve como estaba y se muestra el error.
+ */
+@Composable
+fun rememberIssueStatusSetter(): (IssueDTO, String) -> Unit {
+    val ctx = LocalContext.current
+    val client = LocalClient.current
+    val container = LocalContainer.current
+    val snackbar = LocalSnackbar.current
+    return remember(client, snackbar) {
+        { i: IssueDTO, status: String ->
+            val before = i.status
+            container.scope.launch {
+                try {
+                    client.setIssueStatus(i.id, status)
+                    val text = if (status == "done") ctx.getString(R.string.issue_done_toast, i.title) else ctx.getString(R.string.issue_status_toast, i.title, statusText(ctx, status))
+                    val r = snackbar.showSnackbar(text, actionLabel = ctx.getString(R.string.undo), withDismissAction = false,
+                        duration = androidx.compose.material3.SnackbarDuration.Short)
+                    if (r == androidx.compose.material3.SnackbarResult.ActionPerformed) client.setIssueStatus(i.id, before)
+                } catch (e: Exception) {
+                    snackbar.showSnackbar(errorText(ctx, e))
+                }
+            }
+            Unit
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun IssueRow(i: IssueDTO, data: BootstrapDTO, showWhere: Boolean = true, onOpen: (String) -> Unit) {
     val ctx = LocalContext.current
     val owner = Names.person(data, i.ownerId ?: "")
     val conv = data.conversations.firstOrNull { it.id == i.conversationId }
     val f = issueFlags(i)
-    Row(Modifier.fillMaxWidth().clickable { onOpen(i.id) }.heightIn(min = 60.dp).padding(vertical = 8.dp).testTag("issue-${i.id}"), verticalAlignment = Alignment.CenterVertically) {
+    val setStatus = rememberIssueStatusSetter()
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    var menu by remember { mutableStateOf(false) }
+    Box {
+    Row(Modifier.fillMaxWidth()
+        .background(if (menu) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+        .combinedClickable(onClick = { onOpen(i.id) }, onLongClick = if (i.closed) null else ({ haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); menu = true }),
+            onLongClickLabel = stringResource(R.string.menu_more))
+        .heightIn(min = 60.dp).padding(vertical = 8.dp).testTag("issue-${i.id}"), verticalAlignment = Alignment.CenterVertically) {
         val o = Names.org(data, owner?.orgId)
         Avatar(owner?.name ?: "–", parseColor(o?.colorBg, Color(0xFFBDB5AE)), parseColor(o?.colorFg, Color.White), size = 32.dp, photo = owner?.avatarUrl)
         Spacer(Modifier.width(10.dp))
@@ -128,6 +180,8 @@ fun IssueRow(i: IssueDTO, data: BootstrapDTO, showWhere: Boolean = true, onOpen:
             Text(if (f.overdue) stringResource(R.string.issue_overdue) else if (f.dueToday) stringResource(R.string.issue_today) else dueLabel(ctx, i),
                 style = MaterialTheme.typography.labelSmall, color = if (f.overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+    AnchoredMenu(menu, if (menu) issueQuickMenu(ctx, i, onOpen = { onOpen(i.id) }, onStatus = { st -> setStatus(i, st) }) else emptyList(), { menu = false })
     }
 }
 
@@ -179,7 +233,7 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
                                 Text(visible[cid]?.let { titleOf(ctx, it, data) } ?: "", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
-                        items(inConv, key = { it.id }) { Box(Modifier.padding(start = 12.dp)) { IssueRow(it, data, showWhere = false, onOpen = onOpen) } }
+                        items(inConv, key = { it.id }) { Box(Modifier.animateItem().padding(start = 12.dp)) { IssueRow(it, data, showWhere = false, onOpen = onOpen) } }
                     }
                     return@forEach
                 }
@@ -202,7 +256,7 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
                                 Text(visible[cid]?.let { titleOf(ctx, it, data) } ?: "", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
-                        items(inConv, key = { it.id }) { Box(Modifier.padding(start = 24.dp)) { IssueRow(it, data, showWhere = false, onOpen = onOpen) } }
+                        items(inConv, key = { it.id }) { Box(Modifier.animateItem().padding(start = 24.dp)) { IssueRow(it, data, showWhere = false, onOpen = onOpen) } }
                     }
                 }
             }

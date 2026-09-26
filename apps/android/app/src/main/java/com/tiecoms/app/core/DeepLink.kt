@@ -7,7 +7,8 @@ import java.net.URLDecoder
 sealed interface DeepLink {
     /** [seq]: salta a ese mensaje (?m=seq). */
     /** [side]: abre el origen con ese sidechat desplegado (notificación TC_SIDE). */
-    data class Conversation(val id: String, val seq: Long? = null, val side: String? = null) : DeepLink
+    /** [messageId]: salta a ese mensaje por id (?mid=, push de reacción: el aviso no trae el seq). */
+    data class Conversation(val id: String, val seq: Long? = null, val side: String? = null, val messageId: String? = null) : DeepLink
     data class Workspace(val id: String) : DeepLink
     data class Invite(val token: String) : DeepLink
     data class Signup(val orgToken: String?) : DeepLink
@@ -66,7 +67,7 @@ object DeepLinks {
         val head = segments.firstOrNull()?.lowercase() ?: return null
         val arg = segments.getOrNull(1)?.takeIf { ID.matches(it) }
         return when (head) {
-            "c" -> arg?.let { DeepLink.Conversation(it, query["m"]?.toLongOrNull()?.takeIf { s -> s > 0 }, query["side"]?.takeIf { s -> ID.matches(s) }) }
+            "c" -> arg?.let { DeepLink.Conversation(it, query["m"]?.toLongOrNull()?.takeIf { s -> s > 0 }, query["side"]?.takeIf { s -> ID.matches(s) }, query["mid"]?.takeIf { s -> ID.matches(s) }) }
             "w" -> arg?.let { DeepLink.Workspace(it) }
             "invite" -> arg?.let { DeepLink.Invite(it) }
             "signup" -> DeepLink.Signup(query["org"]?.takeIf { ID.matches(it) })

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.1: collapsible issues in Groups, long-press to complete and emoji reactions (docs/REACCIONES_ENLACES.md). -->
+<resources>
+    <plurals name="grp_issues_chip">
+        <item quantity="one">◆ %1$d issue</item>
+        <item quantity="other">◆ %1$d issues</item>
+    </plurals>
+    <plurals name="grp_overdue_chip">
+        <item quantity="one">%1$d overdue</item>
+        <item quantity="other">%1$d overdue</item>
+    </plurals>
+    <string name="grp_issues_show">Show issues</string>
+    <string name="grp_issues_hide">Hide issues</string>
+    <string name="menu_expand_all">Expand all</string>
+    <string name="menu_show_all_issues">Show all issues</string>
+    <string name="menu_hide_all_issues">Collapse all issues</string>
+
+    <string name="issue_act_done">Complete</string>
+    <string name="issue_act_in_progress">Mark in progress</string>
+    <string name="issue_act_waiting">Mark waiting</string>
+    <string name="issue_done_toast">Issue completed: “%1$s”</string>
+    <string name="issue_status_toast">“%1$s” → %2$s</string>
+
+    <string name="react_add">Add reaction</string>
+    <string name="react_more">More emoji…</string>
+    <string name="react_picker">React</string>
+    <string name="react_type">Or type an emoji</string>
+    <string name="react_invalid">Type a single emoji.</string>
+    <string name="react_chip_label">%1$s %2$d: %3$s</string>
+    <string name="react_mine_on">Remove my reaction</string>
+    <string name="react_mine_off">React with %1$s</string>
+    <string name="react_look_hint">👀 On it: reminds you later</string>
+    <string name="react_done_hint">✅ Done: closes your reminder</string>
+    <string name="react_look_done">👀 I’ll remind you %1$s</string>
+    <string name="react_done_reminders">✅ Reminder closed</string>
+    <string name="react_close_issue">Also close the issue “%1$s”?</string>
+    <string name="react_close_issue_btn">Close issue</string>
+    <string name="react_issue_closed">Issue closed</string>
+    <string name="react_max">This message already has 20 different emoji. Join one of them.</string>
+    <string name="common_and">and</string>
+</resources>

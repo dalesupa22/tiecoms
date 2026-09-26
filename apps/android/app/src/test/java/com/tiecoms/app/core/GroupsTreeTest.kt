@@ -54,8 +54,9 @@ class GroupsTreeTest {
         issue("i6", "g-a1", status = "done"), issue("i7", "g-home", status = "waiting"),
     )
 
-    private fun build(q: String = "", ws: String? = null, collapsed: Set<String> = emptySet(), tab: GroupsTree.Tab = GroupsTree.Tab.ALL) =
-        GroupsTree.build(data, issues, q, ws, collapsed, { it.name ?: it.id }, nowMs = 0, tab = tab)
+    private fun build(q: String = "", ws: String? = null, collapsed: Set<String> = emptySet(), tab: GroupsTree.Tab = GroupsTree.Tab.ALL, list: List<IssueDTO> = issues, d: BootstrapDTO = data) =
+        GroupsTree.build(d, list, q, ws, collapsed, { it.name ?: it.id }, nowMs = 0, tab = tab, today = "2026-09-26")
+    private val open = setOf(GroupsTree.issuesKey("g-a1"), GroupsTree.issuesKey("g-home"))
 
     @Test fun `regla exacta de secciones`() {
         assertEquals(GroupsTree.Placement(GroupsTree.Kind.ORG, "mine", null), GroupsTree.place(data, data.workspaces[0]))
@@ -67,7 +68,16 @@ class GroupsTreeTest {
         assertEquals(GroupsTree.Placement(GroupsTree.Kind.GUEST, "beta", null), GroupsTree.place(data, data.workspaces[6]))
     }
 
-    @Test fun `arbol completo en orden, solo grupos y asuntos`() {
+    @Test fun `arbol completo en orden, asuntos plegados por defecto`() {
+        assertEquals(listOf(
+            "s:ORG:mine", "c:g-home", "c:g-old",
+            "s:RELATIONS",
+            "o:RELATIONS:acme", "c:g-a1", "c:g-a2",
+            "o:RELATIONS:beta", "c:g-b",
+            "o:RELATIONS:pending:nestlé", "c:g-p",
+            "s:GUEST", "o:GUEST:beta", "c:g-g",
+        ), build().map { it.key })
+        // Desplegados (clave iss:<id>): hasta 3 y «+N asuntos».
         assertEquals(listOf(
             "s:ORG:mine", "c:g-home", "i:i7", "c:g-old",
             "s:RELATIONS",
@@ -75,7 +85,65 @@ class GroupsTreeTest {
             "o:RELATIONS:beta", "c:g-b",
             "o:RELATIONS:pending:nestlé", "c:g-p",
             "s:GUEST", "o:GUEST:beta", "c:g-g",
-        ), build().map { it.key })
+        ), build(collapsed = open).map { it.key })
+    }
+
+    @Test fun `chip de asuntos con conteo local y vencidos`() {
+        fun g(k: String, rows: List<GroupsTree.Row>) = rows.first { it.key == k } as GroupsTree.Group
+        val rows = build()
+        // i1…i5 activos (i6 está resuelto): 5 asuntos, 1 vencido (i3, 1-sep).
+        assertEquals(5, g("c:g-a1", rows).issueCount); assertEquals(1, g("c:g-a1", rows).overdueCount)
+        assertFalse(g("c:g-a1", rows).issuesExpanded)
+        assertEquals(1, g("c:g-home", rows).issueCount) // waiting cuenta como activo
+        assertEquals(0, g("c:g-old", rows).issueCount)
+        assertTrue(g("c:g-a1", build(collapsed = open)).issuesExpanded)
+        // Un grupo sin asuntos nunca queda «desplegado» aunque tenga la clave.
+        assertFalse(g("c:g-old", build(collapsed = setOf(GroupsTree.issuesKey("g-old")))).issuesExpanded)
+    }
+
+    @Test fun `completar un asunto lo saca de la lista y baja el conteo al instante`() {
+        // El servidor aún dice openIssues = 9 (atrasado): manda el conteo local.
+        val d = data.copy(conversations = data.conversations.map { if (it.id == "g-a1") it.copy(openIssues = 9) else it })
+        val done = issues.map { if (it.id == "i3") it.copy(status = "done") else if (it.id == "i5") it.copy(status = "cancelled") else it }
+        val rows = build(collapsed = open, list = done, d = d)
+        val g = rows.first { it.key == "c:g-a1" } as GroupsTree.Group
+        assertEquals(3, g.issueCount); assertEquals(0, g.overdueCount)
+        assertFalse(rows.any { it.key == "i:i3" || it.key == "i:i5" })
+        assertEquals(listOf("i:i4", "i:i2", "i:i1"), rows.filter { it is GroupsTree.Issue && it.issue.conversationId == "g-a1" }.map { it.key })
+        assertFalse(rows.any { it.key == "mi:g-a1" })
+        // En curso sigue siendo activo.
+        val moving = issues.map { if (it.id == "i1") it.copy(status = "in_progress") else it }
+        assertEquals(5, (build(list = moving).first { it.key == "c:g-a1" } as GroupsTree.Group).issueCount)
+        assertEquals(setOf("open", "in_progress", "waiting"), GroupsTree.ACTIVE_STATUSES)
+    }
+
+    @Test fun `sin asuntos cargados el chip usa openIssues del servidor`() {
+        val d = data.copy(conversations = data.conversations.map { if (it.id == "g-a2") it.copy(openIssues = 4) else it })
+        val rows = build(list = emptyList(), d = d, collapsed = setOf(GroupsTree.issuesKey("g-a2")))
+        assertEquals(4, (rows.first { it.key == "c:g-a2" } as GroupsTree.Group).issueCount)
+        // Desplegado sin la lista: solo «+4 asuntos», que abre la lista del grupo.
+        assertEquals(4, (rows.first { it.key == "mi:g-a2" } as GroupsTree.MoreIssues).count)
+    }
+
+    @Test fun `buscar y el filtro Asuntos despliegan, No leidos respeta el plegado`() {
+        assertEquals(listOf("s:RELATIONS", "o:RELATIONS:acme", "c:g-a1", "i:i3", "i:i5", "i:i4", "mi:g-a1"), build(q = "g-a1").map { it.key })
+        assertEquals(listOf("s:RELATIONS", "o:RELATIONS:acme", "c:g-a1"), build(tab = GroupsTree.Tab.UNREAD).map { it.key })
+    }
+
+    @Test fun `plegar todo, expandir todo y todos los asuntos`() {
+        val sec = GroupsTree.sectionKey(GroupsTree.Kind.ORG, "mine")
+        val folded = GroupsTree.foldAll(open, data)
+        assertTrue(sec in folded); assertTrue(GroupsTree.companyKey(GroupsTree.Kind.RELATIONS, "acme") in folded)
+        assertTrue(folded.none { it.startsWith(GroupsTree.ISSUES_PREFIX) })
+        assertTrue(GroupsTree.allFolded(folded, data)); assertFalse(GroupsTree.allFolded(folded + GroupsTree.issuesKey("g-a1"), data))
+        // Plegado todo: solo cabeceras y empresas.
+        assertFalse(build(collapsed = folded).any { it is GroupsTree.Group || it is GroupsTree.Issue })
+        val expanded = GroupsTree.expandAll(folded + GroupsTree.sectionKey(GroupsTree.Kind.GUEST), data, issues)
+        assertEquals(setOf(GroupsTree.issuesKey("g-a1"), GroupsTree.issuesKey("g-home")), expanded)
+        assertEquals(setOf(GroupsTree.issuesKey("g-a1"), GroupsTree.issuesKey("g-home")), GroupsTree.allIssueKeys(data, issues))
+        val shown = GroupsTree.showAllIssues(setOf(sec), data, issues)
+        assertEquals(setOf(sec) + GroupsTree.allIssueKeys(data, issues), shown)
+        assertEquals(setOf(sec), GroupsTree.hideAllIssues(shown))
     }
 
     @Test fun `sin cabeceras de espacio, hilos fuera del arbol y pendiente marcada`() {
@@ -90,7 +158,7 @@ class GroupsTreeTest {
         assertNull(p.org); assertEquals("Nestlé", p.pendingName)
         // La derivada no se lista: vive en la barra del chat.
         assertFalse(rows.any { it.key == "c:g-der" })
-        assertEquals(2, (rows.first { it.key == "mi:g-a1" } as GroupsTree.MoreIssues).count)
+        assertEquals(2, (build(collapsed = open).first { it.key == "mi:g-a1" } as GroupsTree.MoreIssues).count)
     }
 
     @Test fun `hilos con no leidos dan el chip en su grupo`() {
@@ -134,6 +202,19 @@ class GroupsTreeTest {
         assertEquals(4, GroupsTree.dmsUnread(data, 0))
     }
 
+    @Test fun `hilos de un directo o chat grupal no van a DMs`() {
+        // derive same fuera de un espacio: chat multi con parentId, deriveKind same.
+        val t = g("t1", null, "2026-09-26T09:00:00Z", kind = "multi", unread = 2, parent = "d1", derive = "same")
+        val d = data.copy(conversations = data.conversations + t)
+        assertTrue(GroupsTree.isChatThread(d, t)); assertFalse(GroupsTree.isDm(d, t))
+        assertEquals(listOf("s1", "d1", "m1"), GroupsTree.dms(d, "", { it.name ?: it.id }, nowMs = 0).map { it.id })
+        // Su no leído va al chip «💬 N» de su chat y sigue sumando en el globo de DMs.
+        assertEquals(2, GroupsTree.threadUnread(d, 0)["d1"])
+        assertEquals(6, GroupsTree.dmsUnread(d, 0))
+        // El sidechat sí sigue en DMs.
+        assertTrue(GroupsTree.isDm(d, d.conversations.first { it.id == "s1" }))
+    }
+
     @Test fun `plegar, buscar y filtrar`() {
         val folded = build(collapsed = setOf(GroupsTree.companyKey(GroupsTree.Kind.RELATIONS, "acme"))).map { it.key }
         assertTrue("o:RELATIONS:acme" in folded); assertFalse("c:g-a1" in folded)
@@ -145,7 +226,7 @@ class GroupsTreeTest {
         assertEquals(listOf("s:RELATIONS", "o:RELATIONS:beta", "c:g-b"),
             build(q = "g-b", collapsed = setOf(GroupsTree.sectionKey(GroupsTree.Kind.RELATIONS))).map { it.key })
         assertEquals(listOf("s:RELATIONS", "o:RELATIONS:acme", "c:g-a1", "i:i3", "i:i5", "i:i4", "mi:g-a1"),
-            build(tab = GroupsTree.Tab.UNREAD).map { it.key })
+            build(tab = GroupsTree.Tab.UNREAD, collapsed = open).map { it.key })
         assertEquals(listOf("s:ORG:mine", "c:g-home", "i:i7", "s:RELATIONS", "o:RELATIONS:acme", "c:g-a1", "i:i3", "i:i5", "i:i4", "mi:g-a1"),
             build(tab = GroupsTree.Tab.ISSUES).map { it.key })
         assertEquals(listOf("s:RELATIONS", "o:RELATIONS:pending:nestlé", "c:g-p"), build(ws = "w-p").map { it.key })

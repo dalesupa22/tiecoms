@@ -104,6 +104,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -170,6 +171,8 @@ private fun JsonObject.s(k: String) = (this[k] as? JsonPrimitive)?.contentOrNull
 fun ConversationScreen(
     id: String,
     jumpSeq: Long? = null,
+    /** Push de reacción: saltar al mensaje por id (el aviso no trae el seq). */
+    jumpMessageId: String? = null,
     onBack: () -> Unit,
     onDetails: () -> Unit,
     onOpenConversation: (String, Long?) -> Unit,
@@ -231,6 +234,8 @@ fun ConversationScreen(
     var confirmDelete by remember { mutableStateOf<MessageDTO?>(null) }
     var confirmLeave by rememberSaveable { mutableStateOf(false) }
     var reportMessage by remember { mutableStateOf<MessageDTO?>(null) }
+    /** Selector completo de emojis abierto desde «＋» de la barra rápida. */
+    var pickerFor by remember { mutableStateOf<MessageDTO?>(null) }
 
     val listState = rememberLazyListState()
     val me = data.me.id
@@ -261,6 +266,7 @@ fun ConversationScreen(
         launch { runCatching { client.loadPins(id) } }
         launch { runCatching { client.loadEvents(Instant.now().minusSeconds(30L * 86400), Instant.now().plusSeconds(60L * 86400), id) } }
         if (jumpSeq != null && jumpSeq > 0) jumpTo(jumpSeq)
+        else if (jumpMessageId != null) client.ensureMessageId(id, jumpMessageId)?.let { jumpTo(it) }
     }
 
     // A full-screen conversation clears its notification. Embedded bubble content must
@@ -321,6 +327,10 @@ fun ConversationScreen(
     val myWsRole = data.workspaces.firstOrNull { it.id == meta.workspaceId }?.myRole
 
     fun act(block: suspend () -> Unit) = scope.launch { runCatching { block() }.onFailure { container.toast(errorText(ctx, it)) } }
+    // Reacciones: solo quien puede publicar, y nunca en mensajes de sistema o eliminados.
+    val reactionActions = reactionActionsFor(data)
+    val react = rememberReactor(reactionActions)
+    fun canReact(m: MessageDTO) = meta.canPost && m.kind != "system" && m.deletedAt == null && !blockedDirect
 
     fun messageMenu(m: MessageDTO): List<SheetItem?> {
         val mine = m.authorId == me
@@ -334,7 +344,8 @@ fun ConversationScreen(
                     subtitle = ctx.getString(R.string.menu_reply_private_sub, author.name.substringBefore(' '))) { onPrivateReply(m) })
             // Bloque 2: responder aparte sin llenar el chat. Hilo con los del chat o sidechat privado; no se juntan con el DM.
             add(null)
-            if (!embedded && canWork && meta.kind != "direct" && myWsRole != "guest" && m.kind == "text" && m.deletedAt == null)
+            // También en directos y chats grupales (solo «Todos los del chat»); un hilo fuera de un espacio no se deriva otra vez.
+            if (!embedded && canWork && myWsRole != "guest" && m.kind == "text" && m.deletedAt == null && !(meta.workspaceId == null && meta.parentId != null))
                 add(SheetItem(ctx.getString(R.string.menu_derive), "💬", tag = "menuDerive", subtitle = ctx.getString(R.string.menu_derive_sub)) { deriving = m })
             if (!embedded && m.kind == "text" && m.deletedAt == null)
                 add(SheetItem(ctx.getString(R.string.menu_ask_side), "🔒", tag = "menuSide", subtitle = ctx.getString(R.string.menu_ask_side_sub)) { sideStart = m })
@@ -488,6 +499,8 @@ fun ConversationScreen(
                                     onPerson = { pid -> personCard = pid },
                                     onSwipeSide = if (!embedded && item.m.kind == "text" && item.m.deletedAt == null && meta.canPost) ({ sideStart = item.m }) else null,
                                     onOpenFile = { a -> scope.launch { openAttachment(ctx, client, a) } },
+                                    canReact = canReact(item.m), reactionActions = reactionActions,
+                                    onReact = { e, on -> react(item.m, e, on) }, onMoreReactions = { pickerFor = item.m },
                                 )
                                 is ChatItem.Pending -> PendingBubble(item.p, onRetry = { client.retry(item.p.clientMessageId) }, onDiscard = { client.discard(item.p.clientMessageId) })
                                 ChatItem.LateJoin -> Notice(stringResource(R.string.late_join))
@@ -585,6 +598,11 @@ fun ConversationScreen(
     sideStart?.let { m -> SideStartSheet(meta, m, onClose = { sideStart = null; sidePreselect = emptyList() }, onStarted = { sid -> sideOpen = sid }, preselect = sidePreselect) }
 
     reportMessage?.let { ReportDialog(it.authorId, it.id, onClose = { reportMessage = null }) }
+    pickerFor?.let { pm ->
+        val live = byId[pm.id] ?: pm
+        val mineSet = live.reactions.filter { data.me.id in it.userIds }.map { it.emoji }.toSet()
+        EmojiPickerSheet(mineSet, reactionActions, onPick = { e -> react(live, e, e !in mineSet) }, onClose = { pickerFor = null })
+    }
     if (convMenu) ActionSheet(title, conversationMenu(ctx, meta, data, onMeeting = { meeting = true to null }, onRemindCustom = { reminderCustom = true to null }, onLeave = { confirmLeave = true })) { convMenu = false }
     viewer?.let { (list, i) -> MediaViewer(list, i) { viewer = null } }
     voiceIssue?.let { (t, m) -> NewIssueDialog(id, m.id, t, onClose = { voiceIssue = null }, onCreated = onOpenIssue) }
@@ -933,6 +951,11 @@ internal fun MessageBubble(
     /** Deslizar la burbuja a la derecha: «Preguntar en un sidechat». */
     onSwipeSide: (() -> Unit)? = null,
     onPerson: (String) -> Unit = {},
+    /** Reacciones: chips bajo la burbuja y barra rápida encima del menú. */
+    canReact: Boolean = false,
+    reactionActions: Boolean = true,
+    onReact: (String, Boolean) -> Unit = { _, _ -> },
+    onMoreReactions: () -> Unit = {},
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val openMenu = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onLongPress() }
@@ -1058,6 +1081,10 @@ internal fun MessageBubble(
                 AttachmentsBlock(m.attachments, fg, onOpenMedia = { i -> onOpenMedia(media, i) }, onOpenFile = onOpenFile, mine = item.mine, onCreateIssue = onVoiceIssue)
             }
             if (deleted) Text(body, color = fg, style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
+            // Solo emojis (1 a 3): grandes, como en la web (isJumbo).
+            else if (m.attachments.isEmpty() && m.mentions.isEmpty() && com.tiecoms.app.core.Reactions.isJumbo(body))
+                Text(body.trim(), color = fg, fontSize = if ((com.tiecoms.app.core.Reactions.clusters(body.filterNot { it.isWhitespace() })?.size ?: 3) == 1) 44.sp else 34.sp,
+                    lineHeight = 52.sp, modifier = Modifier.testTag("body-${m.seq}"))
             else if (body.isNotBlank() || m.attachments.isEmpty()) MessageText(body, m.mentions, fg, data, onPerson = onPerson, modifier = Modifier.testTag("body-${m.seq}"))
             m.linkPreview?.takeIf { !deleted && it.usable }?.let { LinkPreviewCard(it, fg, Modifier.padding(top = 6.dp)) }
             Text(
@@ -1065,9 +1092,12 @@ internal fun MessageBubble(
                 style = MaterialTheme.typography.labelSmall, color = fg.copy(alpha = 0.75f), modifier = Modifier.align(Alignment.End),
             )
         }
-        AnchoredMenu(menuOpen, if (menuOpen) menuItems() else emptyList(), onDismissMenu)
+        val myReactions = m.reactions.filter { data.me.id in it.userIds }.map { it.emoji }.toSet()
+        AnchoredMenu(menuOpen, if (menuOpen) menuItems() else emptyList(), onDismissMenu,
+            header = if (canReact) ({ QuickReactionBar(myReactions, reactionActions, onPick = { e -> onDismissMenu(); onReact(e, e !in myReactions) }, onMore = { onDismissMenu(); onMoreReactions() }) }) else null)
         }
         }
+        ReactionChips(m, data, canReact, onToggle = onReact, modifier = Modifier.padding(start = if (showAvatars && !item.mine) 34.dp else 0.dp))
         ThreadChip(threads, onOpenSide)
         SideChip(sides, onOpenSide)
         if (issue != null) TextButton(onClick = { onIssue(issue.id) }) { Text("◆ " + issue.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium) }

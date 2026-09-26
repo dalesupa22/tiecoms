@@ -405,6 +405,7 @@ class TieComsClient(
             is AccountEvent.PrefsUpdated -> scheduleBootstrap()
             is AccountEvent.WhatsAppUpdated -> setState { copy(waRevision = waRevision + 1) }
             is AccountEvent.DriveUpdated -> setState { copy(driveRevision = driveRevision + 1) }
+            AccountEvent.RemindersChanged -> scope.launch { runCatching { loadRemindersInternal() } }
             is AccountEvent.Unknown -> Unit
         }
     }
@@ -720,6 +721,21 @@ class TieComsClient(
         val i = req("PATCH", "/issues/$id", patch, IssueDTO.serializer())
         putIssues(listOf(i)); recountIssues(i.conversationId); i
     }
+    /**
+     * Cambia el estado de un asunto al instante (pulsación larga en Grupos y Asuntos): el asunto se actualiza
+     * en local y el conteo del grupo baja de una vez; si el PATCH falla, vuelve como estaba y se lanza el error.
+     */
+    suspend fun setIssueStatus(id: String, status: String): IssueDTO = withContext(dispatcher) {
+        val prev = s.issues[id] ?: throw ApiException(404, "not_found", "Asunto no encontrado")
+        if (prev.status == status) return@withContext prev
+        putIssues(listOf(prev.copy(status = status))); recountIssues(prev.conversationId)
+        try {
+            val i = req("PATCH", "/issues/$id", buildJsonObject { put("status", JsonPrimitive(status)) }, IssueDTO.serializer())
+            putIssues(listOf(i)); recountIssues(i.conversationId); i
+        } catch (e: Exception) {
+            putIssues(listOf(prev)); recountIssues(prev.conversationId); throw e
+        }
+    }
     suspend fun issueDetail(id: String): IssueDetail = withContext(dispatcher) {
         val r = req("GET", "/issues/$id", null, IssueDetail.serializer()); putIssues(listOf(r.issue)); r
     }
@@ -793,6 +809,46 @@ class TieComsClient(
         val r = req("GET", "/conversations/$conversationId/pins", null, PinnedMessages.serializer())
         setState { copy(pins = pins + (conversationId to r.messages.map { it.id })) }
         r.messages
+    }
+
+    // ---------- Reacciones (docs/REACCIONES_ENLACES.md) ----------
+    /**
+     * Pone o quita mi reacción, optimista: el chip cambia al instante y, si el API falla, vuelve como estaba.
+     * [remindAt]: hora del recordatorio de 👀 (solo con reacciones con acción). Aplica el mensaje que devuelve
+     * el servidor y los recordatorios creados o cerrados. 409 = ya hay 20 emojis distintos.
+     */
+    suspend fun react(message: MessageDTO, rawEmoji: String, on: Boolean, remindAt: Instant? = null): ReactResult = withContext(dispatcher) {
+        val emoji = Reactions.normalize(rawEmoji) ?: throw ApiException(400, "invalid_emoji", "Emoji inválido")
+        val me = myId ?: throw ApiException(401, "unauthorized", "Sin sesión")
+        fun current() = s.conversations[message.conversationId]?.messages?.firstOrNull { it.id == message.id } ?: message
+        val prev = current().reactions
+        upsertLocal(current().copy(reactions = Reactions.toggle(prev, emoji, me, on)))
+        try {
+            val path = "/messages/${message.id}/reactions/${enc(emoji)}"
+            val r = if (on) req("PUT", path, buildJsonObject { remindAt?.let { put("remindAt", JsonPrimitive(it.toString())) } }, ReactResult.serializer())
+                else req("DELETE", path, null, ReactResult.serializer())
+            r.message?.let { upsertLocal(it) }
+            if (r.reminder != null || r.closedReminderIds.isNotEmpty()) {
+                val closed = r.closedReminderIds.toSet()
+                setState { copy(reminders = (reminders.filter { it.id !in closed && it.id != r.reminder?.id } + listOfNotNull(r.reminder)).sortedBy { it.remindAt }) }
+            }
+            r
+        } catch (e: Exception) {
+            upsertLocal(current().copy(reactions = prev)); throw e
+        }
+    }
+
+    /** Busca un mensaje por id en lo cargado, pidiendo páginas viejas si hace falta (push de reacción). Devuelve su seq. */
+    suspend fun ensureMessageId(conversationId: String, messageId: String): Long? {
+        openConversation(conversationId)
+        repeat(10) {
+            val c = state.value.conversations[conversationId] ?: return null
+            if (!c.loaded) return null
+            c.messages.firstOrNull { it.id == messageId }?.let { return it.seq }
+            if (!c.hasMore) return null
+            loadOlder(conversationId)
+        }
+        return null
     }
 
     // ---------- Recordatorios ----------

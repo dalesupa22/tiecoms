@@ -45,6 +45,13 @@ import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.HourglassTop
+import androidx.compose.material.icons.outlined.Replay
+import androidx.compose.material.icons.outlined.UnfoldLess
+import androidx.compose.material.icons.outlined.UnfoldMore
+import androidx.compose.material.icons.outlined.ExpandCircleDown
 import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.material.icons.automirrored.outlined.Forward
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
@@ -363,6 +370,13 @@ fun iconForGlyph(glyph: String): androidx.compose.ui.graphics.vector.ImageVector
         "T" -> I.Groups
         "⊘" -> I.Block
         "🗄" -> I.Archive
+        "✔" -> I.CheckCircle
+        "▶" -> I.PlayCircle
+        "⏳" -> I.HourglassTop
+        "↺" -> I.Replay
+        "▸" -> I.UnfoldLess
+        "▾" -> I.UnfoldMore
+        "◇" -> I.ExpandCircleDown
         else -> null
     }
 }
@@ -372,7 +386,9 @@ fun iconForGlyph(glyph: String): androidx.compose.ui.graphics.vector.ImageVector
  * separadores y submenús que se abren dentro del mismo menú; se cierra al tocar fuera.
  */
 @Composable
-fun AnchoredMenu(expanded: Boolean, items: List<SheetItem?>, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+fun AnchoredMenu(expanded: Boolean, items: List<SheetItem?>, onDismiss: () -> Unit, modifier: Modifier = Modifier,
+                 /** Encima de las opciones (la barra rápida de reacciones de un mensaje, como en WhatsApp). */
+                 header: (@Composable () -> Unit)? = null) {
     var stack by remember(expanded) { mutableStateOf(listOf<SheetItem>()) }
     val current = stack.lastOrNull()
     val list = current?.children ?: items
@@ -381,6 +397,7 @@ fun AnchoredMenu(expanded: Boolean, items: List<SheetItem?>, onDismiss: () -> Un
         shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
         modifier = modifier.widthIn(min = 240.dp).testTag("contextMenu"),
     ) {
+        if (current == null && header != null) { header(); if (list.isNotEmpty()) HorizontalDivider() }
         if (current != null) {
             androidx.compose.material3.DropdownMenuItem(
                 text = { Text(current.label, fontWeight = FontWeight.SemiBold) },

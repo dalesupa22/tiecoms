@@ -72,10 +72,10 @@ Variables del API: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_CLIENT
 `MICROSOFT_CLIENT_SECRET`, `API_PUBLIC_ORIGIN` (origen de las redirect URI; por defecto
 `PUBLIC_ORIGIN`), `SSO_NATIVE_REDIRECT` (por defecto `tiecoms://auth/callback`).
 
-- Google Cloud: proyecto `tiecoms` (org xertify.co), cliente web «TieComs API», en producción.
-- Microsoft Entra: app «TieComs», multi-tenant (solo organizaciones), claims opcionales
+- Google Cloud: proyecto `tiecoms` (org xertify.co), cliente web «Chaggu API», en producción.
+- Microsoft Entra: app «Chaggu», multi-tenant (solo organizaciones), claims opcionales
   `email` y `xms_edov` en el ID token.
-- Redirect URI registradas: `https://app.tiecoms.com/api/v1/auth/{google|microsoft}/callback`
+- Redirect URI registradas: `https://app.chaggu.com/api/v1/auth/{google|microsoft}/callback`
   y `http://localhost:3021/api/v1/auth/{google|microsoft}/callback` para pruebas.
 
 ## Pendiente

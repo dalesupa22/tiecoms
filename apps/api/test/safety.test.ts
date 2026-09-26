@@ -45,7 +45,7 @@ describe('seguridad de usuarios y contenido', () => {
     await expect.poll(async () => {
       const mails = await (await fetch(`${BREVO}/sent`)).json() as any[];
       return mails.find((m) => m.subject.includes(r.json.id));
-    }, { timeout: 10_000 }).toMatchObject({ to: [{ email: 'admin@tiecoms.com' }] });
+    }, { timeout: 10_000 }).toMatchObject({ to: [{ email: 'admin@chaggu.com' }] });
     const mails = await (await fetch(`${BREVO}/sent`)).json() as any[];
     expect(JSON.stringify(mails.find((m) => m.subject.includes(r.json.id)))).not.toContain('Contenido para reporte');
   });

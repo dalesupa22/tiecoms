@@ -3,7 +3,7 @@
  * Complemento de la demo: asuntos y bifurcaciones sobre los datos de seed-demo.mjs.
  * Deriva un diagnóstico interno (y devuelve su resultado), abre una decisión
  * directiva y crea asuntos con responsables, fechas y estados.
- *   API_URL=https://app.tiecoms.com DEMO_PASSWORD='...' node scripts/seed-demo-extras.mjs
+ *   API_URL=https://app.chaggu.com DEMO_PASSWORD='...' node scripts/seed-demo-extras.mjs
  */
 import { randomUUID } from 'node:crypto';
 

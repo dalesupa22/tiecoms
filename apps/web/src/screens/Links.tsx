@@ -64,7 +64,7 @@ export async function setSaved(linkId: string, saved: boolean) {
   try { const l = await client.setLinkState(linkId, { saved, ...(saved ? { seen: false } : {}) }); remember(l); toast(saved ? t('link.savedToast') : t('link.unsavedToast'), saved ? { label: t('link.openSaved'), run: () => navigate('/ver-despues') } : undefined); return l; }
   catch (e) { toast(errorText(e)); return null; }
 }
-/** Abrir un enlace desde TieComs lo marca como visto (solo para mí). */
+/** Abrir un enlace desde Chaggu lo marca como visto (solo para mí). */
 export function markSeen(linkId?: string) {
   if (!linkId || states[linkId]?.seenAt) return;
   void client.setLinkState(linkId, { seen: true }).then(remember).catch(() => {});

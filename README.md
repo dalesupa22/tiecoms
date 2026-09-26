@@ -1,4 +1,4 @@
-# TieComs
+# Chaggu
 
 La red de trabajo **entre empresas**: espacios compartidos, grupos con audiencia propia, terceros con fecha de salida y mensajería durable. Web responsive primero; macOS, Windows, Android e iOS sobre el mismo contrato.
 
@@ -9,8 +9,8 @@ La red de trabajo **entre empresas**: espacios compartidos, grupos con audiencia
 | `packages/contracts` | Contrato versionado (tipos + validación zod) que comparten API y todos los clientes |
 | `packages/client-core` | Motor de sincronización sin UI: cola persistente, reintentos idempotentes, cursores con detección de huecos, no leídos entre dispositivos |
 | `apps/api` | Fastify + Socket.IO + PostgreSQL. Monolito modular; `server.js` (API y tiempo real) y `worker.js` (trabajos) |
-| `apps/web` | App en app.tiecoms.com. React + Vite, responsive (lista → conversación → detalles en móvil) y PWA |
-| `apps/landing` | Landing de www.tiecoms.com (español en `/`, inglés en `/en/`), estática; `python3 apps/landing/build.py` |
+| `apps/web` | App en app.chaggu.com. React + Vite, responsive (lista → conversación → detalles en móvil) y PWA |
+| `apps/landing` | Landing de www.chaggu.com (español en `/`, inglés en `/en/`), estática; `python3 apps/landing/build.py` |
 | `apps/desktop` | Tauri 2 para macOS y Windows (envuelve `apps/web/dist`) |
 | `apps/mobile` | Capacitor 8 para Android e iOS (envuelve `apps/web/dist`) |
 | `infra` | Dockerfile, Compose, nginx, `bootstrap-server.sh`, `deploy.sh` |
@@ -45,28 +45,28 @@ API_URL=http://localhost:3020 npm test
 - **Agenda**: reuniones que viven en un grupo (su audiencia), con invitados, respuesta de asistencia, zona horaria, enlace de Meet/Teams/Zoom y botones para Google Calendar, Outlook o `.ics`.
 - **Recordatorios**: sobre una conversación o un mensaje; el worker los dispara y llegan como aviso en vivo y notificación del navegador.
 - **Fijados**: conversaciones y espacios fijados arriba (personal) y mensajes fijados en cada grupo (compartido). Silenciar deja de notificar y de sumar al contador.
-- **Reenvíos**: hacia WhatsApp, Slack, Teams, correo u otra conversación de TieComs; y «Traer desde WhatsApp, Slack o correo» (pegado, con detección de chats de WhatsApp). En Android, la PWA instalada aparece en «Compartir».
+- **Reenvíos**: hacia WhatsApp, Slack, Teams, correo u otra conversación de Chaggu; y «Traer desde WhatsApp, Slack o correo» (pegado, con detección de chats de WhatsApp). En Android, la PWA instalada aparece en «Compartir».
 
 ## Datos de demostración
 
 `scripts/seed-demo.mjs` crea por el API 3 empresas (Xertify, Estudio Norte, Nexo Logística), 6 personas, un tercero (Julián Castro, consultor con fecha de salida), 2 espacios entre empresas, grupos compartidos, directivo, internos y directos. Cuentas: `danny|laura|mateo|ana|lucia|carlos|julian@demo.tiecoms.com`, misma contraseña (en `.secrets/demo_password`, fuera de git).
 
 ```bash
-API_URL=https://app.tiecoms.com DEMO_PASSWORD='...' node scripts/seed-demo.mjs        # una sola vez
-API_URL=https://app.tiecoms.com DEMO_PASSWORD='...' node scripts/seed-demo-extras.mjs # asuntos y bifurcaciones de demo
-API_URL=https://app.tiecoms.com DEMO_PASSWORD='...' node scripts/seed-demo-agenda.mjs # reuniones y un mensaje fijado
-API_URL=https://app.tiecoms.com DEMO_PASSWORD='...' node scripts/three-sessions.mjs   # 3 sesiones en vivo: latencia y alcance
+API_URL=https://app.chaggu.com DEMO_PASSWORD='...' node scripts/seed-demo.mjs        # una sola vez
+API_URL=https://app.chaggu.com DEMO_PASSWORD='...' node scripts/seed-demo-extras.mjs # asuntos y bifurcaciones de demo
+API_URL=https://app.chaggu.com DEMO_PASSWORD='...' node scripts/seed-demo-agenda.mjs # reuniones y un mensaje fijado
+API_URL=https://app.chaggu.com DEMO_PASSWORD='...' node scripts/three-sessions.mjs   # 3 sesiones en vivo: latencia y alcance
 ```
 
 Idioma: la app usa el del navegador (español si lo prefiere, inglés en otro caso); se puede fijar en Ajustes. Los mensajes de sistema se guardan como clave + datos y cada cliente los muestra en su idioma.
 
 ## Despliegue
 
-Dominios: www.tiecoms.com (landing es/en), app.tiecoms.com (app + API en `/api/`). `tiecoms.com` y las rutas antiguas `/app/*` y `/producto.html` redirigen.
+Dominios: www.chaggu.com (landing es/en), app.chaggu.com (app + API en `/api/`). `tiecoms.com` y las rutas antiguas `/app/*` y `/producto.html` redirigen.
 
 `npm run deploy` compila en local, sube un artefacto versionado a `/opt/tiecoms/releases/<versión>`, construye la imagen, migra, arranca `api` y `worker` con Compose, verifica `/api/health/ready` y cambia la web de forma atómica. Si la verificación falla, vuelve a la versión anterior. Se conservan las últimas 5 versiones.
 
-Servidor: `ssh ReimaginedClubServer` (EC2 t4g.large, compartida con otros servicios; TieComs solo usa `/opt/tiecoms`, `127.0.0.1:3020` y sus propios archivos de nginx). Secretos en `/opt/tiecoms/shared/api.env` (600). Base: `tiecoms` en RDS con el rol `tiecoms_app` (límite 25 conexiones), TLS verificado con el CA de RDS.
+Servidor: `ssh ReimaginedClubServer` (EC2 t4g.large, compartida con otros servicios; Chaggu solo usa `/opt/tiecoms`, `127.0.0.1:3020` y sus propios archivos de nginx). Secretos en `/opt/tiecoms/shared/api.env` (600). Base: `tiecoms` en RDS con el rol `tiecoms_app` (límite 25 conexiones), TLS verificado con el CA de RDS.
 
 ## Apps
 

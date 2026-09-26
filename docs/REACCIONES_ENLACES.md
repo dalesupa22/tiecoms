@@ -19,7 +19,7 @@ no leídos. La solución tiene dos partes:
 ### Modelo
 
 - `MessageDTO.reactions?: ReactionDTO[]` = `{ emoji, userIds[], external?: [{ name, source }] }`, en el orden de la
-  primera reacción. `external` son reacciones que llegaron por el puente de WhatsApp (sin cuenta en TieComs).
+  primera reacción. `external` son reacciones que llegaron por el puente de WhatsApp (sin cuenta en Chaggu).
 - Llegan en vivo con **`message.updated`** (el mismo evento de siempre). Por eso:
   - **no** suben `unread` (los no leídos cuentan mensajes, no eventos);
   - **no** cambian `editedAt`, así que el mensaje no aparece como «editado».
@@ -139,7 +139,7 @@ La barra del chat queda así: Fijados · Asuntos · Hilos · Agenda · **Enlaces
 - `PUT /api/v1/links/:id/state { saved?, seen? }` devuelve el `LinkItemDTO` con `savedAt` y `seenAt`.
 - `GET /api/v1/links/saved?state=pending|seen|all&before=` devuelve `{ links, hasMore, pending }`. Los
   pendientes son los guardados que aún no he visto.
-- Abrir un enlace desde TieComs lo marca como visto (`seen: true`), pero **solo para mí**: nadie ve quién abrió qué.
+- Abrir un enlace desde Chaggu lo marca como visto (`seen: true`), pero **solo para mí**: nadie ve quién abrió qué.
 - Pantalla `/ver-despues` (web) con las pestañas Pendientes y Vistos. Por enlace: Ya lo vi, ¿De qué trata?,
   Ir al mensaje y ⏰ Recuérdame (esta tarde, mañana a las 9 o el viernes), que crea un recordatorio sobre el
   mensaje con `POST /reminders`.
@@ -166,9 +166,9 @@ La barra del chat queda así: Fijados · Asuntos · Hilos · Agenda · **Enlaces
 
 - Las reacciones de los chats de WhatsApp (`reactionMessage`) se guardan en `wa_messages.reactions` y se ven en
   `/whatsapp` (`WaMessageDTO.reactions`).
-- Si el chat está vinculado a una conversación de TieComs, la reacción llega al mensaje reenviado como
-  `external` («Pedro · WhatsApp»). Quitarla en WhatsApp la quita también en TieComs.
-- Por ahora el puente no manda reacciones de TieComs a WhatsApp, porque hoy tampoco manda mensajes en ese sentido.
+- Si el chat está vinculado a una conversación de Chaggu, la reacción llega al mensaje reenviado como
+  `external` («Pedro · WhatsApp»). Quitarla en WhatsApp la quita también en Chaggu.
+- Por ahora el puente no manda reacciones de Chaggu a WhatsApp, porque hoy tampoco manda mensajes en ese sentido.
 
 ## Pendiente en iOS y Android
 

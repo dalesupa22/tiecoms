@@ -42,7 +42,7 @@ FCM: **mensaje de datos** (sin `notification`), `android.priority: high`, `colla
 
 ### 1. Llave APNs (iOS)
 1. developer.apple.com → **Certificates, IDs & Profiles → Keys → +**.
-2. Nombre `TieComs Push`, marcar **Apple Push Notifications service (APNs)** (entorno: Sandbox & Production), **Continue → Register**.
+2. Nombre `Chaggu Push`, marcar **Apple Push Notifications service (APNs)** (entorno: Sandbox & Production), **Continue → Register**.
 3. **Download** el archivo `AuthKey_XXXXXXXXXX.p8` (solo se puede bajar una vez) y anotar el **Key ID** (10 caracteres).
 4. En Identifiers → `com.tiecoms.app` confirmar que tiene **Push Notifications** activado (y crear el identificador
    `com.tiecoms.app.notifications` para la Notification Service Extension). Team ID: `B76US7H3L3`.

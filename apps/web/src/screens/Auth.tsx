@@ -60,7 +60,7 @@ export function AuthScreen({ mode, after }: { mode: 'login' | 'signup'; after?: 
   return (
     <div className="auth">
       <div className="auth-card">
-        <img src={asset('/tiecoms-logo.svg')} alt="TieComs" width={260} height={77} />
+        <img src={asset('/chaggu-logo.svg')} alt="Chaggu" width={220} height={96} />
         <p className="muted" style={{ fontSize: 16, margin: 0 }}>{t('brand.tagline')}</p>
         {joining && orgInvite && (
           <div className="card" style={{ padding: 14 }}>
@@ -138,7 +138,7 @@ export function SsoReturnScreen() {
   return (
     <div className="auth">
       <div className="auth-card">
-        <img src={asset('/tiecoms-logo.svg')} alt="TieComs" width={260} height={77} />
+        <img src={asset('/chaggu-logo.svg')} alt="Chaggu" width={220} height={96} />
         {error
           ? <>
               <div className="error" role="alert">{error}</div>

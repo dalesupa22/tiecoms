@@ -111,7 +111,7 @@ describe('chats y organización', () => {
     expect((await call(`/whatsapp/chats/${personal.id}/${encodeURIComponent('2@g.us')}`, { token: beto.token, method: 'PATCH', body: { pinned: true } })).status).toBe(404);
   });
 
-  it('leer los mensajes los marca como leídos solo en TieComs', async () => {
+  it('leer los mensajes los marca como leídos solo en Chaggu', async () => {
     const m = await call(`/whatsapp/chats/${personal.id}/${encodeURIComponent('1@g.us')}/messages`, { token: ana.token });
     expect(m.json.messages.map((x: any) => x.body)).toEqual(['Hola equipo', '¿Revisamos?']);
     const r = await call('/whatsapp/chats', { token: ana.token });
@@ -119,7 +119,7 @@ describe('chats y organización', () => {
   });
 });
 
-describe('vincular un chat a una conversación de TieComs', () => {
+describe('vincular un chat a una conversación de Chaggu', () => {
   it('solo a conversaciones donde la persona puede publicar', async () => {
     const other = await call('/workspaces', { token: beto.token, body: { name: `Ajeno ${run}` } });
     const bad = await call(`/whatsapp/chats/${personal.id}/${encodeURIComponent('1@g.us')}`, { token: ana.token, method: 'PATCH', body: { linkedConversationId: other.json.generalConversationId } });

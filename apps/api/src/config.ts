@@ -31,8 +31,8 @@ export const config = {
   microsoft: { clientId: process.env.MICROSOFT_CLIENT_ID ?? '', clientSecret: process.env.MICROSOFT_CLIENT_SECRET ?? '' },
   trustProxy: process.env.TRUST_PROXY !== 'false',
   /** Remitente de los correos (Brevo). Debe estar verificado en la cuenta de Brevo. */
-  mailFrom: process.env.MAIL_FROM ?? 'admin@tiecoms.com',
-  mailFromName: process.env.MAIL_FROM_NAME ?? 'TieComs',
+  mailFrom: process.env.MAIL_FROM ?? 'admin@chaggu.com',
+  mailFromName: process.env.MAIL_FROM_NAME ?? 'Chaggu',
 };
 
 export function pgSsl() {

@@ -17,14 +17,14 @@ install -m 644 "$SRC/nginx/tiecoms.conf" /etc/nginx/conf.d/tiecoms.conf
 nginx -t && systemctl reload nginx
 cat > /etc/systemd/system/tiecoms-cert.service <<'UNIT'
 [Unit]
-Description=TieComs: emitir certificado Let's Encrypt cuando el DNS llegue
+Description=Chaggu: emitir certificados Let's Encrypt cuando el DNS llegue
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/tiecoms-cert
 UNIT
 cat > /etc/systemd/system/tiecoms-cert.timer <<'UNIT'
 [Unit]
-Description=TieComs: reintento del certificado cada 10 minutos
+Description=Chaggu: reintento del certificado cada 10 minutos
 [Timer]
 OnBootSec=2min
 OnUnitActiveSec=10min

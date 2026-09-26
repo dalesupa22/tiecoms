@@ -68,7 +68,7 @@ export type ClientNotice =
   | { kind: 'reaction'; conversationId: string; message: MessageDTO; userId: string; emoji: string };
 
 export interface ClientOptions {
-  /** Origen del API, p. ej. https://app.tiecoms.com. Vacío = mismo origen (web). */
+  /** Origen del API, p. ej. https://app.chaggu.com. Vacío = mismo origen (web). */
   baseUrl: string;
   platform: Platform;
   deviceName: string;
@@ -83,7 +83,7 @@ const uid = () => (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(3
 const base64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 /**
- * Cliente TieComs independiente de la interfaz. Toda la lógica de envío,
+ * Cliente Chaggu independiente de la interfaz. Toda la lógica de envío,
  * reintentos, orden, recuperación y no leídos vive aquí para que web,
  * escritorio y móvil se comporten igual.
  */

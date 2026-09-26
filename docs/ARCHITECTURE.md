@@ -1,4 +1,4 @@
-# Arquitectura de TieComs
+# Arquitectura de Chaggu
 
 Implementa la propuesta de `EntreEmpresas/docs/nodo-requerimientos-arquitectura-inicial.md` (septiembre 2026). Estado al 23-sep-2026: primera sección vertical en producción.
 
@@ -17,7 +17,7 @@ Implementa la propuesta de `EntreEmpresas/docs/nodo-requerimientos-arquitectura-
 - **Monolito modular.** Auth, espacios, conversaciones, mensajes, invitaciones y tiempo real son módulos con límites claros (`apps/api/src/modules`), desplegados juntos. Se separa solo lo que las mediciones justifiquen.
 - **Un contrato para cinco clientes.** `packages/contracts` define DTOs, validación y eventos. Cambios aditivos; un cambio incompatible sube `API_VERSION` (rutas `/api/v2`) y `MIN_CLIENT_CONTRACT` marca qué apps instaladas deben actualizarse.
 - **Lógica de sincronización compartida.** `packages/client-core` no depende de React ni del navegador salvo por adaptadores (`KeyValueStorage`, `SecretStore`). Web usa IndexedDB y cookie httpOnly; las apps usan su almacenamiento y un refresh token por dispositivo.
-- **Apps sobre el build web.** Tauri (macOS/Windows) y Capacitor (Android/iOS) empaquetan `apps/web/dist` con `VITE_API_ORIGIN=https://www.tiecoms.com`. Si una plataforma necesita UI nativa (p. ej. listas muy largas en móvil), se reemplaza solo la capa de UI: el contrato y `client-core` se mantienen.
+- **Apps sobre el build web.** Tauri (macOS/Windows) y Capacitor (Android/iOS) empaquetan `apps/web/dist` con `VITE_API_ORIGIN=https://www.chaggu.com`. Si una plataforma necesita UI nativa (p. ej. listas muy largas en móvil), se reemplaza solo la capa de UI: el contrato y `client-core` se mantienen.
 
 ## Garantías transaccionales
 

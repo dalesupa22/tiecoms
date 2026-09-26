@@ -1,6 +1,6 @@
 /**
  * Correo saliente con la API transaccional de Brevo (BREVO_API_KEY). El remitente
- * es MAIL_FROM (admin@tiecoms.com), que debe estar verificado en Brevo junto con
+ * es MAIL_FROM (admin@chaggu.com), que debe estar verificado en Brevo junto con
  * el dominio (DKIM). Sin llave, `mailEnabled()` es falso y nadie intenta enviar.
  */
 import { config } from './config.ts';
@@ -45,7 +45,7 @@ export type MailResult = { status: 'sent' | 'failed' | 'skipped'; error?: string
  * Dominios a los que nunca se envía: cuentas demo y de pruebas (un rebote por cada
  * resiembra dañaría la reputación del remitente).
  */
-const suppressed = (process.env.MAIL_SUPPRESS_DOMAINS ?? 'demo.tiecoms.com,example.com,example.org,example.net')
+const suppressed = (process.env.MAIL_SUPPRESS_DOMAINS ?? 'demo.tiecoms.com,demo.chaggu.com,example.com,example.org,example.net')
   .split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
 const isSuppressed = (email: string) => {
   const domain = email.slice(email.lastIndexOf('@') + 1).toLowerCase();
@@ -76,7 +76,7 @@ function layout(lang: MailLang, title: string, paragraphs: string[], cta: { labe
   return `<!doctype html><html lang="${lang}"><body style="margin:0;background:#f4f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 16px"><tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:12px;padding:32px">
-<tr><td style="font-size:18px;font-weight:700;color:#111827;padding-bottom:20px">TieComs</td></tr>
+<tr><td style="font-size:18px;font-weight:700;color:#111827;padding-bottom:20px">Chaggu</td></tr>
 <tr><td><h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#111827">${title}</h1>${ps}
 <p style="margin:24px 0"><a href="${esc(cta.url)}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px">${cta.label}</a></p>
 <p style="margin:0;font-size:12px;line-height:1.5;color:#6b7280">${footer}<br><a href="${esc(cta.url)}" style="color:#6b7280;word-break:break-all">${esc(cta.url)}</a></p>
@@ -92,20 +92,20 @@ export function invitationMail(p: {
   const who = esc(p.inviterName), target = esc(p.targetName);
   const until = p.expiresAt.toLocaleDateString(en ? 'en-US' : 'es-CO', { day: 'numeric', month: 'long', year: 'numeric' });
   const subject = en
-    ? `${p.inviterName} invited you to ${p.targetName} on TieComs`
-    : `${p.inviterName} te invitó a ${p.targetName} en TieComs`;
+    ? `${p.inviterName} invited you to ${p.targetName} on Chaggu`
+    : `${p.inviterName} te invitó a ${p.targetName} en Chaggu`;
   const title = en ? `Join ${target}` : `Únete a ${target}`;
   const lead = p.kind === 'org'
-    ? (en ? `<b>${who}</b> invited you to create your TieComs account inside <b>${target}</b>.`
-      : `<b>${who}</b> te invitó a crear tu cuenta de TieComs dentro de <b>${target}</b>.`)
-    : (en ? `<b>${who}</b> invited you to the shared space <b>${target}</b> on TieComs, where teams from different companies work together.`
-      : `<b>${who}</b> te invitó al espacio compartido <b>${target}</b> en TieComs, donde trabajan juntos equipos de distintas empresas.`);
+    ? (en ? `<b>${who}</b> invited you to create your Chaggu account inside <b>${target}</b>.`
+      : `<b>${who}</b> te invitó a crear tu cuenta de Chaggu dentro de <b>${target}</b>.`)
+    : (en ? `<b>${who}</b> invited you to the shared space <b>${target}</b> on Chaggu, where teams from different companies work together.`
+      : `<b>${who}</b> te invitó al espacio compartido <b>${target}</b> en Chaggu, donde trabajan juntos equipos de distintas empresas.`);
   const note = en ? `The link is single-use and expires on ${until}.` : `El enlace es de un solo uso y vence el ${until}.`;
   const footer = en ? `If you weren't expecting this invitation, you can ignore this email. If the button doesn't work, copy this link:`
     : `Si no esperabas esta invitación, puedes ignorar este correo. Si el botón no funciona, copia este enlace:`;
   const label = en ? 'Accept invitation' : 'Aceptar invitación';
   const text = [
-    en ? `${p.inviterName} invited you to ${p.targetName} on TieComs.` : `${p.inviterName} te invitó a ${p.targetName} en TieComs.`,
+    en ? `${p.inviterName} invited you to ${p.targetName} on Chaggu.` : `${p.inviterName} te invitó a ${p.targetName} en Chaggu.`,
     '', `${label}: ${p.url}`, '', note,
   ].join('\n');
   return {
@@ -136,8 +136,8 @@ export function linkDigestMail(p: {
   ].filter(Boolean);
   const url = `${p.appUrl.replace(/\/$/, '')}/ver-despues`;
   const label = en ? 'Open Watch later' : 'Abrir «Ver después»';
-  const footer = en ? 'You get this email because you turned on the weekly link digest in your TieComs profile. Turn it off there anytime.'
-    : 'Te llega porque activaste el resumen semanal de enlaces en tu perfil de TieComs. Lo apagas ahí cuando quieras.';
+  const footer = en ? 'You get this email because you turned on the weekly link digest in your Chaggu profile. Turn it off there anytime.'
+    : 'Te llega porque activaste el resumen semanal de enlaces en tu perfil de Chaggu. Lo apagas ahí cuando quieras.';
   const text = [
     title, '',
     ...(p.total ? [en ? `${p.total} links shared:` : `${p.total} ${p.total === 1 ? 'enlace compartido' : 'enlaces compartidos'}:`, ...p.byConversation.map((c) => `- ${c.name}: ${c.count}`), ''] : []),

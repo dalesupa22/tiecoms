@@ -44,8 +44,8 @@ export const googleLink = (ev: CalendarEventDTO) => `https://calendar.google.com
 export const outlookLink = (ev: CalendarEventDTO) => `https://outlook.office.com/calendar/0/deeplink/compose?path=/calendar/action/compose&rru=addevent&subject=${encodeURIComponent(ev.title)}&startdt=${encodeURIComponent(ev.startsAt)}&enddt=${encodeURIComponent(ev.endsAt)}&body=${encodeURIComponent(details(ev))}&location=${encodeURIComponent(ev.location ?? '')}`;
 export function downloadIcs(ev: CalendarEventDTO) {
   const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/[,;]/g, (c) => `\\${c}`);
-  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//TieComs//ES', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT',
-    `UID:${ev.id}@tiecoms.com`, `DTSTAMP:${gstamp(new Date().toISOString())}`, `DTSTART:${gstamp(ev.startsAt)}`, `DTEND:${gstamp(ev.endsAt)}`,
+  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Chaggu//ES', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT',
+    `UID:${ev.id}@chaggu.com`, `DTSTAMP:${gstamp(new Date().toISOString())}`, `DTSTART:${gstamp(ev.startsAt)}`, `DTEND:${gstamp(ev.endsAt)}`,
     `SUMMARY:${esc(ev.title)}`, `DESCRIPTION:${esc(details(ev))}`, ...(ev.location ? [`LOCATION:${esc(ev.location)}`] : []),
     `URL:${location.origin}${BASE}/c/${ev.conversationId}`, ev.cancelledAt ? 'STATUS:CANCELLED' : 'STATUS:CONFIRMED', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
   const a = document.createElement('a');

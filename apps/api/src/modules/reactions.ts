@@ -115,7 +115,7 @@ export async function react(userId: string, messageId: string, rawEmoji: string,
 }
 
 /**
- * Reacción que llega por el puente de WhatsApp sobre un mensaje reenviado a TieComs.
+ * Reacción que llega por el puente de WhatsApp sobre un mensaje reenviado a Chaggu.
  * emoji vacío = la persona quitó su reacción.
  */
 export async function externalReaction(messageId: string, key: string, emoji: string | null, name: string, source = 'whatsapp') {

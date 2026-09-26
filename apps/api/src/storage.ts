@@ -46,7 +46,7 @@ export async function presignDownload(key: string, fileName: string, contentType
 
 /**
  * La política del usuario de S3 niega DeleteObject (probado el 24-sep-2026): el
- * borrado en TieComs es lógico. Con S3_ALLOW_DELETE=true se borra también el objeto.
+ * borrado en Chaggu es lógico. Con S3_ALLOW_DELETE=true se borra también el objeto.
  */
 export async function deleteObject(key: string) {
   if (process.env.S3_ALLOW_DELETE !== 'true') return;

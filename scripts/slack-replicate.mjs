@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 /**
- * Replica los canales de Slack de Xertify como espacios y grupos en TieComs.
+ * Replica los canales de Slack de Xertify como espacios y grupos en Chaggu.
  * Lee el plan de `.secrets/slack-plan.json` (canales y miembros, fuera de git).
  *
  *   node scripts/slack-replicate.mjs            # crea espacios y grupos solo contigo (idempotente)
  *   node scripts/slack-replicate.mjs --invite   # manda las invitaciones por correo (pide confirmar)
  *
- * API_URL (por defecto https://app.tiecoms.com), TIECOMS_EMAIL y la contraseña se piden por consola
+ * API_URL (por defecto https://app.chaggu.com), TIECOMS_EMAIL y la contraseña se piden por consola
  * (o TIECOMS_PASSWORD para pruebas locales). No copia mensajes de Slack.
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
-const API = process.env.API_URL ?? 'https://app.tiecoms.com';
+const API = process.env.API_URL ?? 'https://app.chaggu.com';
 const SECRETS = new URL('../../tiecoms/.secrets/', import.meta.url);
 const PLAN = process.env.SLACK_PLAN ?? new URL('slack-plan.json', SECRETS).pathname;
 const OUT = process.env.SLACK_OUT ?? new URL('slack-created.json', SECRETS).pathname;
@@ -41,7 +41,7 @@ async function call(path, { body, method } = {}) {
   }
 }
 
-const email = process.env.TIECOMS_EMAIL ?? await ask('Tu correo de TieComs: ');
+const email = process.env.TIECOMS_EMAIL ?? await ask('Tu correo de Chaggu: ');
 const password = process.env.TIECOMS_PASSWORD ?? await ask('Contraseña (no se muestra): ', true);
 token = (await call('/auth/login', { body: { email, password, device: { deviceId: randomUUID(), name: 'Réplica de Slack', platform: 'agent' } } })).accessToken;
 console.log(`Conectado a ${API} como ${email}`);

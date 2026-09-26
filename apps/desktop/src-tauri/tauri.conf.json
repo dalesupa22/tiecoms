@@ -1,18 +1,18 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "TieComs",
+  "productName": "Chaggu",
   "version": "0.1.0",
   "identifier": "com.tiecoms.desktop",
   "build": {
     "beforeDevCommand": "npm -w @tiecoms/web run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "VITE_API_ORIGIN=https://app.tiecoms.com npm -w @tiecoms/web run build",
+    "beforeBuildCommand": "VITE_API_ORIGIN=https://app.chaggu.com npm -w @tiecoms/web run build",
     "frontendDist": "../../web/dist"
   },
   "app": {
-    "windows": [{ "title": "TieComs", "width": 1280, "height": 820, "minWidth": 380, "minHeight": 560 }],
+    "windows": [{ "title": "Chaggu", "width": 1280, "height": 820, "minWidth": 380, "minHeight": 560 }],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' https://app.tiecoms.com wss://app.tiecoms.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:"
+      "csp": "default-src 'self'; connect-src 'self' https://app.chaggu.com wss://app.chaggu.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:"
     }
   },
   "bundle": {

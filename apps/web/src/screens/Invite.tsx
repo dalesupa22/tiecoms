@@ -26,7 +26,7 @@ export function InviteScreen({ token }: { token: string }) {
   return (
     <div className="auth">
       <div className="auth-card">
-        <img src={asset('/tiecoms-logo.svg')} alt="TieComs" width={220} height={65} />
+        <img src={asset('/chaggu-logo.svg')} alt="Chaggu" width={190} height={83} />
         {error && <div className="error">{error}</div>}
         {!inv && !error && <div className="muted">{t('common.loading')}</div>}
         {inv && (

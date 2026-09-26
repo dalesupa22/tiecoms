@@ -22,7 +22,7 @@ const HTML_MAX = 1024 * 1024;
 const IMAGE_MAX = 2 * 1024 * 1024;
 const TIMEOUT_MS = 6000;
 const CACHE_HOURS = 24;
-const UA = 'Mozilla/5.0 (compatible; TieComsBot/1.0; +https://www.tiecoms.com)';
+const UA = 'Mozilla/5.0 (compatible; ChagguBot/1.0; +https://www.chaggu.com)';
 /** Redes que solo sirven etiquetas og: a los rastreadores de vistas previas conocidos. */
 const CRAWLER_UA = 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)';
 const MAX_PREVIEWS = 3;

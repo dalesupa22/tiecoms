@@ -1,7 +1,7 @@
 # Enlaces de las aplicaciones
 
 `infra/nginx/app-links.conf` publica los archivos de asociación en HTTPS, sin
-redirección, en `tiecoms.com`, `www.tiecoms.com` y `app.tiecoms.com`.
+redirección, en `tiecoms.com`, `www.chaggu.com` y `app.chaggu.com`.
 
 ## Android
 

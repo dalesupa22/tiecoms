@@ -117,7 +117,7 @@ Hoja «Invitar a {grupo}», desde el menú del grupo y desde su información:
   La respuesta trae `url` y `code`.
 
 **Pantalla de compartir**: el código en grande (`K7QM-4XPA`, con botón Copiar), el enlace (Copiar), el botón
-Compartir del sistema con el texto «Te invito a {grupo} en TieComs: {url} (código {code})» y «Vence el {fecha}.
+Compartir del sistema con el texto «Te invito a {grupo} en Chaggu: {url} (código {code})» y «Vence el {fecha}.
 Sirve para varias personas».
 
 ## Unirme con código

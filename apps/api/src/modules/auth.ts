@@ -61,7 +61,7 @@ export async function placeNewUser(c: Tx, email: string, opts: { orgInviteToken?
     const owner = await claimedBy(c, domain);
     if (owner) {
       if (owner.joinPolicy === 'auto' && opts.proof) return { orgId: owner.orgId, role: 'member' as OrgRole, inviteId: null, via: 'domain' as const };
-      throw new ApiError(409, 'domain_claimed', `${owner.orgName} ya está en TieComs con el dominio ${domain}. Pide a su administrador que te invite.`, { orgName: owner.orgName, domain });
+      throw new ApiError(409, 'domain_claimed', `${owner.orgName} ya está en Chaggu con el dominio ${domain}. Pide a su administrador que te invite.`, { orgName: owner.orgName, domain });
     }
   }
   const name = (opts.orgName ?? opts.fallbackOrgName).trim().slice(0, 120);

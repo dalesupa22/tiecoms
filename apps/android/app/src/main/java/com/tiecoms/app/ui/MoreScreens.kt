@@ -173,7 +173,7 @@ private fun ReminderRow(r: ReminderDTO, data: BootstrapDTO, due: Boolean, onOpen
     }
 }
 
-// ---------- Compartir hacia TieComs ----------
+// ---------- Compartir hacia Chaggu ----------
 @Composable
 fun ShareScreen(text: String, source: String, onBack: () -> Unit, onDone: (String) -> Unit) {
     val client = LocalClient.current

@@ -66,10 +66,10 @@ class V3DecodingTest {
         assertEquals("/api/v1/avatars/aaa", b.me.avatarUrl)
         assertEquals("/api/v1/avatars/bbb", b.people[0].avatarUrl)
         assertNull(b.people[1].avatarUrl); assertNull(b.people[2].avatarUrl)
-        assertEquals("https://app.tiecoms.com/api/v1/avatars/bbb", Media.absolute(b.people[0].avatarUrl, "https://app.tiecoms.com/"))
+        assertEquals("https://app.chaggu.com/api/v1/avatars/bbb", Media.absolute(b.people[0].avatarUrl, "https://app.chaggu.com/"))
         assertEquals("http://10.0.2.2:3041/api/v1/previews/p", Media.absolute("api/v1/previews/p", "http://10.0.2.2:3041"))
-        assertEquals("https://cdn.x/y.jpg", Media.absolute("https://cdn.x/y.jpg", "https://app.tiecoms.com"))
-        assertNull(Media.absolute(null, "https://app.tiecoms.com")); assertNull(Media.absolute("", "https://app.tiecoms.com"))
+        assertEquals("https://cdn.x/y.jpg", Media.absolute("https://cdn.x/y.jpg", "https://app.chaggu.com"))
+        assertNull(Media.absolute(null, "https://app.chaggu.com")); assertNull(Media.absolute("", "https://app.chaggu.com"))
     }
 
     @Test fun `arbol de archivos con campos extra y nulos`() {

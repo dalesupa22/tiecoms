@@ -18,7 +18,12 @@ sealed interface DeepLink {
 }
 
 object DeepLinks {
-    val HOSTS = setOf("app.tiecoms.com", "tiecoms.com", "www.tiecoms.com")
+    /** App web (y API) y sitio público de Chaggu, para los enlaces que la app genera. */
+    const val APP_URL = "https://app.chaggu.com"
+    const val WEB_URL = "https://www.chaggu.com"
+    /** Chaggu (actual) y TieComs (marca anterior; sus enlaces siguen abriendo la app). */
+    val HOSTS = setOf("app.chaggu.com", "chaggu.com", "www.chaggu.com", "app.tiecoms.com", "tiecoms.com", "www.tiecoms.com")
+    /** Esquema propio: se mantiene «tiecoms» porque el SSO nativo del backend redirige a tiecoms://auth/callback. */
     const val SCHEME = "tiecoms"
     const val SCREEN_ISSUES = "issues"
     const val SCREEN_AGENDA = "agenda"
@@ -40,7 +45,7 @@ object DeepLinks {
     private val ID = Regex("^[A-Za-z0-9_-]{1,200}$")
 
     /**
-     * https://app.tiecoms.com/c/<id>, /w/<id>, /invite/<token>, /signup?org=<token>
+     * https://app.chaggu.com/c/<id> (también chaggu.com, www. y los hosts tiecoms.com), /w/<id>, /invite/<token>, /signup?org=<token>
      * tiecoms://c/<id> (el primer segmento llega como host) · tiecoms:///c/<id>
      */
     fun parse(raw: String?): DeepLink? {

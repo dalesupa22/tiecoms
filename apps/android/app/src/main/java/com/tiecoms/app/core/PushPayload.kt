@@ -38,7 +38,7 @@ object PushPayload {
         val conv = s("conversationId") ?: return null
         return PushMessage(
             type = type,
-            title = s("title") ?: s("authorName") ?: "TieComs",
+            title = s("title") ?: s("authorName") ?: "Chaggu",
             subtitle = s("subtitle") ?: "",
             body = s("body") ?: "",
             badge = s("badge")?.toIntOrNull()?.coerceAtLeast(0) ?: 0,

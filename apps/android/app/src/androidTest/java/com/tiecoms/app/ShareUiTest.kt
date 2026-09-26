@@ -45,7 +45,7 @@ import java.util.UUID
 
 /**
  * SPEC-v4 en el emulador contra 3043: pestañas de Inicio, atajos de Direct Share, la hoja de compartir del SISTEMA con
- * TieComs y sus conversaciones, ShareActivity con 3 fotos de la galería a 2 conversaciones, la burbuja con la
+ * Chaggu y sus conversaciones, ShareActivity con 3 fotos de la galería a 2 conversaciones, la burbuja con la
  * cuadrícula de fotos y el visor.
  *
  *   adb shell am instrument -w -e apiUrl http://10.0.2.2:3043 -e email … -e password … -e conversationId … -e peerId … \
@@ -68,13 +68,13 @@ class ShareUiTest {
     // Sin ventanas de Compose (la hoja se cerró y la app está en segundo plano) cuenta como «no está».
     private fun exists(tag: String) = runCatching { compose.onAllNodes(hasTestTag(tag), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }.getOrDefault(false)
 
-    /** Foto en la galería (MediaStore, Pictures/TieComs), como si viniera de la cámara. */
+    /** Foto en la galería (MediaStore, Pictures/Chaggu), como si viniera de la cámara. */
     private fun galleryPhoto(label: String, color: Int): Uri {
         val cr = ins.targetContext.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, "tiecoms-$label-${UUID.randomUUID().toString().take(4)}.jpg")
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/TieComs")
+            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Chaggu")
         }
         val uri = cr.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)!!
         val bmp = Bitmap.createBitmap(1200, 900, Bitmap.Config.ARGB_8888)
@@ -101,7 +101,7 @@ class ShareUiTest {
     fun compartirDesdeLaGaleria() {
         val apiUrl = arg("apiUrl"); val email = arg("email"); val password = arg("password"); val convId = arg("conversationId"); val peerId = arg("peerId")
         assumeTrue("Faltan argumentos del fixture", apiUrl.isNotBlank() && email.isNotBlank() && password.isNotBlank() && convId.isNotBlank())
-        assertFalse("Nunca contra producción", apiUrl.contains("app.tiecoms.com"))
+        assertFalse("Nunca contra producción", (apiUrl.contains("app.tiecoms.com") || apiUrl.contains("app.chaggu.com")))
         ins.runOnMainSync { app.container.setDebugApiUrl(apiUrl) }
         val c0 = app.container.client.value
         runBlocking {
@@ -137,7 +137,7 @@ class ShareUiTest {
         log("§B Direct Share: ${shortcuts.size} atajos de larga vida (${shortcuts.joinToString { it.shortLabel.toString() }})")
         assertTrue(shortcuts.all { ConversationShortcuts.SHARE_CATEGORY in (it.categories ?: emptySet()) })
 
-        // La hoja de compartir del SISTEMA con 3 fotos de la galería: TieComs y sus conversaciones.
+        // La hoja de compartir del SISTEMA con 3 fotos de la galería: Chaggu y sus conversaciones.
         val photos = listOf(galleryPhoto("Uno", 0xFF2F6FDB.toInt()), galleryPhoto("Dos", 0xFF1A7F51.toInt()), galleryPhoto("Tres", 0xFFB45309.toInt()))
         device.pressHome()
         val send = Intent(Intent.ACTION_SEND_MULTIPLE).setType("image/jpeg")
@@ -146,14 +146,14 @@ class ShareUiTest {
         send.clipData = android.content.ClipData.newUri(ins.targetContext.contentResolver, "fotos", photos[0]).apply { photos.drop(1).forEach { addItem(android.content.ClipData.Item(it)) } }
         ins.targetContext.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
         val title = Names.conversationTitle(client.meta(convId)!!, client.state.value.data, "Interno", "Conversación")
-        device.wait(Until.hasObject(By.text("TieComs")), 10_000)
+        device.wait(Until.hasObject(By.text("Chaggu")), 10_000)
         Thread.sleep(1_500)
         val directShare = device.hasObject(By.textContains(title.take(12)))
         shot("v4-03-hoja-sistema")
-        log("§B hoja del sistema: TieComs ${if (device.hasObject(By.text("TieComs"))) "aparece" else "NO aparece"}; conversación «$title» en Direct Share: $directShare")
+        log("§B hoja del sistema: Chaggu ${if (device.hasObject(By.text("Chaggu"))) "aparece" else "NO aparece"}; conversación «$title» en Direct Share: $directShare")
         // Tocar la conversación de Direct Share (si el sistema la muestra) o la app.
-        val target = device.findObject(By.textContains(title.take(12))) ?: device.findObject(By.text("TieComs"))
-        assertNotNull("TieComs en la hoja de compartir", target)
+        val target = device.findObject(By.textContains(title.take(12))) ?: device.findObject(By.text("Chaggu"))
+        assertNotNull("Chaggu en la hoja de compartir", target)
         target!!.click()
 
         // ShareActivity: vista previa de las 3 fotos y la conversación preseleccionada (si vino por Direct Share).

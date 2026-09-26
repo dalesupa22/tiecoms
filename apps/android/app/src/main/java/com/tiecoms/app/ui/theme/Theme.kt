@@ -9,11 +9,13 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
+/** Marca Chaggu: mandarina #FF5A36, tinta #17161F, papel #F6F3EC. */
 object Brand {
-    val Orange = Color(0xFFFF7A00)
-    val OrangeLight = Color(0xFFFF8A1F)
-    val Black = Color(0xFF1F1F1F)
+    val Orange = Color(0xFFFF5A36)
+    val OrangeLight = Color(0xFFFF7A5C)
+    val Black = Color(0xFF17161F)
     val Cream = Color(0xFFFDFAF7)
+    val Paper = Color(0xFFF6F3EC)
 }
 
 @Immutable
@@ -27,14 +29,14 @@ data class ChatColors(
 )
 
 val LocalChatColors = staticCompositionLocalOf {
-    ChatColors(Color(0xFFE8710A), Color.White, Color(0xFFEFEBE7), Brand.Black, Color(0xFF6B6560), Color(0xFFC62828))
+    ChatColors(Color(0xFFE8502E), Color.White, Color(0xFFEFEBE7), Brand.Black, Color(0xFF6B6560), Color(0xFFC62828))
 }
 
 private val Light = lightColorScheme(
     primary = Brand.Orange,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFE3CC),
-    onPrimaryContainer = Color(0xFF4A2300),
+    primaryContainer = Color(0xFFFFDDD4),
+    onPrimaryContainer = Color(0xFF4A1203),
     secondary = Brand.Black,
     onSecondary = Color.White,
     background = Brand.Cream,
@@ -53,31 +55,31 @@ private val Light = lightColorScheme(
 
 private val Dark = darkColorScheme(
     primary = Brand.OrangeLight,
-    onPrimary = Color(0xFF1F1F1F),
-    primaryContainer = Color(0xFF5A2B00),
-    onPrimaryContainer = Color(0xFFFFDCC2),
+    onPrimary = Color(0xFF17161F),
+    primaryContainer = Color(0xFF5A1E0E),
+    onPrimaryContainer = Color(0xFFFFDAD0),
     secondary = Color(0xFFE8E2DC),
     onSecondary = Brand.Black,
-    background = Color(0xFF151413),
+    background = Color(0xFF17161F),
     onBackground = Color(0xFFEDE7E1),
-    surface = Color(0xFF151413),
+    surface = Color(0xFF17161F),
     onSurface = Color(0xFFEDE7E1),
-    surfaceVariant = Color(0xFF2A2725),
+    surfaceVariant = Color(0xFF2A2933),
     onSurfaceVariant = Color(0xFFBDB5AE),
-    surfaceContainer = Color(0xFF1F1D1B),
-    surfaceContainerHigh = Color(0xFF282523),
-    surfaceContainerLow = Color(0xFF1A1817),
+    surfaceContainer = Color(0xFF1F1E28),
+    surfaceContainerHigh = Color(0xFF282733),
+    surfaceContainerLow = Color(0xFF1B1A23),
     outline = Color(0xFF7A726B),
-    outlineVariant = Color(0xFF3A3633),
+    outlineVariant = Color(0xFF3A3944),
     error = Color(0xFFFF8A80),
 )
 
 @Composable
 fun TieComsTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
     val chat = if (dark) {
-        ChatColors(Color(0xFFC75F08), Color.White, Color(0xFF2B2826), Color(0xFFEDE7E1), Color(0xFFA59D96), Color(0xFFFF8A80))
+        ChatColors(Color(0xFFC8431F), Color.White, Color(0xFF2B2A34), Color(0xFFEDE7E1), Color(0xFFA59D96), Color(0xFFFF8A80))
     } else {
-        ChatColors(Color(0xFFE8710A), Color.White, Color(0xFFEFEBE7), Brand.Black, Color(0xFF6B6560), Color(0xFFC62828))
+        ChatColors(Color(0xFFE8502E), Color.White, Color(0xFFEFEBE7), Brand.Black, Color(0xFF6B6560), Color(0xFFC62828))
     }
     androidx.compose.runtime.CompositionLocalProvider(LocalChatColors provides chat) {
         MaterialTheme(colorScheme = if (dark) Dark else Light, content = content)

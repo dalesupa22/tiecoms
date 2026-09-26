@@ -39,7 +39,7 @@ class LiveApiIntegrationTest {
         assumeTrue("Sin TIECOMS_FIXTURE: se omite la integración", fxPath.isNotBlank() && File(fxPath).exists())
         val fx = TcJson.parseToJsonElement(File(fxPath).readText()).jsonObject
         val api = fx["apiUrl"]!!.jsonPrimitive.content
-        assertFalse("Nunca contra producción", api.contains("app.tiecoms.com"))
+        assertFalse("Nunca contra producción", (api.contains("app.tiecoms.com") || api.contains("app.chaggu.com")))
         val password = fx["password"]!!.jsonPrimitive.content
         val convId = fx["conversationId"]!!.jsonPrimitive.content
         val a = fx["a"] as JsonObject

@@ -58,8 +58,8 @@ import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 
-private val OrangeRope = Color(0xFFFF7A00)
-private val OrangeEdge = Color(0xFFC95A00)
+private val OrangeRope = Color(0xFFFF5A36) // mandarina Chaggu
+private val OrangeEdge = Color(0xFFC8401F)
 
 /**
  * Splash animado «Un solo hilo» (SPEC-v2 §4), dibujado en un Canvas a 60 fps a partir de
@@ -124,14 +124,14 @@ fun SplashOverlay(mode: Mode, ready: Boolean, onFinished: () -> Unit) {
     }
 
     val frame = SplashChoreo.frame(t, readyLatched, waited, effMode)
-    val bg = if (dark) Color(0xFF161413) else Color(0xFFFDFAF7)
+    val bg = if (dark) Color(0xFF17161F) else Color(0xFFFDFAF7)
     val ink = ImageBitmap.imageResource(if (dark) R.drawable.splash_ink_light else R.drawable.splash_ink)
-    val orange = ImageBitmap.imageResource(R.drawable.splash_orange)
+    val orange = ImageBitmap.imageResource(if (dark) R.drawable.splash_orange_dark else R.drawable.splash_orange)
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val slogan = listOf(stringResource(R.string.splash_line1), stringResource(R.string.splash_line2), stringResource(R.string.splash_line3))
     val grey = if (dark) Color(0xFFA59D96) else Color(0xFF6B6560)
-    val strong = if (dark) Color(0xFFF3EDE6) else Color(0xFF1F1F1F)
+    val strong = if (dark) Color(0xFFF6F3EC) else Color(0xFF17161F)
     val a11y = stringResource(R.string.splash_a11y)
 
     Box(
@@ -145,10 +145,10 @@ fun SplashOverlay(mode: Mode, ready: Boolean, onFinished: () -> Unit) {
             val w = size.width; val h = size.height
             val center = Offset(w / 2, h / 2)
             val logoW = min(w * 0.78f, with(density) { 420.dp.toPx() })
-            val logoH = logoW * 484f / 2380f
-            // El logo se coloca de modo que el nudo quede en el centro de la pantalla.
-            val logoTopLeft = Offset(center.x - logoW * SplashChoreo.KNOT_FX, center.y - logoH * SplashChoreo.KNOT_FY)
-            val knot = center
+            val logoH = logoW * SplashChoreo.LOGO_ASPECT
+            // El logo queda centrado; el nudo (la burbuja mandarina de la «g») queda a la altura del centro.
+            val logoTopLeft = Offset(center.x - logoW / 2f, center.y - logoH * SplashChoreo.KNOT_FY)
+            val knot = Offset(logoTopLeft.x + logoW * SplashChoreo.KNOT_FX, center.y)
             scale(frame.exitScale, pivot = center) {
                 drawPeople(frame, w, h, knot, measurer, density.density)
                 drawBirth(frame, knot, logoW)

@@ -55,7 +55,7 @@ class SsoTest {
     }
 
     @Test fun `url de inicio con todos los parametros`() {
-        val u = URI(Sso.startUrl("https://app.tiecoms.com/", SsoProvider.MICROSOFT, "dev-1", "abc_-"))
+        val u = URI(Sso.startUrl("https://app.chaggu.com/", SsoProvider.MICROSOFT, "dev-1", "abc_-"))
         assertEquals("/api/v1/auth/microsoft/start", u.path)
         assertEquals("platform=android&device_id=dev-1&code_challenge=abc_-&code_challenge_method=S256", u.rawQuery)
     }
@@ -68,7 +68,7 @@ class SsoTest {
         assertFalse(e.cancelled)
         assertTrue((Sso.parseCallback("tiecoms://auth/callback?error=access_denied") as SsoCallback.Error).cancelled)
         assertNull(Sso.parseCallback("tiecoms://c/abc"))
-        assertNull(Sso.parseCallback("https://app.tiecoms.com/auth/callback?code=x"))
+        assertNull(Sso.parseCallback("https://app.chaggu.com/auth/callback?code=x"))
         // El router de enlaces ignora el host reservado auth.
         assertNull(DeepLinks.parse("tiecoms://auth/callback?code=xyz"))
         assertNull(DeepLinks.parse("tiecoms://auth/otra"))

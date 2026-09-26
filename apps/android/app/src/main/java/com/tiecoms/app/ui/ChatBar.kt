@@ -218,7 +218,7 @@ fun ThreadChip(threads: List<ConversationDTO>, onOpen: (String) -> Unit) {
                     if (!last.isNullOrBlank() && c.returnedAt == null) Text(last, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f))
                 }
-                if (c.unread > 0 && !c.mutedAt(System.currentTimeMillis())) Box(Modifier.padding(start = 6.dp).size(8.dp).background(Color(0xFFE8710A), CircleShape))
+                if (c.unread > 0 && !c.mutedAt(System.currentTimeMillis())) Box(Modifier.padding(start = 6.dp).size(8.dp).background(Color(0xFFE8502E), CircleShape))
             }
         }
     }

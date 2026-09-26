@@ -84,7 +84,7 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
- * Hoja «Compartir en TieComs» (SPEC-v4 §B, mismo diseño que la extensión de iOS): vista previa de lo compartido,
+ * Hoja «Compartir en Chaggu» (SPEC-v4 §B, mismo diseño que la extensión de iOS): vista previa de lo compartido,
  * buscador, conversaciones (recientes y luego agrupadas como Inicio), hasta 5 destinos, «Añadir un mensaje…» y Enviar
  * con progreso por archivo. El envío corre en WorkManager: si se cierra la hoja, sigue en segundo plano.
  */

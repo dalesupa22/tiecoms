@@ -266,7 +266,7 @@ private fun PendingPill() {
 // ---------- Compartir el enlace y el código ----------
 /**
  * Pantalla de compartir: el código en grande con Copiar, el enlace con Copiar, el Compartir del sistema
- * («Te invito a {grupo} en TieComs: {url} (código {code})») y la fecha de vencimiento. «Listo» cierra.
+ * («Te invito a {grupo} en Chaggu: {url} (código {code})») y la fecha de vencimiento. «Listo» cierra.
  */
 @Composable
 fun ShareInviteSheet(groupName: String, url: String, code: String?, expiresAt: String?, onDone: () -> Unit) {

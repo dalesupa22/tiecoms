@@ -78,7 +78,7 @@ class LiveUiTest {
     fun loginConversacionAccionesYDeepLinks() {
         val apiUrl = arg("apiUrl"); val email = arg("email"); val password = arg("password"); val convId = arg("conversationId")
         assumeTrue("Faltan argumentos del fixture", apiUrl.isNotBlank() && email.isNotBlank() && password.isNotBlank() && convId.isNotBlank())
-        assertFalse("Nunca contra producción", apiUrl.contains("app.tiecoms.com"))
+        assertFalse("Nunca contra producción", (apiUrl.contains("app.tiecoms.com") || apiUrl.contains("app.chaggu.com")))
         prepare(apiUrl)
         val scenario = ActivityScenario.launch(MainActivity::class.java)
         try { flow(scenario, convId, email, password) } catch (t: Throwable) {
@@ -141,7 +141,7 @@ class LiveUiTest {
         Thread.sleep(500)
         screenshot("ui-04-fijado-editado")
 
-        // 5. Compartir hacia TieComs (ACTION_SEND de otra app) → ShareActivity → elegir conversación → Enviar.
+        // 5. Compartir hacia Chaggu (ACTION_SEND de otra app) → ShareActivity → elegir conversación → Enviar.
         val shared = "Pedido 4411 listo para despacho"
         ins.targetContext.startActivity(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, shared)
             .setClassName(ins.targetContext.packageName, "com.tiecoms.app.ShareActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -167,9 +167,9 @@ class LiveUiTest {
         compose.onNodeWithTag("back").performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("conv-$convId"), 10_000)
         t0 = System.currentTimeMillis()
-        open("https://app.tiecoms.com/c/$convId")
+        open("https://app.chaggu.com/c/$convId")
         compose.waitUntilExactlyOneExists(hasTestTag("composer"), 10_000)
-        log("deep link https://app.tiecoms.com/c/<id>: ${System.currentTimeMillis() - t0} ms")
+        log("deep link https://app.chaggu.com/c/<id>: ${System.currentTimeMillis() - t0} ms")
         open("tiecoms://asuntos")
         compose.waitUntilExactlyOneExists(hasTestTag("issues"), 10_000)
         open("tiecoms://agenda")

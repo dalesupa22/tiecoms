@@ -6,10 +6,11 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 
-    <!-- Splash del sistema (Android 12+ y compat): fondo crema con el ícono TC; da paso al splash animado. -->
+    <!-- Splash del sistema (Android 12+ y compat): símbolo de Chaggu sobre círculo tinta; da paso al splash animado. -->
     <style name="Theme.TieComs.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_bg</item>
         <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/ink</item>
         <item name="windowSplashScreenAnimationDuration">200</item>
         <item name="postSplashScreenTheme">@style/Theme.TieComs</item>
     </style>

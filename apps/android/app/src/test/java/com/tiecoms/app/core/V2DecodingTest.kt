@@ -100,9 +100,9 @@ class V2DecodingTest {
     }
 
     @Test fun `sso con empresa o invitacion`() {
-        val u = Sso.startUrl("https://app.tiecoms.com", SsoProvider.GOOGLE, "d", "c", orgName = "Acme SAS")
+        val u = Sso.startUrl("https://app.chaggu.com", SsoProvider.GOOGLE, "d", "c", orgName = "Acme SAS")
         assertTrue(u.endsWith("&org_name=Acme%20SAS"))
-        assertTrue(Sso.startUrl("https://app.tiecoms.com", SsoProvider.GOOGLE, "d", "c", orgInviteToken = "tok").contains("&org=tok"))
+        assertTrue(Sso.startUrl("https://app.chaggu.com", SsoProvider.GOOGLE, "d", "c", orgInviteToken = "tok").contains("&org=tok"))
         assertTrue((Sso.parseCallback("tiecoms://auth/callback?error=sso_cancelled") as SsoCallback.Error).cancelled)
     }
 }

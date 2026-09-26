@@ -48,7 +48,7 @@ class LiveV2IntegrationTest {
         assumeTrue("Sin TIECOMS_FIXTURE: se omite", fxPath.isNotBlank() && File(fxPath).exists())
         val fx = TcJson.parseToJsonElement(File(fxPath).readText()).jsonObject
         val api = fx["apiUrl"]!!.jsonPrimitive.content
-        assertFalse("Nunca contra producción", api.contains("app.tiecoms.com"))
+        assertFalse("Nunca contra producción", (api.contains("app.tiecoms.com") || api.contains("app.chaggu.com")))
         val password = fx["password"]!!.jsonPrimitive.content
         val convId = fx["conversationId"]!!.jsonPrimitive.content
         val a = TieComsClient(api, "JVM A", MemoryStorage(), MemorySecretStore(), ok)
@@ -156,7 +156,7 @@ class LiveV2IntegrationTest {
             assertNotNull("El servidor conserva la fijación", b.meta(convId)!!.pinnedAt)
             log("silenciar", "silenciada: 0 avisos · reactivada: aviso recibido · fijada arriba=${b.meta(convId)!!.pinnedAt != null}")
 
-            // 6. Compartir hacia TieComs: mensaje con forwarded (origen detectado).
+            // 6. Compartir hacia Chaggu: mensaje con forwarded (origen detectado).
             val shared = "Texto compartido desde otra app ${UUID.randomUUID().toString().take(4)}"
             a.send(convId, shared, null, ForwardedInfo(source = "whatsapp", author = "Juan"))
             until(5_000, "B recibe el compartido con origen") { b.state.value.conversations[convId]!!.messages.any { it.body == shared && it.forwarded?.source == "whatsapp" && it.forwarded.author == "Juan" } }
@@ -197,7 +197,7 @@ class LiveV2IntegrationTest {
     fun eliminarCuentaContra3042() = runBlocking {
         val api = System.getenv("TIECOMS_DELETE_API").orEmpty()
         assumeTrue("Sin TIECOMS_DELETE_API: se omite", api.isNotBlank())
-        assertFalse(api.contains("app.tiecoms.com"))
+        assertFalse((api.contains("app.tiecoms.com") || api.contains("app.chaggu.com")))
         val tag = UUID.randomUUID().toString().take(6)
         val email = "borrar.$tag@qa.tiecoms.test"
         val password = "Clave-${UUID.randomUUID()}"

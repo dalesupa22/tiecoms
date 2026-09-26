@@ -111,24 +111,24 @@ fun ReminderDialog(conv: ConversationDTO, message: MessageDTO?, onClose: () -> U
     }
 }
 
-/** Submenú «Reenviar»: a otra conversación de TieComs o hacia otras apps (texto como la web). */
+/** Submenú «Reenviar»: a otra conversación de Chaggu o hacia otras apps (texto como la web). */
 fun forwardMenu(ctx: Context, d: BootstrapDTO, conv: ConversationDTO, m: MessageDTO): SheetItem {
     val container = (ctx.applicationContext as com.tiecoms.app.TieComsApp).container
     val author = Names.person(d, m.authorId)?.name ?: ""
     val title = titleOf(ctx, conv, d)
     val link = messageLink(m.conversationId, m.seq)
-    val plain = "$author: ${m.body}\n\n— $title · TieComs\n$link"
+    val plain = "$author: ${m.body}\n\n— $title · Chaggu\n$link"
     fun open(uri: String) = runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     return SheetItem(
         ctx.getString(R.string.menu_forward), "↪", tag = "menuForward",
         children = listOf(
             SheetItem(ctx.getString(R.string.fwd_whatsapp), "🟢", onClick = { open("https://wa.me/?text=" + Uri.encode(plain)) }),
             SheetItem(ctx.getString(R.string.fwd_slack), "#", onClick = {
-                copyToClipboard(ctx, ">" + m.body.split('\n').joinToString("\n>") + "\n— *$author* · $title · <$link|TieComs>")
+                copyToClipboard(ctx, ">" + m.body.split('\n').joinToString("\n>") + "\n— *$author* · $title · <$link|Chaggu>")
                 container.toast(ctx.getString(R.string.toast_slack_copied))
             }),
             SheetItem(ctx.getString(R.string.fwd_teams), "T", onClick = { copyToClipboard(ctx, plain); container.toast(ctx.getString(R.string.toast_teams_copied)) }),
-            SheetItem(ctx.getString(R.string.fwd_email), "✉", onClick = { open("mailto:?subject=" + Uri.encode("$title · TieComs") + "&body=" + Uri.encode(plain)) }),
+            SheetItem(ctx.getString(R.string.fwd_email), "✉", onClick = { open("mailto:?subject=" + Uri.encode("$title · Chaggu") + "&body=" + Uri.encode(plain)) }),
         ),
     )
 }

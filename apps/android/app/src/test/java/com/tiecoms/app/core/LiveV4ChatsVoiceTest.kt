@@ -48,7 +48,7 @@ class LiveV4ChatsVoiceTest {
         assumeTrue("Sin TIECOMS_FIXTURE: se omite", fxPath.isNotBlank() && File(fxPath).exists())
         val fx = TcJson.parseToJsonElement(File(fxPath).readText()).jsonObject
         val api = fx["apiUrl"]!!.jsonPrimitive.content
-        assertFalse("Nunca contra producción", api.contains("app.tiecoms.com"))
+        assertFalse("Nunca contra producción", (api.contains("app.tiecoms.com") || api.contains("app.chaggu.com")))
         val password = fx["password"]!!.jsonPrimitive.content
         val a = TieComsClient(api, "JVM A", MemoryStorage(), MemorySecretStore(), ok)
         val b = TieComsClient(api, "JVM B (par)", MemoryStorage(), MemorySecretStore(), ok)

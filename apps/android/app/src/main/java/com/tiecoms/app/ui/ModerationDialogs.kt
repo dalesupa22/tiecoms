@@ -91,10 +91,10 @@ fun BlockUserDialog(userId: String, name: String, blocked: Boolean, onClose: () 
 fun LegalLinks() {
     val ctx = LocalContext.current
     val es = LocalConfiguration.current.locales[0].language == "es"
-    TextButton(onClick = { openUrl(ctx, if (es) "https://www.tiecoms.com/terminos/" else "https://www.tiecoms.com/en/terms/") }) {
+    TextButton(onClick = { openUrl(ctx, if (es) "${com.tiecoms.app.core.DeepLinks.WEB_URL}/terminos/" else "${com.tiecoms.app.core.DeepLinks.WEB_URL}/en/terms/") }) {
         Text(stringResource(R.string.legal_terms))
     }
-    TextButton(onClick = { openUrl(ctx, if (es) "https://www.tiecoms.com/privacidad/" else "https://www.tiecoms.com/en/privacy/") }) {
+    TextButton(onClick = { openUrl(ctx, if (es) "${com.tiecoms.app.core.DeepLinks.WEB_URL}/privacidad/" else "${com.tiecoms.app.core.DeepLinks.WEB_URL}/en/privacy/") }) {
         Text(stringResource(R.string.legal_privacy))
     }
 }

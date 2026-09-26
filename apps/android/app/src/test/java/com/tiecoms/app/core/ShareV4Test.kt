@@ -6,7 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** SPEC-v4: adjuntos (contrato e68dbe8), compartir hacia TieComs, pestañas de Inicio y contraste de badges. */
+/** SPEC-v4: adjuntos (contrato e68dbe8), compartir hacia Chaggu, pestañas de Inicio y contraste de badges. */
 class ShareV4Test {
     private val labels = Attachments.Labels("📷 Foto", "📷 %d fotos", "🎬 Video", "🎬 %d videos", "🖼 %d fotos y videos", "📎 %s", "📎 %d archivos")
     private fun att(id: String, type: String, name: String = "$id.bin") = AttachmentDTO(id = id, name = name, contentType = type, url = "/api/v1/attachments/$id")
@@ -78,8 +78,8 @@ class ShareV4Test {
     @Test fun `plan de compartir - maximo 10, mas de 25 MB fuera, tipos`() {
         val big = Attachments.Shared("video.mov", "video/quicktime", Attachments.MAX_BYTES + 1, "")
         val many = List(12) { Attachments.Shared("f$it.jpg", "image/jpeg", 1000, "/c/f$it") }
-        val p = Attachments.plan(many + big, "  https://tiecoms.com  ")
-        assertEquals(10, p.files.size); assertEquals(2, p.dropped); assertEquals(listOf(big), p.tooLarge); assertEquals("https://tiecoms.com", p.text)
+        val p = Attachments.plan(many + big, "  https://chaggu.com  ")
+        assertEquals(10, p.files.size); assertEquals(2, p.dropped); assertEquals(listOf(big), p.tooLarge); assertEquals("https://chaggu.com", p.text)
         assertTrue(Attachments.plan(emptyList(), " ").empty)
         assertFalse(Attachments.plan(emptyList(), "hola").empty)
         assertEquals(Attachments.Kind.IMAGE, Attachments.kind("image/heic")); assertEquals(Attachments.Kind.VIDEO, Attachments.kind("video/mp4"))

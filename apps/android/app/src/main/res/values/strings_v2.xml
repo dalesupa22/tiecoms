@@ -4,7 +4,7 @@
     <string name="splash_line1">Connects humans, companies &amp; bots</string>
     <string name="splash_line2">Every company. Every channel.</string>
     <string name="splash_line3">One thread.</string>
-    <string name="splash_a11y">TieComs. Tap to continue.</string>
+    <string name="splash_a11y">Chaggu. Tap to continue.</string>
     <string name="nav_home">Home</string>
     <string name="nav_issues">Issues</string>
     <string name="nav_agenda">Agenda</string>
@@ -14,7 +14,7 @@
     <string name="auth_or_email">or with your email</string>
     <string name="auth_sso_needs_company">Type your company name before continuing.</string>
     <string name="auth_back_to_login">Back to sign in</string>
-    <string name="err_domain_claimed">Your company is already on TieComs. Ask its administrator to invite you.</string>
+    <string name="err_domain_claimed">Your company is already on Chaggu. Ask its administrator to invite you.</string>
     <string name="err_sso_state">We could not confirm the sign-in in this browser. Please try again.</string>
     <string name="err_sso_cancelled">You cancelled the sign-in.</string>
     <string name="err_sso_failed">We could not complete the sign-in.</string>
@@ -56,7 +56,7 @@
     <string name="mute_8h">For 8 hours</string>
     <string name="mute_week">For 1 week</string>
     <string name="mute_forever">Until I turn it back on</string>
-    <string name="fwd_tiecoms">To another TieComs conversation…</string>
+    <string name="fwd_tiecoms">To another Chaggu conversation…</string>
     <string name="fwd_whatsapp">Via WhatsApp</string>
     <string name="fwd_slack">Copy for Slack</string>
     <string name="fwd_email">Via email</string>
@@ -94,10 +94,10 @@
     <string name="src_slack">Slack</string>
     <string name="src_email">email</string>
     <string name="src_teams">Teams</string>
-    <string name="src_tiecoms">TieComs</string>
+    <string name="src_tiecoms">Chaggu</string>
     <string name="src_other">another app</string>
     <string name="imp_action">Bring from WhatsApp, Slack or email</string>
-    <string name="imp_title">Bring to TieComs</string>
+    <string name="imp_title">Bring to Chaggu</string>
     <string name="imp_body">Paste what you copied from WhatsApp, Slack, an email or another app. It is marked with its origin and original author.</string>
     <string name="imp_source">From</string>
     <string name="imp_paste">Paste the message, thread or email here</string>
@@ -107,7 +107,7 @@
     <string name="imp_as_one">Bring it as a single message</string>
     <string name="imp_send">Bring</string>
     <string name="imp_subject">Subject: %1$s</string>
-    <string name="share_title">Share to TieComs</string>
+    <string name="share_title">Share to Chaggu</string>
     <string name="share_body">Choose where to post what you shared.</string>
     <string name="share_empty">No text arrived to share.</string>
     <string name="rem_title">Reminders</string>
@@ -260,7 +260,7 @@
     <string name="cal_notif_cancelled">Meeting cancelled: %1$s</string>
     <string name="wa_title">WhatsApp</string>
     <string name="wa_connect">＋ Connect WhatsApp</string>
-    <string name="wa_intro">Connect your personal WhatsApp and your WhatsApp Business. TieComs reads your groups and chats as a linked device and organises them by topic; nothing changes on your phone.</string>
+    <string name="wa_intro">Connect your personal WhatsApp and your WhatsApp Business. Chaggu reads your groups and chats as a linked device and organises them by topic; nothing changes on your phone.</string>
     <string name="wa_empty_title">Connect your WhatsApps</string>
     <string name="wa_empty_body">Most of us have two these days: personal and Business. Connect both and see all your groups organised in one place.</string>
     <string name="wa_connect_title">Connect WhatsApp</string>
@@ -274,7 +274,7 @@
     <string name="wa_phone">That account\'s number, with country code</string>
     <string name="wa_phone_ph">+57 300 123 4567</string>
     <string name="wa_phone_hint">Useful if you are on the same phone and cannot scan. WhatsApp will ask you for an 8-letter code.</string>
-    <string name="wa_privacy">Only you see these chats. TieComs does not send messages or mark anything as read. You can disconnect at any time and everything is deleted.</string>
+    <string name="wa_privacy">Only you see these chats. Chaggu does not send messages or mark anything as read. You can disconnect at any time and everything is deleted.</string>
     <string name="wa_start">Generate code</string>
     <string name="wa_linking">Preparing the code…</string>
     <string name="wa_preparing">Asking WhatsApp for the code…</string>
@@ -297,7 +297,7 @@
     <string name="wa_use_phone">Use my number instead</string>
     <string name="wa_use_qr">Use QR instead</string>
     <string name="wa_disconnect">Disconnect</string>
-    <string name="wa_disconnect_confirm">Disconnect “%1$s”? The WhatsApp session is closed and its chats are deleted from TieComs.</string>
+    <string name="wa_disconnect_confirm">Disconnect “%1$s”? The WhatsApp session is closed and its chats are deleted from Chaggu.</string>
     <string name="wa_organizer">Your chats, organised</string>
     <string name="wa_reorganize">Organise again</string>
     <string name="wa_organized">Done: %1$d chats changed category</string>
@@ -318,14 +318,14 @@
     <string name="wa_members">%1$d members</string>
     <string name="wa_category">Category</string>
     <string name="wa_manual">You chose it</string>
-    <string name="wa_suggested">Suggested by TieComs</string>
+    <string name="wa_suggested">Suggested by Chaggu</string>
     <string name="wa_no_messages">No saved messages from this chat yet. New ones and part of the history arrive.</string>
     <string name="wa_pin">📌 Pin</string>
     <string name="wa_unpin">Unpin</string>
     <string name="wa_hide">Hide</string>
     <string name="wa_unhide">Show</string>
     <string name="wa_reset_category">Back to suggested</string>
-    <string name="wa_link_to">Bring new messages into a TieComs conversation</string>
+    <string name="wa_link_to">Bring new messages into a Chaggu conversation</string>
     <string name="wa_not_linked">Do not link</string>
     <string name="wa_link_hint">New messages from this chat will arrive there as “forwarded from WhatsApp”, under your name.</string>
     <string name="wa_linked_hint">New messages arrive in %1$s</string>
@@ -400,7 +400,7 @@
     <string name="dom_only_admins">Only company admins can manage its domains.</string>
     <string name="org_verified">Verified company · %1$s</string>
     <string name="del_title">Delete account</string>
-    <string name="del_row_hint">Permanently delete your TieComs account.</string>
+    <string name="del_row_hint">Permanently delete your Chaggu account.</string>
     <string name="del_intro">This cannot be undone.</string>
     <string name="del_what_goes">Deleted: your name, email and password, Google or Microsoft sign-ins, your reminders and preferences, the WhatsApp accounts you connected and your membership in companies, spaces and conversations. All your sessions are closed.</string>
     <string name="del_what_stays">Kept: the messages you wrote in shared spaces, as the companies\' record, but no longer with your name. If you were the only owner of your company, admin rights go to the longest-standing member.</string>

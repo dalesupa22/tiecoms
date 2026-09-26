@@ -306,7 +306,7 @@ private fun ChatRow(c: WaChatDTO, multi: Boolean, onOpen: () -> Unit) {
             }
             Text(c.lastPreview ?: (if (c.isGroup && c.participants != null) stringResource(R.string.wa_members, c.participants) else ""), style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(listOfNotNull(if (multi) c.accountLabel else null, "${CAT_ICON[c.category]} ${catName(c.category)}", if (c.linkedConversationId != null) "⇄ TieComs" else null).joinToString(" · "),
+            Text(listOfNotNull(if (multi) c.accountLabel else null, "${CAT_ICON[c.category]} ${catName(c.category)}", if (c.linkedConversationId != null) "⇄ Chaggu" else null).joinToString(" · "),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (c.unread > 0) Box(Modifier.background(MaterialTheme.colorScheme.primary, CircleShape).padding(horizontal = 6.dp, vertical = 2.dp)) {

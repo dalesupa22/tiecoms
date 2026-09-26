@@ -54,9 +54,11 @@ object SplashChoreo {
     const val SHORT_DURATION = 1.2f
     const val REDUCED_FADE = 0.4f
 
-    /** Posición del nudo dentro del wordmark (fracción del ancho y alto de la imagen). */
-    const val KNOT_FX = 0.49f
-    const val KNOT_FY = 0.72f
+    /** Posición del nudo (centro de la burbuja mandarina) dentro del wordmark Chaggu (fracción del ancho y alto). */
+    const val KNOT_FX = 0.728f
+    const val KNOT_FY = 0.474f
+    /** Alto / ancho de las imágenes del wordmark (1400 × 563). */
+    const val LOGO_ASPECT = 563f / 1400f
     const val SPARKS = 10
 
     data class Frame(

@@ -43,13 +43,13 @@
     <string name="att_open_with">Abrir con…</string>
     <string name="att_downloading">Descargando…</string>
     <string name="att_no_app">No hay una app para abrir este archivo.</string>
-    <string name="share_header">Compartir en TieComs</string>
+    <string name="share_header">Compartir en Chaggu</string>
     <string name="share_add_message">Añadir un mensaje…</string>
     <string name="share_send">Enviar</string>
     <string name="share_send_to">Enviar a %1$d</string>
     <string name="share_pick">Elige hasta 5 conversaciones</string>
-    <string name="share_sign_in">Inicia sesión en TieComs para compartir</string>
-    <string name="share_open_app">Abrir TieComs</string>
+    <string name="share_sign_in">Inicia sesión en Chaggu para compartir</string>
+    <string name="share_open_app">Abrir Chaggu</string>
     <string name="share_sent_one">Compartido</string>
     <string name="share_sent">Compartido en %1$d conversaciones</string>
     <string name="share_progress">Enviando %1$d de %2$d…</string>
@@ -105,7 +105,7 @@
     <string name="voice_cancelled">Nota descartada</string>
     <string name="voice_uploading">Enviando nota de voz…</string>
     <string name="voice_mic_title">Micrófono</string>
-    <string name="voice_mic_body">TieComs usa el micrófono para grabar notas de voz que envías en tus conversaciones.</string>
+    <string name="voice_mic_body">Chaggu usa el micrófono para grabar notas de voz que envías en tus conversaciones.</string>
     <string name="voice_mic_allow">Permitir</string>
     <string name="voice_mic_denied">Permite el micrófono para grabar notas de voz.</string>
     <string name="share_dropped">Se enviarán 10; quedan fuera %1$d.</string>

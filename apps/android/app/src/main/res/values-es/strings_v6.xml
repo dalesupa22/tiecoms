@@ -46,8 +46,8 @@
     <string name="gshare_link">Enlace</string>
     <string name="gshare_copy">Copiar</string>
     <string name="gshare_system">Compartir</string>
-    <string name="gshare_text">Te invito a %1$s en TieComs: %2$s (código %3$s)</string>
-    <string name="gshare_text_nocode">Te invito a %1$s en TieComs: %2$s</string>
+    <string name="gshare_text">Te invito a %1$s en Chaggu: %2$s (código %3$s)</string>
+    <string name="gshare_text_nocode">Te invito a %1$s en Chaggu: %2$s</string>
     <string name="gshare_expires">Vence el %1$s. Sirve para varias personas.</string>
     <string name="gshare_done">Listo</string>
     <string name="ginv_title">Invitar a %1$s</string>

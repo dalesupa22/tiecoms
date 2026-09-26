@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">TieComs</string>
+    <string name="app_name" translatable="false">Chaggu</string>
     <string name="tagline">One network across the companies you work with. Everyone sees their own scope.</string>
-    <string name="cd_logo">TieComs logo</string>
+    <string name="cd_logo">Chaggu logo</string>
     <string name="email">Work email</string>
     <string name="password">Password</string>
     <string name="password_hint">At least 10 characters.</string>
     <string name="show_password">Show password</string>
     <string name="hide_password">Hide password</string>
     <string name="login">Sign in</string>
-    <string name="no_account">Is your company not on TieComs yet?</string>
+    <string name="no_account">Is your company not on Chaggu yet?</string>
     <string name="create_account">Create account</string>
     <string name="have_account">Already have an account?</string>
     <string name="name">Your name</string>
@@ -79,7 +79,7 @@
     <string name="language_desc">Follows the system language (Spanish or English).</string>
     <string name="server">Server</string>
     <string name="logout">Sign out</string>
-    <string name="logout_confirm">Sign out of TieComs on this device?</string>
+    <string name="logout_confirm">Sign out of Chaggu on this device?</string>
     <string name="cancel">Cancel</string>
     <string name="version">Version %1$s</string>
     <string name="invite_title">Invitation</string>

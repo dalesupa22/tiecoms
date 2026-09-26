@@ -68,7 +68,7 @@ class SplashChoreoTest {
         assertEquals(1f, f(1.95f).inkReveal, eps)
         assertTrue(f(1.70f).inkReveal in 0.3f..0.8f)
         assertEquals(10, SplashChoreo.SPARKS)
-        assertEquals(0.49f, SplashChoreo.KNOT_FX, eps); assertEquals(0.72f, SplashChoreo.KNOT_FY, eps)
+        assertEquals(0.728f, SplashChoreo.KNOT_FX, eps); assertEquals(0.474f, SplashChoreo.KNOT_FY, eps)
     }
 
     @Test fun `eslogan sube 8 pt y aparece`() {

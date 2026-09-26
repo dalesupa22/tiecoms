@@ -4,7 +4,7 @@
     <string name="splash_line1">Conecta humanos, empresas y bots</string>
     <string name="splash_line2">Cada empresa. Cada canal.</string>
     <string name="splash_line3">Un solo hilo.</string>
-    <string name="splash_a11y">TieComs. Toca para continuar.</string>
+    <string name="splash_a11y">Chaggu. Toca para continuar.</string>
     <string name="nav_home">Inicio</string>
     <string name="nav_issues">Asuntos</string>
     <string name="nav_agenda">Agenda</string>
@@ -14,7 +14,7 @@
     <string name="auth_or_email">o con tu correo</string>
     <string name="auth_sso_needs_company">Escribe el nombre de tu empresa antes de continuar.</string>
     <string name="auth_back_to_login">Volver a entrar</string>
-    <string name="err_domain_claimed">Tu empresa ya está en TieComs. Pide a su administrador que te invite.</string>
+    <string name="err_domain_claimed">Tu empresa ya está en Chaggu. Pide a su administrador que te invite.</string>
     <string name="err_sso_state">No pudimos confirmar el inicio de sesión en este navegador. Inténtalo de nuevo.</string>
     <string name="err_sso_cancelled">Cancelaste el inicio de sesión.</string>
     <string name="err_sso_failed">No pudimos completar el inicio de sesión.</string>
@@ -56,7 +56,7 @@
     <string name="mute_8h">Por 8 horas</string>
     <string name="mute_week">Por 1 semana</string>
     <string name="mute_forever">Hasta que lo reactive</string>
-    <string name="fwd_tiecoms">A otra conversación de TieComs…</string>
+    <string name="fwd_tiecoms">A otra conversación de Chaggu…</string>
     <string name="fwd_whatsapp">Por WhatsApp</string>
     <string name="fwd_slack">Copiar para Slack</string>
     <string name="fwd_email">Por correo</string>
@@ -94,10 +94,10 @@
     <string name="src_slack">Slack</string>
     <string name="src_email">correo</string>
     <string name="src_teams">Teams</string>
-    <string name="src_tiecoms">TieComs</string>
+    <string name="src_tiecoms">Chaggu</string>
     <string name="src_other">otra app</string>
     <string name="imp_action">Traer desde WhatsApp, Slack o correo</string>
-    <string name="imp_title">Traer a TieComs</string>
+    <string name="imp_title">Traer a Chaggu</string>
     <string name="imp_body">Pega lo que copiaste de WhatsApp, Slack, un correo u otra app. Queda marcado con su origen y su autor original.</string>
     <string name="imp_source">Desde</string>
     <string name="imp_paste">Pega aquí el mensaje, el hilo o el correo</string>
@@ -107,7 +107,7 @@
     <string name="imp_as_one">Traerlo como un solo mensaje</string>
     <string name="imp_send">Traer</string>
     <string name="imp_subject">Asunto: %1$s</string>
-    <string name="share_title">Compartir en TieComs</string>
+    <string name="share_title">Compartir en Chaggu</string>
     <string name="share_body">Elige dónde publicar lo que compartiste.</string>
     <string name="share_empty">No llegó texto para compartir.</string>
     <string name="rem_title">Recordatorios</string>
@@ -260,7 +260,7 @@
     <string name="cal_notif_cancelled">Reunión cancelada: %1$s</string>
     <string name="wa_title">WhatsApp</string>
     <string name="wa_connect">＋ Conectar WhatsApp</string>
-    <string name="wa_intro">Conecta tu WhatsApp personal y tu WhatsApp Business. TieComs lee tus grupos y chats como un dispositivo vinculado y los organiza por tema; nada cambia en tu teléfono.</string>
+    <string name="wa_intro">Conecta tu WhatsApp personal y tu WhatsApp Business. Chaggu lee tus grupos y chats como un dispositivo vinculado y los organiza por tema; nada cambia en tu teléfono.</string>
     <string name="wa_empty_title">Conecta tus WhatsApp</string>
     <string name="wa_empty_body">Hoy casi todos tenemos dos: el personal y el Business. Conéctalos los dos y mira todos tus grupos ordenados en un solo lugar.</string>
     <string name="wa_connect_title">Conectar WhatsApp</string>
@@ -274,7 +274,7 @@
     <string name="wa_phone">Número de esa cuenta, con indicativo</string>
     <string name="wa_phone_ph">+57 300 123 4567</string>
     <string name="wa_phone_hint">Útil si estás en el mismo teléfono y no puedes escanear. WhatsApp te pedirá un código de 8 letras.</string>
-    <string name="wa_privacy">Solo tú ves estos chats. TieComs no envía mensajes ni marca nada como leído. Puedes desconectar cuando quieras y se borra todo.</string>
+    <string name="wa_privacy">Solo tú ves estos chats. Chaggu no envía mensajes ni marca nada como leído. Puedes desconectar cuando quieras y se borra todo.</string>
     <string name="wa_start">Generar código</string>
     <string name="wa_linking">Preparando el código…</string>
     <string name="wa_preparing">Pidiendo el código a WhatsApp…</string>
@@ -297,7 +297,7 @@
     <string name="wa_use_phone">Mejor con mi número</string>
     <string name="wa_use_qr">Mejor con QR</string>
     <string name="wa_disconnect">Desconectar</string>
-    <string name="wa_disconnect_confirm">¿Desconectar «%1$s»? Se cierra la sesión en WhatsApp y se borran de TieComs sus chats.</string>
+    <string name="wa_disconnect_confirm">¿Desconectar «%1$s»? Se cierra la sesión en WhatsApp y se borran de Chaggu sus chats.</string>
     <string name="wa_organizer">Tus chats, organizados</string>
     <string name="wa_reorganize">Organizar de nuevo</string>
     <string name="wa_organized">Listo: %1$d chats cambiaron de categoría</string>
@@ -318,14 +318,14 @@
     <string name="wa_members">%1$d miembros</string>
     <string name="wa_category">Categoría</string>
     <string name="wa_manual">La elegiste tú</string>
-    <string name="wa_suggested">Sugerida por TieComs</string>
+    <string name="wa_suggested">Sugerida por Chaggu</string>
     <string name="wa_no_messages">Aún no hay mensajes guardados de este chat. Llegan los nuevos y parte del historial.</string>
     <string name="wa_pin">📌 Fijar</string>
     <string name="wa_unpin">Quitar fijado</string>
     <string name="wa_hide">Ocultar</string>
     <string name="wa_unhide">Mostrar</string>
     <string name="wa_reset_category">Volver a la sugerida</string>
-    <string name="wa_link_to">Traer los mensajes nuevos a una conversación de TieComs</string>
+    <string name="wa_link_to">Traer los mensajes nuevos a una conversación de Chaggu</string>
     <string name="wa_not_linked">No vincular</string>
     <string name="wa_link_hint">Los mensajes nuevos de este chat llegarán allí como «reenviado de WhatsApp», a tu nombre.</string>
     <string name="wa_linked_hint">Los mensajes nuevos llegan a %1$s</string>
@@ -400,7 +400,7 @@
     <string name="dom_only_admins">Solo quien administra la empresa puede gestionar sus dominios.</string>
     <string name="org_verified">Empresa verificada · %1$s</string>
     <string name="del_title">Eliminar cuenta</string>
-    <string name="del_row_hint">Borra tu cuenta de TieComs de forma permanente.</string>
+    <string name="del_row_hint">Borra tu cuenta de Chaggu de forma permanente.</string>
     <string name="del_intro">Esta acción no se puede deshacer.</string>
     <string name="del_what_goes">Se borra: tu nombre, correo y contraseña, los accesos con Google o Microsoft, tus recordatorios y preferencias, los WhatsApp que conectaste y tu participación en empresas, espacios y conversaciones. Se cierran todas tus sesiones.</string>
     <string name="del_what_stays">Se conserva: los mensajes que escribiste en espacios compartidos, como registro de las empresas, pero ya sin tu nombre. Si eras la única persona dueña de tu empresa, la administración pasa a quien lleve más tiempo.</string>

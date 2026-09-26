@@ -142,14 +142,14 @@ class Notifier(private val context: Context) {
             Intent(context, BubbleActivity::class.java).setAction(Intent.ACTION_VIEW).setData(Uri.parse(deep)),
             PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
         val bubble = NotificationCompat.BubbleMetadata.Builder(bubbleIntent, shortcutIcon).setDesiredHeight(640).setSuppressNotification(false).build()
-        val reply = NotificationCompat.Action.Builder(R.drawable.ic_stat_tiecoms, context.getString(R.string.notif_reply), actionIntent(ACTION_REPLY, conversationId, mutable = true))
+        val reply = NotificationCompat.Action.Builder(R.drawable.ic_stat_chaggu, context.getString(R.string.notif_reply), actionIntent(ACTION_REPLY, conversationId, mutable = true))
             .addRemoteInput(RemoteInput.Builder(KEY_REPLY).setLabel(context.getString(R.string.notif_reply_hint)).build())
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY).setShowsUserInterface(false).setAllowGeneratedReplies(true).build()
-        val read = NotificationCompat.Action.Builder(R.drawable.ic_stat_tiecoms, context.getString(R.string.notif_mark_read), actionIntent(ACTION_MARK_READ, conversationId, mutable = false))
+        val read = NotificationCompat.Action.Builder(R.drawable.ic_stat_chaggu, context.getString(R.string.notif_mark_read), actionIntent(ACTION_MARK_READ, conversationId, mutable = false))
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ).setShowsUserInterface(false).build()
         val n = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_tiecoms)
-            .setColor(0xFFFF7A00.toInt())
+            .setSmallIcon(R.drawable.ic_stat_chaggu)
+            .setColor(0xFFFF5A36.toInt())
             .setStyle(style)
             .setContentTitle(title).setContentText(text)
             .setShortcutId(conversationId).setLocusId(LocusIdCompat(conversationId))
@@ -177,7 +177,7 @@ class Notifier(private val context: Context) {
             else -> CHANNEL_ID
         }
         val n = NotificationCompat.Builder(context, channel)
-            .setSmallIcon(R.drawable.ic_stat_tiecoms).setColor(0xFFFF7A00.toInt())
+            .setSmallIcon(R.drawable.ic_stat_chaggu).setColor(0xFFFF5A36.toInt())
             .setContentTitle(title).setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setCategory(NotificationCompat.CATEGORY_REMINDER).setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true).setSilent(silent).setContentIntent(openIntent(uri, tag.hashCode()))

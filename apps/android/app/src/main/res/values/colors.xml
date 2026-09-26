@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#FDFAF7</color>
-    <color name="brand_orange">#FF7A00</color>
+    <!-- Marca Chaggu: tinta #17161F, mandarina #FF5A36, papel #F6F3EC. -->
+    <color name="ic_launcher_background">#17161F</color>
+    <color name="brand_orange">#FF5A36</color>
     <color name="cream">#FDFAF7</color>
-    <color name="ink">#1F1F1F</color>
+    <color name="ink">#17161F</color>
+    <color name="paper">#F6F3EC</color>
     <color name="splash_bg">#FDFAF7</color>
 </resources>

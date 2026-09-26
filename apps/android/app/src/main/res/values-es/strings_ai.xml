@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="ai_consent_title">¿Permitir el procesamiento con IA?</string>
-    <string name="ai_consent_voice">Para esta nota de voz, TieComs enviará el audio y el idioma a Inworld para transcribirla. DeepSeek recibirá la transcripción, los nombres del autor y los participantes y el nombre de la conversación para sugerir un resumen y asuntos. Estos servicios externos procesan ese contenido. Puedes continuar sin IA: la nota de voz se enviará y se podrá escuchar igual.</string>
-    <string name="ai_consent_side">Para este resumen, TieComs enviará a DeepSeek los mensajes del sidechat, los nombres de los participantes, el mensaje original y su autor, el nombre del grupo y tu nombre. Este servicio externo procesa ese contenido para sugerir un resumen. Puedes continuar sin IA y editar el texto tú mismo.</string>
+    <string name="ai_consent_voice">Para esta nota de voz, Chaggu enviará el audio y el idioma a Inworld para transcribirla. DeepSeek recibirá la transcripción, los nombres del autor y los participantes y el nombre de la conversación para sugerir un resumen y asuntos. Estos servicios externos procesan ese contenido. Puedes continuar sin IA: la nota de voz se enviará y se podrá escuchar igual.</string>
+    <string name="ai_consent_side">Para este resumen, Chaggu enviará a DeepSeek los mensajes del sidechat, los nombres de los participantes, el mensaje original y su autor, el nombre del grupo y tu nombre. Este servicio externo procesa ese contenido para sugerir un resumen. Puedes continuar sin IA y editar el texto tú mismo.</string>
     <string name="ai_consent_allow">Permitir esta solicitud</string>
     <string name="ai_consent_without">Continuar sin IA</string>
     <string name="ai_consent_summary">Sugerir con IA</string>

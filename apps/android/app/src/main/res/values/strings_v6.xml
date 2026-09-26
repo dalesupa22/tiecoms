@@ -46,8 +46,8 @@
     <string name="gshare_link">Link</string>
     <string name="gshare_copy">Copy</string>
     <string name="gshare_system">Share</string>
-    <string name="gshare_text">Join %1$s on TieComs: %2$s (code %3$s)</string>
-    <string name="gshare_text_nocode">Join %1$s on TieComs: %2$s</string>
+    <string name="gshare_text">Join %1$s on Chaggu: %2$s (code %3$s)</string>
+    <string name="gshare_text_nocode">Join %1$s on Chaggu: %2$s</string>
     <string name="gshare_expires">Expires on %1$s. Works for several people.</string>
     <string name="gshare_done">Done</string>
     <string name="ginv_title">Invite to %1$s</string>

@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="tagline">Una sola red entre las empresas con las que trabajas. Cada persona ve su propio alcance.</string>
-    <string name="cd_logo">Logo de TieComs</string>
+    <string name="cd_logo">Logo de Chaggu</string>
     <string name="email">Correo de trabajo</string>
     <string name="password">Contraseña</string>
     <string name="password_hint">Mínimo 10 caracteres.</string>
     <string name="show_password">Mostrar contraseña</string>
     <string name="hide_password">Ocultar contraseña</string>
     <string name="login">Entrar</string>
-    <string name="no_account">¿Tu empresa aún no está en TieComs?</string>
+    <string name="no_account">¿Tu empresa aún no está en Chaggu?</string>
     <string name="create_account">Crear cuenta</string>
     <string name="have_account">¿Ya tienes cuenta?</string>
     <string name="name">Tu nombre</string>
@@ -78,7 +78,7 @@
     <string name="language_desc">Sigue el idioma del sistema (español o inglés).</string>
     <string name="server">Servidor</string>
     <string name="logout">Cerrar sesión</string>
-    <string name="logout_confirm">¿Cerrar la sesión de TieComs en este dispositivo?</string>
+    <string name="logout_confirm">¿Cerrar la sesión de Chaggu en este dispositivo?</string>
     <string name="cancel">Cancelar</string>
     <string name="version">Versión %1$s</string>
     <string name="invite_title">Invitación</string>

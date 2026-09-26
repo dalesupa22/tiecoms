@@ -63,7 +63,28 @@
             <!-- Direct Share: categoría de los atajos de conversación que salen en la hoja de compartir. -->
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
 
-            <!-- App Links verificados: requieren /.well-known/assetlinks.json en los tres hosts. -->
+            <!-- App Links verificados de Chaggu: requieren /.well-known/assetlinks.json en los tres hosts. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="app.chaggu.com" />
+                <data android:host="chaggu.com" />
+                <data android:host="www.chaggu.com" />
+                <data android:pathPrefix="/c/" />
+                <data android:pathPrefix="/w/" />
+                <data android:pathPrefix="/invite/" />
+                <data android:pathPrefix="/signup" />
+                <data android:pathPrefix="/asuntos" />
+                <data android:pathPrefix="/agenda" />
+                <data android:pathPrefix="/trazo" />
+                <data android:pathPrefix="/whatsapp" />
+                <data android:pathPrefix="/share" />
+                <data android:pathPrefix="/ajustes" />
+            </intent-filter>
+
+            <!-- App Links de la marca anterior (TieComs): se mantienen mientras tiecoms.com siga activo. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -92,7 +113,7 @@
                 <data android:scheme="tiecoms" android:host="auth" android:pathPrefix="/callback" />
             </intent-filter>
 
-            <!-- Esquema propio de respaldo: tiecoms://c/<id>, tiecoms://w/<id>, tiecoms://invite/<token>, tiecoms://signup?org=<token> -->
+            <!-- Esquema propio de respaldo (interno, no cambia con la marca): tiecoms://c/<id>, tiecoms://w/<id>, tiecoms://invite/<token>, tiecoms://signup?org=<token> -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -100,7 +121,7 @@
                 <data android:scheme="tiecoms" />
             </intent-filter>
         </activity>
-        <!-- Compartir hacia TieComs (SPEC-v4 §B): fotos, videos, archivos, texto y enlaces, uno o varios. -->
+        <!-- Compartir hacia Chaggu (SPEC-v4 §B): fotos, videos, archivos, texto y enlaces, uno o varios. -->
         <activity
             android:name=".ShareActivity"
             android:exported="true"

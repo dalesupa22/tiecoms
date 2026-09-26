@@ -55,7 +55,7 @@ class GroupsUiTest {
     fun gruposDmsYNuevoGrupo() {
         val apiUrl = arg("apiUrl"); val email = arg("email"); val password = arg("password")
         assumeTrue("Faltan argumentos del fixture", apiUrl.isNotBlank() && email.isNotBlank() && password.isNotBlank())
-        assertFalse("Nunca contra producción", apiUrl.contains("app.tiecoms.com"))
+        assertFalse("Nunca contra producción", (apiUrl.contains("app.tiecoms.com") || apiUrl.contains("app.chaggu.com")))
         ins.runOnMainSync { app.container.setDebugApiUrl(apiUrl) }
         val c0 = app.container.client.value
         runBlocking {

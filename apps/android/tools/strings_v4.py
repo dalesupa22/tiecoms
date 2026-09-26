@@ -54,7 +54,7 @@ S = [
 ("att_open_with", None, [], "Abrir con…", "Open with…"),                                   # solo Android: selector del sistema
 ("att_downloading", None, [], "Descargando…", "Downloading…"),                              # solo Android
 ("att_no_app", None, [], "No hay una app para abrir este archivo.", "No app can open this file."),  # solo Android
-# Compartir hacia TieComs (share.*)
+# Compartir hacia Chaggu (share.*)
 ("share_header", "share.header", [], "", ""),
 ("share_add_message", "share.addMessage", [], "", ""),
 ("share_send", "share.send", [], "", ""),

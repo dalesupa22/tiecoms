@@ -1,4 +1,4 @@
-# TieComs para Android (nativa)
+# Chaggu para Android (nativa)
 
 App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor. Sigue las especificaciones comunes con iOS (`SPEC.md` y `SPEC-v2.md`): la navegación, los textos, los sonidos, los enlaces, la sincronización y el splash son los mismos en las dos apps y en la web.
 
@@ -6,9 +6,10 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 |---|---|
 | applicationId | `com.tiecoms.app` |
 | minSdk / target / compile | 26 / 36 / 36 |
-| Versión | `versionName 1.5.1`, `versionCode 9`. Sube el `versionCode` en cada envío a Play. |
+| Versión | `versionName 1.6.0`, `versionCode 10`. Sube el `versionCode` en cada envío a Play. |
 | Contrato | `2026-09-25`. Se envía en `x-tiecoms-contract` y en `device.contract`. |
-| API por defecto | `https://app.tiecoms.com` |
+| API por defecto | `https://app.chaggu.com` (web pública: `https://www.chaggu.com`) |
+| Marca | **Chaggu** desde 1.6.0 (antes TieComs). Cambia solo lo visible: nombre, textos, dominios, ícono, splash y colores (tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`). Lo interno se mantiene para no romper Play, Firebase ni el backend: `applicationId`/paquetes `com.tiecoms.app`, clave de subida `tiecoms-upload`, proyecto Firebase `tiecoms`, esquema `tiecoms://` (retorno del SSO), headers `x-tiecoms-*`, claves de SharedPreferences, IDs de canales y nombres de sonidos. |
 | Toolchain | Gradle 8.14.3 (wrapper), AGP 8.13.2, Kotlin 2.3.21 y JDK 17 |
 
 ## Qué hace
@@ -23,7 +24,7 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
   - Recordarme, con tiempos rápidos o fecha y hora.
   - Marcar como no leído desde aquí.
   - Derivar, abrir un asunto y agendar una reunión.
-  - Reenviar a otra conversación de TieComs, por WhatsApp o por correo, o copiarlo para Slack o Teams.
+  - Reenviar a otra conversación de Chaggu, por WhatsApp o por correo, o copiarlo para Slack o Teams.
   - Editar y eliminar, solo en los mensajes propios.
 - **Menú de conversación** (pulsación larga en Inicio, o ⋯ en la cabecera):
   - Fijar arriba.
@@ -51,7 +52,7 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 - **Reenviar a otro chat** (pulsación larga): hoja con buscador, hasta 10 chats y comentario opcional. Por destino, primero el comentario y luego el original con `forwarded {source: tiecoms, author, sentAt, fromConversationId}`, todo por la cola persistente (un `clientMessageId` por envío).
 - **Perfil** (Ajustes → Editar perfil): nombre, cargo y área (`PATCH /me`); foto con el Photo Picker del sistema, con orientación EXIF, recorte al centro a 512×512 JPEG (`POST /me/avatar`, máx. 3 MB) y «Quitar foto». Las fotos se ven en todos los avatares, con las iniciales de respaldo. El cargador es propio (`platform/ImageLoader`): LRU en memoria y caché HTTP de OkHttp en disco.
 - **Archivos** (Ajustes o el acceso de Inicio): «Mis archivos» y una raíz por espacio, con migas, buscador en todo el árbol, crear carpeta, subir (octet-stream + `x-file-type`, hasta 25 MB) y abrir con el enlace firmado. `drive.updated` recarga la carpeta abierta.
-- **Compartir hacia TieComs:** es un destino `ACTION_SEND text/plain`. Se elige la conversación y el texto se envía con `forwarded`. El origen se detecta por el paquete de la app que comparte (WhatsApp, Slack, Teams, Gmail u Outlook); si no se reconoce, queda como `other`.
+- **Compartir hacia Chaggu:** es un destino `ACTION_SEND text/plain`. Se elige la conversación y el texto se envía con `forwarded`. El origen se detecta por el paquete de la app que comparte (WhatsApp, Slack, Teams, Gmail u Outlook); si no se reconoce, queda como `other`.
 - **WhatsApp:**
   - Cuentas personal y Business, vinculadas con QR (imagen `data:` del API) o con código de 8 letras.
   - Re-vincular y desconectar.
@@ -61,17 +62,17 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 - **Eliminar cuenta:** `DELETE /api/v1/account {confirmEmail, password?}`. La pantalla explica qué se borra y qué se conserva. Responde 400 si el correo no coincide y 403 si la contraseña está mal o falta. Al terminar borra las credenciales locales y vuelve al login.
 - **Seguridad de la comunidad:** los detalles de conversación permiten reportar y bloquear/desbloquear participantes; la pulsación larga permite reportar mensajes. El API guarda los reportes para revisión. El bloqueo oculta los mensajes del usuario y sus notificaciones y evita mensajes directos y nuevos chats entre las partes. Los grupos existentes siguen disponibles. El registro requiere aceptar los términos y la política de privacidad, accesibles también desde Login y Ajustes.
 - **Login y registro:** «Continuar con Google / Microsoft» y «o con tu correo». En el registro, el SSO exige antes el nombre de la empresa (`org_name`) o usa la invitación (`org`). Los errores `sso_*` y `domain_claimed` usan los textos de la web.
-- **Deep links:** `/c/<id>` (con `?m=<seq>` salta al mensaje), `/w/<id>`, `/invite/<token>`, `/signup?org=`, `/asuntos`, `/agenda`, `/trazo`, `/whatsapp`, `/ajustes` y `/share?text=`. Funcionan en los tres hosts con `autoVerify` y con el esquema `tiecoms://`. `tiecoms://auth/*` está reservado para el SSO.
+- **Deep links:** `/c/<id>` (con `?m=<seq>` salta al mensaje), `/w/<id>`, `/invite/<token>`, `/signup?org=`, `/asuntos`, `/agenda`, `/trazo`, `/whatsapp`, `/ajustes` y `/share?text=`. Funcionan con `autoVerify` en `app.chaggu.com`, `chaggu.com` y `www.chaggu.com`, y también en los tres hosts de `tiecoms.com` (marca anterior, en un intent-filter aparte), y con el esquema `tiecoms://`. Los enlaces que genera la app usan `https://app.chaggu.com`. `tiecoms://auth/*` está reservado para el SSO.
 
 ### Splash «Un solo hilo» (SPEC-v2 §4)
 
 - **Coreografía:** es una función pura del tiempo en `core/SplashChoreo.kt` (probada en la JVM) y se dibuja en un `Canvas` de Compose (`ui/Splash.kt`) a 60 fps. No usa GIF ni video.
-- **Fases:** personas → hilo (Catmull-Rom + `PathMeasure`) → se amarra, con giro de 20° y háptico en t=1,02 → nace el logo, con pulso, 10 chispas, resorte naranja y tinta de izquierda a derecha → eslogan → salida.
+- **Fases:** personas → hilo (Catmull-Rom + `PathMeasure`) → se amarra, con giro de 20° y háptico en t=1,02 → nace el logo, con pulso, 10 chispas, resorte mandarina (la burbuja de la segunda «g» del logo Chaggu) y tinta de izquierda a derecha → eslogan → salida.
 - **Sonido:** `tc_splash` suena en t=0,30. Respeta el interruptor de Sonidos y el modo silencio.
 - **Cuándo se muestra:** solo en el arranque en frío. Si el arranque en frío viene de un deep link, hay versión corta (salta a la fase 4 y dura 1,2 s). Un toque salta al final. Con las animaciones del sistema desactivadas, solo se funde el logo en 0,4 s.
 - **Espera:** si la sesión todavía carga, un punto late bajo el eslogan hasta 6 s.
 - **Reloj:** arranca en el primer fotograma fluido y cada fotograma avanza como máximo 50 ms. Si el hilo principal se traba, la animación no se salta fases.
-- **Splash del sistema:** Android 12+ usa la SplashScreen API (fondo crema, o `#161413` en oscuro, con el ícono TC), que da paso al splash animado con un fundido de 150 ms.
+- **Splash del sistema:** Android 12+ usa la SplashScreen API (fondo crema, o `#17161F` en oscuro, con el símbolo de Chaggu sobre un círculo tinta), que da paso al splash animado con un fundido de 150 ms.
 - **Textos:** «Conecta humanos, empresas y bots» / «Cada empresa. Cada canal.» / «**Un solo hilo.**». En inglés: «Connects humans, companies & bots» / «Every company. Every channel.» / «One thread.».
 
 ### Sonidos y avisos
@@ -100,13 +101,13 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 
 ### Compartir, adjuntos, pestañas, chats y voz (SPEC-v4)
 
-- **Compartir hacia TieComs:** `ShareActivity` recibe `ACTION_SEND` y `ACTION_SEND_MULTIPLE` de fotos, videos, archivos, texto y enlaces (`image/*`, `video/*`, `application/*`, `text/*`, `*/*`).
+- **Compartir hacia Chaggu:** `ShareActivity` recibe `ACTION_SEND` y `ACTION_SEND_MULTIPLE` de fotos, videos, archivos, texto y enlaces (`image/*`, `video/*`, `application/*`, `text/*`, `*/*`).
   - Copia lo recibido a caché mientras tiene el permiso de lectura del URI.
   - Muestra una vista previa de hasta 10 elementos, un buscador y las conversaciones: primero Recientes y luego agrupadas como Inicio.
   - Permite elegir hasta 5 conversaciones y agregar «Añadir un mensaje…».
   - Al tocar Enviar se ve el progreso de cada archivo, sale un aviso y la hoja se cierra.
   - La subida y el envío corren en WorkManager (`ShareWorker`, en primer plano con una notificación de progreso). Una subida grande sigue aunque se cierre la hoja, y un reintento no duplica.
-  - Sin sesión muestra «Inicia sesión en TieComs para compartir» con un botón para abrir la app.
+  - Sin sesión muestra «Inicia sesión en Chaggu para compartir» con un botón para abrir la app.
   - Si el origen es WhatsApp, Slack, Teams o correo, el mensaje se marca como `forwarded.source`. Las fotos de la galería no son reenvíos.
 - **Direct Share:** `res/xml/shortcuts.xml` declara el `<share-target>` con la categoría `com.tiecoms.app.SHARE_TARGET`.
   - La app publica como atajos de larga vida las 8 conversaciones recientes (sin silenciadas ni laterales), con `Person`, `LocusId` y la foto del grupo o de la persona. Si no hay foto, usa iniciales sobre el color de la persona.
@@ -262,11 +263,11 @@ El release lleva R8 y reducción de recursos. Las reglas de serialización está
 
 ## Publicar en Google Play Console
 
-1. **Crear la app.** Nombre «TieComs», idioma predeterminado español, gratuita.
+1. **Crear la app.** Nombre «Chaggu», idioma predeterminado español, gratuita.
 2. **Play App Signing.** Google genera la clave de firma de la app. Se sube el AAB firmado con la clave de subida `tiecoms-upload`, cuyo SHA-256 es `12:2C:D6:DA:89:5C:D5:D6:39:55:D9:C4:0A:9A:89:80:41:51:94:98:59:A6:40:E9:29:A5:02:2D:13:41:F4:B7`.
-3. **App Links.** Copia el **SHA-256 del certificado de firma de la app** desde Integridad de la app › Firma de apps y agrégalo a `sha256_cert_fingerprints` de `/.well-known/assetlinks.json` en los tres hosts, junto al de subida. Sin ese valor, los enlaces `https` abren el navegador. Las rutas nuevas (`/asuntos`, `/agenda`, `/trazo`, `/whatsapp`, `/share`, `/ajustes`) no requieren cambios en `assetlinks.json`, que cubre todo el dominio.
+3. **App Links.** Copia el **SHA-256 del certificado de firma de la app** desde Integridad de la app › Firma de apps y agrégalo a `sha256_cert_fingerprints` de `/.well-known/assetlinks.json` en los hosts de `chaggu.com` (y mientras sigan activos, en los de `tiecoms.com`), junto al de subida. Sin ese valor, los enlaces `https` abren el navegador. Las rutas nuevas (`/asuntos`, `/agenda`, `/trazo`, `/whatsapp`, `/share`, `/ajustes`) no requieren cambios en `assetlinks.json`, que cubre todo el dominio.
 4. **Ficha de Play Store.**
-   - Ícono: `play-512.png`, junto a este README.
+   - Ícono: `play-512.png`, junto a este README (ícono Chaggu, generado desde `chaggu-marca/definitivo/chaggu-appstore-1024.png`).
    - Gráfico de funciones: 1024×500.
    - Categoría: Empresa. Contacto: admin@tiecoms.com.
 
@@ -284,13 +285,13 @@ El release lleva R8 y reducción de recursos. Las reglas de serialización está
 
    | Campo | ES | EN |
    |---|---|---|
-   | Nombre | TieComs | TieComs |
+   | Nombre | Chaggu | Chaggu |
    | Descripción corta | «Un solo hilo entre las empresas con las que trabajas.» | «One thread across the companies you work with.» |
-   | Descripción completa | «TieComs conecta a personas, empresas y bots en un mismo lugar. Cada empresa conserva su identidad y cada persona ve solo su alcance. Conversa en espacios compartidos con clientes y proveedores; convierte mensajes en asuntos con responsable y fecha; agenda reuniones con confirmación; deriva una conversación para resolver algo aparte y devuelve el resultado; recibe recordatorios; trae mensajes desde WhatsApp, Slack o el correo con su origen; y organiza tus grupos de WhatsApp personal y Business. Cada empresa. Cada canal. Un solo hilo.» | «TieComs connects people, companies and bots in one place. Each company keeps its identity and everyone sees only their own scope. Talk in spaces shared with clients and suppliers; turn messages into issues with an owner and a date; schedule meetings with RSVPs; branch a conversation to solve something separately and bring the result back; get reminders; bring messages from WhatsApp, Slack or email with their origin; and organise your personal and Business WhatsApp groups. Every company. Every channel. One thread.» |
+   | Descripción completa | «Chaggu conecta a personas, empresas y bots en un mismo lugar. Cada empresa conserva su identidad y cada persona ve solo su alcance. Conversa en espacios compartidos con clientes y proveedores; convierte mensajes en asuntos con responsable y fecha; agenda reuniones con confirmación; deriva una conversación para resolver algo aparte y devuelve el resultado; recibe recordatorios; trae mensajes desde WhatsApp, Slack o el correo con su origen; y organiza tus grupos de WhatsApp personal y Business. Cada empresa. Cada canal. Un solo hilo.» | «Chaggu connects people, companies and bots in one place. Each company keeps its identity and everyone sees only their own scope. Talk in spaces shared with clients and suppliers; turn messages into issues with an owner and a date; schedule meetings with RSVPs; branch a conversation to solve something separately and bring the result back; get reminders; bring messages from WhatsApp, Slack or email with their origin; and organise your personal and Business WhatsApp groups. Every company. Every channel. One thread.» |
 
 5. **Contenido de la app.**
-   - **Privacidad:** `https://www.tiecoms.com/privacidad/`.
-   - **Borrado de cuenta:** dentro de la app (Ajustes › Eliminar cuenta). Enlace web: `https://www.tiecoms.com/eliminar-cuenta/`.
+   - **Privacidad:** `https://www.chaggu.com/privacidad/`.
+   - **Borrado de cuenta:** dentro de la app (Ajustes › Eliminar cuenta). Enlace web: `https://www.chaggu.com/eliminar-cuenta/`.
    - **Anuncios:** no.
    - **IARC:** los usuarios interactúan entre sí y comparten contenido.
    - **Público:** mayores de 18.

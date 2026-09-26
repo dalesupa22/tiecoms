@@ -95,7 +95,7 @@ class FeedbackUiTest {
     fun feedbackV3() {
         val apiUrl = arg("apiUrl"); val email = arg("email"); val password = arg("password"); val convId = arg("conversationId"); val peerId = arg("peerId")
         assumeTrue("Faltan argumentos del fixture", apiUrl.isNotBlank() && email.isNotBlank() && password.isNotBlank() && convId.isNotBlank() && peerId.isNotBlank())
-        assertFalse("Nunca contra producción", apiUrl.contains("app.tiecoms.com"))
+        assertFalse("Nunca contra producción", (apiUrl.contains("app.tiecoms.com") || apiUrl.contains("app.chaggu.com")))
         ins.runOnMainSync { app.container.setDebugApiUrl(apiUrl) }
         val c0 = app.container.client.value
         runBlocking {

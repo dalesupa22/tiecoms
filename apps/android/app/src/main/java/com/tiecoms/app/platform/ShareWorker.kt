@@ -74,7 +74,7 @@ class ShareWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
             nm.createNotificationChannel(NotificationChannel(CHANNEL, applicationContext.getString(R.string.share_upload_channel), NotificationManager.IMPORTANCE_LOW))
         val pct = if (total == 0) 0 else (((done + fraction) / total) * 100).toInt().coerceIn(0, 100)
         return NotificationCompat.Builder(applicationContext, CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_tiecoms).setColor(0xFFFF7A00.toInt())
+            .setSmallIcon(R.drawable.ic_stat_chaggu).setColor(0xFFFF5A36.toInt())
             .setContentTitle(applicationContext.getString(R.string.share_title))
             .setContentText(applicationContext.getString(R.string.share_upload_progress, (done + 1).coerceAtMost(total), total))
             .setProgress(100, pct, total == 0).setOngoing(true).setOnlyAlertOnce(true).setSilent(true)

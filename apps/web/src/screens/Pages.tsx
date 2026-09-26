@@ -314,6 +314,12 @@ export function SettingsScreen() {
         <span className="grow"><b>{t('join.title')}</b><span className="small muted" style={{ display: 'block' }}>{t('join.hint')}</span></span>
         <span className="muted">›</span>
       </button>
+      {d.organizations.filter((o) => (o.myRole === 'owner' || o.myRole === 'admin') && o.verifiedDomain).map((o) => (
+        <label key={`jp-${o.id}`} className="card conv-card check" style={{ marginBottom: 12 }}>
+          <input type="checkbox" checked={o.joinPolicy === 'auto'} onChange={(e) => client.setJoinPolicy(o.id, e.target.checked ? 'auto' : 'invite').catch((err) => toast(errorText(err)))} />
+          <span className="grow"><b>{t('org.autoJoin', { domain: o.verifiedDomain ?? '' })}</b><span className="small muted" style={{ display: 'block' }}>{t('org.autoJoinHint', { org: o.name })}</span></span>
+        </label>
+      ))}
       {d.organizations.filter((o) => o.myRole === 'owner' || o.myRole === 'admin').map((o) => (
         <button key={o.id} className="card conv-card" style={{ marginBottom: 24 }} onClick={() => navigate(`/supervision/${o.id}`)}>
           <span style={{ fontSize: 22 }} aria-hidden>◉</span>

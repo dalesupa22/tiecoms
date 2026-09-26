@@ -94,6 +94,16 @@ describe('grupos', () => {
     expect((await call(`/invitations/${inv.json.token}/accept`, { token: nestle.token, body: {} })).status).toBe(200);
     ws = (await call('/bootstrap', { token: nestle.token })).json.workspaces.find((w: any) => w.id === r.json.workspaceId);
     expect(ws.organizationIds).toEqual([danny.orgId, nestle.orgId]);
+    // Viralidad: la primera persona de la empresa nueva queda como coadministradora de la relación.
+    expect(ws.myRole).toBe('admin');
+    // Y arma su propio canal, solo de su empresa: quien la invitó no lo ve.
+    const own = await call('/groups', { token: nestle.token, body: { name: 'Equipo Nestlé', target: { kind: 'workspace', workspaceId: r.json.workspaceId }, internal: true } });
+    expect(own.status).toBe(200);
+    const mine = (await call('/bootstrap', { token: nestle.token })).json.conversations.find((c: any) => c.id === own.json.conversationId);
+    expect(mine).toMatchObject({ kind: 'internal', internalOrgId: nestle.orgId });
+    expect((await call('/bootstrap', { token: danny.token })).json.conversations.some((c: any) => c.id === own.json.conversationId)).toBe(false);
+    const leak = await call('/groups', { token: nestle.token, body: { name: 'Mixto', target: { kind: 'workspace', workspaceId: r.json.workspaceId }, internal: true, memberIds: [danny.id] } });
+    expect(leak.status).toBe(400);
     // La persona de la otra empresa (no tercera) sí puede abrir asuntos y crear grupos en la relación.
     expect((await call(`/conversations/${r.json.conversationId}/issues`, { token: nestle.token, body: { title: 'Factura septiembre' } })).status).toBe(200);
     expect((await call('/groups', { token: nestle.token, body: { name: 'Compras', target: { kind: 'workspace', workspaceId: r.json.workspaceId } } })).status).toBe(200);
@@ -149,6 +159,17 @@ describe('grupos', () => {
     expect((await call(`/invitations/${home.json.inviteCode}/accept`, { token: c.token, body: {} })).status).toBe(200);
     const ws = (await call('/bootstrap', { token: c.token })).json.workspaces.find((w: any) => w.id === home.json.workspaceId);
     expect(ws.myRole).toBe('guest');
+  });
+
+  it('entrada automática por dominio: solo administración y solo con dominio verificado', async () => {
+    expect((await call(`/organizations/${danny.orgId}/join-policy`, { method: 'PUT', token: laura.token, body: { joinPolicy: 'auto' } })).status).toBe(403);
+    // Estas cuentas de prueba usan example.com (dominio público): no hay dominio verificado.
+    expect((await call(`/organizations/${danny.orgId}/join-policy`, { method: 'PUT', token: danny.token, body: { joinPolicy: 'auto' } })).status).toBe(400);
+    expect((await call(`/organizations/${danny.orgId}/join-policy`, { method: 'PUT', token: danny.token, body: { joinPolicy: 'invite' } })).status).toBe(200);
+    const org = (await call('/bootstrap', { token: danny.token })).json.organizations.find((o: any) => o.id === danny.orgId);
+    expect(org.joinPolicy).toBe('invite');
+    const asMember = (await call('/bootstrap', { token: laura.token })).json.organizations.find((o: any) => o.id === danny.orgId);
+    expect(asMember.joinPolicy).toBeUndefined();
   });
 
   it('un tercero no crea grupos en la relación donde está invitado', async () => {

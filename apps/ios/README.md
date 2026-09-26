@@ -10,7 +10,7 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Bundle ID | `com.tiecoms.app` (app) · `com.tiecoms.app.share` (Compartir) · `com.tiecoms.app.notifications` (Notification Service Extension) |
 | Team | `B76US7H3L3` (CERTILABOR SAS), firma automática |
 | App Group | `group.com.tiecoms.app`: Keychain compartido y lista de conversaciones para la extensión |
-| Versión | 1.1.0 (build 5), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
+| Versión | 1.4.0 (build 6), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.tiecoms.com` por defecto; `-TCApiURL <url>` al lanzar (pruebas) |
 
@@ -299,15 +299,15 @@ TEST_RUNNER_TC_FIXTURE4=/tmp/fx4.json TEST_RUNNER_TC_SHOTS=/tmp/v4 xcodebuild te
 
 - También se puede archivar sin iniciar sesión en Xcode si el llavero contiene el certificado
   Apple Distribution y su clave privada, y están instalados los perfiles de distribución
-  `TieComs AppStore` y `TieComsShare AppStore`:
+  `TieComs Release 6 AppStore`, `TieComsShare Release 6 AppStore` y `TieComsNotifications Release 6 AppStore`:
   ```bash
   xcodebuild -scheme TieComs -configuration Release -destination 'generic/platform=iOS' \
     -archivePath build/TieComs.xcarchive CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY='Apple Distribution' \
-    'PROVISIONING_PROFILE_SPECIFIER=$(TARGET_NAME) AppStore' archive
+    'PROVISIONING_PROFILE_SPECIFIER=$(TARGET_NAME) Release 6 AppStore' archive
   xcodebuild -exportArchive -archivePath build/TieComs.xcarchive -exportPath build/export \
     -exportOptionsPlist ExportOptions.plist
   ```
-  `ExportOptions.plist` incluye el team y la correspondencia de ambos perfiles manuales. No contiene
+  `ExportOptions.plist` incluye el team y la correspondencia de los tres perfiles manuales. No contiene
   claves privadas ni credenciales de App Store Connect.
 
 **Portal de desarrollo**
@@ -349,9 +349,10 @@ TEST_RUNNER_TC_FIXTURE4=/tmp/fx4.json TEST_RUNNER_TC_SHOTS=/tmp/v4 xcodebuild te
 **Permisos y por qué**
 - Notificaciones: avisos de mensajes, recordatorios y reuniones. Se piden después del primer login.
 - Red local (ATS `NSAllowsLocalNetworking`): solo para pruebas contra localhost.
-- No solicita permisos de cámara, micrófono, contactos ni ubicación. El QR de WhatsApp se muestra,
-  no se escanea. Si el usuario conecta WhatsApp, el servidor sincroniza los contactos de esa cuenta.
-- Compartir: la extensión recibe el texto o enlace que el usuario comparte a propósito.
+- Cámara: tomar una foto de perfil o grupo, o una foto o video para adjuntar. Micrófono: grabar notas de voz.
+- No solicita permisos de contactos ni ubicación. El QR de WhatsApp se muestra, no se escanea.
+  Si el usuario conecta WhatsApp, el servidor sincroniza los contactos de esa cuenta.
+- Compartir: la extensión recibe fotos, videos, archivos, texto o enlaces que el usuario comparte a propósito.
 
 **Privacidad**
 - `PrivacyInfo.xcprivacy` se incluye en la app y la extensión: UserDefaults propios (CA92.1) y del

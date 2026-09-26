@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Notas de voz (SPEC-v4 §F): se pide al mantener pulsado el micrófono, con una explicación antes. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Grabar es opcional; RECORD_AUDIO no debe excluir equipos sin micrófono en Play. -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <!-- Subidas grandes desde «Compartir» (WorkManager en primer plano). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />

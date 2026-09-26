@@ -6,7 +6,7 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 |---|---|
 | applicationId | `com.tiecoms.app` |
 | minSdk / target / compile | 26 / 36 / 36 |
-| Versión | `versionName 1.4.0`, `versionCode 6`. Sube el `versionCode` en cada envío a Play. |
+| Versión | `versionName 1.4.0`, `versionCode 7`. Sube el `versionCode` en cada envío a Play. |
 | Contrato | `2026-09-23`. Se envía en `x-tiecoms-contract` y en `device.contract`. |
 | API por defecto | `https://app.tiecoms.com` |
 | Toolchain | Gradle 8.14.3 (wrapper), AGP 8.13.2, Kotlin 2.3.21 y JDK 17 |
@@ -130,7 +130,7 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 - **Notas de voz (§F):**
   - **Grabar:** se mantiene pulsado el micrófono con el compositor vacío. Soltar envía, deslizar a la izquierda cancela y deslizar arriba bloquea (manos libres, con Descartar y Enviar).
   - **Formato:** AAC m4a mono de 24 kHz a 32 kbps (MediaRecorder), máximo 15 minutos. La grabación se pausa si otra app toma el audio.
-  - **Permiso:** se pide `RECORD_AUDIO` con una explicación previa.
+  - **Permiso:** se pide `RECORD_AUDIO` con una explicación previa. El micrófono se declara opcional (`android.hardware.microphone`, `required=false`) para que Play no excluya equipos que pueden usar chats y adjuntos sin grabar audio.
   - **Subir:** es un adjunto con `x-voice-note`, `x-duration-ms`, `x-waveform` y `Accept-Language`.
   - **Burbuja:** play/pausa, onda con progreso (se puede tocar para saltar), velocidad 1× / 1,5× / 2×, un punto para «sin escuchar» y reproducción continua de las notas seguidas.
   - **Transcripción:** antes de enviar cada nota se explica qué reciben Inworld (audio e idioma) y DeepSeek (transcripción, nombres y contexto). «Permitir esta solicitud» envía `x-ai-consent: 1`; «Continuar sin IA» envía la nota reproducible sin transcribir. Reintentar también exige permiso para esa solicitud. «Ver transcripción» trae texto copiable, resumen y asuntos sugeridos.

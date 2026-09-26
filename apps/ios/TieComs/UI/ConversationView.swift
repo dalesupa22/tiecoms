@@ -380,20 +380,23 @@ struct ConversationView: View {
             // ?m=<seq>: cargar hacia atrás hasta el mensaje, centrarlo y resaltarlo.
             .task(id: store.jumpTo[conversationId]) {
                 guard let seq = store.jumpTo[conversationId] else { return }
-                store.jumpTo[conversationId] = nil
                 if let id = await store.ensureMessage(conversationId, seq: seq) {
-                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
+                    guard store.jumpTo[conversationId] == seq else { return }
                     withAnimation { proxy.scrollTo(id, anchor: .center) }
                     highlighted = id
-                    try? await Task.sleep(nanoseconds: 1_800_000_000)
-                    withAnimation { highlighted = nil }
+                    do { try await Task.sleep(nanoseconds: 1_800_000_000) } catch {
+                        if highlighted == id { highlighted = nil }
+                        return
+                    }
+                    if highlighted == id { withAnimation { highlighted = nil } }
                 }
+                if !Task.isCancelled, store.jumpTo[conversationId] == seq { store.jumpTo[conversationId] = nil }
             }
             // Push de reacción: se conoce el id del mensaje, no su seq.
             .task(id: store.jumpToMessage[conversationId]) {
                 guard let mid = store.jumpToMessage[conversationId] else { return }
-                store.jumpToMessage[conversationId] = nil
-                if let seq = await store.ensureMessage(conversationId, id: mid) { store.jumpTo[conversationId] = seq }
+                await store.resolveMessageJump(conversationId, messageId: mid)
             }
             .onChange(of: reveal) { _, id in
                 guard let id else { return }

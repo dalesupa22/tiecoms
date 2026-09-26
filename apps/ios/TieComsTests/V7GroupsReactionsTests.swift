@@ -3,6 +3,34 @@ import XCTest
 
 private func dec<T: Decodable>(_ t: T.Type, _ s: String) throws -> T { try JSONDecoder().decode(T.self, from: Data(s.utf8)) }
 
+/// Retiene la página antigua para comprobar el estado mientras la petición HTTP está suspendida.
+private final class MessageJumpURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var pageRequested: XCTestExpectation?
+    nonisolated(unsafe) static var pendingPage: MessageJumpURLProtocol?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        if request.url?.path.hasSuffix("/messages") == true {
+            Self.pendingPage = self
+            Self.pageRequested?.fulfill()
+        } else {
+            complete(#"{"events":[],"lastEventSeq":100,"resetRequired":false}"#)
+        }
+    }
+    override func stopLoading() {}
+    func complete(_ json: String) {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["content-type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    static func session() -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [Self.self]
+        return URLSession(configuration: config)
+    }
+}
+
 /// 1.6.1: asuntos plegables en Grupos, completar con pulsación larga y reacciones (docs/REACCIONES_ENLACES.md).
 @MainActor
 final class V7GroupsReactionsTests: XCTestCase {
@@ -88,12 +116,12 @@ final class V7GroupsReactionsTests: XCTestCase {
 
     // MARK: Completar con pulsación larga (optimista)
 
-    private func mockStore() throws -> AppStore {
+    private func mockStore(session: URLSession = MockURLProtocol.session()) throws -> AppStore {
         MockURLProtocol.routes = [:]
         MockURLProtocol.requests = []
         MockURLProtocol.httpRequests = []
         let s = AppStore(baseURL: URL(string: "https://mock.chaggu.test")!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()),
-                         feedback: nil, session: MockURLProtocol.session())
+                         feedback: nil, session: session)
         let msg = #"{"id":"m1","conversationId":"g1","seq":1,"authorId":"me","kind":"text","body":"Listo el informe","createdAt":"2026-09-26T10:00:00.000Z"}"#
         s.seedForTesting(try boot(), conversations: ["g1": ConversationState(messages: [try dec(MessageDTO.self, msg)], lastEventSeq: 1, hasMore: false, loaded: true)])
         return s
@@ -244,6 +272,48 @@ final class V7GroupsReactionsTests: XCTestCase {
         XCTAssertEqual(p.kind, .reaction)
         XCTAssertEqual(p.messageId, "m1")
         XCTAssertEqual(try dec(AccountEvent.self, #"{"type":"reminders.changed"}"#), .remindersChanged)
+    }
+
+    private func storeWithUncachedReactionTarget() throws -> AppStore {
+        let s = try mockStore(session: MessageJumpURLProtocol.session())
+        let recent = try dec(MessageDTO.self, #"{"id":"recent","conversationId":"g1","seq":51,"authorId":"me","kind":"text","body":"Reciente","createdAt":""}"#)
+        s.seedForTesting(try boot(), conversations: ["g1": ConversationState(messages: [recent], lastEventSeq: 100, hasMore: true, loaded: true)])
+        s.jumpToMessage["g1"] = "old"
+        MessageJumpURLProtocol.pendingPage = nil
+        return s
+    }
+
+    private let oldMessagePage = #"{"messages":[{"id":"old","conversationId":"g1","seq":1,"authorId":"me","kind":"text","body":"Mensaje antiguo","createdAt":""}],"hasMore":false,"lastEventSeq":100}"#
+
+    func testReactionJumpKeepsRequestUntilUncachedMessageLoads() async throws {
+        let s = try storeWithUncachedReactionTarget()
+        let requested = expectation(description: "página fuera de caché")
+        MessageJumpURLProtocol.pageRequested = requested
+        defer { MessageJumpURLProtocol.pageRequested = nil; MessageJumpURLProtocol.pendingPage = nil }
+        let task = Task { await s.resolveMessageJump("g1", messageId: "old") }
+        await fulfillment(of: [requested], timeout: 3)
+        XCTAssertEqual(s.jumpToMessage["g1"], "old", "el id observado por SwiftUI debe seguir vivo durante HTTP")
+        XCTAssertNil(s.jumpTo["g1"])
+        let page = try XCTUnwrap(MessageJumpURLProtocol.pendingPage)
+        XCTAssertTrue(page.request.url!.absoluteString.contains("before=51"))
+        page.complete(oldMessagePage)
+        await task.value
+        XCTAssertEqual(s.jumpTo["g1"], 1, "resolver la página antigua produce el salto correcto")
+        XCTAssertNil(s.jumpToMessage["g1"], "se consume únicamente al terminar")
+    }
+
+    func testReactionJumpDoesNotOverwriteNewerPendingNotification() async throws {
+        let s = try storeWithUncachedReactionTarget()
+        let requested = expectation(description: "página antigua en vuelo")
+        MessageJumpURLProtocol.pageRequested = requested
+        defer { MessageJumpURLProtocol.pageRequested = nil; MessageJumpURLProtocol.pendingPage = nil }
+        let task = Task { await s.resolveMessageJump("g1", messageId: "old") }
+        await fulfillment(of: [requested], timeout: 3)
+        s.jumpToMessage["g1"] = "new-notification"
+        try XCTUnwrap(MessageJumpURLProtocol.pendingPage).complete(oldMessagePage)
+        await task.value
+        XCTAssertEqual(s.jumpToMessage["g1"], "new-notification")
+        XCTAssertNil(s.jumpTo["g1"], "la respuesta antigua no reemplaza el destino del aviso nuevo")
     }
 
     func testChatThreadsStayOutOfDMsButCountOnParent() throws {

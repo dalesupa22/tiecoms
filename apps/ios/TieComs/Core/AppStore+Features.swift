@@ -447,6 +447,16 @@ extension AppStore {
         return nil
     }
 
+    /// Conserva el pedido mientras carga: borrarlo antes del await cancelaría la `.task(id:)` de la vista.
+    /// Un aviso más nuevo tiene prioridad y no debe ser consumido por la carga anterior.
+    func resolveMessageJump(_ conversationId: String, messageId: String) async {
+        guard jumpToMessage[conversationId] == messageId else { return }
+        let seq = await ensureMessage(conversationId, id: messageId)
+        guard !Task.isCancelled, jumpToMessage[conversationId] == messageId else { return }
+        if let seq { jumpTo[conversationId] = seq }
+        jumpToMessage[conversationId] = nil
+    }
+
     /// Laterales visibles para mí que cuelgan de un mensaje.
     func sides(of messageId: String) -> [ConversationDTO] {
         (data?.conversations ?? []).filter { Naming.isSide($0) && $0.parentMessageId == messageId }

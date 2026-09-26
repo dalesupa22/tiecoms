@@ -2,7 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppStore.self) private var store
-    /// Splash animado solo en arranque en frío (este estado vive mientras viva el proceso).
+    /// Splash solo en arranque en frío (este estado vive mientras viva el proceso).
     @State private var showSplash = !AppConfig.launchFlag("TCNoSplash")
     @State private var splashSeconds: Double?
 
@@ -16,7 +16,7 @@ struct RootView: View {
                     .accessibilityIdentifier("metrics.splash").accessibilityLabel("\(Int(s * 1000))")
             }
             if showSplash {
-                AnimatedSplashView(ready: store.status != .loading, short: store.launchedByLink) { seconds in
+                LaunchSplashView(ready: store.status != .loading, short: store.launchedByLink) { seconds in
                     splashSeconds = seconds
                     withAnimation(.easeOut(duration: 0.2)) { showSplash = false }
                 }

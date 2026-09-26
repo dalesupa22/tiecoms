@@ -5,7 +5,7 @@ import XCTest
 
 private func dec<T: Decodable>(_ t: T.Type, _ s: String) throws -> T { try JSONDecoder().decode(T.self, from: Data(s.utf8)) }
 
-/// SPEC-v4: adjuntos, TieComs en la hoja de compartir, pestañas de Inicio y sesión por servidor.
+/// SPEC-v4: adjuntos, Chaggu en la hoja de compartir, pestañas de Inicio y sesión por servidor.
 final class V4Tests: XCTestCase {
     static let json = #"""
     {"contract":"x","serverTime":"","me":{"id":"me","name":"Ana","kind":"human","primaryOrgId":"oA"},
@@ -169,7 +169,7 @@ final class V4Tests: XCTestCase {
         XCTAssertEqual(group.speakableGroupName?.spokenPhrase, "Comité directivo")
         XCTAssertEqual(group.recipients?.map(\.customIdentifier), ["bob"], "sin incluirme")
         XCTAssertEqual(group.sender?.isMe, true)
-        XCTAssertEqual(group.serviceName, "TieComs")
+        XCTAssertEqual(group.serviceName, "Chaggu")
 
         let direct = Donations.intent(d, d.conversations[4], image: INImage(imageData: Data([1, 2, 3])))
         XCTAssertNil(direct.speakableGroupName, "un directo se sugiere como la persona")
@@ -220,7 +220,8 @@ final class V4Tests: XCTestCase {
     // MARK: Sesión
 
     func testSessionIsScopedPerServer() {
-        XCTAssertEqual(KeychainSecretStore.account(for: URL(string: "https://app.tiecoms.com")), "refreshToken", "producción conserva la cuenta histórica")
+        XCTAssertEqual(KeychainSecretStore.account(for: URL(string: "https://app.chaggu.com")), "refreshToken", "producción conserva la cuenta histórica")
+        XCTAssertEqual(KeychainSecretStore.account(for: URL(string: "https://app.tiecoms.com")), "refreshToken", "el dominio anterior comparte la sesión de producción")
         XCTAssertEqual(KeychainSecretStore.account(for: nil), "refreshToken")
         XCTAssertEqual(KeychainSecretStore.account(for: URL(string: "http://localhost:3043")), "refreshToken@localhost:3043")
         XCTAssertEqual(KeychainSecretStore.account(for: URL(string: "http://LOCALHOST:3021/")), "refreshToken@localhost:3021")

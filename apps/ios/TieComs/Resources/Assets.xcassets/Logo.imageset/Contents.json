@@ -1,4 +1,7 @@
 {
-  "images" : [ { "filename" : "logo-wide.png", "idiom" : "universal" } ],
+  "images" : [
+    { "filename" : "logo-claro.png", "idiom" : "universal" },
+    { "appearances" : [ { "appearance" : "luminosity", "value" : "dark" } ], "filename" : "logo-oscuro.png", "idiom" : "universal" }
+  ],
   "info" : { "author" : "xcode", "version" : 1 }
 }

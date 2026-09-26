@@ -54,7 +54,7 @@ final class FeedbackUITests: XCTestCase {
 
     func testFeedbackTestFlight() throws {
         let f = try fixture()
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"))
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")))
         // Datos: B escribe una racha de dos mensajes y otro después; A abre un asunto.
         let tb = login(f, f.b.email)
         for body in ["Hola equipo, ¿cómo vamos con la fecha de salida?", "Necesito confirmarla hoy con dirección."] {

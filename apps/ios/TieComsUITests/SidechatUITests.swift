@@ -51,7 +51,7 @@ final class SidechatUITests: XCTestCase {
 
     func testSidechat() throws {
         let f = try fixture()
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"))
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")))
         let tag = String(UUID().uuidString.prefix(4))
         // B escribe en el general; luego B abre un sidechat a A sobre otro mensaje (A recibe la pregunta).
         let tb = login(f, f.b.email)

@@ -30,7 +30,7 @@ final class IntegrationTests: XCTestCase {
             throw XCTSkip("Sin TC_FIXTURE: las pruebas de integración necesitan el fixture del API de pruebas")
         }
         let f = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"), "las pruebas no se corren contra producción")
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "las pruebas no se corren contra producción")
         Self.fixture = f
         return f
     }

@@ -301,7 +301,7 @@ final class PushTokenSync {
                 case .unregister: registeredToken = nil; serverCleared = true
                 }
             } catch {
-                NSLog("[TieComs] registro push pendiente; se reintentará al volver o recuperar la red")
+                NSLog("[Chaggu] registro push pendiente; se reintentará al volver o recuperar la red")
             }
         }
     }

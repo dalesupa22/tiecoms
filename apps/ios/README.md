@@ -1,4 +1,4 @@
-# TieComs para iOS (nativo)
+# Chaggu para iOS (nativo)
 
 App nativa en SwiftUI (iOS 17+). No usa WebView, Capacitor ni dependencias externas.
 Se comporta igual que la app Android y que la web: la navegación, los textos, los sonidos, los enlaces
@@ -10,9 +10,9 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Bundle ID | `com.tiecoms.app` (app) · `com.tiecoms.app.share` (Compartir) · `com.tiecoms.app.notifications` (Notification Service Extension) |
 | Team | `B76US7H3L3` (CERTILABOR SAS), firma automática |
 | App Group | `group.com.tiecoms.app`: Keychain compartido y lista de conversaciones para la extensión |
-| Versión | 1.5.0 (build 7), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
+| Versión | 1.6.0 (build 8), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
 | Idiomas | es, en (inglés si el sistema no está en español) |
-| API | `https://app.tiecoms.com` por defecto; `-TCApiURL <url>` al lanzar (pruebas) |
+| API | `https://app.chaggu.com` por defecto (web: `https://www.chaggu.com`); `-TCApiURL <url>` al lanzar (pruebas) |
 
 ## Qué hace (v1.1)
 
@@ -21,7 +21,7 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 - **Conversación**:
   - Pulsación larga sobre un mensaje (equivale al clic derecho de la web): responder con cita, copiar
     texto o enlace, fijar o quitar, recordarme (tiempos rápidos o fecha elegida), marcar como no leído
-    desde aquí, derivar, abrir asunto, agendar reunión, reenviar (a TieComs, WhatsApp, Slack, Teams o
+    desde aquí, derivar, abrir asunto, agendar reunión, reenviar (a Chaggu, WhatsApp, Slack, Teams o
     correo), editar ("(editado)") y eliminar ("Mensaje eliminado").
   - Barra de fijados, etiqueta "Reenviado desde…", tarjeta de resultado de una derivada (`mergedFrom`),
     barra de linaje (de dónde viene, derivadas, devolver el resultado) y tarjetas de reunión en el chat.
@@ -54,7 +54,7 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 - **WhatsApp**:
   - Cuentas personal y Business con QR o código de emparejamiento; generar otro código y desconectar.
   - Organizador por categorías, chats con sus mensajes, fijar u ocultar, y vincular un chat a una
-    conversación de TieComs.
+    conversación de Chaggu.
   - `whatsapp.updated` refresca la pantalla.
 - **Dominios de empresa** (solo owner/admin, en Ajustes → Tu empresa): listar, agregar y verificar por
   TXT.
@@ -63,7 +63,7 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 - **Eliminar cuenta** (Ajustes): pantalla que explica qué se borra y qué se conserva, pide el correo y
   la contraseña (si la cuenta tiene), y ejecuta `DELETE /api/v1/account`. Al terminar borra las
   credenciales locales y vuelve al login.
-- **Compartir hacia TieComs**:
+- **Compartir hacia Chaggu**:
   - La extensión de iOS acepta texto o un enlace desde cualquier app. El usuario elige la conversación
     y el texto se publica con `forwarded`.
   - El origen se detecta por el formato: un chat de WhatsApp se separa en mensajes con su autor; un
@@ -74,16 +74,19 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
   - "Continuar con Google" y "Continuar con Microsoft" abren `ASWebAuthenticationSession` con PKCE S256.
   - En el registro, el nombre de la empresa (`org_name`) o la invitación (`org`) se pasan al `/start`.
   - Los errores del SSO usan los mismos textos que la web (`err.sso_*`, `err.domain_claimed`).
-- **Splash "Un solo hilo"** (arranque en frío, `UI/Splash.swift`):
-  - Personas, luego el hilo naranja que las une, el nudo, el logo que nace con un pulso y chispas, y
-    el eslogan.
-  - Se dibuja con Canvas + TimelineView a 60 fps. La coreografía es una función pura del tiempo
-    (`SplashTimeline`).
-  - Sonido `tc_splash` en t = 0,30 s (respeta el interruptor de Sonidos y el modo silencio) y háptico
-    ligero en el nudo (t = 1,02 s).
+- **Splash** (arranque en frío, `UI/Splash.swift`):
+  - Logo de Chaggu sobre tinta `#17161F` con un fundido corto (0,35 s) y el eslogan debajo; sale a
+    los 1,4 s. Sin video ni animación por capas. Los tiempos son funciones puras (`SplashTimeline`).
+  - Sonido `tc_splash` en t = 0,10 s (respeta el interruptor de Sonidos y el modo silencio) y háptico
+    ligero a los 0,35 s.
   - Un toque salta al final. Con Reduce Motion solo hace un fundido del logo. Con un enlace en frío
-    empieza en la fase 4 y dura como máximo 1,2 s. Si la sesión aún carga, un punto late hasta 6 s.
-  - Launch Screen: crema liso, `#161413` en modo oscuro.
+    empieza con el logo ya visible (≤ 1,1 s). Si la sesión aún carga, un punto late hasta 6 s.
+  - Launch Screen: tinta `#17161F` lisa (claro y oscuro).
+- **Marca**: Chaggu (antes TieComs). Tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`. Ícono y
+  logos salen de `chaggu-marca/definitivo` (`AppIcon-1024.png` = `chaggu-appstore-1024.png`, sin alfa;
+  `Logo` = logo claro/oscuro transparente renderizado con `rsvg-convert -w 1300`). Los identificadores
+  internos (bundle IDs, App Group, Keychain, esquema `tiecoms://`, headers `x-tiecoms-*`, targets)
+  conservan el nombre anterior a propósito.
 
 ## Estructura
 
@@ -106,7 +109,7 @@ apps/ios/
     UI/                       RootView (pestañas, splash, toast), Home, Conversation, Menus, Sheets, IssuesViews,
                               AgendaViews, MoreViews (Trazo, Recordatorios, WhatsApp, Dominios, Eliminar cuenta), Splash,
                               ChatsViews (nuevo chat, sumar personas, reenviar, vista previa), ProfileFilesViews (perfil, archivos)
-    Resources/                Info.plist (generado), entitlements, PrivacyInfo, Assets (AppIcon, wordmark por capas), Sounds/*.caf, es/en
+    Resources/                Info.plist (generado), entitlements, PrivacyInfo, Assets (AppIcon, Logo claro/oscuro), Sounds/*.caf, es/en
   TieComsShare/               extensión Compartir (SwiftUI) + Info.plist + entitlements
   TieComsTests/               unitarias + integración (IntegrationTests v1, IntegrationV2Tests)
   TieComsUITests/             recorridos v1 (deep links) y v2 (splash → login → fijar/editar → par en vivo), fotogramas del splash
@@ -186,7 +189,8 @@ TEST_RUNNER_TC_DELETE_API=http://localhost:3042 TEST_RUNNER_TC_SHOTS=/tmp/shots 
 
 - Esquema propio: `tiecoms://c/<id>`, `/w/<id>`, `/invite/<token>`, `/signup?org=`, `/asuntos`, `/agenda`, `/trazo`,
   `/whatsapp`, `/share?text=`.
-- Enlaces universales: `applinks:` para app.tiecoms.com, tiecoms.com y www.tiecoms.com. El AASA lo
+- Enlaces universales: `applinks:` para app.chaggu.com, chaggu.com y www.chaggu.com, y también los
+  del dominio anterior (app.tiecoms.com, tiecoms.com, www.tiecoms.com) para enlaces viejos. El AASA lo
   publica el coordinador. Sin AASA y sin firmar con el App ID, un enlace https abre Safari: está
   comprobado en simulador.
 
@@ -206,13 +210,15 @@ TEST_RUNNER_TC_DELETE_API=http://localhost:3042 TEST_RUNNER_TC_SHOTS=/tmp/shots 
 
 Los textos salen de `tiecoms-feedback/apps/web/src/i18n.ts`: `WEB_I18N=<ruta> node tools/gen-strings.mjs`.
 Cuando `mobile-feedback` llegue a main, basta con `node tools/gen-strings.mjs`.
+El generador reemplaza en los valores el nombre y el dominio anteriores (TieComs, tiecoms.com) por Chaggu y
+chaggu.com, así la app no los muestra aunque la web aún no se haya renombrado. Las claves no cambian.
 
 ## SPEC-v4 (build 6)
 
 - **Adjuntos**: clip del compositor (Fotos, Cámara, Archivos), vista previa y progreso antes de enviar, cuadrícula de fotos
   (1–4 + «+N»), visor con zoom, video y Quick Look. Subida `POST /conversations/:id/attachments` + miniatura de 480 px
   (`/attachments/:id/thumb`); descarga con Bearer y caché (`AttachmentCache`). Máx. 10 por mensaje y 25 MB cada uno.
-- **Compartir en TieComs** (`TieComsShare`): la regla SUBQUERY vive en `ShareItems.activationRule` y en `project.yml`
+- **Compartir en Chaggu** (`TieComsShare`): la regla SUBQUERY vive en `ShareItems.activationRule` y en `project.yml`
   (una prueba compara ambas con el Info.plist compilado). Acepta fotos, videos, archivos, enlaces y texto, hasta 5 destinos.
   Sugerencias de la fila de arriba: `Donations` (INSendMessageIntent al enviar y al abrir; se borran al cerrar sesión, al
   eliminar la cuenta y al salir de la conversación).
@@ -316,11 +322,11 @@ TEST_RUNNER_TC_FIXTURE4=/tmp/fx4.json TEST_RUNNER_TC_SHOTS=/tmp/v4 xcodebuild te
 - La firma automática los crea con `-allowProvisioningUpdates`.
 
 **App Store Connect**
-- Nueva app iOS "TieComs", idioma principal español, bundle `com.tiecoms.app`, SKU `tiecoms-ios`.
+- Nueva app iOS "Chaggu", idioma principal español, bundle `com.tiecoms.app`, SKU `tiecoms-ios`.
 - Categoría Negocios (secundaria Productividad), clasificación 4+.
 
 **Capturas sugeridas** (6,9", iPhone 17 Pro Max 1320×2868; sale de `TieComsUITests` con `TC_SHOTS`)
-1. Splash / logo "Un solo hilo".
+1. Splash con el logo de Chaggu.
 2. Inicio con espacios, fijadas y no leídos.
 3. Conversación entre dos empresas con cita y reenviado.
 4. Menú de acciones de un mensaje.
@@ -330,7 +336,7 @@ TEST_RUNNER_TC_FIXTURE4=/tmp/fx4.json TEST_RUNNER_TC_SHOTS=/tmp/v4 xcodebuild te
 
 **Texto de la ficha (es)**
 - Subtítulo: "Una red entre empresas".
-- Descripción: "TieComs une a las personas de las empresas con las que trabajas en una sola red. Cada
+- Descripción: "Chaggu une a las personas de las empresas con las que trabajas en una sola red. Cada
   empresa conserva su identidad y cada persona ve solo su alcance. Conversa en grupos compartidos o
   internos, convierte mensajes en asuntos con responsable y fecha, agenda reuniones, deriva un tema y
   devuelve el resultado, y trae lo importante desde WhatsApp, Slack o el correo. Cada empresa. Cada
@@ -339,7 +345,7 @@ TEST_RUNNER_TC_FIXTURE4=/tmp/fx4.json TEST_RUNNER_TC_SHOTS=/tmp/v4 xcodebuild te
 
 **Store listing (en)**
 - Subtitle: "One network across companies".
-- Description: "TieComs connects the people of the companies you work with in one network. Every
+- Description: "Chaggu connects the people of the companies you work with in one network. Every
   company keeps its identity and everyone only sees their own scope. Talk in shared or internal
   groups, turn messages into issues with an owner and a due date, schedule meetings, branch a topic
   off and bring the result back, and bring in what matters from WhatsApp, Slack or email. Every
@@ -364,7 +370,7 @@ TEST_RUNNER_TC_FIXTURE4=/tmp/fx4.json TEST_RUNNER_TC_SHOTS=/tmp/v4 xcodebuild te
 
 **Inicio de sesión (guía 4.8)**
 - Se conservan Google y Microsoft, además de correo/contraseña. Apple exime las apps de educación o
-  empresa que requieren una cuenta educativa o empresarial existente. Como TieComs también permite
+  empresa que requieren una cuenta educativa o empresarial existente. Como Chaggu también permite
   crear una empresa desde el registro, App Review debe evaluar si esta excepción aplica; no se asume
   aprobación. Fuente: https://developer.apple.com/app-store/review/guidelines/#login-services
 

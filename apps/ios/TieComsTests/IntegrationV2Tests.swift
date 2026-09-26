@@ -16,7 +16,7 @@ final class IntegrationV2Tests: XCTestCase {
         if let f = Self.fixture { return f }
         guard let path = ProcessInfo.processInfo.environment["TC_FIXTURE"], !path.isEmpty else { throw XCTSkip("Sin TC_FIXTURE") }
         let f = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"))
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")))
         Self.fixture = f
         return f
     }
@@ -232,7 +232,7 @@ final class IntegrationV2Tests: XCTestCase {
     /// Eliminar cuenta (3042, rama account-deletion): 400 correo distinto, 403 contraseña, 200 y la sesión deja de servir.
     func test9_DeleteAccount() async throws {
         guard let base = ProcessInfo.processInfo.environment["TC_DELETE_API"], !base.isEmpty else { throw XCTSkip("Sin TC_DELETE_API") }
-        XCTAssertFalse(base.contains("app.tiecoms.com"))
+        XCTAssertFalse((base.contains("app.chaggu.com") || base.contains("app.tiecoms.com")))
         let tag = UUID().uuidString.prefix(6).lowercased()
         let email = "borrar.\(tag)@qa.tiecoms.test"
         let password = "Clave-\(UUID().uuidString.prefix(12))"

@@ -259,7 +259,7 @@ final class V3FeedbackTests: XCTestCase {
         XCTAssertEqual(rem.kind, .reminder)
         XCTAssertEqual(rem.reminderId, "r1")
         XCTAssertEqual(PushPayload(userInfo: ["type": "algo.nuevo", "conversationId": "c9"])?.kind, .message, "tipo desconocido → mensaje")
-        XCTAssertNil(PushPayload(userInfo: ["aps": ["alert": "x"]]), "sin conversationId no es de TieComs")
+        XCTAssertNil(PushPayload(userInfo: ["aps": ["alert": "x"]]), "sin conversationId no es de Chaggu")
         #if DEBUG
         XCTAssertEqual(PushEnvironment.current, "sandbox")
         #endif

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Enlaces que abre la app: https://{app.,www.,}tiecoms.com/... y tiecoms://...
+/// Enlaces que abre la app: https://{app.,www.,}chaggu.com/..., los viejos de tiecoms.com y tiecoms://...
 enum DeepLink: Equatable, Hashable {
     case conversation(String)
     case workspace(String)
@@ -12,7 +12,9 @@ enum DeepLink: Equatable, Hashable {
     case whatsapp
     case share(text: String?)
 
-    static let hosts: Set<String> = ["app.tiecoms.com", "tiecoms.com", "www.tiecoms.com"]
+    static let hosts: Set<String> = ["app.chaggu.com", "chaggu.com", "www.chaggu.com",
+                                     // Dominio anterior de la marca: los enlaces ya compartidos siguen abriendo la app.
+                                     "app.tiecoms.com", "tiecoms.com", "www.tiecoms.com"]
 
     /// ?m=<seq> en /c/<id>: saltar a ese mensaje.
     static func messageSeq(_ url: URL) -> Int? {

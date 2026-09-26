@@ -332,7 +332,7 @@ struct PinsSheet: View {
     }
 }
 
-// MARK: Compartir hacia TieComs
+// MARK: Compartir hacia Chaggu
 
 /// Equivalente nativo de /share y Bring: el usuario elige la conversación y se envía
 /// con `forwarded` (origen detectado por el texto; si no, "otra app").

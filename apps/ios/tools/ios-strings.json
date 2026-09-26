@@ -40,8 +40,8 @@
   "Your name"
  ],
  "auth.noAccount": [
-  "¿Tu empresa aún no está en TieComs?",
-  "Is your company not on TieComs yet?"
+  "¿Tu empresa aún no está en Chaggu?",
+  "Is your company not on Chaggu yet?"
  ],
  "auth.password": [
   "Contraseña",
@@ -252,8 +252,8 @@
   "For testing only. Applies after restarting the app."
  ],
  "debug.useDefault": [
-  "Usar https://app.tiecoms.com",
-  "Use https://app.tiecoms.com"
+  "Usar https://app.chaggu.com",
+  "Use https://app.chaggu.com"
  ],
  "details.participants": [
   "Participantes ({n})",
@@ -392,8 +392,8 @@
   "Language"
  ],
  "settings.languageHint": [
-  "TieComs sigue el idioma del sistema (español o inglés). Cámbialo en Ajustes › General › Idioma.",
-  "TieComs follows the system language (Spanish or English). Change it in Settings › General › Language."
+  "Chaggu sigue el idioma del sistema (español o inglés). Cámbialo en Ajustes › General › Idioma.",
+  "Chaggu follows the system language (Spanish or English). Change it in Settings › General › Language."
  ],
  "settings.logout": [
   "Cerrar sesión",
@@ -472,16 +472,16 @@
   "One thread."
  ],
  "share.loginFirst": [
-  "Entra en TieComs para compartir en tus conversaciones.",
-  "Sign in to TieComs to share into your conversations."
+  "Entra en Chaggu para compartir en tus conversaciones.",
+  "Sign in to Chaggu to share into your conversations."
  ],
  "share.sent": [
   "Enviado a «{name}»",
   "Sent to “{name}”"
  ],
  "share.openApp": [
-  "Abre TieComs e inicia sesión para compartir aquí.",
-  "Open TieComs and sign in to share here."
+  "Abre Chaggu e inicia sesión para compartir aquí.",
+  "Open Chaggu and sign in to share here."
  ],
  "dom.title": [
   "Dominios de la empresa",
@@ -552,8 +552,8 @@
   "Delete account"
  ],
  "del.intro": [
-  "Se eliminará tu cuenta de TieComs de forma permanente.",
-  "Your TieComs account will be permanently deleted."
+  "Se eliminará tu cuenta de Chaggu de forma permanente.",
+  "Your Chaggu account will be permanently deleted."
  ],
  "del.removed": [
   "Se borran tu perfil, tus sesiones, tus recordatorios, tus inicios con Google o Microsoft y tus WhatsApp conectados. Sales de tus empresas, espacios y conversaciones.",
@@ -644,8 +644,8 @@
   "Send a report"
  ],
  "safety.reportHint": [
-  "Describe el contenido o la conducta que incumple las normas. TieComs revisará el reporte.",
-  "Describe content or behavior that violates the rules. TieComs will review your report."
+  "Describe el contenido o la conducta que incumple las normas. Chaggu revisará el reporte.",
+  "Describe content or behavior that violates the rules. Chaggu will review your report."
  ],
  "safety.reason": [
   "Motivo (5 a 2000 caracteres)",
@@ -656,8 +656,8 @@
   "Send report"
  ],
  "safety.sent": [
-  "Reporte enviado. Gracias por ayudarnos a mantener TieComs seguro.",
-  "Report sent. Thank you for helping keep TieComs safe."
+  "Reporte enviado. Gracias por ayudarnos a mantener Chaggu seguro.",
+  "Report sent. Thank you for helping keep Chaggu safe."
  ],
  "safety.block": [
   "Bloquear persona",
@@ -1052,8 +1052,8 @@
   "People in the space"
  ],
  "grp.noColleagues": [
-  "Aún no hay más personas de tu empresa en TieComs.",
-  "There are no other people from your company on TieComs yet."
+  "Aún no hay más personas de tu empresa en Chaggu.",
+  "There are no other people from your company on Chaggu yet."
  ],
  "grp.inviteOutside": [
   "Invitar de fuera (opcional)",
@@ -1180,12 +1180,12 @@
   "Share"
  ],
  "ishare.text": [
-  "Te invito a {name} en TieComs: {url} (código {code})",
-  "Join {name} on TieComs: {url} (code {code})"
+  "Te invito a {name} en Chaggu: {url} (código {code})",
+  "Join {name} on Chaggu: {url} (code {code})"
  ],
  "ishare.textNoCode": [
-  "Te invito a {name} en TieComs: {url}",
-  "Join {name} on TieComs: {url}"
+  "Te invito a {name} en Chaggu: {url}",
+  "Join {name} on Chaggu: {url}"
  ],
  "ishare.expires": [
   "Vence el {date}. Sirve para varias personas.",
@@ -1300,8 +1300,8 @@
   "Use AI for this voice note?"
  ],
  "ai.voice.message": [
-  "Si lo permites, TieComs envía esta grabación y su idioma a Inworld para transcribirla. Envía la transcripción, los nombres del autor y los participantes, y el nombre/contexto de la conversación a DeepSeek para generar un resumen y una acción sugerida. Puedes enviar y escuchar la nota sin IA. El permiso aplica solo a esta nota.",
-  "If you allow this, TieComs sends this recording and its language to Inworld for transcription. It sends the transcript, author and participant names, and conversation name/context to DeepSeek for a summary and suggested action. You can send and play the voice note without AI. Permission applies to this note only."
+  "Si lo permites, Chaggu envía esta grabación y su idioma a Inworld para transcribirla. Envía la transcripción, los nombres del autor y los participantes, y el nombre/contexto de la conversación a DeepSeek para generar un resumen y una acción sugerida. Puedes enviar y escuchar la nota sin IA. El permiso aplica solo a esta nota.",
+  "If you allow this, Chaggu sends this recording and its language to Inworld for transcription. It sends the transcript, author and participant names, and conversation name/context to DeepSeek for a summary and suggested action. You can send and play the voice note without AI. Permission applies to this note only."
  ],
  "ai.voice.allow": [
   "Permitir IA y enviar",
@@ -1324,8 +1324,8 @@
   "Share this conversation with DeepSeek?"
  ],
  "ai.side.message": [
-  "Para sugerir un resumen, TieComs envía a DeepSeek los mensajes y las transcripciones de esta conversación, los nombres del autor y los participantes, y el nombre/contexto de la conversación. Si lo permites, la sugerencia reemplaza tu borrador. Puedes seguir editando y publicar tu propio resumen sin IA. El permiso aplica solo a esta solicitud.",
-  "To suggest a summary, TieComs sends this conversation's messages and transcripts, author and participant names, and conversation name/context to DeepSeek. Allowing this replaces your draft with the suggestion. You can keep editing and publish your own summary without AI. Permission applies to this request only."
+  "Para sugerir un resumen, Chaggu envía a DeepSeek los mensajes y las transcripciones de esta conversación, los nombres del autor y los participantes, y el nombre/contexto de la conversación. Si lo permites, la sugerencia reemplaza tu borrador. Puedes seguir editando y publicar tu propio resumen sin IA. El permiso aplica solo a esta solicitud.",
+  "To suggest a summary, Chaggu sends this conversation's messages and transcripts, author and participant names, and conversation name/context to DeepSeek. Allowing this replaces your draft with the suggestion. You can keep editing and publish your own summary without AI. Permission applies to this request only."
  ],
  "ai.side.allow": [
   "Permitir y crear resumen",

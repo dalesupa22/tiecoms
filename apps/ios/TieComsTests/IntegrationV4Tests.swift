@@ -13,7 +13,7 @@ final class IntegrationV4Tests: XCTestCase {
     private func fx() throws -> Fixture {
         guard let path = ProcessInfo.processInfo.environment["TC_FIXTURE4"], !path.isEmpty else { throw XCTSkip("Sin TC_FIXTURE4") }
         let f = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"))
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")))
         return f
     }
 

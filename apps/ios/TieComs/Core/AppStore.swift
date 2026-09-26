@@ -45,7 +45,7 @@ struct AppAlert: Identifiable, Equatable {
     var message: String?
 }
 
-/// Cliente TieComs para iOS: sesión, snapshot, tiempo real, cola de envío y
+/// Cliente Chaggu para iOS: sesión, snapshot, tiempo real, cola de envío y
 /// navegación. Imita `packages/client-core/src/client.ts` para que web y móvil
 /// se comporten igual.
 @MainActor
@@ -81,7 +81,7 @@ final class AppStore {
     var sideToOpen: [String: String] = [:]
     /// Respuestas en privado pendientes por conversación directa (cita sobre el compositor).
     var privateReplies: [String: PrivateReplyDraft] = [:]
-    /// Texto compartido hacia TieComs (tiecoms://share?text=…).
+    /// Texto compartido hacia Chaggu (tiecoms://share?text=…).
     var shareText: String?
 
     var tab: AppTab = .home

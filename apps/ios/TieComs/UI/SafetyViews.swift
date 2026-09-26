@@ -102,9 +102,9 @@ struct LegalConsentView: View {
         VStack(alignment: .leading, spacing: 8) {
             Toggle(L("safety.acceptTerms"), isOn: $accepted).accessibilityIdentifier(identifier)
             HStack {
-                Link(L("safety.terms"), destination: URL(string: L10n.lang == "es" ? "https://www.tiecoms.com/terminos/" : "https://www.tiecoms.com/en/terms/")!)
+                Link(L("safety.terms"), destination: URL(string: L10n.lang == "es" ? AppConfig.website + "/terminos/" : AppConfig.website + "/en/terms/")!)
                 Text("·")
-                Link(L("safety.privacy"), destination: URL(string: L10n.lang == "es" ? "https://www.tiecoms.com/privacidad/" : "https://www.tiecoms.com/en/privacy/")!)
+                Link(L("safety.privacy"), destination: URL(string: L10n.lang == "es" ? AppConfig.website + "/privacidad/" : AppConfig.website + "/en/privacy/")!)
             }.font(.footnote)
             Text(L("safety.rulesSummary")).font(.footnote).foregroundStyle(Theme.textSecondary)
         }

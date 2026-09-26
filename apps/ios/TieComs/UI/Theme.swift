@@ -2,9 +2,11 @@ import SwiftUI
 import UIKit
 
 enum Theme {
-    static let orange = Color(hex: 0xFF7A00)
-    static let orangeLight = Color(hex: 0xFF8A1F)
-    static let ink = Color(hex: 0x1F1F1F)
+    /// Mandarina de la marca Chaggu (#FF5A36).
+    static let orange = Color(hex: 0xFF5A36)
+    static let orangeLight = Color(hex: 0xFF7B5E)
+    /// Tinta de la marca (#17161F).
+    static let ink = Color(hex: 0x17161F)
     static let cream = Color(hex: 0xFDFAF7)
 
     /// Fondo general: crema en claro, casi negro en oscuro.
@@ -14,10 +16,10 @@ enum Theme {
     static let bubbleOther = Color(light: 0xEFEBE6, dark: 0x2E2A27)
     static let textPrimary = Color(light: 0x1F1F1F, dark: 0xF4F1EA)
     static let textSecondary = Color(light: 0x6B645B, dark: 0xA8A29A)
-    /// Naranja para texto sobre fondo claro/oscuro con contraste suficiente.
-    static let accentText = Color(light: 0xB35500, dark: 0xFF8A1F)
-    /// Burbuja propia: naranja sobrio (#E8710A en claro, #C75F08 en oscuro), con texto blanco.
-    static let bubbleMine = Color(light: 0xE8710A, dark: 0xC75F08)
+    /// Mandarina para texto sobre fondo claro/oscuro con contraste AA (4,9:1 en claro, 7,2:1 en oscuro).
+    static let accentText = Color(light: 0xC93A1B, dark: 0xFF7B5E)
+    /// Burbuja propia: mandarina sobria (#E8472A en claro, #C73E24 en oscuro), con texto blanco.
+    static let bubbleMine = Color(light: 0xE8472A, dark: 0xC73E24)
 }
 
 extension Theme {
@@ -231,7 +233,8 @@ enum RemoteImageCache {
     }()
 }
 
-/// Logo sobre su fondo crema (legible también en modo oscuro).
+/// Logo de Chaggu sobre su placa: blanca en claro (letras en tinta) y tinta en oscuro (letras en papel).
+/// Los recortes del logo son del color de la placa, así se ve igual sobre cualquier fondo.
 struct LogoView: View {
     var width: CGFloat = 220
     var body: some View {
@@ -240,7 +243,7 @@ struct LogoView: View {
             .scaledToFit()
             .frame(width: width)
             .padding(8)
-            .background(RoundedRectangle(cornerRadius: 20).fill(Theme.cream))
-            .accessibilityLabel("TieComs")
+            .background(RoundedRectangle(cornerRadius: 20).fill(Color(light: 0xFFFFFF, dark: 0x17161F)))
+            .accessibilityLabel("Chaggu")
     }
 }

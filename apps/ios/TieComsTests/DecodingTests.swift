@@ -130,6 +130,13 @@ final class DecodingTests: XCTestCase {
 
     func testDeepLinks() {
         XCTAssertEqual(DeepLink.parse(URL(string: "tiecoms://c/abc-123")!), .conversation("abc-123"))
+        XCTAssertEqual(DeepLink.parse(URL(string: "https://app.chaggu.com/c/abc-123")!), .conversation("abc-123"))
+        XCTAssertEqual(DeepLink.parse(URL(string: "https://www.chaggu.com/w/w1")!), .workspace("w1"))
+        XCTAssertEqual(DeepLink.parse(URL(string: "https://chaggu.com/invite/tok_en-1")!), .invite("tok_en-1"))
+        XCTAssertEqual(DeepLink.parse(URL(string: "https://app.chaggu.com/signup?org=ORG123")!), .signup(orgToken: "ORG123"))
+        XCTAssertEqual(conversationLink("abc-123"), "https://app.chaggu.com/c/abc-123", "los enlaces compartidos usan el dominio nuevo")
+        XCTAssertNil(DeepLink.parse(URL(string: "https://evil.example/c/abc-123")!))
+        // Dominio anterior: los enlaces ya compartidos siguen abriendo la app.
         XCTAssertEqual(DeepLink.parse(URL(string: "https://app.tiecoms.com/c/abc-123")!), .conversation("abc-123"))
         XCTAssertEqual(DeepLink.parse(URL(string: "https://www.tiecoms.com/w/w1")!), .workspace("w1"))
         XCTAssertEqual(DeepLink.parse(URL(string: "https://tiecoms.com/invite/tok_en-1")!), .invite("tok_en-1"))

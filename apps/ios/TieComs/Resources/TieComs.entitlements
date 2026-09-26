@@ -8,6 +8,9 @@
 	<true/>
 	<key>com.apple.developer.associated-domains</key>
 	<array>
+		<string>applinks:app.chaggu.com</string>
+		<string>applinks:chaggu.com</string>
+		<string>applinks:www.chaggu.com</string>
 		<string>applinks:app.tiecoms.com</string>
 		<string>applinks:tiecoms.com</string>
 		<string>applinks:www.tiecoms.com</string>

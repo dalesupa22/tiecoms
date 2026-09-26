@@ -13,7 +13,7 @@ final class IntegrationV3Tests: XCTestCase {
         guard ProcessInfo.processInfo.environment["TC_V3"] == "1" else { throw XCTSkip("Sin TC_V3=1") }
         guard let path = ProcessInfo.processInfo.environment["TC_FIXTURE"], !path.isEmpty else { throw XCTSkip("Sin TC_FIXTURE") }
         let f = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"), "no se prueba contra producción")
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "no se prueba contra producción")
         let s = AppStore(baseURL: URL(string: f.apiUrl)!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: FeedbackSpy())
         try await s.login(email: f.a.email, password: f.password)
         return (s, f)

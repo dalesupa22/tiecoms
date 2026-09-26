@@ -21,7 +21,7 @@ final class KeychainSecretStore: SecretStore {
     /// La sesión se guarda por servidor: cambiar de API (producción, 3043, otro puerto) nunca borra
     /// la sesión de otro. Producción conserva la cuenta histórica "refreshToken".
     static func account(for apiURL: URL?) -> String {
-        guard let apiURL, let host = apiURL.host?.lowercased(), host != URL(string: AppConfig.defaultAPI)?.host else { return legacyAccount }
+        guard let apiURL, let host = apiURL.host?.lowercased(), !AppConfig.productionHosts.contains(host) else { return legacyAccount }
         return "refreshToken@\(host):\(apiURL.port ?? (apiURL.scheme == "http" ? 80 : 443))"
     }
 
@@ -78,7 +78,7 @@ final class KeychainSecretStore: SecretStore {
         }
         var status = add(group)
         if status != errSecSuccess && group != nil { status = add(nil) }
-        if status != errSecSuccess { NSLog("[TieComs] Keychain SecItemAdd falló: \(status)") }
+        if status != errSecSuccess { NSLog("[Chaggu] Keychain SecItemAdd falló: \(status)") }
         #if DEBUG
         // Solo depuración: una build de simulador sin firmar no tiene entitlements (-34018) y la sesión
         // se perdía en cada relanzamiento. En ese caso se guarda en un archivo protegido de la app.

@@ -300,7 +300,7 @@ struct ServerSettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("https://app.tiecoms.com", text: $url)
+                    TextField(AppConfig.defaultAPI, text: $url)
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityIdentifier("debug.url")
                 } header: { Text(L("debug.server")) } footer: { Text(L("debug.serverHint")) }

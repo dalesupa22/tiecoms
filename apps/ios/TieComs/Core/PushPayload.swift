@@ -1,6 +1,6 @@
 import Foundation
 
-/// Payload de un push de TieComs (APNs): `aps` + datos (PushData del contrato).
+/// Payload de un push de Chaggu (APNs): `aps` + datos (PushData del contrato).
 /// Tolerante: campos o tipos desconocidos no rompen; `type` desconocido → .message.
 struct PushPayload: Equatable {
     enum Kind: String { case message, reminder, event, side, mention }

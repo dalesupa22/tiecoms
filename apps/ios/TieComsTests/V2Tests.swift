@@ -102,84 +102,46 @@ final class DecodingV2Tests: XCTestCase {
     }
 }
 
-/// Coreografía del splash como función pura del tiempo.
+/// Splash de Chaggu (logo + eslogan) como función pura del tiempo.
 final class SplashTimelineTests: XCTestCase {
     typealias T = SplashTimeline
 
-    func testPhases() {
-        XCTAssertEqual(T.phase(0.0), .people)
-        XCTAssertEqual(T.phase(0.5), .thread)
-        XCTAssertEqual(T.phase(1.1), .tie)
-        XCTAssertEqual(T.phase(1.5), .logo)
-        XCTAssertEqual(T.phase(2.0), .slogan)
-        XCTAssertEqual(T.phase(2.5), .exit)
-        XCTAssertEqual(T.phase(2.8), .done)
-    }
-
-    func testNodesAppearStaggered() {
-        XCTAssertEqual(T.nodeScale(0, 0), 0)
-        XCTAssertGreaterThan(T.nodeScale(0, 0.1), T.nodeScale(4, 0.3) - 1) // arranca
-        XCTAssertEqual(T.nodeScale(4, 0.27), 0, "el quinto nodo espera 4×70 ms")
-        for i in 0..<5 { XCTAssertEqual(T.nodeScale(i, 0.8), 1, accuracy: 0.001) }
-        XCTAssertEqual(T.nodes.map(\.initials), ["SR", "TB", "LP", "KA", "MG"])
-        XCTAssertEqual(T.nodes.map(\.org), ["Acme", "Acme", "Nova", "Nova", "Lexa"])
-    }
-
-    func testRopeAndRings() {
-        XCTAssertEqual(T.rope(0.30), 0)
-        XCTAssertEqual(T.rope(0.65), 0.5, accuracy: 0.01)
-        XCTAssertEqual(T.rope(1.00), 1)
-        XCTAssertEqual(T.reachTime(0), 0.30, accuracy: 0.001)
-        XCTAssertEqual(T.reachTime(4), 1.00, accuracy: 0.001)
-        let r2 = T.reachTime(2)
-        XCTAssertEqual(r2, 0.65, accuracy: 0.01)
-        XCTAssertEqual(T.ring(2, r2 - 0.01).opacity, 0)
-        XCTAssertEqual(T.ring(2, r2).scale, 1.25, accuracy: 0.01)
-        XCTAssertEqual(T.ring(2, r2 + 0.3).scale, 1.0, accuracy: 0.01)
-    }
-
-    func testTieLogoSloganExit() {
-        XCTAssertEqual(T.tie(1.0), 0)
-        XCTAssertEqual(T.tie(1.35), 1)
-        XCTAssertEqual(T.tieRotation(1.35), 20)
-        XCTAssertEqual(T.nodeOpacity(1.4), 0)
-        XCTAssertEqual(T.hapticAt, 1.02)
-        XCTAssertEqual(T.soundAt, 0.30)
-        XCTAssertEqual(T.orangeLayer(1.2).opacity, 0)
-        XCTAssertEqual(T.orangeLayer(1.9).scale, 1, accuracy: 0.001)
-        XCTAssertEqual(T.inkReveal(1.40), 0)
-        XCTAssertEqual(T.inkReveal(1.95), 1)
-        XCTAssertGreaterThan(T.pulse(1.4).opacity, 0)
-        XCTAssertEqual(T.pulse(1.8).opacity, 0)
-        XCTAssertEqual((0..<T.sparkCount).filter { T.spark($0, 1.6).opacity > 0 }.count, 10)
-        XCTAssertEqual(T.tagline(1.85).opacity, 0)
-        XCTAssertEqual(T.tagline(2.2).offset, 0, accuracy: 0.001)
-        XCTAssertEqual(T.lines(2.4).opacity, 1)
-        XCTAssertEqual(T.exit(2.40).opacity, 1)
-        XCTAssertEqual(T.exit(2.75).opacity, 0)
-        XCTAssertEqual(T.exit(2.75).scale, 1.06, accuracy: 0.001)
+    func testLogoTaglineExit() {
+        XCTAssertEqual(T.logo(0).opacity, 0)
+        XCTAssertEqual(T.logo(0).scale, 0.92, accuracy: 0.001)
+        XCTAssertEqual(T.logo(T.logoIn).opacity, 1)
+        XCTAssertEqual(T.logo(T.logoIn).scale, 1, accuracy: 0.001)
+        XCTAssertEqual(T.tagline(0.1).opacity, 0)
+        XCTAssertEqual(T.tagline(0.6).opacity, 1)
+        XCTAssertEqual(T.tagline(0.6).offset, 0, accuracy: 0.001)
+        XCTAssertEqual(T.exit(T.exitStart).opacity, 1)
+        XCTAssertEqual(T.exit(T.total).opacity, 0)
+        XCTAssertEqual(T.exit(T.total).scale, 1.04, accuracy: 0.001)
+        XCTAssertLessThan(T.soundAt, T.hapticAt)
+        XCTAssertLessThanOrEqual(T.total, 1.5, "splash corto")
     }
 
     func testClockHoldsUntilReadyAndShortMode() {
         // Lista desde el principio: el reloj es el tiempo real.
-        XCTAssertEqual(T.clock(elapsed: 1.0, short: false, readyAt: 0.5), 1.0)
-        XCTAssertEqual(T.clock(elapsed: 2.6, short: false, readyAt: 0.5), 2.6, accuracy: 0.001)
+        XCTAssertEqual(T.clock(elapsed: 0.5, short: false, readyAt: 0.2), 0.5)
+        XCTAssertEqual(T.clock(elapsed: 1.3, short: false, readyAt: 0.2), 1.3, accuracy: 0.001)
         // Aún cargando: se detiene al inicio de la salida.
         XCTAssertEqual(T.clock(elapsed: 3.5, short: false, readyAt: nil), T.exitStart)
         // Lista a los 4 s: la salida arranca entonces.
         XCTAssertEqual(T.clock(elapsed: 4.1, short: false, readyAt: 4.0), T.exitStart + 0.1, accuracy: 0.001)
         // Máximo 6 s esperando: sigue sin estar lista y sale igual.
         XCTAssertEqual(T.clock(elapsed: 6.2, short: false, readyAt: nil), T.exitStart + 0.2, accuracy: 0.001)
-        // Enlace en frío: empieza en la fase 4 y termina en ≤ 1,2 s.
+        // Enlace en frío: el logo ya está visible y termina en ≤ 1,2 s.
         XCTAssertEqual(T.clock(elapsed: 0, short: true, readyAt: 0), T.shortStart)
+        XCTAssertEqual(T.logo(T.clock(elapsed: 0, short: true, readyAt: 0)).opacity, 1)
         XCTAssertGreaterThanOrEqual(T.clock(elapsed: 1.2, short: true, readyAt: 0), T.total - 0.001)
         // Toque: salta a la salida.
-        XCTAssertEqual(T.clock(elapsed: 0.5, short: false, readyAt: 0, skip: T.exitStart - 0.5), T.exitStart, accuracy: 0.001)
+        XCTAssertEqual(T.clock(elapsed: 0.3, short: false, readyAt: 0, skip: T.exitStart - 0.3), T.exitStart, accuracy: 0.001)
         XCTAssertEqual(T.reducedOpacity(0.2), 0.5, accuracy: 0.001)
     }
 }
 
-/// Compartir hacia TieComs y tiempos rápidos.
+/// Compartir hacia Chaggu y tiempos rápidos.
 final class SharedTextTests: XCTestCase {
     func testWhatsAppSplit() {
         let txt = "[24/9/26, 10:12] Juan Pérez: Hola equipo\n[24/9/26, 10:13] Ana: ¿Mañana?\nsegunda línea\n[24/9/26, 10:14] Ana: <Multimedia omitido>"

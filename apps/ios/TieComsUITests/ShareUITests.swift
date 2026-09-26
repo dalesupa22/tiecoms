@@ -1,6 +1,6 @@
 import XCTest
 
-/// SPEC-v4 en el simulador (nunca en los de Danny): compartir una foto desde Fotos a TieComs, la sugerencia
+/// SPEC-v4 en el simulador (nunca en los de Danny): compartir una foto desde Fotos a Chaggu, la sugerencia
 /// en la fila de arriba, la foto en la burbuja, el visor y las pestañas de Inicio.
 /// Entorno: TEST_RUNNER_TC_FIXTURE4=<fx.json>, TEST_RUNNER_TC_SHOTS=<carpeta>; antes: `xcrun simctl addmedia <sim> foto.png`.
 final class ShareUITests: XCTestCase {
@@ -35,7 +35,7 @@ final class ShareUITests: XCTestCase {
 
     func testShareFromPhotosToTwoConversations() throws {
         let f = try fixture()
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"))
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")))
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let app = XCUIApplication()
         app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES",
@@ -78,7 +78,7 @@ final class ShareUITests: XCTestCase {
         app.tap()   // cierra el menú
         sleep(1)
 
-        // Fotos → Compartir → TieComs.
+        // Fotos → Compartir → Chaggu.
         let photos = XCUIApplication(bundleIdentifier: "com.apple.mobileslideshow")
         photos.launch()
         sleep(2)
@@ -100,8 +100,8 @@ final class ShareUITests: XCTestCase {
         sleep(2)
         shot("v4-05-hoja-compartir-sugerencia")
         // La hoja de compartir es un proceso remoto: se busca en Fotos y en SpringBoard; si no, por coordenadas
-        // (TieComs es el segundo ícono de la fila de apps, visible en la captura v4-05).
-        let tie = [photos, springboard].map { $0.buttons.matching(NSPredicate(format: "label == 'TieComs'")).firstMatch }.first { $0.exists }
+        // (Chaggu es el segundo ícono de la fila de apps, visible en la captura v4-05).
+        let tie = [photos, springboard].map { $0.buttons.matching(NSPredicate(format: "label == 'Chaggu'")).firstMatch }.first { $0.exists }
         if let tie { tie.tap() } else { photos.coordinate(withNormalizedOffset: CGVector(dx: 0.386, dy: 0.55)).tap() }
         let ext = XCUIApplication(bundleIdentifier: "com.tiecoms.app.share")
         func q(_ id: String) -> XCUIElement {
@@ -124,7 +124,7 @@ final class ShareUITests: XCTestCase {
         sleep(4)
         shot("v4-08-enviado")
 
-        // De vuelta en TieComs: la foto en la burbuja y el visor.
+        // De vuelta en Chaggu: la foto en la burbuja y el visor.
         app.activate()
         let medias = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'att.media.'"))
         XCTAssertTrue(medias.firstMatch.waitForExistence(timeout: 20), "la foto aparece en el chat")

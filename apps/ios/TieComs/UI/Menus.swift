@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 /// Enlace público de una conversación (solo abre para quien tiene acceso).
-func conversationLink(_ id: String) -> String { "https://app.tiecoms.com/c/\(id)" }
+func conversationLink(_ id: String) -> String { "\(AppConfig.defaultAPI)/c/\(id)" }
 
 /// Menú de conversación (clic derecho de la web = pulsación larga / botón ⋯).
 struct ConversationMenuItems: View {

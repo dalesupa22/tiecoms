@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// Extensión «Compartir en TieComs»: fotos, videos, archivos, enlaces o texto desde cualquier app hacia
+/// Extensión «Compartir en Chaggu»: fotos, videos, archivos, enlaces o texto desde cualquier app hacia
 /// una o varias conversaciones (máx. 5). Usa la sesión de la app (Keychain del grupo group.com.tiecoms.app)
 /// y la lista de conversaciones que la app deja en el App Group. Si el usuario tocó una sugerencia de la fila
 /// de arriba (INSendMessageIntent donado por la app), esa conversación llega preseleccionada.

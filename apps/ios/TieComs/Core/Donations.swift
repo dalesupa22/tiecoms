@@ -1,7 +1,7 @@
 import Foundation
 import Intents
 
-/// Donaciones de `INSendMessageIntent`: así iOS sugiere las conversaciones de TieComs en la fila de
+/// Donaciones de `INSendMessageIntent`: así iOS sugiere las conversaciones de Chaggu en la fila de
 /// arriba de la hoja de compartir (como los contactos de WhatsApp). Se donan al enviar un mensaje y al
 /// abrir una conversación; se borran al cerrar sesión, eliminar la cuenta o salir de la conversación.
 @MainActor
@@ -24,7 +24,7 @@ enum Donations {
         let isGroup = c.kind != .direct
         let intent = INSendMessageIntent(recipients: Array(recipients), outgoingMessageType: .outgoingMessageText, content: nil,
                                          speakableGroupName: isGroup ? INSpeakableString(spokenPhrase: Naming.title(d, c)) : nil,
-                                         conversationIdentifier: c.id, serviceName: "TieComs", sender: sender, attachments: nil)
+                                         conversationIdentifier: c.id, serviceName: "Chaggu", sender: sender, attachments: nil)
         if isGroup, let image { intent.setImage(image, forParameterNamed: \.speakableGroupName) }
         return intent
     }

@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        NSLog("[TieComs] APNs no disponible: \(error.localizedDescription)")
+        NSLog("[Chaggu] APNs no disponible: \(error.localizedDescription)")
     }
 }
 

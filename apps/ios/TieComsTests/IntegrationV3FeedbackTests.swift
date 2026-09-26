@@ -15,7 +15,7 @@ final class IntegrationV3FeedbackTests: XCTestCase {
         if let f = Self.fixture { return f }
         guard let path = ProcessInfo.processInfo.environment["TC_FIXTURE3"], !path.isEmpty else { throw XCTSkip("Sin TC_FIXTURE3") }
         let f = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"))
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")))
         Self.fixture = f
         return f
     }

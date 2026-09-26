@@ -267,9 +267,9 @@ struct SettingsView: View {
             Section(L("safety.title")) {
                 NavigationLink { BlockedUsersView() } label: { Label(L("safety.blockedUsers"), systemImage: "person.slash") }
                     .accessibilityIdentifier("settings.blockedUsers")
-                Link(L("safety.support"), destination: URL(string: L10n.lang == "es" ? "https://www.tiecoms.com/soporte/" : "https://www.tiecoms.com/en/support/")!)
-                Link(L("safety.terms"), destination: URL(string: L10n.lang == "es" ? "https://www.tiecoms.com/terminos/" : "https://www.tiecoms.com/en/terms/")!)
-                Link(L("safety.privacy"), destination: URL(string: L10n.lang == "es" ? "https://www.tiecoms.com/privacidad/" : "https://www.tiecoms.com/en/privacy/")!)
+                Link(L("safety.support"), destination: URL(string: L10n.lang == "es" ? AppConfig.website + "/soporte/" : AppConfig.website + "/en/support/")!)
+                Link(L("safety.terms"), destination: URL(string: L10n.lang == "es" ? AppConfig.website + "/terminos/" : AppConfig.website + "/en/terms/")!)
+                Link(L("safety.privacy"), destination: URL(string: L10n.lang == "es" ? AppConfig.website + "/privacidad/" : AppConfig.website + "/en/privacy/")!)
             }
             Section {
                 LabeledContent(L("settings.language"), value: L10n.lang == "es" ? "Español" : "English")

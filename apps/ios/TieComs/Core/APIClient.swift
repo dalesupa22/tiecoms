@@ -38,7 +38,11 @@ enum SSOProvider: String, CaseIterable, Identifiable {
 }
 
 enum AppConfig {
-    static let defaultAPI = "https://app.tiecoms.com"
+    static let defaultAPI = "https://app.chaggu.com"
+    /// Web pública (landing, soporte y páginas legales).
+    static let website = "https://www.chaggu.com"
+    /// Hosts de producción (el actual y el del nombre anterior): comparten la sesión histórica del Keychain.
+    static let productionHosts: Set<String> = ["app.chaggu.com", "app.tiecoms.com"]
 
     /// Orden: argumento de lanzamiento `-TCApiURL` > URL de depuración guardada > producción.
     static var apiBaseURL: URL {

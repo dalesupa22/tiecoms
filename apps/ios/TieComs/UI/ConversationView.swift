@@ -628,17 +628,17 @@ struct ConversationView: View {
             Divider()
             let author = Naming.person(d, m.authorId)?.name ?? ""
             let link = "\(conversationLink(conversationId))?m=\(m.seq)"
-            let plain = "\(author): \(m.body)\n\n— \(Naming.title(d, c)) · TieComs\n\(link)"
+            let plain = "\(author): \(m.body)\n\n— \(Naming.title(d, c)) · Chaggu\n\(link)"
             Button(L("fwd.whatsapp")) {
                 if let u = URL(string: "https://wa.me/?text=\(plain.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")") { openURL(u) }
             }
             Button(L("fwd.slack")) {
-                UIPasteboard.general.string = ">\(m.body.replacingOccurrences(of: "\n", with: "\n>"))\n— *\(author)* · \(Naming.title(d, c)) · <\(link)|TieComs>"
+                UIPasteboard.general.string = ">\(m.body.replacingOccurrences(of: "\n", with: "\n>"))\n— *\(author)* · \(Naming.title(d, c)) · <\(link)|Chaggu>"
                 store.show(L("toast.slackCopied"))
             }
             Button(L("fwd.teams")) { UIPasteboard.general.string = plain; store.show(L("toast.teamsCopied")) }
             Button(L("fwd.email")) {
-                let subject = "\(Naming.title(d, c)) · TieComs".addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+                let subject = "\(Naming.title(d, c)) · Chaggu".addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
                 if let u = URL(string: "mailto:?subject=\(subject)&body=\(plain.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")") { openURL(u) }
             }
         } label: { Label(L("menu.forward"), systemImage: "arrowshape.turn.up.right") }

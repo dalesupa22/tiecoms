@@ -246,7 +246,7 @@ private struct WaChatRow: View {
                 HStack(spacing: 6) {
                     if multi { Text(chat.accountLabel).font(.caption2) }
                     Text("\(chat.category.icon) \(L("wa.cat.\(chat.category.rawValue)"))").font(.caption2)
-                    if chat.linkedConversationId != nil { Text("⇄ TieComs").font(.caption2.weight(.semibold)).foregroundStyle(Theme.accentText) }
+                    if chat.linkedConversationId != nil { Text("⇄ Chaggu").font(.caption2.weight(.semibold)).foregroundStyle(Theme.accentText) }
                 }
                 .foregroundStyle(Theme.textSecondary)
             }

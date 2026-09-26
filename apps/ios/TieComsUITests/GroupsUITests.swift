@@ -66,7 +66,7 @@ final class GroupsUITests: XCTestCase {
 
     func testGroupsTabsNewGroupShareAndYou() throws {
         let f = try fixture()
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"), "no se prueba contra producción")
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "no se prueba contra producción")
         let app = login(f)
 
         // 1. Grupos: Tu organización · Relaciones · Invitado en, con los asuntos bajo cada grupo.
@@ -151,7 +151,7 @@ final class GroupsUITests: XCTestCase {
     func testChatBarThreadsAndPlus() throws {
         let f = try fixture()
         guard let general = f.generalId, let thread = f.threadId else { throw XCTSkip("Fixture sin hilo") }
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"))
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")))
         let app = login(f)
         let row = app.buttons["conv.row.\(general)"]
         let until = Date().addingTimeInterval(20)
@@ -195,7 +195,7 @@ final class GroupsUITests: XCTestCase {
     func testMentionInsideSidechatSheet() throws {
         let f = try fixture()
         guard let general = f.generalId else { throw XCTSkip("Fixture sin grupo general") }
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"))
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")))
         let app = login(f)
         let row = app.buttons["conv.row.\(general)"]
         let until = Date().addingTimeInterval(20)

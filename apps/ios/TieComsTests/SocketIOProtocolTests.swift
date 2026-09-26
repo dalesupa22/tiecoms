@@ -95,8 +95,8 @@ final class SocketIOProtocolTests: XCTestCase {
     }
 
     func testSocketURL() {
-        XCTAssertEqual(SocketIOClient.socketURL(for: URL(string: "https://app.tiecoms.com")!).absoluteString,
-                       "wss://app.tiecoms.com/api/socket.io/?EIO=4&transport=websocket")
+        XCTAssertEqual(SocketIOClient.socketURL(for: URL(string: "https://app.chaggu.com")!).absoluteString,
+                       "wss://app.chaggu.com/api/socket.io/?EIO=4&transport=websocket")
         XCTAssertEqual(SocketIOClient.socketURL(for: URL(string: "http://localhost:3021")!).absoluteString,
                        "ws://localhost:3021/api/socket.io/?EIO=4&transport=websocket")
     }

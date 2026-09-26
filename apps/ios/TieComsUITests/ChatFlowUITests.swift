@@ -54,7 +54,7 @@ final class ChatFlowUITests: XCTestCase {
         }
     }
 
-    /// iOS puede pedir confirmación ("¿Abrir en TieComs?") al abrir un esquema propio.
+    /// iOS puede pedir confirmación ("¿Abrir en Chaggu?") al abrir un esquema propio.
     private func confirmOpenIfAsked() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         for label in ["Abrir", "Open"] {
@@ -70,7 +70,7 @@ final class ChatFlowUITests: XCTestCase {
     func testLoginSendEchoAndDeepLinks() throws {
         guard ProcessInfo.processInfo.environment["TC_UI_V1"] == "1" else { throw XCTSkip("Recorrido v1: TEST_RUNNER_TC_UI_V1=1") }
         let f = try fixture()
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"), "no se prueba contra producción")
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "no se prueba contra producción")
         let app = XCUIApplication()
         app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
         app.launch()
@@ -119,13 +119,13 @@ final class ChatFlowUITests: XCTestCase {
         // 5. Enlace universal https (sin verificación de dominio en el simulador)
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        XCUIDevice.shared.system.open(URL(string: "https://app.tiecoms.com/c/\(f.conversationId)")!)
+        XCUIDevice.shared.system.open(URL(string: "https://app.chaggu.com/c/\(f.conversationId)")!)
         confirmOpenIfAsked()
         sleep(4)
         let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
         let inApp = app.state == .runningForeground && app.descendants(matching: .any)["composer.field"].exists
         let inSafari = safari.state == .runningForeground
-        print("[resultado] https://app.tiecoms.com/c/<id>: abrió en la app=\(inApp) · abrió Safari=\(inSafari)")
+        print("[resultado] https://app.chaggu.com/c/<id>: abrió en la app=\(inApp) · abrió Safari=\(inSafari)")
         shot(app, "05-enlace-universal")
         let note = XCTAttachment(string: "https link → app=\(inApp) safari=\(inSafari)")
         note.name = "universal-link-result"
@@ -149,9 +149,9 @@ final class ChatFlowUITests: XCTestCase {
         }
     }
 
-    /// Fotogramas del splash (≈0,7 s, 1,5 s, 2,3 s) congelados con -TCSplashFreeze.
+    /// Fotogramas del splash (0,2 s, 0,6 s, 1,2 s) congelados con -TCSplashFreeze.
     func testSplashFrames() throws {
-        for t in ["0.7", "1.5", "2.3"] {
+        for t in ["0.2", "0.6", "1.2"] {
             let app = XCUIApplication()
             app.launchArguments = ["-TCSplashFreeze", t, "-TCResetSession", "YES", "-TCApiURL", "http://127.0.0.1:9", "-AppleLanguages", "(es)"]
             app.launch()
@@ -165,7 +165,7 @@ final class ChatFlowUITests: XCTestCase {
     /// Splash → login (≤ 3 s) → conversación → pulsación larga → fijar y editar → el par responde en vivo.
     func testV2SplashPinEditLive() throws {
         let f = try fixture()
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"))
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")))
         let app = XCUIApplication()
         app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
         app.launchArguments += ["-TCMetrics", "YES"]
@@ -241,7 +241,7 @@ final class ChatFlowUITests: XCTestCase {
     func testV3ChatsLinksForwardProfileFiles() throws {
         guard ProcessInfo.processInfo.environment["TC_UI_V3"] == "1" else { throw XCTSkip("Recorrido v3: TEST_RUNNER_TC_UI_V3=1") }
         let f = try fixture()
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"), "no se prueba contra producción")
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "no se prueba contra producción")
         let multi = try XCTUnwrap(f.multiId, "el fixture v3 trae multiId")
         let app = XCUIApplication()
         app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
@@ -333,7 +333,7 @@ final class ChatFlowUITests: XCTestCase {
     func testStoreScreenshots() throws {
         guard ProcessInfo.processInfo.environment["TC_STORE_SHOTS"] == "1" else { throw XCTSkip("Capturas de tienda desactivadas") }
         let f = try fixture()
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"), "solo entorno de pruebas")
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "solo entorno de pruebas")
         let lang = ProcessInfo.processInfo.environment["TC_SHOT_LANG"] ?? "es"
         let app = XCUIApplication()
         app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-AppleLanguages", "(\(lang))", "-AppleLocale", lang == "es" ? "es_CO" : "en_US"]
@@ -368,7 +368,7 @@ final class ChatFlowUITests: XCTestCase {
     func testReportBlockAndUnblock() throws {
         guard ProcessInfo.processInfo.environment["TC_SAFETY_UI"] == "1" else { throw XCTSkip("Seguridad UI desactivada") }
         let f = try fixture()
-        XCTAssertFalse(f.apiUrl.contains("app.tiecoms.com"))
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")))
         let app = XCUIApplication()
         app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-AppleLanguages", "(es)"]
         app.launch()

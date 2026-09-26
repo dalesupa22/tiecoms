@@ -2,7 +2,7 @@ import Foundation
 import Intents
 import UserNotifications
 
-/// Notificación de comunicación (foto del remitente, nombre del grupo) a partir de un push de TieComs.
+/// Notificación de comunicación (foto del remitente, nombre del grupo) a partir de un push de Chaggu.
 /// La usa la Notification Service Extension; vive en Core para poder probarla.
 enum CommunicationNotification {
     static func intent(payload p: PushPayload, authorId: String, image: INImage?) -> INSendMessageIntent {
@@ -13,7 +13,7 @@ enum CommunicationNotification {
                           image: nil, contactIdentifier: nil, customIdentifier: nil, isMe: true)
         return INSendMessageIntent(recipients: p.isGroup ? [me, sender] : [me], outgoingMessageType: .outgoingMessageText,
                                    content: p.body, speakableGroupName: p.isGroup ? INSpeakableString(spokenPhrase: p.title) : nil,
-                                   conversationIdentifier: p.conversationId, serviceName: "TieComs", sender: sender, attachments: nil)
+                                   conversationIdentifier: p.conversationId, serviceName: "Chaggu", sender: sender, attachments: nil)
     }
 
     /// Dona el intent y devuelve el contenido actualizado (nil si el sistema no lo acepta, p. ej. sin el entitlement).

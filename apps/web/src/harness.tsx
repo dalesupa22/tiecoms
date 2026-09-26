@@ -21,6 +21,7 @@ const conv = (c: Partial<ConversationDTO> & { id: string }): ConversationDTO => 
   lastMessageAt: iso(2 * H), lastMessagePreview: null, lastReadSeq: 0, unread: 0, canPost: true, canManage: true, historyFromSeq: 0,
   parentId: null, parentMessageId: null, parentMessageSeq: null, deriveKind: null, deriveReason: null, returnedAt: null, openIssues: 0, pinnedAt: null, mutedUntil: null, ...c,
 });
+const att = (id: string, name: string, contentType: string, sizeBytes: number) => ({ id, name, contentType, sizeBytes, width: 1200, height: 900, url: `/api/v1/attachments/${id}`, thumbUrl: null });
 let seq = 0;
 const msg = (cid: string, a: string, body: string, ago: number, extra: Partial<MessageDTO> = {}): MessageDTO => ({
   id: `${cid}-m${++seq}`, conversationId: cid, seq, authorId: a, clientMessageId: null, kind: 'text', body, replyTo: null, mergedFrom: null, forwarded: null,
@@ -39,6 +40,10 @@ const g = [
   msg('general', 'mateo', 'Perfecto, gracias. Seguimos con la salida del viernes.', 2 * H, { replyTo: 'general-m7' }),
   msg('general', 'laura', 'Les dejo la guía de marca https://www.tiecoms.com/', 100 * 60_000, { linkPreview: { url: 'https://www.tiecoms.com/', title: 'TieComs · Una sola red entre las empresas con las que trabajas', description: 'Conversaciones, asuntos y archivos entre equipos de distintas empresas, cada quien con su alcance.', siteName: 'TieComs', imageUrl: '/tiecoms-mark.svg' } }),
   msg('general', 'ana', 'Mañana llego a las 8 con el diseñador.', 90 * 60_000, { forwarded: { source: 'whatsapp', author: 'Pedro (Estudio Norte)', sentAt: '24/9/26 07:41' } }),
+  msg('general', 'mateo', 'Fotos de la visita de hoy', 60 * 60_000, { attachments: [1, 2, 3, 4, 5, 6].map((i) => att(`f${i}`, `visita-${i}.jpg`, 'image/jpeg', 820_000)) }),
+  msg('general', 'mateo', '@Danny Suárez ¿puedes revisar con @Laura Gómez la plantilla?', 50 * 60_000, { mentions: [{ userId: 'danny', start: 0, length: 13 }, { userId: 'laura', start: 34, length: 12 }] }),
+  msg('general', 'ana', '', 45 * 60_000, { attachments: [{ ...att('v1', 'nota-de-voz.m4a', 'audio/mp4', 31_000), kind: 'voice', durationMs: 52_000, waveform: Array.from({ length: 48 }, (_, i) => 0.2 + 0.8 * Math.abs(Math.sin(i / 3))), transcript: { status: 'done', text: 'Hola Danny, el jueves te mando el contrato revisado con los cambios de la cláusula cuatro.', language: 'es-CO', summary: 'Ana confirma a Danny que el jueves le envía el contrato revisado.', suggestedIssue: 'Enviar el contrato revisado el jueves' } }] }),
+  msg('general', 'laura', '', 40 * 60_000, { attachments: [att('p1', 'Contrato marco v3.pdf', 'application/pdf', 1_240_000), att('x1', 'Cronograma.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 48_000)] }),
 ];
 seq = 0;
 const dg = [
@@ -47,6 +52,17 @@ const dg = [
   msg('diag', 'danny', 'Era el job de las 10:00: reenviaba a quien no había firmado. Queda en una sola notificación diaria.', 6 * H),
   msg('diag', 'danny', JSON.stringify({ k: 'returned' }), 5 * H, { kind: 'system' }),
 ];
+seq = 0;
+const sd = [
+  msg('side1', 'danny', JSON.stringify({ k: 'side.started', excerpt: 'Veo notificaciones duplicadas en las pruebas, ¿es un reenvío manual o el job?', authorName: 'Ana Torres', parentName: null, messageId: 'general-m4' }), 2 * D - 30 * 60_000, { kind: 'system' }),
+  msg('side1', 'danny', 'Laura, no tengo ni idea de dónde salen los duplicados, ¿me ayudas?', 2 * D - 29 * 60_000),
+  msg('side1', 'laura', 'Es el job de las 10:00. Te paso el log.', 2 * D - 20 * 60_000),
+];
+seq = 0;
+const dm = [
+  msg('dm-ana', 'danny', 'Te cuento por aquí para no llenar el grupo: es el job de las 10.', 3 * H, { forwarded: { source: 'tiecoms', author: 'Ana Torres', sentAt: iso(2 * D), fromConversationId: 'general', messageId: 'general-m4', messageSeq: 4, excerpt: 'Veo notificaciones duplicadas en las pruebas, ¿es un reenvío manual o el job?' } }),
+  msg('dm-ana', 'ana', '¡Gracias! Mucho más claro.', 2 * H),
+];
 
 const data: BootstrapDTO = {
   contract: 'dev', serverTime: new Date().toISOString(),
@@ -54,10 +70,12 @@ const data: BootstrapDTO = {
   organizations: [org('xertify', 'Xertify', 'X', '#dcd0f2', '#3b2a5a', true), org('norte', 'Estudio Norte', 'EN', '#e8d5a8', '#4a3a14')],
   workspaces: [{ id: 'ws1', name: 'Lanzamiento · Estudio Norte', department: 'Portal de certificados', glyph: null, owningOrgId: 'xertify', organizationIds: ['xertify', 'norte'], memberIds: ['danny', 'laura', 'mateo', 'ana'], myRole: 'lead', createdAt: iso(4 * D), pinnedAt: null }],
   conversations: [
-    conv({ id: 'general', name: 'General', pinnedAt: iso(D), memberIds: ['danny', 'laura', 'mateo', 'ana'], lastMessageSeq: g.length, lastEventSeq: g.length, lastReadSeq: g.length - 1, unread: 1, lastMessagePreview: g[g.length - 1]!.body, openIssues: 2 }),
+    conv({ id: 'general', name: 'General', pinnedAt: iso(D), memberIds: ['danny', 'laura', 'mateo', 'ana'], lastMessageSeq: g.length, lastEventSeq: g.length, lastReadSeq: g.length - 1, unread: 1, unreadMentions: 1, lastMessagePreview: g[g.length - 1]!.body, openIssues: 2 }),
     conv({ id: 'diag', name: 'Diagnóstico · notificaciones duplicadas', kind: 'internal', level: null, internalOrgId: 'xertify', memberIds: ['danny', 'laura'], parentId: 'general', parentMessageId: 'general-m4', parentMessageSeq: 4, deriveKind: 'internal', deriveReason: 'Ana necesita saber si es el job o un reenvío', returnedAt: iso(5 * H), lastMessageSeq: dg.length, lastEventSeq: dg.length, lastReadSeq: dg.length }),
     conv({ id: 'dec', name: 'Decisión · fecha de salida', level: 'directivo', memberIds: ['danny', 'mateo'], parentId: 'general', parentMessageId: 'general-m2', parentMessageSeq: 2, deriveKind: 'directive', lastMessageSeq: 0 }),
-    conv({ id: 'multi1', kind: 'multi', workspaceId: null, level: null, name: null, memberIds: ['danny', 'mateo', 'ana', 'laura'], unread: 2, lastMessagePreview: '¿Nos vemos el jueves?' }),
+    conv({ id: 'multi1', kind: 'multi', workspaceId: null, level: null, name: 'Equipo mixto', avatarUrl: '/tiecoms-mark.svg', memberIds: ['danny', 'mateo', 'ana', 'laura'], unread: 2, lastMessagePreview: '¿Nos vemos el jueves?' }),
+    conv({ id: 'side1', kind: 'multi', workspaceId: null, level: null, name: 'Sidechat · Veo notificaciones duplicadas en las…', memberIds: ['danny', 'laura'], parentId: 'general', parentMessageId: 'general-m4', parentMessageSeq: 4, deriveKind: 'side', lastMessageSeq: sd.length, lastEventSeq: sd.length, lastReadSeq: sd.length - 1, unread: 1, lastMessagePreview: sd[2]!.body }),
+    conv({ id: 'dm-ana', kind: 'direct', workspaceId: null, level: null, memberIds: ['danny', 'ana'], lastMessageSeq: dm.length, lastEventSeq: dm.length, lastReadSeq: dm.length, lastMessagePreview: dm[1]!.body }),
     conv({ id: 'internal', name: 'Equipo interno', kind: 'internal', level: null, internalOrgId: 'xertify', memberIds: ['danny', 'laura'] }),
   ],
   people: [person('danny', 'Danny Suárez', 'xertify', 'Líder técnico'), person('laura', 'Laura Gómez', 'xertify', 'Soporte'), person('mateo', 'Mateo Rivas', 'norte', 'Director de proyectos'), person('ana', 'Ana Torres', 'norte', 'Coordinadora')],
@@ -87,6 +105,8 @@ const reminders = [
     general: { messages: g, lastEventSeq: g.length, hasMore: false, loaded: true, loading: false },
     diag: { messages: dg, lastEventSeq: dg.length, hasMore: false, loaded: true, loading: false },
     dec: { messages: [], lastEventSeq: 0, hasMore: false, loaded: true, loading: false },
+    side1: { messages: sd, lastEventSeq: sd.length, hasMore: false, loaded: true, loading: false },
+    'dm-ana': { messages: dm, lastEventSeq: dm.length, hasMore: false, loaded: true, loading: false },
   },
 });
 // WhatsApp de ejemplo: la personal conectada y la Business esperando el QR.
@@ -114,6 +134,11 @@ const waMsgs = [
   { id: 'c', fromMe: false, author: 'Carlos', kind: 'image', body: '📷 Captura del error', sentAt: iso(H) },
   { id: 'd', fromMe: false, author: 'Laura Gómez', kind: 'text', body: 'El despliegue quedó listo ✅', sentAt: iso(20 * 60_000) },
 ];
+(client as any).listMentions = async () => ({ hasMore: false, mentions: g.filter((m) => m.mentions?.some((x) => x.userId === 'danny')).map((m) => ({ message: m, conversationId: 'general', all: false, read: false, createdAt: m.createdAt })) });
+(client as any).fetchBlob = async () => (await fetch('/tiecoms-mark.svg')).blob();
+// Subidas simuladas: devuelven un AttachmentDTO y el envío queda en cola (sin backend).
+(client as any).uploadAttachment = async (_c: string, f: File, name: string) => { await new Promise((r) => setTimeout(r, 300)); return att(`up-${Date.now()}`, name, f.type || 'application/octet-stream', f.size); };
+(client as any).uploadAttachmentThumb = async (id: string) => att(id, 'thumb', 'image/jpeg', 1);
 (client as any).request = async (path: string, init: any = {}) => {
   if (path === '/whatsapp/accounts' && !init.method) return { accounts: waAccounts, max: 5 };
   if (path.startsWith('/whatsapp/chats?')) {
@@ -131,6 +156,7 @@ const waMsgs = [
     return c;
   }
   if (path === '/whatsapp/organize') return { reviewed: 7, changed: 0 };
+  if (path === '/blocks') return { userIds: [] };
   if (path.startsWith('/drive/tree')) {
     const ws = path.includes('workspaceId');
     const fo = (id: string, name: string, parentId: string | null) => ({ id, name, parentId, createdBy: 'danny', createdAt: iso(3 * D) });

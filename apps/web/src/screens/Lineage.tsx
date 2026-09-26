@@ -1,11 +1,11 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import type { BootstrapDTO, ConversationDTO, DeriveKind, MessageDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
 import { navigate } from '../router.ts';
 import { Modal, OrgMark, conversationTitle, orgById, personById } from '../ui.tsx';
 
-const KIND_TONE: Record<DeriveKind, string> = { same: 'k-same', internal: 'k-internal', directive: 'k-directive' };
+const KIND_TONE: Record<DeriveKind, string> = { same: 'k-same', internal: 'k-internal', directive: 'k-directive', side: 'k-side' };
 
 export function KindBadge({ kind }: { kind: DeriveKind | null }) {
   if (!kind) return null;
@@ -22,13 +22,13 @@ export function DeriveDialog({ conv, message, onClose }: { conv: ConversationDTO
   const myOrg = orgById(d, d.me.primaryOrgId);
   const excerpt = message.body.replace(/\s+/g, ' ').trim();
   const short = excerpt.length > 40 ? `${excerpt.slice(0, 40).replace(/\s+\S*$/, '')}…` : excerpt;
-  const [kind, setKind] = useState<DeriveKind>('same');
+  const [kind, setKind] = useState<Exclude<DeriveKind, 'side'>>('same');
   const [name, setName] = useState(`${t('derive.prefix.same')} · ${short}`);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pick = (k: DeriveKind) => { setKind(k); setName(`${t(`derive.prefix.${k}`)} · ${short}`); };
-  const options: [DeriveKind, string, string][] = [
+  const pick = (k: Exclude<DeriveKind, 'side'>) => { setKind(k); setName(`${t(`derive.prefix.${k}`)} · ${short}`); };
+  const options: [Exclude<DeriveKind, 'side'>, string, string][] = [
     ['same', t('derive.same'), t('derive.sameNote')],
     ['internal', t('derive.internal', { org: myOrg?.name ?? '' }), t('derive.internalNote')],
     ['directive', t('derive.directive'), t('derive.directiveNote')],
@@ -68,10 +68,28 @@ function ReturnDialog({ conv, parentName, onClose }: { conv: ConversationDTO; pa
   const d = useClient((s) => s.data)!;
   const local = useClient((s) => s.conversations[conv.id]);
   const lastText = [...(local?.messages ?? [])].reverse().find((m) => m.kind === 'text' && !m.deletedAt)?.body ?? '';
-  const [summary, setSummary] = useState(lastText);
+  const side = conv.deriveKind === 'side';
+  const [summary, setSummary] = useState(side ? '' : lastText);
+  const [source, setSource] = useState<'ai' | 'fallback' | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  void d;
+  // La apertura solo obtiene el respaldo local. La IA necesita una acción explícita.
+  useEffect(() => {
+    if (!side) return;
+    let alive = true;
+    client.request<{ summary: string; source: 'ai' | 'fallback' }>(`/conversations/${conv.id}/return/suggest`, { method: 'POST', json: { aiConsent: false } })
+      .then((r) => { if (alive) { setSummary((s) => s || r.summary); setSource(r.source); } })
+      .catch(() => { if (alive) { setSummary((s) => s || lastText); setSource('fallback'); } });
+    return () => { alive = false; };
+  }, [conv.id]);
+  async function suggestWithAi() {
+    setAiBusy(true); setError(null);
+    try {
+      const r = await client.request<{ summary: string; source: 'ai' | 'fallback' }>(`/conversations/${conv.id}/return/suggest`, { method: 'POST', json: { aiConsent: true } });
+      setSummary(r.summary); setSource(r.source);
+    } catch (e) { setError(errorText(e)); } finally { setAiBusy(false); }
+  }
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true); setError(null);
@@ -83,12 +101,26 @@ function ReturnDialog({ conv, parentName, onClose }: { conv: ConversationDTO; pa
     } catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
   return (
-    <Modal title={t('lin.returnTitle')} onClose={onClose}>
-      <p className="muted" style={{ margin: 0 }}>{t('lin.returnBody', { name: parentName })}</p>
+    <Modal title={conv.deriveKind === 'side' ? t('side.return') : t('lin.returnTitle')} onClose={onClose}>
+      <p className="muted" style={{ margin: 0 }}>{conv.deriveKind === 'side' ? t('side.returnBody', { name: parentName }) : t('lin.returnBody', { name: parentName })}</p>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <textarea className="input" rows={5} required minLength={2} maxLength={4000} value={summary} onChange={(e) => setSummary(e.target.value)} />
+        {side && <div className="card" style={{ padding: 10 }}>
+          <p className="small" style={{ marginTop: 0 }}>{t('ai.sideDisclosure')}</p>
+          <button type="button" className="btn small" disabled={busy || aiBusy || source === null} onClick={() => void suggestWithAi()}>{aiBusy ? t('side.suggesting') : t('ai.allowSummary')}</button>
+        </div>}
+        {side && <div className="small muted">{source === null ? t('side.suggesting') : source === 'ai' ? `✨ ${t('side.suggested')} · ${t('side.returnEdit')}` : `${t('side.suggestedFallback')} · ${t('side.returnEdit')}`}</div>}
+        <textarea className="input" rows={5} disabled={aiBusy} required minLength={2} maxLength={4000} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder={side && source === null ? t('side.suggesting') : undefined} />
+        {side && summary.trim() && (
+          <div>
+            <div className="eyebrow" style={{ marginBottom: 6 }}>{t('side.previewInGroup')}</div>
+            <div className="card" style={{ padding: 10 }}>
+              <div className="merged-card"><span>↩ {t('side.fromSidechat')}</span></div>
+              <div className="small" style={{ whiteSpace: 'pre-wrap', marginTop: 6 }}><b>{d.me.name}</b> · {summary.trim()}</div>
+            </div>
+          </div>
+        )}
         {error && <div className="error">{error}</div>}
-        <div className="modal-actions"><button type="button" className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" disabled={busy}>{t('lin.returnSend')}</button></div>
+        <div className="modal-actions"><button type="button" className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" disabled={busy || aiBusy || summary.trim().length < 2}>{side ? t('side.publish') : t('lin.returnSend')}</button></div>
       </form>
     </Modal>
   );
@@ -99,7 +131,8 @@ export function LineageBar({ conv }: { conv: ConversationDTO }) {
   const d = useClient((s) => s.data)!;
   const [returning, setReturning] = useState(false);
   const parent = conv.parentId ? d.conversations.find((c) => c.id === conv.parentId) : null;
-  const kids = d.conversations.filter((c) => c.parentId === conv.id);
+  // Las laterales son privadas y se ven como chip bajo su mensaje ancla, no aquí.
+  const kids = d.conversations.filter((c) => c.parentId === conv.id && c.deriveKind !== 'side');
   if (!conv.parentId && !kids.length) return null;
   return (
     <div className="lineage">
@@ -115,7 +148,7 @@ export function LineageBar({ conv }: { conv: ConversationDTO }) {
       <span className="grow" />
       {conv.returnedAt && <span className="lin-done">✓ {t('lin.returned')}</span>}
       {conv.parentId && parent && !conv.returnedAt && conv.canPost && (
-        <button className="btn primary small" onClick={() => setReturning(true)}>{t('lin.return')}</button>
+        <button className="btn primary small" onClick={() => setReturning(true)}>{conv.deriveKind === 'side' ? `↩ ${t('side.return')}` : t('lin.return')}</button>
       )}
       <button className="btn ghost small" onClick={() => navigate('/trazo')}>{t('lin.trazo')}</button>
       {returning && parent && <ReturnDialog conv={conv} parentName={conversationTitle(d, parent)} onClose={() => setReturning(false)} />}
@@ -124,12 +157,13 @@ export function LineageBar({ conv }: { conv: ConversationDTO }) {
 }
 
 /** Tarjeta del mensaje que trae de vuelta el resultado de una derivada. */
-export function MergedCard({ childId }: { childId: string }) {
+export function MergedCard({ childId, kind }: { childId: string; kind?: DeriveKind | null }) {
   const d = useClient((s) => s.data)!;
   const child = d.conversations.find((c) => c.id === childId);
+  const side = kind === 'side' || child?.deriveKind === 'side';
   return (
-    <div className="merged-card">
-      <span>↩ {child ? t('lin.resultOf', { name: conversationTitle(d, child) }) : t('lin.resultHidden')}</span>
+    <div className={`merged-card ${side ? 'is-side' : ''}`}>
+      <span>↩ {side ? t('side.fromSidechat') : child ? t('lin.resultOf', { name: conversationTitle(d, child) }) : t('lin.resultHidden')}</span>
       {child && <button className="btn ghost small" onClick={() => navigate(`/c/${child.id}`)}>{t('lin.open')}</button>}
     </div>
   );

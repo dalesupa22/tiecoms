@@ -9,7 +9,7 @@
 import { z } from 'zod';
 
 export const API_VERSION = 1;
-export const CONTRACT_VERSION = '2026-09-23';
+export const CONTRACT_VERSION = '2026-09-25';
 /** Clientes con un contrato anterior a este deben actualizarse. */
 export const MIN_CLIENT_CONTRACT = '2026-09-23';
 
@@ -152,6 +152,16 @@ export interface WorkspaceDTO {
   myRole: WorkspaceRole;
   createdAt: string;
   pinnedAt: string | null;
+  /**
+   * Espacio casa de una empresa: sus grupos internos se muestran en «Tu organización» sin cabecera de espacio.
+   * Clientes viejos: ausente (se trata como false).
+   */
+  isOrgHome?: boolean;
+  /**
+   * Empresa invitada que aún no entra (el nombre que escribió quien creó la relación). Mientras el espacio
+   * no tenga otra empresa, se muestra en «Relaciones» con este nombre y como pendiente. Clientes viejos: ausente.
+   */
+  counterpartName?: string | null;
 }
 
 export interface ConversationDTO {
@@ -183,12 +193,91 @@ export interface ConversationDTO {
   /** Preferencias personales. */
   pinnedAt: string | null;
   mutedUntil: string | null;
+  /** Foto del grupo o chat (/api/v1/avatars/…) o null. Clientes viejos pueden no traerla. */
+  avatarUrl?: string | null;
+  /**
+   * Vista previa preferida para la lista: el último mensaje de texto (de una persona o un agente) entre los
+   * últimos 20 visibles, aunque después haya mensajes de sistema. null si no hay ninguno. Clientes viejos: ausente.
+   */
+  lastHumanPreview?: MessagePreviewDTO | null;
+  /** Menciones a mí (o @todos) sin leer: con seq mayor que lo que ya leí. Clientes viejos: ausente. */
+  unreadMentions?: number;
 }
+
+/** Una entrada de la bandeja «Menciones» (GET /mentions). */
+export interface MentionItemDTO {
+  message: MessageDTO;
+  conversationId: string;
+  /** true si fue @todos y no una mención directa. */
+  all: boolean;
+  read: boolean;
+  createdAt: string;
+}
+
+/** Resumen de adjuntos para vistas previas: «📷 Foto», «📷 3 fotos», «🎬 Video», «📎 nombre». */
+export interface AttachmentSummaryDTO {
+  count: number; images: number; videos: number; files: number; firstName: string | null;
+  /** Notas de voz (no cuentan en files) y la duración de la primera. Clientes viejos: ausentes. */
+  voices?: number; voiceDurationMs?: number | null;
+}
+export interface MessagePreviewDTO {
+  messageId: string;
+  seq: number;
+  authorId: string;
+  /** Texto (puede ser '' si el mensaje solo trae adjuntos). */
+  body: string;
+  attachments: AttachmentSummaryDTO | null;
+  createdAt: string;
+}
+
+/**
+ * Adjunto de un mensaje. url y thumbUrl son rutas del API que exigen Bearer (quien puede leer el mensaje).
+ * width/height solo en imágenes cuyo formato el servidor sabe leer; thumbUrl solo si alguien subió la miniatura.
+ */
+export interface AttachmentDTO {
+  id: string;
+  name: string;
+  contentType: string;
+  sizeBytes: number;
+  width: number | null;
+  height: number | null;
+  url: string;
+  thumbUrl: string | null;
+  /** 'voice' = nota de voz. Ausente en adjuntos viejos (= 'file'). */
+  kind?: 'file' | 'voice';
+  durationMs?: number | null;
+  /** ≤ 64 valores entre 0 y 1 para dibujar la onda. */
+  waveform?: number[] | null;
+  transcript?: VoiceTranscriptDTO | null;
+}
+
+/**
+ * Transcripción de una nota de voz. pending: en proceso; disabled: el servidor no tiene transcripción configurada
+ * (la nota se escucha igual); failed: se puede reintentar con POST /attachments/:id/transcribe.
+ * summary: una línea si la nota dura más de 45 s; suggestedIssue: título sugerido si la nota pide algo.
+ */
+export interface VoiceTranscriptDTO {
+  status: 'pending' | 'done' | 'failed' | 'disabled';
+  text?: string | null;
+  language?: string | null;
+  summary?: string | null;
+  suggestedIssue?: string | null;
+}
+export const MAX_VOICE_MS = 15 * 60_000;
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
 
 export type ForwardSource = 'whatsapp' | 'slack' | 'email' | 'teams' | 'tiecoms' | 'other';
 /** imageUrl es una ruta del API (/api/v1/previews/…): la miniatura ya está en TieComs. */
 export interface LinkPreviewDTO { url: string; title: string | null; description: string | null; siteName: string | null; imageUrl: string | null }
-export interface ForwardedInfo { source: ForwardSource; author?: string | null; sentAt?: string | null; fromConversationId?: string | null }
+/**
+ * messageId: mensaje original (p. ej. «Responder en privado»); el enlace solo abre si el lector puede leer el origen.
+ * messageSeq y excerpt (≤ 200) los pone el servidor a partir del original cuando llega messageId.
+ */
+export interface ForwardedInfo {
+  source: ForwardSource; author?: string | null; sentAt?: string | null; fromConversationId?: string | null;
+  messageId?: string | null; messageSeq?: number | null; excerpt?: string | null;
+}
 
 export interface ReminderDTO {
   id: string;
@@ -204,7 +293,8 @@ export interface ReminderDTO {
 export type Rsvp = 'pending' | 'yes' | 'no' | 'maybe';
 export interface CalendarEventDTO {
   id: string;
-  workspaceId: string;
+  /** null en reuniones de directos y chats grupales (multi, laterales). */
+  workspaceId: string | null;
   conversationId: string;
   originMessageId: string | null;
   title: string;
@@ -219,12 +309,14 @@ export interface CalendarEventDTO {
   updatedAt: string;
 }
 
-export type DeriveKind = 'same' | 'internal' | 'directive';
+/** side = conversación lateral: consulta privada desde un mensaje (chat multi que cuelga de su origen). */
+export type DeriveKind = 'same' | 'internal' | 'directive' | 'side';
 export type IssueStatus = 'open' | 'in_progress' | 'waiting' | 'done' | 'cancelled';
 
 export interface IssueDTO {
   id: string;
-  workspaceId: string;
+  /** null en asuntos de directos y chats grupales (multi, laterales). */
+  workspaceId: string | null;
   conversationId: string;
   originMessageId: string | null;
   originMessageSeq: number | null;
@@ -263,10 +355,16 @@ export interface MessageDTO {
   replyTo: string | null;
   /** Si este mensaje trae de vuelta el resultado de una conversación derivada. */
   mergedFrom: string | null;
+  /** Tipo de la conversación que devolvió el resultado ('side' = «Desde un sidechat»). Ausente en mensajes viejos. */
+  mergedKind?: DeriveKind | null;
   /** Mensaje traído desde WhatsApp, Slack, correo u otra conversación. */
   forwarded: ForwardedInfo | null;
   /** Vista previa del primer enlace; llega después con message.updated. Clientes viejos pueden no traerla. */
   linkPreview?: LinkPreviewDTO | null;
+  /** Adjuntos en el orden de envío ([] o ausente si no hay; [] si el mensaje se eliminó). */
+  attachments?: AttachmentDTO[];
+  /** Menciones válidas (ya filtradas por el servidor); [] o ausente si no hay. */
+  mentions?: MentionDTO[];
   createdAt: string;
   editedAt: string | null;
   deletedAt: string | null;
@@ -297,6 +395,53 @@ export const CreateConversationInput = z.object({
   memberIds: z.array(z.uuid()).max(500).default([]),
 });
 
+/**
+ * Nuevo grupo (el «+» de Grupos). Tres destinos:
+ *  - org: grupo interno de mi empresa (va al espacio casa de la empresa; se crea si falta).
+ *  - workspace: grupo dentro de una relación existente (espacio con otra empresa).
+ *  - company: relación nueva: crea el espacio con esa empresa, el grupo y las invitaciones.
+ * Un tercero invitado (guest) no puede crear grupos.
+ */
+export const CreateGroupInput = z.object({
+  name: z.string().trim().min(2).max(120),
+  target: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('org'), orgId: z.uuid().optional() }),
+    z.object({ kind: z.literal('workspace'), workspaceId: z.uuid() }),
+    z.object({ kind: z.literal('company'), companyName: z.string().trim().min(2).max(120), orgId: z.uuid().optional() }),
+  ]),
+  memberIds: z.array(z.uuid()).max(500).default([]),
+  /** Correos a invitar al grupo (personas de la otra empresa o terceros). */
+  inviteEmails: z.array(email).max(50).default([]),
+  /** guest = tercero a título propio (asesor, mentor): no suma su empresa al espacio. */
+  inviteRole: z.enum(['member', 'guest']).default('member'),
+  /** Además, un enlace directo con código corto para compartir por WhatsApp o donde sea (varias personas, 14 días). */
+  shareLink: z.boolean().default(false),
+  lang: z.enum(['es', 'en']).default('es'),
+});
+export interface CreateGroupResultDTO {
+  workspaceId: string; conversationId: string; invited: number;
+  /** Con shareLink: el enlace y el código para compartir. */
+  inviteUrl?: string; inviteCode?: string | null;
+}
+
+/** Supervisión: los grupos donde participa gente de mi empresa (solo owner/admin de la empresa). */
+export interface OversightGroupDTO {
+  conversationId: string;
+  name: string | null;
+  kind: 'group' | 'internal';
+  workspaceId: string;
+  workspaceName: string;
+  owningOrgId: string;
+  organizationIds: string[];
+  memberCount: number;
+  /** Personas de mi empresa en el grupo. */
+  myOrgMemberIds: string[];
+  lastMessageAt: string | null;
+  /** Si ya soy miembro; si no, lo abro en solo lectura. */
+  iAmMember: boolean;
+}
+export interface OversightDTO { orgId: string; groups: OversightGroupDTO[] }
+
 export const AddMembersInput = z.object({
   userIds: z.array(z.uuid()).min(1).max(200),
   /** 'now' = ven solo lo nuevo (por defecto); 'all' = concesión explícita del historial. */
@@ -317,7 +462,11 @@ export const CreateInvitationInput = z.object({
   history: z.enum(['now', 'all']).default('now'),
   /** Idioma del correo de invitación (si hay `email`). */
   lang: z.enum(['es', 'en']).default('es'),
+  /** Sin correo: el enlace (y su código corto) sirve a varias personas hasta vencer. */
+  multiUse: z.boolean().optional(),
 });
+/** Respuesta de crear una invitación: `url` para compartir y, si no lleva correo, `code` (K7QM-4XPA) para escribir en la app. */
+export interface InvitationCreatedDTO { id: string; token: string; url: string; code: string | null; expiresAt: string; emailSent: boolean; emailStatus: string | null }
 
 export const CreateOrgInvitationInput = z.object({
   email: email.optional(),
@@ -356,6 +505,15 @@ export const DeriveInput = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   reason: z.string().trim().max(300).optional(),
 });
+/**
+ * Conversación lateral desde un mensaje: pregunta en privado a colegas de tu empresa o a
+ * participantes del origen. No publica nada en el origen. Más adelante userIds podrá incluir agentes.
+ */
+export const SideConversationInput = z.object({
+  messageId: z.uuid(),
+  userIds: z.array(z.uuid()).min(1).max(20),
+  question: z.string().trim().min(1).max(4000).optional(),
+});
 export const ReturnResultInput = z.object({ summary: z.string().trim().min(2).max(4000) });
 
 export const AcceptInvitationInput = z.object({ orgId: z.uuid().optional() });
@@ -386,6 +544,12 @@ export interface InvitationPreviewDTO {
   email: string | null;
   expiresAt: string;
   valid: boolean;
+  /** Grupos a los que entra la persona. Clientes viejos: ausente. */
+  groupNames?: string[];
+  /** Enlace o código para varias personas. */
+  multiUse?: boolean;
+  /** Invitación a un grupo interno de una empresa (se entra como invitado de fuera). */
+  orgHome?: boolean;
 }
 
 // ---------- Mensajes ----------
@@ -394,14 +558,35 @@ export const ForwardedInput = z.object({
   author: z.string().trim().max(120).nullable().optional(),
   sentAt: z.string().max(40).nullable().optional(),
   fromConversationId: z.uuid().nullable().optional(),
+  /** Mensaje original dentro de fromConversationId (exige fromConversationId). */
+  messageId: z.uuid().nullable().optional(),
 });
+/**
+ * Mención con @: tramo del body (offsets en unidades UTF-16, como String.length de JS/Kotlin y NSString.length)
+ * que empieza con «@». userId 'all' = @todos / @all.
+ */
+export const MentionInput = z.object({
+  userId: z.union([z.uuid(), z.literal('all')]),
+  start: z.number().int().min(0).max(8000),
+  length: z.number().int().min(2).max(200),
+});
+export interface MentionDTO { userId: string | 'all'; start: number; length: number }
+
 export const SendMessageInput = z.object({
   clientMessageId: z.string().min(8).max(64),
-  body: z.string().trim().min(1).max(8000),
+  /** Puede ir vacío ('') si el mensaje lleva adjuntos. */
+  body: z.string().trim().max(8000),
   replyTo: z.uuid().nullable().optional(),
   forwarded: ForwardedInput.nullable().optional(),
-});
-export const EditMessageInput = z.object({ body: z.string().trim().min(1).max(8000) });
+  /** Adjuntos subidos por mí a esta conversación y aún sin usar (POST /conversations/:id/attachments). */
+  attachmentIds: z.array(z.uuid()).max(10).optional(),
+  /** Reenvío: adjuntos de mensajes que puedo leer; el servidor crea copias que apuntan al mismo archivo. */
+  forwardAttachmentIds: z.array(z.uuid()).max(10).optional(),
+  /** Menciones sobre el body. Las inválidas se descartan (droppedMentions en la respuesta), no dan error. */
+  mentions: z.array(MentionInput).max(50).optional(),
+}).refine((v) => v.body.length > 0 || !!v.attachmentIds?.length || !!v.forwardAttachmentIds?.length, { message: 'body_or_attachments', path: ['body'] })
+  .refine((v) => (v.attachmentIds?.length ?? 0) + (v.forwardAttachmentIds?.length ?? 0) <= 10, { message: 'max_10_attachments', path: ['attachmentIds'] });
+export const EditMessageInput = z.object({ body: z.string().trim().min(1).max(8000), mentions: z.array(MentionInput).max(50).optional() });
 export const ConversationPrefsInput = z.object({ pinned: z.boolean().optional(), mutedUntil: z.iso.datetime().nullable().optional() });
 export const WorkspacePrefsInput = z.object({ pinned: z.boolean() });
 export const MarkUnreadInput = z.object({ seq: z.number().int().min(1) });
@@ -432,6 +617,40 @@ export const EventsQuery = z.object({
   after: z.coerce.number().int().min(0),
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
+
+// ---------- Notificaciones push ----------
+/** Token del dispositivo de ESTA sesión (reemplaza el anterior). sandbox = compilación Debug de Xcode. */
+export const PushTokenInput = z.object({
+  provider: z.enum(['apns', 'fcm']),
+  token: z.string().trim().min(8).max(4096),
+  environment: z.enum(['sandbox', 'production']).default('production'),
+  /** Idioma de los textos que arma el servidor (recordatorios, reuniones). Por defecto, Accept-Language. */
+  lang: z.enum(['es', 'en']).optional(),
+});
+
+/**
+ * Datos que acompañan cada push (APNs: junto a `aps`; FCM: mensaje de datos, todos los valores como texto).
+ * type: message | reminder | event. Clientes: ignorar campos y tipos desconocidos.
+ */
+export interface PushData {
+  /** side = mensaje de un sidechat (categoría TC_SIDE; trae sideOf). */
+  type: 'message' | 'reminder' | 'event' | 'side' | 'mention';
+  conversationId: string;
+  messageId?: string;
+  authorId?: string;
+  authorName?: string;
+  /** Ruta relativa (/api/v1/avatars/…) como en los DTO, o vacío. */
+  authorAvatarUrl?: string;
+  reminderId?: string;
+  eventId?: string;
+  /** Solo en el aviso «empieza pronto» de una reunión (type 'event'): minutos que faltan. */
+  minutes?: number;
+  /**
+   * Solo en sidechats: de qué conversación y mensaje cuelga y su extracto (≤ 60). En FCM llega como JSON en `sideOf`
+   * y aplanado en sideOfConversationId, sideOfMessageId y sideOfExcerpt.
+   */
+  sideOf?: { conversationId: string | null; messageId: string | null; excerpt: string | null };
+}
 
 // ---------- Archivos (árbol de carpetas) ----------
 export interface DriveFolderDTO { id: string; parentId: string | null; name: string; createdBy: string; createdAt: string }
@@ -530,6 +749,8 @@ export type AccountEvent =
   | { type: 'scope.changed'; reason: string }
   | { type: 'read.updated'; conversationId: string; seq: number }
   | { type: 'reminder.due'; reminder: ReminderDTO }
+  /** Una reunión a la que voy (sí, quizá o sin responder) empieza en `minutes` minutos (10 por defecto). */
+  | { type: 'event.soon'; event: CalendarEventDTO; minutes: number }
   | { type: 'prefs.updated'; conversationId?: string; workspaceId?: string }
   | { type: 'whatsapp.updated'; accountId: string }
   | { type: 'drive.updated'; workspaceId: string | null };

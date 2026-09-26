@@ -1,6 +1,7 @@
 import type { Db } from './db.ts';
 import { forbidden, notFound } from './errors.ts';
 import { ensureNotBlocked } from './modules/safety.ts';
+import { OVERSIGHT_SCOPE } from './modules/oversight-scope.ts';
 
 export interface ConversationAccess {
   id: string;
@@ -13,6 +14,8 @@ export interface ConversationAccess {
   canManage: boolean;
   historyFromSeq: number;
   workspaceRole: string | null;
+  /** Lectura de supervisión: administrador de una empresa participante que no es miembro (solo lectura). */
+  oversight?: boolean;
 }
 
 /**
@@ -40,7 +43,13 @@ export async function conversationAccess(
     [conversationId, userId],
   );
   const r = rows[0];
-  if (!r) throw notFound('Conversación');
+  if (!r) {
+    if (need === 'read') {
+      const o = await oversightAccess(db, userId, conversationId);
+      if (o) return o;
+    }
+    throw notFound('Conversación');
+  }
   const a: ConversationAccess = {
     id: r.id, kind: r.kind, workspaceId: r.workspace_id, internalOrgId: r.internal_org_id,
     lastMessageSeq: r.last_message_seq, lastEventSeq: r.last_event_seq,
@@ -54,6 +63,28 @@ export async function conversationAccess(
   }
   if (need === 'manage' && !a.canManage) throw forbidden('No puedes administrar esta conversación');
   return a;
+}
+
+/**
+ * Supervisión: quien administra una empresa (owner/admin) puede leer, sin escribir, los grupos donde
+ * participa su gente (misma regla que la lista de supervisión, OVERSIGHT_SCOPE en modules/groups.ts).
+ */
+async function oversightAccess(db: Db, userId: string, conversationId: string): Promise<ConversationAccess | null> {
+  const { rows } = await db.query(
+    `SELECT c.id, c.kind, c.workspace_id, c.internal_org_id, c.last_message_seq, c.last_event_seq
+       FROM conversations c JOIN workspaces w ON w.id = c.workspace_id AND w.archived_at IS NULL
+      WHERE c.id = $1 AND EXISTS (
+        SELECT 1 FROM organization_memberships adm WHERE adm.user_id = $2 AND adm.role IN ('owner','admin')
+           AND ${OVERSIGHT_SCOPE.replaceAll('$ORG', 'adm.org_id')})`,
+    [conversationId, userId],
+  );
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: r.id, kind: r.kind, workspaceId: r.workspace_id, internalOrgId: r.internal_org_id,
+    lastMessageSeq: r.last_message_seq, lastEventSeq: r.last_event_seq,
+    canPost: false, canManage: false, historyFromSeq: 0, workspaceRole: null, oversight: true,
+  };
 }
 
 export interface WorkspaceAccess { workspaceId: string; role: string; orgId: string | null }

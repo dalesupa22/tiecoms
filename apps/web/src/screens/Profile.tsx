@@ -6,22 +6,7 @@ import { errorText, getLang, langPreference, setLang, t, type Lang } from '../i1
 import { openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate } from '../router.ts';
 import { Avatar, Modal, orgById, personById } from '../ui.tsx';
-
-/** Recorta al centro en cuadrado y reduce a 512 px: la foto sube liviana (≈50–150 KB). */
-async function squareImage(file: File, size = 512): Promise<Blob> {
-  const bmp = await createImageBitmap(file);
-  const side = Math.min(bmp.width, bmp.height);
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = Math.min(size, side);
-  const ctx = canvas.getContext('2d')!;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, canvas.width, canvas.height);
-  bmp.close();
-  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/webp', 0.86));
-  // Safari antiguo no produce WebP: cae a JPEG.
-  if (blob && blob.type === 'image/webp') return blob;
-  return new Promise<Blob>((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('No pude leer la imagen'))), 'image/jpeg', 0.88));
-}
+import { PhotoCropDialog } from './PhotoCrop.tsx';
 
 export function ProfileDialog({ onClose }: { onClose: () => void }) {
   const d = useClient((s) => s.data)!;
@@ -36,22 +21,26 @@ export function ProfileDialog({ onClose }: { onClose: () => void }) {
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
-  async function pick(file: File | undefined) {
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  function pick(file: File | undefined) {
+    if (input.current) input.current.value = '';
     if (!file) return;
     setError(null);
-    if (!file.type.startsWith('image/')) { setError(t('profile.notImage')); return; }
+    if (!file.type.startsWith('image/')) { setError(t('photo.invalid')); return; }
+    setCropFile(file);
+  }
+  async function upload(blob: Blob) {
     setBusy('photo');
     try {
-      const blob = await squareImage(file);
-      setPreview(URL.createObjectURL(blob));
       await client.request<UserDTO>('/me/avatar', { method: 'POST', body: blob, headers: { 'content-type': blob.type } });
       await client.loadBootstrap();
-      toast(t('profile.photoSaved'));
-    } catch (e) { setPreview(null); setError(errorText(e)); } finally { setBusy(null); if (input.current) input.current.value = ''; }
+      setPreview(URL.createObjectURL(blob));
+    } finally { setBusy(null); }
   }
   async function removePhoto() {
+    if (!confirm(t('photo.removeConfirm'))) return;
     setBusy('photo'); setError(null);
-    try { await client.request('/me/avatar', { method: 'DELETE' }); setPreview(null); await client.loadBootstrap(); } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+    try { await client.request('/me/avatar', { method: 'DELETE' }); setPreview(null); await client.loadBootstrap(); toast(t('photo.removed')); } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
   }
   async function save() {
     setBusy('save'); setError(null);
@@ -68,8 +57,10 @@ export function ProfileDialog({ onClose }: { onClose: () => void }) {
   return (
     <Modal title={t('profile.title')} onClose={onClose}>
       <div className="profile-photo">
-        {preview ? <img className="avatar" src={preview} alt="" width={88} height={88} style={{ borderRadius: 99, objectFit: 'cover' }} />
-          : <Avatar person={me} org={org} size={88} />}
+        <button className="photo-btn" title={t('photo.tapToChange')} aria-label={t('photo.choose')} disabled={!!busy} onClick={() => input.current?.click()}>
+          {preview ? <img className="avatar" src={preview} alt="" width={88} height={88} style={{ borderRadius: 99, objectFit: 'cover' }} />
+            : <Avatar person={me} org={org} size={88} />}
+        </button>
         <div style={{ display: 'grid', gap: 8 }}>
           <div className="row" style={{ flexWrap: 'wrap' }}>
             <button className="btn small" disabled={!!busy} onClick={() => input.current?.click()}>📷 {busy === 'photo' ? t('common.wait') : hasPhoto ? t('profile.changePhoto') : t('profile.addPhoto')}</button>
@@ -84,6 +75,7 @@ export function ProfileDialog({ onClose }: { onClose: () => void }) {
       <label className="field"><span>{t('profile.area')}</span><input className="input" maxLength={120} value={area} placeholder={t('profile.areaPh')} onChange={(e) => setArea(e.target.value)} /></label>
       <div className="hint">{d.me.email}{org ? ` · ${org.name}` : ''}</div>
       {error && <div className="error">{error}</div>}
+      {cropFile && <PhotoCropDialog file={cropFile} title={t('photo.cropTitle')} onSave={upload} onClose={() => setCropFile(null)} />}
       <div className="modal-actions">
         <button className="btn ghost" onClick={onClose}>{t('common.close')}</button>
         <button className="btn primary" disabled={!!busy || !changed || name.trim().length < 2} onClick={save}>{t('profile.save')}</button>

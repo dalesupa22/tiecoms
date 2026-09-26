@@ -200,8 +200,11 @@ export function IssuesScreen() {
     .filter((i) => visibleConvs.has(i.conversationId))
     .filter((i) => (filter === 'closed' ? isClosed(i) : !isClosed(i) && (filter === 'open' || i.ownerId === d.me.id)))
     .sort((a, b) => (issueFlags(b).stalledDays - issueFlags(a).stalledDays) || (a.dueDate ?? '9').localeCompare(b.dueDate ?? '9'));
+  // Primero los espacios; los de directos y chats grupales van al final en «Chats».
   const byWs = new Map<string, IssueDTO[]>();
-  for (const i of list) byWs.set(i.workspaceId, [...(byWs.get(i.workspaceId) ?? []), i]);
+  const CHATS = '__chats';
+  for (const i of list) { const k = i.workspaceId ?? CHATS; byWs.set(k, [...(byWs.get(k) ?? []), i]); }
+  const sections = [...byWs.entries()].sort(([a], [b]) => (a === CHATS ? 1 : 0) - (b === CHATS ? 1 : 0));
   const label = { mine: t('issue.mine'), open: t('issue.allOpen'), closed: t('issue.closed') };
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 900 }}>
@@ -212,9 +215,9 @@ export function IssuesScreen() {
       </div>
       {error && <div className="error">{error}</div>}
       {list.length === 0 && <div className="empty">{t('issue.empty')}</div>}
-      {[...byWs.entries()].map(([wsId, items]) => (
+      {sections.map(([wsId, items]) => (
         <section key={wsId} style={{ marginBottom: 18 }}>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>{d.workspaces.find((w) => w.id === wsId)?.name}</div>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>{wsId === CHATS ? t('issue.chatsSection') : d.workspaces.find((w) => w.id === wsId)?.name}</div>
           <div className="list">{items.map((i) => <IssueRow key={i.id} i={i} onOpen={setOpen} />)}</div>
         </section>
       ))}

@@ -206,6 +206,8 @@ export async function revokeSession(userId: string, sessionId: string) {
   await tx(async (c) => {
     const r = await c.query('UPDATE sessions SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL', [sessionId, userId]);
     if (r.rowCount) {
+      // Un dispositivo sin sesión no debe seguir recibiendo notificaciones.
+      await c.query('DELETE FROM push_subscriptions WHERE session_id = $1', [sessionId]);
       await enqueueOutbox(c, 'session.revoke', { sessionId });
       await audit(c, userId, 'auth.session_revoked', { type: 'session', id: sessionId });
     }

@@ -67,7 +67,7 @@ export function createRealtime(httpServer: HttpServer) {
         const { conversationId, ...rest } = (raw ?? {}) as { conversationId: string };
         const input = SendMessageInput.parse(rest);
         const out = await sendMessage(userId, String(conversationId), input);
-        ack?.({ ok: true, message: out.message, duplicate: out.duplicate });
+        ack?.({ ok: true, message: out.message, duplicate: out.duplicate, ...(out.droppedMentions ? { droppedMentions: out.droppedMentions } : {}) });
       } catch (e: any) {
         const code = e instanceof ApiError ? e.code : e?.name === 'ZodError' ? 'bad_request' : 'internal';
         ack?.({ ok: false, error: { code, message: e instanceof ApiError ? e.message : 'No se pudo enviar' } });

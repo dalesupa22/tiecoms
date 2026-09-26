@@ -1,7 +1,7 @@
 import type { z } from 'zod';
 import type { CalendarEventDTO, CreateEventInput, UpdateEventInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
-import { audit, pool, tx, type Db, type Tx } from '../db.ts';
+import { audit, enqueueOutbox, pool, tx, type Db, type Tx } from '../db.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
 import { appendEvent, appendMessage } from './messages.ts';
 
@@ -43,7 +43,6 @@ export async function createEvent(userId: string, conversationId: string, input:
   if (!validTz(input.timezone)) throw badRequest('Zona horaria inválida');
   return tx(async (c) => {
     const a = await conversationAccess(c, userId, conversationId, 'post', true);
-    if (!a.workspaceId) throw badRequest('Las reuniones viven en conversaciones de un espacio');
     const { rows } = await c.query(
       `INSERT INTO calendar_events (workspace_id, conversation_id, origin_message_id, title, description, location, starts_at, ends_at, timezone, organizer_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
@@ -56,6 +55,8 @@ export async function createEvent(userId: string, conversationId: string, input:
     await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: sys('event.created', { title: input.title, eventId: id, startsAt: input.startsAt, timezone: input.timezone }) });
     const ev = await load(c, id);
     await publish(c, ev);
+    // Convocatoria: push a los invitados (el worker revalida y respeta el silencio).
+    await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('push.event', $1, 2)", [JSON.stringify({ eventId: id })]);
     await audit(c, userId, 'event.created', { type: 'event', id, workspaceId: a.workspaceId });
     return ev;
   });
@@ -78,7 +79,8 @@ export async function updateEvent(userId: string, id: string, input: z.infer<typ
     if (input.timezone && !validTz(input.timezone)) throw badRequest('Zona horaria inválida');
     await c.query(
       `UPDATE calendar_events SET title = COALESCE($2, title), description = CASE WHEN $3 THEN $4 ELSE description END,
-         location = CASE WHEN $5 THEN $6 ELSE location END, starts_at = $7, ends_at = $8, timezone = COALESCE($9, timezone), updated_at = now()
+         location = CASE WHEN $5 THEN $6 ELSE location END, starts_at = $7, ends_at = $8, timezone = COALESCE($9, timezone), updated_at = now(),
+         soon_notified_at = CASE WHEN starts_at <> $7::timestamptz THEN NULL ELSE soon_notified_at END
        WHERE id = $1`,
       [id, input.title ?? null, input.description !== undefined, input.description ?? null, input.location !== undefined, input.location ?? null, starts, ends, input.timezone ?? null],
     );
@@ -125,9 +127,10 @@ export async function listEvents(userId: string, from: string, to: string, conve
   const { rows } = await pool.query(
     `SELECT e.id FROM calendar_events e
        JOIN conversation_memberships cm ON cm.conversation_id = e.conversation_id AND cm.user_id = $1 AND cm.removed_at IS NULL
-       JOIN workspace_memberships wm ON wm.workspace_id = e.workspace_id AND wm.user_id = $1 AND wm.revoked_at IS NULL
-                                     AND (wm.expires_at IS NULL OR wm.expires_at > now())
-      WHERE e.starts_at < $3 AND e.ends_at > $2 AND ($4::uuid IS NULL OR e.conversation_id = $4)
+       JOIN conversations cv ON cv.id = e.conversation_id AND cv.archived_at IS NULL
+       LEFT JOIN workspace_memberships wm ON wm.workspace_id = e.workspace_id AND wm.user_id = $1
+      WHERE (e.workspace_id IS NULL OR (wm.user_id IS NOT NULL AND wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())))
+        AND e.starts_at < $3 AND e.ends_at > $2 AND ($4::uuid IS NULL OR e.conversation_id = $4)
       ORDER BY e.starts_at LIMIT 500`,
     [userId, from, to, conversationId ?? null],
   );
@@ -138,4 +141,40 @@ export async function getEvent(userId: string, id: string) {
   const ev = await load(pool, id);
   await conversationAccess(pool, userId, ev.conversationId, 'read');
   return ev;
+}
+
+/** Minutos de anticipación del aviso «empieza pronto» (EVENT_SOON_MINUTES, por defecto 10). */
+export const soonMinutes = () => Math.max(1, Number(process.env.EVENT_SOON_MINUTES ?? 10));
+
+/**
+ * Lo llama el worker: reuniones que empiezan dentro de los próximos minutos y aún no avisaron.
+ * Avisa (evento de cuenta event.soon + push) a los invitados que dijeron sí o quizá o no respondieron
+ * y siguen en la conversación. Idempotente: soon_notified_at se marca en la misma transacción.
+ */
+export async function fireSoonEvents(): Promise<number> {
+  return tx(async (c) => {
+    const { rows } = await c.query(
+      `SELECT id, conversation_id FROM calendar_events
+        WHERE cancelled_at IS NULL AND soon_notified_at IS NULL AND starts_at > now() - interval '1 minute'
+          AND starts_at <= now() + make_interval(mins => $1)
+        ORDER BY starts_at LIMIT 100 FOR UPDATE SKIP LOCKED`,
+      [soonMinutes()],
+    );
+    for (const r of rows) {
+      await c.query('UPDATE calendar_events SET soon_notified_at = now() WHERE id = $1', [r.id]);
+      const { rows: who } = await c.query(
+        `SELECT i.user_id FROM calendar_event_invitees i
+           JOIN conversation_memberships cm ON cm.conversation_id = $2 AND cm.user_id = i.user_id AND cm.removed_at IS NULL
+           JOIN users u ON u.id = i.user_id AND u.disabled_at IS NULL
+          WHERE i.event_id = $1 AND i.rsvp IN ('yes', 'maybe', 'pending')`,
+        [r.id, r.conversation_id],
+      );
+      if (!who.length) continue;
+      const ev = await load(c, r.id);
+      const userIds = who.map((w) => w.user_id as string);
+      await enqueueOutbox(c, 'account.event', { userIds, event: { type: 'event.soon', event: ev, minutes: soonMinutes() } });
+      await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('push.event_soon', $1, 2)", [JSON.stringify({ eventId: r.id, userIds })]);
+    }
+    return rows.length;
+  });
 }

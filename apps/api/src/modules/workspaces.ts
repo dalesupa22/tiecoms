@@ -4,16 +4,17 @@ import type {
 } from '@tiecoms/contracts';
 import { conversationAccess, workspaceAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Tx } from '../db.ts';
-import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
-import { randomToken, sha256 } from '../security.ts';
-import { deliverInvitation, prepareInvitationFor } from './invitations.ts';
-import { appendEvent, appendMessage } from './messages.ts';
+import { ApiError, badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import { inviteCodeHash, normalizeInviteCode, randomInviteCode, randomToken, sha256 } from '../security.ts';
+import { deliverInvitation, invitationUrl, prepareInvitationFor } from './invitations.ts';
+import { appendEvent, appendMessage, toMessageDTO } from './messages.ts';
 import { ensureNotBlocked } from './safety.ts';
+import { getSummarizer } from './voice-providers.ts';
 
 /** Mensaje de sistema estructurado: cada cliente lo muestra en su idioma. */
 const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, ...p });
 
-async function primaryOrg(c: Tx, userId: string, orgId?: string) {
+export async function primaryOrg(c: Tx, userId: string, orgId?: string) {
   const { rows } = await c.query(
     `SELECT om.org_id, u.name FROM organization_memberships om JOIN users u ON u.id = om.user_id
       WHERE om.user_id = $1 AND ($2::uuid IS NULL OR om.org_id = $2)
@@ -30,14 +31,14 @@ async function activeMemberIds(c: Tx, conversationId: string): Promise<string[]>
 }
 
 /** Avisa a los sockets de estos usuarios que entren a la sala y que refresquen su alcance. */
-async function scopeChanged(c: Tx, userIds: string[], reason: string, join?: { conversationId: string }, leave?: { conversationId: string }) {
+export async function scopeChanged(c: Tx, userIds: string[], reason: string, join?: { conversationId: string }, leave?: { conversationId: string }) {
   if (!userIds.length) return;
   if (join) await enqueueOutbox(c, 'rooms.join', { userIds, conversationId: join.conversationId });
   if (leave) await enqueueOutbox(c, 'rooms.leave', { userIds, conversationId: leave.conversationId });
   await enqueueOutbox(c, 'account.event', { userIds, event: { type: 'scope.changed', reason } });
 }
 
-async function addConversationMembers(c: Tx, conversationId: string, userIds: string[], addedBy: string, history: 'now' | 'all', manage = false) {
+export async function addConversationMembers(c: Tx, conversationId: string, userIds: string[], addedBy: string, history: 'now' | 'all', manage = false) {
   const { rows } = await c.query('SELECT last_message_seq FROM conversations WHERE id = $1 FOR UPDATE', [conversationId]);
   const from = history === 'all' ? 0 : rows[0].last_message_seq;
   const added: string[] = [];
@@ -125,7 +126,13 @@ export async function addMembers(userId: string, conversationId: string, input: 
     if (a.kind === 'direct') throw badRequest('Los directos no admiten más personas');
     await ensureNotBlocked(c, userId, input.userIds);
     let rows: { user_id: string; org_id: string | null; name: string }[];
-    if (a.kind === 'multi') {
+    const side = a.kind === 'multi' ? (await c.query("SELECT parent_conversation_id, parent_message_id FROM conversations WHERE id = $1 AND derive_kind = 'side'", [conversationId])).rows[0] : null;
+    if (side) {
+      // Lateral: la misma regla que al abrirla (participantes del origen o colegas de mis empresas).
+      const { outsiders } = await sideAudience(c, userId, side.parent_conversation_id, side.parent_message_id, [...new Set(input.userIds)]);
+      if (outsiders.length) throw sideOutsider(outsiders);
+      rows = (await c.query('SELECT id AS user_id, primary_org_id AS org_id, name FROM users WHERE id = ANY($1)', [input.userIds])).rows;
+    } else if (a.kind === 'multi') {
       // Chat grupal: basta con que quien suma comparta un espacio o la empresa con cada persona.
       const ok = await reachable(c, userId, [...new Set(input.userIds)]);
       if (ok.length !== new Set(input.userIds).size) throw forbidden('Solo puedes sumar personas con las que compartes un espacio o tu empresa');
@@ -245,42 +252,61 @@ export async function createInvitation(userId: string, workspaceId: string, inpu
       if (rows.length !== new Set(input.conversationIds).size) throw badRequest('Solo puedes invitar a grupos compartidos donde participas');
     }
     if (input.role === 'guest' && !input.conversationIds.length) throw badRequest('Un tercero invitado debe entrar a grupos concretos');
+    // «Tu organización» no suma otras empresas: quien viene de fuera entra como tercero invitado.
+    const home = await c.query('SELECT 1 FROM workspaces WHERE id = $1 AND is_org_home', [workspaceId]);
+    if (home.rowCount && input.role !== 'guest') throw badRequest('En los grupos de tu organización, las personas de fuera entran como invitadas');
     if (input.email) await prepareInvitationFor(c, 'workspace', workspaceId, input.email);
+    if (input.multiUse && input.email) throw badRequest('Un enlace para varias personas no lleva correo');
     const token = randomToken(24);
+    // Sin correo es un enlace para compartir: también lleva un código corto para escribirlo en la app.
+    const code = input.email ? null : randomInviteCode();
     const { rows } = await c.query(
-      `INSERT INTO invitations (token_hash, workspace_id, invited_by, email, role, conversation_ids, history, access_until, expires_at, lang)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + make_interval(days => $9), $10) RETURNING id, expires_at`,
-      [sha256(token), workspaceId, userId, input.email ?? null, input.role, input.conversationIds, input.history, input.accessUntil ?? null, input.expiresInDays, input.lang],
+      `INSERT INTO invitations (token_hash, workspace_id, invited_by, email, role, conversation_ids, history, access_until, expires_at, lang, code_hash, multi_use)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + make_interval(days => $9), $10, $11, $12) RETURNING id, expires_at`,
+      [sha256(token), workspaceId, userId, input.email ?? null, input.role, input.conversationIds, input.history, input.accessUntil ?? null, input.expiresInDays, input.lang,
+        code ? inviteCodeHash(normalizeInviteCode(code)!) : null, Boolean(input.multiUse && !input.email)],
     );
-    await audit(c, userId, 'invitation.created', { type: 'invitation', id: rows[0].id, workspaceId }, { role: input.role, email: input.email ?? null });
-    return { id: rows[0].id as string, token, expiresAt: rows[0].expires_at as Date };
+    await audit(c, userId, 'invitation.created', { type: 'invitation', id: rows[0].id, workspaceId }, { role: input.role, email: input.email ?? null, multiUse: Boolean(input.multiUse) });
+    return { id: rows[0].id as string, token, code, expiresAt: rows[0].expires_at as Date };
   });
   const mail = input.email ? await deliverInvitation('workspace', inv.id, inv.token) : null;
-  return { ...inv, emailSent: mail?.status === 'sent', emailStatus: mail?.status ?? null };
+  return { ...inv, url: invitationUrl('workspace', inv.token), emailSent: mail?.status === 'sent', emailStatus: mail?.status ?? null };
 }
+
+/** El enlace trae el token; en la app también se puede escribir el código corto. Ambos se buscan por hash. */
+const INVITE_MATCH = '(i.token_hash = $1 OR i.code_hash = $2)';
+function inviteKeys(tokenOrCode: string): [Buffer, Buffer | null] {
+  const code = normalizeInviteCode(tokenOrCode);
+  return [sha256(tokenOrCode), code ? inviteCodeHash(code) : null];
+}
+const inviteValid = (r: { accepted_at: Date | null; revoked_at: Date | null; expires_at: Date; multi_use: boolean }) =>
+  (r.multi_use || !r.accepted_at) && !r.revoked_at && new Date(r.expires_at) > new Date();
 
 export async function previewInvitation(token: string): Promise<InvitationPreviewDTO> {
   const { rows } = await pool.query(
-    `SELECT i.role, i.email, i.expires_at, i.accepted_at, i.revoked_at, w.name AS workspace_name, u.name AS inviter, o.name AS inviter_org
+    `SELECT i.role, i.email, i.expires_at, i.accepted_at, i.revoked_at, i.multi_use, w.name AS workspace_name, w.is_org_home,
+            u.name AS inviter, o.name AS inviter_org,
+            ARRAY(SELECT c.name FROM conversations c WHERE c.id = ANY(i.conversation_ids) AND c.archived_at IS NULL ORDER BY c.created_at) AS group_names
        FROM invitations i JOIN workspaces w ON w.id = i.workspace_id JOIN users u ON u.id = i.invited_by
-       LEFT JOIN organizations o ON o.id = u.primary_org_id WHERE i.token_hash = $1`,
-    [sha256(token)],
+       LEFT JOIN organizations o ON o.id = u.primary_org_id WHERE ${INVITE_MATCH}`,
+    inviteKeys(token),
   );
   const r = rows[0];
   if (!r) throw notFound('Invitación');
   return {
     workspaceName: r.workspace_name, invitedByName: r.inviter, invitedByOrg: r.inviter_org ?? '', role: r.role, email: r.email,
     expiresAt: new Date(r.expires_at).toISOString(),
-    valid: !r.accepted_at && !r.revoked_at && new Date(r.expires_at) > new Date(),
+    valid: inviteValid(r),
+    groupNames: r.group_names.filter(Boolean), multiUse: r.multi_use, orgHome: r.is_org_home,
   };
 }
 
 export async function acceptInvitation(userId: string, token: string, input: z.infer<typeof AcceptInvitationInput>) {
   return tx(async (c) => {
-    const { rows } = await c.query('SELECT * FROM invitations WHERE token_hash = $1 FOR UPDATE', [sha256(token)]);
+    const { rows } = await c.query(`SELECT * FROM invitations i WHERE ${INVITE_MATCH} FOR UPDATE`, inviteKeys(token));
     const inv = rows[0];
     if (!inv) throw notFound('Invitación');
-    if (inv.accepted_at || inv.revoked_at || new Date(inv.expires_at) < new Date()) throw conflict('La invitación ya no es válida');
+    if (!inviteValid(inv)) throw conflict('La invitación ya no es válida');
     const me = await c.query('SELECT email, name FROM users WHERE id = $1', [userId]);
     if (inv.email && inv.email.toLowerCase() !== String(me.rows[0].email).toLowerCase()) {
       throw forbidden('Esta invitación es para otro correo');
@@ -308,7 +334,9 @@ export async function acceptInvitation(userId: string, token: string, input: z.i
       const added = await addConversationMembers(c, convId, [userId], inv.invited_by, inv.history);
       if (added.length) await appendMessage(c, { conversationId: convId, authorId: userId, kind: 'system', body: sys('member.joined', { name: me.rows[0].name }) });
     }
-    await c.query('UPDATE invitations SET accepted_by = $2, accepted_at = now() WHERE id = $1', [inv.id, userId]);
+    // Un enlace para varias personas sigue vigente: solo cuenta los usos.
+    if (inv.multi_use) await c.query('UPDATE invitations SET uses = uses + 1 WHERE id = $1', [inv.id]);
+    else await c.query('UPDATE invitations SET accepted_by = $2, accepted_at = now() WHERE id = $1', [inv.id, userId]);
     // Los demás participantes del espacio ven a la persona nueva en su directorio.
     const others = await c.query('SELECT user_id FROM workspace_memberships WHERE workspace_id = $1 AND revoked_at IS NULL', [inv.workspace_id]);
     await scopeChanged(c, others.rows.map((r) => r.user_id), 'workspace.member_joined');
@@ -384,13 +412,19 @@ export async function deriveConversation(userId: string, parentId: string, input
 export async function returnResult(userId: string, childId: string, summary: string) {
   return tx(async (c) => {
     await conversationAccess(c, userId, childId, 'post', true);
-    const { rows } = await c.query('SELECT name, parent_conversation_id, returned_at FROM conversations WHERE id = $1', [childId]);
+    const { rows } = await c.query('SELECT name, parent_conversation_id, returned_at, derive_kind FROM conversations WHERE id = $1', [childId]);
     const child = rows[0];
     if (!child?.parent_conversation_id) throw badRequest('Esta conversación no se derivó de otra');
     if (child.returned_at) throw conflict('Esta derivada ya devolvió su resultado');
     // Quien devuelve también debe poder escribir en el origen.
     await conversationAccess(c, userId, child.parent_conversation_id, 'post', true);
     const msg = await appendMessage(c, { conversationId: child.parent_conversation_id, authorId: userId, body: summary, mergedFrom: childId });
+    if (child.derive_kind) {
+      // El origen sabe de qué tipo vino (p. ej. «Desde un sidechat») aunque no pueda abrir la conversación.
+      const { rows: up } = await c.query('UPDATE messages SET merged_kind = $2 WHERE id = $1 RETURNING *', [msg.id, child.derive_kind]);
+      const message = toMessageDTO(up[0]);
+      await appendEvent(c, child.parent_conversation_id, { type: 'message.updated', conversationId: child.parent_conversation_id, message }, msg.id);
+    }
     await c.query('UPDATE conversations SET returned_at = now(), returned_message_id = $2 WHERE id = $1', [childId, msg.id]);
     await appendMessage(c, { conversationId: childId, authorId: userId, kind: 'system', body: sys('returned', {}) });
     const members = (await c.query('SELECT user_id FROM conversation_memberships WHERE conversation_id = ANY($1) AND removed_at IS NULL', [[childId, child.parent_conversation_id]])).rows.map((r) => r.user_id);
@@ -398,4 +432,127 @@ export async function returnResult(userId: string, childId: string, summary: str
     await audit(c, userId, 'conversation.returned', { type: 'conversation', id: childId }, { parentId: child.parent_conversation_id });
     return { parentId: child.parent_conversation_id as string, messageId: msg.id };
   });
+}
+
+// ---------- Conversaciones laterales ----------
+const sideOutsider = (userIds: string[]) =>
+  new ApiError(403, 'side_outsider', 'Solo puedes sumar a participantes de la conversación de origen o a colegas de tu empresa', { userIds });
+
+/** Recorta un extracto a un límite sin cortar la última palabra (si hace falta recortar). */
+function clip(text: string, max: number) {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max).replace(/\s+\S*$/, '');
+  return `${cut || text.slice(0, max)}…`;
+}
+
+/**
+ * Quién puede entrar a una lateral: participantes del origen que ven el mensaje ancla
+ * y colegas de mis empresas. Nadie más, para que el contenido no pase a otra empresa.
+ */
+async function sideAudience(c: Tx, actorId: string, parentId: string | null, anchorId: string | null, ids: string[]) {
+  const anchorSeq = anchorId ? (await c.query('SELECT seq FROM messages WHERE id = $1', [anchorId])).rows[0]?.seq ?? null : null;
+  const { rows } = await c.query(
+    `SELECT u.id, EXISTS (SELECT 1 FROM organization_memberships a JOIN organization_memberships b ON b.org_id = a.org_id
+                           WHERE a.user_id = $1 AND b.user_id = u.id) AS colleague
+       FROM users u WHERE u.id = ANY($2) AND u.disabled_at IS NULL`,
+    [actorId, ids],
+  );
+  const known = new Map(rows.map((r) => [r.id as string, r.colleague as boolean]));
+  const readsOrigin = new Set<string>();
+  const outsiders: string[] = [];
+  for (const id of ids) {
+    let inOrigin = false;
+    if (parentId && known.has(id)) {
+      try {
+        const acc = await conversationAccess(c, id, parentId, 'read');
+        inOrigin = anchorSeq === null || anchorSeq > acc.historyFromSeq;
+      } catch { inOrigin = false; }
+    }
+    if (inOrigin) readsOrigin.add(id);
+    if (!inOrigin && !known.get(id)) outsiders.push(id);
+  }
+  return { outsiders, readsOrigin };
+}
+
+/**
+ * Abre una conversación lateral desde un mensaje: un chat multi privado con
+ * parentId/parentMessageId del origen y deriveKind 'side'. En el origen no se
+ * publica nada; solo sus miembros la ven (y su cliente pinta el chip bajo el ancla).
+ */
+export async function createSideConversation(userId: string, parentId: string, input: { messageId: string; userIds: string[]; question?: string }) {
+  return tx(async (c) => {
+    const a = await conversationAccess(c, userId, parentId, 'read', true);
+    const { rows: mr } = await c.query(
+      'SELECT m.id, m.author_id, m.body, m.kind, m.seq, m.deleted_at, u.name AS author_name FROM messages m JOIN users u ON u.id = m.author_id WHERE m.id = $1 AND m.conversation_id = $2',
+      [input.messageId, parentId],
+    );
+    const m = mr[0];
+    if (!m || m.seq <= a.historyFromSeq || m.kind !== 'text' || m.deleted_at) throw badRequest('Solo se abre una lateral desde un mensaje visible de esta conversación');
+    const others = [...new Set(input.userIds)].filter((u) => u !== userId);
+    if (!others.length) throw badRequest('Elige al menos a una persona');
+    await ensureNotBlocked(c, userId, others);
+    const { outsiders, readsOrigin } = await sideAudience(c, userId, parentId, m.id, others);
+    if (outsiders.length) throw sideOutsider(outsiders);
+
+    const parent = (await c.query('SELECT name FROM conversations WHERE id = $1', [parentId])).rows[0];
+    const excerpt = clip(String(m.body).replace(/\s+/g, ' ').trim(), 80);
+    const name = `Sidechat · ${clip(excerpt.replace(/…$/, ''), 40)}`;
+    const { rows } = await c.query(
+      `INSERT INTO conversations (kind, name, created_by, parent_conversation_id, parent_message_id, derive_kind, derived_by)
+       VALUES ('multi', $1, $2, $3, $4, 'side', $2) RETURNING id`,
+      [name, userId, parentId, m.id],
+    );
+    const id: string = rows[0].id;
+    // Como en los chats grupales: todos pueden sumar a alguien más (con la misma regla de la lateral).
+    await c.query('INSERT INTO conversation_memberships (conversation_id, user_id, can_manage, added_by) VALUES ($1,$2,true,$2)', [id, userId]);
+    for (const uid of others) await c.query('INSERT INTO conversation_memberships (conversation_id, user_id, can_manage, added_by) VALUES ($1,$2,true,$3)', [id, uid, userId]);
+    // El nombre del origen solo se muestra si todos los de la lateral pueden leerlo.
+    const everyoneReads = others.every((u) => readsOrigin.has(u));
+    await appendMessage(c, { conversationId: id, authorId: userId, kind: 'system', body: sys('side.started', {
+      excerpt, authorName: m.author_name, parentName: everyoneReads ? parent?.name ?? null : null, messageId: m.id,
+    }) });
+    if (input.question) await appendMessage(c, { conversationId: id, authorId: userId, body: input.question });
+    await audit(c, userId, 'conversation.side_created', { type: 'conversation', id, workspaceId: a.workspaceId }, { parentId, members: others.length + 1 });
+    await scopeChanged(c, [userId, ...others], 'side.created', { conversationId: id });
+    return { id };
+  });
+}
+
+/**
+ * Resumen sugerido para «Llevar al hilo» un sidechat. Con DeepSeek: redactado con autor y contexto;
+ * sin llave (o si falla): las últimas respuestas de los demás. No publica nada.
+ */
+export async function suggestSideReturn(userId: string, sideId: string, lang: 'es' | 'en', aiConsent = false) {
+  await conversationAccess(pool, userId, sideId, 'post');
+  const { rows } = await pool.query(
+    `SELECT c.parent_conversation_id, c.parent_message_id, c.derive_kind, p.name AS parent_name, am.body AS anchor_body, am.deleted_at AS anchor_deleted, au.name AS anchor_author
+       FROM conversations c LEFT JOIN conversations p ON p.id = c.parent_conversation_id
+       LEFT JOIN messages am ON am.id = c.parent_message_id LEFT JOIN users au ON au.id = am.author_id WHERE c.id = $1`,
+    [sideId],
+  );
+  const side = rows[0];
+  if (!side?.parent_conversation_id) throw badRequest('Esta conversación no se derivó de otra');
+  const me = (await pool.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name ?? '';
+  const msgs = (await pool.query(
+    `SELECT m.author_id, m.body, u.name FROM messages m JOIN users u ON u.id = m.author_id
+      WHERE m.conversation_id = $1 AND m.kind = 'text' AND m.deleted_at IS NULL AND m.body <> '' ORDER BY m.seq DESC LIMIT 40`,
+    [sideId],
+  )).rows.reverse();
+  const fallback = () => {
+    const replies = msgs.filter((m) => m.author_id !== userId).slice(-3);
+    const pick = replies.length ? replies : msgs.slice(-3);
+    return pick.map((m) => (pick.every((x) => x.author_id === pick[0]!.author_id) ? m.body : `${m.name}: ${m.body}`)).join('\n').slice(0, 4000);
+  };
+  const ai = aiConsent ? getSummarizer() : null;
+  if (ai?.suggestSideReturn && msgs.length) {
+    try {
+      const summary = await ai.suggestSideReturn({
+        language: lang, publisherName: me, originName: side.parent_name ?? null,
+        anchor: { authorName: side.anchor_author ?? '', text: side.anchor_deleted ? '' : String(side.anchor_body ?? '') },
+        messages: msgs.map((m) => ({ authorName: m.name, text: m.body })),
+      });
+      if (summary) return { summary, source: 'ai' as const };
+    } catch (e: any) { console.error('[side] resumen sugerido', e?.message); }
+  }
+  return { summary: fallback(), source: 'fallback' as const };
 }

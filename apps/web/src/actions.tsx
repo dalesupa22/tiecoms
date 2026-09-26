@@ -161,7 +161,7 @@ export function conversationMenu(conv: ConversationDTO, extra: { onNewMeeting?: 
       : { label: t('menu.markUnreadConv'), icon: '●', disabled: conv.lastMessageSeq <= conv.historyFromSeq, onSelect: () => void client.markUnread(conv.id, conv.lastMessageSeq).then(() => toast(t('toast.markedUnread'))).catch((e) => toast(errorText(e))) },
     muteMenu(conv),
     remindMenu(conv),
-    ...(extra.onNewMeeting && conv.workspaceId ? [{ label: t('menu.meeting'), icon: '📅', onSelect: extra.onNewMeeting }] : []),
+    ...(extra.onNewMeeting && conv.canPost ? [{ label: t('menu.meeting'), icon: '📅', onSelect: extra.onNewMeeting }] : []),
     { divider: true },
     { label: t('menu.copyLink'), icon: '⛓', onSelect: async () => { await copyText(convLink(conv.id)); toast(t('toast.linkCopied')); } },
     ...(conv.kind !== 'direct' ? [{ divider: true }, {
@@ -188,5 +188,5 @@ export function workspaceMenu(ws: WorkspaceDTO, extra: { onNewGroup?: () => void
 export function personMenu(p: PersonDTO): MenuItem[] {
   const me = client.getState().data?.me.id;
   if (p.id === me) return [];
-  return [{ label: t('menu.dm'), icon: '✉', onSelect: () => void client.openDirect(p.id).then((r) => navigate(`/c/${r.id}`)).catch((e) => toast(errorText(e))) }];
+  return [{ label: t('people.sendMessage'), icon: '✉', onSelect: () => void client.openDirect(p.id).then((r) => navigate(`/c/${r.id}`)).catch((e) => toast(errorText(e))) }];
 }

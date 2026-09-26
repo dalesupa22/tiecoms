@@ -74,4 +74,32 @@ final class V9LanguageSubjectsTests: XCTestCase {
         try await waitUntil(5, "re-registro") { MockURLProtocol.requests.filter { $0.path == "/api/v1/push/token" }.count >= 2 }
         XCTAssertEqual(MockURLProtocol.requests.last { $0.path == "/api/v1/push/token" }?.body["lang"] as? String, "en", "push en el idioma nuevo")
     }
+
+    /// Carrera: cambiar de idioma mientras un PUT en español sigue en vuelo debe terminar en otro PUT en inglés.
+    func testLanguageChangeDuringInFlightPutSendsSecondPutWithNewLang() async throws {
+        final class Box { var lang = "es"; var sent: [(String, String)] = []; var hold: CheckedContinuation<Void, Never>? }
+        let box = Box()
+        let sync = PushTokenSync(lang: { box.lang }) { op in
+            guard case .register(let t) = op else { return }
+            box.sent.append((t, box.lang))
+            if box.sent.count == 1 { await withCheckedContinuation { box.hold = $0 } }   // el PUT en español queda en vuelo
+        }
+        sync.startSession()
+        sync.setEnabled(true)
+        sync.receive("tok")
+        let first = Task { await sync.synchronize() }
+        try await waitUntil(3, "PUT en vuelo") { box.hold != nil }
+        box.lang = "en"
+        sync.resendToken()                       // lo que hace AppStore.setLanguage
+        let second = Task { await sync.synchronize() }
+        box.hold?.resume()
+        await first.value
+        await second.value
+        XCTAssertEqual(box.sent.map(\.1), ["es", "en"], "segundo PUT con el idioma nuevo")
+        XCTAssertEqual(sync.registeredToken, "tok")
+        XCTAssertEqual(sync.registeredLang, "en")
+        // Sin cambios, no hay más PUT.
+        await sync.synchronize()
+        XCTAssertEqual(box.sent.count, 2)
+    }
 }

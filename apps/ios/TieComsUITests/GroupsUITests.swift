@@ -56,10 +56,10 @@ final class GroupsUITests: XCTestCase {
         return all.min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height } ?? q.firstMatch
     }
 
-    private func login(_ f: Fixture) -> XCUIApplication {
+    private func login(_ f: Fixture, resetLanguage: Bool = true) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCResetLanguage", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES",
-                               "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
+        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES",
+                               "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"] + (resetLanguage ? ["-TCResetLanguage", "YES"] : [])
         app.launch()
         let email = app.textFields["login.email"]
         // En un build sin firmar el Keychain del simulador puede conservar la sesión de la prueba anterior (misma persona).
@@ -299,6 +299,43 @@ final class GroupsUITests: XCTestCase {
         auto.tap()
         XCTAssertTrue(app.tabBars.buttons["Asuntos"].waitForExistence(timeout: 5))
         shot("26-idioma-es")
+    }
+
+    /// Elegir un idioma en Tú › Idioma (el nombre de cada idioma se ve igual en ambos).
+    private func pickLanguage(_ app: XCUIApplication, _ label: String) {
+        app.tabBars.buttons.element(boundBy: 4).tap()
+        let picker = app.buttons["settings.language"]
+        for _ in 0..<6 where !picker.isHittable { app.swipeUp() }
+        picker.tap()
+        let option = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+        XCTAssertTrue(option.waitForExistence(timeout: 4), label)
+        option.tap()
+        sleep(1)
+    }
+
+    /// El idioma elegido sobrevive a cerrar y volver a abrir la app (sin borrar preferencias).
+    func testLanguagePersistsAcrossRelaunch() throws {
+        let f = try fixture()
+        var app = login(f)
+        XCTAssertTrue(app.tabBars.buttons.element(boundBy: 4).waitForExistence(timeout: 20))
+        dismissSystemPrompts(app)
+        pickLanguage(app, "English")
+        XCTAssertTrue(app.tabBars.buttons["Subjects"].waitForExistence(timeout: 5))
+        app.terminate()
+        app = login(f, resetLanguage: false)
+        XCTAssertTrue(app.tabBars.buttons["Subjects"].waitForExistence(timeout: 20), "sigue en inglés tras reabrir (aunque el sistema diga es)")
+        app.tabBars.buttons.element(boundBy: 4).tap()
+        let picker = app.buttons["settings.language"]
+        for _ in 0..<6 where !picker.isHittable { app.swipeUp() }
+        XCTAssertTrue(picker.label.contains("English") || (picker.value as? String)?.contains("English") == true, "Ajustes muestra English: \(picker.label)")
+        shot("27-idioma-en-tras-reabrir")
+        pickLanguage(app, "Español")
+        XCTAssertTrue(app.tabBars.buttons["Asuntos"].waitForExistence(timeout: 5))
+        app.terminate()
+        app = login(f, resetLanguage: false)
+        XCTAssertTrue(app.tabBars.buttons["Asuntos"].waitForExistence(timeout: 20), "sigue en español tras reabrir")
+        shot("28-idioma-es-tras-reabrir")
+        pickLanguage(app, "Autom")
     }
 
     /// Mantener presionada una burbuja (su parte visible si la tapa la barra del chat) hasta que aparezca `until`.

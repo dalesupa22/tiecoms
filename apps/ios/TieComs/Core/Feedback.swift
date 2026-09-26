@@ -244,14 +244,22 @@ final class PushTokenSync {
     private var dirty = false
     private var task: Task<Void, Never>?
     private(set) var registeredToken: String?
+    /// Idioma con el que quedó registrado el token: el mismo token en otro idioma se vuelve a registrar.
+    private(set) var registeredLang: String?
+    /// Idioma actual (el del PUT). Inyectable en pruebas.
+    private let currentLang: () -> String
 
-    init(send: @escaping (Operation) async throws -> Void) { self.send = send }
+    init(lang: @escaping () -> String = { L10n.lang }, send: @escaping (Operation) async throws -> Void) {
+        self.currentLang = lang
+        self.send = send
+    }
 
     func startSession() {
         generation += 1
         active = true
         enabled = false
         registeredToken = nil
+        registeredLang = nil
         serverCleared = false
         dirty = true
     }
@@ -260,6 +268,7 @@ final class PushTokenSync {
         generation += 1
         active = false
         registeredToken = nil
+        registeredLang = nil
         serverCleared = false
     }
 
@@ -270,6 +279,7 @@ final class PushTokenSync {
     /// Vuelve a mandar el mismo token (p. ej. cambió el idioma: el servidor arma los avisos en ese `lang`).
     func resendToken() {
         registeredToken = nil
+        registeredLang = nil
         dirty = true
     }
 
@@ -291,8 +301,10 @@ final class PushTokenSync {
         while active && dirty {
             dirty = false
             let operation: Operation
+            let lang = currentLang()
             if enabled {
-                guard let token, token != registeredToken else { continue }
+                // Se compara token E idioma: si el idioma cambió durante un PUT en curso, sale otro PUT con el nuevo.
+                guard let token, token != registeredToken || lang != registeredLang else { continue }
                 operation = .register(token)
                 // Una respuesta perdida no prueba que el servidor no guardó el token.
                 serverCleared = false
@@ -306,8 +318,8 @@ final class PushTokenSync {
                 try await send(operation)
                 guard active, generation == currentGeneration else { continue }
                 switch operation {
-                case .register(let token): registeredToken = token
-                case .unregister: registeredToken = nil; serverCleared = true
+                case .register(let token): registeredToken = token; registeredLang = lang
+                case .unregister: registeredToken = nil; registeredLang = nil; serverCleared = true
                 }
             } catch {
                 NSLog("[Chaggu] registro push pendiente; se reintentará al volver o recuperar la red")

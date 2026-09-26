@@ -4,10 +4,11 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { ZodError } from 'zod';
 import {
-  AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput,
+  AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput, CreateGroupInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
   UpdateProfileInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
+  SideConversationInput, PushTokenInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -19,6 +20,7 @@ import { deleteAccount } from './modules/account.ts';
 import { bootstrap } from './modules/bootstrap.ts';
 import { listEvents, listMessages, markRead, sendMessage } from './modules/messages.ts';
 import * as ws from './modules/workspaces.ts';
+import * as groups from './modules/groups.ts';
 import * as invitations from './modules/invitations.ts';
 import * as issues from './modules/issues.ts';
 import * as cal from './modules/calendar.ts';
@@ -28,6 +30,10 @@ import * as wa from './modules/whatsapp.ts';
 import * as profile from './modules/profile.ts';
 import * as drive from './modules/drive.ts';
 import * as safety from './modules/safety.ts';
+import * as push from './modules/push.ts';
+import * as attachments from './modules/attachments.ts';
+import * as voice from './modules/voice.ts';
+import * as mentions from './modules/mentions.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
 import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
@@ -55,7 +61,7 @@ export async function buildHttp() {
   await app.register(cors, {
     origin: [config.publicOrigin, ...config.extraOrigins],
     credentials: true,
-    allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract', 'x-file-type'],
+    allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract', 'x-file-type', 'x-file-name', 'x-voice-note', 'x-duration-ms', 'x-waveform', 'x-ai-consent'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     maxAge: 600,
   });
@@ -175,6 +181,53 @@ export async function buildHttp() {
     priv.post('/api/v1/me/avatar', { bodyLimit: profile.MAX_AVATAR_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
       async (req) => profile.setAvatar(req.userId, req.body as Buffer));
     priv.delete('/api/v1/me/avatar', async (req) => profile.removeAvatar(req.userId));
+    // Foto de grupo (grupos e internos: quien administra; chats grupales y laterales: cualquier participante).
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/avatar', { bodyLimit: profile.MAX_AVATAR_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+      async (req) => profile.setGroupAvatar(req.userId, z.uuid().parse(req.params.id), req.body as Buffer));
+    priv.delete<{ Params: { id: string } }>('/api/v1/conversations/:id/avatar', async (req) => profile.removeGroupAvatar(req.userId, z.uuid().parse(req.params.id)));
+    // Adjuntos de mensajes: se suben como octet-stream (nombre y tipo en cabeceras) y un mensaje los usa después.
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/attachments', { bodyLimit: attachments.MAX_UPLOAD_BYTES, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => {
+      if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube el archivo como application/octet-stream');
+      return attachments.upload(req.userId, z.uuid().parse(req.params.id), {
+        body: req.body, name: String(req.headers['x-file-name'] ?? ''), type: String(req.headers['x-file-type'] ?? ''),
+        // Nota de voz: x-voice-note: 1, x-duration-ms y x-waveform (≤ 64 valores 0–1 separados por comas).
+        voice: req.headers['x-voice-note'] === '1', aiConsent: req.headers['x-ai-consent'] === '1', durationMs: req.headers['x-duration-ms'] as string | undefined, waveform: req.headers['x-waveform'] as string | undefined,
+        lang: /^\s*en\b/i.test(String(req.headers['accept-language'] ?? '')) ? 'en' : 'es',
+      });
+    });
+    priv.post<{ Params: { id: string } }>('/api/v1/attachments/:id/thumb', { bodyLimit: attachments.MAX_THUMB_BYTES, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => {
+      if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube la miniatura como application/octet-stream');
+      return attachments.uploadThumb(req.userId, z.uuid().parse(req.params.id), req.body);
+    });
+    priv.post<{ Params: { id: string } }>('/api/v1/attachments/:id/transcribe', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+      async (req) => voice.retryTranscription(req.userId, z.uuid().parse(req.params.id), z.object({ aiConsent: z.boolean().optional() }).parse(req.body ?? {}).aiConsent === true));
+    for (const thumb of [false, true]) {
+      priv.get<{ Params: { id: string }; Querystring: { download?: string; original?: string } }>(`/api/v1/attachments/:id${thumb ? '/thumb' : ''}`, async (req, reply) => {
+        const f = await attachments.fetchFile(req.userId, z.uuid().parse(req.params.id), thumb, req.query.original === '1');
+        const ascii = f.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
+        const disp = f.inline && req.query.download !== '1' ? 'inline' : 'attachment';
+        reply.header('content-type', f.contentType)
+          .header('content-disposition', `${disp}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(f.name)}`)
+          .header('cache-control', 'private, max-age=31536000, immutable')
+          .header('x-content-type-options', 'nosniff')
+          .header('content-security-policy', "default-src 'none'; sandbox")
+          .header('accept-ranges', 'bytes');
+        // Rango simple (bytes=a-b): los reproductores de video lo piden.
+        const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+        if (range && (range[1] || range[2])) {
+          const total = f.body.length;
+          let start = range[1] ? Number(range[1]) : Math.max(0, total - Number(range[2]));
+          let end = range[1] && range[2] ? Math.min(Number(range[2]), total - 1) : total - 1;
+          if (start >= total || start > end) return reply.status(416).header('content-range', `bytes */${total}`).send();
+          return reply.status(206).header('content-range', `bytes ${start}-${end}/${total}`).send(f.body.subarray(start, end + 1));
+        }
+        return reply.send(f.body);
+      });
+    }
+    // Notificaciones push: un token por sesión.
+    priv.put('/api/v1/push/token', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) =>
+      push.registerToken(req.sessionId, PushTokenInput.parse(req.body), String(req.headers['accept-language'] ?? '')));
+    priv.delete('/api/v1/push/token', async (req) => push.removeToken(req.sessionId));
     priv.get<{ Params: { id: string } }>('/api/v1/organizations/:id/domains', async (req) => ({ domains: await domains.listDomains(req.userId, req.params.id) }));
     priv.post<{ Params: { id: string } }>('/api/v1/organizations/:id/domains', async (req) =>
       domains.addDomain(req.userId, req.params.id, AddDomainInput.parse(req.body).domain));
@@ -184,6 +237,8 @@ export async function buildHttp() {
       auth.createOrgInvitation(req.userId, req.params.id, CreateOrgInvitationInput.parse(req.body ?? {})));
 
     priv.post('/api/v1/workspaces', async (req) => ws.createWorkspace(req.userId, CreateWorkspaceInput.parse(req.body)));
+    priv.post('/api/v1/groups', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => groups.createGroup(req.userId, CreateGroupInput.parse(req.body)));
+    priv.get<{ Params: { id: string } }>('/api/v1/organizations/:id/oversight', async (req) => groups.listOversight(req.userId, z.uuid().parse(req.params.id)));
     priv.post<{ Params: { id: string } }>('/api/v1/workspaces/:id/conversations', async (req) =>
       ws.createConversation(req.userId, req.params.id, CreateConversationInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/workspaces/:id/invitations', async (req) =>
@@ -223,7 +278,12 @@ export async function buildHttp() {
     priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/prefs', async (req) => prefs.setConversationPrefs(req.userId, req.params.id, ConversationPrefsInput.parse(req.body)));
     priv.put<{ Params: { id: string } }>('/api/v1/workspaces/:id/prefs', async (req) => prefs.setWorkspacePrefs(req.userId, req.params.id, WorkspacePrefsInput.parse(req.body).pinned));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/unread', async (req) => markUnread(req.userId, req.params.id, MarkUnreadInput.parse(req.body).seq));
-    priv.patch<{ Params: { id: string } }>('/api/v1/messages/:id', async (req) => editMessage(req.userId, req.params.id, EditMessageInput.parse(req.body).body));
+    priv.patch<{ Params: { id: string } }>('/api/v1/messages/:id', async (req) => { const e = EditMessageInput.parse(req.body); return editMessage(req.userId, req.params.id, e.body, e.mentions); });
+    // Bandeja «Menciones»: before = createdAt del último que ya tienes.
+    priv.get<{ Querystring: { before?: string; limit?: string } }>('/api/v1/mentions', async (req) => {
+      const q = z.object({ before: z.iso.datetime().optional(), limit: z.coerce.number().int().min(1).max(100).default(50) }).parse(req.query);
+      return mentions.listMentions(req.userId, q.before, q.limit);
+    });
     priv.delete<{ Params: { id: string } }>('/api/v1/messages/:id', async (req) => deleteMessage(req.userId, req.params.id));
     priv.post<{ Params: { id: string } }>('/api/v1/messages/:id/pin', async (req) => setPin(req.userId, req.params.id, true));
     priv.delete<{ Params: { id: string } }>('/api/v1/messages/:id/pin', async (req) => setPin(req.userId, req.params.id, false));
@@ -246,6 +306,10 @@ export async function buildHttp() {
 
     // Bifurcaciones
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/derive', async (req) => ws.deriveConversation(req.userId, req.params.id, DeriveInput.parse(req.body)));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/side', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
+      async (req) => ws.createSideConversation(req.userId, z.uuid().parse(req.params.id), SideConversationInput.parse(req.body)));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/return/suggest', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) =>
+      ws.suggestSideReturn(req.userId, z.uuid().parse(req.params.id), /^\s*en\b/i.test(String(req.headers['accept-language'] ?? '')) ? 'en' : 'es', z.object({ aiConsent: z.boolean().optional() }).parse(req.body ?? {}).aiConsent === true));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/return', async (req) => ws.returnResult(req.userId, req.params.id, ReturnResultInput.parse(req.body).summary));
     // Asuntos
     priv.get<{ Querystring: { workspaceId?: string; conversationId?: string; mine?: string; open?: string } }>('/api/v1/issues', async (req) => ({

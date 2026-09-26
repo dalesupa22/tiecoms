@@ -15,6 +15,8 @@ export async function migrate() {
   const client = await pool.connect();
   try {
     // Un solo migrador a la vez aunque arranquen varios contenedores.
+    // Esperar el lock (u otra migración larga) no debe cortarse por el statement_timeout del pool.
+    await client.query('SET statement_timeout = 0');
     await client.query('SELECT pg_advisory_lock(727001)');
     await client.query('CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
     const done = new Set((await client.query('SELECT version FROM schema_migrations')).rows.map((r) => r.version));
@@ -34,6 +36,7 @@ export async function migrate() {
     }
   } finally {
     await client.query('SELECT pg_advisory_unlock(727001)').catch(() => {});
+    await client.query('RESET statement_timeout').catch(() => {});
     client.release();
   }
 }

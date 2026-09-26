@@ -4,12 +4,17 @@
  * los ejecuta fuera de ella; reintenta con backoff y deja el fallo inspeccionable.
  */
 import { hostname } from 'node:os';
+import { migrate } from './migrate.ts';
 import { enqueueOutbox, pool, tx } from './db.ts';
 import { fireDueReminders } from './modules/reminders.ts';
 import { cleanupExpired as cleanupSso } from './modules/sso.ts';
 import { previewMessage } from './modules/link-preview.ts';
 import { deletePersonalObject } from './storage.ts';
 import { notifyReport } from './modules/safety.ts';
+import { pushEvent, pushEventSoon, pushMessage, pushReminder } from './modules/push.ts';
+import { fireSoonEvents, soonMinutes } from './modules/calendar.ts';
+import { cleanupPending as cleanupAttachments } from './modules/attachments.ts';
+import { transcribeAttachment } from './modules/voice.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
 const LEASE_SECONDS = 120;
@@ -22,6 +27,13 @@ const handlers: Record<string, Handler> = {
     await pool.query('DELETE FROM files WHERE id = $1 AND deleted_at IS NOT NULL', [p.fileId]);
   },
   async 'safety.notify'(p) { await notifyReport(p.reportId); },
+  /** Notificaciones push (APNs / FCM). Los fallos por token se registran sin reintentar el job (evita duplicados). */
+  async 'push.message'(p) { await pushMessage(p.messageId); },
+  async 'push.reminder'(p) { await pushReminder(p.reminderId); },
+  async 'push.event'(p) { await pushEvent(p.eventId); },
+  /** Nota de voz: variante AAC, transcripción y resumen (Inworld / DeepSeek). */
+  async 'voice.transcribe'(p) { await transcribeAttachment(p.attachmentId); },
+  async 'push.event_soon'(p) { await pushEventSoon(p.eventId, p.userIds, soonMinutes()); },
   /** Vista previa del primer enlace de un mensaje. */
   async 'link.preview'(p) { await previewMessage(p.messageId); },
   /** Terceros vencidos: se revoca el acceso y se sacan sus sockets de las salas. */
@@ -53,6 +65,8 @@ const handlers: Record<string, Handler> = {
     await pool.query("DELETE FROM audit_events WHERE created_at < now() - interval '24 months'");
     await pool.query("DELETE FROM safety_reports WHERE created_at < now() - interval '24 months'");
     await cleanupSso();
+    const stale = await cleanupAttachments();
+    if (stale) console.log(`[worker] adjuntos pendientes borrados: ${stale}`);
   },
 };
 
@@ -105,7 +119,8 @@ async function loop() {
   while (!stop) {
     try {
       // Recordatorios: revisión cada 15 s; el aviso llega por el outbox a los dispositivos de la persona.
-      if (Date.now() - lastReminders > 15_000) { lastReminders = Date.now(); const n = await fireDueReminders(); if (n) console.log(`[worker] recordatorios disparados: ${n}`); }
+      if (Date.now() - lastReminders > 15_000) { lastReminders = Date.now(); const n = await fireDueReminders(); if (n) console.log(`[worker] recordatorios disparados: ${n}`);
+        const s = await fireSoonEvents(); if (s) console.log(`[worker] avisos de reunión: ${s}`); }
       if (Date.now() - lastSchedule > 30_000) { await schedule(); lastSchedule = Date.now(); }
       const worked = await runOne();
       if (!worked) await new Promise((r) => setTimeout(r, 1000));
@@ -120,4 +135,8 @@ async function loop() {
 process.on('SIGTERM', () => { stop = true; });
 process.on('SIGINT', () => { stop = true; });
 console.log(`[worker] ${WORKER_ID} iniciado`);
-void loop();
+// Igual que el API: aplica migraciones pendientes antes de trabajar (evita consultas a columnas que aún no existen).
+void (async () => {
+  if (process.env.MIGRATE_ON_START !== 'false') await migrate().catch((e) => console.error('[worker] migraciones', e?.message));
+  await loop();
+})();

@@ -57,7 +57,8 @@ export function downloadIcs(ev: CalendarEventDTO) {
 const isUrl = (s: string | null) => !!s && /^https?:\/\//i.test(s.trim());
 
 function eventColors(d: BootstrapDTO, ev: CalendarEventDTO) {
-  const org = counterpartOrg(d, ev.workspaceId);
+  // Reuniones de directos y chats grupales: color neutro.
+  const org = ev.workspaceId ? counterpartOrg(d, ev.workspaceId) : null;
   return { bg: org?.colorBg ?? '#e0dace', fg: org?.colorFg ?? '#1b1917' };
 }
 
@@ -66,7 +67,8 @@ export function EventDialog({ conversationId, originMessageId, defaultTitle = ''
   conversationId?: string; originMessageId?: string; defaultTitle?: string; event?: CalendarEventDTO; onClose: () => void;
 }) {
   const d = client.getState().data!;
-  const groups = d.conversations.filter((c) => c.canPost && c.workspaceId && c.kind !== 'direct');
+  // También directos y chats grupales (SPEC v4 E).
+  const groups = d.conversations.filter((c) => c.canPost);
   const tz0 = event?.timezone ?? BROWSER_TZ;
   const start0 = event ? new Date(event.startsAt) : (() => { const x = new Date(Date.now() + 86400_000); x.setMinutes(0, 0, 0); x.setHours(10); return x; })();
   const end0 = event ? new Date(event.endsAt) : new Date(start0.getTime() + 3600_000);
@@ -105,7 +107,7 @@ export function EventDialog({ conversationId, originMessageId, defaultTitle = ''
         {!event && (
           <label className="field"><span>{t('cal.conversation')}</span>
             <select className="input" value={conv} onChange={(e) => { setConv(e.target.value); setInvitees(null); }}>
-              {groups.map((g) => <option key={g.id} value={g.id}>{conversationTitle(d, g)} · {d.workspaces.find((w) => w.id === g.workspaceId)?.name}</option>)}
+              {groups.map((g) => <option key={g.id} value={g.id}>{conversationTitle(d, g)} · {d.workspaces.find((w) => w.id === g.workspaceId)?.name ?? t('issue.chatsSection')}</option>)}
             </select>
           </label>
         )}

@@ -2,12 +2,17 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import type { BootstrapDTO, ConversationDTO, IssueDTO, MessageDTO } from '@tiecoms/contracts';
 import type { PendingMessage } from '@tiecoms/client-core';
 import { client, useClient } from '../app-client.ts';
-import { ForwardToChatsDialog, LinkPreviewCard, Linkify } from './Chats.tsx';
+import { ForwardToChatsDialog, LinkPreviewCard, Linkify, StackedAvatars } from './Chats.tsx';
 import { conversationMenu, forwardMenu, messageLink, openDialog, remindMenu } from '../actions.tsx';
 import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate, queryParam } from '../router.ts';
-import { Avatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, orgById, personById } from '../ui.tsx';
+import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, orgById, personById, personColor } from '../ui.tsx';
+import { PhotoCropDialog, pickImage } from './PhotoCrop.tsx';
+import { AttachmentsView, DraftTray, pickFiles, useDrafts } from './Attachments.tsx';
+import { VoiceRecorder } from './Voice.tsx';
+import { MentionMirror, MessageText, backspaceToken, mentionsFor, mentionsMe, useMentionPicker, type MentionToken } from './Mentions.tsx';
+import { QuickReplies, SideChip, SideConnector, SideDialog, replyPrivately, sidesOf, takePrivateDraft } from './Side.tsx';
 import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
 import { AddMembersDialog } from './Dialogs.tsx';
@@ -22,7 +27,7 @@ type Row =
 const draftKey = (id: string) => `tiecoms:draft:${id}`;
 const excerpt = (s: string, n = 90) => s.replace(/\s+/g, ' ').trim().slice(0, n);
 
-export function ConversationScreen({ id }: { id: string }) {
+export function ConversationScreen({ id, embedded }: { id: string; embedded?: { onClose: () => void; anchor?: MessageDTO | null; onSeeAnchor?: () => void } }) {
   const d = useClient((s) => s.data)!;
   const conv = d.conversations.find((c) => c.id === id);
   const local = useClient((s) => s.conversations[id]);
@@ -30,11 +35,20 @@ export function ConversationScreen({ id }: { id: string }) {
   const typing = useClient((s) => s.typing[id]);
   const pinIds = useClient((s) => s.pins[id]);
   const allIssues = useClient((s) => s.issues);
-  const [panel, setPanel] = useState(() => window.innerWidth > 1180);
+  const [panelPref, setPanel] = useState(() => window.innerWidth > 1180);
+  const panel = panelPref && !embedded;
+  // Conversación lateral abierta como panel a la derecha (o hoja en el teléfono).
+  const [sideId, setSideId] = useState<string | null>(null);
+  const [sideFor, setSideForState] = useState<{ message: MessageDTO; userIds: string[] } | null>(null);
+  const setSideFor = (v: MessageDTO | { message: MessageDTO; userIds: string[] } | null) => setSideForState(v && 'message' in v ? v : v ? { message: v, userIds: [] } : null);
+  const [privateReply, setPrivateReply] = useState<MessageDTO | null>(() => takePrivateDraft(id));
+  const [groupCrop, setGroupCrop] = useState<File | null>(null);
+  const drafts = useDrafts(id);
+  const [dropping, setDropping] = useState(false);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deriving, setDeriving] = useState<MessageDTO | null>(null);
-  const [newIssue, setNewIssue] = useState<{ origin?: MessageDTO } | null>(null);
+  const [newIssue, setNewIssue] = useState<{ origin?: MessageDTO; title?: string } | null>(null);
   const [openIssue, setOpenIssue] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<number | null>(null);
   const [replyTo, setReplyTo] = useState<MessageDTO | null>(null);
@@ -42,9 +56,28 @@ export function ConversationScreen({ id }: { id: string }) {
   const [showPins, setShowPins] = useState(false);
   const [text, setText] = useState(() => { try { return localStorage.getItem(draftKey(id)) ?? ''; } catch { return ''; } });
   const scroller = useRef<HTMLDivElement>(null);
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
   const atBottom = useRef(true);
   const prevHeight = useRef(0);
   const input = useRef<HTMLTextAreaElement>(null);
+  const sideAnchorFor = () => replyTo ?? [...(local?.messages ?? [])].reverse().find((m) => m.kind === 'text' && !m.deletedAt && !!m.body) ?? null;
+  // Menciones: tokens «@Nombre» del compositor y lista que aparece al escribir «@».
+  const [tokens, setTokens] = useState<MentionToken[]>([]);
+  const [caret, setCaret] = useState(0);
+  const picker = useMentionPicker({
+    conv, text, caret, messages: local?.messages ?? [],
+    onPick: (range, token) => {
+      const insert = `@${token.label} `;
+      const next = text.slice(0, range.start) + insert + text.slice(range.end);
+      const pos = range.start + insert.length;
+      setText(next); setCaret(pos);
+      setTokens((ts) => [...ts.filter((x) => !(x.userId === token.userId && x.label === token.label)), token]);
+      requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(pos, pos); });
+    },
+    onAddPerson: (p) => void client.addMembers(id, [p.id], 'now').then(() => toast(t('toast.sent'))).catch((e) => toast(errorText(e))),
+    // Ancla: el mensaje al que se responde o el último visible con texto; sin ancla no se ofrece.
+    onAskSide: embedded || !sideAnchorFor() ? undefined : (p) => { const anchor = sideAnchorFor(); if (anchor) setSideFor({ message: anchor, userIds: [p.id] }); },
+  });
 
   const jumpTo = (seq: number) => {
     atBottom.current = false;
@@ -112,17 +145,35 @@ export function ConversationScreen({ id }: { id: string }) {
 
   const send = () => {
     const body = text.trim();
-    if (!body || !conv.canPost) return;
+    if (drafts.busy) { toast(t('att.uploading')); return; }
+    const attachments = drafts.ready;
+    if ((!body && !attachments.length) || !conv.canPost) return;
     atBottom.current = true;
-    void client.send(id, body, replyTo?.id ?? null);
+    if (privateReply) {
+      // «Responder en privado»: el directo lleva la referencia al mensaje original (el servidor pone la cita).
+      const author = personById(d, privateReply.authorId)?.name ?? null;
+      void client.send(id, body, null, { source: 'tiecoms', author, sentAt: privateReply.createdAt, fromConversationId: privateReply.conversationId, messageId: privateReply.id }, { attachments });
+    } else void client.send(id, text, replyTo?.id ?? null, null, { attachments, mentions: mentionsFor(text, tokens) });
+    drafts.clear();
+    setTokens([]);
     setText('');
     setReplyTo(null);
+    setPrivateReply(null);
     input.current?.focus();
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (picker.onKeyDown(e)) return;
+    if (e.key === 'Backspace' && tokens.length) {
+      const el = e.currentTarget;
+      if (el.selectionStart === el.selectionEnd) {
+        const r = backspaceToken(text, el.selectionStart, tokens);
+        if (r) { e.preventDefault(); setText(r.text); setCaret(r.caret); requestAnimationFrame(() => el.setSelectionRange(r.caret, r.caret)); return; }
+      }
+    }
     // Enter envía en escritorio; en móvil el teclado inserta salto de línea y se usa el botón.
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && window.matchMedia('(pointer: fine)').matches) { e.preventDefault(); send(); }
     if (e.key === 'Escape' && replyTo) setReplyTo(null);
+    if (e.key === 'Escape' && privateReply) setPrivateReply(null);
     // Flecha arriba con el campo vacío: editar mi último mensaje (como en Slack).
     if (e.key === 'ArrowUp' && !text) {
       const mine = [...(local?.messages ?? [])].reverse().find((m) => m.authorId === d.me.id && m.kind === 'text' && !m.deletedAt);
@@ -135,25 +186,42 @@ export function ConversationScreen({ id }: { id: string }) {
     const orig = byId.get(editing.id);
     setEditing(null);
     if (!body || body === orig?.body) return;
-    try { await client.editMessage(editing.id, body); } catch (e) { toast(errorText(e)); }
+    // Conserva las menciones que siguen en el texto editado.
+    const kept: MentionToken[] = (orig?.mentions ?? []).map((m) => ({ userId: m.userId, label: (orig?.body ?? '').slice(m.start + 1, m.start + m.length) }));
+    try { await client.editMessage(editing.id, body, mentionsFor(body, kept)); } catch (e) { toast(errorText(e)); }
   };
 
   const title = conversationTitle(d, conv);
   const openHere = Object.values(allIssues).filter((i: IssueDTO) => i.conversationId === id && !isClosed(i));
   const issueOf = (mid: string) => openHere.find((i) => i.originMessageId === mid);
-  const canWork = conv.canPost && conv.kind !== 'direct' && !!conv.workspaceId;
+  // Asuntos y reuniones en todas (también directos y chats grupales); derivar sigue siendo de espacios.
+  const canWork = conv.canPost;
+  const canDerive = canWork && conv.kind !== 'direct' && !!conv.workspaceId;
   const myWsRole = d.workspaces.find((w) => w.id === conv.workspaceId)?.myRole;
   const ws = d.workspaces.find((w) => w.id === conv.workspaceId);
   const typers = (typing ?? []).filter((x) => x.until > Date.now()).map((x) => personById(d, x.userId)?.name.split(' ')[0]).filter(Boolean);
   const orgsHere = [...new Set(conv.memberIds.map((m) => personById(d, m)?.orgId).filter(Boolean))].map((o) => orgById(d, o as string));
   const pinned = new Set(pinIds ?? []);
   const muted = !!conv.mutedUntil && Date.parse(conv.mutedUntil) > Date.now();
+  const canPhoto = conv.kind !== 'direct' && conv.canPost && (conv.kind === 'multi' || conv.canManage);
+  const sideConv = sideId ? d.conversations.find((c) => c.id === sideId) : null;
+  const sideAnchor = sideConv?.parentMessageId ? byId.get(sideConv.parentMessageId) ?? null : null;
+  const isSide = conv.deriveKind === 'side';
+  const sideOthers = conv.memberIds.filter((m) => m !== d.me.id);
+  const lastText = [...(local?.messages ?? [])].reverse().find((m) => m.kind === 'text' && !m.deletedAt) ?? null;
+  // Sin acceso al origen, la tarjeta del ancla usa el extracto del mensaje side.started.
+  const anchorExcerpt = (() => {
+    const first = (local?.messages ?? []).find((m) => m.kind === 'system');
+    try { const p = first ? JSON.parse(first.body) : null; return p?.k === 'side.started' ? `${p.authorName}: ${p.excerpt}` : null; } catch { return null; }
+  })();
 
   const messageMenu = (m: MessageDTO): MenuItem[] => {
     const mine = m.authorId === d.me.id;
     const isPinned = pinned.has(m.id);
     return [
       ...(conv.canPost ? [{ label: t('menu.reply'), icon: '↩', onSelect: () => { setReplyTo(m); input.current?.focus(); } }] : []),
+      ...(!mine && conv.kind !== 'direct' ? [{ label: t('preply.action'), icon: '✉', onSelect: () => void replyPrivately(m) }] : []),
+      ...(!embedded ? [{ label: t('side.ask'), icon: '💬', onSelect: () => setSideFor(m) }] : []),
       { label: t('menu.copyText'), icon: '⧉', onSelect: async () => { await copyText(m.body); toast(t('toast.copied')); } },
       { label: t('menu.copyLink'), icon: '⛓', onSelect: async () => { await copyText(messageLink(m)); toast(t('toast.linkCopied')); } },
       { divider: true },
@@ -162,7 +230,7 @@ export function ConversationScreen({ id }: { id: string }) {
       { label: t('menu.markUnread'), icon: '●', onSelect: () => client.markUnread(id, m.seq).then(() => toast(t('toast.markedUnread'))).catch((e) => toast(errorText(e))) },
       ...(canWork ? [
         { divider: true },
-        ...(myWsRole !== 'guest' ? [{ label: t('menu.derive'), icon: '⑂', onSelect: () => setDeriving(m) }] : []),
+        ...(canDerive && myWsRole !== 'guest' ? [{ label: t('menu.derive'), icon: '⑂', onSelect: () => setDeriving(m) }] : []),
         { label: t('menu.issue'), icon: '◆', onSelect: () => setNewIssue({ origin: m }) },
         { label: t('menu.meeting'), icon: '📅', onSelect: () => newEvent({ conversationId: id, originMessageId: m.id, defaultTitle: excerpt(m.body, 80) }) },
       ] : []),
@@ -177,20 +245,46 @@ export function ConversationScreen({ id }: { id: string }) {
   };
 
   return (
-    <div className={`conv ${panel ? '' : 'no-panel'}`}>
-      <section className="conv-main">
+    <div ref={setHost} className={`conv ${panel || sideConv ? '' : 'no-panel'} ${sideConv ? 'has-side' : ''} ${embedded ? 'is-embedded' : ''}`}>
+      {sideConv && <SideConnector host={host} anchorId={sideConv.parentMessageId} color={personColor(sideAnchor?.authorId ?? sideConv.memberIds[0])} />}
+      <section className={`conv-main ${dropping ? 'is-dropping' : ''}`}
+        onDragOver={(e) => { if (conv.canPost && e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
+        onDragLeave={(e) => { if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) setDropping(false); }}
+        onDrop={(e) => { if (!e.dataTransfer.files.length) return; e.preventDefault(); setDropping(false); drafts.add(e.dataTransfer.files); input.current?.focus(); }}>
+        {dropping && <div className="drop-hint" aria-hidden>{t('att.drop')}</div>}
         <header className="conv-head" onContextMenu={contextHandler(() => conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) }))}>
-          <button className="icon-btn only-mobile" aria-label={t('common.back')} onClick={() => (history.length > 1 ? history.back() : navigate('/conversaciones'))}>‹</button>
+          {!embedded && <button className="icon-btn only-mobile" aria-label={t('common.back')} onClick={() => (history.length > 1 ? history.back() : navigate('/conversaciones'))}>‹</button>}
+          {conv.kind !== 'direct' && conv.avatarUrl && <ConvAvatar c={conv} size={30} />}
           <div className="grow" style={{ minWidth: 0 }}>
-            <h2 className="ellipsis">{conv.kind === 'internal' ? '◌ ' : conv.level === 'directivo' ? '◆ ' : ''}{title}{muted ? ' 🔕' : ''}</h2>
-            <div className="small muted ellipsis">{conversationSubtitle(d, conv)}{conv.kind !== 'direct' ? ` · ${tn(conv.memberIds.length, 'n.participant', 'n.participants')}` : ''}</div>
+            <h2 className="ellipsis">{conv.kind === 'internal' ? '◌ ' : conv.level === 'directivo' ? '◆ ' : ''}{isSide ? `💬 ${t('side.title')}` : title}{muted ? ' 🔕' : ''}</h2>
+            {isSide
+              ? <div className="small muted ellipsis side-head-people"><StackedAvatars c={conv} size={18} /> 🔒 {t('side.privateN', { n: conv.memberIds.length })}</div>
+              : <div className="small muted ellipsis">{conversationSubtitle(d, conv)}{conv.kind !== 'direct' ? ` · ${tn(conv.memberIds.length, 'n.participant', 'n.participants')}` : ''}</div>}
           </div>
           <div className="row only-desktop">{orgsHere.map((o) => o && <OrgMark key={o.id} org={o} size={22} />)}</div>
           {pinned.size > 0 && <button className="btn ghost small" onClick={() => setShowPins(true)} title={t('pins.title')}>📌 {pinned.size}</button>}
           {ws && <button className="btn ghost small only-desktop" onClick={() => navigate(`/w/${ws.id}`)}>{t('chat.space')}</button>}
           <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) })); }}>⋯</button>
-          <button className="icon-btn" aria-label={t('chat.details')} onClick={() => setPanel(!panel)}>ⓘ</button>
+          {embedded ? <>
+            <button className="icon-btn" aria-label={t('side.openFull')} title={t('side.openFull')} onClick={() => navigate(`/c/${id}`)}>⤢</button>
+            <button className="icon-btn" aria-label={t('side.close')} title={t('side.close')} onClick={embedded.onClose}>×</button>
+          </> : <button className="icon-btn" aria-label={t('chat.details')} onClick={() => setPanel(!panelPref)}>ⓘ</button>}
         </header>
+        {isSide && (embedded?.anchor || anchorExcerpt) && (
+          <div className="side-anchor" style={{ borderLeftColor: personColor(embedded?.anchor?.authorId ?? null) }}>
+            <div className="row" style={{ gap: 6 }}>
+              <span className="eyebrow grow">{t('side.anchor')}</span>
+              {embedded?.anchor && <span className="small muted">{new Date(embedded.anchor.createdAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span>}
+              {embedded?.onSeeAnchor && <button className="link-btn small" onClick={embedded.onSeeAnchor}>{t('side.seeInChat')}</button>}
+              {!embedded && conv.parentId && d.conversations.some((c) => c.id === conv.parentId) && (
+                <button className="link-btn small" onClick={() => navigate(`/c/${conv.parentId}${conv.parentMessageSeq ? `?m=${conv.parentMessageSeq}` : ''}`)}>{t('side.seeInChat')}</button>
+              )}
+            </div>
+            <div className="small side-anchor-clamp">
+              {embedded?.anchor ? <><b>{personById(d, embedded.anchor.authorId)?.name}</b> · {embedded.anchor.body}</> : anchorExcerpt}
+            </div>
+          </div>
+        )}
         <LineageBar conv={conv} />
         {openHere.length > 0 && (
           <div className="issues-here">
@@ -223,12 +317,12 @@ export function ConversationScreen({ id }: { id: string }) {
             const isEditing = editing?.id === m.id;
             const menu = m.deletedAt ? null : menuProps(() => messageMenu(m));
             return (
-              <div key={r.key} id={`msg-${id}-${m.seq}`} className={`msg ${r.cont ? 'cont' : ''} ${highlight === m.seq ? 'is-highlight' : ''} ${pinned.has(m.id) ? 'is-pinned' : ''}`} {...(menu ?? {})}>
+              <div key={r.key} id={`msg-${id}-${m.seq}`} data-mid={m.id} className={`msg ${r.cont ? 'cont' : ''} ${highlight === m.seq ? 'is-highlight' : ''} ${pinned.has(m.id) ? 'is-pinned' : ''} ${sideConv?.parentMessageId === m.id ? 'is-anchor' : ''} ${mentionsMe(d, m) ? 'mentions-me' : ''}`} {...(menu ?? {})}>
                 <div>{!r.cont && <Avatar person={author} org={org} size={34} />}</div>
                 <div style={{ minWidth: 0 }}>
                   {!r.cont && (
                     <div className="msg-meta">
-                      <span className="msg-author">{author?.name ?? t('chat.formerParticipant')}</span>
+                      <span className="msg-author" style={conv.kind !== 'direct' && author ? { color: personColor(author.id) } : undefined}>{author?.name ?? t('chat.formerParticipant')}</span>
                       <span className="msg-org">{org?.name ?? (author?.guest ? t('common.guest') : '')}</span>
                       <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span>
                       {pinned.has(m.id) && <span className="msg-time">📌</span>}
@@ -240,7 +334,7 @@ export function ConversationScreen({ id }: { id: string }) {
                     </button>
                   )}
                   {m.forwarded && <ForwardedTag d={d} m={m} />}
-                  {m.mergedFrom && <MergedCard childId={m.mergedFrom} />}
+                  {m.mergedFrom && <MergedCard childId={m.mergedFrom} kind={m.mergedKind} />}
                   {isEditing ? (
                     <div className="msg-edit">
                       <textarea className="input" autoFocus rows={2} value={editing.text} onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
@@ -248,15 +342,17 @@ export function ConversationScreen({ id }: { id: string }) {
                       <div className="row small"><span className="muted grow">{t('edit.hint')}</span><button className="btn ghost small" onClick={() => setEditing(null)}>{t('common.cancel')}</button><button className="btn primary small" onClick={saveEdit}>{t('edit.save')}</button></div>
                     </div>
                   ) : (
-                    <div className="msg-body">{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <Linkify text={m.body} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
+                    (m.body || m.deletedAt || !m.attachments?.length) && <div className="msg-body">{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <MessageText d={d} body={m.body} mentions={m.mentions} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
                   )}
+                  {!m.deletedAt && !!m.attachments?.length && <AttachmentsView list={m.attachments} onCreateIssue={canWork ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
                   {!m.deletedAt && !isEditing && m.linkPreview && <LinkPreviewCard p={m.linkPreview} />}
+                  {!embedded && <SideChip d={d} sides={sidesOf(d, id, m.id)} onOpen={setSideId} />}
                   {issueOf(m.id) && <button className="msg-issue" onClick={() => setOpenIssue(issueOf(m.id)!.id)}>◆ {issueOf(m.id)!.title}</button>}
                   {!m.deletedAt && !isEditing && (
                     <div className="msg-actions">
                       {conv.canPost && <button onClick={() => { setReplyTo(m); input.current?.focus(); }}>↩ {t('menu.reply')}</button>}
                       <button onClick={() => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />)}>↪ {t('menu.forward')}</button>
-                      {canWork && myWsRole !== 'guest' && <button onClick={() => setDeriving(m)}>{t('derive.action')}</button>}
+                      {canDerive && myWsRole !== 'guest' && <button onClick={() => setDeriving(m)}>{t('derive.action')}</button>}
                       {canWork && <button onClick={() => setNewIssue({ origin: m })}>{t('issue.fromMessage')}</button>}
                       <button aria-label={t('menu.open')} onClick={(e) => { const rr = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(rr.left, rr.bottom + 4, messageMenu(m)); }}>⋯</button>
                     </div>
@@ -266,8 +362,18 @@ export function ConversationScreen({ id }: { id: string }) {
             );
           })}
         </div>
+        {isSide && local?.loaded && !(local.messages ?? []).some((m) => m.kind === 'text') && <div className="side-empty">💬 {t('side.emptyChat')}</div>}
+        {isSide && conv.canPost && !text.trim() && lastText && lastText.authorId !== d.me.id && (
+          <QuickReplies onSend={(q) => { atBottom.current = true; void client.send(id, q); }} onAsk={() => setAdding(true)} />
+        )}
         <div className="typing">{typers.length ? t(typers.length > 1 ? 'chat.typingMany' : 'chat.typingOne', { names: typers.join(', ') }) : ''}</div>
         <div className="composer">
+          {privateReply && (
+            <div className="reply-bar is-private">
+              <span className="grow ellipsis"><b>✉ {t('preply.bar', { name: personById(d, privateReply.authorId)?.name ?? '' })}</b> · {excerpt(privateReply.body, 100)}</span>
+              <button className="icon-btn" aria-label={t('preply.cancel')} onClick={() => setPrivateReply(null)}>×</button>
+            </div>
+          )}
           {replyTo && (
             <div className="reply-bar">
               <span className="grow ellipsis"><b>{t('reply.to', { name: personById(d, replyTo.authorId)?.name ?? '' })}</b> · {excerpt(replyTo.body, 100)}</span>
@@ -275,26 +381,59 @@ export function ConversationScreen({ id }: { id: string }) {
             </div>
           )}
           {conv.canPost ? (
+            <>
+            <DraftTray drafts={drafts.drafts} onRemove={drafts.remove} onRetry={drafts.retry} />
             <div className="composer-box">
+              <button className="bring-btn" title={t('att.add')} aria-label={t('att.add')} onClick={(e) => {
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                openMenuAt(r.left, r.top - 8, [
+                  { label: t('att.fromPhotos'), icon: '🖼', onSelect: () => pickFiles('media', drafts.add) },
+                  { label: t('att.fromFiles'), icon: '📎', onSelect: () => pickFiles('any', drafts.add) },
+                ]);
+              }}>📎</button>
               <button className="bring-btn" title={t('imp.action')} aria-label={t('imp.action')} onClick={() => openDialog((close) => <BringDialog conversationId={id} onClose={close} />)}>⤓</button>
+              <div className="mention-wrap">
+              {picker.view}
+              <MentionMirror text={text} tokens={tokens} taRef={input} />
               <textarea
-                ref={input} rows={1} value={text} placeholder={t('chat.placeholder', { name: title })} aria-label={t('common.message')}
-                onChange={(e) => { setText(e.target.value); client.typing(id); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(180, e.target.scrollHeight)}px`; }}
+                ref={input} rows={1} value={text} placeholder={isSide ? (sideOthers.length === 1 ? t('side.placeholder', { name: personById(d, sideOthers[0])?.name.split(' ')[0] ?? '' }) : t('side.placeholderMany')) : t('chat.placeholder', { name: title })} aria-label={t('common.message')}
+                onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+                onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart); client.typing(id); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(180, e.target.scrollHeight)}px`; }}
                 onKeyDown={onKey} enterKeyHint="send"
+                onPaste={(e) => { const files = [...e.clipboardData.files]; if (files.length) { e.preventDefault(); drafts.add(files); } }}
               />
-              <button className="send" onClick={send} disabled={!text.trim()} aria-label={t('chat.send')}>➤</button>
+              </div>
+              {/* Con el compositor vacío, el micrófono: mantener pulsado graba una nota de voz. */}
+              {!text.trim() && !drafts.drafts.length && !privateReply
+                ? <VoiceRecorder conversationId={id} onSent={() => { atBottom.current = true; setReplyTo(null); }} />
+                : <button className="send" onClick={send} disabled={(!text.trim() && !drafts.ready.length) || drafts.busy} aria-label={t('chat.send')}>➤</button>}
             </div>
+            </>
           ) : <div className="hint" style={{ textAlign: 'center', padding: 8 }}>{t('chat.readOnly')}</div>}
         </div>
       </section>
 
-      {panel && (
+      {sideConv && (
+        <aside className="side-panel" aria-label={t('side.title')}>
+          <ConversationScreen key={sideConv.id} id={sideConv.id} embedded={{ onClose: () => setSideId(null), anchor: sideAnchor, onSeeAnchor: sideAnchor ? () => jumpTo(sideAnchor.seq) : undefined }} />
+        </aside>
+      )}
+      {panel && !sideConv && (
         <aside className="panel">
           <div className="row"><span className="eyebrow grow">{t('chat.details')}</span><button className="icon-btn" onClick={() => setPanel(false)} aria-label={t('common.close')}>×</button></div>
-          <div>
-            <div className="serif" style={{ fontSize: 26, lineHeight: 1.1 }}>{title}</div>
-            <div className="small muted">{conversationSubtitle(d, conv)}</div>
+          <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+            {conv.kind !== 'direct' && conv.avatarUrl && <ConvAvatar c={conv} size={56} />}
+            <div className="grow" style={{ minWidth: 0 }}>
+              <div className="serif" style={{ fontSize: 26, lineHeight: 1.1 }}>{title}</div>
+              <div className="small muted">{conversationSubtitle(d, conv)}</div>
+            </div>
           </div>
+          {canPhoto && (
+            <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+              <button className="btn small" onClick={() => void pickImage().then((f) => { if (!f) return; if (!f.type.startsWith('image/')) toast(t('photo.invalid')); else setGroupCrop(f); })}>📷 {conv.avatarUrl ? t('group.changePhoto') : t('group.addPhoto')}</button>
+              {conv.avatarUrl && <button className="btn ghost small" onClick={() => { if (confirm(t('group.removeConfirm'))) void client.removeConversationAvatar(id).then(() => toast(t('group.photoRemoved'))).catch((e) => toast(errorText(e))); }}>{t('group.removePhoto')}</button>}
+            </div>
+          )}
           {canWork && <ConversationAgenda conv={conv} />}
           {canWork && (
             <div>
@@ -342,11 +481,14 @@ export function ConversationScreen({ id }: { id: string }) {
           )}
         </aside>
       )}
+      {sideFor && <SideDialog conv={conv} message={sideFor.message} initialUserIds={sideFor.userIds} onClose={() => setSideFor(null)} onOpened={setSideId} />}
+      {groupCrop && <PhotoCropDialog file={groupCrop} title={t('photo.cropGroupTitle')} onClose={() => setGroupCrop(null)}
+        onSave={async (blob) => { await client.setConversationAvatar(id, blob); }} />}
       {adding && <AddMembersDialog conversationId={id} onClose={() => setAdding(false)} />}
       {deriving && <DeriveDialog conv={conv} message={deriving} onClose={() => setDeriving(null)} />}
       {newIssue && (
         <NewIssueDialog conversationId={id} originMessageId={newIssue.origin?.id}
-          defaultTitle={newIssue.origin ? excerpt(newIssue.origin.body) : ''}
+          defaultTitle={newIssue.title ?? (newIssue.origin ? excerpt(newIssue.origin.body) : '')}
           onClose={() => setNewIssue(null)} onCreated={(i) => setOpenIssue(i.id)} />
       )}
       {openIssue && <IssueDrawer id={openIssue} onClose={() => setOpenIssue(null)} />}
@@ -358,6 +500,17 @@ export function ConversationScreen({ id }: { id: string }) {
 function ForwardedTag({ d, m }: { d: BootstrapDTO; m: MessageDTO }) {
   const f = m.forwarded!;
   const from = f.fromConversationId ? d.conversations.find((c) => c.id === f.fromConversationId) : null;
+  if (f.messageId) {
+    // «Responder en privado»: cita del original, con enlace si quien lee puede abrir el origen.
+    const mine = m.authorId === d.me.id;
+    const text = mine ? t('preply.you', { excerpt: f.excerpt ?? '' }) : t('preply.other', { name: personById(d, m.authorId)?.name ?? '', excerpt: f.excerpt ?? '' });
+    return (
+      <div className="fwd-tag src-private">
+        ✉ {text}
+        {from && <> <span className="muted">{t('preply.in', { name: conversationTitle(d, from) })}</span> · <button className="link-btn" onClick={() => navigate(`/c/${from.id}${f.messageSeq ? `?m=${f.messageSeq}` : ''}`)}>{t('preply.open')}</button></>}
+      </div>
+    );
+  }
   const label = from ? t('fwd.fromConv', { name: conversationTitle(d, from) })
     : f.author ? t('fwd.fromBy', { source: t(`src.${f.source}`), author: f.author }) : t('fwd.from', { source: t(`src.${f.source}`) });
   return <div className={`fwd-tag src-${f.source}`}>↪ {label}{f.sentAt ? <span className="muted"> · {f.sentAt.includes('T') ? new Date(f.sentAt).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : f.sentAt}</span> : null}</div>;
@@ -410,7 +563,8 @@ function PendingRow({ p }: { p: PendingMessage }) {
           <span className="msg-author">{d.me.name}</span>
           <span className="msg-time">{p.status === 'failed' ? t('chat.notSent') : p.attempts > 0 ? t('chat.retrying') : t('chat.sending')}</span>
         </div>
-        <div className="msg-body">{p.body}</div>
+        {p.body && <div className="msg-body">{p.body}</div>}
+        {!!p.attachments?.length && <AttachmentsView list={p.attachments} />}
         {p.status === 'failed' && (
           <div className="row small" style={{ marginTop: 4 }}>
             <span className="error">{p.error}</span>

@@ -2,6 +2,7 @@ import { CONTRACT_VERSION, type BootstrapDTO, type ConversationDTO, type Organiz
 import { pool } from '../db.ts';
 import { loadUser } from './auth.ts';
 import { orgVerification } from './domains.ts';
+import { summarize } from './attachments.ts';
 
 const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())`;
 
@@ -15,7 +16,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
 
   const [ws, convs, people] = await Promise.all([
     pool.query(
-      `SELECT w.id, w.name, w.department, w.glyph, w.owning_org_id, w.created_at, wm.role,
+      `SELECT w.id, w.name, w.department, w.glyph, w.owning_org_id, w.created_at, wm.role, w.is_org_home, w.counterpart_name,
               (SELECT wp.pinned_at FROM workspace_prefs wp WHERE wp.workspace_id = w.id AND wp.user_id = wm.user_id) AS pinned_at,
               ARRAY(SELECT org_id FROM workspace_organizations wo WHERE wo.workspace_id = w.id AND wo.left_at IS NULL ORDER BY wo.joined_at) AS org_ids,
               CASE WHEN wm.role = 'guest' THEN '{}'::uuid[] ELSE ARRAY(SELECT o.user_id FROM workspace_memberships o WHERE o.workspace_id = w.id
@@ -27,13 +28,22 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
     ),
     pool.query(
       `SELECT c.id, c.workspace_id, c.kind, c.level, c.name, c.internal_org_id, c.last_message_seq, c.last_event_seq, c.last_message_at,
-              c.parent_conversation_id, c.parent_message_id, (SELECT pm.seq FROM messages pm WHERE pm.id = c.parent_message_id) AS parent_message_seq, c.derive_kind, c.derive_reason, c.returned_at,
+              c.parent_conversation_id, c.parent_message_id, (SELECT pm.seq FROM messages pm WHERE pm.id = c.parent_message_id) AS parent_message_seq, c.derive_kind, c.derive_reason, c.returned_at, c.avatar_file_id,
               (SELECT count(*) FROM issues i WHERE i.conversation_id = c.id AND i.status NOT IN ('done','cancelled'))::int AS open_issues,
+              (SELECT count(*) FROM message_mentions mm WHERE mm.user_id = m.user_id AND mm.conversation_id = c.id
+                  AND mm.seq > GREATEST(COALESCE(rc.last_read_seq, 0), m.history_from_seq))::int AS unread_mentions,
               m.can_post, m.can_manage, m.history_from_seq, wm.role AS workspace_role, cp.pinned_at, cp.muted_until,
               COALESCE(rc.last_read_seq, 0) AS last_read_seq,
               ARRAY(SELECT user_id FROM conversation_memberships x WHERE x.conversation_id = c.id AND x.removed_at IS NULL ORDER BY x.joined_at) AS member_ids,
               (SELECT CASE WHEN lm.deleted_at IS NULL THEN left(lm.body, 140) ELSE '' END FROM messages lm
-                WHERE lm.conversation_id = c.id AND lm.seq = c.last_message_seq AND lm.seq > m.history_from_seq) AS preview
+                WHERE lm.conversation_id = c.id AND lm.seq = c.last_message_seq AND lm.seq > m.history_from_seq) AS preview,
+              (SELECT lm.attachments FROM messages lm
+                WHERE lm.conversation_id = c.id AND lm.seq = c.last_message_seq AND lm.seq > m.history_from_seq AND lm.deleted_at IS NULL) AS preview_attachments,
+              -- Último mensaje de una persona (o agente) entre los últimos 20 visibles, aunque después haya avisos de sistema.
+              (SELECT json_build_object('id', hm.id, 'seq', hm.seq, 'authorId', hm.author_id, 'body', left(hm.body, 140), 'attachments', hm.attachments, 'createdAt', hm.created_at)
+                 FROM messages hm WHERE hm.conversation_id = c.id AND hm.kind = 'text' AND hm.deleted_at IS NULL
+                  AND hm.seq > GREATEST(m.history_from_seq, c.last_message_seq - 20)
+                ORDER BY hm.seq DESC LIMIT 1) AS human
          FROM conversation_memberships m
          JOIN conversations c ON c.id = m.conversation_id AND c.archived_at IS NULL
          LEFT JOIN workspace_memberships wm ON wm.workspace_id = c.workspace_id AND wm.user_id = m.user_id
@@ -75,6 +85,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
     id: r.id, name: r.name, department: r.department, glyph: r.glyph, owningOrgId: r.owning_org_id,
     organizationIds: r.org_ids, memberIds: r.member_ids, myRole: r.role, createdAt: new Date(r.created_at).toISOString(),
     pinnedAt: r.pinned_at ? new Date(r.pinned_at).toISOString() : null,
+    isOrgHome: r.is_org_home, counterpartName: r.counterpart_name,
   }));
 
   const conversations: ConversationDTO[] = convs.rows.map((r) => {
@@ -83,7 +94,9 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
       id: r.id, workspaceId: r.workspace_id, kind: r.kind, level: r.level, name: r.name, internalOrgId: r.internal_org_id,
       memberIds: r.member_ids, lastMessageSeq: r.last_message_seq, lastEventSeq: r.last_event_seq,
       lastMessageAt: r.last_message_at ? new Date(r.last_message_at).toISOString() : null,
-      lastMessagePreview: r.preview, lastReadSeq: r.last_read_seq,
+      // Clientes viejos: un mensaje solo con adjuntos muestra un ícono en vez de quedar vacío.
+      lastMessagePreview: r.preview === '' && r.preview_attachments?.length ? legacyAttachmentPreview(r.preview_attachments) : r.preview,
+      lastReadSeq: r.last_read_seq,
       unread: Math.max(0, r.last_message_seq - readFrom),
       canPost: r.can_post, canManage: r.can_manage || ['lead', 'admin'].includes(r.workspace_role),
       historyFromSeq: r.history_from_seq,
@@ -92,6 +105,12 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
       openIssues: r.open_issues,
       pinnedAt: r.pinned_at ? new Date(r.pinned_at).toISOString() : null,
       mutedUntil: r.muted_until && new Date(r.muted_until) > new Date() ? new Date(r.muted_until).toISOString() : null,
+      avatarUrl: r.avatar_file_id ? `/api/v1/avatars/${r.avatar_file_id}` : null,
+      unreadMentions: r.unread_mentions ?? 0,
+      lastHumanPreview: r.human ? {
+        messageId: r.human.id, seq: Number(r.human.seq), authorId: r.human.authorId, body: r.human.body ?? '',
+        attachments: summarize(r.human.attachments), createdAt: new Date(r.human.createdAt).toISOString(),
+      } : null,
     };
   });
 
@@ -117,4 +136,12 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   }));
 
   return { contract: CONTRACT_VERSION, serverTime: new Date().toISOString(), me, organizations, workspaces, conversations, people: personList };
+}
+
+function legacyAttachmentPreview(list: { contentType: string; name: string }[]) {
+  const s = summarize(list as any)!;
+  if (s.voices && s.voices === s.count) return '🎤';
+  if (s.images === s.count) return s.count === 1 ? '📷' : `📷 ×${s.count}`;
+  if (s.videos === s.count) return s.count === 1 ? '🎬' : `🎬 ×${s.count}`;
+  return s.count === 1 ? `📎 ${s.firstName ?? ''}`.trim() : `📎 ×${s.count}`;
 }

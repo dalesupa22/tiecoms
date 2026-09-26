@@ -4,7 +4,9 @@
  */
 import { randomUUID } from 'node:crypto';
 import { enqueueOutbox, pool, tx } from '../db.ts';
-import { badRequest, notFound } from '../errors.ts';
+import { badRequest, forbidden, notFound } from '../errors.ts';
+import { conversationAccess } from '../access.ts';
+import { appendMessage } from './messages.ts';
 import { deleteObject, getObject, objectKey, putObject } from '../storage.ts';
 import { loadUser } from './auth.ts';
 
@@ -52,11 +54,16 @@ export async function updateProfile(userId: string, input: { name?: string; titl
   return loadUser(pool, userId);
 }
 
-export async function setAvatar(userId: string, body: Buffer) {
-  if (!body?.length) throw badRequest('Falta la imagen');
+function checkImage(body: Buffer) {
+  if (!Buffer.isBuffer(body) || !body.length) throw badRequest('Falta la imagen');
   if (body.length > MAX_AVATAR_BYTES) throw badRequest('La imagen pesa más de 3 MB');
   const img = sniffImage(body);
   if (!img) throw badRequest('Usa una imagen PNG, JPG o WebP');
+  return img;
+}
+
+export async function setAvatar(userId: string, body: Buffer) {
+  const img = checkImage(body);
   const id = randomUUID();
   const key = objectKey(`avatars/${userId}/${id}.${img.ext}`);
   // Primero S3 (llamada de red, fuera de la transacción); luego la fila.
@@ -88,7 +95,60 @@ export async function removeAvatar(userId: string) {
 
 /** Las fotos son como en cualquier chat: quien tenga el id (que llega en /bootstrap) la ve. */
 export async function readAvatar(fileId: string) {
-  const { rows } = await pool.query("SELECT s3_key FROM files WHERE id = $1 AND purpose = 'avatar' AND deleted_at IS NULL", [fileId]);
+  const { rows } = await pool.query("SELECT s3_key FROM files WHERE id = $1 AND purpose IN ('avatar', 'group_avatar') AND deleted_at IS NULL", [fileId]);
   if (!rows[0]) throw notFound('Foto');
   return getObject(rows[0].s3_key);
+}
+
+// ---------- Foto de grupo ----------
+const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, ...p });
+
+/** Grupos e internos: quien administra; chats grupales (multi, laterales): cualquier participante. Directos: no. */
+async function groupPhotoAccess(db: import('../db.ts').Db, userId: string, conversationId: string, lock = false) {
+  const a = await conversationAccess(db, userId, conversationId, 'read', lock);
+  if (a.kind === 'direct') throw badRequest('Los directos no tienen foto de grupo');
+  if (a.kind !== 'multi' && !a.canManage) throw forbidden('Solo quien administra el grupo puede cambiar su foto');
+  if (!a.canPost) throw forbidden('No puedes publicar en esta conversación');
+  return a;
+}
+
+async function announceGroup(c: import('../db.ts').Tx, conversationId: string) {
+  const { rows } = await c.query('SELECT user_id FROM conversation_memberships WHERE conversation_id = $1 AND removed_at IS NULL', [conversationId]);
+  if (rows.length) await enqueueOutbox(c, 'account.event', { userIds: rows.map((r) => r.user_id), event: { type: 'scope.changed', reason: 'conversation.photo' } });
+}
+
+export async function setGroupAvatar(userId: string, conversationId: string, body: Buffer) {
+  await groupPhotoAccess(pool, userId, conversationId);
+  const img = checkImage(body);
+  const id = randomUUID();
+  const key = objectKey(`group-avatars/${conversationId}/${id}.${img.ext}`);
+  await putObject(key, body, img.type);
+  const old = await tx(async (c) => {
+    await groupPhotoAccess(c, userId, conversationId, true);
+    const prev = await c.query('SELECT f.id, f.s3_key FROM conversations cv JOIN files f ON f.id = cv.avatar_file_id WHERE cv.id = $1', [conversationId]);
+    await c.query('INSERT INTO files (id, owner_id, purpose, s3_key, content_type, size_bytes) VALUES ($1,$2,$3,$4,$5,$6)',
+      [id, userId, 'group_avatar', key, img.type, body.length]);
+    await c.query('UPDATE conversations SET avatar_file_id = $2 WHERE id = $1', [conversationId, id]);
+    if (prev.rows[0]) await c.query('UPDATE files SET deleted_at = now() WHERE id = $1', [prev.rows[0].id]);
+    await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: sys('group.photo_changed') });
+    await announceGroup(c, conversationId);
+    return prev.rows[0] as { id: string; s3_key: string } | undefined;
+  });
+  if (old) void deleteObject(old.s3_key).catch((e) => console.error('[files] no pude borrar la foto anterior del grupo', e?.message));
+  return { avatarUrl: avatarUrl(id) };
+}
+
+export async function removeGroupAvatar(userId: string, conversationId: string) {
+  const old = await tx(async (c) => {
+    await groupPhotoAccess(c, userId, conversationId, true);
+    const prev = await c.query('SELECT f.id, f.s3_key FROM conversations cv JOIN files f ON f.id = cv.avatar_file_id WHERE cv.id = $1', [conversationId]);
+    if (!prev.rows[0]) return undefined;
+    await c.query('UPDATE conversations SET avatar_file_id = NULL WHERE id = $1', [conversationId]);
+    await c.query('UPDATE files SET deleted_at = now() WHERE id = $1', [prev.rows[0].id]);
+    await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: sys('group.photo_removed') });
+    await announceGroup(c, conversationId);
+    return prev.rows[0] as { id: string; s3_key: string };
+  });
+  if (old) void deleteObject(old.s3_key).catch(() => {});
+  return { avatarUrl: null };
 }

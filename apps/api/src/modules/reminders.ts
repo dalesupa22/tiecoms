@@ -57,6 +57,7 @@ export async function fireDueReminders(): Promise<number> {
       if (!ok.rowCount) { await c.query('UPDATE reminders SET done_at = now() WHERE id = $1', [r.id]); continue; }
       const u = await c.query('UPDATE reminders SET fired_at = now() WHERE id = $1 RETURNING fired_at', [r.id]);
       await enqueueOutbox(c, 'account.event', { userIds: [r.user_id], event: { type: 'reminder.due', reminder: toDTO({ ...r, fired_at: u.rows[0].fired_at }) } });
+      await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('push.reminder', $1, 2)", [JSON.stringify({ reminderId: r.id })]);
     }
     return rows.length;
   });

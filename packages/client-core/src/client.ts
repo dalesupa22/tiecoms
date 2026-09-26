@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp,
+  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -13,6 +13,10 @@ export interface PendingMessage {
   body: string;
   replyTo: string | null;
   forwarded?: ForwardedInfo | null;
+  /** Adjuntos ya subidos (para pintarlos mientras se envía) y adjuntos reenviados de otro mensaje. */
+  attachments?: AttachmentDTO[];
+  forwardAttachmentIds?: string[];
+  mentions?: MentionDTO[];
   createdAt: string;
   attempts: number;
   status: 'pending' | 'sending' | 'failed';
@@ -53,7 +57,11 @@ export interface ClientState {
 /** Aviso para la interfaz (notificación del sistema, sonido, toast). */
 export type ClientNotice =
   | { kind: 'message'; conversationId: string; message: MessageDTO }
-  | { kind: 'reminder'; reminder: ReminderDTO };
+  | { kind: 'reminder'; reminder: ReminderDTO }
+  /** Una reunión a la que voy empieza en `minutes` minutos. */
+  | { kind: 'eventSoon'; event: CalendarEventDTO; minutes: number }
+  /** El servidor descartó menciones de un mensaje propio (ids o 'all'). */
+  | { kind: 'mentionsDropped'; conversationId: string; userIds: string[] };
 
 export interface ClientOptions {
   /** Origen del API, p. ej. https://app.tiecoms.com. Vacío = mismo origen (web). */
@@ -316,6 +324,10 @@ export class TieComsClient {
       this.set({ reminders: [...this.state.reminders.filter((r) => r.id !== e.reminder.id), e.reminder].sort((a, b) => a.remindAt.localeCompare(b.remindAt)) });
       this.opts.onNotice?.({ kind: 'reminder', reminder: e.reminder });
     }
+    if (e.type === 'event.soon') {
+      this.putEvents([e.event]);
+      this.opts.onNotice?.({ kind: 'eventSoon', event: e.event, minutes: e.minutes });
+    }
     if (e.type === 'read.updated') {
       const c = this.state.data?.conversations.find((x) => x.id === e.conversationId);
       if (c && e.seq > c.lastReadSeq) this.patchConversationMeta(c.id, { lastReadSeq: e.seq, unread: Math.max(0, c.lastMessageSeq - Math.max(e.seq, c.historyFromSeq)) });
@@ -427,11 +439,18 @@ export class TieComsClient {
   typing(conversationId: string) { this.socket?.emit(SOCKET_EVENTS.typing, { conversationId }); }
 
   // ---------- Envío con cola persistente ----------
-  async send(conversationId: string, body: string, replyTo: string | null = null, forwarded: ForwardedInfo | null = null) {
+  async send(conversationId: string, body: string, replyTo: string | null = null, forwarded: ForwardedInfo | null = null,
+    extra: { attachments?: AttachmentDTO[]; forwardAttachmentIds?: string[]; mentions?: MentionDTO[] } = {}) {
     const text = body.trim();
-    if (!text) return;
+    // Las menciones se miden sobre el texto recortado (como lo guarda el servidor).
+    const lead = body.length - body.trimStart().length;
+    const mentions = (extra.mentions ?? []).map((m) => ({ ...m, start: m.start - lead })).filter((m) => m.start >= 0 && m.start + m.length <= text.length);
+    if (!text && !extra.attachments?.length && !extra.forwardAttachmentIds?.length) return;
     const p: PendingMessage = {
       clientMessageId: uid(), conversationId, body: text, replyTo, forwarded, createdAt: new Date().toISOString(),
+      ...(extra.attachments?.length ? { attachments: extra.attachments } : {}),
+      ...(extra.forwardAttachmentIds?.length ? { forwardAttachmentIds: extra.forwardAttachmentIds } : {}),
+      ...(mentions.length ? { mentions } : {}),
       attempts: 0, status: 'pending', nextAttemptAt: 0,
     };
     // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
@@ -503,11 +522,16 @@ export class TieComsClient {
 
   /** Socket con ACK si está conectado; HTTP como respaldo. Mismo clientMessageId = idempotente. */
   private async deliver(p: PendingMessage): Promise<MessageDTO> {
-    const payload = { conversationId: p.conversationId, clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo, forwarded: p.forwarded ?? null };
+    const files = {
+      ...(p.attachments?.length ? { attachmentIds: p.attachments.map((a) => a.id) } : {}),
+      ...(p.forwardAttachmentIds?.length ? { forwardAttachmentIds: p.forwardAttachmentIds } : {}),
+      ...(p.mentions?.length ? { mentions: p.mentions } : {}),
+    };
+    const payload = { conversationId: p.conversationId, clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo, forwarded: p.forwarded ?? null, ...files };
     if (this.socket?.connected) {
       try {
         const r: any = await this.socket.timeout(8000).emitWithAck(SOCKET_EVENTS.send, payload);
-        if (r?.ok) return r.message;
+        if (r?.ok) { this.noteDropped(p.conversationId, r.droppedMentions); return r.message; }
         const status = r?.error?.code === 'forbidden' ? 403 : r?.error?.code === 'not_found' ? 404 : r?.error?.code === 'conflict' ? 409 : r?.error?.code === 'bad_request' ? 400 : 503;
         throw new ApiRequestError(status, r?.error?.code ?? 'error', r?.error?.message ?? 'No se pudo enviar');
       } catch (e) {
@@ -515,10 +539,15 @@ export class TieComsClient {
         // Timeout del socket: se reintenta por HTTP con el mismo identificador.
       }
     }
-    const r = await this.request<{ message: MessageDTO }>(`/conversations/${p.conversationId}/messages`, {
-      method: 'POST', json: { clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo, forwarded: p.forwarded ?? null },
+    const r = await this.request<{ message: MessageDTO; droppedMentions?: string[] }>(`/conversations/${p.conversationId}/messages`, {
+      method: 'POST', json: { clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo, forwarded: p.forwarded ?? null, ...files },
     });
+    this.noteDropped(p.conversationId, r.droppedMentions);
     return r.message;
+  }
+
+  private noteDropped(conversationId: string, ids: unknown) {
+    if (Array.isArray(ids) && ids.length) this.opts.onNotice?.({ kind: 'mentionsDropped', conversationId, userIds: ids.map(String) });
   }
 
   // ---------- Asuntos ----------
@@ -596,7 +625,11 @@ export class TieComsClient {
     if (local?.loaded) this.setConv(m.conversationId, { messages: upsertMessage(local.messages, m) });
     this.patchPreviewIfLast(m);
   }
-  async editMessage(id: string, body: string) { const m = await this.request<MessageDTO>(`/messages/${id}`, { method: 'PATCH', json: { body } }); this.upsertLocal(m); }
+  async editMessage(id: string, body: string, mentions?: MentionDTO[]) { const m = await this.request<MessageDTO>(`/messages/${id}`, { method: 'PATCH', json: { body, ...(mentions ? { mentions } : {}) } }); this.upsertLocal(m); }
+  /** Bandeja «Menciones»: más recientes primero; before = createdAt del último que ya tienes. */
+  listMentions(before?: string, limit = 50) {
+    return this.request<{ mentions: MentionItemDTO[]; hasMore: boolean }>(`/mentions?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`);
+  }
   async deleteMessage(id: string) { const m = await this.request<MessageDTO>(`/messages/${id}`, { method: 'DELETE' }); this.upsertLocal(m); }
   async setMessagePinned(m: MessageDTO, pinned: boolean) {
     const r = await this.request<{ messageIds: string[] }>(`/messages/${m.id}/pin`, { method: pinned ? 'POST' : 'DELETE' });
@@ -648,6 +681,59 @@ export class TieComsClient {
   }
   async returnResult(conversationId: string, summary: string) {
     const r = await this.request<{ parentId: string; messageId: string }>(`/conversations/${conversationId}/return`, { method: 'POST', json: { summary } });
+    await this.loadBootstrap();
+    return r;
+  }
+
+  // ---------- Adjuntos ----------
+  /** Sube un archivo a una conversación (queda pendiente hasta que un mensaje lo use). ≤ 25 MB. */
+  uploadAttachment(conversationId: string, file: Blob, name: string, voice?: { durationMs: number; waveform?: number[]; aiConsent?: boolean }) {
+    return this.request<AttachmentDTO>(`/conversations/${conversationId}/attachments`, {
+      method: 'POST', body: file,
+      headers: {
+        'content-type': 'application/octet-stream', 'x-file-name': encodeURIComponent(name), 'x-file-type': file.type || 'application/octet-stream',
+        ...(voice ? { 'x-voice-note': '1', ...(voice.aiConsent === true ? { 'x-ai-consent': '1' } : {}), 'x-duration-ms': String(Math.round(voice.durationMs)), ...(voice.waveform?.length ? { 'x-waveform': voice.waveform.map((v) => v.toFixed(2)).join(',') } : {}) } : {}),
+      },
+    });
+  }
+  /** Vuelve a pedir la transcripción de una nota de voz que falló. */
+  retryTranscription(attachmentId: string, aiConsent = false) {
+    return this.request<AttachmentDTO>(`/attachments/${attachmentId}/transcribe`, { method: 'POST', json: { aiConsent } });
+  }
+  /** Miniatura opcional (JPEG/PNG/WebP ≤ 512 KB) de un adjunto aún pendiente. */
+  uploadAttachmentThumb(id: string, thumb: Blob) {
+    return this.request<AttachmentDTO>(`/attachments/${id}/thumb`, { method: 'POST', body: thumb, headers: { 'content-type': 'application/octet-stream' } });
+  }
+  /** Descarga autenticada (Bearer) de una ruta del API, p. ej. AttachmentDTO.url. */
+  async fetchBlob(apiPath: string): Promise<Blob> {
+    const path = apiPath.replace(/^\/api\/v1/, '');
+    if (this.accessToken && Date.now() > this.accessExp - 30_000) await this.refresh();
+    let res = await this.raw(path);
+    if (res.status === 401 && (await this.refresh())) res = await this.raw(path);
+    if (!res.ok) throw await parseError(res);
+    return res.blob();
+  }
+
+  /** Conversación lateral privada desde un mensaje (no publica nada en el origen). */
+  async openSide(conversationId: string, input: { messageId: string; userIds: string[]; question?: string }) {
+    const r = await this.request<{ id: string }>(`/conversations/${conversationId}/side`, { method: 'POST', json: input });
+    await this.loadBootstrap();
+    return r;
+  }
+  /** Nuevo chat: una persona → directo (reutiliza el existente); varias → chat grupal. */
+  async createChat(userIds: string[], name?: string) {
+    const r = await this.request<{ id: string; kind: 'direct' | 'multi' }>('/chats', { method: 'POST', json: { userIds, ...(name ? { name } : {}) } });
+    await this.loadBootstrap();
+    return r;
+  }
+  /** Foto de grupo o chat: bytes de la imagen (PNG, JPG o WebP, ≤ 3 MB). */
+  async setConversationAvatar(conversationId: string, image: Blob) {
+    const r = await this.request<{ avatarUrl: string }>(`/conversations/${conversationId}/avatar`, { method: 'POST', body: image, headers: { 'content-type': image.type || 'image/jpeg' } });
+    await this.loadBootstrap();
+    return r;
+  }
+  async removeConversationAvatar(conversationId: string) {
+    const r = await this.request<{ avatarUrl: null }>(`/conversations/${conversationId}/avatar`, { method: 'DELETE' });
     await this.loadBootstrap();
     return r;
   }

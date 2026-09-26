@@ -105,7 +105,7 @@ const es = {
   'issue.waitingOn': 'Esperando a', 'issue.waitingOnPh': 'Elige una empresa', 'issue.here': 'Asuntos aquí', 'issue.origin': 'Ver mensaje de origen',
   'issue.originOut': 'El mensaje de origen quedó fuera de tu historial', 'issue.requestedBy': 'Lo pidió {name}', 'issue.manual': 'Creado a mano',
   'issue.stalled': 'Detenido hace {n} días', 'issue.stalledOne': 'Detenido hace 1 día', 'issue.overdue': 'Vencido', 'issue.today': 'Vence hoy',
-  'issue.comment': 'Comentar', 'issue.commentPh': 'Escribe un avance o una pregunta…', 'issue.history': 'Historial', 'issue.noIssues': 'No hay asuntos abiertos aquí.',
+  'issue.comment': 'Comentar', 'issue.commentPh': 'Escribe una actualización o una pregunta…', 'issue.history': 'Historial', 'issue.noIssues': 'No hay asuntos abiertos aquí.',
   'issue.mine': 'Míos', 'issue.allOpen': 'Abiertos', 'issue.closed': 'Cerrados', 'issue.pageSub': 'Lo que quedó pendiente en tus conversaciones, con responsable y fecha. Cada asunto guarda el mensaje donde nació y solo lo ve quien puede leer esa conversación.',
   'issue.empty': 'No hay asuntos con este filtro.', 'issue.yours': 'Tus asuntos', 'issue.yoursEmpty': 'No tienes asuntos abiertos.', 'issue.in': 'en {name}',
   'issue.ev.created': 'abrió el asunto', 'issue.ev.status': 'cambió el estado a {to}', 'issue.ev.owner': 'cambió el responsable', 'issue.ev.due': 'cambió la fecha a {to}',
@@ -154,7 +154,7 @@ const es = {
   'imp.action': 'Traer desde WhatsApp, Slack o correo', 'imp.title': 'Traer a TieComs', 'imp.body': 'Pega lo que copiaste de WhatsApp, Slack, un correo u otra app. Queda marcado con su origen y su autor original.',
   'imp.source': 'Desde', 'imp.paste': 'Pega aquí el mensaje, el hilo o el correo', 'imp.author': 'Autor original (opcional)', 'imp.detected': 'Detecté {n} mensajes de WhatsApp',
   'imp.asMany': 'Traerlos como {n} mensajes separados', 'imp.asOne': 'Traerlo como un solo mensaje', 'imp.send': 'Traer', 'imp.subject': 'Asunto: {s}',
-  'share.title': 'Compartir en TieComs', 'share.body': 'Elige dónde publicar lo que compartiste.', 'share.empty': 'No llegó texto para compartir.',
+  'share.title': 'Compartir en TieComs', 'share.body': 'Elige dónde publicar lo que compartiste.', 'share.empty': 'No llegó nada para compartir.',
   // Recordatorios
   'rem.title': 'Recordatorios', 'rem.due': 'Ahora', 'rem.upcoming': 'Próximos', 'rem.empty': 'Sin recordatorios pendientes.', 'rem.done': 'Hecho', 'rem.snooze': 'Posponer 1 h',
   'rem.open': 'Abrir', 'rem.custom': 'Recordarme', 'rem.when': 'Cuándo', 'rem.note': 'Nota (opcional)', 'rem.save': 'Guardar recordatorio', 'rem.about': 'Sobre «{name}»',
@@ -233,6 +233,108 @@ const es = {
   'chat.scopeMulti': 'Solo las personas de este chat pueden leerlo. Quien entra después ve desde ese momento.',
   'sys.chat.created': 'Chat creado con {names}.', 'menu.forwardChat': 'Reenviar a otro chat',
   'fwd.sentMany': 'Reenviado a {n} chats', 'fwd.sendMany': 'Reenviar a {n}',
+  // ---------- Ronda de feedback de TestFlight (web, iOS y Android comparten estos textos) ----------
+  'common.saving': 'Guardando…', 'common.saved': 'Guardado', 'common.search': 'Buscar', 'common.all': 'Todos',
+  'common.unsaved': 'Tienes cambios sin guardar', 'common.discardChanges': '¿Descartar los cambios?',
+  // Conversaciones laterales
+  'side.ask': 'Preguntar en un sidechat', 'side.title': 'Sidechat', 'side.kind': 'Sidechat',
+  'side.body': 'Pregunta en privado sobre este mensaje. En este chat no se publica nada y nadie más sabrá que existe.',
+  'side.anchor': 'Sobre este mensaje', 'side.pick': 'Con quién', 'side.search': 'Buscar en este chat o en tu empresa',
+  'side.inChat': 'En este chat', 'side.colleagues': 'Colegas de tu empresa', 'side.selected': '{n} seleccionadas', 'side.selectedOne': '1 seleccionada',
+  'side.why.outsider': 'Es de otra empresa y no está en este chat', 'side.why.blocked': 'Hay un bloqueo activo', 'side.why.history': 'No ve este mensaje',
+  'side.question': '¿Qué quieres preguntar?', 'side.questionPh': 'No tengo ni idea, ¿me ayudas?', 'side.create': 'Enviar',
+  'side.chip': '💬 Sidechat', 'side.chipN': '💬 {n} sidechats', 'side.private': 'Privado: solo lo ven quienes están aquí.',
+  'side.return': 'Llevar la respuesta al hilo', 'side.returnBody': 'Se publica en «{name}» como respuesta a la consulta. Quienes están allí la verán.',
+  'side.returnOnlyOrigin': 'Solo quien participa en la conversación de origen puede llevar la respuesta.', 'side.returned': 'La respuesta ya está en el hilo',
+  'side.close': 'Cerrar sidechat', 'side.openFull': 'Abrir en pantalla completa', 'side.list': 'Sidechats', 'side.fromMessage': 'Sidechat sobre un mensaje de {name}',
+  'side.aiSoon': 'Pronto podrás sumar agentes de IA a los sidechats.',
+  'sys.side.started': 'Sidechat sobre un mensaje de {authorName}: «{excerpt}»',
+  'sys.side.startedIn': 'Sidechat sobre un mensaje de {authorName} en «{parentName}»: «{excerpt}»',
+  'lin.kind.side': 'Sidechat', 'err.side_outsider': 'Solo puedes sumar a participantes de este chat o a colegas de tu empresa.',
+  'err.blocked_user': 'No se puede contactar a esta persona porque hay un bloqueo activo.',
+  // Responder en privado y nuevo chat
+  'preply.action': 'Responder en privado', 'preply.bar': 'Respondiendo en privado a {name}', 'preply.cancel': 'Cancelar respuesta privada',
+  'preply.you': 'Respondiste en privado a: «{excerpt}»', 'preply.other': '{name} te respondió en privado a: «{excerpt}»',
+  'preply.in': 'en «{name}»', 'preply.open': 'Ver original', 'preply.unreachable': 'No puedes escribirle en privado a esta persona.',
+  'chat.newButton': 'Nuevo chat', 'chat.pickPeople': 'Elige una o varias personas', 'chat.selectedN': '{n} seleccionadas', 'people.sendMessage': 'Enviar mensaje',
+  // Foto de grupo y recorte de fotos
+  'group.photo': 'Foto del grupo', 'group.addPhoto': 'Poner foto del grupo', 'group.changePhoto': 'Cambiar foto del grupo', 'group.removePhoto': 'Quitar foto',
+  'group.removeConfirm': '¿Quitar la foto del grupo?', 'group.photoSaved': 'Foto del grupo actualizada', 'group.photoRemoved': 'Foto del grupo quitada',
+  'group.photoOnlyAdmins': 'Solo quien administra el grupo puede cambiar su foto.',
+  'sys.group.photo_changed': 'Cambió la foto del grupo.', 'sys.group.photo_removed': 'Quitó la foto del grupo.',
+  'photo.cropTitle': 'Ajusta tu foto', 'photo.cropGroupTitle': 'Ajusta la foto del grupo', 'photo.cropHint': 'Arrastra para mover y usa el zoom para encuadrar.',
+  'photo.zoom': 'Zoom', 'photo.preview': 'Vista previa', 'photo.save': 'Guardar', 'photo.cancel': 'Cancelar', 'photo.saving': 'Subiendo foto…', 'photo.saved': 'Foto actualizada',
+  'photo.choose': 'Elegir foto', 'photo.fromGallery': 'Elegir de la galería', 'photo.fromCamera': 'Tomar foto', 'photo.fromFiles': 'Elegir archivo',
+  'photo.remove': 'Quitar foto', 'photo.removeConfirm': '¿Quitar tu foto de perfil?', 'photo.removed': 'Foto quitada',
+  'photo.compressed': 'La imagen pesaba más de 3 MB: la comprimimos antes de subirla.', 'photo.invalid': 'Formato no válido. Usa una foto PNG, JPG, WebP o HEIC.',
+  'photo.failed': 'No se pudo subir la foto. Intenta de nuevo.', 'photo.tapToChange': 'Toca tu foto para cambiarla',
+  // Asuntos en la jerarquía
+  'issue.chipOne': '◆ 1 asunto', 'issue.chipMany': '◆ {n} asuntos', 'issue.openBar': 'Asuntos abiertos ({n})', 'issue.all': 'Todos',
+  'issue.noComments': 'Aún no hay comentarios.', 'issue.commented': 'comentó', 'issue.commentSent': 'Comentario publicado',
+  'home.collapse': 'Contraer', 'home.expand': 'Expandir', 'home.path': '{org} · {space}', 'home.unreadIn': '{n} sin leer',
+  // Notificaciones push
+  'push.primerTitle': 'Activa las notificaciones', 'push.primerBody': 'Te avisamos cuando alguien te escriba, cuando venza un recordatorio o te convoquen a una reunión. Puedes silenciar cada conversación cuando quieras.',
+  'push.enable': 'Activar notificaciones', 'push.later': 'Ahora no', 'push.denied': 'Las notificaciones están desactivadas en los ajustes del sistema.', 'push.openSettings': 'Abrir ajustes',
+  'push.unavailable': 'Las notificaciones push no están disponibles en este dispositivo.',
+  'push.reply': 'Responder', 'push.replyPh': 'Escribe una respuesta…', 'push.replySent': 'Respuesta enviada', 'push.replyFailed': 'No se pudo enviar la respuesta',
+  'push.markRead': 'Marcar como leído', 'push.newMessage': 'Mensaje nuevo', 'push.reminder': 'Recordatorio', 'push.newMeeting': 'Nueva reunión',
+  'push.channelMessages': 'Mensajes', 'push.channelMessagesDesc': 'Mensajes nuevos de tus conversaciones',
+  'push.channelReminders': 'Recordatorios', 'push.channelRemindersDesc': 'Recordatorios que pediste', 'push.channelEvents': 'Reuniones', 'push.channelEventsDesc': 'Convocatorias a reuniones',
+  // ---------- SPEC v4: adjuntos, compartir y pestañas de Inicio ----------
+  'att.photo': '📷 Foto', 'att.photos': '📷 {n} fotos', 'att.video': '🎬 Video', 'att.videos': '🎬 {n} videos', 'att.media': '🖼 {n} fotos y videos',
+  'att.file': '📎 {name}', 'att.files': '📎 {n} archivos', 'att.add': 'Adjuntar', 'att.fromPhotos': 'Fotos y videos', 'att.fromCamera': 'Cámara', 'att.fromFiles': 'Archivos',
+  'att.drop': 'Suelta aquí para adjuntar', 'att.uploading': 'Subiendo…', 'att.uploadingN': 'Subiendo {i} de {n}…', 'att.failed': 'No se pudo subir «{name}»',
+  'att.tooBig': '«{name}» pesa más de 25 MB', 'att.max': 'Máximo 10 adjuntos por mensaje', 'att.remove': 'Quitar adjunto', 'att.retry': 'Reintentar',
+  'att.download': 'Descargar', 'att.open': 'Abrir', 'att.more': '+{n}', 'att.viewer': 'Foto', 'att.prev': 'Anterior', 'att.next': 'Siguiente',
+  'att.unavailable': 'Adjunto no disponible', 'att.outOfHistory': 'Este adjunto está fuera de tu historial', 'att.count': '{i} de {n}',
+  'home.tab.all': 'Todo', 'home.tab.unread': 'No leídos', 'home.tab.issues': 'Asuntos', 'home.tab.chats': 'Chats', 'home.tab.sides': 'Sidechats',
+  'home.empty.unread': 'Estás al día 🎉', 'home.empty.issues': 'No hay conversaciones con asuntos abiertos.', 'home.empty.chats': 'Aún no tienes chats.',
+  'common.youShort': 'Tú', 'home.empty.sides': 'Aún no hay sidechats.', 'home.empty.all': 'Aún no tienes conversaciones.', 'home.filters': 'Filtros',
+  'share.header': 'Compartir en TieComs', 'share.addMessage': 'Añadir un mensaje…', 'share.send': 'Enviar', 'share.sendTo': 'Enviar a {n}',
+  'share.max5': 'Puedes enviar a 5 conversaciones como máximo.', 'share.signIn': 'Inicia sesión en TieComs para compartir', 'share.openApp': 'Abrir TieComs',
+  'share.sentOne': 'Compartido', 'share.sentMany': 'Compartido en {n} conversaciones', 'share.progress': 'Enviando {i} de {n}…', 'share.recent': 'Recientes',
+  'share.items': '{n} elementos', 'share.item': '1 elemento', 'share.failed': 'No se pudo compartir', 'share.pick': 'Elige hasta 5 conversaciones',
+  // ---------- SPEC v4 D: Nuevo chat con grupo en un espacio y orden de Inicio ----------
+  'chat.mode.person': 'Persona o chat grupal', 'chat.mode.space': 'Grupo en un espacio', 'chat.pickSpace': 'Elige el espacio',
+  'chat.groupName': 'Nombre del grupo', 'chat.internalOnly': 'Solo mi empresa (interno)', 'chat.internalHint': 'Solo lo verán personas de tu empresa en este espacio.',
+  'chat.directive': 'Nivel directivo', 'chat.createSpaceGroup': 'Crear grupo', 'chat.noSpaces': 'Aún no tienes espacios con otras empresas.',
+  'chat.spaceMembers': 'Participantes del espacio', 'chat.searchSpace': 'Buscar en este espacio',
+  'home.sortHint': 'Primero lo que tiene mensajes sin leer; luego por actividad reciente.',
+  // ---------- SPEC v4 E: asuntos y agenda en directos y chats grupales ----------
+  'cal.soon': 'Empieza en {n} min: {title}', 'cal.soonShort': 'En {n} min', 'cal.chatsSection': 'Chats', 'issue.chatsSection': 'Chats',
+  'cal.inChat': 'En el chat «{name}»', 'cal.channelSoon': 'Avisos de reunión', 'cal.channelSoonDesc': 'Aviso 10 minutos antes de tus reuniones',
+  // ---------- SPEC v4 F: notas de voz ----------
+  'voice.note': 'Nota de voz', 'voice.preview': '🎤 Nota de voz ({d})', 'voice.previewShort': '🎤 Nota de voz', 'voice.hold': 'Mantén pulsado para grabar',
+  'voice.recording': 'Grabando…', 'voice.slideCancel': '‹ Desliza para cancelar', 'voice.slideLock': 'Desliza arriba para bloquear', 'voice.locked': 'Grabación bloqueada',
+  'voice.send': 'Enviar nota de voz', 'voice.discard': 'Descartar', 'voice.play': 'Reproducir', 'voice.pause': 'Pausar', 'voice.speed': 'Velocidad',
+  'ai.voiceTitle': 'IA para esta nota de voz',
+  'ai.voiceDisclosure': 'Si lo autorizas, enviaremos este audio y su idioma a Inworld para transcribirlo. DeepSeek recibirá la transcripción, los nombres del autor y de los participantes y el nombre de la conversación para resumirla y sugerir asuntos.',
+  'ai.voiceChoice': 'Puedes enviar y escuchar la nota sin usar IA. Esta decisión se aplica solo a esta nota.',
+  'ai.sendWithout': 'Enviar sin IA', 'ai.allowSend': 'Permitir IA y enviar',
+  'ai.retryChoice': '¿Permites volver a enviar estos datos a Inworld y DeepSeek para reintentar?',
+  'ai.sideDisclosure': 'Opcional: DeepSeek puede recibir los mensajes del sidechat y sus autores, el mensaje de origen, el nombre del grupo y tu nombre para preparar un resumen. Puedes editar y publicar el texto sin usar IA.',
+  'ai.allowSummary': 'Permitir IA y resumir',
+  'voice.showTranscript': 'Ver transcripción', 'voice.hideTranscript': 'Ocultar transcripción', 'voice.transcribing': 'Transcribiendo…',
+  'voice.failed': 'No se pudo transcribir', 'voice.retry': 'Reintentar', 'voice.copy': 'Copiar transcripción', 'voice.copied': 'Transcripción copiada',
+  'voice.summary': 'Resumen', 'voice.createIssue': 'Crear asunto: {title}', 'voice.micDenied': 'Permite el micrófono para grabar notas de voz.',
+  'voice.micUnavailable': 'Este navegador no puede grabar audio.', 'voice.tooLong': 'Máximo 15 minutos por nota.', 'voice.tooShort': 'La nota es demasiado corta.',
+  'voice.micPermission': 'TieComs usa el micrófono para grabar notas de voz que envías en tus conversaciones.', 'voice.unheard': 'Sin escuchar',
+  'voice.cancelled': 'Nota descartada', 'voice.uploading': 'Enviando nota de voz…',
+  // ---------- SPEC v4 G: Sidechats ----------
+  'side.replies': '{n} mensajes', 'side.replyOne': '1 mensaje', 'side.thread': 'Sidechat · {n}', 'side.returnedChip': '✓ Llevado al hilo',
+  'side.fromSidechat': 'Desde un sidechat', 'side.privateN': 'Privado · solo ustedes {n}', 'side.placeholder': 'Responde a {name} en privado…',
+  'side.placeholderMany': 'Responde en privado…', 'side.quick.check': 'Déjame reviso', 'side.quick.ask': 'No sé, pregúntale a…',
+  'side.quick.later': 'Te respondo en un rato', 'side.emptyChat': 'Pregunta sin que el grupo lo vea', 'side.seeInChat': 'Ver en el chat',
+  'side.publish': 'Publicar en el hilo', 'side.previewInGroup': 'Así se verá en el grupo', 'side.suggested': 'Resumen sugerido',
+  'side.suggestedFallback': 'Últimas respuestas', 'side.suggesting': 'Preparando un resumen…', 'side.addPerson': 'Añadir persona',
+  'side.leave': 'Salir del sidechat', 'side.minimize': 'Minimizar', 'side.pickPeople': 'Con quién', 'side.suggestions': 'Sugerencias',
+  'side.enterSends': 'Enter envía', 'side.defaultName': 'Sidechat · {excerpt}', 'side.returnEdit': 'Puedes editarlo antes de publicarlo.',
+  // ---------- SPEC v4 H: menciones con @ ----------
+  'mention.all': 'todos', 'mention.allHint': 'Avisar a todos en este chat', 'mention.youMentioned': 'Te mencionaron', 'mention.mentionedYou': '{name} te mencionó',
+  'mention.inbox': 'Menciones', 'mention.empty': 'Nadie te ha mencionado todavía.', 'mention.tab': 'Menciones', 'mention.badge': '@',
+  'mention.notInChat': '{name} no está en este chat', 'mention.addToChat': 'Añadir', 'mention.askSide': 'Preguntarle en un sidechat',
+  'mention.dropped': 'No se pudo mencionar a: {names}', 'mention.picker': 'Mencionar a alguien', 'mention.noMatch': 'Nadie coincide en este chat.',
+  'home.tab.mentions': 'Menciones', 'mention.loadMore': 'Ver más', 'mention.inConv': 'en {name}', 'mention.allLabel': '@todos',
 };
 
 type Key = keyof typeof es;
@@ -365,7 +467,7 @@ const en: Record<Key, string> = {
   'imp.action': 'Bring in from WhatsApp, Slack or email', 'imp.title': 'Bring into TieComs', 'imp.body': 'Paste what you copied from WhatsApp, Slack, an email or another app. It keeps its source and original author.',
   'imp.source': 'From', 'imp.paste': 'Paste the message, thread or email here', 'imp.author': 'Original author (optional)', 'imp.detected': 'Detected {n} WhatsApp messages',
   'imp.asMany': 'Bring them as {n} separate messages', 'imp.asOne': 'Bring it as a single message', 'imp.send': 'Bring in', 'imp.subject': 'Subject: {s}',
-  'share.title': 'Share to TieComs', 'share.body': 'Choose where to post what you shared.', 'share.empty': 'No text arrived to share.',
+  'share.title': 'Share to TieComs', 'share.body': 'Choose where to post what you shared.', 'share.empty': 'Nothing arrived to share.',
   'rem.title': 'Reminders', 'rem.due': 'Now', 'rem.upcoming': 'Upcoming', 'rem.empty': 'No pending reminders.', 'rem.done': 'Done', 'rem.snooze': 'Snooze 1 h',
   'rem.open': 'Open', 'rem.custom': 'Remind me', 'rem.when': 'When', 'rem.note': 'Note (optional)', 'rem.save': 'Save reminder', 'rem.about': 'About “{name}”',
   'rem.alert': 'Reminder', 'notif.enable': 'Turn on browser notifications', 'notif.on': 'Notifications are on in this browser', 'notif.blocked': 'The browser blocked notifications',
@@ -437,6 +539,108 @@ const en: Record<Key, string> = {
   'chat.scopeMulti': 'Only the people in this chat can read it. Anyone added later sees from that moment on.',
   'sys.chat.created': 'Chat created with {names}.', 'menu.forwardChat': 'Forward to another chat',
   'fwd.sentMany': 'Forwarded to {n} chats', 'fwd.sendMany': 'Forward to {n}',
+  // ---------- TestFlight feedback round (web, iOS and Android share these strings) ----------
+  'common.saving': 'Saving…', 'common.saved': 'Saved', 'common.search': 'Search', 'common.all': 'All',
+  'common.unsaved': 'You have unsaved changes', 'common.discardChanges': 'Discard changes?',
+  // Side conversations
+  'side.ask': 'Ask in a sidechat', 'side.title': 'Sidechat', 'side.kind': 'Sidechat',
+  'side.body': 'Ask privately about this message. Nothing is posted in this chat and nobody else will know it exists.',
+  'side.anchor': 'About this message', 'side.pick': 'With whom', 'side.search': 'Search this chat or your company',
+  'side.inChat': 'In this chat', 'side.colleagues': 'Colleagues at your company', 'side.selected': '{n} selected', 'side.selectedOne': '1 selected',
+  'side.why.outsider': 'From another company and not in this chat', 'side.why.blocked': 'There is an active block', 'side.why.history': 'Cannot see this message',
+  'side.question': 'What do you want to ask?', 'side.questionPh': 'I have no idea, can you help?', 'side.create': 'Send',
+  'side.chip': '💬 Sidechat', 'side.chipN': '💬 {n} sidechats', 'side.private': 'Private: only the people here can see it.',
+  'side.return': 'Bring the answer back to the thread', 'side.returnBody': 'It is posted in “{name}” as the answer. Everyone there will see it.',
+  'side.returnOnlyOrigin': 'Only someone in the original conversation can bring the answer back.', 'side.returned': 'The answer is already in the thread',
+  'side.close': 'Close sidechat', 'side.openFull': 'Open full screen', 'side.list': 'Sidechats', 'side.fromMessage': 'Sidechat about a message from {name}',
+  'side.aiSoon': 'Soon you will be able to add AI agents to sidechats.',
+  'sys.side.started': 'Sidechat about a message from {authorName}: “{excerpt}”',
+  'sys.side.startedIn': 'Sidechat about a message from {authorName} in “{parentName}”: “{excerpt}”',
+  'lin.kind.side': 'Side', 'err.side_outsider': 'You can only add people in this chat or colleagues from your company.',
+  'err.blocked_user': 'You cannot contact this person because there is an active block.',
+  // Private reply and new chat
+  'preply.action': 'Reply privately', 'preply.bar': 'Replying privately to {name}', 'preply.cancel': 'Cancel private reply',
+  'preply.you': 'You replied privately to: “{excerpt}”', 'preply.other': '{name} replied privately to: “{excerpt}”',
+  'preply.in': 'in “{name}”', 'preply.open': 'View original', 'preply.unreachable': 'You cannot message this person privately.',
+  'chat.newButton': 'New chat', 'chat.pickPeople': 'Pick one or more people', 'chat.selectedN': '{n} selected', 'people.sendMessage': 'Send message',
+  // Group photo and photo cropping
+  'group.photo': 'Group photo', 'group.addPhoto': 'Add group photo', 'group.changePhoto': 'Change group photo', 'group.removePhoto': 'Remove photo',
+  'group.removeConfirm': 'Remove the group photo?', 'group.photoSaved': 'Group photo updated', 'group.photoRemoved': 'Group photo removed',
+  'group.photoOnlyAdmins': 'Only the group admins can change its photo.',
+  'sys.group.photo_changed': 'Changed the group photo.', 'sys.group.photo_removed': 'Removed the group photo.',
+  'photo.cropTitle': 'Adjust your photo', 'photo.cropGroupTitle': 'Adjust the group photo', 'photo.cropHint': 'Drag to move and use zoom to frame it.',
+  'photo.zoom': 'Zoom', 'photo.preview': 'Preview', 'photo.save': 'Save', 'photo.cancel': 'Cancel', 'photo.saving': 'Uploading photo…', 'photo.saved': 'Photo updated',
+  'photo.choose': 'Choose photo', 'photo.fromGallery': 'Choose from library', 'photo.fromCamera': 'Take photo', 'photo.fromFiles': 'Choose file',
+  'photo.remove': 'Remove photo', 'photo.removeConfirm': 'Remove your profile photo?', 'photo.removed': 'Photo removed',
+  'photo.compressed': 'The image was over 3 MB, so we compressed it before uploading.', 'photo.invalid': 'Unsupported format. Use a PNG, JPG, WebP or HEIC photo.',
+  'photo.failed': 'The photo could not be uploaded. Try again.', 'photo.tapToChange': 'Tap your photo to change it',
+  // Issues in the hierarchy
+  'issue.chipOne': '◆ 1 issue', 'issue.chipMany': '◆ {n} issues', 'issue.openBar': 'Open issues ({n})', 'issue.all': 'All',
+  'issue.noComments': 'No comments yet.', 'issue.commented': 'commented', 'issue.commentSent': 'Comment posted',
+  'home.collapse': 'Collapse', 'home.expand': 'Expand', 'home.path': '{org} · {space}', 'home.unreadIn': '{n} unread',
+  // Push notifications
+  'push.primerTitle': 'Turn on notifications', 'push.primerBody': 'We let you know when someone writes to you, when a reminder is due or when you are invited to a meeting. You can mute any conversation whenever you want.',
+  'push.enable': 'Turn on notifications', 'push.later': 'Not now', 'push.denied': 'Notifications are turned off in system settings.', 'push.openSettings': 'Open settings',
+  'push.unavailable': 'Push notifications are not available on this device.',
+  'push.reply': 'Reply', 'push.replyPh': 'Write a reply…', 'push.replySent': 'Reply sent', 'push.replyFailed': 'The reply could not be sent',
+  'push.markRead': 'Mark as read', 'push.newMessage': 'New message', 'push.reminder': 'Reminder', 'push.newMeeting': 'New meeting',
+  'push.channelMessages': 'Messages', 'push.channelMessagesDesc': 'New messages in your conversations',
+  'push.channelReminders': 'Reminders', 'push.channelRemindersDesc': 'Reminders you asked for', 'push.channelEvents': 'Meetings', 'push.channelEventsDesc': 'Meeting invitations',
+  // ---------- SPEC v4: attachments, sharing and Home tabs ----------
+  'att.photo': '📷 Photo', 'att.photos': '📷 {n} photos', 'att.video': '🎬 Video', 'att.videos': '🎬 {n} videos', 'att.media': '🖼 {n} photos and videos',
+  'att.file': '📎 {name}', 'att.files': '📎 {n} files', 'att.add': 'Attach', 'att.fromPhotos': 'Photos and videos', 'att.fromCamera': 'Camera', 'att.fromFiles': 'Files',
+  'att.drop': 'Drop here to attach', 'att.uploading': 'Uploading…', 'att.uploadingN': 'Uploading {i} of {n}…', 'att.failed': 'Could not upload “{name}”',
+  'att.tooBig': '“{name}” is larger than 25 MB', 'att.max': 'Up to 10 attachments per message', 'att.remove': 'Remove attachment', 'att.retry': 'Retry',
+  'att.download': 'Download', 'att.open': 'Open', 'att.more': '+{n}', 'att.viewer': 'Photo', 'att.prev': 'Previous', 'att.next': 'Next',
+  'att.unavailable': 'Attachment not available', 'att.outOfHistory': 'This attachment is outside your history', 'att.count': '{i} of {n}',
+  'home.tab.all': 'All', 'home.tab.unread': 'Unread', 'home.tab.issues': 'Issues', 'home.tab.chats': 'Chats', 'home.tab.sides': 'Sidechats',
+  'home.empty.unread': 'You are all caught up 🎉', 'home.empty.issues': 'No conversations with open issues.', 'home.empty.chats': 'You have no chats yet.',
+  'common.youShort': 'You', 'home.empty.sides': 'No sidechats yet.', 'home.empty.all': 'You have no conversations yet.', 'home.filters': 'Filters',
+  'share.header': 'Share to TieComs', 'share.addMessage': 'Add a message…', 'share.send': 'Send', 'share.sendTo': 'Send to {n}',
+  'share.max5': 'You can send to up to 5 conversations.', 'share.signIn': 'Sign in to TieComs to share', 'share.openApp': 'Open TieComs',
+  'share.sentOne': 'Shared', 'share.sentMany': 'Shared to {n} conversations', 'share.progress': 'Sending {i} of {n}…', 'share.recent': 'Recent',
+  'share.items': '{n} items', 'share.item': '1 item', 'share.failed': 'Could not share', 'share.pick': 'Pick up to 5 conversations',
+  // ---------- SPEC v4 D: New chat with a group in a space, and Home order ----------
+  'chat.mode.person': 'Person or group chat', 'chat.mode.space': 'Group in a space', 'chat.pickSpace': 'Choose the space',
+  'chat.groupName': 'Group name', 'chat.internalOnly': 'Only my company (internal)', 'chat.internalHint': 'Only people from your company in this space will see it.',
+  'chat.directive': 'Directive level', 'chat.createSpaceGroup': 'Create group', 'chat.noSpaces': "You don't have spaces with other companies yet.",
+  'chat.spaceMembers': 'Space participants', 'chat.searchSpace': 'Search this space',
+  'home.sortHint': 'Unread first, then by recent activity.',
+  // ---------- SPEC v4 E: issues and calendar in direct and group chats ----------
+  'cal.soon': 'Starts in {n} min: {title}', 'cal.soonShort': 'In {n} min', 'cal.chatsSection': 'Chats', 'issue.chatsSection': 'Chats',
+  'cal.inChat': 'In the chat “{name}”', 'cal.channelSoon': 'Meeting alerts', 'cal.channelSoonDesc': 'Alert 10 minutes before your meetings',
+  // ---------- SPEC v4 F: voice notes ----------
+  'voice.note': 'Voice note', 'voice.preview': '🎤 Voice note ({d})', 'voice.previewShort': '🎤 Voice note', 'voice.hold': 'Hold to record',
+  'voice.recording': 'Recording…', 'voice.slideCancel': '‹ Slide to cancel', 'voice.slideLock': 'Slide up to lock', 'voice.locked': 'Recording locked',
+  'voice.send': 'Send voice note', 'voice.discard': 'Discard', 'voice.play': 'Play', 'voice.pause': 'Pause', 'voice.speed': 'Speed',
+  'ai.voiceTitle': 'AI for this voice note',
+  'ai.voiceDisclosure': 'If you allow it, we will send this audio and its language to Inworld for transcription. DeepSeek will receive the transcript, the names of the author and participants, and the conversation name to summarize it and suggest issues.',
+  'ai.voiceChoice': 'You can send and play the note without AI. This choice applies only to this note.',
+  'ai.sendWithout': 'Send without AI', 'ai.allowSend': 'Allow AI and send',
+  'ai.retryChoice': 'Allow sending this data to Inworld and DeepSeek again to retry?',
+  'ai.sideDisclosure': 'Optional: DeepSeek can receive the sidechat messages and their authors, the original message, the group name and your name to prepare a summary. You can edit and post the text without AI.',
+  'ai.allowSummary': 'Allow AI and summarize',
+  'voice.showTranscript': 'Show transcript', 'voice.hideTranscript': 'Hide transcript', 'voice.transcribing': 'Transcribing…',
+  'voice.failed': 'Could not transcribe', 'voice.retry': 'Retry', 'voice.copy': 'Copy transcript', 'voice.copied': 'Transcript copied',
+  'voice.summary': 'Summary', 'voice.createIssue': 'Create issue: {title}', 'voice.micDenied': 'Allow the microphone to record voice notes.',
+  'voice.micUnavailable': 'This browser cannot record audio.', 'voice.tooLong': 'Up to 15 minutes per note.', 'voice.tooShort': 'The note is too short.',
+  'voice.micPermission': 'TieComs uses the microphone to record the voice notes you send in your conversations.', 'voice.unheard': 'Not played',
+  'voice.cancelled': 'Note discarded', 'voice.uploading': 'Sending voice note…',
+  // ---------- SPEC v4 G: Sidechats ----------
+  'side.replies': '{n} messages', 'side.replyOne': '1 message', 'side.thread': 'Sidechat · {n}', 'side.returnedChip': '✓ Brought to the thread',
+  'side.fromSidechat': 'From a sidechat', 'side.privateN': 'Private · just you {n}', 'side.placeholder': 'Reply to {name} privately…',
+  'side.placeholderMany': 'Reply privately…', 'side.quick.check': 'Let me check', 'side.quick.ask': "I don't know, ask…",
+  'side.quick.later': "I'll get back to you soon", 'side.emptyChat': 'Ask without the group seeing it', 'side.seeInChat': 'View in chat',
+  'side.publish': 'Post in the thread', 'side.previewInGroup': 'How it will look in the group', 'side.suggested': 'Suggested summary',
+  'side.suggestedFallback': 'Latest replies', 'side.suggesting': 'Preparing a summary…', 'side.addPerson': 'Add person',
+  'side.leave': 'Leave sidechat', 'side.minimize': 'Minimize', 'side.pickPeople': 'With whom', 'side.suggestions': 'Suggestions',
+  'side.enterSends': 'Enter sends', 'side.defaultName': 'Sidechat · {excerpt}', 'side.returnEdit': 'You can edit it before posting.',
+  // ---------- SPEC v4 H: @mentions ----------
+  'mention.all': 'all', 'mention.allHint': 'Notify everyone in this chat', 'mention.youMentioned': 'You were mentioned', 'mention.mentionedYou': '{name} mentioned you',
+  'mention.inbox': 'Mentions', 'mention.empty': 'Nobody has mentioned you yet.', 'mention.tab': 'Mentions', 'mention.badge': '@',
+  'mention.notInChat': '{name} is not in this chat', 'mention.addToChat': 'Add', 'mention.askSide': 'Ask them in a sidechat',
+  'mention.dropped': 'Could not mention: {names}', 'mention.picker': 'Mention someone', 'mention.noMatch': 'Nobody in this chat matches.',
+  'home.tab.mentions': 'Mentions', 'mention.loadMore': 'Load more', 'mention.inConv': 'in {name}', 'mention.allLabel': '@all',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };
@@ -501,8 +705,21 @@ export function systemText(body: string): string {
   if (!body.startsWith('{')) return body;
   try {
     const p = JSON.parse(body);
-    const key = (p.k === 'members.added' && p.history === 'all' ? 'sys.members.added.all' : `sys.${p.k}`) as Key;
+    const key = (p.k === 'members.added' && p.history === 'all' ? 'sys.members.added.all' : p.k === 'side.started' && p.parentName ? 'sys.side.startedIn' : `sys.${p.k}`) as Key;
     if (p.startsAt) p.when = new Date(p.startsAt).toLocaleString(locale(), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
     return key in es ? t(key, p) : body;
   } catch { return body; }
+}
+
+/** «📷 3 fotos», «🎬 Video», «📎 contrato.pdf» a partir del resumen del API. */
+export function voiceDuration(ms: number | null | undefined) {
+  const total = Math.round((ms ?? 0) / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+export function attachmentSummaryText(a: { count: number; images: number; videos: number; files: number; firstName: string | null; voices?: number; voiceDurationMs?: number | null }): string {
+  if (a.voices && a.voices === a.count) return a.voiceDurationMs ? t('voice.preview', { d: voiceDuration(a.voiceDurationMs) }) : t('voice.previewShort');
+  if (a.images === a.count) return a.count === 1 ? t('att.photo') : t('att.photos', { n: a.count });
+  if (a.videos === a.count) return a.count === 1 ? t('att.video') : t('att.videos', { n: a.count });
+  if (a.images + a.videos === a.count) return t('att.media', { n: a.count });
+  return a.count === 1 ? t('att.file', { name: a.firstName ?? '' }) : t('att.files', { n: a.count });
 }

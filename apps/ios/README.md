@@ -10,7 +10,7 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Bundle ID | `com.tiecoms.app` (app) · `com.tiecoms.app.share` (Compartir) · `com.tiecoms.app.notifications` (Notification Service Extension) |
 | Team | `B76US7H3L3` (CERTILABOR SAS), firma automática |
 | App Group | `group.com.tiecoms.app`: Keychain compartido y lista de conversaciones para la extensión |
-| Versión | 1.4.0 (build 6), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
+| Versión | 1.5.0 (build 7), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.tiecoms.com` por defecto; `-TCApiURL <url>` al lanzar (pruebas) |
 

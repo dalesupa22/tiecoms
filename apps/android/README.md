@@ -4,10 +4,10 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 
 | | |
 |---|---|
-| applicationId | `com.chaggu.app` (app nueva en Play desde 1.6.0 / 11; la anterior era `com.tiecoms.app`). El `namespace` y los paquetes Kotlin siguen siendo `com.tiecoms.app`. |
+| applicationId | `com.chaggu.app` (app nueva en Play desde 1.6.0 / 13; la anterior era `com.tiecoms.app`). El `namespace` y los paquetes Kotlin siguen siendo `com.tiecoms.app`. |
 | minSdk / target / compile | 26 / 36 / 36 |
-| Versión | `versionName 1.6.0`, `versionCode 11`. Sube el `versionCode` en cada envío a Play. |
-| Contrato | `2026-09-25`. Se envía en `x-tiecoms-contract` y en `device.contract`. |
+| Versión | `versionName 1.6.0`, `versionCode 13`. Sube el `versionCode` en cada envío a Play. |
+| Contrato | `2026-09-23` (valor actual de `BuildConfig.CONTRACT_VERSION`). Se envía en `x-tiecoms-contract` y en `device.contract`. |
 | API por defecto | `https://app.chaggu.com` (web pública: `https://www.chaggu.com`) |
 | Marca | **Chaggu** desde 1.6.0 (antes TieComs). Cambia solo lo visible: nombre, textos, dominios, ícono, splash y colores (tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`). Se publica como app nueva: `applicationId` `com.chaggu.app` y esquema propio `chaggu://` (el SSO pide `redirect_scheme=chaggu`), para convivir con la app TieComs instalada. Lo demás interno se mantiene: `namespace`/paquetes Kotlin `com.tiecoms.app`, clave de subida `tiecoms-upload`, proyecto Firebase `tiecoms`, headers `x-tiecoms-*`, claves de SharedPreferences, IDs de canales y nombres de sonidos. |
 | Toolchain | Gradle 8.14.3 (wrapper), AGP 8.13.2, Kotlin 2.3.21 y JDK 17 |
@@ -313,7 +313,7 @@ El release lleva R8 y reducción de recursos. Las reglas de serialización está
 
 ## Pendientes y puntos de extensión
 
-- **Push remoto (FCM):** el cliente está completo, pero falta `google-services.json`; ver «Notificaciones push». La prueba con un FCM real queda pendiente hasta tenerlo.
+- **Push remoto (FCM):** `com.chaggu.app` está registrado en el proyecto `tiecoms`; el AAB 1.6.0 (13) incluye los recursos del cliente de Firebase correcto y conserva la entrega síncrona y los reintentos de registro. `google-services.json` sigue fuera de git. La prueba de entrega remota real del paquete nuevo debe verificarse en un dispositivo con Chaggu instalado; la evidencia anterior de `com.tiecoms.app` no sustituye esa comprobación.
 - **Backend de publicación:** eliminación de cuenta, reportes y bloqueo están integrados en `main` (`e679a10`) y verificados en producción el 24 de septiembre de 2026. El bloqueo de mensajes directos se aplica en el servidor, no solo en la interfaz.
 - **SSO en vivo:** 3041 no tiene credenciales de Google/Microsoft y `/start` responde 503 `sso_unavailable` (controlado). El canje está probado con MockWebServer. Falta la prueba real en producción.
 - **WhatsApp:** en pruebas no hay WhatsApp real. Los estados y la interfaz se probaron con el API (lista vacía) y con MockWebServer (cuentas, QR, chats, vínculo). Falta una prueba con una cuenta real.

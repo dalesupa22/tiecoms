@@ -11,7 +11,10 @@ import { cleanupExpired as cleanupSso } from './modules/sso.ts';
 import { previewMessage } from './modules/link-preview.ts';
 import { deletePersonalObject } from './storage.ts';
 import { notifyReport } from './modules/safety.ts';
-import { pushEvent, pushEventSoon, pushMessage, pushReminder } from './modules/push.ts';
+import { pushEvent, pushEventSoon, pushMessage, pushReaction, pushReminder } from './modules/push.ts';
+import { digestFor, markDigestSent } from './modules/links.ts';
+import { linkDigestMail, trySendMail } from './mail.ts';
+import { config } from './config.ts';
 import { fireSoonEvents, soonMinutes } from './modules/calendar.ts';
 import { cleanupPending as cleanupAttachments } from './modules/attachments.ts';
 import { transcribeAttachment } from './modules/voice.ts';
@@ -34,8 +37,27 @@ const handlers: Record<string, Handler> = {
   /** Nota de voz: variante AAC, transcripción y resumen (Inworld / DeepSeek). */
   async 'voice.transcribe'(p) { await transcribeAttachment(p.attachmentId); },
   async 'push.event_soon'(p) { await pushEventSoon(p.eventId, p.userIds, soonMinutes()); },
-  /** Vista previa del primer enlace de un mensaje. */
+  /** Vistas previas de los primeros 3 enlaces de un mensaje. */
   async 'link.preview'(p) { await previewMessage(p.messageId); },
+  /** Aviso agrupado al autor: reaccionaron a su mensaje. */
+  async 'push.reaction'(p) { await pushReaction(p.messageId); },
+  /** Resumen semanal de enlaces por correo (solo quien lo activó; como mucho uno cada 6 días). */
+  async 'links.digest'() {
+    const { rows } = await pool.query(
+      `SELECT u.id, u.name, u.email, COALESCE((SELECT ps.lang FROM sessions s JOIN push_subscriptions ps ON ps.session_id = s.id
+          WHERE s.user_id = u.id ORDER BY ps.updated_at DESC LIMIT 1), 'es') AS lang
+         FROM users u WHERE u.link_digest AND u.disabled_at IS NULL AND u.email IS NOT NULL
+          AND (u.link_digest_sent_at IS NULL OR u.link_digest_sent_at < now() - interval '6 days')`,
+    );
+    let sent = 0;
+    for (const u of rows) {
+      const d = await digestFor(u.id);
+      if (!d.total && !d.pendingCount) continue;
+      const r = await trySendMail(linkDigestMail({ lang: u.lang === 'en' ? 'en' : 'es', to: u.email, name: u.name, appUrl: config.publicOrigin, ...d }));
+      if (r.status !== 'failed') { await markDigestSent(u.id); if (r.status === 'sent') sent++; }
+    }
+    if (sent) console.log(`[worker] resúmenes de enlaces enviados: ${sent}`);
+  },
   /** Terceros vencidos: se revoca el acceso y se sacan sus sockets de las salas. */
   async 'housekeeping.expire_guests'() {
     await tx(async (c) => {
@@ -78,6 +100,11 @@ async function schedule() {
      ON CONFLICT (dedupe_key) DO NOTHING`,
     [`expire:${minute}`, `cleanup:${Math.floor(minute / 60)}`],
   );
+  // Resumen de enlaces: los lunes desde las 13:00 UTC (8:00 en Colombia), una vez por semana.
+  const now = new Date();
+  if (now.getUTCDay() === 1 && now.getUTCHours() >= 13) {
+    await pool.query("INSERT INTO jobs (kind, dedupe_key) VALUES ('links.digest', $1) ON CONFLICT (dedupe_key) DO NOTHING", [`digest:${now.toISOString().slice(0, 10)}`]);
+  }
 }
 
 async function claim() {

@@ -7,8 +7,8 @@ import { EventRow, newEvent } from './Calendar.tsx';
 import { IssueRow, isClosed } from './Issues.tsx';
 
 /**
- * Barra de accesos del chat (mismas reglas en web, iOS y Android: docs/GRUPOS.md): Fijados, Asuntos, Hilos y
- * Agenda, siempre en el mismo lugar y con su cuenta. Cada uno abre su lista sin mover el chat.
+ * Barra de accesos del chat (mismas reglas en web, iOS y Android: docs/GRUPOS.md): Fijados, Asuntos, Hilos,
+ * Agenda y Enlaces (docs/REACCIONES_ENLACES.md), siempre en el mismo lugar y con su cuenta. Cada uno abre su lista sin mover el chat.
  */
 export type ChatBarPane = 'issues' | 'threads' | 'agenda';
 
@@ -40,9 +40,9 @@ function useAgenda(conv: ConversationDTO, issues: IssueDTO[]) {
   return items.sort((a, b) => a.at.localeCompare(b.at));
 }
 
-export function ChatBar({ conv, pinnedCount, canOpenIssues, onPins, onOpenIssue, onNewIssue, onOpenThread }: {
+export function ChatBar({ conv, pinnedCount, canOpenIssues, onPins, onLinks, onOpenIssue, onNewIssue, onOpenThread }: {
   conv: ConversationDTO; pinnedCount: number; canOpenIssues: boolean;
-  onPins: () => void; onOpenIssue: (id: string) => void; onNewIssue: () => void; onOpenThread: (id: string) => void;
+  onPins: () => void; onLinks: () => void; onOpenIssue: (id: string) => void; onNewIssue: () => void; onOpenThread: (id: string) => void;
 }) {
   const d = useClient((s) => s.data)!;
   const allIssues = useClient((s) => s.issues);
@@ -71,6 +71,7 @@ export function ChatBar({ conv, pinnedCount, canOpenIssues, onPins, onOpenIssue,
         {btn('issues', '◆', t('bar.issues'), issues.length, () => setPane('issues'), overdue)}
         {btn('threads', '💬', t('bar.threads'), openThreads.length, () => setPane('threads'), threadUnread > 0)}
         {btn('agenda', '📅', t('bar.agenda'), agenda.length, () => setPane('agenda'), soon)}
+        {btn('links', '🔗', t('bar.links'), conv.linkCount ?? 0, onLinks)}
       </div>
       {pane === 'issues' && (
         <Modal title={t('bar.issuesTitle')} onClose={() => setPane(null)}>

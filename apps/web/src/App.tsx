@@ -17,6 +17,8 @@ import { FilesScreen } from './screens/Files.tsx';
 import { DmsScreen, GroupsScreen, OversightScreen, ReadOnlyConversationScreen } from './screens/Groups.tsx';
 import { DialogHost } from './actions.tsx';
 import { MenuHost, ToastHost } from './menu.tsx';
+import { EmojiPickerHost } from './screens/Reactions.tsx';
+import { SavedLinksScreen } from './screens/Links.tsx';
 
 function nextParam() {
   const n = new URLSearchParams(location.search).get('next');
@@ -56,6 +58,7 @@ export function App() {
       {route.name === 'share' && <ShareScreen />}
       {route.name === 'whatsapp' && <WhatsAppScreen />}
       {route.name === 'files' && <FilesScreen />}
+      {route.name === 'saved' && <SavedLinksScreen />}
       {route.name === 'groups' && <GroupsScreen />}
       {route.name === 'dms' && <DmsScreen />}
       {route.name === 'oversight' && <OversightScreen key={route.id} orgId={route.id} />}
@@ -67,6 +70,7 @@ export function App() {
     <MenuHost />
     <DialogHost />
     <ToastHost />
+    <EmojiPickerHost />
     </>
   );
 }

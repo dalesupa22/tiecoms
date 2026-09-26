@@ -5,6 +5,7 @@ import { errorText, locale, t } from './i18n.ts';
 import { copyText, toast, type MenuItem } from './menu.tsx';
 import { BASE, navigate } from './router.ts';
 import { Modal, conversationTitle, personById } from './ui.tsx';
+import { previewModeMenu } from './screens/Links.tsx';
 
 // ---------- Diálogos globales (se pueden abrir desde cualquier menú) ----------
 let dialog: ((close: () => void) => ReactNode) | null = null;
@@ -160,6 +161,7 @@ export function conversationMenu(conv: ConversationDTO, extra: { onNewMeeting?: 
       ? { label: t('menu.markRead'), icon: '✓', onSelect: () => void client.markConversationRead(conv.id).catch((e) => toast(errorText(e))) }
       : { label: t('menu.markUnreadConv'), icon: '●', disabled: conv.lastMessageSeq <= conv.historyFromSeq, onSelect: () => void client.markUnread(conv.id, conv.lastMessageSeq).then(() => toast(t('toast.markedUnread'))).catch((e) => toast(errorText(e))) },
     muteMenu(conv),
+    previewModeMenu(conv),
     remindMenu(conv),
     ...(extra.onNewMeeting && conv.canPost ? [{ label: t('menu.meeting'), icon: '📅', onSelect: extra.onNewMeeting }] : []),
     { divider: true },

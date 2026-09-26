@@ -19,6 +19,7 @@ const NAV = [
   { name: 'trazo', label: 'nav.trazo', ico: '⑂', to: '/trazo' },
   { name: 'people', label: 'nav.people', ico: '◎', to: '/participantes' },
   { name: 'files', label: 'nav.files', ico: '▣', to: '/archivos' },
+  { name: 'saved', label: 'nav.saved', ico: '🔖', to: '/ver-despues' },
   { name: 'whatsapp', label: 'nav.whatsapp', ico: '✆', to: '/whatsapp' },
 ] as const;
 

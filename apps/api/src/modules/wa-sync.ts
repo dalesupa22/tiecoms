@@ -10,6 +10,7 @@ import {
 import { config } from '../config.ts';
 import { enqueueOutbox, pool, tx } from '../db.ts';
 import { sendMessage } from './messages.ts';
+import { externalReaction } from './reactions.ts';
 import { suggestCategory } from './wa-organize.ts';
 
 // ---------- Cifrado de credenciales ----------
@@ -284,7 +285,7 @@ export async function bridgeToTieComs(s: Session, rows: MsgRow[]) {
     const l = byJid.get(m.chat);
     if (!l || m.sentAt < new Date(l.linked_since)) continue;
     const author = m.fromMe ? (me[0]?.push_name ?? 'Yo') : (m.authorName ?? m.authorJid?.split('@')[0] ?? null);
-    const clientMessageId = `wa-${createHash('sha256').update(`${s.id}|${m.chat}|${m.id}`).digest('hex').slice(0, 40)}`;
+    const clientMessageId = bridgedClientId(s.id, m.chat, m.id);
     try {
       await sendMessage(s.userId, l.linked_conversation_id, {
         clientMessageId, body: m.body,
@@ -312,4 +313,35 @@ export async function organizeAccount(s: Session) {
     const cat = suggestCategory(r.name, { isGroup: r.is_group, accountKind: s.kind });
     if (cat !== r.category) await pool.query('UPDATE wa_chats SET category = $3 WHERE account_id = $1 AND jid = $2', [s.id, r.jid, cat]);
   }
+}
+
+/** id de TieComs del mensaje reenviado desde WhatsApp (mismo clientMessageId que bridgeToTieComs). */
+const bridgedClientId = (accountId: string, chat: string, id: string) => `wa-${createHash('sha256').update(`${accountId}|${chat}|${id}`).digest('hex').slice(0, 40)}`;
+
+/**
+ * Reacción de WhatsApp (reactionMessage): se guarda en el mensaje de WhatsApp y, si el chat está vinculado,
+ * en el mensaje reenviado a TieComs como reacción externa («Laura · WhatsApp»). Texto vacío = la quitó.
+ */
+export async function storeReaction(s: Session, m: WAMessage) {
+  const r = m.message?.reactionMessage;
+  const target = r?.key;
+  const rawChat = target?.remoteJid ?? m.key.remoteJid;
+  const chat = rawChat ? jidNormalizedUser(rawChat) || rawChat : null;
+  if (!r || !target?.id || !chat || skipJid(chat)) return;
+  const reactorRaw = m.key.fromMe ? s.me : (isJidGroup(chat) ? (m.key.participant ?? (m.key as any).participantAlt ?? null) : chat);
+  if (!reactorRaw) return;
+  const reactor = jidNormalizedUser(reactorRaw) || reactorRaw;
+  const emoji = (r.text ?? '').trim() || null;
+  let name = m.key.fromMe ? null : m.pushName ?? null;
+  if (m.key.fromMe) name = (await pool.query('SELECT push_name FROM wa_accounts WHERE id = $1', [s.id])).rows[0]?.push_name ?? 'Yo';
+  if (!name) name = (await pool.query('SELECT name FROM wa_contacts WHERE account_id = $1 AND jid = $2', [s.id, reactor])).rows[0]?.name ?? reactor.split('@')[0]!;
+  const up = await pool.query(
+    `UPDATE wa_messages SET reactions = NULLIF(CASE WHEN $4::text IS NULL THEN COALESCE(reactions, '{}'::jsonb) - $5
+                                               ELSE COALESCE(reactions, '{}'::jsonb) || jsonb_build_object($5, jsonb_build_object('emoji', $4::text, 'name', $6::text)) END, '{}'::jsonb)
+      WHERE account_id = $1 AND chat_jid = $2 AND id = $3`,
+    [s.id, chat, target.id, emoji, reactor, name],
+  );
+  if (up.rowCount) notifyOwner(s);
+  const tc = await pool.query('SELECT id FROM messages WHERE author_id = $1 AND client_message_id = $2', [s.userId, bridgedClientId(s.id, chat, target.id)]);
+  if (tc.rows[0]) await externalReaction(tc.rows[0].id, `wa:${reactor}`, emoji, name!);
 }

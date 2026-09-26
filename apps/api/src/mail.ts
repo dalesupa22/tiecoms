@@ -115,3 +115,34 @@ export function invitationMail(p: {
     tags: [p.kind === 'org' ? 'org-invitation' : 'workspace-invitation'],
   };
 }
+
+/** Resumen semanal de enlaces (opt-in en el perfil): lo que compartieron otros y mi «Ver después» pendiente. */
+export function linkDigestMail(p: {
+  lang: MailLang; to: string; name: string; appUrl: string;
+  total: number; byConversation: { conversationId: string; name: string; count: number }[];
+  pending: { title: string; url: string; conversationName: string }[]; pendingCount: number;
+}): Mail {
+  const en = p.lang === 'en';
+  const first = esc(p.name.split(' ')[0] ?? p.name);
+  const subject = en
+    ? `${p.total} ${p.total === 1 ? 'link' : 'links'} shared this week${p.pendingCount ? ` · ${p.pendingCount} saved to watch` : ''}`
+    : `${p.total} ${p.total === 1 ? 'enlace compartido' : 'enlaces compartidos'} esta semana${p.pendingCount ? ` · ${p.pendingCount} por ver` : ''}`;
+  const title = en ? `Your links of the week, ${first}` : `Tus enlaces de la semana, ${first}`;
+  const convs = p.byConversation.map((c) => `• <b>${esc(c.name)}</b>: ${c.count}`).join('<br>');
+  const pend = p.pending.map((l) => `• <a href="${esc(l.url)}" style="color:#111827">${esc(l.title.slice(0, 120))}</a> <span style="color:#6b7280">(${esc(l.conversationName)})</span>`).join('<br>');
+  const paragraphs = [
+    p.total ? (en ? `Your teams shared <b>${p.total}</b> links in the last 7 days:` : `Tus equipos compartieron <b>${p.total}</b> enlaces en los últimos 7 días:`) + `<br>${convs}` : '',
+    p.pendingCount ? (en ? `You have <b>${p.pendingCount}</b> saved to watch later:` : `Tienes <b>${p.pendingCount}</b> ${p.pendingCount === 1 ? 'guardado' : 'guardados'} para ver después:`) + `<br>${pend}` : '',
+  ].filter(Boolean);
+  const url = `${p.appUrl.replace(/\/$/, '')}/ver-despues`;
+  const label = en ? 'Open Watch later' : 'Abrir «Ver después»';
+  const footer = en ? 'You get this email because you turned on the weekly link digest in your TieComs profile. Turn it off there anytime.'
+    : 'Te llega porque activaste el resumen semanal de enlaces en tu perfil de TieComs. Lo apagas ahí cuando quieras.';
+  const text = [
+    title, '',
+    ...(p.total ? [en ? `${p.total} links shared:` : `${p.total} ${p.total === 1 ? 'enlace compartido' : 'enlaces compartidos'}:`, ...p.byConversation.map((c) => `- ${c.name}: ${c.count}`), ''] : []),
+    ...(p.pendingCount ? [en ? `${p.pendingCount} saved to watch later:` : `${p.pendingCount} ${p.pendingCount === 1 ? 'guardado' : 'guardados'} para ver después:`, ...p.pending.map((l) => `- ${l.title} ${l.url}`), ''] : []),
+    `${label}: ${url}`,
+  ].join('\n');
+  return { to: [{ email: p.to, name: p.name }], subject, text, html: layout(p.lang, title, paragraphs, { label, url }, footer), tags: ['link-digest'] };
+}

@@ -37,8 +37,9 @@ async function announce(c: import('../db.ts').Tx, userId: string) {
   await enqueueOutbox(c, 'account.event', { userIds: ids, event: { type: 'scope.changed', reason: 'profile.updated' } });
 }
 
-export async function updateProfile(userId: string, input: { name?: string; title?: string | null; area?: string | null }) {
+export async function updateProfile(userId: string, input: { name?: string; title?: string | null; area?: string | null; linkDigest?: boolean }) {
   await tx(async (c) => {
+    if (input.linkDigest !== undefined) await c.query('UPDATE users SET link_digest = $2 WHERE id = $1', [userId, input.linkDigest]);
     if (input.name !== undefined) await c.query('UPDATE users SET name = $2 WHERE id = $1', [userId, input.name]);
     if (input.title !== undefined || input.area !== undefined) {
       await c.query(
@@ -51,7 +52,9 @@ export async function updateProfile(userId: string, input: { name?: string; titl
     }
     await announce(c, userId);
   });
-  return loadUser(pool, userId);
+  const me = await loadUser(pool, userId);
+  me.linkDigest = !!(await pool.query('SELECT link_digest FROM users WHERE id = $1', [userId])).rows[0]?.link_digest;
+  return me;
 }
 
 function checkImage(body: Buffer) {

@@ -4,9 +4,9 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 
 | | |
 |---|---|
-| applicationId | `com.chaggu.app` (app nueva en Play desde 1.6.0 / 13; la anterior era `com.tiecoms.app`). El `namespace` y los paquetes Kotlin siguen siendo `com.tiecoms.app`. |
+| applicationId | `com.chaggu.app` (app nueva en Play desde 1.6.0 / 14; la anterior era `com.tiecoms.app`). El `namespace` y los paquetes Kotlin siguen siendo `com.tiecoms.app`. |
 | minSdk / target / compile | 26 / 36 / 36 |
-| Versión | `versionName 1.6.0`, `versionCode 13`. Sube el `versionCode` en cada envío a Play. |
+| Versión | `versionName 1.6.0`, `versionCode 14`. Sube el `versionCode` en cada envío a Play. |
 | Contrato | `2026-09-23` (valor actual de `BuildConfig.CONTRACT_VERSION`). Se envía en `x-tiecoms-contract` y en `device.contract`. |
 | API por defecto | `https://app.chaggu.com` (web pública: `https://www.chaggu.com`) |
 | Marca | **Chaggu** desde 1.6.0 (antes TieComs). Cambia solo lo visible: nombre, textos, dominios, ícono, splash y colores (tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`). Se publica como app nueva: `applicationId` `com.chaggu.app` y esquema propio `chaggu://` (el SSO pide `redirect_scheme=chaggu`), para convivir con la app TieComs instalada. Lo demás interno se mantiene: `namespace`/paquetes Kotlin `com.tiecoms.app`, clave de subida `tiecoms-upload`, proyecto Firebase `tiecoms`, headers `x-tiecoms-*`, claves de SharedPreferences, IDs de canales y nombres de sonidos. |
@@ -175,6 +175,7 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
   2. Descargar `google-services.json` a `apps/android/app/`. Está en `.gitignore` y no se sube.
   3. En el servidor, configurar la cuenta de servicio de FCM (HTTP v1) según el README del API de `mobile-feedback`.
 - **Antes de pedir el permiso:** en Android 13+ se muestra una explicación («Activa las notificaciones») antes de pedir `POST_NOTIFICATIONS`.
+- **Burbujas:** la conversación embebida conserva su notificación al reanudarse; cancelarla haría que Android cerrara la burbuja. La conversación a pantalla completa sí cancela el aviso. `BubbleDeliveryUiTest` comprueba ambas rutas contra un fixture local. El usuario controla las burbujas en los ajustes de Android y debe conceder el permiso de notificaciones.
 - **Entrega en segundo plano:** el callback FCM publica la notificación antes de retornar, usando el avatar de caché o el ícono local. No espera descargas ni depende de una coroutine fuera del ciclo de vida del servicio.
 - **Registro fiable:** al restaurar la sesión, volver al primer plano, recuperar conexión o conceder el permiso, se registra el token con hasta tres intentos. Se respeta el permiso de notificaciones y se interrumpe el reintento si ya no hay sesión.
 - **Verificación:** `PushDeliveryTest` bloquea el hilo principal y usa un avatar inaccesible para comprobar publicación dentro del callback, acciones y deduplicación. `PushRegistrationTest` cubre reintentos, cancelación y sesión/permiso. `FcmProvisioningTest` se ejecuta explícitamente para obtener un token real del proyecto de Firebase y lo guarda solo en el archivo privado `files/fcm-test-token`, sin imprimirlo.
@@ -313,7 +314,7 @@ El release lleva R8 y reducción de recursos. Las reglas de serialización está
 
 ## Pendientes y puntos de extensión
 
-- **Push remoto (FCM):** `com.chaggu.app` está registrado en el proyecto `tiecoms`; el AAB 1.6.0 (13) incluye los recursos del cliente de Firebase correcto y conserva la entrega síncrona y los reintentos de registro. `google-services.json` sigue fuera de git. La prueba de entrega remota real del paquete nuevo debe verificarse en un dispositivo con Chaggu instalado; la evidencia anterior de `com.tiecoms.app` no sustituye esa comprobación.
+- **Push remoto (FCM):** `com.chaggu.app` está registrado en el proyecto `tiecoms`; el AAB 1.6.0 (14) incluye los recursos del cliente de Firebase correcto y conserva la entrega síncrona y los reintentos de registro. `google-services.json` sigue fuera de git. El 26 de septiembre de 2026, un FCM real despertó `com.chaggu.app` 1.6.0 (13) en un emulador con el proceso cerrado y mostró su notificación y burbuja. El build 14 corrige que la burbuja se cerrara al abrirse; su regresión y apertura persistente se verifican aparte con notificaciones sintéticas locales. Las preferencias de burbujas siguen dependiendo del usuario y del sistema.
 - **Backend de publicación:** eliminación de cuenta, reportes y bloqueo están integrados en `main` (`e679a10`) y verificados en producción el 24 de septiembre de 2026. El bloqueo de mensajes directos se aplica en el servidor, no solo en la interfaz.
 - **SSO en vivo:** 3041 no tiene credenciales de Google/Microsoft y `/start` responde 503 `sso_unavailable` (controlado). El canje está probado con MockWebServer. Falta la prueba real en producción.
 - **WhatsApp:** en pruebas no hay WhatsApp real. Los estados y la interfaz se probaron con el API (lista vacía) y con MockWebServer (cuentas, QR, chats, vínculo). Falta una prueba con una cuenta real.

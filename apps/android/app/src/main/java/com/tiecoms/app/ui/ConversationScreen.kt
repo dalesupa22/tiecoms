@@ -263,13 +263,17 @@ fun ConversationScreen(
         if (jumpSeq != null && jumpSeq > 0) jumpTo(jumpSeq)
     }
 
-    // Conversación visible: decide el sonido de recepción y limpia su notificación.
+    // A full-screen conversation clears its notification. Embedded bubble content must
+    // retain it: Android destroys the bubble when its backing notification is cancelled.
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
-    DisposableEffect(id, lifecycleOwner) {
+    DisposableEffect(id, lifecycleOwner, embedded) {
         val obs = LifecycleEventObserver { _, e ->
             when (e) {
-                Lifecycle.Event.ON_RESUME -> { container.openConversationId = id; container.notifier.cancel(id) }
+                Lifecycle.Event.ON_RESUME -> {
+                    container.openConversationId = id
+                    if (!embedded) container.notifier.cancel(id)
+                }
                 Lifecycle.Event.ON_PAUSE -> if (container.openConversationId == id) container.openConversationId = null
                 else -> Unit
             }

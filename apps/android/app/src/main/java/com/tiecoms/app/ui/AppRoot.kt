@@ -219,9 +219,12 @@ private fun MainNav() {
     fun tab(r: String) = nav.navigate(r) { popUpTo(nav.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true }
 
     // El aviso se lanza en un scope propio: al consumir el enlace cambia la clave del efecto y lo cancelaría.
-    LaunchedEffect(pending, state.data != null) {
+    LaunchedEffect(pending, state.data != null, backStack != null) {
         val p = pending ?: return@LaunchedEffect
         val data = state.data ?: return@LaunchedEffect
+        // Cold notification taps can arrive before NavHost installs its graph.
+        // Keep the link pending until the first destination is ready.
+        if (backStack == null) return@LaunchedEffect
         container.pendingLink.value = null
         when (p) {
             is DeepLink.Conversation ->

@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm -w @tiecoms/web run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "VITE_API_ORIGIN=${CHAGGU_API_ORIGIN:-https://app.chaggu.com} npm -w @tiecoms/web run build",
+    "beforeBuildCommand": "node scripts/build-web.mjs",
     "frontendDist": "../../web/dist"
   },
   "app": {

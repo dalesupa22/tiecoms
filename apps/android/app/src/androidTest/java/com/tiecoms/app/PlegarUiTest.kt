@@ -8,6 +8,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
@@ -139,7 +140,8 @@ class PlegarUiTest {
             // Reacciones: barra rápida al mantener el mensaje, chip, quitar y selector completo.
             // 1.6.4: con el orden único el grupo puede quedar abajo, bajo el aviso «Asunto completado»: se sube la lista.
             compose.onNodeWithTag("conversationList").performScrollToIndex(0)
-            compose.onNodeWithTag("conv-$conv").performClick()
+            // Se toca el título (a la izquierda): el centro de la fila puede caer en el chip de asuntos.
+            compose.onNodeWithTag("conv-$conv").performTouchInput { click(androidx.compose.ui.geometry.Offset(width * 0.3f, height * 0.3f)) }
             compose.waitUntilAtLeastOneExists(hasTestTag("composer"), 15_000)
             compose.waitUntil(10_000) { client.state.value.conversations[conv]?.messages?.any { it.kind == "text" } == true }
             val m = client.state.value.conversations[conv]!!.messages.last { it.kind == "text" }

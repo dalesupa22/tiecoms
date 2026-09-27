@@ -253,7 +253,8 @@ struct NewIssueSheet: View {
     /// «Grupo · Empresa» (o el nombre del chat) para el selector.
     static func label(_ d: BootstrapDTO, _ c: ConversationDTO) -> String {
         guard let ws = d.workspaces.first(where: { $0.id == c.workspaceId }) else { return Naming.title(d, c) }
-        let company = Naming.counterpartOrg(d, ws)?.name ?? ws.counterpartName ?? ws.name
+        // Relación pendiente: el nombre escrito de la otra empresa (counterpartOrg daría la mía), como en Grupos.
+        let company = ws.counterpartName ?? Naming.counterpartOrg(d, ws)?.name ?? ws.name
         return "\(Naming.title(d, c)) · \(company)"
     }
 

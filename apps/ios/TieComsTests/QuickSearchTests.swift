@@ -10,11 +10,13 @@ final class QuickSearchTests: XCTestCase {
          "workspaces":[
            {"id":"wHome","name":"Xertify","owningOrgId":"oA","organizationIds":["oA"],"memberIds":["me","col"],"myRole":"member","isOrgHome":true,"createdAt":"2026-09-01"},
            {"id":"wRel","name":"Mentorías","owningOrgId":"oB","organizationIds":["oB","oA"],"memberIds":["me","bob","mar"],"myRole":"member","createdAt":"2026-09-01"},
+           {"id":"wPend","name":"Nestlé","owningOrgId":"oA","organizationIds":["oA"],"memberIds":["me"],"myRole":"lead","counterpartName":"Nestlé","createdAt":"2026-09-01"},
            {"id":"wGuest","name":"Programa","owningOrgId":"oC","organizationIds":["oC"],"memberIds":["me"],"myRole":"guest","createdAt":"2026-09-01"}],
          "conversations":[
            {"id":"g1","workspaceId":"wHome","kind":"group","name":"Pagos","memberIds":["me","col"],"lastMessageAt":"2026-09-25T10:00:00Z"},
            {"id":"r1","workspaceId":"wRel","kind":"group","name":"Mentoría 1","memberIds":["me","bob"],"lastMessageAt":"2026-09-25T09:00:00Z"},
            {"id":"th","workspaceId":"wRel","kind":"group","name":"Hilo · Pagos","parentId":"r1","deriveKind":"same","memberIds":["me","bob"]},
+           {"id":"p1","workspaceId":"wPend","kind":"group","name":"Proveedores","memberIds":["me"]},
            {"id":"x1","workspaceId":"wGuest","kind":"group","name":"Cohorte","memberIds":["me"]},
            {"id":"ro","workspaceId":"wHome","kind":"group","name":"Anuncios","memberIds":["me"],"canPost":false},
            {"id":"d1","kind":"direct","memberIds":["me","bob"],"lastMessageAt":"2026-09-20T11:00:00Z"},
@@ -66,5 +68,6 @@ final class QuickSearchTests: XCTestCase {
         XCTAssertFalse(ids.contains("th"), "los hilos no")
         XCTAssertEqual(ids.first, "d2", "el de actividad más reciente primero (también directos)")
         XCTAssertEqual(NewIssueSheet.label(d, d.conversations.first { $0.id == "r1" }!), "Mentoría 1 · Ongoing")
+        XCTAssertEqual(NewIssueSheet.label(d, d.conversations.first { $0.id == "p1" }!), "Proveedores · Nestlé", "relación pendiente: la otra empresa")
     }
 }

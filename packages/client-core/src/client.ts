@@ -438,7 +438,7 @@ export class TieComsClient {
   markRead(id: string) {
     const c = this.state.data?.conversations.find((x) => x.id === id);
     if (!c || c.lastMessageSeq <= c.lastReadSeq) return;
-    this.patchConversationMeta(id, { lastReadSeq: c.lastMessageSeq, unread: 0 });
+    this.patchConversationMeta(id, { lastReadSeq: c.lastMessageSeq, unread: 0, unreadMentions: 0 });
     clearTimeout(this.readTimers.get(id));
     this.readTimers.set(id, setTimeout(() => {
       const seq = this.state.data?.conversations.find((x) => x.id === id)?.lastReadSeq ?? 0;

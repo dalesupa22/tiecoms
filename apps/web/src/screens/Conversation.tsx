@@ -22,13 +22,16 @@ import { IssueDrawer, IssueRow, NewIssueDialog, isClosed } from './Issues.tsx';
 import { DeriveDialog, LineageBar, MergedCard } from './Lineage.tsx';
 import { ChatBar, ThreadChip, threadsOf } from './ChatBar.tsx';
 import { AddMembersDialog } from './Dialogs.tsx';
+import { MAX_OLDER_PAGES, firstUnread } from '../chat-nav.ts';
 
 type Row =
   | { kind: 'day'; key: string; label: string }
   | { kind: 'msg'; key: string; m: MessageDTO; cont: boolean }
   /** Varios mensajes seguidos de la misma persona que son solo enlaces: «Laura compartió 5 enlaces». */
   | { kind: 'links'; key: string; msgs: MessageDTO[] }
-  | { kind: 'pending'; key: string; p: PendingMessage };
+  | { kind: 'pending'; key: string; p: PendingMessage }
+  /** Línea «N mensajes nuevos» sobre el primer no leído (queda hasta salir del chat). */
+  | { kind: 'new'; key: string };
 
 const draftKey = (id: string) => `tiecoms:draft:${id}`;
 const excerpt = (s: string, n = 90) => s.replace(/\s+/g, ' ').trim().slice(0, n);
@@ -66,8 +69,26 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const [text, setText] = useState(() => { try { return localStorage.getItem(draftKey(id)) ?? ''; } catch { return ''; } });
   const scroller = useRef<HTMLDivElement>(null);
   const [host, setHost] = useState<HTMLDivElement | null>(null);
-  const atBottom = useRef(true);
+  // Chat largo (docs/GRUPOS.md › «Navegar un chat largo»): con no leídos se abre en el primero, con la línea
+  // «N mensajes nuevos». Lo leído se toma al montar, antes de marcar nada.
+  const [entry] = useState(() => {
+    const c = client.getState().data?.conversations.find((x) => x.id === id);
+    if (!c || c.unread <= 0 || Number(queryParam('m')) > 0) return null;
+    return { readFrom: Math.max(c.lastReadSeq, c.historyFromSeq), unread: c.unread };
+  });
+  const [baseRead] = useState(() => { const c = client.getState().data?.conversations.find((x) => x.id === id); return c ? Math.max(c.lastReadSeq, c.historyFromSeq) : 0; });
+  const [newLine, setNewLine] = useState<number | null>(null);
+  const placing = useRef(!!entry);
+  const olderPages = useRef(0);
+  const justPlaced = useRef(false);
+  // Posición respecto al final: lejos (más de una pantalla), abajo, y si la línea de nuevos quedó arriba.
+  const [nav, setNav] = useState({ far: false, bottom: !entry, lineAbove: false });
+  // Mensajes que llegaron mientras la persona estaba arriba: se cuentan desde el último seq que vio abajo.
+  const awaySeq = useRef<number | null>(entry ? client.getState().data?.conversations.find((x) => x.id === id)?.lastMessageSeq ?? null : null);
+  const [mentionsSeen, setMentionsSeen] = useState<Set<number>>(() => new Set());
+  const atBottom = useRef(!entry);
   const prevHeight = useRef(0);
+  const prevFirst = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   // Un hilo o sidechat abierto al lado recibe el cursor: se escribe ahí sin tocar el chat principal.
   useEffect(() => { if (embedded) requestAnimationFrame(() => input.current?.focus()); }, [embedded ? id : null]);
@@ -140,37 +161,127 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     for (const m of local?.messages ?? []) {
       const day = new Date(m.createdAt).toDateString();
       if (day !== lastDay) { out.push({ kind: 'day', key: `d${day}`, label: dayLabel(m.createdAt) }); lastDay = day; prev = null; }
+      // Bajo la línea «N mensajes nuevos» el primer mensaje vuelve a llevar autor y hora.
       const cont = !!prev && prev.kind === 'text' && m.kind === 'text' && prev.authorId === m.authorId && !m.replyTo && !m.forwarded
-        && Date.parse(m.createdAt) - Date.parse(prev.createdAt) < 5 * 60_000;
+        && Date.parse(m.createdAt) - Date.parse(prev.createdAt) < 5 * 60_000 && m.seq !== newLine;
       out.push({ kind: 'msg', key: m.id, m, cont });
       prev = m;
     }
     const sentIds = new Set((local?.messages ?? []).map((m) => m.clientMessageId));
     for (const p of pending) if (!sentIds.has(p.clientMessageId)) out.push({ kind: 'pending', key: p.clientMessageId, p });
+    if (newLine != null) {
+      let at = out.findIndex((r) => r.kind === 'msg' && r.m.seq >= newLine);
+      if (at > 0 && out[at - 1]!.kind === 'day') at -= 1;
+      if (at >= 0) out.splice(at, 0, { kind: 'new', key: 'new-line' });
+    }
     return groupLinkRuns(out, expandedGroups, highlight);
-  }, [local?.messages, pending, expandedGroups, highlight]);
+  }, [local?.messages, pending, expandedGroups, highlight, newLine]);
 
   // Mantiene la vista abajo al llegar mensajes, y la posición al cargar historial antiguo.
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
+    const first = local?.messages[0]?.seq ?? null;
+    // Solo al cargar historial antiguo (el primer seq bajó) se conserva la posición; la primera carga no mueve la vista.
+    const olderLoaded = prevFirst.current != null && first != null && first < prevFirst.current;
     if (atBottom.current) el.scrollTop = el.scrollHeight;
-    else if (prevHeight.current && el.scrollHeight > prevHeight.current && el.scrollTop < 40) el.scrollTop += el.scrollHeight - prevHeight.current;
+    else if (olderLoaded && prevHeight.current && el.scrollHeight > prevHeight.current && el.scrollTop < 40) el.scrollTop += el.scrollHeight - prevHeight.current;
     prevHeight.current = el.scrollHeight;
+    prevFirst.current = first;
   }, [rows.length]);
 
   useEffect(() => {
     if (conv && conv.unread > 0 && local?.loaded && document.visibilityState === 'visible' && atBottom.current) client.markRead(id);
   }, [conv?.lastMessageSeq, conv?.unread, local?.loaded, id]);
 
+  // Posición al abrir con no leídos: busca el primero (hasta MAX_OLDER_PAGES páginas antiguas); si no aparece, al final.
+  useEffect(() => {
+    if (!placing.current || !entry || !local?.loaded || local.loading) return;
+    const r = firstUnread(local.messages, entry.readFrom, entry.unread, local.hasMore);
+    if (r === 'older' && olderPages.current < MAX_OLDER_PAGES) { olderPages.current += 1; void client.loadOlder(id); return; }
+    placing.current = false;
+    if (r && r !== 'older') { justPlaced.current = true; setNewLine(r.seq); return; }
+    atBottom.current = true;
+    const el = scroller.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    updateNav();
+  }, [local?.loaded, local?.loading, local?.messages]);
+  useLayoutEffect(() => {
+    if (!justPlaced.current || newLine == null) return;
+    justPlaced.current = false;
+    document.getElementById(`new-${id}`)?.scrollIntoView({ block: 'start' });
+    updateNav();
+  }, [newLine]);
+
+  /** Recalcula la posición (tras cada scroll): abajo o lejos, línea de nuevos arriba, menciones ya vistas y marcar leído. */
+  function updateNav() {
+    const el = scroller.current;
+    if (!el) return;
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const bottom = dist < 60;
+    if (!placing.current) {
+      if (bottom) awaySeq.current = null;
+      else if (atBottom.current || awaySeq.current == null) awaySeq.current = client.getState().data?.conversations.find((x) => x.id === id)?.lastMessageSeq ?? 0;
+      atBottom.current = bottom;
+    }
+    const box = el.getBoundingClientRect();
+    const line = document.getElementById(`new-${id}`);
+    const lineAbove = !!line && line.getBoundingClientRect().bottom < box.top;
+    const far = dist > el.clientHeight;
+    setNav((n) => (n.far === far && n.bottom === bottom && n.lineAbove === lineAbove ? n : { far, bottom, lineAbove }));
+    // Una mención cuenta como vista cuando su mensaje entra en pantalla.
+    const seen: number[] = [];
+    if (!placing.current) for (const seq of pendingMentionsRef.current) {
+      const r = document.getElementById(`msg-${id}-${seq}`)?.getBoundingClientRect();
+      if (r && r.top < box.bottom && r.bottom > box.top) seen.push(seq);
+    }
+    if (seen.length) setMentionsSeen((s0) => { const n = new Set(s0); seen.forEach((x) => n.add(x)); return n; });
+    if (!placing.current && bottom && client.getState().data?.conversations.find((x) => x.id === id)?.unread) client.markRead(id);
+  }
+  const pendingMentionsRef = useRef<number[]>([]);
+  const scrollToBottom = (smooth = true) => {
+    const el = scroller.current;
+    if (!el) return;
+    placing.current = false;
+    atBottom.current = true;
+    awaySeq.current = null;
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    client.markRead(id);
+    setNav((n) => ({ ...n, far: false, bottom: true }));
+  };
+  // Web: Fin o ⌥↓ / Alt+↓ con el foco fuera del compositor baja al final.
+  useEffect(() => {
+    if (embedded) return;
+    const k = (e: globalThis.KeyboardEvent) => {
+      if (!(e.key === 'End' || (e.altKey && e.key === 'ArrowDown'))) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      if (document.querySelector('.modal, .ctx-menu')) return;
+      e.preventDefault(); scrollToBottom();
+    };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [embedded, id]);
+
   if (!conv) return <div className="page"><div className="empty">{t('chat.notFound')}</div></div>;
 
   const onScroll = () => {
     const el = scroller.current!;
-    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-    if (atBottom.current && conv.unread) client.markRead(id);
-    if (el.scrollTop < 120 && local?.hasMore && !local.loading) void client.loadOlder(id);
+    updateNav();
+    if (el.scrollTop < 120 && local?.hasMore && !local.loading && !placing.current) void client.loadOlder(id);
   };
+  // Menciones a mí sin leer (desde lo leído al abrir) que aún no pasaron por la pantalla: botón «@».
+  const pendingMentions = (local?.messages ?? []).filter((m) => m.seq > baseRead && !m.deletedAt && mentionsMe(d, m) && !mentionsSeen.has(m.seq)).map((m) => m.seq);
+  pendingMentionsRef.current = pendingMentions;
+  const newWhileAway = awaySeq.current != null && !nav.bottom ? Math.max(0, conv.lastMessageSeq - awaySeq.current) : 0;
+  const showJump = nav.far || newWhileAway > 0;
+  const jumpToMention = () => {
+    const seq = pendingMentions[0];
+    if (seq == null) return;
+    setMentionsSeen((s0) => new Set(s0).add(seq));
+    jumpTo(seq);
+  };
+  const jumpToNewLine = () => document.getElementById(`new-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 
   const send = () => {
     const body = text.trim();
@@ -343,6 +454,10 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
             onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
         )}
 
+        <div className="msgs-wrap">
+        {nav.lineAbove && entry && newLine != null && (
+          <button className="jump-new" onClick={jumpToNewLine} aria-label={t('chat.jumpNew')} title={t('chat.jumpNew')}>{t('chat.newAbove', { n: entry.unread })}</button>
+        )}
         <div className="msgs" ref={scroller} onScroll={onScroll} role="log" aria-live="polite">
           {local?.loading && !local.loaded && <div className="msg-sys">{t('common.loading')}</div>}
           {local?.loaded && !local.hasMore && conv.historyFromSeq > 0 && <div className="msg-sys">{t('chat.lateJoin')}</div>}
@@ -350,6 +465,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           {error && <div className="error" style={{ textAlign: 'center' }}>{error}</div>}
           {rows.map((r) => {
             if (r.kind === 'day') return <div key={r.key} className="day">{r.label}</div>;
+            if (r.kind === 'new') return <div key={r.key} id={`new-${id}`} className="new-line" role="separator">{entry && entry.unread === 1 ? t('chat.newMessagesOne') : t('chat.newMessages', { n: entry?.unread ?? 0 })}</div>;
             if (r.kind === 'links') return <LinkGroup key={r.key} d={d} msgs={r.msgs} onExpand={() => setExpandedGroups((g) => new Set(g).add(r.key))} />;
             if (r.kind === 'pending') return <PendingRow key={r.key} p={r.p} />;
             const m = r.m;
@@ -408,6 +524,21 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               </div>
             );
           })}
+        </div>
+        {(showJump || (pendingMentions.length > 0 && !nav.bottom)) && (
+          <div className="jump-stack">
+            {pendingMentions.length > 0 && !nav.bottom && (
+              <button className="jump-btn is-mention" onClick={jumpToMention} aria-label={t('chat.jumpMention')} title={t('chat.jumpMention')}>
+                @{pendingMentions.length > 1 && <span className="pill">{pendingMentions.length}</span>}
+              </button>
+            )}
+            {showJump && (
+              <button className="jump-btn" onClick={() => scrollToBottom()} aria-label={t('chat.jumpLatest')} title={`${t('chat.jumpLatest')} (End)`}>
+                ⌄{newWhileAway > 0 && <span className="pill">{newWhileAway}</span>}
+              </button>
+            )}
+          </div>
+        )}
         </div>
         {isSide && local?.loaded && !(local.messages ?? []).some((m) => m.kind === 'text') && <div className="side-empty">💬 {t('side.emptyChat')}</div>}
         {isSide && conv.canPost && !text.trim() && lastText && lastText.authorId !== d.me.id && (

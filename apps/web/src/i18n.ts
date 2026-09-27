@@ -486,6 +486,12 @@ const es = {
   'compose.search': 'Buscar persona, empresa o grupo', 'search.people': 'Personas', 'search.groups': 'Grupos', 'search.chats': 'Chats',
   'search.opensChat': 'Abre el chat', 'search.none': 'Nada coincide con «{q}».', 'common.clear': 'Borrar', 'grp.foldMenu': 'Plegar y desplegar',
   'dm.search': 'Buscar personas, grupos o chats', 'grp.search': 'Buscar grupos, empresas o personas',
+  // Bandeja ordenada, Lista/Árbol y chats largos (docs/GRUPOS.md, 27-sep-2026)
+  'inbox.list': 'Lista', 'inbox.tree': 'Árbol', 'inbox.view': 'Vista de grupos', 'inbox.pinned': 'Fijados', 'inbox.recent': 'Recientes',
+  'inbox.tab.all': 'Todo', 'inbox.tab.groups': 'Grupos', 'inbox.tab.dms': 'DMs', 'inbox.tabs': 'Bandeja', 'inbox.filters': 'Filtros',
+  'inbox.fUnread': 'Sin leer', 'inbox.fMentions': 'Menciones', 'inbox.nothing': 'Nada por aquí.', 'inbox.internal': 'Solo tu empresa',
+  'chat.newMessages': '{n} mensajes nuevos', 'chat.newMessagesOne': '1 mensaje nuevo', 'chat.newAbove': '↑ {n} nuevos',
+  'chat.jumpLatest': 'Ir al final', 'chat.jumpNew': 'Ir a los mensajes nuevos', 'chat.jumpMention': 'Ir a la mención',
 };
 
 type Key = keyof typeof es;
@@ -943,6 +949,11 @@ const en: Record<Key, string> = {
   'compose.search': 'Search a person, company or group', 'search.people': 'People', 'search.groups': 'Groups', 'search.chats': 'Chats',
   'search.opensChat': 'Opens the chat', 'search.none': 'Nothing matches “{q}”.', 'common.clear': 'Clear', 'grp.foldMenu': 'Collapse and expand',
   'dm.search': 'Search people, groups or chats', 'grp.search': 'Search groups, companies or people',
+  'inbox.list': 'List', 'inbox.tree': 'Tree', 'inbox.view': 'Groups view', 'inbox.pinned': 'Pinned', 'inbox.recent': 'Recent',
+  'inbox.tab.all': 'All', 'inbox.tab.groups': 'Groups', 'inbox.tab.dms': 'DMs', 'inbox.tabs': 'Inbox', 'inbox.filters': 'Filters',
+  'inbox.fUnread': 'Unread', 'inbox.fMentions': 'Mentions', 'inbox.nothing': 'Nothing here.', 'inbox.internal': 'Your company only',
+  'chat.newMessages': '{n} new messages', 'chat.newMessagesOne': '1 new message', 'chat.newAbove': '↑ {n} new',
+  'chat.jumpLatest': 'Jump to latest', 'chat.jumpNew': 'Jump to new messages', 'chat.jumpMention': 'Jump to mention',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };

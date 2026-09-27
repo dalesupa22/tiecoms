@@ -7,7 +7,7 @@ import { MentionsInbox } from './Mentions.tsx';
 import type { ConversationDTO } from '@tiecoms/contracts';
 import { t } from '../i18n.ts';
 import { openAccountMenu } from './Profile.tsx';
-import { ConvItem, GroupsTree, GroupsViewButton, dmConversations } from './Groups.tsx';
+import { AllList, DmsList, GroupsBody, GroupsViewButton, GroupsViewToggle, dmConversations, useGroupsView } from './Groups.tsx';
 import { isMac, openCreateMenu, openNewMessage, quickKey } from './Quick.tsx';
 import { activityOf, isMuted, pendingOf } from '../home-order.ts';
 
@@ -58,10 +58,10 @@ export function sortHome(d: BootstrapDTO, groups: ReturnType<typeof groupWorkspa
     .sort((a, b) => compareRank(a.rank, b.rank) || (a.org?.id ?? '').localeCompare(b.org?.id ?? ''));
 }
 
-// ---------- Pestañas de Inicio (mismas reglas en web, iOS y Android) ----------
+// ---------- Filtros de la bandeja (mismas reglas en web, iOS y Android) ----------
 export type HomeTab = 'all' | 'unread' | 'mentions' | 'issues' | 'chats' | 'sides';
-/** Chats y sidechats tienen su propia sección (DMs): los filtros de Grupos no los repiten. */
-export const HOME_TABS: HomeTab[] = ['all', 'unread', 'mentions', 'issues'];
+/** En la barra lateral, «Sin leer» y «Menciones» son filtros pequeños junto al botón de vista. */
+const SIDE_FILTERS = ['unread', 'mentions'] as const;
 const TAB_KEY = 'tiecoms:homeTab';
 /** No leídos = unread > 0 y no silenciada; Asuntos = openIssues > 0; Chats = direct + multi; Laterales = deriveKind 'side'. */
 export function matchesTab(c: ConversationDTO, tab: HomeTab) {
@@ -74,16 +74,39 @@ export function matchesTab(c: ConversationDTO, tab: HomeTab) {
     default: return true;
   }
 }
-function storedTab(): HomeTab { try { const v = localStorage.getItem(TAB_KEY) as HomeTab | null; return v && HOME_TABS.includes(v) ? v : 'all'; } catch { return 'all'; } }
+function storedFilter(): HomeTab { try { const v = localStorage.getItem(TAB_KEY); return v === 'unread' || v === 'mentions' ? v : 'all'; } catch { return 'all'; } }
 
-function HomeTabs({ d, tab, onTab }: { d: BootstrapDTO; tab: HomeTab; onTab: (t: HomeTab) => void }) {
+// ---------- Pestañas «Todo · Grupos · DMs» de la barra lateral (solo web de escritorio) ----------
+type SideTab = 'all' | 'groups' | 'dms';
+const SIDE_TAB_KEY = 'chaggu:sidebarTab';
+function storedSideTab(): SideTab { try { const v = localStorage.getItem(SIDE_TAB_KEY); return v === 'groups' || v === 'dms' ? v : 'all'; } catch { return 'all'; } }
+const isDmRow = (c: ConversationDTO) => (c.kind === 'direct' || c.kind === 'multi') && !(c.parentId && c.deriveKind !== 'side');
+
+function SideTabs({ d, tab, onTab }: { d: BootstrapDTO; tab: SideTab; onTab: (t: SideTab) => void }) {
+  // Globo: no leídos pendientes (no silenciados, o con mención). «Grupos» incluye las respuestas de sus hilos.
+  const sum = (f: (c: ConversationDTO) => boolean) => d.conversations.filter(f).reduce((n, c) => n + pendingOf(c), 0);
+  const groups = sum((c) => !!c.workspaceId && c.deriveKind !== 'side');
+  const dms = sum(isDmRow);
+  const n: Record<SideTab, number> = { all: groups + dms, groups, dms };
   return (
-    <div className="home-tabs" role="tablist" aria-label={t('home.filters')}>
-      {HOME_TABS.map((k) => {
-        const n = k === 'all' ? d.conversations.length : k === 'mentions' ? d.conversations.reduce((s, c) => s + (c.unreadMentions ?? 0), 0) : d.conversations.filter((c) => matchesTab(c, k)).length;
+    <div className="side-tabs" role="tablist" aria-label={t('inbox.tabs')}>
+      {(['all', 'groups', 'dms'] as const).map((k) => (
+        <button key={k} role="tab" aria-selected={tab === k} className={`side-tab ${tab === k ? 'on' : ''}`} onClick={() => onTab(k)}>
+          {t(`inbox.tab.${k}`)}{n[k] > 0 && <span className="side-tab-n">{n[k]}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SideFilters({ d, filter, onFilter }: { d: BootstrapDTO; filter: HomeTab; onFilter: (f: HomeTab) => void }) {
+  return (
+    <div className="side-filters" role="group" aria-label={t('inbox.filters')}>
+      {SIDE_FILTERS.map((k) => {
+        const n = k === 'mentions' ? d.conversations.reduce((s, c) => s + (c.unreadMentions ?? 0), 0) : d.conversations.filter((c) => matchesTab(c, k)).length;
         return (
-          <button key={k} role="tab" aria-selected={tab === k} className={`home-tab ${tab === k ? 'on' : ''}`} onClick={() => onTab(k)}>
-            {t(`home.tab.${k}`)}{k !== 'all' && n > 0 ? <span className="home-tab-n">{n}</span> : null}
+          <button key={k} aria-pressed={filter === k} className={`side-filter ${filter === k ? 'on' : ''}`} onClick={() => onFilter(filter === k ? 'all' : k)}>
+            {k === 'mentions' ? '@' : '●'} {t(k === 'mentions' ? 'inbox.fMentions' : 'inbox.fUnread')}{n > 0 && <span className="home-tab-n">{n}</span>}
           </button>
         );
       })}
@@ -118,18 +141,19 @@ function QuickChat() {
 
 function Sidebar({ route }: { route: Route }) {
   const d = useClient((s) => s.data)!;
-  const [tab, setTabState] = useState<HomeTab>(storedTab);
+  const [filter, setFilterState] = useState<HomeTab>(storedFilter);
+  const [sideTab, setSideTabState] = useState<SideTab>(storedSideTab);
+  const view = useGroupsView();
   // Las secciones menos usadas van bajo «Más» para que los grupos y las relaciones quepan sin scroll.
   const [navMore, setNavMore] = useState(() => { try { return localStorage.getItem(NAV_MORE_KEY) === '1'; } catch { return false; } });
   const toggleNavMore = () => { const v = !navMore; setNavMore(v); try { localStorage.setItem(NAV_MORE_KEY, v ? '1' : '0'); } catch {} };
-  const setTab = (v: HomeTab) => { setTabState(v); try { localStorage.setItem(TAB_KEY, v); } catch {} };
+  const setFilter = (v: HomeTab) => { setFilterState(v); try { localStorage.setItem(TAB_KEY, v); } catch {} };
+  const setSideTab = (v: SideTab) => { setSideTabState(v); try { localStorage.setItem(SIDE_TAB_KEY, v); } catch {} };
   const unreadTotal = d.conversations.reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0);
-  const pinnedConvs = d.conversations.filter((c) => c.pinnedAt && matchesTab(c, tab)).sort((a, b) => (a.pinnedAt ?? '').localeCompare(b.pinnedAt ?? ''));
-  const dms = dmConversations(d, tab);
+  const dms = dmConversations(d, filter);
   const me = personById(d, d.me.id);
   const myOrg = orgById(d, d.me.primaryOrgId);
   const activeConv = route.name === 'conversation' ? route.id : null;
-  const activeWs = route.name === 'workspace' ? route.id : null;
 
   return (
     <aside className="side">
@@ -149,23 +173,21 @@ function Sidebar({ route }: { route: Route }) {
           <span className="ico">{navMore ? '⌃' : '⋯'}</span><span className="grow">{navMore ? t('nav.less') : t('nav.more')}</span>
         </button>
       </nav>
+      <SideTabs d={d} tab={sideTab} onTab={setSideTab} />
+      <div className="home-tabs-row side-tools">
+        <SideFilters d={d} filter={filter} onFilter={setFilter} />
+        {/* Lista | Árbol vive junto a ☰; ☰ (plegar) solo aplica en Árbol. */}
+        {sideTab === 'groups' && filter !== 'mentions' && <GroupsViewToggle />}
+        {sideTab === 'groups' && view === 'tree' && filter !== 'mentions' && <GroupsViewButton tab={filter} />}
+      </div>
       <div className="side-scroll">
-        <div className="home-tabs-row"><HomeTabs d={d} tab={tab} onTab={setTab} />{tab !== 'mentions' && <GroupsViewButton tab={tab} />}</div>
-        {tab === 'mentions' ? <MentionsInbox /> : <>
-        {pinnedConvs.length > 0 && (
-          <div className="side-pinned">
-            <div className="eyebrow" style={{ padding: '4px 10px' }}>📌 {t('side.pinned')}</div>
-            {pinnedConvs.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} showWs />)}
-          </div>
-        )}
-        <GroupsTree tab={tab} activeConv={activeConv} activeWs={activeWs} />
-        <div className="row" style={{ padding: '14px 10px 2px' }}>
-          <span className="eyebrow grow">{t('nav.dms')}</span>
-          <button className="btn ghost small" onClick={openNewMessage} title={t('dms.new')} aria-label={t('dms.new')}>✎</button>
-        </div>
-        {dms.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />)}
-        {dms.length === 0 && tab === 'all' && <button className="side-conv" onClick={openNewMessage}><span className="hash">✎</span><span className="grow muted">{t('dms.new')}</span></button>}
-        </>}
+        {filter === 'mentions' ? <MentionsInbox />
+          : sideTab === 'all' ? <AllList tab={filter} activeConv={activeConv} />
+          : sideTab === 'groups' ? <GroupsBody tab={filter} activeConv={activeConv} />
+          : <>
+            <DmsList tab={filter} activeConv={activeConv} />
+            {dms.length === 0 && <button className="side-conv" onClick={openNewMessage}><span className="hash">✎</span><span className="grow muted">{t('dms.new')}</span></button>}
+          </>}
       </div>
       <button className="side-foot" style={{ border: 0, borderTop: '1px solid var(--line)', background: 'transparent', textAlign: 'left' }}
         aria-haspopup="menu" title={t('profile.menu')} onClick={(e) => openAccountMenu(e.currentTarget)}>

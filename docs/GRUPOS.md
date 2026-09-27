@@ -272,3 +272,62 @@ Lo mismo que iOS 1.6.3, adaptado a escritorio:
   «Recientes» (personas de mis directos, máx. 8), personas por empresa (mi equipo primero) donde un clic abre el directo y, al buscar,
   grupos. Flechas mueven, Enter abre (o marca en selección múltiple; ⌘/Ctrl+Enter crea). «Grupo en un espacio» sigue abajo.
 - Reglas puras en `apps/web/src/quick-search.ts` (mismas que `QuickSearch.swift`), probadas en `apps/web/test/quick-search.test.ts`.
+
+## Bandeja ordenada, vista Lista/Árbol y chats largos (27-sep-2026)
+
+Chaggu 1.6.4. Sin cambios de backend: todo sale de los DTO actuales (`pinnedAt`, `unread`, `unreadMentions`, `lastReadSeq`,
+`historyFromSeq`, `mutedUntil`). En móvil la barra inferior sigue igual (Grupos, DMs, Asuntos, Calendario, Tú).
+
+### Orden único (Inicio, DMs, Lista, «Todo» y dentro de cada sección del Árbol)
+`compareConversations` (`apps/web/src/home-order.ts`):
+1. **Fijadas primero** (`pinnedAt`). Entre fijadas, el mismo criterio de abajo.
+2. Una **mención sin leer** (`unreadMentions > 0`), aunque esté silenciada.
+3. **No leídos pendientes** (`pendingOf > 0`: no leídos y no silenciada).
+4. El resto por **actividad** descendente (`activityOf`: último mensaje de una persona o, si no hay, el último). Desempate por id.
+
+Antes era mención → no leído → fijada → actividad: la fijada sube al primer nivel. En el Árbol las empresas se ordenan igual
+(con algo fijado, con mención, con no leídos, actividad) y bajo cada empresa van juntos los grupos de todos sus espacios.
+
+### Separadores
+En Lista, DMs y «Todo»: **Fijados**, **Sin leer** (mención o pendiente) y **Recientes**. Un bloque vacío no sale (`withSeparators`).
+
+### Grupos: «Lista» | «Árbol»
+- Control segmentado arriba de Grupos. Por defecto **Lista**. Se recuerda por dispositivo: web `localStorage['chaggu:groupsView']`,
+  iOS UserDefaults `groupsView`, Android SharedPreferences `groupsView`; valores `list` / `tree`.
+- **Lista**: las mismas filas de grupo del árbol (group/internal, sin hilos derivados) en una sola lista con el orden de arriba, sin
+  cabeceras de sección. Cada fila en dos líneas: «{Empresa} · {Grupo}» con la empresa del árbol (Tu organización → mi empresa; Relaciones →
+  la contraparte o `counterpartName`; Invitado en → la anfitriona); si el nombre ya empieza por la empresa (sin importar mayúsculas ni
+  tildes) no se repite (`companyGroupLabel`), y se trunca al final con «…». Debajo «Nombre: texto» del último mensaje; a la derecha la hora,
+  📌 si está fijada, candado si es internal, «💬 N» de hilos sin leer, el chip «◆ N · M!» de asuntos (mismo plegado) y los globos.
+  Clic derecho / pulsación larga: el menú de grupo del árbol. En un separador: «Mostrar todos los asuntos» / «Contraer todos los asuntos».
+- **Árbol**: el de siempre con el orden nuevo. El botón ☰ (plegar y desplegar) solo aplica en Árbol.
+- La búsqueda de Grupos es la misma en ambas vistas.
+
+### Web de escritorio (barra lateral)
+- Pestañas **Todo · Grupos · DMs** con su número de no leídos pendientes, arriba de la lista (reemplazan la fila Todo/No leídos/Menciones).
+  «Todo» = grupos (como en Lista) + DMs en una lista; «Grupos» = Lista o Árbol según el selector; «DMs» = los DMs. Se recuerda en
+  `localStorage['chaggu:sidebarTab']` (`all` / `groups` / `dms`).
+- «Sin leer» y «@ Menciones» pasan a filtros pequeños (se recuerdan en `tiecoms:homeTab`). Menciones abre la bandeja de menciones.
+- El selector Lista | Árbol va junto a ☰ en la pestaña Grupos. Ya no hay bloque «Fijados» aparte: las fijadas van arriba en cada vista.
+
+### Asuntos contraíbles
+Como el 26-sep-2026: contraídos por defecto, chip «◆ N · M!», se recuerda por dispositivo (`tiecoms:issuesOpen`), tocar el resto de la
+fila abre el chat. Funciona igual en Lista. En pantallas pequeñas los asuntos abiertos son sub-filas compactas con sangría, en una línea
+(◆ título, estado si en curso/esperando, fecha límite pequeña a la derecha, en rojo si venció).
+
+### Navegar un chat largo
+1. **Abrir en el primer no leído**: con `unread > 0` se toma al montar `readFrom = max(lastReadSeq, historyFromSeq)`; el primer no leído es el
+   primer mensaje con seq mayor (`firstUnread`, `apps/web/src/chat-nav.ts`). Si no está cargado se piden páginas antiguas (máx. 3,
+   `MAX_OLDER_PAGES`); si no aparece, se abre al final. Sobre él va la línea **«N mensajes nuevos»** (N = `unread` al abrir) y ese mensaje
+   vuelve a llevar autor y hora. La línea queda hasta salir del chat. Mientras se ubica no se marca leído; se marca al llegar al final.
+2. **⌄ «Ir al final»** abajo a la derecha, sobre el compositor, cuando se está a más de una pantalla del final o llegaron mensajes estando
+   arriba (globo con cuántos: seq actual − último seq visto abajo). Tocar: scroll animado al final y marca leído. Estando arriba los
+   mensajes nuevos no arrastran al final.
+3. **Píldora «↑ N nuevos»** arriba al centro cuando la línea quedó por encima de la vista; tocar salta a la línea.
+4. **«@»** encima del ⌄ con menciones a mí sin leer (desde lo leído al abrir, con `MessageDTO.mentions`) que aún no pasaron por pantalla;
+   tocar salta a la siguiente; cuando no quedan, desaparece.
+5. Web: **Fin** o **⌥↓ / Alt+↓** con el foco fuera del compositor baja al final.
+- Etiquetas: «Ir al final», «Ir a los mensajes nuevos», «Ir a la mención» (EN «Jump to latest», «Jump to new messages», «Jump to mention»).
+- `client.markRead` también pone `unreadMentions: 0` en local (antes la «@» de la fila quedaba hasta recargar).
+
+Pruebas: `apps/web/test/home-order.test.ts` (orden con fijados primero, separadores, «Empresa · Grupo», primer no leído).

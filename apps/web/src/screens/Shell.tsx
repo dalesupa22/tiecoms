@@ -4,12 +4,12 @@ import { client, useClient } from '../app-client.ts';
 import { asset, navigate, type Route } from '../router.ts';
 import { Avatar, counterpartOrg, orgById, personById } from '../ui.tsx';
 import { MentionsInbox } from './Mentions.tsx';
-import { openDialog } from '../actions.tsx';
 import type { ConversationDTO } from '@tiecoms/contracts';
 import { t } from '../i18n.ts';
 import { openAccountMenu } from './Profile.tsx';
-import { NewChatDialog } from './Chats.tsx';
-import { ConvItem, GroupsTree, dmConversations } from './Groups.tsx';
+import { ConvItem, GroupsTree, GroupsViewButton, dmConversations } from './Groups.tsx';
+import { isMac, openCreateMenu, openNewMessage, quickKey } from './Quick.tsx';
+import { activityOf, isMuted, pendingOf } from '../home-order.ts';
 
 const NAV = [
   { name: 'today', label: 'nav.today', ico: '◑', to: '/' },
@@ -37,25 +37,9 @@ export function groupWorkspaces(d: BootstrapDTO) {
   return [...groups.values()];
 }
 
-// ---------- Orden de Inicio (mismas reglas en web, iOS y Android) ----------
-/** Actividad: el último mensaje de una persona si lo hay; si no, el último mensaje. */
-export const activityOf = (c: ConversationDTO) => c.lastHumanPreview?.createdAt ?? c.lastMessageAt ?? '';
-/** Con no leídos (no silenciada) cuenta como pendiente; silenciada con no leídos cuenta como leída. */
-export const pendingOf = (c: ConversationDTO) => (c.unread > 0 && (!isMuted(c) || (c.unreadMentions ?? 0) > 0) ? c.unread : 0);
-/**
- * Primero las que tienen no leídos, luego el resto; en cada bloque las fijadas arriba y después por
- * actividad descendente. Desempate por id para que el orden sea estable.
- */
-export function compareConversations(a: ConversationDTO, b: ConversationDTO) {
-  // Una mención sin leer sube arriba del todo (aunque la conversación esté silenciada).
-  const ma = (a.unreadMentions ?? 0) > 0 ? 1 : 0, mb = (b.unreadMentions ?? 0) > 0 ? 1 : 0;
-  if (ma !== mb) return mb - ma;
-  const ua = pendingOf(a) > 0 ? 1 : 0, ub = pendingOf(b) > 0 ? 1 : 0;
-  if (ua !== ub) return ub - ua;
-  const pa = a.pinnedAt ? 1 : 0, pb = b.pinnedAt ? 1 : 0;
-  if (pa !== pb) return pb - pa;
-  return activityOf(b).localeCompare(activityOf(a)) || a.id.localeCompare(b.id);
-}
+// Orden de Inicio: home-order.ts (puro, con pruebas); se reexporta aquí por compatibilidad.
+export { activityOf, pendingOf, compareConversations } from '../home-order.ts';
+
 /** Espacios y empresas: por no leído agregado y luego por la actividad más reciente de sus conversaciones. */
 function groupRank(convs: ConversationDTO[]) {
   return { unread: convs.reduce((n, c) => n + pendingOf(c), 0), activity: convs.reduce((m, c) => (activityOf(c) > m ? activityOf(c) : m), '') };
@@ -107,26 +91,28 @@ function HomeTabs({ d, tab, onTab }: { d: BootstrapDTO; tab: HomeTab; onTab: (t:
   );
 }
 
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
-const openNewChat = () => openDialog((close) => <NewChatDialog onClose={close} />);
-
-/** Acceso rápido para iniciar un chat: botón arriba de la barra y ⌘K / Ctrl+K desde cualquier pantalla. */
+/**
+ * Arriba de la barra: ✎ Mensaje nuevo (también ⌘K / Ctrl+K desde cualquier pantalla) y «＋ Crear»
+ * (grupo, asunto, reunión o unirme con código). Los mismos dos botones que en Grupos, DMs, Asuntos y Calendario.
+ */
 function QuickChat() {
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
         if (document.querySelector('.modal')) return;
-        e.preventDefault(); openNewChat();
+        e.preventDefault(); openNewMessage();
       }
     };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, []);
-  const key = isMac ? '⌘K' : 'Ctrl+K';
   return (
-    <button className="quick-chat" onClick={openNewChat} title={t('chat.quickHint', { key })} aria-keyshortcuts={isMac ? 'Meta+K' : 'Control+K'}>
-      <span aria-hidden>✎</span><span className="grow">{t('chat.quick')}</span><kbd>{key}</kbd>
-    </button>
+    <div className="quick-bar">
+      <button className="quick-chat" onClick={openNewMessage} title={t('chat.quickHint', { key: quickKey })} aria-keyshortcuts={isMac ? 'Meta+K' : 'Control+K'}>
+        <span aria-hidden>✎</span><span className="grow">{t('chat.quick')}</span><kbd>{quickKey}</kbd>
+      </button>
+      <button className="quick-create-side" aria-haspopup="menu" title={t('quick.create')} aria-label={t('quick.create')} onClick={(e) => openCreateMenu(e.currentTarget)}>＋</button>
+    </div>
   );
 }
 
@@ -164,7 +150,7 @@ function Sidebar({ route }: { route: Route }) {
         </button>
       </nav>
       <div className="side-scroll">
-        <HomeTabs d={d} tab={tab} onTab={setTab} />
+        <div className="home-tabs-row"><HomeTabs d={d} tab={tab} onTab={setTab} />{tab !== 'mentions' && <GroupsViewButton tab={tab} />}</div>
         {tab === 'mentions' ? <MentionsInbox /> : <>
         {pinnedConvs.length > 0 && (
           <div className="side-pinned">
@@ -175,10 +161,10 @@ function Sidebar({ route }: { route: Route }) {
         <GroupsTree tab={tab} activeConv={activeConv} activeWs={activeWs} />
         <div className="row" style={{ padding: '14px 10px 2px' }}>
           <span className="eyebrow grow">{t('nav.dms')}</span>
-          <button className="btn ghost small" onClick={openNewChat} title={t('dms.new')} aria-label={t('dms.new')}>＋</button>
+          <button className="btn ghost small" onClick={openNewMessage} title={t('dms.new')} aria-label={t('dms.new')}>✎</button>
         </div>
         {dms.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />)}
-        {dms.length === 0 && tab === 'all' && <button className="side-conv" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)}><span className="hash">＋</span><span className="grow muted">{t('dms.new')}</span></button>}
+        {dms.length === 0 && tab === 'all' && <button className="side-conv" onClick={openNewMessage}><span className="hash">✎</span><span className="grow muted">{t('dms.new')}</span></button>}
         </>}
       </div>
       <button className="side-foot" style={{ border: 0, borderTop: '1px solid var(--line)', background: 'transparent', textAlign: 'left' }}
@@ -193,8 +179,6 @@ function Sidebar({ route }: { route: Route }) {
     </aside>
   );
 }
-
-const isMuted = (c: ConversationDTO) => !!c.mutedUntil && Date.parse(c.mutedUntil) > Date.now();
 
 /** Barra inferior móvil: 5 pestañas fijas (docs/GRUPOS.md). */
 function MobileTabs({ route }: { route: Route }) {

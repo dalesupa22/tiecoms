@@ -111,7 +111,7 @@ const es = {
   'groups.showAllIssues': 'Mostrar todos los asuntos', 'groups.hideAllIssues': 'Contraer todos los asuntos',
   'issue.complete': 'Completar', 'issue.markInProgress': 'Marcar en curso', 'issue.markWaiting': 'Marcar en espera', 'issue.open': 'Abrir',
   'issue.completed': 'Asunto completado', 'issue.undo': 'Deshacer',
-  'chat.quick': 'Nuevo chat', 'chat.quickHint': 'Nuevo chat ({key})',
+  'chat.quick': 'Mensaje nuevo', 'chat.quickHint': 'Mensaje nuevo ({key})',
   'groups.fromOrigin': 'desde {name}',
   'groups.sidechat': 'Sidechat',
   'groups.forWhom': '¿Para quién es?',
@@ -480,6 +480,12 @@ const es = {
   'mention.notInChat': '{name} no está en este chat', 'mention.addToChat': 'Añadir', 'mention.askSide': 'Preguntarle en un sidechat',
   'mention.dropped': 'No se pudo mencionar a: {names}', 'mention.picker': 'Mencionar a alguien', 'mention.noMatch': 'Nadie coincide en este chat.',
   'home.tab.mentions': 'Menciones', 'mention.loadMore': 'Ver más', 'mention.inConv': 'en {name}', 'mention.allLabel': '@todos',
+  // Barra de arriba: ✎ Mensaje nuevo · ＋ Crear, y búsqueda de personas, grupos y chats (docs/GRUPOS.md)
+  'quick.create': 'Crear', 'issue.where': 'Grupo o chat', 'compose.multi': 'Chat con varias personas',
+  'compose.multiHint': 'Elige a 2 o más personas. Pueden ser de tu equipo o de otras empresas.', 'compose.recent': 'Recientes',
+  'compose.search': 'Buscar persona, empresa o grupo', 'search.people': 'Personas', 'search.groups': 'Grupos', 'search.chats': 'Chats',
+  'search.opensChat': 'Abre el chat', 'search.none': 'Nada coincide con «{q}».', 'common.clear': 'Borrar', 'grp.foldMenu': 'Plegar y desplegar',
+  'dm.search': 'Buscar personas, grupos o chats', 'grp.search': 'Buscar grupos, empresas o personas',
 };
 
 type Key = keyof typeof es;
@@ -585,7 +591,7 @@ const en: Record<Key, string> = {
   'groups.showAllIssues': 'Show all subjects', 'groups.hideAllIssues': 'Collapse all subjects',
   'issue.complete': 'Complete', 'issue.markInProgress': 'Mark in progress', 'issue.markWaiting': 'Mark waiting', 'issue.open': 'Open',
   'issue.completed': 'Subject completed', 'issue.undo': 'Undo',
-  'chat.quick': 'New chat', 'chat.quickHint': 'New chat ({key})',
+  'chat.quick': 'New message', 'chat.quickHint': 'New message ({key})',
   'groups.fromOrigin': 'from {name}',
   'groups.sidechat': 'Sidechat',
   'groups.forWhom': 'Who is it for?',
@@ -931,6 +937,12 @@ const en: Record<Key, string> = {
   'mention.notInChat': '{name} is not in this chat', 'mention.addToChat': 'Add', 'mention.askSide': 'Ask them in a sidechat',
   'mention.dropped': 'Could not mention: {names}', 'mention.picker': 'Mention someone', 'mention.noMatch': 'Nobody in this chat matches.',
   'home.tab.mentions': 'Mentions', 'mention.loadMore': 'Load more', 'mention.inConv': 'in {name}', 'mention.allLabel': '@all',
+  // Top bar: ✎ New message · ＋ Create, and search for people, groups and chats (docs/GRUPOS.md)
+  'quick.create': 'Create', 'issue.where': 'Group or chat', 'compose.multi': 'Chat with several people',
+  'compose.multiHint': 'Pick 2 or more people. They can be on your team or at other companies.', 'compose.recent': 'Recent',
+  'compose.search': 'Search a person, company or group', 'search.people': 'People', 'search.groups': 'Groups', 'search.chats': 'Chats',
+  'search.opensChat': 'Opens the chat', 'search.none': 'Nothing matches “{q}”.', 'common.clear': 'Clear', 'grp.foldMenu': 'Collapse and expand',
+  'dm.search': 'Search people, groups or chats', 'grp.search': 'Search groups, companies or people',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };

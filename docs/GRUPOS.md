@@ -253,3 +253,22 @@ chat, para todos) y **Asunto** (no para terceros). Los dos se crean a mano.
   arman notificaciones locales (web, iOS, Android en primer plano) usan la misma etiqueta.
 - nginx: `POST /api/v1/conversations/:id/attachments` acepta hasta 26 MB (antes caía en el límite general de 128 KB
   y fotos de cámara y notas de voz de más de ~30 s respondían 413) y `/attachments/:id/thumb` hasta 1 MB.
+
+## Barra de arriba y búsqueda rápida en la web (27-sep-2026)
+
+Lo mismo que iOS 1.6.3, adaptado a escritorio:
+
+- Grupos, DMs, Asuntos y Calendario llevan arriba a la derecha **✎ Mensaje nuevo** y **＋ Crear** (Nuevo grupo · Nuevo asunto ·
+  Nueva reunión · Unirme con código). En escritorio la barra lateral repite el par arriba («Mensaje nuevo ⌘K» y «＋»); ⌘K / Ctrl+K
+  sigue abriendo Mensaje nuevo desde cualquier pantalla. Grupos ya no tiene «Unirme con código» ni «＋ Nuevo grupo» sueltos, y
+  Calendario pasa «＋ Reunión» al menú Crear (la semana y Hoy ‹ › quedan debajo del título).
+- Plegar y desplegar: botón de vista ☰ (a la izquierda del título en Grupos y junto a los filtros de la barra lateral). El estado de
+  plegado es uno solo para la barra y la pantalla.
+- «＋ Nuevo asunto» sin grupo de origen pide «Grupo o chat» (`issueDestinations`: donde escribo, sin hilos, no como tercero,
+  en el orden de Inicio; «Grupo · Empresa de la otra parte»).
+- Buscar en Grupos y DMs: Personas (clic = su directo; se crea con POST /chats {userIds:[id]} si no existe), Grupos y Chats; quien
+  ya tiene su directo entre los chats encontrados sale una sola vez. Enter abre el primer resultado; Esc borra.
+- Mensaje nuevo: buscador fijo arriba, «Chat con varias personas» (selección, chips, nombre opcional con 2+, «Crear chat de {n}»),
+  «Recientes» (personas de mis directos, máx. 8), personas por empresa (mi equipo primero) donde un clic abre el directo y, al buscar,
+  grupos. Flechas mueven, Enter abre (o marca en selección múltiple; ⌘/Ctrl+Enter crea). «Grupo en un espacio» sigue abajo.
+- Reglas puras en `apps/web/src/quick-search.ts` (mismas que `QuickSearch.swift`), probadas en `apps/web/test/quick-search.test.ts`.

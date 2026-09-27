@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from 'react';
 import type { BootstrapDTO, ConversationDTO, CreateGroupRequest, InvitationPreviewDTO, IssueDTO, MessageDTO, OrganizationDTO, OversightDTO, WorkspaceDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, getLang, locale, t, tn } from '../i18n.ts';
 import { navigate, queryParam } from '../router.ts';
 import { Avatar, ConvAvatar, Modal, OrgMark, badgeColor, conversationTitle, orgById, personById, timeLabel } from '../ui.tsx';
 import { conversationMenu, openDialog, workspaceMenu } from '../actions.tsx';
-import { copyText, menuProps, toast, type MenuItem } from '../menu.tsx';
+import { copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { newEvent } from './Calendar.tsx';
 import { InviteDialog } from './Dialogs.tsx';
 import { NewIssueDialog, isClosed, issueQuickMenu } from './Issues.tsx';
 import { MessageText } from './Mentions.tsx';
-import { NewChatDialog, StackedAvatars } from './Chats.tsx';
+import { StackedAvatars } from './Chats.tsx';
+import { QuickActions, QuickSearchField, QuickSearchSections, openNewMessage } from './Quick.tsx';
 import { compareConversations, matchesTab, pendingOf, activityOf, type HomeTab } from './Shell.tsx';
 
 // ---------- Árbol de Grupos (mismas reglas en web, iOS y Android: docs/GRUPOS.md) ----------
@@ -103,32 +104,58 @@ export function dmConversations(d: BootstrapDTO, tab: HomeTab = 'all') {
 }
 
 // ---------- Plegado (por dispositivo) ----------
-const FOLD_KEY = 'tiecoms:folded';
-function readFolded(): Set<string> { try { return new Set(JSON.parse(localStorage.getItem(FOLD_KEY) ?? '[]')); } catch { return new Set(); } }
+// Un solo estado para la barra lateral, la pantalla Grupos y su botón de vista (se guardan en este dispositivo).
+function persisted(key: string) {
+  let value: Set<string> = (() => { try { return new Set<string>(JSON.parse(localStorage.getItem(key) ?? '[]')); } catch { return new Set<string>(); } })();
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set: (next: Set<string>) => { value = next; try { localStorage.setItem(key, JSON.stringify([...next])); } catch {} listeners.forEach((l) => l()); },
+    subscribe: (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; },
+  };
+}
+const foldStore = persisted('tiecoms:folded');
+// Asuntos bajo cada grupo: contraídos por defecto; se recuerdan los que la persona abre (por dispositivo).
+const issuesStore = persisted('tiecoms:issuesOpen');
+const useStore = (st: ReturnType<typeof persisted>) => useSyncExternalStore(st.subscribe, st.get);
+
 function useFolded() {
-  const [folded, setFolded] = useState(readFolded);
-  const save = (next: Set<string>) => { setFolded(next); try { localStorage.setItem(FOLD_KEY, JSON.stringify([...next])); } catch {} };
+  const folded = useStore(foldStore);
   return {
     folded,
-    toggle: (k: string) => { const n = new Set(folded); if (n.has(k)) n.delete(k); else n.add(k); save(n); },
-    foldAll: (keys: string[]) => save(new Set([...folded, ...keys])),
-    unfoldAll: () => save(new Set()),
+    toggle: (k: string) => { const n = new Set(folded); if (n.has(k)) n.delete(k); else n.add(k); foldStore.set(n); },
+  };
+}
+type IssuesOpen = { open: Set<string>; toggle: (id: string) => void };
+function useIssuesOpen(): IssuesOpen {
+  const open = useStore(issuesStore);
+  return { open, toggle: (id) => { const n = new Set(open); if (n.has(id)) n.delete(id); else n.add(id); issuesStore.set(n); } };
+}
+
+/** Plegar y desplegar todo el árbol (botón de vista, cabeceras de sección y empresas). */
+function treeControls(sections: GroupSection[]): TreeMenu {
+  const allKeys = sections.flatMap((s) => s.companies.flatMap((c) => [c.key, ...c.workspaces.map((w) => `ws:${w.ws.id}`)]));
+  const withIssues = sections.flatMap((s) => s.companies.flatMap((c) => c.workspaces.flatMap((w) => w.groups.filter((g) => g.issues.length).map((g) => g.conv.id))));
+  return {
+    // Contraer todo deja visibles las secciones (solo pliega empresas y espacios).
+    foldAll: () => { foldStore.set(new Set([...foldStore.get(), ...allKeys])); issuesStore.set(new Set()); },
+    unfoldAll: () => { foldStore.set(new Set()); issuesStore.set(new Set(withIssues)); },
+    showIssues: () => issuesStore.set(new Set(withIssues)),
+    hideIssues: () => issuesStore.set(new Set()),
   };
 }
 
-// Asuntos bajo cada grupo: contraídos por defecto; se recuerdan los que la persona abre (por dispositivo).
-const ISSUES_KEY = 'tiecoms:issuesOpen';
-type IssuesOpen = { open: Set<string>; toggle: (id: string) => void; setAll: (ids: string[] | null) => void };
-function readIssuesOpen(): Set<string> { try { return new Set(JSON.parse(localStorage.getItem(ISSUES_KEY) ?? '[]')); } catch { return new Set(); } }
-function useIssuesOpen(): IssuesOpen {
-  const [open, setOpen] = useState(readIssuesOpen);
-  const save = (next: Set<string>) => { setOpen(next); try { localStorage.setItem(ISSUES_KEY, JSON.stringify([...next])); } catch {} };
-  return {
-    open,
-    toggle: (id) => { const n = new Set(open); if (n.has(id)) n.delete(id); else n.add(id); save(n); },
-    /** null contrae todos; una lista los muestra. */
-    setAll: (ids) => save(new Set(ids ?? [])),
-  };
+/** Botón de vista (plegar y desplegar), aparte de ✎ y «＋», que son para escribir y crear. */
+export function GroupsViewButton({ tab = 'all' }: { tab?: HomeTab }) {
+  const label = t('grp.foldMenu');
+  return (
+    <button className="icon-btn view-btn" title={label} aria-label={label} aria-haspopup="menu"
+      onClick={(e) => {
+        const s = client.getState();
+        const r = e.currentTarget.getBoundingClientRect();
+        openMenuAt(r.left, r.bottom + 4, treeMenuItems(treeControls(buildGroupTree(s.data!, s.issues, tab))));
+      }}>☰</button>
+  );
 }
 
 // ---------- Vista del árbol ----------
@@ -136,16 +163,9 @@ export function GroupsTree({ tab = 'all', activeConv = null, activeWs = null }: 
   const d = useClient((s) => s.data)!;
   const issues = useClient((s) => s.issues);
   const sections = useMemo(() => buildGroupTree(d, issues, tab), [d, issues, tab]);
-  const { folded, toggle, foldAll, unfoldAll } = useFolded();
+  const { folded, toggle } = useFolded();
   const issuesOpen = useIssuesOpen();
-  const allKeys = sections.flatMap((s) => s.companies.flatMap((c) => [c.key, ...c.workspaces.map((w) => `ws:${w.ws.id}`)]));
-  const withIssues = sections.flatMap((s) => s.companies.flatMap((c) => c.workspaces.flatMap((w) => w.groups.filter((g) => g.issues.length).map((g) => g.conv.id))));
-  const treeMenu: TreeMenu = {
-    foldAll: () => { foldAll(allKeys); issuesOpen.setAll(null); },
-    unfoldAll: () => { unfoldAll(); issuesOpen.setAll(withIssues); },
-    showIssues: () => issuesOpen.setAll(withIssues),
-    hideIssues: () => issuesOpen.setAll(null),
-  };
+  const treeMenu = treeControls(sections);
 
   return (
     <div className="groups-tree">
@@ -337,29 +357,37 @@ export function DmsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; act
   return <>{list.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />)}</>;
 }
 
-// ---------- Pantallas móviles: Grupos y DMs ----------
+// ---------- Pantallas Grupos y DMs (pestañas en móvil) ----------
+// Arriba siempre ✎ Mensaje nuevo y «＋ Crear»; al buscar también salen personas, grupos y chats (docs/GRUPOS.md).
 export function GroupsScreen() {
+  const [q, setQ] = useState('');
+  const searching = !!q.trim();
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 760 }}>
-      <div className="row"><h1 className="grow">{t('nav.groups')}</h1>
-        <button className="btn small" onClick={() => openDialog((close) => <JoinWithCodeDialog onClose={close} />)}>{t('join.title')}</button>
-        <button className="btn primary small" onClick={() => openCreateGroup()}>＋ {t('groups.new')}</button>
+      <div className="row page-head"><GroupsViewButton /><h1 className="grow">{t('nav.groups')}</h1><QuickActions /></div>
+      <QuickSearchField value={q} onChange={setQ} placeholder={t('grp.search')} order={['groups', 'people', 'chats']} />
+      <div className="card" style={{ padding: 6, marginTop: 10 }}>
+        {searching ? <QuickSearchSections query={q} order={['groups', 'people', 'chats']} /> : <GroupsTree />}
       </div>
-      <div className="card" style={{ padding: 6, marginTop: 14 }}><GroupsTree /></div>
     </div></div>
   );
 }
 
 export function DmsScreen() {
   const d = useClient((s) => s.data)!;
+  const [q, setQ] = useState('');
   const n = dmConversations(d).length;
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 760 }}>
-      <div className="row"><h1 className="grow">{t('nav.dms')}</h1>
-        <button className="btn primary small" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)}>＋ {t('dms.new')}</button>
-      </div>
-      <div className="card" style={{ padding: 6, marginTop: 14 }}>
-        {n ? <DmsList /> : <div className="empty">{t('dms.empty')}</div>}
+      <div className="row page-head"><h1 className="grow">{t('nav.dms')}</h1><QuickActions /></div>
+      <QuickSearchField value={q} onChange={setQ} placeholder={t('dm.search')} order={['chats', 'people', 'groups']} />
+      <div className="card" style={{ padding: 6, marginTop: 10 }}>
+        {q.trim() ? <QuickSearchSections query={q} order={['chats', 'people', 'groups']} />
+          : n ? <DmsList /> : (
+            <div className="empty">{t('dms.empty')}
+              <div style={{ marginTop: 10 }}><button className="btn primary small" onClick={openNewMessage}>✎ {t('dms.new')}</button></div>
+            </div>
+          )}
       </div>
     </div></div>
   );

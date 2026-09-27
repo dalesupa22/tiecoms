@@ -5,6 +5,8 @@ import { errorText, locale, t } from '../i18n.ts';
 import { navigate } from '../router.ts';
 import { Avatar, Modal, conversationTitle, orgById, personById } from '../ui.tsx';
 import { menuProps, toast, type MenuItem } from '../menu.tsx';
+import { destinationLabel, issueDestinations } from '../quick-search.ts';
+import { QuickActions } from './Quick.tsx';
 
 export const ISSUE_STATUSES: IssueStatus[] = ['open', 'in_progress', 'waiting', 'done', 'cancelled'];
 const CLOSED = new Set<IssueStatus>(['done', 'cancelled']);
@@ -71,11 +73,14 @@ export function IssueRow({ i, showWhere = true, onOpen }: { i: IssueDTO; showWhe
   );
 }
 
+/** Sin conversationId (desde «＋ Crear») se elige el grupo o chat: donde escribo y no soy tercero, el más reciente primero. */
 export function NewIssueDialog({ conversationId, originMessageId, defaultTitle = '', onClose, onCreated }: {
-  conversationId: string; originMessageId?: string; defaultTitle?: string; onClose: () => void; onCreated?: (i: IssueDTO) => void;
+  conversationId?: string; originMessageId?: string; defaultTitle?: string; onClose: () => void; onCreated?: (i: IssueDTO) => void;
 }) {
   const d = useClient((s) => s.data)!;
-  const members = membersOf(d, conversationId);
+  const destinations = useMemo(() => (conversationId ? [] : issueDestinations(d)), [d, conversationId]);
+  const [conv, setConv] = useState(conversationId ?? destinations[0]?.id ?? '');
+  const members = membersOf(d, conv);
   const [title, setTitle] = useState(defaultTitle);
   const [ownerId, setOwnerId] = useState(d.me.id);
   const [due, setDue] = useState('');
@@ -83,9 +88,10 @@ export function NewIssueDialog({ conversationId, originMessageId, defaultTitle =
   const [error, setError] = useState<string | null>(null);
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (!conv) return;
     setBusy(true); setError(null);
     try {
-      const i = await client.createIssue(conversationId, { title, ownerId, dueDate: due || null, originMessageId: originMessageId ?? null });
+      const i = await client.createIssue(conv, { title, ownerId, dueDate: due || null, originMessageId: originMessageId ?? null });
       onCreated?.(i);
       onClose();
     } catch (err) { setError(errorText(err)); } finally { setBusy(false); }
@@ -94,6 +100,13 @@ export function NewIssueDialog({ conversationId, originMessageId, defaultTitle =
     <Modal title={t('issue.newTitle')} onClose={onClose}>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <label className="field"><span>{t('issue.title')}</span><input className="input" required minLength={2} maxLength={200} autoFocus value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+        {!conversationId && (
+          <label className="field"><span>{t('issue.where')}</span>
+            <select className="input" value={conv} onChange={(e) => { setConv(e.target.value); setOwnerId(d.me.id); }}>
+              {destinations.map((c) => <option key={c.id} value={c.id}>{destinationLabel(d, c, conversationTitle(d, c))}</option>)}
+            </select>
+          </label>
+        )}
         <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
           <label className="field grow"><span>{t('issue.owner')}</span>
             <select className="input" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
@@ -103,7 +116,7 @@ export function NewIssueDialog({ conversationId, originMessageId, defaultTitle =
           <label className="field"><span>{t('issue.due')}</span><input className="input" type="date" value={due} onChange={(e) => setDue(e.target.value)} /></label>
         </div>
         {error && <div className="error">{error}</div>}
-        <div className="modal-actions"><button type="button" className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" disabled={busy}>{t('issue.create')}</button></div>
+        <div className="modal-actions"><button type="button" className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" disabled={busy || !conv}>{t('issue.create')}</button></div>
       </form>
     </Modal>
   );
@@ -223,7 +236,7 @@ export function IssuesScreen() {
   const label = { mine: t('issue.mine'), open: t('issue.allOpen'), closed: t('issue.closed') };
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 900 }}>
-      <h1>{t('nav.issues')}</h1>
+      <div className="row page-head"><h1 className="grow">{t('nav.issues')}</h1><QuickActions /></div>
       <div className="muted" style={{ maxWidth: 680 }}>{t('issue.pageSub')}</div>
       <div className="seg" style={{ margin: '16px 0', maxWidth: 420 }}>
         {(['mine', 'open', 'closed'] as const).map((f) => <button key={f} className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>{label[f]}</button>)}

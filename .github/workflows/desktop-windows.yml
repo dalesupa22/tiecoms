@@ -1,0 +1,38 @@
+# Chaggu para Windows: instaladores .exe (NSIS, por usuario, sin admin) y .msi (para TI de empresas).
+# Corre en ramas desktop*, en tags desktop-v* o a mano. Los instaladores quedan como artefacto del run.
+# Firma: cuando exista la cuenta de Azure Trusted Signing se agregan los secretos AZURE_* y el paso de firma.
+name: desktop-windows
+on:
+  workflow_dispatch:
+  push:
+    branches: [desktop, desktop-windows]
+    tags: ['desktop-v*']
+    paths: ['apps/desktop/**', 'apps/web/**', 'packages/**', '.github/workflows/desktop-windows.yml']
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: x86_64-pc-windows-msvc }
+      - uses: swatinem/rust-cache@v2
+        with: { workspaces: apps/desktop/src-tauri }
+      - run: npm ci --ignore-scripts
+      - name: Compilar instaladores
+        working-directory: apps/desktop
+        shell: bash
+        run: npx tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi
+      - name: Pruebas de la envoltura
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --release --target x86_64-pc-windows-msvc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chaggu-windows
+          path: |
+            apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          if-no-files-found: error

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.material.icons.filled.Close
@@ -79,6 +80,7 @@ import com.tiecoms.app.core.ConnectionStatus
 import com.tiecoms.app.core.ConversationDTO
 import com.tiecoms.app.core.GroupsTree
 import com.tiecoms.app.core.Names
+import com.tiecoms.app.core.QuickSearch
 import com.tiecoms.app.core.OrganizationDTO
 import com.tiecoms.app.core.WorkspaceDTO
 import kotlinx.coroutines.launch
@@ -116,6 +118,7 @@ private sealed interface GroupsDialog {
 fun GroupsScreen(
     workspaceFilter: String?, onClearFilter: () -> Unit, onOpen: (String) -> Unit,
     onIssuesOf: (String) -> Unit, onOpenIssue: (String) -> Unit, onDetails: (String) -> Unit, onMentions: () -> Unit, onJoinCode: (String) -> Unit,
+    onReminders: () -> Unit, quick: QuickNav,
 ) {
     val client = LocalClient.current
     val ctx = LocalContext.current
@@ -151,8 +154,8 @@ fun GroupsScreen(
         justExpanded = if (k in collapsed) null else conversationId
         toggle(k)
     }
-    var overflow by remember { mutableStateOf(false) }
-    /** Plegar todo · Expandir todo · Mostrar / Contraer todos los asuntos (menú ⋮ y pulsación larga de las cabeceras). */
+    var foldMenu by remember { mutableStateOf(false) }
+    /** Plegar todo · Expandir todo · Mostrar / Contraer todos los asuntos (botón de vista a la izquierda y pulsación larga de las cabeceras). */
     fun foldItems(): List<SheetItem?> {
         val issueKeys = GroupsTree.allIssueKeys(data, issues)
         val shown = issueKeys.count { it in collapsed }
@@ -164,20 +167,30 @@ fun GroupsScreen(
         )
     }
     val setIssueStatus = rememberIssueStatusSetter()
+    val openPerson = rememberOpenPerson(data, onOpen)
+    // Al buscar: también personas (tocar = escribirle) y chats; los grupos ya salen en el árbol.
+    val quickResults = remember(data, query) {
+        if (query.isBlank()) QuickSearch.Results()
+        else QuickSearch.Results(people = QuickSearch.people(data, query), chats = QuickSearch.chats(data, query, { Names.conversationTitle(it, data, internalFallback, convFallback) }))
+    }
+    // Recordatorios vencidos: antes avisaba la campanita del menú; ahora una fila arriba de la lista.
+    val dueReminders = state.reminders.count { r -> parseInstant(r.remindAt)?.let { !it.isAfter(java.time.Instant.now()) } == true }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.nav_groups), fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() }) },
-                actions = {
-                    IconButton(onClick = { dialog = GroupsDialog.NewGroup(NewGroupPreset(company = false)) }, modifier = Modifier.testTag("newGroup")) {
-                        Icon(Icons.Filled.Add, stringResource(R.string.grp_new))
-                    }
+                // Vista (plegar/desplegar) a la izquierda, aparte de ✏️ y «＋», que son para escribir y crear.
+                // Sin «⋮»: Archivos, Recordatorios, Trazo y WhatsApp viven en «Tú».
+                navigationIcon = {
                     Box {
-                        IconButton(onClick = { overflow = true }, modifier = Modifier.testTag("groupsMenu")) { Icon(Icons.Filled.MoreVert, stringResource(R.string.menu_more)) }
-                        AnchoredMenu(overflow, if (overflow) foldItems() else emptyList(), { overflow = false })
+                        IconButton(onClick = { foldMenu = true }, modifier = Modifier.testTag("home.fold")) {
+                            Icon(Icons.AutoMirrored.Filled.FormatListBulleted, stringResource(R.string.grp_fold_menu))
+                        }
+                        AnchoredMenu(foldMenu, if (foldMenu) foldItems() else emptyList(), { foldMenu = false })
                     }
                 },
+                title = { Text(stringResource(R.string.nav_groups), fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() }) },
+                actions = { QuickActions(quick) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -209,7 +222,18 @@ fun GroupsScreen(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 LazyColumn(Modifier.fillMaxSize().testTag("conversationList")) {
-                    items(rows, key = { it.key }) { row ->
+                    if (dueReminders > 0) item(key = "dueReminders") {
+                        Row(Modifier.fillMaxWidth().clickable(onClick = onReminders).heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp).testTag("home.dueReminders"),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text("🔔", style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.width(10.dp))
+                            Text("${stringResource(R.string.rem_title)} ($dueReminders)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    // Con personas o chats encontrados, el «nada coincide» del árbol sobra.
+                    items(rows.filter { !(it is GroupsTree.Empty && it.filtered && query.isNotBlank() && !quickResults.isEmpty) }, key = { it.key }) { row ->
                         // Al cambiar el orden (llega un no leído), la fila se desliza a su lugar en vez de saltar.
                         Box(Modifier.animateItem()) { when (row) {
                             is GroupsTree.Section -> SectionRow(row, myOrg,
@@ -260,6 +284,8 @@ fun GroupsScreen(
                             ) else GroupsEmpty(onNew = { dialog = GroupsDialog.NewGroup(NewGroupPreset(company = false)) }, onJoin = { dialog = GroupsDialog.JoinCode })
                         } }
                     }
+                    if (query.isNotBlank()) quickSearchSections(data, quickResults, hidePeople = emptySet(), internalFallback, convFallback,
+                        onPerson = { p -> openPerson(p) }, onConv = onOpen)
                     item { Spacer(Modifier.heightIn(min = 24.dp)) }
                 }
             }
@@ -353,7 +379,7 @@ private fun GroupsEmpty(onNew: () -> Unit, onJoin: () -> Unit) {
 /** DMs: directos y chats `multi`, incluidos los sidechats (con su burbuja «Sidechat» y «desde #Grupo»). */
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (String) -> Unit, onMentions: () -> Unit) {
+fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (String) -> Unit, onMentions: () -> Unit, quick: QuickNav) {
     val client = LocalClient.current
     val ctx = LocalContext.current
     val snackbar = LocalSnackbar.current
@@ -371,15 +397,18 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
     var remindFor by remember { mutableStateOf<ConversationDTO?>(null) }
     var leaveFor by remember { mutableStateOf<ConversationDTO?>(null) }
     val sidechat = stringResource(R.string.dm_sidechat)
+    val searching = query.isNotBlank()
+    // Al buscar: personas con las que aún no hay directo en la lista (tocar = escribirle) y grupos; los chats ya son la lista.
+    val quickResults = remember(data, query) {
+        if (!searching) QuickSearch.Results()
+        else QuickSearch.Results(people = QuickSearch.people(data, query), groups = QuickSearch.groups(data, query, { Names.conversationTitle(it, data, internalFallback, convFallback) }))
+    }
+    val openPerson = rememberOpenPerson(data, onOpen)
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.nav_dms), fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() }) },
-                actions = {
-                    TextButton(onClick = onNewMessage, modifier = Modifier.testTag("newChat")) {
-                        Icon(Icons.Filled.Edit, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.dm_new))
-                    }
-                },
+                actions = { QuickActions(quick) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -387,7 +416,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             ConnectionBanner(state.connection)
-            SearchField(query) { query = it }
+            SearchField(query, placeholder = stringResource(R.string.dm_search)) { query = it }
             val all = data.conversations.count { GroupsTree.isDm(data, it) }
             val unread = data.conversations.count { GroupsTree.isDm(data, it) && com.tiecoms.app.core.HomeTree.pending(it, System.currentTimeMillis()) > 0 }
             FilterPills(listOf("ALL" to R.string.home_tab_all, "UNREAD" to R.string.home_tab_unread), if (unreadOnly) "UNREAD" else "ALL",
@@ -398,12 +427,13 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                 modifier = Modifier.fillMaxSize(),
             ) {
                 LazyColumn(Modifier.fillMaxSize().testTag("dmList")) {
-                    if (list.isEmpty()) item {
+                    if (list.isEmpty() && (!searching || quickResults.isEmpty)) item {
                         Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(stringResource(if (query.isNotBlank() || unreadOnly) R.string.home_empty_filter else R.string.dm_empty), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (query.isBlank() && !unreadOnly) Button(onClick = onNewMessage) { Text(stringResource(R.string.dm_new)) }
                         }
                     }
+                    if (searching && list.isNotEmpty()) item(key = "chatsHeader") { QuickHeader(R.string.search_chats) }
                     items(list, key = { it.id }) { c ->
                         val origin = GroupsTree.sideOrigin(data, c)
                         Box(Modifier.animateItem()) {
@@ -415,6 +445,8 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                                 onDismissMenu = { menuFor = null }, onLongPress = { menuFor = c.id }, onIssues = {}) { onOpen(c.id) }
                         }
                     }
+                    if (searching) quickSearchSections(data, quickResults, hidePeople = QuickSearch.directPeople(list), internalFallback, convFallback,
+                        onPerson = { p -> openPerson(p) }, onConv = onOpen)
                     item { Spacer(Modifier.heightIn(min = 24.dp)) }
                 }
             }
@@ -424,12 +456,28 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
 }
 
 // ---------- Piezas compartidas ----------
+/** Tocar a una persona en la búsqueda: su directo (el que existe o uno nuevo, POST /chats). */
 @Composable
-private fun SearchField(query: String, onChange: (String) -> Unit) {
+private fun rememberOpenPerson(data: BootstrapDTO, onOpen: (String) -> Unit): (com.tiecoms.app.core.PersonDTO) -> Unit {
+    val ctx = LocalContext.current
+    val client = LocalClient.current
+    val container = LocalContainer.current
+    val scope = rememberCoroutineScope()
+    return { p ->
+        scope.launch {
+            try { val cid = openDirect(client, data, p.id); kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onOpen(cid) } }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { container.toast(errorText(ctx, e)) }
+        }
+    }
+}
+/** Buscador fijo arriba de la lista (fuera del LazyColumn: no se esconde al desplazar ni tapa el contenido). */
+@Composable
+internal fun SearchField(query: String, placeholder: String? = null, tag: String = "search", onChange: (String) -> Unit) {
     val searchFocus = androidx.compose.ui.platform.LocalFocusManager.current
     OutlinedTextField(
         value = query, onValueChange = onChange,
-        placeholder = { Text(stringResource(R.string.search)) },
+        placeholder = { Text(placeholder ?: stringResource(R.string.search), maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
         trailingIcon = if (query.isNotEmpty()) { { IconButton(onClick = { onChange("") }) { Icon(Icons.Filled.Close, stringResource(R.string.clear_search)) } } } else null,
         singleLine = true,
@@ -437,7 +485,7 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
         // La tecla «buscar» no tiene acción por defecto: sin esto el teclado se quedaría abierto.
         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { searchFocus.clearFocus() }),
         shape = MaterialTheme.shapes.extraLarge,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("search"),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag(tag),
     )
 }
 

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 1.6.3: barra de arriba ✏️ Mensaje nuevo · ＋ Crear, y búsqueda de personas, grupos y chats (igual que iOS) -->
+    <string name="quick_create">Crear</string>
+    <string name="issue_where">Grupo o chat</string>
+    <string name="compose_multi">Chat con varias personas</string>
+    <string name="compose_multi_hint">Elige a 2 o más personas. Pueden ser de tu equipo o de otras empresas.</string>
+    <string name="compose_recent">Recientes</string>
+    <string name="compose_search">Buscar persona, empresa o grupo</string>
+    <string name="search_people">Personas</string>
+    <string name="search_groups">Grupos</string>
+    <string name="search_chats">Chats</string>
+    <string name="search_opens_chat">Abre el chat</string>
+    <string name="grp_fold_menu">Plegar y desplegar</string>
+    <string name="dm_search">Buscar personas, grupos o chats</string>
+</resources>

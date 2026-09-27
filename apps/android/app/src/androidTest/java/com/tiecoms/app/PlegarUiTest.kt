@@ -77,7 +77,7 @@ class PlegarUiTest {
             compose.onNodeWithTag("email").performTextInput(email)
             compose.onNodeWithTag("password").performTextInput(password)
             compose.onNodeWithTag("login").performScrollTo().performClick()
-            compose.waitUntilAtLeastOneExists(hasTestTag("newGroup"), 20_000)
+            compose.waitUntilAtLeastOneExists(hasTestTag("quick.create"), 20_000)
             val client = app.container.client.value
 
             // Cinco asuntos en el grupo, uno vencido.
@@ -120,15 +120,15 @@ class PlegarUiTest {
             log("Completar con pulsación larga: sale de Grupos y baja el conteo")
 
             // Menú ⋮: contraer todos los asuntos, plegar todo, expandir todo.
-            compose.onNodeWithTag("groupsMenu").performClick()
+            compose.onNodeWithTag("home.fold").performClick()
             compose.waitUntilAtLeastOneExists(hasTestTag("menuHideAllIssues"), 5_000)
             shot("05-menu-grupos")
             compose.onNodeWithTag("menuHideAllIssues").performClick()
             compose.waitUntil(5_000) { !exists("moreIssues-$conv") }
-            compose.onNodeWithTag("groupsMenu").performClick()
+            compose.onNodeWithTag("home.fold").performClick()
             compose.onNodeWithTag("menuFoldAll").performClick()
             compose.waitUntil(5_000) { !exists("conv-$conv") }
-            compose.onNodeWithTag("groupsMenu").performClick()
+            compose.onNodeWithTag("home.fold").performClick()
             compose.onNodeWithTag("menuExpandAll").performClick()
             compose.waitUntilAtLeastOneExists(hasTestTag("moreIssues-$conv"), 5_000)
             log("Plegar todo / Expandir todo / Contraer todos los asuntos")

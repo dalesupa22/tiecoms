@@ -84,7 +84,7 @@ class VozUiTest {
             compose.onNodeWithTag("email").performTextInput(email)
             compose.onNodeWithTag("password").performTextInput(password)
             compose.onNodeWithTag("login").performScrollTo().performClick()
-            compose.waitUntilAtLeastOneExists(hasTestTag("newGroup"), 45_000)
+            compose.waitUntilAtLeastOneExists(hasTestTag("quick.create"), 45_000)
             openChat()
             val only = arg("only")
             if (only != "photos") scenario = voice(scenario)

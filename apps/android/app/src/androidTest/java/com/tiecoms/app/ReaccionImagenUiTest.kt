@@ -140,7 +140,7 @@ class ReaccionImagenUiTest {
             compose.onNodeWithTag("email").performTextInput(email)
             compose.onNodeWithTag("password").performTextInput(password)
             compose.onNodeWithTag("login").performScrollTo().performClick()
-            compose.waitUntilAtLeastOneExists(hasTestTag("newGroup"), 20_000)
+            compose.waitUntilAtLeastOneExists(hasTestTag("quick.create"), 20_000)
             runBlocking { peer.login(peerEmail, password) }
             val peerId = peer.myId!!
             val direct = runBlocking { client.createChat(listOf(peerId), null).id }

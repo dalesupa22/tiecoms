@@ -328,7 +328,7 @@ fun EventCard(ev: CalendarEventDTO, data: BootstrapDTO, onOpen: (String) -> Unit
 // ---------- Agenda semanal (vista de lista por día, como la web en móvil) ----------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AgendaScreen(onOpenEvent: (String) -> Unit) {
+fun AgendaScreen(onOpenEvent: (String) -> Unit, quick: QuickNav? = null) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val st by client.state.collectAsStateWithLifecycle()
@@ -336,7 +336,6 @@ fun AgendaScreen(onOpenEvent: (String) -> Unit) {
     var weekStr by rememberSaveable { mutableStateOf(LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).toString()) }
     val week = LocalDate.parse(weekStr)
     var error by remember { mutableStateOf<String?>(null) }
-    var creating by rememberSaveable { mutableStateOf(false) }
     val zone = ZoneId.systemDefault()
     val from = week.atStartOfDay(zone).toInstant(); val to = week.plusDays(7).atStartOfDay(zone).toInstant()
     LaunchedEffect(weekStr) { error = null; runCatching { client.loadEvents(from, to) }.onFailure { error = errorText(ctx, it) } }
@@ -346,22 +345,22 @@ fun AgendaScreen(onOpenEvent: (String) -> Unit) {
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.nav_agenda), fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() }) },
-                actions = {
-                    TextButton(onClick = { weekStr = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).toString() }) { Text(stringResource(R.string.cal_today)) }
-                    IconButton(onClick = { weekStr = week.minusWeeks(1).toString() }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, stringResource(R.string.cal_prev)) }
-                    IconButton(onClick = { weekStr = week.plusWeeks(1).toString() }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, stringResource(R.string.cal_next)) }
-                },
+                // ✏️ y «＋ Crear» como en las demás pestañas («Nueva reunión» vive en «＋»); la semana se mueve abajo.
+                actions = { if (quick != null) QuickActions(quick) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
-        },
-        floatingActionButton = {
-            androidx.compose.material3.ExtendedFloatingActionButton(onClick = { creating = true }, modifier = Modifier.testTag("newMeeting")) { Text(stringResource(R.string.cal_new)) }
         },
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
     ) { pad ->
         LazyColumn(Modifier.padding(pad).fillMaxSize().padding(horizontal = 16.dp).testTag("agenda")) {
             item {
-                Text(stringResource(R.string.cal_week, week.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG))), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+                androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    IconButton(onClick = { weekStr = week.minusWeeks(1).toString() }, modifier = Modifier.testTag("agenda.prev")) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, stringResource(R.string.cal_prev)) }
+                    Text(stringResource(R.string.cal_week, week.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG))), color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { weekStr = week.plusWeeks(1).toString() }, modifier = Modifier.testTag("agenda.next")) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, stringResource(R.string.cal_next)) }
+                    TextButton(onClick = { weekStr = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).toString() }, modifier = Modifier.testTag("agenda.today")) { Text(stringResource(R.string.cal_today)) }
+                }
                 ErrorText(error)
                 if (events.isEmpty()) EmptyNote(stringResource(R.string.cal_empty))
             }
@@ -382,9 +381,8 @@ fun AgendaScreen(onOpenEvent: (String) -> Unit) {
                     items(inChats, key = { it.id }) { EventRow(it, data, onOpen = onOpenEvent) }
                 }
             }
-            item { Spacer(Modifier.heightIn(min = 88.dp)) }
+            item { Spacer(Modifier.heightIn(min = 24.dp)) }
         }
     }
-    if (creating) EventDialog(null, onClose = { creating = false })
 }
 

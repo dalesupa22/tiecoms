@@ -69,7 +69,7 @@ class LanguageUiTest {
             compose.onNodeWithTag("email").performTextInput(email)
             compose.onNodeWithTag("password").performTextInput(password)
             compose.onNodeWithTag("login").performScrollTo().performClick()
-            compose.waitUntilAtLeastOneExists(hasTestTag("newGroup"), 45_000)
+            compose.waitUntilAtLeastOneExists(hasTestTag("quick.create"), 45_000)
 
             pick(AppLanguage.EN)
             compose.waitUntil(10_000) { hasLabel("Subjects") }
@@ -83,7 +83,7 @@ class LanguageUiTest {
             // Persistencia: se cierra y se vuelve a abrir la app.
             scenario.close()
             scenario = ActivityScenario.launch(MainActivity::class.java)
-            compose.waitUntilAtLeastOneExists(hasTestTag("newGroup"), 30_000)
+            compose.waitUntilAtLeastOneExists(hasTestTag("quick.create"), 30_000)
             assertEquals(AppLanguage.ES, AppLocale.current(app))
             compose.waitUntil(10_000) { hasLabel("Asuntos") }
             Log.i("TieComsUiTest", "Idioma: EN → Subjects, ES → Asuntos, persiste al reabrir")

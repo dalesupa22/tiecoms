@@ -217,6 +217,13 @@ private fun MainNav() {
     fun openConv(id: String, seq: Long? = null, side: String? = null, messageId: String? = null) =
         nav.navigate("conv/$id?m=${seq ?: ""}&side=${side ?: ""}&mid=${messageId ?: ""}") { launchSingleTop = true }
     fun tab(r: String) = nav.navigate(r) { popUpTo(nav.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true }
+    // ✏️ y «＋ Crear» de Grupos, DMs, Asuntos y Calendario (docs/GRUPOS.md › Barra de arriba).
+    val quick = QuickNav(
+        onCompose = { nav.navigate("newchat") { launchSingleTop = true } },
+        onOpen = { id -> openConv(id) },
+        onOpenIssue = { i -> nav.navigate("issue/$i") },
+        onJoinCode = { code -> nav.navigate("invite/$code") { launchSingleTop = true } },
+    )
 
     // El aviso se lanza en un scope propio: al consumir el enlace cambia la clave del efecto y lo cancelaría.
     LaunchedEffect(pending, state.data != null, backStack != null) {
@@ -295,21 +302,24 @@ private fun MainNav() {
                     onOpenIssue = { i -> nav.navigate("issue/$i") },
                     onDetails = { c -> nav.navigate("details/$c") { launchSingleTop = true } },
                     onJoinCode = { code -> nav.navigate("invite/$code") { launchSingleTop = true } },
+                    onReminders = { nav.navigate("reminders") { launchSingleTop = true } },
+                    quick = quick,
                 )
             }
             composable("dms") {
                 DmsScreen(
                     onOpen = { id -> openConv(id) },
-                    onNewMessage = { nav.navigate("newchat?person=1") { launchSingleTop = true } },
+                    onNewMessage = quick.onCompose,
                     onDetails = { c -> nav.navigate("details/$c") { launchSingleTop = true } },
                     onMentions = { nav.navigate("mentions") { launchSingleTop = true } },
+                    quick = quick,
                 )
             }
-            composable("issues") { IssuesScreen(onOpen = { nav.navigate("issue/$it") }) }
+            composable("issues") { IssuesScreen(onOpen = { nav.navigate("issue/$it") }, quick = quick) }
             composable("issues-of/{conv}") {
                 IssuesScreen(onOpen = { i -> nav.navigate("issue/$i") }, conversationFilter = it.arguments?.getString("conv"), onBack = { nav.popBackStack() })
             }
-            composable("agenda") { AgendaScreen(onOpenEvent = { nav.navigate("event/$it") }) }
+            composable("agenda") { AgendaScreen(onOpenEvent = { nav.navigate("event/$it") }, quick = quick) }
             composable("settings") { SettingsScreen(onNavigate = { r -> nav.navigate(r) { launchSingleTop = true } }) }
             composable("oversight/{org}") {
                 OversightScreen(it.arguments?.getString("org") ?: "", onBack = { nav.popBackStack() }, onOpen = { c -> openConv(c) },
@@ -371,9 +381,9 @@ private fun MainNav() {
                     onDone = { c -> container.shareDraft = null; nav.popBackStack(); openConv(c) })
             }
             composable("mentions") { MentionsInboxScreen(onBack = { nav.popBackStack() }, onOpen = { c, seq -> openConv(c, seq) }) }
-            composable("newchat?person={person}", arguments = listOf(navArgument("person") { type = NavType.StringType; defaultValue = "" })) {
-                // Desde DMs («Mensaje nuevo»): solo persona o chat grupal (1 persona → directo, 2+ → chat grupal).
-                NewChatScreen(onBack = { nav.popBackStack() }, onOpened = { c -> nav.popBackStack(); openConv(c) }, personOnly = it.arguments?.getString("person") == "1")
+            composable("newchat") {
+                // «Mensaje nuevo» (✏️): un toque abre el directo; «Chat con varias personas» arma un chat grupal.
+                NewChatScreen(onBack = { nav.popBackStack() }, onOpened = { c -> nav.popBackStack(); openConv(c) })
             }
             composable("addmembers/{id}") {
                 AddMembersScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() })

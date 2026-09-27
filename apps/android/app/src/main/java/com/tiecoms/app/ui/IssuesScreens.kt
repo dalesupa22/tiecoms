@@ -187,7 +187,7 @@ fun IssueRow(i: IssueDTO, data: BootstrapDTO, showWhere: Boolean = true, onOpen:
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, onBack: (() -> Unit)? = null) {
+fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, onBack: (() -> Unit)? = null, quick: QuickNav? = null) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val st by client.state.collectAsStateWithLifecycle()
@@ -211,6 +211,8 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
             navigationIcon = { if (onBack != null) androidx.compose.material3.IconButton(onClick = onBack, modifier = Modifier.testTag("back")) {
                 androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
             title = { Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { heading() }) },
+            // Pestaña Asuntos: ✏️ y «＋ Crear» como en Grupos, DMs y Calendario (no en «Asuntos de un grupo»).
+            actions = { if (quick != null) QuickActions(quick) },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)) },
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
     ) { pad ->

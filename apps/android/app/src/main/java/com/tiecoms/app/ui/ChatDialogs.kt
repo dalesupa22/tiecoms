@@ -347,12 +347,17 @@ fun <T> Dropdown(label: String, options: List<Pair<T, String>>, selected: T, onS
 }
 
 @Composable
-fun NewIssueDialog(conversationId: String, originMessageId: String?, defaultTitle: String, onClose: () -> Unit, onCreated: (String) -> Unit) {
+/** Asunto nuevo. [conversationId] null desde «＋ Crear»: se elige el grupo o chat (el más reciente primero). */
+fun NewIssueDialog(conversationId: String?, originMessageId: String?, defaultTitle: String, onClose: () -> Unit, onCreated: (String) -> Unit) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val scope = rememberCoroutineScope()
     val data = client.state.collectAsStateWithLifecycle().value.data ?: return
-    val members = humansOf(data, conversationId)
+    val internalFallback = stringResource(R.string.internal_default)
+    val convFallback = stringResource(R.string.conversation)
+    val destinations = remember(data, conversationId) { if (conversationId == null) com.tiecoms.app.core.QuickSearch.issueDestinations(data) else emptyList() }
+    var conv by rememberSaveable { mutableStateOf(conversationId ?: destinations.firstOrNull()?.id ?: "") }
+    val members = humansOf(data, conv)
     var title by rememberSaveable { mutableStateOf(defaultTitle) }
     var owner by rememberSaveable { mutableStateOf(data.me.id) }
     var due by rememberSaveable { mutableStateOf<String?>(null) }
@@ -361,13 +366,16 @@ fun NewIssueDialog(conversationId: String, originMessageId: String?, defaultTitl
     val you = stringResource(R.string.you); val guest = stringResource(R.string.common_guest)
     FormSheet(stringResource(R.string.issue_new_title), onClose, tag = "issueDialog") {
         OutlinedTextField(title, { title = it.take(200) }, label = { Text(stringResource(R.string.issue_title)) }, modifier = Modifier.fillMaxWidth().testTag("issueTitle"))
+        if (conversationId == null) Dropdown(stringResource(R.string.issue_where),
+            destinations.map { c -> c.id to com.tiecoms.app.core.QuickSearch.issueLabel(data, c) { Names.conversationTitle(it, data, internalFallback, convFallback) } },
+            conv, { conv = it; owner = data.me.id }, modifier = Modifier.fillMaxWidth(), tag = "issue.where")
         Dropdown(stringResource(R.string.issue_owner), members.map { p -> p.id to "${p.name}${if (p.id == data.me.id) " $you" else ""} · ${Names.org(data, p.orgId)?.name ?: guest}" }, owner, { owner = it })
         DateField(stringResource(R.string.issue_due), due?.let { LocalDate.parse(it) }, { due = it?.toString() }, allowClear = true, modifier = Modifier.fillMaxWidth())
         ErrorText(error)
-        DialogButtons(onClose, stringResource(R.string.issue_create), enabled = !busy && title.trim().length >= 2, confirmTag = "issueCreate") {
+        DialogButtons(onClose, stringResource(R.string.issue_create), enabled = !busy && title.trim().length >= 2 && conv.isNotEmpty(), confirmTag = "issueCreate") {
             busy = true; error = null
             scope.launch {
-                try { val i = client.createIssue(conversationId, title.trim(), owner, due, originMessageId); onClose(); onCreated(i.id) }
+                try { val i = client.createIssue(conv, title.trim(), owner, due, originMessageId); onClose(); onCreated(i.id) }
                 catch (e: Exception) { error = errorText(ctx, e) } finally { busy = false }
             }
         }

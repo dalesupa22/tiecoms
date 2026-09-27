@@ -261,19 +261,21 @@ class ShareUiTest {
 
         // §D Grupos ordenado por no leídos; «Mensaje nuevo» vive en DMs (docs/GRUPOS.md).
         compose.onNodeWithTag("back").performClick()
-        compose.waitUntilAtLeastOneExists(hasTestTag("newGroup"), 10_000)
+        compose.waitUntilAtLeastOneExists(hasTestTag("quick.create"), 10_000)
         Thread.sleep(600); shot("v4-08-inicio-orden")
         compose.onNodeWithTag("tab-dms").performClick()
-        compose.waitUntilAtLeastOneExists(hasTestTag("newChat"), 10_000)
-        compose.onNodeWithTag("newChat").performClick()
-        compose.waitUntilAtLeastOneExists(hasTestTag("createChat"), 10_000)
-        assertTrue("desde DMs, solo persona o chat grupal", !exists("chatModeSpace"))
+        compose.waitUntilAtLeastOneExists(hasTestTag("quick.compose"), 10_000)
+        compose.onNodeWithTag("quick.compose").performClick()
+        compose.waitUntilAtLeastOneExists(hasTestTag("compose.multi"), 10_000)
+        assertTrue("Mensaje nuevo: buscador fijo arriba", exists("compose.search"))
         Thread.sleep(400); shot("v4-09-nuevo-chat-persona")
         compose.onNodeWithTag("back").performClick()
         // Grupo en un espacio: el «+» de Grupos con la relación elegida (POST /groups).
         compose.onNodeWithTag("tab-home").performClick()
-        compose.waitUntilAtLeastOneExists(hasTestTag("newGroup"), 10_000)
-        compose.onNodeWithTag("newGroup").performClick()
+        compose.waitUntilAtLeastOneExists(hasTestTag("quick.create"), 10_000)
+        compose.onNodeWithTag("quick.create").performClick()
+        compose.waitUntilAtLeastOneExists(hasTestTag("create.group"), 5_000)
+        compose.onNodeWithTag("create.group").performClick()
         compose.waitUntilAtLeastOneExists(hasTestTag("forCompany"), 5_000)
         compose.onNodeWithTag("forCompany").performClick()
         val ws = client.meta(convId)!!.workspaceId!!

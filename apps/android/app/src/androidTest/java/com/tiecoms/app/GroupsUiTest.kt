@@ -71,7 +71,7 @@ class GroupsUiTest {
         compose.onNodeWithTag("email").performTextInput(email)
         compose.onNodeWithTag("password").performTextInput(password)
         compose.onNodeWithTag("login").performScrollTo().performClick()
-        compose.waitUntilAtLeastOneExists(hasTestTag("newGroup"), 20_000)
+        compose.waitUntilAtLeastOneExists(hasTestTag("quick.create"), 20_000)
         val client = app.container.client.value
         val data = client.state.value.data!!
 
@@ -92,8 +92,10 @@ class GroupsUiTest {
 
         // Nuevo grupo con otra empresa (relación existente) y enlace → pantalla de compartir → Listo abre el grupo.
         compose.onNodeWithTag("tab-home").performClick()
-        compose.waitUntilAtLeastOneExists(hasTestTag("newGroup"), 10_000)
-        compose.onNodeWithTag("newGroup").performClick()
+        compose.waitUntilAtLeastOneExists(hasTestTag("quick.create"), 10_000)
+        compose.onNodeWithTag("quick.create").performClick()
+        compose.waitUntilAtLeastOneExists(hasTestTag("create.group"), 5_000)
+        compose.onNodeWithTag("create.group").performClick()
         compose.waitUntilAtLeastOneExists(hasTestTag("forCompany"), 5_000)
         compose.onNodeWithTag("forCompany").performClick()
         val relation = GroupsTree.companyChoices(data).first { !it.pending }

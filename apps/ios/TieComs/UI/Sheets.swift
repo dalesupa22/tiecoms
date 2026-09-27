@@ -204,8 +204,10 @@ struct ReturnResultSheet: View {
 struct NewIssueSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    let conversationId: String
+    /// nil desde «＋ Crear»: se elige el grupo o chat (el más reciente primero).
+    let conversationId: String?
     let origin: MessageDTO?
+    @State private var conv = ""
     @State private var title = ""
     @State private var ownerId: String = ""
     @State private var hasDue = false
@@ -215,12 +217,19 @@ struct NewIssueSheet: View {
 
     var body: some View {
         let d = store.data
-        SheetForm(title: L("issue.newTitle"), action: L("issue.create"), busy: busy, disabled: title.trimmingCharacters(in: .whitespaces).count < 2, error: error, onSubmit: submit) {
+        SheetForm(title: L("issue.newTitle"), action: L("issue.create"), busy: busy, disabled: title.trimmingCharacters(in: .whitespaces).count < 2 || conv.isEmpty, error: error, onSubmit: submit) {
             Section {
                 TextField(L("issue.title"), text: $title, axis: .vertical).lineLimit(1...4).accessibilityIdentifier("issue.titleField")
                 if let d {
+                    if conversationId == nil {
+                        Picker(L("issue.where"), selection: $conv) {
+                            ForEach(Self.destinations(d)) { c in Text(Self.label(d, c)).tag(c.id) }
+                        }
+                        .onChange(of: conv) { _, _ in ownerId = d.me.id }
+                        .accessibilityIdentifier("issue.where")
+                    }
                     Picker(L("issue.owner"), selection: $ownerId) {
-                        ForEach(humans(d, conversationId)) { p in
+                        ForEach(humans(d, conv)) { p in
                             Text("\(p.name)\(p.id == d.me.id ? " " + L("common.you") : "") · \(Naming.org(d, p.orgId)?.name ?? L("common.guest"))").tag(p.id)
                         }
                     }
@@ -230,16 +239,29 @@ struct NewIssueSheet: View {
             }
         }
         .onAppear {
+            if conv.isEmpty { conv = conversationId ?? d.flatMap { Self.destinations($0).first?.id } ?? "" }
             if ownerId.isEmpty { ownerId = d?.me.id ?? "" }
             if title.isEmpty, let o = origin { title = excerpt(o.body, 200) }
         }
+    }
+
+    /// Dónde puedo crear un asunto: grupos y chats donde escribo y no soy tercero, el de actividad más reciente primero.
+    static func destinations(_ d: BootstrapDTO) -> [ConversationDTO] {
+        d.conversations.filter { $0.canPost && !Naming.isThread($0) && !Naming.isGuest(d, $0) }.sorted(by: HomeOrder.before)
+    }
+
+    /// «Grupo · Empresa» (o el nombre del chat) para el selector.
+    static func label(_ d: BootstrapDTO, _ c: ConversationDTO) -> String {
+        guard let ws = d.workspaces.first(where: { $0.id == c.workspaceId }) else { return Naming.title(d, c) }
+        let company = Naming.counterpartOrg(d, ws)?.name ?? ws.counterpartName ?? ws.name
+        return "\(Naming.title(d, c)) · \(company)"
     }
 
     private func submit() {
         busy = true; error = nil
         Task {
             do {
-                let i = try await store.createIssue(conversationId: conversationId, title: title, ownerId: ownerId.isEmpty ? nil : ownerId,
+                let i = try await store.createIssue(conversationId: conv, title: title, ownerId: ownerId.isEmpty ? nil : ownerId,
                                                     dueDate: hasDue ? IssueDates.iso(due) : nil, originMessageId: origin?.id)
                 dismiss()
                 store.show(i.title)

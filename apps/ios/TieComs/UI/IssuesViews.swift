@@ -242,6 +242,7 @@ struct IssuesScreen: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle(L("nav.issues"))
+        .quickActions()
         .task { await load() }
     }
 

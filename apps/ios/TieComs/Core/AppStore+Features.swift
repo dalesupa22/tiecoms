@@ -334,6 +334,13 @@ extension AppStore {
         return r
     }
 
+    /// Toque en una persona (búsqueda, «Recientes», «Mensaje nuevo»): abre su directo y, si no existe, lo crea.
+    func openDirect(with personId: String) async throws {
+        if let d = data, let c = QuickSearch.direct(d, with: personId) { navigate(to: .conversation(c.id)); return }
+        let r = try await createChat(userIds: [personId], name: nil)
+        navigate(to: .conversation(r.id))
+    }
+
     /// «Grupo en un espacio»: POST /workspaces/:id/conversations {name, kind, level, memberIds}.
     func createWorkspaceConversation(workspaceId: String, name: String, isInternal: Bool, directive: Bool, memberIds: [String]) async throws -> CreateChatResult {
         let body: [String: Any] = ["name": String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120)),

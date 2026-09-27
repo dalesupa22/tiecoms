@@ -293,24 +293,6 @@ final class V4Tests: XCTestCase {
         XCTAssertFalse(t.orderSignature.isEmpty)
     }
 
-    func testSpaceGroupFormData() throws {
-        let d = try dec(BootstrapDTO.self, #"""
-        {"contract":"x","serverTime":"","me":{"id":"me","name":"Ana","kind":"human","primaryOrgId":"oA"},
-         "organizations":[{"id":"oA","name":"Xertify","myRole":"owner"},{"id":"oB","name":"Norte"}],
-         "workspaces":[{"id":"w1","name":"Lanzamiento","owningOrgId":"oA","organizationIds":["oA","oB"],"memberIds":["me","bob","col"],"myRole":"lead","createdAt":""},
-                       {"id":"w2","name":"Ajeno","owningOrgId":"oB","organizationIds":["oA","oB"],"memberIds":["me","bob"],"myRole":"guest","createdAt":""}],
-         "conversations":[],
-         "people":[{"id":"me","name":"Ana","kind":"human","orgId":"oA"},{"id":"bob","name":"Bob","kind":"human","orgId":"oB"},{"id":"col","name":"Carla Núñez","kind":"human","orgId":"oA"}]}
-        """#)
-        let groups = SpaceGroupForm.groups(d)
-        XCTAssertEqual(groups.flatMap { $0.1.map(\.id) }, ["w1"], "sin espacios donde soy tercero")
-        XCTAssertEqual(groups.first?.0, "oB", "agrupado por la empresa contraparte")
-        let ws = d.workspaces[0]
-        XCTAssertEqual(SpaceGroupForm.candidates(d, ws, isInternal: false, query: "").map(\.id), ["bob", "col"])
-        XCTAssertEqual(SpaceGroupForm.candidates(d, ws, isInternal: true, query: "").map(\.id), ["col"], "interno: solo mi empresa")
-        XCTAssertEqual(SpaceGroupForm.candidates(d, ws, isInternal: false, query: "nunez").map(\.id), ["col"], "búsqueda sin tildes")
-    }
-
     // MARK: E. Asuntos y agenda en chats; aviso de 10 min
 
     func testIssuesAndEventsInChats() throws {

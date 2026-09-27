@@ -10,6 +10,8 @@ final class GroupsUITests: XCTestCase {
         var apiUrl: String
         var password: String
         var a: Person
+        var b: Person?
+        var c: Person?
         var orgA: String
         var pagosId: String
         var ventasId: String
@@ -54,6 +56,17 @@ final class GroupsUITests: XCTestCase {
         let q = app.buttons.matching(identifier: "grp.issuesToggle.\(id)")
         let all = q.allElementsBoundByIndex
         return all.min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height } ?? q.firstMatch
+    }
+
+    /// Cierra la búsqueda activa (en iOS 26 es una «X» junto al campo).
+    private func closeSearch(_ app: XCUIApplication) {
+        for label in ["Cancelar", "Cerrar", "Close", "Cancel"] where app.buttons[label].exists { app.buttons[label].firstMatch.tap(); return }
+    }
+
+    /// Plegar/desplegar: botón de vista arriba a la izquierda (ya no hay «…»).
+    private func foldMenu(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["home.fold"].waitForExistence(timeout: 5))
+        app.buttons["home.fold"].tap()
     }
 
     private func login(_ f: Fixture, resetLanguage: Bool = true) -> XCUIApplication {
@@ -115,7 +128,8 @@ final class GroupsUITests: XCTestCase {
 
         // 3. Nuevo grupo con otra empresa (relación existente) y enlace para compartir.
         app.tabBars.buttons["Grupos"].tap()
-        app.buttons["home.newGroup"].tap()
+        app.buttons["quick.create"].tap()
+        app.buttons["create.group"].tap()
         XCTAssertTrue(app.textFields["grp.name"].waitForExistence(timeout: 5))
         app.segmentedControls["grp.forWhom"].buttons["Con otra empresa"].tap()
         let name = app.textFields["grp.name"]
@@ -175,8 +189,8 @@ final class GroupsUITests: XCTestCase {
         dismissSystemPrompts(app)
         if app.buttons["home.tab.all"].exists { app.buttons["home.tab.all"].tap() }
         XCTAssertTrue(toggle.waitForExistence(timeout: 10))
-        // Punto de partida: todo contraído desde el menú «…».
-        app.buttons["home.more"].tap()
+        // Punto de partida: todo contraído desde el menú de la cabecera (mantener presionado).
+        foldMenu(app)
         XCTAssertTrue(app.buttons["home.fold.hideIssues"].waitForExistence(timeout: 3))
         app.buttons["home.fold.hideIssues"].tap()
         let more = app.buttons["grp.moreIssues.\(f.pagosId)"]
@@ -195,7 +209,7 @@ final class GroupsUITests: XCTestCase {
         issuesChip(app, f.pagosId).tap()
         XCTAssertFalse(app.buttons["grp.moreIssues.\(f.pagosId)"].waitForExistence(timeout: 1))
         // «Mostrar todos los asuntos».
-        app.buttons["home.more"].tap()
+        foldMenu(app)
         app.buttons["home.fold.showIssues"].tap()
         XCTAssertTrue(app.buttons["grp.moreIssues.\(f.pagosId)"].waitForExistence(timeout: 3))
         // Mantener presionado el asunto vencido → Completar: sale al instante (quedan 3, sin «+N») y baja el chip.
@@ -221,8 +235,82 @@ final class GroupsUITests: XCTestCase {
         app.tabBars.buttons["Grupos"].tap()
         XCTAssertTrue(app.buttons["grp.moreIssues.\(f.pagosId)"].waitForExistence(timeout: 5), "reabierto: vuelve bajo el grupo")
         // Deja el estado por defecto para las demás pruebas.
-        app.buttons["home.more"].tap()
+        foldMenu(app)
         app.buttons["home.fold.hideIssues"].tap()
+    }
+
+    /// Barra de arriba (✏️ y «＋») en las cuatro pestañas, chat rápido desde «Mensaje nuevo» y búsqueda que encuentra
+    /// personas sin directo (tocar = escribirle) y grupos.
+    func testQuickComposeCreateAndSearch() throws {
+        let f = try fixture()
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "no se prueba contra producción")
+        let app = login(f)
+        dismissSystemPrompts(app)
+        XCTAssertTrue(app.buttons["quick.compose"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["home.more"].exists, "sin «…» en Grupos")
+        shot("20-grupos-barra")
+
+        // «＋»: grupo, asunto, reunión y código, igual en todas las pestañas.
+        for tab in ["Grupos", "DMs", "Asuntos", "Calendario"] {
+            app.tabBars.buttons[tab].tap()
+            XCTAssertTrue(app.buttons["quick.compose"].waitForExistence(timeout: 5), "✏️ en \(tab)")
+            app.buttons["quick.create"].tap()
+            for id in ["create.group", "create.issue", "create.event", "create.join"] {
+                XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 3), "\(id) en \(tab)")
+            }
+            if tab == "Asuntos" { shot("21-crear-menu") }
+            app.buttons["create.issue"].tap()
+            XCTAssertTrue(app.descendants(matching: .any)["issue.where"].waitForExistence(timeout: 5), "asunto: elegir grupo o chat")
+            if tab == "Asuntos" { shot("22-nuevo-asunto") }
+            app.buttons["Cancelar"].firstMatch.tap()
+        }
+
+        // Buscar en DMs: Bruno (ya con directo) sale en Chats y no se repite; Gloria, sin directo, sale en Personas.
+        app.tabBars.buttons["DMs"].tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap(); search.typeText("Bruno")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'search.person.' AND label CONTAINS 'Bruno'")).firstMatch.waitForExistence(timeout: 2), "con directo no se repite en Personas")
+        if search.buttons.firstMatch.exists { search.buttons.firstMatch.tap() }
+        search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "Gloria")
+        // Sin directo sale en Personas; si una corrida anterior ya lo abrió (sesión conservada), en Chats.
+        let gloria = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'search.person.' OR identifier BEGINSWITH 'conv.row.'")).firstMatch
+        XCTAssertTrue(gloria.waitForExistence(timeout: 5), "Gloria en la búsqueda")
+        shot("23-dms-buscar-persona")
+        gloria.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["composer.field"].waitForExistence(timeout: 10), "abre el directo")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        closeSearch(app)
+
+        // Buscar en Grupos: también personas.
+        app.tabBars.buttons["Grupos"].tap()
+        let gsearch = app.searchFields.firstMatch
+        XCTAssertTrue(gsearch.waitForExistence(timeout: 5))
+        gsearch.tap(); gsearch.typeText("Carlos")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'search.conv.'")).firstMatch.waitForExistence(timeout: 5), "Carlos (con directo) en Chats")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'search.person.' AND label CONTAINS 'Carlos'")).firstMatch.exists, "sin repetirlo en Personas")
+        if gsearch.buttons.firstMatch.exists { gsearch.buttons.firstMatch.tap() }
+        gsearch.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6) + "Gloria")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'search.person.' OR identifier BEGINSWITH 'search.conv.'")).firstMatch.waitForExistence(timeout: 5), "personas al buscar en Grupos")
+        shot("24-grupos-buscar-persona")
+        closeSearch(app)
+
+        // ✏️ Mensaje nuevo: un toque en la persona abre el chat.
+        app.buttons["quick.compose"].tap()
+        // Por nombre: el simulador puede conservar la sesión de un fixture anterior (otros ids, mismos nombres).
+        let carlos = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'picker.person.' AND label CONTAINS 'Carlos'")).firstMatch
+        XCTAssertTrue(carlos.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["compose.multi"].exists, "«Chat con varias personas»")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'compose.recent.' AND label CONTAINS 'Bruno'")).firstMatch.exists, "Bruno en Recientes")
+        shot("25-mensaje-nuevo")
+        let field = app.textFields["compose.search"]
+        field.tap(); field.typeText("Pagos")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'compose.group.'")).firstMatch.waitForExistence(timeout: 3), "grupos al buscar en Mensaje nuevo")
+        shot("26-mensaje-nuevo-buscar-grupo")
+        app.buttons["Borrar"].tap()
+        carlos.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["composer.field"].waitForExistence(timeout: 10), "un toque abre el directo")
+        shot("27-directo-abierto")
     }
 
     /// Reacciones: chips bajo la burbuja (con las del fixture) y la barra rápida de la pulsación larga.

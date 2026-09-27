@@ -329,7 +329,7 @@
 "dm.emptyBody" = "Message one person or start a chat with several.";
 "dm.fromOrigin" = "from #{name}";
 "dm.new" = "New message";
-"dm.search" = "Search people or chats";
+"dm.search" = "Search people, groups or chats";
 "dm.side" = "Sidechat";
 "dms.empty" = "No direct messages yet.";
 "dms.new" = "New message";
@@ -1348,3 +1348,17 @@
 "ws.onlyYours" = "You only see the groups you are in; the others do not reveal their name.";
 "ws.participants" = "Participants";
 "ws.yourGroups" = "Your groups in this space";
+
+/* Top bar: ✏️ New message · ＋ Create, and search for people, groups and chats */
+"quick.create" = "Create";
+"issue.where" = "Group or chat";
+"compose.multi" = "Chat with several people";
+"compose.multiHint" = "Pick 2 or more people. They can be on your team or at other companies.";
+"compose.recent" = "Recent";
+"compose.search" = "Search a person, company or group";
+"search.people" = "People";
+"search.groups" = "Groups";
+"search.chats" = "Chats";
+"search.opensChat" = "Opens the chat";
+"common.clear" = "Clear";
+"grp.foldMenu" = "Collapse and expand";

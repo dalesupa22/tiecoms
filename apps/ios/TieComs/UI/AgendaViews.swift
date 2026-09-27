@@ -34,7 +34,6 @@ enum AgendaTime {
 struct AgendaScreen: View {
     @Environment(AppStore.self) private var store
     @State private var week = AgendaTime.startOfWeek(Date())
-    @State private var creating = false
     @State private var error: String?
 
     var body: some View {
@@ -75,8 +74,7 @@ struct AgendaScreen: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle(L("nav.agenda"))
-        .toolbar { ToolbarItem(placement: .primaryAction) { Button(L("cal.new")) { creating = true }.accessibilityIdentifier("agenda.new") } }
-        .sheet(isPresented: $creating) { EventEditorSheet(conversationId: nil, origin: nil, event: nil) }
+        .quickActions()
         .task(id: week) { await load(end) }
     }
 

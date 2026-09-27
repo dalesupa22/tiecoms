@@ -601,6 +601,7 @@ struct DMsView: View {
         Group {
             if let d = store.data {
                 let list = Naming.dms(d, query: query)
+                let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
                 let threadUnread = Naming.chatThreadUnread(d)
                 List {
                     if store.connection != .online {
@@ -617,14 +618,19 @@ struct DMsView: View {
                             .accessibilityIdentifier("conv.row.\(c.id)")
                             .contextMenu { ConversationMenuItems(conv: c) }
                         }
+                    } header: { if searching && !list.isEmpty { HomeHeader(title: L("search.chats")) } }
+                    // Al buscar: personas con las que aún no hay directo en la lista (tocar = escribirle) y grupos.
+                    if searching {
+                        QuickSearchSections(d: d, query: query, showChats: false,
+                                            hidePeople: Set(list.filter { $0.kind == .direct }.flatMap(\.memberIds)))
                     }
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
                 .animation(.spring(response: 0.45, dampingFraction: 0.9), value: list.map(\.id))
                 .overlay {
-                    if list.isEmpty {
-                        if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    if list.isEmpty && (!searching || QuickSearch.run(d, query: query).isEmpty) {
+                        if !searching {
                             ContentUnavailableView {
                                 Label(L("dm.empty"), systemImage: "bubble.left.and.bubble.right")
                             } description: { Text(L("dm.emptyBody")) } actions: {
@@ -641,13 +647,8 @@ struct DMsView: View {
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle(L("tab.dms"))
         .searchable(text: $query, prompt: L("dm.search"))
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { newChat = true } label: { Label(L("dm.new"), systemImage: "square.and.pencil") }
-                    .accessibilityIdentifier("dms.newChat")
-            }
-        }
-        .sheet(isPresented: $newChat) { NewChatSheet(personOnly: true) }
+        .quickActions()
+        .sheet(isPresented: $newChat) { NewChatSheet() }
         .sheet(item: Binding(get: { issuesFor.map(IdBox.init) }, set: { issuesFor = $0?.id })) { ConversationIssuesSheet(conversationId: $0.id) }
     }
 }

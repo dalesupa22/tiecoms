@@ -329,7 +329,7 @@
 "dm.emptyBody" = "Escríbele a una persona o arma un chat con varias.";
 "dm.fromOrigin" = "desde #{name}";
 "dm.new" = "Mensaje nuevo";
-"dm.search" = "Buscar personas o chats";
+"dm.search" = "Buscar personas, grupos o chats";
 "dm.side" = "Sidechat";
 "dms.empty" = "Aún no tienes mensajes directos.";
 "dms.new" = "Mensaje nuevo";
@@ -1348,3 +1348,17 @@
 "ws.onlyYours" = "Solo ves los grupos en los que participas; los demás no revelan su nombre.";
 "ws.participants" = "Participantes";
 "ws.yourGroups" = "Tus grupos en este espacio";
+
+/* Barra de arriba: ✏️ Mensaje nuevo · ＋ Crear, y búsqueda de personas, grupos y chats */
+"quick.create" = "Crear";
+"issue.where" = "Grupo o chat";
+"compose.multi" = "Chat con varias personas";
+"compose.multiHint" = "Elige a 2 o más personas. Pueden ser de tu equipo o de otras empresas.";
+"compose.recent" = "Recientes";
+"compose.search" = "Buscar persona, empresa o grupo";
+"search.people" = "Personas";
+"search.groups" = "Grupos";
+"search.chats" = "Chats";
+"search.opensChat" = "Abre el chat";
+"common.clear" = "Borrar";
+"grp.foldMenu" = "Plegar y desplegar";

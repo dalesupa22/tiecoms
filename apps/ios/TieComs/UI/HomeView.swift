@@ -53,6 +53,14 @@ struct HomeView: View {
                         }
                         .listRowBackground(Color.clear)
                     }
+                    // Recordatorios vencidos: antes avisaba la campanita del menú «…»; ahora una fila arriba.
+                    let due = store.reminders.filter { (ISODate.parse($0.remindAt) ?? .distantFuture) <= Date() }.count
+                    if due > 0 {
+                        Button { store.homePath.append(.reminders) } label: {
+                            Label("\(L("rem.title")) (\(due))", systemImage: "bell.badge").font(.subheadline.weight(.semibold))
+                        }
+                        .accessibilityIdentifier("home.dueReminders")
+                    }
                     if tab == .mentions {
                         MentionsInboxSection()
                     } else {
@@ -63,13 +71,15 @@ struct HomeView: View {
                             } header: { HomeHeader(title: "📌 " + L("side.pinned")) }
                         }
                         ForEach(tree.sections) { s in section(d, s, tree: tree, open: open, searching: searching) }
+                        // Al buscar: también personas (tocar = escribirle) y chats; los grupos ya salen arriba.
+                        if searching { QuickSearchSections(d: d, query: query, showGroups: false) }
                     }
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
                 .animation(.spring(response: 0.45, dampingFraction: 0.9), value: tree.orderSignature)
                 .overlay {
-                    if tree.isEmpty && searching { ContentUnavailableView.search(text: query) }
+                    if tree.isEmpty && searching && QuickSearch.run(d, query: query).isEmpty { ContentUnavailableView.search(text: query) }
                     else if !tree.hasGroups && tab != .all && tab != .mentions {
                         ContentUnavailableView(L("home.empty.\(tab.rawValue)"), systemImage: tab == .unread ? "checkmark.seal" : "tray")
                             .accessibilityIdentifier("home.tab.emptyState")
@@ -84,32 +94,16 @@ struct HomeView: View {
         .navigationTitle(L("tab.groups"))
         .searchable(text: $query, prompt: L("grp.search"))
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            // Vista (plegar/desplegar): a la izquierda, aparte de ✏️ y «＋», que son para escribir y crear.
+            ToolbarItem(placement: .topBarLeading) {
                 Menu {
-                    Button { store.homePath.append(.reminders) } label: {
-                        Label(store.reminders.isEmpty ? L("rem.title") : "\(L("rem.title")) (\(store.reminders.count))", systemImage: "alarm")
-                    }
-                    Button { store.homePath.append(.files) } label: { Label(L("nav.files"), systemImage: "folder") }
-                    Button { store.homePath.append(.trazo) } label: { Label(L("nav.trazo"), systemImage: "arrow.triangle.branch") }
-                    Button { store.homePath.append(.whatsapp) } label: { Label(L("nav.whatsapp"), systemImage: "message") }
-                    Divider()
-                    // Plegar y desplegar: con muchos grupos y asuntos la lista se vuelve larga.
                     if let d = store.data { foldMenu(Naming.groupsTree(d, filterWorkspace: store.workspaceFilter, tab: tab)) }
-                    Divider()
-                    Button { sheet = .joinCode } label: { Label(L("join.title"), systemImage: "ticket") }
-                    Button { sheet = .newGroup(.none) } label: { Label(L("grp.new"), systemImage: "plus.bubble") }
-                } label: {
-                    Image(systemName: store.reminders.contains { (ISODate.parse($0.remindAt) ?? .distantFuture) <= Date() } ? "bell.badge" : "ellipsis.circle")
-                }
-                .accessibilityLabel(L("menu.open"))
-                .accessibilityIdentifier("home.more")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { sheet = .newGroup(.none) } label: { Image(systemName: "plus") }
-                    .accessibilityLabel(L("grp.new"))
-                    .accessibilityIdentifier("home.newGroup")
+                } label: { Image(systemName: "list.bullet.indent") }
+                .accessibilityLabel(L("grp.foldMenu"))
+                .accessibilityIdentifier("home.fold")
             }
         }
+        .quickActions()
         .confirmationDialog(archiving.flatMap { c in store.data.map { L("groups.archiveConfirm", ["name": Naming.title($0, c)]) } } ?? "",
                             isPresented: Binding(get: { archiving != nil }, set: { if !$0 { archiving = nil } }), titleVisibility: .visible) {
             Button(L("groups.archive"), role: .destructive) {
@@ -266,7 +260,7 @@ struct HomeView: View {
         foldMenu(tree)
     }
 
-    /// Plegar y desplegar (menú «…», cabeceras de sección y empresas).
+    /// Plegar y desplegar (botón de vista arriba a la izquierda, cabeceras de sección y empresas).
     @ViewBuilder
     private func foldMenu(_ tree: GroupsTree) -> some View {
         Button { fold { HomeCollapse.setIssues(&$0, HomeCollapse.groupIds(tree), open: true) } } label: {

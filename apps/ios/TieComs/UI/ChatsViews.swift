@@ -161,239 +161,197 @@ struct PeoplePicker: View {
     }
 }
 
-// MARK: - Nuevo chat
+// MARK: - Mensaje nuevo
 
-/// Nuevo chat con selector arriba (como la web): «Persona o chat grupal» o «Grupo en un espacio».
+/// «Mensaje nuevo» (✏️): tocar a una persona abre el chat de una vez (directo; si no existe, se crea).
+/// Arriba, «Recientes» con quienes hablé hace poco; «Chat con varias personas» cambia a selección múltiple.
+/// Al buscar también salen los grupos que coinciden, para entrar sin pasar por su empresa.
 struct NewChatSheet: View {
-    enum Mode: String, CaseIterable, Identifiable { case person, space; var id: String { rawValue } }
-    /// «Mensaje nuevo» de DMs: solo personas (1 → directo, 2+ → chat grupal); los grupos se crean en Grupos.
-    var personOnly = false
-    @State private var mode: Mode = .person
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var multi = false
+    @State private var picked: [String] = []
+    @State private var name = ""
+    @State private var busy = false
+    @State private var error: String?
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if !personOnly {
-                    Picker(L("chat.new"), selection: $mode) {
-                        ForEach(Mode.allCases) { m in Text(L("chat.mode.\(m.rawValue)")).tag(m) }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, 16).padding(.vertical, 8)
-                    .accessibilityIdentifier("newChat.mode")
-                }
-                switch personOnly ? .person : mode {
-                case .person: PersonChatForm()
-                case .space: SpaceGroupForm()
-                }
+            Group {
+                if let d = store.data { list(d) } else { ProgressView() }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                InlineSearchField(text: $query, prompt: L("compose.search"), identifier: "compose.search")
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle(personOnly ? L("dm.new") : L("chat.new"))
+            .navigationTitle(multi ? L("compose.multi") : L("dm.new"))
             .navigationBarTitleDisplayMode(.inline)
-        }
-    }
-}
-
-/// «Grupo en un espacio»: espacio agrupado por empresa (solo donde no soy tercero), nombre obligatorio, interno,
-/// nivel directivo (oculto si es interno) y miembros del espacio. Al crear, abre el grupo.
-struct SpaceGroupForm: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
-    @State private var wsId: String?
-    @State private var name = ""
-    @State private var isInternal = false
-    @State private var directive = false
-    @State private var query = ""
-    @State private var picked: [String] = []
-    @State private var busy = false
-    @State private var error: String?
-    @State private var newSpace = false
-
-    var body: some View {
-        if let d = store.data {
-            let groups = Self.groups(d)
-            let ws = d.workspaces.first { $0.id == (wsId ?? groups.first?.1.first?.id) }
-            Form {
-                if groups.isEmpty {
-                    Section {
-                        Text(L("chat.noSpaces")).foregroundStyle(Theme.textSecondary)
-                        Button(L("dlg.createSpace")) { newSpace = true }.accessibilityIdentifier("newChat.createSpace")
-                    }
-                } else {
-                    Section(L("chat.pickSpace")) {
-                        ForEach(groups, id: \.0) { key, list in
-                            let org = Naming.org(d, key)
-                            Label { Text(org?.name ?? L("common.noCompany")).font(.footnote.weight(.semibold)).foregroundStyle(Theme.textSecondary) } icon: { OrgMark(org: org, size: 18) }
-                            ForEach(list) { w in
-                                Button { wsId = w.id; picked = [] } label: {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 1) {
-                                            Text(w.name).foregroundStyle(Theme.textPrimary)
-                                            if let dep = w.department, !dep.isEmpty { Text(dep).font(.caption).foregroundStyle(Theme.textSecondary) }
-                                        }
-                                        Spacer()
-                                        if ws?.id == w.id { Image(systemName: "checkmark").foregroundStyle(Theme.accentText) }
-                                    }
-                                }
-                                .accessibilityAddTraits(ws?.id == w.id ? .isSelected : [])
-                                .accessibilityIdentifier("newChat.space.\(w.id)")
-                            }
-                        }
-                    }
-                    Section {
-                        TextField(L("chat.groupName"), text: $name)
-                            .onChange(of: name) { _, v in if v.count > 120 { name = String(v.prefix(120)) } }
-                            .accessibilityIdentifier("newChat.spaceGroupName")
-                        Toggle(isOn: $isInternal) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(L("chat.internalOnly"))
-                                Text(L("chat.internalHint")).font(.caption).foregroundStyle(Theme.textSecondary)
-                            }
-                        }
-                        .onChange(of: isInternal) { _, _ in picked = [] }
-                        .accessibilityIdentifier("newChat.internal")
-                        if !isInternal { Toggle(L("chat.directive"), isOn: $directive).accessibilityIdentifier("newChat.directive") }
-                    }
-                    if let ws {
-                        let people = candidates(d, ws)
-                        Section(L("chat.spaceMembers")) {
-                            TextField(L("chat.searchSpace"), text: $query).textInputAutocapitalization(.never)
-                            if people.isEmpty { Text(query.isEmpty ? L("dlg.noCandidates") : L("chat.nobody")).font(.footnote).foregroundStyle(Theme.textSecondary) }
-                            ForEach(people) { p in
-                                Button { if let i = picked.firstIndex(of: p.id) { picked.remove(at: i) } else { picked.append(p.id) } } label: {
-                                    HStack(spacing: 10) {
-                                        Avatar(person: p, org: Naming.org(d, p.orgId), size: 30)
-                                        VStack(alignment: .leading, spacing: 1) {
-                                            Text(p.name).foregroundStyle(Theme.textPrimary)
-                                            Text(Naming.org(d, p.orgId)?.name ?? "").font(.caption).foregroundStyle(Theme.textSecondary)
-                                        }
-                                        Spacer()
-                                        Image(systemName: picked.contains(p.id) ? "checkmark.circle.fill" : "circle")
-                                            .foregroundStyle(picked.contains(p.id) ? Theme.accentText : Theme.textSecondary)
-                                    }
-                                }
-                                .accessibilityAddTraits(picked.contains(p.id) ? .isSelected : [])
-                                .accessibilityIdentifier("newChat.member.\(p.id)")
-                            }
-                        }
-                    }
-                }
-                if let error { Section { Text(error).foregroundStyle(.red).font(.footnote) } }
-            }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    if busy { ProgressView() } else if let ws {
-                        Button(L("chat.createSpaceGroup")) { create(d, ws) }
-                            .disabled(name.trimmingCharacters(in: .whitespaces).count < 2)
-                            .accessibilityIdentifier("newChat.createSpaceGroup")
+                ToolbarItem(placement: .cancellationAction) {
+                    if multi {
+                        Button(L("common.back")) { withAnimation { multi = false; picked = []; name = "" } }
+                            .accessibilityIdentifier("compose.back")
+                    } else {
+                        Button(L("common.cancel")) { dismiss() }
                     }
                 }
-            }
-            .sheet(isPresented: $newSpace) { NewWorkspaceSheet() }
-        }
-    }
-
-    /// Espacios donde no soy tercero, agrupados por empresa contraparte (como Inicio).
-    static func groups(_ d: BootstrapDTO) -> [(String, [WorkspaceDTO])] {
-        var order: [String] = []
-        var map: [String: [WorkspaceDTO]] = [:]
-        for w in d.workspaces where w.myRole != "guest" {
-            let key = Naming.counterpartOrg(d, w)?.id ?? "none"
-            if map[key] == nil { order.append(key) }
-            map[key, default: []].append(w)
-        }
-        return order.map { ($0, map[$0]!.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) }
-    }
-
-    /// Participantes del espacio (sin mí); con «interno», solo los de mis empresas.
-    static func candidates(_ d: BootstrapDTO, _ ws: WorkspaceDTO, isInternal: Bool, query: String) -> [PersonDTO] {
-        let myOrgs = Set(d.organizations.filter { $0.myRole != nil }.map(\.id))
-        let members = Set(ws.memberIds)
-        let fold: (String) -> String = { $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
-        let q = fold(query.trimmingCharacters(in: .whitespaces))
-        return d.people
-            .filter { members.contains($0.id) && $0.id != d.me.id && (!isInternal || $0.orgId.map(myOrgs.contains) == true) }
-            .filter { p in q.isEmpty || [p.name, p.title ?? "", Naming.org(d, p.orgId)?.name ?? ""].contains { fold($0).contains(q) } }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    }
-
-    private func candidates(_ d: BootstrapDTO, _ ws: WorkspaceDTO) -> [PersonDTO] { Self.candidates(d, ws, isInternal: isInternal, query: query) }
-
-    private func create(_ d: BootstrapDTO, _ ws: WorkspaceDTO) {
-        busy = true; error = nil
-        let allowed = Set(Self.candidates(d, ws, isInternal: isInternal, query: "").map(\.id))
-        Task {
-            do {
-                let r = try await store.createWorkspaceConversation(workspaceId: ws.id, name: name, isInternal: isInternal, directive: directive,
-                                                                    memberIds: picked.filter(allowed.contains))
-                dismiss()
-                store.navigate(to: .conversation(r.id))
-            } catch { self.error = L10n.errorText(error) }
-            busy = false
-        }
-    }
-}
-
-/// «Persona o chat grupal»: una persona abre el directo; varias crean un chat grupal (pueden ser de empresas distintas).
-struct PersonChatForm: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
-    @State private var picked: [String] = []
-    @State private var query = ""
-    @State private var name = ""
-    @State private var busy = false
-    @State private var error: String?
-
-    var body: some View {
-        Group {
-            if let d = store.data {
-                let orgs = involvedOrgs(d)
-                Form {
-                    Section { Text(L("chat.newHint")).font(.footnote).foregroundStyle(Theme.textSecondary) }
-                    if picked.count > 1 {
-                        Section {
-                            HStack(spacing: 6) {
-                                HStack(spacing: -4) { ForEach(orgs) { OrgMark(org: $0, size: 22) } }
-                                Text(orgs.count > 1 ? L("chat.crossCompany", ["n": orgs.count]) : L("chat.sameCompany"))
-                                    .font(.footnote).foregroundStyle(Theme.textSecondary)
-                            }
-                            .accessibilityElement(children: .combine)
-                            TextField(L("chat.groupNamePh"), text: $name)
-                                .onChange(of: name) { _, v in if v.count > 120 { name = String(v.prefix(120)) } }
-                                .accessibilityIdentifier("newChat.name")
-                        }
-                    }
-                    PeoplePicker(d: d, picked: $picked, query: $query)
-                    if let error { Section { Text(error).foregroundStyle(.red).font(.footnote) } }
-                }
-                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: L("chat.searchPeople"))
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
+                if multi {
                     ToolbarItem(placement: .confirmationAction) {
                         if busy { ProgressView() } else {
-                            Button(picked.count > 1 ? L("chat.createGroup", ["n": picked.count + 1]) : L("chat.openDirect"), action: create)
+                            Button(picked.count > 1 ? L("chat.createGroup", ["n": picked.count + 1]) : L("chat.openDirect"), action: createMulti)
                                 .disabled(picked.isEmpty)
                                 .accessibilityIdentifier("newChat.create")
                         }
                     }
                 }
             }
+            .overlay { if busy && !multi { ProgressView().controlSize(.large) } }
+            .disabled(busy)
         }
     }
 
-    /// Mi empresa y las de las personas elegidas (sin repetir).
-    private func involvedOrgs(_ d: BootstrapDTO) -> [OrganizationDTO] {
-        var seen = Set<String>()
-        return ([d.me.primaryOrgId] + picked.map { Naming.person(d, $0)?.orgId }).compactMap { $0 }
-            .filter { seen.insert($0).inserted }.compactMap { Naming.org(d, $0) }
+    @ViewBuilder private func list(_ d: BootstrapDTO) -> some View {
+        let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
+        let orgs = Naming.peopleByOrg(d, query: query)
+        let groups = multi ? [] : QuickSearch.groups(d, query: query)
+        List {
+            if multi {
+                Section {
+                    Text(L("compose.multiHint")).font(.footnote).foregroundStyle(Theme.textSecondary)
+                    if !picked.isEmpty { pickedChips(d) }
+                    if picked.count > 1 {
+                        TextField(L("chat.groupNamePh"), text: $name)
+                            .onChange(of: name) { _, v in if v.count > 120 { name = String(v.prefix(120)) } }
+                            .accessibilityIdentifier("newChat.name")
+                    }
+                }
+            } else if !searching {
+                Section {
+                    Button { withAnimation { multi = true } } label: {
+                        Label { Text(L("compose.multi")).foregroundStyle(Theme.textPrimary) } icon: {
+                            Image(systemName: "person.2.fill").font(.footnote).foregroundStyle(Theme.onPrimary)
+                                .frame(width: 32, height: 32).background(Circle().fill(Theme.primaryFill))
+                        }
+                    }
+                    .accessibilityIdentifier("compose.multi")
+                }
+                let recents = QuickSearch.recentPeopleIds(d).prefix(8).compactMap { Naming.person(d, $0) }
+                if !recents.isEmpty {
+                    Section {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 14) {
+                                ForEach(recents) { p in
+                                    Button { open(p) } label: {
+                                        VStack(spacing: 4) {
+                                            Avatar(person: p, org: Naming.org(d, p.orgId), size: 52)
+                                            Text(p.name.split(separator: " ").first.map(String.init) ?? p.name)
+                                                .font(.caption).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                                        }
+                                        .frame(width: 60)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(p.name)
+                                    .accessibilityHint(L("search.opensChat"))
+                                    .accessibilityIdentifier("compose.recent.\(p.id)")
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    } header: { Text(L("compose.recent")) }
+                }
+            }
+            if !groups.isEmpty {
+                Section(L("search.groups")) {
+                    ForEach(groups.prefix(6)) { c in
+                        Button { dismiss(); store.navigate(to: .conversation(c.id)) } label: {
+                            HStack(spacing: 12) {
+                                ConvIcon(d: d, c: c, size: 38)
+                                Text(NewIssueSheet.label(d, c)).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                                Spacer()
+                            }
+                        }
+                        .accessibilityIdentifier("compose.group.\(c.id)")
+                    }
+                }
+            }
+            if orgs.isEmpty && groups.isEmpty {
+                Section { Text(L("chat.nobody")).foregroundStyle(Theme.textSecondary) }
+            }
+            ForEach(orgs) { g in
+                Section {
+                    ForEach(g.people) { p in
+                        Button { multi ? toggle(p.id) : open(p) } label: { PersonPickRow(d: d, p: p, selected: multi ? picked.contains(p.id) : nil) }
+                            .accessibilityIdentifier("picker.person.\(p.id)")
+                    }
+                } header: {
+                    HStack(spacing: 6) {
+                        if let org = g.org { OrgMark(org: org, size: 18) }
+                        Text(g.org?.name ?? L("common.guests"))
+                        if g.isMine {
+                            Text(L("chat.myTeam")).font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 6).padding(.vertical, 1)
+                                .background(Capsule().fill(Theme.orange.opacity(0.15)))
+                                .foregroundStyle(Theme.accentText)
+                        }
+                    }
+                    .textCase(nil)
+                }
+            }
+            if let error { Section { Text(error).foregroundStyle(.red).font(.footnote) } }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .scrollDismissesKeyboard(.immediately)
     }
 
-    private func create() {
+    private func pickedChips(_ d: BootstrapDTO) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(picked, id: \.self) { id in
+                    let p = Naming.person(d, id)
+                    Button { toggle(id) } label: {
+                        HStack(spacing: 4) {
+                            Avatar(person: p, org: Naming.org(d, p?.orgId), size: 22)
+                            Text(p?.name.split(separator: " ").first.map(String.init) ?? "?").font(.subheadline)
+                            Image(systemName: "xmark").font(.caption2.weight(.bold))
+                        }
+                        .padding(.leading, 3).padding(.trailing, 9).padding(.vertical, 3)
+                        .background(Capsule().fill(Theme.orange.opacity(0.14)))
+                        .foregroundStyle(Theme.textPrimary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(L("common.remove")) \(p?.name ?? "")")
+                    .accessibilityIdentifier("picker.chip.\(id)")
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func toggle(_ id: String) {
+        if let i = picked.firstIndex(of: id) { picked.remove(at: i) } else { picked.append(id) }
+    }
+
+    /// Un toque: el directo con esa persona (el que ya existe o uno nuevo).
+    private func open(_ p: PersonDTO) {
+        busy = true; error = nil
+        Task {
+            do { try await store.openDirect(with: p.id); dismiss() } catch { self.error = L10n.errorText(error) }
+            busy = false
+        }
+    }
+
+    private func createMulti() {
         busy = true; error = nil
         Task {
             do {
-                let r = try await store.createChat(userIds: picked, name: picked.count > 1 ? name : nil)
+                if picked.count == 1 { try await store.openDirect(with: picked[0]) }
+                else {
+                    let r = try await store.createChat(userIds: picked, name: name)
+                    store.navigate(to: .conversation(r.id))
+                }
                 dismiss()
-                store.navigate(to: .conversation(r.id))
             } catch { self.error = L10n.errorText(error) }
             busy = false
         }

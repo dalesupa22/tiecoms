@@ -1462,5 +1462,53 @@
  "settings.languageHintApp": [
   "Cambia al instante en toda la app y en los avisos. Algunos textos del sistema (permisos, «Copiar») cambian al volver a abrir Chaggu.",
   "Changes right away across the app and its notifications. Some system texts (permissions, “Copy”) change the next time you open Chaggu."
+ ],
+ "grp.view": [
+  "Vista",
+  "View"
+ ],
+ "grp.view.list": [
+  "Lista",
+  "List"
+ ],
+ "grp.view.tree": [
+  "Árbol",
+  "Tree"
+ ],
+ "inbox.pinned": [
+  "Fijados",
+  "Pinned"
+ ],
+ "inbox.unread": [
+  "Sin leer",
+  "Unread"
+ ],
+ "inbox.recent": [
+  "Recientes",
+  "Recent"
+ ],
+ "chat.newMessages": [
+  "{n} mensajes nuevos",
+  "{n} new messages"
+ ],
+ "chat.newMessagesOne": [
+  "1 mensaje nuevo",
+  "1 new message"
+ ],
+ "chat.newAbove": [
+  "↑ {n} nuevos",
+  "↑ {n} new"
+ ],
+ "chat.jumpLatest": [
+  "Ir al final",
+  "Jump to latest"
+ ],
+ "chat.jumpNew": [
+  "Ir a los mensajes nuevos",
+  "Jump to new messages"
+ ],
+ "chat.jumpMention": [
+  "Ir a la mención",
+  "Jump to mention"
  ]
 }

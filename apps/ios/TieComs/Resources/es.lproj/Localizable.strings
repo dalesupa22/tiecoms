@@ -1362,3 +1362,16 @@
 "search.opensChat" = "Abre el chat";
 "common.clear" = "Borrar";
 "grp.foldMenu" = "Plegar y desplegar";
+
+/* 1.6.4: bandeja (Lista/Árbol, Fijados · Sin leer · Recientes) y navegar un chat largo */
+"grp.view" = "Vista";
+"grp.view.list" = "Lista";
+"grp.view.tree" = "Árbol";
+"inbox.pinned" = "Fijados";
+"inbox.recent" = "Recientes";
+"chat.newMessages" = "{n} mensajes nuevos";
+"chat.newMessagesOne" = "1 mensaje nuevo";
+"chat.newAbove" = "↑ {n} nuevos";
+"chat.jumpLatest" = "Ir al final";
+"chat.jumpNew" = "Ir a los mensajes nuevos";
+"chat.jumpMention" = "Ir a la mención";

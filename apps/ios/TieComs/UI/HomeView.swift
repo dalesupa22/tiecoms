@@ -22,6 +22,8 @@ struct HomeView: View {
     @State private var sheet: GroupsSheet?
     @State private var collapsed = HomeCollapse.load()
     @State private var tab = HomeFilter.savedGroups
+    /// «Lista» (por defecto) o «Árbol»; se recuerda en el dispositivo (UserDefaults `groupsView`).
+    @State private var viewMode = GroupsViewMode.load()
     /// Grupo por archivar (confirmación).
     @State private var archiving: ConversationDTO?
 
@@ -30,11 +32,21 @@ struct HomeView: View {
         Group {
             if let d = store.data {
                 let tree = Naming.groupsTree(d, query: query, filterWorkspace: store.workspaceFilter, tab: tab)
+                let flat = viewMode == .list ? Naming.groupsList(d, query: query, filterWorkspace: store.workspaceFilter, tab: tab) : []
+                let hasGroups = viewMode == .list ? !flat.isEmpty : tree.hasGroups
                 let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
                 // Asuntos abiertos por conversación (se muestran bajo cada grupo).
                 let open = Dictionary(grouping: store.issues.values.filter { !$0.status.closed }, by: \.conversationId)
                     .mapValues { $0.sorted(by: IssueSort.order) }
                 List {
+                    Picker(L("grp.view"), selection: $viewMode) {
+                        ForEach(GroupsViewMode.allCases) { m in Text(L(m.labelKey)).tag(m) }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("grp.viewMode")
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 4, trailing: 16))
                     HomeTabs(d: d, selected: $tab, cases: HomeFilter.groupCases, groupsOnly: true)
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
@@ -63,6 +75,17 @@ struct HomeView: View {
                     }
                     if tab == .mentions {
                         MentionsInboxSection()
+                    } else if viewMode == .list {
+                        if !hasGroups && !searching && tab == .all && store.workspaceFilter == nil { emptyState }
+                        // Lista: una sola lista con el orden único y separadores discretos Fijados · Sin leer · Recientes.
+                        ForEach(InboxBucket.split(flat, conv: \.conv, extraUnread: \.threadUnread), id: \.bucket) { b in
+                            Section {
+                                ForEach(b.items) { n in
+                                    groupRows(d, n, indent: 0, color: companyColor(d, n.conv), guest: Naming.isGuest(d, n.conv), open: open, searching: searching, flat: true)
+                                }
+                            } header: { HomeHeader(title: L(b.bucket.labelKey), identifier: "grp.bucket.\(b.bucket.rawValue)") }
+                        }
+                        if searching { QuickSearchSections(d: d, query: query, showGroups: false) }
                     } else {
                         if !tree.hasGroups && !searching && tab == .all && store.workspaceFilter == nil { emptyState }
                         if !tree.pinned.isEmpty {
@@ -76,11 +99,14 @@ struct HomeView: View {
                     }
                 }
                 .listStyle(.insetGrouped)
+                // Las sub-filas de asuntos miden lo que su texto (no 44 pt).
+                .environment(\.defaultMinListRowHeight, 1)
                 .scrollContentBackground(.hidden)
-                .animation(.spring(response: 0.45, dampingFraction: 0.9), value: tree.orderSignature)
+                .animation(.spring(response: 0.45, dampingFraction: 0.9), value: viewMode == .list ? flat.map(\.id) : tree.orderSignature)
+                .onChange(of: viewMode) { _, m in GroupsViewMode.save(m) }
                 .overlay {
-                    if tree.isEmpty && searching && QuickSearch.run(d, query: query).isEmpty { ContentUnavailableView.search(text: query) }
-                    else if !tree.hasGroups && tab != .all && tab != .mentions {
+                    if (viewMode == .list ? flat.isEmpty : tree.isEmpty) && searching && QuickSearch.run(d, query: query).isEmpty { ContentUnavailableView.search(text: query) }
+                    else if !hasGroups && tab != .all && tab != .mentions {
                         ContentUnavailableView(L("home.empty.\(tab.rawValue)"), systemImage: tab == .unread ? "checkmark.seal" : "tray")
                             .accessibilityIdentifier("home.tab.emptyState")
                     }
@@ -97,7 +123,7 @@ struct HomeView: View {
             // Vista (plegar/desplegar): a la izquierda, aparte de ✏️ y «＋», que son para escribir y crear.
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
-                    if let d = store.data { foldMenu(Naming.groupsTree(d, filterWorkspace: store.workspaceFilter, tab: tab)) }
+                    if let d = store.data { foldMenu(Naming.groupsTree(d, filterWorkspace: store.workspaceFilter, tab: tab), issuesOnly: viewMode == .list) }
                 } label: { Image(systemName: "list.bullet.indent") }
                 .accessibilityLabel(L("grp.foldMenu"))
                 .accessibilityIdentifier("home.fold")
@@ -212,37 +238,78 @@ struct HomeView: View {
         ForEach(co.groups) { n in groupRows(d, n, indent: indent, color: color, guest: kind == .guest, open: open, searching: searching) }
     }
 
-    /// Un grupo con el chip «◆ N asuntos» y, si están desplegados, sus asuntos activos (hasta 3 y «+N asuntos»).
+    /// Un grupo con el chip «◆ N · M!» y, si están desplegados, sus asuntos activos (hasta 3 y «+N asuntos») como
+    /// sub-filas compactas con sangría (sin alturas de 44 pt, separadores ni chevrons). Cada asunto es su propia fila
+    /// de la lista para que su pulsación larga sea la del asunto (en una List el menú contextual es de toda la fila).
     /// Por defecto van plegados; al buscar se despliegan solos los grupos con un asunto que coincide.
+    /// Tocar el chip pliega o despliega sin abrir el chat; tocar el resto de la fila abre el chat.
     @ViewBuilder
-    private func groupRows(_ d: BootstrapDTO, _ n: GroupsTree.ConvNode, indent: Int, color: Color?, guest: Bool, open: [String: [IssueDTO]], searching: Bool) -> some View {
+    private func groupRows(_ d: BootstrapDTO, _ n: GroupsTree.ConvNode, indent: Int, color: Color?, guest: Bool, open: [String: [IssueDTO]], searching: Bool, flat: Bool = false) -> some View {
         let all = open[n.conv.id] ?? []
         let hits = searching ? GroupIssues.matching(all, query: query) : []
         let expanded = !hits.isEmpty || HomeCollapse.issuesOpen(collapsed, n.conv.id)
         let sum = GroupIssues.summary(all, serverCount: n.conv.openIssues)
         let chip = sum.count > 0 ? IssuesToggle(count: sum.count, overdue: sum.overdue, expanded: expanded) : nil
-        convLink(d, n.conv, indent: indent, badgeColor: color, group: true, guest: guest, label: n.label, threadUnread: n.threadUnread,
-                 issues: chip, onToggleIssues: { toggle(HomeCollapse.issuesKey(n.conv.id)) })
-        if expanded { issueLines(n.conv.id, indent: indent, list: hits.isEmpty ? all : hits) }
+        let list = hits.isEmpty ? all : hits
+        let showLines = expanded && !list.isEmpty
+        convButton(d, n.conv, badgeColor: color, group: true, guest: guest, label: n.label, threadUnread: n.threadUnread,
+                   issues: chip, onToggleIssues: { toggle(HomeCollapse.issuesKey(n.conv.id)) }, flat: flat)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16 + CGFloat(indent) * 18, bottom: showLines ? 3 : 6, trailing: 12))
+            .listRowSeparator(showLines ? .hidden : .automatic, edges: .bottom)
+        if showLines { issueLines(n.conv.id, indent: indent, list: list) }
     }
 
+    /// Sub-filas compactas bajo el grupo: alineadas con el nombre y con una guía vertical discreta.
     @ViewBuilder
     private func issueLines(_ conversationId: String, indent: Int, list: [IssueDTO]) -> some View {
-        let inset = EdgeInsets(top: 2, leading: 16 + CGFloat(indent) * 18 + 40, bottom: 2, trailing: 12)
-        ForEach(list.prefix(3)) { i in
-            NavigationLink(value: Route.issue(i.id)) { GroupIssueLine(issue: i) }
-                .listRowInsets(inset)
-                .accessibilityIdentifier("grp.issue.\(i.id)")
-                // Mantener presionado: completar o cambiar el estado sin entrar al asunto.
-                .contextMenu { IssueStatusMenu(issue: i) { store.homePath.append(.issue(i.id)) } }
-                .transition(.opacity.combined(with: .move(edge: .top)))
-        }
-        if list.count > 3 {
-            Button { sheet = .issues(conversationId) } label: {
-                Text(L("grp.moreIssues", ["n": list.count - 3])).font(.caption.weight(.semibold)).foregroundStyle(Theme.accentText)
+        let shown = Array(list.prefix(3))
+        let more = list.count > 3
+        let inset = EdgeInsets(top: 0, leading: 16 + CGFloat(indent) * 18 + 28, bottom: 0, trailing: 12)
+        ForEach(shown) { i in
+            let last = !more && i.id == shown.last?.id
+            Button { store.homePath.append(.issue(i.id)) } label: {
+                issueGuide(GroupIssueLine(issue: i), last: last)
             }
+            .buttonStyle(RowPressStyle())
             .listRowInsets(inset)
+            .listRowSeparator(.hidden, edges: .top)
+            .listRowSeparator(last ? .automatic : .hidden, edges: .bottom)
+            .accessibilityIdentifier("grp.issue.\(i.id)")
+            // Mantener presionado: completar o cambiar el estado sin entrar al asunto.
+            .contextMenu { IssueStatusMenu(issue: i) { store.homePath.append(.issue(i.id)) } }
+            .transition(.opacity.combined(with: .move(edge: .top)))
+        }
+        if more {
+            Button { sheet = .issues(conversationId) } label: {
+                issueGuide(Text(L("grp.moreIssues", ["n": list.count - 3])).font(.caption.weight(.semibold)).foregroundStyle(Theme.accentText)
+                    .frame(maxWidth: .infinity, alignment: .leading), last: true)
+            }
+            .buttonStyle(RowPressStyle())
+            .listRowInsets(inset)
+            .listRowSeparator(.hidden, edges: .top)
             .accessibilityIdentifier("grp.moreIssues.\(conversationId)")
+            .transition(.opacity)
+        }
+    }
+
+    /// Una sub-fila con su tramo de la guía vertical (los tramos se unen de una fila a la siguiente).
+    private func issueGuide(_ content: some View, last: Bool) -> some View {
+        content
+            .padding(.vertical, 5)
+            .padding(.leading, 12)
+            .overlay(alignment: .leading) {
+                Rectangle().fill(Theme.orange.opacity(0.28)).frame(width: 2).padding(.bottom, last ? 6 : 0)
+            }
+            .padding(.bottom, last ? 4 : 0)
+            .contentShape(Rectangle())
+    }
+
+    /// Color de la empresa del árbol (la mía, la contraparte o la anfitriona) para el globo de no leídos en la Lista.
+    private func companyColor(_ d: BootstrapDTO, _ c: ConversationDTO) -> Color? {
+        guard let ws = d.workspaces.first(where: { $0.id == c.workspaceId }) else { return nil }
+        switch Naming.placement(d, ws) {
+        case .mine(let id), .relation(let id), .guest(let id): return Naming.org(d, id).flatMap { Theme.badgeColor($0.colorBg) }
+        case .pending: return nil
         }
     }
 
@@ -262,7 +329,7 @@ struct HomeView: View {
 
     /// Plegar y desplegar (botón de vista arriba a la izquierda, cabeceras de sección y empresas).
     @ViewBuilder
-    private func foldMenu(_ tree: GroupsTree) -> some View {
+    private func foldMenu(_ tree: GroupsTree, issuesOnly: Bool = false) -> some View {
         Button { fold { HomeCollapse.setIssues(&$0, HomeCollapse.groupIds(tree), open: true) } } label: {
             Label(L("grp.showAllIssues"), systemImage: "list.bullet.indent")
         }
@@ -271,10 +338,13 @@ struct HomeView: View {
             Label(L("grp.hideAllIssues"), systemImage: "list.dash")
         }
         .accessibilityIdentifier("home.fold.hideIssues")
+        // Secciones y empresas solo existen en el Árbol.
+        if !issuesOnly {
         Button { fold { HomeCollapse.expandAll(&$0, tree) } } label: { Label(L("grp.expandAll"), systemImage: "rectangle.expand.vertical") }
             .accessibilityIdentifier("home.fold.expandAll")
         Button { fold { HomeCollapse.collapseAll(&$0, tree) } } label: { Label(L("grp.collapseAll"), systemImage: "rectangle.compress.vertical") }
             .accessibilityIdentifier("home.fold.collapseAll")
+        }
     }
 
     private func toggle(_ key: String) {
@@ -290,13 +360,22 @@ struct HomeView: View {
     }
 
     @ViewBuilder
-    private func convLink(_ d: BootstrapDTO, _ c: ConversationDTO, indent: Int, badgeColor: Color? = nil, showWs: Bool = false, group: Bool = false, guest: Bool = false,
-                          label: String? = nil, threadUnread: Int = 0, issues: IssuesToggle? = nil, onToggleIssues: (() -> Void)? = nil) -> some View {
-        NavigationLink(value: Route.conversation(c.id)) {
+    private func convLink(_ d: BootstrapDTO, _ c: ConversationDTO, indent: Int, showWs: Bool = false) -> some View {
+        convButton(d, c, showWs: showWs)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16 + CGFloat(indent) * 18, bottom: 6, trailing: 12))
+    }
+
+    /// Fila de conversación: un botón (no NavigationLink) para que el chip de asuntos reciba su toque aparte y la
+    /// fila no lleve chevron. Mantener presionado: el mismo menú de grupo en Lista y Árbol.
+    @ViewBuilder
+    private func convButton(_ d: BootstrapDTO, _ c: ConversationDTO, badgeColor: Color? = nil, showWs: Bool = false, group: Bool = false, guest: Bool = false,
+                            label: String? = nil, threadUnread: Int = 0, issues: IssuesToggle? = nil, onToggleIssues: (() -> Void)? = nil, flat: Bool = false) -> some View {
+        Button { store.homePath.append(.conversation(c.id)) } label: {
             HierarchyConvRow(d: d, c: c, badgeColor: badgeColor, showWs: showWs, showIssueChip: !group, titleOverride: label, threadUnread: threadUnread,
-                             issuesToggle: issues, onToggleIssues: onToggleIssues) { sheet = .issues(c.id) }
+                             issuesToggle: issues, onToggleIssues: onToggleIssues, showOnlyOrg: !flat) { sheet = .issues(c.id) }
+                .contentShape(Rectangle())
         }
-        .listRowInsets(EdgeInsets(top: 6, leading: 16 + CGFloat(indent) * 18, bottom: 6, trailing: 12))
+        .buttonStyle(RowPressStyle())
         .accessibilityIdentifier("conv.row.\(c.id)")
         .contextMenu {
             ConversationMenuItems(conv: c)
@@ -355,20 +434,33 @@ struct GroupIssueLine: View {
     let issue: IssueDTO
     var body: some View {
         let f = IssueSort.flags(issue)
+        // Una sola línea: «◆ título…» y, a la derecha y en pequeño, la fecha límite (roja si venció) o el estado.
         HStack(spacing: 6) {
-            Text("◆ " + issue.title).font(.caption).foregroundStyle(Theme.textPrimary).lineLimit(1)
+            Text("◆").font(.system(size: 9, weight: .bold)).foregroundStyle(f.overdue ? .red : Theme.accentText).accessibilityHidden(true)
+            Text(issue.title).font(.caption).foregroundStyle(Theme.textPrimary).lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 4)
             if issue.dueDate != nil {
                 Text(f.overdue ? L("issue.overdue") : f.dueToday ? L("issue.today") : IssueSort.dueLabel(issue))
                     .font(.caption2.weight(f.overdue ? .semibold : .regular)).foregroundStyle(f.overdue ? .red : Theme.textSecondary)
+                    .lineLimit(1).fixedSize()
+            } else if issue.status == .in_progress || issue.status == .waiting {
+                Text(L("issue.st.\(issue.status.rawValue)")).font(.caption2.weight(.semibold))
+                    .foregroundStyle(issue.status == .waiting ? Color.purple : Theme.accentText).lineLimit(1).fixedSize()
             }
-            if issue.status == .in_progress || issue.status == .waiting { StatusPill(status: issue.status) }
         }
         .accessibilityElement(children: .combine)
     }
 }
 
 struct IdBox: Identifiable { let id: String }
+
+/// Toque de una fila hecha con Button en una List: resalta como una celda, sin tomar el estilo de botón.
+struct RowPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.textSecondary.opacity(configuration.isPressed ? 0.12 : 0)).padding(-4))
+    }
+}
 
 /// Secciones y empresas plegadas (`sec:`, `org:`) y asuntos desplegados por grupo (`iss:`; por defecto plegados).
 /// Se recuerda en este dispositivo.
@@ -438,6 +530,7 @@ struct HomeHeader: View {
         HStack {
             Text(title).font(.caption.weight(.bold)).textCase(.uppercase).foregroundStyle(Theme.textSecondary)
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier(action == nil ? (identifier ?? "") : "")
             Spacer()
             if let action {
                 Button(action: action.run) { Image(systemName: "plus").font(.subheadline.weight(.bold)) }
@@ -532,6 +625,8 @@ struct HierarchyConvRow: View {
     /// Grupos: chip «◆ N asuntos · N vencidos ⌄» que despliega o pliega sus asuntos (sin abrir el chat).
     var issuesToggle: IssuesToggle? = nil
     var onToggleIssues: (() -> Void)? = nil
+    /// «Solo {empresa}» junto al nombre de un grupo interno (en la Lista basta el candado: el título ya lleva la empresa).
+    var showOnlyOrg = true
     var onIssues: () -> Void
 
     var body: some View {
@@ -548,11 +643,14 @@ struct HierarchyConvRow: View {
                         Text("· \(ws.name)").font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
                     }
                     // Un grupo interno lleva candado y «Solo {empresa}».
-                    if c.kind == .internal, let o = Naming.org(d, c.internalOrgId) {
+                    if showOnlyOrg, c.kind == .internal, let o = Naming.org(d, c.internalOrgId) {
                         Text(L("grp.onlyOrg", ["org": o.name])).font(.caption2.weight(.semibold)).foregroundStyle(Theme.textSecondary).lineLimit(1)
                     }
                     if c.isMuted { Image(systemName: "bell.slash.fill").font(.caption2).foregroundStyle(Theme.textSecondary).accessibilityHidden(true) }
                     Spacer(minLength: 4)
+                    if c.pinnedAt != nil {
+                        Text("📌").font(.caption2).accessibilityHidden(true).accessibilityIdentifier("row.pinned.\(c.id)")
+                    }
                     if threadUnread > 0 {
                         Text("💬 \(threadUnread)").font(.caption2.weight(.bold)).foregroundStyle(Theme.accentText)
                             .padding(.horizontal, 6).padding(.vertical, 2)
@@ -596,6 +694,7 @@ struct HierarchyConvRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel([title, Naming.isSide(c) ? L("dm.side") : nil,
                              Naming.sideOrigin(d, c).map { L("dm.fromOrigin", ["name": Naming.title(d, $0)]) },
+                             c.pinnedAt != nil ? L("side.pinned") : nil,
                              c.isMuted ? L("side.muted") : nil, c.unreadMentions > 0 ? L("mention.youMentioned") : nil,
                              c.unread > 0 ? L("a11y.unread", ["n": c.unread]) : nil, preview, time,
                              issueCountLabel].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))

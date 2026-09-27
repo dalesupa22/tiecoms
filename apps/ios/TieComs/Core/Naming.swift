@@ -275,18 +275,21 @@ extension Naming {
 }
 
 
-/// Orden de Inicio (igual que la web, Shell.tsx `compareConversations` / `sortHome`): primero lo que tiene no leídos
-/// (silenciadas cuentan como leídas), en cada bloque las fijadas arriba y luego por actividad descendente; desempate por id.
+/// Orden único de bandejas (1.6.4, igual que la web `compareConversations`): fijadas siempre arriba; luego (y también
+/// entre fijadas) las que tienen una mención sin leer aunque estén silenciadas, luego las que tienen no leídos pendientes
+/// (no silenciadas) y al final el resto por actividad descendente; desempate por id.
 enum HomeOrder {
     static func activity(_ c: ConversationDTO) -> String { c.lastHumanPreview?.createdAt ?? c.lastMessageAt ?? "" }
     /// Una mención sin leer cuenta aunque la conversación esté silenciada (SPEC-v4 H).
     static func pending(_ c: ConversationDTO) -> Int { c.unread > 0 && (!c.isMuted || c.unreadMentions > 0) ? c.unread : 0 }
 
     static func before(_ a: ConversationDTO, _ b: ConversationDTO) -> Bool {
-        let ua = pending(a) > 0, ub = pending(b) > 0
-        if ua != ub { return ua }
         let pa = a.pinnedAt != nil, pb = b.pinnedAt != nil
         if pa != pb { return pa }
+        let ma = a.unreadMentions > 0, mb = b.unreadMentions > 0
+        if ma != mb { return ma }
+        let ua = pending(a) > 0, ub = pending(b) > 0
+        if ua != ub { return ua }
         let xa = activity(a), xb = activity(b)
         return xa == xb ? a.id < b.id : xa > xb
     }

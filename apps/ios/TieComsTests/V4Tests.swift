@@ -281,8 +281,8 @@ final class V4Tests: XCTestCase {
         let e = try conv("e", at: "2026-09-25T09:00:00Z", human: "2026-09-25T11:00:00Z")
         let f = try conv("f", at: "2026-09-25T10:00:00Z")
         let sorted = [a, b, c, d, e, f].sorted(by: HomeOrder.before).map(\.id)
-        // No leídos primero; silenciada cuenta como leída; fijada arriba de su bloque; actividad = lastHumanPreview ?? lastMessageAt; desempate por id.
-        XCTAssertEqual(sorted, ["b", "d", "c", "e", "a", "f"])
+        // 1.6.4: fijadas primero; luego no leídos (silenciada cuenta como leída); actividad = lastHumanPreview ?? lastMessageAt; desempate por id.
+        XCTAssertEqual(sorted, ["d", "b", "c", "e", "a", "f"])
         XCTAssertTrue(HomeOrder.rankBefore(.init(unread: 1, activity: "2020"), .init(unread: 0, activity: "2030")))
         XCTAssertTrue(HomeOrder.rankBefore(.init(unread: 3, activity: "2020"), .init(unread: 1, activity: "2030")))
         XCTAssertTrue(HomeOrder.rankBefore(.init(unread: 0, activity: "2030"), .init(unread: 0, activity: "2020")))

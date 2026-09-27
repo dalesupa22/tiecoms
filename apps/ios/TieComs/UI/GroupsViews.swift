@@ -609,16 +609,18 @@ struct DMsView: View {
                             .listRowBackground(Color.clear)
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                     }
-                    Section {
-                        ForEach(list) { c in
-                            NavigationLink(value: Route.conversation(c.id)) {
-                                HierarchyConvRow(d: d, c: c, threadUnread: threadUnread[c.id] ?? 0) { issuesFor = c.id }
-                            }
-                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
-                            .accessibilityIdentifier("conv.row.\(c.id)")
-                            .contextMenu { ConversationMenuItems(conv: c) }
+                    if searching {
+                        Section {
+                            ForEach(list) { c in dmRow(d, c, threadUnread: threadUnread[c.id] ?? 0) }
+                        } header: { if !list.isEmpty { HomeHeader(title: L("search.chats")) } }
+                    } else {
+                        // Orden único con separadores discretos Fijados · Sin leer · Recientes (1.6.4).
+                        ForEach(InboxBucket.split(list, conv: { $0 }, extraUnread: { threadUnread[$0.id] ?? 0 }), id: \.bucket) { b in
+                            Section {
+                                ForEach(b.items) { c in dmRow(d, c, threadUnread: threadUnread[c.id] ?? 0) }
+                            } header: { HomeHeader(title: L(b.bucket.labelKey), identifier: "dm.bucket.\(b.bucket.rawValue)") }
                         }
-                    } header: { if searching && !list.isEmpty { HomeHeader(title: L("search.chats")) } }
+                    }
                     // Al buscar: personas con las que aún no hay directo en la lista (tocar = escribirle) y grupos.
                     if searching {
                         QuickSearchSections(d: d, query: query, showChats: false,
@@ -650,6 +652,15 @@ struct DMsView: View {
         .quickActions()
         .sheet(isPresented: $newChat) { NewChatSheet() }
         .sheet(item: Binding(get: { issuesFor.map(IdBox.init) }, set: { issuesFor = $0?.id })) { ConversationIssuesSheet(conversationId: $0.id) }
+    }
+
+    private func dmRow(_ d: BootstrapDTO, _ c: ConversationDTO, threadUnread: Int) -> some View {
+        NavigationLink(value: Route.conversation(c.id)) {
+            HierarchyConvRow(d: d, c: c, threadUnread: threadUnread) { issuesFor = c.id }
+        }
+        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
+        .accessibilityIdentifier("conv.row.\(c.id)")
+        .contextMenu { ConversationMenuItems(conv: c) }
     }
 }
 

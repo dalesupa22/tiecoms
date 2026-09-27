@@ -69,8 +69,20 @@ await say(g.accessToken, wsG.generalConversationId, 'Bienvenida, Ana: esta seman
 // Un código para «Unirme con código»: Gloria comparte otro grupo con enlace.
 const cohort = await call('/groups', { token: g.accessToken, body: { name: 'Cohorte 5', target: { kind: 'org' }, shareLink: true } });
 
+// 1.6.4: chat largo con 40 no leídos (Ana leyó hasta el 30) y una mención a Ana entre ellos; un grupo fijado.
+const largo = await call('/groups', { token: a.accessToken, body: { name: 'Cohorte larga', target: { kind: 'workspace', workspaceId: ws.id }, memberIds: [b.user.id] } });
+let readSeq = 0;
+for (let n = 1; n <= 70; n++) {
+  const body = n === 55 ? '@Ana Márquez ¿puedes revisar el cronograma?' : `Avance ${n} de la cohorte: todo en orden por aquí`;
+  const r = await call(`/conversations/${largo.conversationId}/messages`, { token: b.accessToken,
+    body: { clientMessageId: randomUUID(), body, ...(n === 55 ? { mentions: [{ userId: a.user.id, start: 0, length: 12 }] } : {}) } });
+  if (n === 30) readSeq = r.message?.seq ?? r.seq;
+}
+await call(`/conversations/${largo.conversationId}/read`, { token: a.accessToken, body: { seq: readSeq } });
+await call(`/conversations/${nestle.conversationId}/prefs`, { token: a.accessToken, method: 'PUT', body: { pinned: true } });
+
 const out = { apiUrl: API, password, tag, a: { email: a.user.email, id: a.user.id }, b: { email: b.user.email, id: b.user.id },
   c: { email: c.user.email, id: c.user.id }, orgA, pagosId: pagos.conversationId, ventasId: ventas.conversationId, wsId: ws.id, generalId: ws.generalConversationId, threadId: thread.id,
-  nestleCode: nestle.inviteCode, joinCode: cohort.inviteCode, overdueIssue: i1.id };
+  nestleCode: nestle.inviteCode, joinCode: cohort.inviteCode, overdueIssue: i1.id, longId: largo.conversationId, pinnedId: nestle.conversationId };
 writeFileSync(process.env.FIXTURE_OUT ?? '/dev/stdout', JSON.stringify(out, null, 2));
 console.log(JSON.stringify(out, null, 2));

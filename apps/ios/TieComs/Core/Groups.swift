@@ -238,6 +238,34 @@ extension Naming {
         return tree
     }
 
+    // MARK: Vista Lista (1.6.4)
+
+    /// «{Empresa} · {Grupo}» de la vista Lista. Si el nombre del grupo ya empieza por la empresa, no se repite.
+    static func listLabel(company: String?, group: String) -> String {
+        let co = (company ?? "").trimmingCharacters(in: .whitespaces)
+        guard !co.isEmpty else { return group }
+        let fold: (String) -> String = { $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
+        return fold(group).hasPrefix(fold(co)) ? group : "\(co) · \(group)"
+    }
+
+    /// Lista: las mismas filas de grupo del árbol (sin hilos) en una sola lista con el orden único (HomeOrder) y
+    /// el título «{Empresa} · {Grupo}» (la empresa del árbol: la mía, la contraparte o la anfitriona).
+    static func groupsList(_ d: BootstrapDTO, query: String = "", filterWorkspace: String? = nil, tab: HomeFilter = .all) -> [GroupsTree.ConvNode] {
+        let tree = groupsTree(d, query: query, filterWorkspace: filterWorkspace, tab: tab)
+        var out: [GroupsTree.ConvNode] = []
+        for s in tree.sections {
+            for co in s.companies {
+                let company = co.org?.name ?? co.name
+                for var n in co.groups {
+                    n.label = listLabel(company: company, group: n.label ?? title(d, n.conv))
+                    out.append(n)
+                }
+            }
+            out += s.orphans
+        }
+        return out.sorted { HomeOrder.before($0.conv, $1.conv) }
+    }
+
     // MARK: DMs
 
     /// DMs: directos y chats grupales, incluidos los sidechats, en el orden de Inicio (compareConversations).
@@ -275,6 +303,38 @@ extension Naming {
 
     /// Globo de la pestaña DMs: no leídos de directos y chats (sidechats e hilos de chats incluidos).
     static func dmsUnread(_ d: BootstrapDTO) -> Int { unreadCount(d.conversations.filter { $0.kind.isChat }) }
+}
+
+// MARK: - Bandeja: vista y separadores (1.6.4)
+
+/// Vista de Grupos: «Lista» (todos los grupos en una lista plana) o «Árbol» (por empresa). Por dispositivo.
+enum GroupsViewMode: String, CaseIterable, Identifiable {
+    case list, tree
+    var id: String { rawValue }
+    var labelKey: String { "grp.view.\(rawValue)" }
+    static let key = "groupsView"
+    static func load(_ defaults: UserDefaults = .standard) -> GroupsViewMode { GroupsViewMode(rawValue: defaults.string(forKey: key) ?? "") ?? .list }
+    static func save(_ m: GroupsViewMode, _ defaults: UserDefaults = .standard) { defaults.set(m.rawValue, forKey: key) }
+}
+
+/// Separadores discretos de las listas planas (Lista de Grupos y DMs): Fijados · Sin leer · Recientes.
+enum InboxBucket: String, CaseIterable, Identifiable {
+    case pinned, unread, recent
+    var id: String { rawValue }
+    var labelKey: String { "inbox.\(rawValue)" }
+
+    static func of(_ c: ConversationDTO, extraUnread: Int = 0) -> InboxBucket {
+        if c.pinnedAt != nil { return .pinned }
+        if c.unreadMentions > 0 || HomeOrder.pending(c) > 0 || extraUnread > 0 { return .unread }
+        return .recent
+    }
+
+    /// Parte una lista ya ordenada en bloques; los bloques vacíos no salen. `extraUnread`: respuestas sin leer de sus hilos.
+    static func split<T>(_ list: [T], conv: (T) -> ConversationDTO, extraUnread: (T) -> Int = { _ in 0 }) -> [(bucket: InboxBucket, items: [T])] {
+        var map: [InboxBucket: [T]] = [:]
+        for x in list { map[of(conv(x), extraUnread: extraUnread(x)), default: []].append(x) }
+        return allCases.compactMap { b in map[b].flatMap { $0.isEmpty ? nil : (b, $0) } }
+    }
 }
 
 // MARK: - Códigos de invitación

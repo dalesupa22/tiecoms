@@ -6,14 +6,32 @@ private enum ChatItem: Identifiable {
     case message(MessageDTO, showAuthor: Bool)
     case system(MessageDTO)
     case pending(PendingMessage)
+    /// Línea «N mensajes nuevos» antes del primer no leído (1.6.4).
+    case newDivider(Int)
 
     var id: String {
         switch self {
+        case .newDivider: return ChatNavIds.divider
         case .day(let k, _): return "day-\(k)"
         case .message(let m, _), .system(let m): return m.id
         case .pending(let p): return "p-\(p.clientMessageId)"
         }
     }
+}
+
+enum ChatNavIds {
+    static let divider = "new-divider"
+    static let bottom = "bottom"
+}
+
+/// Borde inferior del contenido del chat y posición de la línea de no leídos, en coordenadas de la vista del chat.
+private struct ChatContentBottomKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+private struct ChatDividerYKey: PreferenceKey {
+    static let defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = nextValue() ?? value }
 }
 
 private struct PendingVoiceSend {
@@ -90,6 +108,22 @@ struct ConversationView: View {
     @State private var draftCursor = 0
     /// ✅ sobre un mensaje que abrió un asunto aún abierto: «¿Cerrar también el asunto?».
     @State private var closeIssuePrompt: String?
+    // 1.6.4 · Navegar un chat largo (SPEC-bandeja D).
+    /// Lo no leído al abrir (antes de marcar leído); la línea «N mensajes nuevos» queda hasta salir del chat.
+    @State private var unreadSnap: ChatNav.Snapshot?
+    /// Primer mensaje no leído (la línea va justo antes).
+    @State private var dividerId: String?
+    /// Ya se colocó el chat al abrir (en el primer no leído o al final).
+    @State private var positioned = false
+    /// A más de una pantalla del final: sale el botón ⌄ y los mensajes nuevos no arrastran la vista.
+    @State private var farFromBottom = false
+    /// Último seq visto estando al final: lo que llegue después cuenta en el globo del ⌄.
+    @State private var bottomSeq = 0
+    /// La línea de no leídos quedó por encima de la vista: píldora «↑ N nuevos».
+    @State private var dividerAbove = false
+    /// Menciones a mí sin leer al abrir, por visitar con el botón «@».
+    @State private var mentionQueue: [String] = []
+    @State private var viewportHeight: CGFloat = 0
 
     var body: some View {
         Group {
@@ -106,6 +140,7 @@ struct ConversationView: View {
         // Solo en pantalla ancha (en iPhone el vidrio del sistema se ve bien y el color fijo se oscurecía con el teclado).
         .toolbarBackground(!embedded && sizeClass == .regular ? .visible : .automatic, for: .navigationBar)
         .onAppear {
+            snapshotUnread()
             // Un hilo o sidechat abierto al lado recibe el cursor.
             if embedded { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { composerFocused = true } }
             store.openConversationId = conversationId
@@ -330,6 +365,7 @@ struct ConversationView: View {
                 lastDay = day
                 prev = nil
             }
+            if m.id == dividerId, let n = unreadSnap?.unread, n > 0 { items.append(.newDivider(n)) }
             if m.isSystem {
                 // Los hilos no ensucian el chat: el aviso «se abrió un hilo» lo reemplaza el chip bajo su mensaje.
                 if (m.systemPayload?["k"] as? String) == "derived.from" { continue }
@@ -375,10 +411,56 @@ struct ConversationView: View {
                     ForEach(items) { item in
                         row(d, c, item, byId: byId).id(item.id)
                     }
-                    Color.clear.frame(height: 4).id("bottom")
+                    Color.clear.frame(height: 4).id(ChatNavIds.bottom)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: ChatContentBottomKey.self, value: g.frame(in: .named("chat.scroll")).maxY)
+                })
+            }
+            .coordinateSpace(name: "chat.scroll")
+            .background(GeometryReader { g in
+                Color.clear
+                    .onAppear { viewportHeight = g.size.height }
+                    .onChange(of: g.size.height) { _, h in viewportHeight = h }
+            })
+            .onPreferenceChange(ChatContentBottomKey.self) { maxY in
+                let far = ChatNav.showsJumpToLatest(distanceFromBottom: maxY - viewportHeight, viewport: viewportHeight)
+                if far != farFromBottom { farFromBottom = far }
+                // De vuelta al final: lo que llegó mientras estaba arriba ya se vio.
+                if !far, let last = store.conversations[conversationId]?.messages.last?.seq, last > bottomSeq {
+                    bottomSeq = last
+                    if positioned { markReadIfVisible() }
+                }
+            }
+            .onPreferenceChange(ChatDividerYKey.self) { y in
+                guard let y else { return }
+                let above = y < 0
+                if above != dividerAbove { dividerAbove = above }
+            }
+            .overlay(alignment: .bottomTrailing) { jumpButtons(d, proxy) }
+            .overlay(alignment: .top) {
+                if let n = unreadSnap?.unread, n > 0, dividerId != nil, dividerAbove {
+                    Button { jump(proxy, to: ChatNavIds.divider, anchor: .top) } label: {
+                        Text(L("chat.newAbove", ["n": n])).font(.footnote.weight(.semibold)).foregroundStyle(.white)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(Capsule().fill(Theme.accentText))
+                            .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .accessibilityLabel(L("chat.jumpNew"))
+                    .accessibilityIdentifier("chat.jumpNew")
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: farFromBottom)
+            .animation(.easeInOut(duration: 0.2), value: dividerAbove)
+            // Al abrir: si hay no leídos, al primero (cargando hasta 3 páginas antiguas) con la línea «N mensajes nuevos».
+            .task(id: state.loaded) {
+                guard state.loaded, !positioned else { return }
+                await positionAtFirstUnread(proxy)
             }
             .defaultScrollAnchor(.bottom)
             // Teléfono con el sidechat a medias: espacio abajo para que el ancla pueda subir sobre la hoja.
@@ -417,7 +499,14 @@ struct ConversationView: View {
             // Tocar el área de mensajes cierra el teclado (simultáneo: no quita el toque a mensajes, menciones ni menús).
             .simultaneousGesture(TapGesture().onEnded { if composerFocused { composerFocused = false } })
             .onChange(of: items.last?.id) { _, _ in
-                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                // Lo mío siempre baja al final; lo de otros no arrastra a quien está leyendo más arriba (sale en el ⌄).
+                let mine: Bool = {
+                    if case .pending = items.last { return true }
+                    return state.messages.last?.authorId == d.me.id
+                }()
+                if positioned && farFromBottom && !mine { return }
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(ChatNavIds.bottom, anchor: .bottom) }
+                if let last = state.messages.last?.seq { bottomSeq = max(bottomSeq, last) }
                 markReadIfVisible()
             }
             .onChange(of: composerFocused) { _, focused in
@@ -476,12 +565,111 @@ struct ConversationView: View {
 
     private func markReadIfVisible() {
         guard scenePhase == .active, store.openConversationId == conversationId else { return }
+        snapshotUnread()
         store.markRead(conversationId)
+    }
+
+    /// Guarda lo no leído al abrir, una vez y antes de marcar leído.
+    private func snapshotUnread() {
+        guard unreadSnap == nil, let c = store.meta(conversationId) else { return }
+        unreadSnap = .init(lastReadSeq: c.lastReadSeq, unread: c.unread)
+    }
+
+    private func positionAtFirstUnread(_ proxy: ScrollViewProxy) async {
+        let me = store.data?.me.id ?? ""
+        defer { positioned = true }
+        bottomSeq = store.conversations[conversationId]?.messages.last?.seq ?? 0
+        guard let snap = unreadSnap, snap.unread > 0 else { return }
+        var pages = 0
+        while pages < ChatNav.maxOlderPages, let st = store.conversations[conversationId],
+              ChatNav.needsOlder(st.messages, snapshot: snap, me: me, hasMore: st.hasMore) {
+            await store.loadOlder(conversationId)
+            pages += 1
+        }
+        guard let st = store.conversations[conversationId],
+              let idx = ChatNav.firstUnreadIndex(st.messages, snapshot: snap, me: me, hasMore: st.hasMore) else { return }
+        let first = st.messages[idx]
+        dividerId = first.id
+        mentionQueue = ChatNav.mentionIds(Array(st.messages[idx...]), after: first.seq - 1, me: me)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        proxy.scrollTo(ChatNavIds.divider, anchor: .top)
+    }
+
+    /// Botones flotantes sobre el compositor: «@» (siguiente mención sin leer) y ⌄ «Ir al final» con los nuevos.
+    @ViewBuilder
+    private func jumpButtons(_ d: BootstrapDTO, _ proxy: ScrollViewProxy) -> some View {
+        let fresh = farFromBottom ? (store.conversations[conversationId]?.messages ?? [])
+            .filter { $0.seq > bottomSeq && !$0.isSystem && $0.authorId != d.me.id }.count : 0
+        VStack(spacing: 10) {
+            if let next = mentionQueue.first {
+                Button {
+                    mentionQueue.removeFirst()
+                    jump(proxy, to: next, anchor: .center)
+                    highlighted = next
+                    Task {
+                        try? await Task.sleep(nanoseconds: 1_600_000_000)
+                        if highlighted == next { withAnimation { highlighted = nil } }
+                    }
+                } label: { floatingCircle(Text("@").font(.system(size: 17, weight: .heavy)), badge: 0) }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L("chat.jumpMention"))
+                .accessibilityIdentifier("chat.jumpMention")
+                .transition(.scale.combined(with: .opacity))
+            }
+            if farFromBottom {
+                Button {
+                    jump(proxy, to: ChatNavIds.bottom, anchor: .bottom)
+                    if let last = store.conversations[conversationId]?.messages.last?.seq { bottomSeq = max(bottomSeq, last) }
+                    markReadIfVisible()
+                } label: { floatingCircle(Image(systemName: "chevron.down").font(.system(size: 16, weight: .bold)), badge: fresh) }
+                .buttonStyle(.plain)
+                .accessibilityLabel(fresh > 0 ? "\(L("chat.jumpLatest")), \(L("a11y.unread", ["n": fresh]))" : L("chat.jumpLatest"))
+                .accessibilityIdentifier("chat.jumpLatest")
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .padding(.trailing, 14)
+        .padding(.bottom, 12)
+    }
+
+    /// Salto animado; en una LazyVStack larga la animación se queda corta (alturas estimadas): se remata sin animar.
+    private func jump(_ proxy: ScrollViewProxy, to id: String, anchor: UnitPoint) {
+        withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(id, anchor: anchor) }
+        Task {
+            for _ in 0..<2 {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                proxy.scrollTo(id, anchor: anchor)
+            }
+        }
+    }
+
+    private func floatingCircle(_ content: some View, badge: Int) -> some View {
+        content
+            .foregroundStyle(Theme.accentText)
+            .frame(width: 42, height: 42)
+            .background(Circle().fill(Theme.surface))
+            .overlay(Circle().strokeBorder(Theme.textSecondary.opacity(0.18), lineWidth: 1))
+            .shadow(color: .black.opacity(0.14), radius: 5, y: 2)
+            .overlay(alignment: .topTrailing) {
+                if badge > 0 { UnreadPill(count: badge).offset(x: 6, y: -6) }
+            }
+            .contentShape(Circle())
     }
 
     @ViewBuilder
     private func row(_ d: BootstrapDTO, _ c: ConversationDTO, _ item: ChatItem, byId: [String: MessageDTO]) -> some View {
         switch item {
+        case .newDivider(let n):
+            HStack(spacing: 8) {
+                Rectangle().fill(Theme.accentText.opacity(0.55)).frame(height: 1)
+                Text(n == 1 ? L("chat.newMessagesOne") : L("chat.newMessages", ["n": n]))
+                    .font(.caption.weight(.semibold)).foregroundStyle(Theme.accentText).lineLimit(1).fixedSize()
+                Rectangle().fill(Theme.accentText.opacity(0.55)).frame(height: 1)
+            }
+            .padding(.vertical, 6)
+            .background(GeometryReader { g in Color.clear.preference(key: ChatDividerYKey.self, value: g.frame(in: .named("chat.scroll")).minY) })
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("chat.newDivider")
         case .day(_, let date):
             Text(L10n.dayLabel(date))
                 .font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)

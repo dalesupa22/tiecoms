@@ -21,6 +21,9 @@ final class GroupsUITests: XCTestCase {
         var threadId: String?
         /// Asunto vencido de «Pagos» (fixtures nuevos).
         var overdueIssue: String?
+        /// 1.6.4: chat largo con 40 no leídos y una mención; grupo fijado.
+        var longId: String?
+        var pinnedId: String?
     }
 
     override func setUp() { continueAfterFailure = false }
@@ -63,6 +66,13 @@ final class GroupsUITests: XCTestCase {
         for label in ["Cancelar", "Cerrar", "Close", "Cancel"] where app.buttons[label].exists { app.buttons[label].firstMatch.tap(); return }
     }
 
+    /// Vista de Grupos (1.6.4): «Lista» o «Árbol».
+    private func setView(_ app: XCUIApplication, _ label: String) {
+        let seg = app.segmentedControls["grp.viewMode"]
+        XCTAssertTrue(seg.waitForExistence(timeout: 5), "selector Lista / Árbol")
+        seg.buttons[label].tap()
+    }
+
     /// Plegar/desplegar: botón de vista arriba a la izquierda (ya no hay «…»).
     private func foldMenu(_ app: XCUIApplication) {
         XCTAssertTrue(app.buttons["home.fold"].waitForExistence(timeout: 5))
@@ -102,7 +112,8 @@ final class GroupsUITests: XCTestCase {
         dismissSystemPrompts(app)
         if app.buttons["home.tab.all"].exists { app.buttons["home.tab.all"].tap() }
         XCTAssertTrue(pagos.waitForExistence(timeout: 10), "grupo interno en Tu organización")
-        XCTAssertTrue(app.buttons["home.section.mine"].exists)
+        setView(app, "Árbol")
+        XCTAssertTrue(app.buttons["home.section.mine"].waitForExistence(timeout: 5))
         // Los asuntos van plegados: el chip «◆ 4» en la fila los despliega (3 y «+1 asuntos»).
         XCTAssertTrue(app.buttons["grp.issuesToggle.\(f.pagosId)"].firstMatch.waitForExistence(timeout: 5), "chip de asuntos en la fila del grupo")
         if !app.buttons["grp.moreIssues.\(f.pagosId)"].exists { issuesChip(app, f.pagosId).tap() }
@@ -168,13 +179,170 @@ final class GroupsUITests: XCTestCase {
         XCTAssertTrue(ovs.waitForExistence(timeout: 5))
         ovs.tap()
         let ventas = app.buttons["ovs.group.\(f.ventasId)"]
-        XCTAssertTrue(ventas.waitForExistence(timeout: 8))
+        // Con el fixture de 1.6.4 hay más grupos (más recientes) antes de «Ventas regionales».
+        let listed = Date().addingTimeInterval(8)
+        while Date() < listed && !app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'ovs.group.'")).firstMatch.exists { usleep(300_000) }
+        for _ in 0..<5 where !ventas.isHittable { app.swipeUp() }
+        XCTAssertTrue(ventas.waitForExistence(timeout: 3))
         shot("07-supervision")
         ventas.tap()
         XCTAssertTrue(app.descendants(matching: .any)["ovs.banner"].waitForExistence(timeout: 8), "franja de solo lectura")
         XCTAssertFalse(app.textViews["composer.field"].exists, "sin compositor")
         sleep(1)
         shot("08-solo-lectura")
+        // Deja la vista por defecto para las demás pruebas (el segundo toque vuelve a la raíz de Grupos).
+        app.tabBars.buttons["Grupos"].tap()
+        if !app.segmentedControls["grp.viewMode"].waitForExistence(timeout: 2) { app.tabBars.buttons["Grupos"].tap() }
+        setView(app, "Lista")
+    }
+
+    /// 1.6.4: Lista (por defecto, «Empresa · Grupo», Fijados · Sin leer · Recientes) y Árbol; los asuntos van contraídos
+    /// y se abren como sub-filas compactas con el chip, sin entrar al chat.
+    func testListTreeAndCompactIssues() throws {
+        let f = try fixture()
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "no se prueba contra producción")
+        guard let pinnedId = f.pinnedId else { throw XCTSkip("Fixture sin grupo fijado (1.6.4)") }
+        let app = login(f)
+        let pagos = app.buttons["conv.row.\(f.pagosId)"]
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !pagos.exists { dismissSystemPrompts(app); usleep(300_000) }
+        dismissSystemPrompts(app)
+        if app.buttons["home.tab.all"].exists { app.buttons["home.tab.all"].tap() }
+        setView(app, "Lista")
+        foldMenu(app)
+        app.buttons["home.fold.hideIssues"].tap()
+        // Lista: separadores, fijado arriba y «Empresa · Grupo».
+        XCTAssertTrue(app.descendants(matching: .any)["grp.bucket.pinned"].waitForExistence(timeout: 5), "separador Fijados")
+        XCTAssertTrue(app.descendants(matching: .any)["grp.bucket.unread"].exists, "separador Sin leer")
+        XCTAssertTrue(app.buttons["conv.row.\(pinnedId)"].exists)
+        XCTAssertFalse(app.buttons["home.section.mine"].exists, "sin cabeceras de sección en la Lista")
+        XCTAssertTrue(pagos.label.contains("Xertify QA") && pagos.label.contains("Pagos y facturación"), "«Empresa · Grupo»: \(pagos.label)")
+        XCTAssertLessThan(app.buttons["conv.row.\(pinnedId)"].frame.minY, pagos.frame.minY, "el fijado va arriba aunque no tenga no leídos")
+        sleep(1)
+        shot("01-grupos-lista")
+        // Chip → sub-filas compactas (sin abrir el chat).
+        issuesChip(app, f.pagosId).tap()
+        let more = app.buttons["grp.moreIssues.\(f.pagosId)"]
+        XCTAssertTrue(more.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.descendants(matching: .any)["chat.header"].exists, "el chip no abre el chat")
+        if let overdue = f.overdueIssue {
+            let line = app.buttons["grp.issue.\(overdue)"]
+            XCTAssertTrue(line.exists)
+            XCTAssertLessThan(line.frame.height, 34, "sub-fila compacta (antes 44 pt)")
+        }
+        sleep(1)
+        shot("03-asuntos-expandidos-lista")
+        issuesChip(app, f.pagosId).tap()
+        XCTAssertTrue(more.waitForNonExistence(timeout: 3), "el chip vuelve a contraer")
+        // Árbol: lo de siempre, con los fijados arriba dentro de cada sección.
+        setView(app, "Árbol")
+        XCTAssertTrue(app.buttons["home.section.mine"].waitForExistence(timeout: 5))
+        sleep(1)
+        shot("02-grupos-arbol")
+        shot("05-asuntos-contraidos-arbol")
+        issuesChip(app, f.pagosId).tap()
+        XCTAssertTrue(more.waitForExistence(timeout: 3))
+        sleep(1)
+        shot("04-asuntos-expandidos-arbol")
+        issuesChip(app, f.pagosId).tap()
+        XCTAssertTrue(more.waitForNonExistence(timeout: 3))
+        // Se recuerda la vista.
+        app.terminate()
+        let again = login(f)
+        XCTAssertTrue(again.buttons["home.section.mine"].waitForExistence(timeout: 20), "sigue en Árbol tras reabrir")
+        setView(again, "Lista")
+        // DMs: Fijados · Sin leer · Recientes.
+        again.tabBars.buttons["DMs"].tap()
+        XCTAssertTrue(again.descendants(matching: .any)["dm.bucket.unread"].waitForExistence(timeout: 8))
+        sleep(1)
+        shot("09-dms-separadores")
+    }
+
+    /// 1.6.4: un chat largo abre en el primer no leído con «N mensajes nuevos»; ⌄ baja al final, «@» salta a la mención
+    /// y, desde arriba, vuelve el ⌄.
+    func testLongChatOpensAtFirstUnread() throws {
+        let f = try fixture()
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "no se prueba contra producción")
+        guard let longId = f.longId else { throw XCTSkip("Fixture sin chat largo (1.6.4)") }
+        let app = login(f)
+        let row = app.buttons["conv.row.\(longId)"]
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !row.exists { dismissSystemPrompts(app); usleep(300_000) }
+        dismissSystemPrompts(app)
+        if app.buttons["home.tab.all"].exists { app.buttons["home.tab.all"].tap() }
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        let divider = app.descendants(matching: .any)["chat.newDivider"]
+        XCTAssertTrue(divider.waitForExistence(timeout: 10), "línea de no leídos")
+        XCTAssertTrue(app.staticTexts["40 mensajes nuevos"].exists)
+        sleep(1)
+        XCTAssertTrue(divider.isHittable, "abre en el primer no leído (la línea se ve)")
+        XCTAssertTrue(app.staticTexts["Avance 31 de la cohorte: todo en orden por aquí"].exists, "el primer no leído")
+        XCTAssertTrue(app.buttons["chat.jumpLatest"].exists, "⌄ Ir al final")
+        XCTAssertTrue(app.buttons["chat.jumpMention"].exists, "@ a la mención")
+        shot("06-chat-mensajes-nuevos")
+        app.buttons["chat.jumpMention"].tap()
+        XCTAssertTrue(app.buttons["chat.jumpMention"].waitForNonExistence(timeout: 3), "sin más menciones")
+        sleep(1)
+        shot("07-chat-mencion")
+        app.buttons["chat.jumpLatest"].tap()
+        XCTAssertTrue(app.buttons["chat.jumpLatest"].waitForNonExistence(timeout: 4), "al final se oculta el ⌄")
+        XCTAssertTrue(app.staticTexts["Avance 70 de la cohorte: todo en orden por aquí"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["chat.jumpNew"].exists, "«↑ 40 nuevos» con la línea por encima")
+        sleep(1)
+        shot("08-chat-al-final")
+        for _ in 0..<3 { app.swipeDown(velocity: .fast) }
+        XCTAssertTrue(app.buttons["chat.jumpLatest"].waitForExistence(timeout: 3), "arriba vuelve el ⌄")
+        sleep(1)
+        shot("10-chat-boton-final")
+        // Bruno escribe mientras Ana lee arriba: no la arrastra al final y el ⌄ lleva el globo con los nuevos.
+        guard let b = f.b else { return }
+        let visible = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Avance '")).firstMatch.label
+        try postAs(f, email: b.email, conversationId: longId, body: "Nuevo aviso 1 mientras lees")
+        try postAs(f, email: b.email, conversationId: longId, body: "Nuevo aviso 2 mientras lees")
+        let jump = app.buttons["chat.jumpLatest"]
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline && !jump.label.contains(",") { usleep(300_000) }
+        XCTAssertTrue(jump.label.contains("2"), "globo con 2 nuevos: \(jump.label)")
+        XCTAssertTrue(app.staticTexts[visible].exists, "los mensajes nuevos no arrastran al final")
+        sleep(1)
+        shot("11-chat-nuevos-mientras-lees")
+        jump.tap()
+        sleep(1)
+        shot("12-chat-tras-ir-al-final")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Nuevo aviso 2'")).firstMatch.waitForExistence(timeout: 5), "⌄ baja hasta lo nuevo")
+        XCTAssertTrue(jump.waitForNonExistence(timeout: 3))
+    }
+
+    /// Publica un mensaje como otra persona del fixture (misma contraseña) directo contra el API de pruebas.
+    private func postAs(_ f: Fixture, email: String, conversationId: String, body: String) throws {
+        func call(_ path: String, token: String? = nil, json: [String: Any]) throws -> [String: Any] {
+            var req = URLRequest(url: URL(string: f.apiUrl.replacingOccurrences(of: "//localhost", with: "//127.0.0.1") + "/api/v1" + path)!)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "content-type")
+            if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "authorization") }
+            req.httpBody = try JSONSerialization.data(withJSONObject: json)
+            var out: [String: Any] = [:]
+            let done = expectation(description: path)
+            URLSession.shared.dataTask(with: req) { data, _, _ in
+                out = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
+                done.fulfill()
+            }.resume()
+            wait(for: [done], timeout: 10)
+            return out
+        }
+        let login = try call("/auth/login", json: ["email": email, "password": f.password,
+                                                   "device": ["deviceId": UUID().uuidString, "name": "UITest peer", "platform": "agent"]])
+        let token = try XCTUnwrap(login["accessToken"] as? String, "login de la otra persona: \(login)")
+        // El fixture acaba de publicar 70 mensajes como esta persona: el API puede responder 429 un rato.
+        let cid = UUID().uuidString
+        var sent: [String: Any] = [:]
+        for _ in 0..<20 {
+            sent = try call("/conversations/\(conversationId)/messages", token: token, json: ["clientMessageId": cid, "body": body])
+            if sent["error"] == nil { break }
+            sleep(3)
+        }
+        XCTAssertNotNil(sent["message"] ?? sent["id"], "mensaje enviado: \(sent)")
     }
 
     /// 1.6.1: los asuntos de cada grupo se pliegan con su chip (recordado al volver a abrir la app), se muestran o

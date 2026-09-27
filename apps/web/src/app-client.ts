@@ -19,14 +19,22 @@ export const platform = detectPlatform();
 
 /**
  * En apps nativas no hay cookie httpOnly de mismo origen: el refresh token se
- * guarda en el dispositivo. Provisional: localStorage de la WebView. Antes de
- * publicar en tiendas se sustituye por Keychain (iOS/macOS) y Keystore/Credential
- * Manager (Android/Windows) mediante un plugin nativo.
+ * guarda en el dispositivo. Escritorio (Tauri): Llavero de macOS / Administrador
+ * de credenciales de Windows. Capacitor: provisional en localStorage de la WebView.
  */
-const nativeSecrets: SecretStore = {
-  async get() { try { return localStorage.getItem('tiecoms:rt'); } catch { return null; } },
-  async set(t) { try { if (t) localStorage.setItem('tiecoms:rt', t); else localStorage.removeItem('tiecoms:rt'); } catch {} },
-};
+const tauriInvoke = (cmd: string, args?: Record<string, unknown>) => (window as any).__TAURI_INTERNALS__.invoke(cmd, args);
+const nativeSecrets: SecretStore = platform === 'macos' || platform === 'windows'
+  ? {
+      async get() { try { return (await tauriInvoke('secret_get')) ?? null; } catch { return null; } },
+      async set(t) { await tauriInvoke('secret_set', { value: t || null }).catch(() => {}); },
+    }
+  : {
+      async get() { try { return localStorage.getItem('tiecoms:rt'); } catch { return null; } },
+      async set(t) { try { if (t) localStorage.setItem('tiecoms:rt', t); else localStorage.removeItem('tiecoms:rt'); } catch {} },
+    };
+
+/** Apps de escritorio (Tauri) en macOS y Windows. */
+export const isDesktop = platform === 'macos' || platform === 'windows';
 
 const en = browserLang() === 'en';
 const mobile = navigator.userAgent.includes('Mobile');

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import type { OrgInvitationPreviewDTO } from '@tiecoms/contracts';
-import { client, platform } from '../app-client.ts';
+import { client, isDesktop, platform } from '../app-client.ts';
 import { errorText, t } from '../i18n.ts';
 import { asset, navigate, queryParam } from '../router.ts';
 
@@ -9,6 +9,7 @@ export function AuthScreen({ mode, after }: { mode: 'login' | 'signup'; after?: 
   const [orgInvite, setOrgInvite] = useState<OrgInvitationPreviewDTO | null>(null);
   const [f, setF] = useState({ name: '', email: '', password: '', orgName: '', title: '' });
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const joining = mode === 'signup' && !!orgToken;
@@ -49,9 +50,15 @@ export function AuthScreen({ mode, after }: { mode: 'login' | 'signup'; after?: 
     setBusy(true);
     setError(null);
     try {
-      location.assign(await client.ssoStartUrl(provider, {
+      const url = await client.ssoStartUrl(provider, {
         next: after, ...(joining ? { orgInviteToken: orgToken } : mode === 'signup' ? { orgName: f.orgName.trim() } : {}),
-      }));
+        ...(isDesktop ? { redirectScheme: 'chaggu' as const } : {}),
+      });
+      if (!isDesktop) { location.assign(url); return; }
+      // Escritorio: Google no deja entrar desde un WebView; se abre el navegador y vuelve por chaggu://auth/callback.
+      await (window as any).__TAURI_INTERNALS__.invoke('plugin:opener|open_url', { url });
+      setInfo(t('auth.ssoInBrowser'));
+      setBusy(false);
     } catch (err: any) {
       setError(errorText(err));
       setBusy(false);
@@ -68,8 +75,8 @@ export function AuthScreen({ mode, after }: { mode: 'login' | 'signup'; after?: 
             <div className="small muted">{orgInvite.valid ? t('auth.joiningBy', { name: orgInvite.invitedByName }) : t('auth.inviteInvalid')}</div>
           </div>
         )}
-        {/* En las apps el SSO va por el navegador del sistema (Google bloquea los WebView); aquí solo la web. */}
-        {platform === 'web' && (
+        {/* En móvil el SSO lo hacen las apps nativas; aquí la web y el escritorio (este por el navegador del sistema). */}
+        {(platform === 'web' || isDesktop) && (
           <div className="sso">
             {mode === 'signup' && !joining && <label className="field"><span>{t('auth.company')}</span><input className="input" autoComplete="organization" value={f.orgName} onChange={set('orgName')} placeholder={t('auth.companyPh')} /></label>}
             <button type="button" className="btn sso-btn" disabled={busy} onClick={() => sso('google')}><GoogleMark /> {t('auth.withGoogle')}</button>
@@ -90,6 +97,7 @@ export function AuthScreen({ mode, after }: { mode: 'login' | 'signup'; after?: 
             {mode === 'signup' && <small className="hint">{t('auth.passwordHint')}</small>}
           </label>
           {error && <div className="error" role="alert">{error}</div>}
+          {info && !error && <div className="small muted" role="status">{info}</div>}
           <button className="btn primary" disabled={busy || (joining && orgInvite?.valid === false)}>{busy ? t('common.wait') : mode === 'login' ? t('auth.login') : joining ? t('auth.signupJoin') : t('auth.signup')}</button>
         </form>
         <div className="auth-switch">

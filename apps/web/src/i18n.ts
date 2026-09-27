@@ -19,7 +19,7 @@ const es = {
   'auth.email': 'Correo de trabajo', 'auth.password': 'Contraseña', 'auth.passwordHint': 'Mínimo 10 caracteres.',
   'auth.login': 'Entrar', 'auth.signup': 'Crear cuenta y empresa', 'auth.signupJoin': 'Crear cuenta y unirme',
   'auth.noAccount': '¿Tu empresa aún no está en Chaggu?', 'auth.createAccount': 'Crear cuenta', 'auth.haveAccount': '¿Ya tienes cuenta?',
-  'auth.withGoogle': 'Continuar con Google', 'auth.withMicrosoft': 'Continuar con Microsoft', 'auth.orEmail': 'o con tu correo',
+  'auth.withGoogle': 'Continuar con Google', 'auth.withMicrosoft': 'Continuar con Microsoft', 'auth.orEmail': 'o con tu correo', 'auth.ssoInBrowser': 'Seguimos en tu navegador: al terminar, Chaggu se abre solo.',
   'auth.ssoNeedsCompany': 'Escribe el nombre de tu empresa antes de continuar.', 'auth.backToLogin': 'Volver a entrar',
   'auth.joining': 'Te unes a {org}', 'auth.joiningBy': '{name} te invitó a su empresa.', 'auth.inviteInvalid': 'La invitación a la empresa ya no es válida.',
   // Invitación a espacio
@@ -495,7 +495,7 @@ const en: Record<Key, string> = {
   'auth.email': 'Work email', 'auth.password': 'Password', 'auth.passwordHint': 'At least 10 characters.',
   'auth.login': 'Sign in', 'auth.signup': 'Create account and company', 'auth.signupJoin': 'Create account and join',
   'auth.noAccount': 'Is your company not on Chaggu yet?', 'auth.createAccount': 'Create account', 'auth.haveAccount': 'Already have an account?',
-  'auth.withGoogle': 'Continue with Google', 'auth.withMicrosoft': 'Continue with Microsoft', 'auth.orEmail': 'or with your email',
+  'auth.withGoogle': 'Continue with Google', 'auth.withMicrosoft': 'Continue with Microsoft', 'auth.orEmail': 'or with your email', 'auth.ssoInBrowser': 'Continue in your browser: Chaggu opens again when you finish.',
   'auth.ssoNeedsCompany': 'Type your company name before continuing.', 'auth.backToLogin': 'Back to sign in',
   'auth.joining': 'You are joining {org}', 'auth.joiningBy': '{name} invited you to their company.', 'auth.inviteInvalid': 'This company invitation is no longer valid.',
   'invite.title': 'Invitation', 'invite.by': '{name}{org} invites you as {role}.', 'invite.forEmail': 'This invitation is for {email}.',

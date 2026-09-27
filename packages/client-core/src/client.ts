@@ -186,7 +186,7 @@ export class TieComsClient {
    * URL para entrar con Google o Microsoft. Se abre en el navegador (en apps, el del
    * sistema); el verifier PKCE queda guardado hasta que vuelva el código.
    */
-  async ssoStartUrl(provider: 'google' | 'microsoft', opts: { orgInviteToken?: string; orgName?: string; next?: string } = {}) {
+  async ssoStartUrl(provider: 'google' | 'microsoft', opts: { orgInviteToken?: string; orgName?: string; next?: string; redirectScheme?: 'chaggu' } = {}) {
     const bytes = crypto.getRandomValues(new Uint8Array(32));
     const verifier = base64url(bytes);
     const challenge = base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
@@ -195,6 +195,7 @@ export class TieComsClient {
     if (opts.orgInviteToken) q.set('org', opts.orgInviteToken);
     if (opts.orgName) q.set('org_name', opts.orgName);
     if (opts.next) q.set('next', opts.next);
+    if (opts.redirectScheme) q.set('redirect_scheme', opts.redirectScheme);
     return `${this.url(`/auth/${provider}/start`)}?${q}`;
   }
 

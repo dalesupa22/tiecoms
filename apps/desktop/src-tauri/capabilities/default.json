@@ -1,7 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permisos mínimos de la ventana principal",
+  "description": "Permisos de la ventana principal (solo la interfaz empaquetada; nada remoto)",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-badge-count",
+    "core:window:allow-request-user-attention",
+    "notification:default",
+    "deep-link:default",
+    "opener:default"
+  ]
 }

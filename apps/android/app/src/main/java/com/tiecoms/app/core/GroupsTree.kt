@@ -36,8 +36,12 @@ object GroupsTree {
                      /** Asuntos activos (open, in_progress, waiting), contados aquí: el openIssues del servidor puede ir atrasado. */
                      val issueCount: Int = 0, val overdueCount: Int = 0,
                      /** Sus asuntos están desplegados (clave [issuesKey] en los ajustes, o buscando). */
-                     val issuesExpanded: Boolean = false, override val key: String) : Row
+                     val issuesExpanded: Boolean = false,
+                     /** Clave que alterna el chip: [issuesKey] normalmente; [issuesHiddenKey] cuando buscar o el filtro Asuntos los despliegan. */
+                     val foldKey: String = "", override val key: String) : Row
     data class Issue(val issue: IssueDTO, val level: Int, override val key: String) : Row
+    /** Separador discreto de la vista Lista: «Fijados», «Sin leer», «Recientes». */
+    data class Divider(val block: HomeTree.Block, override val key: String = "b:" + block.name) : Row
     data class MoreIssues(val conversationId: String, val count: Int, val level: Int, override val key: String) : Row
     /** Sin nada que mostrar: [filtered] = por búsqueda o filtro (si no, es el estado vacío de Grupos). */
     data class Empty(val filtered: Boolean, override val key: String = "empty") : Row
@@ -48,6 +52,15 @@ object GroupsTree {
     /** Al revés que las demás: la clave presente significa asuntos DESPLEGADOS (plegados por defecto). */
     fun issuesKey(conversationId: String) = ISSUES_PREFIX + conversationId
     const val ISSUES_PREFIX = "iss:"
+    /**
+     * Buscar y el filtro Asuntos despliegan todos los asuntos; esta clave los contrae igual (antes el chip no hacía
+     * nada ahí y parecía que no se podían contraer).
+     */
+    fun issuesHiddenKey(conversationId: String) = HIDDEN_PREFIX + conversationId
+    const val HIDDEN_PREFIX = "issh:"
+
+    /** Vista de Grupos (se recuerda por dispositivo: SharedPreferences `groupsView`). */
+    enum class View(val id: String) { LIST("list"), TREE("tree"); companion object { fun of(id: String?) = entries.firstOrNull { it.id == id } ?: LIST } }
 
     // ---------- Regla del árbol ----------
     /** Dónde va un espacio: sección y empresa (id de la organización o, si está pendiente, el nombre escrito). */
@@ -155,6 +168,69 @@ object GroupsTree {
         return Tab.entries.associateWith { t -> groups.count { inTab(t, it, issues, nowMs) } }
     }
 
+    /** Fila de un grupo y, si están desplegados, sus asuntos (hasta [MAX_ISSUES] y «+N asuntos»). Igual en Árbol y Lista. */
+    private fun addGroup(rows: MutableList<Row>, c: ConversationDTO, level: Int, label: String?, threadUnread: Int, issues: Collection<IssueDTO>,
+                         collapsed: Set<String>, showAllIssues: Boolean, today: String) {
+        val open = openIssues(issues, c.id)
+        // Sin asuntos cargados todavía, el chip usa el openIssues del servidor.
+        val count = if (open.isNotEmpty() || issues.isNotEmpty()) open.size else c.openIssues
+        val foldKey = if (showAllIssues) issuesHiddenKey(c.id) else issuesKey(c.id)
+        val expanded = count > 0 && (if (showAllIssues) foldKey !in collapsed else foldKey in collapsed)
+        rows += Group(c, level, label = label, threadUnread = threadUnread,
+            issueCount = count, overdueCount = open.count { it.dueDate != null && it.dueDate < today }, issuesExpanded = expanded, foldKey = foldKey, key = "c:" + c.id)
+        if (!expanded) return
+        open.take(MAX_ISSUES).forEach { rows += Issue(it, level + 1, key = "i:" + it.id) }
+        if (count > MAX_ISSUES) rows += MoreIssues(c.id, count - minOf(open.size, MAX_ISSUES), level + 1, key = "mi:" + c.id)
+    }
+
+    /**
+     * Empresa de un grupo para la vista Lista, la misma del árbol: Tu organización → mi empresa dueña;
+     * Relaciones → la contraparte (o su counterpartName si está pendiente); Invitado en → la anfitriona.
+     */
+    fun companyName(d: BootstrapDTO, c: ConversationDTO, mine: Set<String> = myOrgIds(d)): String? {
+        val w = d.workspaces.firstOrNull { it.id == c.workspaceId } ?: return null
+        val p = place(d, w, mine)
+        return (Names.org(d, p.orgId)?.name ?: p.pendingName)?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    /** «{Empresa} · {Grupo}»; si el nombre del grupo ya empieza por la empresa, no se repite. */
+    fun listLabel(company: String?, group: String): String {
+        val g = group.trim()
+        if (company.isNullOrBlank()) return g
+        return if (g.lowercase().startsWith(company.trim().lowercase())) g else company.trim() + " · " + g
+    }
+
+    /**
+     * Vista Lista (1.6.4): todas las filas de grupo del árbol (sin hilos derivados) en UNA lista con el orden único
+     * (fijados, mención, no leídos, actividad), con separadores «Fijados», «Sin leer» y «Recientes» (los vacíos no salen).
+     * Mismo chip y plegado de asuntos que en el árbol; la búsqueda y los filtros funcionan igual.
+     */
+    fun buildList(
+        d: BootstrapDTO, issues: Collection<IssueDTO>, query: String, wsFilter: String?, collapsed: Set<String>,
+        title: (ConversationDTO) -> String, nowMs: Long = System.currentTimeMillis(), tab: Tab = Tab.ALL,
+        today: String = java.time.LocalDate.now().toString(),
+    ): List<Row> {
+        val q = query.trim().lowercase()
+        val searching = q.isNotEmpty() || tab != Tab.ALL
+        val showAllIssues = q.isNotEmpty() || tab == Tab.ISSUES
+        val mine = myOrgIds(d)
+        val threadUnread = threadUnread(d, nowMs)
+        val all = d.conversations.filter { isGroup(d, it) && it.parentId == null && (wsFilter == null || it.workspaceId == wsFilter) }
+        if (all.isEmpty()) return listOf(Empty(filtered = wsFilter != null))
+        val labels = all.associate { it.id to listLabel(companyName(d, it, mine), title(it)) }
+        val shown = all.filter { c -> (q.isEmpty() || labels[c.id]!!.lowercase().contains(q) || matchesText(d, c, q, title)) && inTab(tab, c, issues, nowMs) }
+        if (shown.isEmpty()) return listOf(Empty(filtered = true))
+        val rows = mutableListOf<Row>()
+        var block: HomeTree.Block? = null
+        for (c in HomeTree.order(shown, nowMs)) {
+            val b = HomeTree.blockOf(c, nowMs)
+            if (b != block && !searching) rows += Divider(b)
+            block = b
+            addGroup(rows, c, 0, labels[c.id], threadUnread[c.id] ?: 0, issues, collapsed, showAllIssues, today)
+        }
+        return rows
+    }
+
     fun build(
         d: BootstrapDTO, issues: Collection<IssueDTO>, query: String, wsFilter: String?, collapsed: Set<String>,
         title: (ConversationDTO) -> String, nowMs: Long = System.currentTimeMillis(), tab: Tab = Tab.ALL,
@@ -165,8 +241,6 @@ object GroupsTree {
         val searching = q.isNotEmpty() || tab != Tab.ALL
         // Buscar y el filtro Asuntos muestran los asuntos desplegados; si no, cada grupo recuerda el suyo.
         val showAllIssues = q.isNotEmpty() || tab == Tab.ISSUES
-        // Sin asuntos cargados todavía, el chip usa el openIssues del servidor.
-        val issuesLoaded = issues.isNotEmpty()
         fun matches(c: ConversationDTO) = (q.isEmpty() || matchesText(d, c, q, title)) && inTab(tab, c, issues, nowMs)
         val groupsByWs = d.conversations.filter { isGroup(d, it) }.groupBy { it.workspaceId!! }
         fun convsOf(w: WorkspaceDTO) = groupsByWs[w.id].orEmpty()
@@ -187,14 +261,7 @@ object GroupsTree {
             HomeTree.order(all.filter { matches(it) }, nowMs).forEach { c ->
                 val ws = byWs[c.workspaceId]
                 val label = if (ws != null && !ws.isOrgHome && title(c).trim().lowercase() in dup) ws.name + " · " + title(c) else null
-                val open = openIssues(issues, c.id)
-                val count = if (open.isNotEmpty() || issuesLoaded) open.size else c.openIssues
-                val expanded = count > 0 && (showAllIssues || issuesKey(c.id) in collapsed)
-                rows += Group(c, level, label = label, threadUnread = threadUnread[c.id] ?: 0,
-                    issueCount = count, overdueCount = open.count { it.dueDate != null && it.dueDate < today }, issuesExpanded = expanded, key = "c:" + c.id)
-                if (!expanded) return@forEach
-                open.take(MAX_ISSUES).forEach { rows += Issue(it, level + 1, key = "i:" + it.id) }
-                if (count > MAX_ISSUES) rows += MoreIssues(c.id, count - minOf(open.size, MAX_ISSUES), level + 1, key = "mi:" + c.id)
+                addGroup(rows, c, level, label, threadUnread[c.id] ?: 0, issues, collapsed, showAllIssues, today)
             }
         }
         fun hasVisible(r: Relation) = r.workspaces.any { w -> listed(w).any { matches(it) } }
@@ -202,7 +269,7 @@ object GroupsTree {
 
         // 📌 Fijados (grupos), como Inicio.
         if (wsFilter == null && !searching) {
-            val pinned = d.conversations.filter { it.pinnedAt != null && isGroup(d, it) && it.parentId == null }.sortedBy { it.pinnedAt }
+            val pinned = HomeTree.order(d.conversations.filter { it.pinnedAt != null && isGroup(d, it) && it.parentId == null }, nowMs)
             if (pinned.isNotEmpty()) {
                 rows += Section(Kind.PINNED, null, false, 0, key = "s:PINNED")
                 pinned.forEach { rows += Group(it, 0, pinnedSection = true, threadUnread = threadUnread[it.id] ?: 0, key = "pc:" + it.id) }
@@ -263,12 +330,20 @@ object GroupsTree {
 
     // ---------- Acciones de los menús (Plegar todo, Expandir todo, asuntos) ----------
     /** «Plegar todo»: pliega empresas y secciones y también los asuntos de cada grupo. */
-    fun foldAll(collapsed: Set<String>, d: BootstrapDTO): Set<String> = (collapsed + allFoldKeys(d)).filterNot { it.startsWith(ISSUES_PREFIX) }.toSet()
+    fun foldAll(collapsed: Set<String>, d: BootstrapDTO): Set<String> = (collapsed + allFoldKeys(d)).filterNot { it.startsWith(ISSUES_PREFIX) }.toSet() + allHiddenKeys(d)
     /** «Expandir todo»: despliega empresas, secciones y los asuntos de todos los grupos. */
     fun expandAll(collapsed: Set<String>, d: BootstrapDTO, issues: Collection<IssueDTO>): Set<String> =
-        collapsed.filterNot { it.startsWith("gs:") || it.startsWith("gc:") }.toSet() + allIssueKeys(d, issues)
-    fun showAllIssues(collapsed: Set<String>, d: BootstrapDTO, issues: Collection<IssueDTO>): Set<String> = collapsed + allIssueKeys(d, issues)
-    fun hideAllIssues(collapsed: Set<String>): Set<String> = collapsed.filterNot { it.startsWith(ISSUES_PREFIX) }.toSet()
+        collapsed.filterNot { it.startsWith("gs:") || it.startsWith("gc:") || it.startsWith(HIDDEN_PREFIX) }.toSet() + allIssueKeys(d, issues)
+    fun showAllIssues(collapsed: Set<String>, d: BootstrapDTO, issues: Collection<IssueDTO>): Set<String> =
+        collapsed.filterNot { it.startsWith(HIDDEN_PREFIX) }.toSet() + allIssueKeys(d, issues)
+    /** «Contraer todos los asuntos»: también los que buscar o el filtro Asuntos despliegan. */
+    fun hideAllIssues(collapsed: Set<String>, d: BootstrapDTO? = null): Set<String> =
+        collapsed.filterNot { it.startsWith(ISSUES_PREFIX) }.toSet() + (d?.let { allHiddenKeys(it) } ?: emptySet())
+    private fun allHiddenKeys(d: BootstrapDTO): Set<String> =
+        d.conversations.filter { isGroup(d, it) && it.parentId == null }.map { issuesHiddenKey(it.id) }.toSet()
+    /** ¿Hay asuntos desplegados? (con [forced], buscando o en el filtro Asuntos). */
+    fun anyIssuesShown(collapsed: Set<String>, d: BootstrapDTO, issues: Collection<IssueDTO>, forced: Boolean): Boolean =
+        if (forced) allIssueKeys(d, issues).any { issuesHiddenKey(it.removePrefix(ISSUES_PREFIX)) !in collapsed } else collapsed.any { it.startsWith(ISSUES_PREFIX) }
     /** ¿Está todo plegado? (para decidir si el menú ofrece «Expandir todo»). */
     fun allFolded(collapsed: Set<String>, d: BootstrapDTO): Boolean = allFoldKeys(d).let { it.isNotEmpty() && collapsed.containsAll(it) } && collapsed.none { it.startsWith(ISSUES_PREFIX) }
 }

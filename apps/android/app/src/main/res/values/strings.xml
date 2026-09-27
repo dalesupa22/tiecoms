@@ -59,7 +59,7 @@
     <string name="discard">Discard</string>
     <string name="today">Today</string>
     <string name="yesterday">Yesterday</string>
-    <string name="jump_latest">Go to latest messages</string>
+    <string name="jump_latest">Jump to latest</string>
     <string name="participants">Participants</string>
     <string name="guests">Guests</string>
     <string name="guest_until">Guest until %1$s</string>

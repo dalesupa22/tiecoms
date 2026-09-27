@@ -75,6 +75,11 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.foundation.border
@@ -135,10 +140,13 @@ internal sealed interface ChatItem {
     data class Pending(val p: PendingMessage) : ChatItem { override val key = "p:" + p.clientMessageId }
     data object LateJoin : ChatItem { override val key = "late" }
     data object Older : ChatItem { override val key = "older" }
+    /** Línea «N mensajes nuevos» antes del primer no leído (queda hasta salir del chat). */
+    data class NewDivider(val count: Int) : ChatItem { override val key = "new" }
 }
 
 /** Cronológico → invertido (índice 0 = lo más nuevo, para reverseLayout). */
-internal fun buildItems(messages: List<MessageDTO>, pending: List<PendingMessage>, me: String?, hasMore: Boolean, loading: Boolean, lateJoin: Boolean): List<ChatItem> {
+internal fun buildItems(messages: List<MessageDTO>, pending: List<PendingMessage>, me: String?, hasMore: Boolean, loading: Boolean, lateJoin: Boolean,
+                        dividerSeq: Long? = null, dividerCount: Int = 0): List<ChatItem> {
     val confirmed = messages.mapNotNull { it.clientMessageId }.toSet()
     val out = mutableListOf<ChatItem>()
     if (hasMore && loading) out += ChatItem.Older
@@ -148,6 +156,7 @@ internal fun buildItems(messages: List<MessageDTO>, pending: List<PendingMessage
     for (m in messages) {
         val day = localDate(m.createdAt)
         if (day != null && day != lastDay) { out += ChatItem.Day(day); lastDay = day; prev = null }
+        if (m.seq == dividerSeq) { out += ChatItem.NewDivider(dividerCount); prev = null }
         val starts = com.tiecoms.app.core.Runs.startsRun(
             prev?.authorId, prev?.kind, prev?.let { parseInstant(it.createdAt)?.toEpochMilli() }, m.authorId, m.kind,
             parseInstant(m.createdAt)?.toEpochMilli() ?: 0L, m.replyTo != null, m.forwarded != null,
@@ -238,12 +247,29 @@ fun ConversationScreen(
     var pickerFor by remember { mutableStateOf<MessageDTO?>(null) }
 
     val listState = rememberLazyListState()
+    val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex <= 1 } }
     val me = data.me.id
     val blockedDirect = meta.kind == "direct" && meta.memberIds.any { it in state.blockedUserIds }
     val pending = state.pending.filter { it.conversationId == id }
-    val items = remember(conv?.messages, pending, conv?.hasMore, conv?.loading, state.blockedUserIds) {
-        buildItems((conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }, pending, me, conv?.hasMore ?: false, conv?.loading ?: false, meta.historyFromSeq > 0)
+    // Foto al entrar, antes de marcar leído: hasta dónde leí y cuántos no leídos había (1.6.4 §D).
+    val entry = remember(id) { Triple(meta.lastReadSeq, meta.unread, meta.unreadMentions) }
+    /** Primer no leído: ahí va la línea «N mensajes nuevos». */
+    var dividerSeq by remember(id) { mutableStateOf<Long?>(null) }
+    /** Ya se colocó la vista al abrir (en el primer no leído o al final); hasta entonces no se marca leído. */
+    var positioned by remember(id) { mutableStateOf(entry.second <= 0 || (jumpSeq ?: 0) > 0 || jumpMessageId != null) }
+    val items = remember(conv?.messages, pending, conv?.hasMore, conv?.loading, state.blockedUserIds, dividerSeq) {
+        buildItems((conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }, pending, me, conv?.hasMore ?: false, conv?.loading ?: false, meta.historyFromSeq > 0,
+            dividerSeq, entry.second)
     }
+    val itemsNow by androidx.compose.runtime.rememberUpdatedState(items)
+    // «Seguir el final»: solo cambia con la lista quieta. Si llega un mensaje durante la animación de otro
+    // (mi envío y la respuesta inmediata), atBottom daría falso a mitad de camino y dejaría de seguir.
+    var follow by remember(id) { mutableStateOf(true) }
+    /** Menciones a mí sin leer al entrar (botón «@»): se quitan al verlas o al saltar a ellas. */
+    val mentionQueue = remember(id) { androidx.compose.runtime.mutableStateListOf<Long>() }
+    /** Último seq cuando la persona dejó el final; lo que llegue de otros después va en el globo del ⌄. */
+    var awaySeq by remember(id) { mutableStateOf<Long?>(null) }
+    val newWhileAway = awaySeq?.let { from -> conv?.messages.orEmpty().count { it.seq > from && it.authorId != me && it.authorId !in state.blockedUserIds } } ?: 0
     val byId = remember(conv?.messages, state.blockedUserIds) { (conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }.associateBy { it.id } }
 
     fun jumpTo(seq: Long) {
@@ -253,6 +279,7 @@ fun ConversationScreen(
             val idx = buildItems((client.state.value.conversations[id]?.messages ?: emptyList()).filter { it.authorId !in client.state.value.blockedUserIds }, client.state.value.pending.filter { it.conversationId == id }, me, false, false, false)
                 .indexOfFirst { (it as? ChatItem.Msg)?.m?.seq == seq }
             if (idx >= 0) listState.animateScrollToItem(idx)
+            mentionQueue.remove(seq)
             highlight = seq
             delay(2800); highlight = null
         }
@@ -267,6 +294,31 @@ fun ConversationScreen(
         launch { runCatching { client.loadEvents(Instant.now().minusSeconds(30L * 86400), Instant.now().plusSeconds(60L * 86400), id) } }
         if (jumpSeq != null && jumpSeq > 0) jumpTo(jumpSeq)
         else if (jumpMessageId != null) client.ensureMessageId(id, jumpMessageId)?.let { jumpTo(it) }
+        else if (!positioned) try {
+            // Abrir en el primer no leído; si no está cargado, hasta 3 páginas más antiguas (si no, al final como siempre).
+            fun loaded() = client.state.value.conversations[id]
+            var pages = 0
+            while (pages < com.tiecoms.app.core.ChatNav.MAX_OLDER_PAGES) {
+                val c = loaded() ?: break
+                if (!com.tiecoms.app.core.ChatNav.needsOlder(c.messages, entry.first, entry.second, me, c.hasMore)) break
+                client.loadOlder(id); pages++
+            }
+            val c = loaded()
+            val seq = c?.let { com.tiecoms.app.core.ChatNav.firstUnreadSeq(it.messages.filter { m -> m.authorId !in client.state.value.blockedUserIds }, entry.first, entry.second, me, it.hasMore) }
+            if (seq != null) {
+                dividerSeq = seq
+                withFrameNanos { }; delay(30)
+                val idx = itemsNow.indexOfFirst { it is ChatItem.NewDivider }
+                if (idx >= 0) scrollDividerToTop(listState, idx)
+                withFrameNanos { }
+            }
+            // Menciones sin leer que no quedaron a la vista: el botón «@» salta a ellas.
+            if (c != null && entry.third > 0) {
+                val visible = listState.layoutInfo.visibleItemsInfo.map { it.key }.toSet()
+                val seen = itemsNow.filterIsInstance<ChatItem.Msg>().filter { it.key in visible }.map { it.m.seq }.toSet()
+                mentionQueue.addAll(com.tiecoms.app.core.ChatNav.unreadMentionSeqs(c.messages, entry.first, me).filter { it !in mentionQueue && it !in seen })
+            }
+        } finally { positioned = true; follow = atBottom }
     }
 
     // A full-screen conversation clears its notification. Embedded bubble content must
@@ -291,30 +343,52 @@ fun ConversationScreen(
         }
     }
 
-    val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex <= 1 } }
+    // ⌄ «Ir al final»: a más de ~1 pantalla del final (estimada con el alto medio de las filas visibles).
+    val farFromBottom by remember { derivedStateOf {
+        val info = listState.layoutInfo; val vis = info.visibleItemsInfo
+        vis.isNotEmpty() && listState.firstVisibleItemIndex * (vis.sumOf { it.size } / vis.size) + listState.firstVisibleItemScrollOffset > info.viewportSize.height
+    } }
+    /** La línea de no leídos quedó por encima de la vista (píldora «↑ N nuevos»). */
+    val dividerAbove by remember { derivedStateOf {
+        val idx = itemsNow.indexOfFirst { it is ChatItem.NewDivider }
+        idx >= 0 && (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: Int.MAX_VALUE) < idx
+    } }
     // Notas de voz en orden cronológico: al terminar una, sigue la siguiente (SPEC-v4 §F).
     val voiceOrder = remember(conv?.messages) { conv?.messages.orEmpty().sortedBy { it.seq }.filter { it.deletedAt == null }.flatMap { it.attachments.filter { a -> a.isVoice } } }
     val voiceQueue: (String) -> List<com.tiecoms.app.core.AttachmentDTO> = remember(voiceOrder) { { aid -> voiceOrder.dropWhile { it.id != aid }.drop(1) } }
     val newest = items.firstOrNull()
     // «Seguir el final»: solo cambia con la lista quieta. Si llega un mensaje durante la animación de otro
     // (mi envío y la respuesta inmediata), atBottom daría falso a mitad de camino y dejaría de seguir.
-    var follow by remember(id) { mutableStateOf(true) }
     LaunchedEffect(listState, id) {
         // Solo al terminar un desplazamiento (del usuario o animado): si llegan mensajes nuevos arriba del
         // índice 0, la lista conserva la posición y atBottom cambiaría sin que nadie se haya movido.
-        snapshotFlow { listState.isScrollInProgress }.distinctUntilChanged().collect { moving -> if (!moving) follow = atBottom }
+        snapshotFlow { listState.isScrollInProgress }.distinctUntilChanged().collect { moving -> if (!moving && positioned) follow = atBottom }
     }
     LaunchedEffect(newest?.key) {
+        if (!positioned) return@LaunchedEffect
         val mine = newest is ChatItem.Pending || (newest as? ChatItem.Msg)?.mine == true
+        // Arriba, lo nuevo no arrastra al final: se cuenta en el globo del ⌄.
         if (newest != null && highlight == null && (follow || mine)) { follow = true; listState.animateScrollToItem(0) }
+    }
+    LaunchedEffect(atBottom, positioned) {
+        if (atBottom) awaySeq = null
+        else if (positioned && awaySeq == null) awaySeq = client.state.value.conversations[id]?.messages?.lastOrNull()?.seq ?: 0
+    }
+    // Una mención que ya se ve en pantalla deja de contar para el botón «@».
+    LaunchedEffect(listState, id) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.key } }.collect { keys ->
+            if (mentionQueue.isEmpty() || !positioned) return@collect
+            val seen = itemsNow.filterIsInstance<ChatItem.Msg>().filter { it.key in keys }.map { it.m.seq }.toSet()
+            mentionQueue.removeAll { it in seen }
+        }
     }
     LaunchedEffect(listState, id) {
         snapshotFlow { (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) to listState.layoutInfo.totalItemsCount }
             .distinctUntilChanged()
             .collect { (last, total) -> if (total > 0 && last >= total - 3) client.loadOlder(id) }
     }
-    LaunchedEffect(meta.lastMessageSeq, atBottom, lifecycleState, conv?.loaded) {
-        if (atBottom && conv?.loaded == true && lifecycleState.isAtLeast(Lifecycle.State.RESUMED)) client.markRead(id)
+    LaunchedEffect(meta.lastMessageSeq, atBottom, lifecycleState, conv?.loaded, positioned) {
+        if (positioned && atBottom && conv?.loaded == true && lifecycleState.isAtLeast(Lifecycle.State.RESUMED)) client.markRead(id)
     }
 
     val typers = (state.typing[id] ?: emptyList()).filter { it.until > System.currentTimeMillis() && it.userId != me }
@@ -505,13 +579,41 @@ fun ConversationScreen(
                                 is ChatItem.Pending -> PendingBubble(item.p, onRetry = { client.retry(item.p.clientMessageId) }, onDiscard = { client.discard(item.p.clientMessageId) })
                                 ChatItem.LateJoin -> Notice(stringResource(R.string.late_join))
                                 ChatItem.Older -> Notice(stringResource(R.string.loading_older))
+                                is ChatItem.NewDivider -> NewMessagesDivider(item.count)
                             }
                         }
                     } }
                 }
-                if (!atBottom && conv?.loaded == true) {
-                    SmallFloatingActionButton(onClick = { scope.launch { listState.animateScrollToItem(0) } }, modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp)) {
-                        Icon(Icons.Filled.KeyboardArrowDown, stringResource(R.string.jump_latest))
+                if (conv?.loaded == true && items.isNotEmpty()) {
+                    // Píldora «↑ N nuevos»: la línea de no leídos quedó arriba; tocar salta a ella.
+                    if (dividerAbove && entry.second > 0) {
+                        val pillCd = stringResource(R.string.jump_new)
+                        Surface(
+                            onClick = { scope.launch { itemsNow.indexOfFirst { it is ChatItem.NewDivider }.takeIf { it >= 0 }?.let { scrollDividerToTop(listState, it, animated = true) } } },
+                            shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary, shadowElevation = 3.dp,
+                            modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp).semantics { contentDescription = pillCd }.testTag("jumpNew"),
+                        ) { Text(stringResource(R.string.chat_new_pill, entry.second), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) }
+                    }
+                    Column(Modifier.align(Alignment.BottomEnd).padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        // «@»: siguiente mención a mí sin leer; desaparece cuando no quedan.
+                        if (mentionQueue.isNotEmpty()) SmallFloatingActionButton(onClick = { mentionQueue.firstOrNull()?.let { jumpTo(it) } },
+                            containerColor = Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE), contentColor = Color.White, modifier = Modifier.testTag("jumpMention")) {
+                            Text("@", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.semantics { contentDescription = ctx.getString(R.string.jump_mention) })
+                        }
+                        // ⌄ «Ir al final», con globo de los que llegaron mientras estaba arriba.
+                        if (farFromBottom || (!atBottom && newWhileAway > 0)) Box {
+                            SmallFloatingActionButton(onClick = { scope.launch { listState.animateScrollToItem(0); follow = true; awaySeq = null; client.markRead(id) } },
+                                modifier = Modifier.testTag("jumpLatest")) {
+                                Icon(Icons.Filled.KeyboardArrowDown, stringResource(R.string.jump_latest))
+                            }
+                            if (newWhileAway > 0) Box(Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp).widthIn(min = 20.dp)
+                                .background(Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE), CircleShape).padding(horizontal = 5.dp, vertical = 1.dp).testTag("jumpLatestCount"),
+                                contentAlignment = Alignment.Center) {
+                                Text(if (newWhileAway > 99) "99+" else newWhileAway.toString(), color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
             }
@@ -1177,4 +1279,28 @@ fun SimpleScaffold(title: String, onBack: () -> Unit, actions: @Composable () ->
             )
         },
     ) { pad -> Column(Modifier.padding(pad).fillMaxSize(), verticalArrangement = Arrangement.Top, content = content) }
+}
+
+/**
+ * Coloca la línea «N mensajes nuevos» arriba de la vista. Con reverseLayout, scrollToItem deja la fila abajo;
+ * luego se sube casi una pantalla hacia lo nuevo (si no hay tanto, queda al final y todo está a la vista).
+ */
+internal suspend fun scrollDividerToTop(listState: androidx.compose.foundation.lazy.LazyListState, idx: Int, animated: Boolean = false) {
+    listState.scrollToItem(idx)
+    val info = listState.layoutInfo
+    val h = info.visibleItemsInfo.firstOrNull { it.index == idx }?.size ?: 0
+    val by = -(info.viewportSize.height - h - info.beforeContentPadding - info.afterContentPadding - 24).coerceAtLeast(0).toFloat()
+    if (animated) listState.animateScrollBy(by) else listState.scrollBy(by)
+}
+
+/** Línea divisoria «N mensajes nuevos» antes del primer no leído. */
+@Composable
+private fun NewMessagesDivider(count: Int) {
+    val label = pluralStringResource(R.plurals.chat_new_divider, count, count)
+    val color = Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE)
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp).semantics(mergeDescendants = true) { heading() }.testTag("newDivider"), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f).height(1.dp).background(color))
+        Text(label, color = color, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 10.dp))
+        Box(Modifier.weight(1f).height(1.dp).background(color))
+    }
 }

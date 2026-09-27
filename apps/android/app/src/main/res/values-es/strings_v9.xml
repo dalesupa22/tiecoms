@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.4: bandeja ordenada, vista Lista / Árbol y navegación en chats largos. -->
+<resources>
+    <string name="view_list">Lista</string>
+    <string name="view_tree">Árbol</string>
+    <string name="block_pinned">Fijados</string>
+    <string name="block_unread">Sin leer</string>
+    <string name="block_recent">Recientes</string>
+    <plurals name="chat_new_divider">
+        <item quantity="one">%d mensaje nuevo</item>
+        <item quantity="other">%d mensajes nuevos</item>
+    </plurals>
+    <string name="chat_new_pill">↑ %d nuevos</string>
+    <string name="jump_new">Ir a los mensajes nuevos</string>
+    <string name="jump_mention">Ir a la mención</string>
+</resources>

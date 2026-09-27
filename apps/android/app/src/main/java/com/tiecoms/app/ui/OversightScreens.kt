@@ -197,6 +197,7 @@ fun ReadOnlyGroupScreen(conversationId: String, name: String, onBack: () -> Unit
                             is ChatItem.Pending -> Unit
                             ChatItem.LateJoin -> Unit
                             ChatItem.Older -> Notice(stringResource(R.string.loading_older))
+                            is ChatItem.NewDivider -> Unit
                         }
                     }
                 }

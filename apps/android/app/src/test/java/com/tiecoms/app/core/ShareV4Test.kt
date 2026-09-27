@@ -140,7 +140,7 @@ class ShareV4Test {
     }
 
     // ---------- §D Orden por no leídos (compareConversations / sortHome de la web) ----------
-    @Test fun `no leidos primero, luego fijadas, luego actividad, desempate por id`() {
+    @Test fun `fijadas primero, luego no leidos, luego actividad, desempate por id`() {
         fun c(id: String, unread: Int = 0, pinned: Boolean = false, at: String = "2026-09-20T10:00:00Z", muted: Boolean = false, human: String? = null) =
             ConversationDTO(id = id, kind = "direct", unread = unread, pinnedAt = if (pinned) "2026-09-01T00:00:00Z" else null, lastMessageAt = at,
                 mutedUntil = if (muted) "2999-01-01T00:00:00Z" else null, lastHumanPreview = human?.let { LastHumanPreviewDTO(createdAt = it) })
@@ -153,7 +153,7 @@ class ShareV4Test {
             c("f", at = "2026-09-01T00:00:00Z", human = "2026-09-24T00:00:00Z"),  // actividad = último mensaje humano
             c("g", at = "2026-09-25T10:00:00Z"),                                   // empata con «a»: por id
         )
-        assertEquals(listOf("e", "b", "c", "d", "a", "g", "f"), HomeTree.order(list, 0).map { it.id })
+        assertEquals(listOf("e", "c", "b", "d", "a", "g", "f"), HomeTree.order(list, 0).map { it.id }) // 1.6.4: fijada al primer nivel
         assertEquals(HomeTree.order(list, 0), HomeTree.order(list.reversed(), 0)) // estable, sin depender del orden de llegada
         assertTrue(HomeTree.compareRank(HomeTree.Rank(1, ""), HomeTree.Rank(0, "2999")) < 0)
         assertTrue(HomeTree.compareRank(HomeTree.Rank(5, "2020"), HomeTree.Rank(2, "2026")) < 0)

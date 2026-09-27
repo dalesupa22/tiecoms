@@ -58,7 +58,7 @@
     <string name="discard">Descartar</string>
     <string name="today">Hoy</string>
     <string name="yesterday">Ayer</string>
-    <string name="jump_latest">Ir a los últimos mensajes</string>
+    <string name="jump_latest">Ir al final</string>
     <string name="participants">Participantes</string>
     <string name="guests">Terceros</string>
     <string name="guest_until">Tercero hasta %1$s</string>

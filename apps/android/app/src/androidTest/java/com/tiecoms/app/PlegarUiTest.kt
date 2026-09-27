@@ -10,6 +10,7 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -71,6 +72,8 @@ class PlegarUiTest {
         }
         // Empieza sin preferencias de plegado de otra corrida.
         app.container.settings.collapsed = emptySet()
+        // Plegar / Expandir todo viven en el Árbol (1.6.4: Grupos abre en Lista por defecto).
+        app.container.settings.groupsView = "tree"
         var scenario = ActivityScenario.launch(MainActivity::class.java)
         try {
             compose.waitUntil(20_000) { exists("email") && !exists("splash") }
@@ -134,6 +137,8 @@ class PlegarUiTest {
             log("Plegar todo / Expandir todo / Contraer todos los asuntos")
 
             // Reacciones: barra rápida al mantener el mensaje, chip, quitar y selector completo.
+            // 1.6.4: con el orden único el grupo puede quedar abajo, bajo el aviso «Asunto completado»: se sube la lista.
+            compose.onNodeWithTag("conversationList").performScrollToIndex(0)
             compose.onNodeWithTag("conv-$conv").performClick()
             compose.waitUntilAtLeastOneExists(hasTestTag("composer"), 15_000)
             compose.waitUntil(10_000) { client.state.value.conversations[conv]?.messages?.any { it.kind == "text" } == true }

@@ -58,16 +58,28 @@ object HomeTree {
     fun pending(c: ConversationDTO, nowMs: Long): Int = if (c.unread > 0 && !c.mutedAt(nowMs)) c.unread else 0
 
     /**
-     * compareConversations de la web (apps/web/src/screens/Shell.tsx): primero con no leídos, luego fijadas,
-     * luego por actividad descendente; desempate por id para que el orden no salte.
+     * compareConversations (orden único 1.6.4, igual en web e iOS):
+     *  1. fijadas primero (pinnedAt); entre ellas, el mismo criterio de abajo;
+     *  2. con una mención sin leer (aunque esté silenciada);
+     *  3. con no leídos pendientes (pendingOf: no leídos y no silenciada);
+     *  4. el resto por actividad descendente (activityOf); desempate por id para que el orden no salte.
      */
     fun comparator(nowMs: Long): Comparator<ConversationDTO> = Comparator { a, b ->
-        // Una mención sin leer sube la conversación aunque esté silenciada (SPEC-v4 §H).
-        val ua = if (pending(a, nowMs) > 0 || a.unreadMentions > 0) 1 else 0; val ub = if (pending(b, nowMs) > 0 || b.unreadMentions > 0) 1 else 0
-        if (ua != ub) return@Comparator ub - ua
         val pa = if (a.pinnedAt != null) 1 else 0; val pb = if (b.pinnedAt != null) 1 else 0
         if (pa != pb) return@Comparator pb - pa
+        val ma = if (a.unreadMentions > 0) 1 else 0; val mb = if (b.unreadMentions > 0) 1 else 0
+        if (ma != mb) return@Comparator mb - ma
+        val ua = if (pending(a, nowMs) > 0) 1 else 0; val ub = if (pending(b, nowMs) > 0) 1 else 0
+        if (ua != ub) return@Comparator ub - ua
         activity(b).compareTo(activity(a)).takeIf { it != 0 } ?: a.id.compareTo(b.id)
+    }
+
+    /** Bloques de las listas planas (Lista de Grupos y DMs): «Fijados», «Sin leer» y «Recientes». */
+    enum class Block { PINNED, UNREAD, RECENT }
+    fun blockOf(c: ConversationDTO, nowMs: Long): Block = when {
+        c.pinnedAt != null -> Block.PINNED
+        c.unreadMentions > 0 || pending(c, nowMs) > 0 -> Block.UNREAD
+        else -> Block.RECENT
     }
 
     fun order(list: List<ConversationDTO>, nowMs: Long): List<ConversationDTO> = list.sortedWith(comparator(nowMs))
@@ -109,7 +121,7 @@ object HomeTree {
 
         // 📌 Fijados (espacios y conversaciones), como la web.
         if (wsFilter == null && !searching) {
-            val pinned = d.conversations.filter { it.pinnedAt != null }.sortedBy { it.pinnedAt }
+            val pinned = order(d.conversations.filter { it.pinnedAt != null }, nowMs)
             val pinnedWs = d.workspaces.filter { it.pinnedAt != null }
             if (pinned.isNotEmpty() || pinnedWs.isNotEmpty()) {
                 rows += Section(Kind.PINNED)

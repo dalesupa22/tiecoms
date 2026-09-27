@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -32,6 +34,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -130,14 +133,25 @@ fun GroupsScreen(
     val internalFallback = stringResource(R.string.internal_default)
     val convFallback = stringResource(R.string.conversation)
     val container = LocalContainer.current
-    var collapsed by remember { mutableStateOf(container.settings.collapsed) }
-    fun setCollapsed(v: Set<String>) { collapsed = v; container.settings.collapsed = v }
-    fun toggle(key: String) = setCollapsed(if (key in collapsed) collapsed - key else collapsed + key)
+    var saved by remember { mutableStateOf(container.settings.collapsed) }
     var tab by remember { mutableStateOf(runCatching { GroupsTree.Tab.valueOf(container.settings.homeTab) }.getOrDefault(GroupsTree.Tab.ALL)) }
+    /** Vista Lista (por defecto) o Árbol, recordada por dispositivo (SharedPreferences `groupsView`). */
+    var view by remember { mutableStateOf(GroupsTree.View.of(container.settings.groupsView)) }
+    // Buscar y el filtro Asuntos despliegan todos los asuntos; lo que se contrae ahí solo vale mientras dura (no se guarda).
+    val forcedIssues = query.isNotBlank() || tab == GroupsTree.Tab.ISSUES
+    var hidden by remember(forcedIssues) { mutableStateOf(emptySet<String>()) }
+    val collapsed = saved + hidden
+    fun setCollapsed(v: Set<String>) {
+        hidden = v.filter { it.startsWith(GroupsTree.HIDDEN_PREFIX) }.toSet()
+        saved = v - hidden; container.settings.collapsed = saved
+    }
+    fun toggle(key: String) = setCollapsed(if (key in collapsed) collapsed - key else collapsed + key)
     val issues = state.issues.values
     val counts = remember(data, state.issues) { GroupsTree.counts(data, issues) }
-    val rows = remember(data, state.issues, query, workspaceFilter, collapsed, tab) {
-        GroupsTree.build(data, issues, query, workspaceFilter, collapsed, { Names.conversationTitle(it, data, internalFallback, convFallback) }, tab = tab)
+    val rows = remember(data, state.issues, query, workspaceFilter, collapsed, tab, view) {
+        val title: (ConversationDTO) -> String = { Names.conversationTitle(it, data, internalFallback, convFallback) }
+        if (view == GroupsTree.View.LIST) GroupsTree.buildList(data, issues, query, workspaceFilter, collapsed, title, tab = tab)
+        else GroupsTree.build(data, issues, query, workspaceFilter, collapsed, title, tab = tab)
     }
     var dialog by remember { mutableStateOf<GroupsDialog?>(null) }
     var menuKey by remember { mutableStateOf<String?>(null) }
@@ -149,21 +163,22 @@ fun GroupsScreen(
     val myOrg = Names.org(data, data.me.primaryOrgId)
     /** Grupo cuyos asuntos se acaban de desplegar: solo esos entran animados (no al volver a verlos con scroll). */
     var justExpanded by remember { mutableStateOf<String?>(null) }
-    fun toggleIssues(conversationId: String) {
-        val k = GroupsTree.issuesKey(conversationId)
-        justExpanded = if (k in collapsed) null else conversationId
-        toggle(k)
+    fun toggleIssues(row: GroupsTree.Group) {
+        justExpanded = if (row.issuesExpanded) null else row.c.id
+        toggle(row.foldKey)
     }
     var foldMenu by remember { mutableStateOf(false) }
     /** Plegar todo · Expandir todo · Mostrar / Contraer todos los asuntos (botón de vista a la izquierda y pulsación larga de las cabeceras). */
     fun foldItems(): List<SheetItem?> {
         val issueKeys = GroupsTree.allIssueKeys(data, issues)
-        val shown = issueKeys.count { it in collapsed }
+        val shown = if (forcedIssues) issueKeys.count { GroupsTree.issuesHiddenKey(it.removePrefix(GroupsTree.ISSUES_PREFIX)) !in collapsed } else issueKeys.count { it in collapsed }
+        val tree = view == GroupsTree.View.TREE
         return listOfNotNull(
-            SheetItem(ctx.getString(R.string.menu_fold_all), "▸", tag = "menuFoldAll") { justExpanded = null; setCollapsed(GroupsTree.foldAll(collapsed, data)) },
-            SheetItem(ctx.getString(R.string.menu_expand_all), "▾", tag = "menuExpandAll") { justExpanded = null; setCollapsed(GroupsTree.expandAll(collapsed, data, issues)) },
+            // Plegar / expandir empresas solo tiene sentido en el Árbol; los asuntos, en las dos vistas.
+            if (tree) SheetItem(ctx.getString(R.string.menu_fold_all), "▸", tag = "menuFoldAll") { justExpanded = null; setCollapsed(GroupsTree.foldAll(collapsed, data)) } else null,
+            if (tree) SheetItem(ctx.getString(R.string.menu_expand_all), "▾", tag = "menuExpandAll") { justExpanded = null; setCollapsed(GroupsTree.expandAll(collapsed, data, issues)) } else null,
             if (issueKeys.isNotEmpty() && shown < issueKeys.size) SheetItem(ctx.getString(R.string.menu_show_all_issues), "◆", tag = "menuShowAllIssues") { justExpanded = null; setCollapsed(GroupsTree.showAllIssues(collapsed, data, issues)) } else null,
-            if (shown > 0) SheetItem(ctx.getString(R.string.menu_hide_all_issues), "◇", tag = "menuHideAllIssues") { setCollapsed(GroupsTree.hideAllIssues(collapsed)) } else null,
+            if (shown > 0) SheetItem(ctx.getString(R.string.menu_hide_all_issues), "◇", tag = "menuHideAllIssues") { setCollapsed(GroupsTree.hideAllIssues(collapsed, if (forcedIssues) data else null)) } else null,
         )
     }
     val setIssueStatus = rememberIssueStatusSetter()
@@ -199,6 +214,7 @@ fun GroupsScreen(
         Column(Modifier.padding(pad).fillMaxSize()) {
             ConnectionBanner(state.connection)
             SearchField(query) { query = it }
+            GroupsViewSwitch(view) { v -> view = v; container.settings.groupsView = v.id }
             FilterPills(
                 GroupsTree.Tab.entries.map { t -> t.name to when (t) { GroupsTree.Tab.ALL -> R.string.home_tab_all; GroupsTree.Tab.UNREAD -> R.string.home_tab_unread; GroupsTree.Tab.ISSUES -> R.string.home_tab_issues } },
                 tab.name, counts.mapKeys { it.key.name }, mentions = data.conversations.sumOf { it.unreadMentions }, onMentions = onMentions,
@@ -245,13 +261,15 @@ fun GroupsScreen(
                                 },
                                 onLongPress = if (row.kind == GroupsTree.Kind.ORG || row.kind == GroupsTree.Kind.RELATIONS) ({ dialog = GroupsDialog.Header(row) }) else null)
                             is GroupsTree.Company -> CompanyRow(row, onToggle = { toggle(GroupsTree.companyKey(row.kind, row.id)) }, onLongPress = { dialog = GroupsDialog.Header(row) })
+                            is GroupsTree.Divider -> BlockHeader(row.block)
                             is GroupsTree.Group -> {
                                 val ws = data.workspaces.firstOrNull { it.id == row.c.workspaceId }
                                 val guest = ws?.myRole == "guest"
                                 ConversationRow(row.c, data, internalFallback, convFallback,
                                     indent = if (row.pinnedSection) 16.dp else (16 + row.level * 20).dp, iconSize = 32.dp, showIssuesChip = row.pinnedSection,
                                     issuesFold = if (row.pinnedSection || row.issueCount <= 0) null
-                                        else IssuesFold(row.issueCount, row.overdueCount, row.issuesExpanded) { toggleIssues(row.c.id) },
+                                        else IssuesFold(row.issueCount, row.overdueCount, row.issuesExpanded) { toggleIssues(row) },
+                                    pinMark = view == GroupsTree.View.LIST && row.c.pinnedAt != null,
                                     titleOverride = row.label, threadUnread = row.threadUnread,
                                     tagLine = if (row.c.kind == "internal") stringResource(R.string.grp_internal_only, Names.org(data, row.c.internalOrgId ?: ws?.owningOrgId)?.name ?: "") else null,
                                     menuOpen = menuKey == row.key,
@@ -271,12 +289,12 @@ fun GroupsScreen(
                                 IssueLine(row, menuOpen = menuKey == row.key, onLongPress = { menuKey = row.key }, onDismissMenu = { menuKey = null },
                                     menuItems = { issueQuickMenu(ctx, row.issue, onOpen = { onOpenIssue(row.issue.id) }, onStatus = { st -> setIssueStatus(row.issue, st) }) }) { onOpenIssue(row.issue.id) }
                             }
-                            is GroupsTree.MoreIssues -> Unfold(row.conversationId == justExpanded) { Text(
+                            is GroupsTree.MoreIssues -> Unfold(row.conversationId == justExpanded) { IssueIndent(row.level) { Text(
                                 pluralStringResource(R.plurals.grp_more_issues, row.count, row.count),
-                                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.fillMaxWidth().clickable { onIssuesOf(row.conversationId) }.heightIn(min = 36.dp)
-                                    .padding(start = (28 + row.level * 20).dp, end = 16.dp, top = 8.dp, bottom = 8.dp).testTag("moreIssues-${row.conversationId}"),
-                            ) }
+                                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.fillMaxWidth().clickable { onIssuesOf(row.conversationId) }.heightIn(min = 32.dp)
+                                    .padding(start = 10.dp, end = 16.dp, top = 6.dp, bottom = 6.dp).testTag("moreIssues-${row.conversationId}"),
+                            ) } }
                             is GroupsTree.Empty -> if (row.filtered) Text(
                                 stringResource(if (tab == GroupsTree.Tab.UNREAD && query.isBlank()) R.string.home_tab_caught_up else if (tab == GroupsTree.Tab.ISSUES && query.isBlank()) R.string.home_empty_issues else R.string.grp_empty_filter),
                                 textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -434,7 +452,13 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                         }
                     }
                     if (searching && list.isNotEmpty()) item(key = "chatsHeader") { QuickHeader(R.string.search_chats) }
-                    items(list, key = { it.id }) { c ->
+                    val nowMs = System.currentTimeMillis()
+                    list.forEachIndexed { i, c ->
+                        // Separadores «Fijados · Sin leer · Recientes» (orden único 1.6.4); buscando no hacen falta.
+                        val block = com.tiecoms.app.core.HomeTree.blockOf(c, nowMs)
+                        if (!searching && (i == 0 || com.tiecoms.app.core.HomeTree.blockOf(list[i - 1], nowMs) != block))
+                            item(key = "b:" + block.name) { Box(Modifier.animateItem()) { BlockHeader(block) } }
+                        item(key = c.id) {
                         val origin = GroupsTree.sideOrigin(data, c)
                         Box(Modifier.animateItem()) {
                             ConversationRow(c, data, internalFallback, convFallback, indent = 16.dp, iconSize = 44.dp, showIssuesChip = true,
@@ -442,7 +466,8 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                                 tagLine = origin?.let { stringResource(R.string.dm_from, Names.conversationTitle(it, data, internalFallback, convFallback)) },
                                 menuOpen = menuFor == c.id,
                                 menuItems = { conversationMenu(ctx, c, data, onMeeting = { meetingFor = c.id }, onRemindCustom = { remindFor = c }, onLeave = { leaveFor = c }, onOpen = { onOpen(c.id) }) + listOf(null, SheetItem(ctx.getString(R.string.details_short), "ⓘ", tag = "menuDetails") { onDetails(c.id) }) },
-                                onDismissMenu = { menuFor = null }, onLongPress = { menuFor = c.id }, onIssues = {}) { onOpen(c.id) }
+                                onDismissMenu = { menuFor = null }, onLongPress = { menuFor = c.id }, onIssues = {}, pinMark = c.pinnedAt != null) { onOpen(c.id) }
+                        }
                         }
                     }
                     if (searching) quickSearchSections(data, quickResults, hidePeople = QuickSearch.directPeople(list), internalFallback, convFallback,
@@ -593,7 +618,7 @@ private fun IssuesFoldChip(f: IssuesFold, conversationId: String) {
     val bg = if (f.expanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else MaterialTheme.colorScheme.primaryContainer
     Row(
         Modifier.clip(RoundedCornerShape(10.dp)).background(bg)
-            .clickable(onClickLabel = action, onClick = f.onToggle).heightIn(min = 32.dp).padding(start = 8.dp, end = 2.dp)
+            .clickable(onClickLabel = action, onClick = f.onToggle).heightIn(min = 28.dp).padding(start = 8.dp, end = 2.dp)
             .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(count.removePrefix("◆ "), overdue).joinToString(", "); stateDescription = action }
             .testTag("issuesFold-$conversationId"),
         verticalAlignment = Alignment.CenterVertically,
@@ -606,8 +631,20 @@ private fun IssuesFoldChip(f: IssuesFold, conversationId: String) {
 }
 
 /**
- * Asunto activo bajo su grupo: «◆ título», la fecha límite (en rojo si venció) y el estado si está en curso o esperando.
- * Pulsación larga: Completar, En curso, En espera, Abrir.
+ * Sangría de las sub-filas de asuntos: empiezan donde empieza el título del grupo (sangría + ícono de 32 + 10)
+ * con una guía vertical fina, para que se lean como parte del grupo y no como filas sueltas.
+ */
+@Composable
+private fun IssueIndent(level: Int, content: @Composable () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(start = (16 + level.coerceAtLeast(1).minus(1) * 20 + 42).dp).height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
+        Box(Modifier.width(2.dp).fillMaxHeight().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)))
+        Box(Modifier.weight(1f)) { content() }
+    }
+}
+
+/**
+ * Asunto activo bajo su grupo, compacto (1.6.4): «◆ título» en una línea y a la derecha la fecha límite pequeña
+ * (en rojo si venció) o el estado si está en curso o esperando. Pulsación larga: Completar, En curso, En espera, Abrir.
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -616,26 +653,60 @@ private fun IssueLine(row: GroupsTree.Issue, menuOpen: Boolean, onLongPress: () 
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val i = row.issue
     val f = issueFlags(i)
+    IssueIndent(row.level) {
     Box {
     Row(
         Modifier.fillMaxWidth().background(if (menuOpen) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
             .combinedClickable(onClick = onOpen, onLongClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onLongPress() },
                 onLongClickLabel = stringResource(R.string.menu_more))
-            .heightIn(min = 36.dp).padding(start = (28 + row.level * 20).dp, end = 16.dp, top = 4.dp, bottom = 4.dp)
+            .heightIn(min = 32.dp).padding(start = 10.dp, end = 16.dp, top = 3.dp, bottom = 3.dp)
             .semantics(mergeDescendants = true) {}.testTag("groupIssue-${i.id}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("◆", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
-        Spacer(Modifier.width(8.dp))
-        Text(i.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-        if (i.dueDate != null) {
-            Text(" · " + if (f.overdue) stringResource(R.string.issue_overdue) + " " + dueLabel(ctx, i) else if (f.dueToday) stringResource(R.string.issue_today) else dueLabel(ctx, i),
-                style = MaterialTheme.typography.labelSmall, maxLines = 1,
+        Text("◆", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+        Spacer(Modifier.width(6.dp))
+        Text(i.title, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        val side = when {
+            i.dueDate != null -> (if (f.overdue) stringResource(R.string.issue_overdue) + " " + dueLabel(ctx, i) else if (f.dueToday) stringResource(R.string.issue_today) else dueLabel(ctx, i))
+            i.status == "in_progress" || i.status == "waiting" -> statusText(ctx, i.status)
+            else -> null
+        }
+        if (side != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(side, style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                fontWeight = if (f.overdue) FontWeight.SemiBold else FontWeight.Normal,
                 color = if (f.overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (i.status == "in_progress" || i.status == "waiting") { Spacer(Modifier.width(6.dp)); StatusPill(i.status) }
     }
     AnchoredMenu(menuOpen, if (menuOpen) menuItems() else emptyList(), onDismissMenu)
+    }
+    }
+}
+
+/** Separador discreto de las listas planas: «Fijados», «Sin leer», «Recientes». */
+@Composable
+internal fun BlockHeader(block: com.tiecoms.app.core.HomeTree.Block) {
+    val label = stringResource(when (block) {
+        com.tiecoms.app.core.HomeTree.Block.PINNED -> R.string.block_pinned
+        com.tiecoms.app.core.HomeTree.Block.UNREAD -> R.string.block_unread
+        com.tiecoms.app.core.HomeTree.Block.RECENT -> R.string.block_recent
+    })
+    Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 2.dp).semantics { heading() }.testTag("block-" + block.name))
+}
+
+/** Selector «Lista | Árbol» arriba de Grupos. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GroupsViewSwitch(view: GroupsTree.View, onPick: (GroupsTree.View) -> Unit) {
+    androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("groupsView")) {
+        GroupsTree.View.entries.forEachIndexed { i, v ->
+            SegmentedButton(
+                selected = view == v, onClick = { onPick(v) },
+                shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, GroupsTree.View.entries.size),
+                icon = {}, modifier = Modifier.heightIn(min = 40.dp).testTag("view-" + v.id),
+            ) { Text(stringResource(if (v == GroupsTree.View.LIST) R.string.view_list else R.string.view_tree), style = MaterialTheme.typography.labelLarge) }
+        }
     }
 }
 
@@ -655,6 +726,8 @@ internal fun ConversationRow(
     threadUnread: Int = 0,
     /** Grupos: chip que pliega sus asuntos (reemplaza al chip «◆ N asuntos» que abre la lista). */
     issuesFold: IssuesFold? = null,
+    /** 📌 junto al título (listas planas: Lista de Grupos y DMs). */
+    pinMark: Boolean = false,
     onClick: () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -702,6 +775,7 @@ internal fun ConversationRow(
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp).testTag("sideBadge-${c.id}"))
                         }
                     }
+                    if (pinMark) Text(" 📌", style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("pinMark-${c.id}"))
                     if (muted) Text(" 🔕", style = MaterialTheme.typography.labelMedium)
                     if (threadUnread > 0) {
                         Spacer(Modifier.width(6.dp))
@@ -710,14 +784,15 @@ internal fun ConversationRow(
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp).testTag("threadUnread-${c.id}"))
                         }
                     }
-                    // En la misma línea del título (como la web): plegado, cada grupo ocupa su fila de siempre.
-                    if (issuesFold != null) { Spacer(Modifier.width(6.dp)); IssuesFoldChip(issuesFold, c.id) }
                 }
                 if (tagLine != null) Text(tagLine, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(preview, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f, fill = false))
                     if (time.isNotEmpty()) Text(" · $time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    // 1.6.4: el chip va en la línea de la vista previa, no en la del título: en un teléfono angosto el
+                    // título «Empresa · Grupo» se comía hasta quedar en «Pag…». Cada grupo sigue en sus dos líneas.
+                    if (issuesFold != null) { Spacer(Modifier.width(6.dp)); IssuesFoldChip(issuesFold, c.id) }
                 }
                 if (issuesFold == null && showIssuesChip && c.openIssues > 0) {
                     val label = if (c.openIssues == 1) stringResource(R.string.issues_count_one) else stringResource(R.string.issues_count, c.openIssues)

@@ -95,6 +95,10 @@ class AppSettings(context: Context) {
     var homeTab: String
         get() = prefs.getString("homeTab", "ALL") ?: "ALL"
         set(v) { prefs.edit().putString("homeTab", v).apply() }
+    /** Vista de Grupos (1.6.4): «list» (Lista, por defecto) o «tree» (Árbol). */
+    var groupsView: String
+        get() = prefs.getString("groupsView", "list")?.takeIf { it == "list" || it == "tree" } ?: "list"
+        set(v) { prefs.edit().putString("groupsView", v).apply() }
     var soundsEnabled: Boolean
         get() = prefs.getBoolean("sounds", true)
         set(v) { prefs.edit().putBoolean("sounds", v).apply() }

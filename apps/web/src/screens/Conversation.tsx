@@ -151,7 +151,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
 
   useEffect(() => {
     // La pantalla se monta de nuevo por conversación (key={id}), así el borrador no se cruza.
-    client.openConversation(id).catch((e) => setError(errorText(e)));
+    setError(null);
+    client.openConversation(id).then(() => setError(null)).catch((e) => setError(errorText(e)));
     client.loadIssues({ conversationId: id }).catch(() => {});
     client.loadPins(id).catch(() => {});
     // ?m=seq: salta a un mensaje (origen de un asunto, derivada, resultado devuelto, recordatorio o enlace copiado).

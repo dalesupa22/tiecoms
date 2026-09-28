@@ -499,7 +499,14 @@ export class TieComsClient {
     if (local?.loading) return;
     this.setConv(id, { loading: true });
     try {
-      const page = await this.request<{ messages: MessageDTO[]; hasMore: boolean; lastEventSeq: number }>(`/conversations/${id}/messages?limit=50`);
+      const url = `/conversations/${id}/messages?limit=50`;
+      let page: { messages: MessageDTO[]; hasMore: boolean; lastEventSeq: number };
+      try { page = await this.request(url); } catch (e: any) {
+        // 429 o 5xx transitorios al abrir (ráfaga de peticiones al recargar): un reintento con espera.
+        if (e?.status !== 429 && !(e?.status >= 500)) throw e;
+        await new Promise((r) => setTimeout(r, 1500));
+        page = await this.request(url);
+      }
       this.setConv(id, { messages: page.messages, hasMore: page.hasMore, lastEventSeq: page.lastEventSeq, loaded: true, loading: false });
       // Eventos que llegaron mientras cargábamos.
       void this.catchUp(id);

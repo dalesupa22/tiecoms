@@ -1622,6 +1622,7 @@
 "toast.dndOff" = "No molestar desactivado";
 "toast.dndOn" = "No molestar activado";
 "toast.linkCopied" = "Enlace copiado · solo abre para quien tiene acceso";
+"toast.markedRead" = "Marcado como leído";
 "toast.markedUnread" = "Marcado como no leído";
 "toast.muted" = "Silenciado";
 "toast.pinned" = "Fijado";
@@ -1652,6 +1653,16 @@
 "trazo.returnedOn" = "Devuelta {date}";
 "trazo.sub" = "Una conversación se deriva en otra cuando hay que resolver algo aparte —con el equipo, con otra empresa, con dirección— y se vuelve a conectar cuando devuelve su resultado. Aquí ves cada recorrido completo.";
 "trazo.tramos" = "{n} tramos";
+"tree.allRead" = "Ya leíste todo lo de este grupo.";
+"tree.chipHelp" = "{n} sin leer en hilos y ramas";
+"tree.markReadHint" = "Marca el grupo y estas conversaciones hasta lo que ves ahora. Lo que llegue después seguirá sin leer.";
+"tree.strip" = "⑂ {n} sin leer en {k} conversaciones de este grupo";
+"tree.stripChat" = "⑂ {n} sin leer en {k} conversaciones de este chat";
+"tree.stripChatOne" = "⑂ {n} sin leer en 1 conversación de este chat";
+"tree.stripOne" = "⑂ {n} sin leer en 1 conversación de este grupo";
+"tree.title" = "Sin leer en este grupo";
+"tree.titleChat" = "Sin leer en este chat";
+"tree.view" = "Ver";
 "voice.cancelled" = "Nota descartada";
 "voice.copied" = "Transcripción copiada";
 "voice.copy" = "Copiar transcripción";

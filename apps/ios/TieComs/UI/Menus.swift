@@ -16,13 +16,17 @@ struct ConversationMenuItems: View {
         Button { run { try await store.setConversationPrefs(conv.id, pinned: !pinned) } } label: {
             Label(pinned ? L("menu.unpinTop") : L("menu.pinTop"), systemImage: pinned ? "pin.slash" : "pin")
         }
-        if conv.unread > 0 {
-            Button { run { try await store.markConversationRead(conv.id) } } label: { Label(L("menu.markRead"), systemImage: "checkmark.circle") }
+        // Pendientes del árbol (grupo + derivadas): un grupo leído con hilos o ramas sin leer ofrece «Marcar como leído».
+        let tree = store.data.map { ReadTree.pending($0, conv) } ?? TreePending(unread: conv.unread, mentions: conv.unreadMentions)
+        if tree.canMarkRead {
+            Button { run(toast: L("toast.markedRead")) { try await store.markTreeRead(conv.id) } } label: { Label(L("menu.markRead"), systemImage: "checkmark.circle") }
+                .accessibilityIdentifier("menu.markRead")
         } else {
             Button { run(toast: L("toast.markedUnread")) { try await store.markUnread(conv.id, seq: conv.lastMessageSeq) } } label: {
                 Label(L("menu.markUnreadConv"), systemImage: "circle.fill")
             }
             .disabled(conv.lastMessageSeq <= conv.historyFromSeq)
+            .accessibilityIdentifier("menu.markUnread")
         }
         MuteMenu(conv: conv)
         RemindMenu(conversationId: conv.id, message: nil, onCustom: onRemindCustom)

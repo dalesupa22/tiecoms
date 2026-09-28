@@ -29,6 +29,11 @@ private struct ChatContentBottomKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
+/// Mayor seq de los mensajes no leídos que ya pasaron por la pantalla (el cursor de lectura solo avanza hasta ahí).
+private struct ChatSeenSeqKey: PreferenceKey {
+    static let defaultValue = 0
+    static func reduce(value: inout Int, nextValue: () -> Int) { value = max(value, nextValue()) }
+}
 private struct ChatDividerYKey: PreferenceKey {
     static let defaultValue: CGFloat? = nil
     static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = nextValue() ?? value }
@@ -47,6 +52,8 @@ private struct PendingVoiceSend {
 enum ChatSheet: Identifiable {
     case derive(MessageDTO), returnResult, newIssue(MessageDTO?), newEvent(MessageDTO?), forward(MessageDTO)
     case reminder(MessageDTO?), pins, issuesHere, report(MessageDTO), threads, agenda, react(MessageDTO)
+    /// «⑂ N sin leer en X conversaciones de este grupo · Ver» (2026-09-28).
+    case treePending
     var id: String {
         switch self {
         case .derive(let m): return "derive-\(m.id)"
@@ -61,6 +68,7 @@ enum ChatSheet: Identifiable {
         case .threads: return "threads"
         case .agenda: return "agenda"
         case .react(let m): return "react-\(m.id)"
+        case .treePending: return "tree"
         }
     }
 }
@@ -127,6 +135,10 @@ struct ConversationView: View {
     /// Menciones a mí sin leer al abrir, por visitar con el botón «@».
     @State private var mentionQueue: [String] = []
     @State private var viewportHeight: CGFloat = 0
+    /// Al final del chat (a menos de 40 pt): todo lo cargado está a la vista.
+    @State private var atBottom = false
+    /// Mayor seq no leído a la vista ahora (o ya pasado): abrir o recorrer una parte no marca lo que no se vio.
+    @State private var seenSeq = 0
 
     var body: some View {
         Group {
@@ -225,6 +237,11 @@ struct ConversationView: View {
         case .pins: PinsSheet(conversationId: conversationId)
         case .issuesHere: ConversationIssuesSheet(conversationId: conversationId)
         case .threads: ChatThreadsSheet(conversationId: conversationId) { id in openThread(id) }
+        case .treePending:
+            TreePendingSheet(conversationId: conversationId) { id in
+                // Un hilo se abre al lado (como en Slack); una rama o interna, a pantalla completa.
+                if let x = store.meta(id), Naming.isThread(x) { openThread(id) } else { store.push(.conversation(id)) }
+            }
         case .react(let m): EmojiPickerSheet(actions: store.data.map(Reactions.actionsEnabled) ?? true) { e in react(m, e) }
         case .agenda:
             let c = store.meta(conversationId)
@@ -288,6 +305,8 @@ struct ConversationView: View {
             if !embedded {
                 ChatBar(conv: c, onPins: { sheet = .pins }, onIssues: { sheet = .issuesHere },
                         onThreads: { sheet = .threads }, onAgenda: { sheet = .agenda })
+                // Lo que falta por leer en sus hilos y ramas (aunque este chat ya esté leído).
+                TreeUnreadStrip(conversationId: conversationId) { sheet = .treePending }
             }
             if let state, state.loaded {
                 messages(d, c, state)
@@ -413,6 +432,14 @@ struct ConversationView: View {
                     }
                     ForEach(items) { item in
                         row(d, c, item, byId: byId).id(item.id)
+                            .background {
+                                if let seq = trackedSeq(item) {
+                                    GeometryReader { g in
+                                        Color.clear.preference(key: ChatSeenSeqKey.self,
+                                                               value: viewportHeight > 0 && g.frame(in: .named("chat.scroll")).midY < viewportHeight ? seq : 0)
+                                    }
+                                }
+                            }
                     }
                     Color.clear.frame(height: 4).id(ChatNavIds.bottom)
                 }
@@ -428,9 +455,18 @@ struct ConversationView: View {
                     .onAppear { viewportHeight = g.size.height }
                     .onChange(of: g.size.height) { _, h in viewportHeight = h }
             })
+            .onPreferenceChange(ChatSeenSeqKey.self) { seq in
+                // El último valor (no el máximo): antes de colocar el chat en el primer no leído la vista está un
+                // instante al final, y eso no cuenta como visto.
+                let grew = seq > seenSeq
+                seenSeq = seq
+                if grew && positioned { markReadIfVisible() }
+            }
             .onPreferenceChange(ChatContentBottomKey.self) { maxY in
                 let far = ChatNav.showsJumpToLatest(distanceFromBottom: maxY - viewportHeight, viewport: viewportHeight)
                 if far != farFromBottom { farFromBottom = far }
+                let bottom = viewportHeight > 0 && maxY - viewportHeight < 40
+                if bottom != atBottom { atBottom = bottom }
                 // De vuelta al final: lo que llegó mientras estaba arriba ya se vio.
                 if !far, let last = store.conversations[conversationId]?.messages.last?.seq, last > bottomSeq {
                     bottomSeq = last
@@ -516,6 +552,7 @@ struct ConversationView: View {
                 if focused { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { proxy.scrollTo("bottom", anchor: .bottom) } }
             }
             .onAppear { markReadIfVisible() }
+            .onChange(of: atBottom) { _, v in if v { markReadIfVisible() } }
             .onChange(of: scenePhase) { _, p in if p == .active { markReadIfVisible() } }
         }
     }
@@ -566,10 +603,21 @@ struct ConversationView: View {
         m.kind == "text" && m.deletedAt == nil && !Naming.isSide(c) && !embedded
     }
 
+    /// Avanza el cursor de lectura solo con lo que se vio: todo si estoy al final; si no, hasta el último mensaje no
+    /// leído que pasó por la pantalla. Antes de colocar el chat (en el primer no leído) no se marca nada.
     private func markReadIfVisible() {
         guard scenePhase == .active, store.openConversationId == conversationId else { return }
         snapshotUnread()
-        store.markRead(conversationId)
+        guard positioned else { return }
+        if atBottom { store.markRead(conversationId) } else if seenSeq > 0 { store.markRead(conversationId, upTo: seenSeq) }
+    }
+
+    /// Seq de una fila que cuenta para el cursor (mensajes y avisos posteriores a lo leído al abrir).
+    private func trackedSeq(_ item: ChatItem) -> Int? {
+        switch item {
+        case .message(let m, _), .system(let m): return m.seq > (unreadSnap?.lastReadSeq ?? 0) ? m.seq : nil
+        default: return nil
+        }
     }
 
     /// Guarda lo no leído al abrir, una vez y antes de marcar leído.
@@ -580,7 +628,11 @@ struct ConversationView: View {
 
     private func positionAtFirstUnread(_ proxy: ScrollViewProxy) async {
         let me = store.data?.me.id ?? ""
-        defer { positioned = true }
+        defer {
+            positioned = true
+            // Ya colocado: se marca lo que quedó a la vista (y nada más).
+            Task { try? await Task.sleep(nanoseconds: 350_000_000); markReadIfVisible() }
+        }
         bottomSeq = store.conversations[conversationId]?.messages.last?.seq ?? 0
         guard let snap = unreadSnap, snap.unread > 0 else { return }
         var pages = 0

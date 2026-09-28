@@ -85,7 +85,7 @@ struct HomeView: View {
                     } else if viewMode == .list {
                         if !hasGroups && !searching && tab == .all && store.workspaceFilter == nil { emptyState }
                         // Lista: una sola lista con el orden único y separadores discretos Fijados · Sin leer · Recientes.
-                        ForEach(InboxBucket.split(flat, conv: \.conv, extraUnread: \.threadUnread), id: \.bucket) { b in
+                        ForEach(InboxBucket.split(flat, conv: \.conv, extraUnread: { $0.tree.derivedUnread + $0.tree.derivedMentions }), id: \.bucket) { b in
                             Section {
                                 ForEach(b.items) { n in
                                     groupRows(d, n, indent: 0, color: companyColor(d, n.conv), guest: Naming.isGuest(d, n.conv), open: open, searching: searching, flat: true)
@@ -261,7 +261,7 @@ struct HomeView: View {
         let chip = sum.count > 0 ? IssuesToggle(count: sum.count, overdue: sum.overdue, expanded: expanded) : nil
         let list = hits.isEmpty ? all : hits
         let showLines = expanded && !list.isEmpty
-        convButton(d, n.conv, badgeColor: color, group: true, guest: guest, label: n.label, threadUnread: n.threadUnread,
+        convButton(d, n.conv, badgeColor: color, group: true, guest: guest, label: n.label, threadUnread: n.threadUnread, threadMentions: n.tree.derivedMentions,
                    issues: chip, onToggleIssues: { toggle(HomeCollapse.issuesKey(n.conv.id)) }, flat: flat)
             .listRowInsets(EdgeInsets(top: 6, leading: 16 + CGFloat(indent) * 18, bottom: showLines ? 3 : 6, trailing: 12))
             .listRowSeparator(showLines ? .hidden : .automatic, edges: .bottom)
@@ -382,9 +382,9 @@ struct HomeView: View {
     /// fila no lleve chevron. Mantener presionado: el mismo menú de grupo en Lista y Árbol.
     @ViewBuilder
     private func convButton(_ d: BootstrapDTO, _ c: ConversationDTO, badgeColor: Color? = nil, showWs: Bool = false, group: Bool = false, guest: Bool = false,
-                            label: String? = nil, threadUnread: Int = 0, issues: IssuesToggle? = nil, onToggleIssues: (() -> Void)? = nil, flat: Bool = false) -> some View {
+                            label: String? = nil, threadUnread: Int = 0, threadMentions: Int = 0, issues: IssuesToggle? = nil, onToggleIssues: (() -> Void)? = nil, flat: Bool = false) -> some View {
         Button { store.homePath.append(.conversation(c.id)) } label: {
-            HierarchyConvRow(d: d, c: c, badgeColor: badgeColor, showWs: showWs, showIssueChip: !group, titleOverride: label, threadUnread: threadUnread,
+            HierarchyConvRow(d: d, c: c, badgeColor: badgeColor, showWs: showWs, showIssueChip: !group, titleOverride: label, threadUnread: threadUnread, threadMentions: threadMentions,
                              issuesToggle: issues, onToggleIssues: onToggleIssues, showOnlyOrg: !flat) { sheet = .issues(c.id) }
                 .contentShape(Rectangle())
         }
@@ -647,8 +647,10 @@ struct HierarchyConvRow: View {
     var showIssueChip = true
     /// «{espacio} · {grupo}» cuando dos grupos de la misma empresa se llaman igual.
     var titleOverride: String? = nil
-    /// Respuestas sin leer de sus hilos: chip «💬 N».
+    /// Pendientes de sus derivadas (hilos, ramas, internas): chip «⑂ N» (antes «💬 N»), 2026-09-28.
     var threadUnread = 0
+    /// Menciones sin leer en sus derivadas: la «@» de la fila también las cuenta.
+    var threadMentions = 0
     /// Grupos: chip «◆ N asuntos · N vencidos ⌄» que despliega o pliega sus asuntos (sin abrir el chat).
     var issuesToggle: IssuesToggle? = nil
     var onToggleIssues: (() -> Void)? = nil
@@ -679,14 +681,16 @@ struct HierarchyConvRow: View {
                         Text("📌").font(.caption2).accessibilityHidden(true).accessibilityIdentifier("row.pinned.\(c.id)")
                     }
                     if threadUnread > 0 {
-                        Text("💬 \(threadUnread)").font(.caption2.weight(.bold)).foregroundStyle(Theme.accentText)
+                        Text("⑂ \(threadUnread)").font(.caption2.weight(.bold)).foregroundStyle(Theme.accentText).monospacedDigit()
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Capsule().fill(Theme.orange.opacity(0.14)))
+                            .help(L("tree.chipHelp", ["n": threadUnread]))
+                            .accessibilityLabel(L("tree.chipHelp", ["n": threadUnread]))
                             .accessibilityIdentifier("grp.threadUnread.\(c.id)")
                     }
                     // En la misma línea que el nombre (como la web): plegado, cada grupo ocupa su fila y nada más.
                     if let t = issuesToggle { issuesChip(t) }
-                    if c.unreadMentions > 0 { MentionBadge() }
+                    if c.unreadMentions > 0 || threadMentions > 0 { MentionBadge() }
                     if c.unread > 0 { UnreadPill(count: c.unread, color: badgeColor, muted: c.isMuted && c.unreadMentions == 0) }
                 }
                 if Naming.isSide(c) {
@@ -722,8 +726,9 @@ struct HierarchyConvRow: View {
         .accessibilityLabel([title, Naming.isSide(c) ? L("dm.side") : nil,
                              Naming.sideOrigin(d, c).map { L("dm.fromOrigin", ["name": Naming.title(d, $0)]) },
                              c.pinnedAt != nil ? L("side.pinned") : nil,
-                             c.isMuted ? L("side.muted") : nil, c.unreadMentions > 0 ? L("mention.youMentioned") : nil,
-                             c.unread > 0 ? L("a11y.unread", ["n": c.unread]) : nil, preview, time,
+                             c.isMuted ? L("side.muted") : nil, c.unreadMentions > 0 || threadMentions > 0 ? L("mention.youMentioned") : nil,
+                             c.unread > 0 ? L("a11y.unread", ["n": c.unread]) : nil,
+                             threadUnread > 0 ? L("tree.chipHelp", ["n": threadUnread]) : nil, preview, time,
                              issueCountLabel].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
         .accessibilityActions {
             if let t = issuesToggle, let onToggleIssues {

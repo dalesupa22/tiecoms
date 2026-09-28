@@ -226,10 +226,11 @@ extension Naming {
         func sidesOf(_ id: String) -> [ConversationDTO] {
             sides.filter { $0.parentId == id }.sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
         }
+        let ix = ReadTree.Index(d)
         func node(_ c: ConversationDTO) -> HomeTree.ConvNode? {
             let s = sidesOf(c.id).filter { matches($0) && tab.includes($0) }
             // En «Laterales» el origen se muestra solo como contexto de sus laterales.
-            let selfOK = matches(c) && tab.includes(c) && tab != .sides
+            let selfOK = matches(c) && tab.includes(c, tree: ix.pending(c)) && tab != .sides
             guard selfOK || !s.isEmpty else { return nil }
             return HomeTree.ConvNode(conv: c, sides: s)
         }
@@ -313,23 +314,32 @@ enum HomeFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var labelKey: String { "home.tab.\(rawValue)" }
 
-    func includes(_ c: ConversationDTO) -> Bool {
+    /// `tree`: pendientes del árbol de la fila (grupo + derivadas, 2026-09-28). Sin él, solo lo propio.
+    func includes(_ c: ConversationDTO, tree: TreePending? = nil) -> Bool {
         switch self {
         case .all: return true
-        case .unread: return c.unread > 0 && (!c.isMuted || c.unreadMentions > 0)
-        case .mentions: return c.unreadMentions > 0
+        case .unread: return tree.map(\.isUnread) ?? (c.unread > 0 && (!c.isMuted || c.unreadMentions > 0))
+        case .mentions: return (tree?.mentions ?? c.unreadMentions) > 0
         case .issues: return c.openIssues > 0
         case .chats: return c.kind == .direct || c.kind == .multi   // como la web: las laterales son multi
         case .sides: return Naming.isSide(c)
         }
     }
 
-    func count(_ d: BootstrapDTO) -> Int { self == .all ? d.conversations.count : d.conversations.filter(includes).count }
+    func count(_ d: BootstrapDTO) -> Int {
+        guard self != .all else { return d.conversations.count }
+        let ix = ReadTree.Index(d)
+        return d.conversations.filter { includes($0, tree: ix.pending($0)) }.count
+    }
 
     /// Chips de Grupos: chats y sidechats viven en la pestaña DMs.
     static let groupCases: [HomeFilter] = [.all, .unread, .mentions, .issues]
     /// Cuenta solo filas de grupo (conversaciones de un espacio).
-    func groupCount(_ d: BootstrapDTO) -> Int { d.conversations.filter { Naming.isGroupRow($0) && !Naming.isThread($0) && includes($0) }.count }
+    /// «No leídos» y «Menciones» con la regla del árbol: un grupo leído con derivadas pendientes cuenta.
+    func groupCount(_ d: BootstrapDTO) -> Int {
+        let ix = ReadTree.Index(d)
+        return d.conversations.filter { Naming.isGroupRow($0) && !Naming.isThread($0) && includes($0, tree: ix.pending($0)) }.count
+    }
     static var savedGroups: HomeFilter { groupCases.contains(saved) ? saved : .all }
 
     private static let key = "tc.home.tab"

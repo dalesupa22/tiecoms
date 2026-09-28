@@ -1622,6 +1622,7 @@
 "toast.dndOff" = "Do not disturb is off";
 "toast.dndOn" = "Do not disturb is on";
 "toast.linkCopied" = "Link copied · it only opens for people with access";
+"toast.markedRead" = "Marked as read";
 "toast.markedUnread" = "Marked as unread";
 "toast.muted" = "Muted";
 "toast.pinned" = "Pinned";
@@ -1652,6 +1653,16 @@
 "trazo.returnedOn" = "Returned {date}";
 "trazo.sub" = "A conversation branches into another when something has to be solved separately —with the team, with another company, with leadership— and reconnects when it returns its result. Here you see each full journey.";
 "trazo.tramos" = "{n} legs";
+"tree.allRead" = "You are all caught up here.";
+"tree.chipHelp" = "{n} unread in threads and branches";
+"tree.markReadHint" = "Marks the group and these conversations up to what you see now. Anything that arrives later stays unread.";
+"tree.strip" = "⑂ {n} unread in {k} conversations of this group";
+"tree.stripChat" = "⑂ {n} unread in {k} conversations of this chat";
+"tree.stripChatOne" = "⑂ {n} unread in 1 conversation of this chat";
+"tree.stripOne" = "⑂ {n} unread in 1 conversation of this group";
+"tree.title" = "Unread in this group";
+"tree.titleChat" = "Unread in this chat";
+"tree.view" = "View";
 "voice.cancelled" = "Note discarded";
 "voice.copied" = "Transcript copied";
 "voice.copy" = "Copy transcript";

@@ -12,7 +12,12 @@ struct GroupsTree {
     enum Kind: String { case mine, relations, guest, other }
     /// Fila de grupo. `label`: «{espacio} · {grupo}» si otro grupo de la misma empresa se llama igual.
     /// `threadUnread`: respuestas sin leer de sus hilos (los hilos no se listan: viven en la barra del chat).
-    struct ConvNode: Identifiable { var conv: ConversationDTO; var label: String? = nil; var threadUnread: Int = 0; var id: String { conv.id } }
+    struct ConvNode: Identifiable {
+        var conv: ConversationDTO; var label: String? = nil; var threadUnread: Int = 0
+        /// Pendientes del árbol de la fila (grupo + derivadas).
+        var tree = TreePending()
+        var id: String { conv.id }
+    }
     /// Espacio de una empresa: no se muestra (solo hay grupos y asuntos); sirve para «Nuevo grupo» e «Invitar».
     struct WsNode: Identifiable { var ws: WorkspaceDTO; var id: String { ws.id } }
     struct CompanyNode: Identifiable {
@@ -160,13 +165,12 @@ extension Naming {
             return hay.contains { fold($0).contains(q) }
         }
         let rows = d.conversations.filter { isGroupRow($0) && !isThread($0) }
-        // Respuestas sin leer de los hilos de cada grupo («💬 N» en su fila).
-        var threadUnread: [String: Int] = [:]
-        for t in d.conversations where isThread(t) { if let p = t.parentId { threadUnread[p, default: 0] += HomeOrder.pending(t) } }
+        // Pendientes del árbol (grupo + derivadas): mandan en «No leídos», «Menciones» y el chip «⑂ N» de la fila.
+        let ix = ReadTree.Index(d)
         func node(_ c: ConversationDTO) -> GroupsTree.ConvNode? {
-            let tu = threadUnread[c.id] ?? 0
-            guard matches(c) && (tab.includes(c) || (tab == .unread && tu > 0)) else { return nil }
-            return .init(conv: c, threadUnread: tu)
+            let t = ix.pending(c)
+            guard matches(c) && tab.includes(c, tree: t) else { return nil }
+            return .init(conv: c, threadUnread: t.derivedUnread, tree: t)
         }
         var tree = GroupsTree()
         let showEmpty = filterWorkspace == nil && tab == .all && q.isEmpty
@@ -292,12 +296,23 @@ extension Naming {
         return d.conversations.first { $0.id == p }
     }
 
-    /// Globo de la pestaña Grupos: no leídos de conversaciones con espacio (no silenciadas).
-    static func groupsUnread(_ d: BootstrapDTO) -> Int { unreadCount(d.conversations.filter { $0.workspaceId != nil && !$0.kind.isChat }) }
-    /// Respuestas sin leer de los hilos de cada directo o chat grupal (chip «💬 N» en su fila de DMs).
+    /// Globo de la pestaña Grupos: pendientes del árbol de cada fila de grupo (grupo + derivadas; silenciadas solo
+    /// con mención) y las derivadas cuyo grupo no está en mi alcance, para no perderlas.
+    static func groupsUnread(_ d: BootstrapDTO) -> Int {
+        let ix = ReadTree.Index(d)
+        let rows = d.conversations.filter { isGroupRow($0) && !isThread($0) }
+        let rowIds = Set(rows.map(\.id))
+        let orphans = d.conversations.filter { isGroupRow($0) && isThread($0) && !rowIds.contains($0.parentId ?? "") }
+        return rows.reduce(0) { $0 + ix.pending($1).pending } + orphans.reduce(0) { $0 + HomeOrder.pending($1) }
+    }
+    /// Pendientes de las derivadas de cada directo o chat grupal (chip «⑂ N» en su fila de DMs).
     static func chatThreadUnread(_ d: BootstrapDTO) -> [String: Int] {
+        let ix = ReadTree.Index(d)
         var out: [String: Int] = [:]
-        for t in d.conversations where t.kind.isChat && isThread(t) { if let p = t.parentId { out[p, default: 0] += HomeOrder.pending(t) } }
+        for c in d.conversations where c.kind.isChat && !isThread(c) {
+            let n = ix.pending(c).derivedUnread
+            if n > 0 { out[c.id] = n }
+        }
         return out
     }
 

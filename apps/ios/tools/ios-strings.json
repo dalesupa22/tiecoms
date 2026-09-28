@@ -2734,5 +2734,49 @@
  "dnd.localOnlyIos": [
   "Por ahora se guardó solo en este dispositivo.",
   "For now it is saved on this device only."
+ ],
+ "tree.chipHelp": [
+  "{n} sin leer en hilos y ramas",
+  "{n} unread in threads and branches"
+ ],
+ "tree.strip": [
+  "⑂ {n} sin leer en {k} conversaciones de este grupo",
+  "⑂ {n} unread in {k} conversations of this group"
+ ],
+ "tree.stripOne": [
+  "⑂ {n} sin leer en 1 conversación de este grupo",
+  "⑂ {n} unread in 1 conversation of this group"
+ ],
+ "tree.stripChat": [
+  "⑂ {n} sin leer en {k} conversaciones de este chat",
+  "⑂ {n} unread in {k} conversations of this chat"
+ ],
+ "tree.stripChatOne": [
+  "⑂ {n} sin leer en 1 conversación de este chat",
+  "⑂ {n} unread in 1 conversation of this chat"
+ ],
+ "tree.view": [
+  "Ver",
+  "View"
+ ],
+ "tree.title": [
+  "Sin leer en este grupo",
+  "Unread in this group"
+ ],
+ "tree.titleChat": [
+  "Sin leer en este chat",
+  "Unread in this chat"
+ ],
+ "tree.allRead": [
+  "Ya leíste todo lo de este grupo.",
+  "You are all caught up here."
+ ],
+ "tree.markReadHint": [
+  "Marca el grupo y estas conversaciones hasta lo que ves ahora. Lo que llegue después seguirá sin leer.",
+  "Marks the group and these conversations up to what you see now. Anything that arrives later stays unread."
+ ],
+ "toast.markedRead": [
+  "Marcado como leído",
+  "Marked as read"
  ]
 }

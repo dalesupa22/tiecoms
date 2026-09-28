@@ -87,6 +87,7 @@ targets:
       - TieComs/Core/SharedText.swift
       - TieComs/Core/L10n.swift
       - TieComs/Core/Naming.swift
+      - TieComs/Core/ReadTree.swift
       - TieComs/Core/SocketIOProtocol.swift
       - TieComs/Core/Attachments.swift
       - TieComs/Core/ShareItems.swift

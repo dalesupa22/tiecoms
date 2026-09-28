@@ -137,7 +137,8 @@ final class GroupsTests: XCTestCase {
         XCTAssertEqual(q.sections[0].companies.map(\.id), ["pending:nestle"])
         XCTAssertEqual(Naming.groupsTree(d, query: "acme foods").sections.first?.companies.map(\.id), ["pending:acme foods"], "la pendiente sin grupos se encuentra por su nombre")
         XCTAssertTrue(Naming.groupsTree(d, query: "zzz").isEmpty)
-        XCTAssertEqual(HomeFilter.unread.groupCount(d), 1, "los chips de Grupos cuentan solo grupos")
+        // 1.6.6: la cifra del chip usa la regla del árbol (r1 está leído pero su hilo no), igual que la lista de arriba.
+        XCTAssertEqual(HomeFilter.unread.groupCount(d), 2, "los chips de Grupos cuentan solo grupos, con sus hilos")
     }
 
     func testUnreadBadgesPerTab() throws {

@@ -703,10 +703,21 @@ final class AppStore {
         conversations[id]?.loading = false
     }
 
-    /// Marca como leído con debounce (400 ms).
-    func markRead(_ id: String) {
-        guard let c = meta(id), c.lastMessageSeq > c.lastReadSeq else { return }
-        patchMeta(id) { $0.lastReadSeq = $0.lastMessageSeq; $0.unread = 0; $0.unreadMentions = 0 }
+    /// Marca como leído con debounce (400 ms). `upTo`: solo hasta ese seq (lo que se vio); sin él, todo lo conocido.
+    /// El cursor nunca retrocede; lo que llegue después sigue sin leer.
+    func markRead(_ id: String, upTo: Int? = nil) {
+        guard let c = meta(id) else { return }
+        let target = min(upTo ?? c.lastMessageSeq, c.lastMessageSeq)
+        guard target > c.lastReadSeq else { return }
+        // Menciones que siguen sin leer después del cursor (de lo cargado; el servidor recalcula al volver).
+        let myId = me?.id ?? ""
+        let left = target >= c.lastMessageSeq ? 0 : min(c.unreadMentions, (conversations[id]?.messages ?? [])
+            .filter { $0.seq > target && $0.deletedAt == nil && MentionText.mentionsMe($0.mentions, me: myId, authorId: $0.authorId) }.count)
+        patchMeta(id) {
+            $0.lastReadSeq = target
+            $0.unread = max(0, $0.lastMessageSeq - max(target, $0.historyFromSeq))
+            $0.unreadMentions = left
+        }
         readTasks[id]?.cancel()
         readTasks[id] = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 400_000_000)
@@ -714,7 +725,7 @@ final class AppStore {
             let seq = self.meta(id)?.lastReadSeq ?? 0
             _ = try? await self.api.requestData("/conversations/\(id)/read", method: "POST", json: ["seq": seq])
         }
-        AppFeedback.shared.clearNotifications(conversationId: id)
+        if target >= c.lastMessageSeq { AppFeedback.shared.clearNotifications(conversationId: id) }
     }
 
     /// Aviso de "escribiendo", como máximo cada 2 s.

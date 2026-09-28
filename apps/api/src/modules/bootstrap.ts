@@ -41,6 +41,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
               (SELECT count(*) FROM message_links ml WHERE ml.conversation_id = c.id AND ml.seq > m.history_from_seq)::int AS link_count,
               COALESCE(rc.last_read_seq, 0) AS last_read_seq,
               ARRAY(SELECT user_id FROM conversation_memberships x WHERE x.conversation_id = c.id AND x.removed_at IS NULL ORDER BY x.joined_at) AS member_ids,
+              ARRAY(SELECT user_id FROM conversation_memberships x WHERE x.conversation_id = c.id AND x.removed_at IS NULL AND x.can_manage ORDER BY x.joined_at) AS admin_ids, c.created_by,
               (SELECT CASE WHEN lm.deleted_at IS NULL THEN left(lm.body, 140) ELSE '' END FROM messages lm
                 WHERE lm.conversation_id = c.id AND lm.seq = c.last_message_seq AND lm.seq > m.history_from_seq) AS preview,
               (SELECT lm.attachments FROM messages lm
@@ -98,7 +99,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
     const readFrom = Math.max(r.last_read_seq, r.history_from_seq);
     return {
       id: r.id, workspaceId: r.workspace_id, kind: r.kind, level: r.level, name: r.name, internalOrgId: r.internal_org_id,
-      memberIds: r.member_ids, lastMessageSeq: r.last_message_seq, lastEventSeq: r.last_event_seq,
+      memberIds: r.member_ids, ...(r.kind !== 'direct' ? { adminIds: r.admin_ids, createdBy: r.created_by } : {}), lastMessageSeq: r.last_message_seq, lastEventSeq: r.last_event_seq,
       lastMessageAt: r.last_message_at ? new Date(r.last_message_at).toISOString() : null,
       // Clientes viejos: un mensaje solo con adjuntos muestra un ícono en vez de quedar vacío.
       lastMessagePreview: r.preview === '' && r.preview_attachments?.length ? legacyAttachmentPreview(r.preview_attachments) : r.preview,

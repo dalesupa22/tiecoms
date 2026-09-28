@@ -38,17 +38,23 @@ async function inviteeIds(c: Tx, conversationId: string, wanted: string[] | unde
   return ids;
 }
 
-export async function createEvent(userId: string, conversationId: string, input: z.infer<typeof CreateEventInput>) {
+export async function createEvent(userId: string, conversationId: string, input: z.infer<typeof CreateEventInput>, meetingId?: string) {
   if (Date.parse(input.endsAt) <= Date.parse(input.startsAt)) throw badRequest('La reunión debe terminar después de empezar');
   if (!validTz(input.timezone)) throw badRequest('Zona horaria inválida');
   return tx(async (c) => {
     const a = await conversationAccess(c, userId, conversationId, 'post', true);
+    if (meetingId) {
+      const meeting = (await c.query('SELECT calendar_event_id FROM meetings WHERE id = $1 AND user_id = $2 AND conversation_id = $3 FOR UPDATE', [meetingId, userId, conversationId])).rows[0];
+      if (!meeting) throw notFound('Reunión');
+      if (meeting.calendar_event_id) return load(c, meeting.calendar_event_id);
+    }
     const { rows } = await c.query(
       `INSERT INTO calendar_events (workspace_id, conversation_id, origin_message_id, title, description, location, starts_at, ends_at, timezone, organizer_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
       [a.workspaceId, conversationId, input.originMessageId ?? null, input.title, input.description ?? null, input.location ?? null, input.startsAt, input.endsAt, input.timezone, userId],
     );
     const id: string = rows[0].id;
+    if (meetingId) await c.query('UPDATE meetings SET calendar_event_id = $2 WHERE id = $1', [meetingId, id]);
     for (const uid of await inviteeIds(c, conversationId, input.inviteeIds, userId)) {
       await c.query('INSERT INTO calendar_event_invitees (event_id, user_id, rsvp, responded_at) VALUES ($1,$2,$3,$4)', [id, uid, uid === userId ? 'yes' : 'pending', uid === userId ? new Date() : null]);
     }

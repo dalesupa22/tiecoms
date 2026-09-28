@@ -210,6 +210,12 @@ export function useExpiry(until: string | null | undefined) {
 }
 
 // ---------- Menús de conversación, espacio y persona ----------
+/** Pendientes del grupo y sus derivadas que ve este cliente (mensajes o menciones). */
+export function treePending(conv: ConversationDTO) {
+  const own = conv.unread + (conv.unreadMentions ?? 0);
+  return own + client.derivedOf(conv.id).reduce((n, x) => n + x.unread + (x.unreadMentions ?? 0), 0);
+}
+
 export function conversationMenu(conv: ConversationDTO, extra: { onNewMeeting?: () => void } = {}): MenuItem[] {
   const pinned = !!conv.pinnedAt;
   return [
@@ -217,8 +223,9 @@ export function conversationMenu(conv: ConversationDTO, extra: { onNewMeeting?: 
     { label: t('menu.openTab'), icon: '⧉', onSelect: () => window.open(convLink(conv.id), '_blank', 'noopener') },
     { divider: true },
     { label: pinned ? t('menu.unpinTop') : t('menu.pinTop'), icon: '📌', onSelect: () => client.setConversationPrefs(conv.id, { pinned: !pinned }).catch((e) => toast(errorText(e))) },
-    conv.unread > 0
-      ? { label: t('menu.markRead'), icon: '✓', onSelect: () => void client.markConversationRead(conv.id).catch((e) => toast(errorText(e))) }
+    // «Marcar como leído» mira el grupo y sus derivadas (hilos, ramas): así no queda «leído» con pendientes escondidos.
+    treePending(conv) > 0
+      ? { label: t('menu.markRead'), icon: '✓', onSelect: () => void client.markTreeRead(conv.id).then(() => toast(t('toast.markedRead'))).catch((e) => toast(errorText(e))) }
       : { label: t('menu.markUnreadConv'), icon: '●', disabled: conv.lastMessageSeq <= conv.historyFromSeq, onSelect: () => void client.markUnread(conv.id, conv.lastMessageSeq).then(() => toast(t('toast.markedUnread'))).catch((e) => toast(errorText(e))) },
     muteMenu(conv),
     previewModeMenu(conv),

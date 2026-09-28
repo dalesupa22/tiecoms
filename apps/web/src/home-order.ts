@@ -10,6 +10,25 @@ export const pendingOf = (c: ConversationDTO) => (c.unread > 0 && (!isMuted(c) |
 const hasMention = (c: ConversationDTO) => (c.unreadMentions ?? 0) > 0;
 
 /**
+ * Pendientes del árbol (docs/TANDA-LECTURA-REUNIONES.md): el grupo más sus derivadas (hilos, ramas,
+ * internas; no sidechats, que van en DMs). Devuelve una copia del grupo con unread y unreadMentions
+ * sumados, para ordenar, separar y filtrar la fila igual que si el pendiente fuera del grupo.
+ */
+export const isTreeChild = (x: ConversationDTO, rootId: string) => x.parentId === rootId && x.deriveKind !== 'side';
+export function withTree(c: ConversationDTO, derived: ConversationDTO[]): ConversationDTO {
+  if (!derived.length) return c;
+  const kids = derived.filter((x) => isTreeChild(x, c.id));
+  return {
+    ...c,
+    unread: pendingOf(c) + kids.reduce((n, x) => n + pendingOf(x), 0),
+    unreadMentions: (c.unreadMentions ?? 0) + kids.reduce((n, x) => n + (x.unreadMentions ?? 0), 0),
+  };
+}
+/** Solo lo que está en las derivadas (la cifra del chip ⑂). */
+export const treeOnlyPending = (c: ConversationDTO, derived: ConversationDTO[]) =>
+  derived.filter((x) => isTreeChild(x, c.id)).reduce((n, x) => n + pendingOf(x), 0);
+
+/**
  * Orden único de la bandeja (docs/GRUPOS.md › «Bandeja ordenada…», 27-sep-2026):
  * 1. Fijadas primero (pinnedAt). Entre fijadas, el mismo criterio de abajo.
  * 2. Una mención sin leer (aunque esté silenciada).

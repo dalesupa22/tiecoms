@@ -2,10 +2,10 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
+  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type UserDTO, normalizeEmoji,
-  type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO,
+  type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO, type IntegrationDTO, type IntegrationSecretDTO,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -110,6 +110,7 @@ export class TieComsClient {
   private listeners = new Set<() => void>();
   private accessToken: string | null = null;
   private accessExp = 0;
+  private sessionGeneration = 0;
   private refreshing: Promise<boolean> | null = null;
   private socket: Socket | null = null;
   private deviceId = '';
@@ -121,6 +122,7 @@ export class TieComsClient {
 
   // ---------- Estado observable (useSyncExternalStore) ----------
   getState = () => this.state;
+  getSessionIdentity = () => `${this.sessionGeneration}:${this.state.data?.me.id ?? ''}`;
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => this.listeners.delete(fn); };
   private set(patch: Partial<ClientState>) {
     this.state = { ...this.state, ...patch };
@@ -151,13 +153,26 @@ export class TieComsClient {
     });
   }
 
+  private assertSession(generation: number) {
+    if (generation !== this.sessionGeneration) throw new ApiRequestError(409, 'session_changed', 'La sesión cambió. Vuelve a intentarlo en la cuenta actual.');
+  }
+
   async request<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
+    const generation = this.sessionGeneration;
     if (this.accessToken && Date.now() > this.accessExp - 30_000) await this.refresh();
+    this.assertSession(generation);
     let res = await this.raw(path, init);
-    if (res.status === 401 && (await this.refresh())) res = await this.raw(path, init);
+    this.assertSession(generation);
+    if (res.status === 401 && (await this.refresh())) {
+      this.assertSession(generation);
+      res = await this.raw(path, init);
+    }
+    this.assertSession(generation);
     if (res.status === 401) { await this.handleSignedOut(); throw await parseError(res); }
     if (!res.ok) throw await parseError(res);
-    return res.json() as Promise<T>;
+    const result = await res.json() as T;
+    this.assertSession(generation);
+    return result;
   }
 
   // ---------- Sesión ----------
@@ -187,16 +202,26 @@ export class TieComsClient {
   }
 
   async login(email: string, password: string) {
+    const generation = ++this.sessionGeneration;
+    this.refreshing = null;
     const res = await this.raw('/auth/login', { method: 'POST', json: { email, password, device: await this.device() } }, false);
     if (!res.ok) throw await parseError(res);
-    await this.applyAuth(await res.json());
+    const auth = await res.json();
+    this.assertSession(generation);
+    await this.applyAuth(auth);
+    this.assertSession(generation);
     await this.afterLogin();
   }
 
   async signup(input: { name: string; email: string; password: string; orgName?: string; orgInviteToken?: string; title?: string }) {
+    const generation = ++this.sessionGeneration;
+    this.refreshing = null;
     const res = await this.raw('/auth/signup', { method: 'POST', json: { ...input, device: await this.device() } }, false);
     if (!res.ok) throw await parseError(res);
-    await this.applyAuth(await res.json());
+    const auth = await res.json();
+    this.assertSession(generation);
+    await this.applyAuth(auth);
+    this.assertSession(generation);
     await this.afterLogin();
   }
 
@@ -218,52 +243,75 @@ export class TieComsClient {
 
   /** Canjea el código que devolvió el servidor tras Google/Microsoft. */
   async ssoComplete(code: string) {
+    const generation = ++this.sessionGeneration;
+    this.refreshing = null;
     const codeVerifier = await this.opts.storage.get<string>('sso:verifier');
     await this.opts.storage.del('sso:verifier');
     if (!codeVerifier) throw Object.assign(new Error('Vuelve a iniciar sesión desde esta app.'), { code: 'sso_state' });
     const res = await this.raw('/auth/sso/exchange', { method: 'POST', json: { code, codeVerifier, device: await this.device() } }, false);
     if (!res.ok) throw await parseError(res);
-    await this.applyAuth(await res.json());
+    const auth = await res.json();
+    this.assertSession(generation);
+    await this.applyAuth(auth);
+    this.assertSession(generation);
     await this.afterLogin();
   }
 
   /** Refresco con vuelo único; en navegador se serializa entre pestañas con Web Locks. */
   private refresh(): Promise<boolean> {
     if (this.refreshing) return this.refreshing;
+    const generation = this.sessionGeneration;
     const run = async () => {
       const stored = this.opts.secrets ? await this.opts.secrets.get() : undefined;
       if (this.opts.secrets && !stored) return false;
       const res = await this.raw('/auth/refresh', { method: 'POST', json: stored ? { refreshToken: stored } : {} }, false).catch(() => null);
+      if (generation !== this.sessionGeneration) return false;
       if (!res) return !!this.accessToken; // sin red: conserva la sesión local
       if (!res.ok) { this.accessToken = null; return false; }
-      await this.applyAuth(await res.json());
-      return true;
+      const auth = await res.json();
+      if (generation !== this.sessionGeneration) return false;
+      await this.applyAuth(auth);
+      return generation === this.sessionGeneration;
     };
     const locks = (globalThis.navigator as any)?.locks;
-    this.refreshing = (locks ? locks.request('tiecoms-refresh', run) : run()).finally(() => { this.refreshing = null; });
-    return this.refreshing!;
+    const pending = (locks ? locks.request('tiecoms-refresh', run) : run()).finally(() => { if (this.refreshing === pending) this.refreshing = null; });
+    this.refreshing = pending;
+    return pending;
   }
 
   async logout() {
-    try { await this.request('/auth/logout', { method: 'POST', json: {} }); } catch {}
+    // Capture this session's token before clearing it; late responses cannot restore its state.
+    const logout = this.raw('/auth/logout', { method: 'POST', json: {} }).catch(() => null);
     await this.handleSignedOut();
+    await logout;
   }
 
   private async handleSignedOut() {
     const userId = this.state.data?.me.id;
+    ++this.sessionGeneration;
+    this.refreshing = null;
+    this.socket?.removeAllListeners();
     this.socket?.disconnect();
     this.socket = null;
     this.accessToken = null;
-    await this.opts.secrets?.set(null);
-    if (userId) await this.opts.storage.clearPrefix(`u:${userId}:`);
+    if (this.bootstrapTimer) clearTimeout(this.bootstrapTimer);
+    if (this.flushTimer) clearTimeout(this.flushTimer);
+    this.bootstrapTimer = null; this.flushTimer = null;
+    for (const timer of this.readTimers.values()) clearTimeout(timer);
+    this.readTimers.clear();
     this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0 };
     this.listeners.forEach((l) => l());
+    await this.opts.secrets?.set(null);
+    if (userId) await this.opts.storage.clearPrefix(`u:${userId}:`);
   }
 
   private async afterLogin() {
+    const generation = this.sessionGeneration;
     await this.loadBootstrap();
+    this.assertSession(generation);
     const me = this.state.data!.me.id;
     const pending = (await this.opts.storage.get<PendingMessage[]>(`u:${me}:outbox`)) ?? [];
+    this.assertSession(generation);
     this.set({ status: 'ready', pending: pending.map((p) => ({ ...p, status: p.status === 'sending' ? 'pending' : p.status })) });
     this.connect();
     this.scheduleFlush(0);
@@ -275,6 +323,7 @@ export class TieComsClient {
 
   // ---------- Snapshot ----------
   async loadBootstrap() {
+    const generation = this.sessionGeneration;
     const data = await this.request<BootstrapDTO>('/bootstrap');
     const dndLocalOnly = data.me.dndUntil === undefined;
     if (dndLocalOnly) {
@@ -282,6 +331,7 @@ export class TieComsClient {
       const local = await this.opts.storage.get<string | null>(`u:${data.me.id}:dnd`).catch(() => null);
       data.me.dndUntil = isActiveUntil(local) ? local : null;
     }
+    this.assertSession(generation);
     this.set({ data, dndLocalOnly });
     // Conversaciones que ya no están en mi alcance: se purgan de la caché local.
     const allowed = new Set(data.conversations.map((c) => c.id));
@@ -352,6 +402,7 @@ export class TieComsClient {
     if (e.type === 'me.dnd') this.patchMe({ dndUntil: e.dndUntil });
     // Asuntos restringidos ('org' o 'private') llegan por la cuenta, no por la conversación.
     if (e.type === 'issue.updated') { this.putIssues([e.issue]); this.recountIssues(e.issue.conversationId); }
+    if (e.type === 'issue.personal') this.putIssues([e.issue]);
     if (e.type === 'issue.hidden') {
       const next = { ...this.state.issues }; delete next[e.issueId];
       this.set({ issues: next }); this.recountIssues(e.conversationId);
@@ -371,7 +422,7 @@ export class TieComsClient {
     }
     if (e.type === 'read.updated') {
       const c = this.state.data?.conversations.find((x) => x.id === e.conversationId);
-      if (c && e.seq > c.lastReadSeq) this.patchConversationMeta(c.id, { lastReadSeq: e.seq, unread: Math.max(0, c.lastMessageSeq - Math.max(e.seq, c.historyFromSeq)) });
+      if (c && e.seq > c.lastReadSeq) this.patchConversationMeta(c.id, { lastReadSeq: e.seq, unread: Math.max(0, c.lastMessageSeq - Math.max(e.seq, c.historyFromSeq)), ...(e.seq >= c.lastMessageSeq ? { unreadMentions: 0 } : {}) });
     }
   }
 
@@ -402,7 +453,7 @@ export class TieComsClient {
     const c = this.state.data?.conversations.find((x) => x.id === m.conversationId);
     if (!c || m.seq <= c.lastMessageSeq) return;
     const mine = m.authorId === this.state.data?.me.id;
-    const lastReadSeq = mine ? m.seq : c.lastReadSeq;
+    const lastReadSeq = mine && m.seq === c.lastMessageSeq + 1 && Math.max(c.lastReadSeq, c.historyFromSeq) >= c.lastMessageSeq ? m.seq : c.lastReadSeq;
     this.patchConversationMeta(c.id, {
       lastMessageSeq: m.seq, lastMessageAt: m.createdAt, lastMessagePreview: m.body.slice(0, 140), lastReadSeq,
       // La pestaña «Enlaces» suma los enlaces nuevos sin esperar otro bootstrap.
@@ -419,7 +470,7 @@ export class TieComsClient {
     let messages = local.messages;
     if (e.type === 'message.updated') this.noticeReaction(local.messages.find((m) => m.id === e.message.id), e.message);
     if (e.type === 'message.created' || e.type === 'message.updated') messages = upsertMessage(messages, e.message);
-    if (e.type === 'members.changed') { this.patchConversationMeta(e.conversationId, { memberIds: e.memberIds }); this.scheduleBootstrap(); }
+    if (e.type === 'members.changed') { this.patchConversationMeta(e.conversationId, { memberIds: e.memberIds, ...(e.adminIds ? { adminIds: e.adminIds } : {}) }); this.scheduleBootstrap(); }
     if (e.type === 'issue.updated') this.putIssues([e.issue]);
     if (e.type === 'message.updated') this.patchPreviewIfLast(e.message);
     this.setConv(e.conversationId, { messages, lastEventSeq: e.eventSeq });
@@ -460,26 +511,32 @@ export class TieComsClient {
 
   async loadOlder(id: string) {
     const local = this.state.conversations[id];
-    if (!local?.loaded || !local.hasMore || local.loading) return;
+    if (!local?.loaded || !local.hasMore || local.loading) return false;
     const before = local.messages[0]?.seq;
-    if (!before) return;
+    if (!before) return false;
+    const generation = this.sessionGeneration;
     this.setConv(id, { loading: true });
     try {
       const page = await this.request<{ messages: MessageDTO[]; hasMore: boolean }>(`/conversations/${id}/messages?before=${before}&limit=50`);
       const cur = this.state.conversations[id]!;
-      this.setConv(id, { messages: [...page.messages, ...cur.messages], hasMore: page.hasMore, loading: false });
-    } catch { this.setConv(id, { loading: false }); }
+      const older = page.messages.filter((m) => m.seq < before);
+      this.setConv(id, { messages: [...older, ...cur.messages], hasMore: page.hasMore, loading: false });
+      return older.length > 0 || !page.hasMore;
+    } catch { if (generation === this.sessionGeneration) this.setConv(id, { loading: false }); return false; }
   }
 
   private readTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  markRead(id: string) {
+  markRead(id: string, visibleThrough: number) {
     const c = this.state.data?.conversations.find((x) => x.id === id);
-    if (!c || c.lastMessageSeq <= c.lastReadSeq) return;
-    this.patchConversationMeta(id, { lastReadSeq: c.lastMessageSeq, unread: 0, unreadMentions: 0 });
+    const seq = Math.min(visibleThrough, c?.lastMessageSeq ?? 0);
+    if (!c || seq <= c.lastReadSeq) return;
+    const generation = this.sessionGeneration;
     clearTimeout(this.readTimers.get(id));
     this.readTimers.set(id, setTimeout(() => {
-      const seq = this.state.data?.conversations.find((x) => x.id === id)?.lastReadSeq ?? 0;
-      void this.request(`/conversations/${id}/read`, { method: 'POST', json: { seq } }).catch(() => {});
+      this.readTimers.delete(id);
+      if (generation !== this.sessionGeneration) return;
+      void this.request<{ lastReadSeq: number }>(`/conversations/${id}/read`, { method: 'POST', json: { seq } })
+        .then((result) => this.applyConfirmedRead(id, result.lastReadSeq)).catch(() => {});
     }, 400));
   }
 
@@ -601,10 +658,14 @@ export class TieComsClient {
   private putIssues(list: IssueDTO[]) {
     if (!list.length) return;
     const next = { ...this.state.issues };
-    for (const i of list) next[i.id] = i;
+    for (const i of list) {
+      if (i.conversationId === null && i.ownerId !== this.state.data?.me.id) continue;
+      next[i.id] = i;
+    }
     this.set({ issues: next });
   }
-  private recountIssues(conversationId: string) {
+  private recountIssues(conversationId: string | null) {
+    if (!conversationId) return; // personal: no cuenta en ningún chat
     const n = Object.values(this.state.issues).filter((i) => i.conversationId === conversationId && i.status !== 'done' && i.status !== 'cancelled').length;
     this.patchConversationMeta(conversationId, { openIssues: n });
   }
@@ -617,6 +678,24 @@ export class TieComsClient {
     const r = await this.request<{ issues: IssueDTO[] }>(`/issues?${q}`);
     this.putIssues(r.issues);
     return r.issues;
+  }
+  /** Asunto personal: sin conversación, solo lo veo yo. */
+  async createPersonalIssue(input: { title: string; dueDate?: string | null }) {
+    const i = await this.request<IssueDTO>('/issues', { method: 'POST', json: input });
+    this.putIssues([i]);
+    return i;
+  }
+  // ---------- Reuniones (Meet, Teams, Zoom) ----------
+  async meetingConnections() { return (await this.request<{ connections: MeetingConnectionDTO[] }>('/meetings/connections')).connections; }
+  async connectMeetingProvider(provider: MeetingProvider, proofChallenge: string, platform: 'web' | 'ios' | 'android' | 'desktop' = 'web') {
+    return this.request<{ url: string }>(`/meetings/connect/${provider}`, { method: 'POST', json: { platform, proofChallenge } });
+  }
+  async confirmMeetingProvider(receipt: string, proofVerifier: string) {
+    return this.request<{ ok: true; provider: MeetingProvider }>('/meetings/connect/confirm', { method: 'POST', json: { receipt, proofVerifier } });
+  }
+  async disconnectMeetingProvider(provider: MeetingProvider) { await this.request(`/meetings/connections/${provider}`, { method: 'DELETE' }); }
+  async createMeeting(input: { provider: MeetingProvider; conversationId?: string | null; idempotencyKey: string; title: string; startsAt?: string | null; durationMin: number; timezone: string; share: boolean }) {
+    return this.request<MeetingDTO>('/meetings', { method: 'POST', json: input });
   }
   /** Tarea hija de un asunto (en su chat o, con conversationId, en un sidechat que salió de él). */
   async createChildIssue(parentId: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; visibility?: IssueVisibility; viewerIds?: string[]; conversationId?: string }) {
@@ -663,11 +742,33 @@ export class TieComsClient {
     const c = this.state.data?.conversations.find((x) => x.id === conversationId);
     if (c) this.patchConversationMeta(conversationId, { lastReadSeq: r.lastReadSeq, unread: Math.max(0, c.lastMessageSeq - Math.max(r.lastReadSeq, c.historyFromSeq)) });
   }
+  /** Derivadas de un grupo que cuentan como sus pendientes (hilos, ramas, internas; no sidechats). */
+  derivedOf(conversationId: string) {
+    return (this.state.data?.conversations ?? []).filter((x) => x.parentId === conversationId && x.deriveKind !== 'side');
+  }
+  /**
+   * «Marcar como leído» desde la lista: el grupo y sus derivadas, cada una hasta el lastMessageSeq que
+   * este cliente conoce (lo que llegue después sigue sin leer). El servidor avisa a mis otros dispositivos.
+   */
+  async markTreeRead(conversationId: string) {
+    const all = [this.state.data?.conversations.find((x) => x.id === conversationId), ...this.derivedOf(conversationId)]
+      .filter((c): c is NonNullable<typeof c> => !!c && (c.unread > 0 || (c.unreadMentions ?? 0) > 0 || c.lastReadSeq < c.lastMessageSeq));
+    if (!all.length) return;
+    const items = all.map((c) => ({ conversationId: c.id, seq: c.lastMessageSeq }));
+    const result = await this.request<{ marked: { conversationId: string; lastReadSeq: number }[] }>(`/conversations/${conversationId}/read-tree`, { method: 'POST', json: { items } });
+    for (const m of result.marked) this.applyConfirmedRead(m.conversationId, m.lastReadSeq);
+  }
   async markConversationRead(conversationId: string) {
     const c = this.state.data?.conversations.find((x) => x.id === conversationId);
     if (!c) return;
-    this.patchConversationMeta(conversationId, { lastReadSeq: c.lastMessageSeq, unread: 0 });
-    await this.request(`/conversations/${conversationId}/read`, { method: 'POST', json: { seq: c.lastMessageSeq } });
+    const result = await this.request<{ lastReadSeq: number }>(`/conversations/${conversationId}/read`, { method: 'POST', json: { seq: c.lastMessageSeq } });
+    this.applyConfirmedRead(conversationId, result.lastReadSeq);
+  }
+  private applyConfirmedRead(id: string, seq: number) {
+    const c = this.state.data?.conversations.find((x) => x.id === id);
+    if (!c) return;
+    const lastReadSeq = Math.max(c.lastReadSeq, seq);
+    this.patchConversationMeta(id, { lastReadSeq, unread: Math.max(0, c.lastMessageSeq - Math.max(lastReadSeq, c.historyFromSeq)), ...(lastReadSeq >= c.lastMessageSeq ? { unreadMentions: 0 } : {}) });
   }
   private patchPreviewIfLast(m: MessageDTO) {
     const c = this.state.data?.conversations.find((x) => x.id === m.conversationId);
@@ -976,6 +1077,28 @@ export class TieComsClient {
   async removeMember(conversationId: string, userId: string) {
     await this.request(`/conversations/${conversationId}/members/${userId}`, { method: 'DELETE' });
     await this.loadBootstrap();
+  }
+  /** Nombrar o quitar admin del grupo (como WhatsApp). */
+  async setMemberAdmin(conversationId: string, userId: string, admin: boolean) {
+    const r = await this.request<{ adminIds: string[] }>(`/conversations/${conversationId}/members/${userId}/admin`, { method: 'PUT', json: { admin } });
+    this.patchConversationMeta(conversationId, { adminIds: r.adminIds });
+    await this.loadBootstrap();
+    return r;
+  }
+  listIntegrations(conversationId: string) {
+    return this.request<{ integrations: IntegrationDTO[]; canConfigure: boolean }>(`/conversations/${conversationId}/integrations`);
+  }
+  createIntegration(conversationId: string, input: { name: string; outgoingUrl?: string | null }) {
+    return this.request<IntegrationSecretDTO>(`/conversations/${conversationId}/integrations`, { method: 'POST', json: input });
+  }
+  updateIntegration(id: string, input: { name?: string; outgoingUrl?: string | null; rotateOutgoingSecret?: boolean }) {
+    return this.request<{ integration: IntegrationDTO; outgoingSecret: string | null }>(`/integrations/${id}`, { method: 'PATCH', json: input });
+  }
+  rotateIntegrationToken(id: string) {
+    return this.request<IntegrationSecretDTO>(`/integrations/${id}/rotate`, { method: 'POST', json: {} });
+  }
+  revokeIntegration(id: string) {
+    return this.request<{ ok: true }>(`/integrations/${id}`, { method: 'DELETE' });
   }
   async openDirect(userId: string) {
     const r = await this.request<{ id: string }>('/directs', { method: 'POST', json: { userId } });

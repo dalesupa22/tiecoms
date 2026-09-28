@@ -5,11 +5,13 @@ import rateLimit from '@fastify/rate-limit';
 import { ZodError } from 'zod';
 import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput, CreateGroupInput, JoinPolicyInput,
-  CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateChildIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateScheduledInput, UpdateScheduledInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
+  CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateChildIssueInput, CreatePersonalIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateScheduledInput, UpdateScheduledInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MarkTreeReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
-  UpdateProfileInput, DndInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
+  UpdateProfileInput, DndInput, MeetingProvider, MeetingConnectInput, MeetingConfirmInput, CreateMeetingInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
+  CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
+  SetAdminInput, UpdateIntegrationInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -19,7 +21,7 @@ import * as sso from './modules/sso.ts';
 import * as domains from './modules/domains.ts';
 import { deleteAccount } from './modules/account.ts';
 import { bootstrap } from './modules/bootstrap.ts';
-import { listEvents, listMessages, markRead, sendMessage } from './modules/messages.ts';
+import { listEvents, listMessages, markRead, markTreeRead, sendMessage } from './modules/messages.ts';
 import * as ws from './modules/workspaces.ts';
 import * as groups from './modules/groups.ts';
 import * as invitations from './modules/invitations.ts';
@@ -27,6 +29,7 @@ import * as issues from './modules/issues.ts';
 import * as cal from './modules/calendar.ts';
 import * as prefs from './modules/prefs.ts';
 import * as reminders from './modules/reminders.ts';
+import * as meetings from './modules/meetings.ts';
 import * as scheduled from './modules/scheduled.ts';
 import * as wa from './modules/whatsapp.ts';
 import * as profile from './modules/profile.ts';
@@ -41,6 +44,7 @@ import * as mentions from './modules/mentions.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
 import * as reactions from './modules/reactions.ts';
 import * as links from './modules/links.ts';
+import * as integrations from './modules/integrations.ts';
 import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
 import { z } from 'zod';
@@ -48,6 +52,8 @@ import { verifyAccess } from './security.ts';
 
 const REFRESH_COOKIE = 'tc_rt';
 const COOKIE_PATH = '/api/v1/auth';
+import { safeRequestPath } from './log-safety.ts';
+
 const SSO_COOKIE = 'tc_sso';
 
 declare module 'fastify' {
@@ -58,7 +64,11 @@ export async function buildHttp() {
   const app = Fastify({
     trustProxy: config.trustProxy,
     bodyLimit: 64 * 1024,
-    logger: { level: config.env === 'production' ? 'info' : 'debug', redact: ['req.headers.authorization', 'req.headers.cookie'] },
+    logger: {
+      level: config.env === 'production' ? 'info' : 'debug', redact: ['req.headers.authorization', 'req.headers.cookie'],
+      // OAuth codes/state/receipts and other URL credentials must never enter access logs.
+      serializers: { req: (req) => ({ method: req.method, url: safeRequestPath(req.url), hostname: req.hostname, remoteAddress: req.ip }) },
+    },
     genReqId: () => crypto.randomUUID(),
   });
 
@@ -88,6 +98,9 @@ export async function buildHttp() {
     req.log.error(err);
     return reply.status(500).send({ error: { code: 'internal', message: 'Error interno' } });
   });
+
+  // Avoid Fastify's default not-found log message, which embeds a raw credential-bearing URL.
+  app.setNotFoundHandler((_req, reply) => reply.status(404).send({ error: { code: 'not_found', message: 'Ruta no encontrada' } }));
 
   // ---------- Salud ----------
   app.get('/api/health/live', async () => ({ ok: true }));
@@ -136,13 +149,52 @@ export async function buildHttp() {
     return reply.redirect(url, 302);
   });
   app.get<{ Params: { provider: string }; Querystring: Record<string, string | undefined> }>('/api/v1/auth/:provider/callback', authLimit, async (req, reply) => {
+    // Conectar Meet/Teams vuelve por esta misma redirect URI registrada: el state lo distingue del login.
+    if (meetings.isMeetingState(req.query.state)) {
+      reply.header('cache-control', 'no-store'); reply.header('referrer-policy', 'no-referrer');
+      return reply.redirect(await meetings.finishConnect(req.query, MeetingProvider.parse(req.params.provider)), 302);
+    }
     const target = await sso.callback(sso.parseProvider(req.params.provider), req.query, req.cookies[SSO_COOKIE]);
     reply.clearCookie(SSO_COOKIE, { path: COOKIE_PATH });
     reply.header('cache-control', 'no-store');
     reply.header('referrer-policy', 'no-referrer');
     return reply.redirect(target, 302);
   });
+  app.get<{ Querystring: Record<string, string | undefined> }>('/api/v1/meetings/zoom/callback', authLimit, async (req, reply) => {
+    reply.header('cache-control', 'no-store'); reply.header('referrer-policy', 'no-referrer');
+    return reply.redirect(await meetings.finishConnect(req.query, 'zoom'), 302);
+  });
   app.post('/api/v1/auth/sso/exchange', authLimit, async (req, reply) => sendAuth(req, reply, await sso.exchange(SsoExchangeInput.parse(req.body))));
+
+  // ---------- Integraciones (token del grupo, sin sesión) ----------
+  // Webhook entrante con el formato de Slack: el token en Authorization o, para quien solo acepta una URL, en la ruta.
+  const hookLimit = { config: { rateLimit: { max: 120, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => `hook:${(r.params as any)?.id ?? r.ip}` } } };
+  const bearer = (req: FastifyRequest) => { const h = req.headers.authorization; return h?.startsWith('Bearer ') ? h.slice(7).trim() : undefined; };
+  const idemKey = (req: FastifyRequest) => { const k = req.headers['idempotency-key']; return typeof k === 'string' && k ? k : undefined; };
+  const hook = async (req: FastifyRequest<{ Params: { id: string; token?: string } }>) => {
+    const id = z.uuid().safeParse(req.params.id);
+    if (!id.success) throw unauthorized('Token de integración inválido');
+    const integ = await integrations.authenticate(req.params.token ?? bearer(req), id.data);
+    return integrations.postMessage(integ, IncomingWebhookInput.parse(req.body ?? {}), idemKey(req));
+  };
+  app.post<{ Params: { id: string } }>('/api/hooks/:id', hookLimit, hook);
+  app.post<{ Params: { id: string; token: string } }>('/api/hooks/:id/:token', hookLimit, hook);
+
+  app.register(async (api) => {
+    api.addHook('onRequest', async (req) => { (req as any).integration = await integrations.authenticate(bearer(req)); });
+    const integ = (req: FastifyRequest) => (req as any).integration as integrations.IntegrationAuth;
+    const limit = { config: { rateLimit: { max: 300, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => `integ:${bearer(r)?.slice(-12) ?? r.ip}` } } };
+    api.get('/api/integration/v1/me', limit, async (req) => integrations.describe(integ(req)));
+    api.post('/api/integration/v1/messages', limit, async (req) => integrations.postMessage(integ(req), IncomingWebhookInput.parse(req.body ?? {}), idemKey(req)));
+    api.post('/api/integration/v1/issues', limit, async (req) => integrations.createIssue(integ(req), IntegrationCreateIssueInput.parse(req.body)));
+    api.get<{ Querystring: { externalId?: string } }>('/api/integration/v1/issues', limit, async (req) =>
+      integrations.findIssue(integ(req), z.string().min(1).max(120).parse(req.query.externalId)));
+    api.get<{ Params: { id: string } }>('/api/integration/v1/issues/:id', limit, async (req) => integrations.getIssue(integ(req), z.uuid().parse(req.params.id)));
+    api.patch<{ Params: { id: string } }>('/api/integration/v1/issues/:id', limit, async (req) =>
+      integrations.updateIssue(integ(req), z.uuid().parse(req.params.id), IntegrationUpdateIssueInput.parse(req.body)));
+    api.post<{ Params: { id: string } }>('/api/integration/v1/issues/:id/comments', limit, async (req) =>
+      integrations.commentIssue(integ(req), z.uuid().parse(req.params.id), IntegrationCommentInput.parse(req.body), idemKey(req)));
+  });
 
   // ---------- Rutas autenticadas ----------
   app.register(async (priv) => {
@@ -312,6 +364,7 @@ export async function buildHttp() {
       return reply.status(out.duplicate ? 200 : 201).send(out);
     });
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/read', async (req) => markRead(req.userId, req.params.id, MarkReadInput.parse(req.body).seq));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/read-tree', async (req) => markTreeRead(req.userId, req.params.id, MarkTreeReadInput.parse(req.body).items));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/members', async (req) => ws.addMembers(req.userId, req.params.id, AddMembersInput.parse(req.body)));
     // Preferencias personales, no leído, mensajes
     priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/prefs', async (req) => prefs.setConversationPrefs(req.userId, req.params.id, ConversationPrefsInput.parse(req.body)));
@@ -350,6 +403,17 @@ export async function buildHttp() {
     priv.patch<{ Params: { id: string } }>('/api/v1/scheduled/:id', async (req) => scheduled.updateScheduled(req.userId, req.params.id, UpdateScheduledInput.parse(req.body)));
     priv.delete<{ Params: { id: string } }>('/api/v1/scheduled/:id', async (req) => scheduled.cancelScheduled(req.userId, req.params.id));
     priv.post<{ Params: { id: string } }>('/api/v1/scheduled/:id/send', async (req) => scheduled.sendScheduledNow(req.userId, req.params.id));
+    // Reuniones con Meet, Teams o Zoom (cuenta de cada persona).
+    priv.get('/api/v1/meetings/connections', async (req) => ({ connections: await meetings.listConnections(req.userId) }));
+    priv.post('/api/v1/meetings/connect/confirm', async (req, reply) => { reply.header('cache-control', 'no-store'); return meetings.confirmConnect(req.userId, MeetingConfirmInput.parse(req.body)); });
+    priv.post<{ Params: { provider: string } }>('/api/v1/meetings/connect/:provider', async (req) => {
+      const p = MeetingProvider.parse(req.params.provider);
+      const b = MeetingConnectInput.parse(req.body ?? {});
+      return meetings.startConnect(req.userId, p, { platform: b.platform, redirectScheme: b.redirectScheme, proofChallenge: b.proofChallenge });
+    });
+    priv.delete<{ Params: { provider: string } }>('/api/v1/meetings/connections/:provider', async (req) => meetings.disconnect(req.userId, MeetingProvider.parse(req.params.provider)));
+    priv.post('/api/v1/meetings', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => meetings.createMeeting(req.userId, CreateMeetingInput.parse(req.body)));
+    priv.get<{ Params: { id: string } }>('/api/v1/meetings/:id', async (req) => meetings.getMeeting(req.userId, req.params.id));
     priv.get('/api/v1/reminders', async (req) => ({ reminders: await reminders.listReminders(req.userId) }));
     priv.post('/api/v1/reminders', async (req) => reminders.createReminder(req.userId, CreateReminderInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/reminders/:id/done', async (req) => reminders.completeReminder(req.userId, req.params.id));
@@ -374,8 +438,11 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/return', async (req) => ws.returnResult(req.userId, req.params.id, ReturnResultInput.parse(req.body).summary));
     // Asuntos
     priv.get<{ Querystring: { workspaceId?: string; conversationId?: string; mine?: string; open?: string } }>('/api/v1/issues', async (req) => ({
-      issues: await issues.listIssues(req.userId, { workspaceId: req.query.workspaceId, conversationId: req.query.conversationId, mine: req.query.mine === '1', open: req.query.open === '1' }),
+      // Los asuntos personales (conversationId null) solo van a clientes que los entienden.
+      issues: await issues.listIssues(req.userId, { workspaceId: req.query.workspaceId, conversationId: req.query.conversationId, mine: req.query.mine === '1', open: req.query.open === '1',
+        personal: String(req.headers['x-tiecoms-contract'] ?? '') >= '2026-09-28' }),
     }));
+    priv.post('/api/v1/issues', async (req) => issues.createPersonalIssue(req.userId, CreatePersonalIssueInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/issues', async (req) => issues.createIssue(req.userId, req.params.id, CreateIssueInput.parse(req.body)));
     priv.get<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.getIssue(req.userId, req.params.id));
     priv.patch<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.updateIssue(req.userId, req.params.id, UpdateIssueInput.parse(req.body)));
@@ -418,6 +485,18 @@ export async function buildHttp() {
       const q = WaMessagesQuery.parse(req.query);
       return wa.listChatMessages(req.userId, z.uuid().parse(req.params.accountId), req.params.jid, q.before, q.limit);
     });
+
+    // Admins de grupo (como WhatsApp).
+    priv.put<{ Params: { id: string; userId: string } }>('/api/v1/conversations/:id/members/:userId/admin', async (req) =>
+      ws.setMemberAdmin(req.userId, z.uuid().parse(req.params.id), z.uuid().parse(req.params.userId), SetAdminInput.parse(req.body).admin));
+    // Integraciones del grupo (las configura quien administra el espacio o la empresa).
+    priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/integrations', async (req) => integrations.listIntegrations(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/integrations', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) =>
+      integrations.createIntegration(req.userId, z.uuid().parse(req.params.id), CreateIntegrationInput.parse(req.body)));
+    priv.patch<{ Params: { id: string } }>('/api/v1/integrations/:id', async (req) => integrations.updateIntegration(req.userId, z.uuid().parse(req.params.id), UpdateIntegrationInput.parse(req.body)));
+    priv.post<{ Params: { id: string } }>('/api/v1/integrations/:id/rotate', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) =>
+      integrations.rotateToken(req.userId, z.uuid().parse(req.params.id)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/integrations/:id', async (req) => integrations.revokeIntegration(req.userId, z.uuid().parse(req.params.id)));
 
     priv.delete<{ Params: { id: string; userId: string } }>('/api/v1/conversations/:id/members/:userId', async (req) => {
       await ws.removeMember(req.userId, req.params.id, req.params.userId);

@@ -19,13 +19,16 @@ import { QuickReplies, SideChip, SideConnector, SideDialog, replyPrivately, side
 import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
 import { SleepNotice } from './Sleep.tsx';
+import { DerivedPendingStrip } from './Pending.tsx';
+import { MeetingDialog } from './Meetings.tsx';
 import { ScheduledStrip, openScheduleMenu, scheduleMenu, whenLabel } from './Scheduled.tsx';
 import { SideIssueStrip, TasksDialog } from './Issues.tsx';
 import { ConversationIssues, IssueDrawer, NewIssueDialog, isClosed } from './Issues.tsx';
 import { DeriveDialog, LineageBar, MergedCard } from './Lineage.tsx';
 import { ChatBar, ThreadChip, threadsOf } from './ChatBar.tsx';
 import { AddMembersDialog } from './Dialogs.tsx';
-import { MAX_OLDER_PAGES, firstUnread } from '../chat-nav.ts';
+import { firstUnread, readThroughVisible, isReadTransparentMessage } from '../chat-nav.ts';
+import { IntegrationsPanel } from './Integrations.tsx';
 
 type Row =
   | { kind: 'day'; key: string; label: string }
@@ -82,7 +85,11 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const [baseRead] = useState(() => { const c = client.getState().data?.conversations.find((x) => x.id === id); return c ? Math.max(c.lastReadSeq, c.historyFromSeq) : 0; });
   const [newLine, setNewLine] = useState<number | null>(null);
   const placing = useRef(!!entry);
-  const olderPages = useRef(0);
+  const loadingUnread = useRef(false);
+  const [placementFailed, setPlacementFailed] = useState(false);
+  const [placementStep, setPlacementStep] = useState(0);
+  const observedRead = useRef(baseRead);
+  const visibleRead = useRef(new Set<number>());
   const justPlaced = useRef(false);
   // Posición respecto al final: lejos (más de una pantalla), abajo, y si la línea de nuevos quedó arriba.
   const [nav, setNav] = useState({ far: false, bottom: !entry, lineAbove: false });
@@ -137,7 +144,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     void client.ensureMessage(id, seq).then((found) => {
       if (!found) return;
       setHighlight(seq);
-      requestAnimationFrame(() => document.getElementById(`msg-${id}-${seq}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+      requestAnimationFrame(() => document.getElementById(`msg-${id}-${seq}`)?.scrollIntoView({ block: 'center', behavior: 'instant' }));
       setTimeout(() => setHighlight(null), 2800);
     });
   };
@@ -177,7 +184,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       if (at > 0 && out[at - 1]!.kind === 'day') at -= 1;
       if (at >= 0) out.splice(at, 0, { kind: 'new', key: 'new-line' });
     }
-    return groupLinkRuns(out, expandedGroups, highlight);
+    return groupLinkRuns(out, expandedGroups, highlight, baseRead);
   }, [local?.messages, pending, expandedGroups, highlight, newLine]);
 
   // Mantiene la vista abajo al llegar mensajes, y la posición al cargar historial antiguo.
@@ -194,21 +201,38 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   }, [rows.length]);
 
   useEffect(() => {
-    if (conv && conv.unread > 0 && local?.loaded && document.visibilityState === 'visible' && atBottom.current) client.markRead(id);
+    if (conv && conv.unread > 0 && local?.loaded && !placing.current && document.visibilityState === 'visible') updateNav();
   }, [conv?.lastMessageSeq, conv?.unread, local?.loaded, id]);
 
-  // Posición al abrir con no leídos: busca el primero (hasta MAX_OLDER_PAGES páginas antiguas); si no aparece, al final.
+  // Locate every pending page; a failed page never turns into a successful jump to the end.
   useEffect(() => {
-    if (!placing.current || !entry || !local?.loaded || local.loading) return;
+    if (!placing.current || !entry || !local?.loaded || local.loading || loadingUnread.current || placementFailed) return;
     const r = firstUnread(local.messages, entry.readFrom, entry.unread, local.hasMore);
-    if (r === 'older' && olderPages.current < MAX_OLDER_PAGES) { olderPages.current += 1; void client.loadOlder(id); return; }
+    if (r === 'older') {
+      loadingUnread.current = true;
+      void client.loadOlder(id).then((loaded) => { loadingUnread.current = false; if (!loaded) setPlacementFailed(true); else setPlacementStep((n) => n + 1); });
+      return;
+    }
+    if (!r && entry.unread > 0) { setPlacementFailed(true); return; }
     placing.current = false;
-    if (r && r !== 'older') { justPlaced.current = true; setNewLine(r.seq); return; }
+    if (r) { justPlaced.current = true; setNewLine(r.seq); return; }
     atBottom.current = true;
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
     updateNav();
-  }, [local?.loaded, local?.loading, local?.messages]);
+  }, [local?.loaded, local?.loading, local?.messages, placementFailed, placementStep]);
+  async function retryUnreadHistory() {
+    if (loadingUnread.current || local?.loading) return;
+    placing.current = true;
+    atBottom.current = false;
+    loadingUnread.current = true;
+    setPlacementFailed(false);
+    // Refresh even when the previous page claimed hasMore=false. Otherwise a terminal
+    // history gap would show the same error forever without making another request.
+    try { await client.openConversation(id, true); }
+    catch { setPlacementFailed(true); }
+    finally { loadingUnread.current = false; setPlacementStep((n) => n + 1); }
+  }
   useLayoutEffect(() => {
     if (!justPlaced.current || newLine == null) return;
     justPlaced.current = false;
@@ -239,17 +263,27 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       if (r && r.top < box.bottom && r.bottom > box.top) seen.push(seq);
     }
     if (seen.length) setMentionsSeen((s0) => { const n = new Set(s0); seen.forEach((x) => n.add(x)); return n; });
-    if (!placing.current && bottom && client.getState().data?.conversations.find((x) => x.id === id)?.unread) client.markRead(id);
+    if (!placing.current && document.visibilityState === 'visible') {
+      const current = client.getState();
+      const meta = current.data?.conversations.find((x) => x.id === id);
+      const visible = (current.conversations[id]?.messages ?? []).filter((m) => {
+        if (isReadTransparentMessage(m)) return true;
+        const rect = document.getElementById(`msg-${id}-${m.seq}`)?.getBoundingClientRect();
+        return !!rect && rect.top < box.bottom && rect.bottom > box.top;
+      }).map((m) => m.seq);
+      observedRead.current = readThroughVisible(Math.max(observedRead.current, meta?.lastReadSeq ?? 0, meta?.historyFromSeq ?? 0), visibleRead.current, visible);
+      client.markRead(id, observedRead.current);
+    }
   }
   const pendingMentionsRef = useRef<number[]>([]);
-  const scrollToBottom = (smooth = true) => {
+  const scrollToBottom = () => {
     const el = scroller.current;
     if (!el) return;
     placing.current = false;
     atBottom.current = true;
     awaySeq.current = null;
-    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
-    client.markRead(id);
+    el.scrollTo({ top: el.scrollHeight, behavior: 'instant' });
+    requestAnimationFrame(updateNav);
     setNav((n) => ({ ...n, far: false, bottom: true }));
   };
   // Web: Fin o ⌥↓ / Alt+↓ con el foco fuera del compositor baja al final.
@@ -284,10 +318,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const jumpToMention = () => {
     const seq = pendingMentions[0];
     if (seq == null) return;
-    setMentionsSeen((s0) => new Set(s0).add(seq));
     jumpTo(seq);
   };
-  const jumpToNewLine = () => document.getElementById(`new-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  const jumpToNewLine = () => document.getElementById(`new-${id}`)?.scrollIntoView({ block: 'start', behavior: 'instant' });
 
   const send = () => {
     const body = text.trim();
@@ -479,7 +512,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)} onLinks={() => setShowLinks(true)}
             onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
         )}
+        {!embedded && <DerivedPendingStrip conv={conv} />}
 
+        {placementFailed && <div className="error" role="alert">{t('chat.unreadLoadFailed')} <button className="link-btn" disabled={local?.loading} onClick={() => void retryUnreadHistory()}>{t('chat.retryUnread')}</button></div>}
         <div className="msgs-wrap">
         {nav.lineAbove && entry && newLine != null && (
           <button className="jump-new" onClick={jumpToNewLine} aria-label={t('chat.jumpNew')} title={t('chat.jumpNew')}>{t('chat.newAbove', { n: entry.unread })}</button>
@@ -597,6 +632,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                   { label: t('att.fromPhotos'), icon: '🖼', onSelect: () => pickFiles('media', drafts.add) },
                   { label: t('att.fromFiles'), icon: '📎', onSelect: () => pickFiles('any', drafts.add) },
                   { divider: true },
+                  { label: t('meet.nowTitle'), icon: '📹', onSelect: () => openDialog((close) => <MeetingDialog conversationId={id} onClose={close} />) },
+                  { label: t('meet.laterTitle'), icon: '🔗', onSelect: () => openDialog((close) => <MeetingDialog conversationId={id} scheduled onClose={close} />) },
                   { label: t('bar.newEvent'), icon: '📅', onSelect: () => newEvent({ conversationId: id }) },
                   ...(canOpenIssues ? [{ label: t('bar.newIssue'), icon: '◆', onSelect: () => setNewIssue({}) }] : []),
                   ...(conv.sideIssueId ? [{ label: t('task.addHere'), icon: '☑', onSelect: () => openDialog((close) => <TasksDialog parentId={conv.sideIssueId!} conversationId={id} onClose={close} />) }] : []),
@@ -689,19 +726,30 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                 <div key={mid} className="member">
                   <Avatar person={p} org={o} size={32} />
                   <div className="grow" style={{ minWidth: 0 }}>
-                    <div className="ellipsis" style={{ fontWeight: 600 }}>{p?.name ?? t('common.participant')}{mid === d.me.id ? ` ${t('common.you')}` : ''}</div>
+                    <div className="ellipsis" style={{ fontWeight: 600 }}>{p?.name ?? t('common.participant')}{mid === d.me.id ? ` ${t('common.you')}` : ''}
+                      {conv.adminIds?.includes(mid) && <span className="tag" style={{ marginLeft: 6 }} title={conv.createdBy === mid ? t('chat.creator') : undefined}>{t('chat.admin')}</span>}
+                      {p?.kind === 'agent' && <span className="tag" style={{ marginLeft: 6 }}>{t('chat.bot')}</span>}
+                    </div>
                     <div className="small muted ellipsis">{[p?.title, p?.area, o?.name ?? (p?.guest ? (p.guestUntil ? t('chat.guestUntil', { date: new Date(p.guestUntil).toLocaleDateString(locale(), { day: 'numeric', month: 'short' }) }) : t('common.guest')) : null)].filter(Boolean).join(' · ')}</div>
                   </div>
-                  {mid !== d.me.id && conv.kind !== 'direct' && (
+                  {mid !== d.me.id && conv.kind !== 'direct' && p?.kind !== 'agent' && (
                     <button className="btn ghost small" title={t('common.directMessage')} aria-label={t('common.directMessage')} onClick={() => client.openDirect(mid).then((r) => navigate(`/c/${r.id}`)).catch((e) => setError(errorText(e)))}>✉</button>
                   )}
-                  {conv.canManage && mid !== d.me.id && conv.kind !== 'direct' && (
+                  {conv.canManage && conv.adminIds && conv.kind !== 'direct' && p?.kind !== 'agent' && !p?.guest && !(conv.adminIds.includes(mid) && conv.createdBy === mid) && (mid !== d.me.id || conv.adminIds.includes(mid)) && (
+                    conv.adminIds.includes(mid)
+                      ? <button className="btn ghost small" title={mid === d.me.id ? t('chat.leaveAdmin') : t('chat.unmakeAdmin')} aria-label={t('chat.unmakeAdmin')}
+                          onClick={() => { if (confirm(t('chat.unmakeAdminConfirm', { name: p?.name ?? '' }))) void client.setMemberAdmin(id, mid, false).catch((e) => setError(errorText(e))); }}>★</button>
+                      : <button className="btn ghost small" title={t('chat.makeAdmin')} aria-label={t('chat.makeAdmin')}
+                          onClick={() => { if (confirm(t('chat.makeAdminConfirm', { name: p?.name ?? '' }))) void client.setMemberAdmin(id, mid, true).catch((e) => setError(errorText(e))); }}>☆</button>
+                  )}
+                  {conv.canManage && mid !== d.me.id && conv.kind !== 'direct' && conv.createdBy !== mid && p?.kind !== 'agent' && (
                     <button className="btn ghost small" title={t('chat.remove')} aria-label={t('chat.remove')} onClick={() => { if (confirm(t('chat.removeConfirm', { name: p?.name ?? '' }))) void client.removeMember(id, mid).catch((e) => setError(errorText(e))); }}>−</button>
                   )}
                 </div>
               );
             })}
           </div>
+          {(conv.kind === 'group' || conv.kind === 'internal') && conv.workspaceId && <IntegrationsPanel conv={conv} />}
           {conv.kind !== 'direct' && (
             <button className="btn ghost small" onClick={() => { if (confirm(t('chat.leaveConfirm'))) void client.removeMember(id, d.me.id).then(() => navigate('/')); }}>{t('chat.leave')}</button>
           )}
@@ -772,7 +820,7 @@ function SystemRow({ m, onIssue }: { m: MessageDTO; onIssue: (id: string) => voi
   // Los hilos no ensucian el chat: el aviso «se abrió un hilo» lo reemplaza el chip bajo su mensaje.
   if (p?.k === 'derived.from') return null;
   return (
-    <div className="msg-sys">
+    <div id={`msg-${m.conversationId}-${m.seq}`} className="msg-sys">
       {systemText(m.body)}
       {child && <> · <button className="link-btn" onClick={() => navigate(`/c/${child.id}`)}>⑂ {conversationTitle(d, child)}</button></>}
       {p?.issueId && <> · <button className="link-btn" onClick={() => onIssue(p.issueId)}>{t('lin.open')}</button></>}
@@ -810,12 +858,12 @@ function PendingRow({ p }: { p: PendingMessage }) {
  * Tres o más mensajes seguidos de la misma persona (en 10 minutos) que son solo enlaces se muestran como un
  * grupo compacto. No se agrupan los que tienen reacciones o el mensaje al que se está saltando.
  */
-function groupLinkRuns(rows: Row[], expanded: Set<string>, highlight: number | null): Row[] {
+function groupLinkRuns(rows: Row[], expanded: Set<string>, highlight: number | null, readFrom: number): Row[] {
   const out: Row[] = [];
   let run: Extract<Row, { kind: 'msg' }>[] = [];
   const flush = () => {
     const key = run.length ? `lg${run[0]!.m.id}` : '';
-    if (run.length >= 3 && !expanded.has(key) && !run.some((r) => r.m.seq === highlight)) out.push({ kind: 'links', key, msgs: run.map((r) => r.m) });
+    if (run.length >= 3 && !expanded.has(key) && !run.some((r) => r.m.seq === highlight || r.m.seq > readFrom)) out.push({ kind: 'links', key, msgs: run.map((r) => r.m) });
     else out.push(...run);
     run = [];
   };

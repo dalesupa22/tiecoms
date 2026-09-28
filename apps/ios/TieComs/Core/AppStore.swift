@@ -150,7 +150,11 @@ final class AppStore {
     var signupOrgToken: String?
     var showSignup = false
     /// Conversación que está en pantalla (la fija la vista).
-    var openConversationId: String?
+    var openConversationId: String? {
+        didSet {
+            if oldValue != openConversationId, let oldValue { cancelConversationRecovery(oldValue) }
+        }
+    }
     /// La conversación que de verdad se está viendo: en pantalla, app activa y mensajes cargados.
     /// Una pantalla vacía por un 502 no cuenta: sus avisos deben salir.
     var visibleConversationId: String? {
@@ -159,7 +163,9 @@ final class AppStore {
     }
     /// Mensajes que ya pasaron por la decisión de aviso en primer plano (socket o push remoto).
     @ObservationIgnored var announced = AnnouncedLedger(capacity: 300)
-    var appActive = true
+    var appActive = true {
+        didSet { if !appActive { feedback?.cancelPendingMessages() } }
+    }
     /// «No molestar» guardado solo en el dispositivo (el API respondió 404 a PUT /me/dnd: servidor viejo).
     var localDndUntil: Date?
     /// El último cambio de «No molestar» quedó solo en este dispositivo (se avisa en silencio en Tú).
@@ -172,12 +178,20 @@ final class AppStore {
     struct SessionStamp: Equatable { let generation: UUID; let userId: String? }
     private var sessionGeneration = UUID()
     var sessionStamp: SessionStamp { SessionStamp(generation: sessionGeneration, userId: me?.id) }
+    var foregroundOwner: String { "\(sessionGeneration.uuidString)|\(me?.id ?? "")" }
+    var foregroundSilenced: Bool { dndActive || sleepActive }
     func requireSession(_ stamp: SessionStamp) throws {
         guard stamp == sessionStamp, !Task.isCancelled else { throw CancellationError() }
     }
     private func invalidateSessionWork() {
         sessionGeneration = UUID()
+        feedback?.cancelPendingMessages()
         api.invalidateRequests()
+        bootstrapTask?.cancel(); bootstrapTask = nil
+        bootstrapRefreshing = false; bootstrapNeedsRefresh = false; bootstrapSignals = []
+        for id in Set(recoveryJobs.keys).union(conversationLoads.keys) { cancelConversationRecovery(id) }
+        catchUpOwners = [:]
+        announced.removeAll()
         cancelMeetingAuthorization()
         if let userId = me?.id { outbox.clearMeetingAttempts(userId: userId) }
         restoredMeetingUserId = nil
@@ -216,7 +230,14 @@ final class AppStore {
     @ObservationIgnored private var flushTask: Task<Void, Never>?
     @ObservationIgnored private var flushing = false
     @ObservationIgnored private var bootstrapTask: Task<Void, Never>?
-    @ObservationIgnored private var catchingUp: Set<String> = []
+    @ObservationIgnored private var bootstrapRefreshing = false
+    @ObservationIgnored private var bootstrapNeedsRefresh = false
+    @ObservationIgnored private var bootstrapSignals: Set<String> = []
+    @ObservationIgnored private var catchUpOwners: [String: UUID] = [:]
+    private struct RecoveryJob { let owner: UUID; let task: Task<Bool, Never> }
+    private struct ConversationLoad { let owner: UUID; let task: Task<Void, Error> }
+    @ObservationIgnored private var recoveryJobs: [String: RecoveryJob] = [:]
+    @ObservationIgnored private var conversationLoads: [String: ConversationLoad] = [:]
     @ObservationIgnored private var readTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var readTargets: [String: Int] = [:]
     var readFailures: Set<String> = []
@@ -439,13 +460,36 @@ final class AppStore {
         ShareTargets.save(d, apiURL: api.baseURL)
     }
 
-    func scheduleBootstrap() {
-        guard bootstrapTask == nil else { return }
+    func scheduleBootstrap(signal: String? = nil) {
+        if let signal, !bootstrapSignals.insert(signal).inserted { return }
+        if bootstrapTask != nil {
+            // Un id nuevo llegó después de iniciarse el snapshot: pedir una vuelta más al terminar.
+            // Los duplicados del mismo mensaje no generan peticiones adicionales.
+            if bootstrapRefreshing { bootstrapNeedsRefresh = true }
+            return
+        }
+        let stamp = sessionStamp
         bootstrapTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 250_000_000)
             guard let self else { return }
-            self.bootstrapTask = nil
-            try? await self.loadBootstrap()
+            defer {
+                if stamp == self.sessionStamp {
+                    self.bootstrapTask = nil
+                    self.bootstrapRefreshing = false
+                    self.bootstrapNeedsRefresh = false
+                    self.bootstrapSignals = []
+                }
+            }
+            do {
+                try await Task.sleep(nanoseconds: 250_000_000)
+                try self.requireSession(stamp)
+                repeat {
+                    self.bootstrapNeedsRefresh = false
+                    self.bootstrapRefreshing = true
+                    try await self.loadBootstrap()
+                    try self.requireSession(stamp)
+                    self.bootstrapRefreshing = false
+                } while self.bootstrapNeedsRefresh
+            } catch {}
         }
     }
 
@@ -478,19 +522,25 @@ final class AppStore {
     /// Tras reconectar o volver del segundo plano: snapshot + recuperación de huecos + cola.
     func resync() async {
         guard status == .ready else { return }
+        let stamp = sessionStamp
         do {
+            try requireSession(stamp)
             try await loadBootstrap()
+            try requireSession(stamp)
             Task { await loadOpenIssues() }
             Task { await loadScheduled() }
             for c in data?.conversations ?? [] {
+                try requireSession(stamp)
                 guard let local = conversations[c.id], local.loaded else { continue }
                 if c.lastEventSeq > local.lastEventSeq || c.id == openConversationId { await catchUp(c.id) }
+                try requireSession(stamp)
             }
-            // El chat en pantalla que no pudo cargar (502 durante un despliegue) se vuelve a pedir al reconectar.
-            if let id = openConversationId, meta(id) != nil, conversations[id]?.loaded != true, conversations[id]?.loading != true {
-                try? await openConversation(id)
+            if let id = openConversationId, meta(id) != nil, conversations[id]?.loaded != true {
+                _ = await openConversationRecovering(id)
+                try requireSession(stamp)
             }
         } catch {}
+        guard stamp == sessionStamp, !Task.isCancelled else { return }
         scheduleFlush(0)
     }
 
@@ -625,48 +675,69 @@ final class AppStore {
         }
     }
 
-    /// Sonido/aviso por un mensaje recibido en vivo (nunca en el catch-up ni por mensajes de sistema).
-    /// Reglas en `NotifyRule.incoming`: silenciado = nada salvo mención; «No molestar» = nada.
+    /// Sonido sólo para el mensaje concreto aplicado; avisos locales se consumen en willPresent.
     private func announce(_ msg: MessageDTO) {
-        guard let d = data, let c = meta(msg.conversationId) else { return }
-        // El push remoto de este mensaje ya se decidió (llegó antes que el socket): no se repite.
-        guard !announced.contains(msg.id) else { return }
+        guard let d = data, let c = meta(msg.conversationId), !announced.contains(msg.id) else { return }
         let outcome = NotifyRule.incoming(.init(
             mine: msg.authorId == d.me.id, system: msg.isSystem, blocked: blockedUserIds.contains(msg.authorId),
-            // «Abierto» exige mensajes cargados: tras un 502 la pantalla está vacía y el aviso debe salir.
-            openAndActive: msg.conversationId == visibleConversationId,
+            openAndActive: messageIsVisible(msg.id, in: msg.conversationId),
             muted: c.isMuted, mutedForever: MentionText.mutedForever(c),
-            mentionsMe: MentionText.mentionsMe(msg.mentions, me: d.me.id, authorId: msg.authorId), dnd: dndActive))
-        announced.record(msg.id, outcome)
+            mentionsMe: MentionText.mentionsMe(msg.mentions, me: d.me.id, authorId: msg.authorId), dnd: foregroundSilenced))
         let author = Naming.person(d, msg.authorId)?.name ?? L("common.participant")
         switch outcome {
-        case .none: break
-        case .sound: feedback?.playReceive()
-        case .mention:
-            feedback?.notifyIncoming(conversationId: c.id, title: L("mention.mentionedYou", ["name": author]), author: Naming.notificationTitle(d, c), body: msg.body)
-        case .notify:
-            feedback?.notifyIncoming(conversationId: c.id, title: Naming.notificationTitle(d, c), author: author, body: msg.body)
+        case .none: announced.record(msg.id, .none)
+        case .sound: receiveOnce(msg.id)
+        case .mention, .notify:
+            let notice = ForegroundMessage(conversationId: c.id, messageId: msg.id, authorId: msg.authorId,
+                                           mention: outcome == .mention, owner: foregroundOwner)
+            feedback?.notifyMessage(notice,
+                title: outcome == .mention ? L("mention.mentionedYou", ["name": author]) : Naming.notificationTitle(d, c),
+                author: outcome == .mention ? Naming.notificationTitle(d, c) : author, body: msg.body)
         }
     }
 
-    /// Push remoto de un mensaje con la app en primer plano: ¿se presenta el banner?
-    /// Si el socket ya lo anunció (id registrado) no se muestra nada; si no (conversación desconocida, hueco, catch-up,
-    /// duplicado o reconexión), se aplican las mismas reglas que al aviso local y el id queda registrado.
-    func presentsForegroundPush(_ p: PushPayload) -> Bool {
+    private func messageIsVisible(_ id: String, in conversationId: String) -> Bool {
+        conversationId == visibleConversationId && conversations[conversationId]?.messages.contains(where: { $0.id == id }) == true
+    }
+
+    private func receiveOnce(_ id: String) {
+        guard !announced.contains(id) else { return }
+        // Deshabilitado es un silencio intencional. Un sink ausente no equivale a sonido emitido.
+        guard Prefs.soundsEnabled else { announced.record(id, .none); return }
+        guard let feedback else { return }
+        announced.record(id, .sound)
+        feedback.playReceive()
+    }
+
+    /// Admisión común de willPresent. Un callback local de otra generación no consume el push vigente.
+    /// Los push remotos actuales no traen destinatario: sólo se pueden aplicar las reglas de la sesión actual.
+    func presentsForegroundPush(_ p: PushPayload, localOwner: String? = nil, soundAlreadyPlayed: Bool = false) -> Bool {
         guard let mid = p.messageId else { return true }
+        if let localOwner, localOwner != foregroundOwner { return false }
+        guard me != nil else { return false }
         let c = meta(p.conversationId)
+        let local = conversations[p.conversationId]
+        let message = local?.messages.first { $0.id == mid }
+        // El push es también señal de datos faltantes, incluso si su banner resulta duplicado/silenciado.
+        if localOwner == nil, c == nil || local?.loaded != true { scheduleBootstrap(signal: mid) }
+        else if localOwner == nil, message == nil {
+            let stamp = sessionStamp
+            Task { [weak self] in
+                guard let self, stamp == self.sessionStamp, !Task.isCancelled else { return }
+                await self.catchUp(p.conversationId)
+            }
+        }
         let input = ForegroundPush.Input(
-            alreadyAnnounced: announced.contains(mid), dnd: dndActive,
-            openActiveLoaded: p.conversationId == visibleConversationId,
+            alreadyAnnounced: announced.contains(mid), dnd: foregroundSilenced,
+            openActiveLoaded: messageIsVisible(mid, in: p.conversationId),
             muted: c?.isMuted ?? false, mutedForever: c.map(MentionText.mutedForever) ?? false,
             mentionsMe: p.kind == .mention, blocked: p.authorId.map(blockedUserIds.contains) ?? false,
-            mine: p.authorId != nil && p.authorId == me?.id)
+            mine: p.authorId != nil && p.authorId == me?.id, system: message?.isSystem ?? false)
         let decision = ForegroundPush.decide(input)
-        if let outcome = decision.outcome { announced.record(mid, outcome) }
-        // El socket no trajo este mensaje: se pide lo que falta (conversación nueva → snapshot; cargada → catch-up).
-        if c == nil { scheduleBootstrap() }
-        else if let local = conversations[p.conversationId], local.loaded, !local.messages.contains(where: { $0.id == mid }) {
-            Task { await catchUp(p.conversationId) }
+        if let outcome = decision.outcome {
+            if outcome == .sound {
+                if soundAlreadyPlayed { announced.record(mid, .sound) } else { receiveOnce(mid) }
+            } else { announced.record(mid, outcome) }
         }
         return decision.present
     }
@@ -709,17 +780,26 @@ final class AppStore {
     }
 
     func catchUp(_ id: String) async {
-        guard !catchingUp.contains(id) else { return }
-        catchingUp.insert(id)
-        defer { catchingUp.remove(id) }
+        guard catchUpOwners[id] == nil, !Task.isCancelled else { return }
+        let owner = UUID(), stamp = sessionStamp
+        catchUpOwners[id] = owner
+        defer { if catchUpOwners[id] == owner { catchUpOwners[id] = nil } }
         do {
             while true {
-                guard let local = conversations[id] else { return }
+                try requireSession(stamp)
+                guard catchUpOwners[id] == owner, let local = conversations[id] else { return }
                 let page: EventsPage = try await api.request("/conversations/\(id)/events?after=\(local.lastEventSeq)&limit=200")
+                try requireSession(stamp)
+                guard catchUpOwners[id] == owner else { return }
                 if page.resetRequired {
-                    catchingUp.remove(id)
-                    try await openConversation(id, force: true)
-                    return
+                    // Renovar la página aquí evita esperar nuestra propia Task de carga.
+                    let refreshed: MessagesPage = try await api.request("/conversations/\(id)/messages?limit=50")
+                    try requireSession(stamp)
+                    guard catchUpOwners[id] == owner else { return }
+                    conversations[id] = ConversationState(messages: refreshed.messages.sorted { $0.seq < $1.seq },
+                        lastEventSeq: refreshed.lastEventSeq, hasMore: refreshed.hasMore, loaded: true,
+                        loading: conversationLoads[id] != nil)
+                    continue
                 }
                 for e in page.events where e.eventSeq > (conversations[id]?.lastEventSeq ?? 0) {
                     if case .messageCreated(_, _, let m) = e { bumpMeta(m) }
@@ -784,54 +864,116 @@ final class AppStore {
     }
 
     func openConversation(_ id: String, force: Bool = false) async throws {
-        if let local = conversations[id], local.loaded, !force { await catchUp(id); return }
-        if conversations[id]?.loading == true { return }
+        let stamp = sessionStamp
+        try requireSession(stamp)
+        if let load = conversationLoads[id] {
+            try await load.task.value
+            try requireSession(stamp)
+            return
+        }
+        if let local = conversations[id], local.loaded, !force {
+            await catchUp(id)
+            try requireSession(stamp)
+            return
+        }
+        let owner = UUID()
         conversations[id, default: ConversationState()].loading = true
         conversations[id]?.error = nil
-        do {
-            let page: MessagesPage = try await api.request("/conversations/\(id)/messages?limit=50")
-            conversations[id] = ConversationState(messages: page.messages.sorted { $0.seq < $1.seq }, lastEventSeq: page.lastEventSeq,
-                                                  hasMore: page.hasMore, loaded: true, loading: false)
-            // Eventos que llegaron mientras cargábamos.
-            await catchUp(id)
-        } catch {
-            conversations[id]?.loading = false
-            conversations[id]?.error = L10n.errorText(error)
-            conversations[id]?.transient = (error as? ApiRequestError)?.isTransient ?? false
-            throw error
+        let task = Task { @MainActor [weak self] in
+            guard let self else { throw CancellationError() }
+            do {
+                try self.requireSession(stamp)
+                guard self.conversationLoads[id]?.owner == owner else { throw CancellationError() }
+                let page: MessagesPage = try await self.api.request("/conversations/\(id)/messages?limit=50")
+                try self.requireSession(stamp)
+                guard self.conversationLoads[id]?.owner == owner else { throw CancellationError() }
+                self.conversations[id] = ConversationState(messages: page.messages.sorted { $0.seq < $1.seq }, lastEventSeq: page.lastEventSeq,
+                                                           hasMore: page.hasMore, loaded: true, loading: true)
+                await self.catchUp(id)
+                try self.requireSession(stamp)
+                guard self.conversationLoads[id]?.owner == owner else { throw CancellationError() }
+                self.conversations[id]?.loading = false
+                self.conversationLoads[id] = nil
+            } catch {
+                if stamp == self.sessionStamp, self.conversationLoads[id]?.owner == owner {
+                    self.conversationLoads[id] = nil
+                    self.conversations[id]?.loading = false
+                    if !(error is CancellationError), !Task.isCancelled {
+                        self.conversations[id]?.error = L10n.errorText(error)
+                        self.conversations[id]?.transient = (error as? ApiRequestError)?.isTransient ?? false
+                    }
+                }
+                throw error
+            }
+        }
+        conversationLoads[id] = ConversationLoad(owner: owner, task: task)
+        try await withTaskCancellationHandler {
+            try await task.value
+            try requireSession(stamp)
+        } onCancel: {
+            task.cancel()
         }
     }
 
-    /// Esperas entre reintentos de abrir un chat ante un error pasajero (≈30 s en total).
-    static let openRetryDelays: [TimeInterval] = [1, 2, 4, 8, 15]
+    nonisolated static let openRetryDelays: [TimeInterval] = [1, 2, 4, 8, 15]
 
-    /// Abre la conversación y, si el error es pasajero (502/503/504 de un despliegue, 5xx, red), reintenta con espera
-    /// creciente. Mientras tanto `transient` queda en true («Reconectando…»); un 403/404 se muestra de inmediato.
-    /// Devuelve true si quedó cargada. El borrador vive en la vista y no se toca.
+    /// Botón y reconexión reutilizan una sola Task retenida por conversación.
+    @discardableResult
+    func startConversationRecovery(_ id: String, delays: [TimeInterval] = AppStore.openRetryDelays) -> Task<Bool, Never> {
+        if let job = recoveryJobs[id] { return job.task }
+        let owner = UUID(), stamp = sessionStamp
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return false }
+            defer { if self.recoveryJobs[id]?.owner == owner { self.recoveryJobs[id] = nil } }
+            var attempt = 0
+            do {
+                while true {
+                    try self.requireSession(stamp)
+                    guard self.recoveryJobs[id]?.owner == owner else { return false }
+                    do { try await self.openConversation(id) }
+                    catch is CancellationError { return false }
+                    catch {}
+                    try self.requireSession(stamp)
+                    guard self.recoveryJobs[id]?.owner == owner else { return false }
+                    if self.conversations[id]?.loaded == true, self.conversations[id]?.loading != true { return true }
+                    guard self.conversations[id]?.transient == true, attempt < delays.count else {
+                        self.conversations[id]?.transient = false
+                        return false
+                    }
+                    try await Task.sleep(nanoseconds: UInt64(max(0, delays[attempt]) * 1_000_000_000))
+                    try self.requireSession(stamp)
+                    guard self.recoveryJobs[id]?.owner == owner else { return false }
+                    attempt += 1
+                }
+            } catch { return false }
+        }
+        recoveryJobs[id] = RecoveryJob(owner: owner, task: task)
+        return task
+    }
+
+    func cancelConversationRecovery(_ id: String) {
+        recoveryJobs.removeValue(forKey: id)?.task.cancel()
+        conversationLoads.removeValue(forKey: id)?.task.cancel()
+        catchUpOwners[id] = nil
+        conversations[id]?.loading = false
+        conversations[id]?.transient = false
+    }
+
     @discardableResult
     func openConversationRecovering(_ id: String, delays: [TimeInterval] = AppStore.openRetryDelays) async -> Bool {
-        var attempt = 0
-        while true {
-            do {
-                try await openConversation(id)
-            } catch is CancellationError {
-                return false
-            } catch {}
-            if conversations[id]?.loaded == true { return true }
-            // Otro intento (reconexión del socket, botón Reintentar) sigue en curso: se espera sin contar un fallo.
-            if conversations[id]?.loading == true {
-                try? await Task.sleep(nanoseconds: 200_000_000)
-                if Task.isCancelled { return false }
-                continue
+        guard !Task.isCancelled else { return false }
+        let stamp = sessionStamp
+        let task = startConversationRecovery(id, delays: delays)
+        let owner = recoveryJobs[id]?.owner
+        return await withTaskCancellationHandler {
+            let result = await task.value
+            return result && stamp == sessionStamp && !Task.isCancelled
+        } onCancel: {
+            task.cancel()
+            Task { @MainActor [weak self] in
+                guard let self, self.recoveryJobs[id]?.owner == owner else { return }
+                self.cancelConversationRecovery(id)
             }
-            guard conversations[id]?.transient == true, attempt < delays.count, !Task.isCancelled else {
-                // Agotados los reintentos: queda el texto del error (sin «Reconectando…») y el botón Reintentar.
-                if conversations[id]?.loaded != true { conversations[id]?.transient = false }
-                return false
-            }
-            try? await Task.sleep(nanoseconds: UInt64(max(0, delays[attempt]) * 1_000_000_000))
-            attempt += 1
-            if Task.isCancelled { return false }
         }
     }
 

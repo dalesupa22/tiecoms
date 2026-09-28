@@ -174,16 +174,22 @@ struct ConversationView: View {
                 VoicePlayer.next(after: finished, in: store?.conversations[id]?.messages ?? [])
             }
         }
-        .onDisappear { if store.openConversationId == conversationId { store.openConversationId = nil } }
+        .onDisappear {
+            store.cancelConversationRecovery(conversationId)
+            if store.openConversationId == conversationId { store.openConversationId = nil }
+        }
         .task(id: conversationId) {
             // Un 502/503/504 (API reiniciándose en un despliegue) o un corte de red se reintentan solos ≈30 s;
             // el borrador del compositor es estado de esta vista y no se pierde.
-            await store.openConversationRecovering(conversationId)
+            let stamp = store.sessionStamp
+            guard await store.openConversationRecovering(conversationId), !Task.isCancelled, stamp == store.sessionStamp else { return }
             // Sugerencias de la hoja de compartir: abrir una conversación también cuenta (como mucho una vez por hora).
             Donations.donate(store, conversationId: conversationId, minInterval: 3600)
-            try? await store.loadPins(conversationId)
-            try? await store.loadIssues(conversationId: conversationId)
-            try? await store.loadEvents(from: Date().addingTimeInterval(-30 * 86400), to: Date().addingTimeInterval(90 * 86400), conversationId: conversationId)
+            _ = try? await store.loadPins(conversationId)
+            guard !Task.isCancelled, stamp == store.sessionStamp else { return }
+            _ = try? await store.loadIssues(conversationId: conversationId)
+            guard !Task.isCancelled, stamp == store.sessionStamp else { return }
+            _ = try? await store.loadEvents(from: Date().addingTimeInterval(-30 * 86400), to: Date().addingTimeInterval(90 * 86400), conversationId: conversationId)
         }
         .sheet(item: $sheet) { s in sheetView(s) }
         .sheet(item: Binding(get: { askSide }, set: { askSide = $0 })) { m in
@@ -336,7 +342,7 @@ struct ConversationView: View {
                 ContentUnavailableView {
                     Label(err, systemImage: "exclamationmark.bubble").accessibilityIdentifier("chat.loadError")
                 } actions: {
-                    Button(L("common.retry")) { Task { await store.openConversationRecovering(conversationId) } }
+                    Button(L("common.retry")) { store.startConversationRecovery(conversationId) }
                         .accessibilityIdentifier("chat.retry")
                 }
                 .frame(maxHeight: .infinity)

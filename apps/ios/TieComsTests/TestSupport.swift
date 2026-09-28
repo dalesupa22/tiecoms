@@ -3,6 +3,13 @@ import XCTest
 
 @MainActor
 final class FeedbackSpy: FeedbackSink {
+    var messageHandler: ((ForegroundMessage, String, String, String) -> Void)?
+    var cancelMessages: (() -> Void)?
+    func cancelPendingMessages() { cancelMessages?() }
+    func notifyMessage(_ message: ForegroundMessage, title: String, author: String, body: String) {
+        notifyIncoming(conversationId: message.conversationId, title: title, author: author, body: body)
+        messageHandler?(message, title, author, body)
+    }
     var sends = 0
     var receives = 0
     var notifications: [(conversationId: String, body: String)] = []

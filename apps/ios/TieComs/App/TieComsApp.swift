@@ -35,7 +35,11 @@ struct TieComsApp: App {
         _store = State(initialValue: s)
         // «Abierta» exige mensajes cargados: un chat vacío por un 502 no calla sus avisos.
         AppFeedback.shared.openConversationId = { [weak s] in s?.visibleConversationId }
-        AppFeedback.shared.presentsRemoteMessage = { [weak s] p in s?.presentsForegroundPush(p) ?? true }
+        AppFeedback.shared.foregroundSession = { [weak s] in
+            guard let s, s.appActive, s.me != nil else { return nil }
+            return s.foregroundOwner
+        }
+        AppFeedback.shared.presentsMessage = { [weak s] p, owner, played in s?.presentsForegroundPush(p, localOwner: owner, soundAlreadyPlayed: played) ?? false }
         AppFeedback.shared.onOpenConversation = { [weak s] id in s?.handle(.conversation(id)) }
         AppFeedback.shared.onOpenSide = { [weak s] origin, side in s?.openSide(origin: origin, side: side) }
         AppFeedback.shared.onOpenMessage = { [weak s] conv, mid in s?.openMessage(conv, messageId: mid) }

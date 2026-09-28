@@ -17,7 +17,7 @@ const password = randomUUID();
 const me = { id: 'u-danny', name: 'Danny Prueba', kind: 'human', email: 'danny@synthetic.test', primaryOrgId: 'o1' };
 const ali = { id: 'u-alicia', name: 'Alicia Prueba', kind: 'human', orgId: 'o1', guest: false };
 const dm = 'dm-502';
-const hits = {};
+const hits = { messagePOSTs: 0 };
 const now = new Date().toISOString();
 
 const bootstrap = {
@@ -44,6 +44,10 @@ http.createServer((req, res) => {
   if (path === '/api/v1/bootstrap') return json(res, 200, bootstrap);
   if (path === '/api/v1/blocks') return json(res, 200, { userIds: [] });
   if (path === `/api/v1/conversations/${dm}/messages`) {
+    if (req.method !== 'GET') {
+      hits.messagePOSTs += 1;
+      return json(res, 405, { error: { code: 'read_only_fixture', message: 'Messages are read-only in this fixture' } });
+    }
     if (hits[path] <= fail) {
       res.writeHead(502, { 'content-type': 'text/html' });
       return res.end('<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>');

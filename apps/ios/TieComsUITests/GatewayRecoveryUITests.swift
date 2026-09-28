@@ -72,6 +72,7 @@ final class GatewayRecoveryUITests: XCTestCase {
         XCTAssertFalse(element(app, containing: "bad gateway").exists)
         XCTAssertTrue(app.buttons["chat.retry"].exists, "botón Reintentar")
         shot("502-01-reconectando")
+        app.buttons["chat.retry"].tap() // reutiliza el intento retenido; no crea una segunda carga
 
         // 2. El borrador escrito durante los reintentos no se pierde.
         let field = app.descendants(matching: .any)["composer.field"]
@@ -88,5 +89,6 @@ final class GatewayRecoveryUITests: XCTestCase {
         let hits = stats(f)["/api/v1/conversations/\(f.dmId)/messages"] ?? 0
         // Solo los GET: 502 × FAIL y un 200. Ningún POST: el borrador no se envió solo.
         XCTAssertEqual(hits, f.fail + 1, "\(f.fail) × 502 y luego 200")
+        XCTAssertEqual(stats(f)["messagePOSTs"] ?? 0, 0, "el borrador no se envía")
     }
 }

@@ -252,6 +252,8 @@ final class V4Tests: XCTestCase {
     /// (Chaggu es una app nueva; ya no existe la migración de la build 6 de TieComs).
     func testKeychainSessionsPerServerAreIsolated() {
         let service = "com.chaggu.test.\(UUID().uuidString)"
+        let independent = KeychainSecretStore(service: service + ".isolated", apiURL: URL(string: "http://localhost:3043"))
+        defer { independent.set(nil) }
         let prod = KeychainSecretStore(service: service)
         prod.set("rt-prod")
         XCTAssertEqual(prod.get(), "rt-prod")
@@ -259,6 +261,7 @@ final class V4Tests: XCTestCase {
         XCTAssertNil(dev.get(), "no hereda la sesión de producción")
         dev.set("rt-dev")
         XCTAssertEqual(dev.get(), "rt-dev")
+        XCTAssertNil(independent.get(), "el fallback DEBUG también se aísla por service")
         XCTAssertEqual(prod.get(), "rt-prod", "no toca la de producción")
         dev.set(nil)
         XCTAssertNil(dev.get())

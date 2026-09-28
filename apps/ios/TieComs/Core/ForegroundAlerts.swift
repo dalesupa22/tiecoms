@@ -1,10 +1,21 @@
 import Foundation
 
-/// Registro acotado de los mensajes que ya pasaron por la decisión de aviso en primer plano,
-/// venga del socket (`announce`) o del push remoto (`willPresent`). El primero decide; el segundo
-/// ve el id registrado y no repite nada. Así un push remoto solo se calla si de verdad hubo decisión local
-/// (antes se callaba siempre que el socket estaba en línea, y se perdían los avisos de conversaciones
-/// desconocidas, huecos, catch-up y reconexiones).
+/// Contexto del aviso local. El dueño incluye la generación de login, incluso para el mismo usuario.
+struct ForegroundMessage {
+    static let ownerKey = "localSessionOwner"
+    let conversationId: String
+    let messageId: String
+    let authorId: String
+    let mention: Bool
+    let owner: String
+    var userInfo: [AnyHashable: Any] {
+        ["conversationId": conversationId, "messageId": messageId, "authorId": authorId,
+         "type": mention ? "mention" : "message", Self.ownerKey: owner]
+    }
+}
+
+/// Registro acotado de admisiones y silencios intencionales. Encolar un aviso no registra nada;
+/// sólo el callback común de presentación puede consumir un banner.
 struct AnnouncedLedger {
     let capacity: Int
     private var order: [String] = []
@@ -41,20 +52,21 @@ enum ForegroundPush {
         /// El id ya pasó por `announce` o por otro push.
         var alreadyAnnounced = false
         var dnd = false
-        /// La conversación está en pantalla, la app activa y los mensajes cargados (no el error de un 502).
+        /// La conversación está en pantalla, la app activa y ese messageId concreto está aplicado.
         var openActiveLoaded = false
         var muted = false
         var mutedForever = false
         var mentionsMe = false
         var blocked = false
         var mine = false
+        var system = false
     }
 
     /// Mismas reglas que el aviso local (`NotifyRule.incoming`). `outcome` nil = ya decidido: no se registra ni muestra.
     static func decide(_ i: Input) -> (present: Bool, outcome: NotifyRule.Outcome?) {
         if i.alreadyAnnounced { return (false, nil) }
-        guard NotifyRule.presentsInForeground(dnd: i.dnd) else { return (false, .none) }
-        let o = NotifyRule.incoming(.init(mine: i.mine, system: false, blocked: i.blocked, openAndActive: i.openActiveLoaded,
+        guard NotifyRule.presentsInForeground(dnd: i.dnd) else { return (false, NotifyRule.Outcome.none) }
+        let o = NotifyRule.incoming(.init(mine: i.mine, system: i.system, blocked: i.blocked, openAndActive: i.openActiveLoaded,
                                           muted: i.muted, mutedForever: i.mutedForever, mentionsMe: i.mentionsMe, dnd: i.dnd))
         switch o {
         case .notify, .mention: return (true, o)

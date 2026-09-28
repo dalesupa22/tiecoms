@@ -6,22 +6,56 @@ import XCTest
 
 /// Responde en orden una lista de (status, cuerpo, content-type) por ruta; el último se repite.
 final class SequenceURLProtocol: URLProtocol {
-    nonisolated(unsafe) static var script: [String: [(Int, String, String)]] = [:]
-    nonisolated(unsafe) static var hits: [String: Int] = [:]
+    nonisolated(unsafe) private static var _script: [String: [(Int, String, String)]] = [:]
+    nonisolated(unsafe) private static var _hits: [String: Int] = [:]
+    static var script: [String: [(Int, String, String)]] {
+        get { lock.lock(); defer { lock.unlock() }; return _script }
+        set { lock.lock(); defer { lock.unlock() }; _script = newValue }
+    }
+    static var hits: [String: Int] {
+        get { lock.lock(); defer { lock.unlock() }; return _hits }
+        set { lock.lock(); defer { lock.unlock() }; _hits = newValue }
+    }
+    nonisolated(unsafe) static var suspendedPaths: Set<String> = []
+    nonisolated(unsafe) static var suspended: [String: [SequenceURLProtocol]] = [:]
+    private static let lock = NSLock()
+    private var response: (Int, String, String)?
+    private var stopped = false
+
+    static func release(_ path: String) {
+        lock.lock()
+        let pending = suspended.removeValue(forKey: path) ?? []
+        suspendedPaths.remove(path)
+        lock.unlock()
+        for item in pending { item.deliver() }
+    }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let path = request.url?.path ?? ""
-        let n = SequenceURLProtocol.hits[path, default: 0]
-        SequenceURLProtocol.hits[path] = n + 1
-        let list = SequenceURLProtocol.script[path] ?? [(404, #"{"error":{"code":"not_found","message":"no"}}"#, "application/json")]
-        let (status, body, type) = list[min(n, list.count - 1)]
+        Self.lock.lock()
+        let n = SequenceURLProtocol._hits[path, default: 0]
+        SequenceURLProtocol._hits[path] = n + 1
+        let list = SequenceURLProtocol._script[path] ?? [(404, #"{"error":{"code":"not_found","message":"no"}}"#, "application/json")]
+        response = list[min(n, list.count - 1)]
+        if Self.suspendedPaths.contains(path) {
+            Self.suspended[path, default: []].append(self)
+            Self.lock.unlock()
+            return
+        }
+        Self.lock.unlock()
+        deliver()
+    }
+    private func deliver() {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        guard !stopped, let (status, body, type) = response else { return }
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["content-type": type])!,
                             cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
-    override func stopLoading() {}
+    override func stopLoading() { Self.lock.lock(); stopped = true; Self.lock.unlock() }
 }
 
 @MainActor
@@ -43,6 +77,8 @@ final class ChatRecoveryTests: XCTestCase {
     override func setUp() {
         SequenceURLProtocol.script = [:]
         SequenceURLProtocol.hits = [:]
+        SequenceURLProtocol.suspendedPaths = []
+        SequenceURLProtocol.suspended = [:]
     }
 
     // MARK: Error de un 502 sin JSON
@@ -146,4 +182,138 @@ final class ChatRecoveryTests: XCTestCase {
         XCTAssertFalse(loaded)
         XCTAssertEqual(SequenceURLProtocol.hits["/api/v1/conversations/dm/messages"], 1)
     }
+    func testRecoveryCannotRetryAfterLogoutAndSameUserLoginDuringBackoff() async throws {
+        let store = try makeStore(), data = try makeStore().data!
+        SequenceURLProtocol.script["/api/v1/conversations/dm/messages"] = [html502, page]
+        store.openConversationId = "dm"
+        let task = store.startConversationRecovery("dm", delays: [0.15])
+        try await waitUntil(2) { store.conversations["dm"]?.transient == true }
+        await store.signOutLocally()
+        store.seedForTesting(data)
+        let result = await task.value
+        XCTAssertFalse(result)
+        try await Task.sleep(nanoseconds: 250_000_000)
+        XCTAssertEqual(SequenceURLProtocol.hits["/api/v1/conversations/dm/messages"], 1)
+        XCTAssertNil(store.conversations["dm"])
+    }
+
+    func testManualRecoveryStopsOnLeavingOrChangingChat() async throws {
+        for next in [nil, "another"] as [String?] {
+            SequenceURLProtocol.hits = [:]
+            let store = try makeStore()
+            SequenceURLProtocol.script["/api/v1/conversations/dm/messages"] = [html502, page]
+            store.openConversationId = "dm"
+            let task = store.startConversationRecovery("dm", delays: [0.1])
+            try await waitUntil(2) { store.conversations["dm"]?.transient == true }
+            store.openConversationId = next
+            let result = await task.value
+            XCTAssertFalse(result)
+            try await Task.sleep(nanoseconds: 150_000_000)
+            XCTAssertEqual(SequenceURLProtocol.hits["/api/v1/conversations/dm/messages"], 1)
+            XCTAssertEqual(store.conversations["dm"]?.loading, false)
+        }
+    }
+
+    func testManualAndReconnectShareInFlightLoadAndDoNotReportEarlySuccess() async throws {
+        let store = try makeStore()
+        let messagePath = "/api/v1/conversations/dm/messages"
+        SequenceURLProtocol.script[messagePath] = [page]
+        SequenceURLProtocol.script["/api/v1/conversations/dm/events"] = [events]
+        SequenceURLProtocol.script["/api/v1/blocks"] = [(200, #"{"userIds":[]}"#, "application/json")]
+        SequenceURLProtocol.script["/api/v1/bootstrap"] = [(200, #"{"me":{"id":"me","name":"Danny"},"conversations":[{"id":"dm","kind":"direct","memberIds":["me","ali"]}]}"#, "application/json")]
+        SequenceURLProtocol.suspendedPaths.insert(messagePath)
+        store.openConversationId = "dm"
+        let first = store.startConversationRecovery("dm", delays: [])
+        try await waitUntil(2) { SequenceURLProtocol.hits[messagePath] == 1 }
+        var secondFinished = false
+        let second = Task { let result = await store.openConversationRecovering("dm", delays: []); secondFinished = true; return result }
+        store.socketEventForTesting("ready", "{}")
+        try await waitUntil(2) { SequenceURLProtocol.hits["/api/v1/bootstrap"] == 1 }
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertFalse(secondFinished)
+        XCTAssertEqual(store.conversations["dm"]?.loading, true)
+        XCTAssertEqual(SequenceURLProtocol.hits[messagePath], 1)
+        SequenceURLProtocol.release(messagePath)
+        let a = await first.value, b = await second.value
+        XCTAssertTrue(a && b)
+        XCTAssertEqual(SequenceURLProtocol.hits[messagePath], 1)
+        XCTAssertEqual(store.conversations["dm"]?.loading, false)
+        XCTAssertEqual(store.conversations["dm"]?.transient, false)
+    }
+
+    func testOldCancelledLoadCannotCleanUpOrApplyOverNewOwner() async throws {
+        let store = try makeStore(), path = "/api/v1/conversations/dm/messages"
+        SequenceURLProtocol.script[path] = [html502, page]
+        SequenceURLProtocol.script["/api/v1/conversations/dm/events"] = [events]
+        SequenceURLProtocol.suspendedPaths.insert(path)
+        store.openConversationId = "dm"
+        let old = store.startConversationRecovery("dm", delays: [])
+        try await waitUntil(2) { SequenceURLProtocol.hits[path] == 1 }
+        store.cancelConversationRecovery("dm")
+        let new = store.startConversationRecovery("dm", delays: [])
+        try await waitUntil(2) { SequenceURLProtocol.hits[path] == 2 }
+        let oldResult = await old.value
+        XCTAssertFalse(oldResult)
+        XCTAssertEqual(store.conversations["dm"]?.loading, true, "el dueño viejo no limpia al nuevo")
+        SequenceURLProtocol.release(path)
+        let loaded = await new.value
+        XCTAssertTrue(loaded)
+        XCTAssertEqual(store.conversations["dm"]?.messages.map(\.id), ["m1"])
+        XCTAssertNil(store.conversations["dm"]?.error)
+    }
+
+    func testPushForKnownUnloadedChatCoalescesMetadataWithoutHistoryOrRead() async throws {
+        for failed in [false, true] {
+            SequenceURLProtocol.hits = [:]
+            let store = try makeStore()
+            if failed { store.seedForTesting(store.data!, conversations: ["dm": ConversationState(error: "502", transient: true)]) }
+            let path = "/api/v1/bootstrap"
+            SequenceURLProtocol.script["/api/v1/blocks"] = [(200, #"{"userIds":[]}"#, "application/json")]
+            SequenceURLProtocol.script[path] = [(200, #"{"me":{"id":"me","name":"Danny"},"conversations":[{"id":"dm","kind":"direct","memberIds":["me","ali"],"lastMessageSeq":8,"lastReadSeq":2,"unread":6,"lastMessagePreview":"nuevo"}]}"#, "application/json")]
+            SequenceURLProtocol.suspendedPaths.insert(path)
+            let push = PushPayload(userInfo: ["type": "message", "conversationId": "dm", "messageId": "m8", "authorId": "ali"])!
+            _ = store.presentsForegroundPush(push)
+            _ = store.presentsForegroundPush(push)
+            try await waitUntil(2) { SequenceURLProtocol.hits[path] == 1 }
+            for _ in 0..<5 { _ = store.presentsForegroundPush(push) }
+            try await Task.sleep(nanoseconds: 300_000_000)
+            XCTAssertEqual(SequenceURLProtocol.hits[path], 1, "también coalesce mientras HTTP está pendiente")
+            SequenceURLProtocol.release(path)
+            try await waitUntil(2) { store.meta("dm")?.lastMessagePreview == "nuevo" }
+            XCTAssertEqual(store.meta("dm")?.unread, 6)
+            XCTAssertEqual(store.meta("dm")?.lastReadSeq, 2)
+            XCTAssertNotEqual(store.conversations["dm"]?.loaded, true)
+            XCTAssertNil(SequenceURLProtocol.hits["/api/v1/conversations/dm/messages"])
+            XCTAssertNil(SequenceURLProtocol.hits["/api/v1/conversations/dm/events"])
+            XCTAssertNil(SequenceURLProtocol.hits["/api/v1/conversations/dm/read"])
+            await store.signOutLocally()
+        }
+    }
+
+    func testNewPushDuringBootstrapGetsOneFollowupSnapshot() async throws {
+        let store = try makeStore(), path = "/api/v1/bootstrap"
+        SequenceURLProtocol.script["/api/v1/blocks"] = [(200, #"{"userIds":[]}"#, "application/json")]
+        func snapshot(_ seq: Int) -> (Int, String, String) {
+            (200, #"{"me":{"id":"me","name":"Danny"},"conversations":[{"id":"dm","kind":"direct","memberIds":["me","ali"],"lastMessageSeq":\#(seq),"lastReadSeq":0,"unread":\#(seq),"lastMessagePreview":"snapshot-\#(seq)"}]}"#, "application/json")
+        }
+        SequenceURLProtocol.script[path] = [snapshot(1), snapshot(2)]
+        SequenceURLProtocol.suspendedPaths.insert(path)
+        func push(_ seq: Int) -> PushPayload {
+            PushPayload(userInfo: ["type": "message", "conversationId": "dm", "messageId": "m\(seq)", "authorId": "ali"])!
+        }
+        _ = store.presentsForegroundPush(push(1))
+        try await waitUntil(2) { SequenceURLProtocol.hits[path] == 1 }
+        // El primer HTTP ya capturó snapshot-1. El segundo mensaje llega antes de recibir esa respuesta.
+        for _ in 0..<5 { _ = store.presentsForegroundPush(push(2)) }
+        SequenceURLProtocol.release(path)
+        try await waitUntil(2) { store.meta("dm")?.lastMessagePreview == "snapshot-2" }
+        XCTAssertEqual(SequenceURLProtocol.hits[path], 2)
+        XCTAssertEqual(store.meta("dm")?.unread, 2)
+        XCTAssertEqual(store.meta("dm")?.lastReadSeq, 0)
+        XCTAssertNil(store.conversations["dm"])
+        XCTAssertNil(SequenceURLProtocol.hits["/api/v1/conversations/dm/messages"])
+        XCTAssertNil(SequenceURLProtocol.hits["/api/v1/conversations/dm/read"])
+        await store.signOutLocally()
+    }
+
 }

@@ -1,4 +1,5 @@
 import XCTest
+import UserNotifications
 @testable import TieComs
 
 /// Incidencia Alicia → Danny (28-sep-2026): avisos perdidos en primer plano y chat roto tras un 502.
@@ -7,6 +8,11 @@ import XCTest
 final class ForegroundAlertTests: XCTestCase {
     var store: AppStore!
     var spy: FeedbackSpy!
+    var center: DeferredNotificationCenter!
+    var appFeedback: AppFeedback!
+    var fallbackSounds = 0
+    var savedSounds = true
+    var savedNotifications = true
 
     private let bootstrapJSON = #"""
     {"contract":"2026-09-23","serverTime":"2026-09-23T10:00:00Z","me":{"id":"me","name":"Danny","kind":"human","primaryOrgId":"o1"},
@@ -20,14 +26,39 @@ final class ForegroundAlertTests: XCTestCase {
     """#
 
     override func setUp() async throws {
+        savedSounds = Prefs.soundsEnabled; savedNotifications = Prefs.notificationsEnabled
+        Prefs.soundsEnabled = true; Prefs.notificationsEnabled = true
         spy = FeedbackSpy()
+        center = DeferredNotificationCenter()
+        appFeedback = AppFeedback(localCenter: center, playNotificationSound: { [weak self] in self?.fallbackSounds += 1 })
+        await appFeedback.refreshAuthorization()
+        spy.messageHandler = { [weak self] m, t, a, b in self?.appFeedback.notifyMessage(m, title: t, author: a, body: b) }
+        spy.cancelMessages = { [weak self] in self?.appFeedback.cancelPendingMessages() }
         // Puerto cerrado: un catch-up falla rápido sin tocar ningún servidor.
         store = AppStore(baseURL: URL(string: "http://127.0.0.1:9")!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: spy)
         let d = try JSONDecoder().decode(BootstrapDTO.self, from: jsonData(bootstrapJSON))
         store.seedForTesting(d, conversations: ["dm": ConversationState(messages: [], lastEventSeq: 5, hasMore: false, loaded: true)])
+        appFeedback.foregroundSession = { [weak self] in
+            guard let store = self?.store, store.appActive, store.me != nil else { return nil }
+            return store.foregroundOwner
+        }
+        appFeedback.presentsMessage = { [weak self] p, owner, played in self?.store.presentsForegroundPush(p, localOwner: owner, soundAlreadyPlayed: played) ?? false }
         store.openConversationId = nil
         // Silenciado 1 h (no «hasta que lo reactive»): una mención sí avisa.
         store.patchMeta("muted") { $0.mutedUntil = ISODate.string(Date().addingTimeInterval(3600)) }
+    }
+
+    override func tearDown() async throws {
+        await store.signOutLocally()
+        Prefs.soundsEnabled = savedSounds; Prefs.notificationsEnabled = savedNotifications
+        appFeedback = nil; center = nil; spy = nil; store = nil
+    }
+
+    private func presentLocal(_ index: Int = 0) -> UNNotificationPresentationOptions {
+        appFeedback.presentationOptions(userInfo: center.requests[index].content.userInfo, isRemote: false)
+    }
+    private func presentRemote(_ seq: Int = 3) -> UNNotificationPresentationOptions {
+        appFeedback.presentationOptions(userInfo: ["type": "message", "conversationId": "dm", "messageId": "m-dm-\(seq)", "authorId": "ali"], isRemote: true)
     }
 
     private func created(_ conv: String, _ eventSeq: Int, seq: Int, author: String = "ali") -> ConversationEvent {
@@ -88,6 +119,8 @@ final class ForegroundAlertTests: XCTestCase {
     func testLocalThenPushIsOneNotice() {
         store.onConversationEvent(created("dm", 6, seq: 3), live: true)
         XCTAssertEqual(spy.notifications.count, 1, "aviso local")
+        XCTAssertNil(store.announced.decision("m-dm-3"), "enqueue no admite")
+        XCTAssertTrue(presentLocal().contains(.banner))
         XCTAssertEqual(store.announced.decision("m-dm-3"), .notify)
         XCTAssertFalse(store.presentsForegroundPush(push("dm", seq: 3)), "el push del mismo mensaje no duplica")
     }
@@ -100,10 +133,12 @@ final class ForegroundAlertTests: XCTestCase {
         XCTAssertEqual(store.conversations["dm"]?.messages.count, 1, "el mensaje sí se aplica")
     }
 
-    func testOpenLoadedConversationShowsNothing() {
+    func testLoadedChatWithoutThatMessageStillPresentsFallback() {
         store.openConversationId = "dm"
         XCTAssertEqual(store.visibleConversationId, "dm")
-        XCTAssertFalse(store.presentsForegroundPush(push("dm", seq: 3)))
+        XCTAssertTrue(presentRemote().contains(.banner))
+        store.onConversationEvent(created("dm", 6, seq: 3), live: true)
+        XCTAssertEqual(spy.receives, 0, "ya se admitió banner para este id")
     }
 
     func testOpenButNotLoadedAfter502Shows() {
@@ -157,8 +192,164 @@ final class ForegroundAlertTests: XCTestCase {
 
     func testSignOutClearsLedger() async {
         store.onConversationEvent(created("dm", 6, seq: 3), live: true)
+        XCTAssertTrue(presentLocal().contains(.banner))
         XCTAssertEqual(store.announced.count, 1)
         await store.signOutLocally()
         XCTAssertEqual(store.announced.count, 0)
+    }
+    func testRemoteWinsWhileLocalQueueIsDeferred() {
+        store.onConversationEvent(created("dm", 6, seq: 3), live: true)
+        XCTAssertEqual(center.requests.count, 1)
+        XCTAssertNil(store.announced.decision("m-dm-3"))
+        XCTAssertTrue(presentRemote().contains(.banner))
+        XCTAssertTrue(presentLocal().isEmpty)
+        XCTAssertTrue(presentRemote().isEmpty)
+    }
+
+    func testDeniedAuthorizationCacheDoesNotConsumeRemoteAndAudioIsSeparate() async {
+        center.authorized = false
+        await appFeedback.refreshAuthorization()
+        store.onConversationEvent(created("dm", 6, seq: 3), live: true)
+        XCTAssertTrue(center.requests.isEmpty)
+        XCTAssertEqual(fallbackSounds, 1)
+        XCTAssertNil(store.announced.decision("m-dm-3"))
+        center.authorized = true
+        await appFeedback.refreshAuthorization()
+        let options = presentRemote()
+        XCTAssertTrue(options.contains(.banner))
+        XCTAssertFalse(options.contains(.sound), "el audio fallback ya sonó; banner sigue elegible")
+    }
+
+    func testFallbackAudioThenOpeningAppliedMessageDoesNotPlayReceiveAgain() async {
+        center.authorized = false
+        await appFeedback.refreshAuthorization()
+        store.onConversationEvent(created("dm", 6, seq: 3), live: true)
+        XCTAssertEqual(fallbackSounds, 1)
+        store.openConversationId = "dm"
+        XCTAssertTrue(presentRemote().isEmpty)
+        XCTAssertEqual(spy.receives, 0)
+    }
+
+    func testAddFailureDoesNotConsumeRemote() {
+        center.accepts = false
+        store.onConversationEvent(created("dm", 6, seq: 3), live: true)
+        XCTAssertTrue(center.pending.isEmpty)
+        XCTAssertNil(store.announced.decision("m-dm-3"))
+        XCTAssertTrue(presentRemote().contains(.banner))
+    }
+
+    func testAbsentFeedbackDoesNotConsumeRemote() {
+        let noSink = AppStore(baseURL: URL(string: "http://127.0.0.1:9")!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: nil)
+        noSink.seedForTesting(store.data!, conversations: store.conversations)
+        noSink.onConversationEvent(created("dm", 6, seq: 3), live: true)
+        XCTAssertNil(noSink.announced.decision("m-dm-3"))
+        XCTAssertTrue(noSink.presentsForegroundPush(push("dm", seq: 3)))
+    }
+
+    func testLocalPresentationDisabledThenRemoteEligible() {
+        store.onConversationEvent(created("dm", 6, seq: 3), live: true)
+        Prefs.notificationsEnabled = false
+        XCTAssertTrue(presentLocal().isEmpty)
+        XCTAssertNil(store.announced.decision("m-dm-3"))
+        Prefs.notificationsEnabled = true
+        XCTAssertTrue(presentRemote().contains(.banner))
+    }
+
+    func testIntentionalSilenceAtLocalPresentationStaysSilent() {
+        store.onConversationEvent(created("dm", 6, seq: 3), live: true)
+        store.patchMe { $0.dndUntil = "2099-01-01T00:00:00Z" }
+        XCTAssertTrue(presentLocal().isEmpty)
+        XCTAssertEqual(store.announced.decision("m-dm-3"), NotifyRule.Outcome.none)
+        store.patchMe { $0.dndUntil = nil }
+        XCTAssertTrue(presentRemote().isEmpty)
+    }
+
+    func testReceiveOnceForAppliedMessageInBothOrdersAndSoundSettings() {
+        for enabled in [true, false] {
+            Prefs.soundsEnabled = enabled
+            for remoteFirst in [true, false] {
+                store.announced.removeAll()
+                store.seedForTesting(store.data!, conversations: ["dm": ConversationState(lastEventSeq: 5, loaded: true)])
+                spy.receives = 0
+                store.openConversationId = "dm"
+                store.onConversationEvent(created("dm", 6, seq: 3), live: !remoteFirst)
+                XCTAssertTrue(presentRemote().isEmpty)
+                store.onConversationEvent(created("dm", 6, seq: 3), live: true)
+                XCTAssertTrue(presentRemote().isEmpty)
+                XCTAssertEqual(spy.receives, enabled ? 1 : 0)
+            }
+        }
+    }
+
+    func testLoadedMissingMessageDoesNotBecomeVisibleOnMereLoadFlag() {
+        store.openConversationId = "dm"
+        store.onConversationEvent(created("dm", 9, seq: 3), live: true)
+        XCTAssertTrue(store.conversations["dm"]!.messages.isEmpty)
+        XCTAssertTrue(presentRemote().contains(.banner))
+        XCTAssertEqual(spy.receives, 0)
+    }
+
+    func testOldLocalCallbackAfterSameUserLogsInAgainDoesNotConsumeNewSession() async {
+        let data = store.data!
+        store.onConversationEvent(created("dm", 6, seq: 3), live: true)
+        let oldOwner = store.foregroundOwner
+        await store.signOutLocally()
+        store.seedForTesting(data)
+        XCTAssertNotEqual(store.foregroundOwner, oldOwner)
+        XCTAssertTrue(presentLocal().isEmpty)
+        XCTAssertTrue(presentRemote().contains(.banner))
+        XCTAssertFalse(center.removed.isEmpty)
+    }
+
+    func testBackgroundCancelsPendingIncludingLateAddCompletion() {
+        center.deferCompletion = true
+        store.onConversationEvent(created("dm", 6, seq: 3), live: true)
+        store.appActive = false
+        center.finish(0)
+        XCTAssertTrue(center.pending.isEmpty)
+        XCTAssertTrue(presentLocal().isEmpty)
+        XCTAssertNil(store.announced.decision("m-dm-3"))
+        store.onConversationEvent(created("dm", 7, seq: 4), live: true)
+        XCTAssertEqual(center.requests.count, 1, "no enqueue en background")
+    }
+
+    func testSleepWindowSilencesMessageAndMention() throws {
+        let minute = SleepRules.minutesIn("UTC", at: Date())
+        let start = String(format: "%02d:%02d", (minute + 1439) % 1440 / 60, (minute + 1439) % 60)
+        let end = String(format: "%02d:%02d", (minute + 30) % 1440 / 60, (minute + 30) % 60)
+        let sleep = try JSONDecoder().decode(SleepDTO.self, from: jsonData(#"{"on":true,"start":"\#(start)","end":"\#(end)","tz":"UTC","tzAuto":false}"#))
+        store.patchMe { $0.sleep = sleep }
+        XCTAssertTrue(store.sleepActive)
+        store.onConversationEvent(created("dm", 6, seq: 3), live: true)
+        XCTAssertTrue(center.requests.isEmpty)
+        XCTAssertTrue(presentRemote().isEmpty)
+        XCTAssertFalse(store.presentsForegroundPush(push("dm", seq: 4, type: "mention")))
+        XCTAssertEqual(spy.receives, 0)
+    }
+
+}
+
+
+@MainActor
+final class DeferredNotificationCenter: LocalNotificationCenter {
+    var authorized = true
+    var accepts = true
+    var deferCompletion = false
+    var requests: [UNNotificationRequest] = []
+    var completions: [@MainActor (Bool) -> Void] = []
+    var pending: Set<String> = []
+    var removed: [String] = []
+    func isAuthorized() async -> Bool { authorized }
+    func add(_ request: UNNotificationRequest, completion: @escaping @MainActor (Bool) -> Void) {
+        requests.append(request); completions.append(completion)
+        if !deferCompletion { finish(requests.count - 1) }
+    }
+    func finish(_ index: Int) {
+        if accepts { pending.insert(requests[index].identifier) }
+        completions[index](accepts)
+    }
+    func removePending(_ identifiers: [String]) {
+        removed += identifiers
+        for id in identifiers { pending.remove(id) }
     }
 }

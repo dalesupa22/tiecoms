@@ -270,7 +270,7 @@ export function AddMembersDialog({ conversationId, onClose }: { conversationId: 
               <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
                 <button className="btn" onClick={() => { setEmailHint(true); search.current?.focus(); }}>✉ {t('add.byEmail')}</button>
                 <button className="btn" disabled={inv.busy || !kind} onClick={copyLink}>🔗 {t('add.copyLink')}</button>
-                {touch && link && <button className="btn" onClick={() => navigator.share({ title: 'Chaggu', text: link.code ? t('share.text', { name: groupName, url: link.url, code: link.code }) : link.url }).catch(() => {})}>{t('add.share')}</button>}
+                {touch && link && <button className="btn" onClick={() => navigator.share({ title: 'chaggu', text: link.code ? t('share.text', { name: groupName, url: link.url, code: link.code }) : link.url }).catch(() => {})}>{t('add.share')}</button>}
               </div>
               {link && (
                 <div className="link-done">

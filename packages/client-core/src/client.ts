@@ -100,7 +100,7 @@ const uid = () => (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(3
 const base64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 /**
- * Cliente Chaggu independiente de la interfaz. Toda la lógica de envío,
+ * Cliente chaggu independiente de la interfaz. Toda la lógica de envío,
  * reintentos, orden, recuperación y no leídos vive aquí para que web,
  * escritorio y móvil se comporten igual.
  */

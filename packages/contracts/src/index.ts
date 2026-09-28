@@ -1,5 +1,5 @@
 /**
- * Contrato público de Chaggu.
+ * Contrato público de chaggu.
  *
  * Lo comparten el API, la web y las apps (escritorio, Android, iOS). Una app
  * instalada no se actualiza con cada despliegue, así que los cambios aquí son
@@ -297,7 +297,7 @@ export type LinkKind = 'video' | 'short' | 'post' | 'article' | 'audio' | 'image
 export type LinkProvider = 'youtube' | 'tiktok' | 'instagram' | 'x' | 'linkedin' | 'facebook' | 'vimeo' | 'spotify' | 'google' | 'github';
 export type LinkPreviewMode = 'large' | 'compact' | 'none';
 /**
- * imageUrl es una ruta del API (/api/v1/previews/…): la miniatura ya está en Chaggu.
+ * imageUrl es una ruta del API (/api/v1/previews/…): la miniatura ya está en chaggu.
  * kind, provider, author y durationSec son aditivos (clientes viejos los ignoran).
  */
 export interface LinkPreviewDTO {
@@ -315,7 +315,7 @@ export interface LinkPreviewDTO {
 export interface ReactionDTO {
   emoji: string;
   userIds: string[];
-  /** Reacciones que llegaron por un puente (WhatsApp): nombre visible, sin cuenta en Chaggu. */
+  /** Reacciones que llegaron por un puente (WhatsApp): nombre visible, sin cuenta en chaggu. */
   external?: { name: string; source: ForwardSource }[];
 }
 /** Máximo de emojis distintos por mensaje. */
@@ -869,7 +869,7 @@ export const UpdateWaChatInput = z.object({
   category: WaCategory.nullable().optional(),
   pinned: z.boolean().optional(),
   hidden: z.boolean().optional(),
-  /** Conversación de Chaggu a la que llegan los mensajes nuevos de este chat (null = desvincular). */
+  /** Conversación de chaggu a la que llegan los mensajes nuevos de este chat (null = desvincular). */
   linkedConversationId: z.uuid().nullable().optional(),
 });
 export const WaMessagesQuery = z.object({ before: z.iso.datetime().optional(), limit: z.coerce.number().int().min(1).max(200).default(60) });

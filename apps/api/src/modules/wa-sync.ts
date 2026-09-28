@@ -1,6 +1,6 @@
 /**
  * Guardado de lo que llega de WhatsApp (credenciales cifradas, contactos, chats,
- * mensajes) y reenvío a Chaggu de los chats vinculados. Lo usa src/wa-bridge.ts.
+ * mensajes) y reenvío a chaggu de los chats vinculados. Lo usa src/wa-bridge.ts.
  */
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import {
@@ -324,7 +324,7 @@ export async function storeMessages(s: Session, rows: MsgRow[], live: boolean) {
   return inserted;
 }
 
-/** Chats vinculados a una conversación de Chaggu: los mensajes nuevos llegan allí como reenviados de WhatsApp. */
+/** Chats vinculados a una conversación de chaggu: los mensajes nuevos llegan allí como reenviados de WhatsApp. */
 export async function bridgeToTieComs(s: Session, rows: MsgRow[]) {
   if (!rows.length) return;
   const { rows: links } = await pool.query(
@@ -349,7 +349,7 @@ export async function bridgeToTieComs(s: Session, rows: MsgRow[]) {
       if (e?.status === 403 || e?.status === 404) {
         await pool.query('UPDATE wa_chats SET linked_conversation_id = NULL, linked_since = NULL WHERE account_id = $1 AND jid = $2', [s.id, m.chat]);
         byJid.delete(m.chat);
-      } else console.error(`[wa] no pude reenviar ${m.id} a Chaggu`, e?.message);
+      } else console.error(`[wa] no pude reenviar ${m.id} a chaggu`, e?.message);
     }
   }
 }
@@ -368,12 +368,12 @@ export async function organizeAccount(s: Session) {
   }
 }
 
-/** id de Chaggu del mensaje reenviado desde WhatsApp (mismo clientMessageId que bridgeToTieComs). */
+/** id de chaggu del mensaje reenviado desde WhatsApp (mismo clientMessageId que bridgeToTieComs). */
 const bridgedClientId = (accountId: string, chat: string, id: string) => `wa-${createHash('sha256').update(`${accountId}|${chat}|${id}`).digest('hex').slice(0, 40)}`;
 
 /**
  * Reacción de WhatsApp (reactionMessage): se guarda en el mensaje de WhatsApp y, si el chat está vinculado,
- * en el mensaje reenviado a Chaggu como reacción externa («Laura · WhatsApp»). Texto vacío = la quitó.
+ * en el mensaje reenviado a chaggu como reacción externa («Laura · WhatsApp»). Texto vacío = la quitó.
  */
 export async function storeReaction(s: Session, m: WAMessage) {
   const r = m.message?.reactionMessage;

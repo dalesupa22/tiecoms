@@ -49,10 +49,10 @@ export function handleNotice(n: ClientNotice) {
       const group = conv ? groupNoticeTitle(d, conv) : null;
       const title = n.mentioned ? t('mention.mentionedYou', { name: who }) : null;
       const note = title
-        ? new Notification(title, { body: `${group ?? (conv ? conversationTitle(d, conv) : 'Chaggu')}: ${n.message.body.slice(0, 160)}`, tag: n.conversationId, icon: `${BASE}/icon-192.png` })
+        ? new Notification(title, { body: `${group ?? (conv ? conversationTitle(d, conv) : 'chaggu')}: ${n.message.body.slice(0, 160)}`, tag: n.conversationId, icon: `${BASE}/icon-192.png` })
         : group
         ? new Notification(group, { body: `${who}: ${n.message.body.slice(0, 160)}`, tag: n.conversationId, icon: `${BASE}/icon-192.png` })
-        : new Notification(`${who} · ${conv ? conversationTitle(d, conv) : 'Chaggu'}`, { body: n.message.body.slice(0, 160), tag: n.conversationId, icon: `${BASE}/icon-192.png` });
+        : new Notification(`${who} · ${conv ? conversationTitle(d, conv) : 'chaggu'}`, { body: n.message.body.slice(0, 160), tag: n.conversationId, icon: `${BASE}/icon-192.png` });
       note.onclick = () => { window.focus(); navigate(`/c/${n.conversationId}?m=${n.message.seq}`); note.close(); };
     }
     return;
@@ -91,7 +91,7 @@ export function handleNotice(n: ClientNotice) {
   }
   const r = n.reminder;
   const conv = d.conversations.find((c) => c.id === r.conversationId);
-  const title = r.note || (conv ? conversationTitle(d, conv) : 'Chaggu');
+  const title = r.note || (conv ? conversationTitle(d, conv) : 'chaggu');
   const go = () => navigate(`/c/${r.conversationId}${r.messageSeq ? `?m=${r.messageSeq}` : ''}`);
   toast(`⏰ ${title}`, { label: t('rem.open'), run: go }, 12_000);
   if (canNotify) {

@@ -50,7 +50,7 @@ export function App() {
     else if (status === 'ready' && (route.name === 'login' || route.name === 'signup')) navigate(nextParam() ?? '/', true);
   }, [status, route.name, path]);
 
-  if (status === 'loading') return <div className="auth"><img src={asset("/chaggu-logo.svg")} alt="Chaggu" width={128} height={56} style={{ opacity: 0.6 }} /></div>;
+  if (status === 'loading') return <div className="auth"><img src={asset("/chaggu-logo.svg")} alt="chaggu" width={128} height={56} style={{ opacity: 0.6 }} /></div>;
   if (route.name === 'sso') return <SsoReturnScreen key={lang} />;
   if (route.name === 'invite') return <InviteScreen key={lang} token={route.token} />;
   if (status === 'anonymous') return <AuthScreen key={lang} mode={route.name === 'signup' ? 'signup' : 'login'} after={nextParam()} />;

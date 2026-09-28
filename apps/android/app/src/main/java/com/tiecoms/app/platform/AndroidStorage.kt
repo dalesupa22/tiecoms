@@ -99,6 +99,13 @@ class AppSettings(context: Context) {
     var groupsView: String
         get() = prefs.getString("groupsView", "list")?.takeIf { it == "list" || it == "tree" } ?: "list"
         set(v) { prefs.edit().putString("groupsView", v).apply() }
+    /** Pestaña Asuntos (1.6.4 / 22): filtro «mine» | «open» | «closed» y agrupación «group» | «person», recordados. */
+    var issueFilter: String
+        get() = prefs.getString("issueFilter", "mine")?.takeIf { it in setOf("mine", "open", "closed") } ?: "mine"
+        set(v) { prefs.edit().putString("issueFilter", v).apply() }
+    var issueGroupBy: String
+        get() = prefs.getString("issueGroupBy", "group")?.takeIf { it == "group" || it == "person" } ?: "group"
+        set(v) { prefs.edit().putString("issueGroupBy", v).apply() }
     var soundsEnabled: Boolean
         get() = prefs.getBoolean("sounds", true)
         set(v) { prefs.edit().putBoolean("sounds", v).apply() }

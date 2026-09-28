@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.4 (22): asuntos como tareas «a prueba de tontos» (paridad con la web 8174998 y 861306c). -->
+<resources>
+    <string name="issue_mark_open">Marcar abierto</string>
+    <string name="issue_reopen">Reabrir</string>
+    <string name="issue_completed">Asunto completado</string>
+    <string name="issue_reopened_toast">Asunto reabierto</string>
+    <string name="issue_no_owner">Sin responsable</string>
+    <string name="issue_me">Yo</string>
+    <string name="issue_quick_ph">Añadir asunto…</string>
+    <string name="issue_add">Añadir</string>
+    <string name="issue_done_count">Completados · %1$d</string>
+    <string name="issue_group_by">Agrupar</string>
+    <string name="issue_by_group">Por grupo</string>
+    <string name="issue_by_person">Por responsable</string>
+    <string name="issue_mark_done">Marcar como hecho</string>
+    <string name="issue_done_banner">✓ Hecho</string>
+    <string name="issue_dropped_banner">Descartado</string>
+    <string name="issue_drop">Descartar asunto</string>
+    <string name="issue_dropped_toast">Asunto descartado</string>
+    <string name="issue_q_who">¿Quién lo hace?</string>
+    <string name="issue_q_when">¿Para cuándo?</string>
+    <string name="issue_q_how">¿Cómo va?</string>
+    <string name="issue_q_news">Novedades</string>
+    <string name="issue_how_open">Sin empezar</string>
+    <string name="issue_how_in_progress">Trabajando en esto</string>
+    <string name="issue_how_waiting">Esperando a alguien</string>
+    <string name="issue_d_today">Hoy</string>
+    <string name="issue_d_tomorrow">Mañana</string>
+    <string name="issue_d_friday">El viernes</string>
+    <string name="issue_d_next_week">La otra semana</string>
+    <string name="issue_d_pick">Otra fecha</string>
+    <string name="issue_overdue_since">Se venció el %1$s</string>
+    <string name="issue_stalled_plain">Nadie lo mueve hace %1$d días</string>
+    <string name="issue_history_count">Ver cambios (%1$d)</string>
+    <string name="issue_send">Enviar</string>
+    <string name="issue_comment_ph_plain">Cuenta cómo va o pregunta algo…</string>
+    <string name="issue_edit_title">Editar el título</string>
+</resources>

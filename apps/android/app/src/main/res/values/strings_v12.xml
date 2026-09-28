@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.4 (22): subjects as foolproof tasks (parity with web 8174998 and 861306c). -->
+<resources>
+    <string name="issue_mark_open">Mark open</string>
+    <string name="issue_reopen">Reopen</string>
+    <string name="issue_completed">Subject completed</string>
+    <string name="issue_reopened_toast">Subject reopened</string>
+    <string name="issue_no_owner">No owner</string>
+    <string name="issue_me">Me</string>
+    <string name="issue_quick_ph">Add a subject…</string>
+    <string name="issue_add">Add</string>
+    <string name="issue_done_count">Completed · %1$d</string>
+    <string name="issue_group_by">Group by</string>
+    <string name="issue_by_group">By group</string>
+    <string name="issue_by_person">By owner</string>
+    <string name="issue_mark_done">Mark as done</string>
+    <string name="issue_done_banner">✓ Done</string>
+    <string name="issue_dropped_banner">Dropped</string>
+    <string name="issue_drop">Drop subject</string>
+    <string name="issue_dropped_toast">Subject dropped</string>
+    <string name="issue_q_who">Who does it?</string>
+    <string name="issue_q_when">By when?</string>
+    <string name="issue_q_how">How is it going?</string>
+    <string name="issue_q_news">Updates</string>
+    <string name="issue_how_open">Not started</string>
+    <string name="issue_how_in_progress">Working on it</string>
+    <string name="issue_how_waiting">Waiting on someone</string>
+    <string name="issue_d_today">Today</string>
+    <string name="issue_d_tomorrow">Tomorrow</string>
+    <string name="issue_d_friday">Friday</string>
+    <string name="issue_d_next_week">Next week</string>
+    <string name="issue_d_pick">Other date</string>
+    <string name="issue_overdue_since">Was due %1$s</string>
+    <string name="issue_stalled_plain">Nobody has moved it in %1$d days</string>
+    <string name="issue_history_count">See changes (%1$d)</string>
+    <string name="issue_send">Send</string>
+    <string name="issue_comment_ph_plain">Share progress or ask something…</string>
+    <string name="issue_edit_title">Edit the title</string>
+</resources>

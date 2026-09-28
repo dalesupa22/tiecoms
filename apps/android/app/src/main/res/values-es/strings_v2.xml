@@ -153,7 +153,7 @@
     <string name="issue_no_issues">No hay asuntos abiertos aquí.</string>
     <string name="issue_mine">Míos</string>
     <string name="issue_all_open">Abiertos</string>
-    <string name="issue_closed">Cerrados</string>
+    <string name="issue_closed">Completados</string>
     <string name="issue_page_sub">Lo que quedó pendiente en tus conversaciones, con responsable y fecha. Cada asunto guarda el mensaje donde nació y solo lo ve quien puede leer esa conversación.</string>
     <string name="issue_empty">No hay asuntos con este filtro.</string>
     <string name="issue_in">en %1$s</string>

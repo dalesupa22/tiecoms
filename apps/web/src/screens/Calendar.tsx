@@ -304,7 +304,7 @@ export function AgendaScreen() {
           </div>
 
           <div className="only-mobile list">
-            {events.length === 0 && <div className="empty">{t('cal.empty')}</div>}
+            {events.length === 0 && <div className="empty">{t(view === 'day' ? 'cal.dayEmpty' : 'cal.empty')}</div>}
             {days.map((x) => {
               const list = events.filter((e) => new Date(e.startsAt).toDateString() === x.toDateString());
               if (!list.length) return null;
@@ -316,7 +316,7 @@ export function AgendaScreen() {
               );
             })}
           </div>
-          {events.length === 0 && <div className="empty only-desktop" style={{ marginTop: 12 }}>{t('cal.empty')}</div>}
+          {events.length === 0 && <div className="empty only-desktop" style={{ marginTop: 12 }}>{t(view === 'day' ? 'cal.dayEmpty' : 'cal.empty')}</div>}
           <div className="row" style={{ marginTop: 10 }}><button className="btn small" onClick={() => { const at = new Date(view === 'day' ? anchor : from); at.setHours(10, 0, 0, 0); newAt(at); }}>{t('cal.new')}</button></div>
         </>
       )}

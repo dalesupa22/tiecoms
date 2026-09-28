@@ -182,8 +182,9 @@ export async function listEvents(userId: string, conversationId: string, after: 
   const a = await conversationAccess(pool, userId, conversationId, 'read');
   if (a.lastEventSeq - after > MAX_CATCHUP_EVENTS) return { events: [], resetRequired: true, lastEventSeq: a.lastEventSeq };
   const { rows } = await pool.query(
-    `SELECT e.payload, m.seq AS message_seq, m.deleted_at AS message_deleted_at FROM conversation_events e
+    `SELECT e.payload, m.seq AS message_seq, m.deleted_at AS message_deleted_at, iv.visibility AS issue_visibility FROM conversation_events e
        LEFT JOIN messages m ON m.id = e.message_id
+       LEFT JOIN issues iv ON e.type = 'issue.updated' AND iv.id = (e.payload->'issue'->>'id')::uuid
       WHERE e.conversation_id = $1 AND e.event_seq > $2 ORDER BY e.event_seq LIMIT $3`,
     [conversationId, after, limit],
   );
@@ -195,6 +196,10 @@ export async function listEvents(userId: string, conversationId: string, after: 
     // Un mensaje eliminado después no reenvía su contenido anterior al ponerse al día.
     if (r.message_deleted_at && r.payload.message) {
       return { ...r.payload, message: { ...r.payload.message, body: '', attachments: [], mentions: [], linkPreview: null, linkPreviews: [], reactions: [], deletedAt: new Date(r.message_deleted_at).toISOString() } } as ConversationEvent;
+    }
+    // Un asunto que después quedó restringido no se reenvía por la conversación al ponerse al día.
+    if (r.payload.type === 'issue.updated' && r.issue_visibility && r.issue_visibility !== 'all') {
+      return { type: 'redacted', conversationId, eventSeq: r.payload.eventSeq } as ConversationEvent;
     }
     return r.payload as ConversationEvent;
   });

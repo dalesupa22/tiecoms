@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import type { BootstrapDTO, IssueDTO, IssueEventDTO, IssueStatus } from '@tiecoms/contracts';
+import type { BootstrapDTO, IssueDTO, IssueEventDTO, IssueStatus, IssueVisibility } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
 import { navigate } from '../router.ts';
@@ -7,6 +7,7 @@ import { Avatar, Modal, conversationTitle, orgById, personById } from '../ui.tsx
 import { menuProps, toast, type MenuItem } from '../menu.tsx';
 import { destinationLabel, issueDestinations } from '../quick-search.ts';
 import { QuickActions } from './Quick.tsx';
+import { openDialog } from '../actions.tsx';
 
 export const ISSUE_STATUSES: IssueStatus[] = ['open', 'in_progress', 'waiting', 'done', 'cancelled'];
 const CLOSED = new Set<IssueStatus>(['done', 'cancelled']);
@@ -40,6 +41,19 @@ function membersOf(d: BootstrapDTO, conversationId: string) {
   return (c?.memberIds ?? []).map((id) => personById(d, id)).filter((p): p is NonNullable<typeof p> => !!p && p.kind === 'human');
 }
 
+/** Tareas hijas visibles de un asunto (el servidor solo manda las que puedo ver). */
+export function childrenOf(all: Record<string, IssueDTO>, parentId: string) {
+  return Object.values(all).filter((x) => x.parentIssueId === parentId)
+    .sort((a, b) => Number(isClosed(a)) - Number(isClosed(b)) || a.createdAt.localeCompare(b.createdAt));
+}
+const isRestricted = (i: IssueDTO) => !!i.visibility && i.visibility !== 'all';
+/** «Solo Xertify» / «Privada»: quién la ve, en palabras. */
+export function visibilityLabel(d: BootstrapDTO, i: Pick<IssueDTO, 'visibility' | 'visibleOrgId'>) {
+  if (i.visibility === 'org') return t('task.visOrg', { org: orgById(d, i.visibleOrgId)?.name ?? '' });
+  if (i.visibility === 'private') return t('task.visPrivate');
+  return t('task.visAll');
+}
+
 /** Completar o reabrir con un toque, y «Deshacer» en el aviso: los asuntos se manejan como tareas. */
 export function toggleDone(i: IssueDTO) {
   const prev = i.status;
@@ -57,8 +71,14 @@ export function issueQuickMenu(i: IssueDTO): MenuItem[] {
     { divider: true },
     { label: t('issue.open'), icon: '◆', onSelect: () => navigate(`/c/${i.conversationId}?issue=${i.id}`) },
   ];
+  const top = !i.parentIssueId;
   return [
     { label: t('issue.complete'), icon: '✓', onSelect: () => void toggleDone(i) },
+    ...(top ? [
+      { label: t('task.add'), icon: '＋', onSelect: () => openDialog((close) => <TasksDialog parentId={i.id} onClose={close} />) },
+      ...(i.visibility !== 'org' && i.visibility !== 'private' ? [{ label: t('task.sidechat'), icon: '💬', onSelect: () => openDialog((close) => <SideFromIssueDialog issue={i} onClose={close} />) }] : []),
+      { divider: true },
+    ] : []),
     ...(i.status !== 'in_progress' ? [{ label: t('issue.markInProgress'), icon: '▶', onSelect: () => void set('in_progress') }] : []),
     ...(i.status !== 'waiting' ? [{ label: t('issue.markWaiting'), icon: '⏸', onSelect: () => void set('waiting') }] : []),
     ...(i.status !== 'open' ? [{ label: t('issue.markOpen'), icon: '○', onSelect: () => void set('open') }] : []),
@@ -80,30 +100,66 @@ export function IssueCheck({ i, size = 20 }: { i: IssueDTO; size?: number }) {
   );
 }
 
-export function IssueRow({ i, showWhere = true, showOwner = true, onOpen }: { i: IssueDTO; showWhere?: boolean; showOwner?: boolean; onOpen: (id: string) => void }) {
+export function IssueRow({ i, showWhere = true, showOwner = true, child = false, onOpen }: { i: IssueDTO; showWhere?: boolean; showOwner?: boolean; child?: boolean; onOpen: (id: string) => void }) {
   const d = useClient((s) => s.data)!;
+  const all = useClient((s) => s.issues);
   const owner = personById(d, i.ownerId);
   const conv = d.conversations.find((c) => c.id === i.conversationId);
   const f = issueFlags(i);
   const done = isClosed(i);
+  const kids = i.parentIssueId ? [] : childrenOf(all, i.id);
+  const kidsDone = kids.filter(isClosed).length;
+  const parent = i.parentIssueId ? all[i.parentIssueId] : null;
+  // Una tarea en un sidechat se marca para que se sepa dónde se habla de ella.
+  const inSide = !!parent && parent.conversationId !== i.conversationId;
+  const meta = [
+    showOwner ? owner?.name ?? t('issue.noOwner') : null,
+    !child && parent ? `↳ ${parent.title}` : null,
+    !child && !parent && i.parentIssueId ? t('task.ofHidden') : null,
+    showWhere && conv && !child ? t('issue.in', { name: conversationTitle(d, conv) }) : null,
+    inSide ? `💬 ${t('task.inSide')}` : null,
+    i.commentCount > 0 ? `💬 ${i.commentCount}` : null,
+  ].filter(Boolean);
   return (
-    <div role="button" tabIndex={0} className={`card issue-row ${f.stalledDays || f.overdue ? 'is-jam' : ''} ${done ? 'is-done' : ''}`}
+    <div role="button" tabIndex={0} className={`card issue-row ${child ? 'is-child' : ''} ${f.stalledDays || f.overdue ? 'is-jam' : ''} ${done ? 'is-done' : ''}`}
       onClick={() => onOpen(i.id)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i.id); }} {...menuProps(() => issueQuickMenu(i))}>
-      <IssueCheck i={i} />
+      {child && <span className="child-elbow" aria-hidden>↳</span>}
+      <IssueCheck i={i} size={child ? 18 : 20} />
       <span className="grow" style={{ minWidth: 0 }}>
-        <b className="ellipsis issue-title" style={{ display: 'block' }}>{i.title}</b>
-        {(showOwner || (showWhere && conv) || i.commentCount > 0) && (
-          <span className="small muted ellipsis" style={{ display: 'block' }}>
-            {[showOwner ? owner?.name ?? t('issue.noOwner') : null, showWhere && conv ? t('issue.in', { name: conversationTitle(d, conv) }) : null, i.commentCount > 0 ? `💬 ${i.commentCount}` : null].filter(Boolean).join(' · ')}
-          </span>
-        )}
+        <b className="ellipsis issue-title" style={{ display: 'block' }}>
+          {isRestricted(i) && <span className="lock" title={visibilityLabel(d, i)} aria-label={visibilityLabel(d, i)}>🔒 </span>}{i.title}
+        </b>
+        {meta.length > 0 && <span className="small muted ellipsis" style={{ display: 'block' }}>{meta.join(' · ')}</span>}
       </span>
+      {kids.length > 0 && <span className={`kids-badge ${kidsDone === kids.length ? 'all-done' : ''}`} title={t('task.progress', { done: kidsDone, n: kids.length })}>☑ {kidsDone}/{kids.length}</span>}
       {f.stalledDays > 0 && <span className="jam-badge" title={t('issue.bottleneck')}>⏱ {f.stalledDays === 1 ? t('issue.stalledOne') : t('issue.stalled', { n: f.stalledDays })}</span>}
       {i.dueDate && <span className={`small ${f.overdue ? 'error' : 'muted'}`} style={{ whiteSpace: 'nowrap' }}>{f.overdue ? t('issue.overdue') : f.dueToday ? t('issue.today') : dueLabel(i)}</span>}
       {(i.status === 'in_progress' || i.status === 'waiting' || i.status === 'cancelled') && <StatusPill status={i.status} />}
-      {showOwner && <Avatar person={owner} org={orgById(d, owner?.orgId)} size={24} />}
+      {!i.parentIssueId && !done && (
+        <button className="row-add" title={t('task.add')} aria-label={t('task.add')}
+          onClick={(e) => { e.stopPropagation(); openDialog((close) => <TasksDialog parentId={i.id} onClose={close} />); }}>＋</button>
+      )}
+      {showOwner && <Avatar person={owner} org={orgById(d, owner?.orgId)} size={child ? 20 : 24} />}
     </div>
   );
+}
+
+/** Un asunto con sus tareas debajo, sangradas. */
+export function IssueWithTasks({ i, showWhere, showOwner, onOpen }: { i: IssueDTO; showWhere?: boolean; showOwner?: boolean; onOpen: (id: string) => void }) {
+  const all = useClient((s) => s.issues);
+  const kids = childrenOf(all, i.id);
+  return (
+    <div className="issue-group">
+      <IssueRow i={i} showWhere={showWhere} showOwner={showOwner} onOpen={onOpen} />
+      {kids.length > 0 && <div className="issue-kids">{kids.map((k) => <IssueRow key={k.id} i={k} child showWhere={false} onOpen={onOpen} />)}</div>}
+    </div>
+  );
+}
+
+/** Principales de una lista: los que no son hijos, o hijos cuyo asunto no está en la lista (o no lo veo). */
+function tops(list: IssueDTO[], all: Record<string, IssueDTO>) {
+  const ids = new Set(list.map((x) => x.id));
+  return list.filter((x) => !x.parentIssueId || !all[x.parentIssueId] || !ids.has(x.parentIssueId));
 }
 
 /**
@@ -160,14 +216,16 @@ export function ConversationIssues({ conversationId, canCreate, onOpen }: { conv
   const all = useClient((s) => s.issues);
   const [showDone, setShowDone] = useState(false);
   useEffect(() => { void client.loadIssues({ conversationId }).catch(() => {}); }, [conversationId]);
-  const mine = Object.values(all).filter((i) => i.conversationId === conversationId);
+  const here = Object.values(all).filter((i) => i.conversationId === conversationId);
+  // Las tareas de un asunto de este chat van debajo de él (aunque vivan en un sidechat).
+  const mine = tops(here, all).filter((i) => !i.parentIssueId || all[i.parentIssueId]?.conversationId !== conversationId);
   const open = mine.filter((i) => !isClosed(i)).sort(byUrgency);
   const done = mine.filter(isClosed).sort((a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? ''));
   return (
     <div className="issue-list">
       {canCreate && <QuickAddIssue conversationId={conversationId} />}
       {open.length === 0 && <div className="hint">{t('issue.noIssues')}</div>}
-      <div className="list" style={{ gap: 6 }}>{open.map((i) => <IssueRow key={i.id} i={i} showWhere={false} onOpen={onOpen} />)}</div>
+      <div className="list" style={{ gap: 6 }}>{open.map((i) => <IssueWithTasks key={i.id} i={i} showWhere={false} onOpen={onOpen} />)}</div>
       {done.length > 0 && (
         <>
           <button className="link-btn issue-done-toggle" aria-expanded={showDone} onClick={() => setShowDone(!showDone)}>
@@ -247,14 +305,19 @@ function eventText(d: BootstrapDTO, e: IssueEventDTO) {
     case 'due': return t('issue.ev.due', { to: p.to ? new Date(`${p.to}T12:00:00`).toLocaleDateString(locale(), { day: 'numeric', month: 'short' }) : t('issue.noDue') });
     case 'title': return `${t('issue.ev.title')} → «${p.to}»`;
     case 'waiting': return `${t('issue.ev.waiting')}${p.to ? `: ${orgById(d, p.to)?.name ?? ''}` : ''}`;
+    case 'visibility': return `${t('task.evVis')} → ${p.to === 'all' ? t('task.visAll') : p.to === 'org' ? t('task.visOrgShort') : t('task.visPrivate')}`;
     default: return '';
   }
 }
 
 /** Detalle de un asunto: estado, responsable, fecha, a quién se espera, origen, historial y comentarios. */
-export function IssueDrawer({ id, onClose }: { id: string; onClose: () => void }) {
+export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () => void }) {
   const d = useClient((s) => s.data)!;
+  // Se navega dentro del mismo diálogo: del asunto a una tarea y de vuelta.
+  const [id, setId] = useState(startId);
+  useEffect(() => setId(startId), [startId]);
   const live = useClient((s) => s.issues[id]);
+  const parent = useClient((s) => (live?.parentIssueId ? s.issues[live.parentIssueId] : undefined));
   const [events, setEvents] = useState<IssueEventDTO[]>([]);
   const [comment, setComment] = useState('');
   const [showHistory, setShowHistory] = useState(false);
@@ -266,8 +329,12 @@ export function IssueDrawer({ id, onClose }: { id: string; onClose: () => void }
   const i = live;
   const done = isClosed(i);
   const conv = d.conversations.find((c) => c.id === i.conversationId);
-  const members = membersOf(d, i.conversationId);
-  const orgIds = [...new Set(members.map((p) => p.orgId).filter(Boolean))] as string[];
+  const chatMembers = membersOf(d, i.conversationId);
+  const extra = (i.viewerIds ?? []).filter((u) => !chatMembers.some((p) => p.id === u)).map((u) => personById(d, u)).filter((p): p is NonNullable<typeof p> => !!p);
+  const members = [...(i.visibility === 'org' ? chatMembers.filter((p) => p.orgId === i.visibleOrgId) : i.visibility === 'private' ? [] : chatMembers), ...extra,
+    ...(i.visibility === 'private' ? chatMembers.filter((p) => (i.viewerIds ?? []).includes(p.id)) : [])]
+    .filter((p, k, arr) => arr.findIndex((x) => x.id === p.id) === k);
+  const orgIds = [...new Set(chatMembers.map((p) => p.orgId).filter(Boolean))] as string[];
   const f = issueFlags(i);
   const canSeeOrigin = !!conv && i.originMessageSeq !== null && i.originMessageSeq > conv.historyFromSeq;
   const requester = personById(d, i.requestedBy);
@@ -291,7 +358,10 @@ export function IssueDrawer({ id, onClose }: { id: string; onClose: () => void }
           onBlur={(e) => { const v = e.currentTarget.value.trim(); if (v.length >= 2 && v !== i.title) void update({ title: v }); else e.currentTarget.value = i.title; }} />
         <span className="issue-title-pen" aria-hidden>✎</span>
       </label>
-      <div className="small muted">{requester ? t('issue.requestedBy', { name: requester.name }) : t('issue.manual')}</div>
+      {i.parentIssueId && (parent
+        ? <button className="link-btn parent-link" onClick={() => setId(parent.id)}>↑ {t('task.partOf', { title: parent.title })}</button>
+        : <div className="small muted">{t('task.ofHidden')}</div>)}
+      <div className="small muted">{requester ? t('issue.requestedBy', { name: requester.name }) : t('issue.manual')}{isRestricted(i) ? <> · <b>🔒 {visibilityLabel(d, i)}</b></> : null}</div>
 
       {done ? (
         <div className={`issue-done-banner ${i.status === 'cancelled' ? 'is-dropped' : ''}`}>
@@ -345,6 +415,9 @@ export function IssueDrawer({ id, onClose }: { id: string; onClose: () => void }
           )}
         </div>
       )}
+
+      {!i.parentIssueId && <TasksSection parentId={i.id} onOpen={setId} />}
+      {i.parentIssueId && i.createdBy === d.me.id && <VisibilityChoice issue={i} />}
 
       <div className="issue-q">
         <div className="issue-q-label">{t('issue.qNews')}{comments.length ? ` · ${comments.length}` : ''}</div>
@@ -411,25 +484,29 @@ export function IssuesScreen() {
   useEffect(() => { client.loadIssues({}).catch((e) => setError(errorText(e))); }, []);
   const remember = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* sin almacenamiento */ } };
   const visibleConvs = useMemo(() => new Set(d.conversations.map((c) => c.id)), [d]);
+  // Los restringidos pueden ser de un chat que no leo (me asignaron una tarea): el servidor ya filtró.
   const list = Object.values(all)
-    .filter((i) => visibleConvs.has(i.conversationId))
+    .filter((i) => visibleConvs.has(i.conversationId) || isRestricted(i))
     .filter((i) => (filter === 'closed' ? isClosed(i) : !isClosed(i) && (filter === 'open' || i.ownerId === d.me.id)))
     .sort(filter === 'closed' ? (a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? '') : byUrgency);
   // Por grupo: la conversación con su espacio. Por persona: el responsable, yo primero y «Sin responsable» al final.
   const NONE = '__none';
   const buckets = new Map<string, IssueDTO[]>();
-  for (const i of list) { const k = groupBy === 'person' ? i.ownerId ?? NONE : i.conversationId; buckets.set(k, [...(buckets.get(k) ?? []), i]); }
+  // Por grupo, las tareas van debajo de su asunto (en la sección del asunto); por responsable, sueltas.
+  const shown = groupBy === 'group' ? tops(list, all) : list;
+  const convOf = (i: IssueDTO) => (i.parentIssueId && all[i.parentIssueId] ? all[i.parentIssueId]!.conversationId : i.conversationId);
+  for (const i of shown) { const k = groupBy === 'person' ? i.ownerId ?? NONE : convOf(i); buckets.set(k, [...(buckets.get(k) ?? []), i]); }
   const sectionTitle = (k: string) => {
     if (groupBy === 'person') return k === NONE ? t('issue.noOwner') : `${personById(d, k)?.name ?? t('common.participant')}${k === d.me.id ? ` ${t('common.you')}` : ''}`;
     const c = d.conversations.find((x) => x.id === k);
     const ws = c?.workspaceId ? d.workspaces.find((w) => w.id === c.workspaceId) : null;
-    return c ? [ws?.name, conversationTitle(d, c)].filter(Boolean).join(' · ') : '';
+    return c ? [ws?.name, conversationTitle(d, c)].filter(Boolean).join(' · ') : t('task.sharedWithMe');
   };
   const sections = [...buckets.entries()].sort(([a, ai], [b, bi]) => groupBy === 'person'
     ? (Number(b === d.me.id) - Number(a === d.me.id)) || (Number(a === NONE) - Number(b === NONE)) || sectionTitle(a).localeCompare(sectionTitle(b))
     : bi.length - ai.length || sectionTitle(a).localeCompare(sectionTitle(b)));
   const label = { mine: t('issue.mine'), open: t('issue.allOpen'), closed: t('issue.closed') };
-  const count = (f: 'mine' | 'open' | 'closed') => Object.values(all).filter((i) => visibleConvs.has(i.conversationId) && (f === 'closed' ? isClosed(i) : !isClosed(i) && (f === 'open' || i.ownerId === d.me.id))).length;
+  const count = (f: 'mine' | 'open' | 'closed') => Object.values(all).filter((i) => (visibleConvs.has(i.conversationId) || isRestricted(i)) && (f === 'closed' ? isClosed(i) : !isClosed(i) && (f === 'open' || i.ownerId === d.me.id))).length;
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 900 }}>
       <div className="row page-head"><h1 className="grow">{t('nav.issues')}</h1><QuickActions /></div>
@@ -448,10 +525,191 @@ export function IssuesScreen() {
       {sections.map(([k, items]) => (
         <section key={k} style={{ marginBottom: 18 }}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>{sectionTitle(k)} · {items.length}</div>
-          <div className="list" style={{ gap: 6 }}>{items.map((i) => <IssueRow key={i.id} i={i} showWhere={groupBy === 'person'} showOwner={groupBy === 'group'} onOpen={setOpen} />)}</div>
+          <div className="list" style={{ gap: 6 }}>{items.map((i) => groupBy === 'group'
+            ? <IssueWithTasks key={i.id} i={i} showWhere={false} onOpen={setOpen} />
+            : <IssueRow key={i.id} i={i} showWhere showOwner={false} onOpen={setOpen} />)}</div>
         </section>
       ))}
       {open && <IssueDrawer id={open} onClose={() => setOpen(null)} />}
     </div></div>
+  );
+}
+
+// ---------- Tareas derivadas de un asunto ----------
+
+/** Visibilidad por defecto de una tarea: si en el chat hay más de una empresa, «solo mi empresa». */
+function defaultVisibility(d: BootstrapDTO, conversationId: string): IssueVisibility {
+  const orgs = new Set(membersOf(d, conversationId).map((p) => p.orgId ?? 'guest'));
+  return orgs.size > 1 && d.me.primaryOrgId ? 'org' : 'all';
+}
+
+/**
+ * Alta de una tarea: título, ¿quién la hace? (del chat o cualquier contacto) y ¿quién la ve?
+ * Si la persona no está en el chat, la tarea no puede ser «de todo el chat»: pasa a privada sola.
+ * En un sidechat (conversationId), la ven solo los del sidechat.
+ */
+function TaskQuickAdd({ parent, conversationId, autoFocus }: { parent: IssueDTO; conversationId?: string; autoFocus?: boolean }) {
+  const d = useClient((s) => s.data)!;
+  const where = conversationId ?? parent.conversationId;
+  const inSide = where !== parent.conversationId;
+  const members = membersOf(d, where);
+  const [title, setTitle] = useState('');
+  const [ownerId, setOwnerId] = useState(d.me.id);
+  const [vis, setVis] = useState<IssueVisibility>(() => (inSide ? 'all' : defaultVisibility(d, parent.conversationId)));
+  const [busy, setBusy] = useState(false);
+  const [pickOther, setPickOther] = useState(false);
+  const outsider = !members.some((p) => p.id === ownerId);
+  const effective: IssueVisibility = outsider && vis === 'all' ? 'private' : vis;
+  const myOrg = orgById(d, d.me.primaryOrgId);
+  const contacts = d.people.filter((p) => p.kind === 'human' && !members.some((m) => m.id === p.id) && p.id !== d.me.id);
+  const owner = personById(d, ownerId);
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    const text = title.trim();
+    if (text.length < 2 || busy) return;
+    setBusy(true);
+    try {
+      await client.createChildIssue(parent.id, { title: text, ownerId, visibility: effective, ...(inSide ? { conversationId: where } : {}) });
+      setTitle('');
+    } catch (err) { toast(errorText(err)); } finally { setBusy(false); }
+  }
+  const visOptions: [IssueVisibility, string][] = inSide
+    ? [['all', t('task.visSide')], ['private', t('task.visPrivate')]]
+    : [['all', t('task.visAll')], ...(myOrg ? [['org', t('task.visOrg', { org: myOrg.name })] as [IssueVisibility, string]] : []), ['private', t('task.visPrivate')]];
+  return (
+    <form className="task-add" onSubmit={submit}>
+      <div className="issue-quick" style={{ marginBottom: 0 }}>
+        <span className="issue-check ghost" aria-hidden>＋</span>
+        <input className="grow" autoFocus={autoFocus} placeholder={t('task.ph')} maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} aria-label={t('task.title')}
+          onKeyDown={(e) => { if (e.key === 'Escape') setTitle(''); }} />
+        <button className="btn primary small" disabled={busy || title.trim().length < 2}>{t('issue.add')}</button>
+      </div>
+      {title.length > 0 && (
+        <>
+          <div className="chips" aria-label={t('issue.qWho')}>
+            <span className="small muted">{t('issue.qWho')}</span>
+            {members.map((p) => (
+              <button type="button" key={p.id} className={`chip-person ${ownerId === p.id ? 'on' : ''}`} aria-pressed={ownerId === p.id} onClick={() => setOwnerId(p.id)}>
+                <Avatar person={p} org={orgById(d, p.orgId)} size={20} /> {p.id === d.me.id ? t('issue.me') : p.name.split(' ')[0]}
+              </button>
+            ))}
+            {outsider && owner && <button type="button" className="chip-person on"><Avatar person={owner} org={orgById(d, owner.orgId)} size={20} /> {owner.name.split(' ')[0]}</button>}
+            {contacts.length > 0 && (pickOther
+              ? <select className="input" autoFocus style={{ maxWidth: 220 }} value="" onChange={(e) => { if (e.target.value) { setOwnerId(e.target.value); setPickOther(false); } }}>
+                  <option value="">{t('task.pickPerson')}</option>
+                  {contacts.map((p) => <option key={p.id} value={p.id}>{p.name} · {orgById(d, p.orgId)?.name ?? t('common.guest')}</option>)}
+                </select>
+              : <button type="button" className="chip-person ghost" onClick={() => setPickOther(true)}>＋ {t('task.otherPerson')}</button>)}
+          </div>
+          <div className="chips" aria-label={t('task.whoSees')}>
+            <span className="small muted">{t('task.whoSees')}</span>
+            {visOptions.map(([v, label]) => (
+              <button type="button" key={v} className={`chip ${effective === v ? 'on' : ''}`} aria-pressed={effective === v}
+                disabled={outsider && v === 'all'} onClick={() => setVis(v)}>{v === 'all' ? '👁' : '🔒'} {label}</button>
+            ))}
+          </div>
+          {outsider && owner && <div className="hint">{t('task.outsiderHint', { name: owner.name.split(' ')[0]! })}</div>}
+        </>
+      )}
+    </form>
+  );
+}
+
+/** «Tareas» dentro del asunto: la lista (lo que yo puedo ver) y el alta. */
+function TasksSection({ parentId, onOpen, conversationId }: { parentId: string; onOpen: (id: string) => void; conversationId?: string }) {
+  const all = useClient((s) => s.issues);
+  const parent = all[parentId];
+  if (!parent) return null;
+  const kids = childrenOf(all, parentId);
+  const done = kids.filter(isClosed).length;
+  const closed = isClosed(parent);
+  return (
+    <div className="issue-q">
+      <div className="issue-q-label">{t('task.section')}{kids.length ? ` · ${done}/${kids.length}` : ''}</div>
+      {kids.length > 0 && <div className="list" style={{ gap: 4 }}>{kids.map((k) => <IssueRow key={k.id} i={k} child showWhere={false} onOpen={onOpen} />)}</div>}
+      {!closed && <TaskQuickAdd parent={parent} conversationId={conversationId} />}
+      {!closed && !kids.length && <div className="hint">{t('task.hint')}</div>}
+    </div>
+  );
+}
+
+/** Diálogo rápido «＋ Tarea» (desde el menú del asunto, el botón de la fila o un sidechat). */
+export function TasksDialog({ parentId, conversationId, onClose }: { parentId: string; conversationId?: string; onClose: () => void }) {
+  const parent = useClient((s) => s.issues[parentId]);
+  const [open, setOpen] = useState<string | null>(null);
+  if (open) return <IssueDrawer id={open} onClose={onClose} />;
+  if (!parent) return null;
+  return (
+    <Modal title={t('task.dialogTitle', { title: parent.title })} onClose={onClose}>
+      <TasksSection parentId={parentId} conversationId={conversationId} onOpen={setOpen} />
+      <div className="modal-actions"><button className="btn primary" onClick={onClose}>{t('common.done')}</button></div>
+    </Modal>
+  );
+}
+
+/** Quién ve la tarea (solo quien la creó lo cambia). */
+function VisibilityChoice({ issue }: { issue: IssueDTO }) {
+  const d = useClient((s) => s.data)!;
+  const myOrg = orgById(d, d.me.primaryOrgId);
+  const set = (visibility: IssueVisibility) => client.updateIssue(issue.id, { visibility }).catch((e) => toast(errorText(e)));
+  const opts: [IssueVisibility, string][] = [['all', t('task.visAll')], ...(myOrg ? [['org', t('task.visOrg', { org: myOrg.name })] as [IssueVisibility, string]] : []), ['private', t('task.visPrivate')]];
+  return (
+    <div className="issue-q">
+      <div className="issue-q-label">{t('task.whoSees')}</div>
+      <div className="chips">
+        {opts.map(([v, label]) => <button key={v} className={`chip ${issue.visibility === v ? 'on' : ''}`} aria-pressed={issue.visibility === v} onClick={() => void set(v)}>{v === 'all' ? '👁' : '🔒'} {label}</button>)}
+      </div>
+    </div>
+  );
+}
+
+/** «Hablar aparte»: un sidechat desde el asunto con quienes elija; sus tareas quedan colgadas del asunto. */
+export function SideFromIssueDialog({ issue, onClose }: { issue: IssueDTO; onClose: () => void }) {
+  const d = useClient((s) => s.data)!;
+  const others = membersOf(d, issue.conversationId).filter((p) => p.id !== d.me.id);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [question, setQuestion] = useState('');
+  const [busy, setBusy] = useState(false);
+  const toggle = (id: string) => setPicked((x) => (x.includes(id) ? x.filter((y) => y !== id) : [...x, id]));
+  const go = async () => {
+    setBusy(true);
+    try {
+      const r = await client.openSide(issue.conversationId, { issueId: issue.id, userIds: picked, ...(question.trim() ? { question: question.trim() } : {}) });
+      onClose();
+      navigate(`/c/${r.id}`);
+    } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title={t('task.sidechat')} onClose={onClose}>
+      <div className="muted">{t('task.sideExplain', { title: issue.title })}</div>
+      <div className="chips" style={{ margin: '12px 0' }}>
+        {others.map((p) => (
+          <button key={p.id} className={`chip-person ${picked.includes(p.id) ? 'on' : ''}`} aria-pressed={picked.includes(p.id)} onClick={() => toggle(p.id)}>
+            <Avatar person={p} org={orgById(d, p.orgId)} size={20} /> {p.name.split(' ')[0]}
+          </button>
+        ))}
+      </div>
+      <input className="input" placeholder={t('task.sideFirst')} value={question} onChange={(e) => setQuestion(e.target.value)} />
+      <div className="modal-actions">
+        <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn primary" disabled={busy || !picked.length} onClick={() => void go()}>💬 {t('task.sideGo')}</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Franja en un sidechat que salió de un asunto: el asunto, su avance y «＋ Tarea». */
+export function SideIssueStrip({ sideId, issueId, onOpen }: { sideId: string; issueId: string; onOpen: (id: string) => void }) {
+  const all = useClient((s) => s.issues);
+  useEffect(() => { if (!all[issueId]) void client.issueDetail(issueId).catch(() => {}); }, [issueId]);
+  const parent = all[issueId];
+  if (!parent) return null;
+  const kids = childrenOf(all, issueId);
+  const done = kids.filter(isClosed).length;
+  return (
+    <div className="side-issue-strip">
+      <button className="grow ellipsis link-btn" onClick={() => onOpen(issueId)}>◆ {parent.title}{kids.length ? ` · ☑ ${done}/${kids.length}` : ''}</button>
+      <button className="btn small" onClick={() => openDialog((close) => <TasksDialog parentId={issueId} conversationId={sideId} onClose={close} />)}>＋ {t('task.short')}</button>
+    </div>
   );
 }

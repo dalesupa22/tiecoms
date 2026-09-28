@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
+  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type UserDTO, normalizeEmoji,
 } from '@tiecoms/contracts';
@@ -349,6 +349,12 @@ export class TieComsClient {
     if (e.type === 'scope.changed') { this.scheduleBootstrap(); void this.loadIssues({ open: true }).catch(() => {}); }
     if (e.type === 'prefs.updated') this.scheduleBootstrap();
     if (e.type === 'me.dnd') this.patchMe({ dndUntil: e.dndUntil });
+    // Asuntos restringidos ('org' o 'private') llegan por la cuenta, no por la conversación.
+    if (e.type === 'issue.updated') { this.putIssues([e.issue]); this.recountIssues(e.issue.conversationId); }
+    if (e.type === 'issue.hidden') {
+      const next = { ...this.state.issues }; delete next[e.issueId];
+      this.set({ issues: next }); this.recountIssues(e.conversationId);
+    }
     if (e.type === 'me.sleep') this.patchMe({ sleep: e.sleep });
     if (e.type === 'reminders.changed') void this.loadReminders().catch(() => {});
     if (e.type === 'scheduled.updated') this.putScheduled(e.scheduled);
@@ -611,19 +617,25 @@ export class TieComsClient {
     this.putIssues(r.issues);
     return r.issues;
   }
-  async createIssue(conversationId: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; originMessageId?: string | null }) {
+  /** Tarea hija de un asunto (en su chat o, con conversationId, en un sidechat que salió de él). */
+  async createChildIssue(parentId: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; visibility?: IssueVisibility; viewerIds?: string[]; conversationId?: string }) {
+    const i = await this.request<IssueDTO>(`/issues/${parentId}/children`, { method: 'POST', json: input });
+    this.putIssues([i]); this.recountIssues(i.conversationId);
+    return i;
+  }
+  async createIssue(conversationId: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; originMessageId?: string | null; visibility?: IssueVisibility; viewerIds?: string[]; parentIssueId?: string | null }) {
     const i = await this.request<IssueDTO>(`/conversations/${conversationId}/issues`, { method: 'POST', json: input });
     this.putIssues([i]); this.recountIssues(conversationId);
     return i;
   }
-  async updateIssue(id: string, patch: Partial<Pick<IssueDTO, 'title' | 'status' | 'ownerId' | 'dueDate' | 'waitingOnOrgId'>>) {
+  async updateIssue(id: string, patch: Partial<Pick<IssueDTO, 'title' | 'status' | 'ownerId' | 'dueDate' | 'waitingOnOrgId' | 'visibility' | 'viewerIds'>>) {
     const i = await this.request<IssueDTO>(`/issues/${id}`, { method: 'PATCH', json: patch });
     this.putIssues([i]); this.recountIssues(i.conversationId);
     return i;
   }
   async issueDetail(id: string) {
-    const r = await this.request<{ issue: IssueDTO; events: IssueEventDTO[] }>(`/issues/${id}`);
-    this.putIssues([r.issue]);
+    const r = await this.request<{ issue: IssueDTO; events: IssueEventDTO[]; children?: IssueDTO[] }>(`/issues/${id}`);
+    this.putIssues([r.issue, ...(r.children ?? [])]);
     return r;
   }
   async commentIssue(id: string, body: string) {
@@ -885,7 +897,7 @@ export class TieComsClient {
   }
 
   /** Conversación lateral privada desde un mensaje (no publica nada en el origen). */
-  async openSide(conversationId: string, input: { messageId: string; userIds: string[]; question?: string }) {
+  async openSide(conversationId: string, input: { messageId?: string; issueId?: string; userIds: string[]; question?: string }) {
     const r = await this.request<{ id: string }>(`/conversations/${conversationId}/side`, { method: 'POST', json: input });
     await this.loadBootstrap();
     return r;

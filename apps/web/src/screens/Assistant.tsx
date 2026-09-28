@@ -171,7 +171,7 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
   async function ask(content: string, retry = false) {
     const q = content.trim();
     if (!q || busy) return;
-    if (!requestConsent('text', () => { void ask(q, retry); })) { setText(q); return; }
+    if (!requestConsent('text', () => { void ask(q, retry); })) return;
     setError(null); setText(''); setInterim('');
     const voice = byVoice.current; byVoice.current = false;
     // «Envíalos» con borradores pendientes: se confirman aquí mismo, sin volver a llamar al modelo.

@@ -67,6 +67,43 @@ final class DecodingTests: XCTestCase {
 
         let members = try decode(ConversationEvent.self, #"{"type":"members.changed","conversationId":"c1","eventSeq":8,"memberIds":["a","b"]}"#)
         XCTAssertEqual(members, .membersChanged(conversationId: "c1", eventSeq: 8, memberIds: ["a", "b"]))
+        guard case .membersChanged(_, _, _, nil) = members else { return XCTFail("sin adminIds (servidor anterior) queda nil") }
+    }
+
+    /// docs/ADMINS-INTEGRACIONES.md §1: adminIds y createdBy son opcionales (un servidor viejo no los manda).
+    func testConversationAdminFieldsOptional() throws {
+        let old = try decode(ConversationDTO.self, Self.conversationJSON)
+        XCTAssertNil(old.adminIds)
+        XCTAssertNil(old.createdBy)
+        let new = try decode(ConversationDTO.self, #"{"id":"c3","kind":"group","memberIds":["u1","u2"],"adminIds":["u1"],"createdBy":"u1","canManage":true}"#)
+        XCTAssertEqual(new.adminIds, ["u1"])
+        XCTAssertEqual(new.createdBy, "u1")
+        let nulls = try decode(ConversationDTO.self, #"{"id":"c4","kind":"multi","adminIds":null,"createdBy":null}"#)
+        XCTAssertNil(nulls.adminIds)
+        XCTAssertNil(nulls.createdBy)
+        let broken = try decode(ConversationDTO.self, #"{"id":"c5","kind":"group","adminIds":"u1","createdBy":7}"#)
+        XCTAssertNil(broken.adminIds, "un tipo inesperado no invalida la conversación")
+        XCTAssertNil(broken.createdBy)
+    }
+
+    func testMembersChangedWithAdminIds() throws {
+        let e = try decode(ConversationEvent.self, #"{"type":"members.changed","conversationId":"c1","eventSeq":9,"memberIds":["a","b"],"adminIds":["a"]}"#)
+        XCTAssertEqual(e, .membersChanged(conversationId: "c1", eventSeq: 9, memberIds: ["a", "b"], adminIds: ["a"]))
+        XCTAssertEqual(e.eventSeq, 9)
+        XCTAssertEqual(e.conversationId, "c1")
+    }
+
+    func testAdminAndIntegrationSystemTextsEsEn() {
+        let saved = L10n.choice
+        defer { L10n.choice = saved }
+        let bodies = [#"{"k":"admin.added","name":"Ana"}"#, #"{"k":"admin.removed","name":"Ana"}"#,
+                      #"{"k":"integration.added","name":"Jira"}"#, #"{"k":"integration.removed","name":"Jira"}"#]
+        L10n.choice = .es
+        XCTAssertEqual(bodies.map(L10n.systemText), ["Ana ahora es admin del grupo.", "Ana ya no es admin del grupo.",
+                                                      "Se conectó la integración «Jira».", "Se desconectó la integración «Jira»."])
+        L10n.choice = .en
+        XCTAssertEqual(bodies.map(L10n.systemText), ["Ana is now a group admin.", "Ana is no longer a group admin.",
+                                                      "The “Jira” integration was connected.", "The “Jira” integration was disconnected."])
     }
 
     func testUnknownRedactedAndBrokenEventsKeepSeq() throws {

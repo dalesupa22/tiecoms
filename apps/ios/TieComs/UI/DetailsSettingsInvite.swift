@@ -72,11 +72,11 @@ struct ConversationDetailsView: View {
                             Button { adding = true } label: { Label(L("dlg.addToGroup"), systemImage: "person.badge.plus") }
                                 .accessibilityIdentifier("details.addPeople")
                         }
-                        ForEach(regular) { p in PersonRow(d: d, p: p, isMe: p.id == d.me.id) }
+                        ForEach(regular) { p in PersonRow(d: d, p: p, isMe: p.id == d.me.id, conv: c) }
                     }
                     if !guests.isEmpty {
                         Section(L("common.guests")) {
-                            ForEach(guests) { p in PersonRow(d: d, p: p, isMe: p.id == d.me.id) }
+                            ForEach(guests) { p in PersonRow(d: d, p: p, isMe: p.id == d.me.id, conv: c) }
                         }
                     }
                     if c.kind == .multi {
@@ -250,16 +250,41 @@ private struct PersonRow: View {
     }
     @State private var report = false
     @State private var confirmBlock = false
+    /// Acción de admin pendiente de confirmar (docs/ADMINS-INTEGRACIONES.md §1).
+    @State private var pendingAction: GroupMemberAction?
     var d: BootstrapDTO
     var p: PersonDTO
     var isMe: Bool
+    /// Grupo del que se muestran los participantes: etiquetas «Admin»/«Bot» y menú de admin.
+    var conv: ConversationDTO? = nil
+
+    private func run(_ a: GroupMemberAction) {
+        guard let conv else { return }
+        Task {
+            do {
+                try await store.perform(a, conversationId: conv.id, userId: p.id)
+                store.show(L("admin.done.\(a.rawValue)", ["name": p.name]))
+            } catch { store.show(L10n.errorText(error)) }
+        }
+    }
 
     var body: some View {
         let org = Naming.org(d, p.orgId)
+        let adminActions = conv.map { GroupAdmins.actions($0, person: p, me: d.me.id) } ?? []
         HStack(spacing: 12) {
             Avatar(person: p, org: org, size: 38, badge: true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(p.name + (isMe ? " " + L("common.you") : "")).font(.body)
+                HStack(spacing: 6) {
+                    Text(p.name + (isMe ? " " + L("common.you") : "")).font(.body)
+                    if let conv, let key = GroupAdmins.badgeKey(conv, person: p) {
+                        Text(L(key))
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Theme.accentText)
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(Capsule().fill(Theme.orange.opacity(0.14)))
+                            .accessibilityIdentifier("person.badge.\(p.id)")
+                    }
+                }
                 let line = [p.title, p.area, org?.name ?? (p.guest ? L("common.guest") : L("common.noCompany"))].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                 Text(line).font(.subheadline).foregroundStyle(Theme.textSecondary)
                 if p.guest {
@@ -283,6 +308,16 @@ private struct PersonRow: View {
             if !isMe && p.kind == "human" {
                 Button { message() } label: { Label(L("people.sendMessage"), systemImage: "message") }
             }
+            if !adminActions.isEmpty {
+                Section {
+                    ForEach(adminActions) { a in
+                        Button(role: a.isDestructive ? .destructive : nil) { pendingAction = a } label: {
+                            Label(L(a.labelKey), systemImage: a.systemImage)
+                        }
+                        .accessibilityIdentifier("person.\(a.rawValue).\(p.id)")
+                    }
+                }
+            }
             if !isMe {
                 Button { report = true } label: { Label(L("safety.reportUser"), systemImage: "flag") }
                 Button(role: .destructive) { confirmBlock = true } label: {
@@ -291,6 +326,13 @@ private struct PersonRow: View {
             }
         }
         .sheet(isPresented: $report) { ReportContentSheet(userId: p.id) }
+        .confirmationDialog(pendingAction.map { L($0.confirmKey, ["name": p.name]) } ?? "",
+                            isPresented: Binding(get: { pendingAction != nil }, set: { if !$0 { pendingAction = nil } }),
+                            titleVisibility: .visible, presenting: pendingAction) { a in
+            Button(L(a.labelKey), role: a.isDestructive ? .destructive : nil) { run(a) }
+                .accessibilityIdentifier("person.confirm.\(a.rawValue)")
+            Button(L("common.cancel"), role: .cancel) {}
+        }
         .confirmationDialog(L(store.blockedUserIds.contains(p.id) ? "safety.unblock" : "safety.blockConfirm"), isPresented: $confirmBlock, titleVisibility: .visible) {
             Button(L(store.blockedUserIds.contains(p.id) ? "safety.unblock" : "safety.block"), role: .destructive) {
                 Task {

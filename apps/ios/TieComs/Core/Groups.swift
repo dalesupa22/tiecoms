@@ -559,3 +559,58 @@ extension AppStore {
         return Naming.isGuest(d, c)
     }
 }
+
+// MARK: - Admins de grupo (docs/ADMINS-INTEGRACIONES.md §1)
+
+/// Qué se puede hacer sobre un participante desde Información del grupo › Participantes.
+/// El API aplica las reglas; aquí solo se oculta lo que no se puede.
+enum GroupMemberAction: String, CaseIterable, Identifiable, Sendable {
+    case makeAdmin, removeAdmin, removeMember, stepDown
+    var id: String { rawValue }
+    var labelKey: String { "admin.action.\(rawValue)" }
+    var confirmKey: String { "admin.confirm.\(rawValue)" }
+    var systemImage: String {
+        switch self {
+        case .makeAdmin: return "star"
+        case .removeAdmin: return "star.slash"
+        case .removeMember: return "person.badge.minus"
+        case .stepDown: return "star.slash"
+        }
+    }
+    var isDestructive: Bool { self != .makeAdmin }
+}
+
+enum GroupAdmins {
+    /// Solo estos tipos tienen admins (el API manda `adminIds` solo en ellos).
+    static func hasAdmins(_ c: ConversationDTO) -> Bool { c.kind == .group || c.kind == .internal || c.kind == .multi }
+
+    static func isBot(_ p: PersonDTO) -> Bool { p.kind == "agent" }
+
+    static func isAdmin(_ c: ConversationDTO, _ userId: String) -> Bool { hasAdmins(c) && (c.adminIds?.contains(userId) ?? false) }
+
+    /// Acciones del menú de un participante, en el orden en que se muestran.
+    /// - Sin `adminIds` (servidor anterior) no se ofrecen nombrar/quitar admin: el endpoint no existe.
+    /// - A quien creó el grupo no se le quita el admin ni se le saca; terceros y bots no son admins; a un bot no se le saca.
+    static func actions(_ c: ConversationDTO, person p: PersonDTO, me: String) -> [GroupMemberAction] {
+        guard hasAdmins(c) else { return [] }
+        let supported = c.adminIds != nil
+        let creator = c.createdBy != nil && c.createdBy == p.id
+        let admin = isAdmin(c, p.id)
+        if p.id == me {
+            return supported && admin && !creator ? [.stepDown] : []
+        }
+        guard c.canManage else { return [] }
+        var out: [GroupMemberAction] = []
+        if supported && !admin && !p.guest && !isBot(p) { out.append(.makeAdmin) }
+        if supported && admin && !creator { out.append(.removeAdmin) }
+        if !creator && !isBot(p) { out.append(.removeMember) }
+        return out
+    }
+
+    /// Etiqueta junto al nombre: «Bot» para agentes, «Admin» si está en `adminIds`.
+    static func badgeKey(_ c: ConversationDTO, person p: PersonDTO) -> String? {
+        if isBot(p) { return "admin.badge.bot" }
+        if isAdmin(c, p.id) { return "admin.badge.admin" }
+        return nil
+    }
+}

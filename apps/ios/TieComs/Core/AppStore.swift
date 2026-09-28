@@ -654,8 +654,8 @@ final class AppStore {
         switch e {
         case .messageCreated(_, _, let m), .messageUpdated(_, _, let m):
             local.messages = AppStore.upsert(local.messages, m)
-        case .membersChanged(let id, _, let ids):
-            patchMeta(id) { $0.memberIds = ids }
+        case .membersChanged(let id, _, let ids, let admins):
+            patchMeta(id) { $0.memberIds = ids; if let admins { $0.adminIds = admins } }
             scheduleBootstrap()
         case .issueUpdated, .pinsChanged, .calendarUpdated:
             break // sus efectos van en sideEffects (también sin mensajes cargados)

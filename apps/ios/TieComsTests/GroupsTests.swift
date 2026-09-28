@@ -295,3 +295,126 @@ final class GroupsTests: XCTestCase {
         XCTAssertTrue(store.isGuest("x1"))
     }
 }
+
+/// docs/ADMINS-INTEGRACIONES.md §1: etiquetas «Admin»/«Bot» y qué acciones de admin ve cada quien.
+final class GroupAdminsTests: XCTestCase {
+    private func conv(_ extra: String, kind: String = "group") throws -> ConversationDTO {
+        try dec(ConversationDTO.self, #"{"id":"g","workspaceId":"w","kind":"\#(kind)","memberIds":["me","crea","adm","col","ter","bot"]\#(extra)}"#)
+    }
+    private func person(_ id: String, kind: String = "human", guest: Bool = false) throws -> PersonDTO {
+        try dec(PersonDTO.self, #"{"id":"\#(id)","name":"\#(id)","kind":"\#(kind)","guest":\#(guest)}"#)
+    }
+    private func acts(_ c: ConversationDTO, _ p: PersonDTO) -> [GroupMemberAction] { GroupAdmins.actions(c, person: p, me: "me") }
+
+    func testAdminSeesActionsPerParticipant() throws {
+        let c = try conv(#","canManage":true,"adminIds":["crea","adm","me"],"createdBy":"crea""#)
+        XCTAssertEqual(acts(c, try person("crea")), [], "a quien creó el grupo no se le quita el admin ni se le saca")
+        XCTAssertEqual(acts(c, try person("adm")), [.removeAdmin, .removeMember], "un admin saca también a otros admins")
+        XCTAssertEqual(acts(c, try person("col")), [.makeAdmin, .removeMember])
+        XCTAssertEqual(acts(c, try person("ter", guest: true)), [.removeMember], "un tercero no puede ser admin")
+        XCTAssertEqual(acts(c, try person("bot", kind: "agent")), [], "un bot no es admin ni se saca desde aquí")
+        XCTAssertEqual(acts(c, try person("me")), [.stepDown], "sobre mí: «Dejar de ser admin»")
+    }
+
+    func testCreatorCannotStepDown() throws {
+        let c = try conv(#","canManage":true,"adminIds":["me"],"createdBy":"me""#)
+        XCTAssertEqual(acts(c, try person("me")), [])
+        XCTAssertEqual(acts(c, try person("col")), [.makeAdmin, .removeMember])
+    }
+
+    func testNonAdminSeesNothing() throws {
+        let c = try conv(#","canManage":false,"adminIds":["crea"],"createdBy":"crea""#)
+        for id in ["crea", "adm", "col", "me"] { XCTAssertEqual(acts(c, try person(id)), [], id) }
+    }
+
+    /// Administro el espacio (canManage) sin estar en adminIds: gestiono, pero no hay «Dejar de ser admin».
+    func testSpaceAdminNotInAdminIds() throws {
+        let c = try conv(#","canManage":true,"adminIds":["crea"],"createdBy":"crea""#)
+        XCTAssertEqual(acts(c, try person("me")), [])
+        XCTAssertEqual(acts(c, try person("col")), [.makeAdmin, .removeMember])
+    }
+
+    /// Servidor anterior (sin adminIds): solo «Quitar del grupo», que ya existía; sin etiquetas «Admin».
+    func testOldServerWithoutAdminIds() throws {
+        let c = try conv(#","canManage":true"#)
+        XCTAssertEqual(acts(c, try person("col")), [.removeMember])
+        XCTAssertEqual(acts(c, try person("me")), [])
+        XCTAssertNil(GroupAdmins.badgeKey(c, person: try person("col")))
+    }
+
+    func testDirectHasNoAdminActions() throws {
+        let c = try conv(#","canManage":true,"adminIds":["me"]"#, kind: "direct")
+        XCTAssertEqual(acts(c, try person("col")), [])
+        XCTAssertFalse(GroupAdmins.isAdmin(c, "me"))
+    }
+
+    func testBadges() throws {
+        let c = try conv(#","adminIds":["adm"]"#, kind: "multi")
+        XCTAssertEqual(GroupAdmins.badgeKey(c, person: try person("adm")), "admin.badge.admin")
+        XCTAssertEqual(GroupAdmins.badgeKey(c, person: try person("bot", kind: "agent")), "admin.badge.bot")
+        XCTAssertNil(GroupAdmins.badgeKey(c, person: try person("col")))
+        let saved = L10n.choice
+        defer { L10n.choice = saved }
+        for lang in [L10n.Choice.es, .en] {
+            L10n.choice = lang
+            XCTAssertEqual(L("admin.badge.admin"), "Admin")
+            XCTAssertEqual(L("admin.badge.bot"), "Bot")
+            for a in GroupMemberAction.allCases {
+                XCTAssertNotEqual(L(a.labelKey), a.labelKey, "\(lang) \(a)")
+                XCTAssertNotEqual(L(a.confirmKey, ["name": "Ana"]), a.confirmKey, "\(lang) \(a)")
+                XCTAssertNotEqual(L("admin.done.\(a.rawValue)"), "admin.done.\(a.rawValue)")
+            }
+        }
+        L10n.choice = .es
+        XCTAssertEqual(L(GroupMemberAction.makeAdmin.confirmKey, ["name": "Ana"]),
+                       "¿Nombrar a Ana admin del grupo? Podrá sumar y sacar personas y nombrar otros admins.")
+        XCTAssertEqual(L(GroupMemberAction.removeAdmin.confirmKey, ["name": "Ana"]), "¿Quitarle el admin a Ana?")
+    }
+
+    private let bootJSON = #"{"contract":"x","serverTime":"","me":{"id":"me","name":"Ana"},"organizations":[],"workspaces":[],"conversations":[{"id":"g","kind":"group","memberIds":["me","col"],"adminIds":["me"],"createdBy":"me","canManage":true}],"people":[]}"#
+
+    @MainActor
+    func testSetAdminCallsPutAndRefreshes() async throws {
+        MockURLProtocol.routes = [
+            "/api/v1/conversations/g/members/col/admin": (200, #"{"adminIds":["me","col"]}"#),
+            "/api/v1/conversations/g/members/col": (200, #"{"ok":true}"#),
+            "/api/v1/blocks": (200, #"{"userIds":[]}"#),
+            "/api/v1/bootstrap": (200, bootJSON),
+        ]
+        MockURLProtocol.requests = []
+        MockURLProtocol.httpRequests = []
+        let store = AppStore(baseURL: URL(string: "https://mock.tiecoms.test")!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: nil, session: MockURLProtocol.session())
+        try await store.perform(.makeAdmin, conversationId: "g", userId: "col")
+        let put = try XCTUnwrap(MockURLProtocol.httpRequests.first { $0.url?.path == "/api/v1/conversations/g/members/col/admin" })
+        XCTAssertEqual(put.httpMethod, "PUT")
+        XCTAssertEqual(MockURLProtocol.requests.first { $0.path == "/api/v1/conversations/g/members/col/admin" }?.body["admin"] as? Bool, true)
+        XCTAssertTrue(MockURLProtocol.requests.contains { $0.path == "/api/v1/bootstrap" }, "después se refresca el bootstrap")
+
+        MockURLProtocol.requests = []
+        try await store.perform(.stepDown, conversationId: "g", userId: "col")
+        XCTAssertEqual(MockURLProtocol.requests.first { $0.path == "/api/v1/conversations/g/members/col/admin" }?.body["admin"] as? Bool, false)
+
+        MockURLProtocol.httpRequests = []
+        try await store.perform(.removeMember, conversationId: "g", userId: "col")
+        XCTAssertEqual(MockURLProtocol.httpRequests.first { $0.url?.path == "/api/v1/conversations/g/members/col" }?.httpMethod, "DELETE")
+    }
+
+    @MainActor
+    func testAdminErrorShowsServerMessage() async throws {
+        MockURLProtocol.routes = [
+            "/api/v1/conversations/g/members/crea/admin": (403, #"{"error":{"code":"forbidden","message":"A quien creó el grupo no se le quita el admin."}}"#),
+        ]
+        MockURLProtocol.requests = []
+        let store = AppStore(baseURL: URL(string: "https://mock.tiecoms.test")!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: nil, session: MockURLProtocol.session())
+        let saved = L10n.choice
+        defer { L10n.choice = saved }
+        L10n.choice = .es
+        do {
+            try await store.perform(.removeAdmin, conversationId: "g", userId: "crea")
+            XCTFail("debía fallar")
+        } catch {
+            XCTAssertEqual(L10n.errorText(error), "A quien creó el grupo no se le quita el admin.")
+        }
+        XCTAssertFalse(MockURLProtocol.requests.contains { $0.path == "/api/v1/bootstrap" }, "si falla no se refresca")
+    }
+}

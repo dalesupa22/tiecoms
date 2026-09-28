@@ -168,6 +168,42 @@ extension MeetingTests {
         XCTAssertNil(s.meetingAttempts["conversation"])
     }
 
+    func testUnconfirmedStoredMeetingRetriesExactPostAfterLookup() async throws {
+        for (failure, status) in [("meeting_uncertain", "creating"), ("not_connected", "failed"), ("reconnect_required", "failed")] {
+            let s = try ControlledURLProtocol.store()
+            var calls: [(String, String)] = []
+            var bodies: [[String: Any]] = []
+            ControlledURLProtocol.handler = { req in Task { @MainActor in
+                let method = req.request.httpMethod ?? "GET"
+                calls.append((method, req.request.url!.path))
+                if method == "GET" {
+                    req.respond(#"{"id":"meeting-1","provider":"google","status":"\#(status)","title":"Synthetic meeting"}"#)
+                } else {
+                    bodies.append(req.json)
+                    if bodies.count == 1 {
+                        req.respond(409, #"{"error":{"code":"\#(failure)","message":"Synthetic failure","details":{"meetingId":"meeting-1"}}}"#)
+                    } else {
+                        req.respond(#"{"id":"meeting-1","provider":"google","status":"created","joinUrl":"https://meet.google.com/synthetic"}"#)
+                    }
+                }
+            } }
+            let original = payload()
+            do { _ = try await s.performMeetingAttempt(original); XCTFail() } catch {}
+            let retained = try XCTUnwrap(s.meetingAttempts["conversation"])
+            XCTAssertEqual(retained.meetingId, "meeting-1")
+            let recovered = try await s.performMeetingAttempt(original)
+            XCTAssertNotNil(recovered.confirmedURL)
+            XCTAssertEqual(calls.map { $0.0 }, ["POST", "GET", "POST"])
+            XCTAssertEqual(calls[1].1, "/api/v1/meetings/meeting-1")
+            XCTAssertEqual(bodies.count, 2)
+            XCTAssertEqual(bodies[1]["idempotencyKey"] as? String, retained.key)
+            XCTAssertEqual(try JSONSerialization.data(withJSONObject: bodies[0], options: .sortedKeys),
+                           try JSONSerialization.data(withJSONObject: bodies[1], options: .sortedKeys),
+                           "Recovery must resume the original operation after \(failure), never start another meeting")
+            XCTAssertNil(s.meetingAttempts["conversation"])
+        }
+    }
+
     func testLostResponseRetriesIdenticalPayloadAndKeyAndBlocksDoubleTap() async throws {
         let s = try ControlledURLProtocol.store()
         let started = expectation(description: "create retained")

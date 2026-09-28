@@ -524,6 +524,18 @@ const es = {
   'add.code': 'Código {code}', 'add.pendingN': 'Invitaciones pendientes ({n})', 'add.resend': 'Reenviar', 'add.revoke': 'Anular',
   'add.onlyMembers': 'Solo los miembros pueden invitar', 'add.noMatch': 'Nadie con ese nombre. Escribe su correo para invitarlo.',
   'join.org': '{name} te invita a unirte a {org} como colega.', 'auth.joiningGroups': 'Entras también a {groups}.',
+  // Asistente
+  'ai.open': 'Abrir el asistente', 'ai.bubbleHint': 'Asistente · mantén presionado para hablar', 'ai.title': 'Asistente',
+  'ai.hello': 'Hola, {name}. ¿En qué te ayudo?', 'ai.intro': 'Escríbeme o háblame: respondo mensajes, reporto lo pendiente, creo grupos, asuntos y reuniones. Nada se envía sin tu visto bueno.',
+  'ai.voiceHint': 'Tip: mantén presionada la burbuja ✦ para hablar y suelta para enviar.',
+  'ai.s.report': 'Dame un reporte de lo que hay', 'ai.s.pending': 'Responde mis pendientes', 'ai.s.due': '¿Qué vence hoy?',
+  'ai.s.write': 'Escríbele a…', 'ai.s.group': 'Crea un grupo con…', 'ai.s.meeting': 'Agenda una reunión mañana a las 10 con…',
+  'ai.s.issue': 'Crea un asunto para…', 'ai.s.cancel': 'Cancela la reunión de…',
+  'ai.placeholder': 'Pídele algo al asistente', 'ai.send': 'Enviar', 'ai.talk': 'Hablar', 'ai.stop': 'Listo', 'ai.listening': 'Te escucho…',
+  'ai.sendAll': 'Enviar todos ({n})', 'ai.sentAll': 'Listo, envié {n}.', 'ai.create': 'Crear', 'ai.confirm': 'Confirmar', 'ai.cancelEvent': 'Cancelar reunión',
+  'ai.edit': 'Editar', 'ai.discard': 'Descartar', 'ai.done': 'Hecho', 'ai.undone': 'Deshecho', 'ai.failed': 'No se pudo', 'ai.undo': 'Deshacer', 'ai.openIt': 'Abrir',
+  'ai.clear': 'Nueva conversación', 'ai.speakOn': 'Leer respuestas en voz alta', 'ai.speakOff': 'No leer en voz alta',
+  'ai.unavailable': 'El asistente no está disponible ahora mismo.',
 };
 
 type Key = keyof typeof es;
@@ -1018,6 +1030,18 @@ const en: Record<Key, string> = {
   'add.code': 'Code {code}', 'add.pendingN': 'Pending invites ({n})', 'add.resend': 'Resend', 'add.revoke': 'Revoke',
   'add.onlyMembers': 'Only members can invite', 'add.noMatch': 'No one by that name. Type their email to invite them.',
   'join.org': '{name} invites you to join {org} as a colleague.', 'auth.joiningGroups': 'You also join {groups}.',
+  // Assistant
+  'ai.open': 'Open the assistant', 'ai.bubbleHint': 'Assistant · press and hold to talk', 'ai.title': 'Assistant',
+  'ai.hello': 'Hi, {name}. How can I help?', 'ai.intro': 'Type or talk to me: I reply to messages, report what is pending, and create groups, subjects and meetings. Nothing is sent without your OK.',
+  'ai.voiceHint': 'Tip: press and hold the ✦ bubble to talk, release to send.',
+  'ai.s.report': 'Give me a report of what is going on', 'ai.s.pending': 'Reply to my pending messages', 'ai.s.due': 'What is due today?',
+  'ai.s.write': 'Write to…', 'ai.s.group': 'Create a group with…', 'ai.s.meeting': 'Schedule a meeting tomorrow at 10 with…',
+  'ai.s.issue': 'Create a subject for…', 'ai.s.cancel': 'Cancel the meeting about…',
+  'ai.placeholder': 'Ask the assistant', 'ai.send': 'Send', 'ai.talk': 'Talk', 'ai.stop': 'Done', 'ai.listening': 'Listening…',
+  'ai.sendAll': 'Send all ({n})', 'ai.sentAll': 'Done, I sent {n}.', 'ai.create': 'Create', 'ai.confirm': 'Confirm', 'ai.cancelEvent': 'Cancel meeting',
+  'ai.edit': 'Edit', 'ai.discard': 'Discard', 'ai.done': 'Done', 'ai.undone': 'Undone', 'ai.failed': 'Failed', 'ai.undo': 'Undo', 'ai.openIt': 'Open',
+  'ai.clear': 'New conversation', 'ai.speakOn': 'Read replies aloud', 'ai.speakOff': 'Do not read aloud',
+  'ai.unavailable': 'The assistant is not available right now.',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };

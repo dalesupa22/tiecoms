@@ -18,7 +18,7 @@ import { AssistantRunInput, AssistantTurnInput } from '@tiecoms/contracts';
 import { config } from '../config.ts';
 import { ApiError, badRequest, forbidden } from '../errors.ts';
 import { bootstrap } from './bootstrap.ts';
-import { deleteMessage, listMessages, sendMessage } from './messages.ts';
+import { deleteMessage, listMessages, markRead, markUnread, sendMessage } from './messages.ts';
 import { getOrCreateDirect } from './workspaces.ts';
 import * as groups from './groups.ts';
 import * as issues from './issues.ts';
@@ -93,6 +93,7 @@ const TOOLS = [
   { name: 'leer_conversacion', description: 'Lee los últimos mensajes de una conversación para resumirla o responder con contexto.', parameters: { type: 'object', properties: { conversationId: str('id de la lista de conversaciones'), limite: { type: 'integer', description: 'cuántos mensajes (máx 40)' } }, required: ['conversationId'] } },
   { name: 'listar_asuntos', description: 'Lista asuntos/tareas. alcance: "mios" (soy responsable), "asigne" (los creé o pedí y los tiene otra persona), "todos". Opcional por conversación.', parameters: { type: 'object', properties: { alcance: { type: 'string', enum: ['mios', 'asigne', 'todos'] }, conversationId: str('opcional'), incluirCerrados: { type: 'boolean' } } } },
   { name: 'listar_eventos', description: 'Lista reuniones del calendario entre dos fechas ISO 8601 con zona horaria.', parameters: { type: 'object', properties: { desde: str('ISO 8601'), hasta: str('ISO 8601') }, required: ['desde', 'hasta'] } },
+  { name: 'marcar_leido', description: 'Marca como leídas una o varias conversaciones (conversationIds), o todas las que tienen no leídos (todas: true). Se hace de una vez (con deshacer).', parameters: { type: 'object', properties: { conversationIds: { type: 'array', items: { type: 'string' } }, todas: { type: 'boolean' } } } },
   { name: 'enviar_mensaje', description: 'Prepara un mensaje para UNA persona (personId: va a su directo) o para UNA conversación (conversationId). Para responder a varios, llama una vez por cada uno con su propio texto. Queda pendiente hasta que la persona confirme.', parameters: { type: 'object', properties: { personId: str('destinatario (directo)'), conversationId: str('o una conversación existente'), texto: str('mensaje en primera persona, como si lo escribiera el usuario') }, required: ['texto'] } },
   { name: 'crear_grupo', description: 'Prepara un grupo nuevo con personas del directorio. Sin espacioId va a la empresa del usuario. Queda pendiente de confirmación.', parameters: { type: 'object', properties: { nombre: str('nombre del grupo'), personIds: { type: 'array', items: { type: 'string' } }, espacioId: str('opcional: id de un espacio (relación con otra empresa)') }, required: ['nombre', 'personIds'] } },
   { name: 'crear_asunto', description: 'Crea un asunto (tarea) en una conversación, con responsable y fecha opcionales. Se hace de una vez (con deshacer).', parameters: { type: 'object', properties: { conversationId: str('dónde vive el asunto'), titulo: str('corto y accionable'), responsableId: str('opcional: personId'), fecha: str('opcional: YYYY-MM-DD') }, required: ['conversationId', 'titulo'] } },
@@ -113,7 +114,7 @@ function systemPrompt(dir: Dir, tz: string, lang: 'es' | 'en') {
   return `Eres el asistente de ${me.name} dentro de chaggu, la app donde su equipo habla con equipos de otras empresas.
 Hoy es ${local} (zona ${tz}; ahora ISO ${now.toISOString()}). Responde en ${lang === 'en' ? 'inglés' : 'español'}, breve y natural (se puede leer en voz alta): frases cortas, sin markdown, sin listas largas ni ids.
 
-Puedes: dar reportes y resúmenes; leer conversaciones; preparar mensajes a una o varias personas (uno por persona, cada uno con su texto); crear grupos; crear, completar, reasignar o fechar asuntos (tareas); crear y cancelar reuniones.
+Puedes: dar reportes y resúmenes; leer conversaciones; marcar como leído; preparar mensajes a una o varias personas (uno por persona, cada uno con su texto); crear grupos; crear, completar, reasignar o fechar asuntos (tareas); crear y cancelar reuniones.
 Si piden algo fuera de eso (correos externos, pagos, archivos, WhatsApp, buscar en internet, ajustes de la cuenta…), di con amabilidad que todavía no puedes ayudar con eso.
 
 Reglas:
@@ -123,6 +124,8 @@ Reglas:
 - Escribe los mensajes en primera persona como ${me.name.split(' ')[0]}, con el tono del chat, sin firmar.
 - Fechas relativas («el jueves», «mañana a las 3») se calculan con la fecha de hoy y la zona ${tz}.
 - Si falta un dato imprescindible (a quién, cuándo), pregunta antes de actuar.
+- «Responde mis pendientes» o parecido: usa el reporte y PREPARA de una vez un borrador por cada chat que espera una respuesta (preguntas, pedidos), con una respuesta razonable y sin comprometer al usuario a cosas nuevas; omite los que solo agradecen o saludan. Luego di en una frase qué dejaste listo.
+- No repitas el reporte cuando lo que piden es una acción.
 
 Personas (id | nombre | empresa | cargo):
 ${people || '(ninguna)'}
@@ -154,15 +157,16 @@ async function runTool(ctx: Ctx, name: string, args: any): Promise<unknown> {
         };
       }));
       const all = await issues.listIssues(userId, { open: true });
-      const today = new Date().toISOString().slice(0, 10);
+      // «Hoy» en la zona de la persona, no en UTC.
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
       const iss = (i: (typeof all)[number]) => ({ asuntoId: i.id, titulo: i.title, estado: i.status, responsable: pname(i.ownerId), fecha: i.dueDate, donde: dir.convs.get(i.conversationId) ? dir.label(dir.convs.get(i.conversationId)!) : null });
       const mine = all.filter((i) => i.ownerId === userId);
       const delegated = all.filter((i) => i.ownerId && i.ownerId !== userId && (i.createdBy === userId || i.requestedBy === userId));
-      const from = new Date(); from.setHours(0, 0, 0, 0);
-      const events = await cal.listEvents(userId, from.toISOString(), new Date(from.getTime() + 2 * 86_400_000).toISOString());
+      const from = new Date(Date.now() - 2 * 3_600_000);
+      const events = await cal.listEvents(userId, from.toISOString(), new Date(from.getTime() + 50 * 3_600_000).toISOString());
       return {
         chatsSinLeer: chats, totalSinLeer: dir.d.conversations.reduce((n, c) => n + (c.mutedUntil ? 0 : c.unread), 0),
-        misAsuntosAbiertos: mine.slice(0, 20).map(iss), vencidos: mine.filter((i) => i.dueDate && i.dueDate < today).map(iss),
+        hoy: today, misAsuntosAbiertos: mine.slice(0, 20).map(iss), vencidos: mine.filter((i) => i.dueDate && i.dueDate < today).map(iss),
         asignadosAOtros: delegated.slice(0, 15).map(iss),
         agenda: events.filter((e) => !e.cancelledAt).map((e) => ({ eventoId: e.id, titulo: e.title, cuando: fmtWhen(e.startsAt, tz), invitados: e.invitees.map((x) => pname(x.userId)) })),
       };
@@ -186,13 +190,24 @@ async function runTool(ctx: Ctx, name: string, args: any): Promise<unknown> {
       const ev = await cal.listEvents(userId, new Date(iso.parse(args.desde)).toISOString(), new Date(iso.parse(args.hasta)).toISOString());
       return ev.map((e) => ({ eventoId: e.id, titulo: e.title, cuando: fmtWhen(e.startsAt, tz), inicio: e.startsAt, cancelado: !!e.cancelledAt, invitados: e.invitees.map((x) => pname(x.userId)), organizador: pname(e.organizerId) }));
     }
+    case 'marcar_leido': {
+      const list = args.todas ? dir.d.conversations.filter((c) => c.unread > 0)
+        : (Array.isArray(args.conversationIds) ? args.conversationIds : []).map((id: unknown) => convOf(dir, id)).filter((c: ConversationDTO) => c.unread > 0);
+      if (!list.length) return { ok: true, marcadas: 0, nota: 'No había nada sin leer ahí.' };
+      await Promise.all(list.map((c: ConversationDTO) => markRead(userId, c.id, c.lastMessageSeq)));
+      const names = list.map((c: ConversationDTO) => dir.label(c));
+      done(ctx, 'mark_read', list.length === 1 ? names[0]! : `${list.length} conversaciones`, list.length === 1 ? '' : names.slice(0, 6).join(', ') + (names.length > 6 ? '…' : ''), null, null,
+        sign({ u: userId, k: 'undo', a: { type: 'read', convs: list.map((c: ConversationDTO) => [c.id, c.lastReadSeq]) } }, UNDO_TTL_MS));
+      return { ok: true, marcadas: list.length };
+    }
     case 'enviar_mensaje': {
       const text = z.string().trim().min(1).max(4000).parse(args.texto);
       let target: string; let a: any;
       if (args.conversationId) {
         const c = convOf(dir, args.conversationId);
         if (!c.canPost) throw new ToolError('En esa conversación no puedes escribir.');
-        target = dir.label(c); a = { conversationId: c.id };
+        const other = c.kind === 'direct' ? c.memberIds.find((m) => m !== userId) : undefined;
+        target = other ? dir.people.get(other)?.name ?? dir.label(c) : dir.label(c); a = { conversationId: c.id };
       } else {
         const p = personOf(dir, args.personId);
         if (p.id === userId) throw new ToolError('No puedes enviarte un mensaje a ti mismo.');
@@ -291,7 +306,10 @@ async function chat(messages: any[]) {
     signal: AbortSignal.timeout(60_000),
   });
   const j: any = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(502, 'assistant_failed', 'El asistente no respondió; intenta de nuevo');
+  if (!res.ok) {
+    console.warn('[assistant] deepseek', res.status, String(j?.error?.message ?? '').slice(0, 300));
+    throw new ApiError(502, 'assistant_failed', 'El asistente no respondió; intenta de nuevo');
+  }
   return j?.choices?.[0]?.message ?? {};
 }
 
@@ -349,8 +367,9 @@ export async function run(userId: string, raw: unknown): Promise<AssistantAction
       if (a.type === 'message') await deleteMessage(userId, a.id);
       else if (a.type === 'event') await cal.cancelEvent(userId, a.id);
       else if (a.type === 'issue') await issues.updateIssue(userId, a.id, a.prev);
+      else if (a.type === 'read') await Promise.all((a.convs as [string, number][]).map(([id, seq]) => markUnread(userId, id, seq + 1)));
       else throw badRequest('Acción inválida');
-      return { id: a.id, kind: a.type === 'event' ? 'create_event' : a.type === 'message' ? 'send_message' : 'update_issue', status: 'undone', target: '', text: '' };
+      return { id: a.id ?? 'read', kind: a.type === 'event' ? 'create_event' : a.type === 'message' ? 'send_message' : a.type === 'read' ? 'mark_read' : 'update_issue', status: 'undone', target: '', text: '' };
     }
     default: throw badRequest('Acción inválida');
   }

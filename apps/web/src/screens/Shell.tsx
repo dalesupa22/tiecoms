@@ -11,6 +11,7 @@ import { AllList, DmsList, GroupsBody, GroupsViewButton, GroupsViewToggle, dmCon
 import { isMac, openCreateMenu, openNewMessage, quickKey } from './Quick.tsx';
 import { activityOf, isMuted, pendingOf } from '../home-order.ts';
 import { DndStrip, MeAvatar } from './Silence.tsx';
+import { AssistantBubble } from './Assistant.tsx';
 
 const NAV = [
   { name: 'today', label: 'nav.today', ico: '◑', to: '/' },
@@ -239,6 +240,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {children}
       </main>
       <MobileTabs route={route} />
+      {/* Como en WhatsApp: en las listas sí, dentro de un chat no. */}
+      <AssistantBubble hidden={inConv} />
     </div>
   );
 }

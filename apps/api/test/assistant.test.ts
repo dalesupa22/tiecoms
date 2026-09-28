@@ -182,4 +182,15 @@ describe('asistente: skills', () => {
     const boot = (await call('/bootstrap', { token: beto.token })).json;
     expect(boot.conversations.some((c: any) => c.name === `Equipo ${run}`)).toBe(true);
   });
+
+  it('marca como leído todo y el deshacer lo devuelve', async () => {
+    await send(beto, anaBeto, 'otro mensaje sin leer');
+    const unread = async () => (await call('/bootstrap', { token: ana.token })).json.conversations.find((c: any) => c.id === anaBeto).unread;
+    expect(await unread()).toBeGreaterThan(0);
+    const r = await ask(ana, [{ tool: 'marcar_leido', args: { todas: true } }]);
+    expect(r.json.actions[0]).toMatchObject({ kind: 'mark_read', status: 'done' });
+    expect(await unread()).toBe(0);
+    await call('/assistant/run', { token: ana.token, body: { token: r.json.actions[0].undoToken } });
+    expect(await unread()).toBeGreaterThan(0);
+  });
 });

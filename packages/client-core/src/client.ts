@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp,
+  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type UserDTO, normalizeEmoji,
 } from '@tiecoms/contracts';
@@ -942,13 +942,18 @@ export class TieComsClient {
     if (!res.ok) throw await parseError(res);
     return res.json();
   }
+  /** Acepta una invitación a un espacio o (con kind 'org') a una empresa y sus grupos. `workspaceId` puede ser null en una de empresa sin grupos. */
   async acceptInvitation(token: string) {
-    const r = await this.request<{ workspaceId: string; conversationIds: string[] }>(`/invitations/${encodeURIComponent(token)}/accept`, { method: 'POST', json: {} });
+    const r = await this.request<{ workspaceId: string | null; conversationIds: string[]; orgId?: string; kind?: 'workspace' | 'org' }>(`/invitations/${encodeURIComponent(token)}/accept`, { method: 'POST', json: {} });
     await this.loadBootstrap();
     return r;
   }
-  createOrgInvitation(orgId: string, input: { email?: string; role?: 'member' | 'admin'; lang?: 'es' | 'en' } = {}) {
-    return this.request<{ id: string; token: string; expiresAt: string; emailSent: boolean; emailStatus: 'sent' | 'failed' | 'skipped' | null }>(`/organizations/${orgId}/invitations`, { method: 'POST', json: input });
+  /**
+   * Invitar a un colega a mi empresa. Con `conversationIds` entra también a esos grupos (cualquier miembro
+   * puede, desde un grupo donde participa); `multiUse` = enlace y código para varias personas.
+   */
+  createOrgInvitation(orgId: string, input: { email?: string; role?: 'member' | 'admin'; lang?: 'es' | 'en'; workspaceId?: string; conversationIds?: string[]; history?: 'now' | 'all'; multiUse?: boolean; expiresInDays?: number } = {}) {
+    return this.request<OrgInvitationCreatedDTO>(`/organizations/${orgId}/invitations`, { method: 'POST', json: input });
   }
   /** Invitaciones con correo aún sin aceptar de una empresa o un espacio. */
   async listInvitations(scope: 'organizations' | 'workspaces', id: string) {

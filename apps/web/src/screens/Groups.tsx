@@ -737,7 +737,7 @@ export function JoinWithCodeDialog({ onClose }: { onClose: () => void }) {
   const look = (e: FormEvent) => { e.preventDefault(); setBusy(true); setError(null); client.previewInvitation(clean).then(setInv).catch((err) => setError(errorText(err))).finally(() => setBusy(false)); };
   const accept = () => {
     setBusy(true); setError(null);
-    client.acceptInvitation(clean).then((r) => { onClose(); navigate(r.conversationIds[0] ? `/c/${r.conversationIds[0]}` : `/w/${r.workspaceId}`); })
+    client.acceptInvitation(clean).then((r) => { onClose(); navigate(r.conversationIds[0] ? `/c/${r.conversationIds[0]}` : r.workspaceId ? `/w/${r.workspaceId}` : '/'); })
       .catch((err) => setError(errorText(err))).finally(() => setBusy(false));
   };
   return (
@@ -773,7 +773,9 @@ export function InvitePreviewText({ inv }: { inv: InvitationPreviewDTO }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div className="serif" style={{ fontSize: 26, lineHeight: 1.15 }}>{groups ?? inv.workspaceName}</div>
-      <div className="muted">{groups
+      <div className="muted">{inv.kind === 'org'
+        ? t('join.org', { name: inv.invitedByName, org: inv.orgName ?? inv.invitedByOrg })
+        : groups
         ? t('join.byGroups', { name: inv.invitedByName, org: inv.invitedByOrg ? ` · ${inv.invitedByOrg}` : '', where: inv.workspaceName })
         : t('invite.by', { name: inv.invitedByName, org: inv.invitedByOrg ? ` · ${inv.invitedByOrg}` : '', role: t(`role.${inv.role}` as 'role.member') })}</div>
       {inv.role === 'guest' && <span className="tag" style={{ alignSelf: 'flex-start' }}>{t('join.asGuest')}</span>}

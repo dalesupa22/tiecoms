@@ -18,7 +18,7 @@ export function InviteScreen({ token }: { token: string }) {
     setBusy(true);
     try {
       const r = await client.acceptInvitation(token);
-      navigate(r.conversationIds[0] ? `/c/${r.conversationIds[0]}` : `/w/${r.workspaceId}`, true);
+      navigate(r.conversationIds[0] ? `/c/${r.conversationIds[0]}` : r.workspaceId ? `/w/${r.workspaceId}` : '/', true);
     } catch (e: any) { setError(errorText(e)); } finally { setBusy(false); }
   }
   const next = `/invite/${encodeURIComponent(token)}`;
@@ -43,7 +43,8 @@ export function InviteScreen({ token }: { token: string }) {
             )}
             {inv.valid && status === 'anonymous' && (
               <div className="row" style={{ flexWrap: 'wrap' }}>
-                <button className="btn primary" onClick={() => navigate(`/signup?next=${encodeURIComponent(next)}`)}>{t('auth.createAccount')}</button>
+                {/* Invitación a la empresa: el registro entra a la empresa y a sus grupos con el mismo token. */}
+                <button className="btn primary" onClick={() => navigate(inv.kind === 'org' ? `/signup?org=${encodeURIComponent(token)}` : `/signup?next=${encodeURIComponent(next)}`)}>{t('auth.createAccount')}</button>
                 <button className="btn" onClick={() => navigate(`/login?next=${encodeURIComponent(next)}`)}>{t('invite.have')}</button>
               </div>
             )}

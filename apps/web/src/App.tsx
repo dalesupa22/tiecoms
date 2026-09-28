@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { notices, useClient } from './app-client.ts';
 import { handleNotice } from './notices.ts';
 import { installSoundUnlock } from './sound.ts';
@@ -36,10 +36,17 @@ export function App() {
   // Cambiar de idioma vuelve a pintar toda la app (key={lang}).
   const lang = useLang();
   const route = parse(path);
+  const prevStatus = useRef(status);
 
   useEffect(() => {
     if (status === 'anonymous' && !['login', 'signup', 'invite', 'sso'].includes(route.name)) navigate(`/login${path !== '/' ? `?next=${encodeURIComponent(path)}` : ''}`, true);
-    if (status === 'ready' && (route.name === 'login' || route.name === 'signup')) navigate(nextParam() ?? '/', true);
+    // Con sesión desde antes, el enlace de una invitación a la empresa (/signup?org=…) se acepta en /invite/… (también
+    // entra a sus grupos). Si la sesión acaba de nacer aquí mismo (se registró con el enlace), ya entró: sigue normal.
+    const org = route.name === 'signup' ? new URLSearchParams(location.search).get('org') : null;
+    const fresh = prevStatus.current === 'anonymous';
+    prevStatus.current = status;
+    if (status === 'ready' && org && !fresh) navigate(`/invite/${encodeURIComponent(org)}`, true);
+    else if (status === 'ready' && (route.name === 'login' || route.name === 'signup')) navigate(nextParam() ?? '/', true);
   }, [status, route.name, path]);
 
   if (status === 'loading') return <div className="auth"><img src={asset("/chaggu-logo.svg")} alt="Chaggu" width={128} height={56} style={{ opacity: 0.6 }} /></div>;

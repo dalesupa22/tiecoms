@@ -36,7 +36,7 @@ export const SignupInput = z.object({
   /** Crea una empresa nueva… */
   orgName: z.string().trim().min(2).max(120).optional(),
   /** …o se une a una existente con una invitación de empresa. */
-  orgInviteToken: z.string().min(16).max(200).optional(),
+  orgInviteToken: z.string().min(8).max(200).optional(),
   title: z.string().trim().max(120).optional(),
   device: DeviceInfo,
 }).refine((v) => !!v.orgName || !!v.orgInviteToken, { message: 'org_required', path: ['orgName'] });
@@ -592,12 +592,25 @@ export interface InvitationCreatedDTO { id: string; token: string; url: string; 
 
 export const JoinPolicyInput = z.object({ joinPolicy: z.enum(['invite', 'auto']) });
 
+/**
+ * Invitar a un colega a mi empresa. Con `conversationIds` (grupos donde participo, de un mismo espacio de mi
+ * empresa: el de «Tu organización» o una relación) la persona, al aceptar, entra a la empresa y además a esos
+ * grupos con el historial `history`. Así cualquier miembro (no solo owner/admin) puede invitar colegas desde un
+ * grupo. `workspaceId` es opcional (se deduce de los grupos; si viene, debe coincidir). `multiUse` = enlace y
+ * código para varias personas, sin correo. Clientes viejos: sin estos campos, igual que antes.
+ */
 export const CreateOrgInvitationInput = z.object({
   email: email.optional(),
   role: z.enum(['member', 'admin']).default('member'),
   expiresInDays: z.number().int().min(1).max(60).default(14),
   lang: z.enum(['es', 'en']).default('es'),
+  workspaceId: z.uuid().optional(),
+  conversationIds: z.array(z.uuid()).max(50).default([]),
+  history: z.enum(['now', 'all']).default('now'),
+  multiUse: z.boolean().optional(),
 });
+/** Respuesta de crear una invitación a la empresa. `url` y `code` son nuevos (28-sep-2026); `code` solo sin correo. */
+export interface OrgInvitationCreatedDTO { id: string; token: string; url?: string; code?: string | null; expiresAt: string; emailSent: boolean; emailStatus: string | null }
 
 export interface OrgInvitationPreviewDTO {
   orgName: string;
@@ -605,6 +618,9 @@ export interface OrgInvitationPreviewDTO {
   email: string | null;
   expiresAt: string;
   valid: boolean;
+  /** Grupos a los que entra además de la empresa. Clientes viejos: ausente. */
+  groupNames?: string[];
+  multiUse?: boolean;
 }
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -658,6 +674,8 @@ export interface PendingInvitationDTO {
   sendCount: number;
   /** Quien invitó o quien administra puede reenviar y revocar. */
   canManage: boolean;
+  /** Grupos a los que entra al aceptar (para filtrar las pendientes de un grupo). Servidores viejos: ausente. */
+  conversationIds?: string[];
 }
 
 export interface InvitationPreviewDTO {
@@ -674,6 +692,14 @@ export interface InvitationPreviewDTO {
   multiUse?: boolean;
   /** Invitación a un grupo interno de una empresa (se entra como invitado de fuera). */
   orgHome?: boolean;
+  /**
+   * 'org' = invitación a unirse a una empresa como colega (y a sus grupos), resuelta por el mismo
+   * `/invitations/:token` (token o código). Ausente o 'workspace' = invitación a un espacio.
+   * Si es 'org' y no hay sesión, el registro va por `/signup?org={token}`.
+   */
+  kind?: 'workspace' | 'org';
+  /** Con kind 'org': la empresa a la que entra. */
+  orgName?: string;
 }
 
 // ---------- Mensajes ----------

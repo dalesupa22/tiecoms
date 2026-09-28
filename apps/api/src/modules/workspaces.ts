@@ -138,12 +138,28 @@ export async function addMembers(userId: string, conversationId: string, input: 
       if (ok.length !== new Set(input.userIds).size) throw forbidden('Solo puedes sumar personas con las que compartes un espacio o tu empresa');
       rows = (await c.query('SELECT id AS user_id, primary_org_id AS org_id, name FROM users WHERE id = ANY($1)', [ok])).rows;
     } else {
-      rows = (await c.query(
+      const inSpace = () => c.query(
         `SELECT wm.user_id, wm.org_id, u.name FROM workspace_memberships wm JOIN users u ON u.id = wm.user_id
           WHERE wm.workspace_id = $1 AND wm.user_id = ANY($2) AND wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())`,
         [a.workspaceId, input.userIds],
-      )).rows;
-      if (rows.length !== new Set(input.userIds).size) throw badRequest('Todas las personas deben participar en el espacio');
+      ).then((r) => r.rows);
+      rows = await inSpace();
+      const missing = [...new Set(input.userIds)].filter((id) => !rows.some((r) => r.user_id === id));
+      if (missing.length) {
+        // Colegas de mi empresa que aún no están en el espacio (p. ej. «Tu organización»): entran como gente de mi empresa.
+        const mine = (await c.query("SELECT org_id FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2 AND role <> 'guest' AND org_id IS NOT NULL", [a.workspaceId, userId])).rows[0]?.org_id;
+        const mates = mine ? (await c.query('SELECT user_id FROM organization_memberships WHERE org_id = $1 AND user_id = ANY($2)', [mine, missing])).rows : [];
+        if (!mine || mates.length !== missing.length) throw badRequest('Todas las personas deben participar en el espacio');
+        for (const { user_id } of mates) {
+          await c.query(
+            `INSERT INTO workspace_memberships (workspace_id, user_id, org_id, role) VALUES ($1,$2,$3,'member')
+             ON CONFLICT (workspace_id, user_id) DO UPDATE SET revoked_at = NULL, expires_at = NULL, org_id = EXCLUDED.org_id,
+               role = CASE WHEN workspace_memberships.role = 'guest' OR workspace_memberships.revoked_at IS NOT NULL THEN 'member' ELSE workspace_memberships.role END`,
+            [a.workspaceId, user_id, mine],
+          );
+        }
+        rows = await inSpace();
+      }
     }
     if (a.kind === 'internal' && rows.some((r) => r.org_id !== a.internalOrgId)) throw badRequest('Un grupo interno solo admite personas de su empresa');
     const added = await addConversationMembers(c, conversationId, input.userIds, userId, input.history);
@@ -292,7 +308,7 @@ export async function previewInvitation(token: string): Promise<InvitationPrevie
     inviteKeys(token),
   );
   const r = rows[0];
-  if (!r) throw notFound('Invitación');
+  if (!r) return previewOrgInvite(token);
   return {
     workspaceName: r.workspace_name, invitedByName: r.inviter, invitedByOrg: r.inviter_org ?? '', role: r.role, email: r.email,
     expiresAt: new Date(r.expires_at).toISOString(),
@@ -305,7 +321,7 @@ export async function acceptInvitation(userId: string, token: string, input: z.i
   return tx(async (c) => {
     const { rows } = await c.query(`SELECT * FROM invitations i WHERE ${INVITE_MATCH} FOR UPDATE`, inviteKeys(token));
     const inv = rows[0];
-    if (!inv) throw notFound('Invitación');
+    if (!inv) return acceptOrgInvite(c, userId, token);
     if (!inviteValid(inv)) throw conflict('La invitación ya no es válida');
     const me = await c.query('SELECT email, name FROM users WHERE id = $1', [userId]);
     if (inv.email && inv.email.toLowerCase() !== String(me.rows[0].email).toLowerCase()) {
@@ -346,8 +362,132 @@ export async function acceptInvitation(userId: string, token: string, input: z.i
     const others = await c.query('SELECT user_id FROM workspace_memberships WHERE workspace_id = $1 AND revoked_at IS NULL', [inv.workspace_id]);
     await scopeChanged(c, others.rows.map((r) => r.user_id), 'workspace.member_joined');
     await audit(c, userId, 'invitation.accepted', { type: 'invitation', id: inv.id, workspaceId: inv.workspace_id }, { role: inv.role, orgId });
-    return { workspaceId: inv.workspace_id as string, conversationIds: inv.conversation_ids as string[] };
+    return { workspaceId: inv.workspace_id as string | null, conversationIds: inv.conversation_ids as string[], kind: 'workspace' as const };
   });
+}
+
+// ---------- Invitación a la empresa con grupos (org_invitations, migración 024) ----------
+/**
+ * Valida los grupos de una invitación a la empresa: todos del mismo espacio (si viene `workspaceId`, ese),
+ * group o internal de esta empresa, donde quien invita participa, y en un espacio donde quien invita
+ * está como persona de esta empresa. Devuelve el espacio.
+ */
+export async function checkOrgInviteGroups(c: Tx, userId: string, orgId: string, conversationIds: string[], workspaceId?: string): Promise<string> {
+  const ids = [...new Set(conversationIds)];
+  const { rows } = await c.query(
+    `SELECT c.id, c.workspace_id FROM conversations c
+       JOIN conversation_memberships m ON m.conversation_id = c.id AND m.user_id = $1 AND m.removed_at IS NULL
+       JOIN workspaces w ON w.id = c.workspace_id AND w.archived_at IS NULL
+       JOIN workspace_memberships wm ON wm.workspace_id = c.workspace_id AND wm.user_id = $1 AND wm.org_id = $2
+        AND wm.role <> 'guest' AND wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())
+      WHERE c.id = ANY($3) AND c.archived_at IS NULL
+        AND (c.kind = 'group' OR (c.kind = 'internal' AND c.internal_org_id = $2))`,
+    [userId, orgId, ids],
+  );
+  const spaces = new Set(rows.map((r) => r.workspace_id as string));
+  if (rows.length !== ids.length || spaces.size !== 1) throw badRequest('Solo puedes invitar a grupos de un mismo espacio donde participas como parte de tu empresa');
+  const ws = [...spaces][0]!;
+  if (workspaceId && workspaceId !== ws) throw badRequest('Los grupos no son de ese espacio');
+  return ws;
+}
+
+const orgInviteValid = inviteValid;
+
+async function findOrgInvite(c: Tx | typeof pool, tokenOrCode: string, lock: boolean) {
+  const { rows } = await c.query(`SELECT * FROM org_invitations i WHERE ${INVITE_MATCH} ${lock ? 'FOR UPDATE' : ''}`, inviteKeys(tokenOrCode));
+  return rows[0] ?? null;
+}
+
+/** Vista previa de una invitación a la empresa por el mismo `/invitations/:token` (token o código). */
+async function previewOrgInvite(token: string): Promise<InvitationPreviewDTO> {
+  const inv = await findOrgInvite(pool, token, false);
+  if (!inv) throw notFound('Invitación');
+  const { rows } = await pool.query(
+    `SELECT o.name AS org_name, u.name AS inviter, w.name AS workspace_name, w.is_org_home,
+            ARRAY(SELECT c.name FROM conversations c WHERE c.id = ANY($3) AND c.archived_at IS NULL ORDER BY c.created_at) AS group_names
+       FROM organizations o JOIN users u ON u.id = $2 LEFT JOIN workspaces w ON w.id = $4 WHERE o.id = $1`,
+    [inv.org_id, inv.invited_by, inv.conversation_ids, inv.workspace_id],
+  );
+  const r = rows[0];
+  return {
+    workspaceName: r.is_org_home || !r.workspace_name ? r.org_name : r.workspace_name, invitedByName: r.inviter, invitedByOrg: r.org_name,
+    role: inv.role, email: inv.email, expiresAt: new Date(inv.expires_at).toISOString(), valid: orgInviteValid(inv),
+    groupNames: r.group_names.filter(Boolean), multiUse: inv.multi_use, orgHome: Boolean(r.is_org_home), kind: 'org', orgName: r.org_name,
+  };
+}
+
+/** Grupos de una invitación a la empresa, para `/org-invitations/:token` (registro). */
+export async function orgInviteGroupNames(conversationIds: string[]): Promise<string[]> {
+  if (!conversationIds?.length) return [];
+  const { rows } = await pool.query('SELECT name FROM conversations WHERE id = ANY($1) AND archived_at IS NULL ORDER BY created_at', [conversationIds]);
+  return rows.map((r) => r.name).filter(Boolean);
+}
+
+/**
+ * Tras entrar a la empresa por una invitación: al espacio como persona de esa empresa y a sus grupos,
+ * con el historial elegido. Si el espacio o un grupo ya no existen, se omiten.
+ */
+export async function joinOrgInviteGroups(c: Tx, userId: string, inv: { org_id: string; invited_by: string; workspace_id: string | null; conversation_ids: string[]; history: 'now' | 'all' }) {
+  if (!inv.workspace_id || !inv.conversation_ids?.length) return { workspaceId: null as string | null, conversationIds: [] as string[] };
+  const w = await c.query('SELECT 1 FROM workspaces WHERE id = $1 AND archived_at IS NULL', [inv.workspace_id]);
+  if (!w.rowCount) return { workspaceId: null, conversationIds: [] };
+  await c.query(
+    `INSERT INTO workspace_memberships (workspace_id, user_id, org_id, role, sponsor_id) VALUES ($1,$2,$3,'member',$4)
+     ON CONFLICT (workspace_id, user_id) DO UPDATE SET revoked_at = NULL, expires_at = NULL, org_id = EXCLUDED.org_id,
+       role = CASE WHEN workspace_memberships.role = 'guest' OR workspace_memberships.revoked_at IS NOT NULL THEN 'member' ELSE workspace_memberships.role END,
+       joined_at = CASE WHEN workspace_memberships.revoked_at IS NULL THEN workspace_memberships.joined_at ELSE now() END`,
+    [inv.workspace_id, userId, inv.org_id, inv.invited_by],
+  );
+  await c.query(
+    'INSERT INTO workspace_organizations (workspace_id, org_id) VALUES ($1,$2) ON CONFLICT (workspace_id, org_id) DO UPDATE SET left_at = NULL',
+    [inv.workspace_id, inv.org_id],
+  );
+  const { rows: convs } = await c.query(
+    `SELECT id FROM conversations WHERE id = ANY($1) AND workspace_id = $2 AND archived_at IS NULL
+        AND (kind = 'group' OR (kind = 'internal' AND internal_org_id = $3)) ORDER BY created_at`,
+    [inv.conversation_ids, inv.workspace_id, inv.org_id],
+  );
+  const name = (await c.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0].name;
+  const joined: string[] = [];
+  for (const { id } of convs) {
+    const added = await addConversationMembers(c, id, [userId], inv.invited_by, inv.history);
+    if (added.length) await appendMessage(c, { conversationId: id, authorId: userId, kind: 'system', body: sys('member.joined', { name }) });
+    joined.push(id);
+  }
+  const others = await c.query('SELECT user_id FROM workspace_memberships WHERE workspace_id = $1 AND revoked_at IS NULL', [inv.workspace_id]);
+  await scopeChanged(c, others.rows.map((r) => r.user_id), 'workspace.member_joined');
+  return { workspaceId: inv.workspace_id, conversationIds: joined };
+}
+
+/** Marca el uso de una invitación a la empresa (un enlace para varias personas solo cuenta usos). */
+export async function consumeOrgInvite(c: Tx, inv: { id: string; multi_use: boolean }, userId: string) {
+  if (inv.multi_use) await c.query('UPDATE org_invitations SET uses = uses + 1 WHERE id = $1', [inv.id]);
+  else await c.query('UPDATE org_invitations SET accepted_by = $2, accepted_at = now() WHERE id = $1', [inv.id, userId]);
+}
+
+/**
+ * Con sesión: aceptar una invitación a la empresa (enlace o código). Quien ya tiene cuenta entra a la
+ * empresa como otra membresía (su empresa principal no cambia) y a los grupos de la invitación.
+ * Si ya era de la empresa, solo entra a los grupos.
+ */
+async function acceptOrgInvite(c: Tx, userId: string, token: string) {
+  const inv = await findOrgInvite(c, token, true);
+  if (!inv) throw notFound('Invitación');
+  if (!orgInviteValid(inv)) throw conflict('La invitación ya no es válida');
+  const me = await c.query('SELECT email FROM users WHERE id = $1', [userId]);
+  if (inv.email && String(inv.email).toLowerCase() !== String(me.rows[0].email).toLowerCase()) throw forbidden('Esta invitación es para otro correo');
+  const m = await c.query(
+    'INSERT INTO organization_memberships (org_id, user_id, role) VALUES ($1,$2,$3) ON CONFLICT (org_id, user_id) DO NOTHING RETURNING user_id',
+    [inv.org_id, userId, inv.role],
+  );
+  if (m.rowCount) {
+    const mates = await c.query('SELECT user_id FROM organization_memberships WHERE org_id = $1', [inv.org_id]);
+    await enqueueOutbox(c, 'account.event', { userIds: mates.rows.map((x) => x.user_id), event: { type: 'scope.changed', reason: 'org.member_joined' } });
+  }
+  await consumeOrgInvite(c, inv, userId);
+  const joined = await joinOrgInviteGroups(c, userId, inv);
+  await audit(c, userId, 'org_invitation.accepted', { type: 'organization', id: inv.org_id }, { invitationId: inv.id, joinedOrg: Boolean(m.rowCount), groups: joined.conversationIds.length });
+  return { workspaceId: joined.workspaceId, conversationIds: joined.conversationIds, orgId: inv.org_id as string, kind: 'org' as const };
 }
 
 // ---------- Bifurcaciones: derivar y devolver ----------

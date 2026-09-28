@@ -5,10 +5,11 @@ import { openDialog } from '../actions.tsx';
 import { errorText, locale, t } from '../i18n.ts';
 import { contextHandler, copyText, toast, type MenuItem } from '../menu.tsx';
 import { BASE, navigate } from '../router.ts';
-import { Avatar, Modal, conversationTitle, counterpartOrg, orgById, personById } from '../ui.tsx';
+import { Avatar, Modal, conversationTitle, orgById, personById } from '../ui.tsx';
 import { QuickActions } from './Quick.tsx';
 import { isMeetingUrl } from './Meetings.tsx';
 import { addDays, startOfDay, storedView, viewRange, VIEW_KEY, type CalView } from '../calendar-grid.ts';
+import { groupColor, isAllDayEvent } from '@tiecoms/client-core';
 
 // ---------- Zonas horarias sin librerías ----------
 const BROWSER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Bogota';
@@ -59,10 +60,36 @@ export function downloadIcs(ev: CalendarEventDTO) {
 }
 const isUrl = (s: string | null) => !!s && /^https?:\/\//i.test(s.trim());
 
-function eventColors(d: BootstrapDTO, ev: CalendarEventDTO) {
-  // Reuniones de directos y chats grupales: color neutro.
-  const org = ev.workspaceId ? counterpartOrg(d, ev.workspaceId) : null;
-  return { bg: org?.colorBg ?? '#e0dace', fg: org?.colorFg ?? '#1b1917' };
+/** Un color por grupo (el mismo en web, iOS y Android: docs/AGENDA-COLORES.md). */
+function eventColors(_d: BootstrapDTO, ev: CalendarEventDTO) {
+  return groupColor(ev.conversationId);
+}
+const allDay = (e: CalendarEventDTO) => isAllDayEvent(e.startsAt, e.endsAt);
+/** Hora del evento o «Todo el día». */
+const evTime = (e: CalendarEventDTO) => (allDay(e) ? t('cal.allDay') : fmtTime(e.startsAt));
+
+// Grupos ocultos en la Agenda (preferencia de este navegador).
+const HIDDEN_KEY = 'chaggu.agenda.hidden';
+function readHidden(): string[] { try { return JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? '[]'); } catch { return []; } }
+
+/** Leyenda: los grupos con eventos en lo que se ve, con su color; tocar uno lo oculta o lo muestra. */
+function GroupLegend({ d, ids, hidden, onToggle, onShowAll }: { d: BootstrapDTO; ids: string[]; hidden: Set<string>; onToggle: (id: string) => void; onShowAll: () => void }) {
+  if (!ids.length) return null;
+  return (
+    <div className="cal-legend" role="group" aria-label={t('cal.groups')}>
+      {ids.map((id) => {
+        const conv = d.conversations.find((c) => c.id === id);
+        if (!conv) return null;
+        const c = groupColor(id), off = hidden.has(id);
+        return (
+          <button key={id} className={`cal-legend-chip ${off ? 'is-off' : ''}`} aria-pressed={!off} onClick={() => onToggle(id)} title={off ? t('cal.showGroup') : t('cal.hideGroup')}>
+            <i style={{ background: off ? 'transparent' : c.fg, borderColor: c.fg }} /><span className="ellipsis">{conversationTitle(d, conv)}</span>
+          </button>
+        );
+      })}
+      {hidden.size > 0 && <button className="btn ghost small" onClick={onShowAll}>{t('cal.showAll')}</button>}
+    </div>
+  );
 }
 
 // ---------- Crear / editar ----------
@@ -222,9 +249,15 @@ export function AgendaScreen() {
   const setView = (v: CalView) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* sin almacenamiento */ } };
   const { from, to, days } = useMemo(() => viewRange(view, anchor), [view, anchor]);
   useEffect(() => { client.loadEvents(from, to).catch((e) => setError(errorText(e))); }, [from.getTime(), to.getTime()]);
+  const [hiddenList, setHiddenList] = useState<string[]>(readHidden);
+  const hidden = new Set(hiddenList);
+  const saveHidden = (next: string[]) => { setHiddenList(next); try { localStorage.setItem(HIDDEN_KEY, JSON.stringify(next)); } catch { /* sin almacenamiento */ } };
   const visible = new Set(d.conversations.map((c) => c.id));
-  const events = Object.values(all).filter((e) => visible.has(e.conversationId) && Date.parse(e.startsAt) < to.getTime() && Date.parse(e.endsAt) > from.getTime())
-    .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  const inRange = Object.values(all).filter((e) => visible.has(e.conversationId) && Date.parse(e.startsAt) < to.getTime() && Date.parse(e.endsAt) > from.getTime())
+    .sort((a, b) => Number(allDay(b)) - Number(allDay(a)) || a.startsAt.localeCompare(b.startsAt));
+  const legendIds = [...new Set(inRange.map((e) => e.conversationId))];
+  const events = inRange.filter((e) => !hidden.has(e.conversationId));
+  const timed = events.filter((e) => !allDay(e));
   const today = new Date().toDateString();
   const shift = (n: number) => setAnchor(view === 'day' ? addDays(anchor, n) : view === 'week' ? addDays(anchor, 7 * n) : new Date(anchor.getFullYear(), anchor.getMonth() + n, 1));
   const newAt = (at: Date) => openDialog((close) => <EventDialog defaultStart={at} onClose={close} />);
@@ -247,6 +280,8 @@ export function AgendaScreen() {
         <button className="icon-btn" aria-label={t(prevNext[1] as 'cal.next')} onClick={() => shift(1)}>›</button>
       </div>
       {error && <div className="error">{error}</div>}
+      <GroupLegend d={d} ids={legendIds} hidden={hidden}
+        onToggle={(id) => saveHidden(hidden.has(id) ? hiddenList.filter((x) => x !== id) : [...hiddenList, id])} onShowAll={() => saveHidden([])} />
 
       {view === 'month' ? (
         <div className="month" role="grid" aria-label={heading}>
@@ -262,7 +297,7 @@ export function AgendaScreen() {
                   {list.slice(0, 3).map((e) => {
                     const c = eventColors(d, e);
                     return <button key={e.id} className={`month-ev ${e.cancelledAt ? 'is-cancelled' : ''}`} style={{ background: c.bg, color: c.fg }} onClick={() => openEvent(e.id)} onContextMenu={contextHandler(() => eventMenu(e))}>
-                      <span className="ellipsis">{meetIcon(e)}{fmtTime(e.startsAt)} {e.title}</span></button>;
+                      <span className="ellipsis">{meetIcon(e)}{allDay(e) ? '' : `${fmtTime(e.startsAt)} `}{e.title}</span></button>;
                   })}
                   {list.length > 3 && <button className="month-more" onClick={() => { setAnchor(x); setView('day'); }}>{t('cal.more', { n: list.length - 3 })}</button>}
                 </div>
@@ -274,10 +309,18 @@ export function AgendaScreen() {
         <>
           <div className={`week only-desktop ${view === 'day' ? 'is-day' : ''}`} style={{ ['--cols' as string]: days.length }}>
             <div className="week-head"><span />{days.map((x) => <span key={x.toISOString()} className={x.toDateString() === today ? 'is-today' : ''}>{fmtDay(x)}</span>)}</div>
+            {events.some(allDay) && (
+              <div className="week-allday"><span className="small muted">{t('cal.allDay')}</span>{days.map((x) => (
+                <div key={x.toISOString()}>{events.filter((e) => allDay(e) && overlaps(e, x)).map((e) => {
+                  const c = eventColors(d, e);
+                  return <button key={e.id} className="month-ev" style={{ background: c.bg, color: c.fg }} onClick={() => openEvent(e.id)} onContextMenu={contextHandler(() => eventMenu(e))}><span className="ellipsis">{e.title}</span></button>;
+                })}</div>
+              ))}</div>
+            )}
             <div className="week-body" style={{ height: (H1 - H0) * PX }}>
               <div className="week-hours">{Array.from({ length: H1 - H0 }, (_, i) => <span key={i} style={{ top: i * PX }}>{String(H0 + i).padStart(2, '0')}:00</span>)}</div>
               {days.map((x) => {
-                const dayEvents = events.filter((e) => new Date(e.startsAt).toDateString() === x.toDateString());
+                const dayEvents = timed.filter((e) => new Date(e.startsAt).toDateString() === x.toDateString());
                 const cols: CalendarEventDTO[][] = [];
                 for (const e of dayEvents) { const c = cols.find((col) => col[col.length - 1]!.endsAt <= e.startsAt); if (c) c.push(e); else cols.push([e]); }
                 return (
@@ -306,7 +349,7 @@ export function AgendaScreen() {
           <div className="only-mobile list">
             {events.length === 0 && <div className="empty">{t(view === 'day' ? 'cal.dayEmpty' : 'cal.empty')}</div>}
             {days.map((x) => {
-              const list = events.filter((e) => new Date(e.startsAt).toDateString() === x.toDateString());
+              const list = events.filter((e) => (allDay(e) ? overlaps(e, x) : new Date(e.startsAt).toDateString() === x.toDateString()));
               if (!list.length) return null;
               return (
                 <section key={x.toISOString()}>
@@ -331,7 +374,7 @@ export function EventRow({ ev, showConv = true }: { ev: CalendarEventDTO; showCo
   const mine = ev.invitees.find((i) => i.userId === d.me.id);
   return (
     <button className={`card event-row ${ev.cancelledAt ? 'is-cancelled' : ''}`} onClick={() => openEvent(ev.id)} onContextMenu={contextHandler(() => eventMenu(ev))}>
-      <span className="event-time" style={{ background: c.bg, color: c.fg }}>{fmtTime(ev.startsAt)}</span>
+      <span className="event-time" style={{ background: c.bg, color: c.fg }}>{evTime(ev)}</span>
       <span className="grow" style={{ minWidth: 0 }}>
         <b className="ellipsis" style={{ display: 'block' }}>{ev.title}</b>
         <span className="small muted ellipsis" style={{ display: 'block' }}>

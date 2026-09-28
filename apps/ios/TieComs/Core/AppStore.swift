@@ -97,6 +97,16 @@ final class AppStore {
     var agendaPath: [Route] = []
     var settingsPath: [Route] = []
     var workspaceFilter: String?
+    /// Pila de la pestaña visible.
+    var currentPath: [Route] {
+        switch tab {
+        case .home: return homePath
+        case .dms: return dmsPath
+        case .issues: return issuesPath
+        case .agenda: return agendaPath
+        case .settings: return settingsPath
+        }
+    }
     /// Abre una pantalla en la pila de la pestaña visible.
     func push(_ r: Route) {
         switch tab {
@@ -289,6 +299,8 @@ final class AppStore {
         PushRegistration.unregister()
         ShareTargets.clear()
         Donations.deleteAll()
+        // El historial de gg vive solo en el dispositivo y se borra al cerrar sesión.
+        AssistantHistory.clearAll()
         socket.disconnect()
         pathMonitor?.cancel(); pathMonitor = nil
         api.clearCredentials()

@@ -94,28 +94,30 @@ struct MainView: View {
     @Environment(AppStore.self) private var store
     /// Mi foto para el ícono de «Tú» (se carga una vez por URL).
     @State private var myPhoto: UIImage?
+    /// gg: burbuja ✦ y panel (docs/ASISTENTE.md).
+    @State private var assistant = AssistantModel()
 
     var body: some View {
         @Bindable var store = store
         let d = store.data
         TabView(selection: $store.tab) {
-            NavigationStack(path: $store.homePath) { HomeView().routes() }
+            NavigationStack(path: $store.homePath) { HomeView().assistantListMargin().routes() }
                 .tabItem { Label(L("tab.groups"), systemImage: "person.3") }
                 .tag(AppTab.home)
                 .badge(d.map(Naming.groupsUnread) ?? 0)
                 .accessibilityIdentifier("tab.home")
-            NavigationStack(path: $store.dmsPath) { DMsView().routes() }
+            NavigationStack(path: $store.dmsPath) { DMsView().assistantListMargin().routes() }
                 .tabItem { Label(L("tab.dms"), systemImage: "bubble.left.and.bubble.right") }
                 .tag(AppTab.dms)
                 .badge(d.map(Naming.dmsUnread) ?? 0)
-            NavigationStack(path: $store.issuesPath) { IssuesScreen().routes() }
+            NavigationStack(path: $store.issuesPath) { IssuesScreen().assistantListMargin().routes() }
                 .tabItem { Label(L("tab.issues"), systemImage: "checklist") }
                 .tag(AppTab.issues)
                 .badge(store.myOpenIssues)
-            NavigationStack(path: $store.agendaPath) { AgendaScreen().routes() }
+            NavigationStack(path: $store.agendaPath) { AgendaScreen().assistantListMargin().routes() }
                 .tabItem { Label(L("tab.calendar"), systemImage: "calendar") }
                 .tag(AppTab.agenda)
-            NavigationStack(path: $store.settingsPath) { SettingsView().routes() }
+            NavigationStack(path: $store.settingsPath) { SettingsView().assistantListMargin().routes() }
                 .tabItem {
                     Label {
                         Text(L("tab.you"))
@@ -136,6 +138,22 @@ struct MainView: View {
             RemoteImageCache.shared.setObject(img, forKey: url as NSURL)
             myPhoto = img
         }
+        .overlay(alignment: .bottomTrailing) {
+            // Solo en las listas: dentro de un chat (o de otra pantalla de la pila) no se monta.
+            if let me = d?.me.id, assistantBubbleVisible {
+                AssistantBubble(model: assistant)
+                    .padding(.trailing, 14).padding(.bottom, Self.bubbleBottom)
+                    .onAppear { assistant.bind(me); assistant.apiRef = store.api }
+                    .onChange(of: me) { _, id in assistant.bind(id) }
+            }
+        }
+        .overlay {
+            if assistant.open {
+                AssistantPanel(model: assistant)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.3), value: assistant.open)
         .overlay(alignment: .bottom) { ToastView() }
         .sheet(isPresented: $store.showPushPrompt) { PushPromptView() }
         .sheet(isPresented: Binding(get: { store.shareText != nil }, set: { if !$0 { store.shareText = nil } })) {
@@ -145,6 +163,14 @@ struct MainView: View {
 }
 
 extension MainView {
+    /// Distancia de la burbuja al borde inferior del área segura: justo encima de la barra de pestañas.
+    fileprivate static let bubbleBottom: CGFloat = 58
+
+    /// Solo en las listas (raíz de la pestaña), nunca dentro de un chat.
+    fileprivate var assistantBubbleVisible: Bool {
+        Assistant.bubbleVisible(path: store.currentPath, openConversationId: store.openConversationId)
+    }
+
     fileprivate var myPhotoURL: URL? {
         guard let d = store.data else { return nil }
         return MediaURL.absolute(Naming.person(d, d.me.id)?.avatarUrl ?? d.me.avatarUrl)

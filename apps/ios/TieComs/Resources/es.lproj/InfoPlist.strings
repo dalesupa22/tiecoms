@@ -1,3 +1,4 @@
 "CFBundleDisplayName" = "Chaggu";
 "NSCameraUsageDescription" = "Chaggu usa la cámara cuando eliges tomar una foto de perfil o del grupo, o una foto o video para adjuntar.";
-"NSMicrophoneUsageDescription" = "Chaggu usa el micrófono para grabar notas de voz que envías en tus conversaciones.";
+"NSMicrophoneUsageDescription" = "Chaggu usa el micrófono para grabar notas de voz que envías en tus conversaciones y para escucharte cuando le hablas a gg, el asistente.";
+"NSSpeechRecognitionUsageDescription" = "Chaggu usa el reconocimiento de voz para convertir en texto lo que le dices a gg, el asistente.";

@@ -104,6 +104,10 @@
     <string name="err_internal">Error interno. Intenta de nuevo.</string>
     <string name="err_network">Sin conexión con el servidor</string>
     <string name="err_generic">No se pudo completar</string>
+    <!-- Recuperación del chat tras un fallo transitorio (502 durante un despliegue, red) -->
+    <string name="chat_reconnecting">Reconectando…</string>
+    <string name="chat_updating_retrying">chaggu se está actualizando, reintentando…</string>
+    <string name="chat_load_paused">Aún no se pudo cargar este chat. Se reintentará al volver la conexión.</string>
     <string name="debug_server">Servidor (debug)</string>
     <string name="debug_server_hint">Emulador: http://10.0.2.2:3021</string>
     <string name="save">Guardar</string>

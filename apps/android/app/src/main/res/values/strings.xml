@@ -105,6 +105,10 @@
     <string name="err_internal">Internal error. Please try again.</string>
     <string name="err_network">Cannot reach the server</string>
     <string name="err_generic">Could not complete</string>
+    <!-- Chat recovery after a transient failure (502 during a release, network) -->
+    <string name="chat_reconnecting">Reconnecting…</string>
+    <string name="chat_updating_retrying">chaggu is updating, retrying…</string>
+    <string name="chat_load_paused">Couldn’t load this chat yet. It will retry when the connection is back.</string>
     <string name="debug_server">Server (debug)</string>
     <string name="debug_server_hint">Emulator: http://10.0.2.2:3021</string>
     <string name="save">Save</string>

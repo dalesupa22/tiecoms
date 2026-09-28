@@ -499,6 +499,15 @@ const es = {
   'inbox.fUnread': 'Sin leer', 'inbox.fMentions': 'Menciones', 'inbox.nothing': 'Nada por aquí.', 'inbox.internal': 'Solo tu empresa',
   'chat.newMessages': '{n} mensajes nuevos', 'chat.newMessagesOne': '1 mensaje nuevo', 'chat.newAbove': '↑ {n} nuevos',
   'chat.jumpLatest': 'Ir al final', 'chat.jumpNew': 'Ir a los mensajes nuevos', 'chat.jumpMention': 'Ir a la mención',
+  // Invitar desde «Agregar al grupo» (docs/GRUPOS.md, 28-sep-2026)
+  'add.search': 'Nombre o correo', 'add.searchEmail': 'Escribe el correo de la persona', 'add.addN': 'Agregar ({n})',
+  'add.inviteEmail': 'Invitar a {email}', 'add.send': 'Enviar invitación', 'add.sent': 'Invitación enviada a {email}', 'add.pendingTag': 'Pendiente',
+  'add.newTitle': 'Invitar a alguien nuevo', 'add.type': 'Tipo de persona', 'add.from': 'De {name}', 'add.guest': 'Tercero (asesor, mentor, cliente…)',
+  'add.hintMine': 'Entra a {org} y a este grupo.', 'add.hintOther': 'Entra a este grupo como persona de {org}.', 'add.hintGuest': 'Entra solo a este grupo, a título propio.',
+  'add.byEmail': 'Invitar por correo', 'add.copyLink': 'Copiar enlace', 'add.copied': 'Enlace copiado · vence el {date}', 'add.share': 'Compartir…',
+  'add.code': 'Código {code}', 'add.pendingN': 'Invitaciones pendientes ({n})', 'add.resend': 'Reenviar', 'add.revoke': 'Anular',
+  'add.onlyMembers': 'Solo los miembros pueden invitar', 'add.noMatch': 'Nadie con ese nombre. Escribe su correo para invitarlo.',
+  'join.org': '{name} te invita a unirte a {org} como colega.', 'auth.joiningGroups': 'Entras también a {groups}.',
 };
 
 type Key = keyof typeof es;
@@ -968,6 +977,15 @@ const en: Record<Key, string> = {
   'inbox.fUnread': 'Unread', 'inbox.fMentions': 'Mentions', 'inbox.nothing': 'Nothing here.', 'inbox.internal': 'Your company only',
   'chat.newMessages': '{n} new messages', 'chat.newMessagesOne': '1 new message', 'chat.newAbove': '↑ {n} new',
   'chat.jumpLatest': 'Jump to latest', 'chat.jumpNew': 'Jump to new messages', 'chat.jumpMention': 'Jump to mention',
+  // Invite from «Add to group» (docs/GRUPOS.md, 28-sep-2026)
+  'add.search': 'Name or email', 'add.searchEmail': "Type the person's email", 'add.addN': 'Add ({n})',
+  'add.inviteEmail': 'Invite {email}', 'add.send': 'Send invite', 'add.sent': 'Invite sent to {email}', 'add.pendingTag': 'Pending',
+  'add.newTitle': 'Invite someone new', 'add.type': 'Type of person', 'add.from': 'From {name}', 'add.guest': 'Guest (advisor, mentor, client…)',
+  'add.hintMine': 'Joins {org} and this group.', 'add.hintOther': 'Joins this group as part of {org}.', 'add.hintGuest': 'Joins only this group, on their own.',
+  'add.byEmail': 'Invite by email', 'add.copyLink': 'Copy link', 'add.copied': 'Link copied · expires {date}', 'add.share': 'Share…',
+  'add.code': 'Code {code}', 'add.pendingN': 'Pending invites ({n})', 'add.resend': 'Resend', 'add.revoke': 'Revoke',
+  'add.onlyMembers': 'Only members can invite', 'add.noMatch': 'No one by that name. Type their email to invite them.',
+  'join.org': '{name} invites you to join {org} as a colleague.', 'auth.joiningGroups': 'You also join {groups}.',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };

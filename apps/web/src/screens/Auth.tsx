@@ -66,6 +66,7 @@ export function AuthScreen({ mode, after }: { mode: 'login' | 'signup'; after?: 
           <div className="card" style={{ padding: 14 }}>
             <b>{t('auth.joining', { org: orgInvite.orgName })}</b>
             <div className="small muted">{orgInvite.valid ? t('auth.joiningBy', { name: orgInvite.invitedByName }) : t('auth.inviteInvalid')}</div>
+            {orgInvite.valid && !!orgInvite.groupNames?.length && <div className="small muted">{t('auth.joiningGroups', { groups: orgInvite.groupNames.join(', ') })}</div>}
           </div>
         )}
         {/* En las apps el SSO va por el navegador del sistema (Google bloquea los WebView); aquí solo la web. */}

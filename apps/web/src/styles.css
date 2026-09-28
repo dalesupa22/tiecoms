@@ -869,3 +869,13 @@ select.link-act { appearance: none; padding-right: 10px; }
 .switch[aria-checked="true"]::after { transform: translateX(16px); }
 .head-mute { border: 0; background: none; padding: 0 2px; cursor: pointer; font-size: .8em; filter: grayscale(1); opacity: .7; vertical-align: middle; }
 .head-mute:hover { opacity: 1; }
+
+/* «Agregar al grupo» con invitar (docs/GRUPOS.md, 28-sep-2026) */
+.invite-row { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
+.add-invite { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.kind-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.kind-chip { border: 1px solid var(--line); background: var(--card); color: var(--ink-2); border-radius: 99px; padding: 5px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.kind-chip.on { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
+.link-done { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 10px; background: var(--paper-2); font-size: 13px; }
+.pending-invites summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--ink-2); padding: 4px 0; }
+.pending-invites .list { margin-top: 6px; }

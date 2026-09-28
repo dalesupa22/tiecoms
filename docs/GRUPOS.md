@@ -350,3 +350,71 @@ Pruebas: `apps/web/test/home-order.test.ts` (orden con fijados primero, separado
 - Sonido (`sound.ts`): «pop» de dos notas con WebAudio (~200 ms, sin archivos); la mención es más aguda. Suena con mensajes de texto de otra persona si el chat no está silenciado (o me mencionan), no hay DND, el sonido está activado y la pestaña está oculta, el mensaje es de otro chat o estoy arriba, a más de una pantalla del final. Máximo uno cada 1,5 s. El audio se desbloquea con el primer clic o tecla; antes no suena nada, sin errores. Ajuste «Sonido de mensajes» en el menú de la cuenta y en Ajustes (`localStorage['chaggu:sound']`, por defecto encendido, con vista previa al encenderlo).
 - Reglas puras en `silence.ts` (`mayAlert`, `shouldSound`, `untilText`, `tomorrowAt8`), probadas en `apps/web/test/silence.test.ts`. `notices.ts` las aplica también a las notificaciones del escritorio.
 - Capturas: `release-assets/1.6.4/web-silencio-shots/`.
+
+## Invitar desde «Agregar al grupo» (28-sep-2026)
+
+Para la viralidad: desde «Agregar al grupo» se suma a quien ya está y se invita por correo o con enlace y código a quien
+aún no usa Chaggu (un colega, alguien de la otra empresa o un tercero). Misma estructura en web, iOS y Android.
+
+### Diálogo
+1. **Buscador** «Nombre o correo» arriba (con foco). Filtra los candidatos por nombre, cargo, área o empresa, sin importar
+   tildes ni mayúsculas (`fold`). Los DTO no traen correos: un correo solo coincide si coincide con el nombre.
+2. **Candidatos** con casilla, «Ven solo lo nuevo / Ven el historial» y «Agregar (N)». Candidatos (`addCandidates`): en un chat
+   grupal, cualquiera; en un grupo, las personas del espacio **y los colegas de mi empresa** que aún no están en él (el API los
+   suma al espacio); en un interno, solo los de esa empresa; nunca agentes ni quien ya está. Si no hay nadie, no sale el texto
+   viejo: se ve directo la sección de invitar.
+3. Si lo escrito es un **correo válido** y no hay candidatos: fila destacada «✉ Invitar a {correo}» con el selector de tipo y
+   «Enviar invitación». Luego «Invitación enviada a {correo}» y la marca «Pendiente» (si Brevo falla, el aviso de siempre).
+   El `history` del selector va en la invitación.
+4. **«Invitar a alguien nuevo»** (no en chats grupales sin espacio):
+   - Tipo (chips, `inviteOptions`): «De {mi empresa}» (`mine`), «De {otra empresa}» (un chip por empresa del espacio que no es
+     mía, sin repetir nombres; si no hay y el espacio tiene `counterpartName`, «De {counterpartName}»), «Tercero (asesor, mentor,
+     cliente…)» (`guest`). En «Tu organización» no hay chips de otra empresa; en un grupo interno solo «De {mi empresa}».
+     Por defecto: casa o interno → mi empresa; relación → la contraparte; si no, tercero. Debajo, una pista del efecto.
+   - «✉ Invitar por correo» enfoca el buscador con «Escribe el correo de la persona». «🔗 Copiar enlace» crea una invitación de
+     varios usos por 14 días (o reutiliza la de la sesión con el mismo tipo, grupo e historial mientras le quede más de una hora,
+     `linkKey`/`cachedLink`) y copia «Te invito a {grupo} en Chaggu: {url} (código {code})». Muestra «Enlace copiado · vence el
+     {fecha}» y el código pequeño con «Copiar código». En pantallas táctiles con `navigator.share`, además «Compartir…» (en iOS y
+     Android, la hoja del sistema).
+   - Tercero (espacio con `myRole === 'guest'`): sin botones, «Solo los miembros pueden invitar».
+5. **«Invitaciones pendientes (N)»** plegado: las de este grupo (de la empresa y del espacio, filtradas por
+   `PendingInvitationDTO.conversationIds`), con «Reenviar» y «Anular» si `canManage`.
+
+### Qué llama cada tipo (`inviteCall`)
+| Tipo | Correo | Enlace y código |
+|---|---|---|
+| De mi empresa | `POST /organizations/{miOrg}/invitations` `{ email, conversationIds: [g], workspaceId, history, lang }` | igual con `{ multiUse: true, expiresInDays: 14 }` sin correo |
+| De otra empresa | `POST /workspaces/{ws}/invitations` `{ email, role: 'member', conversationIds: [g], history, lang }` | igual con `multiUse` |
+| Tercero | igual con `role: 'guest'` | igual con `role: 'guest'` y `multiUse` |
+
+Mi empresa en el espacio (`myOrgIn`): la mía entre las del espacio (la principal si hay dos).
+
+### API (migración 024, commit del backend; todo aditivo)
+- `org_invitations` gana `workspace_id`, `conversation_ids`, `history`, `code_hash`, `multi_use`, `uses`.
+- `POST /organizations/:id/invitations` acepta `workspaceId`, `conversationIds`, `history`, `multiUse` y responde además `url`
+  (`/signup?org={token}`) y `code`. Con `conversationIds` **cualquier miembro** de la empresa puede invitar colegas (solo
+  `member`), a grupos donde participa, de un mismo espacio donde está como persona de esa empresa.
+- Al aceptar, la persona queda en **mi organización** (no como invitada), en el espacio como `member` de mi empresa (también en
+  una relación) y en los grupos con el historial elegido. Registro con `orgInviteToken` (token o código) o SSO con `?org=`.
+- Con sesión, `GET/POST /invitations/:tokenOrCode(/accept)` también resuelven las de empresa (`kind: 'org'`, `orgName`); así
+  «Unirme con código» y `/invite/{token}` sirven para las dos. Quien ya tiene cuenta suma la empresa como otra membresía.
+  Web: con sesión, `/signup?org=…` pasa a `/invite/…`; sin sesión, `/invite/…` de una de empresa lleva a `/signup?org=…`.
+- Pendientes de empresa: un miembro que no administra ve y gestiona solo las suyas. `PendingInvitationDTO.conversationIds`.
+- `POST /conversations/:id/members` acepta colegas de mi empresa que aún no están en el espacio del grupo.
+- «De otra empresa» y terceros no cambian: la regla de **Viralidad** (la primera persona de la empresa nueva queda admin) sigue
+  aplicando. No hay campo para asociar a la persona con la organización contraparte: entra con su propia empresa (la de su
+  dominio verificado o la que crea al registrarse).
+
+### Textos (ES / EN)
+Nombre o correo / Name or email · Invitar a {correo} / Invite {email} · Enviar invitación / Send invite · Invitación enviada a
+{correo} / Invite sent to {email} · Pendiente / Pending · Invitar a alguien nuevo / Invite someone new · Tipo de persona / Type of
+person · De {empresa} / From {company} · Tercero (asesor, mentor, cliente…) / Guest (advisor, mentor, client…) · Invitar por correo /
+Invite by email · Copiar enlace / Copy link · Enlace copiado · vence el {fecha} / Link copied · expires {date} · Compartir… / Share… ·
+Código {code} / Code {code} · Invitaciones pendientes ({n}) / Pending invites ({n}) · Reenviar / Resend · Anular / Revoke · Solo los
+miembros pueden invitar / Only members can invite · Agregar ({n}) / Add ({n}) · Entra a {empresa} y a este grupo. / Joins {company}
+and this group. · Entra a este grupo como persona de {empresa}. / Joins this group as part of {company}. · Entra solo a este grupo, a
+título propio. / Joins only this group, on their own. · «{nombre} te invita a unirte a {empresa} como colega.» (vista previa) ·
+«Entras también a {grupos}.» (registro).
+
+Reglas puras en `apps/web/src/add-invite.ts`, probadas en `apps/web/test/add-invite.test.ts`. API: `apps/api/test/org-invite-groups.test.ts`.
+Capturas: `release-assets/1.6.4/web-invitar-shots/`.

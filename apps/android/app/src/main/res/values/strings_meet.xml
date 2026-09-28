@@ -38,7 +38,7 @@
     <string name="meet_err_in_progress">The meeting is still being created. Tap again in a moment.</string>
     <string name="meet_err_past">Pick a time that hasn\'t passed yet.</string>
     <string name="meet_settings_title">Meetings (Meet, Teams, Zoom)</string>
-    <string name="meet_settings_hint">Connect your account to create real meetings from a chat. We only ask to create calendar events, not to read or send email.</string>
+    <string name="meet_settings_hint">Connect your account to create meetings. Google and Microsoft request read and write access to your calendar; Zoom requests permission to create meetings. We store the connection encrypted until you disconnect it. We do not request permission to read or send email.</string>
     <string name="meet_connected_toast">%1$s connected</string>
     <string name="meet_disconnected_toast">%1$s disconnected</string>
     <string name="meet_connect_cancelled">You cancelled the connection</string>

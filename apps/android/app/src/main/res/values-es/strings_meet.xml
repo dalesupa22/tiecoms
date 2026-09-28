@@ -38,7 +38,7 @@
     <string name="meet_err_in_progress">La reunión todavía se está creando. Toca otra vez en un momento.</string>
     <string name="meet_err_past">Elige una hora que aún no haya pasado.</string>
     <string name="meet_settings_title">Reuniones (Meet, Teams, Zoom)</string>
-    <string name="meet_settings_hint">Conecta tu cuenta para crear reuniones reales desde un chat. Solo pedimos permiso para crear eventos del calendario, no para leer ni enviar correo.</string>
+    <string name="meet_settings_hint">Conecta tu cuenta para crear reuniones. Google y Microsoft solicitan acceso de lectura y escritura al calendario; Zoom, creación de reuniones. Guardamos la conexión cifrada hasta que la desconectes. No pedimos leer ni enviar correo.</string>
     <string name="meet_connected_toast">%1$s conectado</string>
     <string name="meet_disconnected_toast">%1$s desconectado</string>
     <string name="meet_connect_cancelled">Cancelaste la conexión</string>

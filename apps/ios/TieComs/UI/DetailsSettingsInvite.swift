@@ -375,6 +375,10 @@ struct SettingsView: View {
                     .accessibilityIdentifier("settings.files")
                 NavigationLink(value: Route.whatsapp) { Label(L("settings.whatsapp"), systemImage: "message") }
                 NavigationLink(value: Route.reminders) { Label(L("rem.title"), systemImage: "alarm") }
+                NavigationLink(value: Route.scheduled) {
+                    Label(L("nav.scheduled") + (store.scheduled.isEmpty ? "" : " · \(store.scheduled.count)"), systemImage: "clock")
+                }
+                .accessibilityIdentifier("settings.scheduled")
                 NavigationLink(value: Route.trazo) { Label(L("nav.trazo"), systemImage: "arrow.triangle.branch") }
             } footer: { Text(L("settings.whatsappHint")) }
             Section(L("safety.title")) {

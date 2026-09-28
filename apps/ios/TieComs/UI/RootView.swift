@@ -178,6 +178,7 @@ extension View {
             case .drive(let ws, let folder): DriveFolderView(workspaceId: ws, folderId: folder)
             case .oversight(let orgId): OversightView(orgId: orgId)
             case .oversightReader(let id, let name): OversightReaderView(conversationId: id, name: name)
+            case .scheduled: ScheduledScreen()
             }
         }
     }

@@ -516,6 +516,8 @@ enum AccountEvent: Decodable, Equatable, Sendable {
     case remindersChanged
     /// «No molestar» cambió en otra sesión (PUT /me/dnd): `{ type: "me.dnd", dndUntil }`.
     case dndChanged(until: String?)
+    /// Un mensaje programado mío cambió en cualquier dispositivo (docs/PROGRAMADOS.md).
+    case scheduledUpdated(ScheduledMessageDTO)
     case other(type: String)
 
     init(from decoder: Decoder) throws {
@@ -533,6 +535,8 @@ enum AccountEvent: Decodable, Equatable, Sendable {
         case "drive.updated": self = .driveUpdated
         case "reminders.changed": self = .remindersChanged
         case "me.dnd": self = .dndChanged(until: c.o("dndUntil"))
+        case "scheduled.updated":
+            if let x: ScheduledMessageDTO = c.o("scheduled") { self = .scheduledUpdated(x) } else { self = .other(type: type) }
         default: self = .other(type: type)
         }
     }

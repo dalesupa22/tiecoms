@@ -34,6 +34,8 @@ enum Route: Hashable {
     /// Supervisión de una empresa (owner/admin) y visor de solo lectura de un grupo donde no soy miembro.
     case oversight(String)
     case oversightReader(conversationId: String, name: String)
+    /// Mis mensajes programados (Tú › Programados).
+    case scheduled
 }
 
 /// Barra inferior (docs/GRUPOS.md): Grupos (`home`) · DMs · Asuntos · Calendario · Tú (`settings`).
@@ -67,6 +69,8 @@ final class AppStore {
     var pins: [String: [String]] = [:]
     var reminders: [ReminderDTO] = []
     var events: [String: CalendarEventDTO] = [:]
+    /// Mis mensajes programados pendientes, enviándose o fallidos (docs/PROGRAMADOS.md), por hora de salida.
+    var scheduled: [ScheduledMessageDTO] = []
     /// Bloqueos sincronizados antes de mostrar el contenido de la sesión.
     var blockedUserIds: Set<String> = []
     /// Sube cuando WhatsApp trae novedades: la pantalla vuelve a pedir la lista.
@@ -273,6 +277,7 @@ final class AppStore {
         #endif
         Task { try? await loadReminders() }
         Task { await loadOpenIssues() }
+        Task { await loadScheduled() }
         onReady?()
         Task { await retryPushRegistration() }
     }
@@ -306,7 +311,7 @@ final class AppStore {
         conversations = [:]
         pending = []
         typing = [:]
-        issues = [:]; pins = [:]; reminders = []; events = [:]
+        issues = [:]; pins = [:]; reminders = []; events = [:]; scheduled = []
         blockedUserIds = []
         localDndUntil = nil; dndLocalOnly = false; dndExpiryTask?.cancel(); dndExpiryTask = nil
         homePath = []; dmsPath = []; issuesPath = []; agendaPath = []; settingsPath = []
@@ -379,6 +384,7 @@ final class AppStore {
         do {
             try await loadBootstrap()
             Task { await loadOpenIssues() }
+            Task { await loadScheduled() }
             for c in data?.conversations ?? [] {
                 guard let local = conversations[c.id], local.loaded else { continue }
                 if c.lastEventSeq > local.lastEventSeq || c.id == openConversationId { await catchUp(c.id) }
@@ -418,6 +424,7 @@ final class AppStore {
         case .driveUpdated: driveRevision += 1
         case .remindersChanged: Task { try? await loadReminders() }
         case .dndChanged(let until): applyServerDnd(until)
+        case .scheduledUpdated(let x): putScheduled(x)
         case .other: break
         }
     }

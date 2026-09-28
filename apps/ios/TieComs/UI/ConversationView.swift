@@ -86,6 +86,9 @@ struct ConversationView: View {
     @State private var addingToSide = false
     /// Menciones del borrador (offsets UTF-16) y ficha de una persona mencionada.
     @State private var draftMentions: [Mention] = []
+    /// Programar envío: «Elegir fecha y hora…» y la lista de programados del chat.
+    @State private var pickingSchedule = false
+    @State private var showScheduled = false
     @State private var personCard: String?
     @State private var sideForPerson: String?
     @State private var highlighted: String?
@@ -958,6 +961,7 @@ struct ConversationView: View {
             if showQuickReplies(d, c) {
                 SideQuickReplies(onSend: { store.send(conversationId, body: $0) }, onAskOther: { addingToSide = true })
             }
+            ScheduledStrip(conversationId: conversationId) { showScheduled = true }
             StagedAttachments(staged: $staged, progress: uploadProgress)
             if let v = failedVoice {
                 // La nota no se subió: queda aquí para reintentar o descartar.
@@ -1001,6 +1005,10 @@ struct ConversationView: View {
                 if editing == nil && trimmed.isEmpty && staged.isEmpty && !uploading && recorder.state != .locked {
                     VoiceRecordButton(recorder: recorder, onSend: sendVoice)
                 } else if !recorder.isActive {
+                // Con texto (sin adjuntos): 🕒 para programar el envío.
+                if canSchedule(trimmed) {
+                    ScheduleButton(onPick: scheduleDraft, onCustom: { pickingSchedule = true })
+                }
                 Button(action: submit) {
                     Image(systemName: editing != nil ? "checkmark" : "arrow.up")
                         .font(.system(size: 17, weight: .bold))
@@ -1011,11 +1019,37 @@ struct ConversationView: View {
                 .disabled((trimmed.isEmpty && staged.isEmpty) || uploading)
                 .accessibilityLabel(editing != nil ? L("edit.save") : L("chat.send"))
                 .accessibilityIdentifier("composer.send")
+                // Mantener presionado ➤: el mismo menú de programar.
+                .contextMenu {
+                    if canSchedule(trimmed) { ScheduleMenuItems(onPick: scheduleDraft, onCustom: { pickingSchedule = true }) }
+                }
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
         }
         .background(Theme.surface.ignoresSafeArea(edges: .bottom))
+        .sheet(isPresented: $pickingSchedule) { PickWhenSheet(onPick: scheduleDraft) }
+        .sheet(isPresented: $showScheduled) { ScheduledSheet(conversationId: conversationId) }
+    }
+
+    /// Solo se programa texto (con menciones y respuesta); adjuntos, notas de voz y respuestas privadas salen al momento.
+    private func canSchedule(_ trimmed: String) -> Bool {
+        editing == nil && !trimmed.isEmpty && staged.isEmpty && !uploading && store.privateReplies[conversationId] == nil
+    }
+
+    /// Programa el borrador: el compositor se vacía y el aviso trae «Deshacer» (devuelve el texto).
+    private func scheduleDraft(_ at: Date) {
+        // El texto tal cual (como al enviar): los offsets de las menciones se cuentan sobre él.
+        let body = draft
+        guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let ms = draftMentions, reply = replyTo?.id
+        draft = ""; draftMentions = []; replyTo = nil
+        Task {
+            let ok = await store.scheduleFromComposer(conversationId, body: body, at: at, mentions: ms, replyTo: reply) { text, mentions in
+                if draft.isEmpty { draft = text; draftMentions = mentions }
+            }
+            if !ok && draft.isEmpty { draft = body; draftMentions = ms }
+        }
     }
 
     /// Keep the recording on-device until the person chooses whether to use third-party AI.

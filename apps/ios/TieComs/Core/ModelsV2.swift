@@ -597,3 +597,47 @@ struct ReactionDTO: Codable, Equatable, Sendable, Identifiable {
         external = c.lossyArray("external")
     }
 }
+
+// MARK: - Mensajes programados
+
+/// Mensajes programados (docs/PROGRAMADOS.md): se escriben ahora y salen solos a la hora elegida. Solo los ve quien
+/// los escribió hasta que salen. Mismas reglas que la web (Scheduled.tsx).
+struct ScheduledMessageDTO: Decodable, Equatable, Identifiable, Sendable {
+    enum Status: String, Sendable { case pending, sending, sent, cancelled, failed }
+    var id: String
+    var conversationId: String
+    var body: String
+    var mentions: [Mention]
+    var replyTo: String?
+    var sendAt: String
+    var status: Status
+    var messageId: String?
+    var error: String?
+    var createdAt: String
+    var sentAt: String?
+
+    /// Sigue en la lista mientras no haya salido ni se haya cancelado.
+    var isListed: Bool { status == .pending || status == .sending || status == .failed }
+    var failed: Bool { status == .failed }
+    var date: Date? { ISODate.parse(sendAt) }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        conversationId = c.v("conversationId", "")
+        body = c.v("body", "")
+        mentions = c.lossyArray("mentions")
+        replyTo = c.o("replyTo")
+        sendAt = c.v("sendAt", "")
+        status = Status(rawValue: c.v("status", "pending")) ?? .pending
+        messageId = c.o("messageId")
+        error = c.o("error")
+        createdAt = c.v("createdAt", "")
+        sentAt = c.o("sentAt")
+    }
+}
+
+struct ScheduledList: Decodable, Sendable {
+    var scheduled: [ScheduledMessageDTO]
+    init(from decoder: Decoder) throws { scheduled = (try container(decoder)).lossyArray("scheduled") }
+}

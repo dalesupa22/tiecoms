@@ -459,6 +459,7 @@
 "dnd.forever" = "Hasta que lo reactive";
 "dnd.hint" = "Sin sonido, notificaciones ni push en tus dispositivos. Los mensajes quedan sin leer.";
 "dnd.localOnly" = "Guardado solo en este navegador";
+"dnd.localOnlyIos" = "Por ahora se guardó solo en este dispositivo.";
 "dnd.off" = "Reactivar";
 "dnd.offState" = "Desactivado";
 "dnd.on" = "No molestar activo";

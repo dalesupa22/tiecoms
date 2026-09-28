@@ -459,6 +459,7 @@
 "dnd.forever" = "Until I turn it back on";
 "dnd.hint" = "No sound, notifications or push on your devices. Messages stay unread.";
 "dnd.localOnly" = "Saved in this browser only";
+"dnd.localOnlyIos" = "For now it is saved on this device only.";
 "dnd.off" = "Turn off";
 "dnd.offState" = "Off";
 "dnd.on" = "Do not disturb is on";

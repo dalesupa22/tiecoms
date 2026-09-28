@@ -2730,5 +2730,9 @@
  "signed.savedIos": [
   "Mis firmas guardadas",
   "My saved signatures"
+ ],
+ "dnd.localOnlyIos": [
+  "Por ahora se guardó solo en este dispositivo.",
+  "For now it is saved on this device only."
  ]
 }

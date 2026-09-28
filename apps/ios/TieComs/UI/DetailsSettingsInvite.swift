@@ -347,7 +347,7 @@ struct SettingsView: View {
                 DndRow()
                 SleepRow()
             } footer: {
-                Text(store.dndLocalOnly && store.dndActive ? L("dnd.hint") + " " + L("dnd.localOnly") : L("dnd.hint"))
+                Text(store.dndLocalOnly && store.dndActive ? L("dnd.hint") + " " + L("dnd.localOnlyIos") : L("dnd.hint"))
                     .accessibilityIdentifier("settings.dnd.footer")
             }
             Section {

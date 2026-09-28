@@ -12,7 +12,7 @@ Review corrections for the read/meet/calendar batch, 28 September 2026. No real-
 
 This binds completion to possession of both the original client's verifier and the callback receipt. If attacker A transfers the authorization URL to B, B's browser has the receipt but not A's client proof/session; A has the proof but cannot fetch B's receipt from the API. As with other authorization-code flows, secrets intentionally copied between people remain outside this guarantee. See [RFC 9700, section 2.1.1](https://www.rfc-editor.org/rfc/rfc9700.html#section-2.1.1).
 
-Provider callbacks send `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; confirmation sends `Cache-Control: no-store`. API request logging excludes query strings. Do not log request bodies or callback URLs in clients/proxies. A newly confirmed connection replaces old refresh credentials rather than combining credentials from different provider accounts.
+Provider callbacks send `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; confirmation sends `Cache-Control: no-store`. API request logging excludes query strings. Do not log request bodies or callback URLs in clients/proxies. A newly confirmed connection replaces old refresh credentials rather than combining credentials from different provider accounts. Refresh responses update only the captured connection generation and token version: late success cannot resurrect a disconnect or overwrite a replacement, and late rejection cannot mark a replacement for reconnection. `meeting_connection_changed` preserves the attempt when this race is detected.
 
 ## Create and recover
 

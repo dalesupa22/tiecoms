@@ -276,21 +276,20 @@ export async function confirmConnect(userId: string, input: { receipt: string; p
     );
     const pending = rows[0];
     if (!pending) throw new ApiError(409, 'meeting_confirmation_invalid', 'La conexión venció o no pertenece a esta sesión. Conecta la cuenta de nuevo.');
-    await saveTokens(userId, pending.provider, JSON.parse(open(pending.tokens_enc)!), c, true);
+    await saveTokens(userId, pending.provider, JSON.parse(open(pending.tokens_enc)!), c);
     return { ok: true, provider: pending.provider as MeetingProvider };
   });
 }
 
-async function saveTokens(userId: string, provider: string, tk: Tokens, db: Db = pool, replacing = false) {
+/** Only explicit confirmation may insert/replace a connection. Refresh uses compare-and-swap below. */
+async function saveTokens(userId: string, provider: string, tk: Tokens, db: Db) {
   await db.query(
     `INSERT INTO meeting_connections (user_id, provider, account_email, scopes, access_token_enc, refresh_token_enc, expires_at, status, updated_at)
      VALUES ($1,$2,$3,$4,$5,$6, now() + make_interval(secs => $7), 'active', now())
-     ON CONFLICT (user_id, provider) DO UPDATE SET account_email = CASE WHEN $8 THEN EXCLUDED.account_email ELSE COALESCE(EXCLUDED.account_email, meeting_connections.account_email) END,
-       scopes = EXCLUDED.scopes, access_token_enc = EXCLUDED.access_token_enc,
-       refresh_token_enc = CASE WHEN $8 THEN EXCLUDED.refresh_token_enc ELSE COALESCE(EXCLUDED.refresh_token_enc, meeting_connections.refresh_token_enc) END,
-       expires_at = EXCLUDED.expires_at, status = 'active', updated_at = now(),
-       generation = CASE WHEN $8 THEN gen_random_uuid() ELSE meeting_connections.generation END`,
-    [userId, provider, tk.email, tk.scope, seal(tk.access), seal(tk.refresh), Math.max(60, tk.expiresIn - 60), replacing],
+     ON CONFLICT (user_id, provider) DO UPDATE SET account_email = EXCLUDED.account_email,
+       scopes = EXCLUDED.scopes, access_token_enc = EXCLUDED.access_token_enc, refresh_token_enc = EXCLUDED.refresh_token_enc,
+       expires_at = EXCLUDED.expires_at, status = 'active', updated_at = now(), generation = gen_random_uuid()`,
+    [userId, provider, tk.email, tk.scope, seal(tk.access), seal(tk.refresh), Math.max(60, tk.expiresIn - 60)],
   );
 }
 
@@ -306,24 +305,43 @@ export async function disconnect(userId: string, provider: MeetingProvider) {
 }
 
 /** Token vigente; si venció se renueva. Si el proveedor lo rechaza, la conexión queda «reconectar». */
-async function accessToken(userId: string, provider: MeetingProvider): Promise<string> {
+async function accessToken(userId: string, provider: MeetingProvider, expectedGeneration?: string): Promise<{ access: string; generation: string; accessCipher: Buffer }> {
   const { rows } = await pool.query('SELECT * FROM meeting_connections WHERE user_id = $1 AND provider = $2', [userId, provider]);
   const r = rows[0];
   if (!r) throw new ApiError(409, 'not_connected', `Conecta tu cuenta de ${PROVIDERS[provider].label} para crear la reunión`);
+  if (expectedGeneration && r.generation !== expectedGeneration) throw connectionChanged();
   if (r.status === 'reconnect') throw new ApiError(409, 'reconnect_required', `Vuelve a conectar ${PROVIDERS[provider].label}: el permiso venció o se revocó`);
-  if (r.expires_at && new Date(r.expires_at).getTime() > Date.now() + 30_000) return open(r.access_token_enc)!;
+  if (r.expires_at && new Date(r.expires_at).getTime() > Date.now() + 30_000) return { access: open(r.access_token_enc)!, generation: r.generation, accessCipher: r.access_token_enc };
   const refresh = open(r.refresh_token_enc);
-  if (!refresh) { await markReconnect(userId, provider); throw new ApiError(409, 'reconnect_required', `Vuelve a conectar ${PROVIDERS[provider].label}`); }
+  if (!refresh) { await markReconnect(userId, provider, r.generation, r.access_token_enc); throw new ApiError(409, 'reconnect_required', `Vuelve a conectar ${PROVIDERS[provider].label}`); }
   try {
     const tk = await PROVIDERS[provider].refresh(refresh);
-    await saveTokens(userId, provider, tk);
-    return tk.access;
+    const accessCipher = seal(tk.access)!;
+    // A late refresh cannot resurrect a disconnected account, overwrite a new account,
+    // or replace another successful refresh that already changed the captured token version.
+    const saved = await pool.query(
+      `UPDATE meeting_connections SET account_email = COALESCE($5, account_email), scopes = $6,
+         access_token_enc = $7, refresh_token_enc = COALESCE($8, refresh_token_enc),
+         expires_at = now() + make_interval(secs => $9), status = 'active', updated_at = now()
+       WHERE user_id = $1 AND provider = $2 AND generation = $3 AND access_token_enc = $4 RETURNING generation`,
+      [userId, provider, r.generation, r.access_token_enc, tk.email, tk.scope, accessCipher, seal(tk.refresh), Math.max(60, tk.expiresIn - 60)],
+    );
+    if (!saved.rowCount) throw connectionChanged();
+    return { access: tk.access, generation: r.generation, accessCipher };
   } catch (e: any) {
-    if (e instanceof ProviderError && e.status >= 400 && e.status < 500) { await markReconnect(userId, provider); throw new ApiError(409, 'reconnect_required', `Vuelve a conectar ${PROVIDERS[provider].label}: el permiso venció o se revocó`); }
+    if (e instanceof ApiError) throw e;
+    if (e instanceof ProviderError && e.status >= 400 && e.status < 500) {
+      await markReconnect(userId, provider, r.generation, r.access_token_enc);
+      throw new ApiError(409, 'reconnect_required', `Vuelve a conectar ${PROVIDERS[provider].label}: el permiso venció o se revocó`);
+    }
     throw new ApiError(502, 'provider_unreachable', `${PROVIDERS[provider].label} no respondió; inténtalo de nuevo`);
   }
 }
-const markReconnect = (userId: string, provider: string) => pool.query("UPDATE meeting_connections SET status = 'reconnect', updated_at = now() WHERE user_id = $1 AND provider = $2", [userId, provider]);
+const connectionChanged = () => new ApiError(409, 'meeting_connection_changed', 'La cuenta conectada cambió. Conserva el intento y vuelve a comprobarlo.');
+const markReconnect = (userId: string, provider: string, generation: string, accessCipher: Buffer) => pool.query(
+  "UPDATE meeting_connections SET status = 'reconnect', updated_at = now() WHERE user_id = $1 AND provider = $2 AND generation = $3 AND access_token_enc = $4",
+  [userId, provider, generation, accessCipher],
+);
 
 // ---------- Crear y compartir ----------
 const toDTO = (r: any): MeetingDTO => ({
@@ -371,7 +389,7 @@ async function recordFailure(row: any, e: unknown, dispatched: boolean): Promise
   } else if (e instanceof ProviderError && e.status >= 400 && e.status < 500) {
     externalId = e.externalId ?? externalId;
     if (e.status === 401 || e.status === 403) {
-      await markReconnect(row.user_id, row.provider);
+      await markReconnect(row.user_id, row.provider, row.connection_generation, row.connection_access_cipher);
       // A known rejected request can be retried after reconnecting; a previously uncertain one cannot.
       op = row.operation_state === 'reserved' ? 'reserved' : 'uncertain';
       code = 'reconnect_required'; status = 409; message = 'El proveedor rechazó el permiso. Vuelve a conectar la cuenta.';
@@ -433,11 +451,11 @@ async function recover(row: any, readOnly: boolean): Promise<MeetingDTO> {
   }
   let dispatched = false;
   try {
-    const connection = (await pool.query('SELECT generation FROM meeting_connections WHERE user_id = $1 AND provider = $2', [row.user_id, row.provider])).rows[0];
-    if (priorUncertain && row.connection_generation !== connection?.generation) {
-      throw new ApiError(409, 'meeting_uncertain', 'La cuenta conectada cambió. Comprueba la reunión en la cuenta original antes de crear otra.', details(row));
-    }
-    const at = await accessToken(row.user_id, row.provider);
+    if (priorUncertain && !row.connection_generation) throw connectionChanged();
+    const credentials = await accessToken(row.user_id, row.provider, priorUncertain ? row.connection_generation : undefined);
+    row.connection_generation = credentials.generation;
+    row.connection_access_cipher = credentials.accessCipher;
+    const at = credentials.access;
     let created: Created;
     if (readOnly) {
       // GET only reads the original Google event; it never inserts an external event.
@@ -445,7 +463,12 @@ async function recover(row: any, readOnly: boolean): Promise<MeetingDTO> {
       created = await def.read(at, row.external_id);
     } else {
       row.external_id ??= row.provider === 'google' ? row.id.replace(/-/g, '') : null;
-      await pool.query("UPDATE meetings SET operation_state = 'inflight', status = 'creating', connection_generation = $2, external_id = COALESCE(external_id, $3) WHERE id = $1", [row.id, connection?.generation, row.external_id]);
+      const reserved = await pool.query(
+        `UPDATE meetings SET operation_state = 'inflight', status = 'creating', connection_generation = $2, external_id = COALESCE(external_id, $3)
+         WHERE id = $1 AND EXISTS (SELECT 1 FROM meeting_connections WHERE user_id = $4 AND provider = $5 AND generation = $2 AND access_token_enc = $6)`,
+        [row.id, credentials.generation, row.external_id, row.user_id, row.provider, credentials.accessCipher],
+      );
+      if (!reserved.rowCount) throw connectionChanged();
       dispatched = true;
       created = await def.create(at, { key: row.id, title: row.title, startsAt: new Date(row.starts_at).toISOString(), endsAt: new Date(row.ends_at).toISOString(), timezone: row.timezone, instant: row.instant });
     }
@@ -453,7 +476,7 @@ async function recover(row: any, readOnly: boolean): Promise<MeetingDTO> {
   } catch (e) {
     // A read failure cannot prove an earlier write failed. Keep the original reservation.
     if (readOnly) return toDTO(await rowById(row.id));
-    if (priorUncertain && e instanceof ApiError) throw e;
+    if (priorUncertain && e instanceof ApiError) throw new ApiError(409, 'meeting_uncertain', 'No se pudo consultar la cuenta original. Conserva este intento y comprueba su calendario antes de crear otra reunión.', details(row));
     await recordFailure(row, e, dispatched);
   }
   row = await rowById(row.id);

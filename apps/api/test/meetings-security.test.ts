@@ -11,7 +11,7 @@ let a: User, b: User;
 async function call(path: string, user?: User, body?: unknown, method?: string) {
   const res = await fetch(`${API}/api/v1${path}`, {
     method: method ?? (body ? 'POST' : 'GET'), headers: {
-      'content-type': 'application/json', 'x-tiecoms-contract': '2026-09-28',
+      ...(body ? { 'content-type': 'application/json' } : {}), 'x-tiecoms-contract': '2026-09-28',
       ...(user ? { authorization: `Bearer ${user.token}` } : {}),
     }, body: body ? JSON.stringify(body) : undefined,
   });
@@ -55,7 +55,7 @@ beforeAll(async () => {
   if (!['localhost', '127.0.0.1'].includes(new URL(API).hostname) || !['localhost', '127.0.0.1'].includes(new URL(FAKE).hostname)) throw new Error('Local fake services required');
   a = await signup(); b = await signup();
 });
-afterAll(async () => { await control({ googlePending: false, googleFailed: false, dropAfterCreate: null, revokeAll: false }); await pool.end(); });
+afterAll(async () => { await control({ googlePending: false, googleFailed: false, dropAfterCreate: null, revokeAll: false, delayRefresh: false, refreshFailure: false }); await pool.end(); });
 
 describe('OAuth receiving-client confirmation', () => {
   it('requires client proof and does not activate a transferred URL; wrong user/proof cannot consume receipt', async () => {
@@ -161,5 +161,43 @@ describe('durable provider idempotency', () => {
     await control({ googlePending: false });
     expect((await call('/meetings', a, m)).json.error.code).toBe('meeting_uncertain');
     expect((await stats()).google - before.google).toBe(1);
+  });
+});
+
+
+describe('connection refresh race isolation', () => {
+  it.each([
+    { name: 'disconnect', reconnect: false, reject: false },
+    { name: 'reconnect after old refresh succeeds', reconnect: true, reject: false },
+    { name: 'reconnect after old refresh is rejected', reconnect: true, reject: true },
+  ])('does not resurrect or mutate an account after $name', async ({ reconnect, reject }) => {
+    await connect(b, 'google');
+    await pool.query("UPDATE meeting_connections SET expires_at = now() - interval '1 minute' WHERE user_id = $1 AND provider = 'google'", [b.id]);
+    await control({ delayRefresh: true, refreshFailure: reject });
+    const before = await stats();
+    const pending = call('/meetings', b, input());
+    try {
+      let waiting = false;
+      for (let i = 0; i < 100; i++) {
+        const n = await (await fetch(`${FAKE}/stats`)).json() as { refreshWaiting: number };
+        if (n.refreshWaiting > 0) { waiting = true; break; }
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(waiting).toBe(true);
+      expect((await call('/meetings/connections/google', b, undefined, 'DELETE')).status).toBe(200);
+      if (reconnect) await connect(b, 'google');
+      const afterDisconnect = (await pool.query("SELECT generation, status, access_token_enc FROM meeting_connections WHERE user_id = $1 AND provider = 'google'", [b.id])).rows[0];
+      await control({ delayRefresh: false, refreshFailure: false });
+      const result = await pending;
+      expect(result.status).toBe(409);
+      expect(result.json.error.details.meetingId).toBeTruthy();
+      const final = (await pool.query("SELECT generation, status, access_token_enc FROM meeting_connections WHERE user_id = $1 AND provider = 'google'", [b.id])).rows[0];
+      expect(final).toEqual(afterDisconnect);
+      if (reconnect) expect(final.status).toBe('active'); else expect(final).toBeUndefined();
+      expect((await stats()).google).toBe(before.google);
+    } finally {
+      await control({ delayRefresh: false, refreshFailure: false });
+      await pending;
+    }
   });
 });

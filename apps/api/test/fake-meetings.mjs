@@ -13,7 +13,8 @@ import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 
 const port = Number(process.argv[2] ?? 59300);
-const state = { msNoTeams: false, revokeAll: false, failNext: null, dropAfterCreate: null, googlePending: false, googleFailed: false, created: { google: 0, microsoft: 0, zoom: 0 }, byKey: new Map(), events: new Map() };
+const state = { msNoTeams: false, revokeAll: false, failNext: null, dropAfterCreate: null, googlePending: false, googleFailed: false, delayRefresh: false, refreshFailure: false, created: { google: 0, microsoft: 0, zoom: 0 }, byKey: new Map(), events: new Map() };
+const heldRefresh = [];
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const idToken = (email) => `${b64({ alg: 'none' })}.${b64({ email, preferred_username: email })}.`;
 
@@ -28,8 +29,8 @@ const tokens = (p) => ({ access_token: `at-${p}-${randomUUID()}`, refresh_token:
 http.createServer(async (req, res) => {
   const u = new URL(req.url, `http://localhost:${port}`);
   const [, prov, kind, ...rest] = u.pathname.split('/');
-  if (u.pathname === '/stats') return send(res, 200, state.created);
-  if (u.pathname === '/control') { Object.assign(state, await body(req)); return send(res, 200, { ok: true }); }
+  if (u.pathname === '/stats') return send(res, 200, { ...state.created, refreshWaiting: heldRefresh.length });
+  if (u.pathname === '/control') { Object.assign(state, await body(req)); if (!state.delayRefresh) while (heldRefresh.length) heldRefresh.shift()(); return send(res, 200, { ok: true }); }
   if (kind === 'auth') {
     const to = new URL(u.searchParams.get('redirect_uri'));
     to.searchParams.set('state', u.searchParams.get('state') ?? '');
@@ -38,6 +39,11 @@ http.createServer(async (req, res) => {
   }
   if (kind === 'token') {
     const f = await body(req);
+    if (f.grant_type === 'refresh_token') {
+      const fail = state.refreshFailure;
+      if (state.delayRefresh) await new Promise((resolve) => heldRefresh.push(resolve));
+      if (fail) return send(res, 400, { error: 'invalid_grant', error_description: 'Delayed refresh rejection (mock)' });
+    }
     if (state.revokeAll && f.grant_type === 'refresh_token') return send(res, 400, { error: 'invalid_grant', error_description: 'Token revocado (mock)' });
     return send(res, 200, tokens(prov));
   }

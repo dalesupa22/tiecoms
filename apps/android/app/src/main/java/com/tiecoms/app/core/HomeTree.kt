@@ -64,25 +64,29 @@ object HomeTree {
      *  3. con no leídos pendientes (pendingOf: no leídos y no silenciada);
      *  4. el resto por actividad descendente (activityOf); desempate por id para que el orden no salte.
      */
-    fun comparator(nowMs: Long): Comparator<ConversationDTO> = Comparator { a, b ->
+    fun comparator(nowMs: Long, tree: Map<String, ReadTree.Pending>? = null): Comparator<ConversationDTO> = Comparator { a, b ->
         val pa = if (a.pinnedAt != null) 1 else 0; val pb = if (b.pinnedAt != null) 1 else 0
         if (pa != pb) return@Comparator pb - pa
-        val ma = if (a.unreadMentions > 0) 1 else 0; val mb = if (b.unreadMentions > 0) 1 else 0
+        val ma = if (mentionsOf(a, tree) > 0) 1 else 0; val mb = if (mentionsOf(b, tree) > 0) 1 else 0
         if (ma != mb) return@Comparator mb - ma
-        val ua = if (pending(a, nowMs) > 0) 1 else 0; val ub = if (pending(b, nowMs) > 0) 1 else 0
+        val ua = if (pendingOf(a, nowMs, tree) > 0) 1 else 0; val ub = if (pendingOf(b, nowMs, tree) > 0) 1 else 0
         if (ua != ub) return@Comparator ub - ua
         activity(b).compareTo(activity(a)).takeIf { it != 0 } ?: a.id.compareTo(b.id)
     }
 
     /** Bloques de las listas planas (Lista de Grupos y DMs): «Fijados», «Sin leer» y «Recientes». */
     enum class Block { PINNED, UNREAD, RECENT }
-    fun blockOf(c: ConversationDTO, nowMs: Long): Block = when {
+    fun blockOf(c: ConversationDTO, nowMs: Long, tree: Map<String, ReadTree.Pending>? = null): Block = when {
         c.pinnedAt != null -> Block.PINNED
-        c.unreadMentions > 0 || pending(c, nowMs) > 0 -> Block.UNREAD
+        mentionsOf(c, tree) > 0 || pendingOf(c, nowMs, tree) > 0 -> Block.UNREAD
         else -> Block.RECENT
     }
 
-    fun order(list: List<ConversationDTO>, nowMs: Long): List<ConversationDTO> = list.sortedWith(comparator(nowMs))
+    fun order(list: List<ConversationDTO>, nowMs: Long, tree: Map<String, ReadTree.Pending>? = null): List<ConversationDTO> = list.sortedWith(comparator(nowMs, tree))
+
+    /** Con [tree] (ReadTree.all), los pendientes del árbol (propios + derivadas); sin él, los propios. */
+    fun pendingOf(c: ConversationDTO, nowMs: Long, tree: Map<String, ReadTree.Pending>?): Int = tree?.get(c.id)?.total ?: pending(c, nowMs)
+    fun mentionsOf(c: ConversationDTO, tree: Map<String, ReadTree.Pending>?): Int = tree?.get(c.id)?.mentions ?: c.unreadMentions
 
     /** groupRank + compareRank de la web: con no leídos primero, luego más no leídos, luego actividad más reciente. */
     data class Rank(val unread: Int, val activity: String)

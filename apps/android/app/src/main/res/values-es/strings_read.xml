@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.6: pendientes del árbol de un grupo (el grupo y sus hilos y ramas), docs/TANDA-LECTURA-REUNIONES.md §1. -->
+<resources>
+    <plurals name="tree_chip_cd">
+        <item quantity="one">%1$d sin leer en hilos y ramas de este grupo</item>
+        <item quantity="other">%1$d sin leer en hilos y ramas de este grupo</item>
+    </plurals>
+    <plurals name="tree_banner">
+        <item quantity="one">⑂ %1$d sin leer en %2$d conversación de este grupo</item>
+        <item quantity="other">⑂ %1$d sin leer en %2$d conversaciones de este grupo</item>
+    </plurals>
+    <string name="tree_banner_view">Ver</string>
+    <string name="tree_sheet_title">Sin leer en este grupo</string>
+    <string name="tree_sheet_mentioned">Te mencionaron</string>
+    <string name="toast_marked_read">Marcado como leído</string>
+    <string name="tree_banner_one">⑂ %1$d sin leer en «%2$s»</string>
+    <string name="tree_mark_all">Marcar todo como leído</string>
+</resources>

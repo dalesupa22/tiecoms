@@ -916,6 +916,32 @@ class TieComsClient(
         patchMeta(conversationId) { copy(lastReadSeq = lastMessageSeq, unread = 0, unreadMentions = 0) }
         req("POST", "/conversations/$conversationId/read", buildJsonObject { put("seq", JsonPrimitive(c.lastMessageSeq)) }, JsonElement.serializer()); Unit
     }
+    /**
+     * «Marcar como leído» desde la lista (docs/TANDA-LECTURA-REUNIONES.md §1): el grupo y sus derivadas pendientes,
+     * cada una hasta el lastMessageSeq que este cliente conoce (POST /conversations/:id/read-tree). Es una acción
+     * explícita: marca lo que la lista mostraba; lo que llegue mientras tanto (seq mayor) sigue sin leer.
+     * Optimista; si el API falla, vuelve como estaba (solo las que no cambiaron entretanto) y se lanza el error.
+     * Devuelve cuántas conversaciones marcó el servidor.
+     */
+    suspend fun markTreeRead(rootId: String): Int = withContext(dispatcher) {
+        val d = s.data ?: return@withContext 0
+        val root = d.conversations.firstOrNull { it.id == rootId } ?: return@withContext 0
+        val items = ReadTree.items(d, root, now())
+        val before = items.mapNotNull { meta(it.conversationId) }.associateBy { it.id }
+        for (item in items) { readJobs[item.conversationId]?.cancel(); patchMeta(item.conversationId) { ReadTree.applyRead(this, item.seq) } }
+        val optimistic = items.mapNotNull { meta(it.conversationId) }.associateBy { it.id }
+        val r = try {
+            request("POST", "/conversations/$rootId/read-tree", TcJson.encodeToString(ReadTreeBody.serializer(), ReadTreeBody(items)), ReadTreeResult.serializer())
+        } catch (e: Exception) {
+            for ((id, b) in before) if (meta(id)?.let { it.lastReadSeq == optimistic[id]?.lastReadSeq } == true)
+                patchMeta(id) { copy(lastReadSeq = b.lastReadSeq, unread = maxOf(0L, lastMessageSeq - maxOf(b.lastReadSeq, historyFromSeq)).toInt(), unreadMentions = if (lastMessageSeq == b.lastMessageSeq) b.unreadMentions else unreadMentions) }
+            throw e
+        }
+        // El servidor puede tener un cursor más adelante (otro dispositivo): se aplica sin retroceder.
+        for (m in r.marked) patchMeta(m.conversationId) { ReadTree.applyRead(this, m.lastReadSeq) }
+        r.marked.size
+    }
+
     private fun patchPreviewIfLast(m: MessageDTO) {
         val c = meta(m.conversationId) ?: return
         if (c.lastMessageSeq == m.seq) patchMeta(c.id) { copy(lastMessagePreview = m.body.take(140)) }

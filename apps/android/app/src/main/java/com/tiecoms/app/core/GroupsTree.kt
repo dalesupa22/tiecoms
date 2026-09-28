@@ -121,9 +121,9 @@ object GroupsTree {
     /** Hilo de un directo o chat grupal: tiene padre, no es sidechat y no es de un grupo. */
     fun isChatThread(d: BootstrapDTO, c: ConversationDTO): Boolean = c.parentId != null && !c.isSide && !isGroup(d, c)
 
-    /** No leídos de los hilos (no sidechats) de cada conversación: el chip «💬 N». */
+    /** No leídos de las derivadas (no sidechats) de cada conversación: el chip «⑂ N» (antes «💬 N»). */
     fun threadUnread(d: BootstrapDTO, nowMs: Long = System.currentTimeMillis()): Map<String, Int> =
-        d.conversations.filter { it.parentId != null && !it.isSide }.groupBy { it.parentId!! }.mapValues { (_, l) -> l.sumOf { HomeTree.pending(it, nowMs) } }
+        ReadTree.all(d, nowMs).mapValues { it.value.threads }.filterValues { it > 0 }
 
     /** Globo de Grupos y de DMs: no leídos que cuentan (sin silenciadas). */
     fun groupsUnread(d: BootstrapDTO, nowMs: Long = System.currentTimeMillis()): Int = d.conversations.filter { isGroup(d, it) }.sumOf { HomeTree.pending(it, nowMs) }
@@ -132,9 +132,17 @@ object GroupsTree {
     /** DMs en el orden de Inicio (compareConversations), con búsqueda por título, vista previa o personas. */
     fun dms(d: BootstrapDTO, query: String, title: (ConversationDTO) -> String, nowMs: Long = System.currentTimeMillis(), unreadOnly: Boolean = false): List<ConversationDTO> {
         val q = query.trim().lowercase()
+        // Los hilos de un directo o chat grupal cuentan en su fila (pendientes del árbol).
+        val tree = ReadTree.all(d, nowMs)
         return HomeTree.order(d.conversations.filter { isDm(d, it) }
-            .filter { !unreadOnly || HomeTree.pending(it, nowMs) > 0 || it.unreadMentions > 0 }
-            .filter { c -> q.isEmpty() || matchesText(d, c, q, title) }, nowMs)
+            .filter { !unreadOnly || HomeTree.pendingOf(it, nowMs, tree) > 0 || HomeTree.mentionsOf(it, tree) > 0 }
+            .filter { c -> q.isEmpty() || matchesText(d, c, q, title) }, nowMs, tree)
+    }
+
+    /** Contador del filtro «No leídos» de DMs: con pendientes del árbol. */
+    fun dmsUnreadCount(d: BootstrapDTO, nowMs: Long = System.currentTimeMillis()): Int {
+        val tree = ReadTree.all(d, nowMs)
+        return d.conversations.count { isDm(d, it) && (HomeTree.pendingOf(it, nowMs, tree) > 0 || HomeTree.mentionsOf(it, tree) > 0) }
     }
 
     /** Origen visible de un sidechat («desde #Grupo»); null si no lo puedo ver. */
@@ -157,16 +165,19 @@ object GroupsTree {
         return c.memberIds.any { id -> Names.person(d, id)?.name?.lowercase()?.contains(q) == true }
     }
 
-    fun inTab(tab: Tab, c: ConversationDTO, issues: Collection<IssueDTO>, nowMs: Long): Boolean = when (tab) {
+    /** [tree]: pendientes del árbol (ReadTree.all); sin él, solo los no leídos propios. */
+    fun inTab(tab: Tab, c: ConversationDTO, issues: Collection<IssueDTO>, nowMs: Long, tree: Map<String, ReadTree.Pending>? = null): Boolean = when (tab) {
         Tab.ALL -> true
-        Tab.UNREAD -> HomeTree.pending(c, nowMs) > 0 || c.unreadMentions > 0
+        Tab.UNREAD -> HomeTree.pendingOf(c, nowMs, tree) > 0 || HomeTree.mentionsOf(c, tree) > 0
         Tab.ISSUES -> if (issues.isEmpty()) c.openIssues > 0 else issues.any { it.conversationId == c.id && isActive(it) }
     }
 
     /** Contador de cada filtro (Todo = todos los grupos). */
     fun counts(d: BootstrapDTO, issues: Collection<IssueDTO>, nowMs: Long = System.currentTimeMillis()): Map<Tab, Int> {
-        val groups = d.conversations.filter { isGroup(d, it) }
-        return Tab.entries.associateWith { t -> groups.count { inTab(t, it, issues, nowMs) } }
+        // Solo las filas de la lista (sin derivadas): una derivada con no leídos cuenta en su grupo.
+        val tree = ReadTree.all(d, nowMs)
+        val groups = d.conversations.filter { isGroup(d, it) && it.parentId == null }
+        return Tab.entries.associateWith { t -> groups.count { inTab(t, it, issues, nowMs, tree) } }
     }
 
     /** Fila de un grupo y, si están desplegados, sus asuntos (hasta [MAX_ISSUES] y «+N asuntos»). Igual en Árbol y Lista. */
@@ -215,19 +226,19 @@ object GroupsTree {
         val searching = q.isNotEmpty() || tab != Tab.ALL
         val showAllIssues = q.isNotEmpty() || tab == Tab.ISSUES
         val mine = myOrgIds(d)
-        val threadUnread = threadUnread(d, nowMs)
+        val tree = ReadTree.all(d, nowMs)
         val all = d.conversations.filter { isGroup(d, it) && it.parentId == null && (wsFilter == null || it.workspaceId == wsFilter) }
         if (all.isEmpty()) return listOf(Empty(filtered = wsFilter != null))
         val labels = all.associate { it.id to listLabel(companyName(d, it, mine), title(it)) }
-        val shown = all.filter { c -> (q.isEmpty() || labels[c.id]!!.lowercase().contains(q) || matchesText(d, c, q, title)) && inTab(tab, c, issues, nowMs) }
+        val shown = all.filter { c -> (q.isEmpty() || labels[c.id]!!.lowercase().contains(q) || matchesText(d, c, q, title)) && inTab(tab, c, issues, nowMs, tree) }
         if (shown.isEmpty()) return listOf(Empty(filtered = true))
         val rows = mutableListOf<Row>()
         var block: HomeTree.Block? = null
-        for (c in HomeTree.order(shown, nowMs)) {
-            val b = HomeTree.blockOf(c, nowMs)
+        for (c in HomeTree.order(shown, nowMs, tree)) {
+            val b = HomeTree.blockOf(c, nowMs, tree)
             if (b != block && !searching) rows += Divider(b)
             block = b
-            addGroup(rows, c, 0, labels[c.id], threadUnread[c.id] ?: 0, issues, collapsed, showAllIssues, today)
+            addGroup(rows, c, 0, labels[c.id], tree[c.id]?.threads ?: 0, issues, collapsed, showAllIssues, today)
         }
         return rows
     }
@@ -242,12 +253,13 @@ object GroupsTree {
         val searching = q.isNotEmpty() || tab != Tab.ALL
         // Buscar y el filtro Asuntos muestran los asuntos desplegados; si no, cada grupo recuerda el suyo.
         val showAllIssues = q.isNotEmpty() || tab == Tab.ISSUES
-        fun matches(c: ConversationDTO) = (q.isEmpty() || matchesText(d, c, q, title)) && inTab(tab, c, issues, nowMs)
+        val tree = ReadTree.all(d, nowMs)
+        fun matches(c: ConversationDTO) = (q.isEmpty() || matchesText(d, c, q, title)) && inTab(tab, c, issues, nowMs, tree)
         val groupsByWs = d.conversations.filter { isGroup(d, it) }.groupBy { it.workspaceId!! }
         fun convsOf(w: WorkspaceDTO) = groupsByWs[w.id].orEmpty()
         fun unread(list: List<ConversationDTO>) = list.sumOf { HomeTree.pending(it, nowMs) }
-        // Los hilos (derivadas) no se listan: viven en la barra de su chat; su no leído va como «💬 N» en el grupo.
-        val threadUnread = threadUnread(d, nowMs)
+        // Los hilos (derivadas) no se listan: viven en la barra de su chat; su no leído va como «⑂ N» en el grupo.
+        val threadUnread = tree.mapValues { it.value.threads }
         fun listed(w: WorkspaceDTO) = convsOf(w).filter { it.parentId == null }
         val rows = mutableListOf<Row>()
 
@@ -259,7 +271,7 @@ object GroupsTree {
             val byWs = spaces.associateBy { it.id }
             val all = spaces.flatMap { listed(it) }
             val dup = all.groupingBy { title(it).trim().lowercase() }.eachCount().filterValues { it > 1 }.keys
-            HomeTree.order(all.filter { matches(it) }, nowMs).forEach { c ->
+            HomeTree.order(all.filter { matches(it) }, nowMs, tree).forEach { c ->
                 val ws = byWs[c.workspaceId]
                 val label = if (ws != null && !ws.isOrgHome && title(c).trim().lowercase() in dup) ws.name + " · " + title(c) else null
                 addGroup(rows, c, level, label, threadUnread[c.id] ?: 0, issues, collapsed, showAllIssues, today)
@@ -270,7 +282,7 @@ object GroupsTree {
 
         // 📌 Fijados (grupos), como Inicio.
         if (wsFilter == null && !searching) {
-            val pinned = HomeTree.order(d.conversations.filter { it.pinnedAt != null && isGroup(d, it) && it.parentId == null }, nowMs)
+            val pinned = HomeTree.order(d.conversations.filter { it.pinnedAt != null && isGroup(d, it) && it.parentId == null }, nowMs, tree)
             if (pinned.isNotEmpty()) {
                 rows += Section(Kind.PINNED, null, false, 0, key = "s:PINNED")
                 pinned.forEach { rows += Group(it, 0, pinnedSection = true, threadUnread = threadUnread[it.id] ?: 0, key = "pc:" + it.id) }

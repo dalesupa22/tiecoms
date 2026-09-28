@@ -548,6 +548,8 @@ fun ConversationScreen(
             if (!embedded) ChatBar(meta, data, pinned.size, canOpenIssues = canWork && myWsRole != "guest",
                 onPins = { showPins = true }, onOpenIssue = onOpenIssue, onNewIssue = { newIssue = true to null }, onNewEvent = { meeting = true to null },
                 onOpenEvent = onOpenEvent, onOpenThread = { t -> sideOpen = t })
+            // Pendientes del árbol (1.6.6): «⑂ N sin leer en X conversaciones de este grupo · Ver».
+            if (!embedded) TreeUnreadStrip(meta, data, onOpen = { t -> sideOpen = t })
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     conv?.loaded != true && loadError != null -> Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -763,8 +765,12 @@ fun conversationMenu(ctx: android.content.Context, conv: ConversationDTO, data: 
     return buildList {
         onOpen?.let { add(SheetItem(ctx.getString(R.string.menu_open), "↗", onClick = it)) }
         add(SheetItem(ctx.getString(if (pinned) R.string.menu_unpin_top else R.string.menu_pin_top), "📌", tag = "menuPinTop") { act { client.setConversationPrefs(conv.id, pinned = !pinned) } })
-        if (conv.unread > 0) add(SheetItem(ctx.getString(R.string.menu_mark_read), "✓") { act { client.markConversationRead(conv.id) } })
-        else add(SheetItem(ctx.getString(R.string.menu_mark_unread_conv), "●", enabled = conv.lastMessageSeq > conv.historyFromSeq) {
+        // Pendientes del árbol (1.6.6): con no leídos o menciones aquí o en sus hilos y ramas, «Marcar como leído»
+        // marca el grupo y cada derivada hasta lo que la lista conoce (read-tree); si no, «Marcar como no leído».
+        if (com.tiecoms.app.core.ReadTree.of(data, conv).markable) add(SheetItem(ctx.getString(R.string.menu_mark_read), "✓", tag = "menuMarkRead") {
+            act { client.markTreeRead(conv.id); container.toast(ctx.getString(R.string.toast_marked_read)) }
+        })
+        else add(SheetItem(ctx.getString(R.string.menu_mark_unread_conv), "●", tag = "menuMarkUnread", enabled = conv.lastMessageSeq > conv.historyFromSeq) {
             act { client.markUnread(conv.id, conv.lastMessageSeq); container.toast(ctx.getString(R.string.toast_marked_unread)) }
         })
         // SPEC-silencio §2: 1 hora · 8 horas · 1 semana · Hasta que lo reactive, o «Reactivar notificaciones».

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.6: unread across a group's tree (the group plus its threads and branches), docs/TANDA-LECTURA-REUNIONES.md §1. -->
+<resources>
+    <plurals name="tree_chip_cd">
+        <item quantity="one">%1$d unread in threads and branches of this group</item>
+        <item quantity="other">%1$d unread in threads and branches of this group</item>
+    </plurals>
+    <plurals name="tree_banner">
+        <item quantity="one">⑂ %1$d unread in %2$d conversation of this group</item>
+        <item quantity="other">⑂ %1$d unread in %2$d conversations of this group</item>
+    </plurals>
+    <string name="tree_banner_view">View</string>
+    <string name="tree_sheet_title">Unread in this group</string>
+    <string name="tree_sheet_mentioned">You were mentioned</string>
+    <string name="toast_marked_read">Marked as read</string>
+    <string name="tree_banner_one">⑂ %1$d unread in “%2$s”</string>
+    <string name="tree_mark_all">Mark all as read</string>
+</resources>

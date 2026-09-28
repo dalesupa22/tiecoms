@@ -148,6 +148,7 @@ fun GroupsScreen(
     fun toggle(key: String) = setCollapsed(if (key in collapsed) collapsed - key else collapsed + key)
     val issues = state.issues.values
     val counts = remember(data, state.issues) { GroupsTree.counts(data, issues) }
+    val tree = remember(data) { com.tiecoms.app.core.ReadTree.all(data) }
     val rows = remember(data, state.issues, query, workspaceFilter, collapsed, tab, view) {
         val title: (ConversationDTO) -> String = { Names.conversationTitle(it, data, internalFallback, convFallback) }
         if (view == GroupsTree.View.LIST) GroupsTree.buildList(data, issues, query, workspaceFilter, collapsed, title, tab = tab)
@@ -272,7 +273,7 @@ fun GroupsScreen(
                                     issuesFold = if (row.pinnedSection || row.issueCount <= 0) null
                                         else IssuesFold(row.issueCount, row.overdueCount, row.issuesExpanded) { toggleIssues(row) },
                                     pinMark = view == GroupsTree.View.LIST && row.c.pinnedAt != null,
-                                    titleOverride = row.label, threadUnread = row.threadUnread,
+                                    titleOverride = row.label, threadUnread = row.threadUnread, threadMentions = tree[row.c.id]?.threadMentions ?: 0,
                                     tagLine = if (row.c.kind == "internal") stringResource(R.string.grp_internal_only, Names.org(data, row.c.internalOrgId ?: ws?.owningOrgId)?.name ?: "") else null,
                                     menuOpen = menuKey == row.key,
                                     menuItems = {
@@ -412,7 +413,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
     val internalFallback = stringResource(R.string.internal_default)
     val convFallback = stringResource(R.string.conversation)
     val list = remember(data, query, unreadOnly) { GroupsTree.dms(data, query, { Names.conversationTitle(it, data, internalFallback, convFallback) }, unreadOnly = unreadOnly) }
-    val threadUnread = remember(data) { GroupsTree.threadUnread(data) }
+    val threadTree = remember(data) { com.tiecoms.app.core.ReadTree.all(data) }
     var menuFor by remember { mutableStateOf<String?>(null) }
     var meetingFor by remember { mutableStateOf<String?>(null) }
     var remindFor by remember { mutableStateOf<ConversationDTO?>(null) }
@@ -440,7 +441,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
             DndBanner()
             SearchField(query, placeholder = stringResource(R.string.dm_search)) { query = it }
             val all = data.conversations.count { GroupsTree.isDm(data, it) }
-            val unread = data.conversations.count { GroupsTree.isDm(data, it) && com.tiecoms.app.core.HomeTree.pending(it, System.currentTimeMillis()) > 0 }
+            val unread = GroupsTree.dmsUnreadCount(data)
             FilterPills(listOf("ALL" to R.string.home_tab_all, "UNREAD" to R.string.home_tab_unread), if (unreadOnly) "UNREAD" else "ALL",
                 mapOf("ALL" to all, "UNREAD" to unread), mentions = data.conversations.sumOf { it.unreadMentions }, onMentions = onMentions) { unreadOnly = it == "UNREAD" }
             PullToRefreshBox(
@@ -457,16 +458,17 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                     }
                     if (searching && list.isNotEmpty()) item(key = "chatsHeader") { QuickHeader(R.string.search_chats) }
                     val nowMs = System.currentTimeMillis()
+                    val tree = threadTree
                     list.forEachIndexed { i, c ->
                         // Separadores «Fijados · Sin leer · Recientes» (orden único 1.6.4); buscando no hacen falta.
-                        val block = com.tiecoms.app.core.HomeTree.blockOf(c, nowMs)
-                        if (!searching && (i == 0 || com.tiecoms.app.core.HomeTree.blockOf(list[i - 1], nowMs) != block))
+                        val block = com.tiecoms.app.core.HomeTree.blockOf(c, nowMs, tree)
+                        if (!searching && (i == 0 || com.tiecoms.app.core.HomeTree.blockOf(list[i - 1], nowMs, tree) != block))
                             item(key = "b:" + block.name) { Box(Modifier.animateItem()) { BlockHeader(block) } }
                         item(key = c.id) {
                         val origin = GroupsTree.sideOrigin(data, c)
                         Box(Modifier.animateItem()) {
                             ConversationRow(c, data, internalFallback, convFallback, indent = 16.dp, iconSize = 44.dp, showIssuesChip = true,
-                                badge = if (c.isSide) sidechat else null, threadUnread = threadUnread[c.id] ?: 0,
+                                badge = if (c.isSide) sidechat else null, threadUnread = threadTree[c.id]?.threads ?: 0, threadMentions = threadTree[c.id]?.threadMentions ?: 0,
                                 tagLine = origin?.let { stringResource(R.string.dm_from, Names.conversationTitle(it, data, internalFallback, convFallback)) },
                                 menuOpen = menuFor == c.id,
                                 menuItems = { conversationMenu(ctx, c, data, onMeeting = { meetingFor = c.id }, onRemindCustom = { remindFor = c }, onLeave = { leaveFor = c }, onOpen = { onOpen(c.id) }) + listOf(null, SheetItem(ctx.getString(R.string.details_short), "ⓘ", tag = "menuDetails") { onDetails(c.id) }) },
@@ -734,8 +736,10 @@ internal fun ConversationRow(
     tagLine: String? = null,
     /** «{espacio} · {grupo}» cuando dos grupos de la empresa se llaman igual. */
     titleOverride: String? = null,
-    /** No leídos de sus hilos: chip «💬 N» (los hilos no se listan en el árbol). */
+    /** No leídos de sus hilos y ramas: chip «⑂ N» (los hilos no se listan en el árbol). */
     threadUnread: Int = 0,
+    /** Menciones sin leer en sus hilos y ramas: también encienden la «@» de la fila. */
+    threadMentions: Int = 0,
     /** Grupos: chip que pliega sus asuntos (reemplaza al chip «◆ N asuntos» que abre la lista). */
     issuesFold: IssuesFold? = null,
     /** 📌 junto al título (listas planas: Lista de Grupos y DMs). */
@@ -760,7 +764,8 @@ internal fun ConversationRow(
     val internalCd = stringResource(R.string.internal_cd)
     val muted = c.mutedAt(System.currentTimeMillis())
     val mutedCd = stringResource(R.string.side_muted)
-    val a11y = listOfNotNull(title, badge, tagLine, if (c.kind == "internal") internalCd else null, if (muted) mutedCd else null, preview, time, unreadText).joinToString(". ")
+    val treeText = if (threadUnread > 0) pluralStringResource(R.plurals.tree_chip_cd, threadUnread, threadUnread) else null
+    val a11y = listOfNotNull(title, badge, tagLine, if (c.kind == "internal") internalCd else null, if (muted) mutedCd else null, preview, time, unreadText, treeText).joinToString(". ")
     val big = iconSize >= 40.dp
     Box {
         Row(
@@ -790,10 +795,12 @@ internal fun ConversationRow(
                     if (pinMark) Text(" 📌", style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("pinMark-${c.id}"))
                     if (muted) MutedMark(tag = "muted-${c.id}")
                     if (threadUnread > 0) {
+                        // «⑂ N» (1.6.6, antes «💬 N»): no leídos de sus hilos y ramas, con la ayuda «N sin leer en hilos y ramas».
+                        val treeCd = pluralStringResource(R.plurals.tree_chip_cd, threadUnread, threadUnread)
                         Spacer(Modifier.width(6.dp))
                         Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(8.dp)) {
-                            Text("💬 $threadUnread", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp).testTag("threadUnread-${c.id}"))
+                            Text("⑂ $threadUnread", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                maxLines = 1, modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp).semantics { contentDescription = treeCd }.testTag("threadUnread-${c.id}"))
                         }
                     }
                 }
@@ -816,7 +823,7 @@ internal fun ConversationRow(
             Spacer(Modifier.width(8.dp))
             // Color de la empresa solo si el número blanco pasa AA (4,5:1); si no, naranja sobrio (SPEC-v4 §C).
             // Badge «@» junto a los no leídos cuando me mencionaron (SPEC-v4 §H).
-            if (c.unreadMentions > 0) Surface(shape = CircleShape, color = Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE), modifier = Modifier.padding(end = 4.dp).testTag("mentionBadge-${c.id}")) {
+            if (c.unreadMentions + threadMentions > 0) Surface(shape = CircleShape, color = Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE), modifier = Modifier.padding(end = 4.dp).testTag("mentionBadge-${c.id}")) {
                 Text(stringResource(R.string.mention_badge), color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp))
             }
             UnreadPill(c.unread, Color(if (muted) com.tiecoms.app.core.Contrast.MUTED else com.tiecoms.app.core.Contrast.badgeBackground(org?.colorBg)), Color.White)

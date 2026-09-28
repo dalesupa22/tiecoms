@@ -117,10 +117,12 @@ struct IssueCheck: View {
     @Environment(AppStore.self) private var store
     let issue: IssueDTO
     var compact = false
+    /// Tareas bajo su asunto: círculo más pequeño (el área táctil sigue en 44 pt).
+    var small = false
 
     var body: some View {
         let done = issue.status.closed
-        let size: CGFloat = compact ? 16 : 24
+        let size: CGFloat = compact ? 16 : small ? 20 : 24
         Button { IssueActions.toggleDone(store, issue) } label: {
             ZStack {
                 Circle()
@@ -146,6 +148,7 @@ struct IssueCheck: View {
 /// ya se cerró) y Abrir. Completar y Reabrir llevan «Deshacer» en el aviso.
 struct IssueStatusMenu: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.issueSheetHost) private var host
     let issue: IssueDTO
     var onOpen: (() -> Void)? = nil
 
@@ -156,6 +159,18 @@ struct IssueStatusMenu: View {
         } else {
             Button { IssueActions.toggleDone(store, issue) } label: { Label(L("issue.complete"), systemImage: "checkmark.circle") }
                 .accessibilityIdentifier("issue.menu.complete")
+            // Asunto principal: dividirlo en tareas o hablarlo aparte (docs/TAREAS.md).
+            if issue.parentIssueId == nil {
+                Button { present(.tasks(parentId: issue.id, conversationId: nil)) } label: {
+                    Label(L("task.add").replacingOccurrences(of: "＋ ", with: ""), systemImage: "plus.circle")
+                }
+                .accessibilityIdentifier("issue.menu.addTask")
+                if !issue.isRestricted {
+                    Button { present(.side(issueId: issue.id)) } label: { Label(L("task.sidechat"), systemImage: "bubble.left.and.bubble.right") }
+                        .accessibilityIdentifier("issue.menu.sidechat")
+                }
+                Divider()
+            }
             if issue.status != .in_progress {
                 Button { IssueActions.set(store, issue, .in_progress) } label: { Label(L("issue.markInProgress"), systemImage: "play.circle") }
                     .accessibilityIdentifier("issue.menu.inProgress")
@@ -174,6 +189,12 @@ struct IssueStatusMenu: View {
             Button(action: onOpen) { Label(L("issue.open"), systemImage: "arrow.up.forward.square") }
         }
     }
+
+    /// La hoja se pide cuando el menú contextual ya se cerró (si no, UIKit descarta la presentación).
+    private func present(_ s: IssueSheet) {
+        let store = store, host = host
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { store.requestIssueSheet(s, host: host) }
+    }
 }
 
 /// Fila de un asunto: círculo para completar, título (tachado si está hecho), responsable, fecha solo si hay y la
@@ -183,6 +204,8 @@ struct IssueRow: View {
     let issue: IssueDTO
     var showWhere = true
     var showOwner = true
+    /// Tarea sangrada bajo su asunto («↳», casilla más pequeña).
+    var child = false
     var onOpen: () -> Void
 
     var body: some View {
@@ -191,16 +214,25 @@ struct IssueRow: View {
             let conv = store.meta(issue.conversationId)
             let f = IssueSort.flags(issue)
             let done = issue.status.closed
+            let parent = issue.parentIssueId.flatMap { store.issues[$0] }
+            // Una tarea en un sidechat se marca para que se sepa dónde se habla de ella.
+            let inSide = parent.map { $0.conversationId != issue.conversationId } ?? false
+            let progress = issue.parentIssueId == nil ? IssueTasks.progress(store.issues, of: issue.id) : nil
+            let lock = issue.isRestricted ? IssueTasks.label(issue.visibility, orgName: Naming.org(d, issue.visibleOrgId)?.name) : nil
             let sub = [showOwner ? (owner?.name ?? L("issue.noOwner")) : nil,
-                       showWhere ? conv.map { L("issue.in", ["name": Naming.title(d, $0)]) } : nil,
+                       !child ? parent.map { "↳ \($0.title)" } : nil,
+                       !child && parent == nil && issue.parentIssueId != nil ? L("task.ofHidden") : nil,
+                       showWhere && !child ? conv.map { L("issue.in", ["name": Naming.title(d, $0)]) } : nil,
+                       inSide ? "💬 " + L("task.inSide") : nil,
                        issue.commentCount > 0 ? "💬 \(issue.commentCount)" : nil].compactMap { $0 }
             HStack(spacing: 4) {
-                IssueCheck(issue: issue)
+                if child { Text("↳").font(.subheadline).foregroundStyle(Theme.textSecondary).padding(.leading, 12).accessibilityHidden(true) }
+                IssueCheck(issue: issue, small: child)
                 Button(action: onOpen) {
                     HStack(spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(issue.title)
-                                .font(.body.weight(.semibold))
+                            (Text(lock != nil ? "🔒 " : "") + Text(issue.title))
+                                .font(child ? .subheadline.weight(.semibold) : .body.weight(.semibold))
                                 .strikethrough(done)
                                 .foregroundStyle(done ? Theme.textSecondary : Theme.textPrimary)
                                 .lineLimit(2)
@@ -224,6 +256,16 @@ struct IssueRow: View {
                             }
                         }
                         Spacer(minLength: 4)
+                        if let progress {
+                            // «☑ 1/3», verde cuando están todas hechas.
+                            let all = progress.done == progress.total
+                            Text("☑ \(progress.done)/\(progress.total)")
+                                .font(.caption.weight(.bold)).monospacedDigit()
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Capsule().fill((all ? Theme.doneGreen : Theme.textSecondary).opacity(0.15)))
+                                .foregroundStyle(all ? Theme.doneGreen : Theme.textSecondary)
+                                .accessibilityLabel(L("task.progress", ["done": progress.done, "n": progress.total]))
+                        }
                         if showOwner && owner != nil {
                             Avatar(name: owner?.name ?? "—", org: Naming.org(d, owner?.orgId), size: 24, photo: owner?.avatarUrl)
                                 .accessibilityHidden(true)
@@ -234,6 +276,7 @@ struct IssueRow: View {
                 }
                 .buttonStyle(RowPressStyle())
                 .accessibilityElement(children: .combine)
+                .accessibilityHint(lock ?? "")
                 .accessibilityIdentifier("issue.row.\(issue.id)")
             }
             .padding(.vertical, 2)
@@ -371,7 +414,8 @@ struct ConversationIssuesList: View {
     @State private var showDone = false
 
     var body: some View {
-        let mine = store.issues.values.filter { $0.conversationId == conversationId }
+        // Las tareas de un asunto de este chat van debajo de él (aunque vivan en un sidechat).
+        let mine = IssueTasks.listed(in: conversationId, store.issues)
         let open = mine.filter { !$0.status.closed }.sorted(by: IssueSort.order)
         let done = mine.filter { $0.status.closed }.sorted(by: IssueSort.recentlyClosed)
         if canCreate {
@@ -379,7 +423,12 @@ struct ConversationIssuesList: View {
         }
         Section {
             if open.isEmpty { Text(L("issue.noIssues")).foregroundStyle(Theme.textSecondary) }
-            ForEach(open) { i in IssueRow(issue: i, showWhere: false) { onOpen(i.id) } }
+            ForEach(open) { i in
+                IssueRow(issue: i, showWhere: false) { onOpen(i.id) }
+                if i.parentIssueId == nil {
+                    ForEach(IssueTasks.children(store.issues, of: i.id)) { k in IssueRow(issue: k, showWhere: false, child: true) { onOpen(k.id) } }
+                }
+            }
         }
         if !done.isEmpty {
             Section {
@@ -435,11 +484,11 @@ enum IssueTree {
     struct Bucket: Identifiable, Equatable { var id: String; var issues: [IssueDTO] }
 
     /// Por grupo: la conversación (la de más asuntos primero). Por responsable: yo primero y «Sin responsable» al final.
-    static func sections(_ list: [IssueDTO], by: GroupBy, me: String, title: (String) -> String) -> [Bucket] {
+    static func sections(_ list: [IssueDTO], by: GroupBy, me: String, groupKey: ((IssueDTO) -> String)? = nil, title: (String) -> String) -> [Bucket] {
         var order: [String] = []
         var map: [String: [IssueDTO]] = [:]
         for i in list {
-            let k = by == .person ? (i.ownerId ?? noOwner) : i.conversationId
+            let k = by == .person ? (i.ownerId ?? noOwner) : (groupKey?(i) ?? i.conversationId)
             if map[k] == nil { order.append(k) }
             map[k, default: []].append(i)
         }
@@ -501,11 +550,14 @@ struct IssuesScreen: View {
         Group {
             if let d = store.data {
                 let visible = Set(d.conversations.map(\.id))
-                let scoped = store.issues.values.filter { visible.contains($0.conversationId) }
+                // Los restringidos pueden ser de un chat que no leo (me asignaron una tarea): el servidor ya filtró.
+                let scoped = store.issues.values.filter { visible.contains($0.conversationId) || $0.isRestricted }
                 let list = IssueTree.filter(Array(scoped), filter, me: d.me.id)
                     .sorted(by: filter == .closed ? IssueSort.recentlyClosed : IssueSort.order)
                 let groupBy = IssueTree.GroupBy(rawValue: groupByRaw) ?? .group
-                let sections = IssueTree.sections(list, by: groupBy, me: d.me.id) { sectionTitle(d, $0, groupBy) }
+                // Por grupo, las tareas van debajo de su asunto (en la sección del asunto); por responsable, sueltas.
+                let shown = groupBy == .group ? IssueTasks.tops(list, store.issues) : list
+                let sections = IssueTree.sections(shown, by: groupBy, me: d.me.id, groupKey: { IssueTasks.groupConversation($0, store.issues) }) { sectionTitle(d, $0, groupBy) }
                 List {
                     Section {
                         Text(L("issue.pageSub")).font(.footnote).foregroundStyle(Theme.textSecondary)
@@ -532,6 +584,11 @@ struct IssuesScreen: View {
                         Section {
                             ForEach(s.issues) { i in
                                 IssueRow(issue: i, showWhere: groupBy == .person, showOwner: groupBy == .group) { store.push(.issue(i.id)) }
+                                if groupBy == .group && i.parentIssueId == nil {
+                                    ForEach(IssueTasks.children(store.issues, of: i.id)) { k in
+                                        IssueRow(issue: k, showWhere: false, child: true) { store.push(.issue(k.id)) }
+                                    }
+                                }
                             }
                         } header: {
                             sectionHeader(d, s, groupBy)
@@ -562,7 +619,7 @@ struct IssuesScreen: View {
             if k == IssueTree.noOwner { return L("issue.noOwner") }
             return (Naming.person(d, k)?.name ?? L("common.participant")) + (k == d.me.id ? " \(L("common.you"))" : "")
         }
-        guard let c = d.conversations.first(where: { $0.id == k }) else { return "" }
+        guard let c = d.conversations.first(where: { $0.id == k }) else { return L("task.sharedWithMe") }
         let ws = c.workspaceId.flatMap { id in d.workspaces.first { $0.id == id } }
         return [ws?.name, Naming.title(d, c)].compactMap { $0 }.joined(separator: " · ")
     }
@@ -646,8 +703,14 @@ struct IssueDetailView: View {
     @ViewBuilder
     private func detail(_ d: BootstrapDTO, _ i: IssueDTO) -> some View {
         let conv = store.meta(i.conversationId)
-        let members = issueMembers(store, d, i.conversationId)
-        let orgIds = members.compactMap(\.orgId).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        let chatMembers = issueMembers(store, d, i.conversationId)
+        // ¿Quién lo hace? en una tarea restringida: solo quienes la ven (y los agregados que no están en el chat).
+        let extra = i.viewerIds.filter { u in !chatMembers.contains { $0.id == u } }.compactMap { Naming.person(d, $0) }
+        let base: [PersonDTO] = i.visibility == .org ? chatMembers.filter { $0.orgId == i.visibleOrgId }
+            : i.visibility == .private ? chatMembers.filter { i.viewerIds.contains($0.id) } : chatMembers
+        let members = (base + extra).reduce(into: [PersonDTO]()) { acc, p in if !acc.contains(where: { $0.id == p.id }) { acc.append(p) } }
+        let parent = i.parentIssueId.flatMap { store.issues[$0] }
+        let orgIds = chatMembers.compactMap(\.orgId).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         let f = IssueSort.flags(i)
         let done = i.status.closed
         let requester = Naming.person(d, i.requestedBy)
@@ -673,8 +736,23 @@ struct IssueDetailView: View {
                             .accessibilityIdentifier("issue.titleEdit")
                         Image(systemName: "pencil").font(.body).foregroundStyle(Theme.textSecondary).accessibilityHidden(true)
                     }
-                    Text(requester.map { L("issue.requestedBy", ["name": $0.name]) } ?? L("issue.manual"))
+                    if i.parentIssueId != nil {
+                        if let parent {
+                            Button { store.push(.issue(parent.id)) } label: {
+                                Text("↑ " + L("task.partOf", ["title": parent.title])).font(.footnote.weight(.semibold))
+                                    .frame(minHeight: 44, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Theme.accentText)
+                            .accessibilityIdentifier("task.partOf")
+                        } else {
+                            Text(L("task.ofHidden")).font(.footnote).foregroundStyle(Theme.textSecondary)
+                        }
+                    }
+                    (Text(requester.map { L("issue.requestedBy", ["name": $0.name]) } ?? L("issue.manual"))
+                     + Text(i.isRestricted ? " · 🔒 " + IssueTasks.label(i.visibility, orgName: Naming.org(d, i.visibleOrgId)?.name) : "").bold())
                         .font(.footnote).foregroundStyle(Theme.textSecondary)
+                        .accessibilityIdentifier("issue.requested")
                 }
 
                 if done {
@@ -756,6 +834,13 @@ struct IssueDetailView: View {
                             }
                         }
                     }
+                }
+
+                if i.parentIssueId == nil {
+                    TasksSection(parentId: i.id) { store.push(.issue($0)) }
+                }
+                if i.parentIssueId != nil && i.createdBy == d.me.id {
+                    VisibilityChoice(issue: i)
                 }
 
                 question(L("issue.qNews") + (comments.isEmpty ? "" : " · \(comments.count)")) {
@@ -936,6 +1021,7 @@ struct IssueDetailView: View {
         case "due": return L("issue.ev.due", ["to": IssueDates.date(to).map { $0.formatted(Date.FormatStyle().day().month(.abbreviated).locale(L10n.locale)) } ?? L("issue.noDue")])
         case "title": return "\(L("issue.ev.title")) → «\(to ?? "")»"
         case "waiting": return L("issue.ev.waiting") + (to.flatMap { Naming.org(d, $0)?.name }.map { ": \($0)" } ?? "")
+        case "visibility": return "\(L("task.evVis")) → " + (to == "all" ? L("task.visAll") : to == "org" ? L("task.visOrgShort") : L("task.visPrivate"))
         default: return ""
         }
     }

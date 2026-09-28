@@ -1525,3 +1525,32 @@
 "sleep.noticeOne" = "{name} está descansando: le llega sin sonar. Lo verá {when}.";
 "sleep.noticeMany" = "{n} persona(s) del chat están descansando: les llega sin sonar.";
 "sleep.scheduleWake" = "Enviar a las {time}";
+
+/* 1.6.4 (21): tareas derivadas con visibilidad y sidechat desde el asunto (docs/TAREAS.md) */
+"task.add" = "＋ Tarea derivada";
+"task.short" = "Tarea";
+"task.addHere" = "Tarea del asunto";
+"task.section" = "Tareas";
+"task.title" = "Tarea";
+"task.ph" = "Añadir tarea… (Enter)";
+"task.hint" = "Divide el asunto en tareas para cada persona. Puedes hacer que solo tu empresa las vea.";
+"task.dialogTitle" = "Tareas de «{title}»";
+"task.whoSees" = "¿Quién la ve?";
+"task.visAll" = "Todo el chat";
+"task.visOrg" = "Solo {org}";
+"task.visOrgShort" = "Solo mi empresa";
+"task.visPrivate" = "Privada";
+"task.visSide" = "Solo este sidechat";
+"task.otherPerson" = "Otra persona";
+"task.pickPerson" = "Elige a alguien…";
+"task.outsiderHint" = "{name} no está en este chat: la tarea queda restringida y solo verá la tarea, no el chat.";
+"task.partOf" = "Parte de «{title}»";
+"task.ofHidden" = "Tarea de un asunto que no ves";
+"task.inSide" = "en sidechat";
+"task.progress" = "{done} de {n} tareas hechas";
+"task.sidechat" = "Hablar aparte (sidechat)";
+"task.sideExplain" = "Abre un chat privado con quienes elijas para resolver «{title}». Las tareas que creen ahí quedan en el asunto y solo las ven ustedes.";
+"task.sideFirst" = "Primer mensaje (opcional)";
+"task.sideGo" = "Abrir sidechat";
+"task.evVis" = "cambió quién la ve";
+"task.sharedWithMe" = "Compartidas contigo";

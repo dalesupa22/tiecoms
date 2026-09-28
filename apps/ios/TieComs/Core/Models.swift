@@ -226,6 +226,8 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
     var historyFromSeq: Int
     // Campos nuevos (bifurcaciones/issues): opcionales para convivir con API antiguos.
     var parentId: String?
+    /// Sidechat abierto desde un asunto: las tareas creadas aquí son hijas de él (docs/TAREAS.md).
+    var sideIssueId: String?
     var parentMessageId: String?
     var parentMessageSeq: Int?
     var deriveKind: String?
@@ -265,6 +267,7 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
         canManage = c.v("canManage", false)
         historyFromSeq = c.int("historyFromSeq")
         parentId = c.o("parentId")
+        sideIssueId = c.o("sideIssueId")
         parentMessageId = c.o("parentMessageId")
         parentMessageSeq = c.intOpt("parentMessageSeq")
         deriveKind = c.o("deriveKind")
@@ -556,6 +559,10 @@ enum AccountEvent: Decodable, Equatable, Sendable {
     case scheduledUpdated(ScheduledMessageDTO)
     /// Cambió mi modo sueño (desde este u otro dispositivo).
     case sleepChanged(SleepDTO)
+    /// Un asunto restringido que puedo ver cambió (no viaja por la conversación; sin eventSeq).
+    case issueUpdated(IssueDTO)
+    /// Perdí acceso a un asunto: sacarlo de la lista.
+    case issueHidden(issueId: String, conversationId: String)
     case other(type: String)
 
     init(from decoder: Decoder) throws {
@@ -573,6 +580,9 @@ enum AccountEvent: Decodable, Equatable, Sendable {
         case "drive.updated": self = .driveUpdated
         case "reminders.changed": self = .remindersChanged
         case "me.dnd": self = .dndChanged(until: c.o("dndUntil"))
+        case "issue.updated":
+            if let i: IssueDTO = c.o("issue") { self = .issueUpdated(i) } else { self = .other(type: type) }
+        case "issue.hidden": self = .issueHidden(issueId: c.v("issueId", ""), conversationId: c.v("conversationId", ""))
         case "me.sleep":
             if let x: SleepDTO = c.o("sleep") { self = .sleepChanged(x) } else { self = .other(type: type) }
         case "scheduled.updated":

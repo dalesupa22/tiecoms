@@ -327,6 +327,7 @@ struct ConversationIssuesSheet: View {
             .task { _ = try? await store.loadIssues(conversationId: conversationId) }
         }
         .sheetToasts()
+        .issueSheets(host: "conversationIssues-\(conversationId)")
     }
 
     private var canCreate: Bool {

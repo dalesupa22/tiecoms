@@ -75,6 +75,11 @@ final class AppStore {
     var clockTick = 0
     /// Hoja «Todas las noches» (desde «No molestar» o Tú).
     var showSleepSettings = false
+    /// Push de tarea tocado antes de tener sesión.
+    var pendingIssue: PendingIssue?
+    /// «＋ Tarea derivada» / «💬 Hablar aparte» desde el menú de un asunto.
+    var issueSheet: IssueSheet?
+    var issueSheetHost: String?
     /// Bloqueos sincronizados antes de mostrar el contenido de la sesión.
     var blockedUserIds: Set<String> = []
     /// Sube cuando WhatsApp trae novedades: la pantalla vuelve a pedir la lista.
@@ -86,7 +91,6 @@ final class AppStore {
     /// «Deshacer» del aviso actual (completar o descartar un asunto); se borra al cambiar el aviso.
     var toastUndo: (() -> Void)?
     /// Hojas abiertas que muestran su propio aviso (el de la pestaña queda tapado).
-    var toastHosts = 0
     /// Salto pendiente a un mensaje (?m=<seq>) por conversación.
     var jumpTo: [String: Int] = [:]
     /// Sidechat a desplegar al abrir una conversación de origen (push TC_SIDE).
@@ -431,6 +435,13 @@ final class AppStore {
         case .dndChanged(let until): applyServerDnd(until)
         case .scheduledUpdated(let x): putScheduled(x)
         case .sleepChanged(let s): patchMe { $0.sleep = s }
+        // Asuntos restringidos ('org' o 'private') llegan por la cuenta, no por la conversación.
+        case .issueUpdated(let i):
+            issues[i.id] = i
+            recountIssues(i.conversationId)
+        case .issueHidden(let id, let conv):
+            issues[id] = nil
+            recountIssues(conv)
         case .other: break
         }
     }
@@ -910,10 +921,25 @@ final class AppStore {
         handle(.conversation(conversationId))
     }
 
+    /// Push «te asignó una tarea»: abre el asunto; con `inChat`, encima de su chat; si no, solo el asunto (no leo el chat).
+    func openIssue(_ issueId: String, conversationId: String, inChat: Bool) {
+        guard status == .ready, let d = data else { pendingIssue = PendingIssue(id: issueId, conversationId: conversationId, inChat: inChat); return }
+        if inChat, let c = d.conversations.first(where: { $0.id == conversationId }) {
+            if c.kind.isChat { tab = .dms; dmsPath = [.conversation(c.id), .issue(issueId)] } else { tab = .home; homePath = [.conversation(c.id), .issue(issueId)] }
+        } else {
+            tab = .issues
+            issuesPath = [.issue(issueId)]
+        }
+        Task { _ = try? await issueDetail(issueId) }
+    }
+
+    struct PendingIssue: Equatable { var id: String; var conversationId: String; var inChat: Bool }
+
     /// Si no hay sesión se guarda y se abre al entrar.
     func rememberAfterLogin(_ link: DeepLink) { pendingLink = link }
 
     private func consumePendingLink() {
+        if let i = pendingIssue { pendingIssue = nil; openIssue(i.id, conversationId: i.conversationId, inChat: i.inChat) }
         guard let l = pendingLink else { return }
         pendingLink = nil
         navigate(to: l)

@@ -100,26 +100,31 @@ struct MainView: View {
         let d = store.data
         TabView(selection: $store.tab) {
             NavigationStack(path: $store.homePath) { HomeView().routes() }
+                .issueSheets(host: "tab.home")
                 .appTextSize()
                 .tabItem { Label(L("tab.groups"), systemImage: "person.3") }
                 .tag(AppTab.home)
                 .badge(d.map(Naming.groupsUnread) ?? 0)
                 .accessibilityIdentifier("tab.home")
             NavigationStack(path: $store.dmsPath) { DMsView().routes() }
+                .issueSheets(host: "tab.dms")
                 .appTextSize()
                 .tabItem { Label(L("tab.dms"), systemImage: "bubble.left.and.bubble.right") }
                 .tag(AppTab.dms)
                 .badge(d.map(Naming.dmsUnread) ?? 0)
             NavigationStack(path: $store.issuesPath) { IssuesScreen().routes() }
+                .issueSheets(host: "tab.issues")
                 .appTextSize()
                 .tabItem { Label(L("tab.issues"), systemImage: "checklist") }
                 .tag(AppTab.issues)
                 .badge(store.myOpenIssues)
             NavigationStack(path: $store.agendaPath) { AgendaScreen().routes() }
+                .issueSheets(host: "tab.agenda")
                 .appTextSize()
                 .tabItem { Label(L("tab.calendar"), systemImage: "calendar") }
                 .tag(AppTab.agenda)
             NavigationStack(path: $store.settingsPath) { SettingsView().routes() }
+                .issueSheets(host: "tab.settings")
                 .appTextSize()
                 .tabItem {
                     Label {
@@ -193,12 +198,13 @@ extension View {
 }
 
 /// Aviso breve en la parte inferior; con «Deshacer» cuando el aviso lo trae (asuntos completados o descartados).
-/// `inSheet`: la copia que muestra una hoja abierta (la de la pestaña queda tapada y no se anuncia dos veces).
+/// `inSheet`: la copia que muestra una hoja abierta (la de la pestaña queda tapada por la hoja). Solo la de la pestaña
+/// lo anuncia a VoiceOver, para no repetirlo.
 struct ToastView: View {
     @Environment(AppStore.self) private var store
     var inSheet = false
     var body: some View {
-        if let text = store.toast, inSheet || store.toastHosts == 0 {
+        if let text = store.toast {
             let undo = store.toastUndo
             HStack(spacing: 12) {
                 Text(text)
@@ -225,7 +231,7 @@ struct ToastView: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("toast")
             .task(id: store.toastSeq) {
-                UIAccessibility.post(notification: .announcement, argument: text)
+                if !inSheet { UIAccessibility.post(notification: .announcement, argument: text) }
                 let seq = store.toastSeq
                 try? await Task.sleep(nanoseconds: undo == nil ? 2_400_000_000 : 5_000_000_000)
                 withAnimation { if store.toastSeq == seq { store.toast = nil; store.toastUndo = nil } }
@@ -240,11 +246,7 @@ extension View {
 }
 
 private struct SheetToasts: ViewModifier {
-    @Environment(AppStore.self) private var store
     func body(content: Content) -> some View {
-        content
-            .overlay(alignment: .bottom) { ToastView(inSheet: true) }
-            .onAppear { store.toastHosts += 1 }
-            .onDisappear { store.toastHosts = max(0, store.toastHosts - 1) }
+        content.overlay(alignment: .bottom) { ToastView(inSheet: true) }
     }
 }

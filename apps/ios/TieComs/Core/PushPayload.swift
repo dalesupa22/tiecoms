@@ -4,7 +4,8 @@ import Foundation
 /// Tolerante: campos o tipos desconocidos no rompen; `type` desconocido → .message.
 struct PushPayload: Equatable {
     /// reaction = reaccionaron a un mensaje mío: abre la conversación en `messageId`.
-    enum Kind: String { case message, reminder, event, side, mention, reaction }
+    /// issue = me asignaron una tarea (docs/TAREAS.md): abre el asunto; si `inChat` es false, sin abrir el chat.
+    enum Kind: String { case message, reminder, event, side, mention, reaction, issue }
 
     var kind: Kind
     var conversationId: String
@@ -15,6 +16,10 @@ struct PushPayload: Equatable {
     var authorAvatarPath: String?
     var reminderId: String?
     var eventId: String?
+    /// Push de tarea asignada (type 'issue').
+    var issueId: String?
+    /// ¿Estoy en el chat del asunto? Si no, se abre solo el asunto.
+    var inChat: Bool = true
     /// Sidechat (type 'side'): origen, ancla y extracto (SPEC-v4 G).
     var sideOfConversationId: String?
     var sideOfMessageId: String?
@@ -48,6 +53,8 @@ struct PushPayload: Equatable {
         authorAvatarPath = str("authorAvatarUrl")
         reminderId = str("reminderId")
         eventId = str("eventId")
+        issueId = str("issueId")
+        if let b = userInfo["inChat"] as? Bool { inChat = b } else if let s = str("inChat") { inChat = !(s == "false" || s == "0") }
         minutes = str("minutes").flatMap(Int.init)
         var sideOf = userInfo["sideOf"] as? [String: Any]
         if sideOf == nil, let s = userInfo["sideOf"] as? String, let d = s.data(using: .utf8) { sideOf = try? JSONSerialization.jsonObject(with: d) as? [String: Any] }

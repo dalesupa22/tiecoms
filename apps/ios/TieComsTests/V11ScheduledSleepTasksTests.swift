@@ -180,3 +180,100 @@ final class SleepModeTests: XCTestCase {
         XCTAssertTrue(MockURLProtocol.requests.isEmpty)
     }
 }
+
+/// 1.6.4 (21): tareas derivadas con visibilidad y sidechat desde el asunto (docs/TAREAS.md).
+@MainActor
+final class IssueTasksTests: XCTestCase {
+    private var savedLang: L10n.Choice = .system
+    override func setUp() { savedLang = L10n.choice; L10n.choice = .es }
+    override func tearDown() { L10n.choice = savedLang }
+
+    private func issue(_ id: String, conv: String = "g1", parent: String? = nil, status: String = "open", vis: String = "all",
+                       created: String = "2026-09-20T10:00:00.000Z") throws -> IssueDTO {
+        let p = parent.map { "\"\($0)\"" } ?? "null"
+        return try dec(IssueDTO.self, #"{"id":"\#(id)","conversationId":"\#(conv)","title":"T \#(id)","status":"\#(status)","parentIssueId":\#(p),"visibility":"\#(vis)","visibleOrgId":"oA","viewerIds":["me"],"createdAt":"\#(created)","statusSince":"\#(created)"}"#)
+    }
+
+    private func map(_ list: [IssueDTO]) -> [String: IssueDTO] { Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) }) }
+
+    func testDecodingOldServerIsAllAndTopLevel() throws {
+        let old = try dec(IssueDTO.self, #"{"id":"x","conversationId":"g1","title":"Viejo","status":"open"}"#)
+        XCTAssertNil(old.parentIssueId)
+        XCTAssertEqual(old.visibility, .all)
+        XCTAssertFalse(old.isRestricted)
+        let t = try issue("t", parent: "a", vis: "private")
+        XCTAssertTrue(t.isRestricted)
+        XCTAssertEqual(t.viewerIds, ["me"])
+    }
+
+    func testChildrenProgressAndOrder() throws {
+        let all = map([try issue("a"), try issue("t2", parent: "a", created: "2026-09-22T10:00:00.000Z"),
+                       try issue("t1", parent: "a", status: "done", created: "2026-09-21T10:00:00.000Z"),
+                       try issue("t3", parent: "a", created: "2026-09-21T09:00:00.000Z"), try issue("b")])
+        XCTAssertEqual(IssueTasks.children(all, of: "a").map(\.id), ["t3", "t2", "t1"], "abiertas primero, luego por creación")
+        XCTAssertEqual(IssueTasks.progress(all, of: "a")?.done, 1)
+        XCTAssertEqual(IssueTasks.progress(all, of: "a")?.total, 3)
+        XCTAssertNil(IssueTasks.progress(all, of: "b"), "sin tareas no hay chapita")
+    }
+
+    func testTopsAndConversationList() throws {
+        // a (g1) con t1 en g1 y t2 en un sidechat s1; x es una tarea cuyo asunto no veo; y es hija de b (de otro chat).
+        let list = [try issue("a"), try issue("t1", parent: "a"), try issue("t2", conv: "s1", parent: "a"),
+                    try issue("x", parent: "hidden", vis: "private"), try issue("b", conv: "g2"), try issue("y", parent: "b")]
+        let all = map(list)
+        XCTAssertEqual(Set(IssueTasks.tops(list, all).map(\.id)), ["a", "x", "b"], "las hijas van bajo su asunto; la de un asunto que no veo, suelta")
+        XCTAssertEqual(Set(IssueTasks.listed(in: "g1", all).map(\.id)), ["a", "x", "y"], "en g1: su asunto, la tarea huérfana y la hija de un asunto de otro chat")
+        XCTAssertEqual(IssueTasks.listed(in: "s1", all).map(\.id), ["t2"], "en el sidechat se ve suelta (su asunto es del chat de origen), como en la web")
+        XCTAssertEqual(IssueTasks.groupConversation(all["t2"]!, all), "g1", "Por grupo: la tarea del sidechat va en la sección del asunto")
+        XCTAssertEqual(IssueTasks.groupConversation(all["x"]!, all), "g1")
+    }
+
+    private func person(_ id: String, org: String?) throws -> PersonDTO {
+        try dec(PersonDTO.self, #"{"id":"\#(id)","name":"P \#(id)","kind":"human","orgId":\#(org.map { "\"\($0)\"" } ?? "null")}"#)
+    }
+
+    func testDefaultAndEffectiveVisibility() throws {
+        XCTAssertEqual(IssueTasks.defaultVisibility(members: [try person("me", org: "oA"), try person("b", org: "oB")], myOrg: "oA"), .org,
+                       "más de una empresa: solo mi empresa")
+        XCTAssertEqual(IssueTasks.defaultVisibility(members: [try person("me", org: "oA"), try person("c", org: "oA")], myOrg: "oA"), .all)
+        XCTAssertEqual(IssueTasks.defaultVisibility(members: [try person("me", org: "oA"), try person("g", org: nil)], myOrg: "oA"), .org, "un tercero cuenta como otra")
+        XCTAssertEqual(IssueTasks.effective(.all, outsider: true), .private, "fuera del chat: privada")
+        XCTAssertEqual(IssueTasks.effective(.org, outsider: true), .org)
+        XCTAssertEqual(IssueTasks.effective(.all, outsider: false), .all)
+        XCTAssertEqual(IssueTasks.label(.org, orgName: "Xertify"), "Solo Xertify")
+        XCTAssertEqual(IssueTasks.label(.private, orgName: nil), "Privada")
+    }
+
+    func testAccountEventsForRestrictedIssues() throws {
+        let s = AppStore(baseURL: URL(string: "https://mock.chaggu.test")!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: nil)
+        let up = try dec(AccountEvent.self, #"{"type":"issue.updated","issue":{"id":"t9","conversationId":"g1","title":"Privada","status":"open","visibility":"private"}}"#)
+        guard case .issueUpdated(let i) = up else { return XCTFail("\(up)") }
+        XCTAssertEqual(i.visibility, .private)
+        let hidden = try dec(AccountEvent.self, #"{"type":"issue.hidden","issueId":"t9","conversationId":"g1"}"#)
+        XCTAssertEqual(hidden, .issueHidden(issueId: "t9", conversationId: "g1"))
+        s.issues["t9"] = i
+        XCTAssertNotNil(s.issues["t9"])
+    }
+
+    func testIssuePushOpensIssueWithOrWithoutChat() {
+        let p = PushPayload(userInfo: ["type": "issue", "issueId": "t1", "conversationId": "g1", "inChat": false,
+                                       "aps": ["alert": ["title": "Ana te asignó una tarea", "body": "Llamar al banco"]]])
+        XCTAssertEqual(p?.kind, .issue)
+        XCTAssertEqual(p?.issueId, "t1")
+        XCTAssertEqual(p?.inChat, false)
+        XCTAssertEqual(PushPayload(userInfo: ["type": "issue", "issueId": "t1", "conversationId": "g1", "inChat": "true"])?.inChat, true)
+        XCTAssertEqual(PushPayload(userInfo: ["type": "issue", "issueId": "t1", "conversationId": "g1"])?.inChat, true, "sin inChat: se asume que está")
+    }
+
+    func testOpenIssueFromPush() throws {
+        let s = AppStore(baseURL: URL(string: "http://127.0.0.1:9")!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: nil)
+        let boot = #"{"contract":"x","serverTime":"","me":{"id":"me","name":"Ana","kind":"human"},"organizations":[],"workspaces":[],"conversations":[{"id":"g1","kind":"group","name":"Pagos","memberIds":["me"],"canPost":true}],"people":[]}"#
+        s.seedForTesting(try dec(BootstrapDTO.self, boot))
+        s.openIssue("t1", conversationId: "g1", inChat: true)
+        XCTAssertEqual(s.tab, .home)
+        XCTAssertEqual(s.homePath, [.conversation("g1"), .issue("t1")], "inChat: el asunto encima de su chat")
+        s.openIssue("t2", conversationId: "g9", inChat: false)
+        XCTAssertEqual(s.tab, .issues)
+        XCTAssertEqual(s.issuesPath, [.issue("t2")], "sin chat: solo el asunto")
+    }
+}

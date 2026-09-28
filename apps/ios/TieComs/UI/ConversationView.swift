@@ -961,6 +961,7 @@ struct ConversationView: View {
             if showQuickReplies(d, c) {
                 SideQuickReplies(onSend: { store.send(conversationId, body: $0) }, onAskOther: { addingToSide = true })
             }
+            if let issueId = c.sideIssueId { SideIssueStrip(sideId: c.id, issueId: issueId) }
             ScheduledStrip(conversationId: conversationId) { showScheduled = true }
             SleepNoticeBar(conversation: c, typing: !trimmed.isEmpty && editing == nil, onSchedule: scheduleDraft)
             StagedAttachments(staged: $staged, progress: uploadProgress)

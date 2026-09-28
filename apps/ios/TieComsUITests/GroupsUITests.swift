@@ -24,6 +24,11 @@ final class GroupsUITests: XCTestCase {
         /// 1.6.4: chat largo con 40 no leídos y una mención; grupo fijado.
         var longId: String?
         var pinnedId: String?
+        /// 1.6.4 (21): seed-tareas-programados.mjs (API con migraciones 025–027).
+        var dmBrunoId: String?
+        var parentIssueId: String?
+        var taskIds: [String]?
+        var sideId: String?
     }
 
     override func setUp() { continueAfterFailure = false }
@@ -466,8 +471,15 @@ final class GroupsUITests: XCTestCase {
         sleep(1)
         shot("03-asuntos-por-grupo")
         groupBy.buttons["Por responsable"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["issues.section.\(f.a.id)"].waitForExistence(timeout: 3), "sección con mis asuntos")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Ana Márquez (tú)'")).firstMatch.exists, "yo primero, marcado «(tú)»")
+        // Según el API, un asunto sin responsable queda de quien lo creó o en «Sin responsable».
+        let mineSection = app.descendants(matching: .any)["issues.section.\(f.a.id)"]
+        let noneSection = app.descendants(matching: .any)["issues.section.__none"]
+        let sectionsBy = Date().addingTimeInterval(4)
+        while Date() < sectionsBy && !mineSection.exists && !noneSection.exists { usleep(300_000) }
+        XCTAssertTrue(mineSection.exists || noneSection.exists, "secciones por responsable")
+        if mineSection.exists {
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Ana Márquez (tú)'")).firstMatch.exists, "yo primero, marcado «(tú)»")
+        }
         sleep(1)
         shot("04-asuntos-por-responsable")
         groupBy.buttons["Por grupo"].tap()
@@ -627,6 +639,160 @@ final class GroupsUITests: XCTestCase {
         // Vuelve a Normal para las demás pruebas.
         setSize(1, "Normal")
         app.tabBars.buttons["Grupos"].tap()
+    }
+
+    /// 1.6.4 (21): mensajes programados, «No molestar todas las noches» y tareas derivadas (docs/PROGRAMADOS.md, TAREAS.md).
+    func testScheduledSleepAndTasks() throws {
+        let f = try fixture()
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "no se prueba contra producción")
+        guard let dm = f.dmBrunoId, let parent = f.parentIssueId, let tasks = f.taskIds, let side = f.sideId else { throw XCTSkip("Fixture sin seed-tareas-programados") }
+        let app = login(f)
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !app.tabBars.firstMatch.exists { dismissSystemPrompts(app); usleep(300_000) }
+        dismissSystemPrompts(app)
+
+        // 1. Directo con Bruno (descansando): franja de programados y aviso.
+        app.tabBars.buttons["DMs"].tap()
+        let row = app.buttons["conv.row.\(dm)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        let strip = app.buttons["sched.strip"]
+        XCTAssertTrue(strip.waitForExistence(timeout: 10), "franja de programados")
+        XCTAssertTrue(strip.label.hasPrefix("🕒 ") && strip.label.contains("el próximo sale"), strip.label)
+        let before = strip.label
+        let notice = app.descendants(matching: .any)["sleep.notice.text"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 5), "aviso de descanso")
+        XCTAssertTrue(notice.label.hasPrefix("Bruno está descansando: le llega sin sonar. Lo verá"), notice.label)
+        XCTAssertFalse(app.buttons["sleep.scheduleWake"].exists, "el botón sale solo mientras escribo")
+        sleep(1)
+        shot("16-chat-programados-y-descansando")
+        let field = app.descendants(matching: .any)["composer.field"]
+        field.tap(); field.typeText("Te cuento mañana cómo quedó el cierre")
+        XCTAssertTrue(app.buttons["composer.schedule"].waitForExistence(timeout: 3), "🕒 junto a enviar con texto")
+        XCTAssertTrue(app.buttons["sleep.scheduleWake"].waitForExistence(timeout: 3), "🕒 Enviar a las …")
+        XCTAssertTrue(app.buttons["sleep.scheduleWake"].label.contains("Enviar a las"))
+        shot("17-compositor-programar-y-despertar")
+        app.buttons["composer.schedule"].tap()
+        let tomorrow = app.buttons["sched.opt.sched.tomorrowMorning"]
+        XCTAssertTrue(tomorrow.waitForExistence(timeout: 3), "menú de programar")
+        XCTAssertTrue(app.buttons["sched.opt.sched.inHour"].exists)
+        XCTAssertTrue(app.buttons["sched.opt.pick"].exists)
+        sleep(1)
+        shot("18-menu-programar")
+        tomorrow.tap()
+        XCTAssertTrue(app.buttons["toast.undo"].waitForExistence(timeout: 5), "aviso con Deshacer")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '🕒 Programado para mañana'")).firstMatch.exists)
+        let two = Date().addingTimeInterval(5)
+        while Date() < two && strip.label == before { usleep(300_000) }
+        XCTAssertTrue(strip.label.contains("mensajes programados") && strip.label != before, "uno más: \(before) → \(strip.label)")
+        let inChat = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sched.sendNow.'"))
+        shot("19-programado-con-deshacer")
+        strip.tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sched.sendNow.'")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(inChat.count, 2)
+        sleep(1)
+        shot("20-programados-del-chat")
+        app.buttons["Cerrar"].firstMatch.tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // 2. Tú: «Todas las noches» dentro de No molestar y la pantalla Programados.
+        app.tabBars.buttons["Tú"].tap()
+        let dnd = app.buttons["settings.dnd"]
+        for _ in 0..<5 where !(dnd.exists && dnd.isHittable) { app.swipeUp() }
+        XCTAssertTrue(app.buttons["settings.sleep"].exists, "fila Todas las noches")
+        dnd.tap()
+        let nightly = app.buttons["dnd.opt.sleep"]
+        XCTAssertTrue(nightly.waitForExistence(timeout: 3), "«Todas las noches» dentro de No molestar")
+        sleep(1)
+        shot("21-no-molestar-todas-las-noches")
+        nightly.tap()
+        XCTAssertTrue(app.switches["sleep.switch"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["sleep.from"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["sleep.to"].exists)
+        sleep(1)
+        shot("22-todas-las-noches-desde-hasta")
+        app.buttons["sleep.save"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'No molestar todas las noches de'")).firstMatch.waitForExistence(timeout: 5))
+        let schedRow = app.buttons["settings.scheduled"]
+        for _ in 0..<5 where !(schedRow.exists && schedRow.isHittable) { app.swipeUp() }
+        XCTAssertTrue(schedRow.label.hasPrefix("Programados · "), schedRow.label)
+        schedRow.tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sched.sendNow.'")).firstMatch.waitForExistence(timeout: 5))
+        sleep(1)
+        shot("23-pantalla-programados")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // 3. Tareas derivadas: chapita ☑, tareas sangradas, 🔒, menú y alta con ¿Quién la ve?
+        app.tabBars.buttons["Asuntos"].tap()
+        let seg = app.segmentedControls["issues.filter"]
+        XCTAssertTrue(seg.waitForExistence(timeout: 5))
+        seg.buttons.element(boundBy: 1).tap()
+        app.segmentedControls["issues.groupBy"].buttons["Por grupo"].tap()
+        let parentRow = app.buttons["issue.row.\(parent)"]
+        for _ in 0..<6 where !(parentRow.exists && parentRow.isHittable) { app.swipeUp() }
+        XCTAssertTrue(parentRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(parentRow.label.contains("1 de 4 tareas hechas"), "chapita de avance: \(parentRow.label)")
+        let orgTask = app.buttons["issue.row.\(tasks[1])"]
+        XCTAssertTrue(orgTask.exists, "tarea sangrada bajo el asunto")
+        XCTAssertTrue(orgTask.label.contains("🔒"), orgTask.label)
+        sleep(1)
+        shot("24-asuntos-con-tareas")
+        parentRow.press(forDuration: 1.2)
+        XCTAssertTrue(app.buttons["issue.menu.addTask"].waitForExistence(timeout: 4), "＋ Tarea derivada")
+        XCTAssertTrue(app.buttons["issue.menu.sidechat"].exists, "💬 Hablar aparte")
+        shot("25-menu-tarea-derivada")
+        app.buttons["issue.menu.addTask"].tap()
+        let tf = app.textFields["task.quickField"]
+        XCTAssertTrue(tf.waitForExistence(timeout: 5), "hoja de tareas del asunto")
+        tf.tap(); tf.typeText("Llamar al banco")
+        XCTAssertTrue(app.buttons["task.vis.org"].waitForExistence(timeout: 3), "¿Quién la ve?")
+        XCTAssertTrue(app.buttons["task.vis.all"].isSelected, "Pagos es de una sola empresa: por defecto, todo el chat")
+        XCTAssertTrue(app.buttons["task.otherPerson"].exists, "＋ Otra persona")
+        sleep(1)
+        shot("26-alta-tarea-quien-la-hace-quien-la-ve")
+        tf.typeText("\n")
+        let created = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'issue.row.' AND label CONTAINS 'Llamar al banco'")).firstMatch
+        XCTAssertTrue(created.waitForExistence(timeout: 8), "tarea creada en la hoja")
+        app.buttons["task.sheetDone"].tap()
+        XCTAssertTrue(parentRow.waitForExistence(timeout: 5))
+        let five = Date().addingTimeInterval(5)
+        while Date() < five && !parentRow.label.contains("1 de 5 tareas hechas") { usleep(300_000) }
+        XCTAssertTrue(parentRow.label.contains("1 de 5 tareas hechas"), parentRow.label)
+        parentRow.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["task.section"].waitForExistence(timeout: 8), "sección Tareas en el asunto")
+        app.swipeUp()
+        sleep(1)
+        shot("27-detalle-asunto-tareas")
+        let child = app.buttons["issue.row.\(tasks[1])"]
+        for _ in 0..<3 where !(child.exists && child.isHittable) { app.swipeUp() }
+        child.tap()
+        XCTAssertTrue(app.buttons["task.partOf"].waitForExistence(timeout: 8), "↑ Parte de «asunto»")
+        XCTAssertTrue(app.descendants(matching: .any)["issue.requested"].label.contains("🔒"), "🔒 Solo mi empresa")
+        sleep(1)
+        shot("28-tarea-parte-de")
+        app.buttons["task.partOf"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["task.section"].waitForExistence(timeout: 5), "vuelve al asunto")
+
+        // 4. Sidechat desde el asunto: franja «◆ asunto · ☑ · ＋ Tarea».
+        app.tabBars.buttons["DMs"].tap()
+        let sideRow = app.buttons["conv.row.\(side)"]
+        for _ in 0..<4 where !sideRow.exists { app.swipeUp() }
+        XCTAssertTrue(sideRow.waitForExistence(timeout: 8), "sidechat en DMs")
+        sideRow.tap()
+        let sideStrip = app.buttons["side.issue"]
+        XCTAssertTrue(sideStrip.waitForExistence(timeout: 10), "franja del asunto en el sidechat")
+        XCTAssertTrue(sideStrip.label.hasPrefix("◆ Cerrar facturación"), sideStrip.label)
+        XCTAssertTrue(app.buttons["side.addTask"].exists, "＋ Tarea")
+        sleep(1)
+        shot("29-sidechat-desde-el-asunto")
+        app.buttons["side.addTask"].tap()
+        XCTAssertTrue(app.buttons["task.sheetDone"].waitForExistence(timeout: 5))
+        let sf = app.textFields["task.quickField"]
+        sf.tap(); sf.typeText("Confirmar fecha")
+        XCTAssertTrue(app.buttons["task.vis.all"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["task.vis.all"].label.contains("Solo este sidechat"), app.buttons["task.vis.all"].label)
+        shot("30-tarea-en-el-sidechat")
+        app.buttons["task.sheetDone"].tap()
     }
 
     /// Barra de arriba (✏️ y «＋») en las cuatro pestañas, chat rápido desde «Mensaje nuevo» y búsqueda que encuentra

@@ -5,6 +5,7 @@ Nunca contra producción: cada script falla si la URL no es localhost.
 ```bash
 API_URL=http://localhost:3050 FIXTURE_OUT=/tmp/fx.json node apps/ios/tools/fixtures/grupos-fixture.mjs
 node apps/ios/tools/fixtures/seed-reactions.mjs /tmp/fx.json               # reacciones en el grupo general
+node apps/ios/tools/fixtures/seed-tareas-programados.mjs /tmp/fx.json       # 1.6.4 (21): programados, modo sueño y tareas (API con migraciones 025–027)
 node apps/ios/tools/fixtures/seed-image-messages.mjs /tmp/fx.json /tmp/images.json   # archivo, 3 fotos, foto mía, con texto, ajena
 PORT=3059 node apps/ios/tools/fixtures/limit-proxy.mjs &                     # 413 con el límite viejo de nginx (128 KB)
 

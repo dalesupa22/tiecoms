@@ -36,7 +36,8 @@ struct HomeView: View {
                 let hasGroups = viewMode == .list ? !flat.isEmpty : tree.hasGroups
                 let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
                 // Asuntos abiertos por conversación (se muestran bajo cada grupo).
-                let open = Dictionary(grouping: store.issues.values.filter { !$0.status.closed }, by: \.conversationId)
+                // Las tareas de un asunto que veo no van sueltas: se cuentan en su chapita «☑ 1/3».
+                let open = Dictionary(grouping: IssueTasks.tops(store.issues.values.filter { !$0.status.closed }, store.issues), by: \.conversationId)
                     .mapValues { $0.sorted(by: IssueSort.order) }
                 List {
                     if store.dndActive {
@@ -450,9 +451,14 @@ struct GroupIssueLine: View {
         let f = IssueSort.flags(issue)
         let me = store.data?.me.id
         let owner = store.data.flatMap { d in issue.ownerId.flatMap { Naming.person(d, $0) } }
+        let progress = issue.parentIssueId == nil ? IssueTasks.progress(store.issues, of: issue.id) : nil
         HStack(spacing: 6) {
-            Text(issue.title).font(.caption).foregroundStyle(Theme.textPrimary).lineLimit(1).truncationMode(.tail)
+            Text((issue.isRestricted ? "🔒 " : "") + issue.title).font(.caption).foregroundStyle(Theme.textPrimary).lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 4)
+            if let progress {
+                Text("☑ \(progress.done)/\(progress.total)").font(.caption2.weight(.bold)).monospacedDigit()
+                    .foregroundStyle(progress.done == progress.total ? Theme.doneGreen : Theme.textSecondary).fixedSize()
+            }
             if let owner, owner.id != me {
                 Text(String(owner.name.split(separator: " ").first ?? Substring(owner.name)))
                     .font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1).fixedSize()

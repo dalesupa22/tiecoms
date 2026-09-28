@@ -172,6 +172,12 @@ struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
     var statusSince: String
     var closedAt: String?
     var commentCount: Int
+    /// Tarea derivada de este asunto (nil = asunto principal). docs/TAREAS.md.
+    var parentIssueId: String?
+    /// Quién la ve: todo el chat, solo `visibleOrgId` (+ viewerIds) o solo viewerIds. Ausente = servidor anterior (all).
+    var visibility: IssueVisibility = .all
+    var visibleOrgId: String?
+    var viewerIds: [String] = []
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -192,8 +198,17 @@ struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
         statusSince = c.v("statusSince", createdAt)
         closedAt = c.o("closedAt")
         commentCount = c.int("commentCount")
+        parentIssueId = c.o("parentIssueId")
+        visibility = IssueVisibility(rawValue: c.v("visibility", "all")) ?? .all
+        visibleOrgId = c.o("visibleOrgId")
+        viewerIds = c.v("viewerIds", [])
     }
+
+    /// Restringida: 'org' (solo mi empresa) o 'private'.
+    var isRestricted: Bool { visibility != .all }
 }
+
+enum IssueVisibility: String, Codable, CaseIterable, Sendable { case all, org, `private` }
 
 struct IssueEventDTO: Codable, Equatable, Identifiable, Sendable {
     var id: Int
@@ -217,10 +232,13 @@ struct IssueEventDTO: Codable, Equatable, Identifiable, Sendable {
 struct IssueDetail: Decodable, Sendable {
     var issue: IssueDTO
     var events: [IssueEventDTO]
+    /// Solo las tareas hijas que yo veo.
+    var children: [IssueDTO]
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         issue = try c.decode(IssueDTO.self, forKey: AnyKey("issue"))
         events = c.lossyArray("events")
+        children = c.lossyArray("children")
     }
 }
 

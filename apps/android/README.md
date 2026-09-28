@@ -6,11 +6,21 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 |---|---|
 | applicationId | `com.chaggu.app` (app nueva en Play desde 1.6.0 / 14; la anterior era `com.tiecoms.app`). El `namespace` y los paquetes Kotlin siguen siendo `com.tiecoms.app`. |
 | minSdk / target / compile | 26 / 36 / 36 |
-| Versión | `versionName 1.6.5`, `versionCode 24`. Sube el `versionCode` en cada envío a Play. |
-| Contrato | `2026-09-23` (valor actual de `BuildConfig.CONTRACT_VERSION`). Se envía en `x-tiecoms-contract` y en `device.contract`. |
+| Versión | `versionName 1.6.6`, `versionCode 25`. Sube el `versionCode` en cada envío a Play. |
+| Contrato | `2026-09-28` (`CONTRACT_VERSION` en core/Models.kt y `BuildConfig.CONTRACT_VERSION`). Se envía en `x-tiecoms-contract` y en `device.contract`. |
 | API por defecto | `https://app.chaggu.com` (web pública: `https://www.chaggu.com`) |
 | Marca | **Chaggu** desde 1.6.0 (antes TieComs). Cambia solo lo visible: nombre, textos, dominios, ícono, splash y colores (tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`). Se publica como app nueva: `applicationId` `com.chaggu.app` y esquema propio `chaggu://` (el SSO pide `redirect_scheme=chaggu`), para convivir con la app TieComs instalada. Lo demás interno se mantiene: `namespace`/paquetes Kotlin `com.tiecoms.app`, clave de subida `tiecoms-upload`, proyecto Firebase `tiecoms`, headers `x-tiecoms-*`, claves de SharedPreferences, IDs de canales y nombres de sonidos. |
 | Toolchain | Gradle 8.14.3 (wrapper), AGP 8.13.2, Kotlin 2.3.21 y JDK 17 |
+
+## Entrega 1.6.6 (25): lectura, asuntos personales, reuniones y calendario
+
+Guía común: `docs/TANDA-LECTURA-REUNIONES.md` (rama `tanda-lectura-reuniones`). Necesita el API con la migración 028.
+
+- **Pendientes del árbol** (`core/ReadTree.kt`): no leídos del grupo + sus derivadas (sin sidechats) en la sección y el filtro «No leídos», el orden, la «@» y el chip «⑂ N». «Marcar como leído» llama a `POST /conversations/:id/read-tree` con el seq que el cliente conoce; en el chat, la franja «⑂ N sin leer en X conversaciones de este grupo · Ver».
+- **Asuntos**: sin el párrafo explicativo; asuntos personales (`POST /issues`, `conversationId` null) con «🔒 Personal · solo tú» en «¿Dónde?», su sección en «Por grupo» y un detalle sin responsable, tareas ni sidechat.
+- **Reuniones** (`core/Meetings.kt`, `ui/MeetingViews.kt`): «📹 Reunión ahora» y «📅 Agendar reunión con enlace» en el ＋ del chat, con un `idempotencyKey` por intento; Tú › «Reuniones» conecta en Custom Tabs y vuelve por `chaggu://meetings/connected`.
+- **Calendario** (`core/CalendarGrid.kt`): Día / Semana / Mes, con Semana por defecto y recordado (`calendarView`), ‹ Hoy ›, y en Mes una cuadrícula de 6×7 desde el lunes con «+N más».
+- Pruebas: `ReadTreeTest`, `PersonalIssuesTest`, `MeetingsTest` y `CalendarGridTest` (unitarias), y `Tanda166UiTest` (instrumentada, contra el API local y el proveedor falso `apps/api/test/fake-meetings.mjs`, que es un MOCK).
 
 ## Entrega 1.6.5 (24)
 

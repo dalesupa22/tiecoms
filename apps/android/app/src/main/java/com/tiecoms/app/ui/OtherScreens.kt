@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
@@ -30,6 +31,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -66,6 +69,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tiecoms.app.BuildConfig
 import com.tiecoms.app.R
+import com.tiecoms.app.core.GroupAdmins
 import com.tiecoms.app.core.InvitationPreviewDTO
 import com.tiecoms.app.core.Names
 import com.tiecoms.app.ui.theme.Brand
@@ -89,6 +93,7 @@ fun DetailsScreen(
     var confirmLeave by rememberSaveable { mutableStateOf(false) }
     var reportUser by remember { mutableStateOf<String?>(null) }
     var blockUser by remember { mutableStateOf<com.tiecoms.app.core.PersonDTO?>(null) }
+    var adminAction by remember { mutableStateOf<Pair<GroupAdmins.Action, com.tiecoms.app.core.PersonDTO>?>(null) }
     val title = meta?.let { Names.conversationTitle(it, data, stringResource(R.string.internal_default), stringResource(R.string.conversation)) } ?: stringResource(R.string.details)
     SimpleScaffold(title = title, onBack = onBack) {
         if (meta == null) {
@@ -197,11 +202,27 @@ fun DetailsScreen(
             item { SectionHeader("${stringResource(R.string.participants)} · ${members.size}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp).padding(top = 8.dp).semantics { heading() }) }
             items(members, key = { it.id }) { PersonRow(it, data, onDirect = if (it.id != data.me.id && meta.kind != "direct" && it.id !in state.blockedUserIds) ({
                 scope.launch { runCatching { client.openDirect(it.id) }.onSuccess(onOpenConversation).onFailure { e -> container.toast(errorText(ctx, e)) } }
-            }) else null, blocked = it.id in state.blockedUserIds, onReport = { reportUser = it.id }, onBlock = { blockUser = it }) }
+            }) else null, blocked = it.id in state.blockedUserIds, onReport = { reportUser = it.id }, onBlock = { blockUser = it },
+                admin = GroupAdmins.isAdmin(meta, it.id), actions = GroupAdmins.actionsFor(meta, it, data.me.id), onAction = { a -> adminAction = a to it }) }
             if (guests.isNotEmpty()) {
                 item { SectionHeader("${stringResource(R.string.guests)} · ${guests.size}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp).semantics { heading() }) }
-                items(guests, key = { it.id }) { PersonRow(it, data, onDirect = null, blocked = it.id in state.blockedUserIds, onReport = { reportUser = it.id }, onBlock = { blockUser = it }) }
+                items(guests, key = { it.id }) { PersonRow(it, data, onDirect = null, blocked = it.id in state.blockedUserIds, onReport = { reportUser = it.id }, onBlock = { blockUser = it },
+                    admin = GroupAdmins.isAdmin(meta, it.id), actions = GroupAdmins.actionsFor(meta, it, data.me.id), onAction = { a -> adminAction = a to it }) }
             }
+        }
+        adminAction?.let { (action, person) ->
+            AdminActionDialog(action, person.name, onDismiss = { adminAction = null }, onConfirm = {
+                adminAction = null
+                scope.launch {
+                    runCatching {
+                        when (action) {
+                            GroupAdmins.Action.MAKE_ADMIN -> client.setMemberAdmin(id, person.id, true)
+                            GroupAdmins.Action.REMOVE_ADMIN, GroupAdmins.Action.LEAVE_ADMIN -> client.setMemberAdmin(id, person.id, false)
+                            GroupAdmins.Action.REMOVE_FROM_GROUP -> client.removeMember(id, person.id)
+                        }
+                    }.onFailure { e -> container.toast(apiErrorMessage(ctx, e)) }
+                }
+            })
         }
         if (newIssue) NewIssueDialog(id, null, "", onClose = { newIssue = false }, onCreated = onOpenIssue)
         reportUser?.let { ReportDialog(it, onClose = { reportUser = null }) }
@@ -218,14 +239,62 @@ fun DetailsScreen(
     }
 }
 
+/** Confirmación de las acciones de admin del grupo (docs/ADMINS-INTEGRACIONES.md §1). */
 @Composable
-private fun PersonRow(p: com.tiecoms.app.core.PersonDTO, data: com.tiecoms.app.core.BootstrapDTO, onDirect: (() -> Unit)?, blocked: Boolean, onReport: () -> Unit, onBlock: () -> Unit) {
+private fun AdminActionDialog(action: GroupAdmins.Action, name: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    val (text, button) = when (action) {
+        GroupAdmins.Action.MAKE_ADMIN -> stringResource(R.string.admin_make_confirm, name) to stringResource(R.string.admin_make)
+        GroupAdmins.Action.REMOVE_ADMIN -> stringResource(R.string.admin_remove_confirm, name) to stringResource(R.string.admin_remove)
+        GroupAdmins.Action.REMOVE_FROM_GROUP -> stringResource(R.string.admin_kick_confirm, name) to stringResource(R.string.admin_kick)
+        GroupAdmins.Action.LEAVE_ADMIN -> stringResource(R.string.admin_leave_confirm) to stringResource(R.string.admin_leave)
+    }
+    val destructive = action != GroupAdmins.Action.MAKE_ADMIN
+    AlertDialog(
+        onDismissRequest = onDismiss, text = { Text(text) },
+        confirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.testTag("confirmAdminAction")) {
+            Text(button, color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+        } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+/** Mensaje del API tal cual (p. ej. «Un bot no puede ser admin»); si no trae uno legible, el texto genérico. */
+private fun apiErrorMessage(ctx: android.content.Context, e: Throwable): String =
+    (e as? com.tiecoms.app.core.ApiException)?.message?.takeIf { it.isNotBlank() && !it.startsWith("HTTP ") } ?: errorText(ctx, e)
+
+@Composable
+private fun AdminActionLabel(a: GroupAdmins.Action): String = stringResource(when (a) {
+    GroupAdmins.Action.MAKE_ADMIN -> R.string.admin_make
+    GroupAdmins.Action.REMOVE_ADMIN -> R.string.admin_remove
+    GroupAdmins.Action.REMOVE_FROM_GROUP -> R.string.admin_kick
+    GroupAdmins.Action.LEAVE_ADMIN -> R.string.admin_leave
+})
+
+@Composable
+private fun PersonRow(
+    p: com.tiecoms.app.core.PersonDTO, data: com.tiecoms.app.core.BootstrapDTO, onDirect: (() -> Unit)?, blocked: Boolean, onReport: () -> Unit, onBlock: () -> Unit,
+    admin: Boolean = false, actions: List<GroupAdmins.Action> = emptyList(), onAction: (GroupAdmins.Action) -> Unit = {},
+) {
     val org = Names.org(data, p.orgId)
-    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    var menu by remember { mutableStateOf(false) }
+    // Si hay acciones de admin: mantener presionado (o tocar) abre el menú contextual, como en WhatsApp.
+    val press = if (actions.isEmpty()) Modifier else Modifier.combinedClickable(
+        onClick = { menu = true }, onClickLabel = stringResource(R.string.menu_more),
+        onLongClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); menu = true },
+        onLongClickLabel = stringResource(R.string.menu_more),
+    )
+    Box {
+    Row(Modifier.fillMaxWidth().then(press).heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp).semantics(mergeDescendants = true) {}.testTag("person-${p.id}"), verticalAlignment = Alignment.CenterVertically) {
         PersonAvatar(p, data, size = 40.dp, orgBadge = true)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(p.name + if (p.id == data.me.id) " " + stringResource(R.string.you) else "", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(p.name + if (p.id == data.me.id) " " + stringResource(R.string.you) else "", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f, fill = false))
+                if (admin) RoleTag(stringResource(R.string.admin_tag), Modifier.testTag("adminTag-${p.id}"))
+                if (GroupAdmins.isBot(p)) RoleTag(stringResource(R.string.bot_tag), Modifier.testTag("botTag-${p.id}"))
+            }
             // cargo · área · empresa
             Text(
                 listOfNotNull(p.title?.takeIf { it.isNotBlank() }, p.area?.takeIf { it.isNotBlank() },
@@ -246,6 +315,22 @@ private fun PersonRow(p: com.tiecoms.app.core.PersonDTO, data: com.tiecoms.app.c
             }
         }
         if (onDirect != null) TextButton(onClick = onDirect) { Text("✉ " + stringResource(R.string.common_direct_message), style = MaterialTheme.typography.labelMedium) }
+    }
+    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, modifier = Modifier.testTag("personMenu-${p.id}")) {
+        actions.forEach { a ->
+            DropdownMenuItem(
+                text = { Text(AdminActionLabel(a), color = if (a == GroupAdmins.Action.MAKE_ADMIN) Color.Unspecified else MaterialTheme.colorScheme.error) },
+                onClick = { menu = false; onAction(a) }, modifier = Modifier.testTag("adminAction-${a.name}"),
+            )
+        }
+    }
+    }
+}
+
+@Composable
+private fun RoleTag(text: String, modifier: Modifier = Modifier) {
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(6.dp), modifier = modifier.padding(start = 6.dp)) {
+        Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
     }
 }
 

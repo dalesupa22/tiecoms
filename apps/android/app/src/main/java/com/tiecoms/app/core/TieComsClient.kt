@@ -583,7 +583,7 @@ class TieComsClient(
         when (e) {
             is ConversationEvent.MessageCreated -> messages = upsertMessage(messages, e.message)
             is ConversationEvent.MessageUpdated -> { messages = upsertMessage(messages, e.message); patchPreviewIfLast(e.message) }
-            is ConversationEvent.MembersChanged -> { patchMeta(e.conversationId) { copy(memberIds = e.memberIds) }; scheduleBootstrap() }
+            is ConversationEvent.MembersChanged -> { patchMeta(e.conversationId) { copy(memberIds = e.memberIds, adminIds = e.adminIds ?: adminIds) }; scheduleBootstrap() }
             is ConversationEvent.IssueUpdated -> putIssues(listOf(e.issue))
             is ConversationEvent.PinsChanged -> setState { copy(pins = pins + (e.conversationId to e.messageIds)) }
             is ConversationEvent.CalendarUpdated -> putEvents(listOf(e.event))
@@ -1452,6 +1452,13 @@ class TieComsClient(
     }
     suspend fun removeMember(conversationId: String, userId: String) = withContext(dispatcher) {
         req("DELETE", "/conversations/$conversationId/members/$userId", null, JsonElement.serializer()); loadBootstrapInternal(); Unit
+    }
+
+    /** Nombrar o quitar admin del grupo (también «Dejar de ser admin» sobre mí). Devuelve los admins vigentes. */
+    suspend fun setMemberAdmin(conversationId: String, userId: String, admin: Boolean): List<String> = withContext(dispatcher) {
+        val r = req("PUT", "/conversations/$conversationId/members/$userId/admin", buildJsonObject { put("admin", JsonPrimitive(admin)) }, AdminIdsResult.serializer())
+        patchMeta(conversationId) { copy(adminIds = r.adminIds) }
+        loadBootstrapInternal(); r.adminIds
     }
 
     // ---------- Seguridad de la comunidad ----------

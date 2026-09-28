@@ -239,6 +239,17 @@ fun ConversationScreen(
     var voiceIssue by remember { mutableStateOf<Pair<String, MessageDTO>?>(null) }
     /** Visor de fotos y videos abierto: lista del mensaje e índice. */
     var viewer by remember { mutableStateOf<Pair<List<com.tiecoms.app.core.AttachmentDTO>, Int>?>(null) }
+    /** Visor de PDF abierto (adjunto y si entra directo a firmar). */
+    var pdfViewer by remember { mutableStateOf<Pair<com.tiecoms.app.core.AttachmentDTO, Boolean>?>(null) }
+    // Al girar el teléfono el visor sigue abierto (se guarda «id|firmar» y se busca el adjunto otra vez).
+    var pdfSaved by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.conversations[id]?.messages) {
+        val saved = pdfSaved
+        if (pdfViewer == null && saved != null) {
+            val attId = saved.substringBefore('|')
+            state.conversations[id]?.messages?.flatMap { it.attachments }?.firstOrNull { it.id == attId }?.let { pdfViewer = it to saved.endsWith("|1") }
+        }
+    }
     var showPins by rememberSaveable { mutableStateOf(false) }
     var returning by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<MessageDTO?>(null) }
@@ -574,6 +585,7 @@ fun ConversationScreen(
                                     onPerson = { pid -> personCard = pid },
                                     onSwipeSide = if (!embedded && item.m.kind == "text" && item.m.deletedAt == null && meta.canPost) ({ sideStart = item.m }) else null,
                                     onOpenFile = { a -> scope.launch { openAttachment(ctx, client, a) } },
+                                    onOpenPdf = { a, sign -> pdfViewer = a to sign; pdfSaved = a.id + "|" + (if (sign) "1" else "0") },
                                     canReact = canReact(item.m), reactionActions = reactionActions,
                                     onReact = { e, on -> react(item.m, e, on) }, onMoreReactions = { pickerFor = item.m },
                                 )
@@ -713,6 +725,7 @@ fun ConversationScreen(
     }
     if (convMenu) ActionSheet(title, conversationMenu(ctx, meta, data, onMeeting = { meeting = true to null }, onRemindCustom = { reminderCustom = true to null }, onLeave = { confirmLeave = true })) { convMenu = false }
     viewer?.let { (list, i) -> MediaViewer(list, i) { viewer = null } }
+    pdfViewer?.let { (a, sign) -> PdfSheet(a, startSigning = sign && meta.canPost, onClose = { pdfViewer = null; pdfSaved = null }) }
     voiceIssue?.let { (t, m) -> NewIssueDialog(id, m.id, t, onClose = { voiceIssue = null }, onCreated = onOpenIssue) }
     // El hilo nuevo se abre al lado, sin salir del chat (como un hilo de Slack).
     deriving?.let { m -> DeriveDialog(meta, m, onClose = { deriving = null }, onCreated = { cid -> sideOpen = cid }) }
@@ -1116,7 +1129,7 @@ internal fun MessageBubble(
     /** Hilos (derivadas) que cuelgan de este mensaje: chip como en Slack. */
     threads: List<ConversationDTO> = emptyList(),
     onLongPress: () -> Unit, onQuote: (MessageDTO) -> Unit, onIssue: (String) -> Unit, onOpenConversation: (String, Long?) -> Unit,
-    onOpenMedia: (List<com.tiecoms.app.core.AttachmentDTO>, Int) -> Unit = { _, _ -> }, onOpenFile: (com.tiecoms.app.core.AttachmentDTO) -> Unit = {},
+    onOpenMedia: (List<com.tiecoms.app.core.AttachmentDTO>, Int) -> Unit = { _, _ -> }, onOpenFile: (com.tiecoms.app.core.AttachmentDTO) -> Unit = {}, onOpenPdf: ((com.tiecoms.app.core.AttachmentDTO, Boolean) -> Unit)? = null,
     /** Sugerencia de asunto de una nota de voz; null la oculta (terceros). */
     onVoiceIssue: ((String) -> Unit)? = {},
     /** Ancla del sidechat abierto: halo y su posición para el conector (SPEC-v4 §G.2). */
@@ -1253,7 +1266,7 @@ internal fun MessageBubble(
             if (!deleted && m.attachments.isNotEmpty()) {
                 val media = m.attachments.filter { it.isImage || it.isVideo }
                 AttachmentsBlock(m.attachments, fg, onOpenMedia = { i -> onOpenMedia(media, i) }, onOpenFile = onOpenFile, mine = item.mine, onCreateIssue = onVoiceIssue,
-                    onLongPress = openMenu)
+                    onLongPress = openMenu, onOpenPdf = onOpenPdf)
             }
             if (deleted) Text(body, color = fg, style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
             // Solo emojis (1 a 3): grandes, como en la web (isJumbo).

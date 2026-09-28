@@ -415,6 +415,7 @@ private fun MainNav() {
             composable("profile") { ProfileScreen(onBack = { nav.popBackStack() }) }
             composable("blocked-users") { BlockedUsersScreen(onBack = { nav.popBackStack() }) }
             composable("files") { FilesScreen(onBack = { nav.popBackStack() }) }
+            composable("signed") { SignedDocsScreen(onBack = { nav.popBackStack() }, onOpenMessage = { c, mid -> openConv(c, messageId = mid) }) }
             composable("domains/{org}") { DomainsScreen(it.arguments?.getString("org") ?: "", onBack = { nav.popBackStack() }) }
             composable("delete-account") { DeleteAccountScreen(onBack = { nav.popBackStack() }) }
             composable("invite/{token}") {

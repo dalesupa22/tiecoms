@@ -303,6 +303,8 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
             HorizontalDivider()
             NavRow("📁 " + stringResource(R.string.nav_files), null, tag = "rowFiles") { onNavigate("files") }
             HorizontalDivider()
+            NavRow(stringResource(R.string.signed_row), stringResource(R.string.signed_row_hint), tag = "rowSigned") { onNavigate("signed") }
+            HorizontalDivider()
             NavRow(stringResource(R.string.safety_blocked_users), null, tag = "rowBlockedUsers") { onNavigate("blocked-users") }
             HorizontalDivider()
             if (org != null) {

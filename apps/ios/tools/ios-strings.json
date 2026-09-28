@@ -2560,16 +2560,16 @@
   "This device’s time: {tz}"
  ],
  "task.add": [
-  "＋ Tarea derivada",
-  "＋ Sub-task"
+  "＋ Subtarea",
+  "＋ Subtask"
  ],
  "task.addHere": [
   "Subtarea de la tarea",
   "Subtask of this task"
  ],
  "task.dialogTitle": [
-  "Tareas de «{title}»",
-  "Tasks for “{title}”"
+  "Subtareas de «{title}»",
+  "Subtasks of “{title}”"
  ],
  "task.evVis": [
   "cambió quién la ve",
@@ -2600,28 +2600,28 @@
   "Part of “{title}”"
  ],
  "task.ph": [
-  "Añadir tarea… (Enter)",
-  "Add a task… (Enter)"
+  "Añadir subtarea… (Enter)",
+  "Add a subtask… (Enter)"
  ],
  "task.pickPerson": [
   "Elige a alguien…",
   "Pick someone…"
  ],
  "task.progress": [
-  "{done} de {n} tareas hechas",
-  "{done} of {n} tasks done"
+  "{done} de {n} subtareas hechas",
+  "{done} of {n} subtasks done"
  ],
  "task.section": [
-  "Tareas",
-  "Tasks"
+  "Subtareas",
+  "Subtasks"
  ],
  "task.sharedWithMe": [
   "Compartidas contigo",
   "Shared with you"
  ],
  "task.short": [
-  "Tarea",
-  "Task"
+  "Subtarea",
+  "Subtask"
  ],
  "task.sideExplain": [
   "Abre un chat privado con quienes elijas para resolver «{title}». Las subtareas que creen ahí quedan en la tarea y solo las ven ustedes.",
@@ -2640,8 +2640,8 @@
   "Talk privately (sidechat)"
  ],
  "task.title": [
-  "Tarea",
-  "Task"
+  "Subtarea",
+  "Subtask"
  ],
  "task.visAll": [
   "Todo el chat",

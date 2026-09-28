@@ -631,6 +631,8 @@ struct UnreadPill: View {
 /// debajo, en letra pequeña, vista previa y hora; chip «◆ N asuntos» si hay asuntos abiertos.
 struct HierarchyConvRow: View {
     @Environment(AppStore.self) private var store
+    /// Con tamaños de accesibilidad (o «Máximo» en Tú) el nombre y la vista previa usan dos líneas.
+    @Environment(\.dynamicTypeSize) private var typeSize
     var d: BootstrapDTO
     var c: ConversationDTO
     var badgeColor: Color? = nil
@@ -657,7 +659,7 @@ struct HierarchyConvRow: View {
             ConvIcon(d: d, c: c, size: 30)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(title).font(.subheadline.weight(c.unread > 0 && !c.isMuted ? .bold : .medium)).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                    Text(title).font(.subheadline.weight(c.unread > 0 && !c.isMuted ? .bold : .medium)).foregroundStyle(Theme.textPrimary).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                     if showWs, let ws = d.workspaces.first(where: { $0.id == c.workspaceId }) {
                         Text("· \(ws.name)").font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
                     }
@@ -694,7 +696,7 @@ struct HierarchyConvRow: View {
                     }
                 }
                 HStack(spacing: 6) {
-                    Text(preview).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                    Text(preview).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                     Spacer(minLength: 4)
                     Text(time).font(.caption2).foregroundStyle(Theme.textSecondary)
                 }
@@ -739,7 +741,7 @@ struct HierarchyConvRow: View {
             HStack(spacing: 3) {
                 Text("◆ \(t.count)").foregroundStyle(Theme.accentText).monospacedDigit()
                 if t.overdue > 0 { Text("· \(t.overdue)!").foregroundStyle(.red).monospacedDigit() }
-                Image(systemName: "chevron.right").font(.system(size: 8, weight: .heavy)).foregroundStyle(Theme.accentText)
+                Image(systemName: "chevron.right").scaledFont(8, weight: .heavy, relativeTo: .caption).foregroundStyle(Theme.accentText)
                     .rotationEffect(.degrees(t.expanded ? 90 : 0))
             }
             .font(.caption2.weight(.bold))

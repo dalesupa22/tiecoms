@@ -1176,6 +1176,8 @@ struct EventCard: View {
 }
 
 struct MessageBubble: View {
+    /// Emojis solos (1 a 3): 40 pt que escalan con Dynamic Type y con el tamaño del texto de la app.
+    @ScaledMetric(relativeTo: .body) private var jumboSize: CGFloat = 40
     enum Status { case sending, failed }
     /// Columna del avatar a la izquierda de las burbujas ajenas (grupos, chats grupales, laterales).
     enum Leading { case none, spacer, person(name: String, photo: String?, id: String, agent: Bool) }
@@ -1252,7 +1254,7 @@ struct MessageBubble: View {
                         } else if linkify { Text(Linkify.attributed(text)) } else { Text(text) }
                     }
                     // Solo emojis (1 a 3): grandes, como en la web (isJumbo).
-                    .font(jumbo ? .system(size: 40) : .body)
+                    .font(jumbo ? .system(size: jumboSize) : .body)
                     .italic(italic)
                     .foregroundStyle(mine ? Color.white : Theme.textPrimary)
                     .tint(mine ? Color.white : Theme.accentText)

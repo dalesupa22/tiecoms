@@ -1462,3 +1462,14 @@
 "issue.historyCount" = "See changes ({n})";
 "issue.quickPhIos" = "Add a subject…";
 "issue.pickDate" = "Pick a date";
+
+/* 1.6.4 (20): tamaño del texto en Tú › Ajustes */
+"textSize.title" = "Text size";
+"textSize.small" = "Small";
+"textSize.normal" = "Default";
+"textSize.large" = "Large";
+"textSize.larger" = "Larger";
+"textSize.largest" = "Largest";
+"textSize.previewTitle" = "Payments and billing";
+"textSize.previewBody" = "I uploaded the September invoices 📎";
+"textSize.hint" = "Changes the text across the app right away. It adds to the size you pick in Settings › Display & Brightness.";

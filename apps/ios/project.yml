@@ -88,6 +88,7 @@ targets:
       - TieComs/Core/Attachments.swift
       - TieComs/Core/ShareItems.swift
       - TieComs/Core/Keyboard.swift
+      - TieComs/Core/TextSize.swift
       - path: TieComs/Resources
         includes: ["*.lproj/Localizable.strings", "PrivacyInfo.xcprivacy"]
         buildPhase: resources

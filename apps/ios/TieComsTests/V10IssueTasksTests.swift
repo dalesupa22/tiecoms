@@ -186,3 +186,40 @@ final class V10IssueTasksTests: XCTestCase {
         XCTAssertEqual(L("issue.closed"), "Completed")
     }
 }
+
+/// 1.6.4 (20): «Tamaño del texto» (Tú › Ajustes) se suma al Dynamic Type del sistema.
+final class TextSizeTests: XCTestCase {
+    func testStepsAddToSystemDynamicType() {
+        XCTAssertEqual(TextSize.normal.applied(to: .large), .large, "Normal = el tamaño de hoy")
+        XCTAssertEqual(TextSize.small.applied(to: .large), .medium)
+        XCTAssertEqual(TextSize.large.applied(to: .large), .xLarge)
+        XCTAssertEqual(TextSize.larger.applied(to: .large), .xxLarge)
+        XCTAssertEqual(TextSize.largest.applied(to: .large), .accessibility1)
+        // Se suma al del sistema, no lo reemplaza.
+        XCTAssertEqual(TextSize.large.applied(to: .xxxLarge), .accessibility1)
+        XCTAssertEqual(TextSize.normal.applied(to: .accessibility3), .accessibility3)
+        // Límites.
+        XCTAssertEqual(TextSize.small.applied(to: .xSmall), .xSmall)
+        XCTAssertEqual(TextSize.largest.applied(to: .accessibility4), .accessibility5)
+    }
+
+    func testSavedInAppAndAppGroup() throws {
+        let app = try XCTUnwrap(UserDefaults(suiteName: "tc-tests-\(UUID().uuidString)"))
+        let group = try XCTUnwrap(UserDefaults(suiteName: "tc-tests-\(UUID().uuidString)"))
+        XCTAssertEqual(TextSize.shared(group), .normal, "por defecto, Normal")
+        TextSize.save(.larger, defaults: app, shared: group)
+        XCTAssertEqual(app.integer(forKey: TextSize.key), TextSize.larger.rawValue)
+        XCTAssertEqual(TextSize.shared(group), .larger, "la extensión lo lee del App Group")
+    }
+
+    func testFiveStepsWithTexts() {
+        let saved = L10n.choice
+        defer { L10n.choice = saved }
+        L10n.choice = .es
+        XCTAssertEqual(TextSize.allCases.map { L($0.labelKey) }, ["Pequeño", "Normal", "Grande", "Más grande", "Máximo"])
+        XCTAssertEqual(L("textSize.title"), "Tamaño del texto")
+        L10n.choice = .en
+        XCTAssertEqual(TextSize.allCases.map { L($0.labelKey) }, ["Small", "Default", "Large", "Larger", "Largest"])
+        XCTAssertEqual(L("textSize.title"), "Text size")
+    }
+}

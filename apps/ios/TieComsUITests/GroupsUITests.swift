@@ -568,6 +568,67 @@ final class GroupsUITests: XCTestCase {
         XCTAssertEqual(app.buttons["issue.check.\(overdue)"].label, "Completar", "reabierto desde Completados")
     }
 
+    /// 1.6.4 (20): «Tamaño del texto» en Tú: 5 pasos, vista previa en vivo y toda la app (Grupos) cambia al instante.
+    /// Con «Máximo» las filas no se cortan y la barra de pestañas queda limitada.
+    func testTextSizeSetting() throws {
+        let f = try fixture()
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "no se prueba contra producción")
+        let app = login(f)
+        let pagos = app.buttons["conv.row.\(f.pagosId)"]
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !pagos.exists { dismissSystemPrompts(app); usleep(300_000) }
+        dismissSystemPrompts(app)
+        func setSize(_ step: Int, _ name: String) {
+            app.tabBars.buttons["Tú"].tap()
+            let slider = app.sliders["settings.textSize"]
+            for _ in 0..<6 where !slider.isHittable { app.swipeUp() }
+            XCTAssertTrue(slider.waitForExistence(timeout: 5), "control de tamaño en Tú")
+            // adjust(toNormalizedSliderPosition:) no es exacto en un Slider con pasos: se corrige hasta dar con el paso.
+            let names = ["Pequeño", "Normal", "Grande", "Más grande", "Máximo"]
+            let value = app.staticTexts["settings.textSize.value"]
+            var pos = CGFloat(step) / 4
+            for _ in 0..<8 {
+                if step == 4 {
+                    // Arrastrar el pulgar más allá del extremo derecho.
+                    let from = CGFloat(names.firstIndex(of: value.label) ?? 0) / 4
+                    slider.coordinate(withNormalizedOffset: CGVector(dx: 0.04 + from * 0.92, dy: 0.5))
+                        .press(forDuration: 0.2, thenDragTo: slider.coordinate(withNormalizedOffset: CGVector(dx: 1.3, dy: 0.5)))
+                } else { slider.adjust(toNormalizedSliderPosition: pos) }
+                usleep(400_000)
+                guard let now = names.firstIndex(of: value.label), now != step else { break }
+                pos = min(1, max(0, pos + (now < step ? 0.06 : -0.06)))
+            }
+            XCTAssertEqual(value.label, name)
+        }
+        func groupsShot(_ name: String) {
+            app.tabBars.buttons["Grupos"].tap()
+            if !app.segmentedControls["grp.viewMode"].waitForExistence(timeout: 2) { app.tabBars.buttons["Grupos"].tap() }
+            for _ in 0..<3 { app.swipeDown() }
+            sleep(1)
+            shot(name)
+        }
+        setSize(1, "Normal")
+        XCTAssertTrue(app.descendants(matching: .any)["settings.textSize.preview"].exists, "vista previa")
+        sleep(1)
+        shot("11-tamano-texto-ajuste")
+        groupsShot("12-grupos-texto-normal")
+        let normalHeight = app.buttons["conv.row.\(f.pagosId)"].frame.height
+        setSize(2, "Grande")
+        sleep(1)
+        shot("13-tamano-texto-grande-ajuste")
+        groupsShot("14-grupos-texto-grande")
+        let largeRow = app.buttons["conv.row.\(f.pagosId)"]
+        XCTAssertGreaterThan(largeRow.frame.height, normalHeight, "Grande: la fila crece (\(normalHeight) → \(largeRow.frame.height))")
+        setSize(4, "Máximo")
+        groupsShot("15-grupos-texto-maximo")
+        let tab = app.tabBars.firstMatch
+        XCTAssertTrue(tab.buttons["Grupos"].isHittable, "la barra de pestañas sigue visible con «Máximo»")
+        XCTAssertLessThan(tab.frame.height, 140, "barra de pestañas limitada: \(tab.frame.height)")
+        // Vuelve a Normal para las demás pruebas.
+        setSize(1, "Normal")
+        app.tabBars.buttons["Grupos"].tap()
+    }
+
     /// Barra de arriba (✏️ y «＋») en las cuatro pestañas, chat rápido desde «Mensaje nuevo» y búsqueda que encuentra
     /// personas sin directo (tocar = escribirle) y grupos.
     func testQuickComposeCreateAndSearch() throws {

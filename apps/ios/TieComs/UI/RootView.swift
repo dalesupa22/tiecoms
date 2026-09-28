@@ -100,22 +100,27 @@ struct MainView: View {
         let d = store.data
         TabView(selection: $store.tab) {
             NavigationStack(path: $store.homePath) { HomeView().routes() }
+                .appTextSize()
                 .tabItem { Label(L("tab.groups"), systemImage: "person.3") }
                 .tag(AppTab.home)
                 .badge(d.map(Naming.groupsUnread) ?? 0)
                 .accessibilityIdentifier("tab.home")
             NavigationStack(path: $store.dmsPath) { DMsView().routes() }
+                .appTextSize()
                 .tabItem { Label(L("tab.dms"), systemImage: "bubble.left.and.bubble.right") }
                 .tag(AppTab.dms)
                 .badge(d.map(Naming.dmsUnread) ?? 0)
             NavigationStack(path: $store.issuesPath) { IssuesScreen().routes() }
+                .appTextSize()
                 .tabItem { Label(L("tab.issues"), systemImage: "checklist") }
                 .tag(AppTab.issues)
                 .badge(store.myOpenIssues)
             NavigationStack(path: $store.agendaPath) { AgendaScreen().routes() }
+                .appTextSize()
                 .tabItem { Label(L("tab.calendar"), systemImage: "calendar") }
                 .tag(AppTab.agenda)
             NavigationStack(path: $store.settingsPath) { SettingsView().routes() }
+                .appTextSize()
                 .tabItem {
                     Label {
                         Text(L("tab.you"))
@@ -127,6 +132,8 @@ struct MainView: View {
                 }
                 .tag(AppTab.settings)
         }
+        // La barra de pestañas no crece más allá de un tamaño razonable; cada pestaña aplica el tamaño elegido.
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         .task(id: myPhotoURL) {
             guard let url = myPhotoURL else { myPhoto = nil; return }
             if let hit = RemoteImageCache.shared.object(forKey: url as NSURL) { myPhoto = hit; return }

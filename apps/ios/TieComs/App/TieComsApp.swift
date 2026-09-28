@@ -63,6 +63,7 @@ struct TieComsApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .appTextSize()
                 .environment(store)
                 .keyboardDismissable()
                 .task {

@@ -1462,3 +1462,14 @@
 "issue.historyCount" = "Ver cambios ({n})";
 "issue.quickPhIos" = "Añadir asunto…";
 "issue.pickDate" = "Elegir fecha";
+
+/* 1.6.4 (20): tamaño del texto en Tú › Ajustes */
+"textSize.title" = "Tamaño del texto";
+"textSize.small" = "Pequeño";
+"textSize.normal" = "Normal";
+"textSize.large" = "Grande";
+"textSize.larger" = "Más grande";
+"textSize.largest" = "Máximo";
+"textSize.previewTitle" = "Pagos y facturación";
+"textSize.previewBody" = "Ya subí las facturas de septiembre 📎";
+"textSize.hint" = "Cambia el texto de toda la app al instante. Se suma al tamaño que elijas en Ajustes › Pantalla y brillo.";

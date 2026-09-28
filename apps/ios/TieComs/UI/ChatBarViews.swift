@@ -92,7 +92,7 @@ struct ChatBar: View {
         let tint: Color = alert ? Theme.accentText : n > 0 ? Theme.accentText : Theme.textSecondary.opacity(0.7)
         return Button(action: action) {
             HStack(spacing: 4) {
-                Image(systemName: icon).font(.system(size: 11, weight: .semibold))
+                Image(systemName: icon).scaledFont(11, weight: .semibold, relativeTo: .caption)
                 Text("\(n)").font(.caption.weight(.bold)).monospacedDigit()
                 Text(label).font(.caption2.weight(.medium)).lineLimit(1).minimumScaleFactor(0.75)
             }

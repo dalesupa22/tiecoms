@@ -1690,5 +1690,41 @@
  "issue.pickDate": [
   "Elegir fecha",
   "Pick a date"
+ ],
+ "textSize.title": [
+  "Tamaño del texto",
+  "Text size"
+ ],
+ "textSize.small": [
+  "Pequeño",
+  "Small"
+ ],
+ "textSize.normal": [
+  "Normal",
+  "Default"
+ ],
+ "textSize.large": [
+  "Grande",
+  "Large"
+ ],
+ "textSize.larger": [
+  "Más grande",
+  "Larger"
+ ],
+ "textSize.largest": [
+  "Máximo",
+  "Largest"
+ ],
+ "textSize.previewTitle": [
+  "Pagos y facturación",
+  "Payments and billing"
+ ],
+ "textSize.previewBody": [
+  "Ya subí las facturas de septiembre 📎",
+  "I uploaded the September invoices 📎"
+ ],
+ "textSize.hint": [
+  "Cambia el texto de toda la app al instante. Se suma al tamaño que elijas en Ajustes › Pantalla y brillo.",
+  "Changes the text across the app right away. It adds to the size you pick in Settings › Display & Brightness."
  ]
 }

@@ -12,6 +12,7 @@ import { isMac, openCreateMenu, openNewMessage, quickKey } from './Quick.tsx';
 import { activityOf, isMuted, pendingOf } from '../home-order.ts';
 import { DndStrip, MeAvatar } from './Silence.tsx';
 import { AssistantBubble } from './Assistant.tsx';
+import { useSleepTzSync } from './Sleep.tsx';
 
 const NAV = [
   { name: 'today', label: 'nav.today', ico: '◑', to: '/' },
@@ -230,6 +231,7 @@ function MobileTabs({ route }: { route: Route }) {
 }
 
 export function Shell({ route, children }: { route: Route; children: ReactNode }) {
+  useSleepTzSync();
   const connection = useClient((s) => s.connection);
   const inConv = route.name === 'conversation';
   return (

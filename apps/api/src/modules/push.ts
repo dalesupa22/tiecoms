@@ -35,12 +35,13 @@ export async function removeToken(sessionId: string) {
 interface Target { user_id: string; sub_id: string; provider: 'apns' | 'fcm'; token: string; environment: 'sandbox' | 'production'; lang: Lang; mentioned?: boolean }
 
 /**
- * Sesiones con token de quien no tiene «No molestar» activo: con dnd_until > now() no sale ningún push
+ * Sesiones con token de quien no tiene «No molestar» activo ni está en su modo sueño (horario de descanso): con dnd_until > now() no sale ningún push
  * (mensajes, menciones, reacciones, reuniones, avisos de reunión ni recordatorios). Todas las consultas
  * de destinatarios pasan por aquí.
  */
 const ACTIVE_SESSION = `JOIN sessions s ON s.user_id = u.id AND s.revoked_at IS NULL AND s.expires_at > now()
     AND (u.dnd_until IS NULL OR u.dnd_until <= now())
+    AND NOT tiecoms_sleeping(u.sleep_on, u.sleep_start, u.sleep_end, u.sleep_tz)
   JOIN push_subscriptions ps ON ps.session_id = s.id AND ps.provider IN ('apns', 'fcm')`;
 
 /** No leídos de cada persona (conversaciones que puede leer y no tiene silenciadas): el globo del ícono. */

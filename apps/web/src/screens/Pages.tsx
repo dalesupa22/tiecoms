@@ -11,6 +11,8 @@ import { InviteResult, PendingInvitations } from './Invitations.tsx';
 import { IssueDrawer, IssueRow, isClosed } from './Issues.tsx';
 import { TodayAgenda, newEvent } from './Calendar.tsx';
 import { RemindersSection } from './Bring.tsx';
+import { SleepDialog, sleepSummary } from './Sleep.tsx';
+import { TEXT_SIZES, setTextSize, useTextSize } from '../text-size.ts';
 import { askNotifications, conversationMenu, dndMenu, dndText, mutedText, openDialog, personMenu } from '../actions.tsx';
 import { menuProps, openMenuAt, toast } from '../menu.tsx';
 import { isMuted } from '../home-order.ts';
@@ -361,6 +363,8 @@ export function SettingsScreen() {
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('notif.title')}</div>
       <SilenceSettings />
       <NotificationToggle />
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{t('text.title')}</div>
+      <TextSizeSetting />
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('settings.language')}</div>
       <div className="seg" style={{ marginBottom: 24, maxWidth: 480 }}>
         {langOptions.map(([v, label]) => (
@@ -389,9 +393,26 @@ export function SettingsScreen() {
   );
 }
 
+/** Tamaño del texto: 5 pasos con vista previa inmediata (toda la app cambia al mover el control). */
+function TextSizeSetting() {
+  const v = useTextSize();
+  const i = TEXT_SIZES.indexOf(v as (typeof TEXT_SIZES)[number]);
+  const names = [t('text.small'), t('text.default'), t('text.large'), t('text.larger'), t('text.largest')];
+  return (
+    <div className="card text-size">
+      <span className="a-small" aria-hidden>A</span>
+      <input type="range" min={0} max={TEXT_SIZES.length - 1} step={1} value={i < 0 ? 1 : i} aria-label={t('text.title')} aria-valuetext={names[i] ?? names[1]}
+        onChange={(e) => setTextSize(TEXT_SIZES[Number(e.target.value)]!)} />
+      <span className="a-big" aria-hidden>A</span>
+      <span className="small muted" style={{ minWidth: 84, textAlign: 'right' }}>{names[i] ?? names[1]}</span>
+    </div>
+  );
+}
+
 /** «No molestar» y «Sonido de mensajes» (también en el menú de la cuenta). */
 function SilenceSettings() {
   const until = useClient((s) => s.data?.me.dndUntil);
+  const sleep = useClient((s) => s.data?.me.sleep);
   const sound = useSyncExternalStore(subscribeSound, soundEnabled);
   const status = dndText(until);
   return (
@@ -400,6 +421,11 @@ function SilenceSettings() {
         onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left + 16, r.bottom - 6, dndMenu(until).items!); }}>
         <span style={{ fontSize: 22 }} aria-hidden>🌙</span>
         <span className="grow"><b>{t('dnd.title')}</b><span className="small muted" style={{ display: 'block' }}>{status ?? t('dnd.hint')}</span></span>
+        <span className="muted">›</span>
+      </button>
+      <button className="card conv-card" style={{ marginBottom: 12 }} onClick={() => openDialog((close) => <SleepDialog onClose={close} />)}>
+        <span style={{ fontSize: 22 }} aria-hidden>🛌</span>
+        <span className="grow"><b>{t('sleep.title')}</b><span className="small muted" style={{ display: 'block' }}>{sleepSummary(sleep) ?? t('sleep.explain')}</span></span>
         <span className="muted">›</span>
       </button>
       <label className="card conv-card check" style={{ marginBottom: 12 }}>

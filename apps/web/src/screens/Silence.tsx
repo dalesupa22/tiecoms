@@ -2,13 +2,14 @@ import { useClient } from '../app-client.ts';
 import { dndText, setDnd, useExpiry } from '../actions.tsx';
 import { t } from '../i18n.ts';
 import { activeUntil } from '../silence.ts';
+import { sleepingNow } from './Sleep.tsx';
 import { Avatar, orgById, personById } from '../ui.tsx';
 
 /** Avatar con la lunita 🌙 mientras «No molestar» está activo. */
 export function MeAvatar({ size }: { size: number }) {
   const d = useClient((s) => s.data)!;
   useExpiry(d.me.dndUntil);
-  const on = activeUntil(d.me.dndUntil);
+  const on = activeUntil(d.me.dndUntil) || sleepingNow(d.me.sleep?.on ? d.me.sleep : null);
   return (
     <span className={`me-avatar ${on ? 'is-dnd' : ''}`}>
       <Avatar person={personById(d, d.me.id)} org={orgById(d, d.me.primaryOrgId)} size={size} />

@@ -6,6 +6,7 @@ import { copyText, toast, type MenuItem } from './menu.tsx';
 import { BASE, navigate } from './router.ts';
 import { Modal, conversationTitle, personById } from './ui.tsx';
 import { previewModeMenu } from './screens/Links.tsx';
+import { SleepDialog, sleepSummary } from './screens/Sleep.tsx';
 import { MUTE_FOREVER, activeUntil, isForever, tomorrowAt8, untilText } from './silence.ts';
 
 // ---------- Diálogos globales (se pueden abrir desde cualquier menú) ----------
@@ -189,6 +190,9 @@ export function dndMenu(until: string | null | undefined): MenuItem {
       { label: t('dnd.8h'), onSelect: () => void setDnd(at(8 * 3600_000)) },
       { label: t('dnd.tomorrow'), hint: tomorrow.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }), onSelect: () => void setDnd(tomorrow.toISOString()) },
       { label: t('dnd.forever'), onSelect: () => void setDnd(MUTE_FOREVER) },
+      // Complemento automático: «No molestar» todas las noches en mi horario (modo sueño).
+      { divider: true },
+      { label: t('sleep.title'), icon: '🛌', hint: sleepSummary(client.getState().data?.me.sleep) ?? undefined, onSelect: () => openDialog((close) => <SleepDialog onClose={close} />) },
     ],
   };
 }

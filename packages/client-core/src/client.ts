@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO,
+  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type UserDTO, normalizeEmoji,
 } from '@tiecoms/contracts';
@@ -349,6 +349,7 @@ export class TieComsClient {
     if (e.type === 'scope.changed') { this.scheduleBootstrap(); void this.loadIssues({ open: true }).catch(() => {}); }
     if (e.type === 'prefs.updated') this.scheduleBootstrap();
     if (e.type === 'me.dnd') this.patchMe({ dndUntil: e.dndUntil });
+    if (e.type === 'me.sleep') this.patchMe({ sleep: e.sleep });
     if (e.type === 'reminders.changed') void this.loadReminders().catch(() => {});
     if (e.type === 'scheduled.updated') this.putScheduled(e.scheduled);
     if (e.type === 'whatsapp.updated') this.set({ waRevision: this.state.waRevision + 1 });
@@ -750,6 +751,12 @@ export class TieComsClient {
    * «No molestar» (silenciar todo) hasta `until` (ISO; MUTE_FOREVER = hasta que lo reactive); null lo apaga.
    * Si el servidor no conoce la ruta (404), se guarda solo en este dispositivo y devuelve { local: true }.
    */
+  /** Modo sueño: horario diario sin sonidos. Devuelve el horario guardado. */
+  async setSleep(patch: { on?: boolean; start?: string; end?: string; tz?: string; tzAuto?: boolean }) {
+    const r = await this.request<{ sleep: SleepDTO }>('/me/sleep', { method: 'PUT', json: patch });
+    this.patchMe({ sleep: r.sleep });
+    return r.sleep;
+  }
   async setDnd(until: string | null): Promise<{ dndUntil: string | null; local: boolean }> {
     const prev = this.state.data?.me.dndUntil ?? null;
     this.patchMe({ dndUntil: until });

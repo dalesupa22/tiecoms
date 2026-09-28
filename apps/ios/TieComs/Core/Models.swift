@@ -244,6 +244,11 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
     var mutedUntil: String?
     /// Menciones a mí (o @todos) sin leer (SPEC-v4 H).
     var unreadMentions: Int = 0
+    /// Admins explícitos del grupo (orden de ingreso). Solo en group/internal/multi; nil = servidor anterior
+    /// (docs/ADMINS-INTEGRACIONES.md §1).
+    var adminIds: [String]? = nil
+    /// Quien creó el grupo: no se le quita el admin ni se le saca. nil = servidor anterior.
+    var createdBy: String? = nil
 
     var isMuted: Bool { (ISODate.parse(mutedUntil) ?? .distantPast) > Date() }
 
@@ -279,6 +284,8 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
         unreadMentions = c.int("unreadMentions")
         openIssues = c.int("openIssues")
         mutedUntil = c.o("mutedUntil")
+        adminIds = c.o("adminIds")
+        createdBy = c.o("createdBy")
     }
 }
 
@@ -499,7 +506,8 @@ struct AcceptInvitationResult: Decodable, Sendable {
 enum ConversationEvent: Decodable, Equatable, Sendable {
     case messageCreated(conversationId: String, eventSeq: Int, message: MessageDTO)
     case messageUpdated(conversationId: String, eventSeq: Int, message: MessageDTO)
-    case membersChanged(conversationId: String, eventSeq: Int, memberIds: [String])
+    /// `adminIds` llega desde la migración 030; nil = servidor anterior (no cambia los admins conocidos).
+    case membersChanged(conversationId: String, eventSeq: Int, memberIds: [String], adminIds: [String]? = nil)
     case issueUpdated(conversationId: String, eventSeq: Int, issue: IssueDTO)
     case pinsChanged(conversationId: String, eventSeq: Int, messageIds: [String])
     case calendarUpdated(conversationId: String, eventSeq: Int, event: CalendarEventDTO)
@@ -507,13 +515,13 @@ enum ConversationEvent: Decodable, Equatable, Sendable {
 
     var conversationId: String {
         switch self {
-        case .messageCreated(let c, _, _), .messageUpdated(let c, _, _), .membersChanged(let c, _, _), .issueUpdated(let c, _, _),
+        case .messageCreated(let c, _, _), .messageUpdated(let c, _, _), .membersChanged(let c, _, _, _), .issueUpdated(let c, _, _),
              .pinsChanged(let c, _, _), .calendarUpdated(let c, _, _), .other(_, let c, _): return c
         }
     }
     var eventSeq: Int {
         switch self {
-        case .messageCreated(_, let s, _), .messageUpdated(_, let s, _), .membersChanged(_, let s, _), .issueUpdated(_, let s, _),
+        case .messageCreated(_, let s, _), .messageUpdated(_, let s, _), .membersChanged(_, let s, _, _), .issueUpdated(_, let s, _),
              .pinsChanged(_, let s, _), .calendarUpdated(_, let s, _), .other(_, _, let s): return s
         }
     }
@@ -529,7 +537,7 @@ enum ConversationEvent: Decodable, Equatable, Sendable {
         case "message.updated":
             if let m: MessageDTO = c.o("message") { self = .messageUpdated(conversationId: conv, eventSeq: seq, message: m); return }
         case "members.changed":
-            self = .membersChanged(conversationId: conv, eventSeq: seq, memberIds: c.v("memberIds", [])); return
+            self = .membersChanged(conversationId: conv, eventSeq: seq, memberIds: c.v("memberIds", []), adminIds: c.o("adminIds")); return
         case "issue.updated":
             if let i: IssueDTO = c.o("issue") { self = .issueUpdated(conversationId: conv, eventSeq: seq, issue: i); return }
         case "pins.changed":

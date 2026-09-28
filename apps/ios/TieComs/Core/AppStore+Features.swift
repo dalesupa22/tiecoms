@@ -530,6 +530,30 @@ extension AppStore {
         try await loadBootstrap()
     }
 
+    /// Nombrar o quitar admin (también «Dejar de ser admin» sobre mí): PUT …/members/{userId}/admin → `{ adminIds }`.
+    /// Aplica los admins de la respuesta y refresca el bootstrap (docs/ADMINS-INTEGRACIONES.md §1).
+    func setGroupAdmin(_ conversationId: String, userId: String, admin: Bool) async throws {
+        struct R: Decodable { var adminIds: [String]?; init(from d: Decoder) throws { adminIds = try container(d).o("adminIds") } }
+        let r: R = try await api.request("/conversations/\(conversationId)/members/\(userId)/admin", method: "PUT", json: ["admin": admin])
+        if let ids = r.adminIds { patchMeta(conversationId) { $0.adminIds = ids } }
+        try await loadBootstrap()
+    }
+
+    /// Sacar a alguien del grupo (DELETE de su membresía; solo quien administra).
+    func removeMember(_ conversationId: String, userId: String) async throws {
+        try await api.requestData("/conversations/\(conversationId)/members/\(userId)", method: "DELETE")
+        try await loadBootstrap()
+    }
+
+    /// Ejecuta una acción del menú de un participante.
+    func perform(_ action: GroupMemberAction, conversationId: String, userId: String) async throws {
+        switch action {
+        case .makeAdmin: try await setGroupAdmin(conversationId, userId: userId, admin: true)
+        case .removeAdmin, .stepDown: try await setGroupAdmin(conversationId, userId: userId, admin: false)
+        case .removeMember: try await removeMember(conversationId, userId: userId)
+        }
+    }
+
     /// Salir de un chat grupal (DELETE de mi propia membresía).
     func leaveConversation(_ conversationId: String) async throws {
         guard let me = me?.id else { return }

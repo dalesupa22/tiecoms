@@ -7,6 +7,8 @@ import { contextHandler, copyText, toast, type MenuItem } from '../menu.tsx';
 import { BASE, navigate } from '../router.ts';
 import { Avatar, Modal, conversationTitle, counterpartOrg, orgById, personById } from '../ui.tsx';
 import { QuickActions } from './Quick.tsx';
+import { isMeetingUrl } from './Meetings.tsx';
+import { addDays, startOfDay, storedView, viewRange, VIEW_KEY, type CalView } from '../calendar-grid.ts';
 
 // ---------- Zonas horarias sin librerías ----------
 const BROWSER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Bogota';
@@ -64,14 +66,14 @@ function eventColors(d: BootstrapDTO, ev: CalendarEventDTO) {
 }
 
 // ---------- Crear / editar ----------
-export function EventDialog({ conversationId, originMessageId, defaultTitle = '', event, onClose }: {
-  conversationId?: string; originMessageId?: string; defaultTitle?: string; event?: CalendarEventDTO; onClose: () => void;
+export function EventDialog({ conversationId, originMessageId, defaultTitle = '', event, defaultStart, onClose }: {
+  conversationId?: string; originMessageId?: string; defaultTitle?: string; event?: CalendarEventDTO; defaultStart?: Date; onClose: () => void;
 }) {
   const d = client.getState().data!;
   // También directos y chats grupales (SPEC v4 E).
   const groups = d.conversations.filter((c) => c.canPost);
   const tz0 = event?.timezone ?? BROWSER_TZ;
-  const start0 = event ? new Date(event.startsAt) : (() => { const x = new Date(Date.now() + 86400_000); x.setMinutes(0, 0, 0); x.setHours(10); return x; })();
+  const start0 = event ? new Date(event.startsAt) : defaultStart ? new Date(defaultStart) : (() => { const x = new Date(Date.now() + 86400_000); x.setMinutes(0, 0, 0); x.setHours(10); return x; })();
   const end0 = event ? new Date(event.endsAt) : new Date(start0.getTime() + 3600_000);
   const [conv, setConv] = useState(event?.conversationId ?? conversationId ?? groups[0]?.id ?? '');
   const [title, setTitle] = useState(event?.title ?? defaultTitle);
@@ -206,80 +208,118 @@ function eventMenu(ev: CalendarEventDTO): MenuItem[] {
   ];
 }
 
-// ---------- Agenda semanal ----------
+// ---------- Agenda: Día · Semana · Mes (Semana por defecto) ----------
 const H0 = 7, H1 = 21, PX = 48;
-function startOfWeek(d: Date) { const x = new Date(d); const day = (x.getDay() + 6) % 7; x.setDate(x.getDate() - day); x.setHours(0, 0, 0, 0); return x; }
+const overlaps = (e: CalendarEventDTO, day: Date) => Date.parse(e.startsAt) < addDays(day, 1).getTime() && Date.parse(e.endsAt) > day.getTime();
+const meetIcon = (e: CalendarEventDTO) => (isMeetingUrl(e.location) ? '📹 ' : '');
 
 export function AgendaScreen() {
   const d = useClient((s) => s.data)!;
   const all = useClient((s) => s.events);
-  const [week, setWeek] = useState(() => startOfWeek(new Date()));
+  const [view, setViewState] = useState<CalView>(storedView);
+  const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
   const [error, setError] = useState<string | null>(null);
-  const end = useMemo(() => { const x = new Date(week); x.setDate(x.getDate() + 7); return x; }, [week]);
-  useEffect(() => { client.loadEvents(week, end).catch((e) => setError(errorText(e))); }, [week, end]);
+  const setView = (v: CalView) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* sin almacenamiento */ } };
+  const { from, to, days } = useMemo(() => viewRange(view, anchor), [view, anchor]);
+  useEffect(() => { client.loadEvents(from, to).catch((e) => setError(errorText(e))); }, [from.getTime(), to.getTime()]);
   const visible = new Set(d.conversations.map((c) => c.id));
-  const events = Object.values(all).filter((e) => visible.has(e.conversationId) && Date.parse(e.startsAt) < end.getTime() && Date.parse(e.endsAt) > week.getTime())
+  const events = Object.values(all).filter((e) => visible.has(e.conversationId) && Date.parse(e.startsAt) < to.getTime() && Date.parse(e.endsAt) > from.getTime())
     .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
-  const days = Array.from({ length: 7 }, (_, i) => { const x = new Date(week); x.setDate(x.getDate() + i); return x; });
   const today = new Date().toDateString();
-  const shift = (n: number) => { const x = new Date(week); x.setDate(x.getDate() + 7 * n); setWeek(x); };
+  const shift = (n: number) => setAnchor(view === 'day' ? addDays(anchor, n) : view === 'week' ? addDays(anchor, 7 * n) : new Date(anchor.getFullYear(), anchor.getMonth() + n, 1));
+  const newAt = (at: Date) => openDialog((close) => <EventDialog defaultStart={at} onClose={close} />);
+  const heading = view === 'day'
+    ? anchor.toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+    : view === 'week' ? t('cal.week', { date: from.toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: 'numeric' }) })
+    : anchor.toLocaleDateString(locale(), { month: 'long', year: 'numeric' });
+  const prevNext = view === 'day' ? ['cal.prevDay', 'cal.nextDay'] : view === 'week' ? ['cal.prev', 'cal.next'] : ['cal.prevMonth', 'cal.nextMonth'];
 
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 1180 }}>
       <div className="row page-head"><h1 className="grow">{t('nav.agenda')}</h1><QuickActions /></div>
-      {/* La semana y cómo moverse van debajo: ✎ y «＋ Crear» quedan en el mismo sitio que en Grupos, DMs y Asuntos. */}
-      <div className="row" style={{ marginBottom: 14, flexWrap: 'wrap', gap: 6 }}>
-        <span className="muted grow">{t('cal.week', { date: week.toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: 'numeric' }) })}</span>
-        <button className="btn small" onClick={() => setWeek(startOfWeek(new Date()))}>{t('cal.today')}</button>
-        <button className="icon-btn" aria-label={t('cal.prev')} onClick={() => shift(-1)}>‹</button>
-        <button className="icon-btn" aria-label={t('cal.next')} onClick={() => shift(1)}>›</button>
+      <div className="row cal-toolbar">
+        <div className="seg" role="radiogroup" aria-label={t('cal.view')}>
+          {(['day', 'week', 'month'] as const).map((v) => <button key={v} role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>{t(`cal.v.${v}`)}</button>)}
+        </div>
+        <span className="muted grow cal-heading">{heading}</span>
+        <button className="btn small" onClick={() => setAnchor(startOfDay(new Date()))}>{t('cal.today')}</button>
+        <button className="icon-btn" aria-label={t(prevNext[0] as 'cal.prev')} onClick={() => shift(-1)}>‹</button>
+        <button className="icon-btn" aria-label={t(prevNext[1] as 'cal.next')} onClick={() => shift(1)}>›</button>
       </div>
       {error && <div className="error">{error}</div>}
 
-      <div className="week only-desktop">
-        <div className="week-head"><span />{days.map((x) => <span key={x.toISOString()} className={x.toDateString() === today ? 'is-today' : ''}>{fmtDay(x)}</span>)}</div>
-        <div className="week-body" style={{ height: (H1 - H0) * PX }}>
-          <div className="week-hours">{Array.from({ length: H1 - H0 }, (_, i) => <span key={i} style={{ top: i * PX }}>{String(H0 + i).padStart(2, '0')}:00</span>)}</div>
-          {days.map((x) => {
-            const dayEvents = events.filter((e) => new Date(e.startsAt).toDateString() === x.toDateString());
-            const cols: CalendarEventDTO[][] = [];
-            for (const e of dayEvents) { const c = cols.find((col) => col[col.length - 1]!.endsAt <= e.startsAt); if (c) c.push(e); else cols.push([e]); }
-            return (
-              <div key={x.toISOString()} className={`week-day ${x.toDateString() === today ? 'is-today' : ''}`}>
-                {Array.from({ length: H1 - H0 }, (_, i) => <i key={i} style={{ top: i * PX }} />)}
-                {cols.flatMap((col, ci) => col.map((e) => {
-                  const s = new Date(e.startsAt), en = new Date(e.endsAt);
-                  const top = Math.max(0, ((s.getHours() + s.getMinutes() / 60) - H0) * PX);
-                  const h = Math.max(22, ((en.getTime() - s.getTime()) / 3600_000) * PX - 2);
-                  const c = eventColors(d, e);
-                  return (
-                    <button key={e.id} className={`week-ev ${e.cancelledAt ? 'is-cancelled' : ''}`} onContextMenu={contextHandler(() => eventMenu(e))}
-                      style={{ top, height: h, left: `${(ci / cols.length) * 100}%`, width: `${100 / cols.length}%`, background: c.bg, color: c.fg }}
-                      onClick={() => openEvent(e.id)}>
-                      <b className="ellipsis">{e.title}</b><span className="ellipsis">{fmtTime(e.startsAt)} · {conversationTitle(d, d.conversations.find((cv) => cv.id === e.conversationId)!)}</span>
-                    </button>
-                  );
-                }))}
-              </div>
-            );
-          })}
+      {view === 'month' ? (
+        <div className="month" role="grid" aria-label={heading}>
+          <div className="month-head">{days.slice(0, 7).map((x) => <span key={x.toISOString()}>{x.toLocaleDateString(locale(), { weekday: 'short' })}</span>)}</div>
+          <div className="month-body">
+            {days.map((x) => {
+              const list = events.filter((e) => overlaps(e, x));
+              const out = x.getMonth() !== anchor.getMonth();
+              return (
+                <div key={x.toISOString()} role="gridcell" className={`month-day ${out ? 'is-out' : ''} ${x.toDateString() === today ? 'is-today' : ''}`}
+                  onDoubleClick={() => { const at = new Date(x); at.setHours(10); newAt(at); }}>
+                  <button className="month-num" onClick={() => { setAnchor(x); setView('day'); }} aria-label={x.toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long' })}>{x.getDate()}</button>
+                  {list.slice(0, 3).map((e) => {
+                    const c = eventColors(d, e);
+                    return <button key={e.id} className={`month-ev ${e.cancelledAt ? 'is-cancelled' : ''}`} style={{ background: c.bg, color: c.fg }} onClick={() => openEvent(e.id)} onContextMenu={contextHandler(() => eventMenu(e))}>
+                      <span className="ellipsis">{meetIcon(e)}{fmtTime(e.startsAt)} {e.title}</span></button>;
+                  })}
+                  {list.length > 3 && <button className="month-more" onClick={() => { setAnchor(x); setView('day'); }}>{t('cal.more', { n: list.length - 3 })}</button>}
+                </div>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      ) : (
+        <>
+          <div className={`week only-desktop ${view === 'day' ? 'is-day' : ''}`} style={{ ['--cols' as string]: days.length }}>
+            <div className="week-head"><span />{days.map((x) => <span key={x.toISOString()} className={x.toDateString() === today ? 'is-today' : ''}>{fmtDay(x)}</span>)}</div>
+            <div className="week-body" style={{ height: (H1 - H0) * PX }}>
+              <div className="week-hours">{Array.from({ length: H1 - H0 }, (_, i) => <span key={i} style={{ top: i * PX }}>{String(H0 + i).padStart(2, '0')}:00</span>)}</div>
+              {days.map((x) => {
+                const dayEvents = events.filter((e) => new Date(e.startsAt).toDateString() === x.toDateString());
+                const cols: CalendarEventDTO[][] = [];
+                for (const e of dayEvents) { const c = cols.find((col) => col[col.length - 1]!.endsAt <= e.startsAt); if (c) c.push(e); else cols.push([e]); }
+                return (
+                  <div key={x.toISOString()} className={`week-day ${x.toDateString() === today ? 'is-today' : ''}`}
+                    onDoubleClick={(ev) => { if (ev.target !== ev.currentTarget) return; const r = ev.currentTarget.getBoundingClientRect(); const h = H0 + Math.floor((ev.clientY - r.top) / PX); const at = new Date(x); at.setHours(h, 0, 0, 0); newAt(at); }}>
+                    {Array.from({ length: H1 - H0 }, (_, i) => <i key={i} style={{ top: i * PX }} />)}
+                    {cols.flatMap((col, ci) => col.map((e) => {
+                      const st = new Date(e.startsAt), en = new Date(e.endsAt);
+                      const top = Math.max(0, ((st.getHours() + st.getMinutes() / 60) - H0) * PX);
+                      const h = Math.max(22, ((en.getTime() - st.getTime()) / 3600_000) * PX - 2);
+                      const c = eventColors(d, e);
+                      return (
+                        <button key={e.id} className={`week-ev ${e.cancelledAt ? 'is-cancelled' : ''}`} onContextMenu={contextHandler(() => eventMenu(e))}
+                          style={{ top, height: h, left: `${(ci / cols.length) * 100}%`, width: `${100 / cols.length}%`, background: c.bg, color: c.fg }}
+                          onClick={() => openEvent(e.id)}>
+                          <b className="ellipsis">{meetIcon(e)}{e.title}</b><span className="ellipsis">{fmtTime(e.startsAt)} · {conversationTitle(d, d.conversations.find((cv) => cv.id === e.conversationId)!)}</span>
+                        </button>
+                      );
+                    }))}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
-      <div className="only-mobile list">
-        {events.length === 0 && <div className="empty">{t('cal.empty')}</div>}
-        {days.map((x) => {
-          const list = events.filter((e) => new Date(e.startsAt).toDateString() === x.toDateString());
-          if (!list.length) return null;
-          return (
-            <section key={x.toISOString()}>
-              <div className="eyebrow" style={{ margin: '10px 0 6px' }}>{fmtDay(x)}</div>
-              <div className="list">{list.map((e) => <EventRow key={e.id} ev={e} />)}</div>
-            </section>
-          );
-        })}
-      </div>
-      {events.length === 0 && <div className="empty only-desktop" style={{ marginTop: 12 }}>{t('cal.empty')}</div>}
+          <div className="only-mobile list">
+            {events.length === 0 && <div className="empty">{t('cal.empty')}</div>}
+            {days.map((x) => {
+              const list = events.filter((e) => new Date(e.startsAt).toDateString() === x.toDateString());
+              if (!list.length) return null;
+              return (
+                <section key={x.toISOString()}>
+                  <div className="eyebrow" style={{ margin: '10px 0 6px' }}>{fmtDay(x)}</div>
+                  <div className="list">{list.map((e) => <EventRow key={e.id} ev={e} />)}</div>
+                </section>
+              );
+            })}
+          </div>
+          {events.length === 0 && <div className="empty only-desktop" style={{ marginTop: 12 }}>{t('cal.empty')}</div>}
+          <div className="row" style={{ marginTop: 10 }}><button className="btn small" onClick={() => { const at = new Date(view === 'day' ? anchor : from); at.setHours(10, 0, 0, 0); newAt(at); }}>{t('cal.new')}</button></div>
+        </>
+      )}
     </div></div>
   );
 }

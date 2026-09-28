@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
+  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type UserDTO, normalizeEmoji,
   type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO,
@@ -352,6 +352,7 @@ export class TieComsClient {
     if (e.type === 'me.dnd') this.patchMe({ dndUntil: e.dndUntil });
     // Asuntos restringidos ('org' o 'private') llegan por la cuenta, no por la conversación.
     if (e.type === 'issue.updated') { this.putIssues([e.issue]); this.recountIssues(e.issue.conversationId); }
+    if (e.type === 'issue.personal') this.putIssues([e.issue]);
     if (e.type === 'issue.hidden') {
       const next = { ...this.state.issues }; delete next[e.issueId];
       this.set({ issues: next }); this.recountIssues(e.conversationId);
@@ -371,7 +372,7 @@ export class TieComsClient {
     }
     if (e.type === 'read.updated') {
       const c = this.state.data?.conversations.find((x) => x.id === e.conversationId);
-      if (c && e.seq > c.lastReadSeq) this.patchConversationMeta(c.id, { lastReadSeq: e.seq, unread: Math.max(0, c.lastMessageSeq - Math.max(e.seq, c.historyFromSeq)) });
+      if (c && e.seq > c.lastReadSeq) this.patchConversationMeta(c.id, { lastReadSeq: e.seq, unread: Math.max(0, c.lastMessageSeq - Math.max(e.seq, c.historyFromSeq)), ...(e.seq >= c.lastMessageSeq ? { unreadMentions: 0 } : {}) });
     }
   }
 
@@ -604,7 +605,8 @@ export class TieComsClient {
     for (const i of list) next[i.id] = i;
     this.set({ issues: next });
   }
-  private recountIssues(conversationId: string) {
+  private recountIssues(conversationId: string | null) {
+    if (!conversationId) return; // personal: no cuenta en ningún chat
     const n = Object.values(this.state.issues).filter((i) => i.conversationId === conversationId && i.status !== 'done' && i.status !== 'cancelled').length;
     this.patchConversationMeta(conversationId, { openIssues: n });
   }
@@ -617,6 +619,21 @@ export class TieComsClient {
     const r = await this.request<{ issues: IssueDTO[] }>(`/issues?${q}`);
     this.putIssues(r.issues);
     return r.issues;
+  }
+  /** Asunto personal: sin conversación, solo lo veo yo. */
+  async createPersonalIssue(input: { title: string; dueDate?: string | null }) {
+    const i = await this.request<IssueDTO>('/issues', { method: 'POST', json: input });
+    this.putIssues([i]);
+    return i;
+  }
+  // ---------- Reuniones (Meet, Teams, Zoom) ----------
+  async meetingConnections() { return (await this.request<{ connections: MeetingConnectionDTO[] }>('/meetings/connections')).connections; }
+  async connectMeetingProvider(provider: MeetingProvider, platform: 'web' | 'ios' | 'android' | 'desktop' = 'web') {
+    return this.request<{ url: string }>(`/meetings/connect/${provider}`, { method: 'POST', json: { platform } });
+  }
+  async disconnectMeetingProvider(provider: MeetingProvider) { await this.request(`/meetings/connections/${provider}`, { method: 'DELETE' }); }
+  async createMeeting(input: { provider: MeetingProvider; conversationId?: string | null; idempotencyKey: string; title: string; startsAt?: string | null; durationMin: number; timezone: string; share: boolean }) {
+    return this.request<MeetingDTO>('/meetings', { method: 'POST', json: input });
   }
   /** Tarea hija de un asunto (en su chat o, con conversationId, en un sidechat que salió de él). */
   async createChildIssue(parentId: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; visibility?: IssueVisibility; viewerIds?: string[]; conversationId?: string }) {
@@ -662,6 +679,22 @@ export class TieComsClient {
     const r = await this.request<{ lastReadSeq: number }>(`/conversations/${conversationId}/unread`, { method: 'POST', json: { seq } });
     const c = this.state.data?.conversations.find((x) => x.id === conversationId);
     if (c) this.patchConversationMeta(conversationId, { lastReadSeq: r.lastReadSeq, unread: Math.max(0, c.lastMessageSeq - Math.max(r.lastReadSeq, c.historyFromSeq)) });
+  }
+  /** Derivadas de un grupo que cuentan como sus pendientes (hilos, ramas, internas; no sidechats). */
+  derivedOf(conversationId: string) {
+    return (this.state.data?.conversations ?? []).filter((x) => x.parentId === conversationId && x.deriveKind !== 'side');
+  }
+  /**
+   * «Marcar como leído» desde la lista: el grupo y sus derivadas, cada una hasta el lastMessageSeq que
+   * este cliente conoce (lo que llegue después sigue sin leer). El servidor avisa a mis otros dispositivos.
+   */
+  async markTreeRead(conversationId: string) {
+    const all = [this.state.data?.conversations.find((x) => x.id === conversationId), ...this.derivedOf(conversationId)]
+      .filter((c): c is NonNullable<typeof c> => !!c && (c.unread > 0 || (c.unreadMentions ?? 0) > 0 || c.lastReadSeq < c.lastMessageSeq));
+    if (!all.length) return;
+    const items = all.map((c) => ({ conversationId: c.id, seq: c.lastMessageSeq }));
+    for (const c of all) this.patchConversationMeta(c.id, { lastReadSeq: c.lastMessageSeq, unread: 0, unreadMentions: 0 });
+    await this.request(`/conversations/${conversationId}/read-tree`, { method: 'POST', json: { items } });
   }
   async markConversationRead(conversationId: string) {
     const c = this.state.data?.conversations.find((x) => x.id === conversationId);

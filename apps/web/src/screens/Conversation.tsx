@@ -19,6 +19,8 @@ import { QuickReplies, SideChip, SideConnector, SideDialog, replyPrivately, side
 import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
 import { SleepNotice } from './Sleep.tsx';
+import { DerivedPendingStrip } from './Pending.tsx';
+import { MeetingDialog } from './Meetings.tsx';
 import { ScheduledStrip, openScheduleMenu, scheduleMenu, whenLabel } from './Scheduled.tsx';
 import { SideIssueStrip, TasksDialog } from './Issues.tsx';
 import { ConversationIssues, IssueDrawer, NewIssueDialog, isClosed } from './Issues.tsx';
@@ -479,6 +481,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)} onLinks={() => setShowLinks(true)}
             onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
         )}
+        {!embedded && <DerivedPendingStrip conv={conv} />}
 
         <div className="msgs-wrap">
         {nav.lineAbove && entry && newLine != null && (
@@ -597,6 +600,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                   { label: t('att.fromPhotos'), icon: '🖼', onSelect: () => pickFiles('media', drafts.add) },
                   { label: t('att.fromFiles'), icon: '📎', onSelect: () => pickFiles('any', drafts.add) },
                   { divider: true },
+                  { label: t('meet.nowTitle'), icon: '📹', onSelect: () => openDialog((close) => <MeetingDialog conversationId={id} onClose={close} />) },
+                  { label: t('meet.laterTitle'), icon: '🔗', onSelect: () => openDialog((close) => <MeetingDialog conversationId={id} scheduled onClose={close} />) },
                   { label: t('bar.newEvent'), icon: '📅', onSelect: () => newEvent({ conversationId: id }) },
                   ...(canOpenIssues ? [{ label: t('bar.newIssue'), icon: '◆', onSelect: () => setNewIssue({}) }] : []),
                   ...(conv.sideIssueId ? [{ label: t('task.addHere'), icon: '☑', onSelect: () => openDialog((close) => <TasksDialog parentId={conv.sideIssueId!} conversationId={id} onClose={close} />) }] : []),

@@ -40,7 +40,7 @@ struct SignedDocumentsView: View {
     var body: some View {
         List {
             if query.isEmpty {
-                Section(L("signed.saved")) {
+                Section(L("signed.savedIos")) {
                     if saved.list?.isEmpty == true {
                         Text(L("signed.savedEmpty")).font(.footnote).foregroundStyle(Theme.textSecondary)
                     }

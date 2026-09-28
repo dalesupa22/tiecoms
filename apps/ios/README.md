@@ -376,8 +376,8 @@ TEST_RUNNER_TC_FIXTURE4=/tmp/fx4.json TEST_RUNNER_TC_SHOTS=/tmp/v4 xcodebuild te
   claves privadas ni credenciales de App Store Connect.
 
 **Portal de desarrollo**
-Chaggu es una app nueva: hay que crear en developer.apple.com › Certificates, IDs & Profiles (team
-`B76US7H3L3`) lo siguiente. Aún no existe nada de esto.
+Los siguientes recursos ya existen en developer.apple.com › Certificates, IDs & Profiles (team
+`B76US7H3L3`). Se enumeran como referencia de firma: reutilizarlos, sin crear otros.
 1. **App Group** (Identifiers › App Groups): `group.com.chaggu.app` (descripción «Chaggu»).
 2. **App IDs** (Identifiers › App IDs, explícitos):
    - `com.chaggu.app` («Chaggu»): **App Groups** (`group.com.chaggu.app`), **Associated Domains**,
@@ -394,7 +394,7 @@ Chaggu es una app nueva: hay que crear en developer.apple.com › Certificates, 
 - `com.chaggu.app.tests` y `com.chaggu.app.uitests` no necesitan App ID ni perfil de distribución.
 
 **App Store Connect**
-- Nueva app iOS "Chaggu", idioma principal español, bundle `com.chaggu.app`, SKU `chaggu-ios`.
+- App existente de Chaggu: ID `6816439007`, idioma principal español, bundle `com.chaggu.app`, SKU `chaggu-ios`.
 - Categoría Negocios (secundaria Productividad), clasificación 4+.
 
 **Capturas sugeridas** (6,9", iPhone 17 Pro Max 1320×2868; sale de `TieComsUITests` con `TC_SHOTS`)

@@ -2726,5 +2726,9 @@
  "search.people": [
   "Personas",
   "People"
+ ],
+ "signed.savedIos": [
+  "Mis firmas guardadas",
+  "My saved signatures"
  ]
 }

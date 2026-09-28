@@ -149,6 +149,8 @@ struct HomeView: View {
         .sheet(item: $sheet) { s in
             switch s {
             case .newGroup(let p): NewGroupSheet(preset: p)
+            // Un grupo: «Agregar al grupo» con invitar (SPEC-invitar); espacio o empresa: «Invitar a…».
+            case .invite(.group(let id)): AddMembersSheet(conversationId: id)
             case .invite(let t): InviteSheet(target: t)
             case .newIssue(let c): NewIssueSheet(conversationId: c, origin: nil)
             case .issues(let c): ConversationIssuesSheet(conversationId: c)

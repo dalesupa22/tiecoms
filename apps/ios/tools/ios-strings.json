@@ -1594,5 +1594,93 @@
  "toast.dndOn": [
   "No molestar activado",
   "Do not disturb is on"
+ ],
+ "addinv.search": [
+  "Nombre o correo",
+  "Name or email"
+ ],
+ "addinv.typeEmail": [
+  "Escribe el correo",
+  "Type the email"
+ ],
+ "addinv.inviteEmail": [
+  "Invitar a {email}",
+  "Invite {email}"
+ ],
+ "addinv.send": [
+  "Enviar invitación",
+  "Send invite"
+ ],
+ "addinv.sent": [
+  "Invitación enviada a {email}",
+  "Invite sent to {email}"
+ ],
+ "addinv.pendingOne": [
+  "Pendiente",
+  "Pending"
+ ],
+ "addinv.newTitle": [
+  "Invitar a alguien nuevo",
+  "Invite someone new"
+ ],
+ "addinv.kind": [
+  "Tipo de persona",
+  "Type of person"
+ ],
+ "addinv.from": [
+  "De {company}",
+  "From {company}"
+ ],
+ "addinv.guest": [
+  "Tercero (asesor, mentor, cliente…)",
+  "Guest (advisor, mentor, client…)"
+ ],
+ "addinv.byEmail": [
+  "Invitar por correo",
+  "Invite by email"
+ ],
+ "addinv.copyLink": [
+  "Copiar enlace",
+  "Copy link"
+ ],
+ "addinv.copied": [
+  "Enlace copiado · vence el {date}",
+  "Link copied · expires {date}"
+ ],
+ "addinv.code": [
+  "Código {code}",
+  "Code {code}"
+ ],
+ "addinv.copyCode": [
+  "Copiar código",
+  "Copy code"
+ ],
+ "addinv.share": [
+  "Compartir…",
+  "Share…"
+ ],
+ "addinv.pending": [
+  "Invitaciones pendientes ({n})",
+  "Pending invites ({n})"
+ ],
+ "addinv.resend": [
+  "Reenviar",
+  "Resend"
+ ],
+ "addinv.revoke": [
+  "Anular",
+  "Revoke"
+ ],
+ "addinv.revoked": [
+  "Invitación anulada",
+  "Invite revoked"
+ ],
+ "addinv.onlyMembers": [
+  "Solo los miembros pueden invitar",
+  "Only members can invite"
+ ],
+ "addinv.add": [
+  "Agregar ({n})",
+  "Add ({n})"
  ]
 }

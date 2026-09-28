@@ -12,7 +12,6 @@ struct ConversationDetailsView: View {
     @State private var confirmLeave = false
     @State private var choosePhoto = false
     @State private var confirmRemovePhoto = false
-    @State private var inviting = false
 
     var body: some View {
         Group {
@@ -60,9 +59,10 @@ struct ConversationDetailsView: View {
                     }
                     if c.kind == .group || c.kind == .internal {
                         Section {
-                            if !Naming.isGuest(d, c) && c.workspaceId != nil {
-                                Button { inviting = true } label: { Label(L("grp.inviteToGroup"), systemImage: "person.badge.plus") }
-                                    .accessibilityIdentifier("details.inviteGroup")
+                            // «Agregar al grupo»: sumar a alguien del espacio o invitar por correo o enlace (SPEC-invitar).
+                            if c.workspaceId != nil && (c.canManage || !Naming.isGuest(d, c)) {
+                                Button { adding = true } label: { Label(L("dlg.addToGroup"), systemImage: "person.badge.plus") }
+                                    .accessibilityIdentifier("details.addPeople")
                             }
                         } footer: { Text(L("grp.adminsCanRead")).accessibilityIdentifier("details.oversightNote") }
                     }
@@ -88,7 +88,6 @@ struct ConversationDetailsView: View {
                 }
                 .listStyle(.insetGrouped)
                 .sheet(isPresented: $adding) { AddMembersSheet(conversationId: c.id) }
-                .sheet(isPresented: $inviting) { InviteSheet(target: .group(c.id)) }
                 .confirmationDialog(L("chat.leaveConfirm"), isPresented: $confirmLeave, titleVisibility: .visible) {
                     Button(L("chat.leave"), role: .destructive) {
                         Task { do { try await store.leaveConversation(c.id) } catch { store.show(L10n.errorText(error)) } }

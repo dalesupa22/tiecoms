@@ -1398,3 +1398,27 @@
 "mute.state.tomorrow" = "Muted until tomorrow at {time}";
 "toast.dndOff" = "Do not disturb is off";
 "toast.dndOn" = "Do not disturb is on";
+
+/* 1.6.4 (19): «Agregar al grupo» con invitar por correo, copiar enlace, Compartir… y pendientes (SPEC-invitar) */
+"addinv.search" = "Name or email";
+"addinv.typeEmail" = "Type the email";
+"addinv.inviteEmail" = "Invite {email}";
+"addinv.send" = "Send invite";
+"addinv.sent" = "Invite sent to {email}";
+"addinv.pendingOne" = "Pending";
+"addinv.newTitle" = "Invite someone new";
+"addinv.kind" = "Type of person";
+"addinv.from" = "From {company}";
+"addinv.guest" = "Guest (advisor, mentor, client…)";
+"addinv.byEmail" = "Invite by email";
+"addinv.copyLink" = "Copy link";
+"addinv.copied" = "Link copied · expires {date}";
+"addinv.code" = "Code {code}";
+"addinv.copyCode" = "Copy code";
+"addinv.share" = "Share…";
+"addinv.pending" = "Pending invites ({n})";
+"addinv.resend" = "Resend";
+"addinv.revoke" = "Revoke";
+"addinv.revoked" = "Invite revoked";
+"addinv.onlyMembers" = "Only members can invite";
+"addinv.add" = "Add ({n})";

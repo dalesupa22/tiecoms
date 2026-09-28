@@ -516,8 +516,8 @@ extension AppStore {
     }
 
     /// Suma personas a una conversación; ven desde ahora (history 'now').
-    func addMembers(_ conversationId: String, userIds: [String]) async throws {
-        try await api.requestData("/conversations/\(conversationId)/members", method: "POST", json: ["userIds": userIds, "history": "now"])
+    func addMembers(_ conversationId: String, userIds: [String], history: String = "now") async throws {
+        try await api.requestData("/conversations/\(conversationId)/members", method: "POST", json: ["userIds": userIds, "history": history])
         try await loadBootstrap()
     }
 

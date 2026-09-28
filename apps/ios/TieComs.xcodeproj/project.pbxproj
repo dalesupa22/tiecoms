@@ -70,6 +70,7 @@
 		73791647085699BC7871E730 /* CommunicationNotification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F1FB42FA08DF6BC0C3115C7 /* CommunicationNotification.swift */; };
 		7449F903D57C1B5199447D89 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E62F7C36416F5CCC95C04ED6 /* PrivacyInfo.xcprivacy */; };
 		74517461003750B1AEA9B05F /* PushPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A059E228D363070DFB05BB /* PushPayload.swift */; };
+		756DEB775B5CA040E27968CB /* InviteUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B7D9519A4BAD02FAF7B7D2 /* InviteUITests.swift */; };
 		7695CD28B533BC509D30A44E /* tc_splash.caf in Resources */ = {isa = PBXBuildFile; fileRef = 341AE9974BB278BB3D3A1F18 /* tc_splash.caf */; };
 		76C5C689B36884A3C54C59B3 /* SafetyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BBA4C886B6327B84516EA02 /* SafetyTests.swift */; };
 		787E7E59AC77EAC8C71369E1 /* Splash.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3792730DDF81227D7735C79E /* Splash.swift */; };
@@ -87,6 +88,7 @@
 		916991654E1A3974F65F06CE /* ChatNav.swift in Sources */ = {isa = PBXBuildFile; fileRef = A533581A82A3D8834C30DBED /* ChatNav.swift */; };
 		91C244FFC2747DB60736CE3C /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7B7D04AEB3A584685873097 /* Theme.swift */; };
 		A047E88E4473FEA16C6B437E /* PushPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A059E228D363070DFB05BB /* PushPayload.swift */; };
+		A48DF411C5EF677FCECCED60 /* AddInviteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0136BBEE7057B57391B6EF6 /* AddInviteTests.swift */; };
 		A87CE4499CDB317D13154324 /* ComposerMarkedTextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A8701945EDAF84C9FA27BFC /* ComposerMarkedTextTests.swift */; };
 		A913BA0E653F0DBAD93280AC /* TestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744AE6DDB5ABBFD7B89901B0 /* TestSupport.swift */; };
 		B0A1A021264C4E4F5C8C4EEE /* DecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 083932E17F3BCA024B4EBFD6 /* DecodingTests.swift */; };
@@ -119,6 +121,8 @@
 		E6B0D34AF575A80CDA81EBF7 /* DetailsSettingsInvite.swift in Sources */ = {isa = PBXBuildFile; fileRef = F718A99EA118584855D36A3B /* DetailsSettingsInvite.swift */; };
 		E6D0CF9A07083AAB76A12A8A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 583E047F344413AFA12319CA /* Assets.xcassets */; };
 		E918783B7780F302E5C9637B /* Groups.swift in Sources */ = {isa = PBXBuildFile; fileRef = F68682AA201ADAADDD25DBD8 /* Groups.swift */; };
+		ECE58ABB4A1CDE85CF61D735 /* AddMembersSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0EC9F09A4A7F9ADCC5DF67D /* AddMembersSheet.swift */; };
+		EF621546096578B3B02FFF18 /* AddInvite.swift in Sources */ = {isa = PBXBuildFile; fileRef = E350A8EAD5807021812F01A5 /* AddInvite.swift */; };
 		F0EB27FE06E76EE78C5A5313 /* IssuesViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 923D2E3C2F53E9B60B7EAF56 /* IssuesViews.swift */; };
 		F1D53CA0BC55CFAE979817CE /* QuickActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 962C84F1845F1D9F2CD55366 /* QuickActions.swift */; };
 		F22350FDCAF65606418DF454 /* ProfileFilesViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6E05B9B11BCDD8884DC3611 /* ProfileFilesViews.swift */; };
@@ -251,6 +255,7 @@
 		A19A9902A951D7919FF42F1D /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
 		A1A059E228D363070DFB05BB /* PushPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushPayload.swift; sourceTree = "<group>"; };
 		A3F81ABD77EB22BDB57C8850 /* tc_send.caf */ = {isa = PBXFileReference; path = tc_send.caf; sourceTree = "<group>"; };
+		A4B7D9519A4BAD02FAF7B7D2 /* InviteUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteUITests.swift; sourceTree = "<group>"; };
 		A533581A82A3D8834C30DBED /* ChatNav.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatNav.swift; sourceTree = "<group>"; };
 		A77B2FAE28CB7CE545D42DA1 /* KeyboardUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardUITests.swift; sourceTree = "<group>"; };
 		AA7972D69011152D6EB29295 /* IntegrationV3FeedbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationV3FeedbackTests.swift; sourceTree = "<group>"; };
@@ -267,6 +272,7 @@
 		CEABA7548C1667E663D4C70E /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		CF6A5A1072D180B50ABD7291 /* SocketIOProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketIOProtocol.swift; sourceTree = "<group>"; };
 		CF721E25FDD0841A9CA663EC /* V2Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Tests.swift; sourceTree = "<group>"; };
+		D0136BBEE7057B57391B6EF6 /* AddInviteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddInviteTests.swift; sourceTree = "<group>"; };
 		D41DC90D29645B2B6717211C /* TieComsNotifications.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TieComsNotifications.entitlements; sourceTree = "<group>"; };
 		D5512C5E20A20FE9F456CC2F /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		D5FDE484919C99579D339A66 /* PersonColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonColor.swift; sourceTree = "<group>"; };
@@ -274,6 +280,8 @@
 		D9761D73C8074AD793EEE221 /* IntegrationV4Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationV4Tests.swift; sourceTree = "<group>"; };
 		DE7C763836C53E7EA9D3D6E3 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		DFB29A1A5F72FAF013E3473A /* ShareItems.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareItems.swift; sourceTree = "<group>"; };
+		E0EC9F09A4A7F9ADCC5DF67D /* AddMembersSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddMembersSheet.swift; sourceTree = "<group>"; };
+		E350A8EAD5807021812F01A5 /* AddInvite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddInvite.swift; sourceTree = "<group>"; };
 		E4842EF37BA97EFDD7E0A622 /* TieComs.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TieComs.entitlements; sourceTree = "<group>"; };
 		E4E9802F016F0B0A5FD993D1 /* Attachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Attachments.swift; sourceTree = "<group>"; };
 		E62F7C36416F5CCC95C04ED6 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -296,6 +304,7 @@
 				9435F794DD29ECC6D280393D /* ChatFlowUITests.swift */,
 				A16D843AE33D30C155EB369E /* FeedbackUITests.swift */,
 				5B97CA8A60F4AA2EDD7059F7 /* GroupsUITests.swift */,
+				A4B7D9519A4BAD02FAF7B7D2 /* InviteUITests.swift */,
 				A77B2FAE28CB7CE545D42DA1 /* KeyboardUITests.swift */,
 				0952105F81FFF3E626279A80 /* ShareUITests.swift */,
 				8A1E930E8CE6C195EE296120 /* SidechatUITests.swift */,
@@ -318,6 +327,7 @@
 		1A034EA337552117D38C1662 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				E350A8EAD5807021812F01A5 /* AddInvite.swift */,
 				C0EE4F0835A244D173D5CE5E /* APIClient.swift */,
 				9FBBF6EF55B008956531AAC9 /* AppStore.swift */,
 				6F521EF4D592789CF8E947FE /* AppStore+Features.swift */,
@@ -382,6 +392,7 @@
 		A4ACA2A6CA7F27663579A400 /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				E0EC9F09A4A7F9ADCC5DF67D /* AddMembersSheet.swift */,
 				00A0096904EBC6C5EB1BA1A1 /* AgendaViews.swift */,
 				787E89B5DD3CCB47B23CF7B9 /* AttachmentViews.swift */,
 				959E3DC72E9AF90351D4A075 /* AuthViews.swift */,
@@ -462,6 +473,7 @@
 		E6E6FE6ED45C4B2C4FB1B1FC /* TieComsTests */ = {
 			isa = PBXGroup;
 			children = (
+				D0136BBEE7057B57391B6EF6 /* AddInviteTests.swift */,
 				F25672AE6355CE649E04FF44 /* BandejaTests.swift */,
 				55C8B19C2103FA286D289157 /* ChatBarTests.swift */,
 				701807F5A1694A914A001927 /* ChatsProfileTests.swift */,
@@ -678,6 +690,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				557557E2D14658FCBBB20E0E /* APIClient.swift in Sources */,
+				EF621546096578B3B02FFF18 /* AddInvite.swift in Sources */,
+				ECE58ABB4A1CDE85CF61D735 /* AddMembersSheet.swift in Sources */,
 				244A2B97C05B69418D6C313B /* AgendaViews.swift in Sources */,
 				7D64F9F1796899E79F79CA25 /* AppStore+Features.swift in Sources */,
 				0D2EB01988F6AA05517FF249 /* AppStore+Silence.swift in Sources */,
@@ -763,6 +777,7 @@
 				8A1233EC493B295510B8946F /* ChatFlowUITests.swift in Sources */,
 				40E1ED0AC0107DD7EF91B4D8 /* FeedbackUITests.swift in Sources */,
 				079EDD034AA3C8F4A679028B /* GroupsUITests.swift in Sources */,
+				756DEB775B5CA040E27968CB /* InviteUITests.swift in Sources */,
 				694D75BB708C435FACB2B7AA /* KeyboardUITests.swift in Sources */,
 				16CDD74C6B7E738BE578E52D /* ShareUITests.swift in Sources */,
 				82DE85395C5D1215D2EA8616 /* SidechatUITests.swift in Sources */,
@@ -774,6 +789,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A48DF411C5EF677FCECCED60 /* AddInviteTests.swift in Sources */,
 				16E63735D9967CBBA9BCB2F0 /* BandejaTests.swift in Sources */,
 				87B86A5253581DFFC1523AB7 /* ChatBarTests.swift in Sources */,
 				2ACFB2451080E499FAA6C162 /* ChatsProfileTests.swift in Sources */,
@@ -1026,7 +1042,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 18;
+				CURRENT_PROJECT_VERSION = 19;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = B76US7H3L3;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -1135,7 +1151,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 18;
+				CURRENT_PROJECT_VERSION = 19;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = B76US7H3L3;
 				ENABLE_NS_ASSERTIONS = NO;

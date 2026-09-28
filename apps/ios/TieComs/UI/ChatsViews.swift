@@ -358,48 +358,6 @@ struct NewChatSheet: View {
     }
 }
 
-// MARK: - Sumar personas a un chat
-
-struct AddMembersSheet: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
-    let conversationId: String
-    @State private var picked: [String] = []
-    @State private var query = ""
-    @State private var busy = false
-    @State private var error: String?
-
-    var body: some View {
-        NavigationStack {
-            if let d = store.data, let c = store.meta(conversationId) {
-                Form {
-                    PeoplePicker(d: d, picked: $picked, exclude: Set(c.memberIds), query: $query)
-                    if let error { Section { Text(error).foregroundStyle(.red).font(.footnote) } }
-                }
-                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: L("chat.searchPeople"))
-                .navigationTitle(L("dlg.addToGroup"))
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
-                    ToolbarItem(placement: .confirmationAction) {
-                        if busy { ProgressView() } else {
-                            Button(L("dlg.add"), action: add).disabled(picked.isEmpty).accessibilityIdentifier("addMembers.submit")
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func add() {
-        busy = true; error = nil
-        Task {
-            do { try await store.addMembers(conversationId, userIds: picked); dismiss() } catch { self.error = L10n.errorText(error) }
-            busy = false
-        }
-    }
-}
-
 // MARK: - Reenviar a otros chats
 
 /// Reenvío a hasta 10 chats (directos, grupos y chats grupales) con comentario opcional.

@@ -843,7 +843,7 @@ final class AppStore {
         let r: AcceptInvitationResult = try await api.request("/invitations/\(token.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? token)/accept", method: "POST", json: [:])
         try await loadBootstrap()
         inviteToken = nil
-        if let first = r.conversationIds.first { navigate(to: .conversation(first)) } else { navigate(to: .workspace(r.workspaceId)) }
+        if let first = r.conversationIds.first { navigate(to: .conversation(first)) } else if !r.workspaceId.isEmpty { navigate(to: .workspace(r.workspaceId)) }
     }
 
     // MARK: - Enlaces

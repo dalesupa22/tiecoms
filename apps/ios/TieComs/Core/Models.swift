@@ -414,7 +414,9 @@ struct InvitationPreviewDTO: Decodable, Equatable, Sendable {
         groupNames = c.v("groupNames", [String]()).filter { !$0.isEmpty }
         multiUse = c.v("multiUse", false)
         orgHome = c.v("orgHome", false)
+        // Invitación a una empresa (kind 'org', SPEC-invitar): sin espacio, se nombra la empresa.
         workspaceName = c.v("workspaceName", "")
+        if workspaceName.isEmpty { workspaceName = c.v("orgName", "") }
         invitedByName = c.v("invitedByName", "")
         invitedByOrg = c.v("invitedByOrg", "")
         role = c.v("role", "member")

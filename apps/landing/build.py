@@ -39,7 +39,7 @@ print('landing: dist listo (es + en)')
 # de Google y Microsoft: /privacidad/, /terminos/, /en/privacy/, /en/terms/.
 template = (src / 'legal' / 'template.html').read_text()
 UPDATED = {'es': 'Última actualización: 26 de septiembre de 2026', 'en': 'Last updated: September 26, 2026'}
-PRIVACY_UPDATED = {'es': 'Última actualización: 26 de septiembre de 2026', 'en': 'Last updated: September 26, 2026'}
+PRIVACY_UPDATED = {'es': 'Última actualización: 28 de septiembre de 2026', 'en': 'Last updated: September 28, 2026'}
 PAGES = [
     # (idioma, ruta, fuente, título, ruta en el otro idioma, descripción)
     ('es', '/privacidad/', 'privacidad.es.html', 'Política de privacidad', '/en/privacy/', 'Cómo chaggu trata los datos personales.'),

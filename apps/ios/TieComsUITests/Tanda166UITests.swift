@@ -164,4 +164,55 @@ final class Tanda166UITests: XCTestCase {
         XCTAssertLessThan(filter.frame.minY, app.frame.height * 0.3, "filtros cerca del título: \(filter.frame)")
         shot("2-01-asuntos-compactos")
     }
+
+    // MARK: 3. Asuntos personales
+
+    func test3PersonalSubjectCreateSectionAndDetail() throws {
+        let f = try fixture()
+        let app = login(f)
+        tab(app, "Asuntos", f)
+        // La sección «Personal · solo tú» con el asunto del fixture, 🔒 en la fila.
+        let section = app.staticTexts["issues.section.__personal"]
+        let found = section.waitForExistence(timeout: 15)
+        if !found { shot("3-00-debug"); print(app.debugDescription) }
+        XCTAssertTrue(found, "sección Personal · solo tú")
+        XCTAssertTrue(section.label.contains("Personal · solo tú"), section.label)
+        let row = app.buttons["issue.row.\(f.personalIssueId)"]
+        XCTAssertTrue(row.exists)
+        XCTAssertTrue(row.label.contains("🔒") || (row.value as? String)?.contains("Personal") == true, row.label)
+
+        // Alta rápida: sin chat, la primera opción de «¿Dónde?» es «🔒 Personal · solo tú».
+        let field = app.textFields["issue.quickField"]
+        field.tap(); field.typeText("Revisar mi plan de carrera")
+        XCTAssertTrue(app.buttons["issue.quickWhere"].waitForExistence(timeout: 3))
+        let whereValue = app.buttons["issue.quickWhere"].value as? String ?? ""
+        XCTAssertTrue(whereValue.contains("Personal"), "por defecto, Personal: \(whereValue)")
+        XCTAssertFalse(app.buttons["issue.quickOwner"].exists, "un personal no elige responsable")
+        shot("3-01-personal-alta-rapida")
+        app.buttons["issue.quickWhere"].tap()
+        sleep(1)
+        shot("3-02-personal-donde-primera-opcion")
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Personal · solo tú")).firstMatch.tap()
+        app.buttons["issue.quickAdd"].tap()
+        let created = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Revisar mi plan de carrera")).firstMatch
+        XCTAssertTrue(created.waitForExistence(timeout: 8))
+        if app.keyboards.count > 0 { app.swipeDown() }
+        shot("3-03-personal-seccion-por-grupo")
+
+        // Detalle: sin «¿Quién lo hace?», sin tareas ni sidechat.
+        row.tap()
+        XCTAssertTrue(app.textViews["issue.titleEdit"].waitForExistence(timeout: 6) || app.textFields["issue.titleEdit"].exists)
+        XCTAssertFalse(app.staticTexts["¿Quién lo hace?"].exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "issue.who.")).firstMatch.exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "task.")).firstMatch.exists, "sin tareas")
+        XCTAssertTrue(app.buttons["issue.markDone"].exists)
+        shot("3-04-personal-detalle")
+        back(app)
+        // Pulsación larga: sin «Tarea derivada» ni «Hablar aparte».
+        row.press(forDuration: 1.2)
+        XCTAssertTrue(app.buttons["issue.menu.complete"].waitForExistence(timeout: 4))
+        XCTAssertFalse(app.buttons["issue.menu.addTask"].exists)
+        XCTAssertFalse(app.buttons["issue.menu.sidechat"].exists)
+        shot("3-05-personal-menu")
+    }
 }

@@ -50,7 +50,8 @@ struct QuickActions: ViewModifier {
             }
     }
 
-    private var canCreateIssue: Bool { store.data.map { !NewIssueSheet.destinations($0).isEmpty } ?? false }
+    // Siempre se puede crear: al menos un asunto personal (1.6.6).
+    private var canCreateIssue: Bool { store.data != nil }
 }
 
 extension View {

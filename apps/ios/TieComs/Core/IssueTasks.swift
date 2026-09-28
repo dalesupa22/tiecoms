@@ -36,10 +36,13 @@ enum IssueTasks {
         }
     }
 
-    /// La conversación donde se agrupa (Asuntos › Por grupo): la de su asunto, si lo veo.
+    /// Clave de la sección «Personal · solo tú» en Asuntos › Por grupo.
+    static let personalKey = "__personal"
+
+    /// La conversación donde se agrupa (Asuntos › Por grupo): la de su asunto, si lo veo; los personales, aparte.
     static func groupConversation(_ i: IssueDTO, _ all: [String: IssueDTO]) -> String {
-        if let p = i.parentIssueId, let parent = all[p] { return parent.conversationId }
-        return i.conversationId
+        if let p = i.parentIssueId, let parent = all[p] { return parent.conversationId ?? personalKey }
+        return i.conversationId ?? personalKey
     }
 
     /// Visibilidad por defecto: si en el chat hay más de una empresa, «solo mi empresa».

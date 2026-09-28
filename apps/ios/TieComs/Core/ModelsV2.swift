@@ -155,9 +155,10 @@ enum IssueStatus: String, Codable, CaseIterable, Sendable {
 
 struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
     var id: String
-    /// nil en directos, multi y laterales (SPEC-v4 E).
+    /// nil en directos, multi y laterales (SPEC-v4 E) y en los personales.
     var workspaceId: String?
-    var conversationId: String
+    /// nil = asunto personal: sin conversación, solo lo ve su dueño (contrato 2026-09-28).
+    var conversationId: String?
     var originMessageId: String?
     var originMessageSeq: Int?
     var title: String
@@ -183,7 +184,7 @@ struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))
         workspaceId = c.o("workspaceId")
-        conversationId = c.v("conversationId", "")
+        conversationId = c.o("conversationId").flatMap { (s: String) in s.isEmpty ? nil : s }
         originMessageId = c.o("originMessageId")
         originMessageSeq = c.intOpt("originMessageSeq")
         title = c.v("title", "")
@@ -206,6 +207,8 @@ struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
 
     /// Restringida: 'org' (solo mi empresa) o 'private'.
     var isRestricted: Bool { visibility != .all }
+    /// Asunto personal («🔒 Personal · solo tú»): sin chat, sin responsable que elegir, sin tareas ni sidechat.
+    var isPersonal: Bool { conversationId == nil }
 }
 
 enum IssueVisibility: String, Codable, CaseIterable, Sendable { case all, org, `private` }

@@ -453,6 +453,9 @@ final class AppStore {
         case .issueUpdated(let i):
             issues[i.id] = i
             recountIssues(i.conversationId)
+        // Mis asuntos personales (sin conversación): solo llegan a mi cuenta y no cuentan en ningún chat.
+        case .issuePersonal(let i):
+            issues[i.id] = i
         case .issueHidden(let id, let conv):
             issues[id] = nil
             recountIssues(conv)
@@ -511,7 +514,9 @@ final class AppStore {
         }
     }
 
-    func recountIssues(_ conversationId: String) {
+    /// Asuntos abiertos de una conversación (su chip ◆). Un asunto personal no tiene conversación: no cuenta en ninguna.
+    func recountIssues(_ conversationId: String?) {
+        guard let conversationId else { return }
         let n = issues.values.filter { $0.conversationId == conversationId && !$0.status.closed }.count
         patchMeta(conversationId) { $0.openIssues = n }
     }

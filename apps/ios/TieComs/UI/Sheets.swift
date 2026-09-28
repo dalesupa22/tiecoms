@@ -222,15 +222,22 @@ struct NewIssueSheet: View {
                 TextField(L("issue.title"), text: $title, axis: .vertical).lineLimit(1...4).accessibilityIdentifier("issue.titleField")
                 if let d {
                     if conversationId == nil {
+                        // Primera opción: un asunto personal, que solo ves tú (sin chat, sin responsable que elegir).
                         Picker(L("issue.where"), selection: $conv) {
+                            Text("🔒 " + L("issue.personal")).tag(IssueTasks.personalKey)
                             ForEach(Self.destinations(d)) { c in Text(Self.label(d, c)).tag(c.id) }
                         }
                         .onChange(of: conv) { _, _ in ownerId = d.me.id }
                         .accessibilityIdentifier("issue.where")
                     }
-                    Picker(L("issue.owner"), selection: $ownerId) {
-                        ForEach(humans(d, conv)) { p in
-                            Text("\(p.name)\(p.id == d.me.id ? " " + L("common.you") : "") · \(Naming.org(d, p.orgId)?.name ?? L("common.guest"))").tag(p.id)
+                    if conv == IssueTasks.personalKey {
+                        Text(L("issue.personalHint")).font(.footnote).foregroundStyle(Theme.textSecondary)
+                            .accessibilityIdentifier("issue.personalHint")
+                    } else {
+                        Picker(L("issue.owner"), selection: $ownerId) {
+                            ForEach(humans(d, conv)) { p in
+                                Text("\(p.name)\(p.id == d.me.id ? " " + L("common.you") : "") · \(Naming.org(d, p.orgId)?.name ?? L("common.guest"))").tag(p.id)
+                            }
                         }
                     }
                 }
@@ -239,7 +246,7 @@ struct NewIssueSheet: View {
             }
         }
         .onAppear {
-            if conv.isEmpty { conv = conversationId ?? d.flatMap { Self.destinations($0).first?.id } ?? "" }
+            if conv.isEmpty { conv = conversationId ?? IssueTasks.personalKey }
             if ownerId.isEmpty { ownerId = d?.me.id ?? "" }
             if title.isEmpty, let o = origin { title = excerpt(o.body, 200) }
         }
@@ -262,8 +269,10 @@ struct NewIssueSheet: View {
         busy = true; error = nil
         Task {
             do {
-                let i = try await store.createIssue(conversationId: conv, title: title, ownerId: ownerId.isEmpty ? nil : ownerId,
-                                                    dueDate: hasDue ? IssueDates.iso(due) : nil, originMessageId: origin?.id)
+                let i = conv == IssueTasks.personalKey
+                    ? try await store.createPersonalIssue(title: title, dueDate: hasDue ? IssueDates.iso(due) : nil)
+                    : try await store.createIssue(conversationId: conv, title: title, ownerId: ownerId.isEmpty ? nil : ownerId,
+                                                  dueDate: hasDue ? IssueDates.iso(due) : nil, originMessageId: origin?.id)
                 dismiss()
                 store.show(i.title)
             } catch { self.error = L10n.errorText(error) }

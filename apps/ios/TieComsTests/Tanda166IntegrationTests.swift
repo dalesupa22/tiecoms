@@ -146,4 +146,48 @@ final class Tanda166IntegrationTests: XCTestCase {
         XCTAssertEqual(other.meta(f.longId)?.unreadMentions, 1, "la mención del mensaje 55 sigue pendiente")
         await other.logout()
     }
+
+    // MARK: 3. Asuntos personales
+
+    /// Solo su dueño lo ve (lista, por id, tiempo real); no se reasigna, no se comparte ni tiene tareas; las apps 1.6.5 no lo reciben.
+    func test4PersonalIssuePrivacyAndRealtime() async throws {
+        let (s, f) = try await store()
+        _ = try await s.loadIssues()
+        XCTAssertNotNil(s.issues[f.personalIssueId], "el personal del fixture llega con el contrato 2026-09-28")
+        XCTAssertNil(s.issues[f.personalIssueId]?.conversationId)
+        let mine = try await s.createPersonalIssue(title: "Renovar mi pasaporte", dueDate: nil)
+        XCTAssertTrue(mine.isPersonal)
+        XCTAssertEqual(mine.visibility, .private)
+        XCTAssertEqual(mine.ownerId, f.a.id)
+
+        // Bruno (otra empresa) y Carla (mi empresa) no lo ven por lista ni por id.
+        for p in [f.b, f.c] {
+            let t = try await token(p)
+            let (_, list) = try await http("GET", "/issues", token: t)
+            let ids = (list["issues"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
+            XCTAssertFalse(ids.contains(mine.id) || ids.contains(f.personalIssueId), "\(p.email) no ve personales ajenos")
+            let (st, _) = try await http("GET", "/issues/\(mine.id)", token: t)
+            XCTAssertEqual(st, 404, "por id: 404 para los demás")
+        }
+        // Un cliente 1.6.5 (contrato anterior) no recibe asuntos sin conversación.
+        let (_, old) = try await http("GET", "/issues", token: s.api.accessToken, contract: "2026-09-26")
+        XCTAssertFalse((old["issues"] as? [[String: Any]] ?? []).contains { ($0["id"] as? String) == mine.id })
+
+        // No se reasigna, no se comparte ni admite tareas (400).
+        let (st1, _) = try await http("PATCH", "/issues/\(mine.id)", token: s.api.accessToken, body: ["ownerId": f.b.id])
+        XCTAssertEqual(st1, 400)
+        let (st2, _) = try await http("PATCH", "/issues/\(mine.id)", token: s.api.accessToken, body: ["visibility": "all"])
+        XCTAssertEqual(st2, 400)
+        let (st3, _) = try await http("POST", "/issues/\(mine.id)/children", token: s.api.accessToken, body: ["title": "Subtarea"])
+        XCTAssertEqual(st3, 400)
+
+        // Tiempo real: otro dispositivo de Danny recibe issue.personal; nadie más.
+        let other = AppStore(baseURL: URL(string: f.apiUrl)!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: nil)
+        try await other.login(email: f.a.email, password: f.password)
+        try await waitUntil(10, "socket") { other.connection == .online }
+        try await s.updateIssue(mine.id, ["title": "Renovar mi pasaporte (cita)", "dueDate": IssueDates.today()])
+        try await waitUntil(10, "issue.personal en el otro dispositivo") { other.issues[mine.id]?.title == "Renovar mi pasaporte (cita)" }
+        XCTAssertEqual(other.meta(f.generalId)?.openIssues, s.meta(f.generalId)?.openIssues, "no cambia contadores de conversaciones")
+        await other.logout()
+    }
 }

@@ -160,7 +160,7 @@ struct IssueStatusMenu: View {
             Button { IssueActions.toggleDone(store, issue) } label: { Label(L("issue.complete"), systemImage: "checkmark.circle") }
                 .accessibilityIdentifier("issue.menu.complete")
             // Asunto principal: dividirlo en tareas o hablarlo aparte (docs/TAREAS.md).
-            if issue.parentIssueId == nil {
+            if issue.parentIssueId == nil && !issue.isPersonal {
                 Button { present(.tasks(parentId: issue.id, conversationId: nil)) } label: {
                     Label(L("task.add").replacingOccurrences(of: "＋ ", with: ""), systemImage: "plus.circle")
                 }
@@ -211,15 +211,17 @@ struct IssueRow: View {
     var body: some View {
         if let d = store.data {
             let owner = Naming.person(d, issue.ownerId)
-            let conv = store.meta(issue.conversationId)
+            let conv = issue.conversationId.flatMap { store.meta($0) }
             let f = IssueSort.flags(issue)
             let done = issue.status.closed
             let parent = issue.parentIssueId.flatMap { store.issues[$0] }
             // Una tarea en un sidechat se marca para que se sepa dónde se habla de ella.
             let inSide = parent.map { $0.conversationId != issue.conversationId } ?? false
             let progress = issue.parentIssueId == nil ? IssueTasks.progress(store.issues, of: issue.id) : nil
-            let lock = issue.isRestricted ? IssueTasks.label(issue.visibility, orgName: Naming.org(d, issue.visibleOrgId)?.name) : nil
-            let sub = [showOwner ? (owner?.name ?? L("issue.noOwner")) : nil,
+            // Personal: 🔒 y «Personal · solo tú» en vez del chat y del responsable (siempre soy yo).
+            let lock = issue.isPersonal ? L("issue.personal") : issue.isRestricted ? IssueTasks.label(issue.visibility, orgName: Naming.org(d, issue.visibleOrgId)?.name) : nil
+            let sub = [issue.isPersonal && showWhere ? L("issue.personal") : nil,
+                       showOwner && !issue.isPersonal ? (owner?.name ?? L("issue.noOwner")) : nil,
                        !child ? parent.map { "↳ \($0.title)" } : nil,
                        !child && parent == nil && issue.parentIssueId != nil ? L("task.ofHidden") : nil,
                        showWhere && !child ? conv.map { L("issue.in", ["name": Naming.title(d, $0)]) } : nil,
@@ -266,7 +268,7 @@ struct IssueRow: View {
                                 .foregroundStyle(all ? Theme.doneGreen : Theme.textSecondary)
                                 .accessibilityLabel(L("task.progress", ["done": progress.done, "n": progress.total]))
                         }
-                        if showOwner && owner != nil {
+                        if showOwner && owner != nil && !issue.isPersonal {
                             Avatar(name: owner?.name ?? "—", org: Naming.org(d, owner?.orgId), size: 24, photo: owner?.avatarUrl)
                                 .accessibilityHidden(true)
                         }
@@ -278,6 +280,7 @@ struct IssueRow: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityHint(lock ?? "")
                 .accessibilityIdentifier("issue.row.\(issue.id)")
+                .accessibilityValue(issue.isPersonal ? L("issue.personal") : "")
             }
             .padding(.vertical, 2)
             .contextMenu { IssueStatusMenu(issue: issue, onOpen: onOpen) }
@@ -287,8 +290,10 @@ struct IssueRow: View {
 
 /// Personas humanas de una conversación (para responsable y «¿Quién lo hace?»).
 @MainActor
-func issueMembers(_ store: AppStore, _ d: BootstrapDTO, _ conversationId: String) -> [PersonDTO] {
-    (store.meta(conversationId)?.memberIds ?? []).compactMap { Naming.person(d, $0) }.filter { $0.kind == "human" }
+func issueMembers(_ store: AppStore, _ d: BootstrapDTO, _ conversationId: String?) -> [PersonDTO] {
+    // Un asunto personal no tiene chat: nadie más que yo.
+    guard let conversationId else { return [d.me.id].compactMap { Naming.person(d, $0) } }
+    return (store.meta(conversationId)?.memberIds ?? []).compactMap { Naming.person(d, $0) }.filter { $0.kind == "human" }
 }
 
 /// Alta rápida: se escribe y Return. Responsable (Yo por defecto) y fecha aparecen solo al escribir; el campo queda
@@ -307,8 +312,10 @@ struct QuickAddIssue: View {
     var body: some View {
         if let d = store.data {
             let destinations = conversationId == nil ? NewIssueSheet.destinations(d) : []
-            let target = conversationId ?? (conv.isEmpty ? destinations.first?.id ?? "" : conv)
-            let members = issueMembers(store, d, target)
+            // Sin chat (pestaña Asuntos) la primera opción es «🔒 Personal · solo tú».
+            let target = conversationId ?? (conv.isEmpty ? IssueTasks.personalKey : conv)
+            let personal = target == IssueTasks.personalKey
+            let members = issueMembers(store, d, personal ? nil : target)
             let typing = !title.isEmpty
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 4) {
@@ -334,14 +341,18 @@ struct QuickAddIssue: View {
                         if conversationId == nil {
                             Menu {
                                 Picker(L("issue.where"), selection: Binding(get: { target }, set: { conv = $0; ownerId = d.me.id })) {
+                                    Text("🔒 " + L("issue.personal")).tag(IssueTasks.personalKey)
                                     ForEach(destinations) { c in Text(NewIssueSheet.label(d, c)).tag(c.id) }
                                 }
                             } label: {
-                                optLabel("bubble.left.and.bubble.right", store.meta(target).map { Naming.title(d, $0) } ?? L("issue.where"))
+                                optLabel(personal ? "lock" : "bubble.left.and.bubble.right",
+                                         personal ? L("issue.personal") : store.meta(target).map { Naming.title(d, $0) } ?? L("issue.where"))
                             }
                             .accessibilityLabel(L("issue.where"))
+                            .accessibilityValue(personal ? L("issue.personal") : store.meta(target).map { Naming.title(d, $0) } ?? "")
                             .accessibilityIdentifier("issue.quickWhere")
                         }
+                        if !personal {
                         Menu {
                             Picker(L("issue.owner"), selection: $ownerId) {
                                 ForEach(members) { p in Text(p.id == d.me.id ? L("issue.me") : p.name).tag(p.id) }
@@ -352,6 +363,7 @@ struct QuickAddIssue: View {
                         }
                         .accessibilityLabel(L("issue.owner"))
                         .accessibilityIdentifier("issue.quickOwner")
+                        }
                         Menu {
                             ForEach(IssueDates.shortcuts(), id: \.key) { s in Button(L(s.key)) { due = s.iso; pickDate = false } }
                             Button(L("issue.dPick")) { pickDate = true }
@@ -395,7 +407,8 @@ struct QuickAddIssue: View {
         let owner = members.contains { $0.id == ownerId } ? ownerId : d.me.id
         Task {
             do {
-                _ = try await store.createIssue(conversationId: target, title: text, ownerId: owner, dueDate: due, originMessageId: nil)
+                if target == IssueTasks.personalKey { _ = try await store.createPersonalIssue(title: text, dueDate: due) }
+                else { _ = try await store.createIssue(conversationId: target, title: text, ownerId: owner, dueDate: due, originMessageId: nil) }
                 title = ""; due = nil; pickDate = false
                 Haptics.tap()
             } catch { store.show(L10n.errorText(error)) }
@@ -488,12 +501,14 @@ enum IssueTree {
         var order: [String] = []
         var map: [String: [IssueDTO]] = [:]
         for i in list {
-            let k = by == .person ? (i.ownerId ?? noOwner) : (groupKey?(i) ?? i.conversationId)
+            let k = by == .person ? (i.ownerId ?? noOwner) : (groupKey?(i) ?? i.conversationId ?? IssueTasks.personalKey)
             if map[k] == nil { order.append(k) }
             map[k, default: []].append(i)
         }
         let buckets = order.map { Bucket(id: $0, issues: map[$0] ?? []) }
         return buckets.sorted { a, b in
+            // «Personal · solo tú» va primero en Por grupo.
+            if by == .group, (a.id == IssueTasks.personalKey) != (b.id == IssueTasks.personalKey) { return a.id == IssueTasks.personalKey }
             if by == .person {
                 if (a.id == me) != (b.id == me) { return a.id == me }
                 if (a.id == noOwner) != (b.id == noOwner) { return b.id == noOwner }
@@ -508,7 +523,7 @@ enum IssueTree {
         let visible = Set(d.conversations.map(\.id))
         var out: [String: Company] = [:]
         var order: [String] = []
-        let inScope = issues.filter { visible.contains($0.conversationId) }
+        let inScope = issues.filter { $0.conversationId.map(visible.contains) ?? false }
         // Directos, multi y laterales (sin espacio): sección «Chats» después de las empresas.
         let chatItems = inScope.filter { $0.workspaceId == nil }
         let byWs = Dictionary(grouping: inScope.filter { $0.workspaceId != nil }, by: { $0.workspaceId ?? "" })
@@ -517,7 +532,7 @@ enum IssueTree {
             let org = ws.flatMap { Naming.counterpartOrg(d, $0) }
             let key = org?.id ?? "none"
             if out[key] == nil { order.append(key); out[key] = Company(org: org, id: key, workspaces: []) }
-            let convs = Dictionary(grouping: items, by: \.conversationId).map { cid, list in
+            let convs = Dictionary(grouping: items, by: { $0.conversationId ?? "" }).map { (cid: String, list: [IssueDTO]) -> Conv in
                 Conv(conv: d.conversations.first { $0.id == cid }, id: cid, issues: list.sorted(by: IssueSort.order))
             }.sorted { a, b in
                 (a.conv.map { Naming.title(d, $0) } ?? "").localizedCaseInsensitiveCompare(b.conv.map { Naming.title(d, $0) } ?? "") == .orderedAscending
@@ -529,7 +544,7 @@ enum IssueTree {
             return c
         }.sorted { ($0.org?.name ?? "~").localizedCaseInsensitiveCompare($1.org?.name ?? "~") == .orderedAscending }
         if !chatItems.isEmpty {
-            let convs = Dictionary(grouping: chatItems, by: \.conversationId).map { cid, list in
+            let convs = Dictionary(grouping: chatItems, by: { $0.conversationId ?? "" }).map { (cid: String, list: [IssueDTO]) -> Conv in
                 Conv(conv: d.conversations.first { $0.id == cid }, id: cid, issues: list.sorted(by: IssueSort.order))
             }.sorted { a, b in
                 (a.conv.map(HomeOrder.activity) ?? "") > (b.conv.map(HomeOrder.activity) ?? "")
@@ -551,7 +566,8 @@ struct IssuesScreen: View {
             if let d = store.data {
                 let visible = Set(d.conversations.map(\.id))
                 // Los restringidos pueden ser de un chat que no leo (me asignaron una tarea): el servidor ya filtró.
-                let scoped = store.issues.values.filter { visible.contains($0.conversationId) || $0.isRestricted }
+                // Los personales (sin chat) son míos: el servidor solo me los manda a mí.
+                let scoped = store.issues.values.filter { $0.conversationId.map(visible.contains) ?? true || $0.isRestricted }
                 let list = IssueTree.filter(Array(scoped), filter, me: d.me.id)
                     .sorted(by: filter == .closed ? IssueSort.recentlyClosed : IssueSort.order)
                 let groupBy = IssueTree.GroupBy(rawValue: groupByRaw) ?? .group
@@ -621,6 +637,7 @@ struct IssuesScreen: View {
             if k == IssueTree.noOwner { return L("issue.noOwner") }
             return (Naming.person(d, k)?.name ?? L("common.participant")) + (k == d.me.id ? " \(L("common.you"))" : "")
         }
+        if k == IssueTasks.personalKey { return L("issue.personal") }
         guard let c = d.conversations.first(where: { $0.id == k }) else { return L("task.sharedWithMe") }
         let ws = c.workspaceId.flatMap { id in d.workspaces.first { $0.id == id } }
         return [ws?.name, Naming.title(d, c)].compactMap { $0 }.joined(separator: " · ")
@@ -628,7 +645,7 @@ struct IssuesScreen: View {
 
     @ViewBuilder
     private func sectionHeader(_ d: BootstrapDTO, _ s: IssueTree.Bucket, _ by: IssueTree.GroupBy) -> some View {
-        let text = Text("\(sectionTitle(d, s.id, by)) · \(s.issues.count)")
+        let text = Text("\(s.id == IssueTasks.personalKey ? "🔒 " : "")\(sectionTitle(d, s.id, by)) · \(s.issues.count)")
             .font(.subheadline.weight(.bold)).foregroundStyle(Theme.textPrimary).textCase(nil)
         if by == .group, let conv = d.conversations.first(where: { $0.id == s.id }) {
             // Tocar la cabecera abre el grupo o chat.
@@ -684,7 +701,9 @@ struct IssueDetailView: View {
 
     /// El título de la pantalla es el grupo o chat del asunto.
     private var navTitle: String {
-        guard let d = store.data, let i = store.issues[issueId], let c = store.meta(i.conversationId) else { return L("nav.issues") }
+        guard let d = store.data, let i = store.issues[issueId] else { return L("nav.issues") }
+        if i.isPersonal { return L("issue.personal") }
+        guard let cid = i.conversationId, let c = store.meta(cid) else { return L("nav.issues") }
         return Naming.title(d, c)
     }
 
@@ -704,7 +723,7 @@ struct IssueDetailView: View {
 
     @ViewBuilder
     private func detail(_ d: BootstrapDTO, _ i: IssueDTO) -> some View {
-        let conv = store.meta(i.conversationId)
+        let conv = i.conversationId.flatMap { store.meta($0) }
         let chatMembers = issueMembers(store, d, i.conversationId)
         // ¿Quién lo hace? en una tarea restringida: solo quienes la ven (y los agregados que no están en el chat).
         let extra = i.viewerIds.filter { u in !chatMembers.contains { $0.id == u } }.compactMap { Naming.person(d, $0) }
@@ -751,8 +770,8 @@ struct IssueDetailView: View {
                             Text(L("task.ofHidden")).font(.footnote).foregroundStyle(Theme.textSecondary)
                         }
                     }
-                    (Text(requester.map { L("issue.requestedBy", ["name": $0.name]) } ?? L("issue.manual"))
-                     + Text(i.isRestricted ? " · 🔒 " + IssueTasks.label(i.visibility, orgName: Naming.org(d, i.visibleOrgId)?.name) : "").bold())
+                    (Text(i.isPersonal ? L("issue.personalHint") : requester.map { L("issue.requestedBy", ["name": $0.name]) } ?? L("issue.manual"))
+                     + Text(i.isPersonal ? "" : i.isRestricted ? " · 🔒 " + IssueTasks.label(i.visibility, orgName: Naming.org(d, i.visibleOrgId)?.name) : "").bold())
                         .font(.footnote).foregroundStyle(Theme.textSecondary)
                         .accessibilityIdentifier("issue.requested")
                 }
@@ -783,6 +802,8 @@ struct IssueDetailView: View {
                     .accessibilityIdentifier("issue.markDone")
                 }
 
+                // Personal: siempre eres tú; sin «¿Quién lo hace?», tareas ni sidechat.
+                if !i.isPersonal {
                 question(L("issue.qWho")) {
                     ChipFlow(spacing: 8) {
                         ForEach(members) { p in
@@ -797,6 +818,8 @@ struct IssueDetailView: View {
                             chip(on: false, ghost: true, id: "issue.who.none", action: { update(["ownerId": NSNull()]) }) { Text(L("issue.noOwner")) }
                         }
                     }
+                }
+
                 }
 
                 question(L("issue.qWhen"), detail: i.dueDate.map(IssueSort.shortDate)) {
@@ -838,7 +861,7 @@ struct IssueDetailView: View {
                     }
                 }
 
-                if i.parentIssueId == nil {
+                if i.parentIssueId == nil && !i.isPersonal {
                     TasksSection(parentId: i.id) { store.push(.issue($0)) }
                 }
                 if i.parentIssueId != nil && i.createdBy == d.me.id {

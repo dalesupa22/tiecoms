@@ -170,6 +170,14 @@ extension AppStore {
         return i
     }
 
+    /// Asunto personal (POST /issues): sin conversación y solo para mí; el servidor impone la privacidad.
+    @discardableResult
+    func createPersonalIssue(title: String, dueDate: String?) async throws -> IssueDTO {
+        let i: IssueDTO = try await api.request("/issues", method: "POST", json: ["title": title, "dueDate": dueDate ?? NSNull()])
+        issues[i.id] = i
+        return i
+    }
+
     @discardableResult
     func updateIssue(_ id: String, _ patch: [String: Any]) async throws -> IssueDTO {
         let i: IssueDTO = try await api.request("/issues/\(id)", method: "PATCH", json: patch)
@@ -736,7 +744,9 @@ extension AppStore {
     func createSideFromIssue(_ issue: IssueDTO, userIds: [String], question: String?) async throws -> String {
         var body: [String: Any] = ["issueId": issue.id, "userIds": userIds]
         if let q = question?.trimmingCharacters(in: .whitespacesAndNewlines), !q.isEmpty { body["question"] = String(q.prefix(4000)) }
-        let r: IdResult = try await api.request("/conversations/\(issue.conversationId)/side", method: "POST", json: body)
+        // Un asunto personal no tiene chat del que salga un sidechat (la interfaz no lo ofrece).
+        guard let cid = issue.conversationId else { throw ApiRequestError(status: 400, code: "personal_issue", message: L("issue.personalNoSide")) }
+        let r: IdResult = try await api.request("/conversations/\(cid)/side", method: "POST", json: body)
         try await loadBootstrap()
         return r.id
     }

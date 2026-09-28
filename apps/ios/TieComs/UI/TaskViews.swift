@@ -68,7 +68,7 @@ struct TaskQuickAdd: View {
 
     var body: some View {
         if let d = store.data {
-            let whereId = conversationId ?? parent.conversationId
+            let whereId = conversationId ?? parent.conversationId ?? ""
             let inSide = whereId != parent.conversationId
             let members = issueMembers(store, d, whereId)
             let owner = ownerId.isEmpty ? d.me.id : ownerId

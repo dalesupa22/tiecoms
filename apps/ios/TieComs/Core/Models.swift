@@ -2,7 +2,7 @@ import Foundation
 
 /// Versión del contrato que habla esta app (ver packages/contracts).
 enum Contract {
-    static let version = "2026-09-25"
+    static let version = "2026-09-28"
 }
 
 // MARK: - Decodificación tolerante
@@ -561,6 +561,8 @@ enum AccountEvent: Decodable, Equatable, Sendable {
     case sleepChanged(SleepDTO)
     /// Un asunto restringido que puedo ver cambió (no viaja por la conversación; sin eventSeq).
     case issueUpdated(IssueDTO)
+    /// Mi asunto personal cambió (sin conversación; solo llega a mi cuenta). Contrato 2026-09-28.
+    case issuePersonal(IssueDTO)
     /// Perdí acceso a un asunto: sacarlo de la lista.
     case issueHidden(issueId: String, conversationId: String)
     case other(type: String)
@@ -582,6 +584,8 @@ enum AccountEvent: Decodable, Equatable, Sendable {
         case "me.dnd": self = .dndChanged(until: c.o("dndUntil"))
         case "issue.updated":
             if let i: IssueDTO = c.o("issue") { self = .issueUpdated(i) } else { self = .other(type: type) }
+        case "issue.personal":
+            if let i: IssueDTO = c.o("issue") { self = .issuePersonal(i) } else { self = .other(type: type) }
         case "issue.hidden": self = .issueHidden(issueId: c.v("issueId", ""), conversationId: c.v("conversationId", ""))
         case "me.sleep":
             if let x: SleepDTO = c.o("sleep") { self = .sleepChanged(x) } else { self = .other(type: type) }

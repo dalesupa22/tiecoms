@@ -2778,5 +2778,17 @@
  "toast.markedRead": [
   "Marcado como leído",
   "Marked as read"
+ ],
+ "issue.personal": [
+  "Personal · solo tú",
+  "Personal · only you"
+ ],
+ "issue.personalHint": [
+  "Solo lo ves tú: no está en ningún chat, no tiene responsable que elegir, tareas ni sidechat.",
+  "Only you can see it: it is not in any chat and has no owner to pick, tasks or sidechat."
+ ],
+ "issue.personalNoSide": [
+  "Un asunto personal no tiene chat para hablarlo aparte.",
+  "A personal subject has no chat to talk it over separately."
  ]
 }

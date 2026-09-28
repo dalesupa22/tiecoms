@@ -27,6 +27,14 @@ struct HomeView: View {
     /// Grupo por archivar (confirmación).
     @State private var archiving: ConversationDTO?
 
+    /// Asuntos abiertos por conversación (sin los personales), en orden de urgencia.
+    static func openByConversation(_ all: [String: IssueDTO]) -> [String: [IssueDTO]] {
+        let tops: [IssueDTO] = IssueTasks.tops(all.values.filter { !$0.status.closed && $0.conversationId != nil }, all)
+        var out: [String: [IssueDTO]] = [:]
+        for i in tops { if let c = i.conversationId { out[c, default: []].append(i) } }
+        return out.mapValues { $0.sorted(by: IssueSort.order) }
+    }
+
     var body: some View {
         @Bindable var store = store
         Group {
@@ -37,8 +45,8 @@ struct HomeView: View {
                 let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
                 // Asuntos abiertos por conversación (se muestran bajo cada grupo).
                 // Las tareas de un asunto que veo no van sueltas: se cuentan en su chapita «☑ 1/3».
-                let open = Dictionary(grouping: IssueTasks.tops(store.issues.values.filter { !$0.status.closed }, store.issues), by: \.conversationId)
-                    .mapValues { $0.sorted(by: IssueSort.order) }
+                // Los personales no tienen grupo: no van bajo ninguna fila.
+                let open = Self.openByConversation(store.issues)
                 List {
                     if store.dndActive {
                         DndBanner()

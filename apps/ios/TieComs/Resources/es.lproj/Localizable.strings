@@ -860,6 +860,9 @@
 "issue.overdueSince" = "Se venció el {date}";
 "issue.owner" = "Responsable";
 "issue.pageSub" = "Lo que quedó pendiente en tus conversaciones, con responsable y fecha. Cada asunto guarda el mensaje donde nació y solo lo ve quien puede leer esa conversación.";
+"issue.personal" = "Personal · solo tú";
+"issue.personalHint" = "Solo lo ves tú: no está en ningún chat, no tiene responsable que elegir, tareas ni sidechat.";
+"issue.personalNoSide" = "Un asunto personal no tiene chat para hablarlo aparte.";
 "issue.pickDate" = "Elegir fecha";
 "issue.qHow" = "¿Cómo va?";
 "issue.qNews" = "Novedades";

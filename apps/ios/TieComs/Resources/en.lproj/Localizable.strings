@@ -285,6 +285,8 @@
 "chat.guestUntil" = "Guest until {date}";
 "chat.internalHint" = "Only people from your company in this space will see it.";
 "chat.internalOnly" = "Only my company (internal)";
+"chat.ios.readRetry" = "Read status could not be confirmed. Unread messages are preserved. Tap to retry.";
+"chat.ios.unreadRetry" = "Could not locate the first unread message. Nothing was marked as read. Tap to retry.";
 "chat.jumpLatest" = "Jump to latest";
 "chat.jumpMention" = "Jump to mention";
 "chat.jumpNew" = "Jump to new messages";
@@ -1023,6 +1025,9 @@
 "meet.err.noTeams" = "Your Microsoft account does not have Teams for business: the link cannot be created.";
 "meet.err.notConnected" = "Connect your {provider} account to create the meeting.";
 "meet.err.reconnect" = "Reconnect {provider}: the permission expired or was revoked.";
+"meet.ios.network" = "The result could not be confirmed. Retry this same meeting to check its status; do not create another one.";
+"meet.ios.pendingHint" = "This meeting is awaiting confirmation. Its details are saved: retry to check the same operation without creating another meeting.";
+"meet.ios.storage" = "The pending meeting could not be recovered or saved on this device. Another creation will not be sent.";
 "meet.min" = "{n} min";
 "meet.needsReconnect" = "Permission expired or was revoked";
 "meet.now" = "📹 Meeting now";
@@ -1036,9 +1041,9 @@
 "meet.retry" = "Try again";
 "meet.schedule" = "📅 Schedule meeting with link";
 "meet.scheduleTitle" = "Schedule meeting with link";
-"meet.scopeHint" = "chaggu only asks permission to create events or meetings in your account. It never reads or sends your email.";
+"meet.scopeHint" = "Connect your account to create meetings. Google and Microsoft request read and write access to your calendar; Zoom requests permission to create meetings. We store the connection encrypted until you disconnect it. We do not request permission to read or send email.";
 "meet.settings" = "Meetings";
-"meet.settingsHint" = "Connect your account to create real Meet, Teams or Zoom meetings from a chat. Only permission to create events or meetings is requested; your email is never read.";
+"meet.settingsHint" = "Connect your account to create meetings. Google and Microsoft request read and write access to your calendar; Zoom requests permission to create meetings. We store the connection encrypted until you disconnect it. We do not request permission to read or send email.";
 "meet.titleField" = "Title";
 "meet.unavailable" = "Unavailable";
 "meet.when" = "When?";
@@ -1844,9 +1849,3 @@
 "ws.onlyYours" = "You only see the groups you are in; the others do not reveal their name.";
 "ws.participants" = "Participants";
 "ws.yourGroups" = "Your groups in this space";
-
-"chat.ios.unreadRetry" = "Could not locate the first unread message. Nothing was marked as read. Tap to retry.";
-"meet.ios.pendingHint" = "This meeting is awaiting confirmation. Its details are saved: retry to check the same operation without creating another meeting.";
-"meet.ios.network" = "The result could not be confirmed. Retry this same meeting to check its status; do not create another one.";
-"meet.ios.storage" = "The pending meeting could not be recovered or saved on this device. Another creation will not be sent.";
-"chat.ios.readRetry" = "Read status could not be confirmed. Unread messages are preserved. Tap to retry.";

@@ -2812,8 +2812,8 @@
   "With what?"
  ],
  "meet.scopeHint": [
-  "chaggu solo pide permiso para crear eventos o reuniones en tu cuenta. Nunca lee ni envía tu correo.",
-  "chaggu only asks permission to create events or meetings in your account. It never reads or sends your email."
+  "Conecta tu cuenta para crear reuniones. Google y Microsoft solicitan acceso de lectura y escritura al calendario; Zoom, creación de reuniones. Guardamos la conexión cifrada hasta que la desconectes. No pedimos leer ni enviar correo.",
+  "Connect your account to create meetings. Google and Microsoft request read and write access to your calendar; Zoom requests permission to create meetings. We store the connection encrypted until you disconnect it. We do not request permission to read or send email."
  ],
  "meet.connected": [
   "Conectado",
@@ -2960,8 +2960,8 @@
   "Meetings"
  ],
  "meet.settingsHint": [
-  "Conecta tu cuenta para crear reuniones reales de Meet, Teams o Zoom desde un chat. Solo se pide permiso para crear eventos o reuniones; nunca se lee tu correo.",
-  "Connect your account to create real Meet, Teams or Zoom meetings from a chat. Only permission to create events or meetings is requested; your email is never read."
+  "Conecta tu cuenta para crear reuniones. Google y Microsoft solicitan acceso de lectura y escritura al calendario; Zoom, creación de reuniones. Guardamos la conexión cifrada hasta que la desconectes. No pedimos leer ni enviar correo.",
+  "Connect your account to create meetings. Google and Microsoft request read and write access to your calendar; Zoom requests permission to create meetings. We store the connection encrypted until you disconnect it. We do not request permission to read or send email."
  ],
  "cal.view": [
   "Vista",

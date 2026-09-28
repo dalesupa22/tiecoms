@@ -117,6 +117,7 @@ export class TieComsClient {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private bootstrapTimer: ReturnType<typeof setTimeout> | null = null;
   private catchingUp = new Set<string>();
+  private opening = new Map<string, { generation: number; signal?: AbortSignal; promise: Promise<void> }>();
 
   constructor(private opts: ClientOptions) {}
 
@@ -493,20 +494,43 @@ export class TieComsClient {
   }
 
   // ---------- Conversaciones ----------
-  async openConversation(id: string, force = false) {
+  async openConversation(id: string, force = false, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    const generation = this.sessionGeneration;
+    // A second caller must await the real load, not interpret `loading` as success.
+    const active = this.opening.get(id);
+    if (active && active.generation === generation && !active.signal?.aborted) {
+      if (!signal) return active.promise;
+      // Cancelling a follower stops its wait, without cancelling the owner's fetch.
+      return new Promise<void>((resolve, reject) => {
+        const abort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+        signal.addEventListener('abort', abort, { once: true });
+        active.promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+      });
+    }
     const local = this.state.conversations[id];
     if (local?.loaded && !force) { void this.catchUp(id); return; }
-    if (local?.loading) return;
-    this.setConv(id, { loading: true });
-    try {
-      const page = await this.request<{ messages: MessageDTO[]; hasMore: boolean; lastEventSeq: number }>(`/conversations/${id}/messages?limit=50`);
-      this.setConv(id, { messages: page.messages, hasMore: page.hasMore, lastEventSeq: page.lastEventSeq, loaded: true, loading: false });
-      // Eventos que llegaron mientras cargábamos.
-      void this.catchUp(id);
-    } catch (e) {
-      this.setConv(id, { loading: false });
-      throw e;
-    }
+    const operation = { generation, signal, promise: Promise.resolve() };
+    this.opening.set(id, operation);
+    operation.promise = Promise.resolve().then(async () => {
+      try {
+        this.assertSession(generation);
+        signal?.throwIfAborted();
+        this.setConv(id, { loading: true });
+        const page = await this.request<{ messages: MessageDTO[]; hasMore: boolean; lastEventSeq: number }>(`/conversations/${id}/messages?limit=50`, { signal });
+        this.assertSession(generation);
+        signal?.throwIfAborted();
+        this.setConv(id, { messages: page.messages, hasMore: page.hasMore, lastEventSeq: page.lastEventSeq, loaded: true, loading: false });
+        void this.catchUp(id);
+      } catch (e) {
+        // An old/aborted request must not clear a newer load or another account's state.
+        if (generation === this.sessionGeneration && this.opening.get(id) === operation) this.setConv(id, { loading: false });
+        throw e;
+      } finally {
+        if (this.opening.get(id) === operation) this.opening.delete(id);
+      }
+    });
+    return operation.promise;
   }
 
   async loadOlder(id: string) {

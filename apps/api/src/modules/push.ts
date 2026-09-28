@@ -7,6 +7,7 @@
 import type { PushData } from '@tiecoms/contracts';
 import { pool, tx } from '../db.ts';
 import { sendApns, sendFcm, type PushResult } from '../push-transport.ts';
+import { safePushReason } from '../push-reason.ts';
 import { summarize, summaryText } from './attachments.ts';
 
 type Lang = 'es' | 'en';
@@ -112,11 +113,13 @@ export const pushStats = { sent: 0, failed: 0, removed: 0 };
  * borrado, falla o sin configurar). Sin token, sin cuerpo ni título: ids internos y el código del proveedor.
  * «Aceptado» = el proveedor devolvió 200; NO prueba que el teléfono lo haya mostrado.
  */
-function logDelivery(t: Target, n: Note, r: PushResult) {
-  const result = r.ok ? 'accepted' : r.invalidToken ? 'invalid_token_removed' : r.error.endsWith('not_configured') ? 'not_configured' : 'failed';
+function logDelivery(t: Target, n: Note, r: PushResult, cleanup?: 'removed' | 'not_present' | 'failed') {
+  const reason = r.ok ? undefined : safePushReason(r.error);
+  const result = r.ok ? 'accepted' : r.invalidToken ? cleanup === 'removed' ? 'invalid_token_removed' : 'invalid_token'
+    : reason === 'apns_not_configured' || reason === 'fcm_not_configured' ? 'not_configured' : 'failed';
   console.log(JSON.stringify({
     evt: 'push.delivery', result, type: n.data.type, messageId: n.data.messageId ?? null, conversationId: n.data.conversationId ?? null,
-    user: t.user_id, sub: t.sub_id, provider: t.provider, env: t.environment, ...(r.ok ? {} : { reason: r.error.slice(0, 120) }),
+    user: t.user_id, sub: t.sub_id, provider: t.provider, env: t.environment, ...(reason ? { reason } : {}), ...(cleanup ? { cleanup } : {}),
   }));
 }
 
@@ -132,17 +135,24 @@ async function deliver(targets: Target[], note: (t: Target) => Note) {
         ? await sendApns(t.token, t.environment, apnsPayload(n, badge), { collapseId: n.collapseId })
         : await sendFcm(t.token, fcmData(n, badge), { collapseKey: n.threadId });
     } catch (e: any) { r = { ok: false, invalidToken: false, error: String(e?.message ?? e) }; }
+    if (!r.ok && r.invalidToken) {
+      // Provider rejection is known; removal is not known until the DB confirms it.
+      try {
+        const removed = await pool.query('DELETE FROM push_subscriptions WHERE id = $1', [t.sub_id]);
+        if (removed.rowCount) pushStats.removed++;
+        logDelivery(t, n, r, removed.rowCount ? 'removed' : 'not_present');
+      } catch (error) { logDelivery(t, n, r, 'failed'); throw error; }
+      return;
+    }
     logDelivery(t, n, r);
     if (r.ok) {
       pushStats.sent++;
       await pool.query('UPDATE push_subscriptions SET failures = 0, last_error = NULL WHERE id = $1 AND failures > 0', [t.sub_id]);
-    } else if (r.invalidToken) {
-      pushStats.removed++;
-      await pool.query('DELETE FROM push_subscriptions WHERE id = $1', [t.sub_id]);
-    } else if (!r.error.endsWith('not_configured')) {
+    } else if (r.error !== 'apns_not_configured' && r.error !== 'fcm_not_configured') {
       pushStats.failed++;
-      await pool.query('UPDATE push_subscriptions SET failures = failures + 1, last_error = $2 WHERE id = $1', [t.sub_id, r.error.slice(0, 500)]);
-      console.error(`[push] ${t.provider} falló: ${r.error}`);
+      const reason = safePushReason(r.error);
+      await pool.query('UPDATE push_subscriptions SET failures = failures + 1, last_error = $2 WHERE id = $1', [t.sub_id, reason]);
+      console.error(`[push] ${t.provider} falló: ${reason}`);
     }
   }));
 }

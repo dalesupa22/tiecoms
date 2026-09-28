@@ -19,7 +19,7 @@ import { QuickReplies, SideChip, SideConnector, SideDialog, replyPrivately, side
 import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
 import { SleepNotice } from './Sleep.tsx';
-import { isTransient } from '../transient.ts';
+import { createChatRecovery } from '../chat-recovery.ts';
 import { DerivedPendingStrip } from './Pending.tsx';
 import { MeetingDialog } from './Meetings.tsx';
 import { ScheduledStrip, openScheduleMenu, scheduleMenu, whenLabel } from './Scheduled.tsx';
@@ -156,25 +156,30 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
    * conexión; el borrador sigue en el compositor. Un error permanente (403, 404…) se muestra tal cual.
    */
   const [retrying, setRetrying] = useState(false);
-  const openTry = useRef(0);
-  const openWithRetry = async () => {
-    const run = ++openTry.current;
-    for (const wait of [0, 1000, 2000, 4000, 8000, 15000]) {
-      if (wait) await new Promise((r) => setTimeout(r, wait));
-      if (run !== openTry.current) return;
-      try { await client.openConversation(id); setError(null); setRetrying(false); return; } catch (e: any) {
-        if (!isTransient(e)) { setRetrying(false); setError(errorText(e)); return; }
-        setRetrying(true); setError(null);
-      }
-    }
-    setRetrying(false); setError(t('err.updating'));
-  };
+  const recovery = useRef<ReturnType<typeof createChatRecovery> | null>(null);
+  const openWithRetry = () => recovery.current?.start();
+  const sessionIdentity = useClient(() => client.getSessionIdentity());
   const connection = useClient((s) => s.connection);
+
+  useEffect(() => {
+    const owner = createChatRecovery({
+      identity: client.getSessionIdentity,
+      loaded: () => !!client.getState().conversations[id]?.loaded,
+      subscribe: client.subscribe,
+      open: (signal) => client.openConversation(id, false, signal),
+      change: (state) => {
+        setRetrying(state.status === 'retrying');
+        setError(state.status === 'failed' ? state.error ? errorText(state.error) : t('err.updating') : null);
+      },
+    });
+    recovery.current = owner;
+    void owner.start();
+    return () => { owner.dispose(); if (recovery.current === owner) recovery.current = null; };
+  }, [id, sessionIdentity]);
   useEffect(() => { if (connection === 'online' && (retrying || error) && !client.getState().conversations[id]?.loaded) void openWithRetry(); }, [connection]);
 
   useEffect(() => {
     // La pantalla se monta de nuevo por conversación (key={id}), así el borrador no se cruza.
-    void openWithRetry();
     client.loadIssues({ conversationId: id }).catch(() => {});
     client.loadPins(id).catch(() => {});
     // ?m=seq: salta a un mensaje (origen de un asunto, derivada, resultado devuelto, recordatorio o enlace copiado).

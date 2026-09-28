@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.4 (23): Do not disturb every night (sleep mode). -->
+<resources>
+    <string name="sleep_title">Every night</string>
+    <string name="sleep_switch">Do not disturb every night</string>
+    <string name="sleep_summary">From %1$s to %2$s</string>
+    <string name="sleep_off">Off</string>
+    <string name="sleep_explain">Automatic Do not disturb: during your rest hours nothing makes a sound and you read it when you wake up. People writing to you see it arrives silently.</string>
+    <string name="sleep_from">From</string>
+    <string name="sleep_to">Until</string>
+    <string name="sleep_tz">This device’s time: %1$s</string>
+    <string name="sleep_saved">Do not disturb every night from %1$s to %2$s</string>
+    <string name="sleep_saved_off">Nightly Do not disturb off</string>
+    <string name="sleep_notice_one">%1$s is resting: it arrives silently. They’ll see it %2$s.</string>
+    <string name="sleep_notice_many">%1$d person(s) in this chat are resting: it arrives silently.</string>
+    <string name="sleep_schedule_wake">Send at %1$s</string>
+    <string name="sleep_resting">Resting</string>
+</resources>

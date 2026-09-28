@@ -45,7 +45,17 @@ data class UserDTO(
     val avatarUrl: String? = null,
     /** «No molestar» hasta (SPEC-silencio §3); null = apagado o servidor viejo. */
     val dndUntil: String? = null,
+    /** Solo en bootstrap.me: mi «No molestar todas las noches»; ausente = servidor anterior. */
+    val sleep: SleepDTO? = null,
 )
+
+/** Modo sueño: todas las noches, de [start] a [end] (HH:MM en [tz]), no suena nada. */
+@Serializable
+data class SleepDTO(val on: Boolean = true, val start: String = "22:00", val end: String = "07:00", val tz: String = "America/Bogota", val tzAuto: Boolean = true)
+
+/** Ventana de descanso de otra persona (people[].sleep); null = lo tiene apagado. */
+@Serializable
+data class SleepWindowDTO(val start: String = "22:00", val end: String = "07:00", val tz: String = "America/Bogota")
 
 @Serializable
 data class AuthResult(
@@ -85,6 +95,8 @@ data class PersonDTO(
     val avatarUrl: String? = null,
     /** Correo, si el servidor lo comparte (el buscador de «Agregar al grupo» lo usa); ausente en servidores viejos. */
     val email: String? = null,
+    /** Horario de descanso (modo sueño); null = apagado o servidor viejo. */
+    val sleep: SleepWindowDTO? = null,
 )
 
 @Serializable

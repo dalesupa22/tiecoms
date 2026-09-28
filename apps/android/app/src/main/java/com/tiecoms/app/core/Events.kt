@@ -39,6 +39,8 @@ sealed interface AccountEvent {
     data class DndUpdated(val dndUntil: String?) : AccountEvent
     /** Un programado mío cambió en cualquier dispositivo (`scheduled.updated`). */
     data class ScheduledUpdated(val scheduled: ScheduledMessageDTO) : AccountEvent
+    /** Mi modo sueño cambió (`me.sleep`). */
+    data class SleepUpdated(val sleep: SleepDTO) : AccountEvent
     data class Unknown(val type: String) : AccountEvent
 }
 
@@ -91,6 +93,7 @@ fun decodeAccountEvent(el: JsonElement): AccountEvent {
         "drive.updated" -> AccountEvent.DriveUpdated(o.str("workspaceId"))
         "reminders.changed" -> AccountEvent.RemindersChanged
         "scheduled.updated" -> obj(o, "scheduled", ScheduledMessageDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { AccountEvent.ScheduledUpdated(it) } ?: AccountEvent.Unknown(type)
+        "me.sleep" -> obj(o, "sleep", SleepDTO.serializer())?.let { AccountEvent.SleepUpdated(it) } ?: AccountEvent.Unknown(type)
         "me.dnd" -> if (o.containsKey("dndUntil")) AccountEvent.DndUpdated(o.str("dndUntil")) else AccountEvent.Unknown(type)
         else -> AccountEvent.Unknown(type)
     }

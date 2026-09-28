@@ -332,7 +332,33 @@ class TieComsClient(
         if (serverKnowsDnd) { storage.set(DND_KEY, dnd); storage.set(DND_LOCAL_KEY, null) }
         val localOnly = !serverKnowsDnd && storage.get(DND_LOCAL_KEY) == "1"
         setState { copy(data = sorted, conversations = conversations.filterKeys { it in allowed }, dndUntil = dnd, dndLocalOnly = localOnly) }
+        sorted.me.sleep?.let { rememberSleep(it); syncSleepTz(it) }
         return sorted
+    }
+
+    // ---------- Modo sueño («No molestar todas las noches») ----------
+    private fun rememberSleep(sl: SleepDTO) { storage.set(SLEEP_KEY, TcJson.encodeToString(SleepDTO.serializer(), sl)) }
+    /** Mi horario (estado o, antes del bootstrap —push con la app cerrada—, el guardado). */
+    fun mySleep(): SleepDTO? = s.data?.me?.sleep ?: storage.get(SLEEP_KEY)?.let { runCatching { TcJson.decodeFromString(SleepDTO.serializer(), it) }.getOrNull() }
+    private fun applySleep(sl: SleepDTO) {
+        rememberSleep(sl)
+        setState { copy(data = data?.let { d -> d.copy(me = d.me.copy(sleep = sl)) }) }
+    }
+    /** PUT /me/sleep; responde { sleep } y llega también como me.sleep a mis otras sesiones. */
+    suspend fun setSleep(on: Boolean? = null, start: String? = null, end: String? = null, tz: String? = null, tzAuto: Boolean? = null): SleepDTO = withContext(dispatcher) {
+        val b = buildJsonObject {
+            on?.let { put("on", JsonPrimitive(it)) }; start?.let { put("start", JsonPrimitive(it)) }; end?.let { put("end", JsonPrimitive(it)) }
+            tz?.let { put("tz", JsonPrimitive(it)) }; tzAuto?.let { put("tzAuto", JsonPrimitive(it)) }
+        }
+        val r = req("PUT", "/me/sleep", b, JsonObject.serializer())
+        val sl = TcJson.decodeFromJsonElement(SleepDTO.serializer(), r["sleep"] ?: r)
+        applySleep(sl); sl
+    }
+    /** Mientras la zona no se fije a mano (tzAuto), sigue la del teléfono (viajes). */
+    private fun syncSleepTz(sl: SleepDTO) {
+        if (!sl.tzAuto) return
+        val tz = java.time.ZoneId.systemDefault().id
+        if (tz != sl.tz) scope.launch { runCatching { setSleep(tz = tz, tzAuto = true) } }
     }
 
     private fun scheduleBootstrap() {
@@ -422,6 +448,7 @@ class TieComsClient(
             is AccountEvent.DriveUpdated -> setState { copy(driveRevision = driveRevision + 1) }
             AccountEvent.RemindersChanged -> scope.launch { runCatching { loadRemindersInternal() } }
             is AccountEvent.DndUpdated -> applyDnd(e.dndUntil, localOnly = false)
+            is AccountEvent.SleepUpdated -> applySleep(e.sleep)
             is AccountEvent.ScheduledUpdated -> setState { copy(scheduled = Scheduling.apply(scheduled, e.scheduled)) }
             is AccountEvent.Unknown -> Unit
         }
@@ -763,7 +790,8 @@ class TieComsClient(
     // ---------- «No molestar» (SPEC-silencio §3) ----------
     /** Valor vigente (estado o, antes del primer bootstrap —p. ej. un push con la app cerrada—, el guardado). */
     fun dndUntil(): String? = if (s.data != null) s.dndUntil else storage.get(DND_KEY)
-    fun dndActive(): Boolean = Silence.active(dndUntil(), now())
+    /** «No molestar» manual o dentro de mi horario de descanso (todas las noches). */
+    fun dndActive(): Boolean = Silence.active(dndUntil(), now()) || SleepMode.sleepingNow(SleepMode.of(mySleep()), Instant.ofEpochMilli(now()))
 
     private fun applyDnd(until: String?, localOnly: Boolean) {
         val v = until?.takeIf { Silence.active(it, now()) }
@@ -1424,6 +1452,7 @@ object SideOutsiders {
 /** Marcador de «no cambiar» para parámetros anulables. */
 /** «No molestar» guardado en el dispositivo (espejo del servidor o, con un servidor viejo, el único). */
 internal const val DND_KEY = "dnd:until"
+internal const val SLEEP_KEY = "sleep:me"
 internal const val DND_LOCAL_KEY = "dnd:local"
 
 @JvmField val UNCHANGED: String = String(charArrayOf('\u0000'))

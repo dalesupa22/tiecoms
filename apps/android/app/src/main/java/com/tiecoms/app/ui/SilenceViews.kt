@@ -163,12 +163,17 @@ fun DndSheet(onDismiss: () -> Unit) {
         }
     }
     val active = Silence.active(state.dndUntil, System.currentTimeMillis())
+    var sleep by remember { mutableStateOf(false) }
+    if (sleep) { SleepDialog(onClose = { sleep = false; onDismiss() }); return }
     val items = buildList<SheetItem?> {
         add(SheetItem(ctx.getString(R.string.mute_1h), tag = "dnd1h") { set(Silence.DndOption.HOUR_1) })
         add(SheetItem(ctx.getString(R.string.mute_8h), tag = "dnd8h") { set(Silence.DndOption.HOURS_8) })
         add(SheetItem(ctx.getString(R.string.dnd_tomorrow), tag = "dndTomorrow") { set(Silence.DndOption.TOMORROW) })
         add(SheetItem(ctx.getString(R.string.mute_forever), tag = "dndForever") { set(Silence.DndOption.FOREVER) })
         if (active) { add(null); add(SheetItem(ctx.getString(R.string.dnd_turn_off), "🔔", tag = "dndOff") { set(null) }) }
+        // «Todas las noches» (modo sueño) va dentro de No molestar, con desde y hasta.
+        add(null)
+        add(SheetItem(ctx.getString(R.string.sleep_title), "🌙", subtitle = sleepSummary(ctx, state.data?.me?.sleep), tag = "dndNightly") { sleep = true })
     }
     ActionSheet(ctx.getString(R.string.dnd_title), items, onDismiss)
 }
@@ -195,6 +200,8 @@ fun DndRow() {
             if (active && state.dndLocalOnly) Text(stringResource(R.string.dnd_local_only), style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline, modifier = Modifier.testTag("dndLocalOnly"))
             else if (!active) Text(stringResource(R.string.dnd_hint), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+            sleepSummary(ctx, state.data?.me?.sleep)?.let { Text("🌙 " + stringResource(R.string.sleep_title) + " · " + it, style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("dndNightlySummary")) }
         }
         Spacer(Modifier.width(12.dp))
         Switch(checked = active, onCheckedChange = null)

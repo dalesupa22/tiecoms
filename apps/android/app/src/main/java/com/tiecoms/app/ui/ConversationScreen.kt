@@ -942,6 +942,15 @@ private fun Composer(
     })
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Column {
+            // Modo sueño: «Ana está descansando: le llega sin sonar…» y «🕒 Enviar a las 7:00».
+            if (editing == null) client.meta(id)?.let { m ->
+                SleepNotice(data, m.memberIds, typing = text.isNotBlank(), onSchedule = if (schedulable) ({ at ->
+                    val body = text; val bodyMents = ments
+                    text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0)
+                    scheduleWithUndo(ctx, container, snackbar, id, body, bodyMents, replyTo?.id, at, onUndo = { b -> if (text.isBlank()) { text = b; ments = bodyMents; sel = androidx.compose.ui.text.TextRange(b.length) } })
+                    onScheduled()
+                }) else null)
+            }
             if (replyTo != null) Banner(stringResource(R.string.reply_to, Names.person(data, replyTo.authorId)?.name ?: "") + " · " + excerpt(replyTo.body, 100), stringResource(R.string.reply_cancel), onCancelReply, "replyBar")
             if (editing != null) Banner(stringResource(R.string.edit_title), stringResource(R.string.cancel), onCancelEdit, "editBar")
             // Buscador de menciones sobre el compositor.

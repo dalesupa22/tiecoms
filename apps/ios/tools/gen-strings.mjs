@@ -36,10 +36,10 @@ const ios = JSON.parse(readFileSync(join(here, 'ios-strings.json'), 'utf8'));
 // dominio anterior, aquí se reemplazan para que la app nunca los muestre. Solo cambia valores, no claves.
 const brand = (s) => s.replace(/app\.tiecoms\.com/g, 'app.chaggu.com').replace(/www\.tiecoms\.com/g, 'www.chaggu.com')
   .replace(/\btiecoms\.com\b/g, 'chaggu.com').replace(/TieComs/g, 'chaggu').replace(/Chaggu/g, 'chaggu');
-// Producto (26-sep-2026): en inglés los «asuntos» se llaman «Subjects», no «Issues». Solo el texto visible en inglés;
+// Producto (28-sep-2026, docs/TEMAS.md): los «asuntos» se llaman «tareas» y en inglés «Tasks», nunca «Issues». Solo el texto visible;
 // las claves, rutas y campos del API siguen diciendo issue.
-const subjects = (s) => s.replace(/\bIssues\b/g, 'Subjects').replace(/\bissues\b/g, 'subjects')
-  .replace(/\bIssue\b/g, 'Subject').replace(/\bissue\b/g, 'subject').replace(/\bISSUES\b/g, 'SUBJECTS');
+const subjects = (s) => s.replace(/\bIssues\b/g, 'Tasks').replace(/\bissues\b/g, 'tasks')
+  .replace(/\bIssue\b/g, 'Task').replace(/\bissue\b/g, 'task').replace(/\bISSUES\b/g, 'TASKS');
 const esc = (s) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 
 for (const [i, lang] of ['es', 'en'].entries()) {

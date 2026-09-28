@@ -54,7 +54,7 @@ final class V10IssueTasksTests: XCTestCase {
         MockURLProtocol.routes = ["/api/v1/issues/i1": (200, issueJSON("i1", status: "done"))]
         IssueActions.toggleDone(s, s.issues["i1"]!)
         try await waitUntil(3, "optimista") { s.issues["i1"]?.status == .done }
-        try await waitUntil(3, "aviso") { s.toast == "Asunto completado" }
+        try await waitUntil(3, "aviso") { s.toast == "Tarea completada" }
         XCTAssertNotNil(s.toastUndo, "el aviso trae «Deshacer»")
         XCTAssertEqual(MockURLProtocol.requests.last?.body["status"] as? String, "done")
         // Deshacer vuelve al estado anterior (esperando), no a «abierto».
@@ -69,7 +69,7 @@ final class V10IssueTasksTests: XCTestCase {
         s.issues["i2"] = try issue("i2", status: "done", closedAt: "2026-09-27T11:00:00.000Z")
         MockURLProtocol.routes = ["/api/v1/issues/i2": (200, issueJSON("i2", status: "open"))]
         IssueActions.toggleDone(s, s.issues["i2"]!)
-        try await waitUntil(3, "reabierto") { s.issues["i2"]?.status == .open && s.toast == "Asunto reabierto" }
+        try await waitUntil(3, "reabierto") { s.issues["i2"]?.status == .open && s.toast == "Tarea reabierta" }
         XCTAssertEqual(MockURLProtocol.requests.last?.body["status"] as? String, "open")
     }
 
@@ -78,7 +78,7 @@ final class V10IssueTasksTests: XCTestCase {
         s.issues["i3"] = try issue("i3")
         MockURLProtocol.routes = [:] // 404
         IssueActions.toggleDone(s, s.issues["i3"]!)
-        try await waitUntil(3, "error") { s.toast != nil && s.toast != "Asunto completado" }
+        try await waitUntil(3, "error") { s.toast != nil && s.toast != "Tarea completada" }
         XCTAssertEqual(s.issues["i3"]?.status, .open, "si el API falla se revierte")
         XCTAssertNil(s.toastUndo, "un error no ofrece «Deshacer»")
     }
@@ -88,7 +88,7 @@ final class V10IssueTasksTests: XCTestCase {
         s.issues["i4"] = try issue("i4", status: "in_progress")
         MockURLProtocol.routes = ["/api/v1/issues/i4": (200, issueJSON("i4", status: "cancelled"))]
         IssueActions.drop(s, s.issues["i4"]!)
-        try await waitUntil(3, "descartado") { s.issues["i4"]?.status == .cancelled && s.toast == "Asunto descartado" }
+        try await waitUntil(3, "descartado") { s.issues["i4"]?.status == .cancelled && s.toast == "Tarea descartada" }
         MockURLProtocol.routes = ["/api/v1/issues/i4": (200, issueJSON("i4", status: "in_progress"))]
         s.toastUndo?()
         try await waitUntil(3, "deshacer") { s.issues["i4"]?.status == .in_progress }

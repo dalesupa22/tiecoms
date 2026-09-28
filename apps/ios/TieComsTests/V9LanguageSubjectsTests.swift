@@ -31,16 +31,27 @@ final class V9LanguageSubjectsTests: XCTestCase {
     func testNoEnglishTextSaysIssue() throws {
         let en = try strings("en")
         let leftovers = en.filter { $0.value.range(of: #"\bissues?\b"#, options: [.regularExpression, .caseInsensitive]) != nil }
-        XCTAssertTrue(leftovers.isEmpty, "en inglés son «Subjects»: \(leftovers.keys.sorted())")
+        XCTAssertTrue(leftovers.isEmpty, "en inglés son «Tasks»: \(leftovers.keys.sorted())")
         XCTAssertEqual(en["tab.issues"], "Tasks", "docs/TEMAS.md: en la interfaz los asuntos se llaman Tareas")
-        XCTAssertEqual(en["grp.moreIssues"], "+{n} subjects")
+        XCTAssertEqual(en["grp.moreIssues"], "+{n} tasks")
         XCTAssertEqual(en["issue.create"], "Create task")
-        XCTAssertEqual(en["issue.chipOne"], "◆ 1 subject")
-        // En español siguen siendo «asuntos».
+        XCTAssertEqual(en["issue.chipOne"], "◆ 1 task")
         let es = try strings("es")
         XCTAssertEqual(es["tab.issues"], "Tareas")
-        XCTAssertEqual(es["grp.moreIssues"], "+{n} asuntos")
+        XCTAssertEqual(es["grp.moreIssues"], "+{n} tareas")
+        XCTAssertEqual(es["issue.completed"], "Tarea completada")
+        XCTAssertEqual(es["task.addHere"], "Subtarea de la tarea")
         XCTAssertTrue(es.values.allSatisfy { $0.range(of: #"\b(issue|subject)s?\b"#, options: [.regularExpression, .caseInsensitive]) == nil })
+    }
+
+    /// Ningún texto visible dice «asunto» ni «subject»; solo el asunto de un correo importado («Asunto: {s}»).
+    func testNoTextSaysAsuntoOrSubject() throws {
+        for (lang, word) in [("es", "asunto"), ("en", "subject")] {
+            let left = try strings(lang).filter { $0.key != "imp.subject" && $0.value.range(of: word, options: .caseInsensitive) != nil }
+            XCTAssertTrue(left.isEmpty, "\(lang): \(left.keys.sorted())")
+        }
+        XCTAssertEqual(try strings("es")["imp.subject"], "Asunto: {s}")
+        XCTAssertEqual(try strings("en")["imp.subject"], "Subject: {s}")
     }
 
     func testLanguageChoiceAppliesAtOncePersistsAndFormats() {

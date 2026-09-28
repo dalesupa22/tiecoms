@@ -768,7 +768,7 @@
   "Unread"
  ],
  "home.tab.issues": [
-  "Asuntos",
+  "Tareas",
   "Issues"
  ],
  "home.tab.chats": [
@@ -888,7 +888,7 @@
   "DMs"
  ],
  "tab.issues": [
-  "Asuntos",
+  "Tareas",
   "Issues"
  ],
  "tab.calendar": [
@@ -912,7 +912,7 @@
   "New group here"
  ],
  "grp.newIssue": [
-  "Nuevo asunto",
+  "Nueva tarea",
   "New issue"
  ],
  "grp.newTitle": [
@@ -972,7 +972,7 @@
   "Collapse all"
  ],
  "grp.moreIssues": [
-  "+{n} asuntos",
+  "+{n} tareas",
   "+{n} issues"
  ],
  "grp.forWhom": [
@@ -1332,11 +1332,11 @@
   "AI processing needs permission. A voice note sent without AI must be recorded and sent again with permission to use AI."
  ],
  "grp.showAllIssues": [
-  "Mostrar todos los asuntos",
+  "Mostrar todas las tareas",
   "Show all issues"
  ],
  "grp.hideAllIssues": [
-  "Contraer todos los asuntos",
+  "Contraer todas las tareas",
   "Collapse all issues"
  ],
  "grp.expandAll": [
@@ -1344,11 +1344,11 @@
   "Expand all"
  ],
  "grp.showIssues": [
-  "Mostrar asuntos",
+  "Mostrar tareas",
   "Show issues"
  ],
  "grp.hideIssues": [
-  "Ocultar asuntos",
+  "Ocultar tareas",
   "Hide issues"
  ],
  "grp.overdueOne": [
@@ -1380,11 +1380,11 @@
   "Reopen"
  ],
  "issue.toast.done": [
-  "Asunto completado: {title}",
+  "Tarea completada: {title}",
   "Issue completed: {title}"
  ],
  "issue.toast.status": [
-  "Asunto: {status}",
+  "Tarea: {status}",
   "Issue: {status}"
  ],
  "react.limit": [
@@ -1684,8 +1684,8 @@
   "Add ({n})"
  ],
  "issue.quickPhIos": [
-  "Añadir asunto…",
-  "Add a subject…"
+  "Añadir tarea…",
+  "Add task…"
  ],
  "issue.pickDate": [
   "Elegir fecha",
@@ -2104,8 +2104,8 @@
   "Hi, {name}. I'm gg, how can I help?"
  ],
  "ai.intro": [
-  "Escríbeme o háblame: respondo mensajes, reporto lo pendiente, creo grupos, asuntos y reuniones. Nada se envía sin tu visto bueno.",
-  "Type or talk to me: I reply to messages, report what is pending, and create groups, subjects and meetings. Nothing is sent without your OK."
+  "Escríbeme o háblame: respondo mensajes, reporto lo pendiente, creo grupos, tareas y reuniones. Nada se envía sin tu visto bueno.",
+  "Type or talk to me: I reply to messages, report what is pending, and create groups, tasks and meetings. Nothing is sent without your OK."
  ],
  "ai.listening": [
   "Te escucho…",
@@ -2148,8 +2148,8 @@
   "Create a group with…"
  ],
  "ai.s.issue": [
-  "Crea un asunto para…",
-  "Create a subject for…"
+  "Crea una tarea para…",
+  "Create a task for…"
  ],
  "ai.s.meeting": [
   "Agenda una reunión mañana a las 10 con…",
@@ -2240,8 +2240,8 @@
   "Complete"
  ],
  "issue.completed": [
-  "Asunto completado",
-  "Subject completed"
+  "Tarea completada",
+  "Task completed"
  ],
  "issue.dFriday": [
   "El viernes",
@@ -2272,16 +2272,16 @@
   "Completed · {n}"
  ],
  "issue.drop": [
-  "Descartar asunto",
-  "Drop subject"
+  "Descartar tarea",
+  "Drop task"
  ],
  "issue.droppedBanner": [
   "Descartado",
   "Dropped"
  ],
  "issue.droppedToast": [
-  "Asunto descartado",
-  "Subject dropped"
+  "Tarea descartada",
+  "Task dropped"
  ],
  "issue.groupBy": [
   "Agrupar",
@@ -2356,8 +2356,8 @@
   "Reopen"
  ],
  "issue.reopenedToast": [
-  "Asunto reabierto",
-  "Subject reopened"
+  "Tarea reabierta",
+  "Task reopened"
  ],
  "issue.stalledPlain": [
   "Nadie lo mueve hace {n} días",
@@ -2564,8 +2564,8 @@
   "＋ Sub-task"
  ],
  "task.addHere": [
-  "Tarea del asunto",
-  "Task for the subject"
+  "Subtarea de la tarea",
+  "Subtask of this task"
  ],
  "task.dialogTitle": [
   "Tareas de «{title}»",
@@ -2576,16 +2576,16 @@
   "changed who can see it"
  ],
  "task.hint": [
-  "Divide el asunto en tareas para cada persona. Puedes hacer que solo tu empresa las vea.",
-  "Split the subject into tasks for each person. You can make them visible only to your company."
+  "Divide la tarea en subtareas para cada persona. Puedes hacer que solo tu empresa las vea.",
+  "Split the task into subtasks for each person. You can make them visible only to your company."
  ],
  "task.inSide": [
   "en sidechat",
   "in sidechat"
  ],
  "task.ofHidden": [
-  "Tarea de un asunto que no ves",
-  "Task from a subject you can’t see"
+  "Subtarea de una tarea que no ves",
+  "Subtask of a task you can’t see"
  ],
  "task.otherPerson": [
   "Otra persona",
@@ -2624,8 +2624,8 @@
   "Task"
  ],
  "task.sideExplain": [
-  "Abre un chat privado con quienes elijas para resolver «{title}». Las tareas que creen ahí quedan en el asunto y solo las ven ustedes.",
-  "Open a private chat with the people you pick to solve “{title}”. Tasks created there stay in the subject and only you all see them."
+  "Abre un chat privado con quienes elijas para resolver «{title}». Las subtareas que creen ahí quedan en la tarea y solo las ven ustedes.",
+  "Open a private chat with the people you pick to solve “{title}”. Subtasks created there stay in the task and only you all see them."
  ],
  "task.sideFirst": [
   "Primer mensaje (opcional)",
@@ -2676,8 +2676,8 @@
   "Allow"
  ],
  "ai.consentBody": [
-  "Para responder y ayudarte, enviaremos a DeepSeek tu solicitud y los últimos 20 turnos con gg, tu nombre e identificador, idioma y zona horaria; los nombres, identificadores, cargos y empresas de tu directorio; y los nombres e identificadores de tus grupos y espacios y sus recuentos de no leídos. Según lo que pidas, también recibirá los mensajes y sus autores, asuntos, tareas y reuniones que gg consulte y los resultados de sus acciones. Solo se consulta información a la que tienes acceso. Es opcional: Cancelar conserva tu borrador y no envía nada a DeepSeek. El permiso dura hasta que cierres gg o cierres sesión.",
-  "To answer and help you, we will send DeepSeek your request and your last 20 turns with gg, your name and ID, language and time zone; the names, IDs, job titles and companies in your directory; and your group and space names and IDs and their unread counts. Depending on your request, it will also receive the messages and authors, subjects, tasks and meetings gg consults, and the results of its actions. Only information you can access is consulted. This is optional: Cancel keeps your draft and sends nothing to DeepSeek. Permission lasts until you close gg or sign out."
+  "Para responder y ayudarte, enviaremos a DeepSeek tu solicitud y los últimos 20 turnos con gg, tu nombre e identificador, idioma y zona horaria; los nombres, identificadores, cargos y empresas de tu directorio; y los nombres e identificadores de tus grupos y espacios y sus recuentos de no leídos. Según lo que pidas, también recibirá los mensajes y sus autores, tareas, subtareas y reuniones que gg consulte y los resultados de sus acciones. Solo se consulta información a la que tienes acceso. Es opcional: Cancelar conserva tu borrador y no envía nada a DeepSeek. El permiso dura hasta que cierres gg o cierres sesión.",
+  "To answer and help you, we will send DeepSeek your request and your last 20 turns with gg, your name and ID, language and time zone; the names, IDs, job titles and companies in your directory; and your group and space names and IDs and their unread counts. Depending on your request, it will also receive the messages and authors, tasks, subtasks and meetings gg consults, and the results of its actions. Only information you can access is consulted. This is optional: Cancel keeps your draft and sends nothing to DeepSeek. Permission lasts until you close gg or sign out."
  ],
  "common.clear": [
   "Borrar",
@@ -2788,8 +2788,8 @@
   "Only you can see it: it is not in any chat and has no owner to pick, tasks or sidechat."
  ],
  "issue.personalNoSide": [
-  "Un asunto personal no tiene chat para hablarlo aparte.",
-  "A personal subject has no chat to talk it over separately."
+  "Una tarea personal no tiene chat para hablarla aparte.",
+  "A personal task has no chat to talk it over separately."
  ],
  "meet.now": [
   "📹 Reunión ahora",

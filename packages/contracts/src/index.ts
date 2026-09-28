@@ -236,6 +236,13 @@ export interface ConversationDTO {
   name: string | null;
   internalOrgId: string | null;
   memberIds: string[];
+  /**
+   * Admins del grupo (como WhatsApp): pueden sumar, sacar y nombrar o quitar admins. Quien administra el espacio
+   * también puede hacerlo aunque no esté aquí (eso se ve en canManage). Ausente = servidor anterior.
+   */
+  adminIds?: string[];
+  /** Quién creó el grupo: no se le puede sacar ni quitar el admin. Ausente = servidor anterior. */
+  createdBy?: string;
   lastMessageSeq: number;
   lastEventSeq: number;
   lastMessageAt: string | null;
@@ -624,6 +631,11 @@ export interface IssueDTO {
   visibleOrgId?: string | null;
   /** Personas con acceso explícito (solo en 'org' y 'private'). */
   viewerIds?: string[];
+  /** Asunto que viene de una integración (p. ej. un ticket de la mesa de ayuda). Ausente = servidor anterior. */
+  integrationId?: string | null;
+  externalId?: string | null;
+  /** Datos del sistema externo para mostrar (cliente, correo, prioridad, categoría…): pares texto→texto. */
+  externalMeta?: Record<string, string> | null;
 }
 export type IssueVisibility = 'all' | 'org' | 'private';
 
@@ -741,6 +753,100 @@ export interface OversightGroupDTO {
   iAmMember: boolean;
 }
 export interface OversightDTO { orgId: string; groups: OversightGroupDTO[] }
+
+export const SetAdminInput = z.object({ admin: z.boolean() });
+
+// ---------- Integraciones por grupo ----------
+// Las crea quien administra el espacio (lead/admin) o la empresa dueña (owner/admin). Publican como un bot del grupo.
+
+export interface IntegrationDTO {
+  id: string;
+  workspaceId: string;
+  conversationId: string;
+  botUserId: string;
+  name: string;
+  /** Últimos 4 caracteres del token, para reconocerlo. */
+  tokenHint: string;
+  /** URL del webhook entrante (formato Slack). El token va en `Authorization: Bearer`. */
+  webhookUrl: string;
+  outgoingUrl: string | null;
+  createdBy: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  /** Entregas de salida que siguen fallando (para avisar al admin). */
+  failingDeliveries: number;
+}
+/** Respuesta al crear o rotar: el token (y el secreto de salida) se muestran una sola vez. */
+export interface IntegrationSecretDTO {
+  integration: IntegrationDTO;
+  token: string;
+  /** URL con el token incluido, para sistemas que solo aceptan una URL (como un Incoming Webhook de Slack). */
+  webhookUrlWithToken: string;
+  outgoingSecret: string | null;
+}
+
+const OutgoingUrl = z.url().max(500).refine((u) => /^https:\/\//.test(u) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(u), 'Debe ser https');
+
+export const CreateIntegrationInput = z.object({
+  name: z.string().trim().min(2).max(80),
+  outgoingUrl: OutgoingUrl.nullable().optional(),
+});
+export const UpdateIntegrationInput = z.object({
+  name: z.string().trim().min(2).max(80).optional(),
+  outgoingUrl: OutgoingUrl.nullable().optional(),
+  /** true = generar un secreto de salida nuevo (se muestra una vez). */
+  rotateOutgoingSecret: z.boolean().optional(),
+});
+
+/** Webhook entrante con el formato de Slack (Incoming Webhooks): basta cambiar la URL. */
+export const IncomingWebhookInput = z.object({
+  text: z.string().max(12_000).optional(),
+  blocks: z.array(z.any()).max(50).optional(),
+  attachments: z.array(z.any()).max(20).optional(),
+  username: z.string().max(80).optional(),
+  mrkdwn: z.boolean().optional(),
+}).passthrough();
+
+const ExternalMeta = z.record(z.string().max(60), z.string().max(500)).refine((m) => Object.keys(m).length <= 20, 'Máximo 20 campos');
+
+/** API de asuntos para integraciones (token del grupo). */
+export const IntegrationCreateIssueInput = z.object({
+  title: z.string().trim().min(2).max(200),
+  /** Primer comentario (la descripción del ticket). */
+  description: z.string().max(20_000).optional(),
+  externalId: z.string().trim().min(1).max(120),
+  externalMeta: ExternalMeta.optional(),
+  status: z.enum(['open', 'in_progress', 'waiting', 'done', 'cancelled']).optional(),
+  /** Avisar en el chat con un mensaje del bot (por defecto sí). */
+  announce: z.boolean().default(true),
+  /** Comentarios anteriores (migración): se guardan en orden con su autor y fecha como texto. */
+  history: z.array(z.object({ author: z.string().max(120), body: z.string().max(20_000), at: z.string().max(40).optional() })).max(200).optional(),
+});
+export const IntegrationUpdateIssueInput = z.object({
+  status: z.enum(['open', 'in_progress', 'waiting', 'done', 'cancelled']).optional(),
+  title: z.string().trim().min(2).max(200).optional(),
+  externalMeta: ExternalMeta.optional(),
+});
+export const IntegrationCommentInput = z.object({
+  body: z.string().trim().min(1).max(20_000),
+  /** Quién lo escribió en el sistema externo (p. ej. «Ana Pérez (cliente)»). */
+  author: z.string().trim().max(120).optional(),
+});
+
+/** Lo que recibe el webhook de salida (firmado: X-Chaggu-Signature: t=<unix>,v1=<hex hmac-sha256 de "t.body">). */
+export interface IntegrationEventDTO {
+  id: string;
+  type: 'issue.status_changed' | 'issue.commented' | 'issue.updated';
+  createdAt: string;
+  integrationId: string;
+  issue: { id: string; externalId: string | null; title: string; status: IssueStatus; url: string };
+  actor: { id: string; name: string };
+  /** issue.status_changed */
+  from?: IssueStatus;
+  to?: IssueStatus;
+  /** issue.commented */
+  comment?: { body: string };
+}
 
 export const AddMembersInput = z.object({
   userIds: z.array(z.uuid()).min(1).max(200),
@@ -1110,7 +1216,7 @@ export interface WaMessageDTO { id: string; fromMe: boolean; author: string | nu
 export type ConversationEvent =
   | { type: 'message.created'; conversationId: string; eventSeq: number; message: MessageDTO }
   | { type: 'message.updated'; conversationId: string; eventSeq: number; message: MessageDTO }
-  | { type: 'members.changed'; conversationId: string; eventSeq: number; memberIds: string[] }
+  | { type: 'members.changed'; conversationId: string; eventSeq: number; memberIds: string[]; adminIds?: string[] }
   | { type: 'issue.updated'; conversationId: string; eventSeq: number; issue: IssueDTO }
   | { type: 'pins.changed'; conversationId: string; eventSeq: number; messageIds: string[] }
   | { type: 'calendar.updated'; conversationId: string; eventSeq: number; event: CalendarEventDTO }

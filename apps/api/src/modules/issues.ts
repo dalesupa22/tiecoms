@@ -4,6 +4,7 @@ import { conversationAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Db, type Tx } from '../db.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
 import { appendEvent, appendMessage } from './messages.ts';
+import { queueIntegrationEvent } from './integration-events.ts';
 
 /** Mensaje de sistema estructurado: cada cliente lo muestra en su idioma. */
 const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, ...p });
@@ -47,6 +48,7 @@ function toDTO(r: any): IssueDTO {
     closedAt: iso(r.closed_at), commentCount: r.comment_count ?? 0,
     parentIssueId: r.parent_issue_id ?? null, visibility: r.visibility ?? 'all', visibleOrgId: r.visible_org_id ?? null,
     ...(r.visibility && r.visibility !== 'all' ? { viewerIds: r.viewer_ids ?? [] } : {}),
+    ...(r.integration_id ? { integrationId: r.integration_id, externalId: r.external_id ?? null, externalMeta: r.external_meta ?? null } : {}),
   };
 }
 
@@ -289,20 +291,26 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
     }
     const dto = await load(c, issueId);
     await publish(c, dto, before);
+    if (cur.integration_id) {
+      if (input.status !== undefined && input.status !== cur.status) await queueIntegrationEvent(c, issueId, userId, { type: 'issue.status_changed', from: cur.status, to: input.status });
+      else await queueIntegrationEvent(c, issueId, userId, { type: 'issue.updated' });
+    }
     if (input.ownerId !== undefined && input.ownerId !== cur.owner_id) await queueAssignedPush(c, issueId, input.ownerId, userId);
     await audit(c, userId, 'issue.updated', { type: 'issue', id: issueId, workspaceId: cur.workspace_id }, { changes: events.map(([k]) => k) });
     return dto;
   });
 }
 
-export async function commentIssue(userId: string, issueId: string, body: string) {
+export async function commentIssue(userId: string, issueId: string, body: string, extra: { author?: string; at?: string } = {}) {
   return tx(async (c) => {
-    const { rows } = await c.query('SELECT conversation_id, visibility FROM issues WHERE id = $1 FOR UPDATE', [issueId]);
+    const { rows } = await c.query('SELECT conversation_id, visibility, integration_id FROM issues WHERE id = $1 FOR UPDATE', [issueId]);
     if (!rows[0]) throw notFound('Asunto');
     await loadVisible(c, userId, issueId);
     if (rows[0].visibility === 'all') await conversationAccess(c, userId, rows[0].conversation_id, 'post', true);
-    await c.query("INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,'comment',$3)", [issueId, userId, JSON.stringify({ body })]);
+    // `author`: quién lo escribió fuera de Chaggu (comentarios que trae una integración). Los clientes muestran el cuerpo.
+    await c.query("INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,'comment',$3)", [issueId, userId, JSON.stringify({ body, ...extra })]);
     await c.query('UPDATE issues SET updated_at = now() WHERE id = $1', [issueId]);
+    if (rows[0].integration_id) await queueIntegrationEvent(c, issueId, userId, { type: 'issue.commented', body });
     const dto = await load(c, issueId);
     await publish(c, dto);
     return dto;

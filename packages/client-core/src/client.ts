@@ -5,7 +5,7 @@ import {
   type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type UserDTO, normalizeEmoji,
-  type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO,
+  type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO, type IntegrationDTO, type IntegrationSecretDTO,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -470,7 +470,7 @@ export class TieComsClient {
     let messages = local.messages;
     if (e.type === 'message.updated') this.noticeReaction(local.messages.find((m) => m.id === e.message.id), e.message);
     if (e.type === 'message.created' || e.type === 'message.updated') messages = upsertMessage(messages, e.message);
-    if (e.type === 'members.changed') { this.patchConversationMeta(e.conversationId, { memberIds: e.memberIds }); this.scheduleBootstrap(); }
+    if (e.type === 'members.changed') { this.patchConversationMeta(e.conversationId, { memberIds: e.memberIds, ...(e.adminIds ? { adminIds: e.adminIds } : {}) }); this.scheduleBootstrap(); }
     if (e.type === 'issue.updated') this.putIssues([e.issue]);
     if (e.type === 'message.updated') this.patchPreviewIfLast(e.message);
     this.setConv(e.conversationId, { messages, lastEventSeq: e.eventSeq });
@@ -1077,6 +1077,28 @@ export class TieComsClient {
   async removeMember(conversationId: string, userId: string) {
     await this.request(`/conversations/${conversationId}/members/${userId}`, { method: 'DELETE' });
     await this.loadBootstrap();
+  }
+  /** Nombrar o quitar admin del grupo (como WhatsApp). */
+  async setMemberAdmin(conversationId: string, userId: string, admin: boolean) {
+    const r = await this.request<{ adminIds: string[] }>(`/conversations/${conversationId}/members/${userId}/admin`, { method: 'PUT', json: { admin } });
+    this.patchConversationMeta(conversationId, { adminIds: r.adminIds });
+    await this.loadBootstrap();
+    return r;
+  }
+  listIntegrations(conversationId: string) {
+    return this.request<{ integrations: IntegrationDTO[]; canConfigure: boolean }>(`/conversations/${conversationId}/integrations`);
+  }
+  createIntegration(conversationId: string, input: { name: string; outgoingUrl?: string | null }) {
+    return this.request<IntegrationSecretDTO>(`/conversations/${conversationId}/integrations`, { method: 'POST', json: input });
+  }
+  updateIntegration(id: string, input: { name?: string; outgoingUrl?: string | null; rotateOutgoingSecret?: boolean }) {
+    return this.request<{ integration: IntegrationDTO; outgoingSecret: string | null }>(`/integrations/${id}`, { method: 'PATCH', json: input });
+  }
+  rotateIntegrationToken(id: string) {
+    return this.request<IntegrationSecretDTO>(`/integrations/${id}/rotate`, { method: 'POST', json: {} });
+  }
+  revokeIntegration(id: string) {
+    return this.request<{ ok: true }>(`/integrations/${id}`, { method: 'DELETE' });
   }
   async openDirect(userId: string) {
     const r = await this.request<{ id: string }>('/directs', { method: 'POST', json: { userId } });

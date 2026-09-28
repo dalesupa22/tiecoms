@@ -61,7 +61,7 @@ export function isPublicIp(ip: string): boolean {
 }
 
 /** DNS que solo devuelve direcciones públicas: se usa en cada conexión, así un cambio de DNS no cuela una IP interna. */
-const safeLookup: net.LookupFunction = (hostname, options, cb) => {
+export const safeLookup: net.LookupFunction = (hostname, options, cb) => {
   lookup(hostname, { ...options, all: true }, (err, addresses) => {
     if (err) return (cb as any)(err);
     const ok = (addresses as { address: string; family: number }[]).filter((a) => isPublicIp(a.address));

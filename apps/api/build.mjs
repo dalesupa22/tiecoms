@@ -11,7 +11,7 @@ if (!(await readFile(baileysSocket, 'utf8')).includes('companion_reg_refresh')) 
 
 await rm('dist', { recursive: true, force: true });
 await build({
-  entryPoints: { server: 'src/server.ts', worker: 'src/worker.ts', 'wa-bridge': 'src/wa-bridge.ts', migrate: 'src/migrate-cli.ts', moderation: 'src/moderation-cli.ts', deletion: 'src/deletion-cli.ts' },
+  entryPoints: { server: 'src/server.ts', worker: 'src/worker.ts', 'wa-bridge': 'src/wa-bridge.ts', migrate: 'src/migrate-cli.ts', moderation: 'src/moderation-cli.ts', deletion: 'src/deletion-cli.ts', ops: 'src/ops-cli.ts' },
   outdir: 'dist',
   bundle: true,
   platform: 'node',

@@ -43,6 +43,8 @@ data class UserDTO(
     val primaryOrgId: String? = null,
     /** Ruta relativa de la foto (/api/v1/avatars/<uuid>), pública; null = iniciales. */
     val avatarUrl: String? = null,
+    /** «No molestar» hasta (SPEC-silencio §3); null = apagado o servidor viejo. */
+    val dndUntil: String? = null,
 )
 
 @Serializable

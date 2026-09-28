@@ -495,7 +495,7 @@ fun ConversationScreen(
                             if (meta.kind == "internal") { Icon(Icons.Filled.Lock, stringResource(R.string.internal_cd), Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)) }
                             if (meta.level == "directivo") Text("◆ ", color = Brand.Orange)
                             Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false).testTag("chatTitle"))
-                            if (muted) Text(" 🔕", modifier = Modifier.semantics { contentDescription = ctx.getString(R.string.side_muted) })
+                            if (muted) MutedMark(16.dp, tag = "chatMuted")
                         }
                         }
                         // Ruta «Empresa · Espacio» (SPEC-v3 §9); en chats y laterales, su subtítulo propio.
@@ -741,12 +741,6 @@ fun conversationMenu(ctx: android.content.Context, conv: ConversationDTO, data: 
     val client = container.client.value
     fun act(block: suspend () -> Unit) = container.scope.launch { runCatching { block() }.onFailure { container.toast(errorText(ctx, it)) } }
     val pinned = conv.pinnedAt != null
-    val muted = conv.mutedAt(System.currentTimeMillis())
-    fun mute(untilMs: Long?) = act {
-        client.setConversationPrefs(conv.id, mutedUntil = untilMs?.let { Instant.ofEpochMilli(it).toString() } ?: "2099-12-31T00:00:00Z")
-        container.toast(ctx.getString(R.string.toast_muted))
-    }
-    val now = System.currentTimeMillis()
     return buildList {
         onOpen?.let { add(SheetItem(ctx.getString(R.string.menu_open), "↗", onClick = it)) }
         add(SheetItem(ctx.getString(if (pinned) R.string.menu_unpin_top else R.string.menu_pin_top), "📌", tag = "menuPinTop") { act { client.setConversationPrefs(conv.id, pinned = !pinned) } })
@@ -754,13 +748,8 @@ fun conversationMenu(ctx: android.content.Context, conv: ConversationDTO, data: 
         else add(SheetItem(ctx.getString(R.string.menu_mark_unread_conv), "●", enabled = conv.lastMessageSeq > conv.historyFromSeq) {
             act { client.markUnread(conv.id, conv.lastMessageSeq); container.toast(ctx.getString(R.string.toast_marked_unread)) }
         })
-        if (muted) add(SheetItem(ctx.getString(R.string.menu_unmute), "🔔", tag = "menuUnmute") { act { client.setConversationPrefs(conv.id, mutedUntil = null); container.toast(ctx.getString(R.string.toast_unmuted)) } })
-        else add(SheetItem(ctx.getString(R.string.menu_mute), "🔕", tag = "menuMute", children = listOf(
-            SheetItem(ctx.getString(R.string.mute_1h), tag = "mute1h") { mute(now + 3_600_000) },
-            SheetItem(ctx.getString(R.string.mute_8h)) { mute(now + 8 * 3_600_000) },
-            SheetItem(ctx.getString(R.string.mute_week)) { mute(now + 7 * 86_400_000L) },
-            SheetItem(ctx.getString(R.string.mute_forever), tag = "muteForever") { mute(null) },
-        )))
+        // SPEC-silencio §2: 1 hora · 8 horas · 1 semana · Hasta que lo reactive, o «Reactivar notificaciones».
+        add(muteMenuItem(ctx, conv))
         add(remindMenu(ctx, conv, null, onRemindCustom))
         if (onMeeting != null && conv.canPost) add(SheetItem(ctx.getString(R.string.menu_meeting), "📅", onClick = onMeeting))
         add(null)

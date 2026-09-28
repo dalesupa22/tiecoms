@@ -168,6 +168,8 @@ fun DetailsScreen(
                     }
                 }
             }
+            // SPEC-silencio §2: interruptor «Silenciar» con el tiempo restante.
+            item(key = "mute") { HorizontalDivider(); MuteSwitchRow(meta); HorizontalDivider(); Spacer(Modifier.height(8.dp)) }
             if (canWork) {
                 item {
                     Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -283,6 +285,9 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
             }
             HorizontalDivider()
             NavRow("👤 " + stringResource(R.string.profile_edit), null, tag = "rowProfile") { onNavigate("profile") }
+            HorizontalDivider()
+            // SPEC-silencio §3: «No molestar» (1 hora · 8 horas · Hasta mañana · Hasta que lo reactive).
+            DndRow()
             HorizontalDivider()
             NavRow("🔑 " + stringResource(R.string.join_title), stringResource(R.string.join_ph), tag = "rowJoinCode") { joinCode = true }
             data?.organizations.orEmpty().filter { it.myRole == "owner" || it.myRole == "admin" }.forEach { o ->

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.4 (20): silenciar chats y «No molestar» (SPEC-silencio). -->
+<resources>
+    <string name="mute_until_time">Silenciado hasta las %1$s</string>
+    <string name="mute_until_date">Silenciado hasta el %1$s</string>
+    <string name="mute_switch_off">Notificaciones activas</string>
+    <string name="mute_switch_hint">Las menciones te siguen avisando, salvo si lo silencias hasta que lo reactives.</string>
+    <string name="dnd_title">No molestar</string>
+    <string name="dnd_tomorrow">Hasta mañana</string>
+    <string name="dnd_until_time">No molestar hasta las %1$s</string>
+    <string name="dnd_until_date">No molestar hasta el %1$s</string>
+    <string name="dnd_on_until_time">Activo hasta las %1$s</string>
+    <string name="dnd_on_until_date">Activo hasta el %1$s</string>
+    <string name="dnd_on">Activo</string>
+    <string name="dnd_off">Desactivado</string>
+    <string name="dnd_turn_off">Reactivar</string>
+    <string name="dnd_hint">Sin notificaciones de ningún chat, reunión ni recordatorio. Los no leídos se guardan igual.</string>
+    <string name="dnd_local_only">Guardado solo en este dispositivo</string>
+    <string name="dnd_on_cd">No molestar activo</string>
+</resources>

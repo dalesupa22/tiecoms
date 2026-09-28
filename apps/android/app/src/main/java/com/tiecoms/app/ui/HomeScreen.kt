@@ -213,6 +213,7 @@ fun GroupsScreen(
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             ConnectionBanner(state.connection)
+            DndBanner()
             SearchField(query) { query = it }
             GroupsViewSwitch(view) { v -> view = v; container.settings.groupsView = v.id }
             FilterPills(
@@ -434,6 +435,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             ConnectionBanner(state.connection)
+            DndBanner()
             SearchField(query, placeholder = stringResource(R.string.dm_search)) { query = it }
             val all = data.conversations.count { GroupsTree.isDm(data, it) }
             val unread = data.conversations.count { GroupsTree.isDm(data, it) && com.tiecoms.app.core.HomeTree.pending(it, System.currentTimeMillis()) > 0 }
@@ -776,7 +778,7 @@ internal fun ConversationRow(
                         }
                     }
                     if (pinMark) Text(" 📌", style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("pinMark-${c.id}"))
-                    if (muted) Text(" 🔕", style = MaterialTheme.typography.labelMedium)
+                    if (muted) MutedMark(tag = "muted-${c.id}")
                     if (threadUnread > 0) {
                         Spacer(Modifier.width(6.dp))
                         Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(8.dp)) {

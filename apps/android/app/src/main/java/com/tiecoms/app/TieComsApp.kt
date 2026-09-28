@@ -205,6 +205,12 @@ class AppContainer(private val app: Application) {
     fun showPush(p: com.tiecoms.app.core.PushMessage) {
         val c = client.value
         if (foreground && c.state.value.status == com.tiecoms.app.core.SessionStatus.READY && c.state.value.connection == com.tiecoms.app.core.ConnectionStatus.ONLINE) return
+        // SPEC-silencio: con «No molestar» el servidor ya no manda push; si llega uno (servidor viejo, carrera), no se muestra.
+        if (c.dndActive()) return
+        // Chat silenciado: solo pasa la mención (salvo el silencio «siempre»), igual que el filtro del servidor.
+        val conv = c.meta(p.conversationId)
+        if (conv != null && p.type != "event" && p.type != "reminder" &&
+            !com.tiecoms.app.core.Silence.notifies(conv.mutedUntil, p.type == "mention", null, System.currentTimeMillis())) return
         // Aviso de reunión (minutes) vs. convocatoria: claves distintas para no taparse entre sí.
         // Una reacción comparte el messageId con el aviso del mensaje: no se deduplica (la etiqueta la reemplaza).
         val dedupe = if (p.type == "event" && p.minutes != null) "soon:" + p.eventId else if (p.type == "reaction") null else p.messageId

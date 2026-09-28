@@ -345,9 +345,8 @@ fun SidePanelHeader(
                 IconButton(onClick = { menu = true }, modifier = Modifier.testTag("sideMore")) { Icon(Icons.Filled.MoreVert, stringResource(R.string.menu_more)) }
                 AnchoredMenu(menu, listOfNotNull(
                     if (side.isSide) SheetItem(ctx.getString(R.string.side_add_person), "＋", tag = "sideAddPerson") { onAddPerson() } else null,
-                    SheetItem(ctx.getString(if (side.mutedAt(System.currentTimeMillis())) R.string.menu_unmute else R.string.menu_mute), "🔕", tag = "sideMute") {
-                        scope.launch { runCatching { client.setConversationPrefs(side.id, mutedUntil = if (side.mutedAt(System.currentTimeMillis())) null else "2099-12-31T00:00:00Z") } }
-                    },
+                    // Mismas opciones que el chat (SPEC-silencio §2).
+                    muteMenuItem(ctx, side),
                     onReturn?.let { r -> SheetItem(ctx.getString(if (side.isSide) R.string.side_return else R.string.lin_return), "↩", tag = "sideReturn") { r() } },
                     null,
                     SheetItem(ctx.getString(R.string.side_leave), "⎋", danger = true, tag = "sideLeave") { onLeave() },

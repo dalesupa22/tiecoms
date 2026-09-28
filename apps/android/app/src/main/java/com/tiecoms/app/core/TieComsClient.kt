@@ -63,6 +63,10 @@ data class ClientState(
     /** Sube cuando cambia algún árbol de archivos (`drive.updated`): la pantalla Archivos recarga. */
     val driveRevision: Int = 0,
     val blockedUserIds: Set<String> = emptySet(),
+    /** «No molestar» hasta (ISO); null = apagado. Viene del bootstrap, de `me.dnd` o de este dispositivo. */
+    val dndUntil: String? = null,
+    /** El servidor no conoce PUT /me/dnd (404): «No molestar» vive solo en este dispositivo. */
+    val dndLocalOnly: Boolean = false,
 )
 
 /** Avisos puntuales para sonidos y notificaciones. */
@@ -288,6 +292,7 @@ class TieComsClient(
         accessToken = null
         secrets.set(null)
         if (me != null) storage.clearPrefix("u:$me:")
+        storage.set(DND_KEY, null); storage.set(DND_LOCAL_KEY, null)
         val wasSignedIn = s.status != SessionStatus.ANONYMOUS
         _state.value = ClientState(status = SessionStatus.ANONYMOUS)
         if (wasSignedIn) _signals.tryEmit(ClientSignal.SignedOut)
@@ -312,12 +317,18 @@ class TieComsClient(
     suspend fun loadBootstrap(): BootstrapDTO = withContext(dispatcher) { loadBootstrapInternal() }
 
     private suspend fun loadBootstrapInternal(): BootstrapDTO {
-        val data = request("GET", "/bootstrap", null, BootstrapDTO.serializer())
+        val raw = request("GET", "/bootstrap", null, JsonElement.serializer())
+        val data = TcJson.decodeFromJsonElement(BootstrapDTO.serializer(), raw)
         runCatching { Instant.parse(data.serverTime).toEpochMilli() }.getOrNull()?.let { serverOffset = it - now() }
         val sorted = data.copy(conversations = data.conversations.sortedByDescending { it.lastMessageAt ?: "" })
         // Conversaciones que ya no están en mi alcance: se purgan de la caché local.
         val allowed = sorted.conversations.map { it.id }.toSet()
-        setState { copy(data = sorted, conversations = conversations.filterKeys { it in allowed }) }
+        // «No molestar»: si el servidor manda me.dndUntil (aunque sea null), manda él; si no lo conoce, queda el del dispositivo.
+        val serverKnowsDnd = ((raw as? JsonObject)?.get("me") as? JsonObject)?.containsKey("dndUntil") == true
+        val dnd = if (serverKnowsDnd) data.me.dndUntil else storage.get(DND_KEY)
+        if (serverKnowsDnd) { storage.set(DND_KEY, dnd); storage.set(DND_LOCAL_KEY, null) }
+        val localOnly = !serverKnowsDnd && storage.get(DND_LOCAL_KEY) == "1"
+        setState { copy(data = sorted, conversations = conversations.filterKeys { it in allowed }, dndUntil = dnd, dndLocalOnly = localOnly) }
         return sorted
     }
 
@@ -396,16 +407,18 @@ class TieComsClient(
             }
             is AccountEvent.ReminderDue -> {
                 setState { copy(reminders = (reminders.filter { it.id != e.reminder.id } + e.reminder).sortedBy { it.remindAt }) }
-                _signals.tryEmit(ClientSignal.ReminderDue(e.reminder))
+                // «No molestar»: el recordatorio queda en la lista, sin aviso.
+                if (!dndActive()) _signals.tryEmit(ClientSignal.ReminderDue(e.reminder))
             }
             is AccountEvent.EventSoon -> {
                 setState { copy(events = events + (e.event.id to e.event)) }
-                _signals.tryEmit(ClientSignal.EventSoon(e.event, e.minutes))
+                if (!dndActive()) _signals.tryEmit(ClientSignal.EventSoon(e.event, e.minutes))
             }
             is AccountEvent.PrefsUpdated -> scheduleBootstrap()
             is AccountEvent.WhatsAppUpdated -> setState { copy(waRevision = waRevision + 1) }
             is AccountEvent.DriveUpdated -> setState { copy(driveRevision = driveRevision + 1) }
             AccountEvent.RemindersChanged -> scope.launch { runCatching { loadRemindersInternal() } }
+            is AccountEvent.DndUpdated -> applyDnd(e.dndUntil, localOnly = false)
             is AccountEvent.Unknown -> Unit
         }
     }
@@ -430,7 +443,7 @@ class TieComsClient(
                     else -> null
                 }
                 val fresh = runCatching { Instant.parse(ev.updatedAt).toEpochMilli() }.getOrDefault(0L) >= liveSince
-                if (kind != null && invited && ev.organizerId != myId && !muted && fresh) _signals.tryEmit(ClientSignal.CalendarChanged(ev, kind))
+                if (kind != null && invited && ev.organizerId != myId && !muted && !dndActive() && fresh) _signals.tryEmit(ClientSignal.CalendarChanged(ev, kind))
             }
             else -> Unit
         }
@@ -439,10 +452,10 @@ class TieComsClient(
             // Solo suena lo creado con la conexión ya en vivo: si el despacho del servidor llega tarde
             // con mensajes escritos mientras estábamos desconectados, eso cuenta como recuperación.
             val createdAt = runCatching { Instant.parse(e.message.createdAt).toEpochMilli() }.getOrDefault(Long.MAX_VALUE)
-            // Silenciada: sin sonido ni notificación.
-            // Una mención a mí (o @todos) avisa aunque esté silenciada, salvo el silencio «siempre».
-            val mentioned = Mentions.mentionsMe(e.message, myId) && !(meta(e.conversationId)?.mutedUntil?.startsWith("2099") ?: false)
-            if (fresh && (!muted || mentioned) && e.message.authorId != myId && e.message.authorId !in s.blockedUserIds && e.message.kind != "system" && createdAt >= liveSince) _signals.tryEmit(ClientSignal.Incoming(e.message))
+            // Silenciada: sin sonido ni notificación. Una mención a mí (o @todos) avisa aunque esté silenciada,
+            // salvo el silencio «siempre» (como el push del servidor). «No molestar» apaga todo (SPEC-silencio).
+            val mentioned = Mentions.mentionsMe(e.message, myId)
+            if (fresh && Silence.notifies(meta.mutedUntil, mentioned, dndUntil(), now()) && e.message.authorId != myId && e.message.authorId !in s.blockedUserIds && e.message.kind != "system" && createdAt >= liveSince) _signals.tryEmit(ClientSignal.Incoming(e.message))
         }
         val local = s.conversations[e.conversationId]
         if (local?.loaded != true) {
@@ -741,6 +754,37 @@ class TieComsClient(
     }
     suspend fun commentIssue(id: String, body: String): IssueDTO = withContext(dispatcher) {
         val i = req("POST", "/issues/$id/comments", buildJsonObject { put("body", JsonPrimitive(body)) }, IssueDTO.serializer()); putIssues(listOf(i)); i
+    }
+
+    // ---------- «No molestar» (SPEC-silencio §3) ----------
+    /** Valor vigente (estado o, antes del primer bootstrap —p. ej. un push con la app cerrada—, el guardado). */
+    fun dndUntil(): String? = if (s.data != null) s.dndUntil else storage.get(DND_KEY)
+    fun dndActive(): Boolean = Silence.active(dndUntil(), now())
+
+    private fun applyDnd(until: String?, localOnly: Boolean) {
+        val v = until?.takeIf { Silence.active(it, now()) }
+        storage.set(DND_KEY, v); storage.set(DND_LOCAL_KEY, if (localOnly) "1" else null)
+        setState { copy(dndUntil = v, dndLocalOnly = localOnly) }
+    }
+
+    /**
+     * PUT /me/dnd `{ until }` (null apaga). Devuelve true si quedó en el servidor; false si el servidor no conoce
+     * la ruta (404) y quedó solo en este dispositivo. Otros errores deshacen el cambio y se lanzan.
+     */
+    suspend fun setDnd(until: String?): Boolean = withContext(dispatcher) {
+        val before = s.dndUntil to s.dndLocalOnly
+        applyDnd(until, s.dndLocalOnly)
+        try {
+            val r = req("PUT", "/me/dnd", buildJsonObject { put("until", until?.let { JsonPrimitive(it) } ?: JsonNull) }, JsonElement.serializer())
+            val v = ((r as? JsonObject)?.get("dndUntil") as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+            applyDnd(v, localOnly = false)
+            true
+        } catch (e: ApiException) {
+            if (e.status == 404 || e.status == 405) { applyDnd(until, localOnly = true); false }
+            else { applyDnd(before.first, before.second); throw e }
+        } catch (e: Exception) {
+            applyDnd(before.first, before.second); throw e
+        }
     }
 
     // ---------- Preferencias, fijados, no leído, edición ----------
@@ -1309,6 +1353,10 @@ object SideOutsiders {
 }
 
 /** Marcador de «no cambiar» para parámetros anulables. */
+/** «No molestar» guardado en el dispositivo (espejo del servidor o, con un servidor viejo, el único). */
+internal const val DND_KEY = "dnd:until"
+internal const val DND_LOCAL_KEY = "dnd:local"
+
 @JvmField val UNCHANGED: String = String(charArrayOf('\u0000'))
 
 internal fun upsertMessage(list: List<MessageDTO>, m: MessageDTO): List<MessageDTO> {

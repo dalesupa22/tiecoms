@@ -272,9 +272,13 @@ private fun MainNav() {
                     Tab("settings", R.string.nav_you, 0) {
                         val me = data?.me
                         val org = com.tiecoms.app.core.Names.org(data, me?.primaryOrgId)
+                        // «No molestar» activo: la lunita sobre la foto (SPEC-silencio §3).
+                        val dndNow = rememberSilenceNow(state.dndUntil)
+                        DndMoonBadge(com.tiecoms.app.core.Silence.active(state.dndUntil, dndNow)) {
                         Avatar(me?.name ?: "?", parseColor(org?.colorBg, com.tiecoms.app.ui.theme.Brand.Black), parseColor(org?.colorFg, androidx.compose.ui.graphics.Color.White),
                             size = 26.dp, photo = me?.avatarUrl,
                             modifier = if (route == "settings") Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, androidx.compose.foundation.shape.CircleShape) else Modifier)
+                        }
                     },
                 )
                 items.forEach { t ->

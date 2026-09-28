@@ -35,6 +35,8 @@ sealed interface AccountEvent {
     data class DriveUpdated(val workspaceId: String?) : AccountEvent
     /** Mis recordatorios cambiaron en otro dispositivo (👀 / ✅): volver a pedir GET /reminders. */
     data object RemindersChanged : AccountEvent
+    /** «No molestar» cambió en otra sesión (`me.dnd`); null = apagado. */
+    data class DndUpdated(val dndUntil: String?) : AccountEvent
     data class Unknown(val type: String) : AccountEvent
 }
 
@@ -86,6 +88,7 @@ fun decodeAccountEvent(el: JsonElement): AccountEvent {
         "whatsapp.updated" -> AccountEvent.WhatsAppUpdated(o.str("accountId"))
         "drive.updated" -> AccountEvent.DriveUpdated(o.str("workspaceId"))
         "reminders.changed" -> AccountEvent.RemindersChanged
+        "me.dnd" -> if (o.containsKey("dndUntil")) AccountEvent.DndUpdated(o.str("dndUntil")) else AccountEvent.Unknown(type)
         else -> AccountEvent.Unknown(type)
     }
 }

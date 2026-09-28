@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AssistantActionDTO, AssistantTurnDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
-import { navigate } from '../router.ts';
+import { asset, navigate } from '../router.ts';
 import { errorText, getLang as lang, t } from '../i18n.ts';
 
 /**
@@ -70,7 +70,7 @@ export function AssistantBubble({ hidden }: { hidden: boolean }) {
         <button className="ai-bubble" aria-label={t('ai.open')} title={t('ai.bubbleHint')}
           onPointerDown={down} onPointerUp={up} onPointerLeave={() => { if (press.current && !press.current.long) { clearTimeout(press.current.timer); press.current = null; } }}
           onContextMenu={(e) => e.preventDefault()}>
-          <span aria-hidden>✦</span>
+          <img src={asset('/gg-mark-animado.svg')} alt="" width={34} height={34} draggable={false} />
         </button>
       )}
       {open && <AssistantPanel userId={me} listenOnOpen={listenOnOpen} onClose={() => setOpen(false)} />}
@@ -201,8 +201,8 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
       <div className="ai-scrim only-mobile" onClick={onClose} />
       <section className="ai-panel">
         <header className="ai-head">
-          <span className="ai-mark" aria-hidden>✦</span>
-          <b className="grow">{t('ai.title')}</b>
+          <img className="ai-mark" src={asset('/gg-mark.svg')} alt="" width={30} height={30} />
+          <span className="grow ai-head-t"><b>{t('ai.title')}</b><span className="muted small">{t('ai.subtitle')}</span></span>
           <button className="ai-icon" aria-pressed={speakOn} title={speakOn ? t('ai.speakOff') : t('ai.speakOn')} aria-label={speakOn ? t('ai.speakOff') : t('ai.speakOn')} onClick={toggleSpeak}>{speakOn ? '🔊' : '🔇'}</button>
           {turns.length > 0 && <button className="ai-icon" title={t('ai.clear')} aria-label={t('ai.clear')} onClick={clear}>⟲</button>}
           <button className="ai-icon" title={t('common.close')} aria-label={t('common.close')} onClick={onClose}>✕</button>

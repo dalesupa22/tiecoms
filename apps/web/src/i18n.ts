@@ -530,7 +530,7 @@ const es = {
   'add.onlyMembers': 'Solo los miembros pueden invitar', 'add.noMatch': 'Nadie con ese nombre. Escribe su correo para invitarlo.',
   'join.org': '{name} te invita a unirte a {org} como colega.', 'auth.joiningGroups': 'Entras también a {groups}.',
   // Asistente
-  'ai.open': 'Abrir gg', 'ai.bubbleHint': 'gg · mantén presionado para hablar', 'ai.title': 'gg',
+  'ai.open': 'Abrir gg', 'ai.bubbleHint': 'gg · mantén presionado para hablar', 'ai.title': 'gg', 'ai.subtitle': 'Tu asistente con IA',
   'ai.hello': 'Hola, {name}. Soy gg, ¿en qué te ayudo?', 'ai.intro': 'Escríbeme o háblame: respondo mensajes, reporto lo pendiente, creo grupos, asuntos y reuniones. Nada se envía sin tu visto bueno.',
   'ai.voiceHint': 'Tip: mantén presionada la burbuja ✦ para hablar y suelta para enviar.',
   'ai.s.report': 'Dame un reporte de lo que hay', 'ai.s.pending': 'Responde mis pendientes', 'ai.s.due': '¿Qué vence hoy?',
@@ -1041,7 +1041,7 @@ const en: Record<Key, string> = {
   'add.onlyMembers': 'Only members can invite', 'add.noMatch': 'No one by that name. Type their email to invite them.',
   'join.org': '{name} invites you to join {org} as a colleague.', 'auth.joiningGroups': 'You also join {groups}.',
   // Assistant
-  'ai.open': 'Open gg', 'ai.bubbleHint': 'gg · press and hold to talk', 'ai.title': 'gg',
+  'ai.open': 'Open gg', 'ai.bubbleHint': 'gg · press and hold to talk', 'ai.title': 'gg', 'ai.subtitle': 'Your AI assistant',
   'ai.hello': 'Hi, {name}. I\'m gg, how can I help?', 'ai.intro': 'Type or talk to me: I reply to messages, report what is pending, and create groups, subjects and meetings. Nothing is sent without your OK.',
   'ai.voiceHint': 'Tip: press and hold the ✦ bubble to talk, release to send.',
   'ai.s.report': 'Give me a report of what is going on', 'ai.s.pending': 'Reply to my pending messages', 'ai.s.due': 'What is due today?',

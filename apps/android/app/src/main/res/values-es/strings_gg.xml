@@ -7,7 +7,7 @@
     <string name="ai_subtitle">Tu asistente con IA</string>
     <string name="ai_hello">Hola, %1$s. Soy gg, ¿en qué te ayudo?</string>
     <string name="ai_intro">Escríbeme o háblame: respondo mensajes, reporto lo pendiente, creo grupos, asuntos y reuniones. Nada se envía sin tu visto bueno.</string>
-    <string name="ai_voice_hint">Tip: mantén presionada la burbuja ✦ para hablar y suelta para enviar.</string>
+    <string name="ai_voice_hint">Tip: mantén presionada la burbuja gg para hablar y suelta para enviar.</string>
     <string name="ai_s_report">Dame un reporte de lo que hay</string>
     <string name="ai_s_pending">Responde mis pendientes</string>
     <string name="ai_s_due">¿Qué vence hoy?</string>

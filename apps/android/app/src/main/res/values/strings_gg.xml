@@ -7,7 +7,7 @@
     <string name="ai_subtitle">Your AI assistant</string>
     <string name="ai_hello">Hi, %1$s. I\'m gg, how can I help?</string>
     <string name="ai_intro">Type or talk to me: I reply to messages, report what is pending, and create groups, subjects and meetings. Nothing is sent without your OK.</string>
-    <string name="ai_voice_hint">Tip: press and hold the ✦ bubble to talk, release to send.</string>
+    <string name="ai_voice_hint">Tip: press and hold the gg bubble to talk, release to send.</string>
     <string name="ai_s_report">Give me a report of what is going on</string>
     <string name="ai_s_pending">Reply to my pending messages</string>
     <string name="ai_s_due">What is due today?</string>

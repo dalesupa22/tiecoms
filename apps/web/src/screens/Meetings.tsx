@@ -4,6 +4,8 @@ import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
 import { copyText, toast } from '../menu.tsx';
 import { Modal, conversationTitle } from '../ui.tsx';
+import { findMeetingAttempt, saveMeetingAttempt } from '../meeting-attempt.ts';
+import { prepareMeetingProof, takeMeetingProof, clearMeetingProof } from '../meeting-oauth.ts';
 import { queryParam } from '../router.ts';
 
 /**
@@ -28,10 +30,15 @@ function useConnections() {
 
 /** Abre el consentimiento del proveedor en otra pestaña; al volver, Ajustes › Reuniones confirma. */
 async function connect(p: MeetingProvider) {
+  const session = client.getSessionIdentity();
   try {
-    const { url } = await client.connectMeetingProvider(p, 'web');
-    window.location.assign(url);
-  } catch (e) { toast(errorText(e)); }
+    const userId = client.getState().data?.me.id;
+    if (!userId) return;
+    const proofChallenge = await prepareMeetingProof(sessionStorage, userId, p, () => client.getSessionIdentity() === session);
+    if (client.getSessionIdentity() !== session) { clearMeetingProof(sessionStorage); return; }
+    const { url } = await client.connectMeetingProvider(p, proofChallenge, 'web');
+    if (client.getSessionIdentity() === session) window.location.assign(url);
+  } catch (e) { if (client.getSessionIdentity() === session) { clearMeetingProof(sessionStorage); toast(errorText(e)); } }
 }
 
 function statusText(c: MeetingConnectionDTO) {
@@ -45,13 +52,27 @@ function statusText(c: MeetingConnectionDTO) {
 export function MeetingsSettings() {
   const { list, error, reload } = useConnections();
   useEffect(() => {
-    // Vuelta del proveedor: /ajustes?provider=google&connected=1 (o &error=…).
     const p = queryParam('provider');
+    const receipt = queryParam('receipt');
+    const error = queryParam('error');
     if (!p) return;
-    if (queryParam('connected')) toast(t('meet.connectedToast', { name: appLabel(p as MeetingProvider) }));
-    else if (queryParam('error')) toast(queryParam('error') === 'cancelled' ? t('meet.cancelledToast') : t('meet.failedToast', { code: queryParam('error') ?? '' }));
+    // Remove the one-use receipt before any asynchronous work or rendered link.
     history.replaceState(null, '', location.pathname + location.hash);
-    void reload();
+    if (receipt) {
+      const userId = client.getState().data?.me.id;
+      if (!userId) { clearMeetingProof(sessionStorage); return; }
+      try {
+        const verifier = takeMeetingProof(sessionStorage, userId, p);
+        void client.confirmMeetingProvider(receipt, verifier).then((result) => {
+          toast(t('meet.connectedToast', { name: appLabel(result.provider) }));
+          return reload();
+        }).catch((e) => toast(errorText(e)));
+      } catch (e) { toast(errorText(e)); }
+    } else {
+      clearMeetingProof(sessionStorage);
+      if (error) toast(error === 'cancelled' ? t('meet.cancelledToast') : t('meet.failedToast', { code: error }));
+    }
+
   }, []);
   return (
     <div id="reuniones">
@@ -81,18 +102,25 @@ export function MeetingDialog({ conversationId, scheduled = false, onClose }: { 
   const d = useClient((s) => s.data)!;
   const conv = d.conversations.find((c) => c.id === conversationId);
   const { list, error: listError, reload } = useConnections();
-  const [provider, setProvider] = useState<MeetingProvider | null>(null);
-  const [when, setWhen] = useState<'now' | 'later'>(scheduled ? 'later' : 'now');
-  const start0 = new Date(Date.now() + 3600_000); start0.setMinutes(0, 0, 0);
+  const [restored] = useState(() => {
+    try { return { saved: findMeetingAttempt(localStorage, d.me.id, conversationId), error: false }; }
+    catch { return { saved: null, error: true }; }
+  });
+  const saved = restored.saved;
+  const [provider, setProvider] = useState<MeetingProvider | null>(saved?.provider ?? null);
+  const [when, setWhen] = useState<'now' | 'later'>(saved ? (saved.startsAt ? 'later' : 'now') : scheduled ? 'later' : 'now');
+  const start0 = saved?.startsAt ? new Date(saved.startsAt) : new Date(Date.now() + 3600_000); if (!saved) start0.setMinutes(0, 0, 0);
   const pad = (n: number) => String(n).padStart(2, '0');
   const [date, setDate] = useState(`${start0.getFullYear()}-${pad(start0.getMonth() + 1)}-${pad(start0.getDate())}`);
-  const [time, setTime] = useState(`${pad(start0.getHours())}:00`);
-  const [duration, setDuration] = useState(30);
-  const [title, setTitle] = useState(`${t('meet.defaultTitle')} · ${conv ? conversationTitle(d, conv) : ''}`.trim());
+  const [time, setTime] = useState(`${pad(start0.getHours())}:${pad(start0.getMinutes())}`);
+  const [duration, setDuration] = useState(saved?.durationMin ?? 30);
+  const [title, setTitle] = useState(saved?.title ?? `${t('meet.defaultTitle')} · ${conv ? conversationTitle(d, conv) : ''}`.trim());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<MeetingDTO | null>(null);
-  const key = useRef(uuid());
+  const key = useRef(saved?.idempotencyKey ?? uuid());
+  const attempted = useRef<Parameters<typeof client.createMeeting>[0] | null>(saved);
+  const [uncertain, setUncertain] = useState(!!saved);
   useEffect(() => {
     if (!list || provider) return;
     const ready = list.find((c) => c.available && c.status === 'active');
@@ -102,18 +130,26 @@ export function MeetingDialog({ conversationId, scheduled = false, onClose }: { 
   const startsAt = when === 'now' ? null : new Date(`${date}T${time}`);
   const invalidWhen = !!startsAt && (Number.isNaN(startsAt.getTime()) || startsAt.getTime() < Date.now() - 60_000);
   // Cambiar algo del formulario es otra reunión: llave nueva. Un reintento sin cambios reusa la misma.
-  useEffect(() => { key.current = uuid(); }, [provider, when, date, time, duration, title]);
+  useEffect(() => { if (!attempted.current) key.current = uuid(); }, [provider, when, date, time, duration, title]);
 
   async function create() {
-    if (!provider || busy) return;
+    if (!provider || busy || restored.error) return;
     setBusy(true); setError(null);
     try {
-      const m = await client.createMeeting({
+      attempted.current ??= {
         provider, conversationId, idempotencyKey: key.current, title: title.trim() || t('meet.defaultTitle'),
         startsAt: startsAt ? startsAt.toISOString() : null, durationMin: duration, timezone: deviceTz(), share: true,
-      });
-      setDone(m);
+      };
+      saveMeetingAttempt(localStorage, d.me.id, conversationId, attempted.current);
+      const m = await client.createMeeting(attempted.current);
+      if (m.status !== 'created' || !m.joinUrl) throw Object.assign(new Error(t('meet.uncertainHint')), { status: 409, code: 'meeting_pending' });
+      saveMeetingAttempt(localStorage, d.me.id, conversationId, null);
+      setDone(m); setUncertain(false);
     } catch (e: any) {
+      if (client.getState().data?.me.id !== d.me.id || e?.code === 'session_changed') return;
+      const ambiguous = !!e?.details?.meetingId || !e?.status || e.status >= 500 || ['meeting_in_progress', 'meeting_pending', 'meeting_uncertain', 'idempotency_mismatch'].includes(e?.code);
+      setUncertain(ambiguous);
+      if (!ambiguous) { attempted.current = null; saveMeetingAttempt(localStorage, d.me.id, conversationId, null); }
       setError(errorText(e));
       if (e?.code === 'reconnect_required' || e?.code === 'not_connected') void reload();
     } finally { setBusy(false); }
@@ -138,11 +174,12 @@ export function MeetingDialog({ conversationId, scheduled = false, onClose }: { 
   return (
     <Modal title={when === 'now' ? `📹 ${t('meet.nowTitle')}` : `📅 ${t('meet.laterTitle')}`} onClose={onClose}>
       <div className="issue-q">
+        {restored.error && <div className="error">{t('meet.restoreError')}</div>}
         <div className="issue-q-label">{t('meet.withWhat')}</div>
         {!list && (listError ? <div className="error">{listError}</div> : <div className="muted">{t('common.loading')}</div>)}
         <div className="chips">
           {list?.map((c) => (
-            <button key={c.provider} className={`chip ${provider === c.provider ? 'on' : ''}`} aria-pressed={provider === c.provider} disabled={!c.available}
+            <button key={c.provider} className={`chip ${provider === c.provider ? 'on' : ''}`} aria-pressed={provider === c.provider} disabled={!c.available || busy || uncertain}
               title={statusText(c)} onClick={() => setProvider(c.provider)}>{ICON[c.provider]} {c.label}{c.available && c.status !== 'active' ? ` · ${t('meet.notConnectedShort')}` : ''}</button>
           ))}
         </div>
@@ -155,26 +192,27 @@ export function MeetingDialog({ conversationId, scheduled = false, onClose }: { 
       <div className="issue-q">
         <div className="issue-q-label">{t('meet.when')}</div>
         <div className="chips">
-          <button className={`chip ${when === 'now' ? 'on' : ''}`} onClick={() => setWhen('now')}>{t('meet.now')}</button>
-          <button className={`chip ${when === 'later' ? 'on' : ''}`} onClick={() => setWhen('later')}>📅 {t('meet.later')}</button>
+          <button className={`chip ${when === 'now' ? 'on' : ''}`} disabled={busy || uncertain} onClick={() => setWhen('now')}>{t('meet.now')}</button>
+          <button className={`chip ${when === 'later' ? 'on' : ''}`} disabled={busy || uncertain} onClick={() => setWhen('later')}>📅 {t('meet.later')}</button>
         </div>
         {when === 'later' && (
           <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
-            <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ maxWidth: 180 }} aria-label={t('sched.date')} />
-            <input className="input" type="time" step={300} value={time} onChange={(e) => setTime(e.target.value)} style={{ maxWidth: 130 }} aria-label={t('sched.time')} />
+            <input className="input" type="date" disabled={busy || uncertain} value={date} onChange={(e) => setDate(e.target.value)} style={{ maxWidth: 180 }} aria-label={t('sched.date')} />
+            <input className="input" type="time" step={300} disabled={busy || uncertain} value={time} onChange={(e) => setTime(e.target.value)} style={{ maxWidth: 130 }} aria-label={t('sched.time')} />
           </div>
         )}
         <div className="chips">
-          {[15, 30, 45, 60].map((m) => <button key={m} className={`chip ${duration === m ? 'on' : ''}`} onClick={() => setDuration(m)}>{m} min</button>)}
+          {[15, 30, 45, 60].map((m) => <button key={m} className={`chip ${duration === m ? 'on' : ''}`} disabled={busy || uncertain} onClick={() => setDuration(m)}>{m} min</button>)}
         </div>
         {invalidWhen && <div className="error">{t('sched.future')}</div>}
       </div>
-      <label className="field"><span>{t('meet.titleLabel')}</span><input className="input" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+      <label className="field"><span>{t('meet.titleLabel')}</span><input className="input" maxLength={200} disabled={busy || uncertain} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
       {error && <div className="error">{error}</div>}
+      {uncertain && <div className="hint">{t('meet.uncertainHint')}</div>}
       <div className="modal-actions">
         <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
-        <button className="btn primary" disabled={busy || !sel || sel.status !== 'active' || invalidWhen || title.trim().length < 2} onClick={() => void create()}>
-          {busy ? t('meet.creating') : `📹 ${t('meet.createShare')}`}
+        <button className="btn primary" disabled={restored.error || busy || !sel || sel.status !== 'active' || (!uncertain && invalidWhen) || title.trim().length < 2} onClick={() => void create()}>
+          {busy ? t('meet.creating') : uncertain ? t('meet.retrySame') : `📹 ${t('meet.createShare')}`}
         </button>
       </div>
     </Modal>

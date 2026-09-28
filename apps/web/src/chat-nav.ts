@@ -13,7 +13,8 @@ export interface SeqMessage { seq: number }
  * Si `readFrom` no se conoce, se usan los últimos `unread` mensajes.
  */
 export function firstUnread(messages: SeqMessage[], readFrom: number | null, unread: number, hasMore: boolean): { seq: number } | 'older' | null {
-  if (unread <= 0 || !messages.length) return null;
+  if (unread <= 0) return null;
+  if (!messages.length) return hasMore ? 'older' : null;
   if (readFrom == null) {
     const m = messages[Math.max(0, messages.length - unread)]!;
     return { seq: m.seq };
@@ -24,5 +25,18 @@ export function firstUnread(messages: SeqMessage[], readFrom: number | null, unr
   return m ? { seq: m.seq } : null;
 }
 
-/** Cuántas páginas antiguas se cargan como mucho para encontrar el primer no leído; si no aparece, se abre al final. */
-export const MAX_OLDER_PAGES = 3;
+/** A jump over unread content must not advance a contiguous read cursor. */
+export function readThroughVisible(readFrom: number, seen: Set<number>, visible: number[]): number {
+  for (const seq of visible) if (seq > readFrom) seen.add(seq);
+  let through = readFrom;
+  while (seen.has(through + 1)) { seen.delete(++through); }
+  for (const seq of seen) if (seq <= through) seen.delete(seq);
+  return through;
+}
+
+/** The derived.from event has no message body in the log: its content is the parent's thread chip.
+ * This marker does not mark any messages inside that thread as read. */
+export function isReadTransparentMessage(m: { kind: string; body: string }): boolean {
+  if (m.kind !== 'system') return false;
+  try { return JSON.parse(m.body)?.k === 'derived.from'; } catch { return false; }
+}

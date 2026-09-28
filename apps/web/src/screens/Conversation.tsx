@@ -27,7 +27,7 @@ import { ConversationIssues, IssueDrawer, NewIssueDialog, isClosed } from './Iss
 import { DeriveDialog, LineageBar, MergedCard } from './Lineage.tsx';
 import { ChatBar, ThreadChip, threadsOf } from './ChatBar.tsx';
 import { AddMembersDialog } from './Dialogs.tsx';
-import { MAX_OLDER_PAGES, firstUnread } from '../chat-nav.ts';
+import { firstUnread, readThroughVisible, isReadTransparentMessage } from '../chat-nav.ts';
 
 type Row =
   | { kind: 'day'; key: string; label: string }
@@ -84,7 +84,11 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const [baseRead] = useState(() => { const c = client.getState().data?.conversations.find((x) => x.id === id); return c ? Math.max(c.lastReadSeq, c.historyFromSeq) : 0; });
   const [newLine, setNewLine] = useState<number | null>(null);
   const placing = useRef(!!entry);
-  const olderPages = useRef(0);
+  const loadingUnread = useRef(false);
+  const [placementFailed, setPlacementFailed] = useState(false);
+  const [placementStep, setPlacementStep] = useState(0);
+  const observedRead = useRef(baseRead);
+  const visibleRead = useRef(new Set<number>());
   const justPlaced = useRef(false);
   // Posición respecto al final: lejos (más de una pantalla), abajo, y si la línea de nuevos quedó arriba.
   const [nav, setNav] = useState({ far: false, bottom: !entry, lineAbove: false });
@@ -139,7 +143,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     void client.ensureMessage(id, seq).then((found) => {
       if (!found) return;
       setHighlight(seq);
-      requestAnimationFrame(() => document.getElementById(`msg-${id}-${seq}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+      requestAnimationFrame(() => document.getElementById(`msg-${id}-${seq}`)?.scrollIntoView({ block: 'center', behavior: 'instant' }));
       setTimeout(() => setHighlight(null), 2800);
     });
   };
@@ -179,7 +183,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       if (at > 0 && out[at - 1]!.kind === 'day') at -= 1;
       if (at >= 0) out.splice(at, 0, { kind: 'new', key: 'new-line' });
     }
-    return groupLinkRuns(out, expandedGroups, highlight);
+    return groupLinkRuns(out, expandedGroups, highlight, baseRead);
   }, [local?.messages, pending, expandedGroups, highlight, newLine]);
 
   // Mantiene la vista abajo al llegar mensajes, y la posición al cargar historial antiguo.
@@ -196,21 +200,26 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   }, [rows.length]);
 
   useEffect(() => {
-    if (conv && conv.unread > 0 && local?.loaded && document.visibilityState === 'visible' && atBottom.current) client.markRead(id);
+    if (conv && conv.unread > 0 && local?.loaded && !placing.current && document.visibilityState === 'visible') updateNav();
   }, [conv?.lastMessageSeq, conv?.unread, local?.loaded, id]);
 
-  // Posición al abrir con no leídos: busca el primero (hasta MAX_OLDER_PAGES páginas antiguas); si no aparece, al final.
+  // Locate every pending page; a failed page never turns into a successful jump to the end.
   useEffect(() => {
-    if (!placing.current || !entry || !local?.loaded || local.loading) return;
+    if (!placing.current || !entry || !local?.loaded || local.loading || loadingUnread.current || placementFailed) return;
     const r = firstUnread(local.messages, entry.readFrom, entry.unread, local.hasMore);
-    if (r === 'older' && olderPages.current < MAX_OLDER_PAGES) { olderPages.current += 1; void client.loadOlder(id); return; }
+    if (r === 'older') {
+      loadingUnread.current = true;
+      void client.loadOlder(id).then((loaded) => { loadingUnread.current = false; if (!loaded) setPlacementFailed(true); else setPlacementStep((n) => n + 1); });
+      return;
+    }
+    if (!r && entry.unread > 0) { setPlacementFailed(true); return; }
     placing.current = false;
-    if (r && r !== 'older') { justPlaced.current = true; setNewLine(r.seq); return; }
+    if (r) { justPlaced.current = true; setNewLine(r.seq); return; }
     atBottom.current = true;
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
     updateNav();
-  }, [local?.loaded, local?.loading, local?.messages]);
+  }, [local?.loaded, local?.loading, local?.messages, placementFailed, placementStep]);
   useLayoutEffect(() => {
     if (!justPlaced.current || newLine == null) return;
     justPlaced.current = false;
@@ -241,17 +250,27 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       if (r && r.top < box.bottom && r.bottom > box.top) seen.push(seq);
     }
     if (seen.length) setMentionsSeen((s0) => { const n = new Set(s0); seen.forEach((x) => n.add(x)); return n; });
-    if (!placing.current && bottom && client.getState().data?.conversations.find((x) => x.id === id)?.unread) client.markRead(id);
+    if (!placing.current && document.visibilityState === 'visible') {
+      const current = client.getState();
+      const meta = current.data?.conversations.find((x) => x.id === id);
+      const visible = (current.conversations[id]?.messages ?? []).filter((m) => {
+        if (isReadTransparentMessage(m)) return true;
+        const rect = document.getElementById(`msg-${id}-${m.seq}`)?.getBoundingClientRect();
+        return !!rect && rect.top < box.bottom && rect.bottom > box.top;
+      }).map((m) => m.seq);
+      observedRead.current = readThroughVisible(Math.max(observedRead.current, meta?.lastReadSeq ?? 0, meta?.historyFromSeq ?? 0), visibleRead.current, visible);
+      client.markRead(id, observedRead.current);
+    }
   }
   const pendingMentionsRef = useRef<number[]>([]);
-  const scrollToBottom = (smooth = true) => {
+  const scrollToBottom = () => {
     const el = scroller.current;
     if (!el) return;
     placing.current = false;
     atBottom.current = true;
     awaySeq.current = null;
-    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
-    client.markRead(id);
+    el.scrollTo({ top: el.scrollHeight, behavior: 'instant' });
+    requestAnimationFrame(updateNav);
     setNav((n) => ({ ...n, far: false, bottom: true }));
   };
   // Web: Fin o ⌥↓ / Alt+↓ con el foco fuera del compositor baja al final.
@@ -286,10 +305,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const jumpToMention = () => {
     const seq = pendingMentions[0];
     if (seq == null) return;
-    setMentionsSeen((s0) => new Set(s0).add(seq));
     jumpTo(seq);
   };
-  const jumpToNewLine = () => document.getElementById(`new-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  const jumpToNewLine = () => document.getElementById(`new-${id}`)?.scrollIntoView({ block: 'start', behavior: 'instant' });
 
   const send = () => {
     const body = text.trim();
@@ -483,6 +501,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
         )}
         {!embedded && <DerivedPendingStrip conv={conv} />}
 
+        {placementFailed && <div className="error" role="alert">{t('chat.unreadLoadFailed')} <button className="link-btn" onClick={() => { placing.current = true; atBottom.current = false; setPlacementFailed(false); }}>{t('chat.retryUnread')}</button></div>}
         <div className="msgs-wrap">
         {nav.lineAbove && entry && newLine != null && (
           <button className="jump-new" onClick={jumpToNewLine} aria-label={t('chat.jumpNew')} title={t('chat.jumpNew')}>{t('chat.newAbove', { n: entry.unread })}</button>
@@ -777,7 +796,7 @@ function SystemRow({ m, onIssue }: { m: MessageDTO; onIssue: (id: string) => voi
   // Los hilos no ensucian el chat: el aviso «se abrió un hilo» lo reemplaza el chip bajo su mensaje.
   if (p?.k === 'derived.from') return null;
   return (
-    <div className="msg-sys">
+    <div id={`msg-${m.conversationId}-${m.seq}`} className="msg-sys">
       {systemText(m.body)}
       {child && <> · <button className="link-btn" onClick={() => navigate(`/c/${child.id}`)}>⑂ {conversationTitle(d, child)}</button></>}
       {p?.issueId && <> · <button className="link-btn" onClick={() => onIssue(p.issueId)}>{t('lin.open')}</button></>}
@@ -815,12 +834,12 @@ function PendingRow({ p }: { p: PendingMessage }) {
  * Tres o más mensajes seguidos de la misma persona (en 10 minutos) que son solo enlaces se muestran como un
  * grupo compacto. No se agrupan los que tienen reacciones o el mensaje al que se está saltando.
  */
-function groupLinkRuns(rows: Row[], expanded: Set<string>, highlight: number | null): Row[] {
+function groupLinkRuns(rows: Row[], expanded: Set<string>, highlight: number | null, readFrom: number): Row[] {
   const out: Row[] = [];
   let run: Extract<Row, { kind: 'msg' }>[] = [];
   const flush = () => {
     const key = run.length ? `lg${run[0]!.m.id}` : '';
-    if (run.length >= 3 && !expanded.has(key) && !run.some((r) => r.m.seq === highlight)) out.push({ kind: 'links', key, msgs: run.map((r) => r.m) });
+    if (run.length >= 3 && !expanded.has(key) && !run.some((r) => r.m.seq === highlight || r.m.seq > readFrom)) out.push({ kind: 'links', key, msgs: run.map((r) => r.m) });
     else out.push(...run);
     run = [];
   };

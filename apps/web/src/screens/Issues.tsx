@@ -173,7 +173,7 @@ function tops(list: IssueDTO[], all: Record<string, IssueDTO>) {
 export function QuickAddIssue({ conversationId }: { conversationId?: string }) {
   const d = useClient((s) => s.data)!;
   const destinations = useMemo(() => (conversationId ? [] : issueDestinations(d)), [d, conversationId]);
-  const [conv, setConv] = useState(conversationId ?? destinations[0]?.id ?? '');
+  const [conv, setConv] = useState(conversationId ?? PERSONAL_DEST);
   const members = membersOf(d, conv);
   const [title, setTitle] = useState('');
   const [ownerId, setOwnerId] = useState(d.me.id);
@@ -261,7 +261,7 @@ export function NewIssueDialog({ conversationId, originMessageId, defaultTitle =
 }) {
   const d = useClient((s) => s.data)!;
   const destinations = useMemo(() => (conversationId ? [] : issueDestinations(d)), [d, conversationId]);
-  const [conv, setConv] = useState(conversationId ?? destinations[0]?.id ?? '');
+  const [conv, setConv] = useState(conversationId ?? PERSONAL_DEST);
   const members = membersOf(d, conv);
   const [title, setTitle] = useState(defaultTitle);
   const [ownerId, setOwnerId] = useState(d.me.id);

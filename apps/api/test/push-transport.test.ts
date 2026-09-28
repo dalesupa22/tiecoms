@@ -14,6 +14,8 @@ let apns: http2.Http2Server, fcm: http.Server;
 let apnsReqs: { headers: http2.IncomingHttpHeaders; body: any }[] = [];
 let fcmReqs: { url: string; headers: http.IncomingHttpHeaders; body: string }[] = [];
 let apnsReply: { status: number; body?: object } = { status: 200 };
+/** Tema que el APNs falso rechaza con DeviceTokenNotForTopic (token de la otra app). */
+let rejectTopic: string | null = null;
 let t: typeof import('../src/push-transport.ts');
 
 const parts = (jwt: string) => jwt.split('.').map((p, i) => (i < 2 ? JSON.parse(Buffer.from(p, 'base64url').toString()) : p));
@@ -24,6 +26,7 @@ beforeAll(async () => {
     req.on('data', (c) => (d += c));
     req.on('end', () => {
       apnsReqs.push({ headers: req.headers, body: JSON.parse(d) });
+      if (rejectTopic && req.headers['apns-topic'] === rejectTopic) return res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ reason: 'DeviceTokenNotForTopic' }));
       res.writeHead(apnsReply.status, { 'content-type': 'application/json' }).end(apnsReply.body ? JSON.stringify(apnsReply.body) : '');
     });
   });
@@ -44,7 +47,7 @@ beforeAll(async () => {
   const fcmOrigin = `http://127.0.0.1:${(fcm.address() as AddressInfo).port}`;
   Object.assign(process.env, {
     APNS_HOST: `http://127.0.0.1:${(apns.address() as AddressInfo).port}`,
-    APNS_KEY_ID: 'ABC123DEFG', APNS_TEAM_ID: 'B76US7H3L3', APNS_BUNDLE_ID: 'com.tiecoms.app',
+    APNS_KEY_ID: 'ABC123DEFG', APNS_TEAM_ID: 'B76US7H3L3', APNS_BUNDLE_ID: 'com.chaggu.app', APNS_BUNDLE_ID_LEGACY: 'com.tiecoms.app',
     APNS_KEY: ec.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString().replace(/\n/g, '\\n'),
     FCM_HOST: fcmOrigin,
     FCM_SERVICE_ACCOUNT: JSON.stringify({ project_id: 'tiecoms-app', client_email: 'push@tiecoms-app.iam.gserviceaccount.com', private_key: rsa.privateKey.export({ type: 'pkcs8', format: 'pem' }), token_uri: `${fcmOrigin}/token` }),
@@ -61,7 +64,7 @@ describe('APNs', () => {
     expect(r).toEqual({ ok: true });
     const req = apnsReqs.at(-1)!;
     expect(req.headers[':path']).toBe('/3/device/abc123token');
-    expect(req.headers['apns-topic']).toBe('com.tiecoms.app');
+    expect(req.headers['apns-topic']).toBe('com.chaggu.app');
     expect(req.headers['apns-push-type']).toBe('alert');
     expect(req.headers['apns-priority']).toBe('10');
     expect(req.headers['apns-collapse-id']).toBe('m1');
@@ -73,6 +76,16 @@ describe('APNs', () => {
     const signed = jwt.split('.').slice(0, 2).join('.');
     expect(verify('sha256', Buffer.from(signed), { key: ec.publicKey, dsaEncoding: 'ieee-p1363' }, Buffer.from(sig, 'base64url'))).toBe(true);
     expect(req.body.aps.alert.title).toBe('Hola');
+  });
+
+  it('un token de la app anterior se reintenta con su tema (com.tiecoms.app)', async () => {
+    rejectTopic = 'com.chaggu.app';
+    try {
+      const r = await t.sendApns('tokviejo', 'production', { aps: {} });
+      expect(r).toEqual({ ok: true });
+      const [a, b] = apnsReqs.slice(-2);
+      expect([a!.headers['apns-topic'], b!.headers['apns-topic']]).toEqual(['com.chaggu.app', 'com.tiecoms.app']);
+    } finally { rejectTopic = null; }
   });
 
   it('reutiliza el JWT y la conexión', async () => {

@@ -63,7 +63,8 @@ El contenedor solo monta `rds-ca.pem`, así que las llaves van **en línea** (un
 ```
 APNS_KEY_ID=XXXXXXXXXX
 APNS_TEAM_ID=B76US7H3L3
-APNS_BUNDLE_ID=com.tiecoms.app
+APNS_BUNDLE_ID=com.chaggu.app
+APNS_BUNDLE_ID_LEGACY=com.tiecoms.app   # tokens de la app anterior: se reintenta con este tema si Apple responde DeviceTokenNotForTopic
 APNS_KEY=-----BEGIN PRIVATE KEY-----\nMIGT...\n-----END PRIVATE KEY-----
 FCM_SERVICE_ACCOUNT={"type":"service_account","project_id":"…","private_key":"-----BEGIN PRIVATE KEY-----\n…","client_email":"…","token_uri":"https://oauth2.googleapis.com/token"}
 ```

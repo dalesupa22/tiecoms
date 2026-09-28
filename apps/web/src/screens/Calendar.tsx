@@ -6,6 +6,7 @@ import { errorText, locale, t } from '../i18n.ts';
 import { contextHandler, copyText, toast, type MenuItem } from '../menu.tsx';
 import { BASE, navigate } from '../router.ts';
 import { Avatar, Modal, conversationTitle, counterpartOrg, orgById, personById } from '../ui.tsx';
+import { QuickActions } from './Quick.tsx';
 
 // ---------- Zonas horarias sin librerías ----------
 const BROWSER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Bogota';
@@ -44,7 +45,7 @@ export const googleLink = (ev: CalendarEventDTO) => `https://calendar.google.com
 export const outlookLink = (ev: CalendarEventDTO) => `https://outlook.office.com/calendar/0/deeplink/compose?path=/calendar/action/compose&rru=addevent&subject=${encodeURIComponent(ev.title)}&startdt=${encodeURIComponent(ev.startsAt)}&enddt=${encodeURIComponent(ev.endsAt)}&body=${encodeURIComponent(details(ev))}&location=${encodeURIComponent(ev.location ?? '')}`;
 export function downloadIcs(ev: CalendarEventDTO) {
   const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/[,;]/g, (c) => `\\${c}`);
-  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Chaggu//ES', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT',
+  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//chaggu//ES', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT',
     `UID:${ev.id}@chaggu.com`, `DTSTAMP:${gstamp(new Date().toISOString())}`, `DTSTART:${gstamp(ev.startsAt)}`, `DTEND:${gstamp(ev.endsAt)}`,
     `SUMMARY:${esc(ev.title)}`, `DESCRIPTION:${esc(details(ev))}`, ...(ev.location ? [`LOCATION:${esc(ev.location)}`] : []),
     `URL:${location.origin}${BASE}/c/${ev.conversationId}`, ev.cancelledAt ? 'STATUS:CANCELLED' : 'STATUS:CONFIRMED', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
@@ -225,14 +226,14 @@ export function AgendaScreen() {
 
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 1180 }}>
-      <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
-        <h1 className="grow">{t('nav.agenda')}</h1>
+      <div className="row page-head"><h1 className="grow">{t('nav.agenda')}</h1><QuickActions /></div>
+      {/* La semana y cómo moverse van debajo: ✎ y «＋ Crear» quedan en el mismo sitio que en Grupos, DMs y Asuntos. */}
+      <div className="row" style={{ marginBottom: 14, flexWrap: 'wrap', gap: 6 }}>
+        <span className="muted grow">{t('cal.week', { date: week.toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: 'numeric' }) })}</span>
         <button className="btn small" onClick={() => setWeek(startOfWeek(new Date()))}>{t('cal.today')}</button>
         <button className="icon-btn" aria-label={t('cal.prev')} onClick={() => shift(-1)}>‹</button>
         <button className="icon-btn" aria-label={t('cal.next')} onClick={() => shift(1)}>›</button>
-        <button className="btn primary small" onClick={() => newEvent()}>{t('cal.new')}</button>
       </div>
-      <div className="muted" style={{ marginBottom: 14 }}>{t('cal.week', { date: week.toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: 'numeric' }) })}</div>
       {error && <div className="error">{error}</div>}
 
       <div className="week only-desktop">

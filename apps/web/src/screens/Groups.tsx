@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import type { BootstrapDTO, ConversationDTO, CreateGroupRequest, InvitationPreviewDTO, IssueDTO, MessageDTO, OrganizationDTO, OversightDTO, WorkspaceDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, getLang, locale, t, tn } from '../i18n.ts';
 import { navigate, queryParam } from '../router.ts';
-import { Avatar, ConvAvatar, Modal, OrgMark, badgeColor, conversationTitle, orgById, personById, timeLabel } from '../ui.tsx';
-import { conversationMenu, openDialog, workspaceMenu } from '../actions.tsx';
-import { copyText, menuProps, toast, type MenuItem } from '../menu.tsx';
+import { Avatar, ConvAvatar, Modal, OrgMark, badgeColor, conversationPreview, conversationTitle, orgById, personById, timeLabel } from '../ui.tsx';
+import { conversationMenu, mutedText, openDialog } from '../actions.tsx';
+import { DndStrip } from './Silence.tsx';
+import { copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { newEvent } from './Calendar.tsx';
 import { InviteDialog } from './Dialogs.tsx';
-import { NewIssueDialog, isClosed } from './Issues.tsx';
+import { IssueCheck, NewIssueDialog, isClosed, issueQuickMenu, localIso } from './Issues.tsx';
 import { MessageText } from './Mentions.tsx';
-import { NewChatDialog, StackedAvatars } from './Chats.tsx';
-import { compareConversations, matchesTab, pendingOf, activityOf, type HomeTab } from './Shell.tsx';
+import { StackedAvatars } from './Chats.tsx';
+import { QuickActions, QuickSearchField, QuickSearchSections, openNewMessage } from './Quick.tsx';
+import { matchesTab, type HomeTab } from './Shell.tsx';
+import { activityOf, companyGroupLabel, compareConversations, pendingOf, withSeparators } from '../home-order.ts';
 
 // ---------- Árbol de Grupos (mismas reglas en web, iOS y Android: docs/GRUPOS.md) ----------
 /** label: el nombre a mostrar; si dos grupos de la misma empresa se llaman igual, lleva delante el espacio de donde viene. */
@@ -22,13 +25,20 @@ export interface GroupSection { key: string; kind: 'org' | 'relations' | 'guest'
 
 const isMuted = (c: ConversationDTO) => !!c.mutedUntil && Date.parse(c.mutedUntil) > Date.now();
 const openIssuesOf = (issues: Record<string, IssueDTO>, conversationId: string) =>
-  Object.values(issues).filter((i) => i.conversationId === conversationId && !isClosed(i))
+  Object.values(issues).filter((i) => i.conversationId === conversationId && !isClosed(i) && !i.parentIssueId)
     .sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') || b.updatedAt.localeCompare(a.updatedAt));
 
-function rankOf(convs: ConversationDTO[]) {
-  return { unread: convs.reduce((n, c) => n + pendingOf(c), 0), activity: convs.reduce((m, c) => (activityOf(c) > m ? activityOf(c) : m), '') };
+// Empresas y espacios siguen el orden de la bandeja: con algo fijado arriba, luego menciones, no leídos y actividad.
+type Rank = { pinned: boolean; mention: boolean; unread: number; activity: string };
+function rankOf(convs: ConversationDTO[]): Rank {
+  return {
+    pinned: convs.some((c) => !!c.pinnedAt), mention: convs.some((c) => (c.unreadMentions ?? 0) > 0),
+    unread: convs.reduce((n, c) => n + pendingOf(c), 0), activity: convs.reduce((m, c) => (activityOf(c) > m ? activityOf(c) : m), ''),
+  };
 }
-function byRank(a: { unread: number; activity: string }, b: { unread: number; activity: string }) {
+function byRank(a: Rank, b: Rank) {
+  if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+  if (a.mention !== b.mention) return a.mention ? -1 : 1;
   if ((a.unread > 0) !== (b.unread > 0)) return a.unread > 0 ? -1 : 1;
   return b.unread - a.unread || b.activity.localeCompare(a.activity);
 }
@@ -97,31 +107,74 @@ export function buildGroupTree(d: BootstrapDTO, issues: Record<string, IssueDTO>
   return sections;
 }
 
-/** DMs: directos y chats grupales, incluidos los sidechats (con su burbuja). */
+/** DMs: directos y chats grupales, incluidos los sidechats (con su burbuja). Los hilos de un chat viven en su barra. */
 export function dmConversations(d: BootstrapDTO, tab: HomeTab = 'all') {
-  return d.conversations.filter((c) => (c.kind === 'direct' || c.kind === 'multi') && matchesTab(c, tab)).sort(compareConversations);
+  return d.conversations.filter((c) => (c.kind === 'direct' || c.kind === 'multi') && !(c.parentId && c.deriveKind !== 'side') && matchesTab(c, tab)).sort(compareConversations);
 }
 
 // ---------- Plegado (por dispositivo) ----------
-const FOLD_KEY = 'tiecoms:folded';
-function readFolded(): Set<string> { try { return new Set(JSON.parse(localStorage.getItem(FOLD_KEY) ?? '[]')); } catch { return new Set(); } }
+// Un solo estado para la barra lateral, la pantalla Grupos y su botón de vista (se guardan en este dispositivo).
+function persisted(key: string) {
+  let value: Set<string> = (() => { try { return new Set<string>(JSON.parse(localStorage.getItem(key) ?? '[]')); } catch { return new Set<string>(); } })();
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set: (next: Set<string>) => { value = next; try { localStorage.setItem(key, JSON.stringify([...next])); } catch {} listeners.forEach((l) => l()); },
+    subscribe: (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; },
+  };
+}
+const foldStore = persisted('tiecoms:folded');
+// Asuntos bajo cada grupo: contraídos por defecto; se recuerdan los que la persona abre (por dispositivo).
+const issuesStore = persisted('tiecoms:issuesOpen');
+const useStore = (st: ReturnType<typeof persisted>) => useSyncExternalStore(st.subscribe, st.get);
+
 function useFolded() {
-  const [folded, setFolded] = useState(readFolded);
-  const save = (next: Set<string>) => { setFolded(next); try { localStorage.setItem(FOLD_KEY, JSON.stringify([...next])); } catch {} };
+  const folded = useStore(foldStore);
   return {
     folded,
-    toggle: (k: string) => { const n = new Set(folded); if (n.has(k)) n.delete(k); else n.add(k); save(n); },
-    foldAll: (keys: string[]) => save(new Set([...folded, ...keys])),
+    toggle: (k: string) => { const n = new Set(folded); if (n.has(k)) n.delete(k); else n.add(k); foldStore.set(n); },
+  };
+}
+type IssuesOpen = { open: Set<string>; toggle: (id: string) => void };
+function useIssuesOpen(): IssuesOpen {
+  const open = useStore(issuesStore);
+  return { open, toggle: (id) => { const n = new Set(open); if (n.has(id)) n.delete(id); else n.add(id); issuesStore.set(n); } };
+}
+
+/** Plegar y desplegar todo el árbol (botón de vista, cabeceras de sección y empresas). */
+function treeControls(sections: GroupSection[]): TreeMenu {
+  const allKeys = sections.flatMap((s) => s.companies.flatMap((c) => [c.key, ...c.workspaces.map((w) => `ws:${w.ws.id}`)]));
+  const withIssues = sections.flatMap((s) => s.companies.flatMap((c) => c.workspaces.flatMap((w) => w.groups.filter((g) => g.issues.length).map((g) => g.conv.id))));
+  return {
+    // Contraer todo deja visibles las secciones (solo pliega empresas y espacios).
+    foldAll: () => { foldStore.set(new Set([...foldStore.get(), ...allKeys])); issuesStore.set(new Set()); },
+    unfoldAll: () => { foldStore.set(new Set()); issuesStore.set(new Set(withIssues)); },
+    showIssues: () => issuesStore.set(new Set(withIssues)),
+    hideIssues: () => issuesStore.set(new Set()),
   };
 }
 
+/** Botón de vista (plegar y desplegar), aparte de ✎ y «＋», que son para escribir y crear. */
+export function GroupsViewButton({ tab = 'all' }: { tab?: HomeTab }) {
+  const label = t('grp.foldMenu');
+  return (
+    <button className="icon-btn view-btn" title={label} aria-label={label} aria-haspopup="menu"
+      onClick={(e) => {
+        const s = client.getState();
+        const r = e.currentTarget.getBoundingClientRect();
+        openMenuAt(r.left, r.bottom + 4, treeMenuItems(treeControls(buildGroupTree(s.data!, s.issues, tab))));
+      }}>☰</button>
+  );
+}
+
 // ---------- Vista del árbol ----------
-export function GroupsTree({ tab = 'all', activeConv = null, activeWs = null }: { tab?: HomeTab; activeConv?: string | null; activeWs?: string | null }) {
+export function GroupsTree({ tab = 'all', activeConv = null }: { tab?: HomeTab; activeConv?: string | null }) {
   const d = useClient((s) => s.data)!;
   const issues = useClient((s) => s.issues);
   const sections = useMemo(() => buildGroupTree(d, issues, tab), [d, issues, tab]);
-  const { folded, toggle, foldAll } = useFolded();
-  const allKeys = sections.flatMap((s) => s.companies.flatMap((c) => [c.key, ...c.workspaces.map((w) => `ws:${w.ws.id}`)]));
+  const { folded, toggle } = useFolded();
+  const issuesOpen = useIssuesOpen();
+  const treeMenu = treeControls(sections);
 
   return (
     <div className="groups-tree">
@@ -129,24 +182,32 @@ export function GroupsTree({ tab = 'all', activeConv = null, activeWs = null }: 
         const title = s.kind === 'org' ? t('groups.yourOrg', { org: s.org?.name ?? '' }) : s.kind === 'relations' ? t('groups.relations') : t('groups.guestIn');
         const plus = s.kind === 'org' ? () => openCreateGroup({ kind: 'org', orgId: s.org?.id }) : s.kind === 'relations' ? () => openCreateGroup({ kind: 'company' }) : null;
         const empty = s.companies.every((c) => c.workspaces.every((w) => !w.groups.length));
+        const sKey = `sec:${s.key}`;
+        const sFold = folded.has(sKey);
+        const sUnread = s.companies.reduce((n, c) => n + convsOfCompany(c).reduce((m, x) => m + (isMuted(x) ? 0 : x.unread), 0), 0);
         return (
           <section key={s.key} className="groups-section">
             <div className="row groups-section-head">
-              <span className="eyebrow grow">{title}</span>
+              <button className="groups-section-toggle grow" aria-expanded={!sFold} onClick={() => toggle(sKey)} {...menuProps(() => treeMenuItems(treeMenu))}>
+                <span className="eyebrow">{title}</span>
+                <span className="muted small" aria-hidden>{sFold ? '›' : '⌄'}</span>
+                {sFold && sUnread > 0 && <span className="pill">{sUnread}</span>}
+              </button>
               {plus && <button className="btn ghost small" onClick={plus} title={t('groups.new')} aria-label={`${t('groups.new')} · ${title}`}>＋</button>}
             </div>
-            {empty && tab === 'all' && <div className="hint" style={{ padding: '2px 10px 8px' }}>{s.kind === 'org' ? t('groups.emptyOrg') : t('groups.emptyRelations')}</div>}
-            {s.companies.map((c) => {
+            {!sFold && empty && tab === 'all' && <div className="hint" style={{ padding: '2px 10px 8px' }}>{s.kind === 'org' ? t('groups.emptyOrg') : t('groups.emptyRelations')}</div>}
+            {!sFold && s.companies.map((c) => {
               const cKey = c.key;
               const fold = folded.has(cKey);
               const unread = convsOfCompany(c).reduce((n, x) => n + (isMuted(x) ? 0 : x.unread), 0);
-              const body = c.workspaces.map((w) => <WsBlock key={w.ws.id} w={w} folded={folded} toggle={toggle} activeConv={activeConv} activeWs={activeWs} />);
+              // Nunca hay cabecera de espacio: los grupos de todos los espacios de la empresa van juntos, en el orden de la bandeja.
+              const body = companyGroups(c).map(({ g, ws }) => <GroupEntry key={g.conv.id} g={g} ws={ws} issuesOpen={issuesOpen} active={activeConv === g.conv.id} />);
               // Tu organización: los grupos van directo, sin cabecera de empresa.
               if (s.kind === 'org') return <div key={cKey}>{body}</div>;
               return (
                 <div key={cKey} className="groups-company">
                   <button className="side-org groups-company-head" aria-expanded={!fold} onClick={() => toggle(cKey)}
-                    {...menuProps(() => companyMenu(c, () => foldAll(allKeys)))}>
+                    {...menuProps(() => companyMenu(c, treeMenu))}>
                     <OrgMark org={c.org} /><span className="grow ellipsis">{c.name}</span>
                     {c.pending && <span className="tag">{t('groups.pending')}</span>}
                     {fold && unread > 0 && <span className="pill">{unread}</span>}
@@ -163,57 +224,48 @@ export function GroupsTree({ tab = 'all', activeConv = null, activeWs = null }: 
   );
 }
 
-function WsBlock({ w, folded, toggle, activeConv, activeWs }: { w: WsNode; folded: Set<string>; toggle: (k: string) => void; activeConv: string | null; activeWs: string | null }) {
-  const key = `ws:${w.ws.id}`;
-  const fold = w.header && folded.has(key);
-  const unread = convsOfWs(w).reduce((n, x) => n + (isMuted(x) ? 0 : x.unread), 0);
+/** Los grupos de una empresa (de todos sus espacios) en el orden de la bandeja: fijados, menciones, no leídos, actividad. */
+function companyGroups(c: CompanyNode) {
+  return c.workspaces.flatMap((w) => w.groups.map((g) => ({ g, ws: w.ws }))).sort((a, b) => compareConversations(a.g.conv, b.g.conv));
+}
+
+/** Fila de grupo y, si la persona los abrió con el chip ◆, sus asuntos activos debajo. */
+function GroupEntry({ g, ws, issuesOpen, active, label, preview }: { g: GroupNode; ws: WorkspaceDTO; issuesOpen: IssuesOpen; active: boolean; label?: string; preview?: boolean }) {
   return (
     <div>
-      {w.header && (
-        <button className="side-ws-title" style={{ width: '100%', background: activeWs === w.ws.id ? 'var(--card)' : undefined }} aria-expanded={!fold} onClick={() => toggle(key)}
-          {...menuProps(() => workspaceMenu(w.ws, {
-            onNewGroup: () => openCreateGroup({ kind: 'workspace', workspaceId: w.ws.id }),
-            onInvite: () => openDialog((close) => <InviteDialog workspaceId={w.ws.id} onClose={close} />),
-          }))}>
-          <span className="grow ellipsis">{w.ws.pinnedAt ? '📌 ' : ''}{w.ws.name}</span>
-          {fold && unread > 0 && <span className="pill">{unread}</span>}
-          <span className="muted small" aria-hidden>{fold ? '›' : '⌄'}</span>
-        </button>
-      )}
-      {!fold && w.groups.map((g) => (
-        <div key={g.conv.id}>
-          <GroupRow c={g.conv} ws={w.ws} label={g.label} threadUnread={g.derived.reduce((n, x) => n + x.unread, 0)} active={activeConv === g.conv.id} />
-          {g.issues.length > 0 && <IssueLines g={g} />}
-        </div>
-      ))}
+      <ConvItem c={g.conv} active={active} label={label ?? g.label} preview={preview} threadUnread={g.derived.reduce((n, x) => n + x.unread, 0)} extraMenu={groupMenuExtra(g.conv, ws)}
+        issues={{ count: g.issues.length, overdue: overdueCount(g.issues), open: issuesOpen.open.has(g.conv.id), onToggle: () => issuesOpen.toggle(g.conv.id) }} />
+      {g.issues.length > 0 && issuesOpen.open.has(g.conv.id) && <IssueLines g={g} />}
     </div>
   );
 }
 
-/** Asuntos abiertos bajo el grupo: hasta 3 y «+N asuntos». */
+const overdueCount = (list: IssueDTO[]) => { const today = localIso(); return list.filter((i) => i.dueDate && i.dueDate < today).length; };
+
+/**
+ * Asuntos activos bajo el grupo, cuando la persona los abre con el chip ◆ de la fila: hasta 3 y «+N asuntos».
+ * Clic derecho o pulsación larga en un asunto: completarlo o cambiar su estado.
+ */
 function IssueLines({ g }: { g: GroupNode }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const d = useClient((s) => s.data)!;
+  const today = localIso();
   const shown = g.issues.slice(0, 3);
   return (
     <div className="group-issues">
       {shown.map((i) => (
-        <button key={i.id} className="group-issue" onClick={() => navigate(`/c/${g.conv.id}?issue=${i.id}`)}>
-          <span className="diamond" aria-hidden>◆</span>
+        <div role="button" tabIndex={0} key={i.id} className="group-issue" onClick={() => navigate(`/c/${g.conv.id}?issue=${i.id}`)} onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/c/${g.conv.id}?issue=${i.id}`); }} {...menuProps(() => issueQuickMenu(i))}>
+          <IssueCheck i={i} size={16} />
           <span className="grow ellipsis">{i.title}</span>
           {(i.status === 'in_progress' || i.status === 'waiting') && <span className="tag">{t(`issue.st.${i.status}`)}</span>}
+          {i.ownerId && i.ownerId !== d.me.id && <span className="small muted issue-owner-mini">{personById(d, i.ownerId)?.name.split(' ')[0]}</span>}
           {i.dueDate && <span className={`small ${i.dueDate < today ? 'overdue' : 'muted'}`}>{new Date(`${i.dueDate}T12:00:00`).toLocaleDateString(locale(), { day: 'numeric', month: 'short' })}</span>}
-        </button>
+        </div>
       ))}
       {g.issues.length > 3 && (
         <button className="group-issue more" onClick={() => navigate(`/c/${g.conv.id}`)}>{t('groups.moreIssues', { n: g.issues.length - 3 })}</button>
       )}
     </div>
   );
-}
-
-/** Los hilos del grupo no se listan aquí (viven en su chat); si tienen respuestas sin leer, el grupo lo avisa con 💬. */
-function GroupRow({ c, ws, label, threadUnread, active }: { c: ConversationDTO; ws: WorkspaceDTO; label?: string; threadUnread: number; active: boolean }) {
-  return <ConvItem c={c} active={active} label={label} threadUnread={threadUnread} extraMenu={groupMenuExtra(c, ws)} />;
 }
 
 function groupMenuExtra(c: ConversationDTO, ws: WorkspaceDTO): MenuItem[] {
@@ -228,14 +280,25 @@ function groupMenuExtra(c: ConversationDTO, ws: WorkspaceDTO): MenuItem[] {
   ];
 }
 
-function companyMenu(c: CompanyNode, foldAll: () => void): MenuItem[] {
+interface TreeMenu { foldAll: () => void; unfoldAll: () => void; showIssues: () => void; hideIssues: () => void }
+function treeMenuItems(m: TreeMenu): MenuItem[] {
+  return [
+    { label: t('groups.showAllIssues'), icon: '◆', onSelect: m.showIssues },
+    { label: t('groups.hideAllIssues'), icon: '◇', onSelect: m.hideIssues },
+    { divider: true },
+    { label: t('groups.foldAll'), icon: '⌃', onSelect: m.foldAll },
+    { label: t('groups.unfoldAll'), icon: '⌄', onSelect: m.unfoldAll },
+  ];
+}
+
+function companyMenu(c: CompanyNode, m: TreeMenu): MenuItem[] {
   const first = c.workspaces[0]?.ws;
   const canCreate = first && first.myRole !== 'guest';
   return [
     ...(canCreate ? [{ label: t('groups.newWith', { name: c.name }), icon: '#', onSelect: () => openCreateGroup({ kind: 'workspace', workspaceId: first.id }) }] : []),
     ...(canCreate ? [{ label: t('groups.inviteCompany', { name: c.name }), icon: '＋', onSelect: () => openDialog((close) => <InviteDialog workspaceId={first.id} onClose={close} />) }] : []),
     { divider: true },
-    { label: t('groups.foldAll'), icon: '⌃', onSelect: foldAll },
+    ...treeMenuItems(m),
   ];
 }
 
@@ -243,7 +306,14 @@ function companyMenu(c: CompanyNode, foldAll: () => void): MenuItem[] {
 const sideTitle = (title: string) => title.replace(/^(Sidechat|Consulta)\s*·\s*/i, '');
 
 /** Fila de conversación de la barra lateral (grupos y DMs). */
-export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, extraMenu = [] }: { c: ConversationDTO; active: boolean; showWs?: boolean; label?: string; threadUnread?: number; extraMenu?: MenuItem[] }) {
+/** Chip de asuntos en la fila del grupo: contraídos cada grupo ocupa una sola línea; el chip los muestra u oculta. */
+export interface IssuesChip { count: number; overdue: number; open: boolean; onToggle: () => void }
+
+/**
+ * Fila de conversación (barra lateral, Grupos y DMs). Con `preview` ocupa dos líneas: título y hora arriba;
+ * «Nombre: texto» del último mensaje, chips y globos abajo (vista Lista y «Todo»).
+ */
+export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, extraMenu = [], issues, preview = false }: { c: ConversationDTO; active: boolean; showWs?: boolean; label?: string; threadUnread?: number; extraMenu?: MenuItem[]; issues?: IssuesChip; preview?: boolean }) {
   const d = useClient((s) => s.data)!;
   const muted = isMuted(c);
   const other = c.kind === 'direct' ? personById(d, c.memberIds.find((m) => m !== d.me.id)) : null;
@@ -251,55 +321,185 @@ export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, e
   const side = c.deriveKind === 'side';
   const origin = side && c.parentId ? d.conversations.find((x) => x.id === c.parentId) : null;
   const orgOfWs = c.workspaceId ? (() => { const w = d.workspaces.find((x) => x.id === c.workspaceId); return w ? placeWorkspace(d, w).org : null; })() : null;
-  return (
-    <button className={`side-conv ${active ? 'active' : ''} ${c.unread && !muted ? 'unread' : ''} ${muted ? 'is-muted' : ''}`} onClick={() => navigate(`/c/${c.id}`)}
-      {...menuProps(() => [...conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }), ...extraMenu])}>
-      {other ? <Avatar person={other} org={orgById(d, other.orgId)} size={22} />
-        : c.kind === 'internal' ? <span className="hash" aria-hidden>🔒</span>
-        : <ConvAvatar c={c} size={22} fallback={c.kind === 'multi' && !side ? <StackedAvatars c={c} size={20} /> : undefined} />}
-      {side && <span className="chip-side">{t('groups.sidechat')}</span>}
-      <span className="grow ellipsis">
-        {origin && <span className="muted small">{t('groups.fromOrigin', { name: conversationTitle(d, origin) })} · </span>}
-        {label ?? (side ? sideTitle(conversationTitle(d, c)) : conversationTitle(d, c))}
-        {ws ? <span className="muted small"> · {ws.name}</span> : null}
+  const title = label ?? (side ? sideTitle(conversationTitle(d, c)) : conversationTitle(d, c));
+  const avatar = other ? <Avatar person={other} org={orgById(d, other.orgId)} size={preview ? 32 : 22} />
+    : c.kind === 'internal' ? <span className={`hash ${preview ? 'is-big' : ''}`} aria-hidden title={t('inbox.internal')}>🔒</span>
+    : <ConvAvatar c={c} size={preview ? 32 : 22} fallback={c.kind === 'multi' && !side ? <StackedAvatars c={c} size={preview ? 28 : 20} /> : undefined} />;
+  const chips = <>
+    {threadUnread > 0 && <span className="chip-side" title={t('bar.threads')}>💬 {threadUnread}</span>}
+    {issues && issues.count > 0 && (
+      // Va dentro del botón de la fila: un span con rol de botón (no se anidan botones).
+      <span role="button" tabIndex={0} aria-expanded={issues.open} className={`chip-issues ${issues.open ? 'on' : ''} ${issues.overdue ? 'is-late' : ''}`}
+        title={`${issues.open ? t('groups.hideIssues') : t('groups.showIssues')} · ${issues.count === 1 ? t('groups.issuesCountOne') : t('groups.issuesCount', { n: issues.count })}${issues.overdue ? ` · ${t('groups.issuesOverdue', { n: issues.overdue })}` : ''}`}
+        onClick={(e) => { e.stopPropagation(); issues.onToggle(); }}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); issues.onToggle(); } }}>
+        ◆ {issues.count}{issues.overdue > 0 && <b> · {issues.overdue}!</b>} <span aria-hidden>{issues.open ? '⌄' : '›'}</span>
       </span>
-      {threadUnread > 0 && <span className="chip-side" title={t('bar.threads')}>💬 {threadUnread}</span>}
-      {muted && <span className="small" title={t('side.muted')}>🔕</span>}
-      {(c.unreadMentions ?? 0) > 0 && <span className="pill mention-pill" title={t('mention.youMentioned')}>@</span>}
-      {c.unread > 0 && <span className={`pill ${muted ? 'is-muted' : ''}`} style={{ background: badgeColor(orgOfWs) }}>{c.unread}</span>}
+    )}
+    {muted && <span className="mute-ico" title={mutedText(c) ?? t('side.muted')} aria-label={t('side.muted')}>🔕</span>}
+    {(c.unreadMentions ?? 0) > 0 && <span className="pill mention-pill" title={t('mention.youMentioned')}>@</span>}
+    {c.unread > 0 && <span className={`pill ${muted ? 'is-muted' : ''}`} style={{ background: badgeColor(orgOfWs) }}>{c.unread}</span>}
+  </>;
+  const pin = c.pinnedAt ? <span className="conv-pin" title={t('side.pinned')} aria-label={t('side.pinned')}>📌</span> : null;
+  return (
+    <button className={`side-conv ${preview ? 'has-preview' : ''} ${active ? 'active' : ''} ${c.unread && !muted ? 'unread' : ''} ${muted ? 'is-muted' : ''}`} onClick={() => navigate(`/c/${c.id}`)}
+      {...menuProps(() => [...conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }), ...extraMenu])}>
+      {avatar}
+      {preview ? (
+        <span className="conv-lines">
+          <span className="conv-line">
+            {side && <span className="chip-side">{t('groups.sidechat')}</span>}
+            <span className="grow ellipsis conv-title">{title}</span>
+            {pin}
+            <span className="conv-time">{timeLabel(activityOf(c) || null)}</span>
+          </span>
+          <span className="conv-line">
+            <span className="grow ellipsis conv-sub">{conversationPreview(d, c) ?? ''}</span>
+            {chips}
+          </span>
+        </span>
+      ) : <>
+        {side && <span className="chip-side">{t('groups.sidechat')}</span>}
+        <span className="grow ellipsis">
+          {origin && <span className="muted small">{t('groups.fromOrigin', { name: conversationTitle(d, origin) })} · </span>}
+          {title}
+          {ws ? <span className="muted small"> · {ws.name}</span> : null}
+        </span>
+        {pin}
+        {chips}
+      </>}
     </button>
   );
+}
+
+/** Separadores discretos «Fijados · Sin leer · Recientes» (un bloque vacío no sale). */
+function Separated<T>({ items, convOf, render, sepMenu }: { items: T[]; convOf: (x: T) => ConversationDTO; render: (x: T) => ReactNode; sepMenu?: () => MenuItem[] }) {
+  return <>{withSeparators(items, convOf).map((b) => (
+    <div key={b.bucket} className="inbox-block">
+      <div className="inbox-sep" role="separator" {...(sepMenu ? menuProps(sepMenu) : {})}>{t(`inbox.${b.bucket}`)}</div>
+      {b.items.map(render)}
+    </div>
+  ))}</>;
 }
 
 export function DmsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; activeConv?: string | null }) {
   const d = useClient((s) => s.data)!;
   const list = dmConversations(d, tab);
-  return <>{list.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />)}</>;
+  return <Separated items={list} convOf={(c) => c} render={(c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />} />;
 }
 
-// ---------- Pantallas móviles: Grupos y DMs ----------
+// ---------- Vista Lista: todos los grupos en una sola lista ----------
+export interface GroupListItem { g: GroupNode; ws: WorkspaceDTO; company: string; label: string }
+/** Las mismas filas de grupo que el árbol (sin hilos), en una sola lista con el orden de la bandeja y «Empresa · Grupo». */
+export function groupListItems(sections: GroupSection[]): GroupListItem[] {
+  const out: GroupListItem[] = [];
+  for (const s of sections) for (const c of s.companies) {
+    const company = s.kind === 'org' ? s.org?.name ?? c.name : c.name;
+    for (const w of c.workspaces) for (const g of w.groups) out.push({ g, ws: w.ws, company, label: companyGroupLabel(company, g.label ?? g.conv.name ?? '') });
+  }
+  return out.sort((a, b) => compareConversations(a.g.conv, b.g.conv));
+}
+
+export function GroupsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; activeConv?: string | null }) {
+  const d = useClient((s) => s.data)!;
+  const issues = useClient((s) => s.issues);
+  const items = useMemo(() => groupListItems(buildGroupTree(d, issues, tab)), [d, issues, tab]);
+  const issuesOpen = useIssuesOpen();
+  if (!items.length) return <div className="hint" style={{ padding: '8px 10px' }}>{tab === 'all' ? t('groups.emptyOrg') : t('inbox.nothing')}</div>;
+  return (
+    <div className="groups-list">
+      {/* Menú de sección (clic derecho o pulsación larga en un separador): mostrar o contraer todos los asuntos. */}
+      <Separated items={items} convOf={(x) => x.g.conv} sepMenu={() => treeMenuItems(treeControls(buildGroupTree(d, issues, tab))).slice(0, 2)}
+        render={(x) => <GroupEntry key={x.g.conv.id} g={x.g} ws={x.ws} label={x.label} preview issuesOpen={issuesOpen} active={activeConv === x.g.conv.id} />} />
+    </div>
+  );
+}
+
+/** «Todo» de la barra lateral: grupos (como en Lista) y DMs juntos, con el orden de la bandeja. */
+export function AllList({ tab = 'all', activeConv = null }: { tab?: HomeTab; activeConv?: string | null }) {
+  const d = useClient((s) => s.data)!;
+  const issues = useClient((s) => s.issues);
+  const issuesOpen = useIssuesOpen();
+  type Item = { c: ConversationDTO; group?: GroupListItem };
+  const items = useMemo<Item[]>(() => [
+    ...groupListItems(buildGroupTree(d, issues, tab)).map((group) => ({ c: group.g.conv, group })),
+    ...dmConversations(d, tab).map((c) => ({ c })),
+  ].sort((a, b) => compareConversations(a.c, b.c)), [d, issues, tab]);
+  if (!items.length) return <div className="hint" style={{ padding: '8px 10px' }}>{t('inbox.nothing')}</div>;
+  return <Separated items={items} convOf={(x) => x.c}
+    render={(x) => x.group
+      ? <GroupEntry key={x.c.id} g={x.group.g} ws={x.group.ws} label={x.group.label} preview issuesOpen={issuesOpen} active={activeConv === x.c.id} />
+      : <ConvItem key={x.c.id} c={x.c} preview active={activeConv === x.c.id} />} />;
+}
+
+// ---------- Selector de vista «Lista | Árbol» (por dispositivo) ----------
+export type GroupsView = 'list' | 'tree';
+const VIEW_KEY = 'chaggu:groupsView';
+const viewStore = (() => {
+  let value: GroupsView = (() => { try { return localStorage.getItem(VIEW_KEY) === 'tree' ? 'tree' : 'list'; } catch { return 'list'; } })();
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set: (v: GroupsView) => { value = v; try { localStorage.setItem(VIEW_KEY, v); } catch {} listeners.forEach((l) => l()); },
+    subscribe: (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; },
+  };
+})();
+export const useGroupsView = () => useSyncExternalStore(viewStore.subscribe, viewStore.get);
+
+export function GroupsViewToggle() {
+  const view = useGroupsView();
+  return (
+    <div className="seg" role="tablist" aria-label={t('inbox.view')}>
+      {(['list', 'tree'] as const).map((v) => (
+        <button key={v} role="tab" aria-selected={view === v} className={`seg-btn ${view === v ? 'on' : ''}`} onClick={() => viewStore.set(v)}>
+          {v === 'list' ? t('inbox.list') : t('inbox.tree')}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Grupos en la vista elegida. */
+export function GroupsBody({ tab = 'all', activeConv = null }: { tab?: HomeTab; activeConv?: string | null }) {
+  const view = useGroupsView();
+  return view === 'tree' ? <GroupsTree tab={tab} activeConv={activeConv} /> : <GroupsList tab={tab} activeConv={activeConv} />;
+}
+
+// ---------- Pantallas Grupos y DMs (pestañas en móvil) ----------
+// Arriba siempre ✎ Mensaje nuevo y «＋ Crear»; al buscar también salen personas, grupos y chats (docs/GRUPOS.md).
 export function GroupsScreen() {
+  const [q, setQ] = useState('');
+  const view = useGroupsView();
+  const searching = !!q.trim();
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 760 }}>
-      <div className="row"><h1 className="grow">{t('nav.groups')}</h1>
-        <button className="btn small" onClick={() => openDialog((close) => <JoinWithCodeDialog onClose={close} />)}>{t('join.title')}</button>
-        <button className="btn primary small" onClick={() => openCreateGroup()}>＋ {t('groups.new')}</button>
+      <div className="row page-head">{view === 'tree' && <GroupsViewButton />}<h1 className="grow">{t('nav.groups')}</h1><QuickActions /></div>
+      <DndStrip />
+      <QuickSearchField value={q} onChange={setQ} placeholder={t('grp.search')} order={['groups', 'people', 'chats']} />
+      {!searching && <div className="row groups-view-row"><GroupsViewToggle /></div>}
+      <div className="card" style={{ padding: 6, marginTop: 10 }}>
+        {searching ? <QuickSearchSections query={q} order={['groups', 'people', 'chats']} /> : <GroupsBody />}
       </div>
-      <div className="card" style={{ padding: 6, marginTop: 14 }}><GroupsTree /></div>
     </div></div>
   );
 }
 
 export function DmsScreen() {
   const d = useClient((s) => s.data)!;
+  const [q, setQ] = useState('');
   const n = dmConversations(d).length;
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 760 }}>
-      <div className="row"><h1 className="grow">{t('nav.dms')}</h1>
-        <button className="btn primary small" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)}>＋ {t('dms.new')}</button>
-      </div>
-      <div className="card" style={{ padding: 6, marginTop: 14 }}>
-        {n ? <DmsList /> : <div className="empty">{t('dms.empty')}</div>}
+      <div className="row page-head"><h1 className="grow">{t('nav.dms')}</h1><QuickActions /></div>
+      <DndStrip />
+      <QuickSearchField value={q} onChange={setQ} placeholder={t('dm.search')} order={['chats', 'people', 'groups']} />
+      <div className="card" style={{ padding: 6, marginTop: 10 }}>
+        {q.trim() ? <QuickSearchSections query={q} order={['chats', 'people', 'groups']} />
+          : n ? <DmsList /> : (
+            <div className="empty">{t('dms.empty')}
+              <div style={{ marginTop: 10 }}><button className="btn primary small" onClick={openNewMessage}>✎ {t('dms.new')}</button></div>
+            </div>
+          )}
       </div>
     </div></div>
   );
@@ -523,7 +723,7 @@ export function ShareInvite({ url, code, groupName, expiresAt }: { url: string; 
       <div className="linkbox"><input className="input" readOnly value={url} onFocus={(e) => e.currentTarget.select()} />
         <button className="btn small" onClick={async () => { await copyText(url); toast(t('toast.linkCopied')); }}>{t('common.copy')}</button>
       </div>
-      {'share' in navigator && <button className="btn" onClick={() => navigator.share({ title: 'Chaggu', text }).catch(() => {})}>{t('share.share')}</button>}
+      {'share' in navigator && <button className="btn" onClick={() => navigator.share({ title: 'chaggu', text }).catch(() => {})}>{t('share.share')}</button>}
       <span className="hint">{expiresAt ? t('share.expires', { date: new Date(expiresAt).toLocaleDateString(locale(), { day: 'numeric', month: 'long' }) }) : t('share.expires14')}</span>
     </div>
   );
@@ -539,7 +739,7 @@ export function JoinWithCodeDialog({ onClose }: { onClose: () => void }) {
   const look = (e: FormEvent) => { e.preventDefault(); setBusy(true); setError(null); client.previewInvitation(clean).then(setInv).catch((err) => setError(errorText(err))).finally(() => setBusy(false)); };
   const accept = () => {
     setBusy(true); setError(null);
-    client.acceptInvitation(clean).then((r) => { onClose(); navigate(r.conversationIds[0] ? `/c/${r.conversationIds[0]}` : `/w/${r.workspaceId}`); })
+    client.acceptInvitation(clean).then((r) => { onClose(); navigate(r.conversationIds[0] ? `/c/${r.conversationIds[0]}` : r.workspaceId ? `/w/${r.workspaceId}` : '/'); })
       .catch((err) => setError(errorText(err))).finally(() => setBusy(false));
   };
   return (
@@ -575,7 +775,9 @@ export function InvitePreviewText({ inv }: { inv: InvitationPreviewDTO }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div className="serif" style={{ fontSize: 26, lineHeight: 1.15 }}>{groups ?? inv.workspaceName}</div>
-      <div className="muted">{groups
+      <div className="muted">{inv.kind === 'org'
+        ? t('join.org', { name: inv.invitedByName, org: inv.orgName ?? inv.invitedByOrg })
+        : groups
         ? t('join.byGroups', { name: inv.invitedByName, org: inv.invitedByOrg ? ` · ${inv.invitedByOrg}` : '', where: inv.workspaceName })
         : t('invite.by', { name: inv.invitedByName, org: inv.invitedByOrg ? ` · ${inv.invitedByOrg}` : '', role: t(`role.${inv.role}` as 'role.member') })}</div>
       {inv.role === 'guest' && <span className="tag" style={{ alignSelf: 'flex-start' }}>{t('join.asGuest')}</span>}

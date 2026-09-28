@@ -32,8 +32,8 @@ const en = browserLang() === 'en';
 const mobile = navigator.userAgent.includes('Mobile');
 const DEVICE_NAMES: Record<Platform, string> = {
   web: en ? (mobile ? 'Mobile browser' : 'Browser') : (mobile ? 'Navegador móvil' : 'Navegador'),
-  macos: en ? 'Chaggu for Mac' : 'Chaggu para Mac', windows: en ? 'Chaggu for Windows' : 'Chaggu para Windows',
-  android: 'Chaggu Android', ios: 'Chaggu iPhone', agent: en ? 'Agent' : 'Agente',
+  macos: en ? 'chaggu for Mac' : 'chaggu para Mac', windows: en ? 'chaggu for Windows' : 'chaggu para Windows',
+  android: 'chaggu Android', ios: 'chaggu iPhone', agent: en ? 'Agent' : 'Agente',
 };
 
 // En web, API en el mismo origen. En apps, la variable de build apunta a https://app.chaggu.com.

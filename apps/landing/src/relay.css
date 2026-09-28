@@ -53,7 +53,7 @@
 
 .relay-rope{position:absolute;inset:0;width:1000px;height:450px;pointer-events:none;z-index:2;overflow:visible}
 .relay-rope path{fill:none;stroke-linecap:round;stroke-linejoin:round}
-.relay-rope-shadow{stroke:#ff791926;stroke-width:16;filter:blur(4px)}
+.relay-rope-shadow{stroke:#ff5a3626;stroke-width:16;filter:blur(4px)}
 .relay-rope-outline{stroke:#3a2414;stroke-width:7.5}
 .relay-rope-core{stroke:url(#relayCore);stroke-width:4.5}
 .relay-knot{fill:#fff;stroke:#f06200;stroke-width:3;transition:opacity .3s;filter:drop-shadow(0 2px 6px #f0620066)}
@@ -95,7 +95,7 @@
 .relay-alert.is-clear{background:#ecf6ea;color:#2f6b3f;border:1px solid #cde8c9}
 .relay-tasks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 .relay-task{border:1px solid #ece5d9;border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:7px;transition:border-color .4s,box-shadow .4s,background .4s}
-.relay-task.is-changed{border-color:#ffb784;box-shadow:0 0 0 3px #ff791914}
+.relay-task.is-changed{border-color:#ffb784;box-shadow:0 0 0 3px #ff5a3614}
 .relay-task.is-jam{border-color:#e8763a;background:#fff8f3;box-shadow:0 0 0 3px #e8763a1f}
 .relay-task b{font-size:13px}
 .relay-owner{display:flex;align-items:center;gap:6px;font-size:12px;color:#7a7266}
@@ -119,11 +119,11 @@
 .insight-points b{display:block;font-size:14px;margin-bottom:4px}
 .insight-points span{font-size:13px;color:#a79e90;line-height:1.4}
 .insight-quote{margin:0;padding:34px 34px 30px;border-radius:26px;background:linear-gradient(160deg,#241f1b,#1b1815);border:1px solid #3a3530;position:relative}
-.insight-quote::before{content:'“';position:absolute;top:-34px;left:24px;font-family:var(--display);font-size:140px;line-height:1;color:#ff7919}
+.insight-quote::before{content:'“';position:absolute;top:-34px;left:24px;font-family:var(--display);font-size:140px;line-height:1;color:#ff5a36}
 .insight-quote p{font-family:var(--display);font-size:clamp(26px,2.4vw,36px);line-height:1.2;letter-spacing:-.02em;margin:18px 0 22px;font-style:italic}
 .insight-quote footer{display:flex;gap:12px;align-items:center;font-size:14px;color:#c9c1b4}
 .insight-quote footer b{color:#f4efe6;display:block}
-.insight-quote footer i{width:38px;height:38px;border-radius:50%;background:#ff7919;display:grid;place-items:center;font-style:normal;font-weight:700;color:#171513;flex:none}
+.insight-quote footer i{width:38px;height:38px;border-radius:50%;background:#ff5a36;display:grid;place-items:center;font-style:normal;font-weight:700;color:#171513;flex:none}
 
 @media (max-width:1100px){.relay-tasks{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:900px){

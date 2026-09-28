@@ -5,10 +5,11 @@ import rateLimit from '@fastify/rate-limit';
 import { ZodError } from 'zod';
 import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput, CreateGroupInput, JoinPolicyInput,
-  CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
+  CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateChildIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateScheduledInput, UpdateScheduledInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
-  UpdateProfileInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
+  UpdateProfileInput, DndInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
+  SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -26,6 +27,7 @@ import * as issues from './modules/issues.ts';
 import * as cal from './modules/calendar.ts';
 import * as prefs from './modules/prefs.ts';
 import * as reminders from './modules/reminders.ts';
+import * as scheduled from './modules/scheduled.ts';
 import * as wa from './modules/whatsapp.ts';
 import * as profile from './modules/profile.ts';
 import * as drive from './modules/drive.ts';
@@ -33,6 +35,8 @@ import * as safety from './modules/safety.ts';
 import * as push from './modules/push.ts';
 import * as attachments from './modules/attachments.ts';
 import * as voice from './modules/voice.ts';
+import * as assistant from './modules/assistant.ts';
+import * as signatures from './modules/signatures.ts';
 import * as mentions from './modules/mentions.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
 import * as reactions from './modules/reactions.ts';
@@ -180,6 +184,10 @@ export async function buildHttp() {
       safety.report(req.userId, z.object({ userId: z.uuid().optional(), messageId: z.uuid().optional(), reason: z.string().trim().min(5).max(2000) }).parse(req.body)));
     // Perfil propio
     priv.patch('/api/v1/me', async (req) => profile.updateProfile(req.userId, UpdateProfileInput.parse(req.body)));
+    // «No molestar» general: { until: ISO | null } → { dndUntil }.
+    priv.put('/api/v1/me/dnd', async (req) => prefs.setDnd(req.userId, DndInput.parse(req.body ?? {}).until));
+    // Modo sueño: horario diario sin sonidos { on?, start?, end?, tz?, tzAuto? } → { sleep }.
+    priv.put('/api/v1/me/sleep', async (req) => prefs.setSleep(req.userId, SleepInput.parse(req.body ?? {})));
     priv.post('/api/v1/me/avatar', { bodyLimit: profile.MAX_AVATAR_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
       async (req) => profile.setAvatar(req.userId, req.body as Buffer));
     priv.delete('/api/v1/me/avatar', async (req) => profile.removeAvatar(req.userId));
@@ -226,6 +234,28 @@ export async function buildHttp() {
         return reply.send(f.body);
       });
     }
+    // Firmar PDFs: firmas guardadas (PNG crudo, solo su dueño) y estampado en el servidor.
+    priv.get('/api/v1/me/signatures', async (req) => ({ signatures: await signatures.listSignatures(req.userId) }));
+    priv.post('/api/v1/me/signatures', { bodyLimit: MAX_SIGNATURE_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => {
+      if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube la firma como image/png');
+      return signatures.createSignature(req.userId, req.body, String(req.headers['x-signature-kind'] ?? ''), String(req.headers['x-signature-source'] ?? ''));
+    });
+    priv.get<{ Params: { id: string } }>('/api/v1/me/signatures/:id/image', async (req, reply) => {
+      const png = await signatures.signatureImage(req.userId, z.uuid().parse(req.params.id));
+      return reply.header('content-type', 'image/png').header('cache-control', 'private, max-age=31536000, immutable')
+        .header('x-content-type-options', 'nosniff').header('content-security-policy', "default-src 'none'; sandbox").send(png);
+    });
+    priv.delete<{ Params: { id: string } }>('/api/v1/me/signatures/:id', async (req) => signatures.deleteSignature(req.userId, z.uuid().parse(req.params.id)));
+    priv.get('/api/v1/me/signings', async (req) => signatures.listSignings(req.userId, SigningHistoryQuery.parse(req.query)));
+    priv.get<{ Params: { id: string } }>('/api/v1/attachments/:id/sign-info', async (req) => signatures.signInfo(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/attachments/:id/sign', { bodyLimit: 256 * 1024, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+      const input = SignPdfInput.parse(req.body);
+      const out = await signatures.signPdf(req.userId, z.uuid().parse(req.params.id), input, {
+        ip: req.ip ?? null, userAgent: String(req.headers['user-agent'] ?? '') || null,
+        lang: /^\s*en\b/i.test(String(req.headers['accept-language'] ?? '')) ? 'en' : 'es',
+      });
+      return reply.status(out.duplicate ? 200 : 201).send(out);
+    });
     // Notificaciones push: un token por sesión.
     priv.put('/api/v1/push/token', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) =>
       push.registerToken(req.sessionId, PushTokenInput.parse(req.body), String(req.headers['accept-language'] ?? '')));
@@ -261,6 +291,11 @@ export async function buildHttp() {
     priv.post<{ Params: { token: string } }>('/api/v1/invitations/:token/accept', async (req) =>
       ws.acceptInvitation(req.userId, req.params.token, AcceptInvitationInput.parse(req.body ?? {})));
 
+    // Asistente: todo corre con req.userId (ver modules/assistant.ts, «Aislamiento»).
+    priv.post('/api/v1/assistant/turn', { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } }, async (req) => assistant.turn(req.userId, req.body));
+    priv.post<{ Querystring: { lang?: string } }>('/api/v1/assistant/transcribe', { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } },
+      async (req) => assistant.transcribe(req.userId, req.body, req.headers['x-file-type'] as string | undefined, req.query.lang, req.headers['x-ai-consent'] === '1'));
+    priv.post('/api/v1/assistant/run', { config: { rateLimit: { max: 60, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } }, async (req) => assistant.run(req.userId, req.body));
     priv.post('/api/v1/directs', async (req) => ws.getOrCreateDirect(req.userId, CreateDirectInput.parse(req.body).userId));
     priv.post('/api/v1/chats', async (req) => ws.createChat(req.userId, CreateChatInput.parse(req.body)));
 
@@ -309,6 +344,12 @@ export async function buildHttp() {
       return links.summarizeLink(req.userId, z.uuid().parse(req.params.id), lang);
     });
     // Recordatorios
+    // Mensajes programados: solo los ve quien los escribió.
+    priv.get<{ Querystring: { conversationId?: string } }>('/api/v1/scheduled', async (req) => ({ scheduled: await scheduled.listScheduled(req.userId, req.query.conversationId) }));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/scheduled', async (req) => scheduled.createScheduled(req.userId, req.params.id, CreateScheduledInput.parse(req.body)));
+    priv.patch<{ Params: { id: string } }>('/api/v1/scheduled/:id', async (req) => scheduled.updateScheduled(req.userId, req.params.id, UpdateScheduledInput.parse(req.body)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/scheduled/:id', async (req) => scheduled.cancelScheduled(req.userId, req.params.id));
+    priv.post<{ Params: { id: string } }>('/api/v1/scheduled/:id/send', async (req) => scheduled.sendScheduledNow(req.userId, req.params.id));
     priv.get('/api/v1/reminders', async (req) => ({ reminders: await reminders.listReminders(req.userId) }));
     priv.post('/api/v1/reminders', async (req) => reminders.createReminder(req.userId, CreateReminderInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/reminders/:id/done', async (req) => reminders.completeReminder(req.userId, req.params.id));
@@ -338,6 +379,7 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/issues', async (req) => issues.createIssue(req.userId, req.params.id, CreateIssueInput.parse(req.body)));
     priv.get<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.getIssue(req.userId, req.params.id));
     priv.patch<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.updateIssue(req.userId, req.params.id, UpdateIssueInput.parse(req.body)));
+    priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/children', async (req) => issues.createChildIssue(req.userId, req.params.id, CreateChildIssueInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/comments', async (req) => issues.commentIssue(req.userId, req.params.id, IssueCommentInput.parse(req.body).body));
 
     // Archivos en árbol de carpetas («Mis archivos» o un espacio)

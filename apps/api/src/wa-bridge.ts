@@ -10,12 +10,12 @@
  */
 import { hostname } from 'node:os';
 import pino from 'pino';
-import makeWASocket, { Browsers, DisconnectReason, fetchLatestWaWebVersion, isJidGroup, jidNormalizedUser, makeCacheableSignalKeyStore } from 'baileys';
+import makeWASocket, { Browsers, DisconnectReason, fetchLatestWaWebVersion, jidNormalizedUser, makeCacheableSignalKeyStore } from 'baileys';
 import { pool } from './db.ts';
 import {
   bridgeToTieComs, chatFromWa, dbAuthState, groupRow, msgRow, notifyOwner, organizeAccount, setStatus, skipJid, storeMessages, tsOf,
   upsertChats, upsertContacts, type ChatRow, type MsgRow, type Session,
-  storeReaction,
+  storeReaction, aliasOf, rememberSenders, storeAliases,
 } from './modules/wa-sync.ts';
 
 const BRIDGE_ID = `${hostname()}:${process.pid}`;
@@ -42,8 +42,29 @@ async function syncGroups(s: Session) {
   try {
     const groups = await s.sock.groupFetchAllParticipating();
     await upsertChats(s, Object.values(groups).map(groupRow));
+    // Los participantes traen LID y número: con eso se ponen nombres a los mensajes.
+    await storeAliases(s, Object.values(groups).flatMap((g) => g.participants ?? []).map(aliasOf));
+    await resolveLids(s);
     notifyOwner(s);
   } catch (e: any) { console.error(`[wa] ${s.id} no pude leer los grupos`, e?.message); }
+}
+
+/** Autores que solo conocemos por LID: se le pregunta a Baileys su número (lo guarda al descifrar). */
+async function resolveLids(s: Session) {
+  const repo = (s.sock as any)?.signalRepository?.lidMapping;
+  if (!repo) return;
+  const { rows } = await pool.query(
+    `SELECT DISTINCT m.author_jid AS lid FROM wa_messages m
+      WHERE m.account_id = $1 AND m.author_jid LIKE '%@lid'
+        AND NOT EXISTS (SELECT 1 FROM wa_jid_alias a WHERE a.account_id = m.account_id AND a.lid = m.author_jid)
+      LIMIT 5000`,
+    [s.id],
+  );
+  const pairs: { lid: string; pn: string | null }[] = [];
+  for (const r of rows) pairs.push({ lid: r.lid, pn: await repo.getPNForLID(r.lid).catch(() => null) });
+  await storeAliases(s, pairs);
+  const found = pairs.filter((p) => p.pn).length;
+  if (rows.length) console.log(`[wa] ${s.id} LID resueltos ${found}/${rows.length}`);
 }
 
 async function connect(s: Session) {
@@ -125,18 +146,21 @@ async function connect(s: Session) {
     } catch (e: any) { console.error(`[wa] ${s.id} connection.update`, e?.message); }
   });
 
-  sock.ev.on('messaging-history.set', async ({ chats, contacts, messages, isLatest }) => {
+  sock.ev.on('messaging-history.set', async ({ chats, contacts, messages, lidPnMappings, isLatest }) => {
     try {
       await upsertContacts(s, contacts);
+      await storeAliases(s, lidPnMappings ?? []);
+      await rememberSenders(s, messages);
       await upsertChats(s, chats.map(chatFromWa).filter(Boolean) as ChatRow[]);
       const rows = messages.filter((m) => tsOf(m.messageTimestamp).getTime() >= cutoff).map((m) => msgRow(s, m)).filter(Boolean) as MsgRow[];
       await storeMessages(s, rows, false);
       await setStatus(s.id, { last_sync_at: new Date() });
       organizeSoon();
       notifyOwner(s);
-      if (isLatest) console.log(`[wa] ${s.id} historial recibido`);
+      if (isLatest) { console.log(`[wa] ${s.id} historial recibido`); void resolveLids(s).then(() => notifyOwner(s)).catch(() => {}); }
     } catch (e: any) { console.error(`[wa] ${s.id} historial`, e?.message); }
   });
+  sock.ev.on('lid-mapping.update', (m) => void storeAliases(s, [m]).catch(() => {}));
   sock.ev.on('contacts.upsert', (c) => void upsertContacts(s, c).then(organizeSoon).catch(() => {}));
   sock.ev.on('contacts.update', (c) => void upsertContacts(s, c).catch(() => {}));
   sock.ev.on('chats.upsert', (c) => void upsertChats(s, c.map(chatFromWa).filter(Boolean) as ChatRow[]).then(() => notifyOwner(s)).catch(() => {}));
@@ -152,9 +176,8 @@ async function connect(s: Session) {
       const inserted = await storeMessages(s, rows, type === 'notify');
       if (inserted.length) notifyOwner(s);
       if (type === 'notify') await bridgeToTieComs(s, inserted);
-      // Los nombres de quienes escriben en 1:1 sirven como contacto.
-      await upsertContacts(s, messages.filter((m) => !m.key.fromMe && m.pushName && m.key.remoteJid && !isJidGroup(m.key.remoteJid))
-        .map((m) => ({ id: m.key.remoteJid!, notify: m.pushName! })));
+      // El nombre que se puso quien escribe (y su número junto al LID) sirve cuando no está en la libreta.
+      await rememberSenders(s, messages);
     } catch (e: any) { console.error(`[wa] ${s.id} mensajes`, e?.message); }
   });
 }
@@ -185,7 +208,7 @@ async function purgeRemoved() {
   for (const r of rows) {
     const s = sessions.get(r.id);
     if (s?.sock) {
-      try { await s.sock.logout('Chaggu: cuenta desconectada'); } catch {}
+      try { await s.sock.logout('chaggu: cuenta desconectada'); } catch {}
     }
     if (s) stopLocal(s);
     await pool.query('DELETE FROM wa_accounts WHERE id = $1', [r.id]);

@@ -1,5 +1,5 @@
 /**
- * Contrato público de Chaggu.
+ * Contrato público de chaggu.
  *
  * Lo comparten el API, la web y las apps (escritorio, Android, iOS). Una app
  * instalada no se actualiza con cada despliegue, así que los cambios aquí son
@@ -36,7 +36,7 @@ export const SignupInput = z.object({
   /** Crea una empresa nueva… */
   orgName: z.string().trim().min(2).max(120).optional(),
   /** …o se une a una existente con una invitación de empresa. */
-  orgInviteToken: z.string().min(16).max(200).optional(),
+  orgInviteToken: z.string().min(8).max(200).optional(),
   title: z.string().trim().max(120).optional(),
   device: DeviceInfo,
 }).refine((v) => !!v.orgName || !!v.orgInviteToken, { message: 'org_required', path: ['orgName'] });
@@ -56,7 +56,8 @@ export type SsoProvider = z.infer<typeof SsoProvider>;
  * 1. El cliente abre en el navegador del sistema
  *    GET /api/v1/auth/{provider}/start?platform=&code_challenge=&code_challenge_method=S256[&org=<token>][&org_name=][&next=]
  * 2. El servidor habla con Google/Microsoft y redirige a
- *    web: {origen}/auth/sso?code=…   nativas y escritorio: tiecoms://auth/callback?code=…
+ *    web: {origen}/auth/sso?code=…   nativas y escritorio: chaggu://auth/callback?code=… si /start recibe
+ *    redirect_scheme=chaggu (apps com.chaggu.app); sin ese parámetro, tiecoms://auth/callback (apps anteriores).
  *    (si falla: …?error=<código>&message=<texto>)
  * 3. El cliente canjea el código (60 s, un solo uso) con su code_verifier.
  */
@@ -107,7 +108,17 @@ export interface UserDTO {
   avatarUrl?: string | null;
   /** Solo en bootstrap.me: recibe el resumen semanal de enlaces por correo. */
   linkDigest?: boolean;
+  /**
+   * Solo en bootstrap.me: «No molestar» activo hasta esta fecha (ISO), o null si está apagado.
+   * Ausente = servidor anterior a «No molestar».
+   */
+  dndUntil?: string | null;
+  /** Solo en bootstrap.me: mi modo sueño (horario de descanso diario). Ausente = servidor anterior. */
+  sleep?: SleepDTO;
 }
+
+/** Modo sueño: todas las noches, de `start` a `end` (HH:MM en `tz`), no suena nada. */
+export interface SleepDTO { on: boolean; start: string; end: string; tz: string; tzAuto: boolean }
 
 export interface OrganizationDTO {
   id: string;
@@ -152,6 +163,8 @@ export interface PersonDTO {
   guest: boolean;
   guestUntil: string | null;
   avatarUrl?: string | null;
+  /** Horario de descanso de la persona (solo si lo tiene encendido): a quien escribe se le avisa que no le sonará. */
+  sleep?: { start: string; end: string; tz: string } | null;
 }
 
 export interface WorkspaceDTO {
@@ -201,6 +214,8 @@ export interface ConversationDTO {
   parentMessageId: string | null;
   parentMessageSeq: number | null;
   deriveKind: DeriveKind | null;
+  /** Sidechat abierto desde un asunto: las tareas creadas aquí son hijas de él. */
+  sideIssueId?: string | null;
   deriveReason: string | null;
   returnedAt: string | null;
   openIssues: number;
@@ -267,7 +282,115 @@ export interface AttachmentDTO {
   /** ≤ 64 valores entre 0 y 1 para dibujar la onda. */
   waveform?: number[] | null;
   transcript?: VoiceTranscriptDTO | null;
+  /** Solo en PDFs firmados con Chaggu (POST /attachments/:id/sign): quién firmó, cuándo y la huella del resultado. */
+  signing?: AttachmentSigningDTO | null;
 }
+
+/** Referencia corta de una firma (8 caracteres): va impresa en el sello del PDF y sirve para buscarla en el historial. */
+export const signingRef = (signingId: string) => signingId.replace(/-/g, '').slice(0, 8).toUpperCase();
+
+export interface AttachmentSigningDTO {
+  id: string;
+  signerId: string;
+  signerName: string;
+  signedAt: string;
+  /** SHA-256 en hexadecimal del PDF original y del firmado. */
+  originalSha256: string;
+  signedSha256: string;
+}
+
+// ---------- Firmar PDFs ----------
+/** Límite de firmas guardadas por persona y tamaño de cada PNG. */
+export const MAX_SAVED_SIGNATURES = 12;
+export const MAX_SIGNATURE_BYTES = 512 * 1024;
+export const MAX_SIGN_PLACEMENTS = 300;
+
+/**
+ * Firma guardada: PNG con fondo transparente. url es una ruta del API que solo sirve a su dueño.
+ * kind: firma completa o iniciales (rúbrica). source: cómo se hizo (solo informativo).
+ */
+export interface SignatureDTO {
+  id: string;
+  kind: 'signature' | 'initials';
+  source: 'drawn' | 'typed' | 'uploaded';
+  width: number;
+  height: number;
+  url: string;
+  createdAt: string;
+}
+
+/**
+ * Una marca sobre una página, en proporciones (0–1) de la página tal como se ve (ya girada),
+ * con el origen arriba a la izquierda. page empieza en 1. La imagen llena la caja: el cliente
+ * conserva la proporción de la firma.
+ */
+const PlacementBox = {
+  page: z.number().int().min(1).max(5000),
+  x: z.number().min(0).max(1), y: z.number().min(0).max(1),
+  w: z.number().min(0.004).max(1), h: z.number().min(0.004).max(1),
+};
+export const SignPlacementInput = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('signature'), signatureId: z.uuid(), ...PlacementBox }),
+  /** Texto libre, nombre o fecha ya formateada por el cliente. La letra se ajusta a la caja. */
+  z.object({ type: z.literal('text'), text: z.string().trim().min(1).max(300), ...PlacementBox }),
+]).refine((p) => p.x + p.w <= 1.001 && p.y + p.h <= 1.001, { message: 'outside_page' });
+export type SignPlacementInput = z.infer<typeof SignPlacementInput>;
+
+export const SignPdfInput = z.object({
+  clientMessageId: z.string().min(8).max(64),
+  /** Texto del mensaje que acompaña al PDF firmado ('' = el servidor pone «✍️ Documento firmado»). */
+  body: z.string().trim().max(2000).default(''),
+  placements: z.array(SignPlacementInput).min(1).max(MAX_SIGN_PLACEMENTS),
+  /** Sello pequeño bajo cada firma: «Firmado electrónicamente por … · fecha». */
+  stamp: z.boolean().default(true),
+  /** Agrega al final una hoja de constancia con las huellas y los datos de la firma. */
+  certificate: z.boolean().default(false),
+  /** El PDF ya trae una firma digital que se invalidaría: hay que confirmarlo (si no, 409 has_digital_signature). */
+  acceptBreakingSignatures: z.boolean().default(false),
+  /** Zona horaria IANA para las fechas del sello y la constancia. */
+  timeZone: z.string().max(64).optional(),
+});
+export type SignPdfInput = z.input<typeof SignPdfInput>;
+export interface SignInfoDTO {
+  attachmentId: string; name: string; sizeBytes: number;
+  hasDigitalSignature: boolean; encrypted: boolean;
+  /** Si este adjunto ya es un PDF firmado con Chaggu. */
+  signing: AttachmentSigningDTO | null;
+  /** Firmas hechas en Chaggu sobre este documento (como original o como resultado). */
+  history: AttachmentSigningDTO[];
+}
+/**
+ * Historial «Documentos que firmé» (GET /me/signings). attachment es el PDF firmado si todavía puedo
+ * leerlo (null si salí de la conversación o se borró); la constancia se conserva igual.
+ */
+export interface SigningHistoryItemDTO extends AttachmentSigningDTO {
+  ref: string;
+  documentName: string;
+  conversationId: string;
+  conversationName: string | null;
+  messageId: string | null;
+  sourceAttachmentId: string;
+  resultAttachmentId: string;
+  /** Quién mandó el PDF a firmar (autor del mensaje original), si no fui yo. */
+  requestedById: string | null;
+  requestedByName: string | null;
+  /** Total de marcas (firmas, iniciales, textos) y en cuántas páginas del total. */
+  marks: number;
+  signatureMarks: number;
+  pagesMarked: number;
+  pages: number;
+  stamp: boolean;
+  certificate: boolean;
+  attachment: AttachmentDTO | null;
+}
+export interface SigningHistoryPageDTO { signings: SigningHistoryItemDTO[]; nextBefore: string | null; total: number }
+export const SigningHistoryQuery = z.object({
+  before: z.iso.datetime().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+  /** Busca en el nombre del documento, en quién lo pidió o por referencia (REF). */
+  q: z.string().trim().max(120).optional(),
+});
+export interface SignPdfResult { message: MessageDTO; attachment: AttachmentDTO; signing: AttachmentSigningDTO; duplicate: boolean }
 
 /**
  * Transcripción de una nota de voz. pending: en proceso; disabled: el servidor no tiene transcripción configurada
@@ -291,7 +414,7 @@ export type LinkKind = 'video' | 'short' | 'post' | 'article' | 'audio' | 'image
 export type LinkProvider = 'youtube' | 'tiktok' | 'instagram' | 'x' | 'linkedin' | 'facebook' | 'vimeo' | 'spotify' | 'google' | 'github';
 export type LinkPreviewMode = 'large' | 'compact' | 'none';
 /**
- * imageUrl es una ruta del API (/api/v1/previews/…): la miniatura ya está en Chaggu.
+ * imageUrl es una ruta del API (/api/v1/previews/…): la miniatura ya está en chaggu.
  * kind, provider, author y durationSec son aditivos (clientes viejos los ignoran).
  */
 export interface LinkPreviewDTO {
@@ -309,7 +432,7 @@ export interface LinkPreviewDTO {
 export interface ReactionDTO {
   emoji: string;
   userIds: string[];
-  /** Reacciones que llegaron por un puente (WhatsApp): nombre visible, sin cuenta en Chaggu. */
+  /** Reacciones que llegaron por un puente (WhatsApp): nombre visible, sin cuenta en chaggu. */
   external?: { name: string; source: ForwardSource }[];
 }
 /** Máximo de emojis distintos por mensaje. */
@@ -387,6 +510,21 @@ export interface ForwardedInfo {
   messageId?: string | null; messageSeq?: number | null; excerpt?: string | null;
 }
 
+/** Mensaje programado: solo lo ve quien lo escribió, hasta que sale. */
+export interface ScheduledMessageDTO {
+  id: string;
+  conversationId: string;
+  body: string;
+  mentions: { userId: string; start: number; length: number }[];
+  replyTo: string | null;
+  sendAt: string;
+  status: 'pending' | 'sending' | 'sent' | 'cancelled' | 'failed';
+  messageId: string | null;
+  error: string | null;
+  createdAt: string;
+  sentAt: string | null;
+}
+
 export interface ReminderDTO {
   id: string;
   conversationId: string;
@@ -441,13 +579,21 @@ export interface IssueDTO {
   statusSince: string;
   closedAt: string | null;
   commentCount: number;
+  /** Tarea derivada de este asunto (null = asunto principal). Ausente = servidor anterior. */
+  parentIssueId?: string | null;
+  /** Quién la ve: 'all' (todo el chat), 'org' (solo visibleOrgId + viewerIds), 'private' (solo viewerIds). */
+  visibility?: IssueVisibility;
+  visibleOrgId?: string | null;
+  /** Personas con acceso explícito (solo en 'org' y 'private'). */
+  viewerIds?: string[];
 }
+export type IssueVisibility = 'all' | 'org' | 'private';
 
 export interface IssueEventDTO {
   id: number;
   issueId: string;
   actorId: string;
-  kind: 'created' | 'status' | 'owner' | 'due' | 'title' | 'comment' | 'waiting';
+  kind: 'created' | 'status' | 'owner' | 'due' | 'title' | 'comment' | 'waiting' | 'visibility';
   payload: Record<string, unknown>;
   createdAt: string;
 }
@@ -586,12 +732,25 @@ export interface InvitationCreatedDTO { id: string; token: string; url: string; 
 
 export const JoinPolicyInput = z.object({ joinPolicy: z.enum(['invite', 'auto']) });
 
+/**
+ * Invitar a un colega a mi empresa. Con `conversationIds` (grupos donde participo, de un mismo espacio de mi
+ * empresa: el de «Tu organización» o una relación) la persona, al aceptar, entra a la empresa y además a esos
+ * grupos con el historial `history`. Así cualquier miembro (no solo owner/admin) puede invitar colegas desde un
+ * grupo. `workspaceId` es opcional (se deduce de los grupos; si viene, debe coincidir). `multiUse` = enlace y
+ * código para varias personas, sin correo. Clientes viejos: sin estos campos, igual que antes.
+ */
 export const CreateOrgInvitationInput = z.object({
   email: email.optional(),
   role: z.enum(['member', 'admin']).default('member'),
   expiresInDays: z.number().int().min(1).max(60).default(14),
   lang: z.enum(['es', 'en']).default('es'),
+  workspaceId: z.uuid().optional(),
+  conversationIds: z.array(z.uuid()).max(50).default([]),
+  history: z.enum(['now', 'all']).default('now'),
+  multiUse: z.boolean().optional(),
 });
+/** Respuesta de crear una invitación a la empresa. `url` y `code` son nuevos (28-sep-2026); `code` solo sin correo. */
+export interface OrgInvitationCreatedDTO { id: string; token: string; url?: string; code?: string | null; expiresAt: string; emailSent: boolean; emailStatus: string | null }
 
 export interface OrgInvitationPreviewDTO {
   orgName: string;
@@ -599,6 +758,9 @@ export interface OrgInvitationPreviewDTO {
   email: string | null;
   expiresAt: string;
   valid: boolean;
+  /** Grupos a los que entra además de la empresa. Clientes viejos: ausente. */
+  groupNames?: string[];
+  multiUse?: boolean;
 }
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -607,8 +769,25 @@ export const CreateIssueInput = z.object({
   ownerId: z.uuid().nullable().optional(),
   dueDate: isoDate.nullable().optional(),
   originMessageId: z.uuid().nullable().optional(),
+  visibility: z.enum(['all', 'org', 'private']).optional(),
+  /** Personas extra con acceso (solo 'org' y 'private'). Pueden no estar en la conversación. */
+  viewerIds: z.array(z.uuid()).max(50).optional(),
+  /** Tarea hija de este asunto: en su misma conversación o en un sidechat que salió de ella. */
+  parentIssueId: z.uuid().nullable().optional(),
+});
+/** POST /issues/:id/children: tarea derivada. Por defecto la ve solo mi empresa si en el chat hay más de una. */
+export const CreateChildIssueInput = z.object({
+  title: z.string().trim().min(2).max(200),
+  /** Sidechat que salió del chat del asunto (si no, la tarea queda en el mismo chat). */
+  conversationId: z.uuid().optional(),
+  ownerId: z.uuid().nullable().optional(),
+  dueDate: isoDate.nullable().optional(),
+  visibility: z.enum(['all', 'org', 'private']).optional(),
+  viewerIds: z.array(z.uuid()).max(50).optional(),
 });
 export const UpdateIssueInput = z.object({
+  visibility: z.enum(['all', 'org', 'private']).optional(),
+  viewerIds: z.array(z.uuid()).max(50).optional(),
   title: z.string().trim().min(2).max(200).optional(),
   status: z.enum(['open', 'in_progress', 'waiting', 'done', 'cancelled']).optional(),
   ownerId: z.uuid().nullable().optional(),
@@ -628,10 +807,12 @@ export const DeriveInput = z.object({
  * participantes del origen. No publica nada en el origen. Más adelante userIds podrá incluir agentes.
  */
 export const SideConversationInput = z.object({
-  messageId: z.uuid(),
+  /** Desde un mensaje visible, o desde un asunto (issueId): sus tareas nacen ahí como hijas del asunto. */
+  messageId: z.uuid().optional(),
+  issueId: z.uuid().optional(),
   userIds: z.array(z.uuid()).min(1).max(20),
   question: z.string().trim().min(1).max(4000).optional(),
-});
+}).refine((v) => !!v.messageId !== !!v.issueId, { message: 'message_or_issue', path: ['messageId'] });
 export const ReturnResultInput = z.object({ summary: z.string().trim().min(2).max(4000) });
 
 export const AcceptInvitationInput = z.object({ orgId: z.uuid().optional() });
@@ -652,6 +833,8 @@ export interface PendingInvitationDTO {
   sendCount: number;
   /** Quien invitó o quien administra puede reenviar y revocar. */
   canManage: boolean;
+  /** Grupos a los que entra al aceptar (para filtrar las pendientes de un grupo). Servidores viejos: ausente. */
+  conversationIds?: string[];
 }
 
 export interface InvitationPreviewDTO {
@@ -668,6 +851,14 @@ export interface InvitationPreviewDTO {
   multiUse?: boolean;
   /** Invitación a un grupo interno de una empresa (se entra como invitado de fuera). */
   orgHome?: boolean;
+  /**
+   * 'org' = invitación a unirse a una empresa como colega (y a sus grupos), resuelta por el mismo
+   * `/invitations/:token` (token o código). Ausente o 'workspace' = invitación a un espacio.
+   * Si es 'org' y no hay sesión, el registro va por `/signup?org={token}`.
+   */
+  kind?: 'workspace' | 'org';
+  /** Con kind 'org': la empresa a la que entra. */
+  orgName?: string;
 }
 
 // ---------- Mensajes ----------
@@ -707,7 +898,26 @@ export const SendMessageInput = z.object({
 export const EditMessageInput = z.object({ body: z.string().trim().min(1).max(8000), mentions: z.array(MentionInput).max(50).optional() });
 export const ConversationPrefsInput = z.object({ pinned: z.boolean().optional(), mutedUntil: z.iso.datetime().nullable().optional(), linkPreviews: z.enum(['large', 'compact', 'none']).optional() });
 export const WorkspacePrefsInput = z.object({ pinned: z.boolean() });
+/** Constante para «Hasta que lo reactive» (chat silenciado o «No molestar»). */
+export const MUTE_FOREVER = '9999-12-31T00:00:00Z';
+/** PUT /me/dnd: «No molestar» hasta `until` (ISO; MUTE_FOREVER = hasta que lo reactive); null lo apaga. */
+export const DndInput = z.object({ until: z.iso.datetime({ offset: true }).nullable() });
+export interface DndDTO { dndUntil: string | null }
+const HHMM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+/** PUT /me/sleep: cualquier campo; `tz` explícito fija la zona (tzAuto=false) salvo que venga `tzAuto: true`. */
+export const SleepInput = z.object({ on: z.boolean().optional(), start: HHMM.optional(), end: HHMM.optional(), tz: z.string().min(1).max(64).optional(), tzAuto: z.boolean().optional() });
 export const MarkUnreadInput = z.object({ seq: z.number().int().min(1) });
+export const CreateScheduledInput = z.object({
+  body: z.string().trim().min(1).max(8000),
+  mentions: z.array(MentionInput).max(50).optional(),
+  replyTo: z.uuid().nullable().optional(),
+  sendAt: z.iso.datetime({ offset: true }),
+});
+export const UpdateScheduledInput = z.object({
+  body: z.string().trim().min(1).max(8000).optional(),
+  mentions: z.array(MentionInput).max(50).optional(),
+  sendAt: z.iso.datetime({ offset: true }).optional(),
+});
 export const CreateReminderInput = z.object({
   conversationId: z.uuid(), messageId: z.uuid().nullable().optional(), note: z.string().trim().max(300).nullable().optional(), remindAt: z.iso.datetime(),
 });
@@ -752,8 +962,11 @@ export const PushTokenInput = z.object({
  */
 export interface PushData {
   /** side = mensaje de un sidechat (categoría TC_SIDE; trae sideOf). reaction = reaccionaron a mi mensaje (abre el mensaje). */
-  type: 'message' | 'reminder' | 'event' | 'side' | 'mention' | 'reaction';
+  type: 'message' | 'reminder' | 'event' | 'side' | 'mention' | 'reaction' | 'issue';
   conversationId: string;
+  /** type 'issue': me asignaron esta tarea. Abrir el asunto; si inChat es false, sin abrir el chat (no lo puedo leer). */
+  issueId?: string;
+  inChat?: boolean;
   messageId?: string;
   authorId?: string;
   authorName?: string;
@@ -806,7 +1019,7 @@ export const UpdateWaChatInput = z.object({
   category: WaCategory.nullable().optional(),
   pinned: z.boolean().optional(),
   hidden: z.boolean().optional(),
-  /** Conversación de Chaggu a la que llegan los mensajes nuevos de este chat (null = desvincular). */
+  /** Conversación de chaggu a la que llegan los mensajes nuevos de este chat (null = desvincular). */
   linkedConversationId: z.uuid().nullable().optional(),
 });
 export const WaMessagesQuery = z.object({ before: z.iso.datetime().optional(), limit: z.coerce.number().int().min(1).max(200).default(60) });
@@ -869,9 +1082,19 @@ export type AccountEvent =
   | { type: 'reminder.due'; reminder: ReminderDTO }
   /** Mis recordatorios cambiaron desde otro dispositivo (p. ej. una reacción 👀): volver a pedirlos. */
   | { type: 'reminders.changed' }
+  /** Un mensaje programado mío cambió (creado, editado, enviado, cancelado o fallido), en cualquier dispositivo. */
+  | { type: 'scheduled.updated'; scheduled: ScheduledMessageDTO }
   /** Una reunión a la que voy (sí, quizá o sin responder) empieza en `minutes` minutos (10 por defecto). */
   | { type: 'event.soon'; event: CalendarEventDTO; minutes: number }
   | { type: 'prefs.updated'; conversationId?: string; workspaceId?: string }
+  /** Cambió mi «No molestar» (desde este u otro dispositivo). */
+  | { type: 'me.dnd'; dndUntil: string | null }
+  /** Un asunto restringido (visibilidad 'org' o 'private') que puedo ver cambió: no viaja por la conversación. */
+  | { type: 'issue.updated'; issue: IssueDTO }
+  /** Perdí acceso a un asunto (cambió su visibilidad o me quitaron): sacarlo de la lista. */
+  | { type: 'issue.hidden'; issueId: string; conversationId: string }
+  /** Cambió mi modo sueño (desde este u otro dispositivo). */
+  | { type: 'me.sleep'; sleep: SleepDTO }
   | { type: 'whatsapp.updated'; accountId: string }
   | { type: 'drive.updated'; workspaceId: string | null };
 
@@ -892,3 +1115,36 @@ export const SOCKET_EVENTS = {
 export interface ApiErrorBody {
   error: { code: string; message: string; details?: unknown };
 }
+
+// ---------- Asistente (IA) ----------
+/** Una vuelta de la conversación con el asistente. El historial vive en el cliente (últimos 20 turnos). */
+export const AssistantTurnInput = z.object({
+  aiConsent: z.boolean().optional(),
+  messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().trim().min(1).max(4000) })).min(1).max(20),
+  timezone: z.string().min(1).max(64).default('America/Bogota'),
+  lang: z.enum(['es', 'en']).default('es'),
+});
+/** Confirmar una acción pendiente (token firmado por el servidor) o deshacer una hecha. `text` = texto editado de un mensaje. */
+export const AssistantRunInput = z.object({ token: z.string().min(10).max(8000), text: z.string().trim().min(1).max(8000).optional() });
+
+export type AssistantActionKind = 'send_message' | 'create_group' | 'create_issue' | 'update_issue' | 'create_event' | 'cancel_event' | 'mark_read';
+export interface AssistantActionDTO {
+  id: string;
+  kind: AssistantActionKind;
+  /** pending = espera tu confirmación; done = hecho (quizá con undoToken); failed = no se pudo; undone = deshecho. */
+  status: 'pending' | 'done' | 'failed' | 'undone';
+  /** A quién o dónde: «Laura Méndez», «Andes · Operación». */
+  target: string;
+  /** Texto del mensaje, título del asunto o de la reunión. */
+  text: string;
+  /** Línea secundaria: fecha, responsable, invitados… */
+  detail?: string | null;
+  /** Para confirmar (status pending). */
+  token?: string;
+  /** Para deshacer (status done). */
+  undoToken?: string;
+  /** Ruta de la app para abrirlo (/c/…, /asuntos, /agenda). */
+  link?: string | null;
+  error?: string | null;
+}
+export interface AssistantTurnDTO { reply: string; actions: AssistantActionDTO[]; /** 2-3 respuestas rápidas que el usuario probablemente dirá después (chips). */ suggestions?: string[] }

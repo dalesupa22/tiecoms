@@ -28,6 +28,7 @@ export const toDTO = (r: any): AttachmentDTO => ({
   // Si hay variante reproducible (AAC), url la sirve y contentType la describe; ?original=1 da el archivo subido.
   contentType: r.play_type ?? r.content_type, sizeBytes: Number(r.size_bytes), width: r.width ?? null, height: r.height ?? null,
   url: `/api/v1/attachments/${r.id}`, thumbUrl: r.thumb_key ? `/api/v1/attachments/${r.id}/thumb` : null,
+  ...(r.signing ? { signing: r.signing } : {}),
   ...(r.kind === 'voice' ? {
     kind: 'voice' as const, durationMs: r.duration_ms ?? null, waveform: r.waveform ?? null,
     transcript: r.transcript && r.transcript.status !== 'new' ? publicTranscript(r.transcript) : null,
@@ -120,7 +121,7 @@ function exifRotated(b: Buffer): boolean {
   return false;
 }
 
-function cleanName(raw: string | undefined): string {
+export function cleanName(raw: string | undefined): string {
   let name = '';
   try { name = decodeURIComponent(String(raw ?? '')); } catch { name = String(raw ?? ''); }
   name = name.replace(/[\u0000-\u001f\u007f/\\]/g, '_').replace(/^\.+/, '').trim().slice(0, 200);
@@ -230,10 +231,11 @@ export async function claimForMessage(c: Tx, userId: string, conversationId: str
       if (r.message_seq <= acc.historyFromSeq) throw badRequest('Algún adjunto reenviado no existe');
       const copy = await c.query(
         `INSERT INTO attachments (conversation_id, owner_id, name, content_type, size_bytes, width, height, s3_key, thumb_key, thumb_type,
-                                  kind, duration_ms, waveform, transcript, play_key, play_type)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+                                  kind, duration_ms, waveform, transcript, play_key, play_type, signing)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
         [conversationId, userId, r.name, r.content_type, r.size_bytes, r.width, r.height, r.s3_key, r.thumb_key, r.thumb_type,
-          r.kind, r.duration_ms, JSON.stringify(r.waveform), JSON.stringify(r.transcript ? { ...r.transcript, status: r.transcript.status === 'done' ? 'done' : 'disabled', aiConsent: false, aiConsentAt: null } : null), r.play_key, r.play_type],
+          r.kind, r.duration_ms, JSON.stringify(r.waveform), JSON.stringify(r.transcript ? { ...r.transcript, status: r.transcript.status === 'done' ? 'done' : 'disabled', aiConsent: false, aiConsentAt: null } : null), r.play_key, r.play_type,
+          r.signing ? JSON.stringify(r.signing) : null],
       );
       out.push({ id: copy.rows[0].id, dto: toDTO(copy.rows[0]) });
     }

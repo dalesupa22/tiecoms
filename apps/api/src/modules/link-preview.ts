@@ -256,6 +256,17 @@ export async function buildPreview(url: string): Promise<LinkPreviewDTO | null> 
         else if (!oe) return null;
       } else if (!oe) return null;
     } catch (e) { if (!oe) throw e; }
+    // Muchas apps de una sola página (la wallet de Xertify, por ejemplo) solo sirven sus Open Graph a los
+    // rastreadores: si al navegador no le dio imagen ni descripción, se lee una vez más como rastreador.
+    if (!oe && !meta.image && !meta.description && !imagePage && !['instagram', 'facebook', 'tiktok', 'x', 'linkedin'].includes(cls.provider ?? '')) {
+      try {
+        const again = await safeGet(url, 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', HTML_MAX, CRAWLER_UA);
+        if (again.status < 400 && (/html|xml/.test(again.type) || !again.type)) {
+          const m2 = parseMeta(charsetOf(again.type, again.body).decode(again.body));
+          if (m2.image || m2.description) { meta = m2; finalUrl = again.url; }
+        }
+      } catch { /* se queda con lo que tenía */ }
+    }
   }
   const host = new URL(finalUrl).hostname.replace(/^www\./, '');
   const image = oe?.thumbnail ?? meta.image;

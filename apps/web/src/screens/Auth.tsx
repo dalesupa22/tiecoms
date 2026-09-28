@@ -60,12 +60,13 @@ export function AuthScreen({ mode, after }: { mode: 'login' | 'signup'; after?: 
   return (
     <div className="auth">
       <div className="auth-card">
-        <img src={asset('/chaggu-logo.svg')} alt="Chaggu" width={220} height={96} />
+        <img src={asset('/chaggu-logo-animado.svg')} alt="chaggu" width={220} height={96} />
         <p className="muted" style={{ fontSize: 16, margin: 0 }}>{t('brand.tagline')}</p>
         {joining && orgInvite && (
           <div className="card" style={{ padding: 14 }}>
             <b>{t('auth.joining', { org: orgInvite.orgName })}</b>
             <div className="small muted">{orgInvite.valid ? t('auth.joiningBy', { name: orgInvite.invitedByName }) : t('auth.inviteInvalid')}</div>
+            {orgInvite.valid && !!orgInvite.groupNames?.length && <div className="small muted">{t('auth.joiningGroups', { groups: orgInvite.groupNames.join(', ') })}</div>}
           </div>
         )}
         {/* En las apps el SSO va por el navegador del sistema (Google bloquea los WebView); aquí solo la web. */}
@@ -138,7 +139,7 @@ export function SsoReturnScreen() {
   return (
     <div className="auth">
       <div className="auth-card">
-        <img src={asset('/chaggu-logo.svg')} alt="Chaggu" width={220} height={96} />
+        <img src={asset('/chaggu-logo-animado.svg')} alt="chaggu" width={220} height={96} />
         {error
           ? <>
               <div className="error" role="alert">{error}</div>

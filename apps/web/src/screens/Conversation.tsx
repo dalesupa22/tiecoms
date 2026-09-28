@@ -18,6 +18,7 @@ import { MentionMirror, MessageText, backspaceToken, mentionsFor, mentionsMe, us
 import { QuickReplies, SideChip, SideConnector, SideDialog, replyPrivately, sidesOf, takePrivateDraft } from './Side.tsx';
 import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
+import { SleepNotice } from './Sleep.tsx';
 import { ScheduledStrip, openScheduleMenu, scheduleMenu, whenLabel } from './Scheduled.tsx';
 import { ConversationIssues, IssueDrawer, NewIssueDialog, isClosed } from './Issues.tsx';
 import { DeriveDialog, LineageBar, MergedCard } from './Lineage.tsx';
@@ -582,6 +583,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               <button className="icon-btn" aria-label={t('reply.cancel')} onClick={() => setReplyTo(null)}>×</button>
             </div>
           )}
+          {conv.canPost && <SleepNotice conv={conv} typing={!!text.trim()} onSchedule={canSchedule ? schedule : undefined} />}
           {conv.canPost && <ScheduledStrip conversationId={id} />}
           {conv.canPost ? (
             <>

@@ -11,6 +11,7 @@ import { InviteResult, PendingInvitations } from './Invitations.tsx';
 import { IssueDrawer, IssueRow, isClosed } from './Issues.tsx';
 import { TodayAgenda, newEvent } from './Calendar.tsx';
 import { RemindersSection } from './Bring.tsx';
+import { SleepDialog, sleepSummary } from './Sleep.tsx';
 import { askNotifications, conversationMenu, dndMenu, dndText, mutedText, openDialog, personMenu } from '../actions.tsx';
 import { menuProps, openMenuAt, toast } from '../menu.tsx';
 import { isMuted } from '../home-order.ts';
@@ -392,6 +393,7 @@ export function SettingsScreen() {
 /** «No molestar» y «Sonido de mensajes» (también en el menú de la cuenta). */
 function SilenceSettings() {
   const until = useClient((s) => s.data?.me.dndUntil);
+  const sleep = useClient((s) => s.data?.me.sleep);
   const sound = useSyncExternalStore(subscribeSound, soundEnabled);
   const status = dndText(until);
   return (
@@ -400,6 +402,11 @@ function SilenceSettings() {
         onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left + 16, r.bottom - 6, dndMenu(until).items!); }}>
         <span style={{ fontSize: 22 }} aria-hidden>🌙</span>
         <span className="grow"><b>{t('dnd.title')}</b><span className="small muted" style={{ display: 'block' }}>{status ?? t('dnd.hint')}</span></span>
+        <span className="muted">›</span>
+      </button>
+      <button className="card conv-card" style={{ marginBottom: 12 }} onClick={() => openDialog((close) => <SleepDialog onClose={close} />)}>
+        <span style={{ fontSize: 22 }} aria-hidden>🛌</span>
+        <span className="grow"><b>{t('sleep.title')}</b><span className="small muted" style={{ display: 'block' }}>{sleepSummary(sleep) ?? t('sleep.explain')}</span></span>
         <span className="muted">›</span>
       </button>
       <label className="card conv-card check" style={{ marginBottom: 12 }}>

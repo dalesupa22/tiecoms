@@ -38,6 +38,10 @@ const es = {
   // Reacciones y enlaces (docs/REACCIONES_ENLACES.md)
   'common.and': 'y',
   'nav.saved': 'Ver después',
+  'sleep.title': 'Todas las noches', 'sleep.switch': 'No molestar todas las noches', 'sleep.summary': 'De {from} a {to}', 'sleep.off': 'Apagado',
+  'sleep.explain': 'Es «No molestar» automático: en tu horario de descanso no te suena nada y lo lees al despertar. Quien te escriba verá que te llega sin sonar.',
+  'sleep.from': 'Desde', 'sleep.to': 'Hasta', 'sleep.tz': 'Hora de este dispositivo: {tz}', 'sleep.saved': 'No molestar todas las noches de {from} a {to}', 'sleep.savedOff': 'No molestar nocturno apagado',
+  'sleep.noticeOne': '{name} está descansando: le llega sin sonar. Lo verá {when}.', 'sleep.noticeMany': '{n} persona(s) del chat están descansando: les llega sin sonar.', 'sleep.scheduleWake': 'Enviar a las {time}',
   'nav.scheduled': 'Programados', 'sched.menuTitle': 'Programar envío', 'sched.inHour': 'En 1 hora', 'sched.thisAfternoon': 'Esta tarde', 'sched.tomorrowMorning': 'Mañana temprano', 'sched.monday': 'El lunes temprano',
   'sched.pick': 'Elegir fecha y hora…', 'sched.pickTitle': '¿Cuándo lo envío?', 'sched.date': 'Día', 'sched.time': 'Hora', 'sched.willSend': 'Se enviará {when}.', 'sched.future': 'Elige una hora en el futuro.', 'sched.confirm': 'Programar',
   'sched.todayAt': 'hoy a las {time}', 'sched.tomorrowAt': 'mañana a las {time}', 'sched.dayAt': 'el {day} a las {time}',
@@ -556,6 +560,10 @@ const en: Record<Key, string> = {
   // Reactions and links (docs/REACCIONES_ENLACES.md)
   'common.and': 'and',
   'nav.saved': 'Watch later',
+  'sleep.title': 'Every night', 'sleep.switch': 'Do not disturb every night', 'sleep.summary': 'From {from} to {to}', 'sleep.off': 'Off',
+  'sleep.explain': 'Automatic Do not disturb: during your rest hours nothing makes a sound and you read it when you wake up. People writing to you see it arrives silently.',
+  'sleep.from': 'From', 'sleep.to': 'Until', 'sleep.tz': 'This device’s time: {tz}', 'sleep.saved': 'Do not disturb every night from {from} to {to}', 'sleep.savedOff': 'Nightly Do not disturb off',
+  'sleep.noticeOne': '{name} is resting: it arrives silently. They’ll see it {when}.', 'sleep.noticeMany': '{n} person(s) in this chat are resting: it arrives silently.', 'sleep.scheduleWake': 'Send at {time}',
   'nav.scheduled': 'Scheduled', 'sched.menuTitle': 'Schedule send', 'sched.inHour': 'In 1 hour', 'sched.thisAfternoon': 'This afternoon', 'sched.tomorrowMorning': 'Tomorrow morning', 'sched.monday': 'Monday morning',
   'sched.pick': 'Pick date and time…', 'sched.pickTitle': 'When should it go out?', 'sched.date': 'Day', 'sched.time': 'Time', 'sched.willSend': 'It will be sent {when}.', 'sched.future': 'Pick a time in the future.', 'sched.confirm': 'Schedule',
   'sched.todayAt': 'today at {time}', 'sched.tomorrowAt': 'tomorrow at {time}', 'sched.dayAt': 'on {day} at {time}',

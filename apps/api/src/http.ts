@@ -7,7 +7,7 @@ import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput, CreateGroupInput, JoinPolicyInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateScheduledInput, UpdateScheduledInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
-  UpdateProfileInput, DndInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
+  UpdateProfileInput, DndInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
@@ -183,6 +183,8 @@ export async function buildHttp() {
     priv.patch('/api/v1/me', async (req) => profile.updateProfile(req.userId, UpdateProfileInput.parse(req.body)));
     // «No molestar» general: { until: ISO | null } → { dndUntil }.
     priv.put('/api/v1/me/dnd', async (req) => prefs.setDnd(req.userId, DndInput.parse(req.body ?? {}).until));
+    // Modo sueño: horario diario sin sonidos { on?, start?, end?, tz?, tzAuto? } → { sleep }.
+    priv.put('/api/v1/me/sleep', async (req) => prefs.setSleep(req.userId, SleepInput.parse(req.body ?? {})));
     priv.post('/api/v1/me/avatar', { bodyLimit: profile.MAX_AVATAR_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
       async (req) => profile.setAvatar(req.userId, req.body as Buffer));
     priv.delete('/api/v1/me/avatar', async (req) => profile.removeAvatar(req.userId));

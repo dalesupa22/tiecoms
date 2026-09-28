@@ -87,7 +87,7 @@ const data: BootstrapDTO = {
     conv({ id: 'dm-ana', kind: 'direct', workspaceId: null, level: null, memberIds: ['danny', 'ana'], lastMessageSeq: dm.length, lastEventSeq: dm.length, lastReadSeq: dm.length, lastMessagePreview: dm[1]!.body }),
     conv({ id: 'internal', name: 'Equipo interno', kind: 'internal', level: null, internalOrgId: 'xertify', memberIds: ['danny', 'laura'] }),
   ],
-  people: [person('danny', 'Danny Suárez', 'xertify', 'Líder técnico'), person('laura', 'Laura Gómez', 'xertify', 'Soporte'), person('mateo', 'Mateo Rivas', 'norte', 'Director de proyectos'), person('ana', 'Ana Torres', 'norte', 'Coordinadora')],
+  people: [person('danny', 'Danny Suárez', 'xertify', 'Líder técnico'), person('laura', 'Laura Gómez', 'xertify', 'Soporte'), person('mateo', 'Mateo Rivas', 'norte', 'Director de proyectos'), { ...person('ana', 'Ana Torres', 'norte', 'Coordinadora'), sleep: { start: `${String((new Date().getHours() + 23) % 24).padStart(2, '0')}:00`, end: `${String((new Date().getHours() + 7) % 24).padStart(2, '0')}:00`, tz: Intl.DateTimeFormat().resolvedOptions().timeZone } }],
 };
 const issue = (i: Partial<IssueDTO> & { id: string; title: string }): IssueDTO => ({
   workspaceId: 'ws1', conversationId: 'general', originMessageId: null, originMessageSeq: null, status: 'open', waitingOnOrgId: null, ownerId: 'danny', requestedBy: null,

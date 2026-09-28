@@ -929,3 +929,6 @@ select.link-act { appearance: none; padding-right: 10px; }
 .sched-actions { gap: 6px; flex-wrap: wrap; }
 .sched-edit { display: flex; flex-direction: column; gap: 8px; }
 .sched-btn { font-size: 16px; }
+
+/* No molestar todas las noches: aviso a quien escribe */
+.sleep-notice { display: flex; align-items: center; gap: 8px; border: 1px solid #ddd6f3; background: #f5f2fd; color: #4b3f8f; border-radius: 10px; padding: 7px 12px; margin-bottom: 6px; font-size: 13px; font-weight: 600; flex-wrap: wrap; }

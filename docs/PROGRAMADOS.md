@@ -30,3 +30,25 @@ Cuando llega la hora se revalida el acceso. Un error 4xx (por ejemplo, ya no est
 - La lista tiene «Enviar ahora», «Cambiar hora», «Editar» y «Cancelar envío». Cancelar también tiene «Deshacer».
 - Pantalla «Programados» en Más, en `/programados`.
 - Solo se programa texto (con menciones y respuesta). Los adjuntos y las notas de voz se envían al momento.
+
+# No molestar todas las noches (modo sueño)
+
+Complementa a «No molestar» (`dnd_until`, que es manual y por un rato) con un horario diario automático. Migración 026.
+
+- **Base de datos:**
+  - Columnas nuevas en `users`: `sleep_on` (por defecto `true`), `sleep_start` (22:00), `sleep_end` (07:00), `sleep_tz` (America/Bogota) y `sleep_tz_auto`.
+  - Función `tiecoms_sleeping(on, start, end, tz)`. Soporta ventanas que cruzan la medianoche.
+- **Push:** el filtro `ACTIVE_SESSION` de `push.ts` descarta a quien está en su ventana. Funciona igual que No molestar: no sale ningún push, pero los no leídos se cuentan igual.
+- **API:**
+  - `PUT /api/v1/me/sleep` `{ on?, start?, end?, tz?, tzAuto? }` responde `{ sleep }` y manda el evento `me.sleep` a mis sesiones.
+  - Si llega `tz` sin `tzAuto`, la zona queda fijada a mano.
+  - El cliente ajusta la zona según el dispositivo mientras `tzAuto` sea `true` (viajes).
+- **Bootstrap:**
+  - `me.sleep` trae mi configuración completa.
+  - `people[].sleep` trae `{ start, end, tz }`, o `null` si la persona lo tiene apagado.
+- **Interfaz:**
+  - En el menú de «No molestar» y en Ajustes aparece «Todas las noches», con desde y hasta.
+  - La lunita del avatar se enciende también durante la ventana.
+  - A quien escribe se le muestra un aviso:
+    - en un directo con alguien que está descansando: «Ana está descansando: le llega sin sonar. Lo verá mañana a las 7:00 a. m.» y el botón «🕒 Enviar a las 7:00», que programa el mensaje;
+    - en grupos, solo mientras escribe: «N personas del chat están descansando…».

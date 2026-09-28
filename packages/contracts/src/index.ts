@@ -113,7 +113,12 @@ export interface UserDTO {
    * Ausente = servidor anterior a «No molestar».
    */
   dndUntil?: string | null;
+  /** Solo en bootstrap.me: mi modo sueño (horario de descanso diario). Ausente = servidor anterior. */
+  sleep?: SleepDTO;
 }
+
+/** Modo sueño: todas las noches, de `start` a `end` (HH:MM en `tz`), no suena nada. */
+export interface SleepDTO { on: boolean; start: string; end: string; tz: string; tzAuto: boolean }
 
 export interface OrganizationDTO {
   id: string;
@@ -158,6 +163,8 @@ export interface PersonDTO {
   guest: boolean;
   guestUntil: string | null;
   avatarUrl?: string | null;
+  /** Horario de descanso de la persona (solo si lo tiene encendido): a quien escribe se le avisa que no le sonará. */
+  sleep?: { start: string; end: string; tz: string } | null;
 }
 
 export interface WorkspaceDTO {
@@ -759,6 +766,9 @@ export const MUTE_FOREVER = '9999-12-31T00:00:00Z';
 /** PUT /me/dnd: «No molestar» hasta `until` (ISO; MUTE_FOREVER = hasta que lo reactive); null lo apaga. */
 export const DndInput = z.object({ until: z.iso.datetime({ offset: true }).nullable() });
 export interface DndDTO { dndUntil: string | null }
+const HHMM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+/** PUT /me/sleep: cualquier campo; `tz` explícito fija la zona (tzAuto=false) salvo que venga `tzAuto: true`. */
+export const SleepInput = z.object({ on: z.boolean().optional(), start: HHMM.optional(), end: HHMM.optional(), tz: z.string().min(1).max(64).optional(), tzAuto: z.boolean().optional() });
 export const MarkUnreadInput = z.object({ seq: z.number().int().min(1) });
 export const CreateScheduledInput = z.object({
   body: z.string().trim().min(1).max(8000),
@@ -939,6 +949,8 @@ export type AccountEvent =
   | { type: 'prefs.updated'; conversationId?: string; workspaceId?: string }
   /** Cambió mi «No molestar» (desde este u otro dispositivo). */
   | { type: 'me.dnd'; dndUntil: string | null }
+  /** Cambió mi modo sueño (desde este u otro dispositivo). */
+  | { type: 'me.sleep'; sleep: SleepDTO }
   | { type: 'whatsapp.updated'; accountId: string }
   | { type: 'drive.updated'; workspaceId: string | null };
 

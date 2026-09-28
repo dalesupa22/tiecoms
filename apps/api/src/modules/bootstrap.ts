@@ -3,7 +3,7 @@ import { pool } from '../db.ts';
 import { loadUser } from './auth.ts';
 import { orgVerification } from './domains.ts';
 import { summarize } from './attachments.ts';
-import { activeDnd } from './prefs.ts';
+import { activeDnd, toSleep } from './prefs.ts';
 
 const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())`;
 
@@ -14,9 +14,10 @@ const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expire
  */
 export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   const me = await loadUser(pool, userId);
-  const digest = await pool.query('SELECT link_digest, dnd_until FROM users WHERE id = $1', [userId]);
+  const digest = await pool.query('SELECT link_digest, dnd_until, sleep_on, sleep_start, sleep_end, sleep_tz, sleep_tz_auto FROM users WHERE id = $1', [userId]);
   me.linkDigest = !!digest.rows[0]?.link_digest;
   me.dndUntil = activeDnd(digest.rows[0]?.dnd_until);
+  me.sleep = toSleep(digest.rows[0]);
 
   const [ws, convs, people] = await Promise.all([
     pool.query(
@@ -76,7 +77,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
           WHERE mine.user_id = $1
          UNION SELECT $1::uuid
        )
-       SELECT u.id, u.name, u.kind, u.primary_org_id, u.avatar_file_id, om.title, om.area,
+       SELECT u.id, u.name, u.kind, u.primary_org_id, u.avatar_file_id, om.title, om.area, u.sleep_on, u.sleep_start, u.sleep_end, u.sleep_tz,
               (SELECT bool_and(g.role = 'guest') FROM workspace_memberships g WHERE g.user_id = u.id AND g.revoked_at IS NULL) AS guest,
               (SELECT max(g.expires_at) FROM workspace_memberships g WHERE g.user_id = u.id AND g.role = 'guest' AND g.revoked_at IS NULL) AS guest_until
          FROM visible v JOIN users u ON u.id = v.user_id AND u.disabled_at IS NULL
@@ -125,6 +126,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
     id: r.id, name: r.name, kind: r.kind, orgId: r.guest ? null : r.primary_org_id, title: r.title, area: r.area,
     guest: Boolean(r.guest), guestUntil: r.guest_until ? new Date(r.guest_until).toISOString() : null,
     avatarUrl: r.avatar_file_id ? `/api/v1/avatars/${r.avatar_file_id}` : null,
+    sleep: r.kind === 'human' && r.sleep_on && r.sleep_start ? { start: String(r.sleep_start).slice(0, 5), end: String(r.sleep_end).slice(0, 5), tz: r.sleep_tz } : null,
   }));
 
   const orgIds = new Set<string>();

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.4 (21): invite from «Add to group» (SPEC-invitar). -->
+<resources>
+    <string name="ainv_search_ph">Name or email</string>
+    <string name="ainv_search_email_ph">Type the email</string>
+    <string name="ainv_invite_email">Invite %1$s</string>
+    <string name="ainv_send">Send invite</string>
+    <string name="ainv_sent">Invite sent to %1$s</string>
+    <string name="ainv_pending_one">Pending</string>
+    <string name="ainv_see_new">See only new messages</string>
+    <string name="ainv_see_all">See the history</string>
+    <string name="ainv_add">Add (%1$d)</string>
+    <string name="ainv_new">Invite someone new</string>
+    <string name="ainv_kind">Type of person</string>
+    <string name="ainv_from">From %1$s</string>
+    <string name="ainv_guest">Guest (advisor, mentor, client…)</string>
+    <string name="ainv_hint_mine">Joins %1$s and this group.</string>
+    <string name="ainv_hint_company">Joins this group as someone from %1$s.</string>
+    <string name="ainv_hint_guest">Joins only this group, as a guest.</string>
+    <string name="ainv_by_email">Invite by email</string>
+    <string name="ainv_copy_link">Copy link</string>
+    <string name="ainv_copied">Link copied · expires %1$s</string>
+    <string name="ainv_code">Code %1$s</string>
+    <string name="ainv_copy_code">Copy code</string>
+    <string name="ainv_share">Share…</string>
+    <string name="ainv_pending">Pending invites (%1$d)</string>
+    <string name="ainv_resend">Resend</string>
+    <string name="ainv_revoke">Revoke</string>
+    <string name="ainv_resent">Invite resent to %1$s</string>
+    <string name="ainv_revoked">Invite revoked</string>
+    <string name="ainv_expired">Expired</string>
+    <string name="ainv_members_only">Only members can invite</string>
+</resources>

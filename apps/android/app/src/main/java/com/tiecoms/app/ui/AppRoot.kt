@@ -171,7 +171,7 @@ private fun AuthNav() {
                 signedIn = false,
                 onBack = { container.pendingLink.value = null; nav.popBackStack() },
                 onLogin = { nav.navigate("login") { popUpTo("login") { inclusive = true } } },
-                onSignup = { nav.navigate("signup?org=") },
+                onSignup = { org -> nav.navigate("signup?org=" + (org?.let { t -> java.net.URLEncoder.encode(t, "UTF-8") } ?: "")) },
                 onJoined = { _, _ -> },
             )
         }
@@ -406,6 +406,7 @@ private fun MainNav() {
                     onJoined = { ws, conv ->
                         // La vista previa sale de la pila: Atrás desde el grupo vuelve a donde estaba.
                         if (conv != null) { nav.popBackStack(); openConv(conv) }
+                        else if (ws.isBlank()) { if (!nav.popBackStack()) tab("home") } // a la empresa, sin grupos
                         else nav.navigate("home?ws=$ws") { popUpTo(0) { inclusive = true } }
                     },
                 )

@@ -83,6 +83,8 @@ data class PersonDTO(
     val guestUntil: String? = null,
     /** Ruta relativa de la foto (/api/v1/avatars/<uuid>), pública; null = iniciales. */
     val avatarUrl: String? = null,
+    /** Correo, si el servidor lo comparte (el buscador de «Agregar al grupo» lo usa); ausente en servidores viejos. */
+    val email: String? = null,
 )
 
 @Serializable
@@ -340,6 +342,10 @@ data class InvitationPreviewDTO(
     val multiUse: Boolean = false,
     /** Invitación a un grupo interno de una empresa: se entra como invitado de fuera. */
     val orgHome: Boolean = false,
+    /** 'org' = invitación a unirse a una empresa como colega (y a sus grupos); ausente = a un espacio (SPEC-invitar). */
+    val kind: String = "workspace",
+    /** Con kind 'org': la empresa a la que entra. */
+    val orgName: String? = null,
 )
 
 @Serializable
@@ -362,6 +368,33 @@ data class InvitationCreatedDTO(
     val emailSent: Boolean = false,
     val emailStatus: String? = null,
 )
+
+/**
+ * Invitación con correo sin aceptar (GET /workspaces|organizations/:id/invitations): Reenviar y Anular.
+ * [conversationIds] dice a qué grupos entra (null en servidores que no lo mandan); [scope] lo pone la app.
+ */
+@Serializable
+data class PendingInvitationDTO(
+    val id: String = "",
+    val email: String = "",
+    val role: String = "member",
+    val invitedById: String = "",
+    val invitedByName: String = "",
+    val createdAt: String = "",
+    val expiresAt: String = "",
+    val expired: Boolean = false,
+    val emailStatus: String? = null,
+    val emailSentAt: String? = null,
+    val sendCount: Int = 0,
+    val canManage: Boolean = false,
+    val conversationIds: List<String>? = null,
+    /** workspaces | organizations: a qué ruta van Reenviar y Anular. */
+    val scope: String = "workspaces",
+    val scopeId: String = "",
+)
+
+@Serializable
+data class PendingInvitationsPage(val invitations: List<PendingInvitationDTO> = emptyList())
 
 /** Respuesta de POST /groups (el «+» de Grupos). Con shareLink trae el enlace y el código. */
 @Serializable
@@ -400,7 +433,8 @@ data class ArchiveResult(val archived: Boolean = false, val workspaceArchived: B
 data class OversightDTO(val orgId: String = "", val groups: List<OversightGroupDTO> = emptyList())
 
 @Serializable
-data class AcceptInvitationResult(val workspaceId: String = "", val conversationIds: List<String> = emptyList())
+/** workspaceId vacío = invitación a una empresa sin grupos (kind org). */
+data class AcceptInvitationResult(val workspaceId: String = "", val conversationIds: List<String> = emptyList(), val orgId: String? = null, val kind: String? = null)
 
 @Serializable
 data class ApiErrorInner(val code: String = "", val message: String = "", val details: JsonElement? = null)

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.4 (21): invitar desde «Agregar al grupo» (SPEC-invitar). -->
+<resources>
+    <string name="ainv_search_ph">Nombre o correo</string>
+    <string name="ainv_search_email_ph">Escribe el correo</string>
+    <string name="ainv_invite_email">Invitar a %1$s</string>
+    <string name="ainv_send">Enviar invitación</string>
+    <string name="ainv_sent">Invitación enviada a %1$s</string>
+    <string name="ainv_pending_one">Pendiente</string>
+    <string name="ainv_see_new">Ven solo lo nuevo</string>
+    <string name="ainv_see_all">Ven el historial</string>
+    <string name="ainv_add">Agregar (%1$d)</string>
+    <string name="ainv_new">Invitar a alguien nuevo</string>
+    <string name="ainv_kind">Tipo de persona</string>
+    <string name="ainv_from">De %1$s</string>
+    <string name="ainv_guest">Tercero (asesor, mentor, cliente…)</string>
+    <string name="ainv_hint_mine">Entra a %1$s y a este grupo.</string>
+    <string name="ainv_hint_company">Entra a este grupo como persona de %1$s.</string>
+    <string name="ainv_hint_guest">Entra solo a este grupo, como invitado.</string>
+    <string name="ainv_by_email">Invitar por correo</string>
+    <string name="ainv_copy_link">Copiar enlace</string>
+    <string name="ainv_copied">Enlace copiado · vence el %1$s</string>
+    <string name="ainv_code">Código %1$s</string>
+    <string name="ainv_copy_code">Copiar código</string>
+    <string name="ainv_share">Compartir…</string>
+    <string name="ainv_pending">Invitaciones pendientes (%1$d)</string>
+    <string name="ainv_resend">Reenviar</string>
+    <string name="ainv_revoke">Anular</string>
+    <string name="ainv_resent">Invitación reenviada a %1$s</string>
+    <string name="ainv_revoked">Invitación anulada</string>
+    <string name="ainv_expired">Venció</string>
+    <string name="ainv_members_only">Solo los miembros pueden invitar</string>
+</resources>

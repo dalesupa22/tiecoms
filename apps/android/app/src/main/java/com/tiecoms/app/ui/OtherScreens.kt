@@ -138,7 +138,9 @@ fun DetailsScreen(
                         Text(ws.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
                     }
                     if (ws != null && !meta.isSide && !meta.isChat) {
-                        if (!guest) OutlinedButton(onClick = { inviting = true }, modifier = Modifier.padding(bottom = 8.dp).testTag("inviteGroup")) { Text("✉ " + stringResource(R.string.menu_invite_group)) }
+                        // SPEC-invitar: «Agregar al grupo» reúne sumar a quien ya está e invitar por correo o enlace.
+                        if (meta.canPost) OutlinedButton(onClick = { onAddMembers(id) }, modifier = Modifier.padding(bottom = 8.dp).testTag("addPeople")) { Text("＋ " + stringResource(R.string.dlg_add_to_group)) }
+                        else if (!guest) OutlinedButton(onClick = { inviting = true }, modifier = Modifier.padding(bottom = 8.dp).testTag("inviteGroup")) { Text("✉ " + stringResource(R.string.menu_invite_group)) }
                         Text(stringResource(R.string.ov_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(bottom = 12.dp).testTag("oversightNote"))
                     }
@@ -408,7 +410,7 @@ private fun SettingsSection(title: String, content: @Composable () -> Unit) {
 
 // ---------- Invitación a un espacio ----------
 @Composable
-fun InviteScreen(token: String, signedIn: Boolean, onBack: () -> Unit, onLogin: () -> Unit, onSignup: () -> Unit, onJoined: (workspaceId: String, conversationId: String?) -> Unit) {
+fun InviteScreen(token: String, signedIn: Boolean, onBack: () -> Unit, onLogin: () -> Unit, onSignup: (orgToken: String?) -> Unit, onJoined: (workspaceId: String, conversationId: String?) -> Unit) {
     val client = LocalClient.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -475,7 +477,8 @@ fun InviteScreen(token: String, signedIn: Boolean, onBack: () -> Unit, onLogin: 
                         Spacer(Modifier.height(16.dp))
                         Button(onClick = onLogin, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text(stringResource(R.string.login)) }
                         Spacer(Modifier.height(8.dp))
-                        OutlinedButton(onClick = onSignup, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text(stringResource(R.string.create_account)) }
+                        // Invitación a una empresa (De {mi empresa}): el registro entra directo a esa empresa y a sus grupos.
+                        OutlinedButton(onClick = { onSignup(token.takeIf { p.kind == "org" }) }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text(stringResource(R.string.create_account)) }
                     }
                 }
             }

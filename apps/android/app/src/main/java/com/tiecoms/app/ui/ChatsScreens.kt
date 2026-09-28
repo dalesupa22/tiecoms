@@ -338,30 +338,3 @@ private fun PickedChips(data: BootstrapDTO, picked: List<String>, onRemove: (Str
     }
 }
 
-/** Sumar personas a un chat grupal: ven desde ahora (history 'now'). */
-@Composable
-fun AddMembersScreen(conversationId: String, onBack: () -> Unit) {
-    val ctx = LocalContext.current
-    val client = LocalClient.current
-    val container = LocalContainer.current
-    val scope = rememberCoroutineScope()
-    val data = client.state.collectAsStateWithLifecycle().value.data ?: return
-    val meta = data.conversations.firstOrNull { it.id == conversationId }
-    var picked by rememberSaveable { mutableStateOf(listOf<String>()) }
-    var busy by remember { mutableStateOf(false) }
-    SimpleScaffold(title = stringResource(R.string.dlg_add_to_group), onBack = onBack) {
-        if (meta == null) { EmptyNote(stringResource(R.string.chat_not_found)); return@SimpleScaffold }
-        PeoplePicker(data, picked, { id -> picked = if (id in picked) picked - id else picked + id }, exclude = meta.memberIds.toSet(), modifier = Modifier.weight(1f))
-        Button(
-            enabled = picked.isNotEmpty() && !busy,
-            onClick = {
-                busy = true
-                scope.launch {
-                    try { client.addMembers(conversationId, picked); onBack() }
-                    catch (e: Exception) { container.toast(errorText(ctx, e)) } finally { busy = false }
-                }
-            },
-            modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp).heightIn(min = 52.dp).testTag("addMembersConfirm"),
-        ) { Text(stringResource(R.string.dlg_add_to_group) + if (picked.isNotEmpty()) " · ${picked.size}" else "", fontWeight = FontWeight.SemiBold) }
-    }
-}

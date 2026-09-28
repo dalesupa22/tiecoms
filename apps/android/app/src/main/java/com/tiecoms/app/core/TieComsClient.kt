@@ -1110,10 +1110,11 @@ class TieComsClient(
         loadBootstrapInternal(); r
     }
 
-    /** Suma personas a una conversación; ven desde ahora (history 'now'). */
-    suspend fun addMembers(conversationId: String, userIds: List<String>) = withContext(dispatcher) {
+    /** Suma personas a una conversación: [history] 'now' (ven solo lo nuevo) o 'all' (ven el historial). */
+    suspend fun addMembers(conversationId: String, userIds: List<String>, history: String = "now") = withContext(dispatcher) {
         val body = buildJsonObject {
-            put("userIds", kotlinx.serialization.json.JsonArray(userIds.distinct().map { JsonPrimitive(it) })); put("history", JsonPrimitive("now"))
+            put("userIds", kotlinx.serialization.json.JsonArray(userIds.distinct().map { JsonPrimitive(it) }))
+            put("history", JsonPrimitive(if (history == "all") "all" else "now"))
         }
         req("POST", "/conversations/$conversationId/members", body, JsonElement.serializer()); loadBootstrapInternal(); Unit
     }
@@ -1282,13 +1283,16 @@ class TieComsClient(
      * POST /workspaces/:id/invitations a un grupo (o al espacio, sin [conversationId]): con [email] es una
      * invitación por correo; sin correo, un enlace con código para varias personas (multiUse, 14 días).
      */
-    suspend fun inviteToGroup(workspaceId: String, conversationId: String?, role: String, email: String?, lang: String): InvitationCreatedDTO = withContext(dispatcher) {
+    suspend fun inviteToGroup(
+        workspaceId: String, conversationId: String?, role: String, email: String?, lang: String,
+        history: String = "all",
+    ): InvitationCreatedDTO = withContext(dispatcher) {
         val body = buildJsonObject {
             email?.let { put("email", JsonPrimitive(it.trim())) }
             put("role", JsonPrimitive(role))
             put("conversationIds", kotlinx.serialization.json.JsonArray(listOfNotNull(conversationId).map { JsonPrimitive(it) }))
             if (email == null) { put("multiUse", JsonPrimitive(true)); put("expiresInDays", JsonPrimitive(14)) }
-            put("history", JsonPrimitive("all"))
+            put("history", JsonPrimitive(if (history == "now") "now" else "all"))
             put("lang", JsonPrimitive(lang))
         }
         req("POST", "/workspaces/$workspaceId/invitations", body, InvitationCreatedDTO.serializer())
@@ -1298,6 +1302,44 @@ class TieComsClient(
     suspend fun inviteToOrg(orgId: String, email: String, lang: String) = withContext(dispatcher) {
         val body = buildJsonObject { put("email", JsonPrimitive(email.trim())); put("lang", JsonPrimitive(lang)) }
         req("POST", "/organizations/$orgId/invitations", body, JsonElement.serializer()); Unit
+    }
+
+    /**
+     * «De {mi empresa}» desde «Agregar al grupo» (SPEC-invitar): invitación a mi organización que además lleva al
+     * grupo ([workspaceId], [conversationId], [history]). Con [email] va por correo; sin él es un enlace con código
+     * de varios usos por 14 días. Un servidor sin esos campos crea la invitación a la empresa y el enlace se arma
+     * con el token (/signup?org=…).
+     */
+    suspend fun inviteColleagueToGroup(
+        orgId: String, workspaceId: String, conversationId: String, email: String?, history: String, lang: String,
+    ): InvitationCreatedDTO = withContext(dispatcher) {
+        val body = buildJsonObject {
+            email?.let { put("email", JsonPrimitive(it.trim())) }
+            if (email == null) put("multiUse", JsonPrimitive(true))
+            put("expiresInDays", JsonPrimitive(14))
+            put("workspaceId", JsonPrimitive(workspaceId))
+            put("conversationIds", kotlinx.serialization.json.JsonArray(listOf(JsonPrimitive(conversationId))))
+            put("history", JsonPrimitive(if (history == "now") "now" else "all"))
+            put("lang", JsonPrimitive(lang))
+        }
+        val r = req("POST", "/organizations/$orgId/invitations", body, InvitationCreatedDTO.serializer())
+        if (r.url.isNotBlank() || r.token.isBlank()) r else r.copy(url = baseUrl.trimEnd('/') + "/signup?org=" + enc(r.token))
+    }
+
+    /** Pendientes con correo de un espacio o una empresa ([scope] = workspaces | organizations). */
+    suspend fun pendingInvitations(scope: String, id: String): List<PendingInvitationDTO> = withContext(dispatcher) {
+        require(scope == "workspaces" || scope == "organizations")
+        req("GET", "/$scope/$id/invitations", null, PendingInvitationsPage.serializer()).invitations.map { it.copy(scope = scope, scopeId = id) }
+    }
+
+    /** Reenvía el correo con un enlace nuevo (429 resend_too_soon si se acaba de enviar). */
+    suspend fun resendInvitation(inv: PendingInvitationDTO) = withContext(dispatcher) {
+        req("POST", "/${inv.scope}/${inv.scopeId}/invitations/${inv.id}/resend", buildJsonObject {}, JsonElement.serializer()); Unit
+    }
+
+    /** Anula la invitación: el enlace deja de servir. */
+    suspend fun revokeInvitation(inv: PendingInvitationDTO) = withContext(dispatcher) {
+        req("DELETE", "/${inv.scope}/${inv.scopeId}/invitations/${inv.id}", null, JsonElement.serializer()); Unit
     }
 
     /** POST /conversations/:id/archive (solo quien administra el grupo); luego refresca el snapshot. */

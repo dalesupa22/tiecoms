@@ -203,6 +203,13 @@ function meetUrl(ev: any): string | null {
   const ep = (ev?.conferenceData?.entryPoints ?? []).find((e: any) => e.entryPointType === 'video' && typeof e.uri === 'string');
   return ep?.uri ?? null;
 }
+/**
+ * Interruptor de producción: las conexiones y reuniones solo funcionan con MEETINGS_ENABLED=true.
+ * Apagado por defecto hasta cerrar la revisión de seguridad del retorno OAuth (migración 029, Codex).
+ */
+const OFF_REASON = 'Las reuniones con Meet, Teams y Zoom se activan pronto: estamos terminando la revisión de seguridad.';
+const enabled = () => process.env.MEETINGS_ENABLED === 'true';
+const unavailable = (p: MeetingProvider) => (enabled() ? PROVIDERS[p].missing() : OFF_REASON);
 export const isMeetingProvider = (p: string): p is MeetingProvider => p === 'google' || p === 'microsoft' || p === 'zoom';
 
 // ---------- Conexiones ----------
@@ -210,7 +217,7 @@ export async function listConnections(userId: string): Promise<MeetingConnection
   const { rows } = await pool.query('SELECT provider, account_email, status, updated_at FROM meeting_connections WHERE user_id = $1', [userId]);
   return (Object.keys(PROVIDERS) as MeetingProvider[]).map((p) => {
     const r = rows.find((x) => x.provider === p);
-    const missing = PROVIDERS[p].missing();
+    const missing = unavailable(p);
     return {
       provider: p, label: PROVIDERS[p].label, available: !missing, unavailableReason: missing,
       status: r ? (r.status as 'active' | 'reconnect') : 'none', accountEmail: r?.account_email ?? null,
@@ -221,7 +228,7 @@ export async function listConnections(userId: string): Promise<MeetingConnection
 /** Paso 1 (autenticado): la URL del proveedor que la app abre en el navegador del sistema. */
 export async function startConnect(userId: string, provider: MeetingProvider, opts: { platform: string; redirectScheme?: string | null; proofChallenge: string }) {
   const def = PROVIDERS[provider];
-  const missing = def.missing();
+  const missing = unavailable(provider);
   if (missing) throw new ApiError(503, 'provider_unavailable', missing);
   const state = `mtg_${token(32)}`;
   const verifier = token(48);
@@ -244,6 +251,7 @@ function backTo(platform: string, scheme: string | null, params: Record<string, 
 /** Callback never activates credentials. The receipt is delivered only to the receiving user agent;
  * its original authenticated client must also possess the verifier, which is never put in a URL. */
 export async function finishConnect(query: Record<string, string | undefined>, provider: MeetingProvider): Promise<string> {
+  if (!enabled()) return backTo('web', null, { error: 'disabled' });
   const { rows } = await pool.query('DELETE FROM meeting_flows WHERE state_hash = $1 AND provider = $2 RETURNING *', [sha(query.state ?? ''), provider]);
   const flow = rows[0];
   if (!flow || !flow.proof_challenge || new Date(flow.expires_at) < new Date()) return backTo('web', null, { error: 'expired' });
@@ -268,6 +276,7 @@ export async function finishConnect(query: Record<string, string | undefined>, p
 }
 
 export async function confirmConnect(userId: string, input: { receipt: string; proofVerifier: string }) {
+  if (!enabled()) throw new ApiError(503, 'provider_unavailable', OFF_REASON);
   return tx(async (c) => {
     const { rows } = await c.query(
       `DELETE FROM meeting_confirmations WHERE receipt_hash = $1 AND user_id = $2
@@ -489,6 +498,7 @@ export async function createMeeting(userId: string, input: MeetingInput) {
   // Only a new key can fail preflight without a meetingId; callers must keep ambiguous existing attempts.
   const fp = fingerprint(input);
   let row = (await pool.query('SELECT * FROM meetings WHERE user_id = $1 AND idempotency_key = $2', [userId, input.idempotencyKey])).rows[0];
+  if (!enabled()) throw new ApiError(503, 'provider_unavailable', OFF_REASON, row ? details(row) : undefined);
   if (!row) {
     const missing = PROVIDERS[input.provider].missing();
     if (missing) throw new ApiError(503, 'provider_unavailable', missing);
@@ -513,5 +523,6 @@ export async function createMeeting(userId: string, input: MeetingInput) {
 export async function getMeeting(userId: string, id: string) {
   const row = (await pool.query('SELECT * FROM meetings WHERE id = $1 AND user_id = $2', [id, userId])).rows[0];
   if (!row) throw notFound('Reunión');
+  if (!enabled()) return toDTO(row);
   return locked(row, () => recover(row, true));
 }

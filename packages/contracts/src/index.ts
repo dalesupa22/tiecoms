@@ -214,6 +214,8 @@ export interface ConversationDTO {
   parentMessageId: string | null;
   parentMessageSeq: number | null;
   deriveKind: DeriveKind | null;
+  /** Sidechat abierto desde un asunto: las tareas creadas aquí son hijas de él. */
+  sideIssueId?: string | null;
   deriveReason: string | null;
   returnedAt: string | null;
   openIssues: number;
@@ -469,13 +471,21 @@ export interface IssueDTO {
   statusSince: string;
   closedAt: string | null;
   commentCount: number;
+  /** Tarea derivada de este asunto (null = asunto principal). Ausente = servidor anterior. */
+  parentIssueId?: string | null;
+  /** Quién la ve: 'all' (todo el chat), 'org' (solo visibleOrgId + viewerIds), 'private' (solo viewerIds). */
+  visibility?: IssueVisibility;
+  visibleOrgId?: string | null;
+  /** Personas con acceso explícito (solo en 'org' y 'private'). */
+  viewerIds?: string[];
 }
+export type IssueVisibility = 'all' | 'org' | 'private';
 
 export interface IssueEventDTO {
   id: number;
   issueId: string;
   actorId: string;
-  kind: 'created' | 'status' | 'owner' | 'due' | 'title' | 'comment' | 'waiting';
+  kind: 'created' | 'status' | 'owner' | 'due' | 'title' | 'comment' | 'waiting' | 'visibility';
   payload: Record<string, unknown>;
   createdAt: string;
 }
@@ -651,8 +661,25 @@ export const CreateIssueInput = z.object({
   ownerId: z.uuid().nullable().optional(),
   dueDate: isoDate.nullable().optional(),
   originMessageId: z.uuid().nullable().optional(),
+  visibility: z.enum(['all', 'org', 'private']).optional(),
+  /** Personas extra con acceso (solo 'org' y 'private'). Pueden no estar en la conversación. */
+  viewerIds: z.array(z.uuid()).max(50).optional(),
+  /** Tarea hija de este asunto: en su misma conversación o en un sidechat que salió de ella. */
+  parentIssueId: z.uuid().nullable().optional(),
+});
+/** POST /issues/:id/children: tarea derivada. Por defecto la ve solo mi empresa si en el chat hay más de una. */
+export const CreateChildIssueInput = z.object({
+  title: z.string().trim().min(2).max(200),
+  /** Sidechat que salió del chat del asunto (si no, la tarea queda en el mismo chat). */
+  conversationId: z.uuid().optional(),
+  ownerId: z.uuid().nullable().optional(),
+  dueDate: isoDate.nullable().optional(),
+  visibility: z.enum(['all', 'org', 'private']).optional(),
+  viewerIds: z.array(z.uuid()).max(50).optional(),
 });
 export const UpdateIssueInput = z.object({
+  visibility: z.enum(['all', 'org', 'private']).optional(),
+  viewerIds: z.array(z.uuid()).max(50).optional(),
   title: z.string().trim().min(2).max(200).optional(),
   status: z.enum(['open', 'in_progress', 'waiting', 'done', 'cancelled']).optional(),
   ownerId: z.uuid().nullable().optional(),
@@ -672,10 +699,12 @@ export const DeriveInput = z.object({
  * participantes del origen. No publica nada en el origen. Más adelante userIds podrá incluir agentes.
  */
 export const SideConversationInput = z.object({
-  messageId: z.uuid(),
+  /** Desde un mensaje visible, o desde un asunto (issueId): sus tareas nacen ahí como hijas del asunto. */
+  messageId: z.uuid().optional(),
+  issueId: z.uuid().optional(),
   userIds: z.array(z.uuid()).min(1).max(20),
   question: z.string().trim().min(1).max(4000).optional(),
-});
+}).refine((v) => !!v.messageId !== !!v.issueId, { message: 'message_or_issue', path: ['messageId'] });
 export const ReturnResultInput = z.object({ summary: z.string().trim().min(2).max(4000) });
 
 export const AcceptInvitationInput = z.object({ orgId: z.uuid().optional() });
@@ -825,8 +854,11 @@ export const PushTokenInput = z.object({
  */
 export interface PushData {
   /** side = mensaje de un sidechat (categoría TC_SIDE; trae sideOf). reaction = reaccionaron a mi mensaje (abre el mensaje). */
-  type: 'message' | 'reminder' | 'event' | 'side' | 'mention' | 'reaction';
+  type: 'message' | 'reminder' | 'event' | 'side' | 'mention' | 'reaction' | 'issue';
   conversationId: string;
+  /** type 'issue': me asignaron esta tarea. Abrir el asunto; si inChat es false, sin abrir el chat (no lo puedo leer). */
+  issueId?: string;
+  inChat?: boolean;
   messageId?: string;
   authorId?: string;
   authorName?: string;
@@ -949,6 +981,10 @@ export type AccountEvent =
   | { type: 'prefs.updated'; conversationId?: string; workspaceId?: string }
   /** Cambió mi «No molestar» (desde este u otro dispositivo). */
   | { type: 'me.dnd'; dndUntil: string | null }
+  /** Un asunto restringido (visibilidad 'org' o 'private') que puedo ver cambió: no viaja por la conversación. */
+  | { type: 'issue.updated'; issue: IssueDTO }
+  /** Perdí acceso a un asunto (cambió su visibilidad o me quitaron): sacarlo de la lista. */
+  | { type: 'issue.hidden'; issueId: string; conversationId: string }
   /** Cambió mi modo sueño (desde este u otro dispositivo). */
   | { type: 'me.sleep'; sleep: SleepDTO }
   | { type: 'whatsapp.updated'; accountId: string }

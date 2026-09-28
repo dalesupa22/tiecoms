@@ -657,15 +657,25 @@ async function sideAudience(c: Tx, actorId: string, parentId: string | null, anc
  * parentId/parentMessageId del origen y deriveKind 'side'. En el origen no se
  * publica nada; solo sus miembros la ven (y su cliente pinta el chip bajo el ancla).
  */
-export async function createSideConversation(userId: string, parentId: string, input: { messageId: string; userIds: string[]; question?: string }) {
+export async function createSideConversation(userId: string, parentId: string, input: { messageId?: string; issueId?: string; userIds: string[]; question?: string }) {
   return tx(async (c) => {
     const a = await conversationAccess(c, userId, parentId, 'read', true);
-    const { rows: mr } = await c.query(
+    // Desde un asunto: se ancla a su mensaje de origen si lo hay (y lo veo); el extracto es el título del asunto.
+    let issue: { id: string; title: string; origin_message_id: string | null } | null = null;
+    if (input.issueId) {
+      const { rows: ir } = await c.query("SELECT id, title, origin_message_id, conversation_id, visibility FROM issues WHERE id = $1", [input.issueId]);
+      if (!ir[0] || ir[0].conversation_id !== parentId || ir[0].visibility !== 'all') throw badRequest('El asunto no está en esta conversación');
+      issue = ir[0];
+    }
+    const anchorId = input.messageId ?? issue?.origin_message_id ?? null;
+    const { rows: mr } = anchorId ? await c.query(
       'SELECT m.id, m.author_id, m.body, m.kind, m.seq, m.deleted_at, u.name AS author_name FROM messages m JOIN users u ON u.id = m.author_id WHERE m.id = $1 AND m.conversation_id = $2',
-      [input.messageId, parentId],
-    );
-    const m = mr[0];
-    if (!m || m.seq <= a.historyFromSeq || m.kind !== 'text' || m.deleted_at) throw badRequest('Solo se abre una lateral desde un mensaje visible de esta conversación');
+      [anchorId, parentId],
+    ) : { rows: [] as any[] };
+    const visibleAnchor = mr[0] && mr[0].seq > a.historyFromSeq && mr[0].kind === 'text' && !mr[0].deleted_at ? mr[0] : null;
+    if (!issue && !visibleAnchor) throw badRequest('Solo se abre una lateral desde un mensaje visible de esta conversación');
+    const me = issue ? (await c.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0] : null;
+    const m = visibleAnchor ?? { id: null, body: issue!.title, author_name: me?.name ?? '' };
     const others = [...new Set(input.userIds)].filter((u) => u !== userId);
     if (!others.length) throw badRequest('Elige al menos a una persona');
     await ensureNotBlocked(c, userId, others);
@@ -673,12 +683,12 @@ export async function createSideConversation(userId: string, parentId: string, i
     if (outsiders.length) throw sideOutsider(outsiders);
 
     const parent = (await c.query('SELECT name FROM conversations WHERE id = $1', [parentId])).rows[0];
-    const excerpt = clip(String(m.body).replace(/\s+/g, ' ').trim(), 80);
+    const excerpt = clip(String(issue ? issue.title : m.body).replace(/\s+/g, ' ').trim(), 80);
     const name = `Sidechat · ${clip(excerpt.replace(/…$/, ''), 40)}`;
     const { rows } = await c.query(
-      `INSERT INTO conversations (kind, name, created_by, parent_conversation_id, parent_message_id, derive_kind, derived_by)
-       VALUES ('multi', $1, $2, $3, $4, 'side', $2) RETURNING id`,
-      [name, userId, parentId, m.id],
+      `INSERT INTO conversations (kind, name, created_by, parent_conversation_id, parent_message_id, derive_kind, derived_by, side_issue_id)
+       VALUES ('multi', $1, $2, $3, $4, 'side', $2, $5) RETURNING id`,
+      [name, userId, parentId, m.id, issue?.id ?? null],
     );
     const id: string = rows[0].id;
     // Como en los chats grupales: todos pueden sumar a alguien más (con la misma regla de la lateral).
@@ -688,6 +698,7 @@ export async function createSideConversation(userId: string, parentId: string, i
     const everyoneReads = others.every((u) => readsOrigin.has(u));
     await appendMessage(c, { conversationId: id, authorId: userId, kind: 'system', body: sys('side.started', {
       excerpt, authorName: m.author_name, parentName: everyoneReads ? parent?.name ?? null : null, messageId: m.id,
+      ...(issue ? { issueId: issue.id } : {}),
     }) });
     if (input.question) await appendMessage(c, { conversationId: id, authorId: userId, body: input.question });
     await audit(c, userId, 'conversation.side_created', { type: 'conversation', id, workspaceId: a.workspaceId }, { parentId, members: others.length + 1 });

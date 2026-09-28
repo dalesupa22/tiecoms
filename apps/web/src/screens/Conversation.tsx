@@ -20,6 +20,7 @@ import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
 import { SleepNotice } from './Sleep.tsx';
 import { ScheduledStrip, openScheduleMenu, scheduleMenu, whenLabel } from './Scheduled.tsx';
+import { SideIssueStrip, TasksDialog } from './Issues.tsx';
 import { ConversationIssues, IssueDrawer, NewIssueDialog, isClosed } from './Issues.tsx';
 import { DeriveDialog, LineageBar, MergedCard } from './Lineage.tsx';
 import { ChatBar, ThreadChip, threadsOf } from './ChatBar.tsx';
@@ -584,6 +585,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
             </div>
           )}
           {conv.canPost && <SleepNotice conv={conv} typing={!!text.trim()} onSchedule={canSchedule ? schedule : undefined} />}
+          {conv.sideIssueId && <SideIssueStrip sideId={id} issueId={conv.sideIssueId} onOpen={setOpenIssue} />}
           {conv.canPost && <ScheduledStrip conversationId={id} />}
           {conv.canPost ? (
             <>
@@ -597,6 +599,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                   { divider: true },
                   { label: t('bar.newEvent'), icon: '📅', onSelect: () => newEvent({ conversationId: id }) },
                   ...(canOpenIssues ? [{ label: t('bar.newIssue'), icon: '◆', onSelect: () => setNewIssue({}) }] : []),
+                  ...(conv.sideIssueId ? [{ label: t('task.addHere'), icon: '☑', onSelect: () => openDialog((close) => <TasksDialog parentId={conv.sideIssueId!} conversationId={id} onClose={close} />) }] : []),
                 ]);
               }}>＋</button>
               <button className="bring-btn" title={t('imp.action')} aria-label={t('imp.action')} onClick={() => openDialog((close) => <BringDialog conversationId={id} onClose={close} />)}>⤓</button>

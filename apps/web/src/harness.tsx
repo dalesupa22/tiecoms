@@ -97,6 +97,9 @@ const issues: Record<string, IssueDTO> = {
   i1: issue({ id: 'i1', title: 'Plantilla final de certificados', status: 'waiting', waitingOnOrgId: 'norte', ownerId: 'ana', requestedBy: 'danny', originMessageId: 'general-m3', originMessageSeq: 3, statusSince: iso(4 * D), dueDate: new Date(now - D).toISOString().slice(0, 10) }),
   i2: issue({ id: 'i2', title: 'Prueba de carga con 500 registros', status: 'in_progress', ownerId: 'danny', dueDate: new Date(now + 2 * D).toISOString().slice(0, 10), commentCount: 2 }),
   i3: issue({ id: 'i3', title: 'Confirmar fecha con dirección', status: 'done', ownerId: 'mateo', closedAt: iso(D) }),
+  i4: issue({ id: 'i4', title: 'Revisar logs del envío', status: 'open', ownerId: 'danny', parentIssueId: 'i1', visibility: 'org', visibleOrgId: 'xertify', viewerIds: ['danny'] }),
+  i5: issue({ id: 'i5', title: 'Ajustar la plantilla', status: 'done', ownerId: 'laura', parentIssueId: 'i1', visibility: 'org', visibleOrgId: 'xertify', viewerIds: ['danny', 'laura'], closedAt: iso(H) }),
+  i6: issue({ id: 'i6', title: 'Responderle a Ana', status: 'in_progress', ownerId: 'laura', parentIssueId: 'i1' }),
 };
 
 const at = (h: number, m = 0, dayOffset = 0) => { const x = new Date(); x.setDate(x.getDate() + dayOffset); x.setHours(h, m, 0, 0); return x.toISOString(); };

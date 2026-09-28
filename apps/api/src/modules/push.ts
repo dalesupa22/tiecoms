@@ -367,3 +367,30 @@ export async function pushReaction(messageId: string) {
   });
   return targets.length;
 }
+
+/** «Te asignaron una tarea»: al responsable nuevo (no a quien asignó), respetando No molestar y las noches. */
+export async function pushIssueAssigned(issueId: string, ownerId: string, actorId: string) {
+  const { rows } = await pool.query(
+    `SELECT i.id, i.title, i.conversation_id, i.owner_id, i.status, u.name AS actor_name,
+            EXISTS (SELECT 1 FROM conversation_memberships cm WHERE cm.conversation_id = i.conversation_id AND cm.user_id = $2 AND cm.removed_at IS NULL) AS in_chat
+       FROM issues i JOIN users u ON u.id = $3 WHERE i.id = $1`,
+    [issueId, ownerId, actorId],
+  );
+  const r = rows[0];
+  if (!r || r.owner_id !== ownerId || r.status === 'done' || r.status === 'cancelled') return 0;
+  const { rows: targets } = await pool.query<Target>(
+    `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
+       FROM users u ${ACTIVE_SESSION} WHERE u.id = $1 AND u.disabled_at IS NULL`,
+    [ownerId],
+  );
+  // El nombre del grupo solo si la persona está en él (un tercero asignado no lo ve).
+  const labels = r.in_chat ? await groupLabels(r.conversation_id, [ownerId]) : new Map<string, string>();
+  await deliver(targets, (t) => ({
+    title: t.lang === 'en' ? `${r.actor_name} assigned you a task` : `${r.actor_name} te asignó una tarea`,
+    subtitle: labels.get(t.user_id) ?? null,
+    body: clip(r.title, 180),
+    threadId: r.in_chat ? r.conversation_id : `issue-${r.id}`, category: 'TC_ISSUE', collapseId: `issue-${r.id}`,
+    data: { type: 'issue', issueId: r.id, conversationId: r.conversation_id, inChat: !!r.in_chat },
+  }));
+  return targets.length;
+}

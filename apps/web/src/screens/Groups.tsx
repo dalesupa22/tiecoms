@@ -25,7 +25,7 @@ export interface GroupSection { key: string; kind: 'org' | 'relations' | 'guest'
 
 const isMuted = (c: ConversationDTO) => !!c.mutedUntil && Date.parse(c.mutedUntil) > Date.now();
 const openIssuesOf = (issues: Record<string, IssueDTO>, conversationId: string) =>
-  Object.values(issues).filter((i) => i.conversationId === conversationId && !isClosed(i))
+  Object.values(issues).filter((i) => i.conversationId === conversationId && !isClosed(i) && !i.parentIssueId)
     .sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') || b.updatedAt.localeCompare(a.updatedAt));
 
 // Empresas y espacios siguen el orden de la bandeja: con algo fijado arriba, luego menciones, no leídos y actividad.

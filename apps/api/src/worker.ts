@@ -12,7 +12,7 @@ import { cleanupExpired as cleanupSso } from './modules/sso.ts';
 import { previewMessage } from './modules/link-preview.ts';
 import { deletePersonalObject } from './storage.ts';
 import { notifyReport } from './modules/safety.ts';
-import { pushEvent, pushEventSoon, pushMessage, pushReaction, pushReminder } from './modules/push.ts';
+import { pushEvent, pushEventSoon, pushIssueAssigned, pushMessage, pushReaction, pushReminder } from './modules/push.ts';
 import { digestFor, markDigestSent } from './modules/links.ts';
 import { linkDigestMail, trySendMail } from './mail.ts';
 import { config } from './config.ts';
@@ -34,6 +34,7 @@ const handlers: Record<string, Handler> = {
   /** Notificaciones push (APNs / FCM). Los fallos por token se registran sin reintentar el job (evita duplicados). */
   async 'push.message'(p) { await pushMessage(p.messageId); },
   async 'push.reminder'(p) { await pushReminder(p.reminderId); },
+  async 'push.issue'(p) { await pushIssueAssigned(p.issueId, p.ownerId, p.actorId); },
   async 'push.event'(p) { await pushEvent(p.eventId); },
   /** Nota de voz: variante AAC, transcripción y resumen (Inworld / DeepSeek). */
   async 'voice.transcribe'(p) { await transcribeAttachment(p.attachmentId); },

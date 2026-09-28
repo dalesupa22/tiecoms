@@ -604,6 +604,12 @@ struct DMsView: View {
                 let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
                 let threadUnread = Naming.chatThreadUnread(d)
                 List {
+                    if store.dndActive {
+                        DndBanner()
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                    }
                     if store.connection != .online {
                         ConnectionBanner(connection: store.connection)
                             .listRowBackground(Color.clear)
@@ -832,10 +838,14 @@ struct OversightReaderView: View {
 
 /// Mi foto (o mis iniciales) en círculo como ícono de la pestaña «Tú», como el perfil de Instagram.
 enum TabAvatar {
-    static func image(name: String, photo: UIImage?, fill: UIColor, selected: Bool, side: CGFloat = 26) -> UIImage {
+    static func image(name: String, photo: UIImage?, fill: UIColor, selected: Bool, moon: Bool = false, side: CGFloat = 26) -> UIImage {
         let size = CGSize(width: side, height: side)
-        let img = UIGraphicsImageRenderer(size: size).image { _ in
+        let img = UIGraphicsImageRenderer(size: size).image { ctx in
             let rect = CGRect(origin: .zero, size: size)
+            // «No molestar»: lunita abajo a la derecha, encima del avatar (fuera del recorte circular).
+            defer { if moon { drawMoon(in: rect) } }
+            ctx.cgContext.saveGState()
+            defer { ctx.cgContext.restoreGState() }
             if selected {
                 UIColor.label.setStroke()
                 let ring = UIBezierPath(ovalIn: rect.insetBy(dx: 0.75, dy: 0.75))
@@ -858,5 +868,19 @@ enum TabAvatar {
             }
         }
         return img.withRenderingMode(.alwaysOriginal)
+    }
+
+    private static func drawMoon(in rect: CGRect) {
+        let d = rect.width * 0.5
+        let badge = CGRect(x: rect.maxX - d, y: rect.maxY - d, width: d, height: d)
+        UIColor.systemBackground.setFill()
+        UIBezierPath(ovalIn: badge).fill()
+        let inner = badge.insetBy(dx: 1.2, dy: 1.2)
+        UIColor(red: 0.29, green: 0.25, blue: 0.55, alpha: 1).setFill()
+        UIBezierPath(ovalIn: inner).fill()
+        let cfg = UIImage.SymbolConfiguration(pointSize: inner.width * 0.62, weight: .bold)
+        if let m = UIImage(systemName: "moon.fill", withConfiguration: cfg)?.withTintColor(.white, renderingMode: .alwaysOriginal) {
+            m.draw(in: CGRect(x: inner.midX - m.size.width / 2, y: inner.midY - m.size.height / 2, width: m.size.width, height: m.size.height))
+        }
     }
 }

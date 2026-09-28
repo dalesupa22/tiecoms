@@ -40,6 +40,7 @@ struct TieComsApp: App {
         AppFeedback.shared.onReply = { [weak s] conv, text in await s?.replyFromNotification(conv, text: text) }
         AppFeedback.shared.onMarkRead = { [weak s] conv in await s?.markReadFromNotification(conv) }
         AppFeedback.shared.socketOnline = { [weak s] in s?.connection == .online && s?.appActive == true }
+        AppFeedback.shared.dndActive = { [weak s] in s?.dndActive == true }
         PushRegistration.onToken = { [weak s] hex in Task { await s?.registerPushToken(hex) } }
         // Tras entrar: si nunca se pidió el permiso, primero una pantalla que explica por qué; si ya hay permiso, registrar APNs.
         s.onReady = { [weak s] in

@@ -122,7 +122,7 @@ struct MainView: View {
                     } icon: {
                         Image(uiImage: TabAvatar.image(name: d?.me.name ?? "", photo: myPhoto,
                                                        fill: UIColor(d.map { PersonColor.fill($0.me.id) } ?? Theme.bubbleMine),
-                                                       selected: store.tab == .settings))
+                                                       selected: store.tab == .settings, moon: store.dndActive))
                     }
                 }
                 .tag(AppTab.settings)

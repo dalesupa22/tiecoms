@@ -60,6 +60,8 @@ struct UserDTO: Codable, Equatable, Sendable {
     var primaryOrgId: String?
     /// Ruta relativa de la foto (/api/v1/avatars/<uuid>) o nil.
     var avatarUrl: String?
+    /// «No molestar» hasta esta fecha (bootstrap `me.dndUntil`; null o ausente = apagado). SPEC-silencio §3.
+    var dndUntil: String?
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -71,6 +73,7 @@ struct UserDTO: Codable, Equatable, Sendable {
         area = c.o("area")
         primaryOrgId = c.o("primaryOrgId")
         avatarUrl = c.o("avatarUrl")
+        dndUntil = c.o("dndUntil")
     }
 }
 
@@ -509,6 +512,8 @@ enum AccountEvent: Decodable, Equatable, Sendable {
     case driveUpdated
     /// 👀/✅ en otro dispositivo crearon o cerraron recordatorios: volver a pedir GET /reminders.
     case remindersChanged
+    /// «No molestar» cambió en otra sesión (PUT /me/dnd): `{ type: "me.dnd", dndUntil }`.
+    case dndChanged(until: String?)
     case other(type: String)
 
     init(from decoder: Decoder) throws {
@@ -525,6 +530,7 @@ enum AccountEvent: Decodable, Equatable, Sendable {
         case "whatsapp.updated": self = .whatsappUpdated(accountId: c.v("accountId", ""))
         case "drive.updated": self = .driveUpdated
         case "reminders.changed": self = .remindersChanged
+        case "me.dnd": self = .dndChanged(until: c.o("dndUntil"))
         default: self = .other(type: type)
         }
     }

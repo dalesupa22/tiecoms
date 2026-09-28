@@ -39,6 +39,12 @@ struct HomeView: View {
                 let open = Dictionary(grouping: store.issues.values.filter { !$0.status.closed }, by: \.conversationId)
                     .mapValues { $0.sorted(by: IssueSort.order) }
                 List {
+                    if store.dndActive {
+                        DndBanner()
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                    }
                     Picker(L("grp.view"), selection: $viewMode) {
                         ForEach(GroupsViewMode.allCases) { m in Text(L(m.labelKey)).tag(m) }
                     }
@@ -813,7 +819,7 @@ struct ConversationRow: View {
                         Text(c.unread > 99 ? "99+" : "\(c.unread)")
                             .font(.caption.weight(.bold)).foregroundStyle(.white)
                             .padding(.horizontal, 7).padding(.vertical, 2)
-                            .background(Capsule().fill(c.isMuted ? Theme.textSecondary : Theme.bubbleMine))
+                            .background(Capsule().fill(c.isMuted && c.unreadMentions == 0 ? Theme.badgeMuted : Theme.bubbleMine))
                             .accessibilityHidden(true)
                     }
                 }

@@ -77,6 +77,8 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     var onMarkRead: ((String) async -> Void)?
     /// El socket está en línea: los push en primer plano sobran (el aviso local ya salió).
     var socketOnline: (() -> Bool)?
+    /// «No molestar» activo: en primer plano no se presenta ningún aviso (ni local ni push).
+    var dndActive: (() -> Bool)?
     private(set) var authorized = false
 
     func install() {
@@ -154,8 +156,11 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         let conv = notification.request.content.userInfo["conversationId"] as? String
         let isRemote = notification.request.trigger is UNPushNotificationTrigger
-        let (enabled, open, online) = await MainActor.run { (Prefs.notificationsEnabled, AppFeedback.shared.openConversationId?(), AppFeedback.shared.socketOnline?() ?? false) }
-        guard enabled else { return [] }
+        let (enabled, open, online, dnd) = await MainActor.run {
+            (Prefs.notificationsEnabled, AppFeedback.shared.openConversationId?(), AppFeedback.shared.socketOnline?() ?? false,
+             AppFeedback.shared.dndActive?() ?? false)
+        }
+        guard enabled, NotifyRule.presentsInForeground(dnd: dnd) else { return [] }
         let info = notification.request.content.userInfo
         let isEventSoon = (info["type"] as? String) == "event" && info["minutes"] != nil
         // El aviso de reunión se muestra siempre (aunque sea el chat abierto), salvo el push duplicado del aviso local.

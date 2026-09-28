@@ -1375,3 +1375,26 @@
 "chat.jumpLatest" = "Jump to latest";
 "chat.jumpNew" = "Jump to new messages";
 "chat.jumpMention" = "Jump to mention";
+
+/* 1.6.4 (18): silenciar chats y «No molestar» (SPEC-silencio) */
+"dnd.banner.date" = "Do not disturb until {date}";
+"dnd.banner.forever" = "Do not disturb";
+"dnd.banner.today" = "Do not disturb until {time}";
+"dnd.banner.tomorrow" = "Do not disturb until tomorrow at {time}";
+"dnd.hint" = "While it is on you get no notifications at all, not even mentions. Messages stay unread.";
+"dnd.localOnly" = "For now it is saved on this device only.";
+"dnd.off" = "Turn off";
+"dnd.offState" = "Off";
+"dnd.status.date" = "On until {date}";
+"dnd.status.forever" = "On";
+"dnd.status.today" = "On until {time}";
+"dnd.status.tomorrow" = "On until tomorrow at {time}";
+"dnd.title" = "Do not disturb";
+"dnd.tomorrow" = "Until tomorrow";
+"mute.hint" = "No notifications or sound unless someone mentions you. Messages still count as unread.";
+"mute.state.date" = "Muted until {date}";
+"mute.state.forever" = "Muted";
+"mute.state.today" = "Muted until {time}";
+"mute.state.tomorrow" = "Muted until tomorrow at {time}";
+"toast.dndOff" = "Do not disturb is off";
+"toast.dndOn" = "Do not disturb is on";

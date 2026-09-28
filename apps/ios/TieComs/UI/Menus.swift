@@ -54,6 +54,7 @@ struct MuteMenu: View {
                     catch { store.show(L10n.errorText(error)) }
                 }
             } label: { Label(L("menu.unmute"), systemImage: "bell") }
+            .accessibilityIdentifier("mute.menu.unmute")
         } else {
             Menu {
                 ForEach(MuteOption.allCases, id: \.self) { o in
@@ -63,8 +64,10 @@ struct MuteMenu: View {
                             catch { store.show(L10n.errorText(error)) }
                         }
                     }
+                    .accessibilityIdentifier("mute.opt.\(o.id)")
                 }
             } label: { Label(L("menu.mute"), systemImage: "bell.slash") }
+            .accessibilityIdentifier("mute.menu")
         }
     }
 }

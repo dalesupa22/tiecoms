@@ -116,6 +116,13 @@ final class AppStore {
     /// Conversación que está en pantalla (la fija la vista).
     var openConversationId: String?
     var appActive = true
+    /// «No molestar» guardado solo en el dispositivo (el API respondió 404 a PUT /me/dnd: servidor viejo).
+    var localDndUntil: Date?
+    /// El último cambio de «No molestar» quedó solo en este dispositivo (se avisa en silencio en Tú).
+    var dndLocalOnly = false
+    /// Sube cuando vence «No molestar» para que la interfaz (lunita, franja) se redibuje sola.
+    var dndTick = 0
+    @ObservationIgnored var dndExpiryTask: Task<Void, Never>?
 
     // MARK: Dependencias
     let api: APIClient
@@ -293,6 +300,7 @@ final class AppStore {
         typing = [:]
         issues = [:]; pins = [:]; reminders = []; events = [:]
         blockedUserIds = []
+        localDndUntil = nil; dndLocalOnly = false; dndExpiryTask?.cancel(); dndExpiryTask = nil
         homePath = []; dmsPath = []; issuesPath = []; agendaPath = []; settingsPath = []
         tab = .home
         workspaceFilter = nil
@@ -307,6 +315,7 @@ final class AppStore {
         d.conversations.sort { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
         defer { scheduleBadge() }
         data = d
+        loadLocalDnd()
         // Conversaciones que ya no están en mi alcance se purgan de la caché local.
         let allowed = Set(d.conversations.map(\.id))
         conversations = conversations.filter { allowed.contains($0.key) }
@@ -348,6 +357,9 @@ final class AppStore {
             if let e = JSONBridge.decode(AccountEvent.self, from: payload) { onAccountEvent(e) }
         case "typing":
             if let e = JSONBridge.decode(TypingEvent.self, from: payload) { onTyping(e) }
+        case "me.dnd":
+            // Por si el servidor lo emite como evento propio y no dentro de account.event.
+            if let p = payload as? [String: Any] { applyServerDnd(p["dndUntil"] as? String) }
         default:
             break // eventos desconocidos: se ignoran
         }
@@ -379,14 +391,14 @@ final class AppStore {
         case .reminderDue(let r):
             reminders = (reminders.filter { $0.id != r.id } + [r]).sorted { $0.remindAt < $1.remindAt }
             remindersDue += 1
-            if let d = data {
+            if NotifyRule.accountAlert(dnd: dndActive), let d = data {
                 let conv = meta(r.conversationId)
                 feedback?.notifyIncoming(conversationId: r.conversationId, title: L("rem.alert"),
                                          author: conv.map { Naming.notificationTitle(d, $0) } ?? "", body: r.note ?? "")
             }
         case .eventSoon(let e, let minutes):
             events[e.id] = e
-            guard !e.isCancelled, let d = data else { return }
+            guard !e.isCancelled, NotifyRule.accountAlert(dnd: dndActive), let d = data else { return }
             let conv = meta(e.conversationId)
             // Ignora el silencio de la conversación: es un aviso de reunión, como en el push.
             feedback?.notifyEventSoon(conversationId: e.conversationId, eventId: e.id,
@@ -397,6 +409,7 @@ final class AppStore {
         case .whatsappUpdated: waRevision += 1
         case .driveUpdated: driveRevision += 1
         case .remindersChanged: Task { try? await loadReminders() }
+        case .dndChanged(let until): applyServerDnd(until)
         case .other: break
         }
     }
@@ -427,7 +440,8 @@ final class AppStore {
             let isNewEvent = events[ev.id] == nil
             events[ev.id] = ev
             // Reunión nueva de otra persona en vivo → aviso con tc_notify (salvo silenciada).
-            if live, isNewEvent, ev.organizerId != me?.id, !ev.isCancelled, let d = data, let c = meta(cid), !c.isMuted {
+            if live, isNewEvent, ev.organizerId != me?.id, !ev.isCancelled, let d = data, let c = meta(cid),
+               NotifyRule.accountAlert(dnd: dndActive, muted: c.isMuted, respectsMute: true) {
                 feedback?.notifyIncoming(conversationId: cid, title: ev.title, author: Naming.notificationTitle(d, c), body: L10n.eventWhen(ev))
             }
         case .messageUpdated(let cid, _, let m):
@@ -481,18 +495,22 @@ final class AppStore {
     }
 
     /// Sonido/aviso por un mensaje recibido en vivo (nunca en el catch-up ni por mensajes de sistema).
+    /// Reglas en `NotifyRule.incoming`: silenciado = nada salvo mención; «No molestar» = nada.
     private func announce(_ msg: MessageDTO) {
-        guard msg.authorId != me?.id, !blockedUserIds.contains(msg.authorId), !msg.isSystem, let d = data else { return }
-        if msg.conversationId == openConversationId && appActive {
-            feedback?.playReceive()
-        } else if let c = meta(msg.conversationId) {
-            let author = Naming.person(d, msg.authorId)?.name ?? L("common.participant")
-            // Una mención a mí avisa aunque la conversación esté silenciada (salvo el silencio «siempre»).
-            if MentionText.mentionsMe(msg.mentions, me: d.me.id, authorId: msg.authorId), !MentionText.mutedForever(c) {
-                feedback?.notifyIncoming(conversationId: c.id, title: L("mention.mentionedYou", ["name": author]), author: Naming.notificationTitle(d, c), body: msg.body)
-            } else if !c.isMuted {
-                feedback?.notifyIncoming(conversationId: c.id, title: Naming.notificationTitle(d, c), author: author, body: msg.body)
-            }
+        guard let d = data, let c = meta(msg.conversationId) else { return }
+        let outcome = NotifyRule.incoming(.init(
+            mine: msg.authorId == d.me.id, system: msg.isSystem, blocked: blockedUserIds.contains(msg.authorId),
+            openAndActive: msg.conversationId == openConversationId && appActive,
+            muted: c.isMuted, mutedForever: MentionText.mutedForever(c),
+            mentionsMe: MentionText.mentionsMe(msg.mentions, me: d.me.id, authorId: msg.authorId), dnd: dndActive))
+        let author = Naming.person(d, msg.authorId)?.name ?? L("common.participant")
+        switch outcome {
+        case .none: break
+        case .sound: feedback?.playReceive()
+        case .mention:
+            feedback?.notifyIncoming(conversationId: c.id, title: L("mention.mentionedYou", ["name": author]), author: Naming.notificationTitle(d, c), body: msg.body)
+        case .notify:
+            feedback?.notifyIncoming(conversationId: c.id, title: Naming.notificationTitle(d, c), author: author, body: msg.body)
         }
     }
 
@@ -582,6 +600,13 @@ final class AppStore {
             guard let self, !Task.isCancelled else { return }
             try? await UNUserNotificationCenter.current().setBadgeCount(self.status == .ready ? self.badgeCount : 0)
         }
+    }
+
+    /// Cambia mi usuario del snapshot (p. ej. `dndUntil`).
+    func patchMe(_ f: (inout UserDTO) -> Void) {
+        guard var me = data?.me else { return }
+        f(&me)
+        data?.me = me
     }
 
     func patchWorkspace(_ id: String, _ f: (inout WorkspaceDTO) -> Void) {
@@ -943,6 +968,11 @@ extension AppStore {
         data = d
         self.conversations = conversations
         status = .ready
+    }
+
+    /// Un evento del socket tal como llega (nombre + JSON), sin red.
+    func socketEventForTesting(_ name: String, _ json: String) {
+        onSocketEvent(name, try? JSONSerialization.jsonObject(with: Data(json.utf8)))
     }
 }
 #endif

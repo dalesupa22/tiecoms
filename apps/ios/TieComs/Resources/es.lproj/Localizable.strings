@@ -1375,3 +1375,26 @@
 "chat.jumpLatest" = "Ir al final";
 "chat.jumpNew" = "Ir a los mensajes nuevos";
 "chat.jumpMention" = "Ir a la mención";
+
+/* 1.6.4 (18): silenciar chats y «No molestar» (SPEC-silencio) */
+"dnd.banner.date" = "No molestar hasta el {date}";
+"dnd.banner.forever" = "No molestar";
+"dnd.banner.today" = "No molestar hasta las {time}";
+"dnd.banner.tomorrow" = "No molestar hasta mañana a las {time}";
+"dnd.hint" = "Mientras esté activo no te llega ninguna notificación, ni siquiera las menciones. Los mensajes quedan sin leer.";
+"dnd.localOnly" = "Por ahora se guardó solo en este dispositivo.";
+"dnd.off" = "Reactivar";
+"dnd.offState" = "Desactivado";
+"dnd.status.date" = "Activo hasta el {date}";
+"dnd.status.forever" = "Activo";
+"dnd.status.today" = "Activo hasta las {time}";
+"dnd.status.tomorrow" = "Activo hasta mañana a las {time}";
+"dnd.title" = "No molestar";
+"dnd.tomorrow" = "Hasta mañana";
+"mute.hint" = "Sin notificaciones ni sonido, salvo que te mencionen. Los mensajes siguen contando como sin leer.";
+"mute.state.date" = "Silenciado hasta el {date}";
+"mute.state.forever" = "Silenciado";
+"mute.state.today" = "Silenciado hasta las {time}";
+"mute.state.tomorrow" = "Silenciado hasta mañana a las {time}";
+"toast.dndOff" = "No molestar desactivado";
+"toast.dndOn" = "No molestar activado";

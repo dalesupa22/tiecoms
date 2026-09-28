@@ -1510,5 +1510,89 @@
  "chat.jumpMention": [
   "Ir a la mención",
   "Jump to mention"
+ ],
+ "dnd.banner.date": [
+  "No molestar hasta el {date}",
+  "Do not disturb until {date}"
+ ],
+ "dnd.banner.forever": [
+  "No molestar",
+  "Do not disturb"
+ ],
+ "dnd.banner.today": [
+  "No molestar hasta las {time}",
+  "Do not disturb until {time}"
+ ],
+ "dnd.banner.tomorrow": [
+  "No molestar hasta mañana a las {time}",
+  "Do not disturb until tomorrow at {time}"
+ ],
+ "dnd.hint": [
+  "Mientras esté activo no te llega ninguna notificación, ni siquiera las menciones. Los mensajes quedan sin leer.",
+  "While it is on you get no notifications at all, not even mentions. Messages stay unread."
+ ],
+ "dnd.localOnly": [
+  "Por ahora se guardó solo en este dispositivo.",
+  "For now it is saved on this device only."
+ ],
+ "dnd.off": [
+  "Reactivar",
+  "Turn off"
+ ],
+ "dnd.offState": [
+  "Desactivado",
+  "Off"
+ ],
+ "dnd.status.date": [
+  "Activo hasta el {date}",
+  "On until {date}"
+ ],
+ "dnd.status.forever": [
+  "Activo",
+  "On"
+ ],
+ "dnd.status.today": [
+  "Activo hasta las {time}",
+  "On until {time}"
+ ],
+ "dnd.status.tomorrow": [
+  "Activo hasta mañana a las {time}",
+  "On until tomorrow at {time}"
+ ],
+ "dnd.title": [
+  "No molestar",
+  "Do not disturb"
+ ],
+ "dnd.tomorrow": [
+  "Hasta mañana",
+  "Until tomorrow"
+ ],
+ "mute.hint": [
+  "Sin notificaciones ni sonido, salvo que te mencionen. Los mensajes siguen contando como sin leer.",
+  "No notifications or sound unless someone mentions you. Messages still count as unread."
+ ],
+ "mute.state.date": [
+  "Silenciado hasta el {date}",
+  "Muted until {date}"
+ ],
+ "mute.state.forever": [
+  "Silenciado",
+  "Muted"
+ ],
+ "mute.state.today": [
+  "Silenciado hasta las {time}",
+  "Muted until {time}"
+ ],
+ "mute.state.tomorrow": [
+  "Silenciado hasta mañana a las {time}",
+  "Muted until tomorrow at {time}"
+ ],
+ "toast.dndOff": [
+  "No molestar desactivado",
+  "Do not disturb is off"
+ ],
+ "toast.dndOn": [
+  "No molestar activado",
+  "Do not disturb is on"
  ]
 }

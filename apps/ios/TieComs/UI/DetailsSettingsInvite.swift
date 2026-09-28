@@ -48,6 +48,7 @@ struct ConversationDetailsView: View {
                         .padding(.vertical, 4)
                         .accessibilityElement(children: .combine)
                     }
+                    MuteSection(conv: c)
                     if Self.canChangePhoto(c) {
                         Section {
                             Button { choosePhoto = true } label: { Label(c.avatarUrl == nil ? L("group.addPhoto") : L("group.changePhoto"), systemImage: "camera") }
@@ -110,6 +111,113 @@ struct ConversationDetailsView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Detalles del chat: interruptor «Silenciar» con el tiempo restante (SPEC-silencio §2). Al encenderlo se elige cuánto.
+struct MuteSection: View {
+    @Environment(AppStore.self) private var store
+    let conv: ConversationDTO
+    @State private var choosing = false
+
+    var body: some View {
+        let muted = conv.isMuted
+        Section {
+            Toggle(isOn: Binding(get: { muted || choosing }, set: { on in
+                if on { choosing = true } else { set(nil) }
+            })) {
+                HStack(spacing: 12) {
+                    Image(systemName: muted ? "bell.slash.fill" : "bell.slash").foregroundStyle(Theme.accentText)
+                        .frame(width: 28).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("menu.mute"))
+                        if muted, let until = ISODate.parse(conv.mutedUntil) {
+                            Text(Silence.text(.muted, until: until)).font(.footnote).foregroundStyle(Theme.textSecondary)
+                                .accessibilityIdentifier("details.muteState")
+                        }
+                    }
+                }
+            }
+            .accessibilityIdentifier("details.mute")
+            .confirmationDialog(L("menu.mute"), isPresented: $choosing, titleVisibility: .visible) {
+                ForEach(MuteOption.allCases, id: \.self) { o in
+                    Button(L(o.labelKey)) { set(AppStore.muteUntil(o)) }.accessibilityIdentifier("details.mute.\(o.id)")
+                }
+                Button(L("common.cancel"), role: .cancel) {}
+            }
+        } footer: { Text(L("mute.hint")) }
+    }
+
+    private func set(_ until: Date?) {
+        choosing = false
+        Task {
+            do {
+                try await store.setConversationPrefs(conv.id, mutedUntil: .some(until))
+                store.show(L(until == nil ? "toast.unmuted" : "toast.muted"))
+            } catch { store.show(L10n.errorText(error)) }
+        }
+    }
+}
+
+/// Opciones de «No molestar» (fila de Tú, franja de las listas).
+struct DndOptions: View {
+    @Environment(AppStore.self) private var store
+    var body: some View {
+        if store.dndActive {
+            Button { Task { await store.setDoNotDisturb(until: nil) } } label: { Label(L("dnd.off"), systemImage: "bell") }
+                .accessibilityIdentifier("dnd.off")
+            Divider()
+        }
+        ForEach(DndOption.allCases, id: \.self) { o in
+            Button(L(o.labelKey)) { Task { await store.setDoNotDisturb(until: Silence.dndUntil(o)) } }
+                .accessibilityIdentifier("dnd.opt.\(o.id)")
+        }
+    }
+}
+
+/// Tú › «No molestar»: el estado («Activo hasta las 18:00») y las opciones en un menú.
+struct DndRow: View {
+    @Environment(AppStore.self) private var store
+    var body: some View {
+        let until = store.dndUntil
+        Menu { DndOptions() } label: {
+            HStack(spacing: 12) {
+                Image(systemName: until != nil ? "moon.fill" : "moon").foregroundStyle(until != nil ? Theme.accentText : Theme.textPrimary)
+                    .frame(width: 28).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("dnd.title")).foregroundStyle(Theme.textPrimary)
+                    Text(until.map { Silence.text(.dndStatus, until: $0) } ?? L("dnd.offState"))
+                        .font(.footnote).foregroundStyle(until != nil ? Theme.accentText : Theme.textSecondary)
+                        .accessibilityIdentifier("settings.dnd.state")
+                }
+                Spacer()
+                Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(Theme.textSecondary).accessibilityHidden(true)
+            }
+        }
+        .accessibilityIdentifier("settings.dnd")
+    }
+}
+
+/// Franja fina arriba de Grupos y DMs mientras «No molestar» está activo: «🌙 No molestar hasta las 18:00 · Reactivar».
+struct DndBanner: View {
+    @Environment(AppStore.self) private var store
+    var body: some View {
+        if let until = store.dndUntil {
+            HStack(spacing: 6) {
+                Image(systemName: "moon.fill").font(.caption).foregroundStyle(Theme.accentText).accessibilityHidden(true)
+                Text(Silence.text(.dndBanner, until: until)).font(.footnote).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                Text("·").font(.footnote).foregroundStyle(Theme.textSecondary).accessibilityHidden(true)
+                Button(L("dnd.off")) { Task { await store.setDoNotDisturb(until: nil) } }
+                    .font(.footnote.weight(.semibold))
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier("dnd.banner.off")
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(Capsule().fill(Theme.orange.opacity(0.10)))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("dnd.banner")
+        }
     }
 }
 
@@ -227,6 +335,12 @@ struct SettingsView: View {
                             .accessibilityIdentifier("you.oversight.\(org.id)")
                     }
                 } footer: { Text(L("join.youHint")) }
+            }
+            Section {
+                DndRow()
+            } footer: {
+                Text(store.dndLocalOnly && store.dndActive ? L("dnd.hint") + " " + L("dnd.localOnly") : L("dnd.hint"))
+                    .accessibilityIdentifier("settings.dnd.footer")
             }
             Section {
                 Toggle(L("settings.sounds"), isOn: $sounds)

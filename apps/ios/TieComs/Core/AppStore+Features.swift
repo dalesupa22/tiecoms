@@ -95,7 +95,7 @@ extension AppStore {
     func setConversationPrefs(_ id: String, pinned: Bool? = nil, mutedUntil: Date?? = nil) async throws {
         var body: [String: Any] = [:]
         if let pinned { body["pinned"] = pinned }
-        if let mutedUntil { body["mutedUntil"] = mutedUntil.map { ISODate.string($0) } ?? NSNull() }
+        if let mutedUntil { body["mutedUntil"] = Silence.wire(mutedUntil) }
         patchMeta(id) {
             if let pinned { $0.pinnedAt = pinned ? ISODate.string() : nil }
             if let mutedUntil { $0.mutedUntil = mutedUntil.map { ISODate.string($0) } }
@@ -113,7 +113,7 @@ extension AppStore {
         case .hour: return now.addingTimeInterval(3600)
         case .eightHours: return now.addingTimeInterval(8 * 3600)
         case .week: return now.addingTimeInterval(7 * 86400)
-        case .forever: return ISODate.parse("2099-12-31T00:00:00.000Z")!
+        case .forever: return Silence.forever
         }
     }
 
@@ -680,6 +680,7 @@ extension AppStore {
 
 enum MuteOption: CaseIterable { case hour, eightHours, week, forever
     var labelKey: String { ["mute.1h", "mute.8h", "mute.week", "mute.forever"][MuteOption.allCases.firstIndex(of: self)!] }
+    var id: String { ["hour", "8h", "week", "forever"][MuteOption.allCases.firstIndex(of: self)!] }
 }
 
 /// Tiempos rápidos de "Recordarme" (como quickTimes() de la web).

@@ -154,7 +154,7 @@ enum MentionText {
 
     /// Silencio «siempre» (el API lo guarda como una fecha muy lejana).
     static func mutedForever(_ c: ConversationDTO) -> Bool {
-        (ISODate.parse(c.mutedUntil) ?? .distantPast) > Date().addingTimeInterval(20 * 365 * 86400)
+        Silence.isForever(ISODate.parse(c.mutedUntil) ?? .distantPast)
     }
 
     static func mentionsMe(_ mentions: [Mention], me: String, authorId: String) -> Bool {

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.6: calendar Day / Week / Month (docs/TANDA-LECTURA-REUNIONES.md §5). -->
+<resources>
+    <string name="cal_view_day">Day</string>
+    <string name="cal_view_week">Week</string>
+    <string name="cal_view_month">Month</string>
+    <string name="cal_view_label">View</string>
+    <string name="cal_prev_day">Previous day</string>
+    <string name="cal_next_day">Next day</string>
+    <string name="cal_prev_month">Previous month</string>
+    <string name="cal_next_month">Next month</string>
+    <string name="cal_more">+%1$d more</string>
+    <string name="cal_new_at">New meeting at %1$s</string>
+    <string name="cal_new_on">New meeting on %1$s</string>
+    <string name="cal_all_day">All day</string>
+    <string name="cal_empty_day">No meetings this day.</string>
+    <string name="cal_empty_month">No meetings this month.</string>
+    <plurals name="cal_day_cd">
+        <item quantity="one">%1$s, %2$d meeting</item>
+        <item quantity="other">%1$s, %2$d meetings</item>
+    </plurals>
+</resources>

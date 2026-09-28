@@ -106,6 +106,10 @@ class AppSettings(context: Context) {
     var issueGroupBy: String
         get() = prefs.getString("issueGroupBy", "group")?.takeIf { it == "group" || it == "person" } ?: "group"
         set(v) { prefs.edit().putString("issueGroupBy", v).apply() }
+    /** Calendario (1.6.6): «day» | «week» (por defecto) | «month», recordado por dispositivo. */
+    var calendarView: String
+        get() = com.tiecoms.app.core.CalendarGrid.View.of(prefs.getString("calendarView", null)).id
+        set(v) { prefs.edit().putString("calendarView", com.tiecoms.app.core.CalendarGrid.View.of(v).id).apply() }
     /** Tamaño del texto (1.6.4 / 22): factor de TextSize.STEPS; observable para que el tema lo aplique en vivo. */
     private val textScaleState = androidx.compose.runtime.mutableFloatStateOf(com.tiecoms.app.core.TextSize.sanitize(prefs.getFloat("textScale", 1f)))
     var textScale: Float

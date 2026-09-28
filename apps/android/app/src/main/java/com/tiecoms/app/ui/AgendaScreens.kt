@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -26,6 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -38,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,6 +64,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -112,7 +118,9 @@ fun rsvpLabel(ctx: android.content.Context, r: String) = ctx.getString(when (r) 
 
 // ---------- Crear / editar ----------
 @Composable
-fun EventDialog(conversationId: String?, originMessageId: String? = null, defaultTitle: String = "", event: CalendarEventDTO? = null, onClose: () -> Unit) {
+fun EventDialog(conversationId: String?, originMessageId: String? = null, defaultTitle: String = "", event: CalendarEventDTO? = null,
+                /** Crear desde el calendario (1.6.6): la hora del hueco tocado o del día elegido. */
+                initialStart: Instant? = null, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val container = LocalContainer.current
@@ -121,7 +129,7 @@ fun EventDialog(conversationId: String?, originMessageId: String? = null, defaul
     // Reuniones también en directos y chats grupales (SPEC-v4 §E).
     val groups = data.conversations.filter { it.canPost }
     val tz0 = event?.timezone ?: DEVICE_TZ
-    val start0 = remember { event?.let { parseInstant(it.startsAt) } ?: LocalDate.now().plusDays(1).atTime(10, 0).atZone(ZoneId.systemDefault()).toInstant() }
+    val start0 = remember { event?.let { parseInstant(it.startsAt) } ?: initialStart ?: LocalDate.now().plusDays(1).atTime(10, 0).atZone(ZoneId.systemDefault()).toInstant() }
     val end0 = remember { event?.let { parseInstant(it.endsAt) } ?: start0.plusSeconds(3600) }
     var conv by rememberSaveable { mutableStateOf(event?.conversationId ?: conversationId ?: groups.firstOrNull()?.id ?: "") }
     var title by rememberSaveable { mutableStateOf(event?.title ?: defaultTitle) }
@@ -291,7 +299,8 @@ fun EventRow(ev: CalendarEventDTO, data: BootstrapDTO, showConv: Boolean = true,
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(ev.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            // 📹: la reunión tiene un enlace de Meet, Teams o Zoom (las de las integraciones y las pegadas a mano).
+            Text((if (com.tiecoms.app.core.Meetings.isVideoLink(ev.location)) "📹 " else "") + ev.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 textDecoration = if (ev.cancelledAt != null) androidx.compose.ui.text.style.TextDecoration.LineThrough else null)
             val day = parseInstant(ev.startsAt)?.atZone(ZoneId.systemDefault())?.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()))
             Text(listOfNotNull(if (showConv) conv?.let { titleOf(ctx, it, data) } else null, day, if (ev.cancelledAt != null) stringResource(R.string.cal_cancelled) else null).joinToString(" · "),
@@ -325,64 +334,249 @@ fun EventCard(ev: CalendarEventDTO, data: BootstrapDTO, onOpen: (String) -> Unit
     }
 }
 
-// ---------- Agenda semanal (vista de lista por día, como la web en móvil) ----------
+// ---------- Calendario: Día · Semana · Mes (1.6.6, docs/TANDA-LECTURA-REUNIONES.md §5) ----------
+private fun spanOf(ev: CalendarEventDTO): com.tiecoms.app.core.CalendarGrid.Span? {
+    val s = parseInstant(ev.startsAt) ?: return null
+    return com.tiecoms.app.core.CalendarGrid.Span(ev.id, s, parseInstant(ev.endsAt) ?: s)
+}
+private fun videoMark(ev: CalendarEventDTO) = if (com.tiecoms.app.core.Meetings.isVideoLink(ev.location)) "📹 " else ""
+
+/**
+ * Selector Día / Semana / Mes (Semana por defecto, recordado en este dispositivo), ‹ Hoy › y «＋». Se crea desde
+ * cada vista: el hueco de una hora (Día), el «＋» de cada día (Semana) o el botón (Mes, que al tocar un día abre Día).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgendaScreen(onOpenEvent: (String) -> Unit, quick: QuickNav? = null) {
     val ctx = LocalContext.current
     val client = LocalClient.current
+    val container = LocalContainer.current
     val st by client.state.collectAsStateWithLifecycle()
     val data = st.data ?: return
-    var weekStr by rememberSaveable { mutableStateOf(LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).toString()) }
-    val week = LocalDate.parse(weekStr)
+    var viewId by rememberSaveable { mutableStateOf(container.settings.calendarView) }
+    val view = com.tiecoms.app.core.CalendarGrid.View.of(viewId)
+    var anchorStr by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
+    val anchor = LocalDate.parse(anchorStr)
     var error by remember { mutableStateOf<String?>(null) }
+    var creating by remember { mutableStateOf<Instant?>(null) }
     val zone = ZoneId.systemDefault()
-    val from = week.atStartOfDay(zone).toInstant(); val to = week.plusDays(7).atStartOfDay(zone).toInstant()
-    LaunchedEffect(weekStr) { error = null; runCatching { client.loadEvents(from, to) }.onFailure { error = errorText(ctx, it) } }
+    val (from, to) = com.tiecoms.app.core.CalendarGrid.range(view, anchor, zone)
+    LaunchedEffect(viewId, anchorStr) { error = null; runCatching { client.loadEvents(from, to) }.onFailure { error = errorText(ctx, it) } }
     val visible = data.conversations.map { it.id }.toSet()
-    val events = st.events.values.filter { it.conversationId in visible && (parseInstant(it.startsAt)?.isBefore(to) == true) && (parseInstant(it.endsAt)?.isAfter(from) == true) }.sortedBy { it.startsAt }
+    val events = st.events.values.filter { it.conversationId in visible && (parseInstant(it.startsAt)?.isBefore(to) == true) && ((parseInstant(it.endsAt) ?: parseInstant(it.startsAt))?.isAfter(from) == true) }
+        .sortedBy { it.startsAt }
+    fun onDay(day: LocalDate) = events.filter { e -> spanOf(e)?.let { com.tiecoms.app.core.CalendarGrid.overlaps(it, day, zone) } == true }
+    fun setView(v: com.tiecoms.app.core.CalendarGrid.View) { viewId = v.id; container.settings.calendarView = v.id }
+    val today = LocalDate.now()
+    val label = when (view) {
+        com.tiecoms.app.core.CalendarGrid.View.DAY -> anchor.format(DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.getDefault())).replaceFirstChar { it.uppercase() } +
+            if (anchor == today) " · " + stringResource(R.string.cal_today) else ""
+        com.tiecoms.app.core.CalendarGrid.View.WEEK -> stringResource(R.string.cal_week, com.tiecoms.app.core.CalendarGrid.weekStart(anchor).format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG)))
+        com.tiecoms.app.core.CalendarGrid.View.MONTH -> anchor.format(DateTimeFormatter.ofPattern("LLLL yyyy", Locale.getDefault())).replaceFirstChar { it.uppercase() }
+    }
+    val (prevCd, nextCd) = when (view) {
+        com.tiecoms.app.core.CalendarGrid.View.DAY -> stringResource(R.string.cal_prev_day) to stringResource(R.string.cal_next_day)
+        com.tiecoms.app.core.CalendarGrid.View.WEEK -> stringResource(R.string.cal_prev) to stringResource(R.string.cal_next)
+        com.tiecoms.app.core.CalendarGrid.View.MONTH -> stringResource(R.string.cal_prev_month) to stringResource(R.string.cal_next_month)
+    }
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.nav_agenda), fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() }) },
-                // ✏️ y «＋ Crear» como en las demás pestañas («Nueva reunión» vive en «＋»); la semana se mueve abajo.
+                // ✏️ y «＋ Crear» como en las demás pestañas; la fecha se mueve abajo.
                 actions = { if (quick != null) QuickActions(quick) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
     ) { pad ->
-        LazyColumn(Modifier.padding(pad).fillMaxSize().padding(horizontal = 16.dp).testTag("agenda"), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = AssistantListInset)) {
-            item {
-                androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    IconButton(onClick = { weekStr = week.minusWeeks(1).toString() }, modifier = Modifier.testTag("agenda.prev")) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, stringResource(R.string.cal_prev)) }
-                    Text(stringResource(R.string.cal_week, week.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG))), color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { weekStr = week.plusWeeks(1).toString() }, modifier = Modifier.testTag("agenda.next")) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, stringResource(R.string.cal_next)) }
-                    TextButton(onClick = { weekStr = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).toString() }, modifier = Modifier.testTag("agenda.today")) { Text(stringResource(R.string.cal_today)) }
-                }
-                ErrorText(error)
-                if (events.isEmpty()) EmptyNote(stringResource(R.string.cal_empty))
-            }
-            for (i in 0 until 7) {
-                val day = week.plusDays(i.toLong())
-                val list = events.filter { parseInstant(it.startsAt)?.atZone(zone)?.toLocalDate() == day }
-                if (list.isEmpty()) continue
-                item(key = "d$day") {
-                    SectionHeader(day.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())) + if (day == LocalDate.now()) " · " + stringResource(R.string.cal_today) else "",
-                        Modifier.padding(top = 14.dp, bottom = 4.dp).semantics { heading() })
-                }
-                // Primero las de empresas; luego las de directos y chats grupales (sección «Chats», SPEC-v4 §E).
-                val (inSpaces, inChats) = list.partition { it.workspaceId != null }
-                items(inSpaces, key = { it.id }) { EventRow(it, data, onOpen = onOpenEvent) }
-                if (inChats.isNotEmpty()) {
-                    item(key = "dc$day") { Text(stringResource(R.string.cal_chats_section), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 6.dp).testTag("agendaChats")) }
-                    items(inChats, key = { it.id }) { EventRow(it, data, onOpen = onOpenEvent) }
+        Column(Modifier.padding(pad).fillMaxSize().testTag("agenda")) {
+            val views = com.tiecoms.app.core.CalendarGrid.View.entries
+            androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                .semantics { contentDescription = ctx.getString(R.string.cal_view_label) }.testTag("calView")) {
+                views.forEachIndexed { i, v ->
+                    SegmentedButton(selected = view == v, onClick = { setView(v) },
+                        shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, views.size), icon = {},
+                        modifier = Modifier.heightIn(min = 44.dp).testTag("calView-" + v.id)) {
+                        Text(stringResource(when (v) { com.tiecoms.app.core.CalendarGrid.View.DAY -> R.string.cal_view_day; com.tiecoms.app.core.CalendarGrid.View.WEEK -> R.string.cal_view_week; else -> R.string.cal_view_month }),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge)
+                    }
                 }
             }
-            item { Spacer(Modifier.heightIn(min = 24.dp)) }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { anchorStr = com.tiecoms.app.core.CalendarGrid.step(view, anchor, -1).toString() }, modifier = Modifier.testTag("agenda.prev")) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, prevCd) }
+                Text(label, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).semantics { heading() }.testTag("agenda.label"))
+                TextButton(onClick = { anchorStr = LocalDate.now().toString() }, modifier = Modifier.testTag("agenda.today")) { Text(stringResource(R.string.cal_today), maxLines = 1) }
+                IconButton(onClick = { anchorStr = com.tiecoms.app.core.CalendarGrid.step(view, anchor, 1).toString() }, modifier = Modifier.testTag("agenda.next")) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, nextCd) }
+                IconButton(onClick = { creating = com.tiecoms.app.core.CalendarGrid.proposedStart(anchor, null, zone) }, modifier = Modifier.testTag("agenda.new")) {
+                    Icon(androidx.compose.material.icons.Icons.Filled.Add, stringResource(R.string.cal_new_title))
+                }
+            }
+            ErrorText(error)
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                when (view) {
+                    com.tiecoms.app.core.CalendarGrid.View.DAY -> DayView(anchor, onDay(anchor), data, zone, onOpenEvent, onCreate = { h -> creating = com.tiecoms.app.core.CalendarGrid.proposedStart(anchor, h, zone) })
+                    com.tiecoms.app.core.CalendarGrid.View.WEEK -> WeekView(anchor, events, data, zone, onOpenEvent,
+                        onCreate = { d -> creating = com.tiecoms.app.core.CalendarGrid.proposedStart(d, null, zone) }, onDay = { d -> anchorStr = d.toString(); setView(com.tiecoms.app.core.CalendarGrid.View.DAY) })
+                    com.tiecoms.app.core.CalendarGrid.View.MONTH -> MonthView(anchor, events, data, zone, onDay = { d -> anchorStr = d.toString(); setView(com.tiecoms.app.core.CalendarGrid.View.DAY) })
+                }
+            }
+        }
+    }
+    creating?.let { at -> EventDialog(null, initialStart = at, onClose = { creating = null }) }
+}
+
+/** Semana: la lista por día de siempre, con los 7 días y un «＋» en cada uno (crear ese día). */
+@Composable
+private fun WeekView(anchor: LocalDate, events: List<CalendarEventDTO>, data: BootstrapDTO, zone: ZoneId, onOpenEvent: (String) -> Unit, onCreate: (LocalDate) -> Unit, onDay: (LocalDate) -> Unit) {
+    val week = com.tiecoms.app.core.CalendarGrid.weekStart(anchor)
+    val today = LocalDate.now()
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp).testTag("calWeek"), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = AssistantListInset)) {
+        if (events.isEmpty()) item(key = "empty") { EmptyNote(stringResource(R.string.cal_empty)) }
+        for (i in 0 until 7) {
+            val day = week.plusDays(i.toLong())
+            val list = events.filter { e -> spanOf(e)?.let { com.tiecoms.app.core.CalendarGrid.overlaps(it, day, zone) } == true }
+            item(key = "d$day") {
+                val dayText = day.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()))
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp).heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(dayText.uppercase() + if (day == today) " · " + stringResource(R.string.cal_today).uppercase() else "",
+                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                        color = if (day == today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).clickable { onDay(day) }.semantics { heading() }.testTag("calWeekDay-$day"))
+                    IconButton(onClick = { onCreate(day) }, modifier = Modifier.testTag("calWeekNew-$day")) {
+                        Icon(androidx.compose.material.icons.Icons.Filled.Add, stringResource(R.string.cal_new_on, dayText), tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+            // Primero las de empresas; luego las de directos y chats grupales (sección «Chats», SPEC-v4 §E).
+            val (inSpaces, inChats) = list.partition { it.workspaceId != null }
+            items(inSpaces, key = { "$day/${it.id}" }) { EventRow(it, data, onOpen = onOpenEvent) }
+            if (inChats.isNotEmpty()) {
+                item(key = "dc$day") { Text(stringResource(R.string.cal_chats_section), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp).testTag("agendaChats")) }
+                items(inChats, key = { "$day/c/${it.id}" }) { EventRow(it, data, onOpen = onOpenEvent) }
+            }
+        }
+        item { Spacer(Modifier.heightIn(min = 24.dp)) }
+    }
+}
+
+/** Día: una columna de 24 horas; tocar un hueco crea una reunión a esa hora. */
+@Composable
+private fun DayView(day: LocalDate, events: List<CalendarEventDTO>, data: BootstrapDTO, zone: ZoneId, onOpenEvent: (String) -> Unit, onCreate: (Int) -> Unit) {
+    val hourH = 56.dp
+    val scroll = rememberScrollState()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    // Al abrir: la hora actual (hoy) o las 7:00, con una hora de margen arriba.
+    LaunchedEffect(day) {
+        val h = if (day == LocalDate.now()) maxOf(0, LocalTime.now().hour - 1) else 7
+        scroll.scrollTo(with(density) { (hourH * h).roundToPx() })
+    }
+    val spans = events.mapNotNull { e -> spanOf(e)?.let { e to it } }
+    val (allDay, timed) = spans.partition { (_, s) -> com.tiecoms.app.core.CalendarGrid.allDay(s, day, zone) }
+    val slots = timed.mapNotNull { (e, s) -> com.tiecoms.app.core.CalendarGrid.slot(s, day, zone)?.let { e to it } }.sortedBy { it.second.startMin }
+    // Carriles para las que se cruzan: cada una en el primero libre.
+    val laneEnds = mutableListOf<Int>()
+    val lanes = slots.map { (e, sl) ->
+        val lane = laneEnds.indexOfFirst { it <= sl.startMin }.let { if (it < 0) { laneEnds += sl.endMin; laneEnds.lastIndex } else { laneEnds[it] = sl.endMin; it } }
+        Triple(e, sl, lane)
+    }
+    val laneCount = maxOf(1, laneEnds.size)
+    Column(Modifier.fillMaxSize().testTag("calDay")) {
+        allDay.forEach { (e, _) ->
+            val (bg, fg) = eventColors(data, e)
+            Surface(color = bg, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp).clickable { onOpenEvent(e.id) }.testTag("calAllDay-${e.id}")) {
+                Text(stringResource(R.string.cal_all_day) + " · " + videoMark(e) + e.title, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+            }
+        }
+        if (events.isEmpty()) Text(stringResource(R.string.cal_empty_day), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).testTag("calDayEmpty"))
+        Box(Modifier.fillMaxWidth().weight(1f).verticalScroll(scroll)) {
+            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(hourH * 24)) {
+                // La hora («11:00 a. m.») cabe entera también con texto grande.
+                val gutter = (72 * density.fontScale.coerceAtLeast(1f)).dp
+                for (h in 0 until 24) {
+                    val hourText = LocalTime.of(h, 0).format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
+                    val cd = stringResource(R.string.cal_new_at, hourText)
+                    Row(Modifier.offset(y = hourH * h).fillMaxWidth().height(hourH)
+                        .clickable(onClickLabel = cd) { onCreate(h) }.semantics { contentDescription = cd }.testTag("calHour-$h")) {
+                        Text(hourText, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false,
+                            modifier = Modifier.width(gutter).padding(start = 8.dp, top = 2.dp))
+                        androidx.compose.material3.HorizontalDivider(Modifier.weight(1f).padding(end = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
+                val colW = (maxWidth - gutter - 12.dp) / laneCount
+                lanes.forEach { (e, sl, lane) ->
+                    val (bg, fg) = eventColors(data, e)
+                    val top = hourH * (sl.startMin / 60f)
+                    val height = (hourH * ((sl.endMin - sl.startMin) / 60f)).coerceAtLeast(28.dp)
+                    Surface(color = bg, shape = RoundedCornerShape(8.dp), shadowElevation = 1.dp,
+                        modifier = Modifier.offset(x = gutter + colW * lane, y = top).width(colW - 2.dp).height(height).clickable { onOpenEvent(e.id) }
+                            .semantics(mergeDescendants = true) { contentDescription = listOf(e.title, fmtWhen(e)).joinToString(", ") }.testTag("calDayEvent-${e.id}")) {
+                        Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                            Text(videoMark(e) + e.title, color = fg, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                textDecoration = if (e.cancelledAt != null) androidx.compose.ui.text.style.TextDecoration.LineThrough else null)
+                            if (height >= 44.dp) Text(fmtTime(e.startsAt) + "–" + fmtTime(e.endsAt), color = fg, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+                // Línea de «ahora».
+                if (day == LocalDate.now()) {
+                    val n = LocalTime.now()
+                    Box(Modifier.offset(x = gutter, y = hourH * ((n.hour * 60 + n.minute) / 60f)).fillMaxWidth().height(2.dp).background(Brand.Orange).testTag("calNow"))
+                }
+            }
         }
     }
 }
 
+/** Mes: cuadrícula 6×7 que empieza en lunes, con títulos (o puntos) y «+N más»; tocar un día abre la vista Día. */
+@Composable
+private fun MonthView(anchor: LocalDate, events: List<CalendarEventDTO>, data: BootstrapDTO, zone: ZoneId, onDay: (LocalDate) -> Unit) {
+    val month = java.time.YearMonth.from(anchor)
+    val grid = com.tiecoms.app.core.CalendarGrid.monthGrid(month)
+    val today = LocalDate.now()
+    val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
+    // Con texto grande cabe un título por día (los demás van en «+N más»); con texto normal, dos.
+    val maxLines = if (fontScale >= 1.3f) 1 else 2
+    val spans = events.mapNotNull { e -> spanOf(e)?.let { e to it } }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 8.dp).testTag("calMonth")) {
+        Row(Modifier.fillMaxWidth()) {
+            (0 until 7).forEach { i ->
+                val dow = DayOfWeek.MONDAY.plus(i.toLong())
+                Text(dow.getDisplayName(java.time.format.TextStyle.SHORT, Locale.getDefault()).replaceFirstChar { it.uppercase() }, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Clip,
+                    modifier = Modifier.weight(1f).padding(vertical = 4.dp))
+            }
+        }
+        if (spans.none { (_, s) -> grid.any { d -> d.month == month.month && com.tiecoms.app.core.CalendarGrid.overlaps(s, d, zone) } })
+            Text(stringResource(R.string.cal_empty_month), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(4.dp).testTag("calMonthEmpty"))
+        grid.chunked(7).forEachIndexed { w, week ->
+            Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min).testTag("calWeekRow-$w")) {
+                week.forEach { d ->
+                    val here = spans.filter { (_, s) -> com.tiecoms.app.core.CalendarGrid.overlaps(s, d, zone) }.map { it.first }
+                    val cell = com.tiecoms.app.core.CalendarGrid.cell(here, maxLines + 1)
+                    val inMonth = d.month == month.month
+                    val longDay = d.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL))
+                    val cd = androidx.compose.ui.res.pluralStringResource(R.plurals.cal_day_cd, here.size, longDay, here.size)
+                    Column(Modifier.weight(1f).fillMaxHeight().heightIn(min = 72.dp).padding(1.dp)
+                        .background(if (d == today) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(6.dp))
+                        .clickable { onDay(d) }.semantics(mergeDescendants = true) { contentDescription = cd }.padding(3.dp).testTag("calCell-$d")) {
+                        Text(d.dayOfMonth.toString(), style = MaterialTheme.typography.labelMedium, fontWeight = if (d == today) FontWeight.Bold else FontWeight.Normal, maxLines = 1,
+                            color = when { d == today -> MaterialTheme.colorScheme.primary; inMonth -> MaterialTheme.colorScheme.onSurface; else -> MaterialTheme.colorScheme.outline })
+                        cell.shown.forEach { e ->
+                            val (bg, fg) = eventColors(data, e)
+                            Text(videoMark(e) + e.title, color = fg, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth().padding(top = 1.dp).background(bg, RoundedCornerShape(3.dp)).padding(horizontal = 2.dp).testTag("calCellEvent-${e.id}"))
+                        }
+                        if (cell.more > 0) Text(stringResource(R.string.cal_more, cell.more), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("calMore-$d"))
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.heightIn(min = AssistantListInset + 16.dp))
+    }
+}

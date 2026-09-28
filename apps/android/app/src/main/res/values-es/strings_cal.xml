@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.6: calendario Día / Semana / Mes (docs/TANDA-LECTURA-REUNIONES.md §5). -->
+<resources>
+    <string name="cal_view_day">Día</string>
+    <string name="cal_view_week">Semana</string>
+    <string name="cal_view_month">Mes</string>
+    <string name="cal_view_label">Vista</string>
+    <string name="cal_prev_day">Día anterior</string>
+    <string name="cal_next_day">Día siguiente</string>
+    <string name="cal_prev_month">Mes anterior</string>
+    <string name="cal_next_month">Mes siguiente</string>
+    <string name="cal_more">+%1$d más</string>
+    <string name="cal_new_at">Nueva reunión a las %1$s</string>
+    <string name="cal_new_on">Nueva reunión el %1$s</string>
+    <string name="cal_all_day">Todo el día</string>
+    <string name="cal_empty_day">No hay reuniones este día.</string>
+    <string name="cal_empty_month">No hay reuniones este mes.</string>
+    <plurals name="cal_day_cd">
+        <item quantity="one">%1$s, %2$d reunión</item>
+        <item quantity="other">%1$s, %2$d reuniones</item>
+    </plurals>
+</resources>

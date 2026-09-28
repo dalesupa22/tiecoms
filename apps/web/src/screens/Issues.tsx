@@ -14,7 +14,9 @@ const STALL_DAYS = 2;
 
 export const isClosed = (i: IssueDTO) => CLOSED.has(i.status);
 const daysSince = (iso: string) => Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
-const todayIso = () => new Date().toISOString().slice(0, 10);
+/** Fecha local (no UTC): en Colombia, de noche, UTC ya es mañana y todo saldría vencido. */
+export const localIso = (x = new Date()) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+const todayIso = () => localIso();
 
 /** Señal de cuello de botella: lleva días sin moverse, o se venció. */
 export function issueFlags(i: IssueDTO) {
@@ -255,11 +257,14 @@ export function IssueDrawer({ id, onClose }: { id: string; onClose: () => void }
   const live = useClient((s) => s.issues[id]);
   const [events, setEvents] = useState<IssueEventDTO[]>([]);
   const [comment, setComment] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
+  const [pickDate, setPickDate] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const load = () => client.issueDetail(id).then((r) => setEvents(r.events)).catch((e) => setError(errorText(e)));
   useEffect(() => { void load(); }, [id, live?.updatedAt]);
   if (!live) return <Modal title={t('nav.issues')} onClose={onClose}><div className="muted">{error ?? t('common.loading')}</div></Modal>;
   const i = live;
+  const done = isClosed(i);
   const conv = d.conversations.find((c) => c.id === i.conversationId);
   const members = membersOf(d, i.conversationId);
   const orgIds = [...new Set(members.map((p) => p.orgId).filter(Boolean))] as string[];
@@ -272,69 +277,128 @@ export function IssueDrawer({ id, onClose }: { id: string; onClose: () => void }
     if (!comment.trim()) return;
     try { await client.commentIssue(i.id, comment.trim()); setComment(''); await load(); } catch (err) { setError(errorText(err)); }
   };
-
+  const comments = events.filter((e) => e.kind === 'comment');
+  const changes = events.filter((e) => e.kind !== 'comment');
+  const dates = dateShortcuts();
+  const shortDate = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString(locale(), { weekday: 'short', day: 'numeric', month: 'short' });
+  const when = (iso: string) => new Date(iso).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  // Un solo paso por pregunta: ¿quién?, ¿para cuándo?, ¿cómo va? Y un solo botón grande para terminar.
   return (
-    <Modal title={t('issue.drawerTitle')} onClose={onClose}>
-      <div className="issue-head">
-        <IssueCheck i={i} size={26} />
-        <input key={i.title} className={`issue-title-edit grow ${isClosed(i) ? 'is-done' : ''}`} defaultValue={i.title} maxLength={200} aria-label={t('issue.title')}
+    <Modal title={conv ? conversationTitle(d, conv) : t('nav.issues')} onClose={onClose}>
+      <label className="issue-title-wrap">
+        <input key={i.title} className={`issue-title-edit ${done ? 'is-done' : ''}`} defaultValue={i.title} maxLength={200} aria-label={t('issue.title')}
           onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { e.currentTarget.value = i.title; e.currentTarget.blur(); } }}
           onBlur={(e) => { const v = e.currentTarget.value.trim(); if (v.length >= 2 && v !== i.title) void update({ title: v }); else e.currentTarget.value = i.title; }} />
-        <button className={`btn small ${isClosed(i) ? '' : 'primary'}`} onClick={() => void toggleDone(i)}>{isClosed(i) ? `↺ ${t('issue.reopen')}` : `✓ ${t('issue.complete')}`}</button>
-      </div>
-      <div className="small muted">{conv ? conversationTitle(d, conv) : ''} · {requester ? t('issue.requestedBy', { name: requester.name }) : t('issue.manual')}</div>
-      {(f.stalledDays > 0 || f.overdue) && (
-        <div className="jam-alert">⏱ <b>{t('issue.bottleneck')}</b> · {[f.overdue ? t('issue.overdue') : null, f.stalledDays ? (f.stalledDays === 1 ? t('issue.stalledOne') : t('issue.stalled', { n: f.stalledDays })) : null].filter(Boolean).join(' · ')}</div>
+        <span className="issue-title-pen" aria-hidden>✎</span>
+      </label>
+      <div className="small muted">{requester ? t('issue.requestedBy', { name: requester.name }) : t('issue.manual')}</div>
+
+      {done ? (
+        <div className={`issue-done-banner ${i.status === 'cancelled' ? 'is-dropped' : ''}`}>
+          <span className="grow">{i.status === 'cancelled' ? t('issue.droppedBanner') : t('issue.doneBanner')}{i.closedAt ? ` · ${when(i.closedAt)}` : ''}</span>
+          <button className="btn small" onClick={() => void toggleDone(i)}>↺ {t('issue.reopen')}</button>
+        </div>
+      ) : (
+        <>
+          {(f.overdue || f.stalledDays > 0 || f.dueToday) && (
+            <div className="jam-alert">⏱ {[f.overdue && i.dueDate ? t('issue.overdueSince', { date: shortDate(i.dueDate) }) : null, f.dueToday ? t('issue.today') : null, f.stalledDays ? t('issue.stalledPlain', { n: f.stalledDays }) : null].filter(Boolean).join(' · ')}</div>
+          )}
+          <button className="btn issue-done-btn" onClick={() => void toggleDone(i)}>✓ {t('issue.markDone')}</button>
+        </>
       )}
-      <div className="seg issue-seg" role="radiogroup" aria-label={t('issue.status')}>
-        {ISSUE_STATUSES.map((st) => (
-          <button key={st} role="radio" aria-checked={i.status === st} className={i.status === st ? 'on' : ''} onClick={() => update({ status: st })}>{t(`issue.st.${st}`)}</button>
-        ))}
+
+      <div className="issue-q">
+        <div className="issue-q-label">{t('issue.qWho')}</div>
+        <div className="chips">
+          {members.map((p) => (
+            <button key={p.id} className={`chip-person ${i.ownerId === p.id ? 'on' : ''}`} aria-pressed={i.ownerId === p.id} onClick={() => update({ ownerId: p.id })}>
+              <Avatar person={p} org={orgById(d, p.orgId)} size={22} /> {p.id === d.me.id ? t('issue.me') : p.name.split(' ')[0]}
+            </button>
+          ))}
+          {i.ownerId && <button className="chip-person ghost" onClick={() => update({ ownerId: null })}>{t('issue.noOwner')}</button>}
+        </div>
       </div>
-      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
-        <label className="field grow"><span>{t('issue.owner')}</span>
-          <select className="input" value={i.ownerId ?? ''} onChange={(e) => update({ ownerId: e.target.value || null })}>
-            <option value="">{t('common.none')}</option>
-            {members.map((p) => <option key={p.id} value={p.id}>{p.name} · {orgById(d, p.orgId)?.name ?? t('common.guest')}</option>)}
-          </select>
-        </label>
-        <label className="field"><span>{t('issue.due')}</span><input className="input" type="date" value={i.dueDate ?? ''} onChange={(e) => update({ dueDate: e.target.value || null })} /></label>
+
+      <div className="issue-q">
+        <div className="issue-q-label">{t('issue.qWhen')}{i.dueDate ? <b> · {shortDate(i.dueDate)}</b> : null}</div>
+        <div className="chips">
+          {dates.map(([k, iso]) => <button key={k} className={`chip ${i.dueDate === iso ? 'on' : ''}`} aria-pressed={i.dueDate === iso} onClick={() => update({ dueDate: iso })}>{t(k)}</button>)}
+          <button className={`chip ${pickDate ? 'on' : ''}`} onClick={() => setPickDate(!pickDate)}>📅 {t('issue.dPick')}</button>
+          {i.dueDate && <button className="chip ghost" onClick={() => update({ dueDate: null })}>{t('issue.noDue')}</button>}
+        </div>
+        {pickDate && <input className="input" type="date" autoFocus value={i.dueDate ?? ''} onChange={(e) => { void update({ dueDate: e.target.value || null }); setPickDate(false); }} style={{ maxWidth: 200 }} />}
       </div>
-      {i.status === 'waiting' && (
-        <label className="field"><span>{t('issue.waitingOn')}</span>
-          <select className="input" value={i.waitingOnOrgId ?? ''} onChange={(e) => update({ waitingOnOrgId: e.target.value || null })}>
-            <option value="">{t('issue.waitingOnPh')}</option>
-            {orgIds.map((o) => <option key={o} value={o}>{orgById(d, o)?.name}</option>)}
-          </select>
-        </label>
+
+      {!done && (
+        <div className="issue-q">
+          <div className="issue-q-label">{t('issue.qHow')}</div>
+          <div className="chips">
+            {(['open', 'in_progress', 'waiting'] as const).map((st) => (
+              <button key={st} className={`chip ${i.status === st ? 'on' : ''}`} aria-pressed={i.status === st} onClick={() => update({ status: st })}>{t(`issue.how.${st}`)}</button>
+            ))}
+          </div>
+          {i.status === 'waiting' && orgIds.length > 1 && (
+            <div className="chips" style={{ marginTop: 6 }}>
+              <span className="small muted">{t('issue.waitingOn')}:</span>
+              {orgIds.map((o) => <button key={o} className={`chip ${i.waitingOnOrgId === o ? 'on' : ''}`} onClick={() => update({ waitingOnOrgId: i.waitingOnOrgId === o ? null : o })}>{orgById(d, o)?.name}</button>)}
+            </div>
+          )}
+        </div>
       )}
-      {i.originMessageId && (
-        canSeeOrigin
-          ? <button className="btn small" style={{ alignSelf: 'flex-start' }} onClick={() => { onClose(); navigate(`/c/${i.conversationId}?m=${i.originMessageSeq}`); }}>↗ {t('issue.origin')}</button>
-          : <div className="hint">{t('issue.originOut')}</div>
-      )}
-      <div className="eyebrow">{t('issue.history')}</div>
-      <div className="issue-timeline">
-        {events.map((e) => {
+
+      <div className="issue-q">
+        <div className="issue-q-label">{t('issue.qNews')}{comments.length ? ` · ${comments.length}` : ''}</div>
+        {comments.map((e) => {
           const who = personById(d, e.actorId);
           return (
-            <div key={e.id} className={`issue-ev ${e.kind === 'comment' ? 'is-comment' : ''}`}>
+            <div key={e.id} className="issue-ev is-comment">
               <Avatar person={who} org={orgById(d, who?.orgId)} size={24} />
               <div className="grow" style={{ minWidth: 0 }}>
-                <div className="small"><b>{who?.name ?? t('common.participant')}</b> {e.kind === 'comment' ? '' : eventText(d, e)} <span className="muted">· {new Date(e.createdAt).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span></div>
-                {e.kind === 'comment' && <div className="issue-comment">{String((e.payload as any).body)}</div>}
+                <div className="small"><b>{who?.name ?? t('common.participant')}</b> <span className="muted">· {when(e.createdAt)}</span></div>
+                <div className="issue-comment">{String((e.payload as any).body)}</div>
               </div>
             </div>
           );
         })}
+        <form onSubmit={send} className="linkbox">
+          <input className="input" placeholder={t('issue.commentPh')} value={comment} onChange={(e) => setComment(e.target.value)} />
+          <button className="btn primary" disabled={!comment.trim()}>{t('issue.comment')}</button>
+        </form>
       </div>
-      <form onSubmit={send} className="linkbox">
-        <input className="input" placeholder={t('issue.commentPh')} value={comment} onChange={(e) => setComment(e.target.value)} />
-        <button className="btn primary" disabled={!comment.trim()}>{t('issue.comment')}</button>
-      </form>
+
       {error && <div className="error">{error}</div>}
+
+      <div className="issue-foot">
+        {i.originMessageId && (canSeeOrigin
+          ? <button className="link-btn" onClick={() => { onClose(); navigate(`/c/${i.conversationId}?m=${i.originMessageSeq}`); }}>↗ {t('issue.origin')}</button>
+          : <span className="small muted">{t('issue.originOut')}</span>)}
+        {changes.length > 0 && <button className="link-btn" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? '⌄' : '›'} {t('issue.historyCount', { n: changes.length })}</button>}
+        <span className="grow" />
+        {!done && <button className="link-btn muted" onClick={() => void update({ status: 'cancelled' }).then(() => toast(t('issue.droppedToast'), { label: t('issue.undo'), run: () => void client.updateIssue(i.id, { status: i.status }) }))}>{t('issue.drop')}</button>}
+      </div>
+      {showHistory && (
+        <div className="issue-timeline">
+          {changes.map((e) => {
+            const who = personById(d, e.actorId);
+            return <div key={e.id} className="small muted"><b>{who?.name ?? t('common.participant')}</b> {eventText(d, e)} · {when(e.createdAt)}</div>;
+          })}
+        </div>
+      )}
     </Modal>
   );
+}
+
+/** Fechas de un toque en la hora local: hoy, mañana, el viernes y el lunes que viene. */
+function dateShortcuts(): ['issue.dToday' | 'issue.dTomorrow' | 'issue.dFriday' | 'issue.dNextWeek', string][] {
+  const local = localIso;
+  const plus = (n: number) => { const x = new Date(); x.setDate(x.getDate() + n); return x; };
+  const dow = new Date().getDay();
+  const toFriday = (5 - dow + 7) % 7;
+  const toMonday = ((1 - dow + 7) % 7) || 7;
+  const out: ['issue.dToday' | 'issue.dTomorrow' | 'issue.dFriday' | 'issue.dNextWeek', string][] = [['issue.dToday', local(plus(0))], ['issue.dTomorrow', local(plus(1))]];
+  if (toFriday > 1) out.push(['issue.dFriday', local(plus(toFriday))]);
+  out.push(['issue.dNextWeek', local(plus(toMonday))]);
+  return out;
 }
 
 export function IssuesScreen() {

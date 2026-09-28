@@ -9,7 +9,7 @@ import { DndStrip } from './Silence.tsx';
 import { copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { newEvent } from './Calendar.tsx';
 import { InviteDialog } from './Dialogs.tsx';
-import { IssueCheck, NewIssueDialog, isClosed, issueQuickMenu } from './Issues.tsx';
+import { IssueCheck, NewIssueDialog, isClosed, issueQuickMenu, localIso } from './Issues.tsx';
 import { MessageText } from './Mentions.tsx';
 import { StackedAvatars } from './Chats.tsx';
 import { QuickActions, QuickSearchField, QuickSearchSections, openNewMessage } from './Quick.tsx';
@@ -240,7 +240,7 @@ function GroupEntry({ g, ws, issuesOpen, active, label, preview }: { g: GroupNod
   );
 }
 
-const overdueCount = (list: IssueDTO[]) => { const today = new Date().toISOString().slice(0, 10); return list.filter((i) => i.dueDate && i.dueDate < today).length; };
+const overdueCount = (list: IssueDTO[]) => { const today = localIso(); return list.filter((i) => i.dueDate && i.dueDate < today).length; };
 
 /**
  * Asuntos activos bajo el grupo, cuando la persona los abre con el chip ◆ de la fila: hasta 3 y «+N asuntos».
@@ -248,7 +248,7 @@ const overdueCount = (list: IssueDTO[]) => { const today = new Date().toISOStrin
  */
 function IssueLines({ g }: { g: GroupNode }) {
   const d = useClient((s) => s.data)!;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localIso();
   const shown = g.issues.slice(0, 3);
   return (
     <div className="group-issues">

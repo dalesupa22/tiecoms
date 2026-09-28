@@ -4,7 +4,7 @@ import { client, useClient } from '../app-client.ts';
 import { locale, t } from '../i18n.ts';
 import { Avatar, Modal, conversationTitle, personById, timeLabel } from '../ui.tsx';
 import { EventRow, newEvent } from './Calendar.tsx';
-import { ConversationIssues, isClosed } from './Issues.tsx';
+import { ConversationIssues, isClosed, localIso } from './Issues.tsx';
 
 /**
  * Barra de accesos del chat (mismas reglas en web, iOS y Android: docs/GRUPOS.md): Fijados, Asuntos, Hilos,
@@ -53,7 +53,7 @@ export function ChatBar({ conv, pinnedCount, canOpenIssues, onPins, onLinks, onO
     .sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999'));
   const threads = threadsOf(d, conv.id);
   const agenda = useAgenda(conv, issues);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localIso();
   const overdue = issues.some((i) => i.dueDate && i.dueDate < today);
   const soon = agenda.some((a) => a.kind === 'event' && new Date(a.at).toDateString() === new Date().toDateString());
   const openThreads = threads.filter((c) => !c.returnedAt);

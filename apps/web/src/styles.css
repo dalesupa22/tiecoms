@@ -235,7 +235,23 @@ a:hover { color: var(--accent-ink); }
 .issue-done-toggle { align-self: flex-start; margin-top: 4px; font-weight: 600; }
 .issue-toolbar { gap: 10px; flex-wrap: wrap; margin: 16px 0; }
 .issue-toolbar .seg button { white-space: nowrap; }
-.issue-head { display: flex; align-items: center; gap: 10px; }
+.issue-title-wrap { position: relative; display: block; }
+.issue-title-wrap .issue-title-edit { width: 100%; padding-right: 30px; }
+.issue-title-pen { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; font-size: 14px; }
+.issue-done-btn { width: 100%; min-height: 48px; font-size: 16px; font-weight: 700; background: #2f7a45; border-color: #2f7a45; color: #fff; }
+.issue-done-btn:hover { background: #276a3b; }
+.issue-done-banner { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: #e6f3e5; color: #2f7a45; font-weight: 700; }
+.issue-done-banner.is-dropped { background: #efebe5; color: #8a8378; }
+.issue-q { display: flex; flex-direction: column; gap: 8px; }
+.issue-q-label { font-weight: 700; font-size: 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chips .chip, .chip-person { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 4px 12px; border-radius: 99px; border: 1px solid var(--line); background: #fff; font: inherit; font-size: 13.5px; color: inherit; cursor: pointer; }
+.chip-person { padding-left: 4px; }
+.chips .chip:hover, .chip-person:hover { border-color: #b9b2a6; }
+.chips .chip.on, .chip-person.on { background: var(--ink); border-color: var(--ink); color: var(--paper); font-weight: 600; }
+.chips .chip.ghost, .chip-person.ghost { background: transparent; border-style: dashed; color: var(--muted); padding-left: 12px; }
+.issue-foot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 10px; }
+.link-btn.muted { color: var(--muted); }
 .issue-title-edit { font: inherit; font-size: 18px; font-weight: 700; border: 1px solid transparent; border-radius: 8px; padding: 4px 6px; background: transparent; color: inherit; min-width: 0; }
 .issue-title-edit:hover, .issue-title-edit:focus { border-color: var(--line, #ddd6cb); outline: 0; }
 .issue-title-edit.is-done { text-decoration: line-through; color: var(--muted); }

@@ -164,7 +164,8 @@ fun issueQuickMenu(ctx: Context, i: IssueDTO, onOpen: () -> Unit, onStatus: (Str
             IssueTasks.QuickAction.REOPEN -> SheetItem(ctx.getString(R.string.issue_reopen), "↺", tag = "issueActReopen") { onStatus(st) }
         })
         // Asunto principal abierto (docs/TAREAS.md): «＋ Tarea derivada» y «💬 Hablar aparte (sidechat)», tras Completar.
-        if (a == IssueTasks.QuickAction.COMPLETE && i.parentIssueId == null) {
+        // Un asunto personal no tiene tareas ni sidechat.
+        if (a == IssueTasks.QuickAction.COMPLETE && i.parentIssueId == null && !i.personal) {
             onAddTask?.let { add(SheetItem(ctx.getString(R.string.task_add), "＋", tag = "issueActAddTask") { it() }) }
             if (!i.restricted) onSide?.let { add(SheetItem(ctx.getString(R.string.task_sidechat), "💬", tag = "issueActSide") { it() }) }
             if (onAddTask != null || onSide != null) add(null)
@@ -281,7 +282,7 @@ fun IssueRow(i: IssueDTO, data: BootstrapDTO, showWhere: Boolean = true, showOwn
                     color = if (done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                     modifier = if (i.restricted) Modifier.semantics { contentDescription = visibilityLabel(ctx, data, i) + ": " + i.title } else Modifier)
                 val sub = listOfNotNull(
-                    if (showOwner) owner?.name ?: stringResource(R.string.issue_no_owner) else null,
+                    if (i.personal) stringResource(R.string.issue_personal_short) else if (showOwner) owner?.name ?: stringResource(R.string.issue_no_owner) else null,
                     if (!child && parent != null) "↳ " + parent.title else null,
                     if (!child && parent == null && i.parentIssueId != null) stringResource(R.string.task_of_hidden) else null,
                     if (showWhere && conv != null && !child) stringResource(R.string.issue_in, titleOf(ctx, conv, data)) else null,
@@ -363,8 +364,11 @@ fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier) {
     val convFallback = stringResource(R.string.conversation)
     val destinations = remember(data, conversationId) { if (conversationId == null) com.tiecoms.app.core.QuickSearch.issueDestinations(data) else emptyList() }
     var picked by rememberSaveable(conversationId) { mutableStateOf<String?>(null) }
-    val conv = conversationId ?: picked?.takeIf { p -> destinations.any { it.id == p } } ?: destinations.firstOrNull()?.id ?: return
-    val members = humansOf(data, conv).sortedByDescending { it.id == data.me.id }
+    // «¿Dónde?» (1.6.6): la primera opción es «🔒 Personal · solo tú» (sin conversación, solo la veo yo).
+    // Como la web: por defecto el grupo más reciente (o Personal si no hay ninguno).
+    val conv = conversationId ?: picked?.takeIf { p -> p == IssueTasks.PERSONAL || destinations.any { it.id == p } } ?: destinations.firstOrNull()?.id ?: IssueTasks.PERSONAL
+    val personal = conv == IssueTasks.PERSONAL
+    val members = if (personal) emptyList() else humansOf(data, conv).sortedByDescending { it.id == data.me.id }
     var title by rememberSaveable { mutableStateOf("") }
     var owner by rememberSaveable(conv) { mutableStateOf(data.me.id) }
     var due by rememberSaveable { mutableStateOf<String?>(null) }
@@ -380,7 +384,8 @@ fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier) {
         busy = true; error = null
         scope.launch {
             try {
-                client.createIssue(conv, text, if (members.any { it.id == owner }) owner else data.me.id, due, null)
+                if (personal) client.createPersonalIssue(text, due)
+                else client.createIssue(conv, text, if (members.any { it.id == owner }) owner else data.me.id, due, null)
                 title = ""; due = null
                 runCatching { focus.requestFocus() }
             } catch (e: Exception) { error = errorText(ctx, e) } finally { busy = false }
@@ -400,11 +405,13 @@ fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier) {
         AnimatedVisibility(typing) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (conversationId == null) Dropdown(stringResource(R.string.issue_where),
-                    destinations.map { c -> c.id to com.tiecoms.app.core.QuickSearch.issueLabel(data, c) { Names.conversationTitle(it, data, internalFallback, convFallback) } },
+                    listOf(IssueTasks.PERSONAL to stringResource(R.string.issue_personal_option)) +
+                        destinations.map { c -> c.id to com.tiecoms.app.core.QuickSearch.issueLabel(data, c) { Names.conversationTitle(it, data, internalFallback, convFallback) } },
                     conv, { picked = it; owner = data.me.id }, modifier = Modifier.fillMaxWidth(), tag = "issueQuickWhere")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.Center) {
                     val who = members.firstOrNull { it.id == owner }
-                    Box {
+                    // Personal: siempre eres tú, no hay a quién asignarlo.
+                    if (!personal) Box {
                         AssistChip(onClick = { ownerMenu = true },
                             label = { Text(if (owner == data.me.id) stringResource(R.string.issue_me) else IssueTasks.firstName(who?.name), maxLines = 1) },
                             leadingIcon = { PersonAvatar(who, data, size = 20.dp) },
@@ -496,7 +503,7 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
         LaunchedEffect(Unit) { runCatching { client.loadIssues() }.onFailure { error = errorText(ctx, it) } }
         val mine = data.me.id
         // Los restringidos pueden ser de un chat que no leo (me asignaron una tarea): el servidor ya filtró.
-        val inView = st.issues.values.filter { it.conversationId in visible || it.restricted }
+        val inView = st.issues.values.filter { it.personal || it.conversationId in visible || it.restricted }
         val list = inView.filter { IssueTasks.matches(filter, it, mine) }
             .sortedWith(if (filter == "closed") IssueTasks.byClosedDesc else IssueTasks.byUrgency())
         val byPerson = groupBy == "person"
@@ -504,8 +511,10 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
         val you = stringResource(R.string.you)
         val participant = stringResource(R.string.common_participant)
         val shared = stringResource(R.string.task_shared_with_me)
+        val personalTitle = stringResource(R.string.issue_personal_section)
         val sectionTitle: (String) -> String = { k ->
-            if (byPerson) { if (k == IssueTasks.NO_OWNER) noOwner else (Names.person(data, k)?.name ?: participant) + if (k == mine) " $you" else "" }
+            if (!byPerson && k == IssueTasks.PERSONAL) personalTitle
+            else if (byPerson) { if (k == IssueTasks.NO_OWNER) noOwner else (Names.person(data, k)?.name ?: participant) + if (k == mine) " $you" else "" }
             else visible[k]?.let { c -> listOfNotNull(data.workspaces.firstOrNull { it.id == c.workspaceId }?.name, titleOf(ctx, c, data)).distinct().joinToString(" · ") } ?: shared
         }
         // Por grupo, las tareas van debajo de su asunto (en la sección del asunto); por responsable, sueltas con «↳ asunto».
@@ -533,6 +542,7 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
                 item(key = "s$k") {
                     Row(Modifier.padding(top = 18.dp, bottom = 2.dp).semantics(mergeDescendants = true) { heading() }.testTag("issueSection-$k"), verticalAlignment = Alignment.CenterVertically) {
                         if (byPerson) { if (k != IssueTasks.NO_OWNER) { PersonAvatar(Names.person(data, k), data, size = 22.dp); Spacer(Modifier.width(8.dp)) } }
+                        else if (k == IssueTasks.PERSONAL) { Text("🔒", style = MaterialTheme.typography.labelLarge); Spacer(Modifier.width(8.dp)) }
                         else visible[k]?.let { ConversationIcon(it, data, 22.dp); Spacer(Modifier.width(8.dp)) }
                         Text("${sectionTitle(k)} · ${items.size}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -601,7 +611,9 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
     // En vivo: issue.updated trae updatedAt/commentCount nuevos y se recarga el historial.
     LaunchedEffect(id, live?.updatedAt, live?.commentCount) { load() }
     val conv = live?.let { i -> data.conversations.firstOrNull { it.id == i.conversationId } }
-    SimpleScaffold(conv?.let { titleOf(ctx, it, data) } ?: stringResource(R.string.nav_issues), onBack) {
+    // Asunto personal (1.6.6): sin «¿Quién lo hace?» (siempre eres tú), sin tareas y sin sidechat.
+    val personal = live?.personal == true
+    SimpleScaffold(conv?.let { titleOf(ctx, it, data) } ?: if (personal) stringResource(R.string.issue_personal_option) else stringResource(R.string.nav_issues), onBack) {
         val i = live ?: run { if (error != null) ErrorText(error) else CircularProgressIndicator(Modifier.padding(24.dp)); return@SimpleScaffold }
         val done = i.closed
         val chatMembers = humansOf(data, i.conversationId)
@@ -647,7 +659,7 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
                         Text("↑ " + stringResource(R.string.task_part_of, parent.title), maxLines = 2, overflow = TextOverflow.Ellipsis)
                     } else Text(stringResource(R.string.task_of_hidden), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text((requester?.let { stringResource(R.string.issue_requested_by, it.name) } ?: stringResource(R.string.issue_manual)) +
+                if (!personal) Text((requester?.let { stringResource(R.string.issue_requested_by, it.name) } ?: stringResource(R.string.issue_manual)) +
                     if (i.restricted) " · 🔒 " + visibilityLabel(ctx, data, i) else "",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("issueRequester"))
             }
@@ -676,7 +688,11 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
                     }
                 }
             }
-            item(key = "who") {
+            if (personal) item(key = "personal") {
+                Text("🔒 " + stringResource(R.string.issue_personal_note), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp).testTag("issuePersonal"))
+            }
+            if (!personal) item(key = "who") {
                 Question(stringResource(R.string.issue_q_who), tag = "issueQWho") {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         members.forEach { p ->
@@ -719,7 +735,7 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
                     }
                 }
             }
-            if (i.parentIssueId == null) item(key = "tasks") { TasksSection(i.id, null, onOpen = onOpenIssue) }
+            if (i.parentIssueId == null && !personal) item(key = "tasks") { TasksSection(i.id, null, onOpen = onOpenIssue) }
             if (i.parentIssueId != null && i.createdBy == data.me.id) item(key = "vis") { VisibilityChoice(i) }
             item(key = "newsHead") { Question(stringResource(R.string.issue_q_news) + if (comments.isNotEmpty()) " · ${comments.size}" else "", tag = "issueQNews") {} }
             items(comments, key = { it.id }) { e ->
@@ -754,7 +770,7 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
             item(key = "foot") {
                 FlowRow(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.Center) {
                     if (i.originMessageId != null) {
-                        if (canSeeOrigin) TextButton(onClick = { onOpenOrigin(i.conversationId, i.originMessageSeq!!) }, modifier = Modifier.heightIn(min = 48.dp).testTag("issueOrigin")) {
+                        if (canSeeOrigin) TextButton(onClick = { onOpenOrigin(conv!!.id, i.originMessageSeq!!) }, modifier = Modifier.heightIn(min = 48.dp).testTag("issueOrigin")) {
                             Text("↗ " + stringResource(R.string.issue_origin))
                         } else Text(stringResource(R.string.issue_origin_out), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.align(Alignment.CenterVertically))

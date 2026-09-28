@@ -12,6 +12,8 @@ object IssueTasks {
     const val STALL_DAYS = 2
     /** Clave de la sección «Sin responsable» al agrupar por responsable. */
     const val NO_OWNER = "__none"
+    /** Sección «Personal · solo tú» de Asuntos por grupo (asuntos sin conversación). */
+    const val PERSONAL = "__personal"
 
     data class Flags(val stalledDays: Int, val overdue: Boolean, val dueToday: Boolean)
 
@@ -90,10 +92,11 @@ object IssueTasks {
      */
     fun sections(list: List<IssueDTO>, byPerson: Boolean, myId: String, title: (String) -> String): List<Pair<String, List<IssueDTO>>> {
         val buckets = LinkedHashMap<String, MutableList<IssueDTO>>()
-        for (i in list) buckets.getOrPut(if (byPerson) i.ownerId ?: NO_OWNER else i.conversationId) { mutableListOf() }.add(i)
+        for (i in list) buckets.getOrPut(if (byPerson) i.ownerId ?: NO_OWNER else i.conversationId ?: PERSONAL) { mutableListOf() }.add(i)
         val cmp: Comparator<Map.Entry<String, MutableList<IssueDTO>>> = if (byPerson)
             compareByDescending<Map.Entry<String, MutableList<IssueDTO>>> { it.key == myId }.thenBy { it.key == NO_OWNER }.thenBy { title(it.key).lowercase() }
-        else compareByDescending<Map.Entry<String, MutableList<IssueDTO>>> { it.value.size }.thenBy { title(it.key).lowercase() }
+        // Por grupo, «Personal · solo tú» va primero.
+        else compareByDescending<Map.Entry<String, MutableList<IssueDTO>>> { it.key == PERSONAL }.thenByDescending { it.value.size }.thenBy { title(it.key).lowercase() }
         return buckets.entries.sortedWith(cmp).map { it.key to it.value.toList() }
     }
 
@@ -122,7 +125,7 @@ object IssueTasks {
     }
 
     /** Conversación donde se agrupa (Asuntos por grupo): la del asunto padre si lo veo. */
-    fun groupConversation(i: IssueDTO, all: Map<String, IssueDTO>): String = i.parentIssueId?.let { all[it]?.conversationId } ?: i.conversationId
+    fun groupConversation(i: IssueDTO, all: Map<String, IssueDTO>): String? = i.parentIssueId?.let { all[it]?.conversationId } ?: i.conversationId
 
     /** Por defecto una tarea la ve «solo mi empresa» si en el chat hay más de una empresa. */
     fun defaultVisibility(memberOrgIds: List<String?>, myOrgId: String?): String =

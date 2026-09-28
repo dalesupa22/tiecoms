@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.6: asuntos personales, solo los ve su dueño (docs/TANDA-LECTURA-REUNIONES.md §3). -->
+<resources>
+    <string name="issue_personal_option">🔒 Personal · solo tú</string>
+    <string name="issue_personal_section">Personal · solo tú</string>
+    <string name="issue_personal_note">Solo tú lo ves. No está en ningún chat ni lo ve nadie más.</string>
+    <string name="issue_personal_short">Personal</string>
+</resources>

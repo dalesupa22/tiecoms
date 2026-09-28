@@ -61,7 +61,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 
 /** «Solo Xertify» / «Privada» / «Todo el chat»: quién ve la tarea, en palabras. */
-fun visibilityLabel(ctx: Context, d: BootstrapDTO?, i: IssueDTO): String = when (i.visibility) {
+fun visibilityLabel(ctx: Context, d: BootstrapDTO?, i: IssueDTO): String = if (i.personal) ctx.getString(R.string.issue_personal_section) else when (i.visibility) {
     "org" -> ctx.getString(R.string.task_vis_org, Names.org(d, i.visibleOrgId)?.name ?: "")
     "private" -> ctx.getString(R.string.task_vis_private)
     else -> ctx.getString(R.string.task_vis_all)
@@ -120,6 +120,8 @@ fun TasksSection(parentId: String, conversationId: String?, onOpen: (String) -> 
     val st by client.state.collectAsStateWithLifecycle()
     val data = st.data ?: return
     val parent = st.issues[parentId] ?: return
+    // Los asuntos personales no admiten tareas derivadas (el servidor responde 400).
+    if (parent.personal) return
     val kids = IssueTasks.childrenOf(st.issues.values, parentId)
     val p = IssueTasks.progress(kids)
     Column(Modifier.fillMaxWidth().padding(top = 6.dp).testTag("tasksSection"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -243,7 +245,9 @@ fun SideFromIssueSheet(issue: IssueDTO, onClose: () -> Unit) {
     val client = LocalClient.current
     val container = LocalContainer.current
     val data = client.state.collectAsStateWithLifecycle().value.data ?: return
-    val others = humansOf(data, issue.conversationId).filter { it.id != data.me.id }
+    // Un asunto personal no tiene sidechat (no hay con quién hablarlo).
+    val convId = issue.conversationId ?: run { LaunchedEffect(issue.id) { onClose() }; return }
+    val others = humansOf(data, convId).filter { it.id != data.me.id }
     var picked by remember { mutableStateOf(listOf<String>()) }
     var question by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -264,7 +268,7 @@ fun SideFromIssueSheet(issue: IssueDTO, onClose: () -> Unit) {
                 busy = true; error = null
                 container.scope.launch {
                     try {
-                        val id = client.startSideFromIssue(issue.conversationId, issue.id, picked, question)
+                        val id = client.startSideFromIssue(convId, issue.id, picked, question)
                         onClose()
                         container.pendingLink.value = com.tiecoms.app.core.DeepLink.Conversation(id)
                     } catch (e: Exception) { error = errorText(ctx, e) } finally { busy = false }

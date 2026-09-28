@@ -72,7 +72,8 @@ fun QuickActions(nav: QuickNav) {
     val data = LocalClient.current.state.collectAsStateWithLifecycle().value.data
     var menu by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<QuickSheet?>(null) }
-    val canCreateIssue = data?.let { QuickSearch.issueDestinations(it).isNotEmpty() } ?: false
+    // Siempre se puede: al menos un asunto personal (1.6.6).
+    val canCreateIssue = data != null
     Box {
         IconButton(onClick = { menu = true }, modifier = Modifier.testTag("quick.create")) { Icon(Icons.Filled.Add, stringResource(R.string.quick_create)) }
         AnchoredMenu(menu, if (menu) listOf(

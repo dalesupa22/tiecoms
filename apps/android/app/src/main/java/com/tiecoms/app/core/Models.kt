@@ -5,7 +5,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
 /** Versión del contrato que habla esta app (packages/contracts CONTRACT_VERSION). */
-const val CONTRACT_VERSION = "2026-09-26"
+const val CONTRACT_VERSION = "2026-09-28"
 const val PLATFORM = "android"
 
 @Serializable
@@ -553,7 +553,11 @@ data class IssueDTO(
     val id: String = "",
     /** null en directos, chats grupales y laterales (SPEC-v4 §E). */
     val workspaceId: String? = null,
-    val conversationId: String = "",
+    /**
+     * null = asunto personal (contrato 2026-09-28): sin conversación, solo lo ve su dueño (visibility private,
+     * ownerId = createdBy = yo). No tiene responsable elegible, tareas derivadas ni sidechat.
+     */
+    val conversationId: String? = null,
     val originMessageId: String? = null,
     val originMessageSeq: Long? = null,
     val title: String = "",
@@ -577,6 +581,8 @@ data class IssueDTO(
     val viewerIds: List<String> = emptyList(),
 ) {
     val closed: Boolean get() = status == "done" || status == "cancelled"
+    /** Asunto personal: sin conversación (🔒 «Personal · solo tú»). */
+    val personal: Boolean get() = conversationId.isNullOrEmpty()
     /** Restringida: la ve solo mi empresa o es privada (🔒). */
     val restricted: Boolean get() = visibility == "org" || visibility == "private"
 }

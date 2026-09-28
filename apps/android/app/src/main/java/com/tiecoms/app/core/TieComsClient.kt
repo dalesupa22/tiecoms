@@ -452,6 +452,8 @@ class TieComsClient(
             is AccountEvent.DndUpdated -> applyDnd(e.dndUntil, localOnly = false)
             is AccountEvent.SleepUpdated -> applySleep(e.sleep)
             is AccountEvent.IssueUpdated -> { putIssues(listOf(e.issue)); recountIssues(e.issue.conversationId) }
+            // Asunto personal (solo mío): no cuenta en ninguna conversación.
+            is AccountEvent.IssuePersonal -> putIssues(listOf(e.issue))
             is AccountEvent.IssueHidden -> { setState { copy(issues = issues - e.issueId) }; if (e.conversationId.isNotEmpty()) recountIssues(e.conversationId) }
             is AccountEvent.ScheduledUpdated -> setState { copy(scheduled = Scheduling.apply(scheduled, e.scheduled)) }
             is AccountEvent.Unknown -> Unit
@@ -748,7 +750,8 @@ class TieComsClient(
         if (list.isEmpty()) return
         setState { copy(issues = issues + list.associateBy { it.id }) }
     }
-    private fun recountIssues(conversationId: String) {
+    private fun recountIssues(conversationId: String?) {
+        if (conversationId.isNullOrEmpty()) return // personal: no cuenta en ninguna conversación
         val n = s.issues.values.count { it.conversationId == conversationId && !it.closed }
         patchMeta(conversationId) { copy(openIssues = n) }
     }
@@ -763,6 +766,15 @@ class TieComsClient(
         }
         val i = req("POST", "/conversations/$conversationId/issues", body, IssueDTO.serializer())
         putIssues(listOf(i)); recountIssues(conversationId); i
+    }
+    /**
+     * Asunto personal (POST /issues, contrato 2026-09-28): sin conversación y solo para mí. El servidor lo impone:
+     * nadie más lo ve (404 por id), no cuenta en los contadores, no manda push y no admite tareas ni reasignarse.
+     */
+    suspend fun createPersonalIssue(title: String, dueDate: String?): IssueDTO = withContext(dispatcher) {
+        val body = buildJsonObject { put("title", JsonPrimitive(title)); put("dueDate", dueDate?.let { JsonPrimitive(it) } ?: JsonNull) }
+        val i = req("POST", "/issues", body, IssueDTO.serializer()).let { if (it.conversationId == "") it.copy(conversationId = null) else it }
+        putIssues(listOf(i)); i
     }
     /** patch: title, status, ownerId, dueDate, waitingOnOrgId (null explícito = borrar). */
     /**

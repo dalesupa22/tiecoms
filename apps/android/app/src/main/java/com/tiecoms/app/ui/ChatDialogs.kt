@@ -62,8 +62,9 @@ import java.time.ZoneId
 fun excerpt(s: String, n: Int = 90) = s.replace(Regex("\\s+"), " ").trim().take(n)
 
 /** Personas humanas de una conversación. */
-fun humansOf(d: BootstrapDTO, conversationId: String): List<PersonDTO> =
-    (d.conversations.firstOrNull { it.id == conversationId }?.memberIds ?: emptyList()).mapNotNull { Names.person(d, it) }.filter { it.kind == "human" }
+/** Personas de la conversación; sin conversación (asunto personal) no hay nadie más. */
+fun humansOf(d: BootstrapDTO, conversationId: String?): List<PersonDTO> =
+    if (conversationId.isNullOrEmpty()) emptyList() else (d.conversations.firstOrNull { it.id == conversationId }?.memberIds ?: emptyList()).mapNotNull { Names.person(d, it) }.filter { it.kind == "human" }
 
 /** Crea un recordatorio y avisa con el texto de la web («Te lo recuerdo …»). */
 fun remind(ctx: Context, conversationId: String, at: Instant, messageId: String?, note: String?) {
@@ -356,8 +357,10 @@ fun NewIssueDialog(conversationId: String?, originMessageId: String?, defaultTit
     val internalFallback = stringResource(R.string.internal_default)
     val convFallback = stringResource(R.string.conversation)
     val destinations = remember(data, conversationId) { if (conversationId == null) com.tiecoms.app.core.QuickSearch.issueDestinations(data) else emptyList() }
-    var conv by rememberSaveable { mutableStateOf(conversationId ?: destinations.firstOrNull()?.id ?: "") }
-    val members = humansOf(data, conv)
+    // Sin conversación fija, «¿Dónde?» ofrece primero «🔒 Personal · solo tú» (1.6.6); por defecto, el grupo más reciente.
+    var conv by rememberSaveable { mutableStateOf(conversationId ?: destinations.firstOrNull()?.id ?: com.tiecoms.app.core.IssueTasks.PERSONAL) }
+    val personal = conv == com.tiecoms.app.core.IssueTasks.PERSONAL
+    val members = if (personal) emptyList() else humansOf(data, conv)
     var title by rememberSaveable { mutableStateOf(defaultTitle) }
     var owner by rememberSaveable { mutableStateOf(data.me.id) }
     var due by rememberSaveable { mutableStateOf<String?>(null) }
@@ -367,15 +370,20 @@ fun NewIssueDialog(conversationId: String?, originMessageId: String?, defaultTit
     FormSheet(stringResource(R.string.issue_new_title), onClose, tag = "issueDialog") {
         OutlinedTextField(title, { title = it.take(200) }, label = { Text(stringResource(R.string.issue_title)) }, modifier = Modifier.fillMaxWidth().testTag("issueTitle"))
         if (conversationId == null) Dropdown(stringResource(R.string.issue_where),
-            destinations.map { c -> c.id to com.tiecoms.app.core.QuickSearch.issueLabel(data, c) { Names.conversationTitle(it, data, internalFallback, convFallback) } },
+            listOf(com.tiecoms.app.core.IssueTasks.PERSONAL to stringResource(R.string.issue_personal_option)) +
+                destinations.map { c -> c.id to com.tiecoms.app.core.QuickSearch.issueLabel(data, c) { Names.conversationTitle(it, data, internalFallback, convFallback) } },
             conv, { conv = it; owner = data.me.id }, modifier = Modifier.fillMaxWidth(), tag = "issue.where")
-        Dropdown(stringResource(R.string.issue_owner), members.map { p -> p.id to "${p.name}${if (p.id == data.me.id) " $you" else ""} · ${Names.org(data, p.orgId)?.name ?: guest}" }, owner, { owner = it })
+        if (personal) Text(stringResource(R.string.issue_personal_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("issuePersonalNote"))
+        else Dropdown(stringResource(R.string.issue_owner), members.map { p -> p.id to "${p.name}${if (p.id == data.me.id) " $you" else ""} · ${Names.org(data, p.orgId)?.name ?: guest}" }, owner, { owner = it })
         DateField(stringResource(R.string.issue_due), due?.let { LocalDate.parse(it) }, { due = it?.toString() }, allowClear = true, modifier = Modifier.fillMaxWidth())
         ErrorText(error)
         DialogButtons(onClose, stringResource(R.string.issue_create), enabled = !busy && title.trim().length >= 2 && conv.isNotEmpty(), confirmTag = "issueCreate") {
             busy = true; error = null
             scope.launch {
-                try { val i = client.createIssue(conv, title.trim(), owner, due, originMessageId); onClose(); onCreated(i.id) }
+                try {
+                    val i = if (personal) client.createPersonalIssue(title.trim(), due) else client.createIssue(conv, title.trim(), owner, due, originMessageId)
+                    onClose(); onCreated(i.id)
+                }
                 catch (e: Exception) { error = errorText(ctx, e) } finally { busy = false }
             }
         }

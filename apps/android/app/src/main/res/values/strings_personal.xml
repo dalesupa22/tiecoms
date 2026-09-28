@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.6: personal subjects, only their owner sees them (docs/TANDA-LECTURA-REUNIONES.md §3). -->
+<resources>
+    <string name="issue_personal_option">🔒 Personal · only you</string>
+    <string name="issue_personal_section">Personal · only you</string>
+    <string name="issue_personal_note">Only you can see it. It is not in any chat and nobody else sees it.</string>
+    <string name="issue_personal_short">Personal</string>
+</resources>

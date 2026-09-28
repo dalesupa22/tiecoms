@@ -1191,3 +1191,23 @@ button.topic-tag:hover { filter: brightness(.96); }
 .issue-topic { margin-right: 6px; vertical-align: 1px; }
 .topic-x { border: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; line-height: 1; padding: 0 0 0 4px; cursor: pointer; opacity: .6; }
 .topic-x:hover { opacity: 1; }
+
+/* Tarjeta de tarea en el chat. */
+.msg-card-row { padding: 6px 16px 6px 60px; }
+.task-card { max-width: 520px; padding: 12px 14px; border-left: 4px solid #d9731a; display: flex; flex-direction: column; gap: 8px; }
+.task-card.is-done { border-left-color: var(--ok); opacity: .8; }
+.task-card.is-done .task-card-title { text-decoration: line-through; color: var(--muted); }
+.task-card.is-overdue { border-left-color: var(--danger); }
+.task-card.is-loading { min-height: 64px; color: var(--faint); }
+.task-card-top { display: flex; align-items: center; gap: 8px; }
+.task-card-kind { font-size: 11.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; flex: 1; }
+.task-card-main { display: flex; align-items: flex-start; gap: 10px; }
+.task-card-title { border: 0; background: none; padding: 0; font: inherit; font-size: 15.5px; font-weight: 700; color: var(--ink); text-align: left; cursor: pointer; line-height: 1.3; }
+.task-card-title:hover { text-decoration: underline; }
+.task-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-2); }
+.task-card-owner { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.task-card-comments { border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.task-card-comment b { font-weight: 700; }
+.task-card-reply { display: flex; gap: 6px; }
+.task-card-reply .input { flex: 1; min-width: 0; height: 32px; font-size: 13px; }
+@media (max-width: 520px) { .msg-card-row { padding: 6px 10px; } }

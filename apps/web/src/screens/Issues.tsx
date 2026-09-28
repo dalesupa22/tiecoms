@@ -732,3 +732,71 @@ export function SideIssueStrip({ sideId, issueId, onOpen }: { sideId: string; is
     </div>
   );
 }
+
+/**
+ * Tarjeta de la tarea dentro del chat (reemplaza el aviso «Abrió la tarea…»): se ve completa, se marca hecha,
+ * muestra los últimos comentarios y se comenta ahí mismo sin abrirla.
+ */
+export function IssueChatCard({ issueId, creatorId, canPost, onOpen }: { issueId: string; creatorId: string; canPost: boolean; onOpen: (id: string) => void }) {
+  const d = useClient((s) => s.data)!;
+  const i = useClient((s) => s.issues[issueId]);
+  const [comments, setComments] = useState<IssueEventDTO[]>([]);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [missing, setMissing] = useState(false);
+  // Detalle solo si hace falta: la tarea no está en memoria o tiene comentarios que mostrar.
+  useEffect(() => {
+    if (i && !i.commentCount) { setComments([]); return; }
+    let live = true;
+    client.issueDetail(issueId)
+      .then((r) => { if (live) setComments(r.events.filter((e) => e.kind === 'comment').slice(-2)); })
+      .catch(() => { if (live) setMissing(true); });
+    return () => { live = false; };
+  }, [issueId, i?.commentCount ?? -1]);
+  if (!i) return missing ? null : <div className="card task-card is-loading" aria-busy>…</div>;
+  const owner = personById(d, i.ownerId);
+  const creator = personById(d, creatorId);
+  const f = issueFlags(i);
+  const done = isClosed(i);
+  const send = async () => {
+    const body = text.trim();
+    if (!body || busy) return;
+    setBusy(true);
+    try { await client.commentIssue(i.id, body); setText(''); } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className={`card task-card ${done ? 'is-done' : ''} ${f.overdue ? 'is-overdue' : ''}`} {...menuProps(() => issueQuickMenu(i))}>
+      <div className="task-card-top">
+        <span className="task-card-kind">☑ {t('task.card', { name: creator?.name.split(' ')[0] ?? '' })}</span>
+        <IssueTopicTag issueId={i.id} conversationId={i.conversationId} topicId={i.topicId} canEdit={canPost} />
+      </div>
+      <div className="task-card-main">
+        <IssueCheck i={i} size={22} />
+        <button className="task-card-title" onClick={() => onOpen(i.id)}>{i.title}</button>
+      </div>
+      <div className="task-card-meta">
+        <span className="task-card-owner"><Avatar person={owner} org={orgById(d, owner?.orgId)} size={20} />{owner?.name ?? t('issue.noOwner')}</span>
+        <span className={f.overdue ? 'error' : ''}>📅 {f.overdue ? t('issue.overdue') : f.dueToday ? t('issue.today') : dueLabel(i)}</span>
+        <StatusPill status={i.status} />
+        {i.commentCount > 0 && <span>💬 {i.commentCount}</span>}
+      </div>
+      {comments.length > 0 && (
+        <div className="task-card-comments">
+          {comments.map((c) => (
+            <div key={c.id} className="task-card-comment">
+              <b>{c.actorId === d.me.id ? t('common.youShort') : personById(d, c.actorId)?.name.split(' ')[0]}</b> {String((c.payload as any)?.body ?? '')}
+            </div>
+          ))}
+          {i.commentCount > comments.length && <button className="link-btn small" onClick={() => onOpen(i.id)}>{t('task.cardAll', { n: i.commentCount })}</button>}
+        </div>
+      )}
+      {canPost && !done && (
+        <div className="task-card-reply">
+          <input className="input" value={text} placeholder={t('task.cardComment')} onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} />
+          <button className="btn small" disabled={!text.trim() || busy} onClick={() => void send()}>{t('issue.comment')}</button>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -23,7 +23,7 @@ import { DerivedPendingStrip } from './Pending.tsx';
 import { MeetingDialog } from './Meetings.tsx';
 import { ScheduledStrip, openScheduleMenu, scheduleMenu, whenLabel } from './Scheduled.tsx';
 import { SideIssueStrip, TasksDialog } from './Issues.tsx';
-import { ConversationIssues, IssueDrawer, NewIssueDialog, isClosed } from './Issues.tsx';
+import { ConversationIssues, IssueChatCard, IssueDrawer, NewIssueDialog, isClosed } from './Issues.tsx';
 import { DeriveDialog, LineageBar, MergedCard } from './Lineage.tsx';
 import { ChatBar, ThreadChip, threadsOf } from './ChatBar.tsx';
 import { AddMembersDialog } from './Dialogs.tsx';
@@ -171,12 +171,16 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
 
   const pending = useMemo(() => pendingAll.filter((p) => p.conversationId === id), [pendingAll, id]);
   const byId = useMemo(() => new Map((local?.messages ?? []).map((m) => [m.id, m])), [local?.messages]);
+  const issueTopicOf = (m: MessageDTO) => {
+    try { const p = JSON.parse(m.body); return p?.k === 'issue.created' ? allIssues[p.issueId]?.topicId ?? null : null; } catch { return null; }
+  };
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
     let lastDay = '';
     let prev: MessageDTO | null = null;
     for (const m of local?.messages ?? []) {
-      if (activeFilter && m.topicId !== activeFilter) continue;
+      // Con un tema elegido se ven sus mensajes y las tarjetas de sus tareas.
+      if (activeFilter && m.topicId !== activeFilter && !(m.kind === 'system' && issueTopicOf(m) === activeFilter)) continue;
       const day = new Date(m.createdAt).toDateString();
       if (day !== lastDay) { out.push({ kind: 'day', key: `d${day}`, label: dayLabel(m.createdAt) }); lastDay = day; prev = null; }
       // Bajo la línea «N mensajes nuevos» el primer mensaje vuelve a llevar autor y hora.
@@ -193,7 +197,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       if (at >= 0) out.splice(at, 0, { kind: 'new', key: 'new-line' });
     }
     return groupLinkRuns(out, expandedGroups, highlight, baseRead);
-  }, [local?.messages, pending, expandedGroups, highlight, newLine, activeFilter]);
+  }, [local?.messages, pending, expandedGroups, highlight, newLine, activeFilter, activeFilter ? allIssues : null]);
   const topicCounts = useMemo(() => {
     const n: Record<string, number> = {};
     for (const m of local?.messages ?? []) if (m.topicId && !m.deletedAt) n[m.topicId] = (n[m.topicId] ?? 0) + 1;
@@ -546,7 +550,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
             if (r.kind === 'links') return <LinkGroup key={r.key} d={d} msgs={r.msgs} onExpand={() => setExpandedGroups((g) => new Set(g).add(r.key))} />;
             if (r.kind === 'pending') return <PendingRow key={r.key} p={r.p} />;
             const m = r.m;
-            if (m.kind === 'system') return <SystemRow key={r.key} m={m} onIssue={setOpenIssue} />;
+            if (m.kind === 'system') return <SystemRow key={r.key} m={m} onIssue={setOpenIssue} canPost={conv.canPost} />;
             const author = personById(d, m.authorId);
             const org = orgById(d, author?.orgId);
             const quoted = m.replyTo ? byId.get(m.replyTo) : null;
@@ -835,10 +839,14 @@ function PinsDialog({ conv, onJump, onClose }: { conv: ConversationDTO; onJump: 
 }
 
 /** Mensajes de sistema: algunos enlazan a un asunto, una reunión o la conversación derivada (si la puedes ver). */
-function SystemRow({ m, onIssue }: { m: MessageDTO; onIssue: (id: string) => void }) {
+function SystemRow({ m, onIssue, canPost }: { m: MessageDTO; onIssue: (id: string) => void; canPost: boolean }) {
   const d = useClient((s) => s.data)!;
   let p: any = null;
   try { p = m.body.startsWith('{') ? JSON.parse(m.body) : null; } catch {}
+  // Una tarea nueva se ve como tarjeta completa, con sus comentarios y para comentar ahí mismo.
+  if (p?.k === 'issue.created' && p.issueId && !p.parentIssueId) return (
+    <div id={`msg-${m.conversationId}-${m.seq}`} className="msg-card-row"><IssueChatCard issueId={p.issueId} creatorId={m.authorId} canPost={canPost} onOpen={onIssue} /></div>
+  );
   const child = p?.k === 'derived.from' ? d.conversations.find((c) => c.id === p.childId) : null;
   // Los hilos no ensucian el chat: el aviso «se abrió un hilo» lo reemplaza el chip bajo su mensaje.
   if (p?.k === 'derived.from') return null;

@@ -34,3 +34,13 @@ Los temas no son hilos ni tareas:
 `SendMessageInput.topicId` manda el mensaje directamente con ese tema. Cualquier cambio de temas emite el evento `topics.changed`, que lleva la lista completa. Etiquetar un mensaje emite `message.updated`.
 
 Los cambios de base de datos están en la migración `032_conversation_topics.sql`. Crea la tabla `conversation_topics`, agrega `messages.topic_id` y `messages.topic_by`, y agrega `issues.topic_id`. Una tarea lleva el tema del mensaje del que sale, o el filtro activo al crearla; en la lista, la ✕ se lo quita y el menú de la tarea lo cambia (`PATCH /issues/:id { topicId }`).
+
+## Tarjeta de tarea en el chat
+
+Cuando alguien crea una tarea (el mensaje de sistema `issue.created`, sin `parentIssueId`), el chat ya no muestra la línea «Creó la tarea…». En su lugar muestra una **tarjeta completa**, como un evento:
+- Encabezado «☑ TAREA DE <nombre>», con la etiqueta del tema a la derecha y la ✕ para quitarlo.
+- Casilla para marcar hecha, título (al tocarlo se abre la tarea), responsable con avatar, fecha (en rojo si está vencida), estado y 💬 con el número de comentarios.
+- Los 2 últimos comentarios y «Ver los N comentarios».
+- Un campo «Comenta esta tarea…» para comentar desde el chat (`POST /issues/:id/comments`). No aparece si la tarea está cerrada.
+- El borde izquierdo es naranja, rojo si está vencida y verde si está hecha. Clic derecho o pulsación larga abre el menú rápido de la tarea.
+- Al filtrar por un tema se ven también las tarjetas de las tareas de ese tema.

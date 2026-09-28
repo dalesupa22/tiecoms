@@ -2962,5 +2962,45 @@
  "meet.settingsHint": [
   "Conecta tu cuenta para crear reuniones reales de Meet, Teams o Zoom desde un chat. Solo se pide permiso para crear eventos o reuniones; nunca se lee tu correo.",
   "Connect your account to create real Meet, Teams or Zoom meetings from a chat. Only permission to create events or meetings is requested; your email is never read."
+ ],
+ "cal.view": [
+  "Vista",
+  "View"
+ ],
+ "cal.view.day": [
+  "Día",
+  "Day"
+ ],
+ "cal.view.week": [
+  "Semana",
+  "Week"
+ ],
+ "cal.view.month": [
+  "Mes",
+  "Month"
+ ],
+ "cal.continues": [
+  "Viene de antes",
+  "Continues from earlier"
+ ],
+ "cal.newAt": [
+  "Nueva reunión a las {time}",
+  "New meeting at {time}"
+ ],
+ "cal.newOn": [
+  "Nueva reunión el {date}",
+  "New meeting on {date}"
+ ],
+ "cal.more": [
+  "+{n} más",
+  "+{n} more"
+ ],
+ "cal.nEvents": [
+  "{n} reuniones",
+  "{n} meetings"
+ ],
+ "cal.openDay": [
+  "Abre la vista Día",
+  "Opens the Day view"
  ]
 }

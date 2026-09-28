@@ -31,81 +31,287 @@ enum AgendaTime {
     }
 }
 
+/// Calendario Día / Semana / Mes (1.6.6): Semana por defecto y recordada; ‹ Hoy ›; en Mes, cuadrícula de 6×7 que
+/// empieza en lunes con «+N más» (tocar un día abre la vista Día); se crea desde cada vista.
 struct AgendaScreen: View {
     @Environment(AppStore.self) private var store
-    @State private var week = AgendaTime.startOfWeek(Date())
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @State private var mode = CalendarMode.load()
+    @State private var anchor = Date()
     @State private var error: String?
+    @State private var creating: CreateAt?
+
+    struct CreateAt: Identifiable { var start: Date; var id: Double { start.timeIntervalSince1970 } }
+
+    private var cal: Calendar { CalendarGrid.calendar() }
 
     var body: some View {
-        let end = Calendar.current.date(byAdding: .day, value: 7, to: week)!
+        let range = CalendarGrid.range(mode, anchor, cal)
         Group {
             if let d = store.data {
                 let visible = Set(d.conversations.map(\.id))
-                let list = store.events.values.filter { visible.contains($0.conversationId) && $0.start < end && $0.end > week }.sorted { $0.startsAt < $1.startsAt }
-                let days = (0..<7).map { Calendar.current.date(byAdding: .day, value: $0, to: week)! }
-                List {
-                    Section {
-                        HStack {
-                            Button { shift(-1) } label: { Image(systemName: "chevron.left") }.accessibilityLabel(L("cal.prev"))
-                            Spacer()
-                            Text(L("cal.week", ["date": week.formatted(Date.FormatStyle().day().month(.wide).year().locale(L10n.locale))]))
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Button { shift(1) } label: { Image(systemName: "chevron.right") }.accessibilityLabel(L("cal.next"))
-                        }
-                        .buttonStyle(.borderless)
-                        Button(L("cal.today")) { week = AgendaTime.startOfWeek(Date()) }.font(.footnote)
-                        if let error { Text(error).foregroundStyle(.red).font(.footnote) }
-                    }
-                    if list.isEmpty { Text(L("cal.empty")).foregroundStyle(Theme.textSecondary) }
-                    ForEach(days, id: \.self) { day in
-                        let items = list.filter { Calendar.current.isDate($0.start, inSameDayAs: day) }
-                        if !items.isEmpty {
-                            Section(AgendaTime.day(day)) {
-                                ForEach(items) { e in NavigationLink(value: Route.event(e.id)) { EventRow(event: e) } }
-                            }
-                        }
+                let list = store.events.values.filter { visible.contains($0.conversationId) && $0.start < range.end && $0.end > range.start && !$0.isCancelled }
+                    .sorted { $0.startsAt < $1.startsAt }
+                VStack(spacing: 0) {
+                    header
+                    switch mode {
+                    case .day: dayView(list)
+                    case .week: weekView(list)
+                    case .month: monthView(list)
                     }
                 }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
-                .refreshable { await load(end) }
             }
         }
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle(L("nav.agenda"))
+        .navigationBarTitleDisplayMode(.inline)
         .quickActions()
-        .task(id: week) { await load(end) }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { creating = .init(start: CalendarGrid.slot(mode == .day ? anchor : max(anchor, Date()), hour: nil, cal)) } label: {
+                    Image(systemName: "calendar.badge.plus")
+                }
+                .accessibilityLabel(L("cal.newTitle"))
+                .accessibilityIdentifier("cal.new")
+            }
+        }
+        .sheet(item: $creating) { c in EventEditorSheet(conversationId: nil, origin: nil, event: nil, initialStart: c.start) }
+        .onChange(of: mode) { _, m in CalendarMode.save(m) }
+        .task(id: "\(mode.rawValue)-\(range.start.timeIntervalSince1970)") { await load(range) }
     }
 
-    private func shift(_ n: Int) { week = Calendar.current.date(byAdding: .day, value: 7 * n, to: week)! }
+    // MARK: Cabecera: Día / Semana / Mes y ‹ Hoy ›
 
-    private func load(_ end: Date) async {
-        do { try await store.loadEvents(from: week, to: end); error = nil } catch { self.error = L10n.errorText(error) }
+    private var header: some View {
+        VStack(spacing: 8) {
+            Picker(L("cal.view"), selection: $mode) {
+                ForEach(CalendarMode.allCases) { m in Text(L(m.labelKey)).tag(m) }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("cal.mode")
+            HStack(spacing: 8) {
+                Button { anchor = CalendarGrid.shift(mode, anchor, by: -1, cal) } label: { Image(systemName: "chevron.left").frame(width: 44, height: 44) }
+                    .accessibilityLabel(L("cal.prev")).accessibilityIdentifier("cal.prev")
+                Text(title).font(.headline).lineLimit(2).minimumScaleFactor(0.8).multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("cal.title")
+                Button { anchor = CalendarGrid.shift(mode, anchor, by: 1, cal) } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }
+                    .accessibilityLabel(L("cal.next")).accessibilityIdentifier("cal.next")
+                Button(L("cal.today")) { anchor = Date() }
+                    .font(.subheadline.weight(.semibold)).lineLimit(1).fixedSize()
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("cal.today")
+            }
+            if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+        }
+        .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 6)
+        // Con «Máximo» la cabecera crece, pero sin partir palabras.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+    }
+
+    private var title: String {
+        let loc = L10n.locale
+        switch mode {
+        case .day: return anchor.formatted(Date.FormatStyle().weekday(.wide).day().month(.wide).locale(loc)).calTitleCase
+        case .week: return L("cal.week", ["date": CalendarGrid.startOfWeek(anchor, cal).formatted(Date.FormatStyle().day().month(.wide).year().locale(loc))])
+        case .month: return anchor.formatted(Date.FormatStyle().month(.wide).year().locale(loc)).calTitleCase
+        }
+    }
+
+    // MARK: Día: una columna de horas
+
+    private func dayView(_ list: [CalendarEventDTO]) -> some View {
+        let day = cal.startOfDay(for: anchor)
+        let items = CalendarGrid.events(list, on: day, cal)
+        let earlier = items.filter { $0.start < day }
+        return ScrollViewReader { proxy in
+            List {
+                if !earlier.isEmpty {
+                    Section(L("cal.continues")) { ForEach(earlier) { e in eventLink(e) } }
+                }
+                Section {
+                    ForEach(0..<24, id: \.self) { h in
+                        let inHour = items.filter { $0.start >= day && cal.component(.hour, from: $0.start) == h }
+                        HStack(alignment: .top, spacing: 10) {
+                            Text(AgendaTime.time(CalendarGrid.slot(day, hour: h, cal)))
+                                .font(.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary)
+                                .frame(minWidth: 56, alignment: .trailing)
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(inHour) { e in eventLink(e) }
+                                // El hueco: tocarlo crea una reunión a esa hora.
+                                Button { creating = .init(start: CalendarGrid.slot(day, hour: h, cal)) } label: {
+                                    Color.clear.frame(maxWidth: .infinity, minHeight: inHour.isEmpty ? 30 : 8).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(L("cal.newAt", ["time": AgendaTime.time(CalendarGrid.slot(day, hour: h, cal))]))
+                                .accessibilityIdentifier("cal.slot.\(h)")
+                            }
+                        }
+                        .id(h)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 12))
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .refreshable { await load(CalendarGrid.range(mode, anchor, cal)) }
+            .onAppear { proxy.scrollTo(items.first.map { cal.component(.hour, from: max($0.start, day)) } ?? 8, anchor: .top) }
+            .onChange(of: anchor) { _, _ in proxy.scrollTo(8, anchor: .top) }
+        }
+    }
+
+    // MARK: Semana: los 7 días, con «+» en cada uno
+
+    private func weekView(_ list: [CalendarEventDTO]) -> some View {
+        let start = CalendarGrid.startOfWeek(anchor, cal)
+        let days = (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: start) }
+        return List {
+            if list.isEmpty { Text(L("cal.empty")).foregroundStyle(Theme.textSecondary) }
+            ForEach(days, id: \.self) { day in
+                let items = CalendarGrid.events(list, on: day, cal)
+                Section {
+                    ForEach(items) { e in eventLink(e) }
+                } header: {
+                    HStack {
+                        Text(AgendaTime.day(day)).font(.subheadline.weight(cal.isDateInToday(day) ? .bold : .semibold))
+                            .foregroundStyle(cal.isDateInToday(day) ? Theme.accentText : Theme.textSecondary)
+                        Spacer()
+                        Button { creating = .init(start: CalendarGrid.slot(day, hour: nil, cal)) } label: { Image(systemName: "plus.circle") }
+                            .accessibilityLabel(L("cal.newOn", ["date": AgendaTime.day(day)]))
+                            .accessibilityIdentifier("cal.weekAdd.\(cal.component(.weekday, from: day))")
+                    }
+                    .textCase(nil)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(.compact)
+        .scrollContentBackground(.hidden)
+        .refreshable { await load(CalendarGrid.range(mode, anchor, cal)) }
+    }
+
+    // MARK: Mes: 6×7 desde el lunes, títulos o puntos y «+N más»
+
+    private func monthView(_ list: [CalendarEventDTO]) -> some View {
+        let grid = CalendarGrid.monthGrid(anchor, cal)
+        let month = cal.component(.month, from: anchor)
+        let cols = Array(repeating: GridItem(.flexible(), spacing: 2), count: 7)
+        // Con texto de accesibilidad solo caben puntos; con texto normal, hasta 2 títulos.
+        let big = typeSize.isAccessibilitySize
+        let symbols = Self.weekdaySymbols(cal)
+        return ScrollView {
+            LazyVGrid(columns: cols, spacing: 2) {
+                ForEach(symbols, id: \.self) { s in
+                    Text(s).font(.caption2.weight(.bold)).foregroundStyle(Theme.textSecondary).lineLimit(1).minimumScaleFactor(0.6)
+                        .frame(maxWidth: .infinity).accessibilityHidden(true)
+                }
+                ForEach(grid, id: \.self) { day in
+                    let items = CalendarGrid.events(list, on: day, cal)
+                    let c = CalendarGrid.cell(items, max: big ? 0 : 2)
+                    let inMonth = cal.component(.month, from: day) == month
+                    let today = cal.isDateInToday(day)
+                    Button {
+                        anchor = day
+                        mode = .day
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(cal.component(.day, from: day))")
+                                .font(.caption.weight(today ? .heavy : .semibold)).monospacedDigit()
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                                .foregroundStyle(today ? Theme.onPrimary : inMonth ? Theme.textPrimary : Theme.textSecondary.opacity(0.6))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Capsule().fill(today ? Theme.primaryFill : .clear))
+                            ForEach(c.shown) { e in
+                                Text((CalendarGrid.isVideoLink(e.location) ? "📹" : "") + e.title)
+                                    .font(.caption2).lineLimit(1).truncationMode(.tail)
+                                    .foregroundStyle(Theme.textPrimary)
+                                    .padding(.horizontal, 3)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(RoundedRectangle(cornerRadius: 4).fill(Theme.orange.opacity(0.14)))
+                            }
+                            if big && !items.isEmpty {
+                                HStack(spacing: 2) { ForEach(0..<min(items.count, 3), id: \.self) { _ in Circle().fill(Theme.orange).frame(width: 6, height: 6) } }
+                            }
+                            if c.more > 0 && !big {
+                                Text(L("cal.more", ["n": c.more])).font(.caption2.weight(.semibold)).foregroundStyle(Theme.accentText).lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(3)
+                        .frame(maxWidth: .infinity, minHeight: big ? 64 : 84, alignment: .topLeading)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(inMonth ? Theme.surface : Theme.surface.opacity(0.4)))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel([AgendaTime.day(day), items.isEmpty ? nil : L("cal.nEvents", ["n": items.count]),
+                                         items.first.map(\.title)].compactMap { $0 }.joined(separator: ", "))
+                    .accessibilityHint(L("cal.openDay"))
+                    .accessibilityIdentifier("cal.day.\(IssueDates.iso(day, timeZone: cal.timeZone))")
+                }
+            }
+            .padding(.horizontal, 8)
+            // Siete columnas en un teléfono: el texto de la cuadrícula tiene tope (VoiceOver lee la celda completa).
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+            .accessibilityIdentifier("cal.month")
+        }
+        .refreshable { await load(CalendarGrid.range(mode, anchor, cal)) }
+    }
+
+    /// L M X J V S D (o M T W T F S S), empezando en lunes.
+    static func weekdaySymbols(_ cal: Calendar) -> [String] {
+        let f = DateFormatter(); f.locale = cal.locale; f.calendar = cal
+        let s = f.veryShortStandaloneWeekdaySymbols ?? ["D", "L", "M", "X", "J", "V", "S"]
+        let lang = cal.locale?.language.languageCode?.identifier ?? "es"
+        // En español, miércoles es «X» para no repetir la «M» del martes.
+        let fixed = lang == "es" ? ["D", "L", "M", "X", "J", "V", "S"] : s
+        return Array(fixed[1...]) + [fixed[0]]
+    }
+
+    private func eventLink(_ e: CalendarEventDTO) -> some View {
+        NavigationLink(value: Route.event(e.id)) { EventRow(event: e) }
+    }
+
+    private func load(_ r: DateInterval) async {
+        do { try await store.loadEvents(from: r.start, to: r.end); error = nil } catch { self.error = L10n.errorText(error) }
     }
 }
 
 struct EventRow: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.dynamicTypeSize) private var typeSize
     let event: CalendarEventDTO
     var showConv = true
     var body: some View {
         let d = store.data
         let conv = store.meta(event.conversationId)
         let mine = event.invitees.first { $0.userId == d?.me.id }
-        HStack(spacing: 10) {
-            Text(AgendaTime.time(event.start))
-                .font(.caption.weight(.bold)).monospacedDigit()
-                .padding(.horizontal, 8).padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Theme.orange.opacity(0.15)))
-                .foregroundStyle(Theme.accentText)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(event.title).font(.body.weight(.semibold)).strikethrough(event.isCancelled).lineLimit(1)
-                Text([showConv ? conv.flatMap { c in d.map { Naming.title($0, c) } } : nil, AgendaTime.day(event.start), event.isCancelled ? L("cal.cancelled") : nil].compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
+        let time = Text(AgendaTime.time(event.start))
+            .font(.caption.weight(.bold)).monospacedDigit()
+            .lineLimit(1)
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.orange.opacity(0.15)))
+            .foregroundStyle(Theme.accentText)
+            .fixedSize()
+        let info = VStack(alignment: .leading, spacing: 2) {
+            Text((CalendarGrid.isVideoLink(event.location) ? "📹 " : "") + event.title).font(.body.weight(.semibold)).strikethrough(event.isCancelled)
+                .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
+            Text([showConv ? conv.flatMap { c in d.map { Naming.title($0, c) } } : nil, AgendaTime.day(event.start), event.isCancelled ? L("cal.cancelled") : nil].compactMap { $0 }.joined(separator: " · "))
+                .font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+            if typeSize.isAccessibilitySize, let mine { Text(L("cal.rsvp.\(mine.rsvp.rawValue)")).font(.caption2).foregroundStyle(Theme.textSecondary) }
+        }
+        Group {
+            // Con texto grande: la hora arriba y el título debajo, a todo el ancho (sin cortar palabras).
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) { time; info }
+            } else {
+                HStack(spacing: 10) {
+                    time
+                    info
+                    Spacer()
+                    if let mine { Text(L("cal.rsvp.\(mine.rsvp.rawValue)")).font(.caption2).foregroundStyle(Theme.textSecondary) }
+                }
             }
-            Spacer()
-            if let mine { Text(L("cal.rsvp.\(mine.rsvp.rawValue)")).font(.caption2).foregroundStyle(Theme.textSecondary) }
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("event.row.\(event.id)")
@@ -218,6 +424,8 @@ struct EventEditorSheet: View {
     let conversationId: String?
     let origin: MessageDTO?
     let event: CalendarEventDTO?
+    /// Desde el calendario: la hora del hueco o del día tocado.
+    var initialStart: Date? = nil
 
     @State private var conv = ""
     @State private var title = ""
@@ -277,7 +485,8 @@ struct EventEditorSheet: View {
         } else {
             title = origin.map { excerpt($0.body, 80) } ?? ""
             let tomorrow10 = Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: Date().addingTimeInterval(86400))!
-            date = tomorrow10; start = tomorrow10; endTime = tomorrow10.addingTimeInterval(3600)
+            let s0 = initialStart ?? tomorrow10
+            date = s0; start = s0; endTime = s0.addingTimeInterval(3600)
         }
     }
 
@@ -303,4 +512,9 @@ struct EventEditorSheet: View {
             busy = false
         }
     }
+}
+
+private extension String {
+    /// «lunes, 28 de septiembre» → «Lunes, 28 de septiembre».
+    var calTitleCase: String { prefix(1).uppercased() + dropFirst() }
 }

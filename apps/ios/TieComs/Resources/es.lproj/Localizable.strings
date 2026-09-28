@@ -218,6 +218,7 @@
 "cal.channelSoon" = "Avisos de reunión";
 "cal.channelSoonDesc" = "Aviso 10 minutos antes de tus reuniones";
 "cal.chatsSection" = "Chats";
+"cal.continues" = "Viene de antes";
 "cal.conversation" = "Grupo";
 "cal.create" = "Agendar";
 "cal.date" = "Fecha";
@@ -233,11 +234,16 @@
 "cal.join" = "Unirse";
 "cal.location" = "Lugar o enlace de la reunión";
 "cal.locationPh" = "Sala, dirección o enlace de Meet, Teams o Zoom";
+"cal.more" = "+{n} más";
+"cal.nEvents" = "{n} reuniones";
 "cal.new" = "＋ Reunión";
+"cal.newAt" = "Nueva reunión a las {time}";
+"cal.newOn" = "Nueva reunión el {date}";
 "cal.newTitle" = "Nueva reunión";
 "cal.next" = "Semana siguiente";
 "cal.noUpcoming" = "Sin reuniones próximas en este grupo.";
 "cal.openChat" = "Abrir conversación";
+"cal.openDay" = "Abre la vista Día";
 "cal.organizer" = "Organiza {name}";
 "cal.prev" = "Semana anterior";
 "cal.rsvp.maybe" = "Tal vez";
@@ -254,6 +260,10 @@
 "cal.todayList" = "Hoy en tu agenda";
 "cal.tz" = "Zona horaria";
 "cal.upcoming" = "Próximas reuniones";
+"cal.view" = "Vista";
+"cal.view.day" = "Día";
+"cal.view.month" = "Mes";
+"cal.view.week" = "Semana";
 "cal.week" = "Semana del {date}";
 "cal.yourTz" = "Tu hora";
 "chat.aConversation" = "Conversación";

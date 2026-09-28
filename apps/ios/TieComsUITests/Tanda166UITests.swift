@@ -296,4 +296,74 @@ final class Tanda166UITests: XCTestCase {
         XCTAssertTrue(app.buttons["meet.settings.connect.microsoft"].exists, "Conectar Teams")
         shot("4-07-ajustes-reuniones-mock")
     }
+
+    // MARK: 5. Calendario Día / Semana / Mes
+
+    func test5CalendarDayWeekMonthAndLargeText() throws {
+        let f = try fixture()
+        let app = login(f)
+        tab(app, "Calendario", f)
+        let mode = app.segmentedControls["cal.mode"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 8))
+        XCTAssertTrue(mode.buttons["Semana"].isSelected, "Semana por defecto")
+        XCTAssertTrue(app.buttons["cal.today"].exists && app.buttons["cal.prev"].exists && app.buttons["cal.next"].exists, "‹ Hoy ›")
+        let meet = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "📹 Llamada con Estudio Norte")).firstMatch
+        XCTAssertTrue(meet.waitForExistence(timeout: 8), "la reunión con enlace de Meet lleva 📹")
+        shot("5-01-calendario-semana")
+
+        mode.buttons["Mes"].tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "cal.day.")).count == 42, "cuadrícula 6×7")
+        let more = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "+")).firstMatch
+        _ = more
+        shot("5-02-calendario-mes")
+        app.buttons["cal.next"].tap(); sleep(1)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "cal.day.")).count, 42)
+        shot("5-03-calendario-mes-siguiente")
+        app.buttons["cal.today"].tap(); sleep(1)
+
+        // Tocar un día abre la vista Día (el de hoy: tiene dos reuniones).
+        let today = Date()
+        let f2 = DateFormatter(); f2.dateFormat = "yyyy-MM-dd"; f2.locale = Locale(identifier: "en_US_POSIX")
+        app.buttons["cal.day.\(f2.string(from: today))"].tap()
+        XCTAssertTrue(mode.buttons["Día"].waitForExistence(timeout: 3))
+        XCTAssertTrue(mode.buttons["Día"].isSelected)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Revisión semanal")).firstMatch.waitForExistence(timeout: 5))
+        shot("5-04-calendario-dia")
+        // Crear desde un hueco: la hoja trae esa hora.
+        let slot = app.buttons["cal.slot.17"]
+        for _ in 0..<4 where !slot.isHittable { app.swipeUp() }
+        slot.tap()
+        XCTAssertTrue(app.textFields["event.titleField"].waitForExistence(timeout: 5), "crear desde el hueco")
+        shot("5-05-calendario-crear-desde-hueco")
+        app.buttons["Cancelar"].firstMatch.tap()
+
+        // Recordado: al volver a abrir, sigue en la última vista (Día).
+        app.terminate()
+        let again = XCUIApplication()
+        again.launchArguments = ["-TCApiURL", f.apiUrl, "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES", "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
+        again.launch()
+        tab(again, "Calendario", f)
+        XCTAssertTrue(again.segmentedControls["cal.mode"].buttons["Día"].waitForExistence(timeout: 8))
+        XCTAssertTrue(again.segmentedControls["cal.mode"].buttons["Día"].isSelected, "la vista se recuerda en el dispositivo")
+        again.segmentedControls["cal.mode"].buttons["Semana"].tap()
+        again.terminate()
+    }
+
+    /// Texto «Máximo» (tamaño de accesibilidad): el mes muestra puntos, los títulos se cortan sin desbordar.
+    func test6CalendarMonthWithLargestText() throws {
+        let f = try fixture()
+        let app = login(f, extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        tab(app, "Calendario", f)
+        let mode = app.segmentedControls["cal.mode"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 8))
+        shot("5-06-calendario-semana-texto-maximo")
+        mode.buttons["Mes"].tap()
+        sleep(1)
+        let cells = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "cal.day."))
+        XCTAssertEqual(cells.count, 42)
+        let w = app.frame.width
+        for i in [0, 6, 41] { let fr = cells.element(boundBy: i).frame; XCTAssertTrue(fr.minX >= -1 && fr.maxX <= w + 1, "sin desbordar: \(fr)") }
+        shot("5-07-calendario-mes-texto-maximo")
+        mode.buttons["Semana"].tap()
+    }
 }

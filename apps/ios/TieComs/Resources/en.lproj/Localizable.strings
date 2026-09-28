@@ -218,6 +218,7 @@
 "cal.channelSoon" = "Meeting alerts";
 "cal.channelSoonDesc" = "Alert 10 minutes before your meetings";
 "cal.chatsSection" = "Chats";
+"cal.continues" = "Continues from earlier";
 "cal.conversation" = "Group";
 "cal.create" = "Schedule";
 "cal.date" = "Date";
@@ -233,11 +234,16 @@
 "cal.join" = "Join";
 "cal.location" = "Place or meeting link";
 "cal.locationPh" = "Room, address or Meet, Teams or Zoom link";
+"cal.more" = "+{n} more";
+"cal.nEvents" = "{n} meetings";
 "cal.new" = "＋ Meeting";
+"cal.newAt" = "New meeting at {time}";
+"cal.newOn" = "New meeting on {date}";
 "cal.newTitle" = "New meeting";
 "cal.next" = "Next week";
 "cal.noUpcoming" = "No upcoming meetings in this group.";
 "cal.openChat" = "Open conversation";
+"cal.openDay" = "Opens the Day view";
 "cal.organizer" = "Organized by {name}";
 "cal.prev" = "Previous week";
 "cal.rsvp.maybe" = "Maybe";
@@ -254,6 +260,10 @@
 "cal.todayList" = "Today on your calendar";
 "cal.tz" = "Time zone";
 "cal.upcoming" = "Upcoming meetings";
+"cal.view" = "View";
+"cal.view.day" = "Day";
+"cal.view.month" = "Month";
+"cal.view.week" = "Week";
 "cal.week" = "Week of {date}";
 "cal.yourTz" = "Your time";
 "chat.aConversation" = "Conversation";

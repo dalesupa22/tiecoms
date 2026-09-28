@@ -76,6 +76,7 @@
 		5E3407CBD9D372C2E43D5C86 /* IntegrationV2Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8352A75C9CCA7DA3612850D3 /* IntegrationV2Tests.swift */; };
 		6106489D36B946A6E835C968 /* TextSize.swift in Sources */ = {isa = PBXBuildFile; fileRef = A67CAE73897FE30F38663CD4 /* TextSize.swift */; };
 		6768FE2C56CB7B3B9F237FEE /* tc_notify.caf in Resources */ = {isa = PBXBuildFile; fileRef = 4212E6B71E371BC46001BD89 /* tc_notify.caf */; };
+		684594BBF3A68C08608001B2 /* CalendarGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F26A8663845155717B1EED /* CalendarGrid.swift */; };
 		694D75BB708C435FACB2B7AA /* KeyboardUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A77B2FAE28CB7CE545D42DA1 /* KeyboardUITests.swift */; };
 		6A26054A810E081F3EE3BF9A /* Tanda166UITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01034B2C6362F6FC798890A9 /* Tanda166UITests.swift */; };
 		6ABDD49CBA5B75D3EC9CC2E3 /* Mentions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F95B4F84D911AE546652A7B8 /* Mentions.swift */; };
@@ -120,6 +121,7 @@
 		A913BA0E653F0DBAD93280AC /* TestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744AE6DDB5ABBFD7B89901B0 /* TestSupport.swift */; };
 		AE2921B315E0793666CBBFCE /* SignUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D248B9E2FAA3250DD6B020C /* SignUITests.swift */; };
 		B0A1A021264C4E4F5C8C4EEE /* DecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 083932E17F3BCA024B4EBFD6 /* DecodingTests.swift */; };
+		B186685CD82FD534F8D5E9D5 /* CalendarGridTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08078C3CA36813D3506FCD99 /* CalendarGridTests.swift */; };
 		B338BAD46AB5369FB2AE7CCE /* PushPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69213C7511D9460826E73827 /* PushPromptView.swift */; };
 		B53A49AF4F8068606CCB6B5D /* SignImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0944F03672DAE95C16282318 /* SignImage.swift */; };
 		B5F2BA16023265B88621B1CC /* MeetingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C77507D571D2D4FDFC4CF35 /* MeetingViews.swift */; };
@@ -223,6 +225,7 @@
 		00AFC8515C8DFA4A2FEBED43 /* ReactionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactionViews.swift; sourceTree = "<group>"; };
 		01034B2C6362F6FC798890A9 /* Tanda166UITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tanda166UITests.swift; sourceTree = "<group>"; };
 		065ECF12C5C02AC734D2F725 /* MentionSafetyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MentionSafetyTests.swift; sourceTree = "<group>"; };
+		08078C3CA36813D3506FCD99 /* CalendarGridTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarGridTests.swift; sourceTree = "<group>"; };
 		083932E17F3BCA024B4EBFD6 /* DecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecodingTests.swift; sourceTree = "<group>"; };
 		0944F03672DAE95C16282318 /* SignImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignImage.swift; sourceTree = "<group>"; };
 		0952105F81FFF3E626279A80 /* ShareUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareUITests.swift; sourceTree = "<group>"; };
@@ -365,6 +368,7 @@
 		EB118B40A5F8B04415623994 /* StoreSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreSyncTests.swift; sourceTree = "<group>"; };
 		EBB336317C73EE48E2442822 /* Menus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Menus.swift; sourceTree = "<group>"; };
 		F07DB698B001880B34E1D442 /* MentionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MentionViews.swift; sourceTree = "<group>"; };
+		F1F26A8663845155717B1EED /* CalendarGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarGrid.swift; sourceTree = "<group>"; };
 		F25672AE6355CE649E04FF44 /* BandejaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BandejaTests.swift; sourceTree = "<group>"; };
 		F550650F3DAFBC581534B47B /* RichTextViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RichTextViews.swift; sourceTree = "<group>"; };
 		F68682AA201ADAADDD25DBD8 /* Groups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Groups.swift; sourceTree = "<group>"; };
@@ -417,6 +421,7 @@
 				0DF211F0D4E2862568A60C6A /* Assistant.swift */,
 				15B56935C512DB24578AC9B0 /* AssistantVoice.swift */,
 				E4E9802F016F0B0A5FD993D1 /* Attachments.swift */,
+				F1F26A8663845155717B1EED /* CalendarGrid.swift */,
 				A533581A82A3D8834C30DBED /* ChatNav.swift */,
 				1F1FB42FA08DF6BC0C3115C7 /* CommunicationNotification.swift */,
 				8557FC33955580880236C06D /* DeepLink.swift */,
@@ -591,6 +596,7 @@
 				D0136BBEE7057B57391B6EF6 /* AddInviteTests.swift */,
 				A49B7BC21933C038BE7A3E19 /* AssistantTests.swift */,
 				F25672AE6355CE649E04FF44 /* BandejaTests.swift */,
+				08078C3CA36813D3506FCD99 /* CalendarGridTests.swift */,
 				55C8B19C2103FA286D289157 /* ChatBarTests.swift */,
 				701807F5A1694A914A001927 /* ChatsProfileTests.swift */,
 				2A8701945EDAF84C9FA27BFC /* ComposerMarkedTextTests.swift */,
@@ -833,6 +839,7 @@
 				BF823CAF90098A4FBD5EF2A3 /* AttachmentViews.swift in Sources */,
 				252B7B0B0F9F47FF693A5FD0 /* Attachments.swift in Sources */,
 				5C5A90EE8D7AFC7E28E68DF0 /* AuthViews.swift in Sources */,
+				684594BBF3A68C08608001B2 /* CalendarGrid.swift in Sources */,
 				4E59CFA741A2A59474D6B018 /* ChatBarViews.swift in Sources */,
 				916991654E1A3974F65F06CE /* ChatNav.swift in Sources */,
 				0FB9025BC5B98D0AB8FF9DA4 /* ChatsViews.swift in Sources */,
@@ -947,6 +954,7 @@
 				A48DF411C5EF677FCECCED60 /* AddInviteTests.swift in Sources */,
 				3309B10A7D72102369213B8B /* AssistantTests.swift in Sources */,
 				16E63735D9967CBBA9BCB2F0 /* BandejaTests.swift in Sources */,
+				B186685CD82FD534F8D5E9D5 /* CalendarGridTests.swift in Sources */,
 				87B86A5253581DFFC1523AB7 /* ChatBarTests.swift in Sources */,
 				2ACFB2451080E499FAA6C162 /* ChatsProfileTests.swift in Sources */,
 				A87CE4499CDB317D13154324 /* ComposerMarkedTextTests.swift in Sources */,

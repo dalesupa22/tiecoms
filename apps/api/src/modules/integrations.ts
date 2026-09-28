@@ -17,11 +17,11 @@ import type {
 } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { config } from '../config.ts';
-import { audit, pool, tx, type Db } from '../db.ts';
-import { badRequest, forbidden, notFound, unauthorized } from '../errors.ts';
+import { audit, pool, tx, type Db, type Tx } from '../db.ts';
+import { ApiError, badRequest, forbidden, notFound, unauthorized } from '../errors.ts';
 import { randomToken, sha256 } from '../security.ts';
 import * as issues from './issues.ts';
-import { seal } from './integration-events.ts';
+import { seal, validateOutgoingUrl } from './integration-events.ts';
 import { appendMessage } from './messages.ts';
 import { membersChanged } from './workspaces.ts';
 
@@ -80,10 +80,16 @@ export async function listIntegrations(userId: string, conversationId: string) {
   try { await assertIntegrationAdmin(pool, userId, conversationId); } catch { canConfigure = false; }
   if (!canConfigure && !a.canManage) throw forbidden('Solo los admins del grupo ven sus integraciones');
   const { rows } = await pool.query(`${SELECT} WHERE ig.conversation_id = $1 AND ig.revoked_at IS NULL ORDER BY ig.created_at`, [conversationId]);
-  return { integrations: rows.map(toDTO), canConfigure };
+  return { integrations: rows.map((r) => {
+    const dto = toDTO(r);
+    // Destination paths/queries can themselves be secret webhook credentials.
+    if (!canConfigure && dto.outgoingUrl) dto.outgoingUrl = new URL(dto.outgoingUrl).origin;
+    return dto;
+  }), canConfigure };
 }
 
 export async function createIntegration(userId: string, conversationId: string, input: z.infer<typeof CreateIntegrationInput>) {
+  if (input.outgoingUrl) validateOutgoingUrl(input.outgoingUrl);
   return tx(async (c) => {
     const { workspaceId } = await assertIntegrationAdmin(c, userId, conversationId);
     await c.query('SELECT 1 FROM conversations WHERE id = $1 FOR UPDATE', [conversationId]);
@@ -112,6 +118,7 @@ export async function createIntegration(userId: string, conversationId: string, 
 }
 
 export async function updateIntegration(userId: string, integrationId: string, input: z.infer<typeof UpdateIntegrationInput>) {
+  if (input.outgoingUrl) validateOutgoingUrl(input.outgoingUrl);
   return tx(async (c) => {
     const cur = await loadOwned(c, userId, integrationId);
     let secret: string | null = null;
@@ -177,15 +184,31 @@ export async function authenticate(token: string | undefined, id?: string): Prom
   return { id: r.id, conversationId: r.conversation_id, workspaceId: r.workspace_id, botUserId: r.bot_user_id, name: r.name };
 }
 
-/** Repite la respuesta de una petición ya atendida con la misma Idempotency-Key. */
-async function idempotent<T>(integ: IntegrationAuth, key: string | undefined, run: () => Promise<T>): Promise<T> {
-  if (!key) return run();
-  if (key.length > 200) throw badRequest('Idempotency-Key demasiado larga');
-  const prev = await pool.query('SELECT response FROM integration_requests WHERE integration_id = $1 AND idempotency_key = $2', [integ.id, key]);
-  if (prev.rows[0]) return prev.rows[0].response as T;
-  const out = await run();
-  await pool.query('INSERT INTO integration_requests (integration_id, idempotency_key, response) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [integ.id, key, JSON.stringify(out)]);
-  return out;
+/** Canonical payload fingerprints ignore JSON object-key ordering, but never payload/resource changes. */
+const canonical = (v: unknown): unknown => Array.isArray(v) ? v.map(canonical) : v && typeof v === 'object'
+  ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)).map(([k, value]) => [k, canonical(value)])) : v;
+
+/** The side effect and replay receipt commit together. Concurrent calls serialize on the same key. */
+async function idempotent<T>(integ: IntegrationAuth, key: string | undefined, operation: string, payload: unknown, run: (c: Tx) => Promise<T>): Promise<T> {
+  if (key && key.length > 200) throw badRequest('Idempotency-Key demasiado larga');
+  return tx(async (c) => {
+    // A replay must not bypass access revoked since the original request.
+    await conversationAccess(c, integ.botUserId, integ.conversationId, 'post');
+    const hash = sha256(JSON.stringify(canonical([operation, payload])));
+    if (key) {
+      await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`integration-request:${integ.id}:${key}`]);
+      const prev = (await c.query('SELECT response, request_hash FROM integration_requests WHERE integration_id = $1 AND idempotency_key = $2', [integ.id, key])).rows[0];
+      if (prev) {
+        if (prev.request_hash && !prev.request_hash.equals(hash)) throw new ApiError(409, 'idempotency_mismatch', 'Esta llave ya se usó para otra operación o contenido');
+        // Pre-migration receipts cannot be fingerprinted retrospectively. Preserve their
+        // stored response without repeating a committed side effect.
+        return prev.response as T;
+      }
+    }
+    const out = await run(c);
+    if (key) await c.query('INSERT INTO integration_requests (integration_id, idempotency_key, response, request_hash) VALUES ($1,$2,$3,$4)', [integ.id, key, JSON.stringify(out), hash]);
+    return out;
+  });
 }
 
 /** mrkdwn de Slack → texto plano de Chaggu (los mensajes no llevan formato). */
@@ -236,11 +259,9 @@ export function slackPayloadText(p: z.infer<typeof IncomingWebhookInput>): strin
 export async function postMessage(integ: IntegrationAuth, input: z.infer<typeof IncomingWebhookInput>, key?: string) {
   const body = slackPayloadText(input);
   if (!body) throw badRequest('El mensaje está vacío (manda text o blocks)');
-  return idempotent(integ, key, async () => {
-    const m = await tx(async (c) => {
-      await conversationAccess(c, integ.botUserId, integ.conversationId, 'post', true);
-      return appendMessage(c, { conversationId: integ.conversationId, authorId: integ.botUserId, body, clientMessageId: key ?? null });
-    });
+  return idempotent(integ, key, 'message', { body }, async (c) => {
+    await conversationAccess(c, integ.botUserId, integ.conversationId, 'post', true);
+    const m = await appendMessage(c, { conversationId: integ.conversationId, authorId: integ.botUserId, body, clientMessageId: key ?? null });
     return { ok: true, messageId: m.id };
   });
 }
@@ -256,21 +277,21 @@ export async function createIssue(integ: IntegrationAuth, input: z.infer<typeof 
     // Candado por (integración, externalId): dos reintentos simultáneos no crean dos asuntos.
     await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`${integ.id}:${input.externalId}`]);
     const prev = await c.query('SELECT id FROM issues WHERE integration_id = $1 AND external_id = $2', [integ.id, input.externalId]);
-    if (prev.rows[0]) return { issue: (await issues.getIssue(integ.botUserId, prev.rows[0].id)).issue, created: false };
-    const dto = await issues.createIssue(integ.botUserId, integ.conversationId, { title: input.title, ownerId: null, visibility: 'all' } as any);
-    // Fuera de esta transacción (que solo guarda el candado): los pasos siguientes abren las suyas sobre la misma fila.
-    await pool.query('UPDATE issues SET integration_id = $2, external_id = $3, external_meta = $4 WHERE id = $1', [dto.id, integ.id, input.externalId, input.externalMeta ? JSON.stringify(input.externalMeta) : null]);
-    if (input.description) await issues.commentIssue(integ.botUserId, dto.id, input.description);
+    if (prev.rows[0]) return { issue: (await issues.getIssue(integ.botUserId, prev.rows[0].id, c)).issue, created: false };
+    const dto = await issues.createIssue(integ.botUserId, integ.conversationId, { title: input.title, ownerId: null, visibility: 'all' } as any, c);
+    // The issue, source binding, comments, announcement and outbox are one atomic import.
+    await c.query('UPDATE issues SET integration_id = $2, external_id = $3, external_meta = $4 WHERE id = $1', [dto.id, integ.id, input.externalId, input.externalMeta ? JSON.stringify(input.externalMeta) : null]);
+    if (input.description) await issues.commentIssue(integ.botUserId, dto.id, input.description, {}, c);
     for (const h of input.history ?? []) {
-      await issues.commentIssue(integ.botUserId, dto.id, `${h.author}${h.at ? ` · ${h.at}` : ''}\n${h.body}`, { author: h.author, ...(h.at ? { at: h.at } : {}) });
+      await issues.commentIssue(integ.botUserId, dto.id, `${h.author}${h.at ? ` · ${h.at}` : ''}\n${h.body}`, { author: h.author, ...(h.at ? { at: h.at } : {}) }, c);
     }
-    if (input.status && input.status !== 'open') await issues.updateIssue(integ.botUserId, dto.id, { status: input.status });
+    if (input.status && input.status !== 'open') await issues.updateIssue(integ.botUserId, dto.id, { status: input.status }, c);
     if (input.announce) {
       const meta = Object.entries(input.externalMeta ?? {}).map(([k, v]) => `${k}: ${v}`).join('\n');
       const excerpt = input.description ? `\n\n${input.description.slice(0, 600)}${input.description.length > 600 ? '…' : ''}` : '';
-      await tx(async (c2) => appendMessage(c2, { conversationId: integ.conversationId, authorId: integ.botUserId, body: `${input.title}${meta ? `\n${meta}` : ''}${excerpt}` }));
+      await appendMessage(c, { conversationId: integ.conversationId, authorId: integ.botUserId, body: `${input.title}${meta ? `\n${meta}` : ''}${excerpt}` });
     }
-    return { issue: (await issues.getIssue(integ.botUserId, dto.id)).issue, created: true };
+    return { issue: (await issues.getIssue(integ.botUserId, dto.id, c)).issue, created: true };
   });
 }
 
@@ -292,20 +313,23 @@ export async function getIssue(integ: IntegrationAuth, issueId: string) {
 }
 
 export async function updateIssue(integ: IntegrationAuth, issueId: string, input: z.infer<typeof IntegrationUpdateIssueInput>) {
-  await issueOf(pool, integ, issueId);
-  if (input.externalMeta) await pool.query('UPDATE issues SET external_meta = $2 WHERE id = $1', [issueId, JSON.stringify(input.externalMeta)]);
-  const patch: Record<string, unknown> = {};
-  if (input.status) patch.status = input.status;
-  if (input.title) patch.title = input.title;
-  const issue = Object.keys(patch).length ? await issues.updateIssue(integ.botUserId, issueId, patch as any) : (await issues.getIssue(integ.botUserId, issueId)).issue;
-  return { issue };
+  return tx(async (c) => {
+    await issueOf(c, integ, issueId);
+    const patch: Record<string, unknown> = {};
+    if (input.status) patch.status = input.status;
+    if (input.title) patch.title = input.title;
+    // Permission check and metadata update belong to the same transaction as the status/title.
+    await issues.updateIssue(integ.botUserId, issueId, patch as any, c);
+    if (input.externalMeta) await c.query('UPDATE issues SET external_meta = $2 WHERE id = $1', [issueId, JSON.stringify(input.externalMeta)]);
+    return { issue: (await issues.getIssue(integ.botUserId, issueId, c)).issue };
+  });
 }
 
 export async function commentIssue(integ: IntegrationAuth, issueId: string, input: z.infer<typeof IntegrationCommentInput>, key?: string) {
   await issueOf(pool, integ, issueId);
-  return idempotent(integ, key, async () => {
+  return idempotent(integ, key, `comment:${issueId}`, input, async (c) => {
     const body = input.author ? `${input.author}\n${input.body}` : input.body;
-    const issue = await issues.commentIssue(integ.botUserId, issueId, body, input.author ? { author: input.author } : {});
+    const issue = await issues.commentIssue(integ.botUserId, issueId, body, input.author ? { author: input.author } : {}, c);
     return { issue };
   });
 }

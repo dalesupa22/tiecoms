@@ -51,7 +51,9 @@ export function isPublicIp(ip: string): boolean {
     return true;
   }
   if (net.isIPv6(ip)) {
-    const v = ip.toLowerCase();
+    // Canonicalize expanded/zero-padded IPv6 before checking loopback and mapped IPv4.
+    let v: string;
+    try { v = new URL(`http://[${ip}]/`).hostname.slice(1, -1).toLowerCase(); } catch { return false; }
     if (v === '::' || v === '::1') return false;
     if (v.startsWith('::ffff:')) return isPublicIp(v.slice(7));
     if (/^f[cd]/.test(v) || /^fe[89ab]/.test(v) || v.startsWith('ff')) return false;

@@ -56,7 +56,11 @@ grupo las ven sin secretos. Cada integración publica como un participante bot (
 `POST https://app.chaggu.com/api/hooks/{id}` con `Authorization: Bearer chg_…`, o `POST …/api/hooks/{id}/{token}` para
 sistemas que solo aceptan una URL. Cuerpo igual al de un Incoming Webhook de Slack: `text`, `blocks` (header, section con
 fields, context, divider, rich_text) y `attachments` (pretext, title, text, fields). El mrkdwn se pasa a texto plano.
-`Idempotency-Key` opcional. Límite: 120 por minuto por integración.
+`Idempotency-Key` opcional. Límite: 120 por minuto por integración. Para mensajes y comentarios, una llave queda ligada a la operación, al recurso y al contenido: reutilizarla con otro payload devuelve `409 idempotency_mismatch`. Las peticiones simultáneas con la misma llave se serializan; el cambio y su recibo se guardan en una sola transacción. Los recibos anteriores a la migración `031_integration_request_fingerprints.sql` conservan la respuesta guardada y no se vuelven a ejecutar (no es posible reconstruir su fingerprint histórico). Incluso un replay exige que el bot conserve acceso al grupo.
+
+La importación por `(integración, externalId)` guarda asunto, vínculo de origen, historial, estado, anuncio y outbox de forma atómica. Repetir un `externalId` devuelve el asunto existente; para cambiarlo se usa PATCH. Un fallo intermedio no deja un asunto parcial que bloquee el reintento.
+
+Los destinos de salida requieren HTTPS sin credenciales en la URL; se bloquean direcciones IP privadas, loopback y metadatos tanto al configurar como al entregar, y la resolución DNS se valida en cada conexión. `INTEGRATIONS_ALLOW_LOCAL=true` sólo se respeta fuera de producción para fixtures loopback. Las respuestas/error del receptor no se copian al log ni a `last_error`, porque pueden devolver secretos; se conserva el estado HTTP. Los logs del API y nginx redactan las rutas de webhooks con tokens (incluidos errores y referers); nginx mantiene estado y método en su log sanitizado.
 
 ### API de asuntos (token del grupo)
 Base `https://app.chaggu.com/api/integration/v1`, `Authorization: Bearer chg_…`:
@@ -83,3 +87,5 @@ usar `createdAt` del evento.
 - Estados: Por hacer ↔ `open`, En proceso ↔ `in_progress` (y `waiting`), Completado ↔ `done` (y `cancelled`).
 - Comentario del cliente en Xertify → `POST /issues/{id}/comments` con `author`. Respuesta de soporte en Chaggu → evento
   `issue.commented` → comentario `origen: 'chaggu'` en el ticket y correo al cliente.
+
+Revisión de acceso: quitar al bot del grupo impide nuevos webhooks salientes y descarta la entrega de los que estaban en cola cuando ya no tiene acceso. Los admins sólo del grupo ven únicamente el origen del destino de salida; el path/query potencialmente secreto queda reservado a quienes pueden configurar la integración.

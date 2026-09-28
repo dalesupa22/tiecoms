@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate candidate nginx in an isolated local container with synthetic OAuth markers only.
+"""Validate candidate nginx in an isolated local container with synthetic OAuth/webhook markers only.
 Uses an already installed nginx:1.27-alpine image; no production requests or logs.
 """
 from pathlib import Path
@@ -87,16 +87,20 @@ http {
             ('/api/v1/meetings/zoom/callback?code=FAKE_ZOOM_SECRET&state=FAKE_STATE', 'app.chaggu.com', '302'),
             ('/api/v1/auth/google/callback?fail=1&code=FAKE_ERROR_SECRET', 'app.chaggu.com', '502'),
             ('/api/v1/meetings/zoom/callback?fail=1&code=FAKE_ZOOM_ERROR_SECRET', 'app.chaggu.com', '502'),
+            ('/api/hooks/local-id/FAKE_HOOK_TOKEN', 'app.chaggu.com', '302'),
+            ('/api/hooks/local-id/FAKE_HOOK_ERROR_TOKEN?fail=1', 'app.chaggu.com', '502'),
+            ('/api/%68ooks/local-id/FAKE_ENCODED_HOOK_TOKEN?fail=1', 'app.chaggu.com', '502'),
         ]:
             headers = request(path, host)
             assert headers.splitlines()[0].split()[1] == expected, (path.split('?')[0], 'status', headers.splitlines()[0])
             assert 'cache-control: no-store' in headers, (path.split('?')[0], 'cache')
             policies = [x.strip() for x in headers.splitlines() if x.startswith('referrer-policy:')]
             assert policies and all(x == 'referrer-policy: no-referrer' for x in policies), (path.split('?')[0], policies)
-            checks.append({'path': path.split('?')[0], 'host': host, 'status': int(expected), 'noStore': True, 'noReferrer': True})
+            checks.append({'path': '/api/hooks/[redacted]' if 'FAKE_' in path.split('?')[0] else path.split('?')[0], 'host': host, 'status': int(expected), 'noStore': True, 'noReferrer': True})
         normal = request('/assets/fixture.js?normal=kept', referer='https://app.chaggu.com/ajustes?receipt=FAKE_REFERER_SECRET')
         assert 'referrer-policy: strict-origin-when-cross-origin' in normal
         request('/assets/fixture.js?other=kept', referer='https://app.chaggu.com/c/test?normal=kept')
+        request('/assets/fixture.js?hook=kept', referer='https://app.chaggu.com/api/hooks/local-id/FAKE_REFERER_HOOK')
         # Only synthetic local logs are inspected; never read production log contents.
         access = (logs / 'tiecoms-app.access.log').read_text()
         assert 'FAKE_' not in access

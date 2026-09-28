@@ -52,6 +52,8 @@ import { verifyAccess } from './security.ts';
 
 const REFRESH_COOKIE = 'tc_rt';
 const COOKIE_PATH = '/api/v1/auth';
+import { safeRequestPath } from './log-safety.ts';
+
 const SSO_COOKIE = 'tc_sso';
 
 declare module 'fastify' {
@@ -65,7 +67,7 @@ export async function buildHttp() {
     logger: {
       level: config.env === 'production' ? 'info' : 'debug', redact: ['req.headers.authorization', 'req.headers.cookie'],
       // OAuth codes/state/receipts and other URL credentials must never enter access logs.
-      serializers: { req: (req) => ({ method: req.method, url: req.url?.split('?')[0], hostname: req.hostname, remoteAddress: req.ip }) },
+      serializers: { req: (req) => ({ method: req.method, url: safeRequestPath(req.url), hostname: req.hostname, remoteAddress: req.ip }) },
     },
     genReqId: () => crypto.randomUUID(),
   });
@@ -96,6 +98,9 @@ export async function buildHttp() {
     req.log.error(err);
     return reply.status(500).send({ error: { code: 'internal', message: 'Error interno' } });
   });
+
+  // Avoid Fastify's default not-found log message, which embeds a raw credential-bearing URL.
+  app.setNotFoundHandler((_req, reply) => reply.status(404).send({ error: { code: 'not_found', message: 'Ruta no encontrada' } }));
 
   // ---------- Salud ----------
   app.get('/api/health/live', async () => ({ ok: true }));

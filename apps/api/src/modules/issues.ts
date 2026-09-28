@@ -9,6 +9,8 @@ import { queueIntegrationEvent } from './integration-events.ts';
 /** Mensaje de sistema estructurado: cada cliente lo muestra en su idioma. */
 const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, ...p });
 const CLOSED = new Set(['done', 'cancelled']);
+// Integrations compose the whole import/comment and its replay receipt in one transaction.
+const inTransaction = <T>(existing: Tx | undefined, run: (c: Tx) => Promise<T>) => existing ? run(existing) : tx(run);
 
 const SELECT = `
   SELECT i.*, m.seq AS origin_seq,
@@ -147,8 +149,8 @@ async function actorOrg(c: Tx, userId: string): Promise<string | null> {
   return rows[0]?.primary_org_id ?? null;
 }
 
-export async function createIssue(userId: string, conversationId: string, input: z.infer<typeof CreateIssueInput>) {
-  return tx(async (c) => {
+export async function createIssue(userId: string, conversationId: string, input: z.infer<typeof CreateIssueInput>, existing?: Tx) {
+  return inTransaction(existing, async (c) => {
     const a = await conversationAccess(c, userId, conversationId, 'post', true);
     // Los terceros invitados participan en los asuntos (comentan, cambian estado, pueden ser responsables) pero no los abren.
     if (a.workspaceRole === 'guest') throw forbidden('Las personas invitadas de fuera participan en los asuntos, pero no pueden crearlos');
@@ -226,8 +228,8 @@ export async function createChildIssue(userId: string, parentId: string, input: 
  * Puede editar quien ve el asunto. En los de todo el chat, además, debe poder escribir en él (como antes).
  * La visibilidad solo la cambia quien lo creó.
  */
-export async function updateIssue(userId: string, issueId: string, input: z.infer<typeof UpdateIssueInput>) {
-  return tx(async (c) => {
+export async function updateIssue(userId: string, issueId: string, input: z.infer<typeof UpdateIssueInput>, existing?: Tx) {
+  return inTransaction(existing, async (c) => {
     const { rows } = await c.query('SELECT * FROM issues WHERE id = $1 FOR UPDATE', [issueId]);
     const cur = rows[0];
     if (!cur) throw notFound('Asunto');
@@ -301,8 +303,8 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
   });
 }
 
-export async function commentIssue(userId: string, issueId: string, body: string, extra: { author?: string; at?: string } = {}) {
-  return tx(async (c) => {
+export async function commentIssue(userId: string, issueId: string, body: string, extra: { author?: string; at?: string } = {}, existing?: Tx) {
+  return inTransaction(existing, async (c) => {
     const { rows } = await c.query('SELECT conversation_id, visibility, integration_id FROM issues WHERE id = $1 FOR UPDATE', [issueId]);
     if (!rows[0]) throw notFound('Asunto');
     await loadVisible(c, userId, issueId);
@@ -317,12 +319,12 @@ export async function commentIssue(userId: string, issueId: string, body: string
   });
 }
 
-export async function getIssue(userId: string, issueId: string) {
-  const issue = await loadVisible(pool, userId, issueId);
-  const { rows } = await pool.query('SELECT * FROM issue_events WHERE issue_id = $1 ORDER BY id', [issueId]);
+export async function getIssue(userId: string, issueId: string, db: Db = pool) {
+  const issue = await loadVisible(db, userId, issueId);
+  const { rows } = await db.query('SELECT * FROM issue_events WHERE issue_id = $1 ORDER BY id', [issueId]);
   const events: IssueEventDTO[] = rows.map((r) => ({ id: r.id, issueId: r.issue_id, actorId: r.actor_id, kind: r.kind, payload: r.payload, createdAt: iso(r.created_at)! }));
   // Las tareas hijas que esta persona ve (en el chat del asunto o en sus sidechats).
-  const kids = await pool.query(`${SELECT} ${VISIBLE} AND i.parent_issue_id = $2 ORDER BY i.created_at`, [userId, issueId]);
+  const kids = await db.query(`${SELECT} ${VISIBLE} AND i.parent_issue_id = $2 ORDER BY i.created_at`, [userId, issueId]);
   return { issue, events, children: kids.rows.map(toDTO) };
 }
 

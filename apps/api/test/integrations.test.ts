@@ -150,6 +150,7 @@ describe('integraciones por grupo', () => {
     const list = await call(`/conversations/${group}/integrations`, { token: laura.token });
     expect(list.status).toBe(200);
     expect(list.json.canConfigure).toBe(false);
+    expect(list.json.integrations[0].outgoingUrl).toBe(`http://127.0.0.1:${port}`); // no secret destination path/query for group-only admins
     expect(JSON.stringify(list.json)).not.toContain(hook.token);
     expect((await call(`/conversations/${group}/integrations`, { token: pedro.token })).status).toBe(403);
   });

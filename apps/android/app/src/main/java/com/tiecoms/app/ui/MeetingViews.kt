@@ -180,6 +180,7 @@ fun MeetingDialog(conversationId: String, now: Boolean, onClose: () -> Unit) {
             return@FormSheet
         }
         SectionHeader(stringResource(R.string.meet_provider))
+        Text(stringResource(R.string.meet_settings_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (connections == null) CircularProgressIndicator(Modifier.padding(8.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             list.forEach { c ->

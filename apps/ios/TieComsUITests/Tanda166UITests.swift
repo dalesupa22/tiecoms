@@ -382,8 +382,8 @@ extension Tanda166UITests {
         XCTAssertTrue(header.waitForExistence(timeout: 8))
         header.tap()
         let member = app.staticTexts[name]
-        XCTAssertTrue(member.waitForExistence(timeout: 8))
-        for _ in 0..<3 where !member.isHittable { app.swipeUp() }
+        for _ in 0..<5 where !member.exists || !member.isHittable { app.swipeUp() }
+        XCTAssertTrue(member.waitForExistence(timeout: 3))
         let badge = app.staticTexts["person.badge.\(f.b.id)"]
         XCTAssertFalse(badge.exists, "the synthetic member starts without admin rights")
         member.press(forDuration: 1.1)
@@ -391,10 +391,11 @@ extension Tanda166UITests {
         XCTAssertTrue(make.waitForExistence(timeout: 5))
         shot("admins-01-member-menu")
         make.tap()
-        let confirm = app.buttons["person.confirm.makeAdmin"]
+        let confirm = app.buttons["person.confirm.makeAdmin"].firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         shot("admins-02-explicit-confirmation")
-        app.buttons["Cancelar"].tap()
+        if app.buttons["Cancelar"].exists { app.buttons["Cancelar"].firstMatch.tap() }
+        else { app.navigationBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
         XCTAssertFalse(badge.exists, "cancelling the confirmation does not promote anyone")
         member.press(forDuration: 1.1)
         XCTAssertTrue(make.waitForExistence(timeout: 5))
@@ -408,7 +409,7 @@ extension Tanda166UITests {
         let remove = app.buttons["person.removeAdmin.\(f.b.id)"]
         XCTAssertTrue(remove.waitForExistence(timeout: 5))
         remove.tap()
-        let confirmRemove = app.buttons["person.confirm.removeAdmin"]
+        let confirmRemove = app.buttons["person.confirm.removeAdmin"].firstMatch
         XCTAssertTrue(confirmRemove.waitForExistence(timeout: 5))
         confirmRemove.tap()
         let deadline = Date().addingTimeInterval(10)

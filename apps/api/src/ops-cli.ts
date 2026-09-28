@@ -4,7 +4,7 @@
  *
  *   node ops.js members <dominio>                         personas y empresas con ese dominio de correo (solo lectura)
  *   node ops.js groups <correo>                           grupos donde está esa persona (solo lectura)
- *   node ops.js create-group <correo> "<nombre>" [correos,de,miembros]   grupo de «Tu organización»
+ *   node ops.js create-group <correo> "<nombre>" [correos,de,miembros] ["<empresa>"]   grupo de «Tu organización» de esa empresa
  *   node ops.js create-integration <correo> <conversationId> "<nombre>" [urlDeSalida]
  *       imprime el JSON con el token (y el secreto de salida) UNA vez: redirígelo a un archivo protegido.
  */
@@ -20,6 +20,12 @@ async function userId(email: string): Promise<string> {
 }
 
 const [command, a, b, c, d] = process.argv.slice(2);
+
+async function orgOf(uid: string, name: string): Promise<string> {
+  const { rows } = await pool.query('SELECT o.id FROM organizations o JOIN organization_memberships om ON om.org_id = o.id AND om.user_id = $1 WHERE o.name = $2', [uid, name]);
+  if (rows.length !== 1) throw new Error(`La persona no está en una única empresa llamada «${name}»`);
+  return rows[0].id;
+}
 try {
   if (command === 'members' && a) {
     const { rows } = await pool.query(
@@ -40,8 +46,9 @@ try {
     console.log(JSON.stringify(rows, null, 1));
   } else if (command === 'create-group' && a && b) {
     const me = await userId(a);
-    const members = c ? await Promise.all(c.split(',').map((e) => userId(e.trim()))) : [];
-    const r = await createGroup(me, CreateGroupInput.parse({ name: b, target: { kind: 'org' }, memberIds: members }));
+    const members = c ? await Promise.all(c.split(',').filter(Boolean).map((e) => userId(e.trim()))) : [];
+    const orgId = d ? await orgOf(me, d) : undefined;
+    const r = await createGroup(me, CreateGroupInput.parse({ name: b, target: { kind: 'org', ...(orgId ? { orgId } : {}) }, memberIds: members }));
     console.log(JSON.stringify(r));
   } else if (command === 'create-integration' && a && b && c) {
     const r = await createIntegration(await userId(a), b, CreateIntegrationInput.parse({ name: c, outgoingUrl: d || null }));

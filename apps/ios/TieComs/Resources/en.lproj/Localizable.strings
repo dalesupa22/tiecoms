@@ -844,7 +844,7 @@
 "issue.dTomorrow" = "Tomorrow";
 "issue.doneBanner" = "✓ Done";
 "issue.doneCount" = "Completed · {n}";
-"issue.drawerTitle" = "Subject";
+"issue.drawerTitle" = "Task";
 "issue.drop" = "Drop subject";
 "issue.droppedBanner" = "Dropped";
 "issue.droppedToast" = "Subject dropped";
@@ -876,7 +876,7 @@
 "issue.newTitle" = "New task";
 "issue.noComments" = "No comments yet.";
 "issue.noDue" = "No date";
-"issue.noIssues" = "No open subjects here.";
+"issue.noIssues" = "No open tasks here.";
 "issue.noOwner" = "No owner";
 "issue.open" = "Open";
 "issue.openBar" = "Create subjects ({n})";
@@ -894,8 +894,8 @@
 "issue.qNews" = "Updates";
 "issue.qWhen" = "By when?";
 "issue.qWho" = "Who does it?";
-"issue.quickPh" = "Add a subject… (Enter)";
-"issue.quickPhIos" = "Add a subject…";
+"issue.quickPh" = "Add task… (Enter)";
+"issue.quickPhIos" = "Add task…";
 "issue.reopen" = "Reopen";
 "issue.reopenedToast" = "Subject reopened";
 "issue.requestedBy" = "Requested by {name}";
@@ -1637,9 +1637,9 @@
 "sys.group.photo_removed" = "Removed the group photo.";
 "sys.integration.added" = "The “{name}” integration was connected.";
 "sys.integration.removed" = "The “{name}” integration was disconnected.";
-"sys.issue.closed" = "Closed the subject “{title}”.";
-"sys.issue.created" = "Created the subject “{title}”.";
-"sys.issue.reopened" = "Recreated the subject “{title}”.";
+"sys.issue.closed" = "Closed the task “{title}”.";
+"sys.issue.created" = "Created the task “{title}”.";
+"sys.issue.reopened" = "Reopened the task “{title}”.";
 "sys.member.joined" = "{name} joined by invitation.";
 "sys.member.left" = "{name} left the group.";
 "sys.member.removed" = "{name} is no longer in this group.";
@@ -1657,6 +1657,9 @@
 "tab.you" = "You";
 "task.add" = "＋ Sub-task";
 "task.addHere" = "Task for the subject";
+"task.card" = "Task by {name}";
+"task.cardAll" = "See all {n} comments";
+"task.cardComment" = "Comment on this task…";
 "task.dialogTitle" = "Tasks for “{title}”";
 "task.evVis" = "changed who can see it";
 "task.hint" = "Split the subject into tasks for each person. You can make them visible only to your company.";

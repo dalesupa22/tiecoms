@@ -184,12 +184,14 @@ struct ConversationView: View {
         }
         .onDisappear { if store.openConversationId == conversationId { store.openConversationId = nil } }
         .task(id: conversationId) {
+            // Temas y tareas en paralelo con los mensajes: las tarjetas de tarea llegan con su tamaño antes de ubicar el chat.
+            let id = conversationId
+            Task { try? await store.loadTopics(id) }
+            Task { _ = try? await store.loadIssues(conversationId: id) }
             try? await store.openConversation(conversationId)
             // Sugerencias de la hoja de compartir: abrir una conversación también cuenta (como mucho una vez por hora).
             Donations.donate(store, conversationId: conversationId, minInterval: 3600)
             try? await store.loadPins(conversationId)
-            try? await store.loadTopics(conversationId)
-            try? await store.loadIssues(conversationId: conversationId)
             try? await store.loadEvents(from: Date().addingTimeInterval(-30 * 86400), to: Date().addingTimeInterval(90 * 86400), conversationId: conversationId)
         }
         .sheet(item: $sheet) { s in sheetView(s) }
@@ -254,7 +256,7 @@ struct ConversationView: View {
         // El hilo nuevo se abre al lado, sin salir del chat (como en Slack).
         case .derive(let m): DeriveSheet(conversationId: conversationId, message: m) { id in openThread(id) }
         case .returnResult: ReturnResultSheet(conversationId: conversationId)
-        case .newIssue(let m): NewIssueSheet(conversationId: conversationId, origin: m)
+        case .newIssue(let m): NewIssueSheet(conversationId: conversationId, origin: m, topicId: activeTopic?.id)
         case .newEvent(let m): EventEditorSheet(conversationId: conversationId, origin: m, event: nil)
         case .forward(let m): ForwardSheet(source: m)
         case .reminder(let m): ReminderSheet(conversationId: conversationId, message: m)
@@ -426,8 +428,8 @@ struct ConversationView: View {
         var prevDate: Date?
         let cal = Calendar.current
         let filter = activeTopic?.id
-        // Con una banderita elegida solo van los mensajes de ese tema (sin mensajes de sistema).
-        for m in state.messages where !store.blockedUserIds.contains(m.authorId) && (filter == nil || (!m.isSystem && TopicRules.matches(m, filter: filter))) {
+        // Con una banderita elegida solo van los mensajes de ese tema y las tarjetas de sus tareas.
+        for m in state.messages where !store.blockedUserIds.contains(m.authorId) && (filter == nil || TaskCard.matches(m, filter: filter, issues: store.issues)) {
             let date = ISODate.parse(m.createdAt) ?? Date()
             let day = cal.dateComponents([.year, .month, .day], from: date)
             if day != lastDay {
@@ -810,7 +812,12 @@ struct ConversationView: View {
                 .padding(.vertical, 8)
                 .accessibilityAddTraits(.isHeader)
         case .system(let m):
-            SystemRow(message: m)
+            // Una tarea nueva se ve como tarjeta completa (docs/TEMAS.md), no como la línea «Creó la tarea…».
+            if let issueId = TaskCard.issueId(m) {
+                IssueChatCard(issueId: issueId, creatorId: m.authorId, canPost: c.canPost)
+            } else {
+                SystemRow(message: m)
+            }
         case .message(let m, let showAuthor):
             let mine = m.authorId == d.me.id
             let quoted = m.replyTo.flatMap { byId[$0] }

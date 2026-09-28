@@ -844,7 +844,7 @@
 "issue.dTomorrow" = "Mañana";
 "issue.doneBanner" = "✓ Hecho";
 "issue.doneCount" = "Completados · {n}";
-"issue.drawerTitle" = "Asunto";
+"issue.drawerTitle" = "Tarea";
 "issue.drop" = "Descartar asunto";
 "issue.droppedBanner" = "Descartado";
 "issue.droppedToast" = "Asunto descartado";
@@ -876,7 +876,7 @@
 "issue.newTitle" = "Nueva tarea";
 "issue.noComments" = "Aún no hay comentarios.";
 "issue.noDue" = "Sin fecha";
-"issue.noIssues" = "No hay asuntos abiertos aquí.";
+"issue.noIssues" = "No hay tareas abiertas aquí.";
 "issue.noOwner" = "Sin responsable";
 "issue.open" = "Abrir";
 "issue.openBar" = "Asuntos abiertos ({n})";
@@ -894,8 +894,8 @@
 "issue.qNews" = "Novedades";
 "issue.qWhen" = "¿Para cuándo?";
 "issue.qWho" = "¿Quién lo hace?";
-"issue.quickPh" = "Añadir asunto… (Enter)";
-"issue.quickPhIos" = "Añadir asunto…";
+"issue.quickPh" = "Añadir tarea… (Enter)";
+"issue.quickPhIos" = "Añadir tarea…";
 "issue.reopen" = "Reabrir";
 "issue.reopenedToast" = "Asunto reabierto";
 "issue.requestedBy" = "Lo pidió {name}";
@@ -1637,9 +1637,9 @@
 "sys.group.photo_removed" = "Quitó la foto del grupo.";
 "sys.integration.added" = "Se conectó la integración «{name}».";
 "sys.integration.removed" = "Se desconectó la integración «{name}».";
-"sys.issue.closed" = "Cerró el asunto «{title}».";
-"sys.issue.created" = "Abrió el asunto «{title}».";
-"sys.issue.reopened" = "Reabrió el asunto «{title}».";
+"sys.issue.closed" = "Cerró la tarea «{title}».";
+"sys.issue.created" = "Creó la tarea «{title}».";
+"sys.issue.reopened" = "Reabrió la tarea «{title}».";
 "sys.member.joined" = "{name} se unió por invitación.";
 "sys.member.left" = "{name} salió del grupo.";
 "sys.member.removed" = "{name} ya no participa en este grupo.";
@@ -1657,6 +1657,9 @@
 "tab.you" = "Tú";
 "task.add" = "＋ Tarea derivada";
 "task.addHere" = "Tarea del asunto";
+"task.card" = "Tarea de {name}";
+"task.cardAll" = "Ver los {n} comentarios";
+"task.cardComment" = "Comenta esta tarea…";
 "task.dialogTitle" = "Tareas de «{title}»";
 "task.evVis" = "cambió quién la ve";
 "task.hint" = "Divide el asunto en tareas para cada persona. Puedes hacer que solo tu empresa las vea.";

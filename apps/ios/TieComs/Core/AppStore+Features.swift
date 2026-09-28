@@ -171,9 +171,11 @@ extension AppStore {
     }
 
     @discardableResult
-    func createIssue(conversationId: String, title: String, ownerId: String?, dueDate: String?, originMessageId: String?) async throws -> IssueDTO {
+    func createIssue(conversationId: String, title: String, ownerId: String?, dueDate: String?, originMessageId: String?, topicId: String? = nil) async throws -> IssueDTO {
         let stamp = sessionStamp
-        let body: [String: Any] = ["title": title, "ownerId": ownerId ?? NSNull(), "dueDate": dueDate ?? NSNull(), "originMessageId": originMessageId ?? NSNull()]
+        var body: [String: Any] = ["title": title, "ownerId": ownerId ?? NSNull(), "dueDate": dueDate ?? NSNull(), "originMessageId": originMessageId ?? NSNull()]
+        // Con una banderita elegida la tarea nace en ese tema; desde un mensaje con tema, el servidor lo hereda.
+        if let topicId { body["topicId"] = topicId }
         let i: IssueDTO = try await api.request("/conversations/\(conversationId)/issues", method: "POST", json: body)
         try requireSession(stamp)
         guard canCacheIssue(i) else { throw CancellationError() }

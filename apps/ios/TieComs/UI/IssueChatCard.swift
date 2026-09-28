@@ -1,0 +1,257 @@
+import SwiftUI
+
+// Tarjeta de tarea en el chat (docs/TEMAS.md, «Tarjeta de tarea en el chat»): reemplaza la línea de sistema
+// «Creó la tarea…» por una tarjeta completa, como un evento, desde la que se completa y se comenta.
+// Paridad con IssueChatCard de apps/web/src/screens/Issues.tsx.
+
+/// Comentarios que muestra una tarjeta y el `commentCount` con que se pidieron.
+struct TaskCardComments: Equatable, Sendable {
+    var count: Int
+    var items: [IssueEventDTO]
+}
+
+/// Reglas puras de la tarjeta (sin red), compartidas con las pruebas.
+enum TaskCard {
+    /// El mensaje de sistema `issue.created` con `issueId` y sin `parentIssueId` (las tareas derivadas siguen como línea).
+    static func issueId(_ m: MessageDTO) -> String? {
+        guard let p = m.systemPayload, p["k"] as? String == "issue.created", let id = p["issueId"] as? String, !id.isEmpty else { return nil }
+        if let parent = p["parentIssueId"] as? String, !parent.isEmpty { return nil }
+        return id
+    }
+
+    /// Con una banderita elegida: los mensajes de ese tema y las tarjetas de las tareas de ese tema. Sin filtro, todo.
+    static func matches(_ m: MessageDTO, filter: String?, issues: [String: IssueDTO]) -> Bool {
+        guard let filter else { return true }
+        if m.isSystem { return issueId(m).flatMap { issues[$0]?.topicId } == filter }
+        return m.topicId == filter
+    }
+
+    /// Los 2 últimos comentarios del historial.
+    static func lastComments(_ events: [IssueEventDTO], limit: Int = 2) -> [IssueEventDTO] {
+        Array(events.filter { $0.kind == "comment" }.suffix(limit))
+    }
+
+    static func commentBody(_ e: IssueEventDTO) -> String {
+        if case .object(let o) = e.payload, case .string(let s)? = o["body"] { return s }
+        return ""
+    }
+
+    enum Edge { case normal, overdue, done }
+    static func edge(_ i: IssueDTO, now: Date = Date()) -> Edge {
+        if i.status == .done { return .done }
+        return IssueSort.flags(i, now: now).overdue ? .overdue : .normal
+    }
+}
+
+struct IssueChatCard: View {
+    @Environment(AppStore.self) private var store
+    let issueId: String
+    let creatorId: String
+    let canPost: Bool
+    @State private var missing = false
+    @State private var text = ""
+    @State private var busy = false
+
+    var body: some View {
+        Group {
+            if let i = store.issues[issueId], let d = store.data {
+                card(d, i)
+            } else if !missing {
+                // Del alto aproximado de la tarjeta: el chat no salta cuando llega la tarea.
+                RoundedRectangle(cornerRadius: 14).fill(Theme.surface).frame(height: 140).overlay(ProgressView())
+            }
+        }
+        .frame(maxWidth: 520, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
+        // Detalle solo si hace falta: la tarea no está en memoria o tiene comentarios nuevos que mostrar.
+        .task(id: store.issues[issueId]?.commentCount ?? -1) { await loadComments() }
+    }
+
+    private var comments: [IssueEventDTO] { store.taskCardComments[issueId]?.items ?? [] }
+
+    private func loadComments(force: Bool = false) async {
+        let count = store.issues[issueId]?.commentCount
+        if count == 0 { if store.taskCardComments[issueId] != nil { store.taskCardComments[issueId] = nil }; return }
+        if !force, let count, store.taskCardComments[issueId]?.count == count { return }
+        do {
+            let r = try await store.issueDetail(issueId)
+            let next = TaskCardComments(count: r.issue.commentCount, items: TaskCard.lastComments(r.events))
+            if store.taskCardComments[issueId] != next { store.taskCardComments[issueId] = next }
+        } catch is CancellationError {
+        } catch { if store.issues[issueId] == nil { missing = true } }
+    }
+
+    @ViewBuilder private func card(_ d: BootstrapDTO, _ i: IssueDTO) -> some View {
+        let owner = i.ownerId.flatMap { Naming.person(d, $0) }
+        let creator = Naming.person(d, creatorId)?.name.split(separator: " ").first.map(String.init) ?? ""
+        let f = IssueSort.flags(i)
+        let edge = TaskCard.edge(i)
+        let closed = i.status.closed
+        let edgeColor: Color = switch edge { case .done: Theme.doneGreen; case .overdue: .red; case .normal: Theme.orange }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("☑ " + L("task.card", ["name": creator]).uppercased(with: L10n.locale))
+                    .font(.caption2.weight(.bold)).kerning(0.4).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                Spacer(minLength: 4)
+                IssueTopicTag(issue: i, canEdit: canPost)
+            }
+            HStack(alignment: .top, spacing: 6) {
+                IssueCheck(issue: i, small: true).frame(width: 30, height: 30)
+                Button { store.push(.issue(i.id)) } label: {
+                    Text(i.title).font(.body.weight(.bold)).multilineTextAlignment(.leading)
+                        .foregroundStyle(closed ? Theme.textSecondary : Theme.textPrimary)
+                        .strikethrough(i.status == .done)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+                .accessibilityIdentifier("taskCard.title.\(i.id)")
+            }
+            HStack(spacing: 10) {
+                HStack(spacing: 5) {
+                    if let owner {
+                        Avatar(name: owner.name, org: nil, isAgent: owner.kind == "agent", size: 20, photo: owner.avatarUrl, fill: PersonColor.fill(owner.id))
+                    }
+                    Text(owner?.name ?? L("issue.noOwner")).font(.caption.weight(.semibold)).lineLimit(1)
+                }
+                Text("📅 " + (f.overdue ? L("issue.overdue") : f.dueToday ? L("issue.today") : IssueSort.dueLabel(i)))
+                    .font(.caption.weight(f.overdue ? .semibold : .regular))
+                    .foregroundStyle(f.overdue ? .red : Theme.textSecondary)
+                    .lineLimit(1)
+                StatusPill(status: i.status)
+                if i.commentCount > 0 { Text("💬 \(i.commentCount)").font(.caption).foregroundStyle(Theme.textSecondary) }
+            }
+            .foregroundStyle(Theme.textPrimary)
+            if !comments.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(comments) { e in
+                        let who = e.actorId == d.me.id ? L("common.youShort") : (Naming.person(d, e.actorId)?.name.split(separator: " ").first.map(String.init) ?? "")
+                        (Text(who).bold() + Text(" " + TaskCard.commentBody(e))).font(.footnote).foregroundStyle(Theme.textPrimary)
+                    }
+                    if i.commentCount > comments.count {
+                        Button(L("task.cardAll", ["n": i.commentCount])) { store.push(.issue(i.id)) }
+                            .font(.footnote.weight(.semibold)).buttonStyle(.borderless)
+                    }
+                }
+            }
+            // Comentar ahí mismo; no aparece si la tarea está cerrada.
+            if canPost && !closed {
+                HStack(spacing: 6) {
+                    // UITextField y no TextField: un TextField de SwiftUI dentro de la LazyVStack del chat dejaba la lista
+                    // reubicándose sin fin al abrir el teclado del compositor (igual que el compositor, que es UIKit).
+                    CardTextField(text: $text, placeholder: L("task.cardComment"), identifier: "taskCard.comment.\(i.id)", onSubmit: send)
+                        .frame(height: 34)
+                        .padding(.horizontal, 10)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.background))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.textSecondary.opacity(0.25)))
+                    Button(L("issue.comment"), action: send)
+                        .font(.footnote.weight(.semibold))
+                        .buttonStyle(.bordered)
+                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
+                        .accessibilityIdentifier("taskCard.send.\(i.id)")
+                }
+            }
+        }
+        .padding(.leading, 14).padding(.trailing, 12).padding(.vertical, 12)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surface))
+        .overlay(alignment: .leading) {
+            UnevenRoundedRectangle(topLeadingRadius: 14, bottomLeadingRadius: 14).fill(edgeColor).frame(width: 4)
+        }
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.textSecondary.opacity(0.15)))
+        .opacity(i.status == .done ? 0.85 : 1)
+        .contextMenu { IssueStatusMenu(issue: i) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("msg.taskCard.\(i.id)")
+    }
+
+    private func send() {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty, !busy else { return }
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                try await store.commentIssue(issueId, body: body)
+                text = ""
+                // Sin @FocusState en filas de la LazyVStack (con el teclado del compositor la lista no dejaba de reubicarse).
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                await loadComments(force: true)
+            } catch { store.show(L10n.errorText(error)) }
+        }
+    }
+}
+
+/// Etiqueta del tema de una tarea con ✕ para quitarlo (PATCH /issues/:id {topicId: null}) y «Deshacer».
+struct IssueTopicTag: View {
+    @Environment(AppStore.self) private var store
+    let issue: IssueDTO
+    var canEdit: Bool
+
+    var body: some View {
+        if let tid = issue.topicId, let cid = issue.conversationId, let t = store.topics[cid]?.first(where: { $0.id == tid }) {
+            HStack(spacing: 2) {
+                TopicTag(topic: t)
+                if canEdit {
+                    Button { untag(tid) } label: {
+                        Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.textSecondary)
+                            .frame(width: 24, height: 24).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(L("topic.none"))
+                    .accessibilityIdentifier("taskCard.untag.\(issue.id)")
+                }
+            }
+        }
+    }
+
+    private func untag(_ prev: String) {
+        let id = issue.id
+        Task {
+            do {
+                _ = try await store.updateIssue(id, ["topicId": NSNull()])
+                store.show(L("topic.untaggedTask")) { [store] in
+                    Task { do { _ = try await store.updateIssue(id, ["topicId": prev]) } catch { store.show(L10n.errorText(error)) } }
+                }
+            } catch { store.show(L10n.errorText(error)) }
+        }
+    }
+}
+
+/// Campo de una línea en UIKit para comentar desde la tarjeta (Enviar con la tecla de retorno).
+struct CardTextField: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var identifier: String
+    var onSubmit: () -> Void
+
+    func makeUIView(context: Context) -> UITextField {
+        let f = UITextField()
+        f.placeholder = placeholder
+        f.font = .preferredFont(forTextStyle: .footnote)
+        f.adjustsFontForContentSizeCategory = true
+        f.returnKeyType = .send
+        f.accessibilityIdentifier = identifier
+        f.delegate = context.coordinator
+        f.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .editingChanged)
+        f.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        f.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return f
+    }
+
+    func updateUIView(_ f: UITextField, context: Context) {
+        context.coordinator.parent = self
+        if f.text != text { f.text = text }
+        f.placeholder = placeholder
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: CardTextField
+        init(_ p: CardTextField) { parent = p }
+        @objc func changed(_ f: UITextField) { parent.text = f.text ?? "" }
+        func textFieldShouldReturn(_ f: UITextField) -> Bool { parent.onSubmit(); return false }
+    }
+}

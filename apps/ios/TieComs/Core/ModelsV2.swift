@@ -179,6 +179,8 @@ struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
     var visibility: IssueVisibility = .all
     var visibleOrgId: String?
     var viewerIds: [String] = []
+    /// Tema de la tarea (docs/TEMAS.md). nil = sin tema o servidor anterior.
+    var topicId: String?
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -203,6 +205,7 @@ struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
         visibility = IssueVisibility(rawValue: c.v("visibility", "all")) ?? .all
         visibleOrgId = c.o("visibleOrgId")
         viewerIds = c.v("viewerIds", [])
+        topicId = c.o("topicId")
     }
 
     /// Restringida: 'org' (solo mi empresa) o 'private'.

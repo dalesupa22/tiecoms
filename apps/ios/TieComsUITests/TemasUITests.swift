@@ -41,11 +41,10 @@ final class TemasUITests: XCTestCase {
         }
     }
 
-    /// Banderita → el chat se filtra, el campo dice «Mensaje en X» y lo que envío sale con la etiqueta del tema.
-    func testFlagFiltersAndSendsWithTopic() throws {
-        let f = try fixture()
+    /// Inicia sesión y abre el chat del fixture; devuelve la fila de banderitas.
+    @discardableResult
+    private func openChat(_ app: XCUIApplication, _ f: Fixture) -> XCUIElement {
         XCTAssertFalse(f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com"), "no se prueba contra producción")
-        let app = XCUIApplication()
         app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES",
                                "-TCOpenConversation", f.conversationId, "-AppleLanguages", "(es)", "-AppleLocale", "es_CO"]
         app.launch()
@@ -67,6 +66,14 @@ final class TemasUITests: XCTestCase {
             row.tap()
             XCTAssertTrue(dock.waitForExistence(timeout: 10), "la fila de temas aparece en el chat")
         }
+        return dock
+    }
+
+    /// Banderita → el chat se filtra, el campo dice «Mensaje en X» y lo que envío sale con la etiqueta del tema.
+    func testFlagFiltersAndSendsWithTopic() throws {
+        let f = try fixture()
+        let app = XCUIApplication()
+        openChat(app, f)
         XCTAssertTrue(app.buttons["chat.bar.issues"].label.contains("Tareas"), "el chip dice Tareas")
         XCTAssertTrue(app.buttons["topic.all"].exists)
         XCTAssertTrue(app.buttons["topic.new"].exists)
@@ -104,5 +111,29 @@ final class TemasUITests: XCTestCase {
         app.descendants(matching: .any)["topic.dock"].swipeRight()
         app.buttons["topic.all"].tap()
         XCTAssertTrue(app.buttons["topic.all"].isSelected)
+    }
+
+    /// Tarjeta de tarea en el chat: reemplaza «Creó la tarea…», se ve al filtrar por su tema y se comenta ahí mismo.
+    func testTaskCardInChatAndComment() throws {
+        let f = try fixture()
+        let app = XCUIApplication()
+        openChat(app, f)
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "msg.taskCard.")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 10), "hay tarjetas de tarea en el chat")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Creó la tarea")).firstMatch.exists, "sin la línea de sistema")
+        // Filtrar por el tema: aparece la tarjeta de la tarea de ese tema.
+        app.buttons["topic.flag.\(f.topicName)"].tap()
+        let untag = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "taskCard.untag.")).firstMatch
+        XCTAssertTrue(untag.waitForExistence(timeout: 10), "la tarjeta de la tarea del tema se ve filtrada, con su ✕")
+        let field = app.textFields.matching(NSPredicate(format: "identifier BEGINSWITH %@", "taskCard.comment.")).firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "campo «Comenta esta tarea…»")
+        let text = "Comentario iOS \(Int(Date().timeIntervalSince1970) % 10000)"
+        field.tap()
+        field.typeText(text)
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "taskCard.send.")).firstMatch.tap()
+        let comment = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        XCTAssertTrue(comment.waitForExistence(timeout: 10), "el comentario aparece en la tarjeta")
+        sleep(1)
+        shot("ios-temas-tarea")
     }
 }

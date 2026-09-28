@@ -164,3 +164,59 @@ final class TopicsTests: XCTestCase {
         XCTAssertEqual(L("bar.issues"), "Tasks")
     }
 }
+
+/// Tarjeta de tarea en el chat (docs/TEMAS.md): qué mensajes la muestran, filtro por tema y comentarios.
+final class TaskCardTests: XCTestCase {
+    private func sys(_ body: String) -> MessageDTO {
+        MessageDTO(id: UUID().uuidString, conversationId: "c1", seq: 1, authorId: "u1", clientMessageId: nil, kind: "system", body: body, createdAt: "")
+    }
+    private func issue(_ json: String) throws -> IssueDTO { try JSONDecoder().decode(IssueDTO.self, from: Data(json.utf8)) }
+
+    func testOnlyTopLevelIssueCreated() {
+        XCTAssertEqual(TaskCard.issueId(sys(#"{"k":"issue.created","issueId":"i1","title":"Pagar"}"#)), "i1")
+        XCTAssertNil(TaskCard.issueId(sys(#"{"k":"issue.created","issueId":"i2","parentIssueId":"i1"}"#)), "las derivadas siguen como línea")
+        XCTAssertEqual(TaskCard.issueId(sys(#"{"k":"issue.created","issueId":"i3","parentIssueId":null}"#)), "i3")
+        XCTAssertNil(TaskCard.issueId(sys(#"{"k":"issue.closed","issueId":"i1"}"#)))
+        XCTAssertNil(TaskCard.issueId(sys(#"{"k":"issue.created"}"#)))
+        var text = sys(#"{"k":"issue.created","issueId":"i1"}"#); text.kind = "text"
+        XCTAssertNil(TaskCard.issueId(text), "solo mensajes de sistema")
+    }
+
+    func testIssueTopicIdTolerant() throws {
+        XCTAssertEqual(try issue(#"{"id":"i1","title":"x","topicId":"t1"}"#).topicId, "t1")
+        XCTAssertNil(try issue(#"{"id":"i1","title":"x"}"#).topicId, "servidor anterior")
+        XCTAssertNil(try issue(#"{"id":"i1","title":"x","topicId":null}"#).topicId)
+    }
+
+    func testFilterIncludesCardsOfThatTopic() throws {
+        let issues = ["i1": try issue(#"{"id":"i1","title":"x","topicId":"t1"}"#), "i2": try issue(#"{"id":"i2","title":"y"}"#)]
+        let card1 = sys(#"{"k":"issue.created","issueId":"i1"}"#), card2 = sys(#"{"k":"issue.created","issueId":"i2"}"#)
+        let other = sys(#"{"k":"members.added","names":"Ana"}"#)
+        var m = MessageDTO(id: "m", conversationId: "c1", seq: 2, authorId: "u1", clientMessageId: nil, body: "hola", createdAt: ""); m.topicId = "t1"
+        XCTAssertTrue(TaskCard.matches(card1, filter: "t1", issues: issues))
+        XCTAssertFalse(TaskCard.matches(card2, filter: "t1", issues: issues))
+        XCTAssertFalse(TaskCard.matches(other, filter: "t1", issues: issues))
+        XCTAssertTrue(TaskCard.matches(m, filter: "t1", issues: issues))
+        XCTAssertTrue(TaskCard.matches(other, filter: nil, issues: issues), "sin filtro, todo")
+    }
+
+    func testLastTwoCommentsAndEdge() throws {
+        let d = try JSONDecoder().decode(IssueDetail.self, from: Data(#"""
+        {"issue":{"id":"i1","title":"x","status":"open","commentCount":3},"children":[],
+         "events":[{"id":1,"kind":"created","actorId":"u1","payload":{}},{"id":2,"kind":"comment","actorId":"u1","payload":{"body":"uno"}},
+                   {"id":3,"kind":"comment","actorId":"u2","payload":{"body":"dos"}},{"id":4,"kind":"status","actorId":"u1","payload":{}},
+                   {"id":5,"kind":"comment","actorId":"u1","payload":{"body":"tres"}}]}
+        """#.utf8))
+        XCTAssertEqual(TaskCard.lastComments(d.events).map(TaskCard.commentBody), ["dos", "tres"])
+        XCTAssertEqual(TaskCard.edge(try issue(#"{"id":"a","title":"x","status":"done"}"#)), .done)
+        XCTAssertEqual(TaskCard.edge(try issue(#"{"id":"b","title":"x","status":"open","dueDate":"2020-01-01"}"#)), .overdue)
+        XCTAssertEqual(TaskCard.edge(try issue(#"{"id":"c","title":"x","status":"open"}"#)), .normal)
+    }
+
+    func testTaskStrings() {
+        L10n.choice = .es
+        defer { L10n.choice = .system }
+        XCTAssertEqual(L("task.card", ["name": "Laura"]), "Tarea de Laura")
+        XCTAssertEqual(L10n.systemText(#"{"k":"issue.closed","title":"Pagar"}"#), "Cerró la tarea «Pagar».")
+    }
+}

@@ -178,7 +178,7 @@ final class V10IssueTasksTests: XCTestCase {
         XCTAssertEqual(L("issue.qWho"), "¿Quién lo hace?")
         XCTAssertEqual(L("issue.doneCount", ["n": 3]), "Completados · 3")
         XCTAssertEqual(L("issue.stalledPlain", ["n": 4]), "Nadie lo mueve hace 4 días")
-        XCTAssertEqual(L("issue.quickPhIos"), "Añadir asunto…")
+        XCTAssertEqual(L("issue.quickPhIos"), "Añadir tarea…", "docs/TEMAS.md: los asuntos se llaman Tareas")
         XCTAssertEqual(L("issue.comment"), "Enviar")
         L10n.choice = .en
         XCTAssertEqual(L("issue.markDone"), "Mark as done")

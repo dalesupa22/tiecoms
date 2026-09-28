@@ -71,6 +71,9 @@ final class AppStore {
     var pins: [String: [String]] = [:]
     /// Temas por conversación (activos y archivados), en el orden de la fila (docs/TEMAS.md).
     var topics: [String: [TopicDTO]] = [:]
+    /// Últimos comentarios de cada tarjeta de tarea del chat (y con cuántos comentarios se pidieron). Vive en el store:
+    /// la LazyVStack recrea la tarjeta al volver a verla y, con @State, su alto cambiaba y la lista no dejaba de reubicarse.
+    var taskCardComments: [String: TaskCardComments] = [:]
     var reminders: [ReminderDTO] = []
     var events: [String: CalendarEventDTO] = [:]
     /// Mis mensajes programados pendientes, enviándose o fallidos (docs/PROGRAMADOS.md), por hora de salida.
@@ -395,7 +398,7 @@ final class AppStore {
         conversations = [:]
         pending = []
         typing = [:]
-        issues = [:]; pins = [:]; topics = [:]; reminders = []; events = [:]; scheduled = []
+        issues = [:]; pins = [:]; topics = [:]; taskCardComments = [:]; reminders = []; events = [:]; scheduled = []
         blockedUserIds = []
         localDndUntil = nil; dndLocalOnly = false; dndExpiryTask?.cancel(); dndExpiryTask = nil
         homePath = []; dmsPath = []; issuesPath = []; agendaPath = []; settingsPath = []

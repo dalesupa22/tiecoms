@@ -207,6 +207,8 @@ struct NewIssueSheet: View {
     /// nil desde «＋ Crear»: se elige el grupo o chat (el más reciente primero).
     let conversationId: String?
     let origin: MessageDTO?
+    /// Tema de la banderita elegida en el chat (docs/TEMAS.md).
+    var topicId: String? = nil
     @State private var conv = ""
     @State private var title = ""
     @State private var ownerId: String = ""
@@ -272,7 +274,8 @@ struct NewIssueSheet: View {
                 let i = conv == IssueTasks.personalKey
                     ? try await store.createPersonalIssue(title: title, dueDate: hasDue ? IssueDates.iso(due) : nil)
                     : try await store.createIssue(conversationId: conv, title: title, ownerId: ownerId.isEmpty ? nil : ownerId,
-                                                  dueDate: hasDue ? IssueDates.iso(due) : nil, originMessageId: origin?.id)
+                                                  dueDate: hasDue ? IssueDates.iso(due) : nil, originMessageId: origin?.id,
+                                                  topicId: conv == conversationId ? topicId : nil)
                 dismiss()
                 store.show(i.title)
             } catch { self.error = L10n.errorText(error) }

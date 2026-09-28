@@ -40,7 +40,7 @@ const todayText = () => new Intl.DateTimeFormat(getLang() === 'en' ? 'en-US' : '
 
 // ---------- Firmas guardadas (caché del módulo) ----------
 let savedCache: SignatureDTO[] | null = null;
-function useSignatures() {
+export function useSignatures() {
   const [list, setList] = useState<SignatureDTO[] | null>(savedCache);
   const reload = useCallback(async () => {
     try { savedCache = (await client.listSignatures()).signatures; setList(savedCache); } catch (e) { toast(errorText(e)); setList((l) => l ?? []); }
@@ -211,6 +211,15 @@ export default function PdfSheet({ a, startSigning = false, onClose }: { a: Atta
       return next;
     });
   }), []);
+  /** Otra marca igual un poco más abajo (pólizas: la misma firma varias veces en una página). */
+  function duplicate(id: string) {
+    const base = marks.find((m) => m.id === id);
+    if (!base) return;
+    const gap = base.h + 0.02;
+    const below = base.y + gap + base.h <= 1;
+    const m: Mark = { ...base, id: uid(), group: undefined, y: below ? base.y + gap : Math.max(0, base.y - gap) };
+    setMarks((ms) => [...ms, m]); setSelected(m.id);
+  }
   const removeMark = (id: string) => { setMarks((ms) => ms.filter((m) => m.id !== id)); setSelected(null); };
 
   function startSig(kind: 'signature' | 'initials') {
@@ -267,6 +276,7 @@ export default function PdfSheet({ a, startSigning = false, onClose }: { a: Atta
           {sel ? (
             <>
               <button className="pdf-tool" onClick={() => removeMark(sel.id)}><span>🗑</span>{t('sign.remove')}</button>
+              <button className="pdf-tool" onClick={() => duplicate(sel.id)}><span>⊕</span>{t('sign.duplicate')}</button>
               {sizes.length > 1 && <button className="pdf-tool" onClick={() => toAllPages(sel.id)}><span>⧉</span>{t('sign.allPages')}</button>}
               {(sel.kind === 'text' || sel.kind === 'date') && <button className="pdf-tool" onClick={() => setSheet({ type: 'text', markId: sel.id })}><span>✎</span>{t('sign.editText')}</button>}
               <button className="pdf-tool" onClick={() => setSelected(null)}><span>✓</span>{t('common.done')}</button>
@@ -454,7 +464,7 @@ function PickSignature({ kind, list, total, onClose, onPick, onNew, onDeleted }:
     </Modal>
   );
 }
-function SavedTile({ s, onPick, onDelete }: { s: SignatureDTO; onPick: () => void; onDelete: () => void }) {
+export function SavedTile({ s, onPick, onDelete }: { s: SignatureDTO; onPick: () => void; onDelete: () => void }) {
   const url = useBlob(s.url);
   return (
     <div className="sig-tile">
@@ -465,7 +475,7 @@ function SavedTile({ s, onPick, onDelete }: { s: SignatureDTO; onPick: () => voi
 }
 
 // ---------- Crear una firma ----------
-function CreateSignature({ kind, onClose, onSaved }: { kind: 'signature' | 'initials'; onClose: () => void; onSaved: (s: SignatureDTO) => void }) {
+export function CreateSignature({ kind, onClose, onSaved }: { kind: 'signature' | 'initials'; onClose: () => void; onSaved: (s: SignatureDTO) => void }) {
   const me = useClient((s) => s.data?.me);
   const [tab, setTab] = useState<'drawn' | 'typed' | 'uploaded'>('drawn');
   const [color, setColor] = useState<InkColor>('blue');

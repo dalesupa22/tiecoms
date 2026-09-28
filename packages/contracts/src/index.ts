@@ -277,6 +277,9 @@ export interface AttachmentDTO {
   signing?: AttachmentSigningDTO | null;
 }
 
+/** Referencia corta de una firma (8 caracteres): va impresa en el sello del PDF y sirve para buscarla en el historial. */
+export const signingRef = (signingId: string) => signingId.replace(/-/g, '').slice(0, 8).toUpperCase();
+
 export interface AttachmentSigningDTO {
   id: string;
   signerId: string;
@@ -347,6 +350,37 @@ export interface SignInfoDTO {
   /** Firmas hechas en Chaggu sobre este documento (como original o como resultado). */
   history: AttachmentSigningDTO[];
 }
+/**
+ * Historial «Documentos que firmé» (GET /me/signings). attachment es el PDF firmado si todavía puedo
+ * leerlo (null si salí de la conversación o se borró); la constancia se conserva igual.
+ */
+export interface SigningHistoryItemDTO extends AttachmentSigningDTO {
+  ref: string;
+  documentName: string;
+  conversationId: string;
+  conversationName: string | null;
+  messageId: string | null;
+  sourceAttachmentId: string;
+  resultAttachmentId: string;
+  /** Quién mandó el PDF a firmar (autor del mensaje original), si no fui yo. */
+  requestedById: string | null;
+  requestedByName: string | null;
+  /** Total de marcas (firmas, iniciales, textos) y en cuántas páginas del total. */
+  marks: number;
+  signatureMarks: number;
+  pagesMarked: number;
+  pages: number;
+  stamp: boolean;
+  certificate: boolean;
+  attachment: AttachmentDTO | null;
+}
+export interface SigningHistoryPageDTO { signings: SigningHistoryItemDTO[]; nextBefore: string | null; total: number }
+export const SigningHistoryQuery = z.object({
+  before: z.iso.datetime().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+  /** Busca en el nombre del documento, en quién lo pidió o por referencia (REF). */
+  q: z.string().trim().max(120).optional(),
+});
 export interface SignPdfResult { message: MessageDTO; attachment: AttachmentDTO; signing: AttachmentSigningDTO; duplicate: boolean }
 
 /**

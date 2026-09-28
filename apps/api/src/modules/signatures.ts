@@ -12,8 +12,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib';
 import {
-  MAX_ATTACHMENT_BYTES, MAX_SAVED_SIGNATURES, MAX_SIGNATURE_BYTES,
-  type AttachmentDTO, type AttachmentSigningDTO, type MessageDTO, type SignatureDTO, type SignPdfResult, type SignPlacementInput,
+  MAX_ATTACHMENT_BYTES, MAX_SAVED_SIGNATURES, MAX_SIGNATURE_BYTES, signingRef,
+  type AttachmentDTO, type AttachmentSigningDTO, type MessageDTO, type SigningHistoryItemDTO, type SigningHistoryPageDTO, type SignatureDTO, type SignPdfResult, type SignPlacementInput,
 } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { pool } from '../db.ts';
@@ -180,7 +180,8 @@ export async function stampPdf(pdf: Buffer, placements: SignPlacementInput[], im
   const embedded = new Map<string, PDFImage>();
   for (const [id, png] of images) embedded.set(id, await doc.embedPng(png));
   const when = formatWhen(o.signedAt, o.timeZone, o.lang);
-  const caption = winAnsi(`${o.lang === 'en' ? 'Electronically signed by' : 'Firmado electrónicamente por'} ${o.signerName} · ${when}`);
+  // La referencia impresa permite encontrar la constancia en «Documentos que firmé».
+  const caption = winAnsi(`${o.lang === 'en' ? 'Electronically signed by' : 'Firmado electrónicamente por'} ${o.signerName} · ${when} · Chaggu Ref. ${signingRef(o.signingId)}`);
 
   for (const p of placements) {
     const page = pages[p.page - 1];
@@ -241,7 +242,7 @@ function addCertificate(doc: PDFDocument, font: PDFFont, bold: PDFFont, o: Stamp
   line(en ? 'MARKS PLACED' : 'MARCAS ESTAMPADAS', String(marks));
   line(en ? 'ORIGINAL DOCUMENT FINGERPRINT (SHA-256)' : 'HUELLA DEL DOCUMENTO ORIGINAL (SHA-256)', o.originalSha256, true);
   if (o.ip) line(en ? 'IP ADDRESS' : 'DIRECCIÓN IP', o.ip);
-  line(en ? 'RECORD ID' : 'ID DE CONSTANCIA', o.signingId, true);
+  line(en ? 'REFERENCE' : 'REFERENCIA', `${signingRef(o.signingId)}  (${o.signingId})`, true);
   y -= 6;
   const note = en
     ? 'Electronic signature placed with Chaggu. The signer was authenticated with their Chaggu account. The fingerprint of the signed file is kept in the Chaggu record together with this data.'
@@ -326,11 +327,14 @@ export async function signPdf(userId: string, attachmentId: string, input: {
     ...(a.message_id ? { replyTo: a.message_id } : {}),
   });
   if (sent.duplicate) return duplicateResult(sent.message);
+  const requester = a.message_id ? (await pool.query('SELECT author_id FROM messages WHERE id = $1', [a.message_id])).rows[0]?.author_id ?? null : null;
   await pool.query(
-    `INSERT INTO pdf_signings (id, user_id, conversation_id, source_attachment_id, result_attachment_id, message_id, original_sha256, signed_sha256, placements, pages, ip, user_agent)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    `INSERT INTO pdf_signings (id, user_id, conversation_id, source_attachment_id, result_attachment_id, message_id, original_sha256, signed_sha256, placements, pages, ip, user_agent,
+                               document_name, requested_by, marks, pages_marked, stamp, certificate)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
     [signingId, userId, conversationId, attachmentId, newId, sent.message.id, Buffer.from(originalSha256, 'hex'), Buffer.from(signing.signedSha256, 'hex'),
-      JSON.stringify(input.placements), pages, meta.ip, meta.userAgent?.slice(0, 300) ?? null],
+      JSON.stringify(input.placements), pages, meta.ip, meta.userAgent?.slice(0, 300) ?? null,
+      a.name, requester && requester !== userId ? requester : null, input.placements.length, new Set(input.placements.map((p) => p.page)).size, input.stamp, input.certificate],
   );
   const attachment = sent.message.attachments?.find((x) => x.id === newId) ?? toDTO((await pool.query('SELECT * FROM attachments WHERE id = $1', [newId])).rows[0]);
   return { message: sent.message, attachment, signing, duplicate: false };
@@ -340,4 +344,45 @@ function duplicateResult(message: MessageDTO): SignPdfResult {
   const attachment: AttachmentDTO | undefined = message.attachments?.find((x) => x.signing);
   if (!attachment?.signing) throw new ApiError(409, 'conflict', 'clientMessageId reutilizado con otro contenido');
   return { message, attachment, signing: attachment.signing, duplicate: true };
+}
+
+// ---------- Historial «Documentos que firmé» ----------
+/**
+ * Todo lo que firmé, lo más reciente primero. La constancia es mía aunque ya no esté en la conversación;
+ * el PDF firmado solo se incluye si todavía lo puedo leer.
+ */
+export async function listSignings(userId: string, q: { before?: string; limit: number; q?: string }): Promise<SigningHistoryPageDTO> {
+  const where = ['s.user_id = $1'];
+  const args: unknown[] = [userId];
+  if (q.before) { args.push(q.before); where.push(`s.created_at < $${args.length}`); }
+  if (q.q) {
+    args.push(`%${q.q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`);
+    const like = `$${args.length}`;
+    args.push(`${q.q.replace(/[^0-9a-f]/gi, '').toLowerCase()}%`);
+    where.push(`(s.document_name ILIKE ${like} OR r.name ILIKE ${like} OR c.name ILIKE ${like}` +
+      (q.q.replace(/[^0-9a-f]/gi, '').length >= 4 ? ` OR replace(s.id::text, '-', '') LIKE $${args.length})` : ')'));
+  }
+  const base = `FROM pdf_signings s JOIN users u ON u.id = s.user_id LEFT JOIN users r ON r.id = s.requested_by
+                LEFT JOIN conversations c ON c.id = s.conversation_id WHERE ${where.join(' AND ')}`;
+  args.push(q.limit + 1);
+  const { rows } = await pool.query(
+    `SELECT s.*, u.name AS signer_name, r.name AS requested_by_name, c.name AS conversation_name ${base} ORDER BY s.created_at DESC LIMIT $${args.length}`, args,
+  );
+  const total = (await pool.query(`SELECT count(*)::int AS n ${base}`, args.slice(0, -1))).rows[0].n as number;
+  const page = rows.slice(0, q.limit);
+  const items: SigningHistoryItemDTO[] = [];
+  for (const r of page) {
+    let attachment: AttachmentDTO | null = null;
+    try { attachment = toDTO(await readable(userId, r.result_attachment_id)); } catch { /* fuera de mi alcance: solo queda la constancia */ }
+    const placements: SignPlacementInput[] = r.placements ?? [];
+    items.push({
+      ...signingDTO(r), ref: signingRef(r.id), documentName: r.document_name,
+      conversationId: r.conversation_id, conversationName: r.conversation_name ?? null, messageId: r.message_id,
+      sourceAttachmentId: r.source_attachment_id, resultAttachmentId: r.result_attachment_id,
+      requestedById: r.requested_by, requestedByName: r.requested_by_name ?? null,
+      marks: r.marks, signatureMarks: placements.filter((p) => p.type === 'signature').length, pagesMarked: r.pages_marked, pages: r.pages,
+      stamp: r.stamp, certificate: r.certificate, attachment,
+    });
+  }
+  return { signings: items, nextBefore: rows.length > q.limit ? new Date(page.at(-1)!.created_at).toISOString() : null, total };
 }

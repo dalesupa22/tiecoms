@@ -201,6 +201,35 @@ describe.skipIf(!process.env.API_URL)('firmar un PDF del chat', () => {
     expect(fwd.json.message.attachments[0].signing.signedSha256).toBe(r.json.signing.signedSha256);
   });
 
+  it('historial «Documentos que firmé»: solo lo mío, con quién lo pidió, marcas y búsqueda por referencia', async () => {
+    const sig = (await savePng(danny, await png(300, 120))).json;
+    // Una póliza: la misma firma varias veces en páginas distintas.
+    const placements = [1, 2, 2].map((page, i) => ({ type: 'signature', signatureId: sig.id, page, x: 0.1 + i * 0.2, y: 0.8, w: 0.15, h: 0.06 }));
+    const r = await call(`/attachments/${pdfId}/sign`, { token: danny.token, body: { clientMessageId: randomUUID(), placements: [...placements, { type: 'text', text: 'CC 123', page: 1, x: 0.1, y: 0.9, w: 0.1, h: 0.02 }] } });
+    expect(r.status).toBe(201);
+    const h = await call('/me/signings?limit=1', { token: danny.token });
+    expect(h.status).toBe(200);
+    const item = h.json.signings[0];
+    expect(item).toMatchObject({
+      id: r.json.signing.id, documentName: 'Contrato Nexo.pdf', requestedById: adriana.id, requestedByName: 'Adriana',
+      marks: 4, signatureMarks: 3, pagesMarked: 2, pages: 2, stamp: true, certificate: false, signedSha256: r.json.signing.signedSha256,
+    });
+    expect(item.ref).toMatch(/^[0-9A-F]{8}$/);
+    expect(item.attachment.id).toBe(r.json.attachment.id);
+    expect(h.json.total).toBeGreaterThanOrEqual(2);
+    expect(h.json.nextBefore).toBeTruthy();
+    const more = await call(`/me/signings?before=${encodeURIComponent(h.json.nextBefore)}`, { token: danny.token });
+    expect(more.json.signings.map((x: any) => x.id)).not.toContain(item.id);
+    expect((await call(`/me/signings?q=${item.ref}`, { token: danny.token })).json.signings.map((x: any) => x.id)).toEqual([item.id]);
+    expect((await call('/me/signings?q=adriana', { token: danny.token })).json.total).toBeGreaterThanOrEqual(2);
+    expect((await call('/me/signings?q=nada-que-ver', { token: danny.token })).json.total).toBe(0);
+    // Adriana no firmó nada: su historial no muestra lo de Danny.
+    expect((await call('/me/signings', { token: adriana.token })).json.signings).toHaveLength(0);
+    // El sello impreso lleva la referencia.
+    const file = await call(`/attachments/${r.json.attachment.id}`, { token: danny.token });
+    expect(file.status).toBe(200);
+  });
+
   it('no deja firmar con firmas ajenas, sin acceso ni fuera de la página', async () => {
     const mine = (await savePng(adriana, await png())).json;
     const base = { clientMessageId: randomUUID(), placements: [{ type: 'signature', signatureId: mine.id, page: 1, x: 0.1, y: 0.1, w: 0.2, h: 0.1 }] };

@@ -25,11 +25,20 @@ CREATE TABLE pdf_signings (
   original_sha256       bytea NOT NULL,
   signed_sha256         bytea NOT NULL,
   placements            jsonb NOT NULL,
+  -- Para el historial «Documentos que firmé»: nombre del original, quién pidió la firma (autor del
+  -- mensaje con el PDF), cuántas marcas y en cuántas páginas (una póliza lleva la firma varias veces).
+  document_name         text NOT NULL,
+  requested_by          uuid REFERENCES users(id) ON DELETE SET NULL,
+  marks                 integer NOT NULL,
+  pages_marked          integer NOT NULL,
+  stamp                 boolean NOT NULL,
+  certificate           boolean NOT NULL,
   pages                 integer NOT NULL,
   ip                    text,
   user_agent            text,
   created_at            timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX pdf_signings_user ON pdf_signings (user_id, created_at DESC);
 CREATE INDEX pdf_signings_source ON pdf_signings (source_attachment_id);
 CREATE INDEX pdf_signings_result ON pdf_signings (result_attachment_id);
 

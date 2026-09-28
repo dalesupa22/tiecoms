@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { Suspense, lazy, useEffect, useRef } from 'react';
 import { notices, useClient } from './app-client.ts';
 import { handleNotice } from './notices.ts';
 import { installSoundUnlock } from './sound.ts';
-import { useLang } from './i18n.ts';
+import { t, useLang } from './i18n.ts';
 import { asset, navigate, parse, usePath } from './router.ts';
 import { AuthScreen, SsoReturnScreen } from './screens/Auth.tsx';
 import { ConversationScreen } from './screens/Conversation.tsx';
@@ -20,6 +20,8 @@ import { DialogHost } from './actions.tsx';
 import { MenuHost, ToastHost } from './menu.tsx';
 import { EmojiPickerHost } from './screens/Reactions.tsx';
 import { SavedLinksScreen } from './screens/Links.tsx';
+/** «Documentos que firmé»: se carga aparte junto con el visor de PDF. */
+const SignedScreen = lazy(() => import('./screens/Signed.tsx'));
 
 function nextParam() {
   const n = new URLSearchParams(location.search).get('next');
@@ -69,6 +71,7 @@ export function App() {
       {route.name === 'whatsapp' && <WhatsAppScreen />}
       {route.name === 'files' && <FilesScreen />}
       {route.name === 'saved' && <SavedLinksScreen />}
+      {route.name === 'signed' && <Suspense fallback={<div className="page"><div className="hint">{t('common.loading')}</div></div>}><SignedScreen /></Suspense>}
       {route.name === 'groups' && <GroupsScreen />}
       {route.name === 'dms' && <DmsScreen />}
       {route.name === 'oversight' && <OversightScreen key={route.id} orgId={route.id} />}

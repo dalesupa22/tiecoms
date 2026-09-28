@@ -75,6 +75,7 @@ export function ProfileDialog({ onClose }: { onClose: () => void }) {
       <label className="field"><span>{t('profile.jobTitle')}</span><input className="input" maxLength={120} value={title} placeholder={t('profile.jobTitlePh')} onChange={(e) => setTitle(e.target.value)} /></label>
       <label className="field"><span>{t('profile.area')}</span><input className="input" maxLength={120} value={area} placeholder={t('profile.areaPh')} onChange={(e) => setArea(e.target.value)} /></label>
       <div className="hint">{d.me.email}{org ? ` · ${org.name}` : ''}</div>
+      <button type="button" className="btn profile-signed" onClick={() => { onClose(); navigate('/firmas'); }}>✍️ {t('profile.signed')} <span className="muted">›</span></button>
       {error && <div className="error">{error}</div>}
       {cropFile && <PhotoCropDialog file={cropFile} title={t('photo.cropTitle')} onSave={upload} onClose={() => setCropFile(null)} />}
       <div className="modal-actions">
@@ -100,6 +101,7 @@ export function openAccountMenu(anchor: HTMLElement) {
     dndMenu(client.getState().data?.me.dndUntil),
     { label: t('sound.title'), icon: soundEnabled() ? '🔊' : '🔈', hint: soundEnabled() ? '✓' : '—', onSelect: () => setSoundEnabled(!soundEnabled()) },
     { divider: true },
+    { label: t('nav.signed'), icon: '✍️', onSelect: () => navigate('/firmas') },
     { label: t('nav.files'), icon: '▣', onSelect: () => navigate('/archivos') },
     { label: t('nav.whatsapp'), icon: '✆', onSelect: () => navigate('/whatsapp') },
     { label: t('settings.language'), icon: '🌐', hint: pref ? (pref === 'es' ? 'ES' : 'EN') : getLang().toUpperCase(),

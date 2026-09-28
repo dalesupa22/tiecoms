@@ -990,3 +990,27 @@ select.link-act { appearance: none; padding-right: 10px; }
 .att-file-btn.is-pdf .icon-btn { width: 34px; flex: none; }
 .att-sign { border: 0; background: var(--accent); color: #fff; border-radius: 8px; padding: 6px 10px; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
 .att-signed { color: var(--ok); font-weight: 600; }
+
+/* ---------- Documentos que firmé ---------- */
+.seal { flex: none; color: #2f6b45; }
+.signed-page { max-width: 760px; }
+.signed-day { margin-bottom: 14px; }
+.signed-day-h { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 2px 6px; }
+.signed-day-h::first-letter { text-transform: uppercase; }
+.signed-list { padding: 0; overflow: hidden; }
+.signed-row { display: flex; align-items: center; gap: 12px; width: 100%; border: 0; background: transparent; text-align: left; padding: 12px 14px; min-height: 64px; }
+.signed-row + .signed-row { border-top: 1px solid var(--line); }
+.signed-row:hover, .signed-row:active { background: var(--paper-2); }
+.signed-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 32px 16px; text-align: center; }
+.signed-empty .seal { color: var(--faint); }
+.signed-detail-head { display: flex; align-items: center; gap: 14px; }
+.signed-dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 13.5px; }
+.signed-dl dt { color: var(--muted); }
+.signed-dl dd { margin: 0; min-width: 0; word-break: break-word; }
+.signed-hash { display: grid; gap: 2px; }
+.signed-hash button { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 8px; text-align: left; }
+.signed-hash code { font-size: 11.5px; word-break: break-all; }
+.profile-signed { justify-content: space-between; }
+.signed-ref { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; letter-spacing: .04em; color: #2f6b45; }
+.signed-tabs { max-width: 420px; margin-bottom: 14px; } .signed-tabs button { white-space: nowrap; }
+@media (max-width: 520px) { .pdf-zoom { display: none; } }

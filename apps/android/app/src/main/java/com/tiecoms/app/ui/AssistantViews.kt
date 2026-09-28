@@ -608,11 +608,18 @@ private fun ListeningStrip(model: AssistantModel) {
 @Composable
 private fun Composer(model: AssistantModel) {
     val focus = remember { FocusRequester() }
-    LaunchedEffect(model.text) { if (model.text.endsWith(" ") && model.text.isNotBlank()) runCatching { focus.requestFocus() } }
+    // TextFieldValue: cuando un chip rellena el campo, el cursor queda al final para seguir escribiendo.
+    var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(model.text)) }
+    LaunchedEffect(model.text) {
+        if (model.text != field.text) {
+            field = androidx.compose.ui.text.input.TextFieldValue(model.text, androidx.compose.ui.text.TextRange(model.text.length))
+            if (model.text.isNotBlank()) runCatching { focus.requestFocus() }
+        }
+    }
     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         val placeholder = stringResource(R.string.ai_placeholder)
         TextField(
-            model.text, { model.text = it },
+            field, { field = it; model.text = it.text },
             placeholder = { Text(placeholder) }, maxLines = 5,
             shape = RoundedCornerShape(22.dp),
             colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, disabledIndicatorColor = Color.Transparent),

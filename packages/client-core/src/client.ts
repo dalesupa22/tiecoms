@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp,
+  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type UserDTO, normalizeEmoji,
 } from '@tiecoms/contracts';
@@ -49,6 +49,8 @@ export interface ClientState {
   /** Mensajes fijados por conversación. */
   pins: Record<string, string[]>;
   reminders: ReminderDTO[];
+  /** Mis mensajes programados por salir (y los fallidos), ordenados por hora de envío. */
+  scheduled: ScheduledMessageDTO[];
   events: Record<string, CalendarEventDTO>;
   /** Sube cuando el puente de WhatsApp trae chats o mensajes nuevos: la pantalla vuelve a pedir la lista. */
   waRevision: number;
@@ -103,7 +105,7 @@ const base64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+
  * escritorio y móvil se comporten igual.
  */
 export class TieComsClient {
-  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], events: {}, waRevision: 0, driveRevision: 0 };
+  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0 };
   private listeners = new Set<() => void>();
   private accessToken: string | null = null;
   private accessExp = 0;
@@ -253,7 +255,7 @@ export class TieComsClient {
     this.accessToken = null;
     await this.opts.secrets?.set(null);
     if (userId) await this.opts.storage.clearPrefix(`u:${userId}:`);
-    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], events: {}, waRevision: 0, driveRevision: 0 };
+    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0 };
     this.listeners.forEach((l) => l());
   }
 
@@ -265,6 +267,7 @@ export class TieComsClient {
     this.connect();
     this.scheduleFlush(0);
     void this.loadReminders().catch(() => {});
+    void this.loadScheduled().catch(() => {});
     // Grupos muestra los asuntos abiertos bajo cada grupo.
     void this.loadIssues({ open: true }).catch(() => {});
   }
@@ -347,6 +350,7 @@ export class TieComsClient {
     if (e.type === 'prefs.updated') this.scheduleBootstrap();
     if (e.type === 'me.dnd') this.patchMe({ dndUntil: e.dndUntil });
     if (e.type === 'reminders.changed') void this.loadReminders().catch(() => {});
+    if (e.type === 'scheduled.updated') this.putScheduled(e.scheduled);
     if (e.type === 'whatsapp.updated') this.set({ waRevision: this.state.waRevision + 1 });
     if (e.type === 'drive.updated') this.set({ driveRevision: this.state.driveRevision + 1 });
     if (e.type === 'reminder.due') {
@@ -775,6 +779,32 @@ export class TieComsClient {
   }
 
   // ---------- Recordatorios ----------
+  // ---------- Mensajes programados ----------
+  private putScheduled(x: ScheduledMessageDTO) {
+    const rest = this.state.scheduled.filter((y) => y.id !== x.id);
+    const keep = x.status === 'pending' || x.status === 'sending' || x.status === 'failed';
+    this.set({ scheduled: (keep ? [...rest, x] : rest).sort((a, b) => a.sendAt.localeCompare(b.sendAt)) });
+  }
+  async loadScheduled() {
+    try {
+      const r = await this.request<{ scheduled: ScheduledMessageDTO[] }>('/scheduled');
+      this.set({ scheduled: r.scheduled });
+      return r.scheduled;
+    } catch { return this.state.scheduled; } // servidor viejo sin /scheduled
+  }
+  async scheduleMessage(conversationId: string, input: { body: string; sendAt: string; mentions?: { userId: string; start: number; length: number }[]; replyTo?: string | null }) {
+    const x = await this.request<ScheduledMessageDTO>(`/conversations/${conversationId}/scheduled`, { method: 'POST', json: input });
+    this.putScheduled(x);
+    return x;
+  }
+  async updateScheduled(id: string, patch: { body?: string; sendAt?: string }) {
+    const x = await this.request<ScheduledMessageDTO>(`/scheduled/${id}`, { method: 'PATCH', json: patch });
+    this.putScheduled(x);
+    return x;
+  }
+  async cancelScheduled(id: string) { this.putScheduled(await this.request<ScheduledMessageDTO>(`/scheduled/${id}`, { method: 'DELETE' })); }
+  async sendScheduledNow(id: string) { this.putScheduled(await this.request<ScheduledMessageDTO>(`/scheduled/${id}/send`, { method: 'POST', json: {} })); }
+
   async loadReminders() { const r = await this.request<{ reminders: ReminderDTO[] }>('/reminders'); this.set({ reminders: r.reminders }); return r.reminders; }
   async createReminder(input: { conversationId: string; messageId?: string | null; note?: string | null; remindAt: string }) {
     const r = await this.request<ReminderDTO>('/reminders', { method: 'POST', json: input });

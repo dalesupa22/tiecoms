@@ -919,3 +919,13 @@ select.link-act { appearance: none; padding-right: 10px; }
 .link-done { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 10px; background: var(--paper-2); font-size: 13px; }
 .pending-invites summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--ink-2); padding: 4px 0; }
 .pending-invites .list { margin-top: 6px; }
+
+/* Mensajes programados */
+.sched-strip { display: flex; align-items: center; gap: 8px; width: 100%; border: 1px solid #d7e2f5; background: #f1f5fd; color: #2c4f9e; border-radius: 10px; padding: 7px 12px; margin-bottom: 6px; font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+.sched-strip.is-failed { border-color: #f0b58f; background: #fff4ec; color: #a8420e; }
+.sched-row { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.sched-row.is-failed { border-color: #f0b58f; background: #fffaf6; }
+.sched-body { white-space: pre-wrap; word-break: break-word; }
+.sched-actions { gap: 6px; flex-wrap: wrap; }
+.sched-edit { display: flex; flex-direction: column; gap: 8px; }
+.sched-btn { font-size: 16px; }

@@ -21,6 +21,7 @@ const NAV = [
   { name: 'people', label: 'nav.people', ico: '◎', to: '/participantes' },
   { name: 'files', label: 'nav.files', ico: '▣', to: '/archivos' },
   { name: 'saved', label: 'nav.saved', ico: '🔖', to: '/ver-despues' },
+  { name: 'scheduled', label: 'nav.scheduled', ico: '🕒', to: '/programados' },
   { name: 'whatsapp', label: 'nav.whatsapp', ico: '✆', to: '/whatsapp' },
 ] as const;
 /** Today, Conversaciones, Calendario y Asuntos siempre; el resto bajo «Más». */

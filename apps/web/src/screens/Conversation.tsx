@@ -18,6 +18,7 @@ import { MentionMirror, MessageText, backspaceToken, mentionsFor, mentionsMe, us
 import { QuickReplies, SideChip, SideConnector, SideDialog, replyPrivately, sidesOf, takePrivateDraft } from './Side.tsx';
 import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
+import { ScheduledStrip, openScheduleMenu, scheduleMenu, whenLabel } from './Scheduled.tsx';
 import { ConversationIssues, IssueDrawer, NewIssueDialog, isClosed } from './Issues.tsx';
 import { DeriveDialog, LineageBar, MergedCard } from './Lineage.tsx';
 import { ChatBar, ThreadChip, threadsOf } from './ChatBar.tsx';
@@ -304,6 +305,24 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     setPrivateReply(null);
     input.current?.focus();
   };
+  /** Programar: sale solo a la hora elegida. Solo texto (con menciones y respuesta); los adjuntos se envían al momento. */
+  const canSchedule = !!text.trim() && !drafts.drafts.length && !privateReply;
+  const schedule = (when: Date) => {
+    const lead = text.length - text.trimStart().length;
+    const body = text.trim();
+    const mentions = mentionsFor(text, tokens)?.map((m) => ({ ...m, start: m.start - lead })).filter((m) => m.start >= 0 && m.start + m.length <= body.length);
+    const saved = { text, tokens, replyTo };
+    client.scheduleMessage(id, { body, sendAt: when.toISOString(), mentions, replyTo: replyTo?.id ?? null })
+      .then((x) => toast(`🕒 ${t('sched.done', { when: whenLabel(x.sendAt) })}`, {
+        label: t('issue.undo'),
+        run: () => { void client.cancelScheduled(x.id).catch(() => {}); setText(saved.text); setTokens(saved.tokens); setReplyTo(saved.replyTo); },
+      }, 5000))
+      .catch((e) => { toast(errorText(e)); setText(saved.text); setTokens(saved.tokens); });
+    setTokens([]);
+    setText('');
+    setReplyTo(null);
+    input.current?.focus();
+  };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (emoji.onKeyDown(e)) return;
     if (picker.onKeyDown(e)) return;
@@ -563,6 +582,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               <button className="icon-btn" aria-label={t('reply.cancel')} onClick={() => setReplyTo(null)}>×</button>
             </div>
           )}
+          {conv.canPost && <ScheduledStrip conversationId={id} />}
           {conv.canPost ? (
             <>
             <DraftTray drafts={drafts.drafts} onRemove={drafts.remove} onRetry={drafts.retry} />
@@ -594,7 +614,11 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               {/* Con el compositor vacío, el micrófono: mantener pulsado graba una nota de voz. */}
               {!text.trim() && !drafts.drafts.length && !privateReply
                 ? <VoiceRecorder conversationId={id} onSent={() => { atBottom.current = true; setReplyTo(null); }} />
-                : <button className="send" onClick={send} disabled={(!text.trim() && !drafts.ready.length) || drafts.busy} aria-label={t('chat.send')}>➤</button>}
+                : <>
+                  {canSchedule && <button className="bring-btn sched-btn" title={t('sched.menuTitle')} aria-label={t('sched.menuTitle')} onClick={(e) => openScheduleMenu(e.currentTarget, schedule)}>🕒</button>}
+                  <button className="send" onClick={send} disabled={(!text.trim() && !drafts.ready.length) || drafts.busy} aria-label={t('chat.send')}
+                    {...(canSchedule ? menuProps(() => scheduleMenu(schedule, t('sched.menuTitle'))) : {})}>➤</button>
+                </>}
             </div>
             </>
           ) : <div className="hint" style={{ textAlign: 'center', padding: 8 }}>{t('chat.readOnly')}</div>}

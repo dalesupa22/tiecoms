@@ -393,6 +393,21 @@ export interface ForwardedInfo {
   messageId?: string | null; messageSeq?: number | null; excerpt?: string | null;
 }
 
+/** Mensaje programado: solo lo ve quien lo escribió, hasta que sale. */
+export interface ScheduledMessageDTO {
+  id: string;
+  conversationId: string;
+  body: string;
+  mentions: { userId: string; start: number; length: number }[];
+  replyTo: string | null;
+  sendAt: string;
+  status: 'pending' | 'sending' | 'sent' | 'cancelled' | 'failed';
+  messageId: string | null;
+  error: string | null;
+  createdAt: string;
+  sentAt: string | null;
+}
+
 export interface ReminderDTO {
   id: string;
   conversationId: string;
@@ -745,6 +760,17 @@ export const MUTE_FOREVER = '9999-12-31T00:00:00Z';
 export const DndInput = z.object({ until: z.iso.datetime({ offset: true }).nullable() });
 export interface DndDTO { dndUntil: string | null }
 export const MarkUnreadInput = z.object({ seq: z.number().int().min(1) });
+export const CreateScheduledInput = z.object({
+  body: z.string().trim().min(1).max(8000),
+  mentions: z.array(MentionInput).max(50).optional(),
+  replyTo: z.uuid().nullable().optional(),
+  sendAt: z.iso.datetime({ offset: true }),
+});
+export const UpdateScheduledInput = z.object({
+  body: z.string().trim().min(1).max(8000).optional(),
+  mentions: z.array(MentionInput).max(50).optional(),
+  sendAt: z.iso.datetime({ offset: true }).optional(),
+});
 export const CreateReminderInput = z.object({
   conversationId: z.uuid(), messageId: z.uuid().nullable().optional(), note: z.string().trim().max(300).nullable().optional(), remindAt: z.iso.datetime(),
 });
@@ -906,6 +932,8 @@ export type AccountEvent =
   | { type: 'reminder.due'; reminder: ReminderDTO }
   /** Mis recordatorios cambiaron desde otro dispositivo (p. ej. una reacción 👀): volver a pedirlos. */
   | { type: 'reminders.changed' }
+  /** Un mensaje programado mío cambió (creado, editado, enviado, cancelado o fallido), en cualquier dispositivo. */
+  | { type: 'scheduled.updated'; scheduled: ScheduledMessageDTO }
   /** Una reunión a la que voy (sí, quizá o sin responder) empieza en `minutes` minutos (10 por defecto). */
   | { type: 'event.soon'; event: CalendarEventDTO; minutes: number }
   | { type: 'prefs.updated'; conversationId?: string; workspaceId?: string }

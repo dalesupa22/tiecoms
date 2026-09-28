@@ -109,7 +109,11 @@ const reminders = [
   { id: 'r2', conversationId: 'diag', messageId: null, messageSeq: null, note: null, remindAt: iso(-5 * H), firedAt: null, doneAt: null },
 ];
 (client as any).set({
-  status: 'ready', connection: 'online', data, issues, events, reminders, pins: { general: ['general-m3'] },
+  status: 'ready', connection: 'online', data, issues, events, reminders,
+  scheduled: [
+    { id: 's1', conversationId: 'general', body: 'Ana, ¿ya revisaste la cláusula 4 del contrato? Necesito respuesta antes del comité.', mentions: [], replyTo: null, sendAt: new Date(Date.now() + 14 * H).toISOString(), status: 'pending', messageId: null, error: null, createdAt: iso(H), sentAt: null },
+    { id: 's2', conversationId: 'general', body: 'Recordatorio: mañana cerramos la plantilla final.', mentions: [], replyTo: null, sendAt: new Date(Date.now() + 38 * H).toISOString(), status: 'pending', messageId: null, error: null, createdAt: iso(H), sentAt: null },
+  ], pins: { general: ['general-m3'] },
   conversations: {
     general: { messages: g, lastEventSeq: g.length, hasMore: false, loaded: true, loading: false },
     diag: { messages: dg, lastEventSeq: dg.length, hasMore: false, loaded: true, loading: false },

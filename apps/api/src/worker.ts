@@ -7,6 +7,7 @@ import { hostname } from 'node:os';
 import { migrate } from './migrate.ts';
 import { enqueueOutbox, pool, tx } from './db.ts';
 import { fireDueReminders } from './modules/reminders.ts';
+import { sendDueScheduled } from './modules/scheduled.ts';
 import { cleanupExpired as cleanupSso } from './modules/sso.ts';
 import { previewMessage } from './modules/link-preview.ts';
 import { deletePersonalObject } from './storage.ts';
@@ -147,7 +148,9 @@ async function loop() {
     try {
       // Recordatorios: revisión cada 15 s; el aviso llega por el outbox a los dispositivos de la persona.
       if (Date.now() - lastReminders > 15_000) { lastReminders = Date.now(); const n = await fireDueReminders(); if (n) console.log(`[worker] recordatorios disparados: ${n}`);
-        const s = await fireSoonEvents(); if (s) console.log(`[worker] avisos de reunión: ${s}`); }
+        const s = await fireSoonEvents(); if (s) console.log(`[worker] avisos de reunión: ${s}`);
+        // Mensajes programados, en el mismo ciclo de 15 s (índice parcial: sin pendientes no cuesta nada).
+        const p = await sendDueScheduled(); if (p) console.log(`[worker] programados enviados: ${p}`); }
       if (Date.now() - lastSchedule > 30_000) { await schedule(); lastSchedule = Date.now(); }
       const worked = await runOne();
       if (!worked) await new Promise((r) => setTimeout(r, 1000));

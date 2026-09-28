@@ -20,6 +20,7 @@ import { DialogHost } from './actions.tsx';
 import { MenuHost, ToastHost } from './menu.tsx';
 import { EmojiPickerHost } from './screens/Reactions.tsx';
 import { SavedLinksScreen } from './screens/Links.tsx';
+import { ScheduledScreen } from './screens/Scheduled.tsx';
 
 function nextParam() {
   const n = new URLSearchParams(location.search).get('next');
@@ -69,6 +70,7 @@ export function App() {
       {route.name === 'whatsapp' && <WhatsAppScreen />}
       {route.name === 'files' && <FilesScreen />}
       {route.name === 'saved' && <SavedLinksScreen />}
+      {route.name === 'scheduled' && <ScheduledScreen />}
       {route.name === 'groups' && <GroupsScreen />}
       {route.name === 'dms' && <DmsScreen />}
       {route.name === 'oversight' && <OversightScreen key={route.id} orgId={route.id} />}

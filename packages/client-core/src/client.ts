@@ -54,11 +54,26 @@ export interface ClientState {
   waRevision: number;
   /** Sube cuando cambia algún árbol de archivos visible para la persona. */
   driveRevision: number;
+  /** «No molestar» guardado solo en este dispositivo porque el servidor no conoce /me/dnd (servidor viejo). */
+  dndLocalOnly?: boolean;
 }
+
+/** Silencio «hasta que lo reactive»: más de un año (igual que el servidor, que ahí no deja pasar menciones). */
+export const isMutedForever = (until: string | null | undefined) => !!until && Date.parse(until) > Date.now() + 366 * 86_400_000;
+export const isActiveUntil = (until: string | null | undefined) => !!until && Date.parse(until) > Date.now();
+/** «No molestar» activo en este momento. */
+export const dndActive = (s: Pick<ClientState, 'data'>) => isActiveUntil(s.data?.me.dndUntil);
+/** ¿El mensaje me menciona (a mí o a @todos)? */
+export const mentionsUser = (m: Pick<MessageDTO, 'mentions'>, userId: string | undefined) =>
+  !!userId && !!m.mentions?.some((x) => x.userId === userId || x.userId === 'all');
 
 /** Aviso para la interfaz (notificación del sistema, sonido, toast). */
 export type ClientNotice =
-  | { kind: 'message'; conversationId: string; message: MessageDTO }
+  /**
+   * Mensaje nuevo de otra persona. No llega con «No molestar» activo ni en un chat silenciado,
+   * salvo que me mencionen (`mentioned`) y el silencio no sea «hasta que lo reactive» (igual que el push).
+   */
+  | { kind: 'message'; conversationId: string; message: MessageDTO; mentioned: boolean; muted: boolean }
   | { kind: 'reminder'; reminder: ReminderDTO }
   /** Una reunión a la que voy empieza en `minutes` minutos. */
   | { kind: 'eventSoon'; event: CalendarEventDTO; minutes: number }
@@ -257,7 +272,13 @@ export class TieComsClient {
   // ---------- Snapshot ----------
   async loadBootstrap() {
     const data = await this.request<BootstrapDTO>('/bootstrap');
-    this.set({ data });
+    const dndLocalOnly = data.me.dndUntil === undefined;
+    if (dndLocalOnly) {
+      // Servidor anterior a «No molestar»: se usa lo guardado en este dispositivo.
+      const local = await this.opts.storage.get<string | null>(`u:${data.me.id}:dnd`).catch(() => null);
+      data.me.dndUntil = isActiveUntil(local) ? local : null;
+    }
+    this.set({ data, dndLocalOnly });
     // Conversaciones que ya no están en mi alcance: se purgan de la caché local.
     const allowed = new Set(data.conversations.map((c) => c.id));
     const kept: Record<string, ConversationState> = {};
@@ -324,6 +345,7 @@ export class TieComsClient {
   private onAccountEvent(e: AccountEvent) {
     if (e.type === 'scope.changed') { this.scheduleBootstrap(); void this.loadIssues({ open: true }).catch(() => {}); }
     if (e.type === 'prefs.updated') this.scheduleBootstrap();
+    if (e.type === 'me.dnd') this.patchMe({ dndUntil: e.dndUntil });
     if (e.type === 'reminders.changed') void this.loadReminders().catch(() => {});
     if (e.type === 'whatsapp.updated') this.set({ waRevision: this.state.waRevision + 1 });
     if (e.type === 'drive.updated') this.set({ driveRevision: this.state.driveRevision + 1 });
@@ -349,8 +371,11 @@ export class TieComsClient {
     if (e.type === 'issue.updated') { this.putIssues([e.issue]); this.recountIssues(e.conversationId); }
     if (e.type === 'pins.changed') this.set({ pins: { ...this.state.pins, [e.conversationId]: e.messageIds } });
     if (e.type === 'calendar.updated') this.set({ events: { ...this.state.events, [e.event.id]: e.event } });
-    if (e.type === 'message.created' && e.message.authorId !== this.state.data?.me.id && e.message.kind === 'text'
-      && !(meta.mutedUntil && Date.parse(meta.mutedUntil) > Date.now())) this.opts.onNotice?.({ kind: 'message', conversationId: e.conversationId, message: e.message });
+    if (e.type === 'message.created' && e.message.authorId !== this.state.data?.me.id && e.message.kind === 'text' && !dndActive(this.state)) {
+      const muted = isActiveUntil(meta.mutedUntil);
+      const mentioned = mentionsUser(e.message, this.state.data?.me.id);
+      if (!muted || (mentioned && !isMutedForever(meta.mutedUntil))) this.opts.onNotice?.({ kind: 'message', conversationId: e.conversationId, message: e.message, mentioned, muted });
+    }
     if (e.type === 'message.created') this.bumpMeta(e.message);
     if (!local?.loaded) {
       this.patchConversationMeta(e.conversationId, { lastEventSeq: Math.max(meta.lastEventSeq, e.eventSeq) });
@@ -712,6 +737,33 @@ export class TieComsClient {
   async setLinkPreviewMode(conversationId: string, mode: LinkPreviewMode) {
     this.patchConversationMeta(conversationId, { linkPreviews: mode });
     await this.request(`/conversations/${conversationId}/prefs`, { method: 'PUT', json: { linkPreviews: mode } });
+  }
+  private patchMe(patch: Partial<UserDTO>) {
+    const d = this.state.data;
+    if (d) this.set({ data: { ...d, me: { ...d.me, ...patch } } });
+  }
+  /**
+   * «No molestar» (silenciar todo) hasta `until` (ISO; MUTE_FOREVER = hasta que lo reactive); null lo apaga.
+   * Si el servidor no conoce la ruta (404), se guarda solo en este dispositivo y devuelve { local: true }.
+   */
+  async setDnd(until: string | null): Promise<{ dndUntil: string | null; local: boolean }> {
+    const prev = this.state.data?.me.dndUntil ?? null;
+    this.patchMe({ dndUntil: until });
+    try {
+      const r = await this.request<{ dndUntil: string | null }>('/me/dnd', { method: 'PUT', json: { until } });
+      this.set({ dndLocalOnly: false });
+      this.patchMe({ dndUntil: r.dndUntil });
+      return { dndUntil: r.dndUntil, local: false };
+    } catch (e) {
+      const me = this.state.data?.me.id;
+      if (e instanceof ApiRequestError && e.status === 404 && me) {
+        await this.opts.storage.set(`u:${me}:dnd`, until);
+        this.set({ dndLocalOnly: true });
+        return { dndUntil: until, local: true };
+      }
+      this.patchMe({ dndUntil: prev });
+      throw e;
+    }
   }
   /** Resumen semanal de enlaces por correo (opt-in). */
   async setLinkDigest(on: boolean) {

@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import type { BootstrapDTO, ConversationDTO, MessageDTO, PersonDTO, WorkspaceDTO } from '@tiecoms/contracts';
 import { client } from './app-client.ts';
 import { errorText, locale, t } from './i18n.ts';
@@ -6,6 +6,7 @@ import { copyText, toast, type MenuItem } from './menu.tsx';
 import { BASE, navigate } from './router.ts';
 import { Modal, conversationTitle, personById } from './ui.tsx';
 import { previewModeMenu } from './screens/Links.tsx';
+import { MUTE_FOREVER, activeUntil, isForever, tomorrowAt8, untilText } from './silence.ts';
 
 // ---------- Diálogos globales (se pueden abrir desde cualquier menú) ----------
 let dialog: ((close: () => void) => ReactNode) | null = null;
@@ -133,23 +134,78 @@ export function ForwardDialog({ source, onClose }: { source: MessageDTO; onClose
   );
 }
 
-// ---------- Menús de conversación, espacio y persona ----------
-export function muteMenu(conv: ConversationDTO): MenuItem {
-  const muted = !!conv.mutedUntil && Date.parse(conv.mutedUntil) > Date.now();
-  if (muted) return { label: t('menu.unmute'), icon: '🔔', onSelect: () => client.setConversationPrefs(conv.id, { mutedUntil: null }).then(() => toast(t('toast.unmuted'))).catch((e) => toast(errorText(e))) };
+// ---------- Silenciar un chat y «No molestar» ----------
+/** «Silenciado hasta las 18:00», «Silenciado hasta el mar 29, 8:00» o «Silenciado» (hasta que lo reactive). */
+export function mutedText(conv: ConversationDTO): string | null {
+  if (!activeUntil(conv.mutedUntil)) return null;
+  const when = untilText(conv.mutedUntil!, locale());
+  if (!when) return t('mute.on');
+  return new Date(conv.mutedUntil!).toDateString() === new Date().toDateString() ? t('mute.until', { time: when }) : t('mute.untilDay', { time: when });
+}
+
+/** Opciones para silenciar un chat: 1 hora · 8 horas · 1 semana · Hasta que lo reactive. */
+export function muteOptions(conv: ConversationDTO): MenuItem[] {
   const until = (ms: number) => new Date(Date.now() + ms).toISOString();
   const set = (iso: string) => client.setConversationPrefs(conv.id, { mutedUntil: iso }).then(() => toast(t('toast.muted'))).catch((e) => toast(errorText(e)));
+  return [
+    { label: t('mute.1h'), onSelect: () => set(until(3600_000)) },
+    { label: t('mute.8h'), onSelect: () => set(until(8 * 3600_000)) },
+    { label: t('mute.week'), onSelect: () => set(until(7 * 86400_000)) },
+    { label: t('mute.forever'), onSelect: () => set(MUTE_FOREVER) },
+  ];
+}
+export const unmute = (conv: ConversationDTO) => client.setConversationPrefs(conv.id, { mutedUntil: null }).then(() => toast(t('toast.unmuted'))).catch((e) => toast(errorText(e)));
+
+export function muteMenu(conv: ConversationDTO): MenuItem {
+  if (activeUntil(conv.mutedUntil)) return { label: t('menu.unmute'), icon: '🔔', hint: mutedText(conv) ?? undefined, onSelect: () => void unmute(conv) };
+  return { label: t('menu.mute'), icon: '🔕', items: muteOptions(conv) };
+}
+
+/** «No molestar hasta las 18:00» (o el día), «No molestar activo» si es hasta que lo reactive; null si está apagado. */
+export function dndText(until: string | null | undefined): string | null {
+  if (!activeUntil(until)) return null;
+  const when = untilText(until!, locale());
+  if (!when) return t('dnd.on');
+  return new Date(until!).toDateString() === new Date().toDateString() ? t('dnd.until', { time: when }) : t('dnd.untilDay', { time: when });
+}
+
+export async function setDnd(until: string | null) {
+  try {
+    const r = await client.setDnd(until);
+    toast(r.local ? t('dnd.localOnly') : until ? t('dnd.toastOn') : t('dnd.toastOff'));
+  } catch (e) { toast(errorText(e)); }
+}
+
+/** «No molestar»: 1 hora · 8 horas · Hasta mañana (8:00) · Hasta que lo reactive; o «Reactivar» si está activo. */
+export function dndMenu(until: string | null | undefined): MenuItem {
+  const on = activeUntil(until);
+  const at = (ms: number) => new Date(Date.now() + ms).toISOString();
+  const tomorrow = tomorrowAt8();
   return {
-    label: t('menu.mute'), icon: '🔕',
+    label: t('dnd.title'), icon: '🌙', hint: on ? untilText(until!, locale()) ?? t('dnd.activeHint') : undefined,
     items: [
-      { label: t('mute.1h'), onSelect: () => set(until(3600_000)) },
-      { label: t('mute.8h'), onSelect: () => set(until(8 * 3600_000)) },
-      { label: t('mute.week'), onSelect: () => set(until(7 * 86400_000)) },
-      { label: t('mute.forever'), onSelect: () => set(new Date('2099-12-31T00:00:00Z').toISOString()) },
+      ...(on ? [{ label: t('dnd.off'), icon: '🔔', onSelect: () => void setDnd(null) }, { divider: true }] : []),
+      { label: t('dnd.1h'), onSelect: () => void setDnd(at(3600_000)) },
+      { label: t('dnd.8h'), onSelect: () => void setDnd(at(8 * 3600_000)) },
+      { label: t('dnd.tomorrow'), hint: tomorrow.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }), onSelect: () => void setDnd(tomorrow.toISOString()) },
+      { label: t('dnd.forever'), onSelect: () => void setDnd(MUTE_FOREVER) },
     ],
   };
 }
 
+/** Vuelve a pintar cuando vence `until` (para que la lunita, la franja o el 🔕 desaparezcan solos). */
+export function useExpiry(until: string | null | undefined) {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    if (!activeUntil(until) || isForever(until)) return;
+    const ms = Date.parse(until!) - Date.now() + 250;
+    if (ms > 2 ** 31 - 1) return;
+    const h = setTimeout(() => bump((n) => n + 1), ms);
+    return () => clearTimeout(h);
+  }, [until]);
+}
+
+// ---------- Menús de conversación, espacio y persona ----------
 export function conversationMenu(conv: ConversationDTO, extra: { onNewMeeting?: () => void } = {}): MenuItem[] {
   const pinned = !!conv.pinnedAt;
   return [

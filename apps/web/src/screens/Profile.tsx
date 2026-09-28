@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { UserDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
-import { openDialog } from '../actions.tsx';
+import { dndMenu, openDialog } from '../actions.tsx';
+import { setSoundEnabled, soundEnabled } from '../sound.ts';
 import { errorText, getLang, langPreference, setLang, t, type Lang } from '../i18n.ts';
 import { openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate } from '../router.ts';
@@ -94,6 +95,10 @@ export function openAccountMenu(anchor: HTMLElement) {
   const items: MenuItem[] = [
     { label: t('profile.edit'), icon: '✎', onSelect: openProfile },
     { label: t('profile.changePhoto'), icon: '📷', onSelect: openProfile },
+    { divider: true },
+    // «No molestar» (silenciar todo) y el sonido de mensajes (docs/GRUPOS.md, 28-sep-2026).
+    dndMenu(client.getState().data?.me.dndUntil),
+    { label: t('sound.title'), icon: soundEnabled() ? '🔊' : '🔈', hint: soundEnabled() ? '✓' : '—', onSelect: () => setSoundEnabled(!soundEnabled()) },
     { divider: true },
     { label: t('nav.files'), icon: '▣', onSelect: () => navigate('/archivos') },
     { label: t('nav.whatsapp'), icon: '✆', onSelect: () => navigate('/whatsapp') },

@@ -6,7 +6,7 @@ import { ForwardToChatsDialog, Linkify, StackedAvatars } from './Chats.tsx';
 import { QUICK_REACTIONS } from '@tiecoms/contracts';
 import { ReactionBar, isJumbo, openEmojiPicker, toggleReaction, useEmojiAutocomplete } from './Reactions.tsx';
 import { LinkGroup, LinksPane, MessageLinks, isLinkOnly } from './Links.tsx';
-import { conversationMenu, forwardMenu, messageLink, openDialog, remindMenu } from '../actions.tsx';
+import { conversationMenu, forwardMenu, messageLink, muteMenu, muteOptions, mutedText, openDialog, remindMenu, unmute, useExpiry } from '../actions.tsx';
 import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate, queryParam } from '../router.ts';
@@ -263,6 +263,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     return () => window.removeEventListener('keydown', k);
   }, [embedded, id]);
 
+  // El 🔕 y «Silenciado hasta…» se quitan solos cuando vence el silencio.
+  useExpiry(conv?.mutedUntil);
+
   if (!conv) return <div className="page"><div className="empty">{t('chat.notFound')}</div></div>;
 
   const onScroll = () => {
@@ -347,6 +350,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const orgsHere = [...new Set(conv.memberIds.map((m) => personById(d, m)?.orgId).filter(Boolean))].map((o) => orgById(d, o as string));
   const pinned = new Set(pinIds ?? []);
   const muted = !!conv.mutedUntil && Date.parse(conv.mutedUntil) > Date.now();
+  const muteLine = mutedText(conv);
+  const openMuteMenu = (el: HTMLElement) => { const r = el.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, muted ? [muteMenu(conv)] : [{ label: t('mute.how'), disabled: true }, ...muteOptions(conv)]); };
   const canPhoto = conv.kind !== 'direct' && conv.canPost && (conv.kind === 'multi' || conv.canManage);
   const sideConv = sideId ? d.conversations.find((c) => c.id === sideId) : null;
   const sideAnchor = sideConv?.parentMessageId ? byId.get(sideConv.parentMessageId) ?? null : null;
@@ -418,7 +423,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           {!embedded && <button className="icon-btn only-mobile" aria-label={t('common.back')} onClick={() => (history.length > 1 ? history.back() : navigate('/conversaciones'))}>‹</button>}
           {conv.kind !== 'direct' && conv.avatarUrl && <ConvAvatar c={conv} size={30} />}
           <div className="grow" style={{ minWidth: 0 }}>
-            <h2 className="ellipsis">{conv.kind === 'internal' ? '◌ ' : conv.level === 'directivo' ? '◆ ' : ''}{isSide ? `💬 ${t('side.title')}` : title}{muted ? ' 🔕' : ''}</h2>
+            <h2 className="ellipsis">{conv.kind === 'internal' ? '◌ ' : conv.level === 'directivo' ? '◆ ' : ''}{isSide ? `💬 ${t('side.title')}` : title}{muted && <> <button className="head-mute" title={`${muteLine ?? t('side.muted')} · ${t('menu.unmute')}`} aria-label={t('menu.unmute')} onClick={(e) => openMuteMenu(e.currentTarget)}>🔕</button></>}</h2>
             {isSide
               ? <div className="small muted ellipsis side-head-people"><StackedAvatars c={conv} size={18} /> 🔒 {t('side.privateN', { n: conv.memberIds.length })}</div>
               : <div className="small muted ellipsis">{conversationSubtitle(d, conv)}{conv.kind !== 'direct' ? ` · ${tn(conv.memberIds.length, 'n.participant', 'n.participants')}` : ''}</div>}
@@ -458,7 +463,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
         {nav.lineAbove && entry && newLine != null && (
           <button className="jump-new" onClick={jumpToNewLine} aria-label={t('chat.jumpNew')} title={t('chat.jumpNew')}>{t('chat.newAbove', { n: entry.unread })}</button>
         )}
-        <div className="msgs" ref={scroller} onScroll={onScroll} role="log" aria-live="polite">
+        <div className="msgs" data-conv-id={id} ref={scroller} onScroll={onScroll} role="log" aria-live="polite">
           {local?.loading && !local.loaded && <div className="msg-sys">{t('common.loading')}</div>}
           {local?.loaded && !local.hasMore && conv.historyFromSeq > 0 && <div className="msg-sys">{t('chat.lateJoin')}</div>}
           {local?.loaded && local.hasMore && <div className="msg-sys">{local.loading ? t('chat.loadingOlder') : '·'}</div>}
@@ -617,6 +622,16 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               {conv.avatarUrl && <button className="btn ghost small" onClick={() => { if (confirm(t('group.removeConfirm'))) void client.removeConversationAvatar(id).then(() => toast(t('group.photoRemoved'))).catch((e) => toast(errorText(e))); }}>{t('group.removePhoto')}</button>}
             </div>
           )}
+          {/* Silenciar: interruptor con el tiempo restante; al encenderlo se elige por cuánto. */}
+          <div className="card mute-row">
+            <span aria-hidden style={{ fontSize: 18, filter: muted ? 'grayscale(1)' : undefined }}>{muted ? '🔕' : '🔔'}</span>
+            <span className="grow">
+              <b style={{ display: 'block' }}>{t('mute.switch')}</b>
+              <span className="small muted" style={{ display: 'block' }}>{muteLine ?? t('mute.switchHint')}</span>
+            </span>
+            <button className="switch" role="switch" aria-checked={muted} aria-label={t('mute.switch')}
+              onClick={(e) => { if (muted) void unmute(conv); else openMuteMenu(e.currentTarget); }} />
+          </div>
           {canWork && <ConversationAgenda conv={conv} />}
           {canWork && (
             <div>

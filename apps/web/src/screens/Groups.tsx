@@ -4,7 +4,8 @@ import { client, useClient } from '../app-client.ts';
 import { errorText, getLang, locale, t, tn } from '../i18n.ts';
 import { navigate, queryParam } from '../router.ts';
 import { Avatar, ConvAvatar, Modal, OrgMark, badgeColor, conversationPreview, conversationTitle, orgById, personById, timeLabel } from '../ui.tsx';
-import { conversationMenu, openDialog } from '../actions.tsx';
+import { conversationMenu, mutedText, openDialog } from '../actions.tsx';
+import { DndStrip } from './Silence.tsx';
 import { copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { newEvent } from './Calendar.tsx';
 import { InviteDialog } from './Dialogs.tsx';
@@ -333,7 +334,7 @@ export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, e
         ◆ {issues.count}{issues.overdue > 0 && <b> · {issues.overdue}!</b>} <span aria-hidden>{issues.open ? '⌄' : '›'}</span>
       </span>
     )}
-    {muted && <span className="small" title={t('side.muted')}>🔕</span>}
+    {muted && <span className="mute-ico" title={mutedText(c) ?? t('side.muted')} aria-label={t('side.muted')}>🔕</span>}
     {(c.unreadMentions ?? 0) > 0 && <span className="pill mention-pill" title={t('mention.youMentioned')}>@</span>}
     {c.unread > 0 && <span className={`pill ${muted ? 'is-muted' : ''}`} style={{ background: badgeColor(orgOfWs) }}>{c.unread}</span>}
   </>;
@@ -471,6 +472,7 @@ export function GroupsScreen() {
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 760 }}>
       <div className="row page-head">{view === 'tree' && <GroupsViewButton />}<h1 className="grow">{t('nav.groups')}</h1><QuickActions /></div>
+      <DndStrip />
       <QuickSearchField value={q} onChange={setQ} placeholder={t('grp.search')} order={['groups', 'people', 'chats']} />
       {!searching && <div className="row groups-view-row"><GroupsViewToggle /></div>}
       <div className="card" style={{ padding: 6, marginTop: 10 }}>
@@ -487,6 +489,7 @@ export function DmsScreen() {
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 760 }}>
       <div className="row page-head"><h1 className="grow">{t('nav.dms')}</h1><QuickActions /></div>
+      <DndStrip />
       <QuickSearchField value={q} onChange={setQ} placeholder={t('dm.search')} order={['chats', 'people', 'groups']} />
       <div className="card" style={{ padding: 6, marginTop: 10 }}>
         {q.trim() ? <QuickSearchSections query={q} order={['chats', 'people', 'groups']} />

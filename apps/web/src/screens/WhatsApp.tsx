@@ -308,7 +308,7 @@ function ChatPanel({ c, revision, onClose, onPatch }: { c: WaChatDTO; revision: 
         {messages?.length === 0 && <div className="hint">{t('wa.noMessages')}</div>}
         {messages?.map((m) => (
           <div key={m.id} className={`wa-msg ${m.fromMe ? 'me' : ''}`}>
-            {!m.fromMe && c.isGroup && m.author && <div className="wa-author">{m.author}</div>}
+            {!m.fromMe && c.isGroup && <div className={m.author ? 'wa-author' : 'wa-author unknown'}>{m.author ?? t('wa.someone')}</div>}
             <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{m.body}</div>
             <div className="wa-time">{new Date(m.sentAt).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
           </div>

@@ -403,6 +403,7 @@ a.btn { text-decoration: none; color: inherit; } a.btn.primary { color: var(--pa
 .wa-msg { max-width: 85%; background: #fff; border-radius: 10px; padding: 6px 10px; align-self: flex-start; box-shadow: 0 1px 0 var(--line); }
 .wa-msg.me { align-self: flex-end; background: #e3efe6; }
 .wa-author { font-size: 11px; font-weight: 700; color: var(--accent-ink); }
+.wa-author.unknown { color: var(--muted); font-weight: 600; }
 .wa-time { font-size: 10px; color: var(--faint); text-align: right; }
 .wa-panel-foot { padding: 12px 14px; border-top: 1px solid var(--line); }
 @media (max-width: 860px) {

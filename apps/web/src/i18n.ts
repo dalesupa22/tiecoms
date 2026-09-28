@@ -333,7 +333,7 @@ const es = {
   'err.sso_unavailable': 'Este inicio de sesión aún no está disponible.', 'err.sso_personal_account': 'Usa tu cuenta de Microsoft de trabajo; las cuentas personales no están habilitadas.',
   'err.sso_email_unverified': 'Tu proveedor no ha verificado este correo. Entra con tu correo y contraseña.', 'err.account_disabled': 'Esta cuenta está desactivada.',
   // Conectar WhatsApp
-  'nav.whatsapp': 'WhatsApp', 'wa.title': 'WhatsApp', 'wa.connect': '＋ Conectar WhatsApp',
+  'nav.whatsapp': 'WhatsApp', 'wa.title': 'WhatsApp', 'wa.connect': '＋ Conectar WhatsApp', 'wa.someone': 'Participante',
   'wa.intro': 'Conecta tu WhatsApp personal y tu WhatsApp Business. Chaggu lee tus grupos y chats como un dispositivo vinculado y los organiza por tema; nada cambia en tu teléfono.',
   'wa.emptyTitle': 'Conecta tus WhatsApp', 'wa.emptyBody': 'Hoy casi todos tenemos dos: el personal y el Business. Conéctalos los dos y mira todos tus grupos ordenados en un solo lugar.',
   'wa.connectTitle': 'Conectar WhatsApp', 'wa.connectBody': '¿Cuál vas a conectar? Luego puedes agregar el otro.',
@@ -806,7 +806,7 @@ const en: Record<Key, string> = {
   'err.sso_cancelled': 'You cancelled the sign-in.', 'err.sso_failed': 'We could not complete the sign-in.',
   'err.sso_unavailable': 'This sign-in option is not available yet.', 'err.sso_personal_account': 'Use your work Microsoft account; personal accounts are not enabled.',
   'err.sso_email_unverified': 'Your provider has not verified this email. Sign in with your email and password.', 'err.account_disabled': 'This account is disabled.',
-  'nav.whatsapp': 'WhatsApp', 'wa.title': 'WhatsApp', 'wa.connect': '＋ Connect WhatsApp',
+  'nav.whatsapp': 'WhatsApp', 'wa.title': 'WhatsApp', 'wa.connect': '＋ Connect WhatsApp', 'wa.someone': 'Participant',
   'wa.intro': 'Connect your personal WhatsApp and your WhatsApp Business. Chaggu reads your groups and chats as a linked device and sorts them by topic; nothing changes on your phone.',
   'wa.emptyTitle': 'Connect your WhatsApps', 'wa.emptyBody': 'Most of us have two today: personal and Business. Connect both and see all your groups sorted in one place.',
   'wa.connectTitle': 'Connect WhatsApp', 'wa.connectBody': 'Which one are you connecting? You can add the other one next.',

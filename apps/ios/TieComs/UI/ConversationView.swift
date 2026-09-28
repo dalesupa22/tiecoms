@@ -54,6 +54,8 @@ enum ChatSheet: Identifiable {
     case reminder(MessageDTO?), pins, issuesHere, report(MessageDTO), threads, agenda, react(MessageDTO)
     /// «⑂ N sin leer en X conversaciones de este grupo · Ver» (2026-09-28).
     case treePending
+    /// Reunión con Meet, Teams o Zoom: ahora o agendada (2026-09-28).
+    case meeting(now: Bool)
     var id: String {
         switch self {
         case .derive(let m): return "derive-\(m.id)"
@@ -69,6 +71,7 @@ enum ChatSheet: Identifiable {
         case .agenda: return "agenda"
         case .react(let m): return "react-\(m.id)"
         case .treePending: return "tree"
+        case .meeting(let now): return "meeting-\(now)"
         }
     }
 }
@@ -237,6 +240,7 @@ struct ConversationView: View {
         case .pins: PinsSheet(conversationId: conversationId)
         case .issuesHere: ConversationIssuesSheet(conversationId: conversationId)
         case .threads: ChatThreadsSheet(conversationId: conversationId) { id in openThread(id) }
+        case .meeting(let now): MeetingSheet(conversationId: conversationId, now: now)
         case .treePending:
             TreePendingSheet(conversationId: conversationId) { id in
                 // Un hilo se abre al lado (como en Slack); una rama o interna, a pantalla completa.
@@ -1040,7 +1044,8 @@ struct ConversationView: View {
                 // «＋»: fotos, archivos y, aparte, evento o asunto del chat.
                 if editing == nil {
                     AttachButton(staged: $staged, onEvent: embedded ? nil : { sheet = .newEvent(nil) },
-                                 onIssue: embedded || !canOpenIssues ? nil : { sheet = .newIssue(nil) }) { store.show($0) }
+                                 onIssue: embedded || !canOpenIssues ? nil : { sheet = .newIssue(nil) },
+                                 onMeeting: embedded ? nil : { now in sheet = .meeting(now: now) }) { store.show($0) }
                 }
                 // UITextView: tokens resaltados, cursor real y retroceso que borra el token entero.
                 ComposerTextView(text: $draft, mentions: $draftMentions, cursor: $draftCursor, focused: $composerFocused,

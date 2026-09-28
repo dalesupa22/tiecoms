@@ -343,6 +343,8 @@ struct SettingsView: View {
                     }
                 } footer: { Text(L("join.youHint")) }
             }
+            // Conexiones para crear reuniones reales de Meet, Teams o Zoom (1.6.6).
+            if store.data != nil { MeetingsSettingsSection() }
             Section {
                 DndRow()
                 SleepRow()

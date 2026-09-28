@@ -88,6 +88,8 @@ final class AppStore {
     var waRevision = 0
     /// Sube cuando cambia algún árbol de archivos visible (drive.updated).
     var driveRevision = 0
+    /// Cambió una conexión de reuniones (Meet/Teams/Zoom): el diálogo y Ajustes vuelven a pedir el estado.
+    var meetingsRevision = 0
     /// Aviso breve (toast).
     var toast: String?
     /// «Deshacer» del aviso actual (completar o descartar un asunto); se borra al cambiar el aviso.
@@ -912,6 +914,12 @@ final class AppStore {
 
     func handle(url: URL) {
         // chaggu://auth/* es del flujo SSO (lo recibe ASWebAuthenticationSession), no es navegación.
+        // chaggu://meetings/connected?… vuelve de conectar Meet/Teams/Zoom (normalmente lo recibe la sesión web).
+        if MeetingCallback.isMeetings(url) {
+            meetingsRevision += 1
+            if case .connected(let p)? = MeetingCallback.parse(url) { show(L("meet.connectedToast", ["provider": p?.label ?? ""])) }
+            return
+        }
         guard !SSOCallback.isReserved(url), let link = DeepLink.parse(url) else { return }
         if case .conversation(let id) = link, let seq = DeepLink.messageSeq(url) { jumpTo[id] = seq }
         handle(link)

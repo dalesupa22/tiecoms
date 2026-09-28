@@ -2790,5 +2790,177 @@
  "issue.personalNoSide": [
   "Un asunto personal no tiene chat para hablarlo aparte.",
   "A personal subject has no chat to talk it over separately."
+ ],
+ "meet.now": [
+  "📹 Reunión ahora",
+  "📹 Meeting now"
+ ],
+ "meet.schedule": [
+  "📅 Agendar reunión con enlace",
+  "📅 Schedule meeting with link"
+ ],
+ "meet.nowTitle": [
+  "Reunión ahora",
+  "Meeting now"
+ ],
+ "meet.scheduleTitle": [
+  "Agendar reunión con enlace",
+  "Schedule meeting with link"
+ ],
+ "meet.provider": [
+  "¿Con qué?",
+  "With what?"
+ ],
+ "meet.scopeHint": [
+  "chaggu solo pide permiso para crear eventos o reuniones en tu cuenta. Nunca lee ni envía tu correo.",
+  "chaggu only asks permission to create events or meetings in your account. It never reads or sends your email."
+ ],
+ "meet.connected": [
+  "Conectado",
+  "Connected"
+ ],
+ "meet.connect": [
+  "Conectar",
+  "Connect"
+ ],
+ "meet.reconnect": [
+  "Reconectar",
+  "Reconnect"
+ ],
+ "meet.disconnect": [
+  "Desconectar",
+  "Disconnect"
+ ],
+ "meet.connectTo": [
+  "Conectar {provider}",
+  "Connect {provider}"
+ ],
+ "meet.reconnectTo": [
+  "Reconectar {provider}",
+  "Reconnect {provider}"
+ ],
+ "meet.needsReconnect": [
+  "El permiso venció o se revocó",
+  "Permission expired or was revoked"
+ ],
+ "meet.unavailable": [
+  "No disponible",
+  "Unavailable"
+ ],
+ "meet.when": [
+  "¿Cuándo?",
+  "When?"
+ ],
+ "meet.nowOpt": [
+  "Ahora",
+  "Now"
+ ],
+ "meet.at": [
+  "Fecha y hora",
+  "Date and time"
+ ],
+ "meet.duration": [
+  "Duración",
+  "Duration"
+ ],
+ "meet.min": [
+  "{n} min",
+  "{n} min"
+ ],
+ "meet.titleField": [
+  "Título",
+  "Title"
+ ],
+ "meet.defaultTitle": [
+  "Reunión · {name}",
+  "Meeting · {name}"
+ ],
+ "meet.create": [
+  "Crear y compartir",
+  "Create and share"
+ ],
+ "meet.creating": [
+  "Creando…",
+  "Creating…"
+ ],
+ "meet.retry": [
+  "Reintentar",
+  "Try again"
+ ],
+ "meet.createHint": [
+  "El enlace sale del proveedor. Si algo falla, reintentar no crea una reunión repetida.",
+  "The link comes from the provider. If something fails, trying again does not create a duplicate meeting."
+ ],
+ "meet.created": [
+  "Reunión creada y compartida en el chat",
+  "Meeting created and shared in the chat"
+ ],
+ "meet.createdNotShared": [
+  "La reunión se creó, pero no se pudo compartir en el chat: copia el enlace.",
+  "The meeting was created but could not be shared in the chat: copy the link."
+ ],
+ "meet.open": [
+  "Abrir en {app}",
+  "Open in {app}"
+ ],
+ "meet.copy": [
+  "Copiar",
+  "Copy"
+ ],
+ "meet.openHint": [
+  "Si tienes la app instalada se abre ahí; si no, en el navegador.",
+  "If you have the app installed it opens there; otherwise in the browser."
+ ],
+ "meet.err.notConnected": [
+  "Conecta tu cuenta de {provider} para crear la reunión.",
+  "Connect your {provider} account to create the meeting."
+ ],
+ "meet.err.reconnect": [
+  "Vuelve a conectar {provider}: el permiso venció o se revocó.",
+  "Reconnect {provider}: the permission expired or was revoked."
+ ],
+ "meet.err.noTeams": [
+  "Tu cuenta de Microsoft no tiene Teams para empresas: no se puede crear el enlace.",
+  "Your Microsoft account does not have Teams for business: the link cannot be created."
+ ],
+ "meet.err.network": [
+  "Sin conexión: no se creó ninguna reunión. Reintenta; no se duplicará.",
+  "No connection: no meeting was created. Try again; it will not be duplicated."
+ ],
+ "meet.err.noLink": [
+  "El proveedor no confirmó un enlace: no se creó nada.",
+  "The provider did not confirm a link: nothing was created."
+ ],
+ "meet.err.connect": [
+  "No se pudo iniciar la conexión.",
+  "Could not start the connection."
+ ],
+ "meet.connectedToast": [
+  "{provider} conectado",
+  "{provider} connected"
+ ],
+ "meet.disconnectedToast": [
+  "{provider} desconectado",
+  "{provider} disconnected"
+ ],
+ "meet.connectCancelled": [
+  "Conexión cancelada",
+  "Connection cancelled"
+ ],
+ "meet.connectFailed": [
+  "No se pudo conectar {provider} ({code})",
+  "Could not connect {provider} ({code})"
+ ],
+ "meet.disconnectConfirm": [
+  "¿Desconectar {provider}?",
+  "Disconnect {provider}?"
+ ],
+ "meet.settings": [
+  "Reuniones",
+  "Meetings"
+ ],
+ "meet.settingsHint": [
+  "Conecta tu cuenta para crear reuniones reales de Meet, Teams o Zoom desde un chat. Solo se pide permiso para crear eventos o reuniones; nunca se lee tu correo.",
+  "Connect your account to create real Meet, Teams or Zoom meetings from a chat. Only permission to create events or meetings is requested; your email is never read."
  ]
 }

@@ -329,6 +329,8 @@ struct AttachButton: View {
     /// El «＋» del compositor también crea un evento o un asunto del chat (nil = no se ofrece).
     var onEvent: (() -> Void)? = nil
     var onIssue: (() -> Void)? = nil
+    /// «📹 Reunión ahora» y «📅 Agendar reunión con enlace» (Meet, Teams o Zoom), 1.6.6.
+    var onMeeting: ((Bool) -> Void)? = nil
     var onError: (String) -> Void
 
     var body: some View {
@@ -341,11 +343,16 @@ struct AttachButton: View {
             if onEvent != nil || onIssue != nil { Divider() }
             if let onEvent { Button(action: onEvent) { Label(L("bar.newEvent"), systemImage: "calendar.badge.plus") }.accessibilityIdentifier("composer.plus.event") }
             if let onIssue { Button(action: onIssue) { Label(L("bar.newIssue"), systemImage: "diamond") }.accessibilityIdentifier("composer.plus.issue") }
+            if let onMeeting {
+                Divider()
+                Button { onMeeting(true) } label: { Text(L("meet.now")) }.accessibilityIdentifier("composer.plus.meetNow")
+                Button { onMeeting(false) } label: { Text(L("meet.schedule")) }.accessibilityIdentifier("composer.plus.meetSchedule")
+            }
         } label: {
             Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accentText)
                 .frame(width: 36, height: 40)
         }
-        .accessibilityLabel(onEvent != nil || onIssue != nil ? L("bar.plus") : L("att.attach"))
+        .accessibilityLabel(onEvent != nil || onIssue != nil || onMeeting != nil ? L("bar.plus") : L("att.attach"))
         .accessibilityIdentifier("composer.attach")
         .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: AttachmentRules.maxPerMessage,
                       matching: .any(of: [.images, .videos]), photoLibrary: .shared())

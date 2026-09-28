@@ -190,4 +190,103 @@ final class Tanda166IntegrationTests: XCTestCase {
         XCTAssertEqual(other.meta(f.generalId)?.openIssues, s.meta(f.generalId)?.openIssues, "no cambia contadores de conversaciones")
         await other.logout()
     }
+
+    // MARK: 4. Reuniones (proveedor MOCK: tools/fake-meetings.mjs; NO prueba OAuth real)
+
+    /// Sigue una redirección sin ir más allá (para recorrer el OAuth del MOCK sin navegador).
+    private final class NoFollow: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+    }
+    private func location(_ url: URL) async throws -> URL {
+        let s = URLSession(configuration: .ephemeral, delegate: NoFollow(), delegateQueue: nil)
+        let (_, res) = try await s.data(from: url)
+        return try XCTUnwrap(((res as? HTTPURLResponse)?.value(forHTTPHeaderField: "location")).flatMap(URL.init(string:)))
+    }
+    private func mock(_ path: String, _ body: [String: Any]? = nil) async throws -> [String: Any] {
+        guard let base = ProcessInfo.processInfo.environment["TC_FAKE_MEETINGS"], !base.isEmpty else { throw XCTSkip("Sin TC_FAKE_MEETINGS") }
+        var req = URLRequest(url: URL(string: base + path)!)
+        if let body { req.httpMethod = "POST"; req.httpBody = try JSONSerialization.data(withJSONObject: body); req.setValue("application/json", forHTTPHeaderField: "content-type") }
+        let (d, _) = try await URLSession(configuration: .ephemeral).data(for: req)
+        return (try? JSONSerialization.jsonObject(with: d) as? [String: Any]) ?? [:]
+    }
+    /// Conectar con el MOCK: POST /meetings/connect → auth del MOCK → callback del API → chaggu://meetings/connected.
+    private func mockConnect(_ s: AppStore, _ p: MeetingProvider) async throws -> MeetingCallback? {
+        let r: AppStore.UrlResult = try await s.api.request("/meetings/connect/\(p.rawValue)", method: "POST", json: ["platform": "ios", "redirectScheme": "chaggu"])
+        let back = try await location(try await location(try XCTUnwrap(URL(string: r.url))))
+        XCTAssertEqual(back.scheme, "chaggu", "vuelve a la app nativa: \(back)")
+        return MeetingCallback.parse(back)
+    }
+
+    func test5MeetingsWithMockProvider() async throws {
+        let (s, f) = try await store()
+        _ = try await mock("/control", ["msNoTeams": false, "revokeAll": false, "failNext": NSNull()])
+        let before = try await mock("/stats")
+        var conns = try await s.loadMeetingConnections()
+        XCTAssertEqual(conns.map(\.provider), [.google, .microsoft, .zoom])
+        XCTAssertEqual(conns.first { $0.provider == .zoom }?.chipState, .unavailable(conns.first { $0.provider == .zoom }?.unavailableReason), "Zoom sin app OAuth: No disponible con el motivo")
+        XCTAssertNotNil(conns.first { $0.provider == .zoom }?.unavailableReason)
+
+        // Sin conectar: 409 not_connected. Zoom: 503 provider_unavailable.
+        do { _ = try await s.createMeeting(.microsoft, conversationId: f.generalId, idempotencyKey: UUID().uuidString, title: "Reunión · General", startsAt: nil, durationMin: 30); XCTFail("sin conexión") }
+        catch { XCTAssertEqual(MeetingError(error), .notConnected) }
+        do { _ = try await s.createMeeting(.zoom, conversationId: f.generalId, idempotencyKey: UUID().uuidString, title: "Reunión · General", startsAt: nil, durationMin: 30); XCTFail("zoom") }
+        catch { if case .unavailable = MeetingError(error) {} else { XCTFail("\(error)") } }
+
+        // Conectar Google (MOCK) y crear «ahora»: enlace del proveedor, mensaje en el chat y reunión en el calendario.
+        let cb1 = try await mockConnect(s, .google)
+        XCTAssertEqual(cb1, .connected(.google))
+        conns = try await s.loadMeetingConnections()
+        XCTAssertEqual(conns.first { $0.provider == .google }?.chipState, .connected("mock.google@example.com"))
+        var idem = MeetingIdempotency()
+        let key = try XCTUnwrap(idem.begin())
+        let m = try await s.createMeeting(.google, conversationId: f.generalId, idempotencyKey: key, title: "Reunión · General", startsAt: nil, durationMin: 30)
+        XCTAssertEqual(m.confirmedURL?.host, "meet.google.com")
+        XCTAssertTrue(m.shared, "se publicó en el chat")
+        XCTAssertNotNil(m.calendarEventId)
+        // Reintento con la misma llave (respuesta perdida): la misma reunión, sin otra en el proveedor.
+        let again = try await s.createMeeting(.google, conversationId: f.generalId, idempotencyKey: key, title: "Reunión · General", startsAt: nil, durationMin: 30)
+        XCTAssertEqual(again.id, m.id); XCTAssertEqual(again.joinUrl, m.joinUrl)
+        idem.succeeded()
+        let stats = try await mock("/stats")
+        XCTAssertEqual((stats["google"] as? Int ?? 0) - (before["google"] as? Int ?? 0), 1, "un solo evento en el proveedor")
+        try await waitUntil(10, "reunión en el calendario con el enlace") { s.events[m.calendarEventId ?? ""]?.location == m.joinUrl }
+        try await waitUntil(10, "mensaje con el enlace real") { (s.meta(f.generalId)?.lastMessagePreview ?? "").contains("Google Meet") }
+
+        // Agendada: con fecha y hora.
+        let at = Date().addingTimeInterval(3 * 86400)
+        let later = try await s.createMeeting(.google, conversationId: f.generalId, idempotencyKey: UUID().uuidString, title: "Seguimiento", startsAt: at, durationMin: 45)
+        XCTAssertEqual(abs((ISODate.parse(later.startsAt) ?? .distantPast).timeIntervalSince(at)), 0, accuracy: 1)
+
+        // Falla del proveedor (502): no hay enlace; el reintento con la misma llave sí crea una sola.
+        _ = try await mock("/control", ["failNext": "google"])
+        let k2 = UUID().uuidString
+        do { _ = try await s.createMeeting(.google, conversationId: f.generalId, idempotencyKey: k2, title: "Con falla", startsAt: nil, durationMin: 15); XCTFail("falla") }
+        catch { if case .provider = MeetingError(error) {} else { XCTFail("\(error)") } }
+        let retried = try await s.createMeeting(.google, conversationId: f.generalId, idempotencyKey: k2, title: "Con falla", startsAt: nil, durationMin: 15)
+        XCTAssertNotNil(retried.confirmedURL)
+
+        // Microsoft sin Teams para empresas: no_teams.
+        let cb2 = try await mockConnect(s, .microsoft)
+        XCTAssertEqual(cb2, .connected(.microsoft))
+        _ = try await mock("/control", ["msNoTeams": true])
+        do { _ = try await s.createMeeting(.microsoft, conversationId: f.generalId, idempotencyKey: UUID().uuidString, title: "Teams", startsAt: nil, durationMin: 30); XCTFail("no_teams") }
+        catch { XCTAssertEqual(MeetingError(error), .noTeams) }
+        _ = try await mock("/control", ["msNoTeams": false])
+
+        // Permiso revocado en el proveedor: reconnect_required y el chip pasa a «Reconectar».
+        _ = try await mock("/control", ["revokeAll": true])
+        do { _ = try await s.createMeeting(.google, conversationId: f.generalId, idempotencyKey: UUID().uuidString, title: "Revocado", startsAt: nil, durationMin: 30); XCTFail("revocado") }
+        catch { XCTAssertEqual(MeetingError(error), .reconnectRequired) }
+        _ = try await mock("/control", ["revokeAll": false])
+        conns = try await s.loadMeetingConnections()
+        XCTAssertEqual(conns.first { $0.provider == .google }?.chipState, .reconnect)
+        let cb3 = try await mockConnect(s, .google)
+        XCTAssertEqual(cb3, .connected(.google), "reconectar")
+
+        // Desconectar.
+        try await s.disconnectMeetings(.microsoft)
+        conns = try await s.loadMeetingConnections()
+        XCTAssertEqual(conns.first { $0.provider == .microsoft }?.chipState, .connect)
+    }
 }

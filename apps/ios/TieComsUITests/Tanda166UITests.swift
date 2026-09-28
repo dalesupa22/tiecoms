@@ -174,7 +174,6 @@ final class Tanda166UITests: XCTestCase {
         // La sección «Personal · solo tú» con el asunto del fixture, 🔒 en la fila.
         let section = app.staticTexts["issues.section.__personal"]
         let found = section.waitForExistence(timeout: 15)
-        if !found { shot("3-00-debug"); print(app.debugDescription) }
         XCTAssertTrue(found, "sección Personal · solo tú")
         XCTAssertTrue(section.label.contains("Personal · solo tú"), section.label)
         let row = app.buttons["issue.row.\(f.personalIssueId)"]
@@ -214,5 +213,87 @@ final class Tanda166UITests: XCTestCase {
         XCTAssertFalse(app.buttons["issue.menu.addTask"].exists)
         XCTAssertFalse(app.buttons["issue.menu.sidechat"].exists)
         shot("3-05-personal-menu")
+    }
+
+    // MARK: 4. Reuniones (proveedor MOCK; no demuestra OAuth real)
+
+    /// Acepta la alerta del sistema de ASWebAuthenticationSession («… quiere usar “localhost” para iniciar sesión»).
+    func acceptWebAuthAlert() {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let b = springboard.buttons.matching(NSPredicate(format: "label IN %@", ["Continuar", "Continue"])).firstMatch
+        if b.waitForExistence(timeout: 8) { b.tap() }
+    }
+
+    func test4MeetingDialogConnectCreateShareAndSettings() throws {
+        let f = try fixture()
+        let app = login(f)
+        let row = app.buttons["conv.row.\(f.generalId)"]
+        XCTAssertTrue(waitFor(row, 20, app))
+        sleep(1)
+        row.tap()
+        let plus = app.buttons["composer.attach"]
+        XCTAssertTrue(plus.waitForExistence(timeout: 10))
+        plus.tap()
+        XCTAssertTrue(app.buttons["composer.plus.meetNow"].waitForExistence(timeout: 4), "«📹 Reunión ahora» en el ＋")
+        XCTAssertTrue(app.buttons["composer.plus.meetSchedule"].exists, "«📅 Agendar reunión con enlace»")
+        shot("4-01-menu-mas-reuniones")
+        app.buttons["composer.plus.meetNow"].tap()
+
+        // Chips con su estado: Zoom sin app OAuth en este servidor → «No disponible» con el motivo, sin botón.
+        let zoom = app.buttons["meet.chip.zoom"]
+        XCTAssertTrue(zoom.waitForExistence(timeout: 8))
+        XCTAssertTrue(zoom.label.contains("No disponible"), zoom.label)
+        zoom.tap()
+        sleep(1)
+        shot("4-02-dialogo-zoom-no-disponible")
+        let reason = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "OAuth")).firstMatch
+        XCTAssertTrue(reason.waitForExistence(timeout: 3), "se explica el motivo (unavailableReason)")
+        XCTAssertFalse(app.buttons["meet.create"].isEnabled, "sin botón que no funciona")
+
+        // Google (MOCK): Conectar con ASWebAuthenticationSession y vuelta por chaggu://meetings/connected.
+        let google = app.buttons["meet.chip.google"]
+        google.tap()
+        XCTAssertTrue(google.label.contains("Conectar"), google.label)
+        XCTAssertTrue(app.buttons["meet.connect.google"].waitForExistence(timeout: 3))
+        app.buttons["meet.connect.google"].tap()
+        acceptWebAuthAlert()
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !google.label.contains("mock.google@example.com") { usleep(500_000) }
+        XCTAssertTrue(google.label.contains("mock.google@example.com"), "conectado (MOCK): \(google.label)")
+        XCTAssertEqual(app.segmentedControls["meet.when"].buttons["Ahora"].isSelected, true)
+        shot("4-03-dialogo-google-conectado-mock")
+
+        // Crear y compartir: el enlace que devolvió el proveedor (MOCK), «Abrir en Meet» y «Copiar».
+        app.buttons["meet.create"].tap()
+        let link = app.staticTexts["meet.link"]
+        XCTAssertTrue(link.waitForExistence(timeout: 15))
+        XCTAssertTrue(link.label.hasPrefix("https://meet.google.com/mock-"), link.label)
+        XCTAssertTrue(app.buttons["meet.open"].label.contains("Abrir en Meet"))
+        XCTAssertTrue(app.buttons["meet.copy"].exists)
+        shot("4-04-reunion-creada-mock")
+        app.buttons["meet.copy"].tap()
+        app.buttons["Cerrar"].firstMatch.tap()
+        let msg = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "meet.google.com/mock-")).firstMatch
+        XCTAssertTrue(msg.waitForExistence(timeout: 10), "el mensaje con el enlace real quedó en el chat")
+        shot("4-05-mensaje-en-el-chat-mock")
+
+        // Agendar: fecha y hora, duración y título.
+        plus.tap()
+        XCTAssertTrue(app.buttons["composer.plus.meetSchedule"].waitForExistence(timeout: 4))
+        app.buttons["composer.plus.meetSchedule"].tap()
+        XCTAssertTrue(app.datePickers["meet.startsAt"].waitForExistence(timeout: 6), "fecha y hora")
+        XCTAssertTrue(app.segmentedControls["meet.duration"].buttons["45 min"].exists)
+        app.segmentedControls["meet.duration"].buttons["45 min"].tap()
+        shot("4-06-agendar-reunion")
+        app.buttons["Cancelar"].firstMatch.tap()
+
+        // Ajustes › Reuniones: Desconectar Google, Conectar Teams, Zoom no disponible.
+        back(app)
+        tab(app, "Tú", f)
+        let g = app.buttons["meet.settings.disconnect.google"]
+        for _ in 0..<6 where !g.exists { app.swipeUp() }
+        XCTAssertTrue(g.waitForExistence(timeout: 5), "Desconectar Google")
+        XCTAssertTrue(app.buttons["meet.settings.connect.microsoft"].exists, "Conectar Teams")
+        shot("4-07-ajustes-reuniones-mock")
     }
 }

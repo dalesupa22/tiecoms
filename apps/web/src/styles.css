@@ -87,7 +87,7 @@ a:hover { color: var(--accent-ink); }
 .auth-switch { font-size: 13px; color: var(--muted); }
 
 /* ---------- Shell ---------- */
-.shell { display: grid; grid-template-columns: var(--side) minmax(0, 1fr); height: 100%; overflow: hidden; }
+.shell { display: grid; grid-template-columns: min(calc(var(--side) * var(--ui-zoom, 1)), 42vw) minmax(0, 1fr); height: 100%; overflow: hidden; }
 .side {
   background: var(--paper-2); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px;
   padding: calc(16px + var(--safe-t)) 10px 10px; min-height: 0;
@@ -932,3 +932,9 @@ select.link-act { appearance: none; padding-right: 10px; }
 
 /* No molestar todas las noches: aviso a quien escribe */
 .sleep-notice { display: flex; align-items: center; gap: 8px; border: 1px solid #ddd6f3; background: #f5f2fd; color: #4b3f8f; border-radius: 10px; padding: 7px 12px; margin-bottom: 6px; font-size: 13px; font-weight: 600; flex-wrap: wrap; }
+
+/* Tamaño del texto (Ajustes): --ui-zoom lo pone text-size.ts */
+.side, .main, .modal { zoom: var(--ui-zoom, 1); }
+.text-size { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 24px; }
+.text-size .a-small { font-size: 13px; font-weight: 700; } .text-size .a-big { font-size: 22px; font-weight: 700; }
+.text-size input[type=range] { flex: 1; accent-color: var(--ink); }

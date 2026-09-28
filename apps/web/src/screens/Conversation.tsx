@@ -784,7 +784,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       {adding && <AddMembersDialog conversationId={id} onClose={() => setAdding(false)} />}
       {deriving && <DeriveDialog conv={conv} message={deriving} onClose={() => setDeriving(null)} onOpened={setSideId} />}
       {newIssue && (
-        <NewIssueDialog conversationId={id} originMessageId={newIssue.origin?.id}
+        <NewIssueDialog conversationId={id} originMessageId={newIssue.origin?.id} topicId={activeFilter}
           defaultTitle={newIssue.title ?? (newIssue.origin ? excerpt(newIssue.origin.body) : '')}
           onClose={() => setNewIssue(null)} onCreated={(i) => setOpenIssue(i.id)} />
       )}

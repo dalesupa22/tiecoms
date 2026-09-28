@@ -1188,3 +1188,6 @@ button.topic-tag:hover { filter: brightness(.96); }
 .topic-preview { margin: 14px 0 6px; }
 .topic-preview .topic-flag { cursor: default; }
 @media (max-width: 520px) { .topic-dock { padding: 0 8px; } .topic-flag { font-size: 12px; } }
+.issue-topic { margin-right: 6px; vertical-align: 1px; }
+.topic-x { border: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; line-height: 1; padding: 0 0 0 4px; cursor: pointer; opacity: .6; }
+.topic-x:hover { opacity: 1; }

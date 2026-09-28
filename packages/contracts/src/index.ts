@@ -631,6 +631,8 @@ export interface IssueDTO {
   visibleOrgId?: string | null;
   /** Personas con acceso explícito (solo en 'org' y 'private'). */
   viewerIds?: string[];
+  /** Tema del chat (docs/TEMAS.md). null = sin tema; ausente = servidor anterior. */
+  topicId?: string | null;
   /** Asunto que viene de una integración (p. ej. un ticket de la mesa de ayuda). Ausente = servidor anterior. */
   integrationId?: string | null;
   externalId?: string | null;
@@ -951,6 +953,8 @@ export const CreateIssueInput = z.object({
   viewerIds: z.array(z.uuid()).max(50).optional(),
   /** Tarea hija de este asunto: en su misma conversación o en un sidechat que salió de ella. */
   parentIssueId: z.uuid().nullable().optional(),
+  /** Tema activo del chat. Si no llega y la tarea sale de un mensaje con tema, hereda ese tema. */
+  topicId: z.uuid().nullable().optional(),
 });
 /** POST /issues/:id/children: tarea derivada. Por defecto la ve solo mi empresa si en el chat hay más de una. */
 /** POST /issues: asunto personal (sin conversación, solo para mí). */
@@ -972,6 +976,7 @@ export const UpdateIssueInput = z.object({
   ownerId: z.uuid().nullable().optional(),
   dueDate: isoDate.nullable().optional(),
   waitingOnOrgId: z.uuid().nullable().optional(),
+  topicId: z.uuid().nullable().optional(),
 });
 export const IssueCommentInput = z.object({ body: z.string().trim().min(1).max(4000) });
 

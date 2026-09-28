@@ -48,7 +48,7 @@ function toDTO(r: any): IssueDTO {
     dueDate: r.due_date ? (typeof r.due_date === 'string' ? r.due_date : new Date(r.due_date).toISOString().slice(0, 10)) : null,
     createdBy: r.created_by, createdAt: iso(r.created_at)!, updatedAt: iso(r.updated_at)!, statusSince: iso(r.status_since)!,
     closedAt: iso(r.closed_at), commentCount: r.comment_count ?? 0,
-    parentIssueId: r.parent_issue_id ?? null, visibility: r.visibility ?? 'all', visibleOrgId: r.visible_org_id ?? null,
+    parentIssueId: r.parent_issue_id ?? null, topicId: r.topic_id ?? null, visibility: r.visibility ?? 'all', visibleOrgId: r.visible_org_id ?? null,
     ...(r.visibility && r.visibility !== 'all' ? { viewerIds: r.viewer_ids ?? [] } : {}),
     ...(r.integration_id ? { integrationId: r.integration_id, externalId: r.external_id ?? null, externalMeta: r.external_meta ?? null } : {}),
   };
@@ -167,11 +167,15 @@ export async function createIssue(userId: string, conversationId: string, input:
       parentId = parent.id;
     }
     let requestedBy: string | null = null;
+    let topicId: string | null = input.topicId ?? null;
     if (input.originMessageId) {
-      const m = await c.query('SELECT author_id, seq FROM messages WHERE id = $1 AND conversation_id = $2', [input.originMessageId, conversationId]);
+      const m = await c.query('SELECT author_id, seq, topic_id FROM messages WHERE id = $1 AND conversation_id = $2', [input.originMessageId, conversationId]);
       if (!m.rows[0] || m.rows[0].seq <= a.historyFromSeq) throw badRequest('El mensaje de origen no está en esta conversación');
       requestedBy = m.rows[0].author_id;
+      // La tarea que sale de un mensaje con tema hereda su tema (docs/TEMAS.md).
+      if (input.topicId === undefined && m.rows[0].topic_id) topicId = m.rows[0].topic_id;
     }
+    if (topicId) await assertTopic(c, conversationId, topicId);
     const visibility: IssueVisibility = input.visibility ?? 'all';
     let visibleOrg: string | null = null;
     if (visibility === 'org') {
@@ -182,9 +186,9 @@ export async function createIssue(userId: string, conversationId: string, input:
     if (owner) { if (visibility === 'all') await assertMember(c, conversationId, owner); else await assertContact(c, userId, owner); }
     for (const v of input.viewerIds ?? []) await assertContact(c, userId, v);
     const { rows } = await c.query(
-      `INSERT INTO issues (workspace_id, conversation_id, origin_message_id, title, owner_id, requested_by, due_date, created_by, parent_issue_id, visibility, visible_org_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-      [a.workspaceId, conversationId, input.originMessageId ?? null, input.title, owner, requestedBy, input.dueDate ?? null, userId, parentId, visibility, visibleOrg],
+      `INSERT INTO issues (workspace_id, conversation_id, origin_message_id, title, owner_id, requested_by, due_date, created_by, parent_issue_id, visibility, visible_org_id, topic_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      [a.workspaceId, conversationId, input.originMessageId ?? null, input.title, owner, requestedBy, input.dueDate ?? null, userId, parentId, visibility, visibleOrg, topicId],
     );
     const id: string = rows[0].id;
     if (visibility !== 'all') await addViewers(c, id, userId, [userId, ...(owner ? [owner] : []), ...(input.viewerIds ?? [])]);
@@ -282,7 +286,13 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
       if (input.status !== 'waiting') sets.push('waiting_on_org_id = NULL');
       events.push(['status', { from: cur.status, to: input.status }]);
     }
-    if (!events.length && !(input.viewerIds?.length)) return load(c, issueId);
+    let topicChanged = false;
+    if (input.topicId !== undefined && input.topicId !== cur.topic_id) {
+      if (!cur.conversation_id) throw badRequest('Un asunto personal no lleva tema');
+      if (input.topicId) await assertTopic(c, cur.conversation_id, input.topicId);
+      add('topic_id', input.topicId); topicChanged = true;
+    }
+    if (!events.length && !topicChanged && !(input.viewerIds?.length)) return load(c, issueId);
     await c.query(`UPDATE issues SET ${sets.join(', ')} WHERE id = $1`, vals);
     for (const [kind, payload] of events) {
       await c.query('INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,$3,$4)', [issueId, userId, kind, JSON.stringify(payload)]);
@@ -301,6 +311,12 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
     await audit(c, userId, 'issue.updated', { type: 'issue', id: issueId, workspaceId: cur.workspace_id }, { changes: events.map(([k]) => k) });
     return dto;
   });
+}
+
+/** Solo un tema activo del mismo chat. */
+async function assertTopic(c: Tx, conversationId: string, topicId: string) {
+  const { rowCount } = await c.query('SELECT 1 FROM conversation_topics WHERE id = $1 AND conversation_id = $2 AND archived_at IS NULL', [topicId, conversationId]);
+  if (!rowCount) throw badRequest('Ese tema no está activo en esta conversación');
 }
 
 export async function commentIssue(userId: string, issueId: string, body: string, extra: { author?: string; at?: string } = {}, existing?: Tx) {

@@ -8,6 +8,7 @@ import { menuProps, toast, type MenuItem } from '../menu.tsx';
 import { destinationLabel, issueDestinations } from '../quick-search.ts';
 import { QuickActions } from './Quick.tsx';
 import { openDialog } from '../actions.tsx';
+import { IssueTopicTag, issueTopicMenu } from './Topics.tsx';
 
 /** Destino «Personal · solo tú» en los selectores de «¿Dónde?». */
 export const PERSONAL_DEST = '__personal';
@@ -86,6 +87,7 @@ export function issueQuickMenu(i: IssueDTO): MenuItem[] {
     ...(i.status !== 'in_progress' ? [{ label: t('issue.markInProgress'), icon: '▶', onSelect: () => void set('in_progress') }] : []),
     ...(i.status !== 'waiting' ? [{ label: t('issue.markWaiting'), icon: '⏸', onSelect: () => void set('waiting') }] : []),
     ...(i.status !== 'open' ? [{ label: t('issue.markOpen'), icon: '○', onSelect: () => void set('open') }] : []),
+    ...(i.conversationId ? [issueTopicMenu(i.id, i.topicId, client.getState().topics[i.conversationId] ?? [])].filter((x): x is MenuItem => !!x) : []),
     { divider: true },
     { label: t('issue.open'), icon: '◆', onSelect: () => navigate(i.conversationId ? `/c/${i.conversationId}?issue=${i.id}` : `/asuntos?issue=${i.id}`) },
   ];
@@ -133,7 +135,9 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
         <b className="ellipsis issue-title" style={{ display: 'block' }}>
           {(isRestricted(i) || isPersonal(i)) && <span className="lock" title={isPersonal(i) ? t('issue.personalOption') : visibilityLabel(d, i)} aria-label={isPersonal(i) ? t('issue.personalOption') : visibilityLabel(d, i)}>🔒 </span>}{i.title}
         </b>
-        {meta.length > 0 && <span className="small muted ellipsis" style={{ display: 'block' }}>{meta.join(' · ')}</span>}
+        {(meta.length > 0 || i.topicId) && <span className="small muted ellipsis issue-meta" style={{ display: 'block' }}>
+          <IssueTopicTag issueId={i.id} conversationId={i.conversationId} topicId={i.topicId} canEdit={!!conv?.canPost} />{meta.join(' · ')}
+        </span>}
       </span>
       {kids.length > 0 && <span className={`kids-badge ${kidsDone === kids.length ? 'all-done' : ''}`} title={t('task.progress', { done: kidsDone, n: kids.length })}>☑ {kidsDone}/{kids.length}</span>}
       {f.stalledDays > 0 && <span className="jam-badge" title={t('issue.bottleneck')}>⏱ {f.stalledDays === 1 ? t('issue.stalledOne') : t('issue.stalled', { n: f.stalledDays })}</span>}
@@ -256,8 +260,8 @@ export function byUrgency(a: IssueDTO, b: IssueDTO) {
 }
 
 /** Sin conversationId (desde «＋ Crear») se elige el grupo o chat: donde escribo y no soy tercero, el más reciente primero. */
-export function NewIssueDialog({ conversationId, originMessageId, defaultTitle = '', onClose, onCreated }: {
-  conversationId?: string; originMessageId?: string; defaultTitle?: string; onClose: () => void; onCreated?: (i: IssueDTO) => void;
+export function NewIssueDialog({ conversationId, originMessageId, defaultTitle = '', topicId, onClose, onCreated }: {
+  conversationId?: string; originMessageId?: string; defaultTitle?: string; topicId?: string | null; onClose: () => void; onCreated?: (i: IssueDTO) => void;
 }) {
   const d = useClient((s) => s.data)!;
   const destinations = useMemo(() => (conversationId ? [] : issueDestinations(d)), [d, conversationId]);
@@ -275,7 +279,7 @@ export function NewIssueDialog({ conversationId, originMessageId, defaultTitle =
     try {
       const i = conv === PERSONAL_DEST
         ? await client.createPersonalIssue({ title, dueDate: due || null })
-        : await client.createIssue(conv, { title, ownerId, dueDate: due || null, originMessageId: originMessageId ?? null });
+        : await client.createIssue(conv, { title, ownerId, dueDate: due || null, originMessageId: originMessageId ?? null, ...(topicId && !originMessageId ? { topicId } : {}) });
       onCreated?.(i);
       onClose();
     } catch (err) { setError(errorText(err)); } finally { setBusy(false); }

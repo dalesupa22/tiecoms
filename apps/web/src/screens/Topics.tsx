@@ -21,6 +21,50 @@ export function useTopics(conversationId: string) {
 }
 export const activeTopics = (list: TopicDTO[]) => list.filter((x) => !x.archivedAt);
 
+/** Temas de un chat que no está abierto (p. ej. tareas en /asuntos): se piden una vez por chat. */
+const asked = new Set<string>();
+export function useTopicsOf(conversationId: string | null) {
+  const list = useClient((s) => (conversationId ? s.topics[conversationId] : undefined));
+  useEffect(() => {
+    if (!conversationId || list || asked.has(conversationId)) return;
+    asked.add(conversationId);
+    client.loadTopics(conversationId).catch(() => asked.delete(conversationId));
+  }, [conversationId, list]);
+  return list ?? EMPTY;
+}
+
+/** Etiqueta de tema de una tarea: la ✕ la deja sin tema (con Deshacer). */
+export function IssueTopicTag({ issueId, conversationId, topicId, canEdit }: { issueId: string; conversationId: string | null; topicId?: string | null; canEdit: boolean }) {
+  const list = useTopicsOf(topicId ? conversationId : null);
+  const topic = topicId ? list.find((x) => x.id === topicId) : undefined;
+  if (!topic) return null;
+  return (
+    <span className={`topic-tag c-${topic.archivedAt ? 'gray' : topic.color} issue-topic`}>
+      {topic.archivedAt ? '🗄' : topic.icon} {topic.name}
+      {canEdit && <button className="topic-x" aria-label={t('topic.none')} title={t('topic.none')} onClick={(e) => {
+        e.stopPropagation();
+        void client.updateIssue(issueId, { topicId: null })
+          .then(() => toast(t('topic.untaggedTask'), { label: t('issue.undo'), run: () => void client.updateIssue(issueId, { topicId: topic.id }).catch((er) => toast(errorText(er))) }, 4500))
+          .catch((er) => toast(errorText(er)));
+      }}>×</button>}
+    </span>
+  );
+}
+
+/** Submenú «Tema» de una tarea. */
+export function issueTopicMenu(issueId: string, current: string | null | undefined, list: TopicDTO[]): MenuItem | null {
+  const act = activeTopics(list);
+  if (!act.length) return null;
+  const set = (topicId: string | null) => void client.updateIssue(issueId, { topicId }).catch((e) => toast(errorText(e)));
+  return {
+    label: t('topic.set'), icon: '🏷',
+    items: [
+      ...act.map((x) => ({ label: `${x.icon} ${x.name}${current === x.id ? '  ✓' : ''}`, onSelect: () => set(x.id) })),
+      ...(current ? [{ divider: true }, { label: t('topic.none'), icon: '⌫', onSelect: () => set(null) }] : []),
+    ],
+  };
+}
+
 export function TopicTag({ topic, onClick, by }: { topic: TopicDTO | undefined; onClick?: () => void; by?: string | null }) {
   if (!topic) return null;
   const cls = `topic-tag c-${topic.archivedAt ? 'gray' : topic.color}`;

@@ -717,12 +717,12 @@ export class TieComsClient {
     this.putIssues([i]); this.recountIssues(i.conversationId);
     return i;
   }
-  async createIssue(conversationId: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; originMessageId?: string | null; visibility?: IssueVisibility; viewerIds?: string[]; parentIssueId?: string | null }) {
+  async createIssue(conversationId: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; originMessageId?: string | null; visibility?: IssueVisibility; viewerIds?: string[]; parentIssueId?: string | null; topicId?: string | null }) {
     const i = await this.request<IssueDTO>(`/conversations/${conversationId}/issues`, { method: 'POST', json: input });
     this.putIssues([i]); this.recountIssues(conversationId);
     return i;
   }
-  async updateIssue(id: string, patch: Partial<Pick<IssueDTO, 'title' | 'status' | 'ownerId' | 'dueDate' | 'waitingOnOrgId' | 'visibility' | 'viewerIds'>>) {
+  async updateIssue(id: string, patch: Partial<Pick<IssueDTO, 'title' | 'status' | 'ownerId' | 'dueDate' | 'waitingOnOrgId' | 'visibility' | 'viewerIds' | 'topicId'>>) {
     const i = await this.request<IssueDTO>(`/issues/${id}`, { method: 'PATCH', json: patch });
     this.putIssues([i]); this.recountIssues(i.conversationId);
     return i;

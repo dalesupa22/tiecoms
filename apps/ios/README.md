@@ -291,6 +291,19 @@ TEST_RUNNER_TC_FIXTURE4=/tmp/fx4.json TEST_RUNNER_TC_SHOTS=/tmp/v4 xcodebuild te
 - Inicio: badge «@» y orden arriba aunque esté silenciada (`unreadMentions`), pestaña «Menciones» con la bandeja `GET /mentions`.
 - Avisos: una mención notifica aunque el chat esté silenciado (salvo «siempre»); `droppedMentions` → aviso sutil.
 
+## Firmar PDFs (rama ios-firmar)
+
+- Burbuja: los PDF muestran «✍️ Firmar» y «✓ Firmado por …» (`AttachmentDTO.signing`). Tocar el PDF abre el visor (`PdfSignScreen`).
+- Visor (`UI/SignCanvas.swift`): UIScrollView con las páginas (CoreGraphics, dibujo perezoso, zoom 1–4×) y las marcas encima.
+  La página se dibuja con la inversa exacta de `displayToPdf` del servidor (`SignGeometry`), así lo que se ve es donde se estampa,
+  también en páginas con /Rotate 90/270. Arrastrar una marca no desplaza la hoja; se puede soltar en otra página (conserva el
+  tamaño en puntos) y la hoja baja/sube sola cerca del borde. Asa y pellizco para el tamaño (proporción fija), × para quitar,
+  zonas tocables de 44 pt. Barra: Firma · Iniciales · Fecha · Texto · Firmar (n); con una marca: Quitar · Duplicar · En todas · Editar · Listo.
+- Firmas guardadas (`SavedSignatures`): dibujar (PencilKit), escribir (Dancing Script, Great Vibes, Caveat en `Resources/Fonts`,
+  OFL) o foto (umbral de Otsu, `Core/SignImage.swift`); PNG transparente recortado. «Documentos que firmé» en Tú (`GET /me/signings`).
+- Pruebas: `SignTests` (unitarias) y, contra el API de la rama firmar-pdf (3056), `SignIntegrationTests` y `SignUITests` con
+  `TEST_RUNNER_TC_FIXTURE_SIGN=<json {apiUrl, email, password, conversationId}>`.
+
 ## Push (APNs)
 
 - **Registro**:

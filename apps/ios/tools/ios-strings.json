@@ -40,8 +40,8 @@
   "Your name"
  ],
  "auth.noAccount": [
-  "¿Tu empresa aún no está en chaggu?",
-  "Is your company not on chaggu yet?"
+  "¿Tu empresa aún no está en Chaggu?",
+  "Is your company not on Chaggu yet?"
  ],
  "auth.password": [
   "Contraseña",
@@ -392,8 +392,8 @@
   "Language"
  ],
  "settings.languageHint": [
-  "chaggu sigue el idioma del sistema (español o inglés). Cámbialo en Ajustes › General › Idioma.",
-  "chaggu follows the system language (Spanish or English). Change it in Settings › General › Language."
+  "Chaggu sigue el idioma del sistema (español o inglés). Cámbialo en Ajustes › General › Idioma.",
+  "Chaggu follows the system language (Spanish or English). Change it in Settings › General › Language."
  ],
  "settings.logout": [
   "Cerrar sesión",
@@ -464,16 +464,16 @@
   "Connects humans, companies & bots"
  ],
  "share.loginFirst": [
-  "Entra en chaggu para compartir en tus conversaciones.",
-  "Sign in to chaggu to share into your conversations."
+  "Entra en Chaggu para compartir en tus conversaciones.",
+  "Sign in to Chaggu to share into your conversations."
  ],
  "share.sent": [
   "Enviado a «{name}»",
   "Sent to “{name}”"
  ],
  "share.openApp": [
-  "Abre chaggu e inicia sesión para compartir aquí.",
-  "Open chaggu and sign in to share here."
+  "Abre Chaggu e inicia sesión para compartir aquí.",
+  "Open Chaggu and sign in to share here."
  ],
  "dom.title": [
   "Dominios de la empresa",
@@ -544,8 +544,8 @@
   "Delete account"
  ],
  "del.intro": [
-  "Se eliminará tu cuenta de chaggu de forma permanente.",
-  "Your chaggu account will be permanently deleted."
+  "Se eliminará tu cuenta de Chaggu de forma permanente.",
+  "Your Chaggu account will be permanently deleted."
  ],
  "del.removed": [
   "Se borran tu perfil, tus sesiones, tus recordatorios, tus inicios con Google o Microsoft y tus WhatsApp conectados. Sales de tus empresas, espacios y conversaciones.",
@@ -636,8 +636,8 @@
   "Send a report"
  ],
  "safety.reportHint": [
-  "Describe el contenido o la conducta que incumple las normas. chaggu revisará el reporte.",
-  "Describe content or behavior that violates the rules. chaggu will review your report."
+  "Describe el contenido o la conducta que incumple las normas. Chaggu revisará el reporte.",
+  "Describe content or behavior that violates the rules. Chaggu will review your report."
  ],
  "safety.reason": [
   "Motivo (5 a 2000 caracteres)",
@@ -648,8 +648,8 @@
   "Send report"
  ],
  "safety.sent": [
-  "Reporte enviado. Gracias por ayudarnos a mantener chaggu seguro.",
-  "Report sent. Thank you for helping keep chaggu safe."
+  "Reporte enviado. Gracias por ayudarnos a mantener Chaggu seguro.",
+  "Report sent. Thank you for helping keep Chaggu safe."
  ],
  "safety.block": [
   "Bloquear persona",
@@ -1044,8 +1044,8 @@
   "People in the space"
  ],
  "grp.noColleagues": [
-  "Aún no hay más personas de tu empresa en chaggu.",
-  "There are no other people from your company on chaggu yet."
+  "Aún no hay más personas de tu empresa en Chaggu.",
+  "There are no other people from your company on Chaggu yet."
  ],
  "grp.inviteOutside": [
   "Invitar de fuera (opcional)",
@@ -1172,12 +1172,12 @@
   "Share"
  ],
  "ishare.text": [
-  "Te invito a {name} en chaggu: {url} (código {code})",
-  "Join {name} on chaggu: {url} (code {code})"
+  "Te invito a {name} en Chaggu: {url} (código {code})",
+  "Join {name} on Chaggu: {url} (code {code})"
  ],
  "ishare.textNoCode": [
-  "Te invito a {name} en chaggu: {url}",
-  "Join {name} on chaggu: {url}"
+  "Te invito a {name} en Chaggu: {url}",
+  "Join {name} on Chaggu: {url}"
  ],
  "ishare.expires": [
   "Vence el {date}. Sirve para varias personas.",
@@ -1292,8 +1292,8 @@
   "Use AI for this voice note?"
  ],
  "ai.voice.message": [
-  "Si lo permites, chaggu envía esta grabación y su idioma a Inworld para transcribirla. Envía la transcripción, los nombres del autor y los participantes, y el nombre/contexto de la conversación a DeepSeek para generar un resumen y una acción sugerida. Puedes enviar y escuchar la nota sin IA. El permiso aplica solo a esta nota.",
-  "If you allow this, chaggu sends this recording and its language to Inworld for transcription. It sends the transcript, author and participant names, and conversation name/context to DeepSeek for a summary and suggested action. You can send and play the voice note without AI. Permission applies to this note only."
+  "Si lo permites, Chaggu envía esta grabación y su idioma a Inworld para transcribirla. Envía la transcripción, los nombres del autor y los participantes, y el nombre/contexto de la conversación a DeepSeek para generar un resumen y una acción sugerida. Puedes enviar y escuchar la nota sin IA. El permiso aplica solo a esta nota.",
+  "If you allow this, Chaggu sends this recording and its language to Inworld for transcription. It sends the transcript, author and participant names, and conversation name/context to DeepSeek for a summary and suggested action. You can send and play the voice note without AI. Permission applies to this note only."
  ],
  "ai.voice.allow": [
   "Permitir IA y enviar",
@@ -1316,8 +1316,8 @@
   "Share this conversation with DeepSeek?"
  ],
  "ai.side.message": [
-  "Para sugerir un resumen, chaggu envía a DeepSeek los mensajes y las transcripciones de esta conversación, los nombres del autor y los participantes, y el nombre/contexto de la conversación. Si lo permites, la sugerencia reemplaza tu borrador. Puedes seguir editando y publicar tu propio resumen sin IA. El permiso aplica solo a esta solicitud.",
-  "To suggest a summary, chaggu sends this conversation's messages and transcripts, author and participant names, and conversation name/context to DeepSeek. Allowing this replaces your draft with the suggestion. You can keep editing and publish your own summary without AI. Permission applies to this request only."
+  "Para sugerir un resumen, Chaggu envía a DeepSeek los mensajes y las transcripciones de esta conversación, los nombres del autor y los participantes, y el nombre/contexto de la conversación. Si lo permites, la sugerencia reemplaza tu borrador. Puedes seguir editando y publicar tu propio resumen sin IA. El permiso aplica solo a esta solicitud.",
+  "To suggest a summary, Chaggu sends this conversation's messages and transcripts, author and participant names, and conversation name/context to DeepSeek. Allowing this replaces your draft with the suggestion. You can keep editing and publish your own summary without AI. Permission applies to this request only."
  ],
  "ai.side.allow": [
   "Permitir y crear resumen",
@@ -1460,8 +1460,8 @@
   "Idioma / Language"
  ],
  "settings.languageHintApp": [
-  "Cambia al instante en toda la app y en los avisos. Algunos textos del sistema (permisos, «Copiar») cambian al volver a abrir chaggu.",
-  "Changes right away across the app and its notifications. Some system texts (permissions, “Copy”) change the next time you open chaggu."
+  "Cambia al instante en toda la app y en los avisos. Algunos textos del sistema (permisos, «Copiar») cambian al volver a abrir Chaggu.",
+  "Changes right away across the app and its notifications. Some system texts (permissions, “Copy”) change the next time you open Chaggu."
  ],
  "grp.view": [
   "Vista",
@@ -1726,5 +1726,341 @@
  "textSize.hint": [
   "Cambia el texto de toda la app al instante. Se suma al tamaño que elijas en Ajustes › Pantalla y brillo.",
   "Changes the text across the app right away. It adds to the size you pick in Settings › Display & Brightness."
+ ],
+ "sign.duplicate": [
+  "Duplicar",
+  "Duplicate"
+ ],
+ "sign.sign": [
+  "Firmar",
+  "Sign"
+ ],
+ "sign.signature": [
+  "Firma",
+  "Signature"
+ ],
+ "sign.initials": [
+  "Iniciales",
+  "Initials"
+ ],
+ "sign.date": [
+  "Fecha",
+  "Date"
+ ],
+ "sign.text": [
+  "Texto",
+  "Text"
+ ],
+ "sign.finish": [
+  "Firmar",
+  "Sign"
+ ],
+ "sign.pageOf": [
+  "Página {i} de {n}",
+  "Page {i} of {n}"
+ ],
+ "sign.zoomIn": [
+  "Acercar",
+  "Zoom in"
+ ],
+ "sign.zoomOut": [
+  "Alejar",
+  "Zoom out"
+ ],
+ "sign.cantOpen": [
+  "No pude abrir este PDF",
+  "Could not open this PDF"
+ ],
+ "sign.encrypted": [
+  "Este PDF tiene contraseña: no se puede ver ni firmar aquí",
+  "This PDF is password-protected: it cannot be viewed or signed here"
+ ],
+ "sign.discard": [
+  "¿Salir sin firmar? Se pierden las marcas que pusiste.",
+  "Leave without signing? The marks you placed will be lost."
+ ],
+ "sign.hint": [
+  "Toca «Firma» abajo y arrástrala a su lugar. Con el círculo de la esquina la agrandas.",
+  "Tap “Signature” below and drag it into place. Use the corner circle to resize it."
+ ],
+ "sign.hasDigital": [
+  "Este PDF ya trae una firma digital con certificado. Si lo firmas aquí, esa firma deja de ser válida.",
+  "This PDF already has a certificate-based digital signature. Signing it here makes that signature invalid."
+ ],
+ "sign.signedBy": [
+  "Firmado por {name} · {when}",
+  "Signed by {name} · {when}"
+ ],
+ "sign.copied": [
+  "Copiada en {n} páginas más",
+  "Copied to {n} more pages"
+ ],
+ "sign.remove": [
+  "Quitar",
+  "Remove"
+ ],
+ "sign.allPages": [
+  "En todas",
+  "All pages"
+ ],
+ "sign.editText": [
+  "Editar",
+  "Edit"
+ ],
+ "sign.mySignatures": [
+  "Mis firmas",
+  "My signatures"
+ ],
+ "sign.myInitials": [
+  "Mis iniciales",
+  "My initials"
+ ],
+ "sign.newSignature": [
+  "Nueva firma",
+  "New signature"
+ ],
+ "sign.newInitials": [
+  "Nuevas iniciales",
+  "New initials"
+ ],
+ "sign.use": [
+  "Usar esta firma",
+  "Use this signature"
+ ],
+ "sign.delete": [
+  "Borrar firma",
+  "Delete signature"
+ ],
+ "sign.deleteConfirm": [
+  "¿Borrar esta firma guardada? Lo que ya firmaste no cambia.",
+  "Delete this saved signature? Documents you already signed do not change."
+ ],
+ "sign.tooMany": [
+  "Puedes guardar hasta {n} firmas. Borra alguna para crear otra.",
+  "You can save up to {n} signatures. Delete one to create another."
+ ],
+ "sign.tab.drawn": [
+  "Dibujar",
+  "Draw"
+ ],
+ "sign.tab.typed": [
+  "Escribir",
+  "Type"
+ ],
+ "sign.tab.uploaded": [
+  "Foto",
+  "Photo"
+ ],
+ "sign.ink": [
+  "Tinta",
+  "Ink"
+ ],
+ "sign.ink.blue": [
+  "Azul",
+  "Blue"
+ ],
+ "sign.ink.black": [
+  "Negra",
+  "Black"
+ ],
+ "sign.drawHere": [
+  "Firma aquí",
+  "Sign here"
+ ],
+ "sign.clear": [
+  "Borrar",
+  "Clear"
+ ],
+ "sign.typePh": [
+  "Tu nombre",
+  "Your name"
+ ],
+ "sign.empty": [
+  "Primero haz tu firma",
+  "Make your signature first"
+ ],
+ "sign.photoHint": [
+  "Firma en una hoja blanca y tómale una foto: quitamos el fondo.",
+  "Sign on a white sheet and take a photo: we remove the background."
+ ],
+ "sign.takePhoto": [
+  "Tomar foto",
+  "Take photo"
+ ],
+ "sign.pickImage": [
+  "Elegir imagen",
+  "Choose image"
+ ],
+ "sign.photoError": [
+  "No pude leer esa imagen",
+  "Could not read that image"
+ ],
+ "sign.keepColor": [
+  "Conservar el color original",
+  "Keep original color"
+ ],
+ "sign.cleanBg": [
+  "Limpiar el fondo",
+  "Clean background"
+ ],
+ "sign.privacy": [
+  "Tu firma queda guardada solo para ti. Nadie más puede verla ni usarla.",
+  "Your signature is saved only for you. Nobody else can see or use it."
+ ],
+ "sign.saveUse": [
+  "Guardar y usar",
+  "Save and use"
+ ],
+ "sign.textTitle": [
+  "Agregar texto",
+  "Add text"
+ ],
+ "sign.textPh": [
+  "Nombre, cargo, cédula…",
+  "Name, title, ID…"
+ ],
+ "sign.confirmTitle": [
+  "Firmar documento",
+  "Sign document"
+ ],
+ "sign.summary": [
+  "Vas a firmar «{name}» con {n} firma(s) en {p} de {total} página(s). El PDF firmado se responde en este chat.",
+  "You are signing “{name}” with {n} signature(s) on {p} of {total} page(s). The signed PDF is posted as a reply in this chat."
+ ],
+ "sign.bodyPh": [
+  "Mensaje (opcional): ✍️ Documento firmado",
+  "Message (optional): ✍️ Signed document"
+ ],
+ "sign.stamp": [
+  "Sello con fecha bajo la firma",
+  "Date seal under the signature"
+ ],
+ "sign.stampHelp": [
+  "Una línea pequeña: «Firmado electrónicamente por … · fecha y hora».",
+  "A small line: “Electronically signed by … · date and time”."
+ ],
+ "sign.certificate": [
+  "Agregar hoja de constancia",
+  "Add a signature record page"
+ ],
+ "sign.certificateHelp": [
+  "Una página al final con quién firmó, cuándo, desde dónde y la huella del original.",
+  "A final page with who signed, when, from where and the original’s fingerprint."
+ ],
+ "sign.acceptBreak": [
+  "Entiendo que la firma digital que ya trae el PDF deja de ser válida.",
+  "I understand the PDF’s existing digital signature will no longer be valid."
+ ],
+ "sign.legal": [
+  "Es una firma electrónica (Ley 527 de 1999). Chaggu guarda la huella del original y del firmado.",
+  "This is an electronic signature. Chaggu keeps the fingerprint of the original and the signed file."
+ ],
+ "sign.signing": [
+  "Firmando…",
+  "Signing…"
+ ],
+ "sign.signSend": [
+  "Firmar y enviar",
+  "Sign and send"
+ ],
+ "sign.done": [
+  "Documento firmado y enviado ✓",
+  "Document signed and sent ✓"
+ ],
+ "att.signBtn": [
+  "Firmar",
+  "Sign"
+ ],
+ "att.signedBy": [
+  "✓ Firmado por {name}",
+  "✓ Signed by {name}"
+ ],
+ "att.preview": [
+  "Ver PDF",
+  "View PDF"
+ ],
+ "signed.title": [
+  "Documentos que firmé",
+  "Documents I signed"
+ ],
+ "signed.search": [
+  "Documento, persona, grupo o referencia",
+  "Document, person, group or reference"
+ ],
+ "signed.empty": [
+  "Aún no has firmado documentos. Cuando firmes un PDF en un chat, la constancia queda aquí.",
+  "You have not signed any documents yet. When you sign a PDF in a chat, its record stays here."
+ ],
+ "signed.noResults": [
+  "Nada coincide con la búsqueda.",
+  "Nothing matches your search."
+ ],
+ "signed.requestedBy": [
+  "Pedido por {name}",
+  "Requested by {name}"
+ ],
+ "signed.marks": [
+  "{n} firma(s) en {p} de {total} páginas",
+  "{n} signature(s) on {p} of {total} pages"
+ ],
+ "signed.refLabel": [
+  "Ref. {ref}",
+  "Ref. {ref}"
+ ],
+ "signed.detailTitle": [
+  "Constancia de firma",
+  "Signature record"
+ ],
+ "signed.when": [
+  "Fecha",
+  "Date"
+ ],
+ "signed.signer": [
+  "Firmado por",
+  "Signed by"
+ ],
+ "signed.who": [
+  "Lo pidió",
+  "Requested by"
+ ],
+ "signed.where": [
+  "Dónde",
+  "Where"
+ ],
+ "signed.marksLabel": [
+  "Marcas",
+  "Marks"
+ ],
+ "signed.fingerprints": [
+  "Huellas SHA-256",
+  "SHA-256 fingerprints"
+ ],
+ "signed.hashOriginal": [
+  "Original",
+  "Original"
+ ],
+ "signed.hashSigned": [
+  "Firmado",
+  "Signed"
+ ],
+ "signed.viewPdf": [
+  "Ver PDF firmado",
+  "View signed PDF"
+ ],
+ "signed.goMessage": [
+  "Ir al mensaje",
+  "Go to message"
+ ],
+ "signed.noAccess": [
+  "Ya no tienes acceso al archivo, pero la constancia queda.",
+  "You no longer have access to the file, but the record remains."
+ ],
+ "signed.saved": [
+  "Mis firmas guardadas",
+  "My saved signatures"
+ ],
+ "signed.savedEmpty": [
+  "Aún no tienes firmas guardadas. Créalas una vez y reúsalas.",
+  "You have no saved signatures yet. Create them once and reuse them."
  ]
 }

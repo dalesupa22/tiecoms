@@ -473,6 +473,34 @@ struct CreateChatResult: Decodable, Sendable {
 
 // MARK: Adjuntos
 
+/// Quién firmó un PDF con Chaggu, cuándo y las huellas SHA-256 (hex) del original y del firmado.
+struct AttachmentSigningDTO: Codable, Equatable, Sendable, Identifiable {
+    var id: String
+    var signerId: String
+    var signerName: String
+    var signedAt: String
+    var originalSha256: String
+    var signedSha256: String
+
+    init(id: String, signerId: String = "", signerName: String, signedAt: String, originalSha256: String = "", signedSha256: String = "") {
+        self.id = id; self.signerId = signerId; self.signerName = signerName; self.signedAt = signedAt
+        self.originalSha256 = originalSha256; self.signedSha256 = signedSha256
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        signerId = c.v("signerId", "")
+        signerName = c.v("signerName", "")
+        signedAt = c.v("signedAt", "")
+        originalSha256 = c.v("originalSha256", "")
+        signedSha256 = c.v("signedSha256", "")
+    }
+
+    /// Referencia impresa en el sello del PDF («Chaggu Ref. 3F9A21C0»): igual que `signingRef` del contrato.
+    static func ref(_ id: String) -> String { String(id.replacingOccurrences(of: "-", with: "").prefix(8)).uppercased() }
+}
+
 struct AttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var name: String
@@ -489,6 +517,8 @@ struct AttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     /// Hasta 64 valores 0…1.
     var waveform: [Double]?
     var transcript: VoiceTranscript?
+    /// Solo en PDFs firmados con Chaggu: quién firmó, cuándo y la huella del resultado.
+    var signing: AttachmentSigningDTO?
 
     var isVoice: Bool { kind == "voice" }
     var isImage: Bool { !isVoice && contentType.hasPrefix("image/") }
@@ -496,10 +526,11 @@ struct AttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     var isMedia: Bool { isImage || isVideo }
 
     init(id: String, name: String, contentType: String, sizeBytes: Int, width: Int? = nil, height: Int? = nil, url: String, thumbUrl: String? = nil,
-         kind: String? = nil, durationMs: Int? = nil, waveform: [Double]? = nil, transcript: VoiceTranscript? = nil) {
+         kind: String? = nil, durationMs: Int? = nil, waveform: [Double]? = nil, transcript: VoiceTranscript? = nil, signing: AttachmentSigningDTO? = nil) {
         self.id = id; self.name = name; self.contentType = contentType; self.sizeBytes = sizeBytes
         self.width = width; self.height = height; self.url = url; self.thumbUrl = thumbUrl
         self.kind = kind; self.durationMs = durationMs; self.waveform = waveform; self.transcript = transcript
+        self.signing = signing
     }
 
     init(from decoder: Decoder) throws {
@@ -516,6 +547,7 @@ struct AttachmentDTO: Codable, Equatable, Identifiable, Sendable {
         durationMs = c.intOpt("durationMs")
         waveform = (c.o("waveform") as [Double]?).map { $0.prefix(64).map { min(1, max(0, $0)) } }
         transcript = c.o("transcript")
+        signing = c.o("signing")
     }
 }
 

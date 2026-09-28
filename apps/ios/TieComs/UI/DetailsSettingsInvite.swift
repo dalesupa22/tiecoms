@@ -330,6 +330,8 @@ struct SettingsView: View {
                     .accessibilityElement(children: .combine)
                     NavigationLink(value: Route.profile) { Label(L("profile.edit"), systemImage: "person.crop.circle") }
                         .accessibilityIdentifier("settings.editProfile")
+                    NavigationLink(value: Route.signed) { Label(L("signed.title"), systemImage: "signature") }
+                        .accessibilityIdentifier("settings.signed")
                 }
                 Section {
                     Button { joining = true } label: { Label(L("join.title"), systemImage: "ticket") }

@@ -55,7 +55,9 @@ targets:
         CFBundleAllowMixedLocalizations: true
         ITSAppUsesNonExemptEncryption: false
         NSUserActivityTypes: [INSendMessageIntent]
-        NSCameraUsageDescription: chaggu uses the camera when you choose to take a profile or group photo, or a photo or video to attach.
+        NSCameraUsageDescription: chaggu uses the camera when you choose to take a profile or group photo, a photo or video to attach, or a photo of your handwritten signature.
+        # Letras cursivas (OFL) para la firma escrita.
+        UIAppFonts: [DancingScript.ttf, GreatVibes-Regular.ttf, Caveat.ttf]
         NSMicrophoneUsageDescription: chaggu uses the microphone to record the voice notes you send in your conversations and to listen when you talk to gg, the assistant.
         NSSpeechRecognitionUsageDescription: chaggu uses speech recognition to turn what you say to gg, the assistant, into text.
         LSRequiresIPhoneOS: true

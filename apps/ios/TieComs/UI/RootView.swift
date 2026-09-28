@@ -213,6 +213,7 @@ extension View {
             case .deleteAccount: DeleteAccountView()
             case .workspace(let id): WorkspaceDetailsView(workspaceId: id)
             case .profile: EditProfileView()
+            case .signed: SignedDocumentsView()
             case .files: FilesRootView()
             case .drive(let ws, let folder): DriveFolderView(workspaceId: ws, folderId: folder)
             case .oversight(let orgId): OversightView(orgId: orgId)

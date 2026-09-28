@@ -1030,3 +1030,97 @@ select.link-act { appearance: none; padding-right: 10px; }
 .parent-link { align-self: flex-start; font-weight: 600; }
 .side-issue-strip { display: flex; align-items: center; gap: 8px; border: 1px solid #f0d9c5; background: #fff7ef; border-radius: 10px; padding: 6px 10px; margin-bottom: 6px; font-size: 13px; font-weight: 600; }
 .side-issue-strip .link-btn { text-align: left; color: inherit; }
+/* ---------- Ver y firmar PDFs ---------- */
+.pdf-sheet { position: fixed; inset: 0; z-index: 85; background: #d9d4ca; display: flex; flex-direction: column; }
+.pdf-bar { display: flex; align-items: center; gap: 6px; padding: calc(8px + var(--safe-t)) 10px 8px; background: var(--paper); border-bottom: 1px solid var(--line); }
+.pdf-bar .btn { white-space: nowrap; }
+.pdf-zoom { display: flex; }
+.pdf-banner { padding: 8px 14px; font-size: 13px; background: var(--card); border-bottom: 1px solid var(--line); }
+.pdf-banner.ok { background: #e7f2ea; color: #1f5a33; }
+.pdf-banner.warn { background: #fdf0dc; color: #7a4a06; }
+.pdf-banner.hint { background: #fff7f1; color: var(--accent-ink); text-align: center; }
+.pdf-banner code { font-size: 12px; }
+.pdf-stage { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 12px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.pdf-stage > .pdf-page { flex: none; }
+.pdf-page { position: relative; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18), 0 6px 18px rgba(0,0,0,.08); }
+.pdf-page canvas { display: block; }
+.pdf-msg { margin: auto; color: var(--ink-2); display: flex; align-items: center; gap: 10px; }
+.pdf-spin { display: inline-block; width: 18px; height: 18px; border-radius: 99px; border: 2.5px solid rgba(0,0,0,.12); border-top-color: var(--ink); animation: att-spin .8s linear infinite; }
+.pdf-mark { position: absolute; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; display: flex; align-items: center; justify-content: flex-start; outline: 1.5px dashed rgba(199, 58, 26, .55); outline-offset: 2px; border-radius: 2px; }
+.pdf-mark.is-static { cursor: default; outline: none; pointer-events: none; }
+.pdf-mark.is-sel { outline: 2px solid var(--accent); background: rgba(199, 58, 26, .06); z-index: 2; }
+.pdf-mark:active { cursor: grabbing; }
+.pdf-mark img { width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+.pdf-mark .pdf-spin { margin: auto; }
+.pdf-mark-text { white-space: nowrap; line-height: 1; color: #10121e; pointer-events: none; }
+.pdf-x { position: absolute; top: -14px; left: -14px; width: 28px; height: 28px; border-radius: 99px; border: 0; background: var(--ink); color: #fff; font-size: 16px; line-height: 1; display: grid; place-items: center; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+.pdf-handle { position: absolute; right: -11px; bottom: -11px; width: 22px; height: 22px; border-radius: 99px; background: #fff; border: 2px solid var(--accent); cursor: nwse-resize; touch-action: none; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+/* En pantallas táctiles, zonas de toque de ≥ 40 px sin agrandar el dibujo. */
+@media (pointer: coarse) {
+  .pdf-x::after, .pdf-handle::after { content: ''; position: absolute; inset: -9px; }
+  .pdf-mark::before { content: ''; position: absolute; inset: -12px -6px; }
+}
+.pdf-tools { display: flex; align-items: stretch; gap: 4px; padding: 8px 8px calc(8px + var(--safe-b)); background: var(--paper); border-top: 1px solid var(--line); }
+.pdf-tool { flex: 1; min-width: 0; border: 0; background: transparent; border-radius: 10px; padding: 6px 2px; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11.5px; font-weight: 600; color: var(--ink-2); }
+.pdf-tool span { font-size: 20px; line-height: 1.2; }
+.pdf-tool .pdf-ini { font-size: 13px; font-weight: 800; letter-spacing: .5px; font-style: italic; line-height: 26px; }
+.pdf-tool:active, .pdf-tool:hover { background: var(--paper-3); }
+.pdf-go { flex: 1.6; min-width: 0; white-space: nowrap; }
+@media (min-width: 861px) {
+  .pdf-tools { justify-content: center; }
+  .pdf-tool { flex: 0 0 96px; font-size: 12.5px; }
+  .pdf-go { flex: 0 0 auto; padding-inline: 22px; }
+}
+.sig-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.sig-tile { position: relative; border: 1px solid var(--line); border-radius: 12px; background: #fff; min-height: 84px; display: flex; }
+.sig-use { flex: 1; border: 0; background: transparent; padding: 10px; display: grid; place-items: center; border-radius: 12px; }
+.sig-use img { max-width: 100%; max-height: 64px; object-fit: contain; }
+.sig-use:hover { background: #faf7f2; }
+.sig-del { position: absolute; top: 4px; right: 4px; border: 0; background: transparent; font-size: 14px; opacity: .55; width: 30px; height: 30px; border-radius: 8px; }
+.sig-del:hover { opacity: 1; background: var(--paper-3); }
+.sig-new { flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-style: dashed; background: transparent; font-weight: 600; color: var(--ink-2); }
+.sig-new span { font-size: 22px; }
+.sig-pad { position: relative; background: #fff; border: 1px solid var(--line); border-radius: 12px; aspect-ratio: 5 / 2; touch-action: none; overflow: hidden; }
+.sig-pad.k-initials { aspect-ratio: 2 / 1; max-width: 360px; width: 100%; margin: 0 auto; }
+.sig-pad canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+.sig-line { position: absolute; left: 8%; right: 8%; bottom: 26%; border-bottom: 1.5px solid #d8d2c7; pointer-events: none; }
+.sig-pad-hint { position: absolute; left: 8%; bottom: calc(26% - 22px); font-size: 12px; color: var(--faint); pointer-events: none; }
+.sig-clear { position: absolute; top: 6px; right: 6px; }
+.sig-fonts { display: grid; gap: 8px; }
+.sig-font { border: 1px solid var(--line); background: #fff; border-radius: 12px; padding: 6px 14px; font-size: 34px; line-height: 1.3; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sig-font.on { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(199, 58, 26, .18); }
+.sig-photo { min-height: 120px; border: 1px dashed var(--line); border-radius: 12px; display: grid; place-items: center; padding: 10px;
+  background: repeating-conic-gradient(#f1ede6 0 25%, #fff 0 50%) 0 0 / 16px 16px; }
+.sig-photo img { max-width: 100%; max-height: 180px; object-fit: contain; }
+.ink-dot { width: 26px; height: 26px; border-radius: 99px; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line); }
+.ink-dot.on { box-shadow: 0 0 0 2px var(--accent); }
+.att-wrap { grid-template-columns: minmax(0, 1fr); }
+.att-file-btn.is-pdf { padding-right: 2px; gap: 4px; min-width: 0; }
+.att-file-btn.is-pdf > .grow { display: flex; min-width: 0; }
+.att-file-btn.is-pdf .icon-btn { width: 34px; flex: none; }
+.att-sign { border: 0; background: var(--accent); color: #fff; border-radius: 8px; padding: 6px 10px; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.att-signed { color: var(--ok); font-weight: 600; }
+
+/* ---------- Documentos que firmé ---------- */
+.seal { flex: none; color: #2f6b45; }
+.signed-page { max-width: 760px; }
+.signed-day { margin-bottom: 14px; }
+.signed-day-h { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 2px 6px; }
+.signed-day-h::first-letter { text-transform: uppercase; }
+.signed-list { padding: 0; overflow: hidden; }
+.signed-row { display: flex; align-items: center; gap: 12px; width: 100%; border: 0; background: transparent; text-align: left; padding: 12px 14px; min-height: 64px; }
+.signed-row + .signed-row { border-top: 1px solid var(--line); }
+.signed-row:hover, .signed-row:active { background: var(--paper-2); }
+.signed-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 32px 16px; text-align: center; }
+.signed-empty .seal { color: var(--faint); }
+.signed-detail-head { display: flex; align-items: center; gap: 14px; }
+.signed-dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 13.5px; }
+.signed-dl dt { color: var(--muted); }
+.signed-dl dd { margin: 0; min-width: 0; word-break: break-word; }
+.signed-hash { display: grid; gap: 2px; }
+.signed-hash button { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 8px; text-align: left; }
+.signed-hash code { font-size: 11.5px; word-break: break-all; }
+.profile-signed { justify-content: space-between; }
+.signed-ref { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; letter-spacing: .04em; color: #2f6b45; }
+.signed-tabs { max-width: 420px; margin-bottom: 14px; } .signed-tabs button { white-space: nowrap; }
+@media (max-width: 520px) { .pdf-zoom { display: none; } }

@@ -109,7 +109,9 @@ function sameBody(row: any, input: { body: string; attachmentIds?: string[]; for
  * Envío idempotente: reintentar con el mismo clientMessageId devuelve el mismo
  * mensaje; reutilizarlo con otro contenido se rechaza. El ACK sale solo tras el commit.
  */
-export async function sendMessage(userId: string, conversationId: string, input: SendMessageInput): Promise<{ message: MessageDTO; duplicate: boolean; droppedMentions?: string[] }> {
+export async function sendMessage(userId: string, conversationId: string, input: SendMessageInput,
+  afterCreate?: (c: Tx, message: MessageDTO) => Promise<void>,
+): Promise<{ message: MessageDTO; duplicate: boolean; droppedMentions?: string[] }> {
   const existing = await findByClientId(conversationId, userId, input.clientMessageId);
   if (existing) {
     // Aun así revalida el acceso: un duplicado no debe filtrar datos a quien perdió permiso.
@@ -153,6 +155,8 @@ export async function sendMessage(userId: string, conversationId: string, input:
       if (mentions.userIds.length) await saveMentions(c, m.id, conversationId, m.seq, mentions);
       await indexLinks(c, { id: m.id, conversation_id: conversationId, seq: m.seq, author_id: userId, body: input.body, created_at: m.createdAt });
       await queuePreview(c, m.id, input.body);
+      // Datos asociados que deben quedar confirmados junto al mensaje (sin I/O externo).
+      if (afterCreate) await afterCreate(c, m);
       return m;
     });
     return { message, duplicate: false, ...(dropped.length ? { droppedMentions: dropped } : {}) };

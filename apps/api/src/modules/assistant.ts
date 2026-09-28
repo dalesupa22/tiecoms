@@ -323,6 +323,7 @@ async function chat(messages: any[]) {
 
 export async function turn(userId: string, raw: unknown): Promise<AssistantTurnDTO> {
   const input = AssistantTurnInput.parse(raw);
+  if (input.aiConsent !== true) throw new ApiError(403, 'ai_consent_required', 'Autoriza el uso de DeepSeek antes de usar gg');
   const dir = await directory(userId);
   const ctx: Ctx = { userId, dir, tz: validTz(input.timezone) ? input.timezone : 'America/Bogota', actions: [] };
   const messages: any[] = [{ role: 'system', content: systemPrompt(dir, ctx.tz, input.lang) }, ...input.messages];
@@ -406,7 +407,8 @@ function validTz(tz: string) { try { new Intl.DateTimeFormat('en', { timeZone: t
 
 // ---------- Voz: la web graba (MediaRecorder) y aquí se transcribe (Inworld, el mismo de las notas de voz) ----------
 const MAX_VOICE_BYTES = 6 * 1024 * 1024;
-export async function transcribe(_userId: string, audio: unknown, type: string | undefined, lang: string | undefined) {
+export async function transcribe(_userId: string, audio: unknown, type: string | undefined, lang: string | undefined, aiConsent = false) {
+  if (aiConsent !== true) throw new ApiError(403, 'ai_consent_required', 'Autoriza el envío de audio a Inworld antes de transcribir');
   if (!Buffer.isBuffer(audio) || !audio.length) throw badRequest('Falta el audio');
   if (audio.length > MAX_VOICE_BYTES) throw badRequest('El audio es muy largo');
   const t = getTranscriber();

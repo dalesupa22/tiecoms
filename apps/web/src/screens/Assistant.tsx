@@ -3,6 +3,7 @@ import type { AssistantActionDTO, AssistantTurnDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { asset, navigate } from '../router.ts';
 import { errorText, getLang as lang, t } from '../i18n.ts';
+import { Modal } from '../ui.tsx';
 
 /**
  * Asistente: burbuja pequeña abajo a la derecha en las listas (no dentro de un chat, como WhatsApp).
@@ -78,7 +79,7 @@ export function AssistantBubble({ hidden }: { hidden: boolean }) {
           <img src={asset('/gg-mark-animado.svg')} alt="" width={34} height={34} draggable={false} />
         </button>
       )}
-      {open && <AssistantPanel userId={me} listenOnOpen={listenOnOpen} onClose={() => setOpen(false)} />}
+      {open && <AssistantPanel key={me} userId={me} listenOnOpen={listenOnOpen} onClose={() => setOpen(false)} />}
     </>
   );
 }
@@ -94,16 +95,43 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
   const [transcribing, setTranscribing] = useState(false);
   const [speakOn, setSpeakOn] = useState(() => { try { return localStorage.getItem(SPEAK_KEY) !== '0'; } catch { return true; } });
   const rec = useRef<any>(null);
-    const byVoice = useRef(false);
+  const byVoice = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const consent = useRef({ text: false, voice: false });
+  const pendingConsent = useRef<(() => void) | null>(null);
+  const [consentKind, setConsentKind] = useState<'text' | 'voice' | null>(null);
+  const mounted = useRef(true);
+  function requestConsent(kind: 'text' | 'voice', resume: () => void) {
+    if (consent.current[kind]) return true;
+    pendingConsent.current = resume;
+    setConsentKind(kind);
+    return false;
+  }
+  function cancelConsent() { pendingConsent.current = null; setConsentKind(null); }
+  function allowConsent() {
+    consent.current.text = true;
+    if (consentKind === 'voice') consent.current.voice = true;
+    const resume = pendingConsent.current;
+    cancelConsent();
+    resume?.();
+  }
 
   useEffect(() => { save(userId, turns); scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' }); }, [turns, userId]);
   useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !pendingConsent.current) onClose(); };
     window.addEventListener('keydown', k);
-    return () => { window.removeEventListener('keydown', k); try { const r = rec.current; r?.stream?.getTracks().forEach((x: MediaStreamTrack) => x.stop()); window.speechSynthesis?.cancel(); } catch {} };
+    return () => { window.removeEventListener('keydown', k); };
   }, [onClose]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      pendingConsent.current = null;
+      consent.current = { text: false, voice: false };
+      try { rec.current?.stream?.getTracks().forEach((x: MediaStreamTrack) => x.stop()); window.speechSynthesis?.cancel(); } catch {}
+    };
+  }, []);
   useEffect(() => {
     if (listenOnOpen && Recognition) void startListening(true);
     else input.current?.focus();
@@ -113,8 +141,10 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const patchAction = (id: string, patch: Partial<AssistantActionDTO>) =>
+  const patchAction = (id: string, patch: Partial<AssistantActionDTO>) => {
+    if (!mounted.current) return;
     setTurns((ts) => ts.map((x) => (x.actions?.some((a) => a.id === id) ? { ...x, actions: x.actions.map((a) => (a.id === id ? { ...a, ...patch } : a)) } : x)));
+  };
 
   const lastTurn = turns[turns.length - 1];
   const pendingAll = turns.flatMap((x) => x.actions ?? []).filter((a) => a.status === 'pending');
@@ -141,12 +171,14 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
   async function ask(content: string, retry = false) {
     const q = content.trim();
     if (!q || busy) return;
+    if (!requestConsent('text', () => { void ask(q, retry); })) { setText(q); return; }
     setError(null); setText(''); setInterim('');
     const voice = byVoice.current; byVoice.current = false;
     // «Envíalos» con borradores pendientes: se confirman aquí mismo, sin volver a llamar al modelo.
     if (SEND_ALL.test(q) && pendingAll.length) {
       setTurns((ts) => [...ts, { role: 'user', content: q, at: Date.now() }]);
       await Promise.all(pendingAll.map((a) => runAction(a)));
+      if (!mounted.current) return;
       const done = pendingAll.length === 1 ? t('ai.sentOne') : t('ai.sentAll', { n: pendingAll.length });
       setTurns((ts) => [...ts, { role: 'assistant', content: done, at: Date.now() }]);
       if (voice || speakOn) speak(done);
@@ -161,16 +193,19 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
         role: x.role,
         content: x.actions?.length ? `${x.content}\n[${x.actions.map((a) => `${a.status}: ${a.kind} → ${a.target}: ${a.text}`).join(' | ')}]`.slice(0, 4000) : x.content.slice(0, 4000),
       }));
-      const out = await client.request<AssistantTurnDTO>('/assistant/turn', { method: 'POST', json: { messages: history, timezone: tz(), lang: lang() } });
+      const out = await client.request<AssistantTurnDTO>('/assistant/turn', { method: 'POST', json: { aiConsent: true, messages: history, timezone: tz(), lang: lang() } });
+      if (!mounted.current) return;
       setTurns((ts) => [...ts, { role: 'assistant', content: out.reply, actions: out.actions, suggestions: out.suggestions ?? [], at: Date.now() }]);
       if (voice || speakOn) speak(out.reply);
     } catch (e: any) {
+      if (!mounted.current) return;
       setError(e?.status === 503 ? t('ai.unavailable') : errorText(e));
-    } finally { setBusy(false); }
+    } finally { if (mounted.current) setBusy(false); }
   }
 
   async function startListening(_fromHold = false) {
     if (!Recognition || listening || rec.current) return;
+    if (!requestConsent('voice', () => { void startListening(_fromHold); })) return;
     try { window.speechSynthesis?.cancel(); } catch {}
     setError(null);
     const session: { stopAsked: boolean; rec?: MediaRecorder; stream?: MediaStream; timer?: number } = { stopAsked: false };
@@ -179,10 +214,12 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
     let stream: MediaStream;
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
     catch (e: any) {
+      if (!mounted.current) return;
       rec.current = null; setListening(false);
       setError(e?.name === 'NotAllowedError' || e?.name === 'SecurityError' ? t('ai.micDenied') : t('ai.micMissing'));
       return;
     }
+    if (!mounted.current) { stream.getTracks().forEach((x) => x.stop()); return; }
     const type = recorderType();
     const r = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
     const chunks: Blob[] = [];
@@ -190,17 +227,19 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
     r.onstop = async () => {
       stream.getTracks().forEach((x) => x.stop());
       clearTimeout(session.timer);
+      if (!mounted.current || !consent.current.voice) return;
       rec.current = null; setListening(false);
       const blob = new Blob(chunks, { type: r.mimeType || type || 'audio/webm' });
       if (blob.size < 1500) { setInterim(''); return; }
       setTranscribing(true);
       try {
         const out = await client.request<{ text: string }>(`/assistant/transcribe?lang=${lang()}`, {
-          method: 'POST', body: blob, headers: { 'content-type': 'application/octet-stream', 'x-file-type': blob.type },
+          method: 'POST', body: blob, headers: { 'content-type': 'application/octet-stream', 'x-file-type': blob.type, 'x-ai-consent': '1' },
         });
+        if (!mounted.current) return;
         if (out.text) { byVoice.current = true; void ask(out.text); } else setError(t('ai.heardNothing'));
-      } catch (e: any) { setError(e?.status === 503 ? t('ai.voiceUnavailable') : errorText(e)); }
-      finally { setTranscribing(false); }
+      } catch (e: any) { if (mounted.current) setError(e?.status === 503 ? t('ai.voiceUnavailable') : errorText(e)); }
+      finally { if (mounted.current) setTranscribing(false); }
     };
     session.rec = r; session.stream = stream;
     r.start(250);
@@ -289,6 +328,15 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
             : Recognition && <button className={`ai-go ${listening ? 'on' : ''}`} type="button" aria-label={listening ? t('ai.stop') : t('ai.talk')} disabled={transcribing} onClick={() => (listening ? stopListening() : void startListening())}>🎤</button>}
         </form>
       </section>
+      {consentKind && <Modal title={t('ai.ggConsentTitle')} onClose={cancelConsent}>
+        <p>{t('ai.ggDisclosure')}</p>
+        {consentKind === 'voice' && <p>{t('ai.ggVoiceDisclosure')}</p>}
+        <p className="small muted">{t('ai.ggConsentScope')}</p>
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={cancelConsent}>{t('common.cancel')}</button>
+          <button type="button" className="btn" onClick={allowConsent}>{t('ai.ggAllow')}</button>
+        </div>
+      </Modal>}
     </div>
   );
 }

@@ -40,6 +40,8 @@ beforeAll(async () => {
   ana = await signup('Ana');
   laura = await signup('Laura', (await call(`/organizations/${ana.orgId}/invitations`, { token: ana.token, body: {} })).json.token);
   cesar = await signup('Cesar', (await call(`/organizations/${ana.orgId}/invitations`, { token: ana.token, body: {} })).json.token);
+  // Este caso prueba entrega push, independientemente de la hora local del modo sueño por defecto.
+  expect((await call('/me/sleep', { token: cesar.token, method: 'PUT', body: { on: false } })).status).toBe(200);
   otro = await signup('Otro');
   dmId = (await call('/chats', { token: ana.token, body: { userIds: [cesar.id] } })).json.id;
   multiId = (await call('/chats', { token: ana.token, body: { userIds: [cesar.id, laura.id], name: 'Trío' } })).json.id;

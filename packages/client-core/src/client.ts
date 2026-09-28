@@ -5,6 +5,7 @@ import {
   type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type UserDTO, normalizeEmoji,
+  type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -885,6 +886,29 @@ export class TieComsClient {
   /** Miniatura opcional (JPEG/PNG/WebP ≤ 512 KB) de un adjunto aún pendiente. */
   uploadAttachmentThumb(id: string, thumb: Blob) {
     return this.request<AttachmentDTO>(`/attachments/${id}/thumb`, { method: 'POST', body: thumb, headers: { 'content-type': 'application/octet-stream' } });
+  }
+  // ---------- Firmar PDFs ----------
+  /** Mis firmas guardadas (PNG transparentes; url solo me sirve a mí). */
+  listSignatures() { return this.request<{ signatures: SignatureDTO[] }>('/me/signatures'); }
+  /** Guarda una firma o iniciales ya recortadas (PNG ≤ 512 KB). */
+  createSignature(png: Blob, kind: SignatureDTO['kind'], source: SignatureDTO['source']) {
+    return this.request<SignatureDTO>('/me/signatures', { method: 'POST', body: png, headers: { 'content-type': 'image/png', 'x-signature-kind': kind, 'x-signature-source': source } });
+  }
+  deleteSignature(id: string) { return this.request<{ ok: true }>(`/me/signatures/${id}`, { method: 'DELETE' }); }
+  /** Historial «Documentos que firmé» (lo más reciente primero; before = nextBefore de la página anterior). */
+  listSignings(q: { before?: string | null; limit?: number; q?: string } = {}) {
+    const p = new URLSearchParams();
+    if (q.before) p.set('before', q.before);
+    if (q.limit) p.set('limit', String(q.limit));
+    if (q.q?.trim()) p.set('q', q.q.trim());
+    const qs = p.toString();
+    return this.request<SigningHistoryPageDTO>(`/me/signings${qs ? `?${qs}` : ''}`);
+  }
+  /** Antes de firmar: si ya trae firma digital, si está cifrado y quién lo ha firmado en Chaggu. */
+  signInfo(attachmentId: string) { return this.request<SignInfoDTO>(`/attachments/${attachmentId}/sign-info`); }
+  /** Estampa las marcas en el servidor y responde en el hilo con el PDF firmado. Idempotente por clientMessageId. */
+  signPdf(attachmentId: string, input: SignPdfInput) {
+    return this.request<SignPdfResult>(`/attachments/${attachmentId}/sign`, { method: 'POST', json: input });
   }
   /** Descarga autenticada (Bearer) de una ruta del API, p. ej. AttachmentDTO.url. */
   async fetchBlob(apiPath: string): Promise<Blob> {

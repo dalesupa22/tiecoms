@@ -52,7 +52,7 @@ function fakeReply(body: any) {
   return { role: 'assistant', content: JSON.stringify(msgs.slice(lastIdx).filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content))) };
 }
 const ask = (a: Actor, script: { tool: string; args: any }[]) =>
-  call('/assistant/turn', { token: a.token, body: { messages: [{ role: 'user', content: `GUION ${JSON.stringify(script)}` }], timezone: 'America/Bogota' } });
+  call('/assistant/turn', { token: a.token, body: { aiConsent: true, messages: [{ role: 'user', content: `GUION ${JSON.stringify(script)}` }], timezone: 'America/Bogota' } });
 const toolOut = (r: { json: any }) => JSON.parse(r.json.reply) as any[];
 
 let ana: Actor, beto: Actor, eva: Actor;
@@ -85,6 +85,25 @@ beforeAll(async () => {
 afterAll(async () => { await new Promise((r) => fake.close(r)); });
 
 describe('asistente: aislamiento entre usuarios', () => {
+  it('sin permiso explícito no envía el directorio ni mensajes a DeepSeek', async () => {
+    seen.length = 0;
+    for (const aiConsent of [undefined, false]) {
+      const r = await call('/assistant/turn', { token: ana.token, body: { aiConsent, messages: [{ role: 'user', content: 'GUION []' }] } });
+      expect(r.status).toBe(403);
+      expect(r.json.error.code).toBe('ai_consent_required');
+    }
+    expect(seen).toHaveLength(0);
+  });
+
+  it('sin permiso explícito no transcribe audio con Inworld', async () => {
+    const r = await fetch(`${API}/api/v1/assistant/transcribe?lang=es`, {
+      method: 'POST', headers: { authorization: `Bearer ${ana.token}`, 'content-type': 'application/octet-stream', 'x-file-type': 'audio/wav' },
+      body: Buffer.from('audio-sin-consentimiento'),
+    });
+    expect(r.status).toBe(403);
+    expect((await r.json() as any).error.code).toBe('ai_consent_required');
+  });
+
   it('el directorio y el reporte de Ana no contienen nada de Eva', async () => {
     seen.length = 0;
     const r = await ask(ana, [{ tool: 'reporte', args: {} }]);

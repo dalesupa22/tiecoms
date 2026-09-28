@@ -9,6 +9,7 @@ import {
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
   UpdateProfileInput, DndInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
+  SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -35,6 +36,7 @@ import * as push from './modules/push.ts';
 import * as attachments from './modules/attachments.ts';
 import * as voice from './modules/voice.ts';
 import * as assistant from './modules/assistant.ts';
+import * as signatures from './modules/signatures.ts';
 import * as mentions from './modules/mentions.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
 import * as reactions from './modules/reactions.ts';
@@ -232,6 +234,28 @@ export async function buildHttp() {
         return reply.send(f.body);
       });
     }
+    // Firmar PDFs: firmas guardadas (PNG crudo, solo su dueño) y estampado en el servidor.
+    priv.get('/api/v1/me/signatures', async (req) => ({ signatures: await signatures.listSignatures(req.userId) }));
+    priv.post('/api/v1/me/signatures', { bodyLimit: MAX_SIGNATURE_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => {
+      if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube la firma como image/png');
+      return signatures.createSignature(req.userId, req.body, String(req.headers['x-signature-kind'] ?? ''), String(req.headers['x-signature-source'] ?? ''));
+    });
+    priv.get<{ Params: { id: string } }>('/api/v1/me/signatures/:id/image', async (req, reply) => {
+      const png = await signatures.signatureImage(req.userId, z.uuid().parse(req.params.id));
+      return reply.header('content-type', 'image/png').header('cache-control', 'private, max-age=31536000, immutable')
+        .header('x-content-type-options', 'nosniff').header('content-security-policy', "default-src 'none'; sandbox").send(png);
+    });
+    priv.delete<{ Params: { id: string } }>('/api/v1/me/signatures/:id', async (req) => signatures.deleteSignature(req.userId, z.uuid().parse(req.params.id)));
+    priv.get('/api/v1/me/signings', async (req) => signatures.listSignings(req.userId, SigningHistoryQuery.parse(req.query)));
+    priv.get<{ Params: { id: string } }>('/api/v1/attachments/:id/sign-info', async (req) => signatures.signInfo(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/attachments/:id/sign', { bodyLimit: 256 * 1024, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+      const input = SignPdfInput.parse(req.body);
+      const out = await signatures.signPdf(req.userId, z.uuid().parse(req.params.id), input, {
+        ip: req.ip ?? null, userAgent: String(req.headers['user-agent'] ?? '') || null,
+        lang: /^\s*en\b/i.test(String(req.headers['accept-language'] ?? '')) ? 'en' : 'es',
+      });
+      return reply.status(out.duplicate ? 200 : 201).send(out);
+    });
     // Notificaciones push: un token por sesión.
     priv.put('/api/v1/push/token', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) =>
       push.registerToken(req.sessionId, PushTokenInput.parse(req.body), String(req.headers['accept-language'] ?? '')));
@@ -270,7 +294,7 @@ export async function buildHttp() {
     // Asistente: todo corre con req.userId (ver modules/assistant.ts, «Aislamiento»).
     priv.post('/api/v1/assistant/turn', { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } }, async (req) => assistant.turn(req.userId, req.body));
     priv.post<{ Querystring: { lang?: string } }>('/api/v1/assistant/transcribe', { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } },
-      async (req) => assistant.transcribe(req.userId, req.body, req.headers['x-file-type'] as string | undefined, req.query.lang));
+      async (req) => assistant.transcribe(req.userId, req.body, req.headers['x-file-type'] as string | undefined, req.query.lang, req.headers['x-ai-consent'] === '1'));
     priv.post('/api/v1/assistant/run', { config: { rateLimit: { max: 60, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } }, async (req) => assistant.run(req.userId, req.body));
     priv.post('/api/v1/directs', async (req) => ws.getOrCreateDirect(req.userId, CreateDirectInput.parse(req.body).userId));
     priv.post('/api/v1/chats', async (req) => ws.createChat(req.userId, CreateChatInput.parse(req.body)));

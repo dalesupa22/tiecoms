@@ -14,8 +14,10 @@
     "@tiecoms/client-core": "0.1.0",
     "@tiecoms/contracts": "0.1.0",
     "emojibase-data": "17.0.0",
+    "pdfjs-dist": "6.3.289",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "signature_pad": "5.1.4"
   },
   "devDependencies": {
     "@types/react": "19.3.0",

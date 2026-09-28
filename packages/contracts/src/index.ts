@@ -108,6 +108,11 @@ export interface UserDTO {
   avatarUrl?: string | null;
   /** Solo en bootstrap.me: recibe el resumen semanal de enlaces por correo. */
   linkDigest?: boolean;
+  /**
+   * Solo en bootstrap.me: «No molestar» activo hasta esta fecha (ISO), o null si está apagado.
+   * Ausente = servidor anterior a «No molestar».
+   */
+  dndUntil?: string | null;
 }
 
 export interface OrganizationDTO {
@@ -708,6 +713,11 @@ export const SendMessageInput = z.object({
 export const EditMessageInput = z.object({ body: z.string().trim().min(1).max(8000), mentions: z.array(MentionInput).max(50).optional() });
 export const ConversationPrefsInput = z.object({ pinned: z.boolean().optional(), mutedUntil: z.iso.datetime().nullable().optional(), linkPreviews: z.enum(['large', 'compact', 'none']).optional() });
 export const WorkspacePrefsInput = z.object({ pinned: z.boolean() });
+/** Constante para «Hasta que lo reactive» (chat silenciado o «No molestar»). */
+export const MUTE_FOREVER = '9999-12-31T00:00:00Z';
+/** PUT /me/dnd: «No molestar» hasta `until` (ISO; MUTE_FOREVER = hasta que lo reactive); null lo apaga. */
+export const DndInput = z.object({ until: z.iso.datetime({ offset: true }).nullable() });
+export interface DndDTO { dndUntil: string | null }
 export const MarkUnreadInput = z.object({ seq: z.number().int().min(1) });
 export const CreateReminderInput = z.object({
   conversationId: z.uuid(), messageId: z.uuid().nullable().optional(), note: z.string().trim().max(300).nullable().optional(), remindAt: z.iso.datetime(),
@@ -873,6 +883,8 @@ export type AccountEvent =
   /** Una reunión a la que voy (sí, quizá o sin responder) empieza en `minutes` minutos (10 por defecto). */
   | { type: 'event.soon'; event: CalendarEventDTO; minutes: number }
   | { type: 'prefs.updated'; conversationId?: string; workspaceId?: string }
+  /** Cambió mi «No molestar» (desde este u otro dispositivo). */
+  | { type: 'me.dnd'; dndUntil: string | null }
   | { type: 'whatsapp.updated'; accountId: string }
   | { type: 'drive.updated'; workspaceId: string | null };
 

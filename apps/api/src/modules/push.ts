@@ -1,7 +1,7 @@
 /**
  * Notificaciones push: registro del token por sesión y envío desde el worker.
  * Reciben: participantes activos que no son el autor, sin la conversación silenciada,
- * sin bloqueo con el autor, en todas sus sesiones activas con token.
+ * sin «No molestar» activo, sin bloqueo con el autor, en todas sus sesiones activas con token.
  * Payload (APNs y FCM) en docs/PUSH.md.
  */
 import type { PushData } from '@tiecoms/contracts';
@@ -34,7 +34,13 @@ export async function removeToken(sessionId: string) {
 
 interface Target { user_id: string; sub_id: string; provider: 'apns' | 'fcm'; token: string; environment: 'sandbox' | 'production'; lang: Lang; mentioned?: boolean }
 
+/**
+ * Sesiones con token de quien no tiene «No molestar» activo: con dnd_until > now() no sale ningún push
+ * (mensajes, menciones, reacciones, reuniones, avisos de reunión ni recordatorios). Todas las consultas
+ * de destinatarios pasan por aquí.
+ */
 const ACTIVE_SESSION = `JOIN sessions s ON s.user_id = u.id AND s.revoked_at IS NULL AND s.expires_at > now()
+    AND (u.dnd_until IS NULL OR u.dnd_until <= now())
   JOIN push_subscriptions ps ON ps.session_id = s.id AND ps.provider IN ('apns', 'fcm')`;
 
 /** No leídos de cada persona (conversaciones que puede leer y no tiene silenciadas): el globo del ícono. */

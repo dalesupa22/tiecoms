@@ -3,6 +3,7 @@ import { pool } from '../db.ts';
 import { loadUser } from './auth.ts';
 import { orgVerification } from './domains.ts';
 import { summarize } from './attachments.ts';
+import { activeDnd } from './prefs.ts';
 
 const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())`;
 
@@ -13,8 +14,9 @@ const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expire
  */
 export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   const me = await loadUser(pool, userId);
-  const digest = await pool.query('SELECT link_digest FROM users WHERE id = $1', [userId]);
+  const digest = await pool.query('SELECT link_digest, dnd_until FROM users WHERE id = $1', [userId]);
   me.linkDigest = !!digest.rows[0]?.link_digest;
+  me.dndUntil = activeDnd(digest.rows[0]?.dnd_until);
 
   const [ws, convs, people] = await Promise.all([
     pool.query(

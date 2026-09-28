@@ -273,7 +273,81 @@ export interface AttachmentDTO {
   /** ≤ 64 valores entre 0 y 1 para dibujar la onda. */
   waveform?: number[] | null;
   transcript?: VoiceTranscriptDTO | null;
+  /** Solo en PDFs firmados con Chaggu (POST /attachments/:id/sign): quién firmó, cuándo y la huella del resultado. */
+  signing?: AttachmentSigningDTO | null;
 }
+
+export interface AttachmentSigningDTO {
+  id: string;
+  signerId: string;
+  signerName: string;
+  signedAt: string;
+  /** SHA-256 en hexadecimal del PDF original y del firmado. */
+  originalSha256: string;
+  signedSha256: string;
+}
+
+// ---------- Firmar PDFs ----------
+/** Límite de firmas guardadas por persona y tamaño de cada PNG. */
+export const MAX_SAVED_SIGNATURES = 12;
+export const MAX_SIGNATURE_BYTES = 512 * 1024;
+export const MAX_SIGN_PLACEMENTS = 300;
+
+/**
+ * Firma guardada: PNG con fondo transparente. url es una ruta del API que solo sirve a su dueño.
+ * kind: firma completa o iniciales (rúbrica). source: cómo se hizo (solo informativo).
+ */
+export interface SignatureDTO {
+  id: string;
+  kind: 'signature' | 'initials';
+  source: 'drawn' | 'typed' | 'uploaded';
+  width: number;
+  height: number;
+  url: string;
+  createdAt: string;
+}
+
+/**
+ * Una marca sobre una página, en proporciones (0–1) de la página tal como se ve (ya girada),
+ * con el origen arriba a la izquierda. page empieza en 1. La imagen llena la caja: el cliente
+ * conserva la proporción de la firma.
+ */
+const PlacementBox = {
+  page: z.number().int().min(1).max(5000),
+  x: z.number().min(0).max(1), y: z.number().min(0).max(1),
+  w: z.number().min(0.004).max(1), h: z.number().min(0.004).max(1),
+};
+export const SignPlacementInput = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('signature'), signatureId: z.uuid(), ...PlacementBox }),
+  /** Texto libre, nombre o fecha ya formateada por el cliente. La letra se ajusta a la caja. */
+  z.object({ type: z.literal('text'), text: z.string().trim().min(1).max(300), ...PlacementBox }),
+]).refine((p) => p.x + p.w <= 1.001 && p.y + p.h <= 1.001, { message: 'outside_page' });
+export type SignPlacementInput = z.infer<typeof SignPlacementInput>;
+
+export const SignPdfInput = z.object({
+  clientMessageId: z.string().min(8).max(64),
+  /** Texto del mensaje que acompaña al PDF firmado ('' = el servidor pone «✍️ Documento firmado»). */
+  body: z.string().trim().max(2000).default(''),
+  placements: z.array(SignPlacementInput).min(1).max(MAX_SIGN_PLACEMENTS),
+  /** Sello pequeño bajo cada firma: «Firmado electrónicamente por … · fecha». */
+  stamp: z.boolean().default(true),
+  /** Agrega al final una hoja de constancia con las huellas y los datos de la firma. */
+  certificate: z.boolean().default(false),
+  /** El PDF ya trae una firma digital que se invalidaría: hay que confirmarlo (si no, 409 has_digital_signature). */
+  acceptBreakingSignatures: z.boolean().default(false),
+  /** Zona horaria IANA para las fechas del sello y la constancia. */
+  timeZone: z.string().max(64).optional(),
+});
+export type SignPdfInput = z.input<typeof SignPdfInput>;
+export interface SignInfoDTO {
+  attachmentId: string; name: string; sizeBytes: number;
+  hasDigitalSignature: boolean; encrypted: boolean;
+  /** Si este adjunto ya es un PDF firmado con Chaggu. */
+  signing: AttachmentSigningDTO | null;
+  /** Firmas hechas en Chaggu sobre este documento (como original o como resultado). */
+  history: AttachmentSigningDTO[];
+}
+export interface SignPdfResult { message: MessageDTO; attachment: AttachmentDTO; signing: AttachmentSigningDTO; duplicate: boolean }
 
 /**
  * Transcripción de una nota de voz. pending: en proceso; disabled: el servidor no tiene transcripción configurada

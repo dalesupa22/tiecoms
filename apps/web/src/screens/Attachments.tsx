@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import type { AttachmentDTO } from '@tiecoms/contracts';
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE } from '@tiecoms/contracts';
 import { client } from '../app-client.ts';
@@ -32,6 +32,9 @@ function useBlobUrl(path: string | null) {
 
 export const isImage = (a: { contentType: string }) => a.contentType.startsWith('image/') && a.contentType !== 'image/heic' && a.contentType !== 'image/heif';
 export const isVideo = (a: { contentType: string }) => a.contentType.startsWith('video/');
+export const isPdf = (a: { contentType: string; name: string }) => a.contentType === 'application/pdf' || /\.pdf$/i.test(a.name);
+/** Visor y firma de PDFs: pdf.js se descarga solo cuando alguien abre uno. */
+const PdfSheet = lazy(() => import('./Sign.tsx'));
 const isVisual = (a: AttachmentDTO) => isImage(a) || isVideo(a);
 
 export function fileSize(n: number) {
@@ -72,13 +75,13 @@ function Tile({ a, more, onOpen }: { a: AttachmentDTO; more?: number; onOpen: ()
   );
 }
 
-export function FileChip({ a, onRemove, status }: { a: { name: string; contentType: string; sizeBytes: number }; onRemove?: () => void; status?: string }) {
+export function FileChip({ a, onRemove, status }: { a: { name: string; contentType: string; sizeBytes: number; signing?: AttachmentDTO['signing'] }; onRemove?: () => void; status?: string }) {
   return (
     <span className="att-file">
       <span className="att-file-ico" aria-hidden>{fileIcon(a)}</span>
       <span className="grow" style={{ minWidth: 0 }}>
         <b className="ellipsis" style={{ display: 'block' }}>{a.name}</b>
-        <span className="small muted">{status ?? fileSize(a.sizeBytes)}</span>
+        <span className="small muted">{status ?? (a.signing ? <><span className="att-signed">{t('att.signedBy', { name: a.signing.signerName })}</span> · {fileSize(a.sizeBytes)}</> : fileSize(a.sizeBytes))}</span>
       </span>
       {onRemove && <button type="button" className="icon-btn" aria-label={t('att.remove')} onClick={onRemove}>×</button>}
     </span>
@@ -88,6 +91,7 @@ export function FileChip({ a, onRemove, status }: { a: { name: string; contentTy
 /** Fotos y videos en cuadrícula (1–4 visibles + «+N») y archivos como fichas con descarga. */
 export function AttachmentsView({ list, onCreateIssue }: { list: AttachmentDTO[]; onCreateIssue?: (title: string) => void }) {
   const [viewing, setViewing] = useState<number | null>(null);
+  const [pdf, setPdf] = useState<{ a: AttachmentDTO; sign: boolean } | null>(null);
   const voices = list.filter((a) => a.kind === 'voice');
   const visual = list.filter((a) => a.kind !== 'voice' && isVisual(a));
   const files = list.filter((a) => a.kind !== 'voice' && !isVisual(a));
@@ -100,13 +104,26 @@ export function AttachmentsView({ list, onCreateIssue }: { list: AttachmentDTO[]
           {shown.map((a, i) => <Tile key={a.id} a={a} more={i === 3 && visual.length > 4 ? visual.length - 4 : undefined} onOpen={() => setViewing(i)} />)}
         </div>
       )}
-      {files.map((a) => (
+      {files.map((a) => isPdf(a) ? (
+        <div key={a.id} className="att-file-btn is-pdf">
+          <button type="button" className="grow" style={{ border: 0, background: 'transparent', padding: 0, textAlign: 'left', minWidth: 0 }} title={t('att.preview')} onClick={() => setPdf({ a, sign: false })}>
+            <FileChip a={a} />
+          </button>
+          <button type="button" className="att-sign" onClick={() => setPdf({ a, sign: true })}>✍️ {t('att.signBtn')}</button>
+          <button type="button" className="icon-btn" aria-label={t('att.download')} onClick={() => void downloadAttachment(a)}>⤓</button>
+        </div>
+      ) : (
         <button key={a.id} type="button" className="att-file-btn" title={t('att.download')} onClick={() => void downloadAttachment(a)}>
           <FileChip a={a} />
           <span className="att-dl" aria-hidden>⤓</span>
         </button>
       ))}
       {viewing !== null && <Viewer list={visual} start={viewing} onClose={() => setViewing(null)} />}
+      {pdf && (
+        <Suspense fallback={<div className="pdf-sheet"><div className="pdf-msg"><span className="pdf-spin" /> {t('common.loading')}</div></div>}>
+          <PdfSheet a={pdf.a} startSigning={pdf.sign} onClose={() => setPdf(null)} />
+        </Suspense>
+      )}
     </div>
   );
 }

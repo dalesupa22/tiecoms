@@ -67,6 +67,8 @@ data class ClientState(
     val dndUntil: String? = null,
     /** El servidor no conoce PUT /me/dnd (404): «No molestar» vive solo en este dispositivo. */
     val dndLocalOnly: Boolean = false,
+    /** Mis mensajes programados pendientes o fallidos (docs/PROGRAMADOS.md). */
+    val scheduled: List<ScheduledMessageDTO> = emptyList(),
 )
 
 /** Avisos puntuales para sonidos y notificaciones. */
@@ -311,6 +313,7 @@ class TieComsClient(
         socket.start()
         scheduleFlush(0)
         scope.launch { runCatching { loadRemindersInternal() } }
+        scope.launch { runCatching { loadScheduled() } }
         // Asuntos abiertos bajo cada grupo (docs/GRUPOS.md); luego llegan por issue.updated.
         scope.launch { runCatching { loadOpenIssues() } }
     }
@@ -331,7 +334,33 @@ class TieComsClient(
         if (serverKnowsDnd) { storage.set(DND_KEY, dnd); storage.set(DND_LOCAL_KEY, null) }
         val localOnly = !serverKnowsDnd && storage.get(DND_LOCAL_KEY) == "1"
         setState { copy(data = sorted, conversations = conversations.filterKeys { it in allowed }, dndUntil = dnd, dndLocalOnly = localOnly) }
+        sorted.me.sleep?.let { rememberSleep(it); syncSleepTz(it) }
         return sorted
+    }
+
+    // ---------- Modo sueño («No molestar todas las noches») ----------
+    private fun rememberSleep(sl: SleepDTO) { storage.set(SLEEP_KEY, TcJson.encodeToString(SleepDTO.serializer(), sl)) }
+    /** Mi horario (estado o, antes del bootstrap —push con la app cerrada—, el guardado). */
+    fun mySleep(): SleepDTO? = s.data?.me?.sleep ?: storage.get(SLEEP_KEY)?.let { runCatching { TcJson.decodeFromString(SleepDTO.serializer(), it) }.getOrNull() }
+    private fun applySleep(sl: SleepDTO) {
+        rememberSleep(sl)
+        setState { copy(data = data?.let { d -> d.copy(me = d.me.copy(sleep = sl)) }) }
+    }
+    /** PUT /me/sleep; responde { sleep } y llega también como me.sleep a mis otras sesiones. */
+    suspend fun setSleep(on: Boolean? = null, start: String? = null, end: String? = null, tz: String? = null, tzAuto: Boolean? = null): SleepDTO = withContext(dispatcher) {
+        val b = buildJsonObject {
+            on?.let { put("on", JsonPrimitive(it)) }; start?.let { put("start", JsonPrimitive(it)) }; end?.let { put("end", JsonPrimitive(it)) }
+            tz?.let { put("tz", JsonPrimitive(it)) }; tzAuto?.let { put("tzAuto", JsonPrimitive(it)) }
+        }
+        val r = req("PUT", "/me/sleep", b, JsonObject.serializer())
+        val sl = TcJson.decodeFromJsonElement(SleepDTO.serializer(), r["sleep"] ?: r)
+        applySleep(sl); sl
+    }
+    /** Mientras la zona no se fije a mano (tzAuto), sigue la del teléfono (viajes). */
+    private fun syncSleepTz(sl: SleepDTO) {
+        if (!sl.tzAuto) return
+        val tz = java.time.ZoneId.systemDefault().id
+        if (tz != sl.tz) scope.launch { runCatching { setSleep(tz = tz, tzAuto = true) } }
     }
 
     private fun scheduleBootstrap() {
@@ -399,7 +428,7 @@ class TieComsClient(
     private fun onAccountEvent(e: AccountEvent) {
         when (e) {
             is AccountEvent.ScopeChanged -> {
-                scope.launch { runCatching { loadBlocks() }; scheduleBootstrap(); runCatching { loadOpenIssues() } }
+                scope.launch { runCatching { loadBlocks() }; scheduleBootstrap(); runCatching { loadOpenIssues() }; runCatching { loadScheduled() } }
             }
             is AccountEvent.ReadUpdated -> {
                 val c = meta(e.conversationId) ?: return
@@ -421,6 +450,10 @@ class TieComsClient(
             is AccountEvent.DriveUpdated -> setState { copy(driveRevision = driveRevision + 1) }
             AccountEvent.RemindersChanged -> scope.launch { runCatching { loadRemindersInternal() } }
             is AccountEvent.DndUpdated -> applyDnd(e.dndUntil, localOnly = false)
+            is AccountEvent.SleepUpdated -> applySleep(e.sleep)
+            is AccountEvent.IssueUpdated -> { putIssues(listOf(e.issue)); recountIssues(e.issue.conversationId) }
+            is AccountEvent.IssueHidden -> { setState { copy(issues = issues - e.issueId) }; if (e.conversationId.isNotEmpty()) recountIssues(e.conversationId) }
+            is AccountEvent.ScheduledUpdated -> setState { copy(scheduled = Scheduling.apply(scheduled, e.scheduled)) }
             is AccountEvent.Unknown -> Unit
         }
     }
@@ -732,6 +765,21 @@ class TieComsClient(
         putIssues(listOf(i)); recountIssues(conversationId); i
     }
     /** patch: title, status, ownerId, dueDate, waitingOnOrgId (null explícito = borrar). */
+    /**
+     * Tarea derivada (POST /issues/:id/children): en el chat del asunto o, con [conversationId], en un sidechat que
+     * salió de él. [visibility] all | org | private; [viewerIds] personas con acceso (pueden no estar en el chat).
+     */
+    suspend fun createChildIssue(parentId: String, title: String, ownerId: String?, dueDate: String? = null, visibility: String? = null,
+                                 viewerIds: List<String> = emptyList(), conversationId: String? = null): IssueDTO = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("title", JsonPrimitive(title)); put("ownerId", ownerId?.let { JsonPrimitive(it) } ?: JsonNull)
+            dueDate?.let { put("dueDate", JsonPrimitive(it)) }; visibility?.let { put("visibility", JsonPrimitive(it)) }
+            if (viewerIds.isNotEmpty()) put("viewerIds", kotlinx.serialization.json.JsonArray(viewerIds.map { JsonPrimitive(it) }))
+            conversationId?.let { put("conversationId", JsonPrimitive(it)) }
+        }
+        val i = req("POST", "/issues/$parentId/children", body, IssueDTO.serializer())
+        putIssues(listOf(i)); recountIssues(i.conversationId); i
+    }
     suspend fun updateIssue(id: String, patch: JsonObject): IssueDTO = withContext(dispatcher) {
         val i = req("PATCH", "/issues/$id", patch, IssueDTO.serializer())
         putIssues(listOf(i)); recountIssues(i.conversationId); i
@@ -752,7 +800,7 @@ class TieComsClient(
         }
     }
     suspend fun issueDetail(id: String): IssueDetail = withContext(dispatcher) {
-        val r = req("GET", "/issues/$id", null, IssueDetail.serializer()); putIssues(listOf(r.issue)); r
+        val r = req("GET", "/issues/$id", null, IssueDetail.serializer()); putIssues(listOf(r.issue) + r.children); r
     }
     suspend fun commentIssue(id: String, body: String): IssueDTO = withContext(dispatcher) {
         val i = req("POST", "/issues/$id/comments", buildJsonObject { put("body", JsonPrimitive(body)) }, IssueDTO.serializer()); putIssues(listOf(i)); i
@@ -781,7 +829,8 @@ class TieComsClient(
     // ---------- «No molestar» (SPEC-silencio §3) ----------
     /** Valor vigente (estado o, antes del primer bootstrap —p. ej. un push con la app cerrada—, el guardado). */
     fun dndUntil(): String? = if (s.data != null) s.dndUntil else storage.get(DND_KEY)
-    fun dndActive(): Boolean = Silence.active(dndUntil(), now())
+    /** «No molestar» manual o dentro de mi horario de descanso (todas las noches). */
+    fun dndActive(): Boolean = Silence.active(dndUntil(), now()) || SleepMode.sleepingNow(SleepMode.of(mySleep()), Instant.ofEpochMilli(now()))
 
     private fun applyDnd(until: String?, localOnly: Boolean) {
         val v = until?.takeIf { Silence.active(it, now()) }
@@ -808,6 +857,29 @@ class TieComsClient(
             applyDnd(before.first, before.second); throw e
         }
     }
+
+    // ---------- Mensajes programados (docs/PROGRAMADOS.md) ----------
+    suspend fun loadScheduled(conversationId: String? = null): List<ScheduledMessageDTO> = withContext(dispatcher) {
+        val r = req("GET", "/scheduled" + q("conversationId" to conversationId), null, ScheduledPage.serializer())
+        if (conversationId == null) setState { copy(scheduled = r.scheduled.sortedBy { it.sendAt }) }
+        else setState { copy(scheduled = (scheduled.filter { it.conversationId != conversationId } + r.scheduled).sortedBy { it.sendAt }) }
+        r.scheduled
+    }
+    private fun putScheduled(s0: ScheduledMessageDTO): ScheduledMessageDTO { setState { copy(scheduled = Scheduling.apply(scheduled, s0)) }; return s0 }
+    suspend fun scheduleMessage(conversationId: String, body: String, sendAt: Instant, mentions: List<MentionDTO> = emptyList(), replyTo: String? = null): ScheduledMessageDTO = withContext(dispatcher) {
+        val b = buildJsonObject {
+            put("body", JsonPrimitive(body)); put("sendAt", JsonPrimitive(sendAt.toString()))
+            if (mentions.isNotEmpty()) put("mentions", TcJson.encodeToJsonElement(ListSerializer(MentionDTO.serializer()), mentions))
+            replyTo?.let { put("replyTo", JsonPrimitive(it)) }
+        }
+        putScheduled(req("POST", "/conversations/$conversationId/scheduled", b, ScheduledMessageDTO.serializer()))
+    }
+    suspend fun updateScheduled(id: String, body: String? = null, sendAt: Instant? = null): ScheduledMessageDTO = withContext(dispatcher) {
+        val b = buildJsonObject { body?.let { put("body", JsonPrimitive(it)) }; sendAt?.let { put("sendAt", JsonPrimitive(it.toString())) } }
+        putScheduled(req("PATCH", "/scheduled/$id", b, ScheduledMessageDTO.serializer()))
+    }
+    suspend fun cancelScheduled(id: String): ScheduledMessageDTO = withContext(dispatcher) { putScheduled(req("DELETE", "/scheduled/$id", null, ScheduledMessageDTO.serializer())) }
+    suspend fun sendScheduledNow(id: String): ScheduledMessageDTO = withContext(dispatcher) { putScheduled(req("POST", "/scheduled/$id/send", buildJsonObject {}, ScheduledMessageDTO.serializer())) }
 
     // ---------- Preferencias, fijados, no leído, edición ----------
     /** pinned null = no cambia. mutedUntil: [UNCHANGED] = no cambia, null = reactivar. */
@@ -1075,6 +1147,16 @@ class TieComsClient(
     suspend fun startSide(conversationId: String, messageId: String, userIds: List<String>, question: String?): String = withContext(dispatcher) {
         val body = buildJsonObject {
             put("messageId", JsonPrimitive(messageId))
+            put("userIds", kotlinx.serialization.json.JsonArray(userIds.distinct().map { JsonPrimitive(it) }))
+            question?.trim()?.takeIf { it.isNotEmpty() }?.let { put("question", JsonPrimitive(it.take(4000))) }
+        }
+        val r = req("POST", "/conversations/$conversationId/side", body, IdResult.serializer()); loadBootstrapInternal(); r.id
+    }
+
+    /** «💬 Hablar aparte» desde un asunto (docs/TAREAS.md): el sidechat queda con sideIssueId y sus tareas cuelgan del asunto. */
+    suspend fun startSideFromIssue(conversationId: String, issueId: String, userIds: List<String>, question: String?): String = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("issueId", JsonPrimitive(issueId))
             put("userIds", kotlinx.serialization.json.JsonArray(userIds.distinct().map { JsonPrimitive(it) }))
             question?.trim()?.takeIf { it.isNotEmpty() }?.let { put("question", JsonPrimitive(it.take(4000))) }
         }
@@ -1419,6 +1501,7 @@ object SideOutsiders {
 /** Marcador de «no cambiar» para parámetros anulables. */
 /** «No molestar» guardado en el dispositivo (espejo del servidor o, con un servidor viejo, el único). */
 internal const val DND_KEY = "dnd:until"
+internal const val SLEEP_KEY = "sleep:me"
 internal const val DND_LOCAL_KEY = "dnd:local"
 
 @JvmField val UNCHANGED: String = String(charArrayOf('\u0000'))

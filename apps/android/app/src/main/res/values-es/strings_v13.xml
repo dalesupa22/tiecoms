@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.4 (22): tamaño del texto en «Tú». -->
+<resources>
+    <string name="text_size">Tamaño del texto</string>
+    <string name="text_size_small">Pequeño</string>
+    <string name="text_size_default">Normal</string>
+    <string name="text_size_large">Grande</string>
+    <string name="text_size_larger">Más grande</string>
+    <string name="text_size_largest">Máximo</string>
+    <string name="text_size_hint">Se suma al tamaño de letra del teléfono.</string>
+    <string name="text_size_preview_title">Equipo de ventas</string>
+    <string name="text_size_preview_body">Laura: ¿Revisamos la propuesta mañana?</string>
+</resources>

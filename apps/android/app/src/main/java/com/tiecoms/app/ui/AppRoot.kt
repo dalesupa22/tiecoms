@@ -96,7 +96,7 @@ fun AppRoot() {
                     SessionStatus.LOADING -> Splash()
                     SessionStatus.UNREACHABLE -> Unreachable()
                     SessionStatus.ANONYMOUS -> AuthNav()
-                    SessionStatus.READY -> MainNav()
+                    SessionStatus.READY -> TaskDialogsHost { MainNav() }
                 }
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 72.dp))
                 // Splash animado sobre la app: la app carga debajo y aparece cuando el splash se aleja.
@@ -239,6 +239,11 @@ private fun MainNav() {
                 // Sidechat de un chat que no puedo leer (colega que no está en el grupo): el sidechat a pantalla completa.
                 else if (p.side != null && data.conversations.any { it.id == p.side }) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.side) }
                 else uiScope.launch { container.toast(ctx.getString(R.string.no_access)) }
+            is DeepLink.Issue -> {
+                // Push «te asignó una tarea»: si está en un chat que leo (inChat), primero el chat y encima el asunto.
+                if (p.conversationId != null && data.conversations.any { it.id == p.conversationId }) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.conversationId) }
+                nav.navigate("issue/${p.id}") { launchSingleTop = true }
+            }
             is DeepLink.Workspace ->
                 if (data.workspaces.any { it.id == p.id }) nav.navigate("home?ws=${p.id}") { popUpTo(0) { inclusive = true } }
                 else uiScope.launch { container.toast(ctx.getString(R.string.err_not_found)) }
@@ -249,6 +254,7 @@ private fun MainNav() {
                 DeepLinks.SCREEN_SETTINGS -> tab("settings")
                 DeepLinks.SCREEN_TRAZO -> nav.navigate("trazo") { launchSingleTop = true }
                 DeepLinks.SCREEN_WHATSAPP -> nav.navigate("whatsapp") { launchSingleTop = true }
+                DeepLinks.SCREEN_SCHEDULED -> nav.navigate("scheduled") { launchSingleTop = true }
             }
             is DeepLink.Share -> { container.shareDraft = p; nav.navigate("share") { launchSingleTop = true } }
             is DeepLink.Signup -> Unit
@@ -277,7 +283,7 @@ private fun MainNav() {
                         val org = com.tiecoms.app.core.Names.org(data, me?.primaryOrgId)
                         // «No molestar» activo: la lunita sobre la foto (SPEC-silencio §3).
                         val dndNow = rememberSilenceNow(state.dndUntil)
-                        DndMoonBadge(com.tiecoms.app.core.Silence.active(state.dndUntil, dndNow)) {
+                        DndMoonBadge(com.tiecoms.app.core.Silence.active(state.dndUntil, dndNow) || mySleepingNow()) {
                         Avatar(me?.name ?: "?", parseColor(org?.colorBg, com.tiecoms.app.ui.theme.Brand.Black), parseColor(org?.colorFg, androidx.compose.ui.graphics.Color.White),
                             size = 26.dp, photo = me?.avatarUrl,
                             modifier = if (route == "settings") Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, androidx.compose.foundation.shape.CircleShape) else Modifier)
@@ -290,7 +296,15 @@ private fun MainNav() {
                         icon = {
                             if (t.badge > 0) BadgedBox(badge = { Badge { Text(if (t.badge > 99) "99+" else t.badge.toString()) } }) { t.icon() } else t.icon()
                         },
-                        label = { Text(stringResource(t.label), maxLines = 1) },
+                        // Con «Tamaño del texto» Máximo (o letra grande del sistema) «Calendario» no cabe: las etiquetas
+                        // de la barra crecen hasta 1,15× y no más, para que ninguna se corte.
+                        label = {
+                            val d = androidx.compose.ui.platform.LocalDensity.current
+                            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides
+                                androidx.compose.ui.unit.Density(d.density, minOf(d.fontScale, com.tiecoms.app.core.TextSize.TAB_LABEL_MAX))) {
+                                Text(stringResource(t.label), maxLines = 1, softWrap = false)
+                            }
+                        },
                         modifier = Modifier.testTag("tab-" + t.route.substringBefore('?')),
                     )
                 }
@@ -375,11 +389,13 @@ private fun MainNav() {
                     onLeft = { nav.popBackStack(nav.graph.findStartDestination().id, false) })
             }
             composable("issue/{id}") {
-                IssueDetailScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() }, onOpenOrigin = { c, seq -> openConv(c, seq) })
+                IssueDetailScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() }, onOpenOrigin = { c, seq -> openConv(c, seq) },
+                    onOpenIssue = { i -> nav.navigate("issue/$i") })
             }
             composable("event/{id}") {
                 EventDetailScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() }, onOpenChat = { c -> openConv(c) })
             }
+            composable("scheduled") { ScheduledScreen(onBack = { nav.popBackStack() }, onOpenConversation = { c -> openConv(c) }) }
             composable("reminders") { RemindersScreen(onBack = { nav.popBackStack() }, onOpen = { c, seq -> openConv(c, seq) }) }
             composable("trazo") { TrazoScreen(onBack = { nav.popBackStack() }, onOpen = { c -> openConv(c) }) }
             composable("whatsapp") { WhatsAppScreen(onBack = { nav.popBackStack() }, onOpenConversation = { c -> openConv(c) }) }

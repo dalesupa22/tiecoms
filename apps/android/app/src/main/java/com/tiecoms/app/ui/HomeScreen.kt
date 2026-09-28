@@ -182,6 +182,7 @@ fun GroupsScreen(
         )
     }
     val setIssueStatus = rememberIssueStatusSetter()
+    val taskDialogs = LocalTaskDialogs.current
     val openPerson = rememberOpenPerson(data, onOpen)
     // Al buscar: también personas (tocar = escribirle) y chats; los grupos ya salen en el árbol.
     val quickResults = remember(data, query) {
@@ -287,8 +288,9 @@ fun GroupsScreen(
                                     onLongPress = { menuKey = row.key }, onIssues = { onIssuesOf(row.c.id) }) { onOpen(row.c.id) }
                             }
                             is GroupsTree.Issue -> Unfold(row.issue.conversationId == justExpanded) {
-                                IssueLine(row, menuOpen = menuKey == row.key, onLongPress = { menuKey = row.key }, onDismissMenu = { menuKey = null },
-                                    menuItems = { issueQuickMenu(ctx, row.issue, onOpen = { onOpenIssue(row.issue.id) }, onStatus = { st -> setIssueStatus(row.issue, st) }) }) { onOpenIssue(row.issue.id) }
+                                IssueLine(row, data, menuOpen = menuKey == row.key, onLongPress = { menuKey = row.key }, onDismissMenu = { menuKey = null },
+                                    menuItems = { issueQuickMenu(ctx, row.issue, onOpen = { onOpenIssue(row.issue.id) }, onStatus = { st -> setIssueStatus(row.issue, st) },
+                                        onAddTask = { taskDialogs.openTasks(row.issue.id) }, onSide = { taskDialogs.openSide(row.issue) }) }) { onOpenIssue(row.issue.id) }
                             }
                             is GroupsTree.MoreIssues -> Unfold(row.conversationId == justExpanded) { IssueIndent(row.level) { Text(
                                 pluralStringResource(R.plurals.grp_more_issues, row.count, row.count),
@@ -650,9 +652,10 @@ private fun IssueIndent(level: Int, content: @Composable () -> Unit) {
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun IssueLine(row: GroupsTree.Issue, menuOpen: Boolean, onLongPress: () -> Unit, onDismissMenu: () -> Unit, menuItems: () -> List<SheetItem?>, onOpen: () -> Unit) {
+private fun IssueLine(row: GroupsTree.Issue, data: BootstrapDTO, menuOpen: Boolean, onLongPress: () -> Unit, onDismissMenu: () -> Unit, menuItems: () -> List<SheetItem?>, onOpen: () -> Unit) {
     val ctx = LocalContext.current
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val toggle = rememberIssueToggle()
     val i = row.issue
     val f = issueFlags(i)
     IssueIndent(row.level) {
@@ -661,13 +664,20 @@ private fun IssueLine(row: GroupsTree.Issue, menuOpen: Boolean, onLongPress: () 
         Modifier.fillMaxWidth().background(if (menuOpen) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
             .combinedClickable(onClick = onOpen, onLongClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onLongPress() },
                 onLongClickLabel = stringResource(R.string.menu_more))
-            .heightIn(min = 32.dp).padding(start = 10.dp, end = 16.dp, top = 3.dp, bottom = 3.dp)
-            .semantics(mergeDescendants = true) {}.testTag("groupIssue-${i.id}"),
+            .heightIn(min = 40.dp).padding(start = 0.dp, end = 16.dp)
+            .testTag("groupIssue-${i.id}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("◆", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-        Spacer(Modifier.width(6.dp))
-        Text(i.title, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        // 1.6.4 (22): el ◆ pasa a ser el círculo para completar (área táctil ampliada a 48 dp por Compose).
+        IssueCheck(i, { toggle(i) }, size = 16.dp, box = 40.dp)
+        Text((if (i.restricted) "🔒 " else "") + i.title, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        val kids = com.tiecoms.app.core.IssueTasks.childrenOf(LocalClient.current.state.collectAsStateWithLifecycle().value.issues.values, i.id)
+        if (kids.isNotEmpty()) { Spacer(Modifier.width(6.dp)); com.tiecoms.app.core.IssueTasks.progress(kids).let { KidsBadge(it.done, it.total, Modifier.testTag("groupKids-${i.id}")) } }
+        val ownerName = i.ownerId?.takeIf { it != data.me.id }?.let { com.tiecoms.app.core.IssueTasks.firstName(com.tiecoms.app.core.Names.person(data, it)?.name) }?.takeIf { it.isNotEmpty() }
+        if (ownerName != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(ownerName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, modifier = Modifier.testTag("groupIssueOwner-${i.id}"))
+        }
         val side = when {
             i.dueDate != null -> (if (f.overdue) stringResource(R.string.issue_overdue) + " " + dueLabel(ctx, i) else if (f.dueToday) stringResource(R.string.issue_today) else dueLabel(ctx, i))
             i.status == "in_progress" || i.status == "waiting" -> statusText(ctx, i.status)
@@ -833,7 +843,7 @@ fun ConversationIcon(c: ConversationDTO, data: BootstrapDTO, size: androidx.comp
 }
 
 @Composable
-private fun GlyphBox(g: String, size: androidx.compose.ui.unit.Dp) {
+internal fun GlyphBox(g: String, size: androidx.compose.ui.unit.Dp) {
     Box(Modifier.size(size).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp)).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
         Text(g, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = with(androidx.compose.ui.platform.LocalDensity.current) { (size * 0.5f).toSp() })
     }

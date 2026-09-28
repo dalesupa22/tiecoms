@@ -72,9 +72,10 @@ fun ChatBar(
     val client = LocalClient.current
     val st by client.state.collectAsStateWithLifecycle()
     var pane by remember { mutableStateOf<Pane?>(null) }
+    val sheetSnackbar = remember { androidx.compose.material3.SnackbarHostState() }
     LaunchedEffect(conv.id) { runCatching { client.loadEvents(Instant.now().minusSeconds(3600), Instant.now().plusSeconds(90L * 86400), conv.id) } }
-    val today = LocalDate.now().toString()
-    val issues = st.issues.values.filter { it.conversationId == conv.id && !it.closed }.sortedBy { it.dueDate ?: "9999" }
+    val today = com.tiecoms.app.core.IssueTasks.localToday().toString()
+    val issues = st.issues.values.filter { it.conversationId == conv.id && !it.closed }.sortedWith(com.tiecoms.app.core.IssueTasks.byUrgency())
     val threads = threadsOf(data, conv.id)
     val openThreads = threads.count { it.returnedAt == null }
     val events = st.events.values.filter { it.conversationId == conv.id && it.cancelledAt == null && (parseInstant(it.endsAt)?.isAfter(Instant.now()) == true) }
@@ -93,10 +94,9 @@ fun ChatBar(
     }
     when (pane) {
         null -> Unit
-        Pane.Issues -> FormSheet(stringResource(R.string.bar_issues_title), { pane = null }, tag = "barIssuesSheet") {
-            if (issues.isEmpty()) Text(stringResource(R.string.issue_no_issues), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            issues.forEach { IssueRow(it, data, showWhere = false) { id -> pane = null; onOpenIssue(id) } }
-            if (canOpenIssues) Button(onClick = { pane = null; onNewIssue() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("barNewIssue")) { Text("＋ " + stringResource(R.string.bar_new_issue)) }
+        // Lista del chat (1.6.4 / 22): alta rápida, activos por urgencia y «Completados · N» plegable (ConversationIssues).
+        Pane.Issues -> FormSheet(stringResource(R.string.bar_issues_title), { pane = null }, tag = "barIssuesSheet", snackbar = sheetSnackbar) {
+            ConversationIssues(conv.id, canCreate = canOpenIssues) { id -> pane = null; onOpenIssue(id) }
         }
         Pane.Threads -> FormSheet(stringResource(R.string.bar_threads_title), { pane = null }, tag = "barThreadsSheet") {
             if (threads.isEmpty()) Text(stringResource(R.string.bar_no_threads), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

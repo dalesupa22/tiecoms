@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.4 (23): No molestar todas las noches (modo sueño). -->
+<resources>
+    <string name="sleep_title">Todas las noches</string>
+    <string name="sleep_switch">No molestar todas las noches</string>
+    <string name="sleep_summary">De %1$s a %2$s</string>
+    <string name="sleep_off">Apagado</string>
+    <string name="sleep_explain">Es «No molestar» automático: en tu horario de descanso no te suena nada y lo lees al despertar. Quien te escriba verá que te llega sin sonar.</string>
+    <string name="sleep_from">Desde</string>
+    <string name="sleep_to">Hasta</string>
+    <string name="sleep_tz">Hora de este dispositivo: %1$s</string>
+    <string name="sleep_saved">No molestar todas las noches de %1$s a %2$s</string>
+    <string name="sleep_saved_off">No molestar nocturno apagado</string>
+    <string name="sleep_notice_one">%1$s está descansando: le llega sin sonar. Lo verá %2$s.</string>
+    <string name="sleep_notice_many">%1$d persona(s) del chat están descansando: les llega sin sonar.</string>
+    <string name="sleep_schedule_wake">Enviar a las %1$s</string>
+    <string name="sleep_resting">Descansando</string>
+</resources>

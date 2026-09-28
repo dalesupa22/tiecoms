@@ -89,6 +89,7 @@
                 <data android:pathPrefix="/whatsapp" />
                 <data android:pathPrefix="/share" />
                 <data android:pathPrefix="/ajustes" />
+                <data android:pathPrefix="/programados" />
             </intent-filter>
 
             <!-- App Links de la marca anterior (TieComs): se mantienen mientras tiecoms.com siga activo. -->
@@ -110,6 +111,7 @@
                 <data android:pathPrefix="/whatsapp" />
                 <data android:pathPrefix="/share" />
                 <data android:pathPrefix="/ajustes" />
+                <data android:pathPrefix="/programados" />
             </intent-filter>
 
             <!-- Retorno del SSO (Google / Microsoft): chaggu://auth/callback?code=… | ?error=…&message=… -->

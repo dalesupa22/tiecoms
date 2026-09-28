@@ -185,7 +185,7 @@ fun <T> Segmented(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> 
 
 fun copyToClipboard(ctx: Context, text: String) {
     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    cm.setPrimaryClip(ClipData.newPlainText("Chaggu", text))
+    cm.setPrimaryClip(ClipData.newPlainText("chaggu", text))
 }
 
 fun convLink(id: String) = "${com.tiecoms.app.core.DeepLinks.APP_URL}/c/$id"
@@ -322,9 +322,12 @@ fun DialogButtons(onCancel: () -> Unit, confirm: String, enabled: Boolean = true
 /** Hoja modal a pantalla casi completa para formularios (equivalente al Modal de la web). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FormSheet(title: String, onDismiss: () -> Unit, tag: String? = null, content: @Composable () -> Unit) {
+fun FormSheet(title: String, onDismiss: () -> Unit, tag: String? = null, snackbar: androidx.compose.material3.SnackbarHostState? = null, content: @Composable () -> Unit) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state, modifier = if (tag != null) Modifier.testTag(tag) else Modifier) {
+        // Con [snackbar], los avisos («Deshacer») se ven dentro de la hoja: el SnackbarHost de la app queda tapado por ella.
+        androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides (snackbar ?: LocalSnackbar.current)) {
+        androidx.compose.foundation.layout.Box {
         Column(
             Modifier.fillMaxWidth().widthIn(max = 640.dp).dismissKeyboardOnOutsideInteraction().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -332,6 +335,9 @@ fun FormSheet(title: String, onDismiss: () -> Unit, tag: String? = null, content
             Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
             content()
             Spacer(Modifier.heightIn(min = 12.dp))
+        }
+        if (snackbar != null) androidx.compose.material3.SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(8.dp))
+        }
         }
     }
 }

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.4 (23): scheduled messages (docs/PROGRAMADOS.md). -->
+<resources>
+    <string name="nav_scheduled">Scheduled</string>
+    <string name="sched_menu_title">Schedule send</string>
+    <string name="sched_in_hour">In 1 hour</string>
+    <string name="sched_this_afternoon">This afternoon</string>
+    <string name="sched_tomorrow_morning">Tomorrow morning</string>
+    <string name="sched_monday">Monday morning</string>
+    <string name="sched_pick">Pick date and time…</string>
+    <string name="sched_pick_title">When should it go out?</string>
+    <string name="sched_date">Day</string>
+    <string name="sched_time">Time</string>
+    <string name="sched_will_send">It will be sent %1$s.</string>
+    <string name="sched_future">Pick a time in the future.</string>
+    <string name="sched_confirm">Schedule</string>
+    <string name="sched_today_at">today at %1$s</string>
+    <string name="sched_tomorrow_at">tomorrow at %1$s</string>
+    <string name="sched_day_at">on %1$s at %2$s</string>
+    <string name="sched_done">Scheduled for %1$s</string>
+    <string name="sched_cancelled">Scheduled message cancelled</string>
+    <string name="sched_sent_now">Sent</string>
+    <string name="sched_moved">Now going out %1$s</string>
+    <string name="sched_failed">Could not be sent</string>
+    <string name="sched_failed_count">%1$d scheduled message(s) could not be sent</string>
+    <string name="sched_one_here">1 scheduled message</string>
+    <string name="sched_many_here">%1$d scheduled messages</string>
+    <string name="sched_next">next one %1$s</string>
+    <string name="sched_see">View</string>
+    <string name="sched_send_now">Send now</string>
+    <string name="sched_change">Change time</string>
+    <string name="sched_retry_later">Retry at another time</string>
+    <string name="sched_edit">Edit</string>
+    <string name="sched_save">Save</string>
+    <string name="sched_cancel">Cancel send</string>
+    <string name="sched_empty">You have no scheduled messages.</string>
+    <string name="sched_title_here">Scheduled in this chat</string>
+    <string name="sched_page_sub">Write it now and it goes out on its own at the time you pick. Tap 🕒 next to send (or long-press ➤). Only you see them until they go out.</string>
+    <string name="sched_button">Schedule send</string>
+</resources>

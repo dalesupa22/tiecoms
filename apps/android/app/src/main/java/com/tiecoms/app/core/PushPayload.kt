@@ -26,11 +26,14 @@ data class PushMessage(
     val sideOfConversationId: String? = null,
     val sideOfMessageId: String? = null,
     val sideOfExcerpt: String? = null,
+    /** Push «te asignó una tarea» (type issue, docs/TAREAS.md): el asunto y si puedo leer su chat. */
+    val issueId: String? = null,
+    val inChat: Boolean = true,
 )
 
 object PushPayload {
     /** reaction: reaccionaron a un mensaje mío (un aviso agrupado por mensaje; abre la conversación en él). */
-    val TYPES = setOf("message", "reminder", "event", "side", "mention", "reaction")
+    val TYPES = setOf("message", "reminder", "event", "side", "mention", "reaction", "issue")
 
     fun parse(data: Map<String, String?>): PushMessage? {
         fun s(k: String) = data[k]?.trim()?.takeIf { it.isNotEmpty() }
@@ -39,7 +42,7 @@ object PushPayload {
         val conv = s("conversationId") ?: return null
         return PushMessage(
             type = type,
-            title = s("title") ?: s("authorName") ?: "Chaggu",
+            title = s("title") ?: s("authorName") ?: "chaggu",
             subtitle = s("subtitle") ?: "",
             body = s("body") ?: "",
             badge = s("badge")?.toIntOrNull()?.coerceAtLeast(0) ?: 0,
@@ -56,6 +59,8 @@ object PushPayload {
             sideOfConversationId = s("sideOfConversationId") ?: sideOf(s("sideOf"), "conversationId"),
             sideOfMessageId = s("sideOfMessageId") ?: sideOf(s("sideOf"), "messageId"),
             sideOfExcerpt = s("sideOfExcerpt") ?: sideOf(s("sideOf"), "excerpt"),
+            issueId = s("issueId"),
+            inChat = s("inChat")?.lowercase() != "false",
         )
     }
 

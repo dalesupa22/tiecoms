@@ -45,7 +45,17 @@ data class UserDTO(
     val avatarUrl: String? = null,
     /** «No molestar» hasta (SPEC-silencio §3); null = apagado o servidor viejo. */
     val dndUntil: String? = null,
+    /** Solo en bootstrap.me: mi «No molestar todas las noches»; ausente = servidor anterior. */
+    val sleep: SleepDTO? = null,
 )
+
+/** Modo sueño: todas las noches, de [start] a [end] (HH:MM en [tz]), no suena nada. */
+@Serializable
+data class SleepDTO(val on: Boolean = true, val start: String = "22:00", val end: String = "07:00", val tz: String = "America/Bogota", val tzAuto: Boolean = true)
+
+/** Ventana de descanso de otra persona (people[].sleep); null = lo tiene apagado. */
+@Serializable
+data class SleepWindowDTO(val start: String = "22:00", val end: String = "07:00", val tz: String = "America/Bogota")
 
 @Serializable
 data class AuthResult(
@@ -85,6 +95,8 @@ data class PersonDTO(
     val avatarUrl: String? = null,
     /** Correo, si el servidor lo comparte (el buscador de «Agregar al grupo» lo usa); ausente en servidores viejos. */
     val email: String? = null,
+    /** Horario de descanso (modo sueño); null = apagado o servidor viejo. */
+    val sleep: SleepWindowDTO? = null,
 )
 
 @Serializable
@@ -145,6 +157,8 @@ data class ConversationDTO(
     val lastHumanPreview: LastHumanPreviewDTO? = null,
     /** Menciones a mí (o @todos) sin leer (SPEC-v4 §H). */
     val unreadMentions: Int = 0,
+    /** Sidechat abierto desde este asunto (docs/TAREAS.md): arriba del compositor va «◆ asunto · ＋ Tarea». */
+    val sideIssueId: String? = null,
 ) {
     /** Directos y chats grupales van juntos en la lista: no pertenecen a un espacio. */
     val isChat: Boolean get() = kind == "direct" || kind == "multi"
@@ -553,8 +567,16 @@ data class IssueDTO(
     val statusSince: String = "",
     val closedAt: String? = null,
     val commentCount: Int = 0,
+    /** Tarea derivada de este asunto (null = asunto principal); ausente = servidor anterior (docs/TAREAS.md). */
+    val parentIssueId: String? = null,
+    /** all (todo el chat) | org (solo visibleOrgId + viewerIds) | private (solo viewerIds); ausente = all. */
+    val visibility: String? = null,
+    val visibleOrgId: String? = null,
+    val viewerIds: List<String> = emptyList(),
 ) {
     val closed: Boolean get() = status == "done" || status == "cancelled"
+    /** Restringida: la ve solo mi empresa o es privada (🔒). */
+    val restricted: Boolean get() = visibility == "org" || visibility == "private"
 }
 
 @Serializable
@@ -568,7 +590,7 @@ data class IssueEventDTO(
     val createdAt: String = "",
 )
 
-@Serializable data class IssueDetail(val issue: IssueDTO = IssueDTO(), val events: List<IssueEventDTO> = emptyList())
+@Serializable data class IssueDetail(val issue: IssueDTO = IssueDTO(), val events: List<IssueEventDTO> = emptyList(), val children: List<IssueDTO> = emptyList())
 @Serializable data class IssuesPage(val issues: List<IssueDTO> = emptyList())
 @Serializable data class RemindersPage(val reminders: List<ReminderDTO> = emptyList())
 @Serializable data class CalendarPage(val events: List<CalendarEventDTO> = emptyList())
@@ -698,3 +720,22 @@ data class DriveTreeDTO(
 const val MAX_AVATAR_BYTES = 3 * 1024 * 1024
 const val MAX_DRIVE_FILE_BYTES = 25 * 1024 * 1024
 const val MAX_FORWARD_TARGETS = 10
+
+/** Mensaje programado (docs/PROGRAMADOS.md): solo lo ve quien lo escribió, hasta que sale. */
+@Serializable
+data class ScheduledMessageDTO(
+    val id: String = "",
+    val conversationId: String = "",
+    val body: String = "",
+    val mentions: List<MentionDTO> = emptyList(),
+    val replyTo: String? = null,
+    val sendAt: String = "",
+    /** pending | sending | sent | cancelled | failed */
+    val status: String = "pending",
+    val messageId: String? = null,
+    val error: String? = null,
+    val createdAt: String = "",
+    val sentAt: String? = null,
+)
+
+@Serializable data class ScheduledPage(val scheduled: List<ScheduledMessageDTO> = emptyList())

@@ -9,7 +9,7 @@ import { DndStrip } from './Silence.tsx';
 import { copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { newEvent } from './Calendar.tsx';
 import { InviteDialog } from './Dialogs.tsx';
-import { NewIssueDialog, isClosed, issueQuickMenu } from './Issues.tsx';
+import { IssueCheck, NewIssueDialog, isClosed, issueQuickMenu } from './Issues.tsx';
 import { MessageText } from './Mentions.tsx';
 import { StackedAvatars } from './Chats.tsx';
 import { QuickActions, QuickSearchField, QuickSearchSections, openNewMessage } from './Quick.tsx';
@@ -247,17 +247,19 @@ const overdueCount = (list: IssueDTO[]) => { const today = new Date().toISOStrin
  * Clic derecho o pulsación larga en un asunto: completarlo o cambiar su estado.
  */
 function IssueLines({ g }: { g: GroupNode }) {
+  const d = useClient((s) => s.data)!;
   const today = new Date().toISOString().slice(0, 10);
   const shown = g.issues.slice(0, 3);
   return (
     <div className="group-issues">
       {shown.map((i) => (
-        <button key={i.id} className="group-issue" onClick={() => navigate(`/c/${g.conv.id}?issue=${i.id}`)} {...menuProps(() => issueQuickMenu(i))}>
-          <span className="diamond" aria-hidden>◆</span>
+        <div role="button" tabIndex={0} key={i.id} className="group-issue" onClick={() => navigate(`/c/${g.conv.id}?issue=${i.id}`)} onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/c/${g.conv.id}?issue=${i.id}`); }} {...menuProps(() => issueQuickMenu(i))}>
+          <IssueCheck i={i} size={16} />
           <span className="grow ellipsis">{i.title}</span>
           {(i.status === 'in_progress' || i.status === 'waiting') && <span className="tag">{t(`issue.st.${i.status}`)}</span>}
+          {i.ownerId && i.ownerId !== d.me.id && <span className="small muted issue-owner-mini">{personById(d, i.ownerId)?.name.split(' ')[0]}</span>}
           {i.dueDate && <span className={`small ${i.dueDate < today ? 'overdue' : 'muted'}`}>{new Date(`${i.dueDate}T12:00:00`).toLocaleDateString(locale(), { day: 'numeric', month: 'short' })}</span>}
-        </button>
+        </div>
       ))}
       {g.issues.length > 3 && (
         <button className="group-issue more" onClick={() => navigate(`/c/${g.conv.id}`)}>{t('groups.moreIssues', { n: g.issues.length - 3 })}</button>

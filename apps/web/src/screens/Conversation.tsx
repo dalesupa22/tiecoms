@@ -18,7 +18,7 @@ import { MentionMirror, MessageText, backspaceToken, mentionsFor, mentionsMe, us
 import { QuickReplies, SideChip, SideConnector, SideDialog, replyPrivately, sidesOf, takePrivateDraft } from './Side.tsx';
 import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
-import { IssueDrawer, IssueRow, NewIssueDialog, isClosed } from './Issues.tsx';
+import { ConversationIssues, IssueDrawer, NewIssueDialog, isClosed } from './Issues.tsx';
 import { DeriveDialog, LineageBar, MergedCard } from './Lineage.tsx';
 import { ChatBar, ThreadChip, threadsOf } from './ChatBar.tsx';
 import { AddMembersDialog } from './Dialogs.tsx';
@@ -639,8 +639,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                 <span className="eyebrow grow">{t('nav.issues')} · {openHere.length}</span>
                 {canOpenIssues && <button className="btn small" onClick={() => setNewIssue({})}>{t('issue.new')}</button>}
               </div>
-              {openHere.length === 0 && <div className="hint">{t('issue.noIssues')}</div>}
-              <div className="list" style={{ gap: 6 }}>{openHere.map((i) => <IssueRow key={i.id} i={i} showWhere={false} onOpen={setOpenIssue} />)}</div>
+              <ConversationIssues conversationId={id} canCreate={canOpenIssues} onOpen={setOpenIssue} />
             </div>
           )}
           {conv.kind !== 'direct' && (

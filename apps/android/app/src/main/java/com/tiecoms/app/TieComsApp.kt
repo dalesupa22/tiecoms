@@ -283,6 +283,41 @@ class AppContainer(private val app: Application) {
         }
     }
 
+    // ---------- Reuniones: conectar Meet, Teams o Zoom (docs/TANDA-LECTURA-REUNIONES.md §4) ----------
+    /** Proveedor cuya conexión está abierta en el navegador (para el aviso al volver). */
+    @Volatile var meetingConnecting: String? = null
+
+    /**
+     * «Conectar» / «Reconectar»: pide la URL del proveedor y la abre en Custom Tabs (el navegador del sistema, nunca
+     * WebView). Vuelve por chaggu://meetings/connected?provider=…&connected=1 o &error=… ([handleMeetingReturn]).
+     */
+    fun startMeetingConnect(activity: Context, provider: String) {
+        val c = client.value
+        scope.launch {
+            try {
+                val url = c.startMeetingConnect(provider)
+                meetingConnecting = provider
+                val tabs = CustomTabsIntent.Builder().setShowTitle(true)
+                    .setDefaultColorSchemeParams(CustomTabColorSchemeParams.Builder().setToolbarColor(0xFFFDFAF7.toInt()).build()).build()
+                try { tabs.launchUrl(activity, Uri.parse(url)) } catch (e: ActivityNotFoundException) { meetingConnecting = null; toast(app.getString(R.string.sso_no_browser)) }
+            } catch (e: Exception) {
+                // 503 provider_unavailable: el motivo del servidor, sin inventar un botón que no funciona.
+                toast(errorText(app, e))
+            }
+        }
+    }
+
+    fun handleMeetingReturn(r: com.tiecoms.app.core.Meetings.Return) {
+        val provider = r.provider ?: meetingConnecting
+        meetingConnecting = null
+        val label = provider?.let { p -> client.value.state.value.meetingConnections?.firstOrNull { it.provider == p }?.label ?: com.tiecoms.app.core.Meetings.label(p) } ?: ""
+        when (r) {
+            is com.tiecoms.app.core.Meetings.Return.Connected -> toast(app.getString(R.string.meet_connected_toast, label))
+            is com.tiecoms.app.core.Meetings.Return.Failed -> toast(if (r.cancelled) app.getString(R.string.meet_connect_cancelled) else app.getString(R.string.meet_connect_failed, r.error))
+        }
+        scope.launch { runCatching { client.value.loadMeetingConnections() } }
+    }
+
     fun handleSsoCallback(cb: SsoCallback) {
         val c = client.value
         when (cb) {

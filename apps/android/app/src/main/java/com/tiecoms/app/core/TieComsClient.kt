@@ -69,6 +69,8 @@ data class ClientState(
     val dndLocalOnly: Boolean = false,
     /** Mis mensajes programados pendientes o fallidos (docs/PROGRAMADOS.md). */
     val scheduled: List<ScheduledMessageDTO> = emptyList(),
+    /** Mis conexiones con Meet, Teams y Zoom (null = aún no se pidieron). */
+    val meetingConnections: List<MeetingConnectionDTO>? = null,
 )
 
 /** Avisos puntuales para sonidos y notificaciones. */
@@ -816,6 +818,39 @@ class TieComsClient(
     }
     suspend fun commentIssue(id: String, body: String): IssueDTO = withContext(dispatcher) {
         val i = req("POST", "/issues/$id/comments", buildJsonObject { put("body", JsonPrimitive(body)) }, IssueDTO.serializer()); putIssues(listOf(i)); i
+    }
+
+    // ---------- Reuniones con Meet, Teams o Zoom (docs/TANDA-LECTURA-REUNIONES.md §4) ----------
+    suspend fun loadMeetingConnections(): List<MeetingConnectionDTO> = withContext(dispatcher) {
+        val l = req("GET", "/meetings/connections", null, MeetingConnectionsPage.serializer()).connections
+        setState { copy(meetingConnections = l) }; l
+    }
+    /** URL del proveedor para abrir en el navegador del sistema (Custom Tabs); vuelve por chaggu://meetings/connected. */
+    suspend fun startMeetingConnect(provider: String): String = withContext(dispatcher) {
+        req("POST", "/meetings/connect/${enc(provider)}", buildJsonObject { put("platform", JsonPrimitive(PLATFORM)); put("redirectScheme", JsonPrimitive(DeepLinks.SCHEME)) },
+            MeetingConnectResult.serializer()).url
+    }
+    suspend fun disconnectMeeting(provider: String) = withContext(dispatcher) {
+        req("DELETE", "/meetings/connections/${enc(provider)}", null, JsonElement.serializer())
+        setState { copy(meetingConnections = meetingConnections?.map { if (it.provider == provider) it.copy(status = "none", accountEmail = null) else it }) }
+        Unit
+    }
+    /**
+     * Crea la reunión con el proveedor (POST /meetings). Sin [startsAt] es ahora. [idempotencyKey]: la misma en el
+     * reintento devuelve la misma reunión. Con [share], y solo si el proveedor confirma, el servidor publica el enlace
+     * en la conversación y crea la reunión del calendario (location = joinUrl).
+     */
+    suspend fun createMeeting(provider: String, conversationId: String?, idempotencyKey: String, title: String, startsAt: Instant?, durationMin: Int,
+                              timezone: String, share: Boolean = true): MeetingDTO = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("provider", JsonPrimitive(provider)); put("conversationId", conversationId?.let { JsonPrimitive(it) } ?: JsonNull)
+            put("idempotencyKey", JsonPrimitive(idempotencyKey)); put("title", JsonPrimitive(title))
+            put("startsAt", startsAt?.let { JsonPrimitive(it.toString()) } ?: JsonNull)
+            put("durationMin", JsonPrimitive(durationMin)); put("timezone", JsonPrimitive(timezone)); put("share", JsonPrimitive(share))
+        }
+        val m = req("POST", "/meetings", body, MeetingDTO.serializer())
+        // Un 409/502 ya dejó la conexión en «reconectar» en el servidor: la lista se refresca aparte.
+        m
     }
 
     // ---------- gg, el asistente (docs/ASISTENTE.md) ----------

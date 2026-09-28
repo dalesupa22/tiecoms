@@ -122,6 +122,14 @@
                 <data android:scheme="chaggu" android:host="auth" android:pathPrefix="/callback" />
             </intent-filter>
 
+            <!-- Vuelta de «Conectar» Meet, Teams o Zoom (Custom Tabs): chaggu://meetings/connected?provider=…&connected=1 | &error=… -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="chaggu" android:host="meetings" android:pathPrefix="/connected" />
+            </intent-filter>
+
             <!-- Esquema propio de respaldo (chaggu, para no chocar con la app TieComs instalada): chaggu://c/<id>, chaggu://w/<id>, chaggu://invite/<token>, chaggu://signup?org=<token> -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

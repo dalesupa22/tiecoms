@@ -264,7 +264,9 @@ private fun VideoPage(a: AttachmentDTO, active: Boolean) {
 @Composable
 fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.net.Uri>) -> Unit, onEvent: (() -> Unit)? = null, onIssue: (() -> Unit)? = null,
                  /** Sidechat que salió de un asunto: «Tarea del asunto». */
-                 onTask: (() -> Unit)? = null) {
+                 onTask: (() -> Unit)? = null,
+                 /** 1.6.6: «📹 Reunión ahora» y «📅 Agendar reunión con enlace» (Meet, Teams o Zoom). */
+                 onMeetNow: (() -> Unit)? = null, onMeetSchedule: (() -> Unit)? = null) {
     val ctx = LocalContext.current
     // Saveable: si el sistema recrea la actividad mientras la cámara está abierta, la foto no se pierde.
     var cameraUri by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<android.net.Uri?>(null) }
@@ -292,6 +294,9 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
             runCatching { camera.launch(uri) }.onFailure { container.toast(ctx.getString(R.string.att_camera_unavailable)) }
         },
         SheetItem(ctx.getString(R.string.att_files_pick), "📎", tag = "attFiles") { docs.launch(arrayOf("*/*")) },
+    ) + (if (onMeetNow != null || onMeetSchedule != null) listOf(null) else emptyList()) + listOfNotNull(
+        onMeetNow?.let { SheetItem(ctx.getString(R.string.meet_now), "", tag = "plusMeetNow", onClick = it) },
+        onMeetSchedule?.let { SheetItem(ctx.getString(R.string.meet_schedule), "", tag = "plusMeetSchedule", onClick = it) },
     ) + (if (onEvent != null || onIssue != null || onTask != null) listOf(null) else emptyList()) + listOfNotNull(
         onTask?.let { SheetItem(ctx.getString(R.string.task_add_here), "☑", tag = "plusTask", onClick = it) },
         onEvent?.let { SheetItem(ctx.getString(R.string.bar_new_event), "📅", tag = "plusEvent", onClick = it) },

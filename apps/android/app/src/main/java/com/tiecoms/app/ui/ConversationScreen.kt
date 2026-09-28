@@ -257,6 +257,8 @@ fun ConversationScreen(
     var reportMessage by remember { mutableStateOf<MessageDTO?>(null) }
     /** Selector completo de emojis abierto desde «＋» de la barra rápida. */
     var pickerFor by remember { mutableStateOf<MessageDTO?>(null) }
+    /** Reunión con enlace real (1.6.6): true = ahora, false = agendada; null = cerrado. */
+    var meetingLink by rememberSaveable { mutableStateOf<Boolean?>(null) }
 
     val listState = rememberLazyListState()
     val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex <= 1 } }
@@ -674,6 +676,7 @@ fun ConversationScreen(
                 onBring = { bringing = true },
                 placeholderOverride = if (meta.isSide) sidePlaceholder else null,
                 onNewEvent = { meeting = true to null }, onNewIssue = if (myWsRole != "guest") ({ newIssue = true to null }) else null,
+                onMeeting = if (canWork) ({ now -> meetingLink = now }) else null,
                 autoFocus = embedded,
                 canSchedule = privateHere == null, onScheduled = { replyTo = null },
             ) } else ReadOnlyNotice()
@@ -734,6 +737,7 @@ fun ConversationScreen(
     newIssue?.let { (_, m) -> NewIssueDialog(id, m?.id, m?.let { excerpt(it.body) } ?: "", onClose = { newIssue = null }, onCreated = onOpenIssue) }
     meeting?.let { (_, m) -> EventDialog(id, originMessageId = m?.id, defaultTitle = m?.let { excerpt(it.body, 80) } ?: "", onClose = { meeting = null }) }
     forwarding?.let { m -> ForwardDialog(m, onClose = { forwarding = null }, onSent = {}) }
+    meetingLink?.let { now -> MeetingDialog(id, now, onClose = { meetingLink = null }) }
     reminderCustom?.let { (_, m) -> ReminderDialog(meta, m, onClose = { reminderCustom = null }) }
     if (bringing) BringDialog(id, onClose = { bringing = false })
     if (showPins) PinsSheet(meta, onJump = { seq -> showPins = false; jumpTo(seq) }, onClose = { showPins = false })
@@ -823,6 +827,8 @@ private fun Composer(
     onAskSide: (String) -> Unit = {},
     /** El «＋»: además de fotos y archivos, Evento y Asunto (null lo oculta, p. ej. Asunto para terceros). */
     onNewEvent: (() -> Unit)? = null, onNewIssue: (() -> Unit)? = null,
+    /** «📹 Reunión ahora» (true) y «📅 Agendar reunión con enlace» (false). */
+    onMeeting: ((Boolean) -> Unit)? = null,
     autoFocus: Boolean = false,
     /** Mensajes programados (1.6.4 / 23): 🕒 junto a enviar y pulsación larga en ➤. false en respuestas privadas. */
     canSchedule: Boolean = false, onScheduled: () -> Unit = {},
@@ -922,7 +928,8 @@ private fun Composer(
     val taskDialogs = LocalTaskDialogs.current
     val sideIssue = client.meta(id)?.sideIssueId
     AttachPicker(picker, onDismiss = { picker = false }, onPicked = { add(it) }, onEvent = onNewEvent, onIssue = onNewIssue,
-        onTask = sideIssue?.let { sid -> { picker = false; taskDialogs.openTasks(sid, id) } })
+        onTask = sideIssue?.let { sid -> { picker = false; taskDialogs.openTasks(sid, id) } },
+        onMeetNow = onMeeting?.let { f -> { picker = false; f(true) } }, onMeetSchedule = onMeeting?.let { f -> { picker = false; f(false) } })
     // Un hilo o sidechat abierto al lado recibe el cursor.
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(id, autoFocus) { if (autoFocus) { delay(300); runCatching { focus.requestFocus() } } }

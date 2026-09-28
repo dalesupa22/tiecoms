@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.6: reuniones reales con Google Meet, Microsoft Teams o Zoom (docs/TANDA-LECTURA-REUNIONES.md §4). -->
+<resources>
+    <string name="meet_now">📹 Reunión ahora</string>
+    <string name="meet_schedule">📅 Agendar reunión con enlace</string>
+    <string name="meet_title_now">Reunión ahora</string>
+    <string name="meet_title_schedule">Agendar reunión con enlace</string>
+    <string name="meet_provider">¿Con qué?</string>
+    <string name="meet_connected_as">Conectada · %1$s</string>
+    <string name="meet_connected">Conectado</string>
+    <string name="meet_connect">Conectar</string>
+    <string name="meet_reconnect">Reconectar</string>
+    <string name="meet_disconnect">Desconectar</string>
+    <string name="meet_unavailable">No disponible todavía</string>
+    <string name="meet_when">¿Cuándo?</string>
+    <string name="meet_when_now">Ahora</string>
+    <string name="meet_when_later">Otro momento</string>
+    <string name="meet_duration">Duración</string>
+    <string name="meet_minutes">%1$d min</string>
+    <string name="meet_field_title">Título</string>
+    <string name="meet_default_title">Reunión · %1$s</string>
+    <string name="meet_create_share">Crear y compartir</string>
+    <string name="meet_creating">Creando…</string>
+    <string name="meet_created">Reunión creada</string>
+    <string name="meet_shared_note">El enlace ya está en el chat y la reunión en el calendario.</string>
+    <string name="meet_not_shared_note">La reunión existe, pero no se pudo publicar en el chat: copia el enlace y compártelo.</string>
+    <string name="meet_open_in">Abrir en %1$s</string>
+    <string name="meet_copy">Copiar enlace</string>
+    <string name="meet_copied">Enlace copiado</string>
+    <string name="meet_done">Listo</string>
+    <string name="meet_pick_connected">Conecta un proveedor para crear la reunión.</string>
+    <string name="meet_err_not_connected">Conecta tu cuenta de %1$s para crear la reunión.</string>
+    <string name="meet_err_reconnect">Vuelve a conectar %1$s: el permiso venció o se revocó.</string>
+    <string name="meet_err_no_teams">Esta cuenta de Microsoft no tiene Teams para empresas, así que Outlook no puede crear un enlace de Teams.</string>
+    <string name="meet_err_unavailable">%1$s no está disponible: %2$s</string>
+    <string name="meet_err_provider">%1$s</string>
+    <string name="meet_err_network">Sin conexión. No se creó ninguna reunión; toca otra vez para reintentar (no se duplica).</string>
+    <string name="meet_err_in_progress">La reunión todavía se está creando. Toca otra vez en un momento.</string>
+    <string name="meet_err_past">Elige una hora que aún no haya pasado.</string>
+    <string name="meet_settings_title">Reuniones (Meet, Teams, Zoom)</string>
+    <string name="meet_settings_hint">Conecta tu cuenta para crear reuniones reales desde un chat. Solo pedimos permiso para crear eventos del calendario, no para leer ni enviar correo.</string>
+    <string name="meet_connected_toast">%1$s conectado</string>
+    <string name="meet_disconnected_toast">%1$s desconectado</string>
+    <string name="meet_connect_cancelled">Cancelaste la conexión</string>
+    <string name="meet_connect_failed">No se pudo conectar (%1$s)</string>
+    <string name="meet_video_cd">Reunión con video</string>
+    <string name="meet_not_connected">Sin conectar</string>
+    <string name="meet_none_available">Aún no hay proveedores de reuniones configurados en chaggu.</string>
+    <string name="meet_reconnect_hint">El permiso venció o se revocó: vuelve a conectar</string>
+    <string name="meet_connect_to">Conectar %1$s</string>
+</resources>

@@ -58,6 +58,8 @@ class MainActivity : ComponentActivity() {
             val data = intent.dataString
             // chaggu://auth/callback es el retorno del SSO, no un destino de navegación.
             Sso.parseCallback(data)?.let { container.handleSsoCallback(it); return }
+            // chaggu://meetings/connected: vuelta de «Conectar» Meet, Teams o Zoom (no es un destino de navegación).
+            com.tiecoms.app.core.Meetings.parseReturn(data)?.let { container.handleMeetingReturn(it); return }
             DeepLinks.parse(data)?.let { container.pendingLink.value = it }
         }
     }

@@ -295,6 +295,9 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
             // SPEC-silencio §3: «No molestar» (1 hora · 8 horas · Hasta mañana · Hasta que lo reactive).
             DndRow()
             HorizontalDivider()
+            // 1.6.6: «Reuniones» (Meet, Teams, Zoom): Conectar, Reconectar y Desconectar.
+            MeetingsSettingsSection()
+            HorizontalDivider()
             NavRow("🔑 " + stringResource(R.string.join_title), stringResource(R.string.join_ph), tag = "rowJoinCode") { joinCode = true }
             data?.organizations.orEmpty().filter { it.myRole == "owner" || it.myRole == "admin" }.forEach { o ->
                 HorizontalDivider()

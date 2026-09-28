@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.6: real meetings with Google Meet, Microsoft Teams or Zoom (docs/TANDA-LECTURA-REUNIONES.md §4). -->
+<resources>
+    <string name="meet_now">📹 Meeting now</string>
+    <string name="meet_schedule">📅 Schedule a meeting with link</string>
+    <string name="meet_title_now">Meeting now</string>
+    <string name="meet_title_schedule">Schedule a meeting with link</string>
+    <string name="meet_provider">With what?</string>
+    <string name="meet_connected_as">Connected · %1$s</string>
+    <string name="meet_connected">Connected</string>
+    <string name="meet_connect">Connect</string>
+    <string name="meet_reconnect">Reconnect</string>
+    <string name="meet_disconnect">Disconnect</string>
+    <string name="meet_unavailable">Not available yet</string>
+    <string name="meet_when">When?</string>
+    <string name="meet_when_now">Now</string>
+    <string name="meet_when_later">Another time</string>
+    <string name="meet_duration">Duration</string>
+    <string name="meet_minutes">%1$d min</string>
+    <string name="meet_field_title">Title</string>
+    <string name="meet_default_title">Meeting · %1$s</string>
+    <string name="meet_create_share">Create and share</string>
+    <string name="meet_creating">Creating…</string>
+    <string name="meet_created">Meeting created</string>
+    <string name="meet_shared_note">The link is in the chat and the meeting is on the calendar.</string>
+    <string name="meet_not_shared_note">The meeting exists but could not be posted to the chat: copy the link and share it.</string>
+    <string name="meet_open_in">Open in %1$s</string>
+    <string name="meet_copy">Copy link</string>
+    <string name="meet_copied">Link copied</string>
+    <string name="meet_done">Done</string>
+    <string name="meet_pick_connected">Connect a provider to create the meeting.</string>
+    <string name="meet_err_not_connected">Connect your %1$s account to create the meeting.</string>
+    <string name="meet_err_reconnect">Reconnect %1$s: the permission expired or was revoked.</string>
+    <string name="meet_err_no_teams">This Microsoft account doesn\'t have Teams for business, so Outlook can\'t create a Teams link.</string>
+    <string name="meet_err_unavailable">%1$s isn\'t available: %2$s</string>
+    <string name="meet_err_provider">%1$s</string>
+    <string name="meet_err_network">No connection. No meeting was created; tap again to retry (it won\'t be duplicated).</string>
+    <string name="meet_err_in_progress">The meeting is still being created. Tap again in a moment.</string>
+    <string name="meet_err_past">Pick a time that hasn\'t passed yet.</string>
+    <string name="meet_settings_title">Meetings (Meet, Teams, Zoom)</string>
+    <string name="meet_settings_hint">Connect your account to create real meetings from a chat. We only ask to create calendar events, not to read or send email.</string>
+    <string name="meet_connected_toast">%1$s connected</string>
+    <string name="meet_disconnected_toast">%1$s disconnected</string>
+    <string name="meet_connect_cancelled">You cancelled the connection</string>
+    <string name="meet_connect_failed">Could not connect (%1$s)</string>
+    <string name="meet_video_cd">Video meeting</string>
+    <string name="meet_not_connected">Not connected</string>
+    <string name="meet_none_available">No meeting providers are configured in chaggu yet.</string>
+    <string name="meet_reconnect_hint">Permission expired or was revoked: connect again</string>
+    <string name="meet_connect_to">Connect %1$s</string>
+</resources>

@@ -68,6 +68,35 @@ export async function createEvent(userId: string, conversationId: string, input:
   });
 }
 
+/**
+ * Importación silenciosa (solo ops.js por SSH): eventos de un sistema externo (p. ej. los eventos comerciales de
+ * Semillero) que entran a la agenda del grupo sin convocatoria, sin push y sin aviso en el chat. Quien organiza es
+ * la única invitada; el grupo los ve igual (la agenda muestra todo lo de las conversaciones que puedo leer).
+ */
+export async function importEvents(userId: string, conversationId: string, items: z.infer<typeof CreateEventInput>[]) {
+  return tx(async (c) => {
+    const a = await conversationAccess(c, userId, conversationId, 'post', true);
+    const out: CalendarEventDTO[] = [];
+    for (const input of items) {
+      if (Date.parse(input.endsAt) <= Date.parse(input.startsAt)) throw badRequest(`«${input.title}» termina antes de empezar`);
+      if (!validTz(input.timezone)) throw badRequest(`Zona horaria inválida en «${input.title}»`);
+      const dup = await c.query('SELECT id FROM calendar_events WHERE conversation_id = $1 AND title = $2 AND starts_at = $3 AND cancelled_at IS NULL', [conversationId, input.title, input.startsAt]);
+      if (dup.rows[0]) { out.push(await load(c, dup.rows[0].id)); continue; }
+      const { rows } = await c.query(
+        `INSERT INTO calendar_events (workspace_id, conversation_id, title, description, location, starts_at, ends_at, timezone, organizer_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+        [a.workspaceId, conversationId, input.title, input.description ?? null, input.location ?? null, input.startsAt, input.endsAt, input.timezone, userId],
+      );
+      await c.query("INSERT INTO calendar_event_invitees (event_id, user_id, rsvp, responded_at) VALUES ($1,$2,'yes',now())", [rows[0].id, userId]);
+      const ev = await load(c, rows[0].id);
+      await publish(c, ev);
+      out.push(ev);
+    }
+    await audit(c, userId, 'event.imported', { type: 'conversation', id: conversationId, workspaceId: a.workspaceId }, { count: out.length });
+    return out;
+  });
+}
+
 async function editable(c: Tx, userId: string, id: string) {
   const { rows } = await c.query('SELECT * FROM calendar_events WHERE id = $1 FOR UPDATE', [id]);
   const e = rows[0];

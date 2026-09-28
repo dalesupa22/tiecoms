@@ -23,13 +23,17 @@ const SELECT = `
 const VISIBLE = `
   LEFT JOIN conversation_memberships vcm ON vcm.conversation_id = i.conversation_id AND vcm.user_id = $1 AND vcm.removed_at IS NULL
   LEFT JOIN workspace_memberships vwm ON vwm.workspace_id = i.workspace_id AND vwm.user_id = $1
-  JOIN conversations vcv ON vcv.id = i.conversation_id AND vcv.archived_at IS NULL
+  LEFT JOIN conversations vcv ON vcv.id = i.conversation_id
   WHERE (
-    (vcm.user_id IS NOT NULL
-      AND (i.workspace_id IS NULL OR (vwm.user_id IS NOT NULL AND vwm.revoked_at IS NULL AND (vwm.expires_at IS NULL OR vwm.expires_at > now())))
-      AND (i.visibility = 'all'
-        OR (i.visibility = 'org' AND EXISTS (SELECT 1 FROM organization_memberships vom WHERE vom.user_id = $1 AND vom.org_id = i.visible_org_id))))
-    OR (i.visibility <> 'all' AND EXISTS (SELECT 1 FROM issue_viewers vv WHERE vv.issue_id = i.id AND vv.user_id = $1))
+    -- Personal: sin conversación, solo su dueño.
+    (i.conversation_id IS NULL AND i.created_by = $1)
+    OR (i.conversation_id IS NOT NULL AND vcv.archived_at IS NULL AND (
+      (vcm.user_id IS NOT NULL
+        AND (i.workspace_id IS NULL OR (vwm.user_id IS NOT NULL AND vwm.revoked_at IS NULL AND (vwm.expires_at IS NULL OR vwm.expires_at > now())))
+        AND (i.visibility = 'all'
+          OR (i.visibility = 'org' AND EXISTS (SELECT 1 FROM organization_memberships vom WHERE vom.user_id = $1 AND vom.org_id = i.visible_org_id))))
+      OR (i.visibility <> 'all' AND EXISTS (SELECT 1 FROM issue_viewers vv WHERE vv.issue_id = i.id AND vv.user_id = $1))
+    ))
   )`;
 
 const iso = (d: any) => (d ? new Date(d).toISOString() : null);
@@ -114,6 +118,11 @@ async function addViewers(c: Tx, issueId: string, actorId: string, ids: string[]
  * a quienes lo ven, por su cuenta; y quien perdió acceso recibe issue.hidden.
  */
 async function publish(c: Tx, issue: IssueDTO, before: { visibility: IssueVisibility; audience: string[] } | null = null) {
+  // Personal: solo a su dueño y con un tipo propio (las apps anteriores no esperan conversationId null).
+  if (!issue.conversationId) {
+    await enqueueOutbox(c, 'account.event', { userIds: [issue.createdBy], event: { type: 'issue.personal', issue } });
+    return;
+  }
   if (issue.visibility === 'all' && (!before || before.visibility === 'all')) {
     await appendEvent(c, issue.conversationId, { type: 'issue.updated', conversationId: issue.conversationId, issue });
     return;
@@ -145,6 +154,7 @@ export async function createIssue(userId: string, conversationId: string, input:
     if (input.parentIssueId) {
       // Una tarea hija nace en la conversación del asunto o en un sidechat que salió de ella. Un solo nivel.
       const parent = await loadVisible(c, userId, input.parentIssueId);
+      if (!parent.conversationId) throw badRequest('Los asuntos personales no tienen tareas derivadas');
       if (parent.parentIssueId) throw badRequest('Las tareas no tienen subtareas: créala en el asunto principal');
       const conv = (await c.query('SELECT parent_conversation_id FROM conversations WHERE id = $1', [conversationId])).rows[0];
       if (parent.conversationId !== conversationId && conv?.parent_conversation_id !== parent.conversationId) {
@@ -185,9 +195,28 @@ export async function createIssue(userId: string, conversationId: string, input:
   });
 }
 
+/** Asunto personal: sin conversación, privado para quien lo crea (y solo él puede ser responsable). */
+export async function createPersonalIssue(userId: string, input: { title: string; dueDate?: string | null }) {
+  return tx(async (c) => {
+    const { rows } = await c.query(
+      `INSERT INTO issues (workspace_id, conversation_id, title, owner_id, due_date, created_by, visibility)
+       VALUES (NULL, NULL, $1, $2, $3, $2, 'private') RETURNING id`,
+      [input.title, userId, input.dueDate ?? null],
+    );
+    const id: string = rows[0].id;
+    await addViewers(c, id, userId, [userId]);
+    await c.query("INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,'created',$3)", [id, userId, JSON.stringify({ title: input.title, personal: true })]);
+    const dto = await load(c, id);
+    await publish(c, dto);
+    await audit(c, userId, 'issue.created', { type: 'issue', id }, { personal: true });
+    return dto;
+  });
+}
+
 /** Tarea hija. Sin conversationId, en la conversación del asunto; con él, en un sidechat que salió de ella. */
 export async function createChildIssue(userId: string, parentId: string, input: z.infer<typeof CreateIssueInput> & { conversationId?: string }) {
   const parent = await loadVisible(pool, userId, parentId);
+  if (!parent.conversationId) throw badRequest('Los asuntos personales no tienen tareas derivadas');
   return createIssue(userId, input.conversationId ?? parent.conversationId, { ...input, parentIssueId: parentId });
 }
 
@@ -202,6 +231,13 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
     if (!cur) throw notFound('Asunto');
     await loadVisible(c, userId, issueId);
     if (cur.visibility === 'all') await conversationAccess(c, userId, cur.conversation_id, 'post', true);
+    if (!cur.conversation_id) {
+      // Un asunto personal sigue siendo personal: no se reasigna, no se comparte ni espera a una empresa.
+      if (input.ownerId !== undefined && input.ownerId !== userId && input.ownerId !== null) throw badRequest('Un asunto personal solo es tuyo');
+      if (input.visibility !== undefined && input.visibility !== 'private') throw badRequest('Un asunto personal no se comparte');
+      if (input.viewerIds?.length) throw badRequest('Un asunto personal no se comparte');
+      if (input.waitingOnOrgId) throw badRequest('Un asunto personal no espera a una empresa');
+    }
     const nextVis: IssueVisibility = input.visibility ?? cur.visibility;
     if (input.visibility !== undefined && input.visibility !== cur.visibility && cur.created_by !== userId) throw forbidden('Solo quien creó el asunto cambia quién lo ve');
     const before = cur.visibility !== 'all' || nextVis !== 'all' ? { visibility: cur.visibility as IssueVisibility, audience: await audience(c, issueId) } : null;
@@ -286,14 +322,15 @@ export async function getIssue(userId: string, issueId: string) {
  * Asuntos visibles para la persona: los de conversaciones que puede leer ahora mismo (membresía activa y,
  * si es tercero, dentro de su fecha) según su visibilidad, y los restringidos donde la agregaron.
  */
-export async function listIssues(userId: string, filter: { workspaceId?: string; conversationId?: string; mine?: boolean; open?: boolean }) {
+export async function listIssues(userId: string, filter: { workspaceId?: string; conversationId?: string; mine?: boolean; open?: boolean; personal?: boolean }) {
   const { rows } = await pool.query(
     `${SELECT} ${VISIBLE}
         AND ($2::uuid IS NULL OR i.workspace_id = $2) AND ($3::uuid IS NULL OR i.conversation_id = $3)
         AND (NOT $4 OR i.owner_id = $1) AND (NOT $5 OR i.status NOT IN ('done','cancelled'))
+        AND ($6 OR i.conversation_id IS NOT NULL)
       ORDER BY (i.status IN ('done','cancelled')), i.due_date NULLS LAST, i.created_at DESC
       LIMIT 500`,
-    [userId, filter.workspaceId ?? null, filter.conversationId ?? null, !!filter.mine, !!filter.open],
+    [userId, filter.workspaceId ?? null, filter.conversationId ?? null, !!filter.mine, !!filter.open, filter.personal !== false],
   );
   return rows.map(toDTO);
 }

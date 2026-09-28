@@ -228,6 +228,29 @@ export async function markRead(userId: string, conversationId: string, seq: numb
   });
 }
 
+/**
+ * «Marcar como leído» desde la lista: el grupo y sus conversaciones derivadas (hilos, ramas, internas)
+ * donde participo, cada una hasta el seq que el cliente vio (no se tragan mensajes que llegaron después).
+ * Los sidechats (derive_kind 'side') viven en DMs y se marcan aparte.
+ */
+export async function markTreeRead(userId: string, rootId: string, items: { conversationId: string; seq: number }[]) {
+  await conversationAccess(pool, userId, rootId, 'read');
+  const ids = [...new Set(items.map((i) => i.conversationId))];
+  const { rows } = await pool.query(
+    `SELECT c.id FROM conversations c JOIN conversation_memberships cm ON cm.conversation_id = c.id AND cm.user_id = $1 AND cm.removed_at IS NULL
+      WHERE c.id = ANY($2) AND (c.id = $3 OR (c.parent_conversation_id = $3 AND COALESCE(c.derive_kind, '') <> 'side'))`,
+    [userId, ids, rootId],
+  );
+  const allowed = new Set(rows.map((r) => r.id as string));
+  const out: { conversationId: string; lastReadSeq: number }[] = [];
+  for (const it of items) {
+    if (!allowed.has(it.conversationId)) continue;
+    const r = await markRead(userId, it.conversationId, it.seq);
+    out.push({ conversationId: it.conversationId, lastReadSeq: r.lastReadSeq });
+  }
+  return { marked: out };
+}
+
 // ---------- Editar, eliminar, no leído, fijar ----------
 async function ownMessage(c: Tx, userId: string, messageId: string) {
   const { rows } = await c.query('SELECT * FROM messages WHERE id = $1', [messageId]);

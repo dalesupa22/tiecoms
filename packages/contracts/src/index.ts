@@ -9,7 +9,7 @@
 import { z } from 'zod';
 
 export const API_VERSION = 1;
-export const CONTRACT_VERSION = '2026-09-26';
+export const CONTRACT_VERSION = '2026-09-28';
 /** Clientes con un contrato anterior a este deben actualizarse. */
 export const MIN_CLIENT_CONTRACT = '2026-09-23';
 
@@ -49,6 +49,34 @@ export const RefreshInput = z.object({ refreshToken: z.string().optional() });
 
 // ---------- Inicio de sesión con Google / Microsoft ----------
 export const SsoProvider = z.enum(['google', 'microsoft']);
+
+// ---------- Reuniones con proveedores (Meet, Teams, Zoom) ----------
+export const MeetingProvider = z.enum(['google', 'microsoft', 'zoom']);
+export type MeetingProvider = z.infer<typeof MeetingProvider>;
+/** Estado de mi conexión con un proveedor. available=false: falta configurarlo en el servidor (unavailableReason). */
+export interface MeetingConnectionDTO {
+  provider: MeetingProvider; label: string; available: boolean; unavailableReason: string | null;
+  status: 'none' | 'active' | 'reconnect'; accountEmail: string | null;
+}
+export interface MeetingDTO {
+  id: string; provider: MeetingProvider; status: 'creating' | 'created' | 'failed'; title: string;
+  startsAt: string; endsAt: string; timezone: string;
+  /** Enlace real devuelto por el proveedor (nunca inventado). */
+  joinUrl: string | null; conversationId: string | null; calendarEventId: string | null; messageId: string | null; error: string | null;
+}
+/** POST /meetings/connect/:provider → { url } para abrir en el navegador del sistema. */
+export const MeetingConnectInput = z.object({ platform: z.enum(['web', 'ios', 'android', 'desktop']).default('web'), redirectScheme: z.enum(['chaggu', 'tiecoms']).optional() });
+/** POST /meetings: sin startsAt = reunión ahora. share=true la publica en la conversación y el calendario. */
+export const CreateMeetingInput = z.object({
+  provider: MeetingProvider,
+  conversationId: z.uuid().nullable().optional(),
+  idempotencyKey: z.string().min(8).max(80),
+  title: z.string().trim().min(2).max(200),
+  startsAt: z.iso.datetime({ offset: true }).nullable().optional(),
+  durationMin: z.number().int().min(15).max(480).default(30),
+  timezone: z.string().min(1).max(64),
+  share: z.boolean().default(true),
+});
 export type SsoProvider = z.infer<typeof SsoProvider>;
 
 /**
@@ -561,9 +589,10 @@ export type IssueStatus = 'open' | 'in_progress' | 'waiting' | 'done' | 'cancell
 
 export interface IssueDTO {
   id: string;
-  /** null en asuntos de directos y chats grupales (multi, laterales). */
+  /** null en asuntos de directos y chats grupales (multi, laterales) y en los personales. */
   workspaceId: string | null;
-  conversationId: string;
+  /** null = asunto personal (solo lo ve su dueño; solo lo reciben clientes con contrato ≥ 2026-09-28). */
+  conversationId: string | null;
   originMessageId: string | null;
   originMessageSeq: number | null;
   title: string;
@@ -776,6 +805,8 @@ export const CreateIssueInput = z.object({
   parentIssueId: z.uuid().nullable().optional(),
 });
 /** POST /issues/:id/children: tarea derivada. Por defecto la ve solo mi empresa si en el chat hay más de una. */
+/** POST /issues: asunto personal (sin conversación, solo para mí). */
+export const CreatePersonalIssueInput = z.object({ title: z.string().trim().min(2).max(200), dueDate: isoDate.nullable().optional() });
 export const CreateChildIssueInput = z.object({
   title: z.string().trim().min(2).max(200),
   /** Sidechat que salió del chat del asunto (si no, la tarea queda en el mismo chat). */
@@ -935,6 +966,8 @@ export const RsvpInput = z.object({ rsvp: z.enum(['yes', 'no', 'maybe']) });
 export type SendMessageInput = z.infer<typeof SendMessageInput>;
 
 export const MarkReadInput = z.object({ seq: z.number().int().min(0) });
+/** POST /conversations/:id/read-tree: el grupo y sus derivadas, cada una hasta el seq que el cliente vio. */
+export const MarkTreeReadInput = z.object({ items: z.array(z.object({ conversationId: z.uuid(), seq: z.number().int().min(0) })).min(1).max(200) });
 
 export const PageQuery = z.object({
   before: z.coerce.number().int().positive().optional(),
@@ -1091,6 +1124,8 @@ export type AccountEvent =
   | { type: 'me.dnd'; dndUntil: string | null }
   /** Un asunto restringido (visibilidad 'org' o 'private') que puedo ver cambió: no viaja por la conversación. */
   | { type: 'issue.updated'; issue: IssueDTO }
+  /** Mi asunto personal cambió (no tiene conversación). */
+  | { type: 'issue.personal'; issue: IssueDTO }
   /** Perdí acceso a un asunto (cambió su visibilidad o me quitaron): sacarlo de la lista. */
   | { type: 'issue.hidden'; issueId: string; conversationId: string }
   /** Cambió mi modo sueño (desde este u otro dispositivo). */

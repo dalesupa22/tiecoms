@@ -5,9 +5,9 @@ import rateLimit from '@fastify/rate-limit';
 import { ZodError } from 'zod';
 import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput, CreateGroupInput, JoinPolicyInput,
-  CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateChildIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateScheduledInput, UpdateScheduledInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
+  CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateChildIssueInput, CreatePersonalIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateScheduledInput, UpdateScheduledInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MarkTreeReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
-  UpdateProfileInput, DndInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
+  UpdateProfileInput, DndInput, MeetingProvider, MeetingConnectInput, CreateMeetingInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
 } from '@tiecoms/contracts';
@@ -19,7 +19,7 @@ import * as sso from './modules/sso.ts';
 import * as domains from './modules/domains.ts';
 import { deleteAccount } from './modules/account.ts';
 import { bootstrap } from './modules/bootstrap.ts';
-import { listEvents, listMessages, markRead, sendMessage } from './modules/messages.ts';
+import { listEvents, listMessages, markRead, markTreeRead, sendMessage } from './modules/messages.ts';
 import * as ws from './modules/workspaces.ts';
 import * as groups from './modules/groups.ts';
 import * as invitations from './modules/invitations.ts';
@@ -27,6 +27,7 @@ import * as issues from './modules/issues.ts';
 import * as cal from './modules/calendar.ts';
 import * as prefs from './modules/prefs.ts';
 import * as reminders from './modules/reminders.ts';
+import * as meetings from './modules/meetings.ts';
 import * as scheduled from './modules/scheduled.ts';
 import * as wa from './modules/whatsapp.ts';
 import * as profile from './modules/profile.ts';
@@ -136,11 +137,20 @@ export async function buildHttp() {
     return reply.redirect(url, 302);
   });
   app.get<{ Params: { provider: string }; Querystring: Record<string, string | undefined> }>('/api/v1/auth/:provider/callback', authLimit, async (req, reply) => {
+    // Conectar Meet/Teams vuelve por esta misma redirect URI registrada: el state lo distingue del login.
+    if (meetings.isMeetingState(req.query.state)) {
+      reply.header('cache-control', 'no-store'); reply.header('referrer-policy', 'no-referrer');
+      return reply.redirect(await meetings.finishConnect(req.query), 302);
+    }
     const target = await sso.callback(sso.parseProvider(req.params.provider), req.query, req.cookies[SSO_COOKIE]);
     reply.clearCookie(SSO_COOKIE, { path: COOKIE_PATH });
     reply.header('cache-control', 'no-store');
     reply.header('referrer-policy', 'no-referrer');
     return reply.redirect(target, 302);
+  });
+  app.get<{ Querystring: Record<string, string | undefined> }>('/api/v1/meetings/zoom/callback', authLimit, async (req, reply) => {
+    reply.header('cache-control', 'no-store'); reply.header('referrer-policy', 'no-referrer');
+    return reply.redirect(await meetings.finishConnect(req.query), 302);
   });
   app.post('/api/v1/auth/sso/exchange', authLimit, async (req, reply) => sendAuth(req, reply, await sso.exchange(SsoExchangeInput.parse(req.body))));
 
@@ -312,6 +322,7 @@ export async function buildHttp() {
       return reply.status(out.duplicate ? 200 : 201).send(out);
     });
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/read', async (req) => markRead(req.userId, req.params.id, MarkReadInput.parse(req.body).seq));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/read-tree', async (req) => markTreeRead(req.userId, req.params.id, MarkTreeReadInput.parse(req.body).items));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/members', async (req) => ws.addMembers(req.userId, req.params.id, AddMembersInput.parse(req.body)));
     // Preferencias personales, no leído, mensajes
     priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/prefs', async (req) => prefs.setConversationPrefs(req.userId, req.params.id, ConversationPrefsInput.parse(req.body)));
@@ -350,6 +361,16 @@ export async function buildHttp() {
     priv.patch<{ Params: { id: string } }>('/api/v1/scheduled/:id', async (req) => scheduled.updateScheduled(req.userId, req.params.id, UpdateScheduledInput.parse(req.body)));
     priv.delete<{ Params: { id: string } }>('/api/v1/scheduled/:id', async (req) => scheduled.cancelScheduled(req.userId, req.params.id));
     priv.post<{ Params: { id: string } }>('/api/v1/scheduled/:id/send', async (req) => scheduled.sendScheduledNow(req.userId, req.params.id));
+    // Reuniones con Meet, Teams o Zoom (cuenta de cada persona).
+    priv.get('/api/v1/meetings/connections', async (req) => ({ connections: await meetings.listConnections(req.userId) }));
+    priv.post<{ Params: { provider: string } }>('/api/v1/meetings/connect/:provider', async (req) => {
+      const p = MeetingProvider.parse(req.params.provider);
+      const b = MeetingConnectInput.parse(req.body ?? {});
+      return meetings.startConnect(req.userId, p, { platform: b.platform, redirectScheme: b.redirectScheme });
+    });
+    priv.delete<{ Params: { provider: string } }>('/api/v1/meetings/connections/:provider', async (req) => meetings.disconnect(req.userId, MeetingProvider.parse(req.params.provider)));
+    priv.post('/api/v1/meetings', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => meetings.createMeeting(req.userId, CreateMeetingInput.parse(req.body)));
+    priv.get<{ Params: { id: string } }>('/api/v1/meetings/:id', async (req) => meetings.getMeeting(req.userId, req.params.id));
     priv.get('/api/v1/reminders', async (req) => ({ reminders: await reminders.listReminders(req.userId) }));
     priv.post('/api/v1/reminders', async (req) => reminders.createReminder(req.userId, CreateReminderInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/reminders/:id/done', async (req) => reminders.completeReminder(req.userId, req.params.id));
@@ -374,8 +395,11 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/return', async (req) => ws.returnResult(req.userId, req.params.id, ReturnResultInput.parse(req.body).summary));
     // Asuntos
     priv.get<{ Querystring: { workspaceId?: string; conversationId?: string; mine?: string; open?: string } }>('/api/v1/issues', async (req) => ({
-      issues: await issues.listIssues(req.userId, { workspaceId: req.query.workspaceId, conversationId: req.query.conversationId, mine: req.query.mine === '1', open: req.query.open === '1' }),
+      // Los asuntos personales (conversationId null) solo van a clientes que los entienden.
+      issues: await issues.listIssues(req.userId, { workspaceId: req.query.workspaceId, conversationId: req.query.conversationId, mine: req.query.mine === '1', open: req.query.open === '1',
+        personal: String(req.headers['x-tiecoms-contract'] ?? '') >= '2026-09-28' }),
     }));
+    priv.post('/api/v1/issues', async (req) => issues.createPersonalIssue(req.userId, CreatePersonalIssueInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/issues', async (req) => issues.createIssue(req.userId, req.params.id, CreateIssueInput.parse(req.body)));
     priv.get<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.getIssue(req.userId, req.params.id));
     priv.patch<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.updateIssue(req.userId, req.params.id, UpdateIssueInput.parse(req.body)));

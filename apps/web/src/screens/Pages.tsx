@@ -12,6 +12,7 @@ import { IssueDrawer, IssueRow, isClosed } from './Issues.tsx';
 import { TodayAgenda, newEvent } from './Calendar.tsx';
 import { RemindersSection } from './Bring.tsx';
 import { SleepDialog, sleepSummary } from './Sleep.tsx';
+import { MeetingsSettings } from './Meetings.tsx';
 import { TEXT_SIZES, setTextSize, useTextSize } from '../text-size.ts';
 import { askNotifications, conversationMenu, dndMenu, dndText, mutedText, openDialog, personMenu } from '../actions.tsx';
 import { menuProps, openMenuAt, toast } from '../menu.tsx';
@@ -52,7 +53,7 @@ export function TodayScreen() {
   const [openIssue, setOpenIssue] = useState<string | null>(null);
   useEffect(() => { client.loadIssues({ mine: true, open: true }).catch(() => {}); }, []);
   const visible = new Set(d.conversations.map((c) => c.id));
-  const mine = Object.values(issues).filter((i) => i.ownerId === d.me.id && !isClosed(i) && visible.has(i.conversationId))
+  const mine = Object.values(issues).filter((i) => i.ownerId === d.me.id && !isClosed(i) && (!i.conversationId || visible.has(i.conversationId)))
     .sort((a, b) => (a.dueDate ?? '9').localeCompare(b.dueDate ?? '9'));
   const unreadConvs = d.conversations.filter((c) => c.unread > 0);
   const unread = unreadConvs.reduce((n, c) => n + c.unread, 0);
@@ -206,7 +207,7 @@ export function WorkspaceScreen({ id }: { id: string }) {
           <div className="list">
             {(() => {
               const visible = new Set(convs.map((c) => c.id));
-              const list = Object.values(issues).filter((i) => i.workspaceId === id && !isClosed(i) && visible.has(i.conversationId));
+              const list = Object.values(issues).filter((i) => i.workspaceId === id && !isClosed(i) && !!i.conversationId && visible.has(i.conversationId));
               return list.length ? list.map((i) => <IssueRow key={i.id} i={i} onOpen={setOpenIssue} />) : <div className="empty">{t('issue.noIssues')}</div>;
             })()}
           </div>
@@ -360,6 +361,8 @@ export function SettingsScreen() {
         <span className="grow"><b>{t('wa.connect').replace('＋ ', '')}</b><span className="small muted" style={{ display: 'block' }}>{t('settings.whatsappHint')}</span></span>
         <span className="muted">›</span>
       </button>
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{t('meet.settingsTitle')}</div>
+      <div style={{ marginBottom: 24 }}><MeetingsSettings /></div>
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('notif.title')}</div>
       <SilenceSettings />
       <NotificationToggle />

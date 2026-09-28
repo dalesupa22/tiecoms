@@ -362,10 +362,10 @@ a:hover { color: var(--accent-ink); }
 
 /* ---------- Agenda ---------- */
 .week { border: 1px solid var(--line); border-radius: 14px; background: #fffdf9; overflow: hidden; }
-.week-head { display: grid; grid-template-columns: 56px repeat(7, minmax(0, 1fr)); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 700; color: var(--ink-2); }
+.week-head { display: grid; grid-template-columns: 56px repeat(var(--cols, 7), minmax(0, 1fr)); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 700; color: var(--ink-2); }
 .week-head span { padding: 8px 8px; text-transform: capitalize; }
 .week-head .is-today { color: var(--accent-ink); }
-.week-body { display: grid; grid-template-columns: 56px repeat(7, minmax(0, 1fr)); position: relative; overflow: hidden; }
+.week-body { display: grid; grid-template-columns: 56px repeat(var(--cols, 7), minmax(0, 1fr)); position: relative; overflow: hidden; }
 .week-hours { position: relative; }
 .week-hours span { position: absolute; right: 6px; font-size: 10.5px; color: var(--faint); transform: translateY(-6px); }
 .week-day { position: relative; border-left: 1px solid #efeae1; }
@@ -1124,3 +1124,31 @@ select.link-act { appearance: none; padding-right: 10px; }
 .signed-ref { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; letter-spacing: .04em; color: #2f6b45; }
 .signed-tabs { max-width: 420px; margin-bottom: 14px; } .signed-tabs button { white-space: nowrap; }
 @media (max-width: 520px) { .pdf-zoom { display: none; } }
+
+/* Pendientes en derivadas del grupo */
+.tree-strip { display: flex; align-items: center; gap: 8px; width: calc(100% - 24px); margin: 6px 12px 0; border: 1px solid #f0d9c5; background: #fff7ef; color: #8a4a12; border-radius: 10px; padding: 7px 12px; font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+
+/* Reuniones */
+.meet-conn { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.meet-done { display: flex; flex-direction: column; gap: 8px; }
+.meet-link { font-weight: 700; word-break: break-all; }
+
+/* Calendario: Día · Semana · Mes */
+.cal-toolbar { margin-bottom: 14px; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cal-heading { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-heading::first-letter { text-transform: uppercase; }
+@media (max-width: 600px) { .cal-heading { flex-basis: 100%; order: 5; } }
+.month { border: 1px solid var(--line); border-radius: 14px; background: #fffdf9; overflow: hidden; }
+.month-head { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 700; color: var(--ink-2); }
+.month-head span { padding: 8px; text-transform: capitalize; }
+.month-body { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-auto-rows: minmax(96px, auto); }
+.month-day { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 4px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.month-day:nth-child(7n) { border-right: 0; }
+.month-day.is-out { background: #f7f3ec; color: var(--muted); }
+.month-num { align-self: flex-start; border: 0; background: transparent; font: inherit; font-size: 12.5px; font-weight: 700; border-radius: 99px; min-width: 26px; height: 26px; cursor: pointer; color: inherit; }
+.month-num:hover { background: var(--paper-3); }
+.month-day.is-today .month-num { background: var(--accent, #c73a1a); color: #fff; }
+.month-ev { border: 0; border-radius: 6px; padding: 2px 6px; font: inherit; font-size: 11.5px; text-align: left; cursor: pointer; min-width: 0; display: flex; }
+.month-ev.is-cancelled { text-decoration: line-through; opacity: .6; }
+.month-more { border: 0; background: transparent; font: inherit; font-size: 11.5px; font-weight: 700; color: var(--muted); text-align: left; cursor: pointer; padding: 0 6px; }
+@media (max-width: 860px) { .month-body { grid-auto-rows: minmax(64px, auto); } .month-ev span { font-size: 10.5px; } }

@@ -14,7 +14,7 @@ import { MessageText } from './Mentions.tsx';
 import { StackedAvatars } from './Chats.tsx';
 import { QuickActions, QuickSearchField, QuickSearchSections, openNewMessage } from './Quick.tsx';
 import { matchesTab, type HomeTab } from './Shell.tsx';
-import { activityOf, companyGroupLabel, compareConversations, pendingOf, withSeparators } from '../home-order.ts';
+import { activityOf, companyGroupLabel, compareConversations, pendingOf, treeOnlyPending, withSeparators, withTree } from '../home-order.ts';
 
 // ---------- Árbol de Grupos (mismas reglas en web, iOS y Android: docs/GRUPOS.md) ----------
 /** label: el nombre a mostrar; si dos grupos de la misma empresa se llaman igual, lleva delante el espacio de donde viene. */
@@ -79,7 +79,8 @@ export function buildGroupTree(d: BootstrapDTO, issues: Record<string, IssueDTO>
     const groups = inWs.filter((c) => !isChild(c))
       .map((conv) => ({ conv, derived: inWs.filter((x) => x.parentId === conv.id && isChild(x)).sort(compareConversations), issues: openIssuesOf(issues, conv.id) }))
       .filter((g) => tab === 'all' || shows(g.conv, g.derived))
-      .sort((a, b) => compareConversations(a.conv, b.conv));
+      // El grupo se ordena con los pendientes de sus derivadas (un hilo sin leer sube el grupo).
+      .sort((a, b) => compareConversations(withTree(a.conv, a.derived), withTree(b.conv, b.derived)));
     // Solo hay grupos y asuntos: un espacio sin grupos (archivado o vacío) no aparece.
     if (!groups.length && !(tab === 'all' && w.counterpartName)) continue;
     const p = placeWorkspace(d, w);
@@ -233,7 +234,7 @@ function companyGroups(c: CompanyNode) {
 function GroupEntry({ g, ws, issuesOpen, active, label, preview }: { g: GroupNode; ws: WorkspaceDTO; issuesOpen: IssuesOpen; active: boolean; label?: string; preview?: boolean }) {
   return (
     <div>
-      <ConvItem c={g.conv} active={active} label={label ?? g.label} preview={preview} threadUnread={g.derived.reduce((n, x) => n + x.unread, 0)} extraMenu={groupMenuExtra(g.conv, ws)}
+      <ConvItem c={g.conv} active={active} label={label ?? g.label} preview={preview} threadUnread={treeOnlyPending(g.conv, g.derived)} treeMentions={g.derived.reduce((n, x) => n + (x.unreadMentions ?? 0), 0)} extraMenu={groupMenuExtra(g.conv, ws)}
         issues={{ count: g.issues.length, overdue: overdueCount(g.issues), open: issuesOpen.open.has(g.conv.id), onToggle: () => issuesOpen.toggle(g.conv.id) }} />
       {g.issues.length > 0 && issuesOpen.open.has(g.conv.id) && <IssueLines g={g} />}
     </div>
@@ -313,7 +314,7 @@ export interface IssuesChip { count: number; overdue: number; open: boolean; onT
  * Fila de conversación (barra lateral, Grupos y DMs). Con `preview` ocupa dos líneas: título y hora arriba;
  * «Nombre: texto» del último mensaje, chips y globos abajo (vista Lista y «Todo»).
  */
-export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, extraMenu = [], issues, preview = false }: { c: ConversationDTO; active: boolean; showWs?: boolean; label?: string; threadUnread?: number; extraMenu?: MenuItem[]; issues?: IssuesChip; preview?: boolean }) {
+export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, treeMentions = 0, extraMenu = [], issues, preview = false }: { c: ConversationDTO; active: boolean; showWs?: boolean; label?: string; threadUnread?: number; treeMentions?: number; extraMenu?: MenuItem[]; issues?: IssuesChip; preview?: boolean }) {
   const d = useClient((s) => s.data)!;
   const muted = isMuted(c);
   const other = c.kind === 'direct' ? personById(d, c.memberIds.find((m) => m !== d.me.id)) : null;
@@ -326,7 +327,7 @@ export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, e
     : c.kind === 'internal' ? <span className={`hash ${preview ? 'is-big' : ''}`} aria-hidden title={t('inbox.internal')}>🔒</span>
     : <ConvAvatar c={c} size={preview ? 32 : 22} fallback={c.kind === 'multi' && !side ? <StackedAvatars c={c} size={preview ? 28 : 20} /> : undefined} />;
   const chips = <>
-    {threadUnread > 0 && <span className="chip-side" title={t('bar.threads')}>💬 {threadUnread}</span>}
+    {threadUnread > 0 && <span className="chip-side" title={t('tree.chipHelp', { n: threadUnread })}>⑂ {threadUnread}{treeMentions > 0 ? ' @' : ''}</span>}
     {issues && issues.count > 0 && (
       // Va dentro del botón de la fila: un span con rol de botón (no se anidan botones).
       <span role="button" tabIndex={0} aria-expanded={issues.open} className={`chip-issues ${issues.open ? 'on' : ''} ${issues.overdue ? 'is-late' : ''}`}
@@ -397,7 +398,7 @@ export function groupListItems(sections: GroupSection[]): GroupListItem[] {
     const company = s.kind === 'org' ? s.org?.name ?? c.name : c.name;
     for (const w of c.workspaces) for (const g of w.groups) out.push({ g, ws: w.ws, company, label: companyGroupLabel(company, g.label ?? g.conv.name ?? '') });
   }
-  return out.sort((a, b) => compareConversations(a.g.conv, b.g.conv));
+  return out.sort((a, b) => compareConversations(withTree(a.g.conv, a.g.derived), withTree(b.g.conv, b.g.derived)));
 }
 
 export function GroupsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; activeConv?: string | null }) {
@@ -409,7 +410,7 @@ export function GroupsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; 
   return (
     <div className="groups-list">
       {/* Menú de sección (clic derecho o pulsación larga en un separador): mostrar o contraer todos los asuntos. */}
-      <Separated items={items} convOf={(x) => x.g.conv} sepMenu={() => treeMenuItems(treeControls(buildGroupTree(d, issues, tab))).slice(0, 2)}
+      <Separated items={items} convOf={(x) => withTree(x.g.conv, x.g.derived)} sepMenu={() => treeMenuItems(treeControls(buildGroupTree(d, issues, tab))).slice(0, 2)}
         render={(x) => <GroupEntry key={x.g.conv.id} g={x.g} ws={x.ws} label={x.label} preview issuesOpen={issuesOpen} active={activeConv === x.g.conv.id} />} />
     </div>
   );

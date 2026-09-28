@@ -167,7 +167,7 @@ async function runTool(ctx: Ctx, name: string, args: any): Promise<unknown> {
       const all = await issues.listIssues(userId, { open: true });
       // «Hoy» en la zona de la persona, no en UTC.
       const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-      const iss = (i: (typeof all)[number]) => ({ asuntoId: i.id, titulo: i.title, estado: i.status, responsable: pname(i.ownerId), fecha: i.dueDate, donde: dir.convs.get(i.conversationId) ? dir.label(dir.convs.get(i.conversationId)!) : null });
+      const iss = (i: (typeof all)[number]) => ({ asuntoId: i.id, titulo: i.title, estado: i.status, responsable: pname(i.ownerId), fecha: i.dueDate, donde: !i.conversationId ? "Personal (solo tú)" : dir.convs.get(i.conversationId) ? dir.label(dir.convs.get(i.conversationId)!) : null });
       const mine = all.filter((i) => i.ownerId === userId);
       const delegated = all.filter((i) => i.ownerId && i.ownerId !== userId && (i.createdBy === userId || i.requestedBy === userId));
       const from = new Date(Date.now() - 2 * 3_600_000);
@@ -192,7 +192,7 @@ async function runTool(ctx: Ctx, name: string, args: any): Promise<unknown> {
       let list = await issues.listIssues(userId, { conversationId, open: !args.incluirCerrados });
       if (args.alcance === 'mios') list = list.filter((i) => i.ownerId === userId);
       if (args.alcance === 'asigne') list = list.filter((i) => i.ownerId !== userId && (i.createdBy === userId || i.requestedBy === userId));
-      return list.slice(0, 40).map((i) => ({ asuntoId: i.id, titulo: i.title, estado: i.status, responsable: pname(i.ownerId), fecha: i.dueDate, donde: dir.convs.get(i.conversationId) ? dir.label(dir.convs.get(i.conversationId)!) : null }));
+      return list.slice(0, 40).map((i) => ({ asuntoId: i.id, titulo: i.title, estado: i.status, responsable: pname(i.ownerId), fecha: i.dueDate, donde: !i.conversationId ? "Personal (solo tú)" : dir.convs.get(i.conversationId) ? dir.label(dir.convs.get(i.conversationId)!) : null }));
     }
     case 'listar_eventos': {
       const ev = await cal.listEvents(userId, new Date(iso.parse(args.desde)).toISOString(), new Date(iso.parse(args.hasta)).toISOString());
@@ -253,7 +253,7 @@ async function runTool(ctx: Ctx, name: string, args: any): Promise<unknown> {
       await issues.updateIssue(userId, it.id, patch);
       const what = patch.status === 'done' ? 'Completado' : patch.status === 'open' ? 'Reabierto' : patch.status === 'cancelled' ? 'Descartado'
         : patch.ownerId ? `Ahora lo tiene ${pname(patch.ownerId)}` : patch.dueDate ? `Para el ${patch.dueDate}` : 'Actualizado';
-      done(ctx, 'update_issue', dir.convs.get(it.conversationId) ? dir.label(dir.convs.get(it.conversationId)!) : 'Asunto', patch.title ?? it.title, what, `/c/${it.conversationId}`,
+      done(ctx, 'update_issue', it.conversationId && dir.convs.get(it.conversationId) ? dir.label(dir.convs.get(it.conversationId)!) : "Asunto", patch.title ?? it.title, what, it.conversationId ? `/c/${it.conversationId}` : `/asuntos?issue=${it.id}`,
         sign({ u: userId, k: 'undo', a: { type: 'issue', id: it.id, prev } }, UNDO_TTL_MS));
       return { ok: true };
     }

@@ -150,7 +150,7 @@ fun MuteSwitchRow(conv: ConversationDTO) {
 
 /** Opciones de «No molestar»: 1 hora · 8 horas · Hasta mañana · Hasta que lo reactive (y Reactivar si está activo). */
 @Composable
-fun DndSheet(onDismiss: () -> Unit) {
+fun DndSheet(onDismiss: () -> Unit, onNightly: () -> Unit = {}) {
     val ctx = LocalContext.current
     val container = com.tiecoms.app.ui.LocalContainer.current
     val client = LocalClient.current
@@ -163,8 +163,6 @@ fun DndSheet(onDismiss: () -> Unit) {
         }
     }
     val active = Silence.active(state.dndUntil, System.currentTimeMillis())
-    var sleep by remember { mutableStateOf(false) }
-    if (sleep) { SleepDialog(onClose = { sleep = false; onDismiss() }); return }
     val items = buildList<SheetItem?> {
         add(SheetItem(ctx.getString(R.string.mute_1h), tag = "dnd1h") { set(Silence.DndOption.HOUR_1) })
         add(SheetItem(ctx.getString(R.string.mute_8h), tag = "dnd8h") { set(Silence.DndOption.HOURS_8) })
@@ -173,7 +171,7 @@ fun DndSheet(onDismiss: () -> Unit) {
         if (active) { add(null); add(SheetItem(ctx.getString(R.string.dnd_turn_off), "🔔", tag = "dndOff") { set(null) }) }
         // «Todas las noches» (modo sueño) va dentro de No molestar, con desde y hasta.
         add(null)
-        add(SheetItem(ctx.getString(R.string.sleep_title), "🌙", subtitle = sleepSummary(ctx, state.data?.me?.sleep), tag = "dndNightly") { sleep = true })
+        add(SheetItem(ctx.getString(R.string.sleep_title), "🌙", subtitle = sleepSummary(ctx, state.data?.me?.sleep), tag = "dndNightly") { onDismiss(); onNightly() })
     }
     ActionSheet(ctx.getString(R.string.dnd_title), items, onDismiss)
 }
@@ -206,7 +204,10 @@ fun DndRow() {
         Spacer(Modifier.width(12.dp))
         Switch(checked = active, onCheckedChange = null)
     }
-    if (open) DndSheet(onDismiss = { open = false })
+    // El diálogo vive aquí y no dentro de la hoja: al tocar «Todas las noches» la hoja se cierra.
+    var nightly by remember { mutableStateOf(false) }
+    if (open) DndSheet(onDismiss = { open = false }, onNightly = { nightly = true })
+    if (nightly) SleepDialog(onClose = { nightly = false })
 }
 
 /** Franja fina arriba de Grupos y DMs: «🌙 No molestar hasta las 18:00 · Reactivar». */

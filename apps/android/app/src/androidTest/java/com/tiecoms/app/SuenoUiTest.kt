@@ -8,7 +8,9 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ActivityScenario
@@ -103,8 +105,11 @@ class SuenoUiTest {
             assertFalse("sin escribir no hay botón", exists("sleepScheduleWake"))
             compose.onNodeWithTag("composer").performTextInput("¿Me confirmas mañana?")
             compose.waitUntilAtLeastOneExists(hasTestTag("sleepScheduleWake"), 5_000)
+            compose.waitForIdle(); Thread.sleep(1500)
             shot("03-aviso-directo")
-            compose.onNodeWithTag("sleepScheduleWake").performClick()
+            // Toque real del sistema (UiAutomator), como el de una persona.
+            val dev = androidx.test.uiautomator.UiDevice.getInstance(ins)
+            dev.wait(androidx.test.uiautomator.Until.findObject(androidx.test.uiautomator.By.res("sleepScheduleWake")), 5_000)!!.click()
             compose.waitUntil(10_000) { client.state.value.scheduled.any { it.conversationId == direct && it.body == "¿Me confirmas mañana?" } }
             val s = client.state.value.scheduled.first { it.conversationId == direct }
             assertEquals(SleepMode.wakeAt(w!!, Instant.now()).epochSecond / 60, Instant.parse(s.sendAt).epochSecond / 60)
@@ -114,7 +119,8 @@ class SuenoUiTest {
             // Mi ventana ahora: la lunita del avatar se enciende.
             val now = java.time.LocalTime.now()
             runBlocking { client.setSleep(on = true, start = now.minusHours(1).withSecond(0).withNano(0).toString().take(5), end = now.plusHours(2).withSecond(0).withNano(0).toString().take(5)) }
-            compose.waitUntilAtLeastOneExists(hasTestTag("dndMoon"), 10_000)
+            compose.onNodeWithTag("back").performClick()
+            compose.waitUntil(10_000) { exists("dndMoon") }
             assertTrue(client.dndActive())
             shot("05-lunita")
             runBlocking { client.setSleep(on = true, start = "22:00", end = "07:00") }

@@ -105,18 +105,23 @@ class ProgramadosUiTest {
             log("Pulsación larga en ➤ → En 1 hora")
 
             // Lista: Enviar ahora el segundo, cancelar el primero con Deshacer.
-            compose.waitUntil(8_000) { !hasTextNow(str(R.string.undo)) }
+            // El aviso «Programado para …» tapa parte de la franja: se espera a que se vaya (el emulador va lento).
+            runCatching { compose.waitUntil(30_000) { !hasTextNow(str(R.string.undo)) } }
             compose.onNodeWithTag("schedStrip").performClick()
             compose.waitUntilAtLeastOneExists(hasTestTag("schedList"), 5_000)
             shot("03-lista")
             val second = client.state.value.scheduled.first { it.body == "Segundo programado" }
             compose.onNodeWithTag("sched-${second.id}").performScrollTo()
-            compose.onAllNodes(hasTestTag("schedSendNow"), useUnmergedTree = true)[1].performClick()
+            // La lista va por hora: «En 1 hora» (el segundo) sale antes que «Mañana temprano».
+            val order = client.state.value.scheduled.filter { it.conversationId == conv }.sortedBy { it.sendAt }.map { it.id }
+            compose.onAllNodes(hasTestTag("schedSendNow"), useUnmergedTree = true)[order.indexOf(second.id)].performClick()
             compose.waitUntil(15_000) { client.state.value.scheduled.none { it.id == second.id } }
             compose.waitUntil(15_000) { client.state.value.conversations[conv]?.messages?.any { it.body == "Segundo programado" } == true }
             log("Enviar ahora: sale y deja la lista")
             val first = client.state.value.scheduled.first { it.conversationId == conv }
-            compose.onNodeWithTag("schedCancel").performClick()
+            // El aviso «Enviado» tapa el pie de la hoja unos segundos.
+            runCatching { compose.waitUntil(15_000) { !hasTextNow(str(R.string.sched_sent_now)) } }
+            compose.onNodeWithTag("schedCancel").performTouchInput { click() }
             compose.waitUntil(10_000) { client.state.value.scheduled.none { it.id == first.id } }
             compose.waitUntil(5_000) { hasTextNow(str(R.string.sched_cancelled)) }
             compose.onNodeWithText(str(R.string.undo)).performClick()

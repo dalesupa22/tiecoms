@@ -209,6 +209,11 @@ fun ScheduledStrip(conversationId: String) {
     val st by client.state.collectAsStateWithLifecycle()
     val list = Scheduling.forConversation(st.scheduled, conversationId)
     var open by remember { mutableStateOf(false) }
+    // La hoja sigue abierta aunque se cancele el último: así se ve el aviso con «Deshacer».
+    if (open) {
+        val local = remember { androidx.compose.material3.SnackbarHostState() }
+        FormSheet(stringResource(R.string.sched_title_here), { open = false }, tag = "schedSheet", snackbar = local) { ScheduledList(conversationId) }
+    }
     if (list.isEmpty()) return
     val failed = list.count { it.status == "failed" }
     val next = list.firstOrNull { it.status != "failed" }
@@ -224,10 +229,6 @@ fun ScheduledStrip(conversationId: String) {
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.sched_see), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
         }
-    }
-    if (open) {
-        val local = remember { androidx.compose.material3.SnackbarHostState() }
-        FormSheet(stringResource(R.string.sched_title_here), { open = false }, tag = "schedSheet", snackbar = local) { ScheduledList(conversationId) }
     }
 }
 

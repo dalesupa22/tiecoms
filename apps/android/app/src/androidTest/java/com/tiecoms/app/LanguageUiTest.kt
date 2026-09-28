@@ -27,7 +27,7 @@ import org.junit.runner.RunWith
 import java.io.File
 
 /**
- * «Idioma / Language» en Tú (1.6.2): English → la pestaña dice «Subjects»; Español → «Asuntos»; se recuerda al volver a
+ * «Idioma / Language» en Tú (1.6.2): English → la pestaña dice «Tasks»; Español → «Tareas»; se recuerda al volver a
  * abrir la app. Deja la app en el idioma de [-e endLang] (es|en|auto) para las capturas del splash desde adb.
  */
 @OptIn(ExperimentalTestApi::class)
@@ -72,11 +72,11 @@ class LanguageUiTest {
             compose.waitUntilAtLeastOneExists(hasTestTag("quick.create"), 45_000)
 
             pick(AppLanguage.EN)
-            compose.waitUntil(10_000) { hasLabel("Subjects") }
+            compose.waitUntil(10_000) { hasLabel("Tasks") }
             shot("en-tu")
             compose.onNodeWithTag("tab-home").performClick(); Thread.sleep(1_000); shot("en-grupos")
             pick(AppLanguage.ES)
-            compose.waitUntil(10_000) { hasLabel("Asuntos") }
+            compose.waitUntil(10_000) { hasLabel("Tareas") }
             shot("es-tu")
             compose.onNodeWithTag("tab-home").performClick(); Thread.sleep(1_000); shot("es-grupos")
 
@@ -85,7 +85,7 @@ class LanguageUiTest {
             scenario = ActivityScenario.launch(MainActivity::class.java)
             compose.waitUntilAtLeastOneExists(hasTestTag("quick.create"), 30_000)
             assertEquals(AppLanguage.ES, AppLocale.current(app))
-            compose.waitUntil(10_000) { hasLabel("Asuntos") }
+            compose.waitUntil(10_000) { hasLabel("Tareas") }
             Log.i("TieComsUiTest", "Idioma: EN → Subjects, ES → Asuntos, persiste al reabrir")
 
             val end = when (arg("endLang")) { "en" -> AppLanguage.EN; "auto" -> AppLanguage.SYSTEM; else -> AppLanguage.ES }

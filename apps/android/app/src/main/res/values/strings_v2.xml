@@ -4,7 +4,7 @@
     <string name="splash_slogan">Connects humans, companies &amp; bots</string>
     <string name="splash_a11y">chaggu. Tap to continue.</string>
     <string name="nav_home">Home</string>
-    <string name="nav_issues">Subjects</string>
+    <string name="nav_issues">Tasks</string>
     <string name="nav_agenda">Agenda</string>
     <string name="nav_settings">Settings</string>
     <string name="nav_trazo">Trace</string>
@@ -28,7 +28,7 @@
     <string name="menu_remind">Remind me</string>
     <string name="menu_mark_unread">Mark unread from here</string>
     <string name="menu_derive">Reply in a thread</string>
-    <string name="menu_issue">Open subject</string>
+    <string name="menu_issue">Create task</string>
     <string name="menu_meeting">Schedule a meeting</string>
     <string name="menu_forward">Forward</string>
     <string name="menu_edit">Edit</string>
@@ -122,14 +122,14 @@
     <string name="rem_alert">Reminder</string>
     <string name="rem_date">Date</string>
     <string name="rem_time">Time</string>
-    <string name="issue_new">＋ Subject</string>
-    <string name="issue_new_title">New subject</string>
-    <string name="issue_from_message">＋ Open subject</string>
+    <string name="issue_new">＋ Task</string>
+    <string name="issue_new_title">New task</string>
+    <string name="issue_from_message">＋ Task</string>
     <string name="issue_title">What needs to be solved</string>
     <string name="issue_owner">Owner</string>
     <string name="issue_due">Due date</string>
     <string name="issue_no_due">No date</string>
-    <string name="issue_create">Open subject</string>
+    <string name="issue_create">Create task</string>
     <string name="issue_status">Status</string>
     <string name="issue_st_open">Open</string>
     <string name="issue_st_in_progress">In progress</string>
@@ -138,7 +138,7 @@
     <string name="issue_st_cancelled">Dropped</string>
     <string name="issue_waiting_on">Waiting on</string>
     <string name="issue_waiting_on_ph">Pick a company</string>
-    <string name="issue_here">Subjects here</string>
+    <string name="issue_here">Tasks here</string>
     <string name="issue_origin">See original message</string>
     <string name="issue_origin_out">The original message is outside your history</string>
     <string name="issue_requested_by">Requested by %1$s</string>
@@ -150,7 +150,7 @@
     <string name="issue_comment">Comment</string>
     <string name="issue_comment_ph">Write an update or a question…</string>
     <string name="issue_history">History</string>
-    <string name="issue_no_issues">No open subjects here.</string>
+    <string name="issue_no_issues">No open tasks here.</string>
     <string name="issue_mine">Mine</string>
     <string name="issue_all_open">Open</string>
     <string name="issue_closed">Completed</string>
@@ -205,9 +205,9 @@
     <string name="trazo_open">Open</string>
     <string name="trazo_returned_on">Returned %1$s</string>
     <string name="trazo_tramos">%1$d legs</string>
-    <string name="sys_issue_created">Opened the subject “%1$s”.</string>
-    <string name="sys_issue_closed">Closed the subject “%1$s”.</string>
-    <string name="sys_issue_reopened">Reopened the subject “%1$s”.</string>
+    <string name="sys_issue_created">Created the task “%1$s”.</string>
+    <string name="sys_issue_closed">Closed the task “%1$s”.</string>
+    <string name="sys_issue_reopened">Reopened the task “%1$s”.</string>
     <string name="sys_derived_here">Branched from “%1$s”: “%2$s”</string>
     <string name="sys_derived_from">A conversation was branched from here.</string>
     <string name="sys_returned">This conversation returned its result to its origin.</string>

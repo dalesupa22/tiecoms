@@ -18,6 +18,8 @@ sealed interface ConversationEvent {
     data class IssueUpdated(override val conversationId: String, override val eventSeq: Long, val issue: IssueDTO) : ConversationEvent
     data class PinsChanged(override val conversationId: String, override val eventSeq: Long, val messageIds: List<String>) : ConversationEvent
     data class CalendarUpdated(override val conversationId: String, override val eventSeq: Long, val event: CalendarEventDTO) : ConversationEvent
+    /** `topics.changed` (docs/TEMAS.md): trae la lista completa de temas (activos y archivados); reemplaza la local. */
+    data class TopicsChanged(override val conversationId: String, override val eventSeq: Long, val topics: List<TopicDTO>) : ConversationEvent
 
     /** `redacted` o cualquier tipo nuevo: solo avanza el cursor. */
     data class CursorOnly(override val conversationId: String, override val eventSeq: Long, val type: String) : ConversationEvent
@@ -73,6 +75,8 @@ fun decodeConversationEvent(el: JsonElement): ConversationEvent? {
         "pins.changed" -> ids(o, "messageIds")?.let { ConversationEvent.PinsChanged(conv, seq, it) }
         "issue.updated" -> obj(o, "issue", IssueDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { ConversationEvent.IssueUpdated(conv, seq, it) }
         "calendar.updated" -> obj(o, "event", CalendarEventDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { ConversationEvent.CalendarUpdated(conv, seq, it) }
+        "topics.changed" -> obj(o, "topics", kotlinx.serialization.builtins.ListSerializer(TopicDTO.serializer()))
+            ?.filter { it.id.isNotEmpty() }?.map { it.copy(conversationId = it.conversationId.ifEmpty { conv }) }?.let { ConversationEvent.TopicsChanged(conv, seq, it) }
         else -> null
     } ?: ConversationEvent.CursorOnly(conv, seq, type)
 }

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Temas del chat (docs/TEMAS.md): banderitas arriba del chat y etiqueta por mensaje. -->
+<resources>
+    <string name="topic_bar">Temas del chat</string>
+    <string name="topic_all">Todo</string>
+    <string name="topic_new">Nuevo</string>
+    <string name="topic_archived_n">Archivados %1$d</string>
+    <string name="topic_new_title">Nuevo tema</string>
+    <string name="topic_name_ph">Finanzas</string>
+    <string name="topic_icon">Ícono</string>
+    <string name="topic_color_label">Color</string>
+    <string name="topic_create">Crear</string>
+    <string name="topic_rename">Renombrar</string>
+    <string name="topic_rename_title">Renombrar tema</string>
+    <string name="topic_color">Cambiar color</string>
+    <string name="topic_archive">Archivar</string>
+    <string name="topic_archive_hint">Sale de la fila. Sus mensajes quedan con etiqueta gris.</string>
+    <string name="topic_remove">Quitar tema</string>
+    <string name="topic_remove_confirm">¿Quitar «%1$s»? %2$d mensajes quedan sin tema. No se borra ningún mensaje.</string>
+    <string name="topic_archived">Archivaste %1$s</string>
+    <string name="topic_removed">Quitaste %1$s</string>
+    <string name="topic_restored">Restauraste %1$s</string>
+    <string name="topic_restore">Restaurar</string>
+    <string name="topic_archived_title">Temas archivados</string>
+    <string name="topic_set">Tema</string>
+    <string name="topic_none">Sin tema</string>
+    <string name="topic_tagged">Etiquetado en %1$s</string>
+    <string name="topic_untagged">Mensaje sin tema</string>
+    <string name="topic_by">tema puesto por %1$s</string>
+    <string name="topic_placeholder">Mensaje en %1$s</string>
+    <string name="topic_empty">Todavía no hay mensajes en %1$s. Lo que escribas ahora queda en este tema.</string>
+    <string name="topic_menu_cd">Mantén presionada una banderita para renombrarla, cambiarle el color, archivarla o quitarla</string>
+    <string name="topic_color_blue">Azul</string>
+    <string name="topic_color_green">Verde</string>
+    <string name="topic_color_orange">Naranja</string>
+    <string name="topic_color_violet">Violeta</string>
+    <string name="topic_color_magenta">Rosa</string>
+    <string name="topic_color_aqua">Aguamarina</string>
+    <string name="topic_color_red">Rojo</string>
+    <string name="topic_color_yellow">Amarillo</string>
+    <!-- Tarjeta de tarea en el chat -->
+    <string name="task_card">Tarea de %1$s</string>
+    <string name="task_card_comment">Comenta esta tarea…</string>
+    <string name="task_card_all">Ver los %1$d comentarios</string>
+    <string name="topic_untagged_task">Tarea sin tema</string>
+    <string name="topic_remove_from_task">Quitar el tema de la tarea</string>
+</resources>

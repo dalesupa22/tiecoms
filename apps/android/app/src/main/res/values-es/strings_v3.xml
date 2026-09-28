@@ -18,7 +18,7 @@
     <string name="home_unread_in">%1$d sin leer</string>
     <string name="issues_count_one">◆ 1 asunto</string>
     <string name="issues_count">◆ %1$d asuntos</string>
-    <string name="issues_open_bar">Asuntos abiertos (%1$d)</string>
+    <string name="issues_open_bar">Tareas abiertas (%1$d)</string>
     <string name="issue_all">Todos</string>
     <string name="issue_comment_ph3">Escribe una actualización o una pregunta…</string>
     <string name="issue_no_comments">Aún no hay comentarios.</string>
@@ -27,7 +27,7 @@
     <string name="common_saving">Guardando…</string>
     <string name="common_saved">Guardado</string>
     <string name="system_message">Mensaje del sistema</string>
-    <string name="issue_in_conversation">Asuntos de «%1$s»</string>
+    <string name="issue_in_conversation">Tareas de «%1$s»</string>
     <string name="details_short">Detalles</string>
     <string name="notif_you">Tú</string>
     <string name="menu_reply_private">Responder en privado</string>

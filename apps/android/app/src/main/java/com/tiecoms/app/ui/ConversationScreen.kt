@@ -260,6 +260,14 @@ fun ConversationScreen(
     var pickerFor by remember { mutableStateOf<MessageDTO?>(null) }
     /** Reunión con enlace real (1.6.6): true = ahora, false = agendada; null = cerrado. */
     var meetingLink by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    // Temas (docs/TEMAS.md): la banderita elegida filtra el chat y es el tema de lo que escribo.
+    val topics = state.topics[id].orEmpty()
+    var topicFilter by rememberSaveable(id) { mutableStateOf<String?>(null) }
+    val activeTopic = com.tiecoms.app.core.Topics.validFilter(topics, topicFilter)?.let { f -> topics.firstOrNull { it.id == f } }
+    val topicById = remember(topics) { topics.associateBy { it.id } }
+    /** «＋ Nuevo tema» desde el menú de un mensaje: al crearlo, el mensaje queda con ese tema. */
+    var topicNewFor by remember { mutableStateOf<MessageDTO?>(null) }
+    val snackbar = LocalSnackbar.current
 
     val listState = rememberLazyListState()
     val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex <= 1 } }
@@ -276,10 +284,14 @@ fun ConversationScreen(
     var dividerSeq by remember(id) { mutableStateOf<Long?>(null) }
     /** Ya se colocó la vista al abrir (en el primer no leído o al final); hasta entonces no se marca leído. */
     var positioned by remember(id) { mutableStateOf(entry.second <= 0 || (jumpSeq ?: 0) > 0 || jumpMessageId != null) }
-    val items = remember(conv?.messages, pending, conv?.hasMore, conv?.loading, state.blockedUserIds, dividerSeq) {
-        buildItems((conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }, pending, me, conv?.hasMore ?: false, conv?.loading ?: false, meta.historyFromSeq > 0,
+    val items = remember(conv?.messages, pending, conv?.hasMore, conv?.loading, state.blockedUserIds, dividerSeq, activeTopic?.id, if (activeTopic != null) state.issues else null) {
+        val tid = activeTopic?.id
+        // Con un tema elegido se ven sus mensajes y las tarjetas de sus tareas.
+        buildItems(com.tiecoms.app.core.Topics.filter((conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }, tid) { iid -> state.issues[iid]?.topicId },
+            if (tid == null) pending else pending.filter { it.topicId == tid }, me, conv?.hasMore ?: false, conv?.loading ?: false, meta.historyFromSeq > 0,
             dividerSeq, entry.second)
     }
+    val topicCounts = remember(conv?.messages) { com.tiecoms.app.core.Topics.counts(conv?.messages.orEmpty()) }
     val itemsNow by androidx.compose.runtime.rememberUpdatedState(items)
     // «Seguir el final»: solo cambia con la lista quieta. Si llega un mensaje durante la animación de otro
     // (mi envío y la respuesta inmediata), atBottom daría falso a mitad de camino y dejaría de seguir.
@@ -292,6 +304,8 @@ fun ConversationScreen(
     val byId = remember(conv?.messages, state.blockedUserIds) { (conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }.associateBy { it.id } }
 
     fun jumpTo(seq: Long) {
+        // El salto busca en el chat completo: se quita el filtro de tema.
+        topicFilter = null
         scope.launch {
             if (!client.ensureMessage(id, seq)) { readLoadFailed = true; return@launch }
             delay(80)
@@ -310,6 +324,7 @@ fun ConversationScreen(
         try { client.openConversation(id, force = reloadKey > 0) } catch (e: Exception) { loadError = errorText(ctx, e) }
         launch { runCatching { client.loadIssues(conversationId = id) } }
         launch { runCatching { client.loadPins(id) } }
+        launch { runCatching { client.loadTopics(id) } }
         launch { runCatching { client.loadEvents(Instant.now().minusSeconds(30L * 86400), Instant.now().plusSeconds(60L * 86400), id) } }
         if (jumpSeq != null && jumpSeq > 0) jumpTo(jumpSeq)
         else if (jumpMessageId != null) {
@@ -483,6 +498,9 @@ fun ConversationScreen(
             if (meta.canPost) add(SheetItem(ctx.getString(if (isPinned) R.string.menu_unpin else R.string.menu_pin), "📌", tag = "menuPin") {
                 act { client.setMessagePinned(m, !isPinned); container.toast(ctx.getString(if (isPinned) R.string.toast_unpinned else R.string.toast_pinned)) }
             })
+            // 🏷 Tema: cualquiera del chat etiqueta cualquier mensaje de texto (docs/TEMAS.md).
+            if (meta.canPost && !embedded && m.kind == "text" && m.deletedAt == null)
+                add(topicMenuItem(ctx, container, snackbar, m, topics) { topicNewFor = m })
             add(remindMenu(ctx, meta, m) { reminderCustom = true to m })
             add(SheetItem(ctx.getString(R.string.menu_mark_unread), "●", tag = "menuUnread") { act { client.markUnread(id, m.seq); container.toast(ctx.getString(R.string.toast_marked_unread)) } })
             if (canWork) {
@@ -589,6 +607,11 @@ fun ConversationScreen(
             if (!embedded) ChatBar(meta, data, pinned.size, canOpenIssues = canWork && myWsRole != "guest",
                 onPins = { showPins = true }, onOpenIssue = onOpenIssue, onNewIssue = { newIssue = true to null }, onNewEvent = { meeting = true to null },
                 onOpenEvent = onOpenEvent, onOpenThread = { t -> sideOpen = t })
+            // Temas (docs/TEMAS.md): banderitas bajo la barra de accesos, con scroll horizontal.
+            if (!embedded) TopicDock(meta, topics, activeTopic?.id, topicCounts, onFilter = { f ->
+                topicFilter = f
+                scope.launch { runCatching { listState.scrollToItem(0) }; follow = true }
+            })
             // Pendientes del árbol (1.6.6): «⑂ N sin leer en X conversaciones de este grupo · Ver».
             if (!embedded) TreeUnreadStrip(meta, data, onOpen = { t -> sideOpen = t })
             if (readLoadFailed || readSaveFailed) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("readRetry"), verticalAlignment = Alignment.CenterVertically) {
@@ -606,6 +629,9 @@ fun ConversationScreen(
                         Button(onClick = { reloadKey++ }) { Text(stringResource(R.string.retry)) }
                     }
                     conv?.loaded != true -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    activeTopic != null && items.none { it is ChatItem.Msg || it is ChatItem.Pending } ->
+                        Text(stringResource(R.string.topic_empty, activeTopic.name), Modifier.align(Alignment.Center).padding(32.dp).testTag("topicEmpty"),
+                            textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     items.isEmpty() -> Text(stringResource(if (meta.isSide) R.string.side_empty_chat else R.string.no_messages), Modifier.align(Alignment.Center).testTag("sideEmpty"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else -> androidx.compose.runtime.CompositionLocalProvider(LocalVoiceQueue provides voiceQueue) { LazyColumn(
                         state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize().onGloballyPositioned { listRect = it.boundsInRoot() }.dismissKeyboardOnTouch().testTag("messages"),
@@ -616,7 +642,7 @@ fun ConversationScreen(
                         items(items, key = { it.key }) { item ->
                             when (item) {
                                 is ChatItem.Day -> DaySeparator(dayText(ctx, item.date))
-                                is ChatItem.Msg -> if (item.m.kind == "system") SystemRow(item.m, data, state.events, onOpenConversation, onOpenIssue, onOpenEvent)
+                                is ChatItem.Msg -> if (item.m.kind == "system") SystemRow(item.m, data, state.events, onOpenConversation, onOpenIssue, onOpenEvent, canPost = meta.canPost && !blockedDirect)
                                 else MessageBubble(
                                     item, data, quoted = item.m.replyTo?.let { byId[it] }, pinnedHere = item.m.id in pinned, highlighted = highlight == item.m.seq,
                                     issue = openHere.firstOrNull { it.originMessageId == item.m.id },
@@ -638,6 +664,8 @@ fun ConversationScreen(
                                     onOpenPdf = { a, sign -> pdfViewer = a to sign; pdfSaved = a.id + "|" + (if (sign) "1" else "0") },
                                     canReact = canReact(item.m), reactionActions = reactionActions,
                                     onReact = { e, on -> react(item.m, e, on) }, onMoreReactions = { pickerFor = item.m },
+                                    topic = if (embedded || item.m.deletedAt != null) null else item.m.topicId?.let { topicById[it] },
+                                    topicBy = com.tiecoms.app.core.Topics.setBy(item.m)?.let { by -> if (by == me) stringResource(R.string.common_you_short) else Names.person(data, by)?.name?.substringBefore(' ') ?: "" },
                                 )
                                 is ChatItem.Pending -> PendingBubble(item.p, onRetry = { client.retry(item.p.clientMessageId) }, onDiscard = { client.discard(item.p.clientMessageId) })
                                 ChatItem.LateJoin -> Notice(stringResource(R.string.late_join))
@@ -711,7 +739,7 @@ fun ConversationScreen(
                         val src = privateHere.source
                         client.send(id, text, null, com.tiecoms.app.core.ForwardedInfo("tiecoms", privateHere.authorName, src.createdAt, src.conversationId, src.id), attachments = att, mentions = mentions)
                         container.privateReply.value = null
-                    } else client.send(id, text, replyTo?.id, attachments = att, mentions = mentions)
+                    } else client.send(id, text, replyTo?.id, attachments = att, mentions = mentions, topicId = activeTopic?.id)
                     replyTo = null
                 },
                 onSaveEdit = { m, text, mentions ->
@@ -720,7 +748,7 @@ fun ConversationScreen(
                 },
                 onAskSide = { pid -> conv?.messages?.lastOrNull { it.kind == "text" && it.deletedAt == null }?.let { last -> sidePreselect = listOf(pid); sideStart = last } },
                 onBring = { bringing = true },
-                placeholderOverride = if (meta.isSide) sidePlaceholder else null,
+                placeholderOverride = if (meta.isSide) sidePlaceholder else activeTopic?.let { stringResource(R.string.topic_placeholder, it.name) },
                 onNewEvent = { meeting = true to null }, onNewIssue = if (myWsRole != "guest") ({ newIssue = true to null }) else null,
                 onMeeting = if (canWork) ({ now -> meetingLink = now }) else null,
                 autoFocus = embedded,
@@ -768,6 +796,7 @@ fun ConversationScreen(
     personCard?.let { pid -> PersonCardSheet(pid, onClose = { personCard = null }, onDirect = { uid -> act { val cid = client.createChat(listOf(uid), null).id; kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onOpenConversation(cid, null) } } }) }
     sideStart?.let { m -> SideStartSheet(meta, m, onClose = { sideStart = null; sidePreselect = emptyList() }, onStarted = { sid -> sideOpen = sid }, preselect = sidePreselect) }
 
+    topicNewFor?.let { m -> TopicSheet(id, topics, edit = null, onClose = { topicNewFor = null }, onSaved = { t -> tagWithNewTopic(ctx, container, snackbar, m, t) }) }
     reportMessage?.let { ReportDialog(it.authorId, it.id, onClose = { reportMessage = null }) }
     pickerFor?.let { pm ->
         val live = byId[pm.id] ?: pm
@@ -1155,9 +1184,13 @@ internal fun Notice(text: String) {
 internal fun SystemRow(
     m: MessageDTO, data: BootstrapDTO, events: Map<String, com.tiecoms.app.core.CalendarEventDTO>,
     onOpenConversation: (String, Long?) -> Unit, onOpenIssue: (String) -> Unit, onOpenEvent: (String) -> Unit,
+    /** Quien puede escribir comenta y marca la tarjeta de tarea. */
+    canPost: Boolean = false,
 ) {
     val ctx = LocalContext.current
     val chat = LocalChatColors.current
+    // Una tarea nueva se ve como tarjeta completa, con sus comentarios y para comentar ahí mismo (docs/TEMAS.md).
+    com.tiecoms.app.core.Topics.cardIssueId(m)?.let { iid -> IssueChatCard(iid, m.authorId, data, canPost, onOpenIssue); return }
     val p = systemPayload(m.body)
     // Los hilos no ensucian el chat: el aviso «se abrió un hilo» lo reemplaza el chip bajo su mensaje.
     if (p?.s("k") == "derived.from") return
@@ -1202,6 +1235,9 @@ internal fun MessageBubble(
     reactionActions: Boolean = true,
     onReact: (String, Boolean) -> Unit = { _, _ -> },
     onMoreReactions: () -> Unit = {},
+    /** Tema del mensaje (docs/TEMAS.md) y, si no lo puso el autor, quién («Tú» si fui yo). */
+    topic: com.tiecoms.app.core.TopicDTO? = null,
+    topicBy: String? = null,
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val openMenu = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onLongPress() }
@@ -1334,10 +1370,13 @@ internal fun MessageBubble(
                     lineHeight = 52.sp, modifier = Modifier.testTag("body-${m.seq}"))
             else if (body.isNotBlank() || m.attachments.isEmpty()) MessageText(body, m.mentions, fg, data, onPerson = onPerson, modifier = Modifier.testTag("body-${m.seq}"))
             m.linkPreview?.takeIf { !deleted && it.usable }?.let { LinkPreviewCard(it, fg, Modifier.padding(top = 6.dp)) }
-            Text(
-                listOfNotNull(if (pinnedHere && item.mine) "📌" else null, time, if (m.editedAt != null && !deleted) stringResource(R.string.msg_edited) else null).joinToString(" "),
-                style = MaterialTheme.typography.labelSmall, color = fg.copy(alpha = 0.75f), modifier = Modifier.align(Alignment.End),
-            )
+            FlowRow(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End), verticalArrangement = Arrangement.Center) {
+                if (topic != null) TopicTag(topic, topicBy, Modifier.align(Alignment.CenterVertically))
+                Text(
+                    listOfNotNull(if (pinnedHere && item.mine) "📌" else null, time, if (m.editedAt != null && !deleted) stringResource(R.string.msg_edited) else null).joinToString(" "),
+                    style = MaterialTheme.typography.labelSmall, color = fg.copy(alpha = 0.75f), modifier = Modifier.align(Alignment.CenterVertically),
+                )
+            }
         }
         val myReactions = m.reactions.filter { data.me.id in it.userIds }.map { it.emoji }.toSet()
         AnchoredMenu(menuOpen, if (menuOpen) menuItems() else emptyList(), onDismissMenu,

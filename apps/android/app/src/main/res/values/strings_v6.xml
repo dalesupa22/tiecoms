@@ -68,7 +68,7 @@
     <string name="menu_invite_group">Invite to this group</string>
     <string name="menu_new_group">New group</string>
     <string name="menu_new_group_here">New group here</string>
-    <string name="menu_new_issue">New subject</string>
+    <string name="menu_new_issue">New task</string>
     <string name="menu_invite">Invite</string>
     <string name="menu_open_space">Open space</string>
     <string name="menu_fold_all">Collapse all</string>
@@ -95,17 +95,17 @@
     <!-- Dentro del chat: barra de accesos, hilos y el «+» (docs/GRUPOS.md, textos bar.* de la web) -->
     <string name="bar_label">Chat shortcuts</string>
     <string name="bar_pins">Pinned</string>
-    <string name="bar_issues">Subjects</string>
+    <string name="bar_issues">Tasks</string>
     <string name="bar_threads">Threads</string>
     <string name="bar_agenda">Agenda</string>
-    <string name="bar_issues_title">Subjects in this chat</string>
+    <string name="bar_issues_title">Tasks in this chat</string>
     <string name="bar_threads_title">Threads in this chat</string>
     <string name="bar_agenda_title">Agenda for this chat</string>
     <string name="bar_no_threads">No threads yet. Start one from a message: “Reply in a thread” or “Private sidechat”.</string>
     <string name="bar_no_agenda">No dates yet: meetings, subject deadlines and your reminders show up here.</string>
-    <string name="bar_new_issue">Subject</string>
+    <string name="bar_new_issue">Task</string>
     <string name="bar_new_event">Event</string>
-    <string name="bar_plus">Attach, event or subject</string>
+    <string name="bar_plus">Attach, event or task</string>
     <string name="bar_due_on">Due %1$s</string>
     <string name="bar_overdue">Overdue</string>
     <string name="bar_reminder">Reminder</string>

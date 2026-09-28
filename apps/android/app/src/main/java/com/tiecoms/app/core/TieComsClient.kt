@@ -56,6 +56,8 @@ data class ClientState(
     val issues: Map<String, IssueDTO> = emptyMap(),
     /** Mensajes fijados por conversación. */
     val pins: Map<String, List<String>> = emptyMap(),
+    /** Temas por conversación (activos y archivados), en el orden de la fila (docs/TEMAS.md). */
+    val topics: Map<String, List<TopicDTO>> = emptyMap(),
     val reminders: List<ReminderDTO> = emptyList(),
     val events: Map<String, CalendarEventDTO> = emptyMap(),
     /** Sube cuando el puente de WhatsApp trae novedades: la pantalla vuelve a pedir la lista. */
@@ -520,6 +522,7 @@ class TieComsClient(
         when (e) {
             is ConversationEvent.IssueUpdated -> { putIssues(listOf(e.issue)); recountIssues(e.conversationId) }
             is ConversationEvent.PinsChanged -> setState { copy(pins = pins + (e.conversationId to e.messageIds)) }
+            is ConversationEvent.TopicsChanged -> putTopics(e.conversationId, e.topics)
             is ConversationEvent.CalendarUpdated -> {
                 val prev = s.events[e.event.id]
                 putEvents(listOf(e.event))
@@ -587,6 +590,7 @@ class TieComsClient(
             is ConversationEvent.IssueUpdated -> putIssues(listOf(e.issue))
             is ConversationEvent.PinsChanged -> setState { copy(pins = pins + (e.conversationId to e.messageIds)) }
             is ConversationEvent.CalendarUpdated -> putEvents(listOf(e.event))
+            is ConversationEvent.TopicsChanged -> putTopics(e.conversationId, e.topics)
             is ConversationEvent.CursorOnly -> Unit
         }
         setConv(e.conversationId) { copy(messages = messages, lastEventSeq = maxOf(lastEventSeq, e.eventSeq)) }
@@ -675,6 +679,8 @@ class TieComsClient(
         conversationId: String, body: String, replyTo: String? = null, forwarded: ForwardedInfo? = null,
         attachments: List<AttachmentDTO> = emptyList(), forwardAttachments: List<AttachmentDTO> = emptyList(),
         mentions: List<MentionDTO> = emptyList(),
+        /** Banderita elegida (docs/TEMAS.md): el mensaje sale con ese tema. */
+        topicId: String? = null,
     ): String? {
         // El servidor recorta el body: se recorta aquí y se corren los offsets de las menciones.
         val (text, ments) = Mentions.trim(body, mentions)
@@ -683,7 +689,7 @@ class TieComsClient(
         val p = PendingMessage(
             clientMessageId = UUID.randomUUID().toString(), conversationId = conversationId, body = text,
             replyTo = replyTo, forwarded = forwarded, createdAt = Instant.ofEpochMilli(now()).toString(),
-            attachments = attachments.take(Attachments.MAX_PER_MESSAGE), forwardAttachments = fwd, mentions = ments,
+            attachments = attachments.take(Attachments.MAX_PER_MESSAGE), forwardAttachments = fwd, mentions = ments, topicId = topicId,
         )
         // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
         scope.launch {
@@ -761,7 +767,7 @@ class TieComsClient(
         if (socket.connected) {
             try {
                 val payload = TcJson.encodeToJsonElement(SocketSendBody.serializer(), SocketSendBody(p.conversationId, p.clientMessageId, p.body, p.replyTo, p.forwarded,
-                    p.attachments.map { it.id }.ifEmpty { null }, p.forwardAttachments.map { it.id }.ifEmpty { null }, p.mentions.ifEmpty { null }))
+                    p.attachments.map { it.id }.ifEmpty { null }, p.forwardAttachments.map { it.id }.ifEmpty { null }, p.mentions.ifEmpty { null }, p.topicId))
                 val r = socket.emitWithAck("message.send", payload, 8000).firstOrNull() as? JsonObject
                 if ((r?.get("ok") as? JsonPrimitive)?.booleanOrNull == true) {
                     val m = r["message"]?.let { runCatching { TcJson.decodeFromJsonElement(MessageDTO.serializer(), it) }.getOrNull() }
@@ -784,7 +790,7 @@ class TieComsClient(
         val r = request(
             "POST", "/conversations/${p.conversationId}/messages",
             TcJson.encodeToString(SendBody.serializer(), SendBody(p.clientMessageId, p.body, p.replyTo, p.forwarded,
-                p.attachments.map { it.id }.ifEmpty { null }, p.forwardAttachments.map { it.id }.ifEmpty { null }, p.mentions.ifEmpty { null })), SendResult.serializer(),
+                p.attachments.map { it.id }.ifEmpty { null }, p.forwardAttachments.map { it.id }.ifEmpty { null }, p.mentions.ifEmpty { null }, p.topicId)), SendResult.serializer(),
         )
         sentViaHttp++
         if (r.droppedMentions.isNotEmpty()) _signals.tryEmit(ClientSignal.MentionsDropped(p.conversationId, r.droppedMentions))
@@ -865,6 +871,11 @@ class TieComsClient(
             if (generation == sessionGeneration) { putIssues(listOf(prev)); recountIssues(prev.conversationId) }
             throw e
         }
+    }
+    /** Pone o quita (null) el tema de una tarea (docs/TEMAS.md): PATCH /issues/:id {topicId}. */
+    suspend fun setIssueTopic(id: String, topicId: String?): IssueDTO = withContext(dispatcher) {
+        val i = req("PATCH", "/issues/$id", buildJsonObject { put("topicId", topicId?.let { JsonPrimitive(it) } ?: JsonNull) }, IssueDTO.serializer())
+        putIssues(listOf(i)); i
     }
     suspend fun issueDetail(id: String): IssueDetail = withContext(dispatcher) {
         val r = req("GET", "/issues/$id", null, IssueDetail.serializer()); putIssues(listOf(r.issue) + r.children); r
@@ -1096,6 +1107,51 @@ class TieComsClient(
         val r = req("GET", "/conversations/$conversationId/pins", null, PinnedMessages.serializer())
         setState { copy(pins = pins + (conversationId to r.messages.map { it.id })) }
         r.messages
+    }
+
+    // ---------- Temas (docs/TEMAS.md) ----------
+    private fun putTopics(conversationId: String, topics: List<TopicDTO>) = setState { copy(topics = this.topics + (conversationId to topics)) }
+
+    suspend fun loadTopics(conversationId: String): List<TopicDTO> = withContext(dispatcher) {
+        req("GET", "/conversations/$conversationId/topics", null, TopicsPage.serializer()).topics.also { putTopics(conversationId, it) }
+    }
+
+    /** 409 si el nombre está repetido o se llega al tope técnico ([Topics.LIMIT]): la interfaz muestra el mensaje del servidor. */
+    suspend fun createTopic(conversationId: String, name: String, color: String?, icon: String?): TopicDTO = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("name", JsonPrimitive(name.trim().take(40)))
+            color?.let { put("color", JsonPrimitive(it)) }
+            icon?.let { put("icon", JsonPrimitive(it)) }
+        }
+        val r = req("POST", "/conversations/$conversationId/topics", body, TopicCreated.serializer())
+        putTopics(conversationId, r.topics)
+        r.topic
+    }
+
+    /** Renombrar, cambiar color o ícono, archivar (archived = true) o restaurar (false; también respeta el tope). */
+    suspend fun updateTopic(t: TopicDTO, name: String? = null, color: String? = null, icon: String? = null, archived: Boolean? = null): List<TopicDTO> = withContext(dispatcher) {
+        val body = buildJsonObject {
+            name?.let { put("name", JsonPrimitive(it.trim().take(40))) }
+            color?.let { put("color", JsonPrimitive(it)) }
+            icon?.let { put("icon", JsonPrimitive(it)) }
+            archived?.let { put("archived", JsonPrimitive(it)) }
+        }
+        req("PATCH", "/topics/${t.id}", body, TopicsPage.serializer()).topics.also { putTopics(t.conversationId, it) }
+    }
+
+    /** Quitar un tema: sus mensajes quedan sin tema (no se borra ninguno). Devuelve cuántos quedaron sin tema. */
+    suspend fun deleteTopic(t: TopicDTO): Int = withContext(dispatcher) {
+        val r = req("DELETE", "/topics/${t.id}", null, TopicsPage.serializer())
+        putTopics(t.conversationId, r.topics)
+        if (s.conversations[t.conversationId]?.loaded == true) setConv(t.conversationId) { copy(messages = Topics.clear(messages, t.id)) }
+        r.cleared
+    }
+
+    /** Etiquetar cualquier mensaje del chat con un tema activo; null lo deja sin tema. */
+    suspend fun setMessageTopic(m: MessageDTO, topicId: String?): MessageDTO = withContext(dispatcher) {
+        // topicId: null debe viajar explícito (TcJson omite los nulos).
+        val body = buildJsonObject { put("topicId", topicId?.let { JsonPrimitive(it) } ?: JsonNull) }
+        req("PUT", "/messages/${m.id}/topic", body, MessageDTO.serializer()).also { upsertLocal(it.copy(conversationId = it.conversationId.ifEmpty { m.conversationId })) }
     }
 
     // ---------- Reacciones (docs/REACCIONES_ENLACES.md) ----------

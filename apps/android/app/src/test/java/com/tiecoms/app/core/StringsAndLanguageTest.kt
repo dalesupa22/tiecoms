@@ -6,7 +6,7 @@ import org.junit.Test
 import java.io.File
 import java.util.Locale
 
-/** 1.6.2: «Issues» → «Subjects» en inglés (Asunto/Asuntos en español), idioma de la app y línea del splash. */
+/** 1.6.2: «Issues» → «Subjects» en inglés; Temas (docs/TEMAS.md): la pestaña y los chips dicen «Tasks»/«Tareas». Idioma y splash. */
 class StringsAndLanguageTest {
     private val res = File("src/main/res")
     /** Texto visible de cada <string>/<item> de un directorio values*, sin nombres ni comentarios. */
@@ -25,14 +25,14 @@ class StringsAndLanguageTest {
         val left = texts("values").filterValues { Regex("\\b(issue|issues)\\b", RegexOption.IGNORE_CASE).containsMatchIn(it) }
         assertTrue("Quedan «Issue» en inglés: $left", left.isEmpty())
         val en = texts("values")
-        assertTrue(en.values.contains("Subjects")) // pestaña y chips
+        assertTrue(en.values.contains("Tasks")) // pestaña y chips (docs/TEMAS.md)
         assertTrue(en.any { it.key.startsWith("strings_v6.xml:grp_more_issues") || it.value == "+%1\$d subjects" })
     }
 
-    @Test fun `en espanol siguen siendo asuntos`() {
+    @Test fun `en espanol la pestana dice Tareas`() {
         val es = texts("values-es")
         assertTrue(es.values.none { Regex("\\b(issue|issues|subject|subjects)\\b", RegexOption.IGNORE_CASE).containsMatchIn(it) })
-        assertTrue(es.values.any { it == "Asuntos" })
+        assertTrue(es.values.any { it == "Tareas" })
     }
 
     @Test fun `linea de seguridad del splash sin promesas de extremo a extremo`() {

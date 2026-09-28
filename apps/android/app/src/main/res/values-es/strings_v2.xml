@@ -4,7 +4,7 @@
     <string name="splash_slogan">Conecta humanos, empresas y bots</string>
     <string name="splash_a11y">chaggu. Toca para continuar.</string>
     <string name="nav_home">Inicio</string>
-    <string name="nav_issues">Asuntos</string>
+    <string name="nav_issues">Tareas</string>
     <string name="nav_agenda">Agenda</string>
     <string name="nav_settings">Ajustes</string>
     <string name="nav_trazo">Trazo</string>
@@ -28,7 +28,7 @@
     <string name="menu_remind">Recordarme</string>
     <string name="menu_mark_unread">Marcar como no leído desde aquí</string>
     <string name="menu_derive">Responder en un hilo</string>
-    <string name="menu_issue">Abrir asunto</string>
+    <string name="menu_issue">Crear tarea</string>
     <string name="menu_meeting">Agendar reunión</string>
     <string name="menu_forward">Reenviar</string>
     <string name="menu_edit">Editar</string>
@@ -122,14 +122,14 @@
     <string name="rem_alert">Recordatorio</string>
     <string name="rem_date">Fecha</string>
     <string name="rem_time">Hora</string>
-    <string name="issue_new">＋ Asunto</string>
-    <string name="issue_new_title">Nuevo asunto</string>
-    <string name="issue_from_message">＋ Abrir asunto</string>
+    <string name="issue_new">＋ Tarea</string>
+    <string name="issue_new_title">Nueva tarea</string>
+    <string name="issue_from_message">＋ Tarea</string>
     <string name="issue_title">Qué hay que resolver</string>
     <string name="issue_owner">Responsable</string>
     <string name="issue_due">Fecha límite</string>
     <string name="issue_no_due">Sin fecha</string>
-    <string name="issue_create">Abrir asunto</string>
+    <string name="issue_create">Crear tarea</string>
     <string name="issue_status">Estado</string>
     <string name="issue_st_open">Abierto</string>
     <string name="issue_st_in_progress">En curso</string>
@@ -138,7 +138,7 @@
     <string name="issue_st_cancelled">Descartado</string>
     <string name="issue_waiting_on">Esperando a</string>
     <string name="issue_waiting_on_ph">Elige una empresa</string>
-    <string name="issue_here">Asuntos aquí</string>
+    <string name="issue_here">Tareas aquí</string>
     <string name="issue_origin">Ver mensaje de origen</string>
     <string name="issue_origin_out">El mensaje de origen quedó fuera de tu historial</string>
     <string name="issue_requested_by">Lo pidió %1$s</string>
@@ -150,7 +150,7 @@
     <string name="issue_comment">Comentar</string>
     <string name="issue_comment_ph">Escribe un avance o una pregunta…</string>
     <string name="issue_history">Historial</string>
-    <string name="issue_no_issues">No hay asuntos abiertos aquí.</string>
+    <string name="issue_no_issues">No hay tareas abiertas aquí.</string>
     <string name="issue_mine">Míos</string>
     <string name="issue_all_open">Abiertos</string>
     <string name="issue_closed">Completados</string>
@@ -205,9 +205,9 @@
     <string name="trazo_open">Abierta</string>
     <string name="trazo_returned_on">Devuelta %1$s</string>
     <string name="trazo_tramos">%1$d tramos</string>
-    <string name="sys_issue_created">Abrió el asunto «%1$s».</string>
-    <string name="sys_issue_closed">Cerró el asunto «%1$s».</string>
-    <string name="sys_issue_reopened">Reabrió el asunto «%1$s».</string>
+    <string name="sys_issue_created">Creó la tarea «%1$s».</string>
+    <string name="sys_issue_closed">Cerró la tarea «%1$s».</string>
+    <string name="sys_issue_reopened">Reabrió la tarea «%1$s».</string>
     <string name="sys_derived_here">Conversación derivada de «%1$s»: «%2$s»</string>
     <string name="sys_derived_from">Se derivó una conversación desde aquí.</string>
     <string name="sys_returned">Esta conversación devolvió su resultado al origen.</string>

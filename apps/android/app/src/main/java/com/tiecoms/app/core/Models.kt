@@ -230,6 +230,10 @@ data class MessageDTO(
     val mentions: List<MentionDTO> = emptyList(),
     /** Reacciones (contrato 2026-09-26), en el orden de la primera reacción; ausente en servidores viejos. */
     val reactions: List<ReactionDTO> = emptyList(),
+    /** Tema del mensaje (docs/TEMAS.md). null = sin tema o servidor anterior que no lo manda. */
+    val topicId: String? = null,
+    /** Quién le puso el tema (cualquiera del chat puede etiquetar cualquier mensaje). */
+    val topicBy: String? = null,
 )
 
 /** Reacción agregada: quién reaccionó con [emoji]; [external] llegó por un puente (WhatsApp), sin cuenta en Chaggu. */
@@ -484,13 +488,15 @@ data class RefreshBody(val refreshToken: String)
 data class SendBody(
     val clientMessageId: String, val body: String, val replyTo: String? = null, val forwarded: ForwardedInfo? = null,
     val attachmentIds: List<String>? = null, val forwardAttachmentIds: List<String>? = null, val mentions: List<MentionDTO>? = null,
+    /** Tema con el que sale (docs/TEMAS.md); null no se envía (explicitNulls = false). */
+    val topicId: String? = null,
 )
 
 @Serializable
 data class SocketSendBody(
     val conversationId: String, val clientMessageId: String, val body: String,
     val replyTo: String? = null, val forwarded: ForwardedInfo? = null, val attachmentIds: List<String>? = null,
-    val forwardAttachmentIds: List<String>? = null, val mentions: List<MentionDTO>? = null,
+    val forwardAttachmentIds: List<String>? = null, val mentions: List<MentionDTO>? = null, val topicId: String? = null,
 )
 
 @Serializable
@@ -510,6 +516,8 @@ data class PendingMessage(
     /** Adjuntos de otro mensaje que se reenvían (el servidor copia la referencia). */
     val forwardAttachments: List<AttachmentDTO> = emptyList(),
     val mentions: List<MentionDTO> = emptyList(),
+    /** Tema de la banderita elegida al escribir (docs/TEMAS.md). */
+    val topicId: String? = null,
     val attempts: Int = 0,
     /** pending | sending | failed */
     val status: String = "pending",
@@ -583,6 +591,8 @@ data class IssueDTO(
     val visibility: String? = null,
     val visibleOrgId: String? = null,
     val viewerIds: List<String> = emptyList(),
+    /** Tema de la tarea (docs/TEMAS.md); la creada desde un mensaje con tema lo hereda. Ausente = sin tema. */
+    val topicId: String? = null,
 ) {
     val closed: Boolean get() = status == "done" || status == "cancelled"
     /** Asunto personal: sin conversación (🔒 «Personal · solo tú»). */

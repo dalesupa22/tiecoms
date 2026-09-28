@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Chat topics (docs/TEMAS.md): flags above the chat and a tag per message. -->
+<resources>
+    <string name="topic_bar">Chat topics</string>
+    <string name="topic_all">All</string>
+    <string name="topic_new">New</string>
+    <string name="topic_archived_n">Archived %1$d</string>
+    <string name="topic_new_title">New topic</string>
+    <string name="topic_name_ph">Finance</string>
+    <string name="topic_icon">Icon</string>
+    <string name="topic_color_label">Color</string>
+    <string name="topic_create">Create</string>
+    <string name="topic_rename">Rename</string>
+    <string name="topic_rename_title">Rename topic</string>
+    <string name="topic_color">Change color</string>
+    <string name="topic_archive">Archive</string>
+    <string name="topic_archive_hint">Leaves the row. Its messages keep a gray tag.</string>
+    <string name="topic_remove">Remove topic</string>
+    <string name="topic_remove_confirm">Remove “%1$s”? %2$d messages become untagged. No message is deleted.</string>
+    <string name="topic_archived">Archived %1$s</string>
+    <string name="topic_removed">Removed %1$s</string>
+    <string name="topic_restored">Restored %1$s</string>
+    <string name="topic_restore">Restore</string>
+    <string name="topic_archived_title">Archived topics</string>
+    <string name="topic_set">Topic</string>
+    <string name="topic_none">No topic</string>
+    <string name="topic_tagged">Tagged %1$s</string>
+    <string name="topic_untagged">Message untagged</string>
+    <string name="topic_by">topic set by %1$s</string>
+    <string name="topic_placeholder">Message in %1$s</string>
+    <string name="topic_empty">No messages in %1$s yet. What you write now goes to this topic.</string>
+    <string name="topic_menu_cd">Long-press a flag to rename it, change its color, archive it or remove it</string>
+    <string name="topic_color_blue">Blue</string>
+    <string name="topic_color_green">Green</string>
+    <string name="topic_color_orange">Orange</string>
+    <string name="topic_color_violet">Violet</string>
+    <string name="topic_color_magenta">Pink</string>
+    <string name="topic_color_aqua">Aqua</string>
+    <string name="topic_color_red">Red</string>
+    <string name="topic_color_yellow">Yellow</string>
+    <!-- Task card in the chat -->
+    <string name="task_card">Task by %1$s</string>
+    <string name="task_card_comment">Comment on this task…</string>
+    <string name="task_card_all">See all %1$d comments</string>
+    <string name="topic_untagged_task">Task untagged</string>
+    <string name="topic_remove_from_task">Remove the task topic</string>
+</resources>

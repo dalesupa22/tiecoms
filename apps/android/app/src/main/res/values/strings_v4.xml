@@ -3,11 +3,11 @@
 <resources>
     <string name="home_tab_all">All</string>
     <string name="home_tab_unread">Unread</string>
-    <string name="home_tab_issues">Subjects</string>
+    <string name="home_tab_issues">Tasks</string>
     <string name="home_tab_chats">Chats</string>
     <string name="home_tab_sides">Sidechats</string>
     <string name="home_tab_caught_up">You are all caught up 🎉</string>
-    <string name="home_empty_issues">No conversations with open subjects.</string>
+    <string name="home_empty_issues">No conversations with open tasks.</string>
     <string name="home_empty_chats">You have no chats yet.</string>
     <string name="home_empty_sides">No sidechats yet.</string>
     <string name="home_empty_all">You have no conversations yet.</string>
@@ -100,7 +100,7 @@
     <string name="voice_copy">Copy transcript</string>
     <string name="voice_copied">Transcript copied</string>
     <string name="voice_summary">Summary</string>
-    <string name="voice_create_issue">Create subject: %1$s</string>
+    <string name="voice_create_issue">Create task: %1$s</string>
     <string name="voice_unheard">Not played</string>
     <string name="voice_cancelled">Note discarded</string>
     <string name="voice_uploading">Sending voice note…</string>

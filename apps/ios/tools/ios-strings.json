@@ -3094,5 +3094,209 @@
  "sys.integration.removed": [
   "Se desconectó la integración «{name}».",
   "The “{name}” integration was disconnected."
+ ],
+ "topic.all": [
+  "Todo",
+  "All"
+ ],
+ "topic.new": [
+  "Nuevo",
+  "New"
+ ],
+ "topic.newFree": [
+  "Nuevo · {n} libre",
+  "New · {n} left"
+ ],
+ "topic.newFreeN": [
+  "Nuevo · {n} libres",
+  "New · {n} left"
+ ],
+ "topic.archivedN": [
+  "Archivados {n}",
+  "Archived {n}"
+ ],
+ "topic.bar": [
+  "Temas del chat",
+  "Chat topics"
+ ],
+ "topic.newTitle": [
+  "Nuevo tema",
+  "New topic"
+ ],
+ "topic.namePh": [
+  "Finanzas",
+  "Finance"
+ ],
+ "topic.left": [
+  "Quedan {n} de {max}.",
+  "{n} of {max} left."
+ ],
+ "topic.create": [
+  "Crear",
+  "Create"
+ ],
+ "topic.full": [
+  "Ya hay {max} temas",
+  "There are already {max} topics"
+ ],
+ "topic.fullHint": [
+  "Archiva los que ya no uses: mantén presionada su banderita (o clic derecho).",
+  "Archive the ones you no longer use: long-press its flag (or right-click)."
+ ],
+ "topic.rename": [
+  "Renombrar",
+  "Rename"
+ ],
+ "topic.renameTitle": [
+  "Renombrar tema",
+  "Rename topic"
+ ],
+ "topic.color": [
+  "Cambiar color",
+  "Change color"
+ ],
+ "topic.archive": [
+  "Archivar",
+  "Archive"
+ ],
+ "topic.archiveHint": [
+  "Sale de la fila. Sus mensajes quedan con etiqueta gris.",
+  "Leaves the row. Its messages keep a gray tag."
+ ],
+ "topic.remove": [
+  "Quitar tema",
+  "Remove topic"
+ ],
+ "topic.removeHint": [
+  "Los mensajes quedan sin tema. No se borra nada.",
+  "Messages become untagged. Nothing is deleted."
+ ],
+ "topic.removeConfirm": [
+  "¿Quitar «{name}»? {n} mensajes quedan sin tema. No se borra ningún mensaje.",
+  "Remove “{name}”? {n} messages become untagged. No message is deleted."
+ ],
+ "topic.archived": [
+  "Archivaste {name}",
+  "Archived {name}"
+ ],
+ "topic.removed": [
+  "Quitaste {name}",
+  "Removed {name}"
+ ],
+ "topic.restored": [
+  "Restauraste {name}",
+  "Restored {name}"
+ ],
+ "topic.restore": [
+  "Restaurar",
+  "Restore"
+ ],
+ "topic.archivedTitle": [
+  "Temas archivados",
+  "Archived topics"
+ ],
+ "topic.set": [
+  "Tema",
+  "Topic"
+ ],
+ "topic.none": [
+  "Sin tema",
+  "No topic"
+ ],
+ "topic.tagged": [
+  "Etiquetado en {name}",
+  "Tagged {name}"
+ ],
+ "topic.untagged": [
+  "Mensaje sin tema",
+  "Message untagged"
+ ],
+ "topic.untaggedTask": [
+  "Tarea sin tema",
+  "Task untagged"
+ ],
+ "topic.by": [
+  "tema puesto por {name}",
+  "topic set by {name}"
+ ],
+ "topic.placeholder": [
+  "Mensaje en {name}",
+  "Message in {name}"
+ ],
+ "topic.only": [
+  "Solo {name}",
+  "Only {name}"
+ ],
+ "topic.empty": [
+  "Todavía no hay mensajes en {name}. Lo que escribas ahora queda en este tema.",
+  "No messages in {name} yet. What you write now goes to this topic."
+ ],
+ "topic.colors.blue": [
+  "Azul",
+  "Blue"
+ ],
+ "topic.colors.green": [
+  "Verde",
+  "Green"
+ ],
+ "topic.colors.orange": [
+  "Naranja",
+  "Orange"
+ ],
+ "topic.colors.violet": [
+  "Violeta",
+  "Violet"
+ ],
+ "topic.colors.magenta": [
+  "Rosa",
+  "Pink"
+ ],
+ "topic.colors.aqua": [
+  "Aguamarina",
+  "Aqua"
+ ],
+ "topic.colors.red": [
+  "Rojo",
+  "Red"
+ ],
+ "topic.colors.yellow": [
+  "Amarillo",
+  "Yellow"
+ ],
+ "topic.tagMenu": [
+  "🏷 Tema",
+  "🏷 Topic"
+ ],
+ "topic.newTopic": [
+  "Nuevo tema",
+  "New topic"
+ ],
+ "topic.icon": [
+  "Ícono",
+  "Icon"
+ ],
+ "topic.colorLabel": [
+  "Color",
+  "Color"
+ ],
+ "topic.name": [
+  "Nombre",
+  "Name"
+ ],
+ "topic.archivedEmpty": [
+  "No hay temas archivados.",
+  "No archived topics."
+ ],
+ "topic.archivedTag": [
+  "Archivado",
+  "Archived"
+ ],
+ "topic.a11yCount": [
+  "{name}, {n} mensajes",
+  "{name}, {n} messages"
+ ],
+ "topic.a11yHint": [
+  "Mantén presionado para renombrar, cambiar color, archivar o quitar",
+  "Long-press to rename, recolor, archive or remove"
  ]
 }

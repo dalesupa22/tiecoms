@@ -56,6 +56,8 @@ enum ChatSheet: Identifiable {
     case treePending
     /// Reunión con Meet, Teams o Zoom: ahora o agendada (2026-09-28).
     case meeting(now: Bool)
+    /// Temas (docs/TEMAS.md): nuevo (desde la fila o para etiquetar un mensaje), renombrar y archivados.
+    case newTopic(MessageDTO?), renameTopic(TopicDTO), archivedTopics
     var id: String {
         switch self {
         case .derive(let m): return "derive-\(m.id)"
@@ -72,6 +74,9 @@ enum ChatSheet: Identifiable {
         case .react(let m): return "react-\(m.id)"
         case .treePending: return "tree"
         case .meeting(let now): return "meeting-\(now)"
+        case .newTopic(let m): return "topic-new-\(m?.id ?? "")"
+        case .renameTopic(let t): return "topic-edit-\(t.id)"
+        case .archivedTopics: return "topics-archived"
         }
     }
 }
@@ -111,6 +116,9 @@ struct ConversationView: View {
     @State private var editing: MessageDTO?
     @State private var sheet: ChatSheet?
     @State private var confirmDelete: MessageDTO?
+    /// Banderita elegida: filtra el chat y es el tema de lo que escribo (nil = «Todo»).
+    @State private var topicFilter: String?
+    @State private var confirmRemoveTopic: TopicDTO?
     @State private var blockUserId: String?
     @State private var recorder = VoiceRecorder()
     @State private var pendingVoice: PendingVoiceSend?
@@ -151,7 +159,7 @@ struct ConversationView: View {
     var body: some View {
         Group {
             if let d = store.data, let c = store.meta(conversationId) {
-                content(d, c)
+                content(d, c).modifier(removeTopicDialog)
             } else {
                 ContentUnavailableView(L("chat.notFound"), systemImage: "lock.slash")
             }
@@ -180,6 +188,7 @@ struct ConversationView: View {
             // Sugerencias de la hoja de compartir: abrir una conversación también cuenta (como mucho una vez por hora).
             Donations.donate(store, conversationId: conversationId, minInterval: 3600)
             try? await store.loadPins(conversationId)
+            try? await store.loadTopics(conversationId)
             try? await store.loadIssues(conversationId: conversationId)
             try? await store.loadEvents(from: Date().addingTimeInterval(-30 * 86400), to: Date().addingTimeInterval(90 * 86400), conversationId: conversationId)
         }
@@ -232,6 +241,14 @@ struct ConversationView: View {
         } message: { _ in Text(L("ai.voice.message")) }
     }
 
+    /// Quitar un tema: pide confirmación; sus mensajes quedan sin tema y no se borra ningún mensaje.
+    private var removeTopicDialog: RemoveTopicDialog {
+        RemoveTopicDialog(topic: $confirmRemoveTopic, count: confirmRemoveTopic.flatMap { topicCounts[$0.id] } ?? 0) { t in
+            if topicFilter == t.id { topicFilter = nil }
+            act(toast: L("topic.removed", ["name": t.name])) { try await store.deleteTopic(t) }
+        }
+    }
+
     @ViewBuilder private func sheetView(_ s: ChatSheet) -> some View {
         switch s {
         // El hilo nuevo se abre al lado, sin salir del chat (como en Slack).
@@ -257,8 +274,23 @@ struct ConversationView: View {
             ChatAgendaSheet(conversationId: conversationId,
                             onNewEvent: c?.canPost == true ? { sheet = .newEvent(nil) } : nil,
                             onNewIssue: canOpenIssues ? { sheet = .newIssue(nil) } : nil)
+        case .newTopic(let m):
+            // Desde la fila: el tema nuevo queda elegido. Desde un mensaje: se le pone al mensaje.
+            TopicEditorSheet(conversationId: conversationId) { t in
+                if let m { MessageTopicMenu.set(store, m, t.id, list: store.topics[conversationId] ?? []) } else { topicFilter = t.id }
+            }
+        case .renameTopic(let t): TopicEditorSheet(conversationId: conversationId, edit: t)
+        case .archivedTopics: ArchivedTopicsSheet(conversationId: conversationId)
         }
     }
+
+    /// Tema elegido si sigue activo (si lo archivan o quitan en otro dispositivo, el chat vuelve a «Todo»).
+    private var activeTopic: TopicDTO? {
+        guard !embedded, let id = TopicRules.effectiveFilter(topicFilter, in: store.topics[conversationId] ?? []) else { return nil }
+        return store.topics[conversationId]?.first { $0.id == id }
+    }
+
+    private var topicCounts: [String: Int] { TopicRules.counts(store.conversations[conversationId]?.messages ?? []) }
 
     /// Asuntos: solo quien puede escribir y no es tercero (el API responde 403 a los terceros).
     private var canOpenIssues: Bool {
@@ -315,6 +347,11 @@ struct ConversationView: View {
                 ChatBar(conv: c, onPins: { sheet = .pins }, onIssues: { sheet = .issuesHere },
                         onThreads: { sheet = .threads }, onAgenda: { sheet = .agenda })
                 // Lo que falta por leer en sus hilos y ramas (aunque este chat ya esté leído).
+                // Temas: banderitas con scroll horizontal justo debajo de la barra de accesos.
+                TopicDock(conv: c, filter: activeTopic?.id, counts: topicCounts,
+                          onFilter: { topicFilter = $0; Haptics.tap() }, onNew: { sheet = .newTopic(nil) },
+                          onRename: { sheet = .renameTopic($0) }, onRemove: { confirmRemoveTopic = $0 },
+                          onArchived: { sheet = .archivedTopics })
                 TreeUnreadStrip(conversationId: conversationId) { sheet = .treePending }
             }
             if let state, state.loaded {
@@ -388,7 +425,9 @@ struct ConversationView: View {
         var prev: MessageDTO?
         var prevDate: Date?
         let cal = Calendar.current
-        for m in state.messages where !store.blockedUserIds.contains(m.authorId) {
+        let filter = activeTopic?.id
+        // Con una banderita elegida solo van los mensajes de ese tema (sin mensajes de sistema).
+        for m in state.messages where !store.blockedUserIds.contains(m.authorId) && (filter == nil || (!m.isSystem && TopicRules.matches(m, filter: filter))) {
             let date = ISODate.parse(m.createdAt) ?? Date()
             let day = cal.dateComponents([.year, .month, .day], from: date)
             if day != lastDay {
@@ -408,7 +447,7 @@ struct ConversationView: View {
             }
             prevDate = date
         }
-        items += pending.map(ChatItem.pending)
+        items += pending.filter { filter == nil || $0.topicId == filter }.map(ChatItem.pending)
         return items
     }
 
@@ -437,6 +476,10 @@ struct ConversationView: View {
                     }
                     if embedded && Naming.isSide(c) && !state.messages.contains(where: { !$0.isSystem }) {
                         SideEmptyState()
+                    } else if let t = activeTopic, !items.contains(where: { if case .day = $0 { return false }; return true }) {
+                        Text(L("topic.empty", ["name": t.name])).font(.subheadline).foregroundStyle(Theme.textSecondary)
+                            .multilineTextAlignment(.center).padding(.horizontal, 24).padding(.top, 40)
+                            .accessibilityIdentifier("topic.empty")
                     } else if state.messages.isEmpty && items.isEmpty {
                         Text(L("conv.noMessages")).font(.subheadline).foregroundStyle(Theme.textSecondary).padding(.top, 40)
                     }
@@ -569,6 +612,10 @@ struct ConversationView: View {
                 if let last = state.messages.last?.seq { bottomSeq = max(bottomSeq, last) }
                 markReadIfVisible()
             }
+            // Cambiar de banderita lleva al final del chat filtrado.
+            .onChange(of: topicFilter) { _, _ in
+                DispatchQueue.main.async { proxy.scrollTo(ChatNavIds.bottom, anchor: .bottom) }
+            }
             .onChange(of: composerFocused) { _, focused in
                 if focused { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { proxy.scrollTo("bottom", anchor: .bottom) } }
             }
@@ -607,6 +654,7 @@ struct ConversationView: View {
             return L("side.placeholder", ["name": name.split(separator: " ").first.map(String.init) ?? name])
         }
         if Naming.isSide(c) { return L("side.placeholderMany") }
+        if let t = activeTopic { return L("topic.placeholder", ["name": t.name]) }
         return L("chat.placeholder", ["name": Naming.title(d, c)])
     }
 
@@ -787,7 +835,9 @@ struct ConversationView: View {
                 messageId: m.id, conversationId: conversationId,
                 mentions: m.deletedAt == nil ? m.mentions : [],
                 mentionsMe: m.deletedAt == nil && MentionText.mentionsMe(m.mentions, me: d.me.id, authorId: m.authorId),
-                sideAnchor: activeAnchor == m.id
+                sideAnchor: activeAnchor == m.id,
+                topic: embedded || m.deletedAt != nil ? nil : m.topicId.flatMap { id in store.topics[conversationId]?.first { $0.id == id } },
+                topicBy: TopicRules.byLine(m, me: d.me.id) { Naming.person(d, $0)?.name }
             )
             Group {
                 if m.deletedAt == nil {
@@ -952,6 +1002,10 @@ struct ConversationView: View {
             Button { act(toast: isPinned ? L("toast.unpinned") : L("toast.pinned")) { try await store.setMessagePinned(m, !isPinned) } } label: {
                 Label(isPinned ? L("menu.unpin") : L("menu.pin"), systemImage: isPinned ? "pin.slash" : "pin")
             }
+        }
+        // «🏷 Tema»: cualquiera del chat puede etiquetar cualquier mensaje de texto (docs/TEMAS.md).
+        if c.canPost && m.kind == "text" && !embedded {
+            MessageTopicMenu(message: m) { sheet = .newTopic(m) }
         }
         RemindMenu(conversationId: conversationId, message: m, onCustom: { sheet = .reminder(m) })
         Button { act(toast: L("toast.markedUnread")) { try await store.markUnread(conversationId, seq: m.seq) } } label: {
@@ -1152,7 +1206,7 @@ struct ConversationView: View {
             defer { uploading = false }
             do {
                 let a = try await store.api.uploadVoiceNote(conversationId, data: voice.data, durationMs: voice.durationMs, waveform: voice.waveform, aiConsent: aiConsent)
-                store.send(conversationId, body: "", replyTo: voice.replyTo, attachments: [a])
+                store.send(conversationId, body: "", replyTo: voice.replyTo, attachments: [a], topicId: activeTopic?.id)
                 replyTo = nil
             } catch {
                 failedVoice = voice
@@ -1174,7 +1228,7 @@ struct ConversationView: View {
         }
         if !staged.isEmpty {
             // Adjuntos: se suben (con progreso) y luego se envía el mensaje con sus ids.
-            let files = staged, text = draft, reply = replyTo?.id, ms = draftMentions
+            let files = staged, text = draft, reply = replyTo?.id, ms = draftMentions, topic = activeTopic?.id
             uploading = true
             Task {
                 defer { uploading = false; uploadProgress = [:] }
@@ -1190,7 +1244,7 @@ struct ConversationView: View {
                         return
                     }
                 }
-                store.send(conversationId, body: text, replyTo: reply, attachments: done, mentions: ms)
+                store.send(conversationId, body: text, replyTo: reply, attachments: done, mentions: ms, topicId: topic)
                 staged = []
                 draftMentions = []
                 draft = ""
@@ -1201,7 +1255,8 @@ struct ConversationView: View {
         if let pr = store.privateReplies[conversationId] {
             store.sendPrivateReply(pr, body: draft)
         } else {
-            store.send(conversationId, body: draft, replyTo: replyTo?.id, mentions: draftMentions)
+            // Con una banderita elegida, lo que escribo sale con ese tema.
+            store.send(conversationId, body: draft, replyTo: replyTo?.id, mentions: draftMentions, topicId: activeTopic?.id)
         }
         replyTo = nil
         draftMentions = []
@@ -1321,6 +1376,9 @@ struct MessageBubble: View {
     var mentionsMe = false
     /// Ancla del sidechat abierto: halo y posición exacta de la burbuja para el conector.
     var sideAnchor = false
+    /// Tema del mensaje (etiqueta junto a la hora) y «tema puesto por X» si no fue el autor.
+    var topic: TopicDTO? = nil
+    var topicBy: String? = nil
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -1411,6 +1469,7 @@ struct MessageBubble: View {
                     case .failed: Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red); Text(L("chat.notSentTap")).foregroundStyle(.red)
                     case nil: Text(time)
                     }
+                    if let topic { TopicTag(topic: topic, by: topicBy) }
                 }
                 .font(.caption2)
                 .foregroundStyle(Theme.textSecondary)
@@ -1444,6 +1503,7 @@ struct MessageBubble: View {
         parts.append(text)
         if let p = linkPreview { parts.append([p.host, p.title].compactMap { $0 }.joined(separator: ": ")) }
         if pinned { parts.append(L("toast.pinned")) }
+        if let topic { parts.append([L("topic.set") + ": " + topic.name, topic.isArchived ? L("topic.archivedTag") : nil, topicBy].compactMap { $0 }.joined(separator: ", ")) }
         switch status {
         case .sending: parts.append(L("chat.sending"))
         case .failed: parts.append(L("chat.notSent"))

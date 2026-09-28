@@ -69,6 +69,8 @@ final class AppStore {
     var issues: [String: IssueDTO] = [:]
     /// Mensajes fijados por conversación.
     var pins: [String: [String]] = [:]
+    /// Temas por conversación (activos y archivados), en el orden de la fila (docs/TEMAS.md).
+    var topics: [String: [TopicDTO]] = [:]
     var reminders: [ReminderDTO] = []
     var events: [String: CalendarEventDTO] = [:]
     /// Mis mensajes programados pendientes, enviándose o fallidos (docs/PROGRAMADOS.md), por hora de salida.
@@ -393,7 +395,7 @@ final class AppStore {
         conversations = [:]
         pending = []
         typing = [:]
-        issues = [:]; pins = [:]; reminders = []; events = [:]; scheduled = []
+        issues = [:]; pins = [:]; topics = [:]; reminders = []; events = [:]; scheduled = []
         blockedUserIds = []
         localDndUntil = nil; dndLocalOnly = false; dndExpiryTask?.cancel(); dndExpiryTask = nil
         homePath = []; dmsPath = []; issuesPath = []; agendaPath = []; settingsPath = []
@@ -550,6 +552,8 @@ final class AppStore {
             recountIssues(cid)
         case .pinsChanged(let cid, _, let ids):
             pins[cid] = ids
+        case .topicsChanged(let cid, _, let list):
+            topics[cid] = list
         case .calendarUpdated(let cid, _, let ev):
             let isNewEvent = events[ev.id] == nil
             events[ev.id] = ev
@@ -657,7 +661,7 @@ final class AppStore {
         case .membersChanged(let id, _, let ids, let admins):
             patchMeta(id) { $0.memberIds = ids; if let admins { $0.adminIds = admins } }
             scheduleBootstrap()
-        case .issueUpdated, .pinsChanged, .calendarUpdated:
+        case .issueUpdated, .pinsChanged, .topicsChanged, .calendarUpdated:
             break // sus efectos van en sideEffects (también sin mensajes cargados)
         case .other:
             break // redacted o tipos futuros: solo avanzan el cursor
@@ -740,6 +744,16 @@ final class AppStore {
             conversations[m.conversationId] = local
         }
         patchPreviewIfLast(m)
+    }
+
+    /// Quitar un tema: sus mensajes cargados quedan sin etiqueta sin esperar los message.updated.
+    func clearTopicLocally(_ topicId: String, in conversationId: String) {
+        guard var local = conversations[conversationId], local.loaded else { return }
+        local.messages = local.messages.map { m in
+            guard m.topicId == topicId else { return m }
+            var x = m; x.topicId = nil; x.topicBy = nil; return x
+        }
+        conversations[conversationId] = local
     }
 
     func openConversation(_ id: String, force: Bool = false) async throws {
@@ -836,7 +850,7 @@ final class AppStore {
     @discardableResult
     func send(_ conversationId: String, body: String, replyTo: String? = nil, forwarded: ForwardedInfo? = nil,
               attachments: [AttachmentDTO] = [], forwardAttachments: [AttachmentDTO] = [], mentions: [Mention] = [],
-              clientMessageId: String = UUID().uuidString.lowercased()) -> PendingMessage? {
+              topicId: String? = nil, clientMessageId: String = UUID().uuidString.lowercased()) -> PendingMessage? {
         // El servidor recorta el texto: se recorta aquí y se corren las menciones.
         let (text, mentionsTrimmed) = MentionText.trimmed(body, mentions: mentions)
         // Con adjuntos el texto puede ir vacío.
@@ -846,7 +860,7 @@ final class AppStore {
                                forwardAttachmentIds: forwardAttachments.isEmpty ? nil : forwardAttachments.map(\.id),
                                attachments: (attachments + forwardAttachments).isEmpty ? nil : attachments + forwardAttachments,
                                mentions: mentionsTrimmed.isEmpty ? nil : MentionText.valid(mentionsTrimmed, in: String(text.prefix(8000))),
-                               createdAt: ISODate.string(), attempts: 0, status: .pending, error: nil, nextAttemptAt: 0)
+                               topicId: topicId, createdAt: ISODate.string(), attempts: 0, status: .pending, error: nil, nextAttemptAt: 0)
         Donations.donate(self, conversationId: conversationId)
         // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
         savePending(pending + [p])
@@ -929,6 +943,7 @@ final class AppStore {
         if let ids = p.attachmentIds, !ids.isEmpty { payload["attachmentIds"] = ids }
         if let ids = p.forwardAttachmentIds, !ids.isEmpty { payload["forwardAttachmentIds"] = ids }
         if let ms = p.mentions, !ms.isEmpty { payload["mentions"] = ms.map(\.json) }
+        if let t = p.topicId { payload["topicId"] = t }
         if socket.state == .connected {
             do {
                 let r = try await socket.emitWithAck("message.send", payload, timeout: 8) as? [String: Any]

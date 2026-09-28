@@ -260,6 +260,8 @@ struct PendingMessage: Codable, Equatable, Identifiable, Sendable {
     var attachments: [AttachmentDTO]? = nil
     /// Menciones con @ (offsets UTF-16 sobre body ya recortado).
     var mentions: [Mention]? = nil
+    /// Tema con el que sale (la banderita elegida al escribir; docs/TEMAS.md).
+    var topicId: String? = nil
     var createdAt: String
     var attempts: Int
     var status: Status

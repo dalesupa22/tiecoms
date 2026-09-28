@@ -32,13 +32,13 @@ final class V9LanguageSubjectsTests: XCTestCase {
         let en = try strings("en")
         let leftovers = en.filter { $0.value.range(of: #"\bissues?\b"#, options: [.regularExpression, .caseInsensitive]) != nil }
         XCTAssertTrue(leftovers.isEmpty, "en inglés son «Subjects»: \(leftovers.keys.sorted())")
-        XCTAssertEqual(en["tab.issues"], "Subjects")
+        XCTAssertEqual(en["tab.issues"], "Tasks", "docs/TEMAS.md: en la interfaz los asuntos se llaman Tareas")
         XCTAssertEqual(en["grp.moreIssues"], "+{n} subjects")
-        XCTAssertEqual(en["issue.create"], "Create subject")
+        XCTAssertEqual(en["issue.create"], "Create task")
         XCTAssertEqual(en["issue.chipOne"], "◆ 1 subject")
         // En español siguen siendo «asuntos».
         let es = try strings("es")
-        XCTAssertEqual(es["tab.issues"], "Asuntos")
+        XCTAssertEqual(es["tab.issues"], "Tareas")
         XCTAssertEqual(es["grp.moreIssues"], "+{n} asuntos")
         XCTAssertTrue(es.values.allSatisfy { $0.range(of: #"\b(issue|subject)s?\b"#, options: [.regularExpression, .caseInsensitive]) == nil })
     }
@@ -46,11 +46,11 @@ final class V9LanguageSubjectsTests: XCTestCase {
     func testLanguageChoiceAppliesAtOncePersistsAndFormats() {
         L10n.choice = .en
         XCTAssertEqual(L10n.lang, "en")
-        XCTAssertEqual(L("tab.issues"), "Subjects", "cambia sin reiniciar")
+        XCTAssertEqual(L("tab.issues"), "Tasks", "cambia sin reiniciar")
         XCTAssertEqual(L10n.locale.identifier, "en-US")
         XCTAssertEqual(UserDefaults.standard.stringArray(forKey: "AppleLanguages"), ["en"], "los textos del sistema siguen al próximo arranque")
         L10n.choice = .es
-        XCTAssertEqual(L("tab.issues"), "Asuntos")
+        XCTAssertEqual(L("tab.issues"), "Tareas")
         XCTAssertEqual(L("splash.secure"), "Conexión cifrada para proteger tu información")
         XCTAssertEqual(L10n.defaults.string(forKey: L10n.choiceKey), "es", "se guarda en el grupo compartido (extensión Compartir)")
         L10n.choice = .system

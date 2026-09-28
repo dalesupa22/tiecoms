@@ -310,6 +310,10 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
     var mentions: [Mention] = []
     /// Reacciones (orden de la primera). Llegan en vivo con `message.updated`: no suben no leídos ni marcan «editado».
     var reactions: [ReactionDTO] = []
+    /// Tema del mensaje (docs/TEMAS.md). nil = sin tema o servidor anterior que no lo manda.
+    var topicId: String?
+    /// Quién le puso el tema (cualquiera del chat puede).
+    var topicBy: String?
     var createdAt: String
     var editedAt: String?
     var deletedAt: String?
@@ -338,6 +342,8 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
         attachments = c.lossyArray("attachments")
         mentions = c.lossyArray("mentions")
         reactions = c.lossyArray("reactions")
+        topicId = c.o("topicId")
+        topicBy = c.o("topicBy")
         createdAt = c.v("createdAt", "")
         editedAt = c.o("editedAt")
         deletedAt = c.o("deletedAt")
@@ -347,6 +353,55 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
          body: String, createdAt: String) {
         self.id = id; self.conversationId = conversationId; self.seq = seq; self.authorId = authorId
         self.clientMessageId = clientMessageId; self.kind = kind; self.body = body; self.createdAt = createdAt
+    }
+}
+
+// Temas del chat (docs/TEMAS.md). Aquí y no en Topics.swift: la extensión Compartir compila este archivo.
+/// Tema fijo de una conversación. `archivedAt` ≠ nil = archivado (sale de la fila, sus mensajes quedan en gris).
+struct TopicDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var conversationId: String
+    var name: String
+    /// Uno de `TopicRules.colors`; un color que esta versión no conoce se pinta azul.
+    var color: String
+    var icon: String
+    var position: Int
+    var archivedAt: String?
+    var createdBy: String
+    var createdAt: String
+
+    var isArchived: Bool { archivedAt != nil }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        conversationId = c.v("conversationId", "")
+        name = c.v("name", "")
+        color = c.v("color", "blue")
+        icon = c.v("icon", "#")
+        position = c.int("position")
+        archivedAt = c.o("archivedAt")
+        createdBy = c.v("createdBy", "")
+        createdAt = c.v("createdAt", "")
+    }
+
+    init(id: String, conversationId: String, name: String, color: String = "blue", icon: String = "#", position: Int = 0,
+         archivedAt: String? = nil, createdBy: String = "", createdAt: String = "") {
+        self.id = id; self.conversationId = conversationId; self.name = name; self.color = color; self.icon = icon
+        self.position = position; self.archivedAt = archivedAt; self.createdBy = createdBy; self.createdAt = createdAt
+    }
+}
+
+/// `{ topics }` (GET, PATCH, DELETE) o `{ topic, topics }` (POST).
+struct TopicsResult: Decodable, Sendable {
+    var topic: TopicDTO?
+    var topics: [TopicDTO]
+    var cleared: Int?
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        topic = c.o("topic")
+        topics = c.lossyArray("topics")
+        cleared = c.intOpt("cleared")
     }
 }
 
@@ -510,19 +565,21 @@ enum ConversationEvent: Decodable, Equatable, Sendable {
     case membersChanged(conversationId: String, eventSeq: Int, memberIds: [String], adminIds: [String]? = nil)
     case issueUpdated(conversationId: String, eventSeq: Int, issue: IssueDTO)
     case pinsChanged(conversationId: String, eventSeq: Int, messageIds: [String])
+    /// Temas del chat: trae la lista completa (activos y archivados) y reemplaza la local.
+    case topicsChanged(conversationId: String, eventSeq: Int, topics: [TopicDTO])
     case calendarUpdated(conversationId: String, eventSeq: Int, event: CalendarEventDTO)
     case other(type: String, conversationId: String, eventSeq: Int)
 
     var conversationId: String {
         switch self {
         case .messageCreated(let c, _, _), .messageUpdated(let c, _, _), .membersChanged(let c, _, _, _), .issueUpdated(let c, _, _),
-             .pinsChanged(let c, _, _), .calendarUpdated(let c, _, _), .other(_, let c, _): return c
+             .pinsChanged(let c, _, _), .topicsChanged(let c, _, _), .calendarUpdated(let c, _, _), .other(_, let c, _): return c
         }
     }
     var eventSeq: Int {
         switch self {
         case .messageCreated(_, let s, _), .messageUpdated(_, let s, _), .membersChanged(_, let s, _, _), .issueUpdated(_, let s, _),
-             .pinsChanged(_, let s, _), .calendarUpdated(_, let s, _), .other(_, _, let s): return s
+             .pinsChanged(_, let s, _), .topicsChanged(_, let s, _), .calendarUpdated(_, let s, _), .other(_, _, let s): return s
         }
     }
 
@@ -542,6 +599,8 @@ enum ConversationEvent: Decodable, Equatable, Sendable {
             if let i: IssueDTO = c.o("issue") { self = .issueUpdated(conversationId: conv, eventSeq: seq, issue: i); return }
         case "pins.changed":
             self = .pinsChanged(conversationId: conv, eventSeq: seq, messageIds: c.v("messageIds", [])); return
+        case "topics.changed":
+            self = .topicsChanged(conversationId: conv, eventSeq: seq, topics: c.lossyArray("topics")); return
         case "calendar.updated":
             if let e: CalendarEventDTO = c.o("event") { self = .calendarUpdated(conversationId: conv, eventSeq: seq, event: e); return }
         default: break

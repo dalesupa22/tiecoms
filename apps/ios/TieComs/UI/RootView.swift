@@ -127,10 +127,17 @@ struct MainView: View {
                     } icon: {
                         Image(uiImage: TabAvatar.image(name: d?.me.name ?? "", photo: myPhoto,
                                                        fill: UIColor(d.map { PersonColor.fill($0.me.id) } ?? Theme.bubbleMine),
-                                                       selected: store.tab == .settings, moon: store.dndActive))
+                                                       selected: store.tab == .settings, moon: store.dndActive || store.sleepActive))
                     }
                 }
                 .tag(AppTab.settings)
+        }
+        // Cada minuto: la ventana de «No molestar todas las noches» (lunita y avisos) entra y sale sola.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                store.clockTick += 1
+            }
         }
         // La barra de pestañas no crece más allá de un tamaño razonable; cada pestaña aplica el tamaño elegido.
         .dynamicTypeSize(...DynamicTypeSize.xxLarge)
@@ -145,6 +152,7 @@ struct MainView: View {
         }
         .overlay(alignment: .bottom) { ToastView() }
         .sheet(isPresented: $store.showPushPrompt) { PushPromptView() }
+        .sheet(isPresented: $store.showSleepSettings) { SleepSheet() }
         .sheet(isPresented: Binding(get: { store.shareText != nil }, set: { if !$0 { store.shareText = nil } })) {
             ShareIntoTieComsView(text: store.shareText ?? "")
         }

@@ -93,3 +93,90 @@ final class ScheduledTests: XCTestCase {
         XCTAssertTrue(s.scheduled.isEmpty, "Deshacer cancela el programado")
     }
 }
+
+/// 1.6.4 (21): «No molestar todas las noches» (modo sueño).
+@MainActor
+final class SleepModeTests: XCTestCase {
+    private var savedLang: L10n.Choice = .system
+    override func setUp() { savedLang = L10n.choice; L10n.choice = .es }
+    override func tearDown() { L10n.choice = savedLang }
+
+    private let night = SleepWindow(start: "22:00", end: "07:00", tz: "America/Bogota")
+
+    func testSleepingNowAcrossMidnight() {
+        XCTAssertTrue(SleepRules.sleepingNow(night, at: at("2026-09-28T04:30:00.000Z")), "23:30 en Bogotá")
+        XCTAssertTrue(SleepRules.sleepingNow(night, at: at("2026-09-28T11:59:00.000Z")), "06:59")
+        XCTAssertFalse(SleepRules.sleepingNow(night, at: at("2026-09-28T12:00:00.000Z")), "07:00 ya despertó")
+        XCTAssertTrue(SleepRules.sleepingNow(night, at: at("2026-09-28T03:00:00.000Z")), "22:00 empieza")
+        XCTAssertFalse(SleepRules.sleepingNow(night, at: at("2026-09-28T02:59:00.000Z")), "21:59")
+        let siesta = SleepWindow(start: "13:00", end: "15:00", tz: "America/Bogota")
+        XCTAssertTrue(SleepRules.sleepingNow(siesta, at: at("2026-09-28T19:00:00.000Z")), "ventana sin medianoche")
+        XCTAssertFalse(SleepRules.sleepingNow(SleepWindow(start: "07:00", end: "07:00", tz: "UTC"), at: Date()), "inicio = fin: apagado")
+        XCTAssertFalse(SleepRules.sleepingNow(nil), "people[].sleep null: lo tiene apagado")
+        // En su zona, no en la mía: 23:30 en Madrid es 16:30 en Bogotá.
+        let madrid = SleepWindow(start: "22:00", end: "07:00", tz: "Europe/Madrid")
+        XCTAssertTrue(SleepRules.sleepingNow(madrid, at: at("2026-09-28T21:30:00.000Z")))
+    }
+
+    func testWakeAt() {
+        // 23:30 del domingo en Bogotá → despierta el lunes a las 7:00 (12:00 UTC).
+        XCTAssertEqual(SleepRules.wakeAt(night, at: at("2026-09-28T04:30:20.000Z")), at("2026-09-28T12:00:00.000Z"))
+        // 06:59 → en un minuto.
+        XCTAssertEqual(SleepRules.wakeAt(night, at: at("2026-09-28T11:59:00.000Z")), at("2026-09-28T12:00:00.000Z"))
+        // Justo a las 7:00 → el día siguiente.
+        XCTAssertEqual(SleepRules.wakeAt(night, at: at("2026-09-28T12:00:00.000Z")), at("2026-09-29T12:00:00.000Z"))
+    }
+
+    private func person(_ id: String, _ name: String, sleep: SleepWindow?) throws -> PersonDTO {
+        let s = sleep.map { #","sleep":{"start":"\#($0.start)","end":"\#($0.end)","tz":"\#($0.tz)"}"# } ?? #","sleep":null"#
+        return try dec(PersonDTO.self, #"{"id":"\#(id)","name":"\#(name)","kind":"human"\#(s)}"#)
+    }
+
+    func testNoticeInDirectAndGroups() throws {
+        let t = at("2026-09-28T04:30:00.000Z") // 23:30 en Bogotá
+        let me = try person("me", "Danny Suárez", sleep: nil)
+        let ana = try person("ana", "Ana Márquez", sleep: night)
+        let bob = try person("bob", "Bruno Ortega", sleep: nil)
+        // Directo: siempre; el botón «Enviar a las 7:00» solo mientras escribo.
+        let idle = try XCTUnwrap(SleepRules.notice(me: "me", members: [me, ana], typing: false, at: t))
+        XCTAssertTrue(idle.text.hasPrefix("Ana está descansando: le llega sin sonar. Lo verá mañana a las 7:00"), idle.text)
+        XCTAssertNil(idle.wake)
+        let typing = try XCTUnwrap(SleepRules.notice(me: "me", members: [me, ana], typing: true, at: t))
+        XCTAssertEqual(typing.wake, at("2026-09-28T12:00:00.000Z"))
+        // Grupo: solo mientras escribo y sin botón.
+        XCTAssertNil(SleepRules.notice(me: "me", members: [me, ana, bob], typing: false, at: t))
+        let group = try XCTUnwrap(SleepRules.notice(me: "me", members: [me, ana, bob], typing: true, at: t))
+        XCTAssertEqual(group.text, "1 persona(s) del chat están descansando: les llega sin sonar.")
+        XCTAssertNil(group.wake)
+        // De día, nada.
+        XCTAssertNil(SleepRules.notice(me: "me", members: [me, ana], typing: true, at: at("2026-09-28T17:00:00.000Z")))
+    }
+
+    func testDecodingAndEvent() throws {
+        let u = try dec(UserDTO.self, #"{"id":"me","name":"Ana","sleep":{"on":true,"start":"23:00","end":"06:30","tz":"Europe/Madrid","tzAuto":false}}"#)
+        XCTAssertEqual(u.sleep, SleepDTO(on: true, start: "23:00", end: "06:30", tz: "Europe/Madrid", tzAuto: false))
+        XCTAssertNil(try dec(UserDTO.self, #"{"id":"me","name":"Ana"}"#).sleep, "servidor anterior")
+        XCTAssertNil(SleepDTO(on: false).window)
+        let e = try dec(AccountEvent.self, #"{"type":"me.sleep","sleep":{"on":false,"start":"22:00","end":"07:00","tz":"America/Bogota","tzAuto":true}}"#)
+        XCTAssertEqual(e, .sleepChanged(SleepDTO(on: false)))
+    }
+
+    func testTimeZoneFollowsDeviceWhileAuto() async throws {
+        MockURLProtocol.routes = ["/api/v1/me/sleep": (200, #"{"sleep":{"on":true,"start":"22:00","end":"07:00","tz":"Europe/Madrid","tzAuto":true}}"#)]
+        MockURLProtocol.requests = []
+        let s = AppStore(baseURL: URL(string: "https://mock.chaggu.test")!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()),
+                         feedback: nil, session: MockURLProtocol.session())
+        let boot = #"{"contract":"x","serverTime":"","me":{"id":"me","name":"Ana","kind":"human","sleep":{"on":true,"start":"22:00","end":"07:00","tz":"America/Bogota","tzAuto":true}},"organizations":[],"workspaces":[],"conversations":[],"people":[]}"#
+        s.seedForTesting(try dec(BootstrapDTO.self, boot))
+        await s.syncSleepTimeZone(device: "Europe/Madrid")
+        let put = try XCTUnwrap(MockURLProtocol.requests.last { $0.path == "/api/v1/me/sleep" })
+        XCTAssertEqual(put.body["tz"] as? String, "Europe/Madrid")
+        XCTAssertEqual(put.body["tzAuto"] as? Bool, true)
+        XCTAssertEqual(s.data?.me.sleep?.tz, "Europe/Madrid")
+        // Zona fijada a mano: no se toca.
+        MockURLProtocol.requests = []
+        s.seedForTesting(try dec(BootstrapDTO.self, boot.replacingOccurrences(of: #""tzAuto":true"#, with: #""tzAuto":false"#)))
+        await s.syncSleepTimeZone(device: "Asia/Tokyo")
+        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+    }
+}

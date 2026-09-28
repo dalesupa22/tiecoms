@@ -71,6 +71,10 @@ final class AppStore {
     var events: [String: CalendarEventDTO] = [:]
     /// Mis mensajes programados pendientes, enviándose o fallidos (docs/PROGRAMADOS.md), por hora de salida.
     var scheduled: [ScheduledMessageDTO] = []
+    /// Sube cada minuto (MainView): la ventana de descanso y sus avisos entran y salen solos.
+    var clockTick = 0
+    /// Hoja «Todas las noches» (desde «No molestar» o Tú).
+    var showSleepSettings = false
     /// Bloqueos sincronizados antes de mostrar el contenido de la sesión.
     var blockedUserIds: Set<String> = []
     /// Sube cuando WhatsApp trae novedades: la pantalla vuelve a pedir la lista.
@@ -278,6 +282,7 @@ final class AppStore {
         Task { try? await loadReminders() }
         Task { await loadOpenIssues() }
         Task { await loadScheduled() }
+        Task { await syncSleepTimeZone() }
         onReady?()
         Task { await retryPushRegistration() }
     }
@@ -425,6 +430,7 @@ final class AppStore {
         case .remindersChanged: Task { try? await loadReminders() }
         case .dndChanged(let until): applyServerDnd(until)
         case .scheduledUpdated(let x): putScheduled(x)
+        case .sleepChanged(let s): patchMe { $0.sleep = s }
         case .other: break
         }
     }

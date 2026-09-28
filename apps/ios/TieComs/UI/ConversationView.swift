@@ -962,6 +962,7 @@ struct ConversationView: View {
                 SideQuickReplies(onSend: { store.send(conversationId, body: $0) }, onAskOther: { addingToSide = true })
             }
             ScheduledStrip(conversationId: conversationId) { showScheduled = true }
+            SleepNoticeBar(conversation: c, typing: !trimmed.isEmpty && editing == nil, onSchedule: scheduleDraft)
             StagedAttachments(staged: $staged, progress: uploadProgress)
             if let v = failedVoice {
                 // La nota no se subió: queda aquí para reintentar o descartar.

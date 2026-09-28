@@ -1510,3 +1510,18 @@
 "sched.empty" = "No tienes mensajes programados.";
 "sched.titleHere" = "Programados en este chat";
 "sched.pageSub" = "Escríbelo ahora y sale solo a la hora que elijas. Toca 🕒 junto a enviar (o clic derecho en ➤). Solo tú los ves hasta que salen.";
+
+/* 1.6.4 (21): No molestar todas las noches (modo sueño, docs/PROGRAMADOS.md) */
+"sleep.title" = "Todas las noches";
+"sleep.switch" = "No molestar todas las noches";
+"sleep.summary" = "De {from} a {to}";
+"sleep.off" = "Apagado";
+"sleep.explain" = "Es «No molestar» automático: en tu horario de descanso no te suena nada y lo lees al despertar. Quien te escriba verá que te llega sin sonar.";
+"sleep.from" = "Desde";
+"sleep.to" = "Hasta";
+"sleep.tz" = "Hora de este dispositivo: {tz}";
+"sleep.saved" = "No molestar todas las noches de {from} a {to}";
+"sleep.savedOff" = "No molestar nocturno apagado";
+"sleep.noticeOne" = "{name} está descansando: le llega sin sonar. Lo verá {when}.";
+"sleep.noticeMany" = "{n} persona(s) del chat están descansando: les llega sin sonar.";
+"sleep.scheduleWake" = "Enviar a las {time}";

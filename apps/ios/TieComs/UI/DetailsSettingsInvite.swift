@@ -171,6 +171,12 @@ struct DndOptions: View {
             Button(L(o.labelKey)) { Task { await store.setDoNotDisturb(until: Silence.dndUntil(o)) } }
                 .accessibilityIdentifier("dnd.opt.\(o.id)")
         }
+        // «Todas las noches» va dentro de «No molestar», con desde y hasta.
+        Divider()
+        Button { store.showSleepSettings = true } label: {
+            Label("\(L("sleep.title")) · \(SleepRules.summary(store.data?.me.sleep))", systemImage: "moon.stars")
+        }
+        .accessibilityIdentifier("dnd.opt.sleep")
     }
 }
 
@@ -337,6 +343,7 @@ struct SettingsView: View {
             }
             Section {
                 DndRow()
+                SleepRow()
             } footer: {
                 Text(store.dndLocalOnly && store.dndActive ? L("dnd.hint") + " " + L("dnd.localOnly") : L("dnd.hint"))
                     .accessibilityIdentifier("settings.dnd.footer")

@@ -1510,3 +1510,18 @@
 "sched.empty" = "You have no scheduled messages.";
 "sched.titleHere" = "Scheduled in this chat";
 "sched.pageSub" = "Write it now and it goes out on its own at the time you pick. Tap 🕒 next to send (or right-click ➤). Only you see them until they go out.";
+
+/* 1.6.4 (21): No molestar todas las noches (modo sueño, docs/PROGRAMADOS.md) */
+"sleep.title" = "Every night";
+"sleep.switch" = "Do not disturb every night";
+"sleep.summary" = "From {from} to {to}";
+"sleep.off" = "Off";
+"sleep.explain" = "Automatic Do not disturb: during your rest hours nothing makes a sound and you read it when you wake up. People writing to you see it arrives silently.";
+"sleep.from" = "From";
+"sleep.to" = "Until";
+"sleep.tz" = "This device’s time: {tz}";
+"sleep.saved" = "Do not disturb every night from {from} to {to}";
+"sleep.savedOff" = "Nightly Do not disturb off";
+"sleep.noticeOne" = "{name} is resting: it arrives silently. They’ll see it {when}.";
+"sleep.noticeMany" = "{n} person(s) in this chat are resting: it arrives silently.";
+"sleep.scheduleWake" = "Send at {time}";

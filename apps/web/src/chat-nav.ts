@@ -7,7 +7,7 @@ export interface SeqMessage { seq: number }
 /**
  * Primer no leído al abrir. `readFrom` es lo último que ya leí (max(lastReadSeq, historyFromSeq)); el primer no leído
  * es el primer mensaje con seq mayor. Respuesta:
- * - `null`: no hay no leídos (abrir al final).
+ * - `null`: no hay no leídos; si el contador aún tiene pendientes, falta historial y se debe mostrar el error de carga.
  * - `'older'`: el primero no está cargado y hay más antiguos (cargar otra página y volver a preguntar).
  * - `{ seq }`: el mensaje sobre el que va la línea «N mensajes nuevos».
  * Si `readFrom` no se conoce, se usan los últimos `unread` mensajes.
@@ -22,7 +22,9 @@ export function firstUnread(messages: SeqMessage[], readFrom: number | null, unr
   const first = messages[0]!;
   if (first.seq > readFrom + 1 && hasMore) return 'older';
   const m = messages.find((x) => x.seq > readFrom);
-  return m ? { seq: m.seq } : null;
+  // The message API includes deleted-message tombstones. A missing sequence after the
+  // granted history boundary is an incomplete page, never permission to skip unread content.
+  return m?.seq === readFrom + 1 ? { seq: m.seq } : null;
 }
 
 /** A jump over unread content must not advance a contiguous read cursor. */

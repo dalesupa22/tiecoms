@@ -185,7 +185,10 @@ export function MeetingDialog({ conversationId, scheduled = false, onClose }: { 
         </div>
         {sel && <div className={`small ${sel.status === 'active' ? 'muted' : 'error'}`}>{statusText(sel)}</div>}
         {sel && sel.available && sel.status !== 'active' && (
-          <button className="btn small" style={{ alignSelf: 'flex-start' }} onClick={() => void connect(sel.provider)}>{sel.status === 'reconnect' ? t('meet.reconnect') : t('meet.connectTo', { name: sel.label })}</button>
+          <>
+            <div className="hint">{t('meet.scopeHint')}</div>
+            <button className="btn small" style={{ alignSelf: 'flex-start' }} onClick={() => void connect(sel.provider)}>{sel.status === 'reconnect' ? t('meet.reconnect') : t('meet.connectTo', { name: sel.label })}</button>
+          </>
         )}
         {list && list.every((c) => !c.available) && <div className="hint">{t('meet.noneAvailable')}</div>}
       </div>

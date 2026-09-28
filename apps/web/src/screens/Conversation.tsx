@@ -220,6 +220,18 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     if (el) el.scrollTop = el.scrollHeight;
     updateNav();
   }, [local?.loaded, local?.loading, local?.messages, placementFailed, placementStep]);
+  async function retryUnreadHistory() {
+    if (loadingUnread.current || local?.loading) return;
+    placing.current = true;
+    atBottom.current = false;
+    loadingUnread.current = true;
+    setPlacementFailed(false);
+    // Refresh even when the previous page claimed hasMore=false. Otherwise a terminal
+    // history gap would show the same error forever without making another request.
+    try { await client.openConversation(id, true); }
+    catch { setPlacementFailed(true); }
+    finally { loadingUnread.current = false; setPlacementStep((n) => n + 1); }
+  }
   useLayoutEffect(() => {
     if (!justPlaced.current || newLine == null) return;
     justPlaced.current = false;
@@ -501,7 +513,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
         )}
         {!embedded && <DerivedPendingStrip conv={conv} />}
 
-        {placementFailed && <div className="error" role="alert">{t('chat.unreadLoadFailed')} <button className="link-btn" onClick={() => { placing.current = true; atBottom.current = false; setPlacementFailed(false); }}>{t('chat.retryUnread')}</button></div>}
+        {placementFailed && <div className="error" role="alert">{t('chat.unreadLoadFailed')} <button className="link-btn" disabled={local?.loading} onClick={() => void retryUnreadHistory()}>{t('chat.retryUnread')}</button></div>}
         <div className="msgs-wrap">
         {nav.lineAbove && entry && newLine != null && (
           <button className="jump-new" onClick={jumpToNewLine} aria-label={t('chat.jumpNew')} title={t('chat.jumpNew')}>{t('chat.newAbove', { n: entry.unread })}</button>

@@ -61,7 +61,7 @@ describe('primer no leído al abrir un chat', () => {
   it('sin no leídos abre al final', () => expect(firstUnread(msgs(1, 10), 10, 0, false)).toBeNull());
   it('el primero después de lo leído', () => expect(firstUnread(msgs(1, 50), 42, 8, true)).toEqual({ seq: 43 }));
   it('si no está cargado pide páginas antiguas', () => expect(firstUnread(msgs(51, 100), 20, 80, true)).toBe('older'));
-  it('sin más historia, el primero cargado', () => expect(firstUnread(msgs(31, 100), 20, 80, false)).toEqual({ seq: 31 }));
-  it('con huecos de seq (mensajes ocultos) toma el siguiente que exista', () => expect(firstUnread([{ seq: 5 }, { seq: 9 }, { seq: 12 }], 6, 6, false)).toEqual({ seq: 9 }));
+  it('sin más historia informa el hueco en vez de saltar pendientes', () => expect(firstUnread(msgs(31, 100), 20, 80, false)).toBeNull());
+  it('un hueco interno también exige recargar el historial', () => expect(firstUnread([{ seq: 5 }, { seq: 9 }, { seq: 12 }], 6, 6, false)).toBeNull());
   it('sin lo leído usa los últimos `unread` mensajes', () => expect(firstUnread(msgs(1, 20), null, 3, true)).toEqual({ seq: 18 }));
 });

@@ -238,7 +238,7 @@ fun GroupsScreen(
                 },
                 modifier = Modifier.fillMaxSize(),
             ) {
-                LazyColumn(Modifier.fillMaxSize().testTag("conversationList")) {
+                LazyColumn(Modifier.fillMaxSize().testTag("conversationList"), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = AssistantListInset)) {
                     if (dueReminders > 0) item(key = "dueReminders") {
                         Row(Modifier.fillMaxWidth().clickable(onClick = onReminders).heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp).testTag("home.dueReminders"),
                             verticalAlignment = Alignment.CenterVertically) {
@@ -446,7 +446,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                 onRefresh = { scope.launch { refreshing = true; try { client.loadBootstrap() } catch (e: Exception) { snackbar.showSnackbar(errorText(ctx, e)) } finally { refreshing = false } } },
                 modifier = Modifier.fillMaxSize(),
             ) {
-                LazyColumn(Modifier.fillMaxSize().testTag("dmList")) {
+                LazyColumn(Modifier.fillMaxSize().testTag("dmList"), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = AssistantListInset)) {
                     if (list.isEmpty() && (!searching || quickResults.isEmpty)) item {
                         Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(stringResource(if (query.isNotBlank() || unreadOnly) R.string.home_empty_filter else R.string.dm_empty), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -216,7 +216,7 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)) },
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
     ) { pad ->
-        LazyColumn(Modifier.padding(pad).fillMaxSize().padding(horizontal = 16.dp).testTag("issues")) {
+        LazyColumn(Modifier.padding(pad).fillMaxSize().padding(horizontal = 16.dp).testTag("issues"), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = AssistantListInset)) {
             item {
                 if (conversationFilter == null) Text(stringResource(R.string.issue_page_sub), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.heightIn(min = 12.dp))

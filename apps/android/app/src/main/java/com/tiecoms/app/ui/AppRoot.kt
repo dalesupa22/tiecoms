@@ -255,6 +255,9 @@ private fun MainNav() {
         }
     }
 
+    // gg (docs/ASISTENTE.md): burbuja solo en las 5 listas; el panel cubre también la barra de pestañas.
+    val gg = rememberAssistant(client)
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         bottomBar = {
             if (route in TABS) NavigationBar(modifier = Modifier.testTag("tabs")) {
@@ -295,7 +298,8 @@ private fun MainNav() {
         },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { pad ->
-        NavHost(nav, startDestination = "home?ws={ws}", modifier = Modifier.padding(pad)) {
+        Box(Modifier.padding(pad).fillMaxSize()) {
+        NavHost(nav, startDestination = "home?ws={ws}", modifier = Modifier.fillMaxSize()) {
             composable("home?ws={ws}", arguments = listOf(navArgument("ws") { type = NavType.StringType; nullable = true; defaultValue = null })) {
                 GroupsScreen(
                     workspaceFilter = it.arguments?.getString("ws"),
@@ -412,5 +416,17 @@ private fun MainNav() {
                 )
             }
         }
+        AssistantBubble(gg, visible = route in TABS && !gg.open, modifier = Modifier.align(Alignment.BottomEnd))
+        }
+    }
+    AssistantPanel(gg, myName = state.data?.me?.name ?: "") { target ->
+        gg.close()
+        when (target) {
+            is com.tiecoms.app.core.Assistant.Target.Conversation ->
+                if (state.data?.conversations?.any { it.id == target.id } == true) openConv(target.id)
+                else uiScope.launch { runCatching { client.loadBootstrap() }; openConv(target.id) }
+            is com.tiecoms.app.core.Assistant.Target.Screen -> tab(target.name)
+        }
+    }
     }
 }

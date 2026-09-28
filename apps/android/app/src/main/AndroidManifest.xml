@@ -15,6 +15,13 @@
 
     <!-- Custom Tabs para el SSO (Android 11+ exige declarar la consulta al navegador). -->
     <queries>
+        <!-- gg: dictado (SpeechRecognizer) y lectura en voz alta (TextToSpeech) en Android 11+. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
         <intent>
             <action android:name="android.support.customtabs.action.CustomTabsService" />
         </intent>

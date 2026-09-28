@@ -292,6 +292,8 @@ class TieComsClient(
         accessToken = null
         secrets.set(null)
         if (me != null) storage.clearPrefix("u:$me:")
+        // gg: el historial vive solo en el dispositivo y se borra al cerrar sesión (docs/ASISTENTE.md).
+        Assistant.clear(storage)
         storage.set(DND_KEY, null); storage.set(DND_LOCAL_KEY, null)
         val wasSignedIn = s.status != SessionStatus.ANONYMOUS
         _state.value = ClientState(status = SessionStatus.ANONYMOUS)
@@ -755,6 +757,26 @@ class TieComsClient(
     suspend fun commentIssue(id: String, body: String): IssueDTO = withContext(dispatcher) {
         val i = req("POST", "/issues/$id/comments", buildJsonObject { put("body", JsonPrimitive(body)) }, IssueDTO.serializer()); putIssues(listOf(i)); i
     }
+
+    // ---------- gg, el asistente (docs/ASISTENTE.md) ----------
+    /** Un turno: los últimos 20 mensajes (con el resumen de acciones) → respuesta y tarjetas. */
+    suspend fun assistantTurn(messages: List<AssistantMessage>, timezone: String, lang: String): AssistantTurnDTO = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("messages", TcJson.encodeToJsonElement(ListSerializer(AssistantMessage.serializer()), messages))
+            put("timezone", JsonPrimitive(timezone)); put("lang", JsonPrimitive(lang))
+        }
+        req("POST", "/assistant/turn", body, AssistantTurnDTO.serializer())
+    }
+    /** Confirma una acción pendiente (token) o deshace una hecha (undoToken); [text] = mensaje editado. */
+    suspend fun assistantRun(token: String, text: String? = null): AssistantActionDTO = withContext(dispatcher) {
+        val body = buildJsonObject { put("token", JsonPrimitive(token)); if (text != null) put("text", JsonPrimitive(text)) }
+        req("POST", "/assistant/run", body, AssistantActionDTO.serializer())
+    }
+    /** Historial local de gg de la persona con sesión (el de otra cuenta se descarta). */
+    fun assistantHistory(): List<AssistantTurn> = myId?.let { Assistant.load(storage, it) } ?: emptyList()
+    fun saveAssistantHistory(turns: List<AssistantTurn>) { myId?.let { Assistant.save(storage, it, turns) } }
+    fun assistantSpeak(): Boolean = storage.get(Assistant.SPEAK_KEY) != "0"
+    fun setAssistantSpeak(on: Boolean) = storage.set(Assistant.SPEAK_KEY, if (on) "1" else "0")
 
     // ---------- «No molestar» (SPEC-silencio §3) ----------
     /** Valor vigente (estado o, antes del primer bootstrap —p. ej. un push con la app cerrada—, el guardado). */

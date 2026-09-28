@@ -270,7 +270,7 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
     if (joinCode) JoinCodeDialog(onClose = { joinCode = false }, onGo = { code -> joinCode = false; onNavigate("invite/$code") })
     // «Tú» (docs/GRUPOS.md): perfil, ajustes, «Unirme con código» y «Supervisión» si administro una empresa.
     TabScaffold(title = stringResource(R.string.nav_you)) {
-        Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 32.dp).testTag("settingsScreen")) {
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = AssistantListInset + 16.dp).testTag("settingsScreen")) {
             val me = data?.me
             val org = Names.org(data, me?.primaryOrgId)
             SettingsSection(stringResource(R.string.account)) {

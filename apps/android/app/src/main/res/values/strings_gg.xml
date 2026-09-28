@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- gg, el asistente (docs/ASISTENTE.md): mismas claves que ai.* en la web. -->
+<resources>
+    <string name="ai_open">Open gg</string>
+    <string name="ai_bubble_hint">gg · press and hold to talk</string>
+    <string name="ai_title">gg</string>
+    <string name="ai_subtitle">Your AI assistant</string>
+    <string name="ai_hello">Hi, %1$s. I\'m gg, how can I help?</string>
+    <string name="ai_intro">Type or talk to me: I reply to messages, report what is pending, and create groups, subjects and meetings. Nothing is sent without your OK.</string>
+    <string name="ai_voice_hint">Tip: press and hold the ✦ bubble to talk, release to send.</string>
+    <string name="ai_s_report">Give me a report of what is going on</string>
+    <string name="ai_s_pending">Reply to my pending messages</string>
+    <string name="ai_s_due">What is due today?</string>
+    <string name="ai_s_write">Write to…</string>
+    <string name="ai_s_group">Create a group with…</string>
+    <string name="ai_s_meeting">Schedule a meeting tomorrow at 10 with…</string>
+    <string name="ai_s_issue">Create a subject for…</string>
+    <string name="ai_s_cancel">Cancel the meeting about…</string>
+    <string name="ai_placeholder">Ask gg</string>
+    <string name="ai_send">Send</string>
+    <string name="ai_talk">Talk</string>
+    <string name="ai_stop">Done</string>
+    <string name="ai_listening">Listening…</string>
+    <string name="ai_send_all">Send all (%1$d)</string>
+    <string name="ai_create">Create</string>
+    <string name="ai_confirm">Confirm</string>
+    <string name="ai_cancel_event">Cancel meeting</string>
+    <string name="ai_edit">Edit</string>
+    <string name="ai_discard">Discard</string>
+    <string name="ai_done">Done</string>
+    <string name="ai_undone">Undone</string>
+    <string name="ai_failed">Failed</string>
+    <string name="ai_undo">Undo</string>
+    <string name="ai_open_it">Open</string>
+    <string name="ai_clear">New conversation</string>
+    <string name="ai_speak_on">Read replies aloud</string>
+    <string name="ai_speak_off">Do not read aloud</string>
+    <string name="ai_unavailable">gg is not available right now.</string>
+    <string name="ai_wait">gg is thinking</string>
+    <string name="ai_mic_body">gg uses the microphone only while you talk to it, to turn what you say into text.</string>
+    <string name="ai_mic_denied">Allow the microphone to talk to gg.</string>
+    <string name="ai_expired">This action expired. Ask gg again.</string>
+    <string name="ai_sent_all">Done, I sent all %1$d.</string>
+    <string name="ai_sent_one">Done, sent.</string>
+    <string name="ai_redo">Another version</string>
+    <string name="ai_redo_ask">Write another version of the message for %1$s</string>
+    <string name="ai_retry">Retry</string>
+</resources>

@@ -352,7 +352,7 @@ fun AgendaScreen(onOpenEvent: (String) -> Unit, quick: QuickNav? = null) {
         },
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
     ) { pad ->
-        LazyColumn(Modifier.padding(pad).fillMaxSize().padding(horizontal = 16.dp).testTag("agenda")) {
+        LazyColumn(Modifier.padding(pad).fillMaxSize().padding(horizontal = 16.dp).testTag("agenda"), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = AssistantListInset)) {
             item {
                 androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     IconButton(onClick = { weekStr = week.minusWeeks(1).toString() }, modifier = Modifier.testTag("agenda.prev")) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, stringResource(R.string.cal_prev)) }

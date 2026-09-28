@@ -11,6 +11,10 @@ final class AssistantModel {
     var text = ""
     var busy = false
     var error: String?
+    private(set) var hasAIConsent = false
+    var showConsentPrompt = false
+    @ObservationIgnored private var sessionID = UUID()
+    @ObservationIgnored private var pendingQuestion: (content: String, api: APIClient, retry: Bool, replacing: AssistantActionDTO?)?
     var speakOn = AssistantHistory.speakOn
     let listener = AssistantListener()
     @ObservationIgnored private(set) var userId: String?
@@ -18,7 +22,9 @@ final class AssistantModel {
 
     func bind(_ userId: String) {
         guard self.userId != userId else { return }
+        endConsentSession()
         self.userId = userId
+        text = ""
         turns = AssistantHistory.load(userId)
     }
 
@@ -33,6 +39,7 @@ final class AssistantModel {
     }
 
     func close() {
+        endConsentSession()
         listener.cancel()
         AssistantSpeaker.shared.stop()
         holding = false
@@ -40,8 +47,30 @@ final class AssistantModel {
     }
 
     func clear() {
+        endConsentSession()
         turns = []; error = nil
         persist()
+    }
+
+    /// Consent is deliberately held in memory only, for this opening of gg.
+    private func endConsentSession() {
+        hasAIConsent = false
+        cancelConsent()
+        sessionID = UUID()
+    }
+
+    func cancelConsent() {
+        showConsentPrompt = false
+        pendingQuestion = nil
+        byVoice = false
+    }
+
+    func allowConsent() async {
+        guard let question = pendingQuestion else { return }
+        pendingQuestion = nil
+        showConsentPrompt = false
+        hasAIConsent = true
+        await ask(question.content, api: question.api, retry: question.retry, replacing: question.replacing)
     }
 
     func toggleSpeak() {
@@ -106,20 +135,30 @@ final class AssistantModel {
     /// «Otra versión»: descarta el borrador y le pide a gg que lo redacte de nuevo.
     func redo(_ a: AssistantActionDTO, api: APIClient) async {
         guard !busy else { return }
-        discard(a)
-        await ask(L("ai.redoAsk", ["name": a.target]), api: api)
+        await ask(L("ai.redoAsk", ["name": a.target]), api: api, replacing: a)
     }
 
-    func ask(_ content: String, api: APIClient? = nil, retry: Bool = false) async {
+    func ask(_ content: String, api: APIClient? = nil, retry: Bool = false, replacing: AssistantActionDTO? = nil) async {
         let q = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !busy, let api = api ?? apiRef else { return }
+        let waiting = pending
+        let confirmsLocally = Assistant.isSendAll(q) && !waiting.isEmpty && replacing == nil
+        guard hasAIConsent || confirmsLocally else {
+            // Nothing is persisted, discarded or sent until the person chooses Allow.
+            if text.isEmpty { text = content }
+            pendingQuestion = (content, api, retry, replacing)
+            showConsentPrompt = true
+            return
+        }
+        if let replacing { discard(replacing) }
         error = nil; text = ""
         let voice = byVoice; byVoice = false
-        let waiting = pending
+        let requestSession = sessionID
         // «Envíalos» con borradores pendientes: se confirman aquí mismo, sin volver a llamar al modelo.
-        if Assistant.isSendAll(q), !waiting.isEmpty {
+        if confirmsLocally {
             turns.append(AssistantTurn(role: .user, content: q)); persist()
             await sendAll(api: api)
+            guard sessionID == requestSession else { return }
             let done = Assistant.sentText(waiting.count)
             turns.append(AssistantTurn(role: .assistant, content: done)); persist()
             if voice || speakOn { AssistantSpeaker.shared.speak(done) }
@@ -129,13 +168,16 @@ final class AssistantModel {
         busy = true
         defer { busy = false }
         do {
-            let out = try await api.assistantTurn(turns)
+            let out = try await api.assistantTurn(turns, aiConsent: hasAIConsent)
+            guard sessionID == requestSession else { return }
             turns.append(AssistantTurn(role: .assistant, content: out.reply, actions: out.actions.isEmpty ? nil : out.actions,
                                        suggestions: out.suggestions.isEmpty ? nil : out.suggestions)); persist()
             if voice || speakOn { AssistantSpeaker.shared.speak(out.reply) }
         } catch let e as ApiRequestError where e.status == 503 {
+            guard sessionID == requestSession else { return }
             error = L("ai.unavailable")
         } catch {
+            guard sessionID == requestSession else { return }
             self.error = L10n.errorText(error)
         }
     }
@@ -246,6 +288,14 @@ struct AssistantPanel: View {
         }
         .onAppear { model.apiRef = store.api }
         .onDisappear { model.listener.cancel() }
+        .alert(L("ai.consentTitle"), isPresented: $model.showConsentPrompt) {
+            Button(L("common.cancel"), role: .cancel) { model.cancelConsent() }
+                .accessibilityIdentifier("assistant.consent.cancel")
+            Button(L("ai.consentAllow")) { Task { await model.allowConsent() } }
+                .accessibilityIdentifier("assistant.consent.allow")
+        } message: {
+            Text(L("ai.consentBody"))
+        }
     }
 
     private var header: some View {

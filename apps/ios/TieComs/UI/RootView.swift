@@ -173,6 +173,7 @@ struct MainView: View {
             }
         }
         .animation(.spring(duration: 0.3), value: assistant.open)
+        .onDisappear { assistant.close() }
         .overlay(alignment: .bottom) { ToastView() }
         .sheet(isPresented: $store.showPushPrompt) { PushPromptView() }
         .sheet(isPresented: $store.showSleepSettings) { SleepSheet() }

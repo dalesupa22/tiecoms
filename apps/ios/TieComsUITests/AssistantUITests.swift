@@ -32,10 +32,10 @@ final class AssistantUITests: XCTestCase {
         }
     }
 
-    private func login(_ f: Fixture) -> XCUIApplication {
+    private func login(_ f: Fixture, language: String = "es") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES", "-TCResetLanguage", "YES",
-                               "-AppleLanguages", "(es)", "-AppleLocale", "es_CO", "-tc.assistantSpeak", "NO", "-TCNoAnimations", "YES"]
+                               "-AppleLanguages", "(\(language))", "-AppleLocale", language == "es" ? "es_CO" : "en_US", "-tc.assistantSpeak", "NO", "-TCNoAnimations", "YES"]
         app.launch()
         let email = app.textFields["login.email"]
         let deadline = Date().addingTimeInterval(15)
@@ -51,8 +51,48 @@ final class AssistantUITests: XCTestCase {
         return app
     }
 
+    private func allowAI(_ app: XCUIApplication) {
+        let allow = app.buttons.matching(identifier: "assistant.consent.allow").firstMatch
+        XCTAssertTrue(allow.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["assistant.consent.cancel"].exists)
+        allow.tap()
+    }
+
     private func count(_ app: XCUIApplication, _ id: String) -> Int {
         app.descendants(matching: .any).matching(identifier: id).count
+    }
+
+    /// Local fixture only; deliberately cancels every prompt, so no provider request or action is made.
+    func testConsentCancelKeepsDraftInSpanishAndEnglish() throws {
+        let f = try fixture()
+        for language in ["es", "en"] {
+            let app = login(f, language: language)
+            let bubble = app.descendants(matching: .any)["assistant.bubble"]
+            XCTAssertTrue(bubble.waitForExistence(timeout: 20))
+            bubble.tap()
+            let draft = "Consent draft 22"
+            let input = app.textFields["assistant.input"].exists ? app.textFields["assistant.input"] : app.textViews["assistant.input"]
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            input.tap(); input.typeText(draft)
+            app.buttons["assistant.send"].tap()
+            let cancel = app.buttons.matching(identifier: "assistant.consent.cancel").firstMatch
+            XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["assistant.consent.allow"].exists)
+            XCTAssertTrue(app.alerts.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "DeepSeek")).firstMatch.exists)
+            shot("consent-\(language)")
+            cancel.tap()
+            XCTAssertEqual(input.value as? String, draft)
+            app.buttons["assistant.close"].tap()
+            XCTAssertTrue(bubble.waitForExistence(timeout: 5))
+            bubble.tap()
+            let reopenedInput = app.textFields["assistant.input"].exists ? app.textFields["assistant.input"] : app.textViews["assistant.input"]
+            XCTAssertTrue(reopenedInput.waitForExistence(timeout: 5))
+            XCTAssertEqual(reopenedInput.value as? String, draft)
+            app.buttons["assistant.send"].tap()
+            XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+            cancel.tap()
+            app.terminate()
+        }
     }
 
     func testBubblePanelPendingRepliesSendAllAndMarkRead() throws {
@@ -79,6 +119,7 @@ final class AssistantUITests: XCTestCase {
 
         // «Responde mis pendientes» → tarjetas de mensajes por confirmar.
         chip.tap()
+        allowAI(app)
         let thinking = app.descendants(matching: .any)["assistant.thinking"]
         _ = thinking.waitForExistence(timeout: 3)
         let answer = app.descendants(matching: .any).matching(identifier: "assistant.turn.assistant").firstMatch
@@ -176,6 +217,7 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["assistant.hello"].waitForExistence(timeout: 5))
 
         app.buttons["assistant.chip.ai.s.pending"].tap()
+        allowAI(app)
         waitAnswer(app, after: 0)
         let run = app.buttons.matching(identifier: "assistant.card.run").firstMatch
         XCTAssertTrue(run.waitForExistence(timeout: 5), "hay borradores")

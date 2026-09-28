@@ -192,9 +192,10 @@ enum AssistantHistory {
 }
 
 extension APIClient {
-    func assistantTurn(_ turns: [AssistantTurn], timezone: String = TimeZone.current.identifier, lang: String = L10n.lang) async throws -> AssistantTurnDTO {
-        try await request("/assistant/turn", method: "POST",
-                          json: ["messages": Assistant.payload(turns), "timezone": timezone, "lang": lang])
+    func assistantTurn(_ turns: [AssistantTurn], aiConsent: Bool, timezone: String = TimeZone.current.identifier, lang: String = L10n.lang) async throws -> AssistantTurnDTO {
+        guard aiConsent else { throw ApiRequestError(status: 403, code: "ai_consent_required", message: L("ai.consentTitle")) }
+        return try await request("/assistant/turn", method: "POST",
+                                json: ["messages": Assistant.payload(turns), "timezone": timezone, "lang": lang, "aiConsent": true])
     }
 
     /// Confirma una acción pendiente (`token`) o deshace una hecha (`undoToken`). `text`: mensaje editado.

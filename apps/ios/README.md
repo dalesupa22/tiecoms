@@ -10,9 +10,25 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Bundle ID | `com.chaggu.app` (app) · `com.chaggu.app.share` (Compartir) · `com.chaggu.app.notifications` (Notification Service Extension) · pruebas `com.chaggu.app.tests` / `com.chaggu.app.uitests` |
 | Team | `B76US7H3L3` (CERTILABOR SAS), firma automática |
 | App Group | `group.com.chaggu.app`: Keychain compartido (servicio `com.chaggu.app.session`) y lista de conversaciones para la extensión |
-| Versión | 1.6.4 (build 19), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
+| Versión | 1.6.5 (build 22), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.chaggu.com` por defecto (web: `https://www.chaggu.com`); `-TCApiURL <url>` al lanzar (pruebas) |
+
+## Integración 1.6.5
+
+Integra gg, asuntos y tareas privadas, mensajes programados, descanso nocturno y firma de PDF.
+Antes de la primera petición a gg en cada apertura del panel se muestra un permiso en español o inglés:
+DeepSeek recibe la solicitud, hasta 20 turnos de historial, los datos del directorio y las conversaciones,
+asuntos y reuniones consultados para responder. Cancelar conserva el borrador y no inicia ninguna petición.
+El permiso solo vive en memoria: cerrar gg, cambiar de cuenta o cerrar sesión lo invalida.
+`POST /assistant/turn` incluye `aiConsent: true` únicamente después de pulsar Permitir.
+La entrada de voz de gg usa el reconocimiento de voz de Apple, con sus permisos del sistema.
+
+Las pruebas `AssistantTests` verifican consentimiento, cancelación, cambio de cuenta y el contrato HTTP;
+`AssistantUITests/testConsentCancelKeepsDraftInSpanishAndEnglish` comprueba el aviso y el borrador en ambos idiomas.
+Para las pruebas de simulador usar `CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-`: la firma ad hoc permite
+comprobar el Keychain real del simulador sin cambiar certificados ni permisos del llavero.
+La app de App Store Connect, sus tres App IDs, App Group y perfiles ya existen; se reutilizan al publicar.
 
 ## Qué hace (v1.1)
 

@@ -34,7 +34,7 @@ final class V9LanguageSubjectsTests: XCTestCase {
         XCTAssertTrue(leftovers.isEmpty, "en inglés son «Subjects»: \(leftovers.keys.sorted())")
         XCTAssertEqual(en["tab.issues"], "Subjects")
         XCTAssertEqual(en["grp.moreIssues"], "+{n} subjects")
-        XCTAssertEqual(en["issue.create"], "Open subject")
+        XCTAssertEqual(en["issue.create"], "Create subject")
         XCTAssertEqual(en["issue.chipOne"], "◆ 1 subject")
         // En español siguen siendo «asuntos».
         let es = try strings("es")

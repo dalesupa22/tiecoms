@@ -168,6 +168,7 @@ final class AssistantTests: XCTestCase {
         let m = AssistantModel()
         MockURLProtocol.routes["/api/v1/assistant/turn"] = (502, #"{"error":{"code":"assistant_failed","message":"no respondió"}}"#)
         await m.ask("¿Qué vence hoy?", api: api)
+        await m.allowConsent()
         XCTAssertNotNil(m.error)
         XCTAssertTrue(m.canRetry)
         XCTAssertEqual(m.turns.map(\.content), ["¿Qué vence hoy?"])
@@ -193,6 +194,7 @@ final class AssistantTests: XCTestCase {
         m.turns = [AssistantTurn(role: .assistant, content: "Preparé esto", actions: [draft])]
         MockURLProtocol.routes["/api/v1/assistant/turn"] = (200, #"{"reply":"Otra versión:","actions":[{"id":"d2","kind":"send_message","status":"pending","target":"Laura Méndez","text":"Hola, Laura","token":"tok-654321"}]}"#)
         await m.redo(draft, api: api)
+        await m.allowConsent()
         MockURLProtocol.routes["/api/v1/assistant/turn"] = nil
         XCTAssertEqual(m.turns[0].actions?.first?.status, .undone)
         XCTAssertNil(m.turns[0].actions?.first?.token)
@@ -216,5 +218,94 @@ final class AssistantTests: XCTestCase {
         XCTAssertEqual(m.turns[0].actions?.first?.status, .done)
         XCTAssertEqual(m.turns[0].actions?.first?.undoToken, "u-1")
         XCTAssertFalse(MockURLProtocol.requests.contains { $0.path == "/api/v1/assistant/turn" })
+    }
+
+    func testConsentCancelPreservesDraftAndSendsNoRequest() async {
+        let api = mockAPI()
+        let m = AssistantModel()
+        m.text = "  Ayúdame con el informe  "
+        await m.ask(m.text, api: api)
+        XCTAssertTrue(m.showConsentPrompt)
+        XCTAssertFalse(m.hasAIConsent)
+        XCTAssertTrue(m.turns.isEmpty)
+        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+        m.cancelConsent()
+        await m.allowConsent() // A late callback from a dismissed prompt must not send.
+        XCTAssertFalse(m.hasAIConsent)
+        XCTAssertFalse(m.showConsentPrompt)
+        XCTAssertEqual(m.text, "  Ayúdame con el informe  ")
+        XCTAssertTrue(m.turns.isEmpty)
+        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+    }
+
+    func testConsentIncludesExplicitFlagAndExpiresWhenPanelCloses() async {
+        let api = mockAPI()
+        let m = AssistantModel()
+        m.speakOn = false
+        MockURLProtocol.routes["/api/v1/assistant/turn"] = (200, #"{"reply":"Listo","actions":[]}"#)
+        defer { MockURLProtocol.routes["/api/v1/assistant/turn"] = nil }
+        await m.ask("Primera pregunta", api: api)
+        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+        await m.allowConsent()
+        XCTAssertTrue(m.hasAIConsent)
+        XCTAssertEqual(MockURLProtocol.requests.count, 1)
+        XCTAssertEqual(MockURLProtocol.requests.last?.body["aiConsent"] as? Bool, true)
+        await m.ask("Segunda pregunta", api: api)
+        XCTAssertEqual(MockURLProtocol.requests.count, 2, "One explicit choice covers this open panel only")
+        m.close()
+        m.present(listen: false)
+        await m.ask("Después de volver a abrir", api: api)
+        XCTAssertFalse(m.hasAIConsent)
+        XCTAssertTrue(m.showConsentPrompt)
+        XCTAssertEqual(MockURLProtocol.requests.count, 2)
+        XCTAssertFalse(AssistantModel().hasAIConsent, "A new signed-in view never inherits permission")
+    }
+
+    func testChangingAccountInvalidatesPendingConsent() async {
+        let api = mockAPI()
+        let m = AssistantModel()
+        m.bind("consent-test-user-a")
+        await m.ask("Borrador privado de A", api: api)
+        m.bind("consent-test-user-b")
+        await m.allowConsent()
+        XCTAssertFalse(m.hasAIConsent)
+        XCTAssertFalse(m.showConsentPrompt)
+        XCTAssertEqual(m.text, "")
+        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+    }
+
+    func testCancelConsentForAnotherVersionKeepsExistingAction() async {
+        let api = mockAPI()
+        let m = AssistantModel()
+        let draft = AssistantActionDTO(id: "draft", kind: .sendMessage, status: .pending, target: "Laura", text: "Hola", token: "test-token")
+        m.turns = [AssistantTurn(role: .assistant, content: "Borrador", actions: [draft])]
+        await m.redo(draft, api: api)
+        m.cancelConsent()
+        XCTAssertEqual(m.pending, [draft])
+        XCTAssertEqual(m.turns.count, 1)
+        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+    }
+
+    func testAPIRejectsMissingConsentBeforeNetworking() async {
+        let api = mockAPI()
+        do {
+            _ = try await api.assistantTurn([AssistantTurn(role: .user, content: "privado")], aiConsent: false)
+            XCTFail("Consent is mandatory even for non-UI callers")
+        } catch let e as ApiRequestError { XCTAssertEqual(e.code, "ai_consent_required") }
+        catch { XCTFail("Unexpected error: \(error)") }
+        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+    }
+
+    func testConsentDisclosureNamesProviderAndDataInBothLanguages() {
+        let saved = L10n.choice
+        defer { L10n.choice = saved }
+        for lang in [L10n.Choice.es, .en] {
+            L10n.choice = lang
+            XCTAssertTrue(L("ai.consentTitle").contains("DeepSeek"))
+            XCTAssertTrue(L("ai.consentBody").contains("DeepSeek"))
+            XCTAssertTrue(L("ai.consentBody").contains("20"))
+            XCTAssertFalse(L("ai.consentAllow").hasPrefix("ai."))
+            XCTAssertFalse(L("common.cancel").hasPrefix("common."))
+        }
     }
 }

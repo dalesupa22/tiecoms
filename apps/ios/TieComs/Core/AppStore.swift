@@ -12,6 +12,8 @@ struct ConversationState: Equatable {
     var loaded: Bool = false
     var loading: Bool = false
     var error: String?
+    /// El error es pasajero (5xx, 502 de un despliegue, red): la vista reintenta sola y muestra «Reconectando…».
+    var transient: Bool = false
 }
 
 struct TypingEntry: Equatable { var userId: String; var until: Date }
@@ -484,6 +486,10 @@ final class AppStore {
                 guard let local = conversations[c.id], local.loaded else { continue }
                 if c.lastEventSeq > local.lastEventSeq || c.id == openConversationId { await catchUp(c.id) }
             }
+            // El chat en pantalla que no pudo cargar (502 durante un despliegue) se vuelve a pedir al reconectar.
+            if let id = openConversationId, meta(id) != nil, conversations[id]?.loaded != true, conversations[id]?.loading != true {
+                try? await openConversation(id)
+            }
         } catch {}
         scheduleFlush(0)
     }
@@ -791,7 +797,41 @@ final class AppStore {
         } catch {
             conversations[id]?.loading = false
             conversations[id]?.error = L10n.errorText(error)
+            conversations[id]?.transient = (error as? ApiRequestError)?.isTransient ?? false
             throw error
+        }
+    }
+
+    /// Esperas entre reintentos de abrir un chat ante un error pasajero (≈30 s en total).
+    static let openRetryDelays: [TimeInterval] = [1, 2, 4, 8, 15]
+
+    /// Abre la conversación y, si el error es pasajero (502/503/504 de un despliegue, 5xx, red), reintenta con espera
+    /// creciente. Mientras tanto `transient` queda en true («Reconectando…»); un 403/404 se muestra de inmediato.
+    /// Devuelve true si quedó cargada. El borrador vive en la vista y no se toca.
+    @discardableResult
+    func openConversationRecovering(_ id: String, delays: [TimeInterval] = AppStore.openRetryDelays) async -> Bool {
+        var attempt = 0
+        while true {
+            do {
+                try await openConversation(id)
+            } catch is CancellationError {
+                return false
+            } catch {}
+            if conversations[id]?.loaded == true { return true }
+            // Otro intento (reconexión del socket, botón Reintentar) sigue en curso: se espera sin contar un fallo.
+            if conversations[id]?.loading == true {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                if Task.isCancelled { return false }
+                continue
+            }
+            guard conversations[id]?.transient == true, attempt < delays.count, !Task.isCancelled else {
+                // Agotados los reintentos: queda el texto del error (sin «Reconectando…») y el botón Reintentar.
+                if conversations[id]?.loaded != true { conversations[id]?.transient = false }
+                return false
+            }
+            try? await Task.sleep(nanoseconds: UInt64(max(0, delays[attempt]) * 1_000_000_000))
+            attempt += 1
+            if Task.isCancelled { return false }
         }
     }
 

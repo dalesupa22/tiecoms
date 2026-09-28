@@ -382,6 +382,8 @@
 "compose.multiHint" = "Elige a 2 o más personas. Pueden ser de tu equipo o de otras empresas.";
 "compose.recent" = "Recientes";
 "compose.search" = "Buscar persona, empresa o grupo";
+"chat.updatingRetrying" = "chaggu se está actualizando, reintentando…";
+"chat.reconnecting" = "Reconectando…";
 "conn.connecting" = "Conectando…";
 "conn.offline" = "Sin conexión. Tus mensajes quedan en cola y se envían al volver.";
 "conn.retryHint" = "Revisa tu conexión. Tu sesión sigue guardada en este dispositivo.";
@@ -532,6 +534,7 @@
 "err.not_found" = "No encontrado o fuera de tu alcance";
 "err.not_pdf" = "Este archivo no es un PDF";
 "err.rate_limited" = "Demasiados intentos. Espera un momento.";
+"err.server_updating" = "chaggu se está actualizando. Reintenta en unos segundos.";
 "err.side_outsider" = "Solo puedes sumar a participantes de este chat o a colegas de tu empresa.";
 "err.sso_cancelled" = "Cancelaste el inicio de sesión.";
 "err.sso_email_unverified" = "Tu proveedor no ha verificado este correo. Entra con tu correo y contraseña.";

@@ -176,7 +176,9 @@ struct ConversationView: View {
         }
         .onDisappear { if store.openConversationId == conversationId { store.openConversationId = nil } }
         .task(id: conversationId) {
-            try? await store.openConversation(conversationId)
+            // Un 502/503/504 (API reiniciándose en un despliegue) o un corte de red se reintentan solos ≈30 s;
+            // el borrador del compositor es estado de esta vista y no se pierde.
+            await store.openConversationRecovering(conversationId)
             // Sugerencias de la hoja de compartir: abrir una conversación también cuenta (como mucho una vez por hora).
             Donations.donate(store, conversationId: conversationId, minInterval: 3600)
             try? await store.loadPins(conversationId)
@@ -319,11 +321,23 @@ struct ConversationView: View {
             }
             if let state, state.loaded {
                 messages(d, c, state)
+            } else if let state, state.error != nil, state.transient {
+                // Error pasajero: se sigue reintentando (y al reconectar el socket). Sin «bad gateway».
+                ContentUnavailableView {
+                    Label { Text(L(store.connection == .online ? "chat.updatingRetrying" : "chat.reconnecting")) } icon: { ProgressView() }
+                        .accessibilityIdentifier("chat.reconnecting")
+                } actions: {
+                    // Un intento ya, sin cortar el ciclo de reintentos en curso.
+                    Button(L("common.retry")) { Task { try? await store.openConversation(conversationId) } }
+                        .accessibilityIdentifier("chat.retry")
+                }
+                .frame(maxHeight: .infinity)
             } else if let err = state?.error {
                 ContentUnavailableView {
-                    Label(err, systemImage: "exclamationmark.bubble")
+                    Label(err, systemImage: "exclamationmark.bubble").accessibilityIdentifier("chat.loadError")
                 } actions: {
-                    Button(L("common.retry")) { Task { try? await store.openConversation(conversationId, force: true) } }
+                    Button(L("common.retry")) { Task { await store.openConversationRecovering(conversationId) } }
+                        .accessibilityIdentifier("chat.retry")
                 }
                 .frame(maxHeight: .infinity)
             } else {

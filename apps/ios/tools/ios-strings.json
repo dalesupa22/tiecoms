@@ -3094,5 +3094,17 @@
  "sys.integration.removed": [
   "Se desconectó la integración «{name}».",
   "The “{name}” integration was disconnected."
+ ],
+ "err.server_updating": [
+  "chaggu se está actualizando. Reintenta en unos segundos.",
+  "chaggu is updating. Try again in a few seconds."
+ ],
+ "chat.updatingRetrying": [
+  "chaggu se está actualizando, reintentando…",
+  "chaggu is updating, retrying…"
+ ],
+ "chat.reconnecting": [
+  "Reconectando…",
+  "Reconnecting…"
  ]
 }

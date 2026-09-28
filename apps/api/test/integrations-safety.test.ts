@@ -140,6 +140,8 @@ describe('integration request safety', () => {
   it('redacts path tokens and OAuth queries, including malformed/nonexistent routes', async () => {
     expect(safeRequestPath('/api/hooks/id/FAKE_PATH_SECRET?x=1')).toBe('/api/hooks/[redacted]');
     expect(safeRequestPath('/api/%68ooks/id/FAKE_PATH_SECRET')).toBe('/api/hooks/[redacted]');
+    expect(safeRequestPath('/api/%68ooks/id/FAKE_PATH_SECRET%ZZ')).toBe('/api/hooks/[redacted]');
+    expect(safeRequestPath('/%61pi%2Fhooks/id/FAKE_PATH_SECRET%ZZ')).toBe('/api/hooks/[redacted]');
     expect(safeRequestPath('/api/hooks/id/FAKE_PATH_SECRET/extra')).toBe('/api/hooks/[redacted]');
     expect(safeRequestPath('/api/v1/auth/google/callback?code=FAKE_CODE')).toBe('/api/v1/auth/google/callback');
     const response = await raw('/api/hooks/id/FAKE_PATH_SECRET/extra', undefined, { text: 'test' });

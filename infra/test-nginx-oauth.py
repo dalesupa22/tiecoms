@@ -101,6 +101,8 @@ http {
         assert 'referrer-policy: strict-origin-when-cross-origin' in normal
         request('/assets/fixture.js?other=kept', referer='https://app.chaggu.com/c/test?normal=kept')
         request('/assets/fixture.js?hook=kept', referer='https://app.chaggu.com/api/hooks/local-id/FAKE_REFERER_HOOK')
+        request('/assets/fixture.js?encoded=kept', referer='https://app.chaggu.com/api/%68ooks/local-id/FAKE_REFERER_HOOK%ZZ')
+        request('/assets/fixture.js?encoded-api=kept', referer='https://app.chaggu.com/%61pi%2Fhooks/local-id/FAKE_REFERER_PREFIX%ZZ')
         # Only synthetic local logs are inspected; never read production log contents.
         access = (logs / 'tiecoms-app.access.log').read_text()
         assert 'FAKE_' not in access

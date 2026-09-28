@@ -6,7 +6,7 @@ import { ZodError } from 'zod';
 import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput, CreateGroupInput, JoinPolicyInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateChildIssueInput, CreatePersonalIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateScheduledInput, UpdateScheduledInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MarkTreeReadInput, MIN_CLIENT_CONTRACT, PageQuery,
-  RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
+  RefreshInput, SendMessageInput, CreateTopicInput, UpdateTopicInput, SetMessageTopicInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
   UpdateProfileInput, DndInput, MeetingProvider, MeetingConnectInput, MeetingConfirmInput, CreateMeetingInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
@@ -44,6 +44,7 @@ import * as mentions from './modules/mentions.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
 import * as reactions from './modules/reactions.ts';
 import * as links from './modules/links.ts';
+import * as topics from './modules/topics.ts';
 import * as integrations from './modules/integrations.ts';
 import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
@@ -380,6 +381,12 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/messages/:id/pin', async (req) => setPin(req.userId, req.params.id, true));
     priv.delete<{ Params: { id: string } }>('/api/v1/messages/:id/pin', async (req) => setPin(req.userId, req.params.id, false));
     priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/pins', async (req) => ({ messages: await listPins(req.userId, req.params.id) }));
+    // Temas (docs/TEMAS.md): banderitas del chat y etiqueta de cada mensaje.
+    priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/topics', async (req) => ({ topics: await topics.listTopics(req.userId, req.params.id) }));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/topics', async (req) => topics.createTopic(req.userId, req.params.id, CreateTopicInput.parse(req.body)));
+    priv.patch<{ Params: { id: string } }>('/api/v1/topics/:id', async (req) => topics.updateTopic(req.userId, z.uuid().parse(req.params.id), UpdateTopicInput.parse(req.body)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/topics/:id', async (req) => topics.deleteTopic(req.userId, z.uuid().parse(req.params.id)));
+    priv.put<{ Params: { id: string } }>('/api/v1/messages/:id/topic', async (req) => topics.setMessageTopic(req.userId, z.uuid().parse(req.params.id), SetMessageTopicInput.parse(req.body).topicId));
     // Reacciones: el emoji va en la ruta (URL-encoded). No suben no leídos; llegan a todos con message.updated.
     priv.put<{ Params: { id: string; emoji: string } }>('/api/v1/messages/:id/reactions/:emoji', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) =>
       reactions.react(req.userId, z.uuid().parse(req.params.id), req.params.emoji, true, ReactInput.parse(req.body ?? {})));

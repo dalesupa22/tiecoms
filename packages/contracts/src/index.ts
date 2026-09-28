@@ -673,10 +673,43 @@ export interface MessageDTO {
   attachments?: AttachmentDTO[];
   /** Menciones válidas (ya filtradas por el servidor); [] o ausente si no hay. */
   mentions?: MentionDTO[];
+  /** Tema del mensaje (docs/TEMAS.md). null = sin tema; ausente = servidor anterior. */
+  topicId?: string | null;
+  /** Quién le puso el tema (cualquiera del chat puede). */
+  topicBy?: string | null;
   createdAt: string;
   editedAt: string | null;
   deletedAt: string | null;
 }
+
+/** Tema fijo de una conversación: banderita con color e ícono. Máximo TOPIC_LIMIT activos. */
+export interface TopicDTO {
+  id: string;
+  conversationId: string;
+  name: string;
+  color: TopicColor;
+  icon: string;
+  position: number;
+  archivedAt: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+export const TOPIC_LIMIT = 5;
+export const TOPIC_COLORS = ['blue', 'green', 'orange', 'violet', 'magenta', 'aqua', 'red', 'yellow'] as const;
+export type TopicColor = (typeof TOPIC_COLORS)[number];
+export const CreateTopicInput = z.object({
+  name: z.string().trim().min(1).max(40),
+  color: z.enum(TOPIC_COLORS).optional(),
+  icon: z.string().trim().min(1).max(8).optional(),
+});
+export const UpdateTopicInput = z.object({
+  name: z.string().trim().min(1).max(40).optional(),
+  color: z.enum(TOPIC_COLORS).optional(),
+  icon: z.string().trim().min(1).max(8).optional(),
+  archived: z.boolean().optional(),
+  position: z.number().int().min(0).max(1000).optional(),
+});
+export const SetMessageTopicInput = z.object({ topicId: z.uuid().nullable() });
 
 export interface BootstrapDTO {
   contract: string;
@@ -1039,6 +1072,8 @@ export const SendMessageInput = z.object({
   forwardAttachmentIds: z.array(z.uuid()).max(10).optional(),
   /** Menciones sobre el body. Las inválidas se descartan (droppedMentions en la respuesta), no dan error. */
   mentions: z.array(MentionInput).max(50).optional(),
+  /** Tema activo de esta conversación (docs/TEMAS.md). */
+  topicId: z.uuid().nullable().optional(),
 }).refine((v) => v.body.length > 0 || !!v.attachmentIds?.length || !!v.forwardAttachmentIds?.length, { message: 'body_or_attachments', path: ['body'] })
   .refine((v) => (v.attachmentIds?.length ?? 0) + (v.forwardAttachmentIds?.length ?? 0) <= 10, { message: 'max_10_attachments', path: ['attachmentIds'] });
 export const EditMessageInput = z.object({ body: z.string().trim().min(1).max(8000), mentions: z.array(MentionInput).max(50).optional() });
@@ -1219,6 +1254,8 @@ export type ConversationEvent =
   | { type: 'members.changed'; conversationId: string; eventSeq: number; memberIds: string[]; adminIds?: string[] }
   | { type: 'issue.updated'; conversationId: string; eventSeq: number; issue: IssueDTO }
   | { type: 'pins.changed'; conversationId: string; eventSeq: number; messageIds: string[] }
+  /** Lista completa de temas (activos y archivados) tras crear, editar, archivar o quitar uno. */
+  | { type: 'topics.changed'; conversationId: string; eventSeq: number; topics: TopicDTO[] }
   | { type: 'calendar.updated'; conversationId: string; eventSeq: number; event: CalendarEventDTO }
   /** Evento fuera de tu historial visible: solo avanza el cursor. */
   | { type: 'redacted'; conversationId: string; eventSeq: number };

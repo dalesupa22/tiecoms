@@ -47,6 +47,8 @@ export function toMessageDTO(r: any): MessageDTO {
     reactions: deleted ? [] : r.reactions ?? [],
     attachments: deleted ? [] : r.attachments ?? [],
     mentions: deleted ? [] : r.mentions ?? [],
+    topicId: deleted ? null : r.topic_id ?? null,
+    topicBy: deleted ? null : r.topic_by ?? null,
     createdAt: new Date(r.created_at).toISOString(),
     editedAt: r.edited_at ? new Date(r.edited_at).toISOString() : null,
     deletedAt: deleted ? new Date(r.deleted_at).toISOString() : null,
@@ -77,11 +79,12 @@ export async function appendMessage(c: Tx, p: {
   conversationId: string; authorId: string; body: string; kind?: 'text' | 'system';
   clientMessageId?: string | null; replyTo?: string | null; mergedFrom?: string | null; forwarded?: ForwardedInfo | null;
   attachments?: import('@tiecoms/contracts').AttachmentDTO[] | null; hash?: Buffer | null; mentions?: import('@tiecoms/contracts').MentionDTO[] | null;
+  topicId?: string | null;
 }): Promise<MessageDTO> {
-  const { rows } = await c.query('SELECT tiecoms_append_message($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) AS m', [
+  const { rows } = await c.query('SELECT tiecoms_append_message($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) AS m', [
     p.conversationId, p.authorId, p.clientMessageId ?? null, p.kind ?? 'text', p.body, p.replyTo ?? null, p.mergedFrom ?? null,
     p.forwarded ? JSON.stringify(p.forwarded) : null, p.attachments?.length ? JSON.stringify(p.attachments) : null, p.hash ?? null,
-    p.mentions?.length ? JSON.stringify(p.mentions) : null,
+    p.mentions?.length ? JSON.stringify(p.mentions) : null, p.topicId ?? null,
   ]);
   const m = rows[0].m as MessageDTO;
   if ((p.kind ?? 'text') === 'text') await queuePush(c, m.id, p.conversationId, p.authorId);
@@ -127,6 +130,11 @@ export async function sendMessage(userId: string, conversationId: string, input:
         const { rowCount } = await c.query('SELECT 1 FROM messages WHERE id = $1 AND conversation_id = $2', [input.replyTo, conversationId]);
         if (!rowCount) throw badRequest('El mensaje citado no está en esta conversación');
       }
+      if (input.topicId) {
+        // Solo un tema activo del mismo chat (docs/TEMAS.md).
+        const { rowCount } = await c.query('SELECT 1 FROM conversation_topics WHERE id = $1 AND conversation_id = $2 AND archived_at IS NULL', [input.topicId, conversationId]);
+        if (!rowCount) throw badRequest('Ese tema no está activo en esta conversación');
+      }
       let forwarded: ForwardedInfo | null = null;
       if (input.forwarded) {
         // Reenviar desde otra conversación exige poder leerla: no se puede atribuir contenido ajeno.
@@ -150,6 +158,7 @@ export async function sendMessage(userId: string, conversationId: string, input:
       const m = await appendMessage(c, {
         conversationId, authorId: userId, body: input.body, clientMessageId: input.clientMessageId, replyTo: input.replyTo ?? null, forwarded,
         attachments: claimed.map((x) => x.dto), hash: contentHash(input.body, input.attachmentIds, input.forwardAttachmentIds), mentions: mentions.mentions,
+        topicId: input.topicId ?? null,
       });
       if (claimed.length) await linkToMessage(c, m.id, claimed.map((x) => x.id));
       if (mentions.userIds.length) await saveMentions(c, m.id, conversationId, m.seq, mentions);

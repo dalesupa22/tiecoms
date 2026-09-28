@@ -4,7 +4,7 @@ import {
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
   type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
-  type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type UserDTO, normalizeEmoji,
+  type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type TopicColor, type TopicDTO, type UserDTO, normalizeEmoji,
   type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO, type IntegrationDTO, type IntegrationSecretDTO,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
@@ -20,6 +20,8 @@ export interface PendingMessage {
   attachments?: AttachmentDTO[];
   forwardAttachmentIds?: string[];
   mentions?: MentionDTO[];
+  /** Tema con el que sale (docs/TEMAS.md). */
+  topicId?: string | null;
   createdAt: string;
   attempts: number;
   status: 'pending' | 'sending' | 'failed';
@@ -49,6 +51,8 @@ export interface ClientState {
   issues: Record<string, IssueDTO>;
   /** Mensajes fijados por conversación. */
   pins: Record<string, string[]>;
+  /** Temas por conversación (activos y archivados), en el orden de la fila. */
+  topics: Record<string, TopicDTO[]>;
   reminders: ReminderDTO[];
   /** Mis mensajes programados por salir (y los fallidos), ordenados por hora de envío. */
   scheduled: ScheduledMessageDTO[];
@@ -106,7 +110,7 @@ const base64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+
  * escritorio y móvil se comporten igual.
  */
 export class TieComsClient {
-  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0 };
+  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0 };
   private listeners = new Set<() => void>();
   private accessToken: string | null = null;
   private accessExp = 0;
@@ -299,7 +303,7 @@ export class TieComsClient {
     this.bootstrapTimer = null; this.flushTimer = null;
     for (const timer of this.readTimers.values()) clearTimeout(timer);
     this.readTimers.clear();
-    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0 };
+    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0 };
     this.listeners.forEach((l) => l());
     await this.opts.secrets?.set(null);
     if (userId) await this.opts.storage.clearPrefix(`u:${userId}:`);
@@ -433,6 +437,7 @@ export class TieComsClient {
     // Los asuntos se actualizan aunque la conversación no esté abierta.
     if (e.type === 'issue.updated') { this.putIssues([e.issue]); this.recountIssues(e.conversationId); }
     if (e.type === 'pins.changed') this.set({ pins: { ...this.state.pins, [e.conversationId]: e.messageIds } });
+    if (e.type === 'topics.changed') this.set({ topics: { ...this.state.topics, [e.conversationId]: e.topics } });
     if (e.type === 'calendar.updated') this.set({ events: { ...this.state.events, [e.event.id]: e.event } });
     if (e.type === 'message.created' && e.message.authorId !== this.state.data?.me.id && e.message.kind === 'text' && !dndActive(this.state)) {
       const muted = isActiveUntil(meta.mutedUntil);
@@ -551,7 +556,7 @@ export class TieComsClient {
 
   // ---------- Envío con cola persistente ----------
   async send(conversationId: string, body: string, replyTo: string | null = null, forwarded: ForwardedInfo | null = null,
-    extra: { attachments?: AttachmentDTO[]; forwardAttachmentIds?: string[]; mentions?: MentionDTO[] } = {}) {
+    extra: { attachments?: AttachmentDTO[]; forwardAttachmentIds?: string[]; mentions?: MentionDTO[]; topicId?: string | null } = {}) {
     const text = body.trim();
     // Las menciones se miden sobre el texto recortado (como lo guarda el servidor).
     const lead = body.length - body.trimStart().length;
@@ -562,6 +567,7 @@ export class TieComsClient {
       ...(extra.attachments?.length ? { attachments: extra.attachments } : {}),
       ...(extra.forwardAttachmentIds?.length ? { forwardAttachmentIds: extra.forwardAttachmentIds } : {}),
       ...(mentions.length ? { mentions } : {}),
+      ...(extra.topicId ? { topicId: extra.topicId } : {}),
       attempts: 0, status: 'pending', nextAttemptAt: 0,
     };
     // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
@@ -637,6 +643,7 @@ export class TieComsClient {
       ...(p.attachments?.length ? { attachmentIds: p.attachments.map((a) => a.id) } : {}),
       ...(p.forwardAttachmentIds?.length ? { forwardAttachmentIds: p.forwardAttachmentIds } : {}),
       ...(p.mentions?.length ? { mentions: p.mentions } : {}),
+      ...(p.topicId ? { topicId: p.topicId } : {}),
     };
     const payload = { conversationId: p.conversationId, clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo, forwarded: p.forwarded ?? null, ...files };
     if (this.socket?.connected) {
@@ -795,6 +802,34 @@ export class TieComsClient {
   async setMessagePinned(m: MessageDTO, pinned: boolean) {
     const r = await this.request<{ messageIds: string[] }>(`/messages/${m.id}/pin`, { method: pinned ? 'POST' : 'DELETE' });
     this.set({ pins: { ...this.state.pins, [m.conversationId]: r.messageIds } });
+  }
+  // ---------- Temas (docs/TEMAS.md) ----------
+  private putTopics(conversationId: string, topics: TopicDTO[]) { this.set({ topics: { ...this.state.topics, [conversationId]: topics } }); }
+  async loadTopics(conversationId: string) {
+    const r = await this.request<{ topics: TopicDTO[] }>(`/conversations/${conversationId}/topics`);
+    this.putTopics(conversationId, r.topics);
+    return r.topics;
+  }
+  async createTopic(conversationId: string, input: { name: string; color?: TopicColor; icon?: string }) {
+    const r = await this.request<{ topic: TopicDTO; topics: TopicDTO[] }>(`/conversations/${conversationId}/topics`, { method: 'POST', json: input });
+    this.putTopics(conversationId, r.topics);
+    return r.topic;
+  }
+  async updateTopic(t: TopicDTO, patch: { name?: string; color?: TopicColor; icon?: string; archived?: boolean; position?: number }) {
+    const r = await this.request<{ topics: TopicDTO[] }>(`/topics/${t.id}`, { method: 'PATCH', json: patch });
+    this.putTopics(t.conversationId, r.topics);
+  }
+  async deleteTopic(t: TopicDTO) {
+    const r = await this.request<{ topics: TopicDTO[]; cleared: number }>(`/topics/${t.id}`, { method: 'DELETE' });
+    this.putTopics(t.conversationId, r.topics);
+    const local = this.state.conversations[t.conversationId];
+    if (local?.loaded) this.setConv(t.conversationId, { messages: local.messages.map((m) => (m.topicId === t.id ? { ...m, topicId: null, topicBy: null } : m)) });
+    return r.cleared;
+  }
+  async setMessageTopic(m: MessageDTO, topicId: string | null) {
+    const out = await this.request<MessageDTO>(`/messages/${m.id}/topic`, { method: 'PUT', json: { topicId } });
+    this.upsertLocal(out);
+    return out;
   }
   async loadPins(conversationId: string) {
     const r = await this.request<{ messages: MessageDTO[] }>(`/conversations/${conversationId}/pins`);

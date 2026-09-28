@@ -29,6 +29,7 @@ import { ChatBar, ThreadChip, threadsOf } from './ChatBar.tsx';
 import { AddMembersDialog } from './Dialogs.tsx';
 import { firstUnread, readThroughVisible, isReadTransparentMessage } from '../chat-nav.ts';
 import { IntegrationsPanel } from './Integrations.tsx';
+import { TopicDock, TopicTag, openTopicMenu, topicMenu, useTopics } from './Topics.tsx';
 
 type Row =
   | { kind: 'day'; key: string; label: string }
@@ -72,6 +73,11 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const [showPins, setShowPins] = useState(false);
   const [showLinks, setShowLinks] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
+  // Temas (docs/TEMAS.md): la banderita elegida filtra el chat y es el tema de lo que escribo.
+  const topics = useTopics(id);
+  const [topicFilter, setTopicFilter] = useState<string | null>(null);
+  const topicById = useMemo(() => new Map(topics.map((x) => [x.id, x])), [topics]);
+  const activeFilter = topicFilter && topicById.get(topicFilter) && !topicById.get(topicFilter)!.archivedAt ? topicFilter : null;
   const [text, setText] = useState(() => { try { return localStorage.getItem(draftKey(id)) ?? ''; } catch { return ''; } });
   const scroller = useRef<HTMLDivElement>(null);
   const [host, setHost] = useState<HTMLDivElement | null>(null);
@@ -170,6 +176,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     let lastDay = '';
     let prev: MessageDTO | null = null;
     for (const m of local?.messages ?? []) {
+      if (activeFilter && m.topicId !== activeFilter) continue;
       const day = new Date(m.createdAt).toDateString();
       if (day !== lastDay) { out.push({ kind: 'day', key: `d${day}`, label: dayLabel(m.createdAt) }); lastDay = day; prev = null; }
       // Bajo la línea «N mensajes nuevos» el primer mensaje vuelve a llevar autor y hora.
@@ -186,7 +193,12 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       if (at >= 0) out.splice(at, 0, { kind: 'new', key: 'new-line' });
     }
     return groupLinkRuns(out, expandedGroups, highlight, baseRead);
-  }, [local?.messages, pending, expandedGroups, highlight, newLine]);
+  }, [local?.messages, pending, expandedGroups, highlight, newLine, activeFilter]);
+  const topicCounts = useMemo(() => {
+    const n: Record<string, number> = {};
+    for (const m of local?.messages ?? []) if (m.topicId && !m.deletedAt) n[m.topicId] = (n[m.topicId] ?? 0) + 1;
+    return n;
+  }, [local?.messages]);
 
   // Mantiene la vista abajo al llegar mensajes, y la posición al cargar historial antiguo.
   useLayoutEffect(() => {
@@ -333,7 +345,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       // «Responder en privado»: el directo lleva la referencia al mensaje original (el servidor pone la cita).
       const author = personById(d, privateReply.authorId)?.name ?? null;
       void client.send(id, body, null, { source: 'tiecoms', author, sentAt: privateReply.createdAt, fromConversationId: privateReply.conversationId, messageId: privateReply.id }, { attachments });
-    } else void client.send(id, text, replyTo?.id ?? null, null, { attachments, mentions: mentionsFor(text, tokens) });
+    } else void client.send(id, text, replyTo?.id ?? null, null, { attachments, mentions: mentionsFor(text, tokens), topicId: activeFilter });
     drafts.clear();
     setTokens([]);
     setText('');
@@ -449,6 +461,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       { label: t('menu.copyLink'), icon: '⛓', onSelect: async () => { await copyText(messageLink(m)); toast(t('toast.linkCopied')); } },
       { divider: true },
       ...(conv.canPost ? [{ label: isPinned ? t('menu.unpin') : t('menu.pin'), icon: '📌', onSelect: () => client.setMessagePinned(m, !isPinned).then(() => toast(isPinned ? t('toast.unpinned') : t('toast.pinned'))).catch((e) => toast(errorText(e))) }] : []),
+      ...(conv.canPost && m.kind === 'text' && !embedded ? [topicMenu(m, topics)].filter((x): x is MenuItem => !!x) : []),
       remindMenu(conv, m),
       { label: t('menu.markUnread'), icon: '●', onSelect: () => client.markUnread(id, m.seq).then(() => toast(t('toast.markedUnread'))).catch((e) => toast(errorText(e))) },
       ...(canWork ? [
@@ -513,6 +526,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)} onLinks={() => setShowLinks(true)}
             onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
         )}
+        {!embedded && <TopicDock conv={conv} list={topics} filter={activeFilter} onFilter={(x) => { setTopicFilter(x); atBottom.current = true; requestAnimationFrame(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }); }} counts={topicCounts} />}
         {!embedded && <DerivedPendingStrip conv={conv} />}
 
         {placementFailed && <div className="error" role="alert">{t('chat.unreadLoadFailed')} <button className="link-btn" disabled={local?.loading} onClick={() => void retryUnreadHistory()}>{t('chat.retryUnread')}</button></div>}
@@ -525,6 +539,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           {local?.loaded && !local.hasMore && conv.historyFromSeq > 0 && <div className="msg-sys">{t('chat.lateJoin')}</div>}
           {local?.loaded && local.hasMore && <div className="msg-sys">{local.loading ? t('chat.loadingOlder') : '·'}</div>}
           {error && <div className="error" style={{ textAlign: 'center' }}>{error}</div>}
+          {activeFilter && local?.loaded && !rows.some((r) => r.kind === 'msg' || r.kind === 'links') && <div className="topic-empty">{t('topic.empty', { name: topicById.get(activeFilter)!.name })}</div>}
           {rows.map((r) => {
             if (r.kind === 'day') return <div key={r.key} className="day">{r.label}</div>;
             if (r.kind === 'new') return <div key={r.key} id={`new-${id}`} className="new-line" role="separator">{entry && entry.unread === 1 ? t('chat.newMessagesOne') : t('chat.newMessages', { n: entry?.unread ?? 0 })}</div>;
@@ -547,8 +562,14 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                       <span className="msg-org">{org?.name ?? (author?.guest ? t('common.guest') : '')}</span>
                       <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span>
                       {pinned.has(m.id) && <span className="msg-time">📌</span>}
+                      {!embedded && m.topicId && !m.deletedAt && <TopicTag topic={topicById.get(m.topicId)} onClick={conv.canPost ? () => openTopicMenu(document.querySelector(`[data-mid="${m.id}"] .topic-tag`) as HTMLElement, m, topics) : undefined}
+                        by={m.topicBy && m.topicBy !== m.authorId ? t('topic.by', { name: m.topicBy === d.me.id ? t('common.youShort') : personById(d, m.topicBy)?.name.split(' ')[0] ?? '' }) : null} />}
                     </div>
                   )}
+                  {r.cont && !embedded && m.topicId && !m.deletedAt && (() => {
+                    const prevM = (local?.messages ?? []).find((x) => x.seq === m.seq - 1);
+                    return prevM?.topicId === m.topicId ? null : <div className="msg-meta is-topic-only"><TopicTag topic={topicById.get(m.topicId)} /></div>;
+                  })()}
                   {m.replyTo && (
                     <button className="msg-quote" onClick={() => quoted && jumpTo(quoted.seq)}>
                       {quoted ? <><b>{personById(d, quoted.authorId)?.name}</b> {quoted.deletedAt ? t('chat.deleted') : excerpt(quoted.body, 120)}</> : t('reply.quoteMissing')}
@@ -579,6 +600,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                       <button onClick={() => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />)}>↪ {t('menu.forward')}</button>
                       {canDerive && myWsRole !== 'guest' && <button onClick={() => setDeriving(m)}>{t('derive.action')}</button>}
                       {canOpenIssues && <button onClick={() => setNewIssue({ origin: m })}>{t('issue.fromMessage')}</button>}
+                      {conv.canPost && !embedded && m.kind === 'text' && <button onClick={(e) => openTopicMenu(e.currentTarget as HTMLElement, m, topics)}>🏷 {t('topic.set')}</button>}
                       <button aria-label={t('menu.open')} onClick={(e) => { const rr = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(rr.left, rr.bottom + 4, messageMenu(m)); }}>⋯</button>
                     </div>
                   )}
@@ -647,7 +669,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               {emoji.view}
               <MentionMirror text={text} tokens={tokens} taRef={input} />
               <textarea
-                ref={input} rows={1} value={text} placeholder={isSide ? (sideOthers.length === 1 ? t('side.placeholder', { name: personById(d, sideOthers[0])?.name.split(' ')[0] ?? '' }) : t('side.placeholderMany')) : t('chat.placeholder', { name: title })} aria-label={t('common.message')}
+                ref={input} rows={1} value={text} placeholder={isSide ? (sideOthers.length === 1 ? t('side.placeholder', { name: personById(d, sideOthers[0])?.name.split(' ')[0] ?? '' }) : t('side.placeholderMany')) : activeFilter ? t('topic.placeholder', { name: topicById.get(activeFilter)!.name }) : t('chat.placeholder', { name: title })} aria-label={t('common.message')}
                 onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
                 onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart); client.typing(id); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(180, e.target.scrollHeight)}px`; }}
                 onKeyDown={onKey} enterKeyHint="send"

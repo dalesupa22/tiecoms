@@ -202,7 +202,7 @@ struct LaunchSplashView: View {
             if t < T.exitStart { skip += T.exitStart - t }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Chaggu. " + L("splash.tagline") + ". " + L("splash.secure"))
+        .accessibilityLabel("chaggu. " + L("splash.tagline") + ". " + L("splash.secure"))
         .accessibilityIdentifier("splash")
         .onAppear {
             start = Date()

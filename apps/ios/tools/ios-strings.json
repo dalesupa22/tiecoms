@@ -40,8 +40,8 @@
   "Your name"
  ],
  "auth.noAccount": [
-  "¿Tu empresa aún no está en Chaggu?",
-  "Is your company not on Chaggu yet?"
+  "¿Tu empresa aún no está en chaggu?",
+  "Is your company not on chaggu yet?"
  ],
  "auth.password": [
   "Contraseña",
@@ -392,8 +392,8 @@
   "Language"
  ],
  "settings.languageHint": [
-  "Chaggu sigue el idioma del sistema (español o inglés). Cámbialo en Ajustes › General › Idioma.",
-  "Chaggu follows the system language (Spanish or English). Change it in Settings › General › Language."
+  "chaggu sigue el idioma del sistema (español o inglés). Cámbialo en Ajustes › General › Idioma.",
+  "chaggu follows the system language (Spanish or English). Change it in Settings › General › Language."
  ],
  "settings.logout": [
   "Cerrar sesión",
@@ -464,16 +464,16 @@
   "Connects humans, companies & bots"
  ],
  "share.loginFirst": [
-  "Entra en Chaggu para compartir en tus conversaciones.",
-  "Sign in to Chaggu to share into your conversations."
+  "Entra en chaggu para compartir en tus conversaciones.",
+  "Sign in to chaggu to share into your conversations."
  ],
  "share.sent": [
   "Enviado a «{name}»",
   "Sent to “{name}”"
  ],
  "share.openApp": [
-  "Abre Chaggu e inicia sesión para compartir aquí.",
-  "Open Chaggu and sign in to share here."
+  "Abre chaggu e inicia sesión para compartir aquí.",
+  "Open chaggu and sign in to share here."
  ],
  "dom.title": [
   "Dominios de la empresa",
@@ -544,8 +544,8 @@
   "Delete account"
  ],
  "del.intro": [
-  "Se eliminará tu cuenta de Chaggu de forma permanente.",
-  "Your Chaggu account will be permanently deleted."
+  "Se eliminará tu cuenta de chaggu de forma permanente.",
+  "Your chaggu account will be permanently deleted."
  ],
  "del.removed": [
   "Se borran tu perfil, tus sesiones, tus recordatorios, tus inicios con Google o Microsoft y tus WhatsApp conectados. Sales de tus empresas, espacios y conversaciones.",
@@ -636,8 +636,8 @@
   "Send a report"
  ],
  "safety.reportHint": [
-  "Describe el contenido o la conducta que incumple las normas. Chaggu revisará el reporte.",
-  "Describe content or behavior that violates the rules. Chaggu will review your report."
+  "Describe el contenido o la conducta que incumple las normas. chaggu revisará el reporte.",
+  "Describe content or behavior that violates the rules. chaggu will review your report."
  ],
  "safety.reason": [
   "Motivo (5 a 2000 caracteres)",
@@ -648,8 +648,8 @@
   "Send report"
  ],
  "safety.sent": [
-  "Reporte enviado. Gracias por ayudarnos a mantener Chaggu seguro.",
-  "Report sent. Thank you for helping keep Chaggu safe."
+  "Reporte enviado. Gracias por ayudarnos a mantener chaggu seguro.",
+  "Report sent. Thank you for helping keep chaggu safe."
  ],
  "safety.block": [
   "Bloquear persona",
@@ -1044,8 +1044,8 @@
   "People in the space"
  ],
  "grp.noColleagues": [
-  "Aún no hay más personas de tu empresa en Chaggu.",
-  "There are no other people from your company on Chaggu yet."
+  "Aún no hay más personas de tu empresa en chaggu.",
+  "There are no other people from your company on chaggu yet."
  ],
  "grp.inviteOutside": [
   "Invitar de fuera (opcional)",
@@ -1172,12 +1172,12 @@
   "Share"
  ],
  "ishare.text": [
-  "Te invito a {name} en Chaggu: {url} (código {code})",
-  "Join {name} on Chaggu: {url} (code {code})"
+  "Te invito a {name} en chaggu: {url} (código {code})",
+  "Join {name} on chaggu: {url} (code {code})"
  ],
  "ishare.textNoCode": [
-  "Te invito a {name} en Chaggu: {url}",
-  "Join {name} on Chaggu: {url}"
+  "Te invito a {name} en chaggu: {url}",
+  "Join {name} on chaggu: {url}"
  ],
  "ishare.expires": [
   "Vence el {date}. Sirve para varias personas.",
@@ -1292,8 +1292,8 @@
   "Use AI for this voice note?"
  ],
  "ai.voice.message": [
-  "Si lo permites, Chaggu envía esta grabación y su idioma a Inworld para transcribirla. Envía la transcripción, los nombres del autor y los participantes, y el nombre/contexto de la conversación a DeepSeek para generar un resumen y una acción sugerida. Puedes enviar y escuchar la nota sin IA. El permiso aplica solo a esta nota.",
-  "If you allow this, Chaggu sends this recording and its language to Inworld for transcription. It sends the transcript, author and participant names, and conversation name/context to DeepSeek for a summary and suggested action. You can send and play the voice note without AI. Permission applies to this note only."
+  "Si lo permites, chaggu envía esta grabación y su idioma a Inworld para transcribirla. Envía la transcripción, los nombres del autor y los participantes, y el nombre/contexto de la conversación a DeepSeek para generar un resumen y una acción sugerida. Puedes enviar y escuchar la nota sin IA. El permiso aplica solo a esta nota.",
+  "If you allow this, chaggu sends this recording and its language to Inworld for transcription. It sends the transcript, author and participant names, and conversation name/context to DeepSeek for a summary and suggested action. You can send and play the voice note without AI. Permission applies to this note only."
  ],
  "ai.voice.allow": [
   "Permitir IA y enviar",
@@ -1316,8 +1316,8 @@
   "Share this conversation with DeepSeek?"
  ],
  "ai.side.message": [
-  "Para sugerir un resumen, Chaggu envía a DeepSeek los mensajes y las transcripciones de esta conversación, los nombres del autor y los participantes, y el nombre/contexto de la conversación. Si lo permites, la sugerencia reemplaza tu borrador. Puedes seguir editando y publicar tu propio resumen sin IA. El permiso aplica solo a esta solicitud.",
-  "To suggest a summary, Chaggu sends this conversation's messages and transcripts, author and participant names, and conversation name/context to DeepSeek. Allowing this replaces your draft with the suggestion. You can keep editing and publish your own summary without AI. Permission applies to this request only."
+  "Para sugerir un resumen, chaggu envía a DeepSeek los mensajes y las transcripciones de esta conversación, los nombres del autor y los participantes, y el nombre/contexto de la conversación. Si lo permites, la sugerencia reemplaza tu borrador. Puedes seguir editando y publicar tu propio resumen sin IA. El permiso aplica solo a esta solicitud.",
+  "To suggest a summary, chaggu sends this conversation's messages and transcripts, author and participant names, and conversation name/context to DeepSeek. Allowing this replaces your draft with the suggestion. You can keep editing and publish your own summary without AI. Permission applies to this request only."
  ],
  "ai.side.allow": [
   "Permitir y crear resumen",
@@ -1460,8 +1460,8 @@
   "Idioma / Language"
  ],
  "settings.languageHintApp": [
-  "Cambia al instante en toda la app y en los avisos. Algunos textos del sistema (permisos, «Copiar») cambian al volver a abrir Chaggu.",
-  "Changes right away across the app and its notifications. Some system texts (permissions, “Copy”) change the next time you open Chaggu."
+  "Cambia al instante en toda la app y en los avisos. Algunos textos del sistema (permisos, «Copiar») cambian al volver a abrir chaggu.",
+  "Changes right away across the app and its notifications. Some system texts (permissions, “Copy”) change the next time you open chaggu."
  ],
  "grp.view": [
   "Vista",

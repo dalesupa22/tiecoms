@@ -46,8 +46,8 @@ targets:
     info:
       path: TieComs/Resources/Info.plist
       properties:
-        CFBundleDisplayName: Chaggu
-        CFBundleName: Chaggu
+        CFBundleDisplayName: chaggu
+        CFBundleName: chaggu
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDevelopmentRegion: en
@@ -55,8 +55,8 @@ targets:
         CFBundleAllowMixedLocalizations: true
         ITSAppUsesNonExemptEncryption: false
         NSUserActivityTypes: [INSendMessageIntent]
-        NSCameraUsageDescription: Chaggu uses the camera when you choose to take a profile or group photo, or a photo or video to attach.
-        NSMicrophoneUsageDescription: Chaggu uses the microphone to record the voice notes you send in your conversations.
+        NSCameraUsageDescription: chaggu uses the camera when you choose to take a profile or group photo, or a photo or video to attach.
+        NSMicrophoneUsageDescription: chaggu uses the microphone to record the voice notes you send in your conversations.
         LSRequiresIPhoneOS: true
         UILaunchScreen:
           UIColorName: LaunchBackground
@@ -105,7 +105,7 @@ targets:
     info:
       path: TieComsShare/Info.plist
       properties:
-        CFBundleDisplayName: Chaggu
+        CFBundleDisplayName: chaggu
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDevelopmentRegion: en
@@ -140,7 +140,7 @@ targets:
     info:
       path: TieComsNotifications/Info.plist
       properties:
-        CFBundleDisplayName: Chaggu
+        CFBundleDisplayName: chaggu
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:

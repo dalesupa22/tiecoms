@@ -110,11 +110,11 @@ final class AddInviteTests: XCTestCase {
 
     func testShareText() {
         let link = InviteLink(url: "https://app.chaggu.com/invite/abc", code: "K7QM-4XPA", expiresAt: Date())
-        XCTAssertEqual(AddInvite.shareText(group: "Pagos", link: link), "Te invito a Pagos en Chaggu: https://app.chaggu.com/invite/abc (código K7QM-4XPA)")
+        XCTAssertEqual(AddInvite.shareText(group: "Pagos", link: link), "Te invito a Pagos en chaggu: https://app.chaggu.com/invite/abc (código K7QM-4XPA)")
         XCTAssertEqual(AddInvite.shareText(group: "Pagos", link: InviteLink(url: "https://x.test/i", code: nil, expiresAt: Date())),
-                       "Te invito a Pagos en Chaggu: https://x.test/i")
+                       "Te invito a Pagos en chaggu: https://x.test/i")
         L10n.choice = .en
-        XCTAssertEqual(AddInvite.shareText(group: "Pagos", link: link), "Join Pagos on Chaggu: https://app.chaggu.com/invite/abc (code K7QM-4XPA)")
+        XCTAssertEqual(AddInvite.shareText(group: "Pagos", link: link), "Join Pagos on chaggu: https://app.chaggu.com/invite/abc (code K7QM-4XPA)")
     }
 
     func testRequests() {

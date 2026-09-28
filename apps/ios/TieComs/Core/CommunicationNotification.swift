@@ -13,7 +13,7 @@ enum CommunicationNotification {
                           image: nil, contactIdentifier: nil, customIdentifier: nil, isMe: true)
         return INSendMessageIntent(recipients: p.isGroup ? [me, sender] : [me], outgoingMessageType: .outgoingMessageText,
                                    content: p.body, speakableGroupName: p.isGroup ? INSpeakableString(spokenPhrase: p.title) : nil,
-                                   conversationIdentifier: p.conversationId, serviceName: "Chaggu", sender: sender, attachments: nil)
+                                   conversationIdentifier: p.conversationId, serviceName: "chaggu", sender: sender, attachments: nil)
     }
 
     /// Dona el intent y devuelve el contenido actualizado (nil si el sistema no lo acepta, p. ej. sin el entitlement).

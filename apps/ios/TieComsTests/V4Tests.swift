@@ -169,7 +169,7 @@ final class V4Tests: XCTestCase {
         XCTAssertEqual(group.speakableGroupName?.spokenPhrase, "Estudio Norte - Comité directivo", "«Empresa - Grupo», como el push")
         XCTAssertEqual(group.recipients?.map(\.customIdentifier), ["bob"], "sin incluirme")
         XCTAssertEqual(group.sender?.isMe, true)
-        XCTAssertEqual(group.serviceName, "Chaggu")
+        XCTAssertEqual(group.serviceName, "chaggu")
 
         let direct = Donations.intent(d, d.conversations[4], image: INImage(imageData: Data([1, 2, 3])))
         XCTAssertNil(direct.speakableGroupName, "un directo se sugiere como la persona")

@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Chaggu</string>
+	<string>chaggu</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -20,7 +20,7 @@
 		<string>es</string>
 	</array>
 	<key>CFBundleName</key>
-	<string>Chaggu</string>
+	<string>chaggu</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -48,9 +48,9 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Chaggu uses the camera when you choose to take a profile or group photo, or a photo or video to attach.</string>
+	<string>chaggu uses the camera when you choose to take a profile or group photo, or a photo or video to attach.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Chaggu uses the microphone to record the voice notes you send in your conversations.</string>
+	<string>chaggu uses the microphone to record the voice notes you send in your conversations.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>INSendMessageIntent</string>

@@ -1430,7 +1430,7 @@
 "ai.subtitle" = "Tu asistente con IA";
 "ai.hello" = "Hola, {name}. Soy gg, ¿en qué te ayudo?";
 "ai.intro" = "Escríbeme o háblame: respondo mensajes, reporto lo pendiente, creo grupos, asuntos y reuniones. Nada se envía sin tu visto bueno.";
-"ai.voiceHint" = "Tip: mantén presionada la burbuja ✦ para hablar y suelta para enviar.";
+"ai.voiceHint" = "Tip: mantén presionada la burbuja gg para hablar y suelta para enviar.";
 "ai.s.report" = "Dame un reporte de lo que hay";
 "ai.s.pending" = "Responde mis pendientes";
 "ai.s.due" = "¿Qué vence hoy?";

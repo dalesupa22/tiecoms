@@ -1430,7 +1430,7 @@
 "ai.subtitle" = "Your AI assistant";
 "ai.hello" = "Hi, {name}. I'm gg, how can I help?";
 "ai.intro" = "Type or talk to me: I reply to messages, report what is pending, and create groups, subjects and meetings. Nothing is sent without your OK.";
-"ai.voiceHint" = "Tip: press and hold the ✦ bubble to talk, release to send.";
+"ai.voiceHint" = "Tip: press and hold the gg bubble to talk, release to send.";
 "ai.s.report" = "Give me a report of what is going on";
 "ai.s.pending" = "Reply to my pending messages";
 "ai.s.due" = "What is due today?";

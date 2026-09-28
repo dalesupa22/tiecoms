@@ -329,7 +329,7 @@ export async function createMeeting(userId: string, input: {
     const err = e instanceof ApiError ? e : e instanceof ProviderError
       ? (e.status === 401 || e.status === 403
         ? (await markReconnect(userId, input.provider), new ApiError(409, 'reconnect_required', `${def.label} rechazó el permiso: vuelve a conectar la cuenta (${e.message})`))
-        : new ApiError(502, e.code, `${def.label}: ${e.message}`))
+        : new ApiError(e.status === 409 ? 409 : 502, e.code, `${def.label}: ${e.message}`))
       : new ApiError(502, 'provider_unreachable', `${def.label} no respondió; no se creó ninguna reunión`);
     // Se libera la llave para poder reintentar después de reconectar.
     await pool.query('DELETE FROM meetings WHERE id = $1', [row.id]);

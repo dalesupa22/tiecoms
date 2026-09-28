@@ -226,3 +226,195 @@ chat, para todos) y **Asunto** (no para terceros). Los dos se crean a mano.
   verificado (por Google Workspace/Microsoft Entra al registrarse, o por TXT).
 - Con `auto`, quien inicia sesión con Google o Microsoft con un correo de ese dominio entra a la empresa sin invitación.
 - `OrganizationDTO.joinPolicy` solo viene para owner/admin. En «Tú»: interruptor «Entrada automática con @dominio».
+
+## Plegado de asuntos, completar rápido e hilos en directos (26-sep-2026)
+
+- **Asuntos contraídos por defecto.** La fila del grupo lleva un chip «◆ N» (y «· M!» si hay vencidos). Tocarlo
+  muestra u oculta los asuntos activos de ese grupo (hasta 3 y «+N asuntos») sin entrar al chat. Se recuerda por
+  dispositivo (web: `localStorage['tiecoms:issuesOpen']`, la lista de grupos abiertos).
+- Las **secciones** (Tu organización, Relaciones, Invitado en) se pliegan tocando su título. Su menú (clic derecho o
+  pulsación larga) trae «Mostrar todos los asuntos», «Contraer todos los asuntos», «Plegar todo» y «Expandir todo».
+- **Completar sin abrir**: clic derecho o pulsación larga sobre un asunto (en Grupos y en la lista de Asuntos) ofrece
+  Completar, Marcar en curso, Marcar en espera y Abrir. Bajo los grupos solo se ven los activos (open, in_progress,
+  waiting); al completarse sale de inmediato y baja el conteo.
+- **Hilos en directos y chats grupales**: `POST /conversations/:id/derive` con `kind: 'same'` funciona también fuera
+  de un espacio. Crea un chat `multi` con las mismas personas, `parentId` y `parentMessageId` del mensaje y
+  `deriveKind: 'same'`. Allí no hay `internal` ni `directive` (400), y un hilo no se deriva otra vez (400). Los
+  clientes no lo listan en DMs (solo los sidechats van allí): vive en la barra de hilos del chat.
+- **Web**: «Nuevo chat» arriba de la barra lateral y ⌘K / Ctrl+K desde cualquier pantalla. Trazo, Personas,
+  Archivos, Ver después y WhatsApp van bajo «Más» para que los grupos y las relaciones quepan sin scroll.
+
+## Títulos de notificaciones y subidas (26-sep-2026)
+
+- Los push de un chat de un espacio (grupos y sus hilos) llevan como título, o como subtítulo en menciones,
+  recordatorios, reuniones y reacciones, **«Empresa - Grupo»** (p. ej. «Xertify - General»). La empresa se calcula
+  por persona con la regla del árbol: invitado → anfitriona; otra empresa en el espacio → esa; relación pendiente
+  → la contraparte; si no → la dueña. Helper `groupLabels()` en `apps/api/src/modules/push.ts`. Los clientes que
+  arman notificaciones locales (web, iOS, Android en primer plano) usan la misma etiqueta.
+- nginx: `POST /api/v1/conversations/:id/attachments` acepta hasta 26 MB (antes caía en el límite general de 128 KB
+  y fotos de cámara y notas de voz de más de ~30 s respondían 413) y `/attachments/:id/thumb` hasta 1 MB.
+
+## Barra de arriba y búsqueda rápida en la web (27-sep-2026)
+
+Lo mismo que iOS 1.6.3, adaptado a escritorio:
+
+- Grupos, DMs, Asuntos y Calendario llevan arriba a la derecha **✎ Mensaje nuevo** y **＋ Crear** (Nuevo grupo · Nuevo asunto ·
+  Nueva reunión · Unirme con código). En escritorio la barra lateral repite el par arriba («Mensaje nuevo ⌘K» y «＋»); ⌘K / Ctrl+K
+  sigue abriendo Mensaje nuevo desde cualquier pantalla. Grupos ya no tiene «Unirme con código» ni «＋ Nuevo grupo» sueltos, y
+  Calendario pasa «＋ Reunión» al menú Crear (la semana y Hoy ‹ › quedan debajo del título).
+- Plegar y desplegar: botón de vista ☰ (a la izquierda del título en Grupos y junto a los filtros de la barra lateral). El estado de
+  plegado es uno solo para la barra y la pantalla.
+- «＋ Nuevo asunto» sin grupo de origen pide «Grupo o chat» (`issueDestinations`: donde escribo, sin hilos, no como tercero,
+  en el orden de Inicio; «Grupo · Empresa de la otra parte»).
+- Buscar en Grupos y DMs: Personas (clic = su directo; se crea con POST /chats {userIds:[id]} si no existe), Grupos y Chats; quien
+  ya tiene su directo entre los chats encontrados sale una sola vez. Enter abre el primer resultado; Esc borra.
+- Mensaje nuevo: buscador fijo arriba, «Chat con varias personas» (selección, chips, nombre opcional con 2+, «Crear chat de {n}»),
+  «Recientes» (personas de mis directos, máx. 8), personas por empresa (mi equipo primero) donde un clic abre el directo y, al buscar,
+  grupos. Flechas mueven, Enter abre (o marca en selección múltiple; ⌘/Ctrl+Enter crea). «Grupo en un espacio» sigue abajo.
+- Reglas puras en `apps/web/src/quick-search.ts` (mismas que `QuickSearch.swift`), probadas en `apps/web/test/quick-search.test.ts`.
+
+## Bandeja ordenada, vista Lista/Árbol y chats largos (27-sep-2026)
+
+Chaggu 1.6.4. Sin cambios de backend: todo sale de los DTO actuales (`pinnedAt`, `unread`, `unreadMentions`, `lastReadSeq`,
+`historyFromSeq`, `mutedUntil`). En móvil la barra inferior sigue igual (Grupos, DMs, Asuntos, Calendario, Tú).
+
+### Orden único (Inicio, DMs, Lista, «Todo» y dentro de cada sección del Árbol)
+`compareConversations` (`apps/web/src/home-order.ts`):
+1. **Fijadas primero** (`pinnedAt`). Entre fijadas, el mismo criterio de abajo.
+2. Una **mención sin leer** (`unreadMentions > 0`), aunque esté silenciada.
+3. **No leídos pendientes** (`pendingOf > 0`: no leídos y no silenciada).
+4. El resto por **actividad** descendente (`activityOf`: último mensaje de una persona o, si no hay, el último). Desempate por id.
+
+Antes era mención → no leído → fijada → actividad: la fijada sube al primer nivel. En el Árbol las empresas se ordenan igual
+(con algo fijado, con mención, con no leídos, actividad) y bajo cada empresa van juntos los grupos de todos sus espacios.
+
+### Separadores
+En Lista, DMs y «Todo»: **Fijados**, **Sin leer** (mención o pendiente) y **Recientes**. Un bloque vacío no sale (`withSeparators`).
+
+### Grupos: «Lista» | «Árbol»
+- Control segmentado arriba de Grupos. Por defecto **Lista**. Se recuerda por dispositivo: web `localStorage['chaggu:groupsView']`,
+  iOS UserDefaults `groupsView`, Android SharedPreferences `groupsView`; valores `list` / `tree`.
+- **Lista**: las mismas filas de grupo del árbol (group/internal, sin hilos derivados) en una sola lista con el orden de arriba, sin
+  cabeceras de sección. Cada fila en dos líneas: «{Empresa} · {Grupo}» con la empresa del árbol (Tu organización → mi empresa; Relaciones →
+  la contraparte o `counterpartName`; Invitado en → la anfitriona); si el nombre ya empieza por la empresa (sin importar mayúsculas ni
+  tildes) no se repite (`companyGroupLabel`), y se trunca al final con «…». Debajo «Nombre: texto» del último mensaje; a la derecha la hora,
+  📌 si está fijada, candado si es internal, «💬 N» de hilos sin leer, el chip «◆ N · M!» de asuntos (mismo plegado) y los globos.
+  Clic derecho / pulsación larga: el menú de grupo del árbol. En un separador: «Mostrar todos los asuntos» / «Contraer todos los asuntos».
+- **Árbol**: el de siempre con el orden nuevo. El botón ☰ (plegar y desplegar) solo aplica en Árbol.
+- La búsqueda de Grupos es la misma en ambas vistas.
+
+### Web de escritorio (barra lateral)
+- Pestañas **Todo · Grupos · DMs** con su número de no leídos pendientes, arriba de la lista (reemplazan la fila Todo/No leídos/Menciones).
+  «Todo» = grupos (como en Lista) + DMs en una lista; «Grupos» = Lista o Árbol según el selector; «DMs» = los DMs. Se recuerda en
+  `localStorage['chaggu:sidebarTab']` (`all` / `groups` / `dms`).
+- «Sin leer» y «@ Menciones» pasan a filtros pequeños (se recuerdan en `tiecoms:homeTab`). Menciones abre la bandeja de menciones.
+- El selector Lista | Árbol va junto a ☰ en la pestaña Grupos. Ya no hay bloque «Fijados» aparte: las fijadas van arriba en cada vista.
+
+### Asuntos contraíbles
+Como el 26-sep-2026: contraídos por defecto, chip «◆ N · M!», se recuerda por dispositivo (`tiecoms:issuesOpen`), tocar el resto de la
+fila abre el chat. Funciona igual en Lista. En pantallas pequeñas los asuntos abiertos son sub-filas compactas con sangría, en una línea
+(◆ título, estado si en curso/esperando, fecha límite pequeña a la derecha, en rojo si venció).
+
+### Navegar un chat largo
+1. **Abrir en el primer no leído**: con `unread > 0` se toma al montar `readFrom = max(lastReadSeq, historyFromSeq)`; el primer no leído es el
+   primer mensaje con seq mayor (`firstUnread`, `apps/web/src/chat-nav.ts`). Si no está cargado se piden páginas antiguas (máx. 3,
+   `MAX_OLDER_PAGES`); si no aparece, se abre al final. Sobre él va la línea **«N mensajes nuevos»** (N = `unread` al abrir) y ese mensaje
+   vuelve a llevar autor y hora. La línea queda hasta salir del chat. Mientras se ubica no se marca leído; se marca al llegar al final.
+2. **⌄ «Ir al final»** abajo a la derecha, sobre el compositor, cuando se está a más de una pantalla del final o llegaron mensajes estando
+   arriba (globo con cuántos: seq actual − último seq visto abajo). Tocar: scroll animado al final y marca leído. Estando arriba los
+   mensajes nuevos no arrastran al final.
+3. **Píldora «↑ N nuevos»** arriba al centro cuando la línea quedó por encima de la vista; tocar salta a la línea.
+4. **«@»** encima del ⌄ con menciones a mí sin leer (desde lo leído al abrir, con `MessageDTO.mentions`) que aún no pasaron por pantalla;
+   tocar salta a la siguiente; cuando no quedan, desaparece.
+5. Web: **Fin** o **⌥↓ / Alt+↓** con el foco fuera del compositor baja al final.
+- Etiquetas: «Ir al final», «Ir a los mensajes nuevos», «Ir a la mención» (EN «Jump to latest», «Jump to new messages», «Jump to mention»).
+- `client.markRead` también pone `unreadMentions: 0` en local (antes la «@» de la fila quedaba hasta recargar).
+
+Pruebas: `apps/web/test/home-order.test.ts` (orden con fijados primero, separadores, «Empresa · Grupo», primer no leído).
+
+## Sonido, silenciar chats y No molestar (28-sep-2026)
+
+**API (compatible con clientes viejos, que ignoran el campo nuevo).**
+- Migración `023_do_not_disturb.sql`: `users.dnd_until timestamptz` (nullable).
+- `PUT /api/v1/me/dnd` con `{ until: ISO | null }` → `{ dndUntil }`. `null` o una fecha pasada lo apagan (responde `null`). «Hasta que lo reactive» = `9999-12-31T00:00:00Z` (`MUTE_FOREVER` en `@tiecoms/contracts`).
+- Evento `account.event` `{ type: 'me.dnd', dndUntil }` a todas mis sesiones. El bootstrap trae `me.dndUntil` (`null` si ya pasó; ausente = servidor anterior).
+- Push (`modules/push.ts`, `ACTIVE_SESSION`): con `dnd_until > now()` no sale **ningún** push (mensajes, menciones, reacciones, reuniones, «empieza en 10 min», recordatorios). Los no leídos se cuentan igual y el evento `reminder.due` sigue llegando a la app. Prueba: `apps/api/test/dnd.test.ts`.
+- Silenciar un chat sigue siendo `PUT /conversations/:id/prefs { mutedUntil }`. En silencio pasan las menciones, salvo con «hasta que lo reactive» (más de 366 días).
+
+**client-core.** `setDnd(until)` (si el servidor responde 404 lo guarda solo en el dispositivo, `u:<id>:dnd`, y marca `dndLocalOnly`), `me.dnd` en vivo, y los helpers `dndActive`, `isMutedForever` y `mentionsUser`. El aviso `message` no sale con DND; en un chat silenciado solo sale si me mencionan (con `mentioned` y `muted` en el aviso).
+
+**Web.**
+- Silenciar un chat: 1 hora · 8 horas · 1 semana · Hasta que lo reactive; si ya está silenciado, «Reactivar notificaciones». Está en el «⋯» del encabezado (y el 🔕 junto al título abre el mismo menú), en el panel de detalles como interruptor «Silenciar» («Silenciado hasta las 8:30 p. m.» o «Silenciado»), y con clic derecho o pulsación larga en las filas de Todo, Grupos (Lista y Árbol), DMs, Inicio y Conversaciones.
+- Filas silenciadas: 🔕 gris pequeño y globo gris; las menciones siguen en naranja con «@».
+- «No molestar» en el menú de la cuenta (y en Ajustes): 1 hora · 8 horas · Hasta mañana (8:00 a. m. hora local) · Hasta que lo reactive. Mientras está activo: lunita 🌙 en el avatar (abajo a la izquierda y en «Tú» en el teléfono), franja «No molestar hasta las… · Reactivar» arriba de la lista (también en Grupos y DMs en el teléfono), sin sonido ni notificaciones del navegador (los recordatorios y reuniones quedan como toast). Todo se quita solo al vencer.
+- Sonido (`sound.ts`): «pop» de dos notas con WebAudio (~200 ms, sin archivos); la mención es más aguda. Suena con mensajes de texto de otra persona si el chat no está silenciado (o me mencionan), no hay DND, el sonido está activado y la pestaña está oculta, el mensaje es de otro chat o estoy arriba, a más de una pantalla del final. Máximo uno cada 1,5 s. El audio se desbloquea con el primer clic o tecla; antes no suena nada, sin errores. Ajuste «Sonido de mensajes» en el menú de la cuenta y en Ajustes (`localStorage['chaggu:sound']`, por defecto encendido, con vista previa al encenderlo).
+- Reglas puras en `silence.ts` (`mayAlert`, `shouldSound`, `untilText`, `tomorrowAt8`), probadas en `apps/web/test/silence.test.ts`. `notices.ts` las aplica también a las notificaciones del escritorio.
+- Capturas: `release-assets/1.6.4/web-silencio-shots/`.
+
+## Invitar desde «Agregar al grupo» (28-sep-2026)
+
+Para la viralidad: desde «Agregar al grupo» se suma a quien ya está y se invita por correo o con enlace y código a quien
+aún no usa Chaggu (un colega, alguien de la otra empresa o un tercero). Misma estructura en web, iOS y Android.
+
+### Diálogo
+1. **Buscador** «Nombre o correo» arriba (con foco). Filtra los candidatos por nombre, cargo, área o empresa, sin importar
+   tildes ni mayúsculas (`fold`). Los DTO no traen correos: un correo solo coincide si coincide con el nombre.
+2. **Candidatos** con casilla, «Ven solo lo nuevo / Ven el historial» y «Agregar (N)». Candidatos (`addCandidates`): en un chat
+   grupal, cualquiera; en un grupo, las personas del espacio **y los colegas de mi empresa** que aún no están en él (el API los
+   suma al espacio); en un interno, solo los de esa empresa; nunca agentes ni quien ya está. Si no hay nadie, no sale el texto
+   viejo: se ve directo la sección de invitar.
+3. Si lo escrito es un **correo válido** y no hay candidatos: fila destacada «✉ Invitar a {correo}» con el selector de tipo y
+   «Enviar invitación». Luego «Invitación enviada a {correo}» y la marca «Pendiente» (si Brevo falla, el aviso de siempre).
+   El `history` del selector va en la invitación.
+4. **«Invitar a alguien nuevo»** (no en chats grupales sin espacio):
+   - Tipo (chips, `inviteOptions`): «De {mi empresa}» (`mine`), «De {otra empresa}» (un chip por empresa del espacio que no es
+     mía, sin repetir nombres; si no hay y el espacio tiene `counterpartName`, «De {counterpartName}»), «Tercero (asesor, mentor,
+     cliente…)» (`guest`). En «Tu organización» no hay chips de otra empresa; en un grupo interno solo «De {mi empresa}».
+     Por defecto: casa o interno → mi empresa; relación → la contraparte; si no, tercero. Debajo, una pista del efecto.
+   - «✉ Invitar por correo» enfoca el buscador con «Escribe el correo de la persona». «🔗 Copiar enlace» crea una invitación de
+     varios usos por 14 días (o reutiliza la de la sesión con el mismo tipo, grupo e historial mientras le quede más de una hora,
+     `linkKey`/`cachedLink`) y copia «Te invito a {grupo} en Chaggu: {url} (código {code})». Muestra «Enlace copiado · vence el
+     {fecha}» y el código pequeño con «Copiar código». En pantallas táctiles con `navigator.share`, además «Compartir…» (en iOS y
+     Android, la hoja del sistema).
+   - Tercero (espacio con `myRole === 'guest'`): sin botones, «Solo los miembros pueden invitar».
+5. **«Invitaciones pendientes (N)»** plegado: las de este grupo (de la empresa y del espacio, filtradas por
+   `PendingInvitationDTO.conversationIds`), con «Reenviar» y «Anular» si `canManage`.
+
+### Qué llama cada tipo (`inviteCall`)
+| Tipo | Correo | Enlace y código |
+|---|---|---|
+| De mi empresa | `POST /organizations/{miOrg}/invitations` `{ email, conversationIds: [g], workspaceId, history, lang }` | igual con `{ multiUse: true, expiresInDays: 14 }` sin correo |
+| De otra empresa | `POST /workspaces/{ws}/invitations` `{ email, role: 'member', conversationIds: [g], history, lang }` | igual con `multiUse` |
+| Tercero | igual con `role: 'guest'` | igual con `role: 'guest'` y `multiUse` |
+
+Mi empresa en el espacio (`myOrgIn`): la mía entre las del espacio (la principal si hay dos).
+
+### API (migración 024, commit del backend; todo aditivo)
+- `org_invitations` gana `workspace_id`, `conversation_ids`, `history`, `code_hash`, `multi_use`, `uses`.
+- `POST /organizations/:id/invitations` acepta `workspaceId`, `conversationIds`, `history`, `multiUse` y responde además `url`
+  (`/signup?org={token}`) y `code`. Con `conversationIds` **cualquier miembro** de la empresa puede invitar colegas (solo
+  `member`), a grupos donde participa, de un mismo espacio donde está como persona de esa empresa.
+- Al aceptar, la persona queda en **mi organización** (no como invitada), en el espacio como `member` de mi empresa (también en
+  una relación) y en los grupos con el historial elegido. Registro con `orgInviteToken` (token o código) o SSO con `?org=`.
+- Con sesión, `GET/POST /invitations/:tokenOrCode(/accept)` también resuelven las de empresa (`kind: 'org'`, `orgName`); así
+  «Unirme con código» y `/invite/{token}` sirven para las dos. Quien ya tiene cuenta suma la empresa como otra membresía.
+  Web: con sesión, `/signup?org=…` pasa a `/invite/…`; sin sesión, `/invite/…` de una de empresa lleva a `/signup?org=…`.
+- Pendientes de empresa: un miembro que no administra ve y gestiona solo las suyas. `PendingInvitationDTO.conversationIds`.
+- `POST /conversations/:id/members` acepta colegas de mi empresa que aún no están en el espacio del grupo.
+- «De otra empresa» y terceros no cambian: la regla de **Viralidad** (la primera persona de la empresa nueva queda admin) sigue
+  aplicando. No hay campo para asociar a la persona con la organización contraparte: entra con su propia empresa (la de su
+  dominio verificado o la que crea al registrarse).
+
+### Textos (ES / EN)
+Nombre o correo / Name or email · Invitar a {correo} / Invite {email} · Enviar invitación / Send invite · Invitación enviada a
+{correo} / Invite sent to {email} · Pendiente / Pending · Invitar a alguien nuevo / Invite someone new · Tipo de persona / Type of
+person · De {empresa} / From {company} · Tercero (asesor, mentor, cliente…) / Guest (advisor, mentor, client…) · Invitar por correo /
+Invite by email · Copiar enlace / Copy link · Enlace copiado · vence el {fecha} / Link copied · expires {date} · Compartir… / Share… ·
+Código {code} / Code {code} · Invitaciones pendientes ({n}) / Pending invites ({n}) · Reenviar / Resend · Anular / Revoke · Solo los
+miembros pueden invitar / Only members can invite · Agregar ({n}) / Add ({n}) · Entra a {empresa} y a este grupo. / Joins {company}
+and this group. · Entra a este grupo como persona de {empresa}. / Joins this group as part of {company}. · Entra solo a este grupo, a
+título propio. / Joins only this group, on their own. · «{nombre} te invita a unirte a {empresa} como colega.» (vista previa) ·
+«Entras también a {grupos}.» (registro).
+
+Reglas puras en `apps/web/src/add-invite.ts`, probadas en `apps/web/test/add-invite.test.ts`. API: `apps/api/test/org-invite-groups.test.ts`.
+Capturas: `release-assets/1.6.4/web-invitar-shots/`.

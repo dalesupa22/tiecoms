@@ -268,7 +268,7 @@ function ChatRow({ c, active, multi, onOpen, onPatch }: { c: WaChatDTO; active: 
           <span className="row" style={{ gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
             {multi && <span className="tag">{c.accountLabel}</span>}
             {c.isGroup && c.participants ? <span className="tag">{t('wa.members', { n: c.participants })}</span> : null}
-            {c.linkedConversationId && <span className="tag wa-linked">⇄ Chaggu</span>}
+            {c.linkedConversationId && <span className="tag wa-linked">⇄ chaggu</span>}
           </span>
         </span>
         {c.unread > 0 && <span className="pill">{c.unread}</span>}
@@ -308,7 +308,7 @@ function ChatPanel({ c, revision, onClose, onPatch }: { c: WaChatDTO; revision: 
         {messages?.length === 0 && <div className="hint">{t('wa.noMessages')}</div>}
         {messages?.map((m) => (
           <div key={m.id} className={`wa-msg ${m.fromMe ? 'me' : ''}`}>
-            {!m.fromMe && c.isGroup && m.author && <div className="wa-author">{m.author}</div>}
+            {!m.fromMe && c.isGroup && <div className={m.author ? 'wa-author' : 'wa-author unknown'}>{m.author ?? t('wa.someone')}</div>}
             <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{m.body}</div>
             <div className="wa-time">{new Date(m.sentAt).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
           </div>

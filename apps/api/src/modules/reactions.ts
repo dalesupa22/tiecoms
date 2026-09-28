@@ -87,7 +87,7 @@ export async function react(userId: string, messageId: string, rawEmoji: string,
         if (closed.rowCount) out.closedReminderIds = closed.rows.map((r) => r.id);
         // «Hecho» reemplaza a «lo reviso».
         await c.query('DELETE FROM message_reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3', [messageId, userId, REACTION_ACTIONS.look]);
-        const issue = await c.query("SELECT id FROM issues WHERE origin_message_id = $1 AND status NOT IN ('done','cancelled') LIMIT 1", [messageId]);
+        const issue = await c.query("SELECT id FROM issues WHERE origin_message_id = $1 AND visibility = 'all' AND status NOT IN ('done','cancelled') LIMIT 1", [messageId]);
         if (issue.rows[0]) out.openIssueId = issue.rows[0].id;
       }
       if (m.author_id && m.author_id !== userId) {
@@ -115,7 +115,7 @@ export async function react(userId: string, messageId: string, rawEmoji: string,
 }
 
 /**
- * Reacción que llega por el puente de WhatsApp sobre un mensaje reenviado a Chaggu.
+ * Reacción que llega por el puente de WhatsApp sobre un mensaje reenviado a chaggu.
  * emoji vacío = la persona quitó su reacción.
  */
 export async function externalReaction(messageId: string, key: string, emoji: string | null, name: string, source = 'whatsapp') {

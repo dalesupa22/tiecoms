@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { BootstrapDTO, ConversationDTO, MessageDTO, PersonDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { attachmentSummaryText, errorText, t } from '../i18n.ts';
@@ -7,7 +7,9 @@ import { openDialog } from '../actions.tsx';
 import { groupWorkspaces } from './Shell.tsx';
 import { CreateGroupDialog } from './Groups.tsx';
 import { navigate } from '../router.ts';
-import { Avatar, Modal, OrgMark, conversationTitle, orgById, personById } from '../ui.tsx';
+import { Avatar, ConvAvatar, Modal, OrgMark, conversationTitle, orgById, personById } from '../ui.tsx';
+import { destinationLabel, peopleByOrg, recentPeopleIds, searchGroups } from '../quick-search.ts';
+import { openDirect } from './Quick.tsx';
 
 // ---------- Enlaces clicables en el texto ----------
 const URL_SPLIT = /(\bhttps?:\/\/[^\s<>"'`]+)/gi;
@@ -23,80 +25,186 @@ export function Linkify({ text }: { text: string }) {
 }
 
 // ---------- Vista previa de enlaces ----------
-// ---------- Personas agrupadas por empresa ----------
-function groupByOrg(d: BootstrapDTO, people: PersonDTO[]) {
-  const mine = d.me.primaryOrgId;
-  const groups = new Map<string, PersonDTO[]>();
-  for (const p of people) {
-    const k = p.orgId ?? 'guests';
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k)!.push(p);
-  }
-  // Primero mi empresa, luego las demás por nombre, al final terceros.
-  return [...groups.entries()].sort(([a], [b]) => {
-    if (a === mine) return -1; if (b === mine) return 1;
-    if (a === 'guests') return 1; if (b === 'guests') return -1;
-    return (orgById(d, a)?.name ?? '').localeCompare(orgById(d, b)?.name ?? '');
-  });
-}
-
 const roleLine = (p: PersonDTO) => [p.title, p.area].filter(Boolean).join(' · ');
 
-export function PeoplePicker({ picked, onToggle, exclude = [] }: { picked: string[]; onToggle: (id: string) => void; exclude?: string[] }) {
+/**
+ * Mensaje nuevo (✎ y ⌘K): buscador fijo arriba; un clic en una persona abre su directo (el que existe o uno nuevo).
+ * «Recientes» son las personas de mis directos; «Chat con varias personas» pasa a selección múltiple (chat grupal,
+ * pueden ser de empresas distintas). Al buscar también salen grupos. Flechas mueven, Enter abre (o marca).
+ * «Grupo en un espacio» sigue disponible abajo (docs/GRUPOS.md › Barra de arriba y búsqueda rápida).
+ */
+export function NewChatDialog({ onClose }: { onClose: () => void }) {
   const d = useClient((s) => s.data)!;
+  const [mode, setMode] = useState<'compose' | 'space'>('compose');
   const [q, setQ] = useState('');
-  const skip = new Set([d.me.id, ...exclude]);
-  const needle = q.trim().toLowerCase();
-  const people = d.people.filter((p) => !skip.has(p.id) && p.kind === 'human')
-    .filter((p) => !needle || [p.name, p.title, p.area, orgById(d, p.orgId)?.name].some((x) => x?.toLowerCase().includes(needle)))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const groups = groupByOrg(d, people);
+  const [multi, setMulti] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [active, setActive] = useState(0);
+  const list = useRef<HTMLDivElement>(null);
+  const searching = !!q.trim();
+  const orgs = useMemo(() => peopleByOrg(d, q), [d, q]);
+  const groups = useMemo(() => (multi || !searching ? [] : searchGroups(d, q, { title: (c) => conversationTitle(d, c) }).slice(0, 6)), [d, q, multi, searching]);
+  const recents = useMemo(() => recentPeopleIds(d).slice(0, 8).map((id) => personById(d, id)).filter((p): p is PersonDTO => !!p), [d]);
+  // Lo que se recorre con el teclado: grupos encontrados y luego personas, en el orden en que se ven.
+  const items: ({ kind: 'group'; c: ConversationDTO } | { kind: 'person'; p: PersonDTO })[] = [
+    ...groups.map((c) => ({ kind: 'group' as const, c })),
+    ...orgs.flatMap((g) => g.people.map((p) => ({ kind: 'person' as const, p }))),
+  ];
+  const at = Math.min(active, Math.max(0, items.length - 1));
+  useEffect(() => { setActive(0); }, [q, multi]);
+  useEffect(() => { list.current?.querySelector('[data-active]')?.scrollIntoView({ block: 'nearest' }); }, [at]);
+  const toggle = (id: string) => setPicked((x) => (x.includes(id) ? x.filter((y) => y !== id) : [...x, id]));
+  const pickedOrgs = [...new Set([d.me.primaryOrgId, ...picked.map((id) => personById(d, id)?.orgId)].filter(Boolean) as string[])];
+
+  async function run(fn: () => Promise<void>) {
+    setBusy(true); setError(null);
+    try { await fn(); onClose(); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+  }
+  /** Un clic: el directo con esa persona. */
+  const open = (p: PersonDTO) => run(() => openDirect(p.id));
+  const openGroup = (c: ConversationDTO) => { onClose(); navigate(`/c/${c.id}`); };
+  const createMulti = () => run(async () => {
+    if (picked.length === 1) { await openDirect(picked[0]!); return; }
+    const r = await client.request<{ id: string; kind: string }>('/chats', { method: 'POST', json: { userIds: picked, ...(name.trim() ? { name: name.trim() } : {}) } });
+    await client.loadBootstrap();
+    navigate(`/c/${r.id}`);
+  });
+  const choose = (it: (typeof items)[number] | undefined) => {
+    if (!it || busy) return;
+    if (it.kind === 'group') openGroup(it.c);
+    else if (multi) toggle(it.p.id);
+    else void open(it.p);
+  };
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(at + 1, items.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(at - 1, 0)); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      // En selección múltiple, ⌘/Ctrl+Enter crea el chat.
+      if (multi && (e.metaKey || e.ctrlKey)) { if (picked.length) void createMulti(); return; }
+      if (searching || multi) choose(items[at]);
+    }
+  };
+  const isActive = (it: (typeof items)[number]) => (searching || multi) && items[at] === it;
+
+  if (mode === 'space') {
+    return (
+      <Modal title={t('chat.mode.space')} onClose={onClose}>
+        <button className="btn ghost small" style={{ alignSelf: 'flex-start' }} onClick={() => setMode('compose')}>‹ {t('dms.new')}</button>
+        <SpaceGroupForm onClose={onClose} />
+      </Modal>
+    );
+  }
   return (
-    <div className="picker">
-      <input className="input" placeholder={t('chat.searchPeople')} value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
-      {picked.length > 0 && (
-        <div className="picker-chips">
-          {picked.map((id) => {
-            const p = personById(d, id);
-            return <button key={id} className="chip" onClick={() => onToggle(id)} title={t('common.remove')}><Avatar person={p} org={orgById(d, p?.orgId)} size={20} />{p?.name.split(' ')[0]} ×</button>;
-          })}
+    <Modal title={multi ? t('compose.multi') : t('dms.new')} onClose={onClose}>
+      <div className="search-field compose-search">
+        <span aria-hidden className="muted">⌕</span>
+        <input className="grow" autoFocus type="search" value={q} placeholder={t('compose.search')} aria-label={t('compose.search')} autoComplete="off" spellCheck={false}
+          role="combobox" aria-expanded aria-controls="compose-list" onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} disabled={busy} />
+        {q && <button type="button" className="search-clear" onClick={() => setQ('')} aria-label={t('common.clear')}>×</button>}
+      </div>
+      {multi && (
+        <div className="compose-multi">
+          <span className="hint">{t('compose.multiHint')}</span>
+          {picked.length > 0 && (
+            <div className="picker-chips">
+              {picked.map((id) => {
+                const p = personById(d, id);
+                return <button key={id} type="button" className="chip" onClick={() => toggle(id)} title={t('common.remove')}><Avatar person={p} org={orgById(d, p?.orgId)} size={20} />{p?.name.split(' ')[0]} ×</button>;
+              })}
+            </div>
+          )}
+          {picked.length > 1 && (
+            <>
+              <div className="row small muted" style={{ gap: 6, flexWrap: 'wrap' }}>
+                {pickedOrgs.map((o) => <OrgMark key={o} org={orgById(d, o)} size={18} />)}
+                <span>{pickedOrgs.length > 1 ? t('chat.crossCompany', { n: pickedOrgs.length }) : t('chat.sameCompany')}</span>
+              </div>
+              <input className="input" maxLength={120} placeholder={t('chat.groupNamePh')} value={name} onChange={(e) => setName(e.target.value)} />
+            </>
+          )}
         </div>
       )}
-      <div className="picker-list">
-        {groups.length === 0 && <div className="hint" style={{ padding: 10 }}>{t('chat.nobody')}</div>}
-        {groups.map(([orgId, list]) => {
-          const org = orgById(d, orgId);
-          return (
-            <section key={orgId}>
-              <div className="picker-org"><OrgMark org={org} size={20} /><span>{org?.name ?? t('common.guests')}</span>{orgId === d.me.primaryOrgId && <span className="tag">{t('chat.myTeam')}</span>}</div>
-              {list.map((p) => (
-                <label key={p.id} className={`picker-person ${picked.includes(p.id) ? 'on' : ''}`}>
-                  <input type="checkbox" checked={picked.includes(p.id)} onChange={() => onToggle(p.id)} />
-                  <Avatar person={p} org={org} size={34} />
+      <div className="compose-list" id="compose-list" ref={list} role="listbox" aria-busy={busy}>
+        {!multi && !searching && (
+          <>
+            <button type="button" className="person-row compose-multi-btn" onClick={() => setMulti(true)}>
+              <span className="compose-multi-ico" aria-hidden>👥</span><b className="grow">{t('compose.multi')}</b><span className="muted" aria-hidden>›</span>
+            </button>
+            {recents.length > 0 && (
+              <section>
+                <div className="picker-org">{t('compose.recent')}</div>
+                <div className="compose-recents">
+                  {recents.map((p) => (
+                    <button key={p.id} type="button" className="compose-recent" onClick={() => void open(p)} title={`${p.name} · ${t('search.opensChat')}`} aria-label={p.name}>
+                      <Avatar person={p} org={orgById(d, p.orgId)} size={44} />
+                      <span className="ellipsis">{p.name.split(' ')[0]}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+          </>
+        )}
+        {groups.length > 0 && (
+          <section>
+            <div className="picker-org">{t('search.groups')}</div>
+            {items.filter((x) => x.kind === 'group').map((it) => {
+              const c = (it as { c: ConversationDTO }).c;
+              return (
+                <button key={c.id} type="button" role="option" aria-selected={isActive(it)} data-active={isActive(it) || undefined}
+                  className={`person-row ${isActive(it) ? 'is-active' : ''}`} onClick={() => openGroup(c)}>
+                  <span className="compose-group-ico"><ConvAvatar c={c} size={26} /></span>
+                  <span className="grow ellipsis"><b>{destinationLabel(d, c, conversationTitle(d, c))}</b></span>
+                </button>
+              );
+            })}
+          </section>
+        )}
+        {orgs.length === 0 && groups.length === 0 && <div className="hint" style={{ padding: 12 }}>{t('chat.nobody')}</div>}
+        {orgs.map((g) => (
+          <section key={g.orgId}>
+            <div className="picker-org"><OrgMark org={g.org} size={20} /><span>{g.org?.name ?? t('common.guests')}</span>{g.isMine && <span className="tag">{t('chat.myTeam')}</span>}</div>
+            {g.people.map((p) => {
+              const it = items.find((x) => x.kind === 'person' && x.p.id === p.id)!;
+              const on = picked.includes(p.id);
+              const line = roleLine(p) || (p.guest ? t('common.guest') : g.org?.name ?? '');
+              return (
+                <button key={p.id} type="button" role="option" aria-selected={multi ? on : isActive(it)} data-active={isActive(it) || undefined}
+                  className={`person-row ${isActive(it) ? 'is-active' : ''} ${on ? 'on' : ''}`} onClick={() => (multi ? toggle(p.id) : void open(p))}
+                  title={multi ? undefined : t('search.opensChat')}>
+                  {multi && <span className={`compose-check ${on ? 'on' : ''}`} aria-hidden>{on ? '✓' : ''}</span>}
+                  <Avatar person={p} org={g.org} size={32} />
                   <span className="grow" style={{ minWidth: 0 }}>
                     <b className="ellipsis" style={{ display: 'block' }}>{p.name}</b>
-                    <span className="small muted ellipsis" style={{ display: 'block' }}>{roleLine(p) || (p.guest ? t('common.guest') : org?.name)}</span>
+                    {line && <span className="small muted ellipsis" style={{ display: 'block' }}>{line}</span>}
                   </span>
-                </label>
-              ))}
-            </section>
-          );
-        })}
+                  {!multi && <span className="person-row-go" aria-hidden>💬</span>}
+                </button>
+              );
+            })}
+          </section>
+        ))}
       </div>
-    </div>
-  );
-}
-
-/** Nuevo chat: una persona abre el directo; varias, un chat grupal (pueden ser de empresas distintas). */
-export function NewChatDialog({ onClose }: { onClose: () => void }) {
-  const [mode, setMode] = useState<'person' | 'space'>('person');
-  return (
-    <Modal title={t('chat.new')} onClose={onClose}>
-      <div className="seg" role="tablist">
-        <button type="button" role="tab" aria-selected={mode === 'person'} className={mode === 'person' ? 'on' : ''} onClick={() => setMode('person')}>{t('chat.mode.person')}</button>
-        <button type="button" role="tab" aria-selected={mode === 'space'} className={mode === 'space' ? 'on' : ''} onClick={() => setMode('space')}>{t('chat.mode.space')}</button>
+      {error && <div className="error">{error}</div>}
+      <div className="modal-actions">
+        {multi ? (
+          <>
+            <button className="btn ghost" onClick={() => { setMulti(false); setPicked([]); setName(''); }}>‹ {t('common.back')}</button>
+            <button className="btn primary" disabled={!picked.length || busy} onClick={() => void createMulti()}>
+              {picked.length > 1 ? t('chat.createGroup', { n: picked.length + 1 }) : t('chat.openDirect')}
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="btn ghost small" style={{ marginRight: 'auto' }} onClick={() => setMode('space')}>{t('chat.mode.space')}</button>
+            <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+          </>
+        )}
       </div>
-      {mode === 'person' ? <PersonChatForm onClose={onClose} /> : <SpaceGroupForm onClose={onClose} />}
     </Modal>
   );
 }
@@ -185,43 +293,6 @@ function SpaceGroupForm({ onClose }: { onClose: () => void }) {
         <button className="btn primary" disabled={busy || !ws || name.trim().length < 2} onClick={create}>
           {t('chat.createSpaceGroup')}
         </button>
-      </div>
-    </>
-  );
-}
-
-function PersonChatForm({ onClose }: { onClose: () => void }) {
-  const d = useClient((s) => s.data)!;
-  const [picked, setPicked] = useState<string[]>([]);
-  const [name, setName] = useState('');
-  const [busy, setBusy] = useState(false);
-  const toggle = (id: string) => setPicked((x) => (x.includes(id) ? x.filter((y) => y !== id) : [...x, id]));
-  const orgs = useMemo(() => [...new Set([d.me.primaryOrgId, ...picked.map((id) => personById(d, id)?.orgId)].filter(Boolean) as string[])], [d, picked]);
-  async function go() {
-    setBusy(true);
-    try {
-      const r = await client.request<{ id: string; kind: string }>('/chats', { method: 'POST', json: { userIds: picked, ...(picked.length > 1 && name.trim() ? { name: name.trim() } : {}) } });
-      await client.loadBootstrap();
-      onClose();
-      navigate(`/c/${r.id}`);
-    } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
-  }
-  return (
-    <>
-      <p className="muted" style={{ margin: 0 }}>{t('chat.newHint')}</p>
-      <PeoplePicker picked={picked} onToggle={toggle} />
-      {picked.length > 1 && (
-        <>
-          <div className="row small muted" style={{ gap: 6, flexWrap: 'wrap' }}>
-            {orgs.map((o) => <OrgMark key={o} org={orgById(d, o)} size={18} />)}
-            <span>{orgs.length > 1 ? t('chat.crossCompany', { n: orgs.length }) : t('chat.sameCompany')}</span>
-          </div>
-          <input className="input" maxLength={120} placeholder={t('chat.groupNamePh')} value={name} onChange={(e) => setName(e.target.value)} />
-        </>
-      )}
-      <div className="modal-actions">
-        <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
-        <button className="btn primary" disabled={!picked.length || busy} onClick={go}>{picked.length > 1 ? t('chat.createGroup', { n: picked.length + 1 }) : t('chat.openDirect')}</button>
       </div>
     </>
   );

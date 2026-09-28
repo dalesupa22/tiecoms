@@ -2,9 +2,10 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueEventDTO, type MessageDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp,
+  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type UserDTO, normalizeEmoji,
+  type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -49,16 +50,33 @@ export interface ClientState {
   /** Mensajes fijados por conversación. */
   pins: Record<string, string[]>;
   reminders: ReminderDTO[];
+  /** Mis mensajes programados por salir (y los fallidos), ordenados por hora de envío. */
+  scheduled: ScheduledMessageDTO[];
   events: Record<string, CalendarEventDTO>;
   /** Sube cuando el puente de WhatsApp trae chats o mensajes nuevos: la pantalla vuelve a pedir la lista. */
   waRevision: number;
   /** Sube cuando cambia algún árbol de archivos visible para la persona. */
   driveRevision: number;
+  /** «No molestar» guardado solo en este dispositivo porque el servidor no conoce /me/dnd (servidor viejo). */
+  dndLocalOnly?: boolean;
 }
+
+/** Silencio «hasta que lo reactive»: más de un año (igual que el servidor, que ahí no deja pasar menciones). */
+export const isMutedForever = (until: string | null | undefined) => !!until && Date.parse(until) > Date.now() + 366 * 86_400_000;
+export const isActiveUntil = (until: string | null | undefined) => !!until && Date.parse(until) > Date.now();
+/** «No molestar» activo en este momento. */
+export const dndActive = (s: Pick<ClientState, 'data'>) => isActiveUntil(s.data?.me.dndUntil);
+/** ¿El mensaje me menciona (a mí o a @todos)? */
+export const mentionsUser = (m: Pick<MessageDTO, 'mentions'>, userId: string | undefined) =>
+  !!userId && !!m.mentions?.some((x) => x.userId === userId || x.userId === 'all');
 
 /** Aviso para la interfaz (notificación del sistema, sonido, toast). */
 export type ClientNotice =
-  | { kind: 'message'; conversationId: string; message: MessageDTO }
+  /**
+   * Mensaje nuevo de otra persona. No llega con «No molestar» activo ni en un chat silenciado,
+   * salvo que me mencionen (`mentioned`) y el silencio no sea «hasta que lo reactive» (igual que el push).
+   */
+  | { kind: 'message'; conversationId: string; message: MessageDTO; mentioned: boolean; muted: boolean }
   | { kind: 'reminder'; reminder: ReminderDTO }
   /** Una reunión a la que voy empieza en `minutes` minutos. */
   | { kind: 'eventSoon'; event: CalendarEventDTO; minutes: number }
@@ -83,12 +101,12 @@ const uid = () => (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(3
 const base64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 /**
- * Cliente Chaggu independiente de la interfaz. Toda la lógica de envío,
+ * Cliente chaggu independiente de la interfaz. Toda la lógica de envío,
  * reintentos, orden, recuperación y no leídos vive aquí para que web,
  * escritorio y móvil se comporten igual.
  */
 export class TieComsClient {
-  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], events: {}, waRevision: 0, driveRevision: 0 };
+  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0 };
   private listeners = new Set<() => void>();
   private accessToken: string | null = null;
   private accessExp = 0;
@@ -238,7 +256,7 @@ export class TieComsClient {
     this.accessToken = null;
     await this.opts.secrets?.set(null);
     if (userId) await this.opts.storage.clearPrefix(`u:${userId}:`);
-    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], events: {}, waRevision: 0, driveRevision: 0 };
+    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0 };
     this.listeners.forEach((l) => l());
   }
 
@@ -250,6 +268,7 @@ export class TieComsClient {
     this.connect();
     this.scheduleFlush(0);
     void this.loadReminders().catch(() => {});
+    void this.loadScheduled().catch(() => {});
     // Grupos muestra los asuntos abiertos bajo cada grupo.
     void this.loadIssues({ open: true }).catch(() => {});
   }
@@ -257,7 +276,13 @@ export class TieComsClient {
   // ---------- Snapshot ----------
   async loadBootstrap() {
     const data = await this.request<BootstrapDTO>('/bootstrap');
-    this.set({ data });
+    const dndLocalOnly = data.me.dndUntil === undefined;
+    if (dndLocalOnly) {
+      // Servidor anterior a «No molestar»: se usa lo guardado en este dispositivo.
+      const local = await this.opts.storage.get<string | null>(`u:${data.me.id}:dnd`).catch(() => null);
+      data.me.dndUntil = isActiveUntil(local) ? local : null;
+    }
+    this.set({ data, dndLocalOnly });
     // Conversaciones que ya no están en mi alcance: se purgan de la caché local.
     const allowed = new Set(data.conversations.map((c) => c.id));
     const kept: Record<string, ConversationState> = {};
@@ -324,7 +349,16 @@ export class TieComsClient {
   private onAccountEvent(e: AccountEvent) {
     if (e.type === 'scope.changed') { this.scheduleBootstrap(); void this.loadIssues({ open: true }).catch(() => {}); }
     if (e.type === 'prefs.updated') this.scheduleBootstrap();
+    if (e.type === 'me.dnd') this.patchMe({ dndUntil: e.dndUntil });
+    // Asuntos restringidos ('org' o 'private') llegan por la cuenta, no por la conversación.
+    if (e.type === 'issue.updated') { this.putIssues([e.issue]); this.recountIssues(e.issue.conversationId); }
+    if (e.type === 'issue.hidden') {
+      const next = { ...this.state.issues }; delete next[e.issueId];
+      this.set({ issues: next }); this.recountIssues(e.conversationId);
+    }
+    if (e.type === 'me.sleep') this.patchMe({ sleep: e.sleep });
     if (e.type === 'reminders.changed') void this.loadReminders().catch(() => {});
+    if (e.type === 'scheduled.updated') this.putScheduled(e.scheduled);
     if (e.type === 'whatsapp.updated') this.set({ waRevision: this.state.waRevision + 1 });
     if (e.type === 'drive.updated') this.set({ driveRevision: this.state.driveRevision + 1 });
     if (e.type === 'reminder.due') {
@@ -349,8 +383,11 @@ export class TieComsClient {
     if (e.type === 'issue.updated') { this.putIssues([e.issue]); this.recountIssues(e.conversationId); }
     if (e.type === 'pins.changed') this.set({ pins: { ...this.state.pins, [e.conversationId]: e.messageIds } });
     if (e.type === 'calendar.updated') this.set({ events: { ...this.state.events, [e.event.id]: e.event } });
-    if (e.type === 'message.created' && e.message.authorId !== this.state.data?.me.id && e.message.kind === 'text'
-      && !(meta.mutedUntil && Date.parse(meta.mutedUntil) > Date.now())) this.opts.onNotice?.({ kind: 'message', conversationId: e.conversationId, message: e.message });
+    if (e.type === 'message.created' && e.message.authorId !== this.state.data?.me.id && e.message.kind === 'text' && !dndActive(this.state)) {
+      const muted = isActiveUntil(meta.mutedUntil);
+      const mentioned = mentionsUser(e.message, this.state.data?.me.id);
+      if (!muted || (mentioned && !isMutedForever(meta.mutedUntil))) this.opts.onNotice?.({ kind: 'message', conversationId: e.conversationId, message: e.message, mentioned, muted });
+    }
     if (e.type === 'message.created') this.bumpMeta(e.message);
     if (!local?.loaded) {
       this.patchConversationMeta(e.conversationId, { lastEventSeq: Math.max(meta.lastEventSeq, e.eventSeq) });
@@ -438,7 +475,7 @@ export class TieComsClient {
   markRead(id: string) {
     const c = this.state.data?.conversations.find((x) => x.id === id);
     if (!c || c.lastMessageSeq <= c.lastReadSeq) return;
-    this.patchConversationMeta(id, { lastReadSeq: c.lastMessageSeq, unread: 0 });
+    this.patchConversationMeta(id, { lastReadSeq: c.lastMessageSeq, unread: 0, unreadMentions: 0 });
     clearTimeout(this.readTimers.get(id));
     this.readTimers.set(id, setTimeout(() => {
       const seq = this.state.data?.conversations.find((x) => x.id === id)?.lastReadSeq ?? 0;
@@ -581,19 +618,25 @@ export class TieComsClient {
     this.putIssues(r.issues);
     return r.issues;
   }
-  async createIssue(conversationId: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; originMessageId?: string | null }) {
+  /** Tarea hija de un asunto (en su chat o, con conversationId, en un sidechat que salió de él). */
+  async createChildIssue(parentId: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; visibility?: IssueVisibility; viewerIds?: string[]; conversationId?: string }) {
+    const i = await this.request<IssueDTO>(`/issues/${parentId}/children`, { method: 'POST', json: input });
+    this.putIssues([i]); this.recountIssues(i.conversationId);
+    return i;
+  }
+  async createIssue(conversationId: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; originMessageId?: string | null; visibility?: IssueVisibility; viewerIds?: string[]; parentIssueId?: string | null }) {
     const i = await this.request<IssueDTO>(`/conversations/${conversationId}/issues`, { method: 'POST', json: input });
     this.putIssues([i]); this.recountIssues(conversationId);
     return i;
   }
-  async updateIssue(id: string, patch: Partial<Pick<IssueDTO, 'title' | 'status' | 'ownerId' | 'dueDate' | 'waitingOnOrgId'>>) {
+  async updateIssue(id: string, patch: Partial<Pick<IssueDTO, 'title' | 'status' | 'ownerId' | 'dueDate' | 'waitingOnOrgId' | 'visibility' | 'viewerIds'>>) {
     const i = await this.request<IssueDTO>(`/issues/${id}`, { method: 'PATCH', json: patch });
     this.putIssues([i]); this.recountIssues(i.conversationId);
     return i;
   }
   async issueDetail(id: string) {
-    const r = await this.request<{ issue: IssueDTO; events: IssueEventDTO[] }>(`/issues/${id}`);
-    this.putIssues([r.issue]);
+    const r = await this.request<{ issue: IssueDTO; events: IssueEventDTO[]; children?: IssueDTO[] }>(`/issues/${id}`);
+    this.putIssues([r.issue, ...(r.children ?? [])]);
     return r;
   }
   async commentIssue(id: string, body: string) {
@@ -713,6 +756,39 @@ export class TieComsClient {
     this.patchConversationMeta(conversationId, { linkPreviews: mode });
     await this.request(`/conversations/${conversationId}/prefs`, { method: 'PUT', json: { linkPreviews: mode } });
   }
+  private patchMe(patch: Partial<UserDTO>) {
+    const d = this.state.data;
+    if (d) this.set({ data: { ...d, me: { ...d.me, ...patch } } });
+  }
+  /**
+   * «No molestar» (silenciar todo) hasta `until` (ISO; MUTE_FOREVER = hasta que lo reactive); null lo apaga.
+   * Si el servidor no conoce la ruta (404), se guarda solo en este dispositivo y devuelve { local: true }.
+   */
+  /** Modo sueño: horario diario sin sonidos. Devuelve el horario guardado. */
+  async setSleep(patch: { on?: boolean; start?: string; end?: string; tz?: string; tzAuto?: boolean }) {
+    const r = await this.request<{ sleep: SleepDTO }>('/me/sleep', { method: 'PUT', json: patch });
+    this.patchMe({ sleep: r.sleep });
+    return r.sleep;
+  }
+  async setDnd(until: string | null): Promise<{ dndUntil: string | null; local: boolean }> {
+    const prev = this.state.data?.me.dndUntil ?? null;
+    this.patchMe({ dndUntil: until });
+    try {
+      const r = await this.request<{ dndUntil: string | null }>('/me/dnd', { method: 'PUT', json: { until } });
+      this.set({ dndLocalOnly: false });
+      this.patchMe({ dndUntil: r.dndUntil });
+      return { dndUntil: r.dndUntil, local: false };
+    } catch (e) {
+      const me = this.state.data?.me.id;
+      if (e instanceof ApiRequestError && e.status === 404 && me) {
+        await this.opts.storage.set(`u:${me}:dnd`, until);
+        this.set({ dndLocalOnly: true });
+        return { dndUntil: until, local: true };
+      }
+      this.patchMe({ dndUntil: prev });
+      throw e;
+    }
+  }
   /** Resumen semanal de enlaces por correo (opt-in). */
   async setLinkDigest(on: boolean) {
     const d = this.state.data;
@@ -723,6 +799,32 @@ export class TieComsClient {
   }
 
   // ---------- Recordatorios ----------
+  // ---------- Mensajes programados ----------
+  private putScheduled(x: ScheduledMessageDTO) {
+    const rest = this.state.scheduled.filter((y) => y.id !== x.id);
+    const keep = x.status === 'pending' || x.status === 'sending' || x.status === 'failed';
+    this.set({ scheduled: (keep ? [...rest, x] : rest).sort((a, b) => a.sendAt.localeCompare(b.sendAt)) });
+  }
+  async loadScheduled() {
+    try {
+      const r = await this.request<{ scheduled: ScheduledMessageDTO[] }>('/scheduled');
+      this.set({ scheduled: r.scheduled });
+      return r.scheduled;
+    } catch { return this.state.scheduled; } // servidor viejo sin /scheduled
+  }
+  async scheduleMessage(conversationId: string, input: { body: string; sendAt: string; mentions?: { userId: string; start: number; length: number }[]; replyTo?: string | null }) {
+    const x = await this.request<ScheduledMessageDTO>(`/conversations/${conversationId}/scheduled`, { method: 'POST', json: input });
+    this.putScheduled(x);
+    return x;
+  }
+  async updateScheduled(id: string, patch: { body?: string; sendAt?: string }) {
+    const x = await this.request<ScheduledMessageDTO>(`/scheduled/${id}`, { method: 'PATCH', json: patch });
+    this.putScheduled(x);
+    return x;
+  }
+  async cancelScheduled(id: string) { this.putScheduled(await this.request<ScheduledMessageDTO>(`/scheduled/${id}`, { method: 'DELETE' })); }
+  async sendScheduledNow(id: string) { this.putScheduled(await this.request<ScheduledMessageDTO>(`/scheduled/${id}/send`, { method: 'POST', json: {} })); }
+
   async loadReminders() { const r = await this.request<{ reminders: ReminderDTO[] }>('/reminders'); this.set({ reminders: r.reminders }); return r.reminders; }
   async createReminder(input: { conversationId: string; messageId?: string | null; note?: string | null; remindAt: string }) {
     const r = await this.request<ReminderDTO>('/reminders', { method: 'POST', json: input });
@@ -785,6 +887,29 @@ export class TieComsClient {
   uploadAttachmentThumb(id: string, thumb: Blob) {
     return this.request<AttachmentDTO>(`/attachments/${id}/thumb`, { method: 'POST', body: thumb, headers: { 'content-type': 'application/octet-stream' } });
   }
+  // ---------- Firmar PDFs ----------
+  /** Mis firmas guardadas (PNG transparentes; url solo me sirve a mí). */
+  listSignatures() { return this.request<{ signatures: SignatureDTO[] }>('/me/signatures'); }
+  /** Guarda una firma o iniciales ya recortadas (PNG ≤ 512 KB). */
+  createSignature(png: Blob, kind: SignatureDTO['kind'], source: SignatureDTO['source']) {
+    return this.request<SignatureDTO>('/me/signatures', { method: 'POST', body: png, headers: { 'content-type': 'image/png', 'x-signature-kind': kind, 'x-signature-source': source } });
+  }
+  deleteSignature(id: string) { return this.request<{ ok: true }>(`/me/signatures/${id}`, { method: 'DELETE' }); }
+  /** Historial «Documentos que firmé» (lo más reciente primero; before = nextBefore de la página anterior). */
+  listSignings(q: { before?: string | null; limit?: number; q?: string } = {}) {
+    const p = new URLSearchParams();
+    if (q.before) p.set('before', q.before);
+    if (q.limit) p.set('limit', String(q.limit));
+    if (q.q?.trim()) p.set('q', q.q.trim());
+    const qs = p.toString();
+    return this.request<SigningHistoryPageDTO>(`/me/signings${qs ? `?${qs}` : ''}`);
+  }
+  /** Antes de firmar: si ya trae firma digital, si está cifrado y quién lo ha firmado en Chaggu. */
+  signInfo(attachmentId: string) { return this.request<SignInfoDTO>(`/attachments/${attachmentId}/sign-info`); }
+  /** Estampa las marcas en el servidor y responde en el hilo con el PDF firmado. Idempotente por clientMessageId. */
+  signPdf(attachmentId: string, input: SignPdfInput) {
+    return this.request<SignPdfResult>(`/attachments/${attachmentId}/sign`, { method: 'POST', json: input });
+  }
   /** Descarga autenticada (Bearer) de una ruta del API, p. ej. AttachmentDTO.url. */
   async fetchBlob(apiPath: string): Promise<Blob> {
     const path = apiPath.replace(/^\/api\/v1/, '');
@@ -796,7 +921,7 @@ export class TieComsClient {
   }
 
   /** Conversación lateral privada desde un mensaje (no publica nada en el origen). */
-  async openSide(conversationId: string, input: { messageId: string; userIds: string[]; question?: string }) {
+  async openSide(conversationId: string, input: { messageId?: string; issueId?: string; userIds: string[]; question?: string }) {
     const r = await this.request<{ id: string }>(`/conversations/${conversationId}/side`, { method: 'POST', json: input });
     await this.loadBootstrap();
     return r;
@@ -890,13 +1015,18 @@ export class TieComsClient {
     if (!res.ok) throw await parseError(res);
     return res.json();
   }
+  /** Acepta una invitación a un espacio o (con kind 'org') a una empresa y sus grupos. `workspaceId` puede ser null en una de empresa sin grupos. */
   async acceptInvitation(token: string) {
-    const r = await this.request<{ workspaceId: string; conversationIds: string[] }>(`/invitations/${encodeURIComponent(token)}/accept`, { method: 'POST', json: {} });
+    const r = await this.request<{ workspaceId: string | null; conversationIds: string[]; orgId?: string; kind?: 'workspace' | 'org' }>(`/invitations/${encodeURIComponent(token)}/accept`, { method: 'POST', json: {} });
     await this.loadBootstrap();
     return r;
   }
-  createOrgInvitation(orgId: string, input: { email?: string; role?: 'member' | 'admin'; lang?: 'es' | 'en' } = {}) {
-    return this.request<{ id: string; token: string; expiresAt: string; emailSent: boolean; emailStatus: 'sent' | 'failed' | 'skipped' | null }>(`/organizations/${orgId}/invitations`, { method: 'POST', json: input });
+  /**
+   * Invitar a un colega a mi empresa. Con `conversationIds` entra también a esos grupos (cualquier miembro
+   * puede, desde un grupo donde participa); `multiUse` = enlace y código para varias personas.
+   */
+  createOrgInvitation(orgId: string, input: { email?: string; role?: 'member' | 'admin'; lang?: 'es' | 'en'; workspaceId?: string; conversationIds?: string[]; history?: 'now' | 'all'; multiUse?: boolean; expiresInDays?: number } = {}) {
+    return this.request<OrgInvitationCreatedDTO>(`/organizations/${orgId}/invitations`, { method: 'POST', json: input });
   }
   /** Invitaciones con correo aún sin aceptar de una empresa o un espacio. */
   async listInvitations(scope: 'organizations' | 'workspaces', id: string) {

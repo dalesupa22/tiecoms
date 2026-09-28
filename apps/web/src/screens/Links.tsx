@@ -64,7 +64,7 @@ export async function setSaved(linkId: string, saved: boolean) {
   try { const l = await client.setLinkState(linkId, { saved, ...(saved ? { seen: false } : {}) }); remember(l); toast(saved ? t('link.savedToast') : t('link.unsavedToast'), saved ? { label: t('link.openSaved'), run: () => navigate('/ver-despues') } : undefined); return l; }
   catch (e) { toast(errorText(e)); return null; }
 }
-/** Abrir un enlace desde Chaggu lo marca como visto (solo para mí). */
+/** Abrir un enlace desde chaggu lo marca como visto (solo para mí). */
 export function markSeen(linkId?: string) {
   if (!linkId || states[linkId]?.seenAt) return;
   void client.setLinkState(linkId, { seen: true }).then(remember).catch(() => {});
@@ -247,6 +247,12 @@ export function LinksPane({ conv, onJump, onClose }: { conv: ConversationDTO; on
       </div>
       {page === null && <div className="muted">{t('common.loading')}</div>}
       {page?.links.length === 0 && <div className="hint">{q || kind !== 'all' ? t('link.noMatch') : t('link.empty')}</div>}
+      {/* Si pegan un enlace que aún no está en el chat, se ofrece compartirlo (es lo que casi siempre buscan). */}
+      {page?.links.length === 0 && /^https?:\/\/\S+$/i.test(q.trim()) && conv.canPost && (
+        <button className="btn primary" onClick={() => {
+          void Promise.resolve(client.send(conv.id, q.trim())).then(() => { toast(t('link.shared')); onClose(); }).catch((e) => toast(errorText(e)));
+        }}>↗ {t('link.shareHere')}</button>
+      )}
       <div className="list" style={{ gap: 6 }}>
         {page?.links.map((l) => <LinkRow key={l.id} d={d} l={l} onJump={() => { onClose(); onJump(l.messageSeq); }} />)}
       </div>

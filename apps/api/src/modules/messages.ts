@@ -109,7 +109,9 @@ function sameBody(row: any, input: { body: string; attachmentIds?: string[]; for
  * Envío idempotente: reintentar con el mismo clientMessageId devuelve el mismo
  * mensaje; reutilizarlo con otro contenido se rechaza. El ACK sale solo tras el commit.
  */
-export async function sendMessage(userId: string, conversationId: string, input: SendMessageInput): Promise<{ message: MessageDTO; duplicate: boolean; droppedMentions?: string[] }> {
+export async function sendMessage(userId: string, conversationId: string, input: SendMessageInput,
+  afterCreate?: (c: Tx, message: MessageDTO) => Promise<void>,
+): Promise<{ message: MessageDTO; duplicate: boolean; droppedMentions?: string[] }> {
   const existing = await findByClientId(conversationId, userId, input.clientMessageId);
   if (existing) {
     // Aun así revalida el acceso: un duplicado no debe filtrar datos a quien perdió permiso.
@@ -153,6 +155,8 @@ export async function sendMessage(userId: string, conversationId: string, input:
       if (mentions.userIds.length) await saveMentions(c, m.id, conversationId, m.seq, mentions);
       await indexLinks(c, { id: m.id, conversation_id: conversationId, seq: m.seq, author_id: userId, body: input.body, created_at: m.createdAt });
       await queuePreview(c, m.id, input.body);
+      // Datos asociados que deben quedar confirmados junto al mensaje (sin I/O externo).
+      if (afterCreate) await afterCreate(c, m);
       return m;
     });
     return { message, duplicate: false, ...(dropped.length ? { droppedMentions: dropped } : {}) };
@@ -182,8 +186,9 @@ export async function listEvents(userId: string, conversationId: string, after: 
   const a = await conversationAccess(pool, userId, conversationId, 'read');
   if (a.lastEventSeq - after > MAX_CATCHUP_EVENTS) return { events: [], resetRequired: true, lastEventSeq: a.lastEventSeq };
   const { rows } = await pool.query(
-    `SELECT e.payload, m.seq AS message_seq, m.deleted_at AS message_deleted_at FROM conversation_events e
+    `SELECT e.payload, m.seq AS message_seq, m.deleted_at AS message_deleted_at, iv.visibility AS issue_visibility FROM conversation_events e
        LEFT JOIN messages m ON m.id = e.message_id
+       LEFT JOIN issues iv ON e.type = 'issue.updated' AND iv.id = (e.payload->'issue'->>'id')::uuid
       WHERE e.conversation_id = $1 AND e.event_seq > $2 ORDER BY e.event_seq LIMIT $3`,
     [conversationId, after, limit],
   );
@@ -195,6 +200,10 @@ export async function listEvents(userId: string, conversationId: string, after: 
     // Un mensaje eliminado después no reenvía su contenido anterior al ponerse al día.
     if (r.message_deleted_at && r.payload.message) {
       return { ...r.payload, message: { ...r.payload.message, body: '', attachments: [], mentions: [], linkPreview: null, linkPreviews: [], reactions: [], deletedAt: new Date(r.message_deleted_at).toISOString() } } as ConversationEvent;
+    }
+    // Un asunto que después quedó restringido no se reenvía por la conversación al ponerse al día.
+    if (r.payload.type === 'issue.updated' && r.issue_visibility && r.issue_visibility !== 'all') {
+      return { type: 'redacted', conversationId, eventSeq: r.payload.eventSeq } as ConversationEvent;
     }
     return r.payload as ConversationEvent;
   });

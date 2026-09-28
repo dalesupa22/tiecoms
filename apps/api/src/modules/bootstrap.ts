@@ -3,6 +3,7 @@ import { pool } from '../db.ts';
 import { loadUser } from './auth.ts';
 import { orgVerification } from './domains.ts';
 import { summarize } from './attachments.ts';
+import { activeDnd, toSleep } from './prefs.ts';
 
 const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())`;
 
@@ -13,8 +14,10 @@ const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expire
  */
 export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   const me = await loadUser(pool, userId);
-  const digest = await pool.query('SELECT link_digest FROM users WHERE id = $1', [userId]);
+  const digest = await pool.query('SELECT link_digest, dnd_until, sleep_on, sleep_start, sleep_end, sleep_tz, sleep_tz_auto FROM users WHERE id = $1', [userId]);
   me.linkDigest = !!digest.rows[0]?.link_digest;
+  me.dndUntil = activeDnd(digest.rows[0]?.dnd_until);
+  me.sleep = toSleep(digest.rows[0]);
 
   const [ws, convs, people] = await Promise.all([
     pool.query(
@@ -30,8 +33,8 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
     ),
     pool.query(
       `SELECT c.id, c.workspace_id, c.kind, c.level, c.name, c.internal_org_id, c.last_message_seq, c.last_event_seq, c.last_message_at,
-              c.parent_conversation_id, c.parent_message_id, (SELECT pm.seq FROM messages pm WHERE pm.id = c.parent_message_id) AS parent_message_seq, c.derive_kind, c.derive_reason, c.returned_at, c.avatar_file_id,
-              (SELECT count(*) FROM issues i WHERE i.conversation_id = c.id AND i.status NOT IN ('done','cancelled'))::int AS open_issues,
+              c.parent_conversation_id, c.parent_message_id, c.side_issue_id, (SELECT pm.seq FROM messages pm WHERE pm.id = c.parent_message_id) AS parent_message_seq, c.derive_kind, c.derive_reason, c.returned_at, c.avatar_file_id,
+              (SELECT count(*) FROM issues i WHERE i.conversation_id = c.id AND i.visibility = 'all' AND i.status NOT IN ('done','cancelled'))::int AS open_issues,
               (SELECT count(*) FROM message_mentions mm WHERE mm.user_id = m.user_id AND mm.conversation_id = c.id
                   AND mm.seq > GREATEST(COALESCE(rc.last_read_seq, 0), m.history_from_seq))::int AS unread_mentions,
               m.can_post, m.can_manage, m.history_from_seq, wm.role AS workspace_role, cp.pinned_at, cp.muted_until, cp.link_previews,
@@ -74,7 +77,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
           WHERE mine.user_id = $1
          UNION SELECT $1::uuid
        )
-       SELECT u.id, u.name, u.kind, u.primary_org_id, u.avatar_file_id, om.title, om.area,
+       SELECT u.id, u.name, u.kind, u.primary_org_id, u.avatar_file_id, om.title, om.area, u.sleep_on, u.sleep_start, u.sleep_end, u.sleep_tz,
               (SELECT bool_and(g.role = 'guest') FROM workspace_memberships g WHERE g.user_id = u.id AND g.revoked_at IS NULL) AS guest,
               (SELECT max(g.expires_at) FROM workspace_memberships g WHERE g.user_id = u.id AND g.role = 'guest' AND g.revoked_at IS NULL) AS guest_until
          FROM visible v JOIN users u ON u.id = v.user_id AND u.disabled_at IS NULL
@@ -103,7 +106,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
       unread: Math.max(0, r.last_message_seq - readFrom),
       canPost: r.can_post, canManage: r.can_manage || ['lead', 'admin'].includes(r.workspace_role),
       historyFromSeq: r.history_from_seq,
-      parentId: r.parent_conversation_id, parentMessageId: r.parent_message_id, parentMessageSeq: r.parent_message_seq ?? null, deriveKind: r.derive_kind,
+      parentId: r.parent_conversation_id, parentMessageId: r.parent_message_id, sideIssueId: r.side_issue_id ?? null, parentMessageSeq: r.parent_message_seq ?? null, deriveKind: r.derive_kind,
       deriveReason: r.derive_reason, returnedAt: r.returned_at ? new Date(r.returned_at).toISOString() : null,
       openIssues: r.open_issues,
       pinnedAt: r.pinned_at ? new Date(r.pinned_at).toISOString() : null,
@@ -123,6 +126,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
     id: r.id, name: r.name, kind: r.kind, orgId: r.guest ? null : r.primary_org_id, title: r.title, area: r.area,
     guest: Boolean(r.guest), guestUntil: r.guest_until ? new Date(r.guest_until).toISOString() : null,
     avatarUrl: r.avatar_file_id ? `/api/v1/avatars/${r.avatar_file_id}` : null,
+    sleep: r.kind === 'human' && r.sleep_on && r.sleep_start ? { start: String(r.sleep_start).slice(0, 5), end: String(r.sleep_end).slice(0, 5), tz: r.sleep_tz } : null,
   }));
 
   const orgIds = new Set<string>();

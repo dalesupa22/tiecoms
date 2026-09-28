@@ -32,7 +32,7 @@ export const config = {
   trustProxy: process.env.TRUST_PROXY !== 'false',
   /** Remitente de los correos (Brevo). Debe estar verificado en la cuenta de Brevo. */
   mailFrom: process.env.MAIL_FROM ?? 'admin@chaggu.com',
-  mailFromName: process.env.MAIL_FROM_NAME ?? 'Chaggu',
+  mailFromName: process.env.MAIL_FROM_NAME ?? 'chaggu',
 };
 
 export function pgSsl() {

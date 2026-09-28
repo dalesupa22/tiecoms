@@ -79,8 +79,8 @@ async function access(c: Tx | typeof pool, kind: InvitationKind, userId: string,
   if (kind === 'org') {
     const { rows } = await c.query('SELECT role FROM organization_memberships WHERE org_id = $1 AND user_id = $2', [scopeId, userId]);
     if (!rows[0]) throw notFound('Empresa');
-    if (!['owner', 'admin'].includes(rows[0].role)) throw forbidden('Solo quien administra la empresa gestiona sus invitaciones');
-    return { admin: true };
+    // Desde un grupo cualquier colega puede invitar (28-sep-2026): ve y gestiona solo las suyas.
+    return { admin: ['owner', 'admin'].includes(rows[0].role) };
   }
   const a = await workspaceAccess(c, userId, scopeId, 'nonguest');
   return { admin: ['lead', 'admin'].includes(a.role) };
@@ -90,19 +90,19 @@ export async function listPendingInvitations(kind: InvitationKind, userId: strin
   const { admin } = await access(pool, kind, userId, scopeId);
   const { rows } = await pool.query(
     `SELECT i.id, i.email, i.role, i.invited_by, u.name AS inviter_name, i.created_at, i.expires_at,
-            i.email_status, i.email_error, i.email_sent_at, i.send_count
+            i.email_status, i.email_error, i.email_sent_at, i.send_count, i.conversation_ids
        FROM ${TABLE[kind]} i JOIN users u ON u.id = i.invited_by
       WHERE i.${SCOPE[kind]} = $1 AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.email IS NOT NULL
-        AND i.expires_at > now() - interval '30 days'
+        AND i.expires_at > now() - interval '30 days' AND ($2 OR i.invited_by = $3)
       ORDER BY i.created_at DESC LIMIT 200`,
-    [scopeId],
+    [scopeId, admin || kind === 'workspace', userId],
   );
   return rows.map((r) => ({
     id: r.id, email: r.email, role: r.role, invitedById: r.invited_by, invitedByName: r.inviter_name,
     createdAt: new Date(r.created_at).toISOString(), expiresAt: new Date(r.expires_at).toISOString(),
     expired: new Date(r.expires_at) < new Date(),
     emailStatus: r.email_status, emailSentAt: r.email_sent_at ? new Date(r.email_sent_at).toISOString() : null,
-    sendCount: r.send_count, canManage: admin || r.invited_by === userId,
+    sendCount: r.send_count, canManage: admin || r.invited_by === userId, conversationIds: r.conversation_ids ?? [],
   }));
 }
 

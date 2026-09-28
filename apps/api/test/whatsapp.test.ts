@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { pool } from '../src/db.ts';
-import { bridgeToTieComs, storeMessages, upsertChats, upsertContacts, type MsgRow, type Session } from '../src/modules/wa-sync.ts';
+import { bridgeToTieComs, rememberSenders, storeAliases, storeMessages, upsertChats, upsertContacts, type MsgRow, type Session } from '../src/modules/wa-sync.ts';
 
 const API = process.env.API_URL ?? 'http://localhost:3020';
 const run = randomUUID().slice(0, 8);
@@ -116,6 +116,29 @@ describe('chats y organización', () => {
     expect(m.json.messages.map((x: any) => x.body)).toEqual(['Hola equipo', '¿Revisamos?']);
     const r = await call('/whatsapp/chats', { token: ana.token });
     expect(r.json.chats.find((c: any) => c.jid === '1@g.us').unread).toBe(0);
+  });
+});
+
+describe('nombres de quienes escriben', () => {
+  it('resuelve LID → número → contacto, usa el pushName y si no, el número', async () => {
+    const s = session(personal);
+    const g = '77@g.us';
+    await upsertChats(s, [{ jid: g, name: 'Clientes', isGroup: true }, { jid: '111@lid', name: null, isGroup: false }]);
+    await storeAliases(s, [{ lid: '111@lid', pn: '573005550001@s.whatsapp.net' }, { lid: '333@lid', pn: '573005550003@s.whatsapp.net' }]);
+    await upsertContacts(s, [{ id: '573005550001@s.whatsapp.net', name: 'Laura Libreta' }]);
+    // pushName de un mensaje en vivo (no pisa la libreta) y par LID ↔ número desde la llave del mensaje.
+    await rememberSenders(s, [
+      { key: { remoteJid: g, id: 'x1', participant: '222@lid', participantAlt: '573005550002@s.whatsapp.net' } as any, pushName: 'Mateo' },
+      { key: { remoteJid: g, id: 'x2', participant: '111@lid' } as any, pushName: 'Apodo que no pisa' },
+    ] as any);
+    const at = new Date('2026-09-27T12:00:00Z');
+    const row = (id: string, author: string): MsgRow => ({ chat: g, id, fromMe: false, authorJid: author, authorName: null, kind: 'text', body: id, sentAt: new Date(at.getTime() + Number(id.slice(1)) * 1000) });
+    await storeMessages(s, [row('m1', '111@lid'), row('m2', '222@lid'), row('m3', '333@lid'), row('m4', '444@lid')], false);
+    const r = await call(`/whatsapp/chats/${personal.id}/${encodeURIComponent(g)}/messages`, { token: ana.token });
+    expect(r.status).toBe(200);
+    expect(r.json.messages.map((m: any) => m.author)).toEqual(['Laura Libreta', 'Mateo', '+57 300 5550003', null]);
+    const dm = await call(`/whatsapp/chats?accountId=${personal.id}&groups=0&limit=100`, { token: ana.token });
+    expect(dm.json.chats.find((c: any) => c.jid === '111@lid')?.name).toBe('Laura Libreta');
   });
 });
 

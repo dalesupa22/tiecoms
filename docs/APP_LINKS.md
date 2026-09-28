@@ -1,9 +1,29 @@
 # Enlaces de las aplicaciones
 
 `infra/nginx/app-links.conf` publica los archivos de asociación en HTTPS, sin
-redirección, en `tiecoms.com`, `www.chaggu.com` y `app.chaggu.com`.
+redirección, en `chaggu.com`, `www.chaggu.com`, `app.chaggu.com` y los tres hosts
+equivalentes de `tiecoms.com`.
 
 ## Android
+
+### Chaggu
+
+Paquete: `com.chaggu.app`. Play Console: aplicación `4974615302608394008`.
+Certificados públicos descargados del ZIP oficial de Play Console y comprobados
+por SHA-256 el 26 de septiembre de 2026. Se conserva la clave de subida local.
+
+| Certificado | SHA-256 |
+| --- | --- |
+| Subida / compilación local | `12:2C:D6:DA:89:5C:D5:D6:39:55:D9:C4:0A:9A:89:80:41:51:94:98:59:A6:40:E9:29:A5:02:2D:13:41:F4:B7` |
+| deployment_cert.der | `AC:D8:D4:BB:B8:27:F3:6E:CC:7C:42:B7:CE:80:95:7A:6C:1C:A2:0B:D9:B5:B6:DB:C2:2E:B4:4C:5B:D5:CA:4B` |
+| hybrid_classical_cert.der | `08:F4:33:91:39:BF:B7:94:99:F6:D9:05:C0:CF:3B:05:3B:A5:FD:8A:DC:1B:DA:07:85:4E:D1:15:ED:A1:44:1F` |
+| hybrid_pqc_cert.der | `70:E2:E3:44:0D:3E:9B:95:52:96:95:D9:2A:B4:6E:8B:FF:7A:47:6C:4E:69:2E:41:76:FD:56:EB:1A:6E:AD:B5` |
+
+Los tres certificados de Play corresponden a la firma clásica de Android 16 o
+anterior y a las dos claves de firma híbrida de Android 17 o posterior. Google
+pide registrar las tres huellas también en Digital Asset Links.
+
+### TieComs (compatibilidad)
 
 Paquete: `com.tiecoms.app`. Play Console: aplicación `4972162421982903452`.
 Las siguientes huellas SHA-256 públicas se comprobaron en Play Console el
@@ -31,13 +51,14 @@ no verifica necesariamente una aplicación instalada desde Google Play.
 - [Publicar Digital Asset Links](https://developer.android.com/training/app-links/configure-assetlinks)
 
 Después de cada rotación, comprobar las huellas en Play Console, actualizar esta
-lista y desplegar. Verificar `/.well-known/assetlinks.json` en los tres dominios:
+lista y desplegar. Verificar `/.well-known/assetlinks.json` en los seis hosts:
 HTTP 200 directo, `Content-Type: application/json`, paquete exacto y todas las
 huellas esperadas. La verificación del archivo publicado no sustituye una prueba
 de apertura con una instalación de Google Play.
 
 ## Apple
 
-`/.well-known/apple-app-site-association` declara `B76US7H3L3.com.tiecoms.app`
-para `/c/*`, `/w/*`, `/invite/*` y `/signup?org=…`, y el mismo identificador para
+`/.well-known/apple-app-site-association` declara `B76US7H3L3.com.chaggu.app` y
+`B76US7H3L3.com.tiecoms.app`
+para `/c/*`, `/w/*`, `/invite/*` y `/signup?org=…`, y ambos identificadores para
 credenciales web. No depende de los certificados de Android.

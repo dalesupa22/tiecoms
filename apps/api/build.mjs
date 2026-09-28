@@ -1,6 +1,13 @@
 // Empaqueta API y worker en archivos únicos (sin dependencias nativas) para la imagen de producción.
 import { build } from 'esbuild';
-import { cp, rm } from 'node:fs/promises';
+import { cp, readFile, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+
+// Sin el parche de patches/ (companion_reg_refresh) el QR de WhatsApp no vincula: se exige.
+const baileysSocket = createRequire(import.meta.url).resolve('baileys').replace(/index\.js$/, 'Socket/socket.js');
+if (!(await readFile(baileysSocket, 'utf8')).includes('companion_reg_refresh')) {
+  throw new Error('baileys sin parchear: corre npm install (postinstall aplica patches/)');
+}
 
 await rm('dist', { recursive: true, force: true });
 await build({

@@ -28,10 +28,13 @@ export function DeriveDialog({ conv, message, onClose, onOpened }: { conv: Conve
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pick = (k: Exclude<DeriveKind, 'side'>) => { setKind(k); setName(`${t(`derive.prefix.${k}`)} · ${short}`); };
+  // Fuera de un espacio (directos y chats grupales) solo hay hilo con las mismas personas.
   const options: [Exclude<DeriveKind, 'side'>, string, string][] = [
     ['same', t('derive.same'), t('derive.sameNote')],
-    ['internal', t('derive.internal', { org: myOrg?.name ?? '' }), t('derive.internalNote')],
-    ['directive', t('derive.directive'), t('derive.directiveNote')],
+    ...(conv.workspaceId ? [
+      ['internal', t('derive.internal', { org: myOrg?.name ?? '' }), t('derive.internalNote')],
+      ['directive', t('derive.directive'), t('derive.directiveNote')],
+    ] as [Exclude<DeriveKind, 'side'>, string, string][] : []),
   ];
   async function submit(e: FormEvent) {
     e.preventDefault();

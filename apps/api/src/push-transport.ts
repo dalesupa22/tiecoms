@@ -17,7 +17,9 @@ export type PushResult =
 const b64url = (b: Buffer | string) => Buffer.from(b).toString('base64url');
 
 // ---------- APNs ----------
-interface ApnsConfig { keyId: string; teamId: string; bundleId: string; key: KeyObject }
+/** bundleId: app actual (com.chaggu.app). legacyBundleId: app publicada con el nombre anterior; se usa si Apple
+ * responde DeviceTokenNotForTopic (el token es de la otra app). */
+interface ApnsConfig { keyId: string; teamId: string; bundleId: string; legacyBundleId: string | null; key: KeyObject }
 let apnsCfg: ApnsConfig | null | undefined;
 
 /** Lee la configuración una vez (null si falta algo: se registra el token pero no se envía). */
@@ -29,7 +31,9 @@ export function apnsConfig(): ApnsConfig | null {
     console.warn('[push] APNs sin configurar (APNS_KEY_ID, APNS_TEAM_ID, APNS_KEY_PATH o APNS_KEY): los tokens de iOS se guardan pero no se envían');
     return (apnsCfg = null);
   }
-  return (apnsCfg = { keyId, teamId, bundleId: process.env.APNS_BUNDLE_ID || 'com.tiecoms.app', key: createPrivateKey(pem.replace(/\\n/g, '\n')) });
+  const bundleId = process.env.APNS_BUNDLE_ID || 'com.chaggu.app';
+  const legacy = process.env.APNS_BUNDLE_ID_LEGACY ?? 'com.tiecoms.app';
+  return (apnsCfg = { keyId, teamId, bundleId, legacyBundleId: legacy && legacy !== bundleId ? legacy : null, key: createPrivateKey(pem.replace(/\\n/g, '\n')) });
 }
 
 let apnsJwt: { token: string; at: number } | null = null;
@@ -68,11 +72,11 @@ export async function sendApns(token: string, environment: 'sandbox' | 'producti
   const cfg = apnsConfig();
   if (!cfg) return { ok: false, invalidToken: false, error: 'apns_not_configured' };
   const body = JSON.stringify(payload);
-  const exec = () => new Promise<{ status: number; body: string }>((resolve, reject) => {
+  const exec = (topic = cfg.bundleId) => new Promise<{ status: number; body: string }>((resolve, reject) => {
     const req = h2(apnsHost(environment)).request({
       ':method': 'POST', ':path': `/3/device/${encodeURIComponent(token)}`,
       authorization: `bearer ${apnsToken(cfg)}`,
-      'apns-topic': cfg.bundleId, 'apns-push-type': 'alert', 'apns-priority': '10',
+      'apns-topic': topic, 'apns-push-type': 'alert', 'apns-priority': '10',
       'apns-expiration': String(Math.floor(Date.now() / 1000) + 86_400),
       ...(opts.collapseId ? { 'apns-collapse-id': opts.collapseId.slice(0, 64) } : {}),
       'content-type': 'application/json', 'content-length': Buffer.byteLength(body),
@@ -96,6 +100,13 @@ export async function sendApns(token: string, environment: 'sandbox' | 'producti
   if (r.status === 200) return { ok: true };
   let reason = '';
   try { reason = JSON.parse(r.body).reason ?? ''; } catch {}
+  if (r.status === 400 && reason === 'DeviceTokenNotForTopic' && cfg.legacyBundleId) {
+    // Token de la app publicada con el nombre anterior.
+    try { r = await exec(cfg.legacyBundleId); } catch (e: any) { return { ok: false, invalidToken: false, error: `apns_network: ${e?.message}` }; }
+    if (r.status === 200) return { ok: true };
+    reason = '';
+    try { reason = JSON.parse(r.body).reason ?? ''; } catch {}
+  }
   if (r.status === 403 && /ProviderToken/.test(reason)) apnsJwt = null;
   const invalid = r.status === 410 || (r.status === 400 && ['BadDeviceToken', 'DeviceTokenNotForTopic'].includes(reason));
   return { ok: false, invalidToken: invalid, error: `apns_${r.status}${reason ? `_${reason}` : ''}` };

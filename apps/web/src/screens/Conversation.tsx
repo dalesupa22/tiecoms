@@ -6,7 +6,7 @@ import { ForwardToChatsDialog, Linkify, StackedAvatars } from './Chats.tsx';
 import { QUICK_REACTIONS } from '@tiecoms/contracts';
 import { ReactionBar, isJumbo, openEmojiPicker, toggleReaction, useEmojiAutocomplete } from './Reactions.tsx';
 import { LinkGroup, LinksPane, MessageLinks, isLinkOnly } from './Links.tsx';
-import { conversationMenu, forwardMenu, messageLink, openDialog, remindMenu } from '../actions.tsx';
+import { conversationMenu, forwardMenu, messageLink, muteMenu, muteOptions, mutedText, openDialog, remindMenu, unmute, useExpiry } from '../actions.tsx';
 import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate, queryParam } from '../router.ts';
@@ -18,17 +18,23 @@ import { MentionMirror, MessageText, backspaceToken, mentionsFor, mentionsMe, us
 import { QuickReplies, SideChip, SideConnector, SideDialog, replyPrivately, sidesOf, takePrivateDraft } from './Side.tsx';
 import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
-import { IssueDrawer, IssueRow, NewIssueDialog, isClosed } from './Issues.tsx';
+import { SleepNotice } from './Sleep.tsx';
+import { ScheduledStrip, openScheduleMenu, scheduleMenu, whenLabel } from './Scheduled.tsx';
+import { SideIssueStrip, TasksDialog } from './Issues.tsx';
+import { ConversationIssues, IssueDrawer, NewIssueDialog, isClosed } from './Issues.tsx';
 import { DeriveDialog, LineageBar, MergedCard } from './Lineage.tsx';
 import { ChatBar, ThreadChip, threadsOf } from './ChatBar.tsx';
 import { AddMembersDialog } from './Dialogs.tsx';
+import { MAX_OLDER_PAGES, firstUnread } from '../chat-nav.ts';
 
 type Row =
   | { kind: 'day'; key: string; label: string }
   | { kind: 'msg'; key: string; m: MessageDTO; cont: boolean }
   /** Varios mensajes seguidos de la misma persona que son solo enlaces: «Laura compartió 5 enlaces». */
   | { kind: 'links'; key: string; msgs: MessageDTO[] }
-  | { kind: 'pending'; key: string; p: PendingMessage };
+  | { kind: 'pending'; key: string; p: PendingMessage }
+  /** Línea «N mensajes nuevos» sobre el primer no leído (queda hasta salir del chat). */
+  | { kind: 'new'; key: string };
 
 const draftKey = (id: string) => `tiecoms:draft:${id}`;
 const excerpt = (s: string, n = 90) => s.replace(/\s+/g, ' ').trim().slice(0, n);
@@ -66,8 +72,26 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const [text, setText] = useState(() => { try { return localStorage.getItem(draftKey(id)) ?? ''; } catch { return ''; } });
   const scroller = useRef<HTMLDivElement>(null);
   const [host, setHost] = useState<HTMLDivElement | null>(null);
-  const atBottom = useRef(true);
+  // Chat largo (docs/GRUPOS.md › «Navegar un chat largo»): con no leídos se abre en el primero, con la línea
+  // «N mensajes nuevos». Lo leído se toma al montar, antes de marcar nada.
+  const [entry] = useState(() => {
+    const c = client.getState().data?.conversations.find((x) => x.id === id);
+    if (!c || c.unread <= 0 || Number(queryParam('m')) > 0) return null;
+    return { readFrom: Math.max(c.lastReadSeq, c.historyFromSeq), unread: c.unread };
+  });
+  const [baseRead] = useState(() => { const c = client.getState().data?.conversations.find((x) => x.id === id); return c ? Math.max(c.lastReadSeq, c.historyFromSeq) : 0; });
+  const [newLine, setNewLine] = useState<number | null>(null);
+  const placing = useRef(!!entry);
+  const olderPages = useRef(0);
+  const justPlaced = useRef(false);
+  // Posición respecto al final: lejos (más de una pantalla), abajo, y si la línea de nuevos quedó arriba.
+  const [nav, setNav] = useState({ far: false, bottom: !entry, lineAbove: false });
+  // Mensajes que llegaron mientras la persona estaba arriba: se cuentan desde el último seq que vio abajo.
+  const awaySeq = useRef<number | null>(entry ? client.getState().data?.conversations.find((x) => x.id === id)?.lastMessageSeq ?? null : null);
+  const [mentionsSeen, setMentionsSeen] = useState<Set<number>>(() => new Set());
+  const atBottom = useRef(!entry);
   const prevHeight = useRef(0);
+  const prevFirst = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   // Un hilo o sidechat abierto al lado recibe el cursor: se escribe ahí sin tocar el chat principal.
   useEffect(() => { if (embedded) requestAnimationFrame(() => input.current?.focus()); }, [embedded ? id : null]);
@@ -140,37 +164,130 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     for (const m of local?.messages ?? []) {
       const day = new Date(m.createdAt).toDateString();
       if (day !== lastDay) { out.push({ kind: 'day', key: `d${day}`, label: dayLabel(m.createdAt) }); lastDay = day; prev = null; }
+      // Bajo la línea «N mensajes nuevos» el primer mensaje vuelve a llevar autor y hora.
       const cont = !!prev && prev.kind === 'text' && m.kind === 'text' && prev.authorId === m.authorId && !m.replyTo && !m.forwarded
-        && Date.parse(m.createdAt) - Date.parse(prev.createdAt) < 5 * 60_000;
+        && Date.parse(m.createdAt) - Date.parse(prev.createdAt) < 5 * 60_000 && m.seq !== newLine;
       out.push({ kind: 'msg', key: m.id, m, cont });
       prev = m;
     }
     const sentIds = new Set((local?.messages ?? []).map((m) => m.clientMessageId));
     for (const p of pending) if (!sentIds.has(p.clientMessageId)) out.push({ kind: 'pending', key: p.clientMessageId, p });
+    if (newLine != null) {
+      let at = out.findIndex((r) => r.kind === 'msg' && r.m.seq >= newLine);
+      if (at > 0 && out[at - 1]!.kind === 'day') at -= 1;
+      if (at >= 0) out.splice(at, 0, { kind: 'new', key: 'new-line' });
+    }
     return groupLinkRuns(out, expandedGroups, highlight);
-  }, [local?.messages, pending, expandedGroups, highlight]);
+  }, [local?.messages, pending, expandedGroups, highlight, newLine]);
 
   // Mantiene la vista abajo al llegar mensajes, y la posición al cargar historial antiguo.
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
+    const first = local?.messages[0]?.seq ?? null;
+    // Solo al cargar historial antiguo (el primer seq bajó) se conserva la posición; la primera carga no mueve la vista.
+    const olderLoaded = prevFirst.current != null && first != null && first < prevFirst.current;
     if (atBottom.current) el.scrollTop = el.scrollHeight;
-    else if (prevHeight.current && el.scrollHeight > prevHeight.current && el.scrollTop < 40) el.scrollTop += el.scrollHeight - prevHeight.current;
+    else if (olderLoaded && prevHeight.current && el.scrollHeight > prevHeight.current && el.scrollTop < 40) el.scrollTop += el.scrollHeight - prevHeight.current;
     prevHeight.current = el.scrollHeight;
+    prevFirst.current = first;
   }, [rows.length]);
 
   useEffect(() => {
     if (conv && conv.unread > 0 && local?.loaded && document.visibilityState === 'visible' && atBottom.current) client.markRead(id);
   }, [conv?.lastMessageSeq, conv?.unread, local?.loaded, id]);
 
+  // Posición al abrir con no leídos: busca el primero (hasta MAX_OLDER_PAGES páginas antiguas); si no aparece, al final.
+  useEffect(() => {
+    if (!placing.current || !entry || !local?.loaded || local.loading) return;
+    const r = firstUnread(local.messages, entry.readFrom, entry.unread, local.hasMore);
+    if (r === 'older' && olderPages.current < MAX_OLDER_PAGES) { olderPages.current += 1; void client.loadOlder(id); return; }
+    placing.current = false;
+    if (r && r !== 'older') { justPlaced.current = true; setNewLine(r.seq); return; }
+    atBottom.current = true;
+    const el = scroller.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    updateNav();
+  }, [local?.loaded, local?.loading, local?.messages]);
+  useLayoutEffect(() => {
+    if (!justPlaced.current || newLine == null) return;
+    justPlaced.current = false;
+    document.getElementById(`new-${id}`)?.scrollIntoView({ block: 'start' });
+    updateNav();
+  }, [newLine]);
+
+  /** Recalcula la posición (tras cada scroll): abajo o lejos, línea de nuevos arriba, menciones ya vistas y marcar leído. */
+  function updateNav() {
+    const el = scroller.current;
+    if (!el) return;
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const bottom = dist < 60;
+    if (!placing.current) {
+      if (bottom) awaySeq.current = null;
+      else if (atBottom.current || awaySeq.current == null) awaySeq.current = client.getState().data?.conversations.find((x) => x.id === id)?.lastMessageSeq ?? 0;
+      atBottom.current = bottom;
+    }
+    const box = el.getBoundingClientRect();
+    const line = document.getElementById(`new-${id}`);
+    const lineAbove = !!line && line.getBoundingClientRect().bottom < box.top;
+    const far = dist > el.clientHeight;
+    setNav((n) => (n.far === far && n.bottom === bottom && n.lineAbove === lineAbove ? n : { far, bottom, lineAbove }));
+    // Una mención cuenta como vista cuando su mensaje entra en pantalla.
+    const seen: number[] = [];
+    if (!placing.current) for (const seq of pendingMentionsRef.current) {
+      const r = document.getElementById(`msg-${id}-${seq}`)?.getBoundingClientRect();
+      if (r && r.top < box.bottom && r.bottom > box.top) seen.push(seq);
+    }
+    if (seen.length) setMentionsSeen((s0) => { const n = new Set(s0); seen.forEach((x) => n.add(x)); return n; });
+    if (!placing.current && bottom && client.getState().data?.conversations.find((x) => x.id === id)?.unread) client.markRead(id);
+  }
+  const pendingMentionsRef = useRef<number[]>([]);
+  const scrollToBottom = (smooth = true) => {
+    const el = scroller.current;
+    if (!el) return;
+    placing.current = false;
+    atBottom.current = true;
+    awaySeq.current = null;
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    client.markRead(id);
+    setNav((n) => ({ ...n, far: false, bottom: true }));
+  };
+  // Web: Fin o ⌥↓ / Alt+↓ con el foco fuera del compositor baja al final.
+  useEffect(() => {
+    if (embedded) return;
+    const k = (e: globalThis.KeyboardEvent) => {
+      if (!(e.key === 'End' || (e.altKey && e.key === 'ArrowDown'))) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      if (document.querySelector('.modal, .ctx-menu')) return;
+      e.preventDefault(); scrollToBottom();
+    };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [embedded, id]);
+
+  // El 🔕 y «Silenciado hasta…» se quitan solos cuando vence el silencio.
+  useExpiry(conv?.mutedUntil);
+
   if (!conv) return <div className="page"><div className="empty">{t('chat.notFound')}</div></div>;
 
   const onScroll = () => {
     const el = scroller.current!;
-    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-    if (atBottom.current && conv.unread) client.markRead(id);
-    if (el.scrollTop < 120 && local?.hasMore && !local.loading) void client.loadOlder(id);
+    updateNav();
+    if (el.scrollTop < 120 && local?.hasMore && !local.loading && !placing.current) void client.loadOlder(id);
   };
+  // Menciones a mí sin leer (desde lo leído al abrir) que aún no pasaron por la pantalla: botón «@».
+  const pendingMentions = (local?.messages ?? []).filter((m) => m.seq > baseRead && !m.deletedAt && mentionsMe(d, m) && !mentionsSeen.has(m.seq)).map((m) => m.seq);
+  pendingMentionsRef.current = pendingMentions;
+  const newWhileAway = awaySeq.current != null && !nav.bottom ? Math.max(0, conv.lastMessageSeq - awaySeq.current) : 0;
+  const showJump = nav.far || newWhileAway > 0;
+  const jumpToMention = () => {
+    const seq = pendingMentions[0];
+    if (seq == null) return;
+    setMentionsSeen((s0) => new Set(s0).add(seq));
+    jumpTo(seq);
+  };
+  const jumpToNewLine = () => document.getElementById(`new-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 
   const send = () => {
     const body = text.trim();
@@ -188,6 +305,24 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     setText('');
     setReplyTo(null);
     setPrivateReply(null);
+    input.current?.focus();
+  };
+  /** Programar: sale solo a la hora elegida. Solo texto (con menciones y respuesta); los adjuntos se envían al momento. */
+  const canSchedule = !!text.trim() && !drafts.drafts.length && !privateReply;
+  const schedule = (when: Date) => {
+    const lead = text.length - text.trimStart().length;
+    const body = text.trim();
+    const mentions = mentionsFor(text, tokens)?.map((m) => ({ ...m, start: m.start - lead })).filter((m) => m.start >= 0 && m.start + m.length <= body.length);
+    const saved = { text, tokens, replyTo };
+    client.scheduleMessage(id, { body, sendAt: when.toISOString(), mentions, replyTo: replyTo?.id ?? null })
+      .then((x) => toast(`🕒 ${t('sched.done', { when: whenLabel(x.sendAt) })}`, {
+        label: t('issue.undo'),
+        run: () => { void client.cancelScheduled(x.id).catch(() => {}); setText(saved.text); setTokens(saved.tokens); setReplyTo(saved.replyTo); },
+      }, 5000))
+      .catch((e) => { toast(errorText(e)); setText(saved.text); setTokens(saved.tokens); });
+    setTokens([]);
+    setText('');
+    setReplyTo(null);
     input.current?.focus();
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -224,9 +359,10 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const title = conversationTitle(d, conv);
   const openHere = Object.values(allIssues).filter((i: IssueDTO) => i.conversationId === id && !isClosed(i));
   const issueOf = (mid: string) => openHere.find((i) => i.originMessageId === mid);
-  // Asuntos y reuniones en todas (también directos y chats grupales); derivar sigue siendo de espacios.
+  // Asuntos, reuniones e hilos en todas (también directos y chats grupales). Fuera de un espacio el hilo es con
+  // las mismas personas, y un hilo no se deriva otra vez.
   const canWork = conv.canPost;
-  const canDerive = canWork && conv.kind !== 'direct' && !!conv.workspaceId;
+  const canDerive = canWork && (!!conv.workspaceId ? conv.kind !== 'direct' : !conv.parentId);
   const myWsRole = d.workspaces.find((w) => w.id === conv.workspaceId)?.myRole;
   // Los terceros invitados participan en los asuntos pero no los abren (el API responde 403).
   const canOpenIssues = canWork && myWsRole !== 'guest';
@@ -235,6 +371,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const orgsHere = [...new Set(conv.memberIds.map((m) => personById(d, m)?.orgId).filter(Boolean))].map((o) => orgById(d, o as string));
   const pinned = new Set(pinIds ?? []);
   const muted = !!conv.mutedUntil && Date.parse(conv.mutedUntil) > Date.now();
+  const muteLine = mutedText(conv);
+  const openMuteMenu = (el: HTMLElement) => { const r = el.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, muted ? [muteMenu(conv)] : [{ label: t('mute.how'), disabled: true }, ...muteOptions(conv)]); };
   const canPhoto = conv.kind !== 'direct' && conv.canPost && (conv.kind === 'multi' || conv.canManage);
   const sideConv = sideId ? d.conversations.find((c) => c.id === sideId) : null;
   const sideAnchor = sideConv?.parentMessageId ? byId.get(sideConv.parentMessageId) ?? null : null;
@@ -306,7 +444,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           {!embedded && <button className="icon-btn only-mobile" aria-label={t('common.back')} onClick={() => (history.length > 1 ? history.back() : navigate('/conversaciones'))}>‹</button>}
           {conv.kind !== 'direct' && conv.avatarUrl && <ConvAvatar c={conv} size={30} />}
           <div className="grow" style={{ minWidth: 0 }}>
-            <h2 className="ellipsis">{conv.kind === 'internal' ? '◌ ' : conv.level === 'directivo' ? '◆ ' : ''}{isSide ? `💬 ${t('side.title')}` : title}{muted ? ' 🔕' : ''}</h2>
+            <h2 className="ellipsis">{conv.kind === 'internal' ? '◌ ' : conv.level === 'directivo' ? '◆ ' : ''}{isSide ? `💬 ${t('side.title')}` : title}{muted && <> <button className="head-mute" title={`${muteLine ?? t('side.muted')} · ${t('menu.unmute')}`} aria-label={t('menu.unmute')} onClick={(e) => openMuteMenu(e.currentTarget)}>🔕</button></>}</h2>
             {isSide
               ? <div className="small muted ellipsis side-head-people"><StackedAvatars c={conv} size={18} /> 🔒 {t('side.privateN', { n: conv.memberIds.length })}</div>
               : <div className="small muted ellipsis">{conversationSubtitle(d, conv)}{conv.kind !== 'direct' ? ` · ${tn(conv.memberIds.length, 'n.participant', 'n.participants')}` : ''}</div>}
@@ -342,13 +480,18 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
             onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
         )}
 
-        <div className="msgs" ref={scroller} onScroll={onScroll} role="log" aria-live="polite">
+        <div className="msgs-wrap">
+        {nav.lineAbove && entry && newLine != null && (
+          <button className="jump-new" onClick={jumpToNewLine} aria-label={t('chat.jumpNew')} title={t('chat.jumpNew')}>{t('chat.newAbove', { n: entry.unread })}</button>
+        )}
+        <div className="msgs" data-conv-id={id} ref={scroller} onScroll={onScroll} role="log" aria-live="polite">
           {local?.loading && !local.loaded && <div className="msg-sys">{t('common.loading')}</div>}
           {local?.loaded && !local.hasMore && conv.historyFromSeq > 0 && <div className="msg-sys">{t('chat.lateJoin')}</div>}
           {local?.loaded && local.hasMore && <div className="msg-sys">{local.loading ? t('chat.loadingOlder') : '·'}</div>}
           {error && <div className="error" style={{ textAlign: 'center' }}>{error}</div>}
           {rows.map((r) => {
             if (r.kind === 'day') return <div key={r.key} className="day">{r.label}</div>;
+            if (r.kind === 'new') return <div key={r.key} id={`new-${id}`} className="new-line" role="separator">{entry && entry.unread === 1 ? t('chat.newMessagesOne') : t('chat.newMessages', { n: entry?.unread ?? 0 })}</div>;
             if (r.kind === 'links') return <LinkGroup key={r.key} d={d} msgs={r.msgs} onExpand={() => setExpandedGroups((g) => new Set(g).add(r.key))} />;
             if (r.kind === 'pending') return <PendingRow key={r.key} p={r.p} />;
             const m = r.m;
@@ -408,6 +551,21 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
             );
           })}
         </div>
+        {(showJump || (pendingMentions.length > 0 && !nav.bottom)) && (
+          <div className="jump-stack">
+            {pendingMentions.length > 0 && !nav.bottom && (
+              <button className="jump-btn is-mention" onClick={jumpToMention} aria-label={t('chat.jumpMention')} title={t('chat.jumpMention')}>
+                @{pendingMentions.length > 1 && <span className="pill">{pendingMentions.length}</span>}
+              </button>
+            )}
+            {showJump && (
+              <button className="jump-btn" onClick={() => scrollToBottom()} aria-label={t('chat.jumpLatest')} title={`${t('chat.jumpLatest')} (End)`}>
+                ⌄{newWhileAway > 0 && <span className="pill">{newWhileAway}</span>}
+              </button>
+            )}
+          </div>
+        )}
+        </div>
         {isSide && local?.loaded && !(local.messages ?? []).some((m) => m.kind === 'text') && <div className="side-empty">💬 {t('side.emptyChat')}</div>}
         {isSide && conv.canPost && !text.trim() && lastText && lastText.authorId !== d.me.id && (
           <QuickReplies onSend={(q) => { atBottom.current = true; void client.send(id, q); }} onAsk={() => setAdding(true)} />
@@ -426,6 +584,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               <button className="icon-btn" aria-label={t('reply.cancel')} onClick={() => setReplyTo(null)}>×</button>
             </div>
           )}
+          {conv.canPost && <SleepNotice conv={conv} typing={!!text.trim()} onSchedule={canSchedule ? schedule : undefined} />}
+          {conv.sideIssueId && <SideIssueStrip sideId={id} issueId={conv.sideIssueId} onOpen={setOpenIssue} />}
+          {conv.canPost && <ScheduledStrip conversationId={id} />}
           {conv.canPost ? (
             <>
             <DraftTray drafts={drafts.drafts} onRemove={drafts.remove} onRetry={drafts.retry} />
@@ -438,6 +599,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                   { divider: true },
                   { label: t('bar.newEvent'), icon: '📅', onSelect: () => newEvent({ conversationId: id }) },
                   ...(canOpenIssues ? [{ label: t('bar.newIssue'), icon: '◆', onSelect: () => setNewIssue({}) }] : []),
+                  ...(conv.sideIssueId ? [{ label: t('task.addHere'), icon: '☑', onSelect: () => openDialog((close) => <TasksDialog parentId={conv.sideIssueId!} conversationId={id} onClose={close} />) }] : []),
                 ]);
               }}>＋</button>
               <button className="bring-btn" title={t('imp.action')} aria-label={t('imp.action')} onClick={() => openDialog((close) => <BringDialog conversationId={id} onClose={close} />)}>⤓</button>
@@ -457,7 +619,11 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               {/* Con el compositor vacío, el micrófono: mantener pulsado graba una nota de voz. */}
               {!text.trim() && !drafts.drafts.length && !privateReply
                 ? <VoiceRecorder conversationId={id} onSent={() => { atBottom.current = true; setReplyTo(null); }} />
-                : <button className="send" onClick={send} disabled={(!text.trim() && !drafts.ready.length) || drafts.busy} aria-label={t('chat.send')}>➤</button>}
+                : <>
+                  {canSchedule && <button className="bring-btn sched-btn" title={t('sched.menuTitle')} aria-label={t('sched.menuTitle')} onClick={(e) => openScheduleMenu(e.currentTarget, schedule)}>🕒</button>}
+                  <button className="send" onClick={send} disabled={(!text.trim() && !drafts.ready.length) || drafts.busy} aria-label={t('chat.send')}
+                    {...(canSchedule ? menuProps(() => scheduleMenu(schedule, t('sched.menuTitle'))) : {})}>➤</button>
+                </>}
             </div>
             </>
           ) : <div className="hint" style={{ textAlign: 'center', padding: 8 }}>{t('chat.readOnly')}</div>}
@@ -485,6 +651,16 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               {conv.avatarUrl && <button className="btn ghost small" onClick={() => { if (confirm(t('group.removeConfirm'))) void client.removeConversationAvatar(id).then(() => toast(t('group.photoRemoved'))).catch((e) => toast(errorText(e))); }}>{t('group.removePhoto')}</button>}
             </div>
           )}
+          {/* Silenciar: interruptor con el tiempo restante; al encenderlo se elige por cuánto. */}
+          <div className="card mute-row">
+            <span aria-hidden style={{ fontSize: 18, filter: muted ? 'grayscale(1)' : undefined }}>{muted ? '🔕' : '🔔'}</span>
+            <span className="grow">
+              <b style={{ display: 'block' }}>{t('mute.switch')}</b>
+              <span className="small muted" style={{ display: 'block' }}>{muteLine ?? t('mute.switchHint')}</span>
+            </span>
+            <button className="switch" role="switch" aria-checked={muted} aria-label={t('mute.switch')}
+              onClick={(e) => { if (muted) void unmute(conv); else openMuteMenu(e.currentTarget); }} />
+          </div>
           {canWork && <ConversationAgenda conv={conv} />}
           {canWork && (
             <div>
@@ -492,8 +668,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                 <span className="eyebrow grow">{t('nav.issues')} · {openHere.length}</span>
                 {canOpenIssues && <button className="btn small" onClick={() => setNewIssue({})}>{t('issue.new')}</button>}
               </div>
-              {openHere.length === 0 && <div className="hint">{t('issue.noIssues')}</div>}
-              <div className="list" style={{ gap: 6 }}>{openHere.map((i) => <IssueRow key={i.id} i={i} showWhere={false} onOpen={setOpenIssue} />)}</div>
+              <ConversationIssues conversationId={id} canCreate={canOpenIssues} onOpen={setOpenIssue} />
             </div>
           )}
           {conv.kind !== 'direct' && (

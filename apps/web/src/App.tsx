@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { notices, useClient } from './app-client.ts';
 import { handleNotice } from './notices.ts';
+import { installSoundUnlock } from './sound.ts';
 import { useLang } from './i18n.ts';
 import { asset, navigate, parse, usePath } from './router.ts';
 import { AuthScreen, SsoReturnScreen } from './screens/Auth.tsx';
@@ -26,6 +27,8 @@ function nextParam() {
 }
 
 notices.handler = handleNotice;
+// El audio del sonido de mensajes se desbloquea con el primer clic o tecla (sound.ts).
+installSoundUnlock();
 
 export function App() {
   const path = usePath();

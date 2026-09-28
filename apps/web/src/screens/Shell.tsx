@@ -10,6 +10,7 @@ import { openAccountMenu } from './Profile.tsx';
 import { AllList, DmsList, GroupsBody, GroupsViewButton, GroupsViewToggle, dmConversations, useGroupsView } from './Groups.tsx';
 import { isMac, openCreateMenu, openNewMessage, quickKey } from './Quick.tsx';
 import { activityOf, isMuted, pendingOf } from '../home-order.ts';
+import { DndStrip, MeAvatar } from './Silence.tsx';
 
 const NAV = [
   { name: 'today', label: 'nav.today', ico: '◑', to: '/' },
@@ -151,7 +152,6 @@ function Sidebar({ route }: { route: Route }) {
   const setSideTab = (v: SideTab) => { setSideTabState(v); try { localStorage.setItem(SIDE_TAB_KEY, v); } catch {} };
   const unreadTotal = d.conversations.reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0);
   const dms = dmConversations(d, filter);
-  const me = personById(d, d.me.id);
   const myOrg = orgById(d, d.me.primaryOrgId);
   const activeConv = route.name === 'conversation' ? route.id : null;
 
@@ -173,6 +173,7 @@ function Sidebar({ route }: { route: Route }) {
           <span className="ico">{navMore ? '⌃' : '⋯'}</span><span className="grow">{navMore ? t('nav.less') : t('nav.more')}</span>
         </button>
       </nav>
+      <DndStrip />
       <SideTabs d={d} tab={sideTab} onTab={setSideTab} />
       <div className="home-tabs-row side-tools">
         <SideFilters d={d} filter={filter} onFilter={setFilter} />
@@ -191,7 +192,7 @@ function Sidebar({ route }: { route: Route }) {
       </div>
       <button className="side-foot" style={{ border: 0, borderTop: '1px solid var(--line)', background: 'transparent', textAlign: 'left' }}
         aria-haspopup="menu" title={t('profile.menu')} onClick={(e) => openAccountMenu(e.currentTarget)}>
-        <Avatar person={me} org={myOrg} size={34} />
+        <MeAvatar size={34} />
         <span className="grow" style={{ minWidth: 0 }}>
           <span className="ellipsis" style={{ display: 'block', fontWeight: 700 }}>{d.me.name}</span>
           <span className="ellipsis small muted" style={{ display: 'block' }}>{myOrg?.name}</span>
@@ -218,7 +219,7 @@ function MobileTabs({ route }: { route: Route }) {
     <nav className="tabs" aria-label={t('nav.mainNav')}>
       {tabs.map((x) => (
         <button key={x.name} className={route.name === x.name || (x.name === 'groups' && route.name === 'today') ? 'on' : ''} onClick={() => navigate(x.to)}>
-          {x.ico ? <span className="ico">{x.ico}</span> : <span className="ico"><Avatar person={me} org={d ? orgById(d, d.me.primaryOrgId) : null} size={22} /></span>}{x.label}
+          {x.ico ? <span className="ico">{x.ico}</span> : <span className="ico">{d ? <MeAvatar size={22} /> : <Avatar person={me} org={null} size={22} />}</span>}{x.label}
           {x.badge > 0 && <span className="pill">{x.badge}</span>}
         </button>
       ))}

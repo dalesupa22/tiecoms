@@ -331,3 +331,22 @@ fila abre el chat. Funciona igual en Lista. En pantallas pequeñas los asuntos a
 - `client.markRead` también pone `unreadMentions: 0` en local (antes la «@» de la fila quedaba hasta recargar).
 
 Pruebas: `apps/web/test/home-order.test.ts` (orden con fijados primero, separadores, «Empresa · Grupo», primer no leído).
+
+## Sonido, silenciar chats y No molestar (28-sep-2026)
+
+**API (compatible con clientes viejos, que ignoran el campo nuevo).**
+- Migración `023_do_not_disturb.sql`: `users.dnd_until timestamptz` (nullable).
+- `PUT /api/v1/me/dnd` con `{ until: ISO | null }` → `{ dndUntil }`. `null` o una fecha pasada lo apagan (responde `null`). «Hasta que lo reactive» = `9999-12-31T00:00:00Z` (`MUTE_FOREVER` en `@tiecoms/contracts`).
+- Evento `account.event` `{ type: 'me.dnd', dndUntil }` a todas mis sesiones. El bootstrap trae `me.dndUntil` (`null` si ya pasó; ausente = servidor anterior).
+- Push (`modules/push.ts`, `ACTIVE_SESSION`): con `dnd_until > now()` no sale **ningún** push (mensajes, menciones, reacciones, reuniones, «empieza en 10 min», recordatorios). Los no leídos se cuentan igual y el evento `reminder.due` sigue llegando a la app. Prueba: `apps/api/test/dnd.test.ts`.
+- Silenciar un chat sigue siendo `PUT /conversations/:id/prefs { mutedUntil }`. En silencio pasan las menciones, salvo con «hasta que lo reactive» (más de 366 días).
+
+**client-core.** `setDnd(until)` (si el servidor responde 404 lo guarda solo en el dispositivo, `u:<id>:dnd`, y marca `dndLocalOnly`), `me.dnd` en vivo, y los helpers `dndActive`, `isMutedForever` y `mentionsUser`. El aviso `message` no sale con DND; en un chat silenciado solo sale si me mencionan (con `mentioned` y `muted` en el aviso).
+
+**Web.**
+- Silenciar un chat: 1 hora · 8 horas · 1 semana · Hasta que lo reactive; si ya está silenciado, «Reactivar notificaciones». Está en el «⋯» del encabezado (y el 🔕 junto al título abre el mismo menú), en el panel de detalles como interruptor «Silenciar» («Silenciado hasta las 8:30 p. m.» o «Silenciado»), y con clic derecho o pulsación larga en las filas de Todo, Grupos (Lista y Árbol), DMs, Inicio y Conversaciones.
+- Filas silenciadas: 🔕 gris pequeño y globo gris; las menciones siguen en naranja con «@».
+- «No molestar» en el menú de la cuenta (y en Ajustes): 1 hora · 8 horas · Hasta mañana (8:00 a. m. hora local) · Hasta que lo reactive. Mientras está activo: lunita 🌙 en el avatar (abajo a la izquierda y en «Tú» en el teléfono), franja «No molestar hasta las… · Reactivar» arriba de la lista (también en Grupos y DMs en el teléfono), sin sonido ni notificaciones del navegador (los recordatorios y reuniones quedan como toast). Todo se quita solo al vencer.
+- Sonido (`sound.ts`): «pop» de dos notas con WebAudio (~200 ms, sin archivos); la mención es más aguda. Suena con mensajes de texto de otra persona si el chat no está silenciado (o me mencionan), no hay DND, el sonido está activado y la pestaña está oculta, el mensaje es de otro chat o estoy arriba, a más de una pantalla del final. Máximo uno cada 1,5 s. El audio se desbloquea con el primer clic o tecla; antes no suena nada, sin errores. Ajuste «Sonido de mensajes» en el menú de la cuenta y en Ajustes (`localStorage['chaggu:sound']`, por defecto encendido, con vista previa al encenderlo).
+- Reglas puras en `silence.ts` (`mayAlert`, `shouldSound`, `untilText`, `tomorrowAt8`), probadas en `apps/web/test/silence.test.ts`. `notices.ts` las aplica también a las notificaciones del escritorio.
+- Capturas: `release-assets/1.6.4/web-silencio-shots/`.

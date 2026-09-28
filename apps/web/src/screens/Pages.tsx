@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from 'react';
 import type { ConversationDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, getLang, langPreference, locale, setLang, t, tn, useLang, type Lang } from '../i18n.ts';
@@ -11,8 +11,10 @@ import { InviteResult, PendingInvitations } from './Invitations.tsx';
 import { IssueDrawer, IssueRow, isClosed } from './Issues.tsx';
 import { TodayAgenda, newEvent } from './Calendar.tsx';
 import { RemindersSection } from './Bring.tsx';
-import { askNotifications, conversationMenu, openDialog, personMenu } from '../actions.tsx';
-import { menuProps, toast } from '../menu.tsx';
+import { askNotifications, conversationMenu, dndMenu, dndText, mutedText, openDialog, personMenu } from '../actions.tsx';
+import { menuProps, openMenuAt, toast } from '../menu.tsx';
+import { isMuted } from '../home-order.ts';
+import { setSoundEnabled, soundEnabled, subscribeSound } from '../sound.ts';
 import { SignOutButton, groupWorkspaces } from './Shell.tsx';
 import { JoinWithCodeDialog, openCreateGroup } from './Groups.tsx';
 
@@ -25,15 +27,18 @@ function ConvCard({ c }: { c: ConversationDTO }) {
   const d = useClient((s) => s.data)!;
   const other = c.kind === 'direct' ? personById(d, c.memberIds.find((m) => m !== d.me.id)) : null;
   const org = other ? orgById(d, other.orgId) : c.workspaceId ? counterpartOrg(d, c.workspaceId) : null;
+  const muted = isMuted(c);
   return (
-    <button className="card conv-card" onClick={() => navigate(`/c/${c.id}`)} {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
+    <button className={`card conv-card ${muted ? 'is-muted' : ''}`} onClick={() => navigate(`/c/${c.id}`)} {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
       {other ? <Avatar person={other} org={org} size={38} /> : c.avatarUrl ? <ConvAvatar c={c} size={38} /> : c.deriveKind === 'side' ? <span className="mark" style={{ width: 38, height: 38, background: 'var(--paper-3)', fontSize: 18 }}>💬</span> : c.kind === 'multi' ? <StackedAvatars c={c} size={30} /> : <OrgMark org={org} size={38} />}
       <span className="grow" style={{ minWidth: 0 }}>
         <span className="row"><b className="ellipsis grow">{conversationTitle(d, c)}</b><span className="small muted">{timeLabel(c.lastMessageAt)}</span></span>
         <span className="small muted ellipsis" style={{ display: 'block' }}>{conversationSubtitle(d, c)}</span>
         <span className="small ellipsis" style={{ display: 'block', color: c.unread ? 'var(--ink)' : 'var(--muted)' }}>{conversationPreview(d, c) ?? t('conv.noMessages')}</span>
       </span>
-      {c.unread > 0 && <span className="pill">{c.unread}</span>}
+      {muted && <span className="mute-ico" title={mutedText(c) ?? t('side.muted')} aria-label={t('side.muted')}>🔕</span>}
+      {(c.unreadMentions ?? 0) > 0 && <span className="pill mention-pill" title={t('mention.youMentioned')}>@</span>}
+      {c.unread > 0 && <span className={`pill ${muted ? 'is-muted' : ''}`}>{c.unread}</span>}
     </button>
   );
 }
@@ -188,7 +193,9 @@ export function WorkspaceScreen({ id }: { id: string }) {
                   <span className="row"><b className="grow ellipsis">{conversationTitle(d, c)}</b><span className="small muted">{timeLabel(c.lastMessageAt)}</span></span>
                   <span className="small muted ellipsis" style={{ display: 'block' }}>{t(c.kind === 'internal' ? 'kind.internal' : c.level === 'directivo' ? 'kind.directivo' : 'kind.operativo')} · {tn(c.memberIds.length, 'n.participant', 'n.participants')}</span>
                 </span>
-                {c.unread > 0 && <span className="pill">{c.unread}</span>}
+                {isMuted(c) && <span className="mute-ico" title={mutedText(c) ?? t('side.muted')} aria-label={t('side.muted')}>🔕</span>}
+                {(c.unreadMentions ?? 0) > 0 && <span className="pill mention-pill" title={t('mention.youMentioned')}>@</span>}
+                {c.unread > 0 && <span className={`pill ${isMuted(c) ? 'is-muted' : ''}`}>{c.unread}</span>}
               </button>
             ))}
           </div>
@@ -352,6 +359,7 @@ export function SettingsScreen() {
         <span className="muted">›</span>
       </button>
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('notif.title')}</div>
+      <SilenceSettings />
       <NotificationToggle />
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('settings.language')}</div>
       <div className="seg" style={{ marginBottom: 24, maxWidth: 480 }}>
@@ -378,6 +386,27 @@ export function SettingsScreen() {
       </div>
       <div className="hint" style={{ marginTop: 18 }}>{t('settings.platforms')}</div>
     </div></div>
+  );
+}
+
+/** «No molestar» y «Sonido de mensajes» (también en el menú de la cuenta). */
+function SilenceSettings() {
+  const until = useClient((s) => s.data?.me.dndUntil);
+  const sound = useSyncExternalStore(subscribeSound, soundEnabled);
+  const status = dndText(until);
+  return (
+    <>
+      <button className="card conv-card" style={{ marginBottom: 12 }} aria-haspopup="menu"
+        onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left + 16, r.bottom - 6, dndMenu(until).items!); }}>
+        <span style={{ fontSize: 22 }} aria-hidden>🌙</span>
+        <span className="grow"><b>{t('dnd.title')}</b><span className="small muted" style={{ display: 'block' }}>{status ?? t('dnd.hint')}</span></span>
+        <span className="muted">›</span>
+      </button>
+      <label className="card conv-card check" style={{ marginBottom: 12 }}>
+        <input type="checkbox" checked={sound} onChange={(e) => setSoundEnabled(e.target.checked)} />
+        <span className="grow"><b>{t('sound.title')}</b><span className="small muted" style={{ display: 'block' }}>{t('sound.hint')}</span></span>
+      </label>
+    </>
   );
 }
 

@@ -23,6 +23,7 @@ import { getOrCreateDirect } from './workspaces.ts';
 import * as groups from './groups.ts';
 import * as issues from './issues.ts';
 import * as cal from './calendar.ts';
+import { getTranscriber, toPcm16, wavFromPcm } from './voice-providers.ts';
 
 const MAX_STEPS = 6;
 const TOKEN_TTL_MS = 30 * 60_000;
@@ -376,3 +377,16 @@ export async function run(userId: string, raw: unknown): Promise<AssistantAction
 }
 
 function validTz(tz: string) { try { new Intl.DateTimeFormat('en', { timeZone: tz }); return true; } catch { return false; } }
+
+// ---------- Voz: la web graba (MediaRecorder) y aquí se transcribe (Inworld, el mismo de las notas de voz) ----------
+const MAX_VOICE_BYTES = 6 * 1024 * 1024;
+export async function transcribe(_userId: string, audio: unknown, type: string | undefined, lang: string | undefined) {
+  if (!Buffer.isBuffer(audio) || !audio.length) throw badRequest('Falta el audio');
+  if (audio.length > MAX_VOICE_BYTES) throw badRequest('El audio es muy largo');
+  const t = getTranscriber();
+  if (!t) throw new ApiError(503, 'transcription_disabled', 'La transcripción no está configurada');
+  const base = String(type ?? '').split(';')[0]!.trim().toLowerCase();
+  const input = t.accepts.has(base) && audio.length <= t.maxBytes ? audio : wavFromPcm(await toPcm16(audio));
+  const out = await t.transcribe(input, lang === 'en' ? 'en-US' : 'es-CO');
+  return { text: out.text.trim() };
+}

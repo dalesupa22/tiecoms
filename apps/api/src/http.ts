@@ -269,6 +269,8 @@ export async function buildHttp() {
 
     // Asistente: todo corre con req.userId (ver modules/assistant.ts, «Aislamiento»).
     priv.post('/api/v1/assistant/turn', { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } }, async (req) => assistant.turn(req.userId, req.body));
+    priv.post<{ Querystring: { lang?: string } }>('/api/v1/assistant/transcribe', { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } },
+      async (req) => assistant.transcribe(req.userId, req.body, req.headers['x-file-type'] as string | undefined, req.query.lang));
     priv.post('/api/v1/assistant/run', { config: { rateLimit: { max: 60, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } }, async (req) => assistant.run(req.userId, req.body));
     priv.post('/api/v1/directs', async (req) => ws.getOrCreateDirect(req.userId, CreateDirectInput.parse(req.body).userId));
     priv.post('/api/v1/chats', async (req) => ws.createChat(req.userId, CreateChatInput.parse(req.body)));

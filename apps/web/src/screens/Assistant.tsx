@@ -25,8 +25,13 @@ function load(userId: string): Turn[] {
 }
 function save(userId: string, turns: Turn[]) { try { localStorage.setItem(KEY + userId, JSON.stringify(turns.slice(-MAX_KEEP))); } catch {} }
 
-// ---------- Voz (Web Speech API; si no existe, no hay micrófono) ----------
-const Recognition: any = typeof window !== 'undefined' ? (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition : null;
+// ---------- Voz: se graba aquí (MediaRecorder) y la transcribe el servidor; funciona en Chrome, Safari, Firefox, escritorio y apps ----------
+const Recognition: boolean = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined';
+const MAX_RECORD_MS = 60_000;
+function recorderType() {
+  for (const t of ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus']) { try { if (MediaRecorder.isTypeSupported(t)) return t; } catch {} }
+  return '';
+}
 function speak(text: string) {
   try {
     const s = window.speechSynthesis; if (!s || !text) return;
@@ -86,10 +91,10 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
   const [error, setError] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState('');
+  const [transcribing, setTranscribing] = useState(false);
   const [speakOn, setSpeakOn] = useState(() => { try { return localStorage.getItem(SPEAK_KEY) !== '0'; } catch { return true; } });
   const rec = useRef<any>(null);
-  const heard = useRef('');
-  const byVoice = useRef(false);
+    const byVoice = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
 
@@ -97,10 +102,10 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', k);
-    return () => { window.removeEventListener('keydown', k); try { rec.current?.abort(); window.speechSynthesis?.cancel(); } catch {} };
+    return () => { window.removeEventListener('keydown', k); try { const r = rec.current; r?.stream?.getTracks().forEach((x: MediaStreamTrack) => x.stop()); window.speechSynthesis?.cancel(); } catch {} };
   }, [onClose]);
   useEffect(() => {
-    if (listenOnOpen && Recognition) startListening(true);
+    if (listenOnOpen && Recognition) void startListening(true);
     else input.current?.focus();
     const release = () => stopListening();
     window.addEventListener('chaggu:assistant-release', release);
@@ -162,30 +167,51 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
     } finally { setBusy(false); }
   }
 
-  function startListening(fromHold = false) {
-    if (!Recognition || listening) return;
+  async function startListening(_fromHold = false) {
+    if (!Recognition || listening || rec.current) return;
     try { window.speechSynthesis?.cancel(); } catch {}
-    const r = new Recognition();
-    r.lang = lang() === 'en' ? 'en-US' : 'es-CO';
-    r.interimResults = true; r.continuous = fromHold;
-    heard.current = '';
-    r.onresult = (e: any) => {
-      let fin = '', mid = '';
-      for (let i = 0; i < e.results.length; i++) (e.results[i].isFinal ? (fin += e.results[i][0].transcript) : (mid += e.results[i][0].transcript));
-      heard.current = fin || heard.current;
-      setInterim((fin + ' ' + mid).trim());
+    setError(null);
+    const session: { stopAsked: boolean; rec?: MediaRecorder; stream?: MediaStream; timer?: number } = { stopAsked: false };
+    rec.current = session;
+    setListening(true); setInterim('');
+    let stream: MediaStream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e: any) {
+      rec.current = null; setListening(false);
+      setError(e?.name === 'NotAllowedError' || e?.name === 'SecurityError' ? t('ai.micDenied') : t('ai.micMissing'));
+      return;
+    }
+    const type = recorderType();
+    const r = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    const chunks: Blob[] = [];
+    r.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    r.onstop = async () => {
+      stream.getTracks().forEach((x) => x.stop());
+      clearTimeout(session.timer);
+      rec.current = null; setListening(false);
+      const blob = new Blob(chunks, { type: r.mimeType || type || 'audio/webm' });
+      if (blob.size < 1500) { setInterim(''); return; }
+      setTranscribing(true);
+      try {
+        const out = await client.request<{ text: string }>(`/assistant/transcribe?lang=${lang()}`, {
+          method: 'POST', body: blob, headers: { 'content-type': 'application/octet-stream', 'x-file-type': blob.type },
+        });
+        if (out.text) { byVoice.current = true; void ask(out.text); } else setError(t('ai.heardNothing'));
+      } catch (e: any) { setError(e?.status === 503 ? t('ai.voiceUnavailable') : errorText(e)); }
+      finally { setTranscribing(false); }
     };
-    r.onerror = () => { setListening(false); };
-    r.onend = () => {
-      setListening(false);
-      const said = (heard.current || '').trim();
-      if (said) { byVoice.current = true; void ask(said); } else setInterim('');
-    };
-    rec.current = r;
-    setListening(true);
-    try { r.start(); } catch { setListening(false); }
+    session.rec = r; session.stream = stream;
+    r.start(250);
+    session.timer = window.setTimeout(() => stopListening(), MAX_RECORD_MS);
+    // Se soltó la burbuja antes de que el micrófono arrancara.
+    if (session.stopAsked) stopListening();
   }
-  function stopListening() { try { rec.current?.stop(); } catch {} }
+  function stopListening() {
+    const s = rec.current;
+    if (!s) return;
+    s.stopAsked = true;
+    try { if (s.rec && s.rec.state !== 'inactive') s.rec.stop(); } catch {}
+  }
 
   const toggleSpeak = () => { const v = !speakOn; setSpeakOn(v); try { localStorage.setItem(SPEAK_KEY, v ? '1' : '0'); } catch {} if (!v) window.speechSynthesis?.cancel(); };
   const clear = () => { setTurns([]); setError(null); };
@@ -232,6 +258,7 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
           {pendingAll.length > 1 && (
             <button className="btn primary ai-sendall" onClick={() => pendingAll.forEach((a) => void runAction(a))}>{t('ai.sendAll', { n: pendingAll.length })}</button>
           )}
+          {transcribing && <div className="ai-turn user"><div className="ai-say muted">{t('ai.transcribing')}</div></div>}
           {busy && <div className="ai-turn assistant"><div className="ai-say ai-dots" aria-label={t('common.wait')}><i /><i /><i /></div></div>}
           {error && <div className="ai-error" role="alert">{error}</div>}
         </div>
@@ -249,7 +276,7 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask(text); } }} />
           {text.trim()
             ? <button className="ai-go" type="submit" disabled={busy} aria-label={t('ai.send')}>↑</button>
-            : Recognition && <button className={`ai-go ${listening ? 'on' : ''}`} type="button" aria-label={listening ? t('ai.stop') : t('ai.talk')} onClick={() => (listening ? stopListening() : startListening())}>🎤</button>}
+            : Recognition && <button className={`ai-go ${listening ? 'on' : ''}`} type="button" aria-label={listening ? t('ai.stop') : t('ai.talk')} disabled={transcribing} onClick={() => (listening ? stopListening() : void startListening())}>🎤</button>}
         </form>
       </section>
     </div>

@@ -160,14 +160,14 @@ describe('reuniones (proveedor FALSO: no prueba OAuth real)', () => {
     // Beto no ve la conexión de Ana.
     expect((await call('/meetings/connections', { token: beto.token })).json.connections.find((c: any) => c.provider === 'google').status).toBe('none');
 
-    const stats0 = await (await fetch(`${FAKE}/stats`)).json();
+    const stats0: any = await (await fetch(`${FAKE}/stats`)).json();
     const key = randomUUID();
     const input = { provider: 'google', conversationId: groupId, idempotencyKey: key, title: 'Urgente: caída del envío', durationMin: 30, timezone: 'America/Bogota', share: true };
     const [a, b] = await Promise.all([call('/meetings', { token: ana.token, body: input }), call('/meetings', { token: ana.token, body: input })]);
     expect(a.status).toBe(200); expect(b.status).toBe(200);
     expect(a.json.id).toBe(b.json.id);
     expect(a.json.joinUrl).toMatch(/^https:\/\/meet\.google\.com\/mock-/);
-    const stats1 = await (await fetch(`${FAKE}/stats`)).json();
+    const stats1: any = await (await fetch(`${FAKE}/stats`)).json();
     expect(stats1.google - stats0.google).toBe(1);
     // Compartido: mensaje con el enlace y reunión en el calendario del grupo.
     const msgs = (await call(`/conversations/${groupId}/messages?limit=100`, { token: beto.token })).json.messages;

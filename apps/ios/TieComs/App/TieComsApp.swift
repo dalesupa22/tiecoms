@@ -33,7 +33,9 @@ struct TieComsApp: App {
         if AppConfig.launchFlag("TCResetLanguage") { L10n.choice = .system }
         let s = AppStore(baseURL: base, secrets: secrets, feedback: AppFeedback.shared)
         _store = State(initialValue: s)
-        AppFeedback.shared.openConversationId = { [weak s] in s?.appActive == true ? s?.openConversationId : nil }
+        // «Abierta» exige mensajes cargados: un chat vacío por un 502 no calla sus avisos.
+        AppFeedback.shared.openConversationId = { [weak s] in s?.visibleConversationId }
+        AppFeedback.shared.presentsRemoteMessage = { [weak s] p in s?.presentsForegroundPush(p) ?? true }
         AppFeedback.shared.onOpenConversation = { [weak s] id in s?.handle(.conversation(id)) }
         AppFeedback.shared.onOpenSide = { [weak s] origin, side in s?.openSide(origin: origin, side: side) }
         AppFeedback.shared.onOpenMessage = { [weak s] conv, mid in s?.openMessage(conv, messageId: mid) }

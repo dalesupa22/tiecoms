@@ -149,6 +149,14 @@ final class AppStore {
     var showSignup = false
     /// Conversación que está en pantalla (la fija la vista).
     var openConversationId: String?
+    /// La conversación que de verdad se está viendo: en pantalla, app activa y mensajes cargados.
+    /// Una pantalla vacía por un 502 no cuenta: sus avisos deben salir.
+    var visibleConversationId: String? {
+        guard appActive, let id = openConversationId, conversations[id]?.loaded == true else { return nil }
+        return id
+    }
+    /// Mensajes que ya pasaron por la decisión de aviso en primer plano (socket o push remoto).
+    @ObservationIgnored var announced = AnnouncedLedger(capacity: 300)
     var appActive = true
     /// «No molestar» guardado solo en el dispositivo (el API respondió 404 a PUT /me/dnd: servidor viejo).
     var localDndUntil: Date?
@@ -400,6 +408,7 @@ final class AppStore {
         tab = .home
         workspaceFilter = nil
         openConversationId = nil
+        announced.removeAll()
     }
 
     // MARK: - Snapshot
@@ -614,11 +623,15 @@ final class AppStore {
     /// Reglas en `NotifyRule.incoming`: silenciado = nada salvo mención; «No molestar» = nada.
     private func announce(_ msg: MessageDTO) {
         guard let d = data, let c = meta(msg.conversationId) else { return }
+        // El push remoto de este mensaje ya se decidió (llegó antes que el socket): no se repite.
+        guard !announced.contains(msg.id) else { return }
         let outcome = NotifyRule.incoming(.init(
             mine: msg.authorId == d.me.id, system: msg.isSystem, blocked: blockedUserIds.contains(msg.authorId),
-            openAndActive: msg.conversationId == openConversationId && appActive,
+            // «Abierto» exige mensajes cargados: tras un 502 la pantalla está vacía y el aviso debe salir.
+            openAndActive: msg.conversationId == visibleConversationId,
             muted: c.isMuted, mutedForever: MentionText.mutedForever(c),
             mentionsMe: MentionText.mentionsMe(msg.mentions, me: d.me.id, authorId: msg.authorId), dnd: dndActive))
+        announced.record(msg.id, outcome)
         let author = Naming.person(d, msg.authorId)?.name ?? L("common.participant")
         switch outcome {
         case .none: break
@@ -628,6 +641,28 @@ final class AppStore {
         case .notify:
             feedback?.notifyIncoming(conversationId: c.id, title: Naming.notificationTitle(d, c), author: author, body: msg.body)
         }
+    }
+
+    /// Push remoto de un mensaje con la app en primer plano: ¿se presenta el banner?
+    /// Si el socket ya lo anunció (id registrado) no se muestra nada; si no (conversación desconocida, hueco, catch-up,
+    /// duplicado o reconexión), se aplican las mismas reglas que al aviso local y el id queda registrado.
+    func presentsForegroundPush(_ p: PushPayload) -> Bool {
+        guard let mid = p.messageId else { return true }
+        let c = meta(p.conversationId)
+        let input = ForegroundPush.Input(
+            alreadyAnnounced: announced.contains(mid), dnd: dndActive,
+            openActiveLoaded: p.conversationId == visibleConversationId,
+            muted: c?.isMuted ?? false, mutedForever: c.map(MentionText.mutedForever) ?? false,
+            mentionsMe: p.kind == .mention, blocked: p.authorId.map(blockedUserIds.contains) ?? false,
+            mine: p.authorId != nil && p.authorId == me?.id)
+        let decision = ForegroundPush.decide(input)
+        if let outcome = decision.outcome { announced.record(mid, outcome) }
+        // El socket no trajo este mensaje: se pide lo que falta (conversación nueva → snapshot; cargada → catch-up).
+        if c == nil { scheduleBootstrap() }
+        else if let local = conversations[p.conversationId], local.loaded, !local.messages.contains(where: { $0.id == mid }) {
+            Task { await catchUp(p.conversationId) }
+        }
+        return decision.present
     }
 
     @discardableResult

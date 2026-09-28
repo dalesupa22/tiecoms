@@ -63,8 +63,10 @@ final class SoundPlayer {
 final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegate {
     static let shared = AppFeedback()
     let sounds = SoundPlayer()
-    /// Conversación visible ahora mismo (para decidir si se presenta el banner).
+    /// Conversación visible ahora mismo (en pantalla, app activa y cargada) para decidir si se presenta el banner.
     var openConversationId: (() -> String?)?
+    /// Push remoto de un mensaje en primer plano: el store decide con el registro de ids ya anunciados.
+    var presentsRemoteMessage: ((PushPayload) -> Bool)?
     /// Toque en una notificación.
     var onOpenConversation: ((String) -> Void)?
     /// Toque en un push de sidechat: (origen, sidechat).
@@ -77,7 +79,8 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     var onReply: ((String, String) async -> Void)?
     /// Acción «Marcar como leído».
     var onMarkRead: ((String) async -> Void)?
-    /// El socket está en línea: los push en primer plano sobran (el aviso local ya salió).
+    /// El socket está en línea: los push en primer plano que no son de mensajes (recordatorio, reacción, tarea,
+    /// aviso de reunión) sobran porque el socket ya los avisó. Los de mensajes usan `presentsRemoteMessage`.
     var socketOnline: (() -> Bool)?
     /// «No molestar» activo: en primer plano no se presenta ningún aviso (ni local ni push).
     var dndActive: (() -> Bool)?
@@ -158,6 +161,7 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         let conv = notification.request.content.userInfo["conversationId"] as? String
         let isRemote = notification.request.trigger is UNPushNotificationTrigger
+        let payload = PushPayload(userInfo: notification.request.content.userInfo)
         let (enabled, open, online, dnd) = await MainActor.run {
             (Prefs.notificationsEnabled, AppFeedback.shared.openConversationId?(), AppFeedback.shared.socketOnline?() ?? false,
              AppFeedback.shared.dndActive?() ?? false)
@@ -167,7 +171,13 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
         let isEventSoon = (info["type"] as? String) == "event" && info["minutes"] != nil
         // El aviso de reunión se muestra siempre (aunque sea el chat abierto), salvo el push duplicado del aviso local.
         if isEventSoon { return isRemote && online ? [] : [.banner, .list, .sound] }
-        // En primer plano: nada si es la conversación abierta (ya sonó tc_receive).
+        // Push de un mensaje: no se supone que el socket ya avisó. Si el id ya se anunció, nada (sin duplicado);
+        // si no (conversación nueva, hueco, catch-up, reconexión), las mismas reglas que el aviso local.
+        if isRemote, let payload, payload.messageId != nil, ForegroundPush.isMessage(payload.kind) {
+            let present = await MainActor.run { AppFeedback.shared.presentsRemoteMessage?(payload) ?? (payload.conversationId != open) }
+            return present ? [.banner, .list, .sound] : []
+        }
+        // En primer plano: nada si es la conversación abierta y cargada (ya sonó tc_receive).
         if let conv, conv == open { return [] }
         // Con el socket en línea el aviso local ya salió: el push remoto sería un duplicado.
         if isRemote && online { return [] }

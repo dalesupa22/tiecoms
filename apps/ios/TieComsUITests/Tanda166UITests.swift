@@ -68,6 +68,14 @@ final class Tanda166UITests: XCTestCase {
         return app
     }
 
+    /// Espera la lista de Grupos (la sesión ya cargó) y cambia de pestaña.
+    func tab(_ app: XCUIApplication, _ label: String, _ f: Fixture) {
+        XCTAssertTrue(waitFor(app.buttons["conv.row.\(f.generalId)"], 20, app), "sesión lista")
+        let b = app.tabBars.buttons[label]
+        XCTAssertTrue(b.waitForExistence(timeout: 5), "pestaña \(label): \(app.tabBars.buttons.allElementsBoundByIndex.map(\.label))")
+        b.tap()
+    }
+
     func back(_ app: XCUIApplication) { app.navigationBars.buttons.element(boundBy: 0).tap() }
 
     func waitFor(_ el: XCUIElement, _ timeout: TimeInterval = 10, _ app: XCUIApplication) -> Bool {
@@ -140,5 +148,20 @@ final class Tanda166UITests: XCTestCase {
         XCTAssertTrue(long.label.contains("sin leer"), "lo que no se vio sigue sin leer: \(long.label)")
         XCTAssertFalse(long.label.contains("40 sin leer"), "lo visto sí avanzó: \(long.label)")
         shot("1-07-chat-largo-sigue-pendiente")
+    }
+
+    // MARK: 2. Asuntos compactos
+
+    func test2SubjectsWithoutExplanatoryParagraph() throws {
+        let f = try fixture()
+        let app = login(f)
+        tab(app, "Asuntos", f)
+        let filter = app.segmentedControls["issues.filter"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Lo que quedó pendiente")).firstMatch.exists, "sin el párrafo issue.pageSub")
+        XCTAssertTrue(app.segmentedControls["issues.groupBy"].exists, "Por grupo / Por responsable se conservan")
+        // Los filtros quedan pegados al título: arriba de la primera cuarta parte de la pantalla.
+        XCTAssertLessThan(filter.frame.minY, app.frame.height * 0.3, "filtros cerca del título: \(filter.frame)")
+        shot("2-01-asuntos-compactos")
     }
 }

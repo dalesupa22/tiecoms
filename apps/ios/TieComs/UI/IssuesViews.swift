@@ -559,8 +559,8 @@ struct IssuesScreen: View {
                 let shown = groupBy == .group ? IssueTasks.tops(list, store.issues) : list
                 let sections = IssueTree.sections(shown, by: groupBy, me: d.me.id, groupKey: { IssueTasks.groupConversation($0, store.issues) }) { sectionTitle(d, $0, groupBy) }
                 List {
+                    // 1.6.6: sin el párrafo explicativo (issue.pageSub); los filtros quedan pegados al título.
                     Section {
-                        Text(L("issue.pageSub")).font(.footnote).foregroundStyle(Theme.textSecondary)
                         Picker(L("nav.issues"), selection: $filter) {
                             ForEach([IssueTree.Filter.mine, .open, .closed], id: \.self) { f in
                                 Text("\(label(f)) \(IssueTree.filter(Array(scoped), f, me: d.me.id).count)").tag(f)
@@ -596,6 +596,8 @@ struct IssuesScreen: View {
                     }
                 }
                 .listStyle(.insetGrouped)
+                .listSectionSpacing(.compact)
+                .contentMargins(.top, 4, for: .scrollContent)
                 .scrollContentBackground(.hidden)
                 .refreshable { await load() }
             }

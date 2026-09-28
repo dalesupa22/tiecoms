@@ -111,6 +111,10 @@ class AppSettings(context: Context) {
     var calendarView: String
         get() = com.tiecoms.app.core.CalendarGrid.View.of(prefs.getString("calendarView", null)).id
         set(v) { prefs.edit().putString("calendarView", com.tiecoms.app.core.CalendarGrid.View.of(v).id).apply() }
+    /** Agenda: grupos ocultos desde la leyenda (ids de conversación), por dispositivo (docs/AGENDA-COLORES.md). */
+    var agendaHidden: Set<String>
+        get() = prefs.getStringSet("agendaHidden", emptySet())?.toSet() ?: emptySet()
+        set(v) { prefs.edit().putStringSet("agendaHidden", v.toSet()).apply() }
     /** Tamaño del texto (1.6.4 / 22): factor de TextSize.STEPS; observable para que el tema lo aplique en vivo. */
     private val textScaleState = androidx.compose.runtime.mutableFloatStateOf(com.tiecoms.app.core.TextSize.sanitize(prefs.getFloat("textScale", 1f)))
     var textScale: Float

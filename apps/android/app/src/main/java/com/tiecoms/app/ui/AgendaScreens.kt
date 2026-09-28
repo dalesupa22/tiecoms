@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.CalendarContract
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -59,6 +62,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -73,6 +77,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tiecoms.app.R
 import com.tiecoms.app.core.BootstrapDTO
 import com.tiecoms.app.core.CalendarEventDTO
+import com.tiecoms.app.core.GroupColors
 import com.tiecoms.app.core.Names
 import com.tiecoms.app.ui.theme.Brand
 import kotlinx.coroutines.launch
@@ -97,21 +102,36 @@ private fun tzList() = (listOf(DEVICE_TZ) + COMMON_TZ).distinct()
 private fun fmtTime(iso: String, tz: ZoneId = ZoneId.systemDefault()) =
     parseInstant(iso)?.atZone(tz)?.format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)) ?: ""
 
-/** «Martes 30 de septiembre · 10:00–11:00» (como fmtWhen de la web). */
-fun fmtWhen(ev: CalendarEventDTO): String {
+/** «Martes 30 de septiembre · 10:00–11:00» (como fmtWhen de la web); con [allDayLabel], «… · Todo el día» si lo es. */
+fun fmtWhen(ev: CalendarEventDTO, allDayLabel: String? = null): String {
     val s = parseInstant(ev.startsAt)?.atZone(ZoneId.systemDefault()) ?: return ""
     val day = s.format(DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.getDefault())).replaceFirstChar { it.uppercase() }
+    if (allDayLabel != null && isAllDay(ev)) return "$day · $allDayLabel"
     return "$day · ${fmtTime(ev.startsAt)}–${fmtTime(ev.endsAt)}"
 }
 
+/** Día completo en la zona del dispositivo (docs/AGENDA-COLORES.md). */
+fun isAllDay(ev: CalendarEventDTO) = GroupColors.isAllDay(ev, ZoneId.systemDefault())
+
+/** Hora del evento o «Todo el día». */
+@Composable
+private fun evTime(ev: CalendarEventDTO) = if (isAllDay(ev)) stringResource(R.string.cal_all_day) else fmtTime(ev.startsAt)
+
 private fun isUrl(s: String?) = s != null && Regex("^https?://", RegexOption.IGNORE_CASE).containsMatchIn(s.trim())
 
-private fun eventColors(d: BootstrapDTO, ev: CalendarEventDTO): Pair<Color, Color> {
-    val ws = d.workspaces.firstOrNull { it.id == ev.workspaceId }
-    // Empresa contraparte: la primera del espacio que no es la mía.
-    val org = ws?.organizationIds?.firstOrNull { it != d.me.primaryOrgId }?.let { Names.org(d, it) } ?: Names.org(d, ws?.owningOrgId)
-    return parseColor(org?.colorBg, Color(0xFFE0DACE)) to parseColor(org?.colorFg, Color(0xFF1B1917))
+/**
+ * Un color por grupo (fondo, texto), el mismo en web, iOS y Android (docs/AGENDA-COLORES.md). En modo oscuro,
+ * el color de texto va de fondo con texto blanco.
+ */
+@Composable
+fun groupColors(conversationId: String): Pair<Color, Color> {
+    val c = GroupColors.of(conversationId)
+    return if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(c.fg) to Color.White else Color(c.bg) to Color(c.fg)
 }
+
+@Suppress("UNUSED_PARAMETER")
+@Composable
+private fun eventColors(d: BootstrapDTO, ev: CalendarEventDTO): Pair<Color, Color> = groupColors(ev.conversationId)
 
 private fun rsvpIcon(r: String) = when (r) { "yes" -> "✓"; "no" -> "✕"; "maybe" -> "?"; else -> "·" }
 fun rsvpLabel(ctx: android.content.Context, r: String) = ctx.getString(when (r) { "yes" -> R.string.cal_rsvp_yes; "no" -> R.string.cal_rsvp_no; "maybe" -> R.string.cal_rsvp_maybe; else -> R.string.cal_rsvp_pending })
@@ -186,7 +206,7 @@ fun EventDialog(conversationId: String?, originMessageId: String? = null, defaul
             scope.launch {
                 try {
                     val ev = if (event != null) client.updateEvent(event.id, payload) else client.createEvent(conv, payload)
-                    container.toast("${ev.title} · ${fmtWhen(ev)}")
+                    container.toast("${ev.title} · ${fmtWhen(ev, ctx.getString(R.string.cal_all_day))}")
                     onClose()
                 } catch (ex: Exception) { error = errorText(ctx, ex) } finally { busy = false }
             }
@@ -218,7 +238,7 @@ fun EventDetailScreen(id: String, onBack: () -> Unit, onOpenChat: (String) -> Un
             if (ev.cancelledAt != null) Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.small) {
                 Text(stringResource(R.string.cal_cancelled), Modifier.padding(10.dp), color = MaterialTheme.colorScheme.onErrorContainer)
             }
-            Text(fmtWhen(ev), fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("eventWhen"))
+            Text(fmtWhen(ev, stringResource(R.string.cal_all_day)), fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("eventWhen"))
             if (ev.timezone != DEVICE_TZ) {
                 val z = runCatching { ZoneId.of(ev.timezone) }.getOrDefault(ZoneId.of("UTC"))
                 Text("${stringResource(R.string.cal_event_tz)}: ${fmtTime(ev.startsAt, z)}–${fmtTime(ev.endsAt, z)} (${ev.timezone.replace('_', ' ')})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -295,7 +315,7 @@ fun EventRow(ev: CalendarEventDTO, data: BootstrapDTO, showConv: Boolean = true,
     ) {
         if (ev.workspaceId == null && conv != null) { ConversationIcon(conv, data, 32.dp); Spacer(Modifier.width(8.dp)) }
         Box(Modifier.background(bg, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 6.dp).widthIn(min = 56.dp), contentAlignment = Alignment.Center) {
-            Text(fmtTime(ev.startsAt), color = fg, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
+            Text(evTime(ev), color = fg, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge, maxLines = 1, modifier = Modifier.testTag("eventTime-${ev.id}"))
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
@@ -325,7 +345,7 @@ fun EventCard(ev: CalendarEventDTO, data: BootstrapDTO, onOpen: (String) -> Unit
                 Spacer(Modifier.width(8.dp))
                 Text(ev.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text(if (ev.cancelledAt != null) stringResource(R.string.cal_cancelled) else fmtWhen(ev), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (ev.cancelledAt != null) stringResource(R.string.cal_cancelled) else fmtWhen(ev, stringResource(R.string.cal_all_day)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (mine != null && ev.cancelledAt == null) {
                 Segmented(listOf("yes" to stringResource(R.string.cal_rsvp_yes), "maybe" to stringResource(R.string.cal_rsvp_maybe), "no" to stringResource(R.string.cal_rsvp_no)),
                     mine.rsvp, { r -> scope.launch { runCatching { client.rsvp(ev.id, r) }.onFailure { (ctx.applicationContext as com.tiecoms.app.TieComsApp).container.toast(errorText(ctx, it)) } } })
@@ -363,8 +383,11 @@ fun AgendaScreen(onOpenEvent: (String) -> Unit, quick: QuickNav? = null) {
     val (from, to) = com.tiecoms.app.core.CalendarGrid.range(view, anchor, zone)
     LaunchedEffect(viewId, anchorStr) { error = null; runCatching { client.loadEvents(from, to) }.onFailure { error = errorText(ctx, it) } }
     val visible = data.conversations.map { it.id }.toSet()
-    val events = st.events.values.filter { it.conversationId in visible && (parseInstant(it.startsAt)?.isBefore(to) == true) && ((parseInstant(it.endsAt) ?: parseInstant(it.startsAt))?.isAfter(from) == true) }
-        .sortedBy { it.startsAt }
+    // Lo que se ve, con los de día completo antes que los de hora; la leyenda sale de aquí, antes de ocultar.
+    val inRange = GroupColors.allDayFirst(st.events.values.filter { it.conversationId in visible && (parseInstant(it.startsAt)?.isBefore(to) == true) && ((parseInstant(it.endsAt) ?: parseInstant(it.startsAt))?.isAfter(from) == true) }, zone)
+    var hidden by remember { mutableStateOf(container.settings.agendaHidden) }
+    fun saveHidden(next: Set<String>) { hidden = next; container.settings.agendaHidden = next }
+    val events = GroupColors.withoutHidden(inRange, hidden)
     fun onDay(day: LocalDate) = events.filter { e -> spanOf(e)?.let { com.tiecoms.app.core.CalendarGrid.overlaps(it, day, zone) } == true }
     fun setView(v: com.tiecoms.app.core.CalendarGrid.View) { viewId = v.id; container.settings.calendarView = v.id }
     val today = LocalDate.now()
@@ -414,6 +437,7 @@ fun AgendaScreen(onOpenEvent: (String) -> Unit, quick: QuickNav? = null) {
                 }
             }
             ErrorText(error)
+            GroupLegend(data, GroupColors.legendIds(inRange), hidden, onToggle = { id -> saveHidden(GroupColors.toggle(hidden, id)) }, onShowAll = { saveHidden(emptySet()) })
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when (view) {
                     com.tiecoms.app.core.CalendarGrid.View.DAY -> DayView(anchor, onDay(anchor), data, zone, onOpenEvent, onCreate = { h -> creating = com.tiecoms.app.core.CalendarGrid.proposedStart(anchor, h, zone) })
@@ -474,7 +498,8 @@ private fun DayView(day: LocalDate, events: List<CalendarEventDTO>, data: Bootst
         scroll.scrollTo(with(density) { (hourH * h).roundToPx() })
     }
     val spans = events.mapNotNull { e -> spanOf(e)?.let { e to it } }
-    val (allDay, timed) = spans.partition { (_, s) -> com.tiecoms.app.core.CalendarGrid.allDay(s, day, zone) }
+    // Franja de arriba: los de día completo (00:00–23:59) y los de varios días que cubren este día entero.
+    val (allDay, timed) = spans.partition { (e, s) -> isAllDay(e) || com.tiecoms.app.core.CalendarGrid.allDay(s, day, zone) }
     val slots = timed.mapNotNull { (e, s) -> com.tiecoms.app.core.CalendarGrid.slot(s, day, zone)?.let { e to it } }.sortedBy { it.second.startMin }
     // Carriles para las que se cruzan: cada una en el primero libre.
     val laneEnds = mutableListOf<Int>()
@@ -578,5 +603,46 @@ private fun MonthView(anchor: LocalDate, events: List<CalendarEventDTO>, data: B
             }
         }
         Spacer(Modifier.heightIn(min = AssistantListInset + 16.dp))
+    }
+}
+
+/**
+ * Leyenda de la Agenda: los grupos con eventos en lo que se ve, con su color (punto con el color de texto). Tocar uno
+ * lo oculta o lo muestra; «Mostrar todos» limpia los ocultos. Se recuerda en este dispositivo.
+ */
+@Composable
+private fun GroupLegend(data: BootstrapDTO, ids: List<String>, hidden: Set<String>, onToggle: (String) -> Unit, onShowAll: () -> Unit) {
+    val ctx = LocalContext.current
+    val convs = ids.mapNotNull { id -> data.conversations.firstOrNull { it.id == id } }
+    if (convs.isEmpty()) return
+    val groupsCd = stringResource(R.string.cal_groups)
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp)
+            .semantics { contentDescription = groupsCd }.testTag("agendaLegend"),
+        horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        convs.forEach { conv ->
+            val off = conv.id in hidden
+            val dot = Color(GroupColors.of(conv.id).fg)
+            val name = titleOf(ctx, conv, data)
+            val state = stringResource(if (off) R.string.cal_group_hidden else R.string.cal_group_shown, name)
+            Surface(
+                shape = RoundedCornerShape(50), color = if (off) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.heightIn(min = 40.dp)
+                    .toggleable(!off, role = Role.Checkbox, onValueChange = { onToggle(conv.id) })
+                    .semantics(mergeDescendants = true) { contentDescription = state }.testTag("legend-${conv.id}"),
+            ) {
+                Row(Modifier.heightIn(min = 40.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(10.dp).background(if (off) Color.Transparent else dot, androidx.compose.foundation.shape.CircleShape)
+                        .border(1.5.dp, dot, androidx.compose.foundation.shape.CircleShape))
+                    Spacer(Modifier.width(6.dp))
+                    Text(name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp),
+                        color = if (off) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                        textDecoration = if (off) androidx.compose.ui.text.style.TextDecoration.LineThrough else null)
+                }
+            }
+        }
+        if (hidden.isNotEmpty()) TextButton(onClick = onShowAll, modifier = Modifier.testTag("legendShowAll")) { Text(stringResource(R.string.cal_show_all), maxLines = 1) }
     }
 }

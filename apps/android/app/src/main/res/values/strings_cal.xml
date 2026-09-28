@@ -19,4 +19,11 @@
         <item quantity="one">%1$s, %2$d meeting</item>
         <item quantity="other">%1$s, %2$d meetings</item>
     </plurals>
+    <!-- Agenda: un color por grupo y leyenda (docs/AGENDA-COLORES.md). -->
+    <string name="cal_groups">Groups in the agenda</string>
+    <string name="cal_show_all">Show all</string>
+    <string name="cal_group_shown">%1$s, shown</string>
+    <string name="cal_group_hidden">%1$s, hidden</string>
+    <string name="cal_hide_group">Hide group</string>
+    <string name="cal_show_group">Show group</string>
 </resources>

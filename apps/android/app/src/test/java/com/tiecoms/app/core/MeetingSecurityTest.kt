@@ -100,6 +100,41 @@ class MeetingSecurityTest {
         }
     }
 
+    @Test fun `late group admin and removal responses cannot patch or refresh replacement account`() = runBlocking {
+        Fixture().use { f ->
+            val c = f.client; c.login("a@test", "test")
+            val entered = CountDownLatch(2); val release = CountDownLatch(1)
+            f.custom = { r, _ ->
+                if (r.path!!.startsWith("/api/v1/conversations/c/members/") && r.getHeader("authorization") == "Bearer a") {
+                    entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
+                    MockResponse().setBody("""{"adminIds":["private-a"]}""")
+                } else null
+            }
+            val generation = c.sessionGeneration
+            val jobs = listOf(async(Dispatchers.Default) { runCatching { c.setMemberAdmin("c", "target", true, generation) } },
+                async(Dispatchers.Default) { runCatching { c.removeMember("c", "target", generation) } })
+            try {
+                assertTrue(entered.await(10, TimeUnit.SECONDS))
+                c.logout(); c.login("b@test", "test")
+                val snapshots = f.requests.count { it.first.path == "/api/v1/bootstrap" }
+                release.countDown()
+                jobs.forEach { assertTrue(it.await().exceptionOrNull() is CancellationException) }
+                assertEquals("b", c.myId); assertNull(c.meta("c")!!.adminIds)
+                assertEquals(snapshots, f.requests.count { it.first.path == "/api/v1/bootstrap" })
+            } finally { release.countDown() }
+        }
+    }
+
+    @Test fun `old confirmation cannot send group mutation under a new account`() = runBlocking {
+        Fixture().use { f ->
+            val c = f.client; c.login("a@test", "test"); val generation = c.sessionGeneration
+            c.logout(); c.login("b@test", "test")
+            assertTrue(runCatching { c.setMemberAdmin("c", "target", true, generation) }.exceptionOrNull() is CancellationException)
+            assertTrue(runCatching { c.removeMember("c", "target", generation) }.exceptionOrNull() is CancellationException)
+            assertEquals(0, f.requests.count { it.first.path!!.startsWith("/api/v1/conversations/c/members/") })
+        }
+    }
+
     @Test fun `late 401 does not refresh or sign out the replacement session`() = runBlocking {
         Fixture().use { f ->
             val c = f.client; c.login("a@test", "test")

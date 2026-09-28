@@ -1450,13 +1450,18 @@ class TieComsClient(
     suspend fun openDirect(userId: String): String = withContext(dispatcher) {
         val r = req("POST", "/directs", buildJsonObject { put("userId", JsonPrimitive(userId)) }, IdResult.serializer()); loadBootstrapInternal(); r.id
     }
-    suspend fun removeMember(conversationId: String, userId: String) = withContext(dispatcher) {
-        req("DELETE", "/conversations/$conversationId/members/$userId", null, JsonElement.serializer()); loadBootstrapInternal(); Unit
+    suspend fun removeMember(conversationId: String, userId: String, expectedSession: Long = sessionGeneration) = withContext(dispatcher) {
+        requireSession(expectedSession)
+        req("DELETE", "/conversations/$conversationId/members/$userId", null, JsonElement.serializer())
+        requireSession(expectedSession)
+        loadBootstrapInternal(); Unit
     }
 
     /** Nombrar o quitar admin del grupo (también «Dejar de ser admin» sobre mí). Devuelve los admins vigentes. */
-    suspend fun setMemberAdmin(conversationId: String, userId: String, admin: Boolean): List<String> = withContext(dispatcher) {
+    suspend fun setMemberAdmin(conversationId: String, userId: String, admin: Boolean, expectedSession: Long = sessionGeneration): List<String> = withContext(dispatcher) {
+        requireSession(expectedSession)
         val r = req("PUT", "/conversations/$conversationId/members/$userId/admin", buildJsonObject { put("admin", JsonPrimitive(admin)) }, AdminIdsResult.serializer())
+        requireSession(expectedSession)
         patchMeta(conversationId) { copy(adminIds = r.adminIds) }
         loadBootstrapInternal(); r.adminIds
     }

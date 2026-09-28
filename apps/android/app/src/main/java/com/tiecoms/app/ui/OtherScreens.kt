@@ -93,7 +93,8 @@ fun DetailsScreen(
     var confirmLeave by rememberSaveable { mutableStateOf(false) }
     var reportUser by remember { mutableStateOf<String?>(null) }
     var blockUser by remember { mutableStateOf<com.tiecoms.app.core.PersonDTO?>(null) }
-    var adminAction by remember { mutableStateOf<Pair<GroupAdmins.Action, com.tiecoms.app.core.PersonDTO>?>(null) }
+    val adminSession = client.sessionGeneration
+    var adminAction by remember(client, id, adminSession) { mutableStateOf<Pair<GroupAdmins.Action, com.tiecoms.app.core.PersonDTO>?>(null) }
     val title = meta?.let { Names.conversationTitle(it, data, stringResource(R.string.internal_default), stringResource(R.string.conversation)) } ?: stringResource(R.string.details)
     SimpleScaffold(title = title, onBack = onBack) {
         if (meta == null) {
@@ -214,13 +215,16 @@ fun DetailsScreen(
             AdminActionDialog(action, person.name, onDismiss = { adminAction = null }, onConfirm = {
                 adminAction = null
                 scope.launch {
+                    if (client.sessionGeneration != adminSession || action !in GroupAdmins.actionsFor(client.meta(id) ?: return@launch, person, client.myId ?: return@launch)) return@launch
                     runCatching {
                         when (action) {
-                            GroupAdmins.Action.MAKE_ADMIN -> client.setMemberAdmin(id, person.id, true)
-                            GroupAdmins.Action.REMOVE_ADMIN, GroupAdmins.Action.LEAVE_ADMIN -> client.setMemberAdmin(id, person.id, false)
-                            GroupAdmins.Action.REMOVE_FROM_GROUP -> client.removeMember(id, person.id)
+                            GroupAdmins.Action.MAKE_ADMIN -> client.setMemberAdmin(id, person.id, true, adminSession)
+                            GroupAdmins.Action.REMOVE_ADMIN, GroupAdmins.Action.LEAVE_ADMIN -> client.setMemberAdmin(id, person.id, false, adminSession)
+                            GroupAdmins.Action.REMOVE_FROM_GROUP -> client.removeMember(id, person.id, adminSession)
                         }
-                    }.onFailure { e -> container.toast(apiErrorMessage(ctx, e)) }
+                    }.onFailure { e ->
+                        if (client.sessionGeneration == adminSession && e !is kotlinx.coroutines.CancellationException) container.toast(apiErrorMessage(ctx, e))
+                    }
                 }
             })
         }

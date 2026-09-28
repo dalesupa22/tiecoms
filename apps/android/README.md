@@ -26,6 +26,12 @@ La conexión a reuniones usa un verifier aleatorio en memoria y un challenge SHA
 
 El chat carga todas las páginas necesarias para llegar al primer pendiente. Sólo confirma un prefijo continuo de mensajes vistos; saltar a una mención o al final no borra el hueco. Los contadores de lectura y de lectura del árbol se actualizan con la respuesta confirmada del servidor. `MeetingSecurityTest`, `ReadProgressTest` y `ReadProgressUiTest` cubren carreras entre cuentas, reinicio, errores de red y un historial sintético de seis páginas. Estas pruebas locales no demuestran entrega FCM ni conexiones reales con proveedores.
 
+### Admins de grupo integrados
+
+Sobre la tanda corregida de lectura/reuniones se integra `android-admins` (`043d3b8`). En Participantes se distinguen Admin y Bot; mantener pulsado abre las acciones permitidas, con confirmación antes de nombrar, retirar el rol o sacar del grupo. El creador y los bots conservan las restricciones del API. Los campos nuevos son opcionales para tolerar servidores anteriores. Las confirmaciones se invalidan al cambiar de sesión, y las respuestas tardías no actualizan la cuenta siguiente. Las integraciones/webhooks se administran en web; Android sólo muestra sus bots y mensajes.
+
+Verificación local adicional: `GroupAdminsTest`, guardias A→B en `MeetingSecurityTest` y `GroupAdminsUiTest` (interfaz real con servidor sintético dentro del emulador). No prueban entrega FCM ni proveedores OAuth reales.
+
 ## Entrega 1.6.5 (24)
 
 Integra gg, tareas derivadas, mensajes programados, horario de descanso y firma de PDFs. Antes de enviar la primera solicitud a gg, se explica el envío a DeepSeek y se pide permiso para la apertura actual del panel. Cancelar conserva el borrador y no envía la solicitud; cerrar gg o salir de la cuenta revoca ese permiso. El cliente manda `aiConsent: true` únicamente después de permitirlo. El dictado usa el servicio de reconocimiento de voz de Android, que puede procesar audio fuera del dispositivo.

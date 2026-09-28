@@ -384,6 +384,7 @@ final class GroupAdminsTests: XCTestCase {
         MockURLProtocol.requests = []
         MockURLProtocol.httpRequests = []
         let store = AppStore(baseURL: URL(string: "https://mock.tiecoms.test")!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: nil, session: MockURLProtocol.session())
+        store.seedForTesting(try dec(BootstrapDTO.self, bootJSON))
         try await store.perform(.makeAdmin, conversationId: "g", userId: "col")
         let put = try XCTUnwrap(MockURLProtocol.httpRequests.first { $0.url?.path == "/api/v1/conversations/g/members/col/admin" })
         XCTAssertEqual(put.httpMethod, "PUT")
@@ -416,5 +417,37 @@ final class GroupAdminsTests: XCTestCase {
             XCTAssertEqual(L10n.errorText(error), "A quien creó el grupo no se le quita el admin.")
         }
         XCTAssertFalse(MockURLProtocol.requests.contains { $0.path == "/api/v1/bootstrap" }, "si falla no se refresca")
+    }
+
+    @MainActor
+    func testHeldAdminActionsCannotPatchOrRefreshReplacementSession() async throws {
+        for action in [GroupMemberAction.makeAdmin, .removeMember] {
+            for nextUser in ["b", "a"] {
+                let store = try ControlledURLProtocol.store(user: "a")
+                var initial = try ControlledURLProtocol.boot("a")
+                initial.conversations = [try conv(#","adminIds":["a"],"createdBy":"a","canManage":true"#)]
+                store.seedForTesting(initial)
+                let started = expectation(description: "admin response retained")
+                var held: ControlledURLProtocol?
+                var paths: [String] = []
+                ControlledURLProtocol.handler = { req in Task { @MainActor in
+                    paths.append(req.request.url!.path)
+                    if held == nil { held = req; started.fulfill() }
+                    else { req.respond("{}") }
+                } }
+                let task = Task { try await store.perform(action, conversationId: "g", userId: "col") }
+                await fulfillment(of: [started], timeout: 2)
+                await store.signOutLocally()
+                var replacement = try ControlledURLProtocol.boot(nextUser)
+                replacement.conversations = [try conv(#","adminIds":["new-admin"],"createdBy":"new-admin","canManage":false"#)]
+                store.seedForTesting(replacement)
+                held?.respond(action == .makeAdmin ? #"{"adminIds":["a","col"]}"# : #"{"ok":true}"#)
+                do { try await task.value; XCTFail("a completed action must not cross an auth-session replacement") }
+                catch is CancellationError {} catch { XCTFail("\(error)") }
+                XCTAssertEqual(store.meta("g")?.adminIds, ["new-admin"])
+                XCTAssertEqual(store.me?.id, nextUser)
+                XCTAssertEqual(paths.count, 1, "the old action cannot refresh bootstrap under the new session")
+            }
+        }
     }
 }

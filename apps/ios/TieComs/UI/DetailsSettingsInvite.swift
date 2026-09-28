@@ -260,11 +260,19 @@ private struct PersonRow: View {
 
     private func run(_ a: GroupMemberAction) {
         guard let conv else { return }
+        let stamp = store.sessionStamp
         Task {
             do {
+                try store.requireSession(stamp)
                 try await store.perform(a, conversationId: conv.id, userId: p.id)
+                try store.requireSession(stamp)
                 store.show(L("admin.done.\(a.rawValue)", ["name": p.name]))
-            } catch { store.show(L10n.errorText(error)) }
+            } catch is CancellationError {
+                // The result belongs to a dismissed session, not the person now signed in.
+            } catch {
+                guard stamp == store.sessionStamp else { return }
+                store.show(L10n.errorText(error))
+            }
         }
     }
 

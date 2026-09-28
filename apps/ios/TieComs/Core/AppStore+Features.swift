@@ -571,16 +571,22 @@ extension AppStore {
     /// Nombrar o quitar admin (también «Dejar de ser admin» sobre mí): PUT …/members/{userId}/admin → `{ adminIds }`.
     /// Aplica los admins de la respuesta y refresca el bootstrap (docs/ADMINS-INTEGRACIONES.md §1).
     func setGroupAdmin(_ conversationId: String, userId: String, admin: Bool) async throws {
+        let stamp = sessionStamp
         struct R: Decodable { var adminIds: [String]?; init(from d: Decoder) throws { adminIds = try container(d).o("adminIds") } }
         let r: R = try await api.request("/conversations/\(conversationId)/members/\(userId)/admin", method: "PUT", json: ["admin": admin])
+        try requireSession(stamp)
         if let ids = r.adminIds { patchMeta(conversationId) { $0.adminIds = ids } }
         try await loadBootstrap()
+        try requireSession(stamp)
     }
 
     /// Sacar a alguien del grupo (DELETE de su membresía; solo quien administra).
     func removeMember(_ conversationId: String, userId: String) async throws {
+        let stamp = sessionStamp
         try await api.requestData("/conversations/\(conversationId)/members/\(userId)", method: "DELETE")
+        try requireSession(stamp)
         try await loadBootstrap()
+        try requireSession(stamp)
     }
 
     /// Ejecuta una acción del menú de un participante.

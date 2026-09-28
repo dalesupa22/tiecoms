@@ -3022,5 +3022,77 @@
  "chat.ios.readRetry": [
   "No se pudo confirmar la lectura. Los pendientes se conservan. Toca para reintentar.",
   "Read status could not be confirmed. Unread messages are preserved. Tap to retry."
+ ],
+ "admin.action.makeAdmin": [
+  "Nombrar admin",
+  "Make admin"
+ ],
+ "admin.action.removeAdmin": [
+  "Quitar como admin",
+  "Remove as admin"
+ ],
+ "admin.action.removeMember": [
+  "Quitar del grupo",
+  "Remove from group"
+ ],
+ "admin.action.stepDown": [
+  "Dejar de ser admin",
+  "Stop being admin"
+ ],
+ "admin.badge.admin": [
+  "Admin",
+  "Admin"
+ ],
+ "admin.badge.bot": [
+  "Bot",
+  "Bot"
+ ],
+ "admin.confirm.makeAdmin": [
+  "¿Nombrar a {name} admin del grupo? Podrá sumar y sacar personas y nombrar otros admins.",
+  "Make {name} a group admin? They will be able to add and remove people and make other admins."
+ ],
+ "admin.confirm.removeAdmin": [
+  "¿Quitarle el admin a {name}?",
+  "Remove {name} as admin?"
+ ],
+ "admin.confirm.removeMember": [
+  "¿Quitar a {name} del grupo?",
+  "Remove {name} from the group?"
+ ],
+ "admin.confirm.stepDown": [
+  "¿Dejar de ser admin de este grupo?",
+  "Stop being an admin of this group?"
+ ],
+ "admin.done.makeAdmin": [
+  "{name} ahora es admin del grupo.",
+  "{name} is now a group admin."
+ ],
+ "admin.done.removeAdmin": [
+  "{name} ya no es admin del grupo.",
+  "{name} is no longer a group admin."
+ ],
+ "admin.done.removeMember": [
+  "{name} ya no está en el grupo.",
+  "{name} is no longer in the group."
+ ],
+ "admin.done.stepDown": [
+  "Ya no eres admin del grupo.",
+  "You are no longer a group admin."
+ ],
+ "sys.admin.added": [
+  "{name} ahora es admin del grupo.",
+  "{name} is now a group admin."
+ ],
+ "sys.admin.removed": [
+  "{name} ya no es admin del grupo.",
+  "{name} is no longer a group admin."
+ ],
+ "sys.integration.added": [
+  "Se conectó la integración «{name}».",
+  "The “{name}” integration was connected."
+ ],
+ "sys.integration.removed": [
+  "Se desconectó la integración «{name}».",
+  "The “{name}” integration was disconnected."
  ]
 }

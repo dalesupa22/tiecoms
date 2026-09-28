@@ -6,7 +6,7 @@ import XCTest
 /// Fixture: `tools/fixtures/tanda166-fixture.mjs` por `TEST_RUNNER_TC_FIXTURE166`; capturas con `TEST_RUNNER_TC_SHOTS=/dir`.
 final class Tanda166UITests: XCTestCase {
     struct Fixture: Decodable {
-        struct Person: Decodable { var email: String; var id: String }
+        struct Person: Decodable { var email: String; var id: String; var name: String? }
         var apiUrl: String
         var password: String
         var a: Person
@@ -365,5 +365,55 @@ final class Tanda166UITests: XCTestCase {
         for i in [0, 6, 41] { let fr = cells.element(boundBy: i).frame; XCTAssertTrue(fr.minX >= -1 && fr.maxX <= w + 1, "sin desbordar: \(fr)") }
         shot("5-07-calendario-mes-texto-maximo")
         mode.buttons["Semana"].tap()
+    }
+}
+
+extension Tanda166UITests {
+    /// Synthetic local group owned by A, with B as an ordinary member. No external invitations or provider calls.
+    func test7GroupAdminConfirmationAndBadge() throws {
+        let f = try fixture()
+        guard let name = f.b.name else { throw XCTSkip("Admin UI fixture requires a named synthetic member") }
+        let app = login(f)
+        defer { app.terminate() }
+        let row = app.buttons["conv.row.\(f.generalId)"]
+        XCTAssertTrue(waitFor(row, 20, app))
+        row.tap()
+        let header = app.buttons["chat.header"]
+        XCTAssertTrue(header.waitForExistence(timeout: 8))
+        header.tap()
+        let member = app.staticTexts[name]
+        XCTAssertTrue(member.waitForExistence(timeout: 8))
+        for _ in 0..<3 where !member.isHittable { app.swipeUp() }
+        let badge = app.staticTexts["person.badge.\(f.b.id)"]
+        XCTAssertFalse(badge.exists, "the synthetic member starts without admin rights")
+        member.press(forDuration: 1.1)
+        let make = app.buttons["person.makeAdmin.\(f.b.id)"]
+        XCTAssertTrue(make.waitForExistence(timeout: 5))
+        shot("admins-01-member-menu")
+        make.tap()
+        let confirm = app.buttons["person.confirm.makeAdmin.\(f.b.id)"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        shot("admins-02-explicit-confirmation")
+        app.buttons["Cancelar"].tap()
+        XCTAssertFalse(badge.exists, "cancelling the confirmation does not promote anyone")
+        member.press(forDuration: 1.1)
+        XCTAssertTrue(make.waitForExistence(timeout: 5))
+        make.tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        XCTAssertTrue(badge.waitForExistence(timeout: 10))
+        XCTAssertEqual(badge.label, "Admin")
+        shot("admins-03-promoted-member")
+        member.press(forDuration: 1.1)
+        let remove = app.buttons["person.removeAdmin.\(f.b.id)"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 5))
+        remove.tap()
+        let confirmRemove = app.buttons["person.confirm.removeAdmin.\(f.b.id)"]
+        XCTAssertTrue(confirmRemove.waitForExistence(timeout: 5))
+        confirmRemove.tap()
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline && badge.exists { usleep(200_000) }
+        XCTAssertFalse(badge.exists, "confirmed removal restores the member's original role")
+        shot("admins-04-restored-member")
     }
 }

@@ -107,6 +107,19 @@ export function fcmData(n: Note, badge: number): Record<string, string> {
 
 export const pushStats = { sent: 0, failed: 0, removed: 0 };
 
+/**
+ * Recibo de cada envío en el log del worker: qué pasó con cada aviso (aceptado por APNs/FCM, token inválido
+ * borrado, falla o sin configurar). Sin token, sin cuerpo ni título: ids internos y el código del proveedor.
+ * «Aceptado» = el proveedor devolvió 200; NO prueba que el teléfono lo haya mostrado.
+ */
+function logDelivery(t: Target, n: Note, r: PushResult) {
+  const result = r.ok ? 'accepted' : r.invalidToken ? 'invalid_token_removed' : r.error.endsWith('not_configured') ? 'not_configured' : 'failed';
+  console.log(JSON.stringify({
+    evt: 'push.delivery', result, type: n.data.type, messageId: n.data.messageId ?? null, conversationId: n.data.conversationId ?? null,
+    user: t.user_id, sub: t.sub_id, provider: t.provider, env: t.environment, ...(r.ok ? {} : { reason: r.error.slice(0, 120) }),
+  }));
+}
+
 async function deliver(targets: Target[], note: (t: Target) => Note) {
   if (!targets.length) return;
   const counts = await badges([...new Set(targets.map((t) => t.user_id))]);
@@ -119,6 +132,7 @@ async function deliver(targets: Target[], note: (t: Target) => Note) {
         ? await sendApns(t.token, t.environment, apnsPayload(n, badge), { collapseId: n.collapseId })
         : await sendFcm(t.token, fcmData(n, badge), { collapseKey: n.threadId });
     } catch (e: any) { r = { ok: false, invalidToken: false, error: String(e?.message ?? e) }; }
+    logDelivery(t, n, r);
     if (r.ok) {
       pushStats.sent++;
       await pool.query('UPDATE push_subscriptions SET failures = 0, last_error = NULL WHERE id = $1 AND failures > 0', [t.sub_id]);
@@ -197,6 +211,8 @@ export async function pushMessage(messageId: string) {
         AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = u.id AND b.blocked_id = $2) OR (b.blocker_id = $2 AND b.blocked_id = u.id))`,
     [m.conversation_id, m.author_id, m.seq, m.id],
   );
+  // Sin destinatarios: dejarlo dicho (sesión cerrada, sin token, silencio, DND o descanso), para no confundirlo con un envío.
+  if (!targets.length) console.log(JSON.stringify({ evt: 'push.delivery', result: 'no_eligible_targets', type: 'message', messageId: m.id, conversationId: m.conversation_id }));
   const direct = m.conv_kind === 'direct';
   const avatar = m.avatar_file_id ? `/api/v1/avatars/${m.avatar_file_id}` : '';
   const labels = await groupLabels(m.conversation_id, targets.map((t) => t.user_id));

@@ -19,6 +19,7 @@ import { QuickReplies, SideChip, SideConnector, SideDialog, replyPrivately, side
 import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
 import { SleepNotice } from './Sleep.tsx';
+import { isTransient } from '../transient.ts';
 import { DerivedPendingStrip } from './Pending.tsx';
 import { MeetingDialog } from './Meetings.tsx';
 import { ScheduledStrip, openScheduleMenu, scheduleMenu, whenLabel } from './Scheduled.tsx';
@@ -149,9 +150,31 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     });
   };
 
+  /**
+   * Abrir con reintento: un 502/503/504 o un corte de red (p. ej. mientras se despliega el API) no deja el
+   * chat roto con «Bad Gateway». Reintenta con espera creciente (≈30 s en total) y otra vez cuando vuelve la
+   * conexión; el borrador sigue en el compositor. Un error permanente (403, 404…) se muestra tal cual.
+   */
+  const [retrying, setRetrying] = useState(false);
+  const openTry = useRef(0);
+  const openWithRetry = async () => {
+    const run = ++openTry.current;
+    for (const wait of [0, 1000, 2000, 4000, 8000, 15000]) {
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      if (run !== openTry.current) return;
+      try { await client.openConversation(id); setError(null); setRetrying(false); return; } catch (e: any) {
+        if (!isTransient(e)) { setRetrying(false); setError(errorText(e)); return; }
+        setRetrying(true); setError(null);
+      }
+    }
+    setRetrying(false); setError(t('err.updating'));
+  };
+  const connection = useClient((s) => s.connection);
+  useEffect(() => { if (connection === 'online' && (retrying || error) && !client.getState().conversations[id]?.loaded) void openWithRetry(); }, [connection]);
+
   useEffect(() => {
     // La pantalla se monta de nuevo por conversación (key={id}), así el borrador no se cruza.
-    client.openConversation(id).catch((e) => setError(errorText(e)));
+    void openWithRetry();
     client.loadIssues({ conversationId: id }).catch(() => {});
     client.loadPins(id).catch(() => {});
     // ?m=seq: salta a un mensaje (origen de un asunto, derivada, resultado devuelto, recordatorio o enlace copiado).
@@ -523,7 +546,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           {local?.loading && !local.loaded && <div className="msg-sys">{t('common.loading')}</div>}
           {local?.loaded && !local.hasMore && conv.historyFromSeq > 0 && <div className="msg-sys">{t('chat.lateJoin')}</div>}
           {local?.loaded && local.hasMore && <div className="msg-sys">{local.loading ? t('chat.loadingOlder') : '·'}</div>}
-          {error && <div className="error" style={{ textAlign: 'center' }}>{error}</div>}
+          {retrying && <div className="hint" role="status" style={{ textAlign: 'center' }}>⟳ {t('chat.reconnecting')}</div>}
+          {error && <div className="error" style={{ textAlign: 'center' }}>{error} <button className="link-btn" onClick={() => void openWithRetry()}>{t('chat.retry')}</button></div>}
           {rows.map((r) => {
             if (r.kind === 'day') return <div key={r.key} className="day">{r.label}</div>;
             if (r.kind === 'new') return <div key={r.key} id={`new-${id}`} className="new-line" role="separator">{entry && entry.unread === 1 ? t('chat.newMessagesOne') : t('chat.newMessages', { n: entry?.unread ?? 0 })}</div>;

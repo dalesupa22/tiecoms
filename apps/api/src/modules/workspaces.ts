@@ -30,6 +30,78 @@ async function activeMemberIds(c: Tx, conversationId: string): Promise<string[]>
   return rows.map((r) => r.user_id);
 }
 
+async function activeAdminIds(c: Tx, conversationId: string): Promise<string[]> {
+  const { rows } = await c.query('SELECT user_id FROM conversation_memberships WHERE conversation_id = $1 AND removed_at IS NULL AND can_manage ORDER BY joined_at', [conversationId]);
+  return rows.map((r) => r.user_id);
+}
+
+/** Evento de miembros: la lista y quiénes la administran (adminIds es aditivo; los clientes viejos lo ignoran). */
+export async function membersChanged(c: Tx, conversationId: string) {
+  await appendEvent(c, conversationId, {
+    type: 'members.changed', conversationId, memberIds: await activeMemberIds(c, conversationId), adminIds: await activeAdminIds(c, conversationId),
+  });
+}
+
+/** Grupos (group/internal/multi) con admins al estilo WhatsApp. Los directos no tienen admins. */
+const ADMIN_KINDS = new Set(['group', 'internal', 'multi']);
+
+/**
+ * Nunca un grupo sin admin: si ya no queda ninguno, el miembro más antiguo que no es tercero ni bot pasa a serlo.
+ * Devuelve a quién se promovió, para el aviso del chat.
+ */
+async function ensureAdmin(c: Tx, conversationId: string): Promise<string | null> {
+  const { rows } = await c.query(
+    `SELECT m.user_id FROM conversation_memberships m
+       JOIN conversations cv ON cv.id = m.conversation_id
+       JOIN users u ON u.id = m.user_id AND u.kind = 'human' AND u.disabled_at IS NULL
+       LEFT JOIN workspace_memberships wm ON wm.workspace_id = cv.workspace_id AND wm.user_id = m.user_id
+      WHERE m.conversation_id = $1 AND m.removed_at IS NULL AND COALESCE(wm.role, 'member') <> 'guest'
+        AND NOT EXISTS (SELECT 1 FROM conversation_memberships a WHERE a.conversation_id = $1 AND a.removed_at IS NULL AND a.can_manage)
+      ORDER BY m.joined_at LIMIT 1`,
+    [conversationId],
+  );
+  if (!rows[0]) return null;
+  await c.query('UPDATE conversation_memberships SET can_manage = true WHERE conversation_id = $1 AND user_id = $2', [conversationId, rows[0].user_id]);
+  return rows[0].user_id;
+}
+
+/**
+ * Nombrar o quitar admin (como WhatsApp): cualquier admin del grupo (o del espacio) lo hace con cualquier miembro.
+ * Reglas: los terceros y los bots no son admins; a quien creó el grupo no se le quita; un admin puede dejar de serlo
+ * él mismo, pero si era el último, el grupo recibe otro admin.
+ */
+export async function setMemberAdmin(userId: string, conversationId: string, targetId: string, admin: boolean) {
+  return tx(async (c) => {
+    const a = await conversationAccess(c, userId, conversationId, targetId === userId && !admin ? 'read' : 'manage', true);
+    if (!ADMIN_KINDS.has(a.kind)) throw badRequest('Los directos no tienen admins');
+    const { rows } = await c.query(
+      `SELECT m.can_manage, u.kind, u.name, cv.created_by, wm.role
+         FROM conversation_memberships m JOIN users u ON u.id = m.user_id JOIN conversations cv ON cv.id = m.conversation_id
+         LEFT JOIN workspace_memberships wm ON wm.workspace_id = cv.workspace_id AND wm.user_id = m.user_id
+        WHERE m.conversation_id = $1 AND m.user_id = $2 AND m.removed_at IS NULL`,
+      [conversationId, targetId],
+    );
+    const t = rows[0];
+    if (!t) throw notFound('Participante');
+    if (admin && t.kind !== 'human') throw badRequest('Un bot no puede ser admin');
+    if (admin && t.role === 'guest') throw badRequest('Las personas invitadas de fuera no pueden ser admins del grupo');
+    if (!admin && t.created_by === targetId && targetId !== userId) throw forbidden('A quien creó el grupo no se le quita el admin');
+    if (t.can_manage === admin) return { adminIds: await activeAdminIds(c, conversationId) };
+    await c.query('UPDATE conversation_memberships SET can_manage = $3 WHERE conversation_id = $1 AND user_id = $2', [conversationId, targetId, admin]);
+    await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: sys(admin ? 'admin.added' : 'admin.removed', { name: t.name }) });
+    if (!admin) {
+      const promoted = await ensureAdmin(c, conversationId);
+      if (promoted) {
+        const name = (await c.query('SELECT name FROM users WHERE id = $1', [promoted])).rows[0]?.name ?? '';
+        await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: sys('admin.added', { name }) });
+      }
+    }
+    await membersChanged(c, conversationId);
+    await audit(c, userId, admin ? 'conversation.admin_added' : 'conversation.admin_removed', { type: 'conversation', id: conversationId, workspaceId: a.workspaceId }, { targetId });
+    return { adminIds: await activeAdminIds(c, conversationId) };
+  });
+}
+
 /** Avisa a los sockets de estos usuarios que entren a la sala y que refresquen su alcance. */
 export async function scopeChanged(c: Tx, userIds: string[], reason: string, join?: { conversationId: string }, leave?: { conversationId: string }) {
   if (!userIds.length) return;
@@ -56,7 +128,7 @@ export async function addConversationMembers(c: Tx, conversationId: string, user
     if (r.rowCount) added.push(uid);
   }
   if (added.length) {
-    await appendEvent(c, conversationId, { type: 'members.changed', conversationId, memberIds: await activeMemberIds(c, conversationId) });
+    await membersChanged(c, conversationId);
     await scopeChanged(c, added, 'conversation.joined', { conversationId });
   }
   return added;
@@ -176,7 +248,9 @@ export async function removeMember(userId: string, conversationId: string, targe
   return tx(async (c) => {
     const a = await conversationAccess(c, userId, conversationId, targetId === userId ? 'read' : 'manage');
     if (a.kind === 'direct') throw badRequest('No se puede salir de un directo');
-    await c.query('SELECT 1 FROM conversations WHERE id = $1 FOR UPDATE', [conversationId]);
+    const conv = (await c.query('SELECT created_by FROM conversations WHERE id = $1 FOR UPDATE', [conversationId])).rows[0];
+    // Como WhatsApp: los admins sacan a cualquiera (también a otros admins) menos a quien creó el grupo.
+    if (targetId !== userId && conv?.created_by === targetId && a.kind !== 'multi') throw forbidden('A quien creó el grupo no se le puede sacar');
     const r = await c.query(
       'UPDATE conversation_memberships SET removed_at = now() WHERE conversation_id = $1 AND user_id = $2 AND removed_at IS NULL RETURNING user_id',
       [conversationId, targetId],
@@ -184,7 +258,15 @@ export async function removeMember(userId: string, conversationId: string, targe
     if (!r.rowCount) throw notFound('Participante');
     const name = (await c.query('SELECT name FROM users WHERE id = $1', [targetId])).rows[0]?.name ?? 'Alguien';
     await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: sys(targetId === userId ? 'member.left' : 'member.removed', { name }) });
-    await appendEvent(c, conversationId, { type: 'members.changed', conversationId, memberIds: await activeMemberIds(c, conversationId) });
+    await c.query('UPDATE conversation_memberships SET can_manage = false WHERE conversation_id = $1 AND user_id = $2', [conversationId, targetId]);
+    if (ADMIN_KINDS.has(a.kind)) {
+      const promoted = await ensureAdmin(c, conversationId);
+      if (promoted) {
+        const pname = (await c.query('SELECT name FROM users WHERE id = $1', [promoted])).rows[0]?.name ?? '';
+        await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: sys('admin.added', { name: pname }) });
+      }
+    }
+    await membersChanged(c, conversationId);
     await scopeChanged(c, [targetId], 'conversation.left', undefined, { conversationId });
     await audit(c, userId, 'conversation.member_removed', { type: 'conversation', id: conversationId, workspaceId: a.workspaceId }, { targetId });
   });

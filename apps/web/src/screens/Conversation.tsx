@@ -27,6 +27,7 @@ import { ConversationIssues, IssueDrawer, NewIssueDialog, isClosed } from './Iss
 import { DeriveDialog, LineageBar, MergedCard } from './Lineage.tsx';
 import { ChatBar, ThreadChip, threadsOf } from './ChatBar.tsx';
 import { AddMembersDialog } from './Dialogs.tsx';
+import { IntegrationsPanel } from './Integrations.tsx';
 import { MAX_OLDER_PAGES, firstUnread } from '../chat-nav.ts';
 
 type Row =
@@ -694,19 +695,30 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                 <div key={mid} className="member">
                   <Avatar person={p} org={o} size={32} />
                   <div className="grow" style={{ minWidth: 0 }}>
-                    <div className="ellipsis" style={{ fontWeight: 600 }}>{p?.name ?? t('common.participant')}{mid === d.me.id ? ` ${t('common.you')}` : ''}</div>
+                    <div className="ellipsis" style={{ fontWeight: 600 }}>{p?.name ?? t('common.participant')}{mid === d.me.id ? ` ${t('common.you')}` : ''}
+                      {conv.adminIds?.includes(mid) && <span className="tag" style={{ marginLeft: 6 }} title={conv.createdBy === mid ? t('chat.creator') : undefined}>{t('chat.admin')}</span>}
+                      {p?.kind === 'agent' && <span className="tag" style={{ marginLeft: 6 }}>{t('chat.bot')}</span>}
+                    </div>
                     <div className="small muted ellipsis">{[p?.title, p?.area, o?.name ?? (p?.guest ? (p.guestUntil ? t('chat.guestUntil', { date: new Date(p.guestUntil).toLocaleDateString(locale(), { day: 'numeric', month: 'short' }) }) : t('common.guest')) : null)].filter(Boolean).join(' · ')}</div>
                   </div>
-                  {mid !== d.me.id && conv.kind !== 'direct' && (
+                  {mid !== d.me.id && conv.kind !== 'direct' && p?.kind !== 'agent' && (
                     <button className="btn ghost small" title={t('common.directMessage')} aria-label={t('common.directMessage')} onClick={() => client.openDirect(mid).then((r) => navigate(`/c/${r.id}`)).catch((e) => setError(errorText(e)))}>✉</button>
                   )}
-                  {conv.canManage && mid !== d.me.id && conv.kind !== 'direct' && (
+                  {conv.canManage && conv.adminIds && conv.kind !== 'direct' && p?.kind !== 'agent' && !p?.guest && !(conv.adminIds.includes(mid) && conv.createdBy === mid) && (mid !== d.me.id || conv.adminIds.includes(mid)) && (
+                    conv.adminIds.includes(mid)
+                      ? <button className="btn ghost small" title={mid === d.me.id ? t('chat.leaveAdmin') : t('chat.unmakeAdmin')} aria-label={t('chat.unmakeAdmin')}
+                          onClick={() => { if (confirm(t('chat.unmakeAdminConfirm', { name: p?.name ?? '' }))) void client.setMemberAdmin(id, mid, false).catch((e) => setError(errorText(e))); }}>★</button>
+                      : <button className="btn ghost small" title={t('chat.makeAdmin')} aria-label={t('chat.makeAdmin')}
+                          onClick={() => { if (confirm(t('chat.makeAdminConfirm', { name: p?.name ?? '' }))) void client.setMemberAdmin(id, mid, true).catch((e) => setError(errorText(e))); }}>☆</button>
+                  )}
+                  {conv.canManage && mid !== d.me.id && conv.kind !== 'direct' && conv.createdBy !== mid && p?.kind !== 'agent' && (
                     <button className="btn ghost small" title={t('chat.remove')} aria-label={t('chat.remove')} onClick={() => { if (confirm(t('chat.removeConfirm', { name: p?.name ?? '' }))) void client.removeMember(id, mid).catch((e) => setError(errorText(e))); }}>−</button>
                   )}
                 </div>
               );
             })}
           </div>
+          {(conv.kind === 'group' || conv.kind === 'internal') && conv.workspaceId && <IntegrationsPanel conv={conv} />}
           {conv.kind !== 'direct' && (
             <button className="btn ghost small" onClick={() => { if (confirm(t('chat.leaveConfirm'))) void client.removeMember(id, d.me.id).then(() => navigate('/')); }}>{t('chat.leave')}</button>
           )}

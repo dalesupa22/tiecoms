@@ -19,6 +19,7 @@ import { config } from './config.ts';
 import { fireSoonEvents, soonMinutes } from './modules/calendar.ts';
 import { cleanupPending as cleanupAttachments } from './modules/attachments.ts';
 import { transcribeAttachment } from './modules/voice.ts';
+import { deliverIntegrationEvent } from './modules/integration-events.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
 const LEASE_SECONDS = 120;
@@ -41,6 +42,8 @@ const handlers: Record<string, Handler> = {
   /** Nota de voz: variante AAC, transcripción y resumen (Inworld / DeepSeek). */
   async 'voice.transcribe'(p) { await transcribeAttachment(p.attachmentId); },
   async 'push.event_soon'(p) { await pushEventSoon(p.eventId, p.userIds, soonMinutes()); },
+  /** Webhook de salida de una integración (firmado; reintenta con backoff hasta max_attempts). */
+  async 'integration.deliver'(p) { await deliverIntegrationEvent(p.deliveryId); },
   /** Vistas previas de los primeros 3 enlaces de un mensaje. */
   async 'link.preview'(p) { await previewMessage(p.messageId); },
   /** Aviso agrupado al autor: reaccionaron a su mensaje. */

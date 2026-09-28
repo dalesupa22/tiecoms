@@ -10,6 +10,8 @@ import {
   UpdateProfileInput, DndInput, MeetingProvider, MeetingConnectInput, CreateMeetingInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
+  CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
+  SetAdminInput, UpdateIntegrationInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -42,6 +44,7 @@ import * as mentions from './modules/mentions.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
 import * as reactions from './modules/reactions.ts';
 import * as links from './modules/links.ts';
+import * as integrations from './modules/integrations.ts';
 import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
 import { z } from 'zod';
@@ -153,6 +156,36 @@ export async function buildHttp() {
     return reply.redirect(await meetings.finishConnect(req.query), 302);
   });
   app.post('/api/v1/auth/sso/exchange', authLimit, async (req, reply) => sendAuth(req, reply, await sso.exchange(SsoExchangeInput.parse(req.body))));
+
+  // ---------- Integraciones (token del grupo, sin sesión) ----------
+  // Webhook entrante con el formato de Slack: el token en Authorization o, para quien solo acepta una URL, en la ruta.
+  const hookLimit = { config: { rateLimit: { max: 120, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => `hook:${(r.params as any)?.id ?? r.ip}` } } };
+  const bearer = (req: FastifyRequest) => { const h = req.headers.authorization; return h?.startsWith('Bearer ') ? h.slice(7).trim() : undefined; };
+  const idemKey = (req: FastifyRequest) => { const k = req.headers['idempotency-key']; return typeof k === 'string' && k ? k : undefined; };
+  const hook = async (req: FastifyRequest<{ Params: { id: string; token?: string } }>) => {
+    const id = z.uuid().safeParse(req.params.id);
+    if (!id.success) throw unauthorized('Token de integración inválido');
+    const integ = await integrations.authenticate(req.params.token ?? bearer(req), id.data);
+    return integrations.postMessage(integ, IncomingWebhookInput.parse(req.body ?? {}), idemKey(req));
+  };
+  app.post<{ Params: { id: string } }>('/api/hooks/:id', hookLimit, hook);
+  app.post<{ Params: { id: string; token: string } }>('/api/hooks/:id/:token', hookLimit, hook);
+
+  app.register(async (api) => {
+    api.addHook('onRequest', async (req) => { (req as any).integration = await integrations.authenticate(bearer(req)); });
+    const integ = (req: FastifyRequest) => (req as any).integration as integrations.IntegrationAuth;
+    const limit = { config: { rateLimit: { max: 300, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => `integ:${bearer(r)?.slice(-12) ?? r.ip}` } } };
+    api.get('/api/integration/v1/me', limit, async (req) => integrations.describe(integ(req)));
+    api.post('/api/integration/v1/messages', limit, async (req) => integrations.postMessage(integ(req), IncomingWebhookInput.parse(req.body ?? {}), idemKey(req)));
+    api.post('/api/integration/v1/issues', limit, async (req) => integrations.createIssue(integ(req), IntegrationCreateIssueInput.parse(req.body)));
+    api.get<{ Querystring: { externalId?: string } }>('/api/integration/v1/issues', limit, async (req) =>
+      integrations.findIssue(integ(req), z.string().min(1).max(120).parse(req.query.externalId)));
+    api.get<{ Params: { id: string } }>('/api/integration/v1/issues/:id', limit, async (req) => integrations.getIssue(integ(req), z.uuid().parse(req.params.id)));
+    api.patch<{ Params: { id: string } }>('/api/integration/v1/issues/:id', limit, async (req) =>
+      integrations.updateIssue(integ(req), z.uuid().parse(req.params.id), IntegrationUpdateIssueInput.parse(req.body)));
+    api.post<{ Params: { id: string } }>('/api/integration/v1/issues/:id/comments', limit, async (req) =>
+      integrations.commentIssue(integ(req), z.uuid().parse(req.params.id), IntegrationCommentInput.parse(req.body), idemKey(req)));
+  });
 
   // ---------- Rutas autenticadas ----------
   app.register(async (priv) => {
@@ -442,6 +475,18 @@ export async function buildHttp() {
       const q = WaMessagesQuery.parse(req.query);
       return wa.listChatMessages(req.userId, z.uuid().parse(req.params.accountId), req.params.jid, q.before, q.limit);
     });
+
+    // Admins de grupo (como WhatsApp).
+    priv.put<{ Params: { id: string; userId: string } }>('/api/v1/conversations/:id/members/:userId/admin', async (req) =>
+      ws.setMemberAdmin(req.userId, z.uuid().parse(req.params.id), z.uuid().parse(req.params.userId), SetAdminInput.parse(req.body).admin));
+    // Integraciones del grupo (las configura quien administra el espacio o la empresa).
+    priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/integrations', async (req) => integrations.listIntegrations(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/integrations', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) =>
+      integrations.createIntegration(req.userId, z.uuid().parse(req.params.id), CreateIntegrationInput.parse(req.body)));
+    priv.patch<{ Params: { id: string } }>('/api/v1/integrations/:id', async (req) => integrations.updateIntegration(req.userId, z.uuid().parse(req.params.id), UpdateIntegrationInput.parse(req.body)));
+    priv.post<{ Params: { id: string } }>('/api/v1/integrations/:id/rotate', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) =>
+      integrations.rotateToken(req.userId, z.uuid().parse(req.params.id)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/integrations/:id', async (req) => integrations.revokeIntegration(req.userId, z.uuid().parse(req.params.id)));
 
     priv.delete<{ Params: { id: string; userId: string } }>('/api/v1/conversations/:id/members/:userId', async (req) => {
       await ws.removeMember(req.userId, req.params.id, req.params.userId);

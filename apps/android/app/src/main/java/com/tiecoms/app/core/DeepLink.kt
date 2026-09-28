@@ -10,6 +10,8 @@ sealed interface DeepLink {
     /** [messageId]: salta a ese mensaje por id (?mid=, push de reacción: el aviso no trae el seq). */
     data class Conversation(val id: String, val seq: Long? = null, val side: String? = null, val messageId: String? = null) : DeepLink
     data class Workspace(val id: String) : DeepLink
+    /** Un asunto o tarea (push «te asignó una tarea»): con [conversationId] abre antes el chat, si lo puedo leer. */
+    data class Issue(val id: String, val conversationId: String? = null) : DeepLink
     data class Invite(val token: String) : DeepLink
     data class Signup(val orgToken: String?) : DeepLink
     /** Pantallas principales: asuntos, agenda, trazo, whatsapp, ajustes, recordatorios. */
@@ -70,6 +72,7 @@ object DeepLinks {
         return when (head) {
             "c" -> arg?.let { DeepLink.Conversation(it, query["m"]?.toLongOrNull()?.takeIf { s -> s > 0 }, query["side"]?.takeIf { s -> ID.matches(s) }, query["mid"]?.takeIf { s -> ID.matches(s) }) }
             "w" -> arg?.let { DeepLink.Workspace(it) }
+            "issue" -> arg?.let { DeepLink.Issue(it, query["c"]?.takeIf { s -> ID.matches(s) }) }
             "invite" -> arg?.let { DeepLink.Invite(it) }
             "signup" -> DeepLink.Signup(query["org"]?.takeIf { ID.matches(it) })
             "asuntos" -> DeepLink.Screen(SCREEN_ISSUES)

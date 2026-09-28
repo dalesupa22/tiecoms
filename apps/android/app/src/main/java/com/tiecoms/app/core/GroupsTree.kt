@@ -147,7 +147,8 @@ object GroupsTree {
 
     /** Asuntos activos de un grupo: primero los que tienen fecha (la más cercana), luego los más nuevos. */
     fun openIssues(issues: Collection<IssueDTO>, conversationId: String): List<IssueDTO> =
-        issues.filter { it.conversationId == conversationId && isActive(it) }
+        // Las tareas derivadas van dentro de su asunto (chapita ☑ 1/3), no como líneas sueltas bajo el grupo.
+        issues.filter { it.conversationId == conversationId && isActive(it) && (it.parentIssueId == null || issues.none { p -> p.id == it.parentIssueId && p.conversationId == conversationId }) }
             .sortedWith(compareBy<IssueDTO> { it.dueDate == null }.thenBy { it.dueDate ?: "" }.thenByDescending { it.createdAt }.thenBy { it.id })
 
     private fun matchesText(d: BootstrapDTO, c: ConversationDTO, q: String, title: (ConversationDTO) -> String): Boolean {

@@ -31,6 +31,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -150,7 +152,8 @@ fun StatusPill(status: String) {
  * activo → Completar, Marcar en curso, Marcar en espera, Marcar abierto (sin el estado que ya tiene) y Abrir;
  * cerrado → Reabrir y Abrir.
  */
-fun issueQuickMenu(ctx: Context, i: IssueDTO, onOpen: () -> Unit, onStatus: (String) -> Unit): List<SheetItem?> = buildList {
+fun issueQuickMenu(ctx: Context, i: IssueDTO, onOpen: () -> Unit, onStatus: (String) -> Unit,
+                   onAddTask: (() -> Unit)? = null, onSide: (() -> Unit)? = null): List<SheetItem?> = buildList {
     IssueTasks.quickActions(i).forEach { a ->
         val st = IssueTasks.statusOf(a)
         add(when (a) {
@@ -160,6 +163,12 @@ fun issueQuickMenu(ctx: Context, i: IssueDTO, onOpen: () -> Unit, onStatus: (Str
             IssueTasks.QuickAction.OPEN -> SheetItem(ctx.getString(R.string.issue_mark_open), "○", tag = "issueActMarkOpen") { onStatus(st) }
             IssueTasks.QuickAction.REOPEN -> SheetItem(ctx.getString(R.string.issue_reopen), "↺", tag = "issueActReopen") { onStatus(st) }
         })
+        // Asunto principal abierto (docs/TAREAS.md): «＋ Tarea derivada» y «💬 Hablar aparte (sidechat)», tras Completar.
+        if (a == IssueTasks.QuickAction.COMPLETE && i.parentIssueId == null) {
+            onAddTask?.let { add(SheetItem(ctx.getString(R.string.task_add), "＋", tag = "issueActAddTask") { it() }) }
+            if (!i.restricted) onSide?.let { add(SheetItem(ctx.getString(R.string.task_sidechat), "💬", tag = "issueActSide") { it() }) }
+            if (onAddTask != null || onSide != null) add(null)
+        }
     }
     add(null)
     add(SheetItem(ctx.getString(R.string.menu_open), "↗", tag = "issueActOpen") { onOpen() })
@@ -236,8 +245,14 @@ fun IssueCheck(i: IssueDTO, onToggle: () -> Unit, size: Dp = 22.dp, box: Dp = 48
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun IssueRow(i: IssueDTO, data: BootstrapDTO, showWhere: Boolean = true, showOwner: Boolean = true, onOpen: (String) -> Unit) {
+fun IssueRow(i: IssueDTO, data: BootstrapDTO, showWhere: Boolean = true, showOwner: Boolean = true, child: Boolean = false, onOpen: (String) -> Unit) {
     val ctx = LocalContext.current
+    val all = LocalClient.current.state.collectAsStateWithLifecycle().value.issues
+    val dialogs = LocalTaskDialogs.current
+    val kids = if (i.parentIssueId == null) IssueTasks.childrenOf(all.values, i.id) else emptyList()
+    val parent = i.parentIssueId?.let { all[it] }
+    // Una tarea en un sidechat se marca para que se sepa dónde se habla de ella.
+    val inSide = parent != null && parent.conversationId != i.conversationId
     val owner = Names.person(data, i.ownerId ?: "")
     val conv = data.conversations.firstOrNull { it.id == i.conversationId }
     val f = issueFlags(i)
@@ -255,15 +270,22 @@ fun IssueRow(i: IssueDTO, data: BootstrapDTO, showWhere: Boolean = true, showOwn
                 .heightIn(min = 56.dp).padding(vertical = 4.dp).testTag("issue-${i.id}"),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IssueCheck(i, { toggle(i) })
+            if (child) Text("↳", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp))
+            IssueCheck(i, { toggle(i) }, size = if (child) 18.dp else 22.dp)
             Spacer(Modifier.width(4.dp))
             Column(Modifier.weight(1f)) {
-                Text(i.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                val lock = if (i.restricted) "🔒 " else ""
+                Text(lock + i.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     textDecoration = if (done) TextDecoration.LineThrough else null,
-                    color = if (done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+                    style = if (child) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
+                    color = if (done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    modifier = if (i.restricted) Modifier.semantics { contentDescription = visibilityLabel(ctx, data, i) + ": " + i.title } else Modifier)
                 val sub = listOfNotNull(
                     if (showOwner) owner?.name ?: stringResource(R.string.issue_no_owner) else null,
-                    if (showWhere && conv != null) stringResource(R.string.issue_in, titleOf(ctx, conv, data)) else null,
+                    if (!child && parent != null) "↳ " + parent.title else null,
+                    if (!child && parent == null && i.parentIssueId != null) stringResource(R.string.task_of_hidden) else null,
+                    if (showWhere && conv != null && !child) stringResource(R.string.issue_in, titleOf(ctx, conv, data)) else null,
+                    if (inSide) "💬 " + stringResource(R.string.task_in_side) else null,
                     if (i.commentCount > 0) "💬 ${i.commentCount}" else null,
                 ).joinToString(" · ")
                 if (sub.isNotEmpty()) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -271,15 +293,36 @@ fun IssueRow(i: IssueDTO, data: BootstrapDTO, showWhere: Boolean = true, showOwn
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(start = 8.dp)) {
+                if (kids.isNotEmpty()) IssueTasks.progress(kids).let { KidsBadge(it.done, it.total, Modifier.testTag("kids-${i.id}")) }
                 if (i.status == "in_progress" || i.status == "waiting" || i.status == "cancelled") StatusPill(i.status)
                 if (i.dueDate != null && !done) Text(if (f.overdue) stringResource(R.string.issue_overdue) else if (f.dueToday) stringResource(R.string.issue_today) else dueLabel(ctx, i),
                     style = MaterialTheme.typography.labelSmall, fontWeight = if (f.overdue) FontWeight.SemiBold else null,
                     color = if (f.overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 else if (i.dueDate != null) Text(dueLabel(ctx, i), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
-            if (showOwner && owner != null) { Spacer(Modifier.width(8.dp)); PersonAvatar(owner, data, size = 24.dp) }
+            if (showOwner && owner != null) { Spacer(Modifier.width(8.dp)); PersonAvatar(owner, data, size = if (child) 20.dp else 24.dp) }
         }
-        AnchoredMenu(menu, if (menu) issueQuickMenu(ctx, i, onOpen = { onOpen(i.id) }, onStatus = { st -> setStatus(i, st) }) else emptyList(), { menu = false })
+        AnchoredMenu(menu, if (menu) issueQuickMenu(ctx, i, onOpen = { onOpen(i.id) }, onStatus = { st -> setStatus(i, st) },
+            onAddTask = { dialogs.openTasks(i.id) }, onSide = { dialogs.openSide(i) }) else emptyList(), { menu = false })
+    }
+}
+
+/** Un asunto con sus tareas debajo, sangradas; en móvil se pliegan con la flecha del asunto. */
+@Composable
+fun IssueWithTasks(i: IssueDTO, data: BootstrapDTO, showWhere: Boolean = false, showOwner: Boolean = true, onOpen: (String) -> Unit) {
+    val all = LocalClient.current.state.collectAsStateWithLifecycle().value.issues
+    val kids = IssueTasks.childrenOf(all.values, i.id)
+    var open by rememberSaveable(i.id) { mutableStateOf(true) }
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { IssueRow(i, data, showWhere = showWhere, showOwner = showOwner, onOpen = onOpen) }
+            if (kids.isNotEmpty()) IconButton(onClick = { open = !open }, modifier = Modifier.testTag("kidsToggle-${i.id}")) {
+                Icon(if (open) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, stringResource(if (open) R.string.task_hide else R.string.task_show))
+            }
+        }
+        AnimatedVisibility(open && kids.isNotEmpty()) {
+            Column(Modifier.padding(start = 20.dp)) { kids.forEach { androidx.compose.runtime.key(it.id) { IssueRow(it, data, showWhere = false, child = true, onOpen = onOpen) } } }
+        }
     }
 }
 
@@ -400,12 +443,13 @@ fun ConversationIssues(conversationId: String, canCreate: Boolean, onOpen: (Stri
     val data = st.data ?: return
     var showDone by rememberSaveable(conversationId) { mutableStateOf(false) }
     LaunchedEffect(conversationId) { runCatching { client.loadIssues(conversationId = conversationId) } }
-    val (open, done) = IssueTasks.split(st.issues.values.filter { it.conversationId == conversationId })
+    // Las tareas de un asunto de este chat van debajo de él (aunque vivan en un sidechat).
+    val (open, done) = IssueTasks.split(IssueTasks.conversationTops(st.issues, conversationId))
     Column(Modifier.fillMaxWidth().testTag("conversationIssues"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (canCreate) QuickAddIssue(conversationId, Modifier.padding(bottom = 6.dp))
         if (open.isEmpty()) Text(stringResource(R.string.issue_no_issues), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(vertical = 8.dp))
-        open.forEach { androidx.compose.runtime.key(it.id) { IssueRow(it, data, showWhere = false, onOpen = onOpen) } }
+        open.forEach { androidx.compose.runtime.key(it.id) { IssueWithTasks(it, data, onOpen = onOpen) } }
         if (done.isNotEmpty()) {
             val label = stringResource(R.string.issue_done_count, done.size)
             TextButton(onClick = { showDone = !showDone }, modifier = Modifier.heightIn(min = 48.dp).testTag("issuesDoneToggle")) {
@@ -451,18 +495,23 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
         var error by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(Unit) { runCatching { client.loadIssues() }.onFailure { error = errorText(ctx, it) } }
         val mine = data.me.id
-        val inView = st.issues.values.filter { it.conversationId in visible }
+        // Los restringidos pueden ser de un chat que no leo (me asignaron una tarea): el servidor ya filtró.
+        val inView = st.issues.values.filter { it.conversationId in visible || it.restricted }
         val list = inView.filter { IssueTasks.matches(filter, it, mine) }
             .sortedWith(if (filter == "closed") IssueTasks.byClosedDesc else IssueTasks.byUrgency())
         val byPerson = groupBy == "person"
         val noOwner = stringResource(R.string.issue_no_owner)
         val you = stringResource(R.string.you)
         val participant = stringResource(R.string.common_participant)
+        val shared = stringResource(R.string.task_shared_with_me)
         val sectionTitle: (String) -> String = { k ->
             if (byPerson) { if (k == IssueTasks.NO_OWNER) noOwner else (Names.person(data, k)?.name ?: participant) + if (k == mine) " $you" else "" }
-            else visible[k]?.let { c -> listOfNotNull(data.workspaces.firstOrNull { it.id == c.workspaceId }?.name, titleOf(ctx, c, data)).distinct().joinToString(" · ") } ?: ""
+            else visible[k]?.let { c -> listOfNotNull(data.workspaces.firstOrNull { it.id == c.workspaceId }?.name, titleOf(ctx, c, data)).distinct().joinToString(" · ") } ?: shared
         }
-        val sections = IssueTasks.sections(list, byPerson, mine, sectionTitle)
+        // Por grupo, las tareas van debajo de su asunto (en la sección del asunto); por responsable, sueltas con «↳ asunto».
+        val shown = if (byPerson) list else IssueTasks.tops(list, st.issues)
+        val sections = IssueTasks.sections(shown.map { if (byPerson) it else it.copy(conversationId = IssueTasks.groupConversation(it, st.issues)) }, byPerson, mine, sectionTitle)
+            .map { (k, items) -> k to items.map { x -> st.issues[x.id] ?: x } }
         fun count(f: String) = inView.count { IssueTasks.matches(f, it, mine) }
         LazyColumn(Modifier.padding(pad).fillMaxSize().imePadding().padding(horizontal = 16.dp).testTag("issues")) {
             item(key = "head") {
@@ -489,7 +538,9 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
                             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                items(items, key = { "$k/${it.id}" }) { Box(Modifier.animateItem()) { IssueRow(it, data, showWhere = byPerson, showOwner = !byPerson, onOpen = onOpen) } }
+                items(items, key = { "$k/${it.id}" }) { Box(Modifier.animateItem()) {
+                    if (byPerson) IssueRow(it, data, showWhere = true, showOwner = false, onOpen = onOpen) else IssueWithTasks(it, data, onOpen = onOpen)
+                } }
             }
             item(key = "foot") { Spacer(Modifier.heightIn(min = 24.dp)) }
         }
@@ -505,6 +556,7 @@ private fun eventText(ctx: Context, d: BootstrapDTO, e: IssueEventDTO): String {
         "due" -> ctx.getString(R.string.issue_ev_due, to?.let { fmtDate(it, "d MMM") } ?: ctx.getString(R.string.issue_no_due))
         "title" -> ctx.getString(R.string.issue_ev_title) + " → «$to»"
         "waiting" -> ctx.getString(R.string.issue_ev_waiting) + (to?.let { ": " + (Names.org(d, it)?.name ?: "") } ?: "")
+        "visibility" -> ctx.getString(R.string.task_ev_vis) + " → " + ctx.getString(when (to) { "all" -> R.string.task_vis_all; "org" -> R.string.task_vis_org_short; else -> R.string.task_vis_private })
         else -> ""
     }
 }
@@ -530,7 +582,7 @@ private fun Chip(selected: Boolean, label: String, tag: String, leading: (@Compo
  * ¿cómo va?— con botones de un toque, y un solo botón grande para terminar. El título de la pantalla es el grupo.
  */
 @Composable
-fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Long) -> Unit) {
+fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Long) -> Unit, onOpenIssue: (String) -> Unit = {}) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val scope = rememberCoroutineScope()
@@ -552,8 +604,11 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
     SimpleScaffold(conv?.let { titleOf(ctx, it, data) } ?: stringResource(R.string.nav_issues), onBack) {
         val i = live ?: run { if (error != null) ErrorText(error) else CircularProgressIndicator(Modifier.padding(24.dp)); return@SimpleScaffold }
         val done = i.closed
-        val members = humansOf(data, i.conversationId).sortedByDescending { it.id == data.me.id }
-        val orgIds = members.mapNotNull { it.orgId }.distinct()
+        val chatMembers = humansOf(data, i.conversationId)
+        // En una tarea restringida, «¿Quién lo hace?» son quienes la ven (y los agregados que no están en el chat).
+        val members = IssueTasks.audience(i, chatMembers, data.people).sortedByDescending { it.id == data.me.id }
+        val orgIds = chatMembers.mapNotNull { it.orgId }.distinct()
+        val parent = i.parentIssueId?.let { st.issues[it] }
         val f = issueFlags(i)
         val canSeeOrigin = conv != null && i.originMessageSeq != null && i.originMessageSeq > conv.historyFromSeq
         val requester = Names.person(data, i.requestedBy ?: "")
@@ -587,8 +642,14 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
                         Icon(Icons.Outlined.Edit, stringResource(R.string.issue_edit_title), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                Text(requester?.let { stringResource(R.string.issue_requested_by, it.name) } ?: stringResource(R.string.issue_manual),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (i.parentIssueId != null) {
+                    if (parent != null) TextButton(onClick = { onOpenIssue(parent.id) }, modifier = Modifier.heightIn(min = 48.dp).testTag("issueParent")) {
+                        Text("↑ " + stringResource(R.string.task_part_of, parent.title), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    } else Text(stringResource(R.string.task_of_hidden), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text((requester?.let { stringResource(R.string.issue_requested_by, it.name) } ?: stringResource(R.string.issue_manual)) +
+                    if (i.restricted) " · 🔒 " + visibilityLabel(ctx, data, i) else "",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("issueRequester"))
             }
             item(key = "main") {
                 if (done) {
@@ -658,6 +719,8 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
                     }
                 }
             }
+            if (i.parentIssueId == null) item(key = "tasks") { TasksSection(i.id, null, onOpen = onOpenIssue) }
+            if (i.parentIssueId != null && i.createdBy == data.me.id) item(key = "vis") { VisibilityChoice(i) }
             item(key = "newsHead") { Question(stringResource(R.string.issue_q_news) + if (comments.isNotEmpty()) " · ${comments.size}" else "", tag = "issueQNews") {} }
             items(comments, key = { it.id }) { e ->
                 val who = Names.person(data, e.actorId)

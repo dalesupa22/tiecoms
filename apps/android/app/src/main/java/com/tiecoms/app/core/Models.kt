@@ -157,6 +157,8 @@ data class ConversationDTO(
     val lastHumanPreview: LastHumanPreviewDTO? = null,
     /** Menciones a mí (o @todos) sin leer (SPEC-v4 §H). */
     val unreadMentions: Int = 0,
+    /** Sidechat abierto desde este asunto (docs/TAREAS.md): arriba del compositor va «◆ asunto · ＋ Tarea». */
+    val sideIssueId: String? = null,
 ) {
     /** Directos y chats grupales van juntos en la lista: no pertenecen a un espacio. */
     val isChat: Boolean get() = kind == "direct" || kind == "multi"
@@ -565,8 +567,16 @@ data class IssueDTO(
     val statusSince: String = "",
     val closedAt: String? = null,
     val commentCount: Int = 0,
+    /** Tarea derivada de este asunto (null = asunto principal); ausente = servidor anterior (docs/TAREAS.md). */
+    val parentIssueId: String? = null,
+    /** all (todo el chat) | org (solo visibleOrgId + viewerIds) | private (solo viewerIds); ausente = all. */
+    val visibility: String? = null,
+    val visibleOrgId: String? = null,
+    val viewerIds: List<String> = emptyList(),
 ) {
     val closed: Boolean get() = status == "done" || status == "cancelled"
+    /** Restringida: la ve solo mi empresa o es privada (🔒). */
+    val restricted: Boolean get() = visibility == "org" || visibility == "private"
 }
 
 @Serializable
@@ -580,7 +590,7 @@ data class IssueEventDTO(
     val createdAt: String = "",
 )
 
-@Serializable data class IssueDetail(val issue: IssueDTO = IssueDTO(), val events: List<IssueEventDTO> = emptyList())
+@Serializable data class IssueDetail(val issue: IssueDTO = IssueDTO(), val events: List<IssueEventDTO> = emptyList(), val children: List<IssueDTO> = emptyList())
 @Serializable data class IssuesPage(val issues: List<IssueDTO> = emptyList())
 @Serializable data class RemindersPage(val reminders: List<ReminderDTO> = emptyList())
 @Serializable data class CalendarPage(val events: List<CalendarEventDTO> = emptyList())

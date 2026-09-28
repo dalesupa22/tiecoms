@@ -449,6 +449,8 @@ class TieComsClient(
             AccountEvent.RemindersChanged -> scope.launch { runCatching { loadRemindersInternal() } }
             is AccountEvent.DndUpdated -> applyDnd(e.dndUntil, localOnly = false)
             is AccountEvent.SleepUpdated -> applySleep(e.sleep)
+            is AccountEvent.IssueUpdated -> { putIssues(listOf(e.issue)); recountIssues(e.issue.conversationId) }
+            is AccountEvent.IssueHidden -> { setState { copy(issues = issues - e.issueId) }; if (e.conversationId.isNotEmpty()) recountIssues(e.conversationId) }
             is AccountEvent.ScheduledUpdated -> setState { copy(scheduled = Scheduling.apply(scheduled, e.scheduled)) }
             is AccountEvent.Unknown -> Unit
         }
@@ -761,6 +763,21 @@ class TieComsClient(
         putIssues(listOf(i)); recountIssues(conversationId); i
     }
     /** patch: title, status, ownerId, dueDate, waitingOnOrgId (null explícito = borrar). */
+    /**
+     * Tarea derivada (POST /issues/:id/children): en el chat del asunto o, con [conversationId], en un sidechat que
+     * salió de él. [visibility] all | org | private; [viewerIds] personas con acceso (pueden no estar en el chat).
+     */
+    suspend fun createChildIssue(parentId: String, title: String, ownerId: String?, dueDate: String? = null, visibility: String? = null,
+                                 viewerIds: List<String> = emptyList(), conversationId: String? = null): IssueDTO = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("title", JsonPrimitive(title)); put("ownerId", ownerId?.let { JsonPrimitive(it) } ?: JsonNull)
+            dueDate?.let { put("dueDate", JsonPrimitive(it)) }; visibility?.let { put("visibility", JsonPrimitive(it)) }
+            if (viewerIds.isNotEmpty()) put("viewerIds", kotlinx.serialization.json.JsonArray(viewerIds.map { JsonPrimitive(it) }))
+            conversationId?.let { put("conversationId", JsonPrimitive(it)) }
+        }
+        val i = req("POST", "/issues/$parentId/children", body, IssueDTO.serializer())
+        putIssues(listOf(i)); recountIssues(i.conversationId); i
+    }
     suspend fun updateIssue(id: String, patch: JsonObject): IssueDTO = withContext(dispatcher) {
         val i = req("PATCH", "/issues/$id", patch, IssueDTO.serializer())
         putIssues(listOf(i)); recountIssues(i.conversationId); i
@@ -781,7 +798,7 @@ class TieComsClient(
         }
     }
     suspend fun issueDetail(id: String): IssueDetail = withContext(dispatcher) {
-        val r = req("GET", "/issues/$id", null, IssueDetail.serializer()); putIssues(listOf(r.issue)); r
+        val r = req("GET", "/issues/$id", null, IssueDetail.serializer()); putIssues(listOf(r.issue) + r.children); r
     }
     suspend fun commentIssue(id: String, body: String): IssueDTO = withContext(dispatcher) {
         val i = req("POST", "/issues/$id/comments", buildJsonObject { put("body", JsonPrimitive(body)) }, IssueDTO.serializer()); putIssues(listOf(i)); i
@@ -1108,6 +1125,16 @@ class TieComsClient(
     suspend fun startSide(conversationId: String, messageId: String, userIds: List<String>, question: String?): String = withContext(dispatcher) {
         val body = buildJsonObject {
             put("messageId", JsonPrimitive(messageId))
+            put("userIds", kotlinx.serialization.json.JsonArray(userIds.distinct().map { JsonPrimitive(it) }))
+            question?.trim()?.takeIf { it.isNotEmpty() }?.let { put("question", JsonPrimitive(it.take(4000))) }
+        }
+        val r = req("POST", "/conversations/$conversationId/side", body, IdResult.serializer()); loadBootstrapInternal(); r.id
+    }
+
+    /** «💬 Hablar aparte» desde un asunto (docs/TAREAS.md): el sidechat queda con sideIssueId y sus tareas cuelgan del asunto. */
+    suspend fun startSideFromIssue(conversationId: String, issueId: String, userIds: List<String>, question: String?): String = withContext(dispatcher) {
+        val body = buildJsonObject {
+            put("issueId", JsonPrimitive(issueId))
             put("userIds", kotlinx.serialization.json.JsonArray(userIds.distinct().map { JsonPrimitive(it) }))
             question?.trim()?.takeIf { it.isNotEmpty() }?.let { put("question", JsonPrimitive(it.take(4000))) }
         }

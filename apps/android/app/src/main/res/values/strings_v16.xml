@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.4 (23): sub-tasks and visibility (docs/TAREAS.md). -->
+<resources>
+    <string name="task_add">＋ Sub-task</string>
+    <string name="task_short">Task</string>
+    <string name="task_add_here">Task for the subject</string>
+    <string name="task_section">Tasks</string>
+    <string name="task_title">Task</string>
+    <string name="task_ph">Add a task…</string>
+    <string name="task_hint">Split the subject into tasks for each person. You can make them visible only to your company.</string>
+    <string name="task_dialog_title">Tasks for “%1$s”</string>
+    <string name="task_who_sees">Who can see it?</string>
+    <string name="task_vis_all">Whole chat</string>
+    <string name="task_vis_org">Only %1$s</string>
+    <string name="task_vis_org_short">Only my company</string>
+    <string name="task_vis_private">Private</string>
+    <string name="task_vis_side">Only this sidechat</string>
+    <string name="task_other_person">Someone else</string>
+    <string name="task_pick_person">Pick someone…</string>
+    <string name="task_outsider_hint">%1$s is not in this chat: the task stays restricted and they will see the task, not the chat.</string>
+    <string name="task_part_of">Part of “%1$s”</string>
+    <string name="task_of_hidden">Task from a subject you can’t see</string>
+    <string name="task_in_side">in sidechat</string>
+    <string name="task_progress">%1$d of %2$d tasks done</string>
+    <string name="task_sidechat">Talk privately (sidechat)</string>
+    <string name="task_side_explain">Open a private chat with the people you pick to solve “%1$s”. Tasks created there stay in the subject and only you all see them.</string>
+    <string name="task_side_first">First message (optional)</string>
+    <string name="task_side_go">Open sidechat</string>
+    <string name="task_ev_vis">changed who can see it</string>
+    <string name="task_shared_with_me">Shared with you</string>
+    <string name="task_assigned">You were assigned a task</string>
+    <string name="task_show">Show tasks</string>
+    <string name="task_hide">Hide tasks</string>
+</resources>

@@ -99,4 +99,46 @@ object IssueTasks {
 
     /** Primer nombre (para chips y el árbol de Grupos). */
     fun firstName(name: String?) = name?.trim()?.split(Regex("\\s+"))?.firstOrNull().orEmpty()
+
+    // ---------- Tareas derivadas (docs/TAREAS.md) ----------
+
+    /** Tareas hijas visibles de un asunto: las abiertas primero y luego por creación. */
+    fun childrenOf(all: Collection<IssueDTO>, parentId: String): List<IssueDTO> =
+        all.filter { it.parentIssueId == parentId }.sortedWith(compareBy<IssueDTO> { it.closed }.thenBy { it.createdAt })
+
+    data class Progress(val done: Int, val total: Int) { val allDone: Boolean get() = total > 0 && done == total }
+    fun progress(kids: List<IssueDTO>) = Progress(kids.count { it.closed }, kids.size)
+
+    /** Principales de una lista: los que no son hijos, o hijos cuyo asunto no está en la lista (o no lo veo). */
+    fun tops(list: List<IssueDTO>, all: Map<String, IssueDTO>): List<IssueDTO> {
+        val ids = list.mapTo(HashSet()) { it.id }
+        return list.filter { it.parentIssueId == null || all[it.parentIssueId] == null || it.parentIssueId !in ids }
+    }
+
+    /** Lista de un chat: sus asuntos y tareas sueltas, sin las tareas cuyo asunto es de este chat (van debajo de él). */
+    fun conversationTops(all: Map<String, IssueDTO>, conversationId: String): List<IssueDTO> {
+        val here = all.values.filter { it.conversationId == conversationId }
+        return tops(here, all).filter { it.parentIssueId == null || all[it.parentIssueId]?.conversationId != conversationId }
+    }
+
+    /** Conversación donde se agrupa (Asuntos por grupo): la del asunto padre si lo veo. */
+    fun groupConversation(i: IssueDTO, all: Map<String, IssueDTO>): String = i.parentIssueId?.let { all[it]?.conversationId } ?: i.conversationId
+
+    /** Por defecto una tarea la ve «solo mi empresa» si en el chat hay más de una empresa. */
+    fun defaultVisibility(memberOrgIds: List<String?>, myOrgId: String?): String =
+        if (memberOrgIds.map { it ?: "guest" }.toSet().size > 1 && myOrgId != null) "org" else "all"
+
+    /** Si quien la hace no está en el chat, la tarea no puede ser de «todo el chat»: queda privada. */
+    fun effectiveVisibility(vis: String, ownerInChat: Boolean): String = if (!ownerInChat && vis == "all") "private" else vis
+
+    /** Quién ve la tarea en el detalle (para los chips de responsable). */
+    fun audience(i: IssueDTO, chatMembers: List<PersonDTO>, people: List<PersonDTO>): List<PersonDTO> {
+        val extra = i.viewerIds.filter { u -> chatMembers.none { it.id == u } }.mapNotNull { u -> people.firstOrNull { it.id == u } }
+        val base = when (i.visibility) {
+            "org" -> chatMembers.filter { it.orgId == i.visibleOrgId }
+            "private" -> chatMembers.filter { it.id in i.viewerIds }
+            else -> chatMembers
+        }
+        return (base + extra).distinctBy { it.id }
+    }
 }

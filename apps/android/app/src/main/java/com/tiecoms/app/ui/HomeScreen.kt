@@ -182,6 +182,7 @@ fun GroupsScreen(
         )
     }
     val setIssueStatus = rememberIssueStatusSetter()
+    val taskDialogs = LocalTaskDialogs.current
     val openPerson = rememberOpenPerson(data, onOpen)
     // Al buscar: también personas (tocar = escribirle) y chats; los grupos ya salen en el árbol.
     val quickResults = remember(data, query) {
@@ -288,7 +289,8 @@ fun GroupsScreen(
                             }
                             is GroupsTree.Issue -> Unfold(row.issue.conversationId == justExpanded) {
                                 IssueLine(row, data, menuOpen = menuKey == row.key, onLongPress = { menuKey = row.key }, onDismissMenu = { menuKey = null },
-                                    menuItems = { issueQuickMenu(ctx, row.issue, onOpen = { onOpenIssue(row.issue.id) }, onStatus = { st -> setIssueStatus(row.issue, st) }) }) { onOpenIssue(row.issue.id) }
+                                    menuItems = { issueQuickMenu(ctx, row.issue, onOpen = { onOpenIssue(row.issue.id) }, onStatus = { st -> setIssueStatus(row.issue, st) },
+                                        onAddTask = { taskDialogs.openTasks(row.issue.id) }, onSide = { taskDialogs.openSide(row.issue) }) }) { onOpenIssue(row.issue.id) }
                             }
                             is GroupsTree.MoreIssues -> Unfold(row.conversationId == justExpanded) { IssueIndent(row.level) { Text(
                                 pluralStringResource(R.plurals.grp_more_issues, row.count, row.count),
@@ -668,7 +670,9 @@ private fun IssueLine(row: GroupsTree.Issue, data: BootstrapDTO, menuOpen: Boole
     ) {
         // 1.6.4 (22): el ◆ pasa a ser el círculo para completar (área táctil ampliada a 48 dp por Compose).
         IssueCheck(i, { toggle(i) }, size = 16.dp, box = 40.dp)
-        Text(i.title, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text((if (i.restricted) "🔒 " else "") + i.title, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        val kids = com.tiecoms.app.core.IssueTasks.childrenOf(LocalClient.current.state.collectAsStateWithLifecycle().value.issues.values, i.id)
+        if (kids.isNotEmpty()) { Spacer(Modifier.width(6.dp)); com.tiecoms.app.core.IssueTasks.progress(kids).let { KidsBadge(it.done, it.total, Modifier.testTag("groupKids-${i.id}")) } }
         val ownerName = i.ownerId?.takeIf { it != data.me.id }?.let { com.tiecoms.app.core.IssueTasks.firstName(com.tiecoms.app.core.Names.person(data, it)?.name) }?.takeIf { it.isNotEmpty() }
         if (ownerName != null) {
             Spacer(Modifier.width(8.dp))

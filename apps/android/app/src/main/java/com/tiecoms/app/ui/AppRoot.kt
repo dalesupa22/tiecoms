@@ -96,7 +96,7 @@ fun AppRoot() {
                     SessionStatus.LOADING -> Splash()
                     SessionStatus.UNREACHABLE -> Unreachable()
                     SessionStatus.ANONYMOUS -> AuthNav()
-                    SessionStatus.READY -> MainNav()
+                    SessionStatus.READY -> TaskDialogsHost { MainNav() }
                 }
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 72.dp))
                 // Splash animado sobre la app: la app carga debajo y aparece cuando el splash se aleja.
@@ -239,6 +239,11 @@ private fun MainNav() {
                 // Sidechat de un chat que no puedo leer (colega que no está en el grupo): el sidechat a pantalla completa.
                 else if (p.side != null && data.conversations.any { it.id == p.side }) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.side) }
                 else uiScope.launch { container.toast(ctx.getString(R.string.no_access)) }
+            is DeepLink.Issue -> {
+                // Push «te asignó una tarea»: si está en un chat que leo (inChat), primero el chat y encima el asunto.
+                if (p.conversationId != null && data.conversations.any { it.id == p.conversationId }) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.conversationId) }
+                nav.navigate("issue/${p.id}") { launchSingleTop = true }
+            }
             is DeepLink.Workspace ->
                 if (data.workspaces.any { it.id == p.id }) nav.navigate("home?ws=${p.id}") { popUpTo(0) { inclusive = true } }
                 else uiScope.launch { container.toast(ctx.getString(R.string.err_not_found)) }
@@ -380,7 +385,8 @@ private fun MainNav() {
                     onLeft = { nav.popBackStack(nav.graph.findStartDestination().id, false) })
             }
             composable("issue/{id}") {
-                IssueDetailScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() }, onOpenOrigin = { c, seq -> openConv(c, seq) })
+                IssueDetailScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() }, onOpenOrigin = { c, seq -> openConv(c, seq) },
+                    onOpenIssue = { i -> nav.navigate("issue/$i") })
             }
             composable("event/{id}") {
                 EventDetailScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() }, onOpenChat = { c -> openConv(c) })

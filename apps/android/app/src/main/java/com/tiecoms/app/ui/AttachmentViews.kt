@@ -257,7 +257,9 @@ private fun VideoPage(a: AttachmentDTO, active: Boolean) {
 
 /** Clip del compositor: Fotos y videos (selector del sistema, hasta 10), Cámara o Archivos. */
 @Composable
-fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.net.Uri>) -> Unit, onEvent: (() -> Unit)? = null, onIssue: (() -> Unit)? = null) {
+fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.net.Uri>) -> Unit, onEvent: (() -> Unit)? = null, onIssue: (() -> Unit)? = null,
+                 /** Sidechat que salió de un asunto: «Tarea del asunto». */
+                 onTask: (() -> Unit)? = null) {
     val ctx = LocalContext.current
     // Saveable: si el sistema recrea la actividad mientras la cámara está abierta, la foto no se pierde.
     var cameraUri by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<android.net.Uri?>(null) }
@@ -285,7 +287,8 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
             runCatching { camera.launch(uri) }.onFailure { container.toast(ctx.getString(R.string.att_camera_unavailable)) }
         },
         SheetItem(ctx.getString(R.string.att_files_pick), "📎", tag = "attFiles") { docs.launch(arrayOf("*/*")) },
-    ) + (if (onEvent != null || onIssue != null) listOf(null) else emptyList()) + listOfNotNull(
+    ) + (if (onEvent != null || onIssue != null || onTask != null) listOf(null) else emptyList()) + listOfNotNull(
+        onTask?.let { SheetItem(ctx.getString(R.string.task_add_here), "☑", tag = "plusTask", onClick = it) },
         onEvent?.let { SheetItem(ctx.getString(R.string.bar_new_event), "📅", tag = "plusEvent", onClick = it) },
         onIssue?.let { SheetItem(ctx.getString(R.string.bar_new_issue), "◆", tag = "plusIssue", onClick = it) },
     ), onDismiss)

@@ -209,7 +209,7 @@ class AppContainer(private val app: Application) {
         if (c.dndActive()) return
         // Chat silenciado: solo pasa la mención (salvo el silencio «siempre»), igual que el filtro del servidor.
         val conv = c.meta(p.conversationId)
-        if (conv != null && p.type != "event" && p.type != "reminder" &&
+        if (conv != null && p.type != "event" && p.type != "reminder" && p.type != "issue" &&
             !com.tiecoms.app.core.Silence.notifies(conv.mutedUntil, p.type == "mention", null, System.currentTimeMillis())) return
         // Aviso de reunión (minutes) vs. convocatoria: claves distintas para no taparse entre sí.
         // Una reacción comparte el messageId con el aviso del mensaje: no se deduplica (la etiqueta la reemplaza).
@@ -237,6 +237,10 @@ class AppContainer(private val app: Application) {
                     shortcutLabel = if (isGroup) conversationName(p.conversationId).ifBlank { p.title } else p.title)
             }
             // «Laura reaccionó 👍» (TC_MESSAGE, collapseId react-<id>): tocar abre la conversación en ese mensaje.
+            // «Laura te asignó una tarea»: tocar abre el asunto (y antes el chat, si lo puedo leer).
+            "issue" -> notifier.showMessage(p.conversationId, p.title, listOf(p.subtitle, p.body).filter { it.isNotBlank() }.joinToString(" · "),
+                silent = !settings.soundsEnabled, tag = "issue:" + (p.issueId ?: p.conversationId),
+                openUri = "chaggu://issue/${p.issueId ?: ""}" + if (p.inChat) "?c=${p.conversationId}" else "")
             "reaction" -> notifier.showMessage(p.conversationId, p.title, listOf(p.subtitle, p.body).filter { it.isNotBlank() }.joinToString(" · "),
                 silent = !settings.soundsEnabled, tag = "react-" + (p.messageId ?: p.conversationId),
                 openUri = "chaggu://c/${p.conversationId}" + (p.messageId?.let { "?mid=$it" } ?: ""))

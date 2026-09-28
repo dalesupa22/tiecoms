@@ -41,6 +41,10 @@ sealed interface AccountEvent {
     data class ScheduledUpdated(val scheduled: ScheduledMessageDTO) : AccountEvent
     /** Mi modo sueño cambió (`me.sleep`). */
     data class SleepUpdated(val sleep: SleepDTO) : AccountEvent
+    /** Un asunto restringido que puedo ver cambió: llega por la cuenta, sin eventSeq (docs/TAREAS.md). */
+    data class IssueUpdated(val issue: IssueDTO) : AccountEvent
+    /** Perdí acceso a un asunto: sacarlo de la lista. */
+    data class IssueHidden(val issueId: String, val conversationId: String) : AccountEvent
     data class Unknown(val type: String) : AccountEvent
 }
 
@@ -93,6 +97,8 @@ fun decodeAccountEvent(el: JsonElement): AccountEvent {
         "drive.updated" -> AccountEvent.DriveUpdated(o.str("workspaceId"))
         "reminders.changed" -> AccountEvent.RemindersChanged
         "scheduled.updated" -> obj(o, "scheduled", ScheduledMessageDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { AccountEvent.ScheduledUpdated(it) } ?: AccountEvent.Unknown(type)
+        "issue.updated" -> obj(o, "issue", IssueDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { AccountEvent.IssueUpdated(it) } ?: AccountEvent.Unknown(type)
+        "issue.hidden" -> o.str("issueId")?.let { AccountEvent.IssueHidden(it, o.str("conversationId") ?: "") } ?: AccountEvent.Unknown(type)
         "me.sleep" -> obj(o, "sleep", SleepDTO.serializer())?.let { AccountEvent.SleepUpdated(it) } ?: AccountEvent.Unknown(type)
         "me.dnd" -> if (o.containsKey("dndUntil")) AccountEvent.DndUpdated(o.str("dndUntil")) else AccountEvent.Unknown(type)
         else -> AccountEvent.Unknown(type)

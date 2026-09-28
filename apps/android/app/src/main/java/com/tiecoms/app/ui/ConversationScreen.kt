@@ -636,6 +636,8 @@ fun ConversationScreen(
                     val lastHuman = conv?.messages?.lastOrNull { it.kind == "text" && it.deletedAt == null }
                     if (lastHuman != null && lastHuman.authorId != me) SideQuickReplies(onSend = { t -> client.send(id, t) }, onAsk = { sideAddHere = true })
                 }
+                // Sidechat abierto desde un asunto: «◆ asunto · ☑ 1/3 · ＋ Tarea».
+                meta.sideIssueId?.let { SideIssueStrip(id, it, onOpen = onOpenIssue) }
                 // Mensajes programados de este chat (solo los veo yo): «🕒 N programados · el próximo sale … · Ver».
                 ScheduledStrip(id)
                 Composer(
@@ -898,7 +900,10 @@ private fun Composer(
             files = plan.files
         }
     }
-    AttachPicker(picker, onDismiss = { picker = false }, onPicked = { add(it) }, onEvent = onNewEvent, onIssue = onNewIssue)
+    val taskDialogs = LocalTaskDialogs.current
+    val sideIssue = client.meta(id)?.sideIssueId
+    AttachPicker(picker, onDismiss = { picker = false }, onPicked = { add(it) }, onEvent = onNewEvent, onIssue = onNewIssue,
+        onTask = sideIssue?.let { sid -> { picker = false; taskDialogs.openTasks(sid, id) } })
     // Un hilo o sidechat abierto al lado recibe el cursor.
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(id, autoFocus) { if (autoFocus) { delay(300); runCatching { focus.requestFocus() } } }

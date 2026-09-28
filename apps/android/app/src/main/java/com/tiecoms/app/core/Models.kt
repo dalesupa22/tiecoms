@@ -159,6 +159,10 @@ data class ConversationDTO(
     val unreadMentions: Int = 0,
     /** Sidechat abierto desde este asunto (docs/TAREAS.md): arriba del compositor va «◆ asunto · ＋ Tarea». */
     val sideIssueId: String? = null,
+    /** Admins del grupo, como WhatsApp (docs/ADMINS-INTEGRACIONES.md); solo group/internal/multi. null = servidor viejo. */
+    val adminIds: List<String>? = null,
+    /** Quién creó el grupo: no se le quita el admin ni se le saca. null = servidor viejo o directo. */
+    val createdBy: String? = null,
 ) {
     /** Directos y chats grupales van juntos en la lista: no pertenecen a un espacio. */
     val isChat: Boolean get() = kind == "direct" || kind == "multi"
@@ -606,6 +610,7 @@ data class IssueEventDTO(
 @Serializable data class PinnedMessages(val messages: List<MessageDTO> = emptyList())
 @Serializable data class ReadResult(val lastReadSeq: Long = 0)
 @Serializable data class IdResult(val id: String = "")
+@Serializable data class AdminIdsResult(val adminIds: List<String> = emptyList())
 @Serializable data class ReturnSuggestion(val summary: String = "", val source: String = "fallback")
 @Serializable data class ReturnResult(val parentId: String = "", val messageId: String = "")
 

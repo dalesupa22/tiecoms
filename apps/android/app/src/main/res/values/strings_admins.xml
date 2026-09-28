@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Admins de grupo e integraciones (docs/ADMINS-INTEGRACIONES.md). -->
+<resources>
+    <string name="admin_tag">Admin</string>
+    <string name="bot_tag">Bot</string>
+    <string name="admin_make">Make group admin</string>
+    <string name="admin_remove">Dismiss as admin</string>
+    <string name="admin_kick">Remove from group</string>
+    <string name="admin_leave">Stop being admin</string>
+    <string name="admin_make_confirm">Make %1$s a group admin? They will be able to add and remove people and make other admins.</string>
+    <string name="admin_remove_confirm">Dismiss %1$s as admin?</string>
+    <string name="admin_kick_confirm">Remove %1$s from the group?</string>
+    <string name="admin_leave_confirm">Stop being an admin of this group? You will stay in the group.</string>
+    <string name="sys_admin_added">%1$s is now a group admin.</string>
+    <string name="sys_admin_removed">%1$s is no longer a group admin.</string>
+    <string name="sys_integration_added">The “%1$s” integration was connected.</string>
+    <string name="sys_integration_removed">The “%1$s” integration was disconnected.</string>
+</resources>

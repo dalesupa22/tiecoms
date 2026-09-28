@@ -14,7 +14,7 @@ sealed interface ConversationEvent {
 
     data class MessageCreated(override val conversationId: String, override val eventSeq: Long, val message: MessageDTO) : ConversationEvent
     data class MessageUpdated(override val conversationId: String, override val eventSeq: Long, val message: MessageDTO) : ConversationEvent
-    data class MembersChanged(override val conversationId: String, override val eventSeq: Long, val memberIds: List<String>) : ConversationEvent
+    data class MembersChanged(override val conversationId: String, override val eventSeq: Long, val memberIds: List<String>, val adminIds: List<String>? = null) : ConversationEvent
     data class IssueUpdated(override val conversationId: String, override val eventSeq: Long, val issue: IssueDTO) : ConversationEvent
     data class PinsChanged(override val conversationId: String, override val eventSeq: Long, val messageIds: List<String>) : ConversationEvent
     data class CalendarUpdated(override val conversationId: String, override val eventSeq: Long, val event: CalendarEventDTO) : ConversationEvent
@@ -69,7 +69,7 @@ fun decodeConversationEvent(el: JsonElement): ConversationEvent? {
     return when (type) {
         "message.created" -> message()?.let { ConversationEvent.MessageCreated(conv, seq, it.copy(conversationId = it.conversationId.ifEmpty { conv })) }
         "message.updated" -> message()?.let { ConversationEvent.MessageUpdated(conv, seq, it.copy(conversationId = it.conversationId.ifEmpty { conv })) }
-        "members.changed" -> ids(o, "memberIds")?.let { ConversationEvent.MembersChanged(conv, seq, it) }
+        "members.changed" -> ids(o, "memberIds")?.let { ConversationEvent.MembersChanged(conv, seq, it, ids(o, "adminIds")) }
         "pins.changed" -> ids(o, "messageIds")?.let { ConversationEvent.PinsChanged(conv, seq, it) }
         "issue.updated" -> obj(o, "issue", IssueDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { ConversationEvent.IssueUpdated(conv, seq, it) }
         "calendar.updated" -> obj(o, "event", CalendarEventDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { ConversationEvent.CalendarUpdated(conv, seq, it) }

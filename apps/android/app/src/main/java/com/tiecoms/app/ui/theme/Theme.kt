@@ -86,7 +86,12 @@ fun TieComsTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () 
     } else {
         ChatColors(Brand.OrangeText, Color.White, Color(0xFFEFEBE7), Brand.Black, Color(0xFF6B6560), Color(0xFFC62828))
     }
-    androidx.compose.runtime.CompositionLocalProvider(LocalChatColors provides chat) {
+    // Tamaño del texto elegido en «Tú»: multiplica la escala de fuente del sistema en toda la app.
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as? com.tiecoms.app.TieComsApp
+    val factor = runCatching { app?.container?.settings?.textScale }.getOrNull() ?: 1f
+    val base = androidx.compose.ui.platform.LocalDensity.current
+    val density = androidx.compose.ui.unit.Density(base.density, com.tiecoms.app.core.TextSize.fontScale(base.fontScale, factor))
+    androidx.compose.runtime.CompositionLocalProvider(LocalChatColors provides chat, androidx.compose.ui.platform.LocalDensity provides density) {
         MaterialTheme(colorScheme = if (dark) Dark else Light, content = content)
     }
 }

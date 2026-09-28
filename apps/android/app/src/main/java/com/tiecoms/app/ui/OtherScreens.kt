@@ -13,6 +13,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.style.TextOverflow
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -313,6 +317,8 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
             HorizontalDivider()
             NavRow("⑂ " + stringResource(R.string.nav_trazo), null, tag = "rowTrazo") { onNavigate("trazo") }
             HorizontalDivider()
+            TextSizeRow()
+            HorizontalDivider()
             Row(
                 Modifier.fillMaxWidth().clickable(role = Role.Switch) { sounds = !sounds; container.settings.soundsEnabled = sounds }
                     .padding(16.dp).semantics(mergeDescendants = true) {}.testTag("soundsRow"),
@@ -398,6 +404,42 @@ fun TabScaffold(title: String, content: @Composable ColumnScope.() -> Unit) {
         },
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
     ) { pad -> Column(Modifier.padding(pad).fillMaxSize(), content = content) }
+}
+
+/**
+ * «Tamaño del texto» (1.6.4 / 22): slider de 5 pasos que se aplica en vivo a toda la app (el tema multiplica la
+ * escala de fuente del sistema) y una fila de Grupos de muestra como vista previa.
+ */
+@Composable
+private fun TextSizeRow() {
+    val container = LocalContainer.current
+    val labels = listOf(R.string.text_size_small, R.string.text_size_default, R.string.text_size_large, R.string.text_size_larger, R.string.text_size_largest).map { stringResource(it) }
+    val idx = com.tiecoms.app.core.TextSize.index(container.settings.textScale)
+    Column(Modifier.fillMaxWidth().padding(16.dp).testTag("textSizeRow")) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.text_size), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Text(labels[idx], style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("textSizeValue"))
+        }
+        Text(stringResource(R.string.text_size_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val steps = com.tiecoms.app.core.TextSize.STEPS
+        androidx.compose.material3.Slider(
+            value = idx.toFloat(), onValueChange = { v -> container.settings.textScale = steps[v.roundToInt().coerceIn(0, steps.lastIndex)] },
+            valueRange = 0f..steps.lastIndex.toFloat(), steps = steps.size - 2,
+            modifier = Modifier.fillMaxWidth().semantics { stateDescription = labels[idx]; contentDescription = labels[0] + " … " + labels.last() }.testTag("textSizeSlider"),
+        )
+        Row { Text("A", style = MaterialTheme.typography.bodySmall); Spacer(Modifier.weight(1f)); Text("A", style = MaterialTheme.typography.titleLarge) }
+        // Vista previa: una fila como las de Grupos.
+        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag("textSizePreview")) {
+            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                GlyphBox("#", 32.dp)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.text_size_preview_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.text_size_preview_body), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
 }
 
 @Composable

@@ -839,7 +839,7 @@ fun ConversationIcon(c: ConversationDTO, data: BootstrapDTO, size: androidx.comp
 }
 
 @Composable
-private fun GlyphBox(g: String, size: androidx.compose.ui.unit.Dp) {
+internal fun GlyphBox(g: String, size: androidx.compose.ui.unit.Dp) {
     Box(Modifier.size(size).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp)).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
         Text(g, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = with(androidx.compose.ui.platform.LocalDensity.current) { (size * 0.5f).toSp() })
     }

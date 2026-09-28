@@ -14,13 +14,17 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 
 ## Entrega 1.6.6 (25): lectura, asuntos personales, reuniones y calendario
 
-Guía común: `docs/TANDA-LECTURA-REUNIONES.md` (rama `tanda-lectura-reuniones`). Necesita el API con la migración 028.
+Guía común: `docs/TANDA-LECTURA-REUNIONES.md` (rama `tanda-lectura-reuniones`). Necesita el API final de esta tanda con confirmación OAuth y la migración 030 para conservar pendientes al enviar.
 
 - **Pendientes del árbol** (`core/ReadTree.kt`): no leídos del grupo + sus derivadas (sin sidechats) en la sección y el filtro «No leídos», el orden, la «@» y el chip «⑂ N». «Marcar como leído» llama a `POST /conversations/:id/read-tree` con el seq que el cliente conoce; en el chat, la franja «⑂ N sin leer en X conversaciones de este grupo · Ver».
 - **Asuntos**: sin el párrafo explicativo; asuntos personales (`POST /issues`, `conversationId` null) con «🔒 Personal · solo tú» en «¿Dónde?», su sección en «Por grupo» y un detalle sin responsable, tareas ni sidechat.
 - **Reuniones** (`core/Meetings.kt`, `ui/MeetingViews.kt`): «📹 Reunión ahora» y «📅 Agendar reunión con enlace» en el ＋ del chat, con un `idempotencyKey` por intento; Tú › «Reuniones» conecta en Custom Tabs y vuelve por `chaggu://meetings/connected`.
 - **Calendario** (`core/CalendarGrid.kt`): Día / Semana / Mes, con Semana por defecto y recordado (`calendarView`), ‹ Hoy ›, y en Mes una cuadrícula de 6×7 desde el lunes con «+N más».
 - Pruebas: `ReadTreeTest`, `PersonalIssuesTest`, `MeetingsTest` y `CalendarGridTest` (unitarias), y `Tanda166UiTest` (instrumentada, contra el API local y el proveedor falso `apps/api/test/fake-meetings.mjs`, que es un MOCK).
+
+La conexión a reuniones usa un verifier aleatorio en memoria y un challenge SHA-256. La vuelta del navegador sólo entrega un recibo de un uso; la cuenta queda conectada después del POST autenticado `/meetings/connect/confirm`. Cancelar o cambiar de sesión descarta el verifier. Un intento de reunión incierto conserva payload, llave e ID en el almacén AES-GCM del Android Keystore antes de enviar; sobrevive al cierre del proceso y se elimina al cerrar sesión. Un reintento conserva la operación original y sólo un estado `created` con URL HTTPS habilita compartir/copiar.
+
+El chat carga todas las páginas necesarias para llegar al primer pendiente. Sólo confirma un prefijo continuo de mensajes vistos; saltar a una mención o al final no borra el hueco. Los contadores de lectura y de lectura del árbol se actualizan con la respuesta confirmada del servidor. `MeetingSecurityTest`, `ReadProgressTest` y `ReadProgressUiTest` cubren carreras entre cuentas, reinicio, errores de red y un historial sintético de seis páginas. Estas pruebas locales no demuestran entrega FCM ni conexiones reales con proveedores.
 
 ## Entrega 1.6.5 (24)
 

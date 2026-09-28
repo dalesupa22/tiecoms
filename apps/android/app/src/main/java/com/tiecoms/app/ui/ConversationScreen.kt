@@ -127,6 +127,7 @@ import com.tiecoms.app.ui.theme.Brand
 import com.tiecoms.app.ui.theme.LocalChatColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -263,6 +264,10 @@ fun ConversationScreen(
     val listState = rememberLazyListState()
     val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex <= 1 } }
     val me = data.me.id
+    val readProgress = remember(id, me) { com.tiecoms.app.core.ReadProgress() }
+    var readLoadFailed by remember(id) { mutableStateOf(false) }
+    var readSaveFailed by remember(id) { mutableStateOf(false) }
+    var readRetry by remember(id) { mutableIntStateOf(0) }
     val blockedDirect = meta.kind == "direct" && meta.memberIds.any { it in state.blockedUserIds }
     val pending = state.pending.filter { it.conversationId == id }
     // Foto al entrar, antes de marcar leído: hasta dónde leí y cuántos no leídos había (1.6.4 §D).
@@ -288,7 +293,7 @@ fun ConversationScreen(
 
     fun jumpTo(seq: Long) {
         scope.launch {
-            if (!client.ensureMessage(id, seq)) return@launch
+            if (!client.ensureMessage(id, seq)) { readLoadFailed = true; return@launch }
             delay(80)
             val idx = buildItems((client.state.value.conversations[id]?.messages ?: emptyList()).filter { it.authorId !in client.state.value.blockedUserIds }, client.state.value.pending.filter { it.conversationId == id }, me, false, false, false)
                 .indexOfFirst { (it as? ChatItem.Msg)?.m?.seq == seq }
@@ -302,23 +307,29 @@ fun ConversationScreen(
     LaunchedEffect(id, reloadKey) {
         runCatching { client.loadBlocks() }
         loadError = null
-        try { client.openConversation(id) } catch (e: Exception) { loadError = errorText(ctx, e) }
+        try { client.openConversation(id, force = reloadKey > 0) } catch (e: Exception) { loadError = errorText(ctx, e) }
         launch { runCatching { client.loadIssues(conversationId = id) } }
         launch { runCatching { client.loadPins(id) } }
         launch { runCatching { client.loadEvents(Instant.now().minusSeconds(30L * 86400), Instant.now().plusSeconds(60L * 86400), id) } }
         if (jumpSeq != null && jumpSeq > 0) jumpTo(jumpSeq)
-        else if (jumpMessageId != null) client.ensureMessageId(id, jumpMessageId)?.let { jumpTo(it) }
+        else if (jumpMessageId != null) {
+            val seq = client.ensureMessageId(id, jumpMessageId)
+            if (seq != null) jumpTo(seq) else readLoadFailed = true
+        }
         else if (!positioned) try {
-            // Abrir en el primer no leído; si no está cargado, hasta 3 páginas más antiguas (si no, al final como siempre).
+            // Load back to the unread frontier. A failed page must not position at the end or clear unread.
             fun loaded() = client.state.value.conversations[id]
-            var pages = 0
-            while (pages < com.tiecoms.app.core.ChatNav.MAX_OLDER_PAGES) {
+            readLoadFailed = false
+            val floor = maxOf(entry.first, meta.historyFromSeq)
+            while (true) {
                 val c = loaded() ?: break
-                if (!com.tiecoms.app.core.ChatNav.needsOlder(c.messages, entry.first, entry.second, me, c.hasMore)) break
-                client.loadOlder(id); pages++
+                if (!com.tiecoms.app.core.ChatNav.needsOlder(c.messages, floor, entry.second, me, c.hasMore)) break
+                if (!client.loadOlder(id)) throw IllegalStateException("Unread page unavailable")
             }
             val c = loaded()
-            val seq = c?.let { com.tiecoms.app.core.ChatNav.firstUnreadSeq(it.messages.filter { m -> m.authorId !in client.state.value.blockedUserIds }, entry.first, entry.second, me, it.hasMore) }
+            val position = com.tiecoms.app.core.ChatNav.position(c?.messages.orEmpty(), floor, entry.second, me, meta.lastMessageSeq, client.state.value.blockedUserIds)
+            if (position !is com.tiecoms.app.core.ChatNav.Position.Ready) throw IllegalStateException("Unread history has a gap")
+            val seq = position.seq
             if (seq != null) {
                 dividerSeq = seq
                 withFrameNanos { }; delay(30)
@@ -332,7 +343,11 @@ fun ConversationScreen(
                 val seen = itemsNow.filterIsInstance<ChatItem.Msg>().filter { it.key in visible }.map { it.m.seq }.toSet()
                 mentionQueue.addAll(com.tiecoms.app.core.ChatNav.unreadMentionSeqs(c.messages, entry.first, me).filter { it !in mentionQueue && it !in seen })
             }
-        } finally { positioned = true; follow = atBottom }
+            positioned = true; follow = atBottom
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            readLoadFailed = true
+        }
     }
 
     // A full-screen conversation clears its notification. Embedded bubble content must
@@ -396,14 +411,38 @@ fun ConversationScreen(
             mentionQueue.removeAll { it in seen }
         }
     }
-    LaunchedEffect(listState, id) {
+    LaunchedEffect(listState, id, positioned) {
+        if (!positioned) return@LaunchedEffect
         snapshotFlow { (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) to listState.layoutInfo.totalItemsCount }
             .distinctUntilChanged()
-            .collect { (last, total) -> if (total > 0 && last >= total - 3) client.loadOlder(id) }
+            .collect { (last, total) ->
+                val c = client.state.value.conversations[id]
+                if (total > 0 && last >= total - 3 && c?.hasMore == true && !c.loading && !client.loadOlder(id)) readLoadFailed = true
+            }
     }
-    LaunchedEffect(meta.lastMessageSeq, atBottom, lifecycleState, conv?.loaded, positioned) {
-        if (positioned && atBottom && conv?.loaded == true && lifecycleState.isAtLeast(Lifecycle.State.RESUMED)) client.markRead(id)
+    LaunchedEffect(id, positioned, lifecycleState, conv?.loaded, conv?.messages, meta.lastReadSeq, readRetry) {
+        if (!positioned || conv?.loaded != true || !lifecycleState.isAtLeast(Lifecycle.State.RESUMED)) return@LaunchedEffect
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            layout.visibleItemsInfo.filter { it.offset + it.size > layout.viewportStartOffset + 8 && it.offset < layout.viewportEndOffset - 8 }.map { it.key }.toSet()
+        }.collectLatest { keys ->
+            // Scrolling/jumping past a row is not reading it. Wait until the viewport settles.
+            delay(350)
+            val st = client.state.value
+            val current = client.meta(id) ?: return@collectLatest
+            val loaded = st.conversations[id]?.messages.orEmpty()
+            val visible = itemsNow.filterIsInstance<ChatItem.Msg>().filter { it.key in keys }.map { it.m.seq }.toSet()
+            val seq = readProgress.observe(current.lastReadSeq, current.historyFromSeq, loaded, visible, me, st.blockedUserIds)
+            if (seq > current.lastReadSeq) {
+                try { client.markRead(id, seq); readSaveFailed = false }
+                catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    readSaveFailed = true
+                }
+            }
+        }
     }
+
 
     val typers = (state.typing[id] ?: emptyList()).filter { it.until > System.currentTimeMillis() && it.userId != me }
         .mapNotNull { Names.person(data, it.userId)?.name?.substringBefore(' ') }
@@ -552,6 +591,13 @@ fun ConversationScreen(
                 onOpenEvent = onOpenEvent, onOpenThread = { t -> sideOpen = t })
             // Pendientes del árbol (1.6.6): «⑂ N sin leer en X conversaciones de este grupo · Ver».
             if (!embedded) TreeUnreadStrip(meta, data, onOpen = { t -> sideOpen = t })
+            if (readLoadFailed || readSaveFailed) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("readRetry"), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(if (readLoadFailed) R.string.read_load_failed else R.string.read_save_failed), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                TextButton(onClick = {
+                    if (readLoadFailed) { readLoadFailed = false; positioned = false; reloadKey++ }
+                    readSaveFailed = false; readRetry++
+                }) { Text(stringResource(R.string.retry)) }
+            }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     conv?.loaded != true && loadError != null -> Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -621,7 +667,7 @@ fun ConversationScreen(
                         }
                         // ⌄ «Ir al final», con globo de los que llegaron mientras estaba arriba.
                         if (farFromBottom || (!atBottom && newWhileAway > 0)) Box {
-                            SmallFloatingActionButton(onClick = { scope.launch { listState.animateScrollToItem(0); follow = true; awaySeq = null; client.markRead(id) } },
+                            SmallFloatingActionButton(onClick = { scope.launch { listState.animateScrollToItem(0); follow = true; awaySeq = null } },
                                 modifier = Modifier.testTag("jumpLatest")) {
                                 Icon(Icons.Filled.KeyboardArrowDown, stringResource(R.string.jump_latest))
                             }
@@ -1354,8 +1400,12 @@ fun SimpleScaffold(title: String, onBack: () -> Unit, actions: @Composable () ->
 internal suspend fun scrollDividerToTop(listState: androidx.compose.foundation.lazy.LazyListState, idx: Int, animated: Boolean = false) {
     listState.scrollToItem(idx)
     val info = listState.layoutInfo
-    val h = info.visibleItemsInfo.firstOrNull { it.index == idx }?.size ?: 0
-    val by = -(info.viewportSize.height - h - info.beforeContentPadding - info.afterContentPadding - 24).coerceAtLeast(0).toFloat()
+    // At the oldest boundary scrollToItem is already clamped near the top. Moving a whole
+    // viewport again skips the first unread messages; correct only the measured displacement.
+    val divider = info.visibleItemsInfo.firstOrNull { it.index == idx } ?: return
+    // In a reverse list item offsets start at the bottom; convert to its visual top.
+    val top = info.viewportSize.height - divider.offset - divider.size - info.afterContentPadding
+    val by = -(top - info.beforeContentPadding).coerceAtLeast(0).toFloat()
     if (animated) listState.animateScrollBy(by) else listState.scrollBy(by)
 }
 

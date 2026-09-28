@@ -134,8 +134,8 @@ class BandejaTest {
         // Mi propio mensaje no cuenta como no leído.
         assertEquals(13L, ChatNav.firstUnreadSeq(msgs, lastReadSeq = 11, unread = 8, me = "u1"))
         assertNull(ChatNav.firstUnreadSeq(msgs, lastReadSeq = 10, unread = 0, me = "u1"))
-        // Sin lastReadSeq: los últimos `unread` mensajes de otros.
-        assertEquals(17L, ChatNav.firstUnreadSeq(msgs, lastReadSeq = 0, unread = 4, me = "u1"))
+        // Un conteo menor no autoriza saltar el inicio cuando el cursor es cero.
+        assertEquals(1L, ChatNav.firstUnreadSeq(msgs, lastReadSeq = 0, unread = 4, me = "u1"))
     }
 
     @Test fun `si el primer no leido no esta cargado hay que traer mas antiguos`() {
@@ -143,8 +143,8 @@ class BandejaTest {
         assertTrue(ChatNav.needsOlder(page, lastReadSeq = 20, unread = 80, me = "u1", hasMore = true))
         assertNull(ChatNav.firstUnreadSeq(page, lastReadSeq = 20, unread = 80, me = "u1", hasMore = true))
         assertFalse(ChatNav.needsOlder(page, lastReadSeq = 60, unread = 40, me = "u1", hasMore = true))
-        // Sin más historia (me uní tarde): el primero cargado.
-        assertEquals(51L, ChatNav.firstUnreadSeq(page, lastReadSeq = 20, unread = 80, me = "u1", hasMore = false))
+        // Una página terminal tampoco autoriza saltar el hueco; historyFrom se aplica aparte.
+        assertNull(ChatNav.firstUnreadSeq(page, lastReadSeq = 20, unread = 80, me = "u1", hasMore = false))
     }
 
     @Test fun `menciones a mi sin leer para el boton arroba`() {

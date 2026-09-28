@@ -85,7 +85,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
             try {
                 val client = c.client.value
                 // Con la app cerrada, el cliente reanuda la sesión guardada antes de actuar.
-                withTimeoutOrNull(10_000) { client.state.first { it.status == SessionStatus.READY } }
+                withTimeoutOrNull(10_000) { client.state.first { it.status == SessionStatus.READY } } ?: return@launch
                 when (intent.action) {
                     Notifier.ACTION_REPLY -> {
                         val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(Notifier.KEY_REPLY)?.toString()?.trim()
@@ -95,7 +95,11 @@ class NotificationActionReceiver : BroadcastReceiver() {
                             c.notifier.appendMine(conv, c.conversationName(conv), meta != null && meta.kind != "direct", text)
                         }
                     }
-                    Notifier.ACTION_MARK_READ -> { runCatching { client.markConversationRead(conv) }; c.notifier.cancel(conv) }
+                    Notifier.ACTION_MARK_READ -> {
+                        val generation = client.sessionGeneration
+                        val confirmed = runCatching { client.markConversationRead(conv) }.getOrDefault(false)
+                        if (confirmed && c.client.value === client && client.sessionGeneration == generation) c.notifier.cancel(conv)
+                    }
                 }
             } finally { pending.finish() }
         }

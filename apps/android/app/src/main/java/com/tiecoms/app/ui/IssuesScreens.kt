@@ -363,10 +363,10 @@ fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier) {
     val internalFallback = stringResource(R.string.internal_default)
     val convFallback = stringResource(R.string.conversation)
     val destinations = remember(data, conversationId) { if (conversationId == null) com.tiecoms.app.core.QuickSearch.issueDestinations(data) else emptyList() }
-    var picked by rememberSaveable(conversationId) { mutableStateOf<String?>(null) }
+    var picked by rememberSaveable(data.me.id, conversationId) { mutableStateOf<String?>(null) }
     // «¿Dónde?» (1.6.6): la primera opción es «🔒 Personal · solo tú» (sin conversación, solo la veo yo).
-    // Como la web: por defecto el grupo más reciente (o Personal si no hay ninguno).
-    val conv = conversationId ?: picked?.takeIf { p -> p == IssueTasks.PERSONAL || destinations.any { it.id == p } } ?: destinations.firstOrNull()?.id ?: IssueTasks.PERSONAL
+    // Desde Asuntos es privado por defecto; desde el chat conserva esa conversación.
+    val conv = conversationId ?: picked?.takeIf { p -> p == IssueTasks.PERSONAL || destinations.any { it.id == p } } ?: IssueTasks.PERSONAL
     val personal = conv == IssueTasks.PERSONAL
     val members = if (personal) emptyList() else humansOf(data, conv).sortedByDescending { it.id == data.me.id }
     var title by rememberSaveable { mutableStateOf("") }

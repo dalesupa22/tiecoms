@@ -14,6 +14,17 @@ import com.tiecoms.app.ui.AppRoot
 import com.tiecoms.app.ui.theme.TieComsTheme
 
 class MainActivity : ComponentActivity() {
+    private var pausedForMeeting = false
+    override fun onPause() {
+        if (container.meetingConnecting != null) pausedForMeeting = true
+        super.onPause()
+    }
+    override fun onResume() {
+        super.onResume()
+        // A callback is handled by onNewIntent/onCreate before this. A plain Back from Custom Tabs cancels.
+        if (pausedForMeeting && container.meetingConnecting != null) container.cancelMeetingConnect()
+        pausedForMeeting = false
+    }
     override fun attachBaseContext(newBase: android.content.Context) { super.attachBaseContext(com.tiecoms.app.platform.AppLocale.wrap(newBase)) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,7 +70,10 @@ class MainActivity : ComponentActivity() {
             // chaggu://auth/callback es el retorno del SSO, no un destino de navegación.
             Sso.parseCallback(data)?.let { container.handleSsoCallback(it); return }
             // chaggu://meetings/connected: vuelta de «Conectar» Meet, Teams o Zoom (no es un destino de navegación).
-            com.tiecoms.app.core.Meetings.parseReturn(data)?.let { container.handleMeetingReturn(it); return }
+            com.tiecoms.app.core.Meetings.parseReturn(data)?.let {
+                intent.data = null // Do not retain the short-lived receipt in the activity Intent.
+                container.handleMeetingReturn(it); return
+            }
             DeepLinks.parse(data)?.let { container.pendingLink.value = it }
         }
     }

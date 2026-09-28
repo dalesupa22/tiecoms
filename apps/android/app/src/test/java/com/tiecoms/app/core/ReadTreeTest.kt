@@ -174,9 +174,9 @@ class ReadTreeTest {
         val c = client(api)
         try {
             val job = async { c.markTreeRead("general") }
-            // Optimista: la fila deja de contar de una vez.
-            kotlinx.coroutines.withTimeout(3_000) { while (c.meta("diag")?.unread != 0) kotlinx.coroutines.delay(10) }
-            assertEquals(0, c.meta("decision")!!.unreadMentions)
+            kotlinx.coroutines.withTimeout(3_000) { while (api.requests.none { it.first.path == "/api/v1/conversations/general/read-tree" }) kotlinx.coroutines.delay(10) }
+            assertEquals(5, c.meta("diag")!!.unread)
+            assertEquals(1, c.meta("decision")!!.unreadMentions)
             api.bootstrap = boot(convJson("general", 40, 40, 0), convJson("diag", 6, 0, 6, "general", "internal"),
                 convJson("decision", 6, 0, 6, "general", "directive", mentions = 1), convJson("side", 3, 0, 3, "general", "side"))
             c.loadBootstrap() // el snapshot trae el 6 (y todavía no la lectura)
@@ -216,6 +216,18 @@ class ReadTreeTest {
             api.bootstrap = boot(convJson("general", 40, 40, 0), convJson("diag", 5, 5, 0, "general", "internal"))
             c.loadBootstrap()
             assertFalse(ReadTree.of(c.state.value.data!!, c.meta("general")!!).markable)
+        } finally { c.close() }
+    }
+
+    @Test fun `partial acknowledgement only clears explicitly confirmed conversations`() = runBlocking {
+        val api = Api(CopyOnWriteArrayList(), boot(convJson("general", 40, 38, 2), convJson("diag", 5, 0, 5, "general", "internal")), {
+            MockResponse().setBody("""{"marked":[{"conversationId":"general","lastReadSeq":40}]}""")
+        })
+        val c = client(api)
+        try {
+            assertEquals(1, c.markTreeRead("general"))
+            assertEquals(0, c.meta("general")!!.unread)
+            assertEquals(5, c.meta("diag")!!.unread)
         } finally { c.close() }
     }
 }

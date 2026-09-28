@@ -34,7 +34,7 @@
     <string name="meet_err_no_teams">This Microsoft account doesn\'t have Teams for business, so Outlook can\'t create a Teams link.</string>
     <string name="meet_err_unavailable">%1$s isn\'t available: %2$s</string>
     <string name="meet_err_provider">%1$s</string>
-    <string name="meet_err_network">No connection. No meeting was created; tap again to retry (it won\'t be duplicated).</string>
+    <string name="meet_err_network">No connection. The meeting may have been created. Retry the same request to check.</string>
     <string name="meet_err_in_progress">The meeting is still being created. Tap again in a moment.</string>
     <string name="meet_err_past">Pick a time that hasn\'t passed yet.</string>
     <string name="meet_settings_title">Meetings (Meet, Teams, Zoom)</string>
@@ -48,4 +48,10 @@
     <string name="meet_none_available">No meeting providers are configured in chaggu yet.</string>
     <string name="meet_reconnect_hint">Permission expired or was revoked: connect again</string>
     <string name="meet_connect_to">Connect %1$s</string>
+    <string name="meet_err_pending">The provider is still confirming this meeting. Check its status without creating another.</string>
+    <string name="meet_err_uncertain">The provider has not confirmed the outcome. Check the original meeting; do not create a duplicate.</string>
+    <string name="meet_err_mismatch">This attempt belongs to different meeting details. Its outcome must be resolved before creating another.</string>
+    <string name="meet_request_held">Pending meeting: %1$s. These details are kept for a safe retry.</string>
+    <string name="meet_check_status">Check status</string>
+    <string name="meet_retry_same">Retry same meeting</string>
 </resources>

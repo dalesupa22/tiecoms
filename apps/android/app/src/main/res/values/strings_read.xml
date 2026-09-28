@@ -15,4 +15,6 @@
     <string name="toast_marked_read">Marked as read</string>
     <string name="tree_banner_one">⑂ %1$d unread in “%2$s”</string>
     <string name="tree_mark_all">Mark all as read</string>
+    <string name="read_load_failed">Some unread messages could not load. They remain unread.</string>
+    <string name="read_save_failed">Reading progress could not be saved. Retry when connected.</string>
 </resources>

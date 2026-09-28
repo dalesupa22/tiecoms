@@ -66,6 +66,7 @@ class AppContainer(private val app: Application) {
     val settings = AppSettings(app)
     private val storage = PrefsStorage(app)
     private val secrets = KeystoreSecretStore(app)
+    private val meetingStore = KeystoreSecretStore(app, "meeting_attempts", failIfUnreadable = true)
     val notifier = Notifier(app)
     val sounds by lazy { SoundPlayer(app, settings) }
     val push = NoopPushRegistrar()
@@ -118,7 +119,7 @@ class AppContainer(private val app: Application) {
 
     val foreground: Boolean get() = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 
-    private fun newClient(url: String) = TieComsClient(url, deviceName, storage, secrets, okHttp)
+    private fun newClient(url: String) = TieComsClient(url, deviceName, storage, secrets, okHttp, meetingStore = meetingStore)
 
     /** Notas de voz: un solo reproductor para toda la app (reproducción continua). */
     val voice by lazy { com.tiecoms.app.platform.VoicePlayer(app, okHttp, settings) }
@@ -153,6 +154,9 @@ class AppContainer(private val app: Application) {
                 .map { it.status to it.data?.me?.id }
                 .distinctUntilChanged()
                 .collect { (status, meId) ->
+                    if (status != com.tiecoms.app.core.SessionStatus.READY || meId == null) {
+                        client.value.cancelMeetingConnect(); meetingConnecting = null
+                    }
                     if (status == com.tiecoms.app.core.SessionStatus.READY && meId != null) retryPushRegistration()
                 }
         }
@@ -293,29 +297,46 @@ class AppContainer(private val app: Application) {
      */
     fun startMeetingConnect(activity: Context, provider: String) {
         val c = client.value
+        val generation = c.sessionGeneration
         scope.launch {
             try {
                 val url = c.startMeetingConnect(provider)
+                if (client.value !== c || c.sessionGeneration != generation) return@launch
                 meetingConnecting = provider
                 val tabs = CustomTabsIntent.Builder().setShowTitle(true)
                     .setDefaultColorSchemeParams(CustomTabColorSchemeParams.Builder().setToolbarColor(0xFFFDFAF7.toInt()).build()).build()
-                try { tabs.launchUrl(activity, Uri.parse(url)) } catch (e: ActivityNotFoundException) { meetingConnecting = null; toast(app.getString(R.string.sso_no_browser)) }
+                try { tabs.launchUrl(activity, Uri.parse(url)) } catch (e: ActivityNotFoundException) { cancelMeetingConnect(); toast(app.getString(R.string.sso_no_browser)) }
             } catch (e: Exception) {
                 // 503 provider_unavailable: el motivo del servidor, sin inventar un botón que no funciona.
-                toast(errorText(app, e))
+                if (e !is kotlinx.coroutines.CancellationException && client.value === c && c.sessionGeneration == generation) toast(errorText(app, e))
             }
         }
     }
 
+    fun cancelMeetingConnect() { client.value.cancelMeetingConnect(); meetingConnecting = null }
+
     fun handleMeetingReturn(r: com.tiecoms.app.core.Meetings.Return) {
+        val c = client.value
+        val generation = c.sessionGeneration
         val provider = r.provider ?: meetingConnecting
         meetingConnecting = null
         val label = provider?.let { p -> client.value.state.value.meetingConnections?.firstOrNull { it.provider == p }?.label ?: com.tiecoms.app.core.Meetings.label(p) } ?: ""
         when (r) {
-            is com.tiecoms.app.core.Meetings.Return.Connected -> toast(app.getString(R.string.meet_connected_toast, label))
-            is com.tiecoms.app.core.Meetings.Return.Failed -> toast(if (r.cancelled) app.getString(R.string.meet_connect_cancelled) else app.getString(R.string.meet_connect_failed, r.error))
+            is com.tiecoms.app.core.Meetings.Return.Pending -> scope.launch {
+                try {
+                    c.confirmMeetingConnect(r.provider, r.receipt)
+                    c.loadMeetingConnections()
+                    if (client.value === c && c.sessionGeneration == generation) toast(app.getString(R.string.meet_connected_toast, label))
+                } catch (e: Exception) {
+                    if (e !is kotlinx.coroutines.CancellationException && client.value === c && c.sessionGeneration == generation)
+                        toast(app.getString(R.string.meet_connect_failed, "meeting_confirmation_invalid"))
+                }
+            }
+            is com.tiecoms.app.core.Meetings.Return.Failed -> {
+                c.cancelMeetingConnect()
+                toast(if (r.cancelled) app.getString(R.string.meet_connect_cancelled) else app.getString(R.string.meet_connect_failed, r.error))
+            }
         }
-        scope.launch { runCatching { client.value.loadMeetingConnections() } }
     }
 
     fun handleSsoCallback(cb: SsoCallback) {

@@ -122,7 +122,7 @@
                 <data android:scheme="chaggu" android:host="auth" android:pathPrefix="/callback" />
             </intent-filter>
 
-            <!-- Vuelta de «Conectar» Meet, Teams o Zoom (Custom Tabs): chaggu://meetings/connected?provider=…&connected=1 | &error=… -->
+            <!-- Vuelta de «Conectar» Meet, Teams o Zoom: recibo de un uso, confirmado con prueba local por POST autenticado. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

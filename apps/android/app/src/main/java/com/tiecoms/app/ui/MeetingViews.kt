@@ -90,6 +90,9 @@ private fun problemText(ctx: Context, p: Meetings.Problem, label: String): Strin
     is Meetings.Problem.Provider -> ctx.getString(R.string.meet_err_provider, p.message)
     Meetings.Problem.Network -> ctx.getString(R.string.meet_err_network)
     Meetings.Problem.InProgress -> ctx.getString(R.string.meet_err_in_progress)
+    is Meetings.Problem.Pending -> ctx.getString(R.string.meet_err_pending)
+    is Meetings.Problem.Uncertain -> ctx.getString(R.string.meet_err_uncertain)
+    Meetings.Problem.IdempotencyMismatch -> ctx.getString(R.string.meet_err_mismatch)
     is Meetings.Problem.Other -> p.message.ifBlank { ctx.getString(R.string.err_generic) }
 }
 
@@ -117,7 +120,8 @@ fun MeetingDialog(conversationId: String, now: Boolean, onClose: () -> Unit) {
     val conv = data.conversations.firstOrNull { it.id == conversationId } ?: return
     val connections = rememberMeetingConnections()
     val list = connections ?: emptyList()
-    var picked by rememberSaveable { mutableStateOf<String?>(null) }
+    val attempt = remember(client, conversationId) { client.meetingAttempt(conversationId) }
+    var picked by rememberSaveable { mutableStateOf(attempt.payload?.provider) }
     // Como la web: el primero conectado (o el primero disponible, con «Conectar»); se puede elegir cualquiera disponible.
     val provider = picked?.takeIf { p -> list.any { it.provider == p && it.available } } ?: Meetings.defaultProvider(list, null) ?: list.firstOrNull { it.available }?.provider
     val sel = list.firstOrNull { it.provider == provider }
@@ -128,39 +132,51 @@ fun MeetingDialog(conversationId: String, now: Boolean, onClose: () -> Unit) {
     var duration by rememberSaveable { mutableStateOf(30) }
     val defaultTitle = stringResource(R.string.meet_default_title, titleOf(ctx, conv, data))
     var title by rememberSaveable { mutableStateOf(defaultTitle) }
-    val attempt = remember { MeetingAttempt() }
-    var busy by remember { mutableStateOf(false) }
-    var problem by remember { mutableStateOf<Pair<Meetings.Problem, String>?>(null) }
-    var result by remember { mutableStateOf<MeetingDTO?>(null) }
+    val attemptRevision by attempt.revision.collectAsStateWithLifecycle()
+    val busy = remember(attemptRevision) { attempt.creating }
+    var problem by remember { mutableStateOf(attempt.lastProblem?.let { it to (attempt.payload?.provider ?: "") }) }
+    val result = remember(attemptRevision) { attempt.result }
     val labelOf: (String) -> String = { p -> list.firstOrNull { it.provider == p }?.label?.ifBlank { null } ?: Meetings.label(p) }
     // Cambiar algo del formulario es otra reunión: llave nueva. Un reintento sin cambios reusa la misma.
     LaunchedEffect(provider, instant, date, time, duration, title) { attempt.reset() }
 
     fun create() {
-        val p = provider?.takeIf { sel?.connected == true } ?: return
+        val p = attempt.payload?.provider ?: provider?.takeIf { sel?.connected == true } ?: return
         val startsAt = if (instant) null else runCatching { LocalDate.parse(date).atTime(LocalTime.parse(time)).atZone(ZoneId.systemDefault()).toInstant() }.getOrNull()
-        if (!instant && (startsAt == null || startsAt.isBefore(Instant.now().minusSeconds(60)))) { problem = Meetings.Problem.Other(ctx.getString(R.string.meet_err_past)) to p; return }
-        val key = attempt.begin() ?: return // doble toque: ya hay una en curso
-        busy = true; problem = null
-        // En el scope de la app: cerrar la hoja no corta una creación que el proveedor ya pudo confirmar.
+        if (attempt.payload == null && !instant && (startsAt == null || startsAt.isBefore(Instant.now().minusSeconds(60)))) { problem = Meetings.Problem.Other(ctx.getString(R.string.meet_err_past)) to p; return }
+        val payload = attempt.payload ?: com.tiecoms.app.core.MeetingRequest(p, conversationId, title.trim(), startsAt?.toString(), duration, ZoneId.systemDefault().id)
+        val key = try { attempt.begin(payload) } catch (_: Exception) {
+            problem = Meetings.Problem.Other(ctx.getString(R.string.err_generic)) to p
+            return
+        } ?: return
+        val generation = client.sessionGeneration
+        fun current() = client.sessionGeneration == generation && container.client.value === client
+        problem = null
+        // Keep the original operation across dismissal/restart; recovery always uses its frozen key and payload.
         container.scope.launch {
             try {
-                val m = client.createMeeting(p, conversationId, key, title.trim(), startsAt, duration, ZoneId.systemDefault().id, share = true)
-                if (m.usableUrl == null) throw IllegalStateException(m.error ?: ctx.getString(R.string.err_generic))
-                attempt.succeeded(); result = m
+                val m = client.resolveMeetingAttempt(payload, key, attempt.meetingId)
+                if (!current()) return@launch
+                if (m.usableUrl != null) { attempt.succeeded(m) }
+                else {
+                    val pr = if (m.status == "creating") Meetings.Problem.Pending(m.id) else Meetings.Problem.Uncertain(m.id)
+                    attempt.failed(problem = pr, id = m.id); problem = pr to p
+                }
             } catch (e: Exception) {
+                if (!current() || e is kotlinx.coroutines.CancellationException) return@launch
                 val pr = Meetings.problem(e)
-                attempt.failed(keepKey = Meetings.retryable(pr))
+                attempt.failed(keepKey = Meetings.mustKeepAttempt(e, attempt.meetingId), problem = pr, id = Meetings.meetingId(e))
                 problem = pr to p
                 if (pr == Meetings.Problem.NotConnected || pr == Meetings.Problem.Reconnect || pr is Meetings.Problem.Unavailable) runCatching { client.loadMeetingConnections() }
-            } finally { busy = false }
+            }
         }
     }
 
-    FormSheet(stringResource(if (now) R.string.meet_title_now else R.string.meet_title_schedule), onClose, tag = "meetingDialog") {
+    fun closeSheet() { if (attempt.result != null) attempt.dismissResult(); onClose() }
+    FormSheet(stringResource(if (now) R.string.meet_title_now else R.string.meet_title_schedule), ::closeSheet, tag = "meetingDialog") {
         val done = result
         if (done != null) {
-            MeetingResult(done, labelOf(done.provider), onClose)
+            MeetingResult(done, labelOf(done.provider), ::closeSheet)
             return@FormSheet
         }
         SectionHeader(stringResource(R.string.meet_provider))
@@ -169,7 +185,7 @@ fun MeetingDialog(conversationId: String, now: Boolean, onClose: () -> Unit) {
             list.forEach { c ->
                 val status = statusLine(c)
                 FilterChip(
-                    selected = c.provider == provider, enabled = c.available,
+                    selected = c.provider == provider, enabled = c.available && !busy && !attempt.locked,
                     onClick = { picked = c.provider },
                     label = {
                         Column(Modifier.padding(vertical = 4.dp)) {
@@ -184,11 +200,14 @@ fun MeetingDialog(conversationId: String, now: Boolean, onClose: () -> Unit) {
         }
         // «No disponible» dice por qué en su chip (falta registrar la app OAuth en el servidor), sin un botón que no funciona.
         // El elegido sin conectar: «Conectar Google Meet» / «Reconectar» (Custom Tabs).
-        if (sel != null && sel.available && !sel.connected) OutlinedButton(onClick = { container.startMeetingConnect(ctx, sel.provider) }, modifier = Modifier.heightIn(min = 48.dp).testTag("meetConnectSel")) {
+        if (!attempt.locked && sel != null && sel.available && !sel.connected) OutlinedButton(onClick = { container.startMeetingConnect(ctx, sel.provider) }, modifier = Modifier.heightIn(min = 48.dp).testTag("meetConnectSel")) {
             Text(if (sel.status == "reconnect") stringResource(R.string.meet_reconnect) else stringResource(R.string.meet_connect_to, sel.label))
         }
         if (connections != null && list.none { it.available }) Text(stringResource(R.string.meet_none_available), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("meetNoneAvailable"))
 
+        if (attempt.locked) {
+            Text(stringResource(R.string.meet_request_held, attempt.payload?.title.orEmpty()), modifier = Modifier.testTag("meetHeld"))
+        } else {
         SectionHeader(stringResource(R.string.meet_when))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(instant, { instant = true }, label = { Text(stringResource(R.string.meet_when_now)) }, modifier = Modifier.heightIn(min = 48.dp).testTag("meetNowChip"))
@@ -205,7 +224,8 @@ fun MeetingDialog(conversationId: String, now: Boolean, onClose: () -> Unit) {
             }
         }
         OutlinedTextField(title, { title = it.take(200) }, label = { Text(stringResource(R.string.meet_field_title)) }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("meetTitle"))
-        problem?.let { (pr, p) ->
+        }
+        (problem ?: attempt.lastProblem?.let { it to (attempt.payload?.provider ?: "") })?.let { (pr, p) ->
             Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().testTag("meetProblem")) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(problemText(ctx, pr, labelOf(p)), color = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
@@ -216,10 +236,10 @@ fun MeetingDialog(conversationId: String, now: Boolean, onClose: () -> Unit) {
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onClose) { Text(stringResource(R.string.cancel)) }
-            Button(onClick = { create() }, enabled = !busy && sel?.connected == true && title.trim().length >= 2, modifier = Modifier.heightIn(min = 48.dp).testTag("meetCreate")) {
+            TextButton(onClick = ::closeSheet) { Text(stringResource(R.string.cancel)) }
+            Button(onClick = { create() }, enabled = !busy && (attempt.locked || (sel?.connected == true && title.trim().length >= 2)) && (problem?.first ?: attempt.lastProblem) != Meetings.Problem.IdempotencyMismatch, modifier = Modifier.heightIn(min = 48.dp).testTag("meetCreate")) {
                 if (busy) { CircularProgressIndicator(Modifier.padding(end = 8.dp).width(18.dp).heightIn(max = 18.dp), strokeWidth = 2.dp); Text(stringResource(R.string.meet_creating)) }
-                else Text(stringResource(R.string.meet_create_share))
+                else Text(stringResource(if (attempt.meetingId != null) R.string.meet_check_status else if (attempt.locked) R.string.meet_retry_same else R.string.meet_create_share))
             }
         }
     }

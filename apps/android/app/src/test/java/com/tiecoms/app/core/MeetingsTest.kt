@@ -25,7 +25,9 @@ import java.util.concurrent.CopyOnWriteArrayList
 /** Reuniones con Meet, Teams o Zoom (docs/TANDA-LECTURA-REUNIONES.md §4). Todo contra un servidor simulado. */
 class MeetingsTest {
     @Test fun `vuelta de conectar por el deep link`() {
-        assertEquals(Meetings.Return.Connected("google"), Meetings.parseReturn("chaggu://meetings/connected?provider=google&connected=1"))
+        val pending = Meetings.parseReturn("chaggu://meetings/connected?provider=google&receipt=" + "a".repeat(43)) as Meetings.Return.Pending
+        assertEquals("google", pending.provider)
+        assertTrue(Meetings.parseReturn("chaggu://meetings/connected?provider=google&connected=1") is Meetings.Return.Failed)
         val c = Meetings.parseReturn("chaggu://meetings/connected?provider=microsoft&error=cancelled") as Meetings.Return.Failed
         assertEquals("microsoft", c.provider); assertTrue(c.cancelled)
         val d = Meetings.parseReturn("chaggu://meetings/connected?provider=zoom&error=invalid_grant") as Meetings.Return.Failed
@@ -67,9 +69,9 @@ class MeetingsTest {
         a.reset()
         assertEquals("mientras crea, cambiar el formulario no suelta la llave", "k2", a.pendingKey)
         a.failed(); a.reset()
-        assertEquals("tras un fallo, cambiar el formulario es otra reunión", "k3", a.begin())
+        assertEquals("una operación incierta conserva la llave al cambiar el formulario", "k2", a.begin())
         a.failed(keepKey = false)
-        assertEquals("sin Teams o sin permiso: repetir la llave daría lo mismo, el siguiente es otro", "k4", a.begin())
+        assertEquals("sin Teams o sin permiso: repetir la llave daría lo mismo, el siguiente es otro", "k3", a.begin())
         // Con UUID por defecto.
         val u = MeetingAttempt().begin()!!
         assertEquals(36, u.length)

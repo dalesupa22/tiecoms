@@ -108,6 +108,7 @@ class TieComsClient(
     private val secrets: SecretStore,
     okHttp: OkHttpClient,
     private val now: () -> Long = System::currentTimeMillis,
+    private val meetingStore: SecretStore = MemorySecretStore(),
 ) {
     val http = HttpApi(baseUrl, okHttp)
     val baseUrl: String get() = http.baseUrl
@@ -121,6 +122,39 @@ class TieComsClient(
 
     private var accessToken: String? = null
     private var accessExp = 0L
+    private var authSessionId: String? = null
+    @Volatile var sessionGeneration: Long = 0; private set
+    @Volatile private var meetingProof: MeetingProof? = null
+    private val meetingAttempts = java.util.concurrent.ConcurrentHashMap<String, MeetingAttempt>()
+    private var meetingOwner: String? = null
+    private var meetingStorageFailed = false
+    fun meetingAttempt(conversationId: String): MeetingAttempt = meetingAttempts.getOrPut(conversationId) { newMeetingAttempt() }
+    private fun newMeetingAttempt(saved: SavedMeetingAttempt? = null): MeetingAttempt {
+        val generation = sessionGeneration
+        return MeetingAttempt().also { attempt ->
+            saved?.let(attempt::restore)
+            attempt.persist = { if (generation == sessionGeneration) persistMeetingAttempts() }
+        }
+    }
+    @Synchronized private fun persistMeetingAttempts() {
+        check(!meetingStorageFailed) { "Saved meeting must be recovered before another can be created" }
+        val owner = meetingOwner ?: return
+        val snapshots = meetingAttempts.mapNotNull { (id, attempt) -> attempt.snapshot()?.let { id to it } }.toMap()
+        meetingStore.set(if (snapshots.isEmpty()) null else TcJson.encodeToString(SavedMeetingAttempts.serializer(), SavedMeetingAttempts(owner, snapshots)))
+    }
+    @Synchronized private fun restoreMeetingAttempts(userId: String) {
+        if (meetingOwner == userId) return
+        meetingAttempts.clear(); meetingOwner = userId
+        meetingStorageFailed = false
+        val saved = try { meetingStore.get()?.let { TcJson.decodeFromString(SavedMeetingAttempts.serializer(), it) } }
+        catch (_: Exception) { meetingStorageFailed = true; return }
+        if (saved?.userId == userId) saved.attempts.forEach { (id, value) -> meetingAttempts[id] = newMeetingAttempt(value) }
+        else meetingStore.set(null)
+    }
+    fun cancelMeetingConnect() { meetingProof = null }
+    private fun requireSession(generation: Long) {
+        if (generation != sessionGeneration) throw kotlinx.coroutines.CancellationException("Session changed")
+    }
     private var refreshing: Deferred<RefreshOutcome>? = null
     private var flushJob: Job? = null
     private var bootstrapJob: Job? = null
@@ -175,14 +209,20 @@ class TieComsClient(
 
     // ---------- HTTP con sesión ----------
     private suspend fun <T> request(method: String, path: String, body: String? = null, serializer: KSerializer<T>, raw: HttpApi.RawBody? = null): T {
+        val generation = sessionGeneration
         if (accessToken != null && now() > accessExp - 30_000) refresh()
+        requireSession(generation)
         var r = http.exec(method, path, body, accessToken, raw)
+        requireSession(generation)
         if (r.code == 401) {
-            when (refresh()) {
+            val outcome = refresh()
+            requireSession(generation)
+            when (outcome) {
                 RefreshOutcome.OK -> r = http.exec(method, path, body, accessToken, raw)
                 RefreshOutcome.UNAUTHORIZED -> { handleSignedOut(); throw HttpApi.parseError(r) }
                 RefreshOutcome.NETWORK -> throw HttpApi.parseError(r)
             }
+            requireSession(generation)
             if (r.code == 401) { handleSignedOut(); throw HttpApi.parseError(r) }
         }
         if (!r.ok) throw HttpApi.parseError(r)
@@ -198,6 +238,10 @@ class TieComsClient(
     private fun device() = DeviceInfo(deviceId = deviceId(), name = deviceName.take(120))
 
     private fun applyAuth(r: AuthResult) {
+        if (authSessionId != r.sessionId) {
+            sessionGeneration++; authSessionId = r.sessionId
+            cancelMeetingConnect(); meetingAttempts.clear(); meetingOwner = null
+        }
         accessToken = r.accessToken
         accessExp = runCatching { Instant.parse(r.accessExpiresAt).toEpochMilli() }.getOrElse { now() + 10 * 60_000 }
         r.refreshToken?.let { secrets.set(it) }
@@ -269,10 +313,12 @@ class TieComsClient(
     private suspend fun refresh(): RefreshOutcome {
         refreshing?.let { return it.await() }
         val d = scope.async {
+            val generation = sessionGeneration
             val stored = secrets.get() ?: return@async RefreshOutcome.UNAUTHORIZED
             val r = try {
                 http.exec("POST", "$AUTH_BASE_PATH/refresh", TcJson.encodeToString(RefreshBody.serializer(), RefreshBody(stored)))
             } catch (e: NetworkException) { return@async RefreshOutcome.NETWORK }
+            requireSession(generation)
             when {
                 r.ok -> { applyAuth(TcJson.decodeFromString(AuthResult.serializer(), r.body)); RefreshOutcome.OK }
                 r.code == 401 || r.code == 400 || r.code == 403 -> { accessToken = null; secrets.set(null); RefreshOutcome.UNAUTHORIZED }
@@ -284,11 +330,14 @@ class TieComsClient(
     }
 
     suspend fun logout() = withContext(dispatcher) {
+        val generation = sessionGeneration
         try { requestUnit("POST", "$AUTH_BASE_PATH/logout", "{}") } catch (_: Exception) {}
-        handleSignedOut()
+        if (generation == sessionGeneration) handleSignedOut()
     }
 
     private fun handleSignedOut() {
+        sessionGeneration++; authSessionId = null
+        cancelMeetingConnect(); meetingAttempts.clear(); meetingOwner = null; meetingStore.set(null)
         val me = s.data?.me?.id
         socket.stop()
         flushJob?.cancel(); bootstrapJob?.cancel(); startRetryJob?.cancel()
@@ -336,6 +385,7 @@ class TieComsClient(
         if (serverKnowsDnd) { storage.set(DND_KEY, dnd); storage.set(DND_LOCAL_KEY, null) }
         val localOnly = !serverKnowsDnd && storage.get(DND_LOCAL_KEY) == "1"
         setState { copy(data = sorted, conversations = conversations.filterKeys { it in allowed }, dndUntil = dnd, dndLocalOnly = localOnly) }
+        restoreMeetingAttempts(sorted.me.id)
         sorted.me.sleep?.let { rememberSleep(it); syncSleepTz(it) }
         return sorted
     }
@@ -511,12 +561,13 @@ class TieComsClient(
         val c = meta(m.conversationId) ?: return false
         if (m.seq <= c.lastMessageSeq) return false
         val mine = m.authorId == myId
-        val lastRead = if (mine) m.seq else c.lastReadSeq
+        val readThroughPrevious = maxOf(c.lastReadSeq, c.historyFromSeq) >= c.lastMessageSeq && m.seq == c.lastMessageSeq + 1
+        val lastRead = if (mine && readThroughPrevious) m.seq else c.lastReadSeq
         patchMeta(c.id) {
             copy(
                 lastMessageSeq = m.seq, lastMessageAt = m.createdAt, lastMessagePreview = m.body.take(140), lastReadSeq = lastRead,
                 unread = maxOf(0L, m.seq - maxOf(lastRead, historyFromSeq)).toInt(),
-                unreadMentions = if (mine) 0 else unreadMentions + if (Mentions.mentionsMe(m, myId)) 1 else 0,
+                unreadMentions = if (mine && readThroughPrevious) 0 else unreadMentions + if (!mine && Mentions.mentionsMe(m, myId)) 1 else 0,
                 lastHumanPreview = if (m.kind == "system") lastHumanPreview else LastHumanPreviewDTO(m.id, m.seq, m.authorId, m.body,
                     m.attachments.takeIf { it.isNotEmpty() }?.let { a -> AttachmentSummaryDTO(a.size, a.count { it.isImage }, a.count { it.isVideo }, a.count { !it.isImage && !it.isVideo && !it.isVoice },
                         a.firstOrNull()?.name, a.count { it.isVoice }, a.firstOrNull { it.isVoice }?.durationMs) }, m.createdAt),
@@ -579,10 +630,11 @@ class TieComsClient(
         }
     }
 
-    suspend fun loadOlder(id: String) = withContext(dispatcher) {
-        val local = s.conversations[id] ?: return@withContext
-        if (!local.loaded || !local.hasMore || local.loading) return@withContext
-        val before = local.messages.firstOrNull()?.seq ?: return@withContext
+    suspend fun loadOlder(id: String): Boolean = withContext(dispatcher) {
+        val generation = sessionGeneration
+        val local = s.conversations[id] ?: return@withContext false
+        if (!local.loaded || !local.hasMore || local.loading) return@withContext false
+        val before = local.messages.firstOrNull()?.seq ?: return@withContext false
         setConv(id) { copy(loading = true) }
         try {
             val page = request("GET", "/conversations/$id/messages?before=$before&limit=50", null, MessagesPage.serializer())
@@ -590,22 +642,21 @@ class TieComsClient(
                 val known = messages.map { it.id }.toSet()
                 copy(messages = (page.messages.filter { it.id !in known } + messages).sortedBy { it.seq }, hasMore = page.hasMore, loading = false)
             }
-        } catch (_: Exception) { setConv(id) { copy(loading = false) } }
+            page.messages.any { it.seq < before } || !page.hasMore
+        } catch (e: Exception) {
+            if (generation == sessionGeneration) setConv(id) { copy(loading = false) }
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            false
+        }
     }
 
-    /** Marca leído hasta el último mensaje (con debounce). */
-    fun markRead(id: String) {
-        scope.launch {
-            val c = meta(id) ?: return@launch
-            if (c.lastMessageSeq <= c.lastReadSeq && c.unread == 0) return@launch
-            patchMeta(id) { copy(lastReadSeq = lastMessageSeq, unread = 0, unreadMentions = 0) }
-            readJobs[id]?.cancel()
-            readJobs[id] = scope.launch {
-                delay(400)
-                val seq = meta(id)?.lastReadSeq ?: 0
-                runCatching { requestUnit("POST", "/conversations/$id/read", TcJson.encodeToString(ReadBody.serializer(), ReadBody(seq))) }
-            }
-        }
+    /** Only the visible contiguous prefix; local counters change after server acknowledgement. */
+    suspend fun markRead(id: String, throughSeq: Long) = withContext(dispatcher) {
+        val c = meta(id) ?: return@withContext
+        val seq = minOf(throughSeq, c.lastMessageSeq)
+        if (seq <= c.lastReadSeq) return@withContext
+        requestUnit("POST", "/conversations/$id/read", TcJson.encodeToString(ReadBody.serializer(), ReadBody(seq)))
+        patchMeta(id) { ReadTree.applyRead(this, seq) }
     }
 
     /** Aviso de escritura: como máximo uno cada 2 s. */
@@ -803,6 +854,7 @@ class TieComsClient(
      * en local y el conteo del grupo baja de una vez; si el PATCH falla, vuelve como estaba y se lanza el error.
      */
     suspend fun setIssueStatus(id: String, status: String): IssueDTO = withContext(dispatcher) {
+        val generation = sessionGeneration
         val prev = s.issues[id] ?: throw ApiException(404, "not_found", "Asunto no encontrado")
         if (prev.status == status) return@withContext prev
         putIssues(listOf(prev.copy(status = status))); recountIssues(prev.conversationId)
@@ -810,7 +862,8 @@ class TieComsClient(
             val i = req("PATCH", "/issues/$id", buildJsonObject { put("status", JsonPrimitive(status)) }, IssueDTO.serializer())
             putIssues(listOf(i)); recountIssues(i.conversationId); i
         } catch (e: Exception) {
-            putIssues(listOf(prev)); recountIssues(prev.conversationId); throw e
+            if (generation == sessionGeneration) { putIssues(listOf(prev)); recountIssues(prev.conversationId) }
+            throw e
         }
     }
     suspend fun issueDetail(id: String): IssueDetail = withContext(dispatcher) {
@@ -827,13 +880,43 @@ class TieComsClient(
     }
     /** URL del proveedor para abrir en el navegador del sistema (Custom Tabs); vuelve por chaggu://meetings/connected. */
     suspend fun startMeetingConnect(provider: String): String = withContext(dispatcher) {
-        req("POST", "/meetings/connect/${enc(provider)}", buildJsonObject { put("platform", JsonPrimitive(PLATFORM)); put("redirectScheme", JsonPrimitive(DeepLinks.SCHEME)) },
-            MeetingConnectResult.serializer()).url
+        val userId = myId ?: throw ApiException(401, "unauthorized", "")
+        val proof = MeetingProof(provider, userId, sessionGeneration, now())
+        meetingProof = proof
+        try {
+            val url = req("POST", "/meetings/connect/${enc(provider)}", buildJsonObject {
+                put("platform", JsonPrimitive(PLATFORM)); put("redirectScheme", JsonPrimitive(DeepLinks.SCHEME)); put("proofChallenge", JsonPrimitive(proof.challenge))
+            }, MeetingConnectResult.serializer()).url
+            if (meetingProof !== proof) throw kotlinx.coroutines.CancellationException("Connection cancelled")
+            url
+        } catch (e: Exception) { if (meetingProof === proof) meetingProof = null; throw e }
+    }
+    /** Receipt alone cannot connect an account: confirm with this session's one-use browser proof. */
+    suspend fun confirmMeetingConnect(provider: String, receipt: String): MeetingConfirmResult = withContext(dispatcher) {
+        val proof = meetingProof
+        meetingProof = null
+        if (proof == null || proof.provider != provider || proof.userId != myId || proof.session != sessionGeneration || now() - proof.startedAt > 15 * 60_000)
+            throw ApiException(409, "meeting_confirmation_invalid", "")
+        val result = req("POST", "/meetings/connect/confirm", buildJsonObject {
+            put("receipt", JsonPrimitive(receipt)); put("proofVerifier", JsonPrimitive(proof.verifier))
+        }, MeetingConfirmResult.serializer())
+        if (!result.ok || result.provider != provider) throw ApiException(409, "meeting_confirmation_invalid", "")
+        result
     }
     suspend fun disconnectMeeting(provider: String) = withContext(dispatcher) {
+        cancelMeetingConnect()
         req("DELETE", "/meetings/connections/${enc(provider)}", null, JsonElement.serializer())
         setState { copy(meetingConnections = meetingConnections?.map { if (it.provider == provider) it.copy(status = "none", accountEmail = null) else it }) }
         Unit
+    }
+    suspend fun meetingStatus(id: String): MeetingDTO = withContext(dispatcher) {
+        req("GET", "/meetings/${enc(id)}", null, MeetingDTO.serializer())
+    }
+    /** Read first, then recover the exact reserved operation; the server controls safe provider retries. */
+    suspend fun resolveMeetingAttempt(payload: MeetingRequest, key: String, meetingId: String?): MeetingDTO = withContext(dispatcher) {
+        meetingId?.let { id -> meetingStatus(id).takeIf { it.usableUrl != null }?.let { return@withContext it } }
+        createMeeting(payload.provider, payload.conversationId, key, payload.title, payload.startsAt?.let(Instant::parse),
+            payload.durationMin, payload.timezone, payload.share)
     }
     /**
      * Crea la reunión con el proveedor (POST /meetings). Sin [startsAt] es ahora. [idempotencyKey]: la misma en el
@@ -958,32 +1041,23 @@ class TieComsClient(
         readJobs[conversationId]?.cancel()
         patchMeta(conversationId) { copy(lastReadSeq = r.lastReadSeq, unread = maxOf(0L, lastMessageSeq - maxOf(r.lastReadSeq, historyFromSeq)).toInt(), unreadMentions = if (r.lastReadSeq >= lastMessageSeq) 0 else unreadMentions) }
     }
-    suspend fun markConversationRead(conversationId: String) = withContext(dispatcher) {
-        val c = meta(conversationId) ?: return@withContext
-        patchMeta(conversationId) { copy(lastReadSeq = lastMessageSeq, unread = 0, unreadMentions = 0) }
-        req("POST", "/conversations/$conversationId/read", buildJsonObject { put("seq", JsonPrimitive(c.lastMessageSeq)) }, JsonElement.serializer()); Unit
+    suspend fun markConversationRead(conversationId: String): Boolean = withContext(dispatcher) {
+        val c = meta(conversationId) ?: return@withContext false
+        markRead(conversationId, c.lastMessageSeq)
+        true
     }
     /**
      * «Marcar como leído» desde la lista (docs/TANDA-LECTURA-REUNIONES.md §1): el grupo y sus derivadas pendientes,
      * cada una hasta el lastMessageSeq que este cliente conoce (POST /conversations/:id/read-tree). Es una acción
      * explícita: marca lo que la lista mostraba; lo que llegue mientras tanto (seq mayor) sigue sin leer.
-     * Optimista; si el API falla, vuelve como estaba (solo las que no cambiaron entretanto) y se lanza el error.
+     * Sólo aplica los cursores confirmados; un rechazo deja todos los pendientes intactos.
      * Devuelve cuántas conversaciones marcó el servidor.
      */
     suspend fun markTreeRead(rootId: String): Int = withContext(dispatcher) {
         val d = s.data ?: return@withContext 0
         val root = d.conversations.firstOrNull { it.id == rootId } ?: return@withContext 0
         val items = ReadTree.items(d, root, now())
-        val before = items.mapNotNull { meta(it.conversationId) }.associateBy { it.id }
-        for (item in items) { readJobs[item.conversationId]?.cancel(); patchMeta(item.conversationId) { ReadTree.applyRead(this, item.seq) } }
-        val optimistic = items.mapNotNull { meta(it.conversationId) }.associateBy { it.id }
-        val r = try {
-            request("POST", "/conversations/$rootId/read-tree", TcJson.encodeToString(ReadTreeBody.serializer(), ReadTreeBody(items)), ReadTreeResult.serializer())
-        } catch (e: Exception) {
-            for ((id, b) in before) if (meta(id)?.let { it.lastReadSeq == optimistic[id]?.lastReadSeq } == true)
-                patchMeta(id) { copy(lastReadSeq = b.lastReadSeq, unread = maxOf(0L, lastMessageSeq - maxOf(b.lastReadSeq, historyFromSeq)).toInt(), unreadMentions = if (lastMessageSeq == b.lastMessageSeq) b.unreadMentions else unreadMentions) }
-            throw e
-        }
+        val r = request("POST", "/conversations/$rootId/read-tree", TcJson.encodeToString(ReadTreeBody.serializer(), ReadTreeBody(items)), ReadTreeResult.serializer())
         // El servidor puede tener un cursor más adelante (otro dispositivo): se aplica sin retroceder.
         for (m in r.marked) patchMeta(m.conversationId) { ReadTree.applyRead(this, m.lastReadSeq) }
         r.marked.size
@@ -1054,14 +1128,13 @@ class TieComsClient(
     /** Busca un mensaje por id en lo cargado, pidiendo páginas viejas si hace falta (push de reacción). Devuelve su seq. */
     suspend fun ensureMessageId(conversationId: String, messageId: String): Long? {
         openConversation(conversationId)
-        repeat(10) {
+        while (true) {
             val c = state.value.conversations[conversationId] ?: return null
             if (!c.loaded) return null
             c.messages.firstOrNull { it.id == messageId }?.let { return it.seq }
             if (!c.hasMore) return null
-            loadOlder(conversationId)
+            if (!loadOlder(conversationId)) return null
         }
-        return null
     }
 
     // ---------- Recordatorios ----------
@@ -1118,14 +1191,13 @@ class TieComsClient(
     /** Carga hacia atrás hasta tener el mensaje con ese seq (para saltar a un mensaje de origen). */
     suspend fun ensureMessage(conversationId: String, seq: Long): Boolean {
         openConversation(conversationId)
-        repeat(40) {
+        while (true) {
             val c = state.value.conversations[conversationId] ?: return false
             if (!c.loaded) return false
             if (c.messages.any { it.seq == seq }) return true
             if (!c.hasMore || (c.messages.firstOrNull()?.seq ?: 0) <= seq) return false
-            loadOlder(conversationId)
+            if (!loadOlder(conversationId)) return false
         }
-        return false
     }
 
     // ---------- Reenviar a otros chats ----------
@@ -1592,6 +1664,7 @@ class TieComsClient(
     fun debugReconnect() { scope.launch { socket.start() } }
 
     fun close() {
+        sessionGeneration++; cancelMeetingConnect(); meetingAttempts.clear()
         socket.stop()
         scope.cancel()
     }

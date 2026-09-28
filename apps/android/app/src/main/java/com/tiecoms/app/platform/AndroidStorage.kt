@@ -32,7 +32,7 @@ class PrefsStorage(context: Context) : KeyValueStorage {
  * Refresh token cifrado con AES-256/GCM; la clave vive en el Android Keystore
  * (no exportable) y el texto cifrado en preferencias privadas excluidas del respaldo.
  */
-class KeystoreSecretStore(context: Context) : SecretStore {
+class KeystoreSecretStore(context: Context, private val entry: String = "rt", private val failIfUnreadable: Boolean = false) : SecretStore {
     private val prefs = context.getSharedPreferences("tiecoms_secure", Context.MODE_PRIVATE)
     private val alias = "tiecoms_refresh_token"
 
@@ -52,7 +52,7 @@ class KeystoreSecretStore(context: Context) : SecretStore {
 
     @Synchronized
     override fun get(): String? {
-        val blob = prefs.getString("rt", null) ?: return null
+        val blob = prefs.getString(entry, null) ?: return null
         return try {
             val raw = Base64.decode(blob, Base64.NO_WRAP)
             val iv = raw.copyOfRange(0, 12)
@@ -60,20 +60,21 @@ class KeystoreSecretStore(context: Context) : SecretStore {
             c.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv))
             String(c.doFinal(raw.copyOfRange(12, raw.size)), Charsets.UTF_8)
         } catch (e: Exception) {
+            if (failIfUnreadable) throw IllegalStateException("Saved operation could not be decrypted", e)
             // Clave invalidada (restauración de respaldo, cambio de dispositivo): se pide login otra vez.
             Log.w("TieComs", "No se pudo descifrar la sesión guardada: ${e.javaClass.simpleName}")
-            prefs.edit().remove("rt").commit()
+            prefs.edit().remove(entry).commit()
             null
         }
     }
 
     @Synchronized
     override fun set(value: String?) {
-        if (value == null) { prefs.edit().remove("rt").commit(); return }
+        if (value == null) { check(prefs.edit().remove(entry).commit()); return }
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.ENCRYPT_MODE, key())
         val out = c.iv + c.doFinal(value.toByteArray(Charsets.UTF_8))
-        prefs.edit().putString("rt", Base64.encodeToString(out, Base64.NO_WRAP)).commit()
+        check(prefs.edit().putString(entry, Base64.encodeToString(out, Base64.NO_WRAP)).commit())
     }
 }
 

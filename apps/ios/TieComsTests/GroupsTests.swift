@@ -450,4 +450,19 @@ final class GroupAdminsTests: XCTestCase {
             }
         }
     }
+
+    @MainActor
+    func testOldAdminConfirmationCannotSendUnderReplacementSession() async throws {
+        let store = try ControlledURLProtocol.store(user: "a")
+        let original = store.sessionStamp
+        await store.signOutLocally()
+        store.seedForTesting(try ControlledURLProtocol.boot("b"))
+        var requests = 0
+        ControlledURLProtocol.handler = { req in Task { @MainActor in requests += 1; req.respond("{}") } }
+        for action in GroupMemberAction.allCases {
+            do { try await store.perform(action, conversationId: "g", userId: "col", expectedSession: original); XCTFail() }
+            catch is CancellationError {} catch { XCTFail("\(error)") }
+        }
+        XCTAssertEqual(requests, 0)
+    }
 }

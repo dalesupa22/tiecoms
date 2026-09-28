@@ -251,20 +251,25 @@ private struct PersonRow: View {
     @State private var report = false
     @State private var confirmBlock = false
     /// Acción de admin pendiente de confirmar (docs/ADMINS-INTEGRACIONES.md §1).
-    @State private var pendingAction: GroupMemberAction?
+    private struct PendingAdminAction {
+        let action: GroupMemberAction
+        let session: AppStore.SessionStamp
+    }
+    @State private var pendingAction: PendingAdminAction?
     var d: BootstrapDTO
     var p: PersonDTO
     var isMe: Bool
     /// Grupo del que se muestran los participantes: etiquetas «Admin»/«Bot» y menú de admin.
     var conv: ConversationDTO? = nil
 
-    private func run(_ a: GroupMemberAction) {
+    private func run(_ pending: PendingAdminAction) {
         guard let conv else { return }
-        let stamp = store.sessionStamp
+        let a = pending.action
+        let stamp = pending.session
         Task {
             do {
                 try store.requireSession(stamp)
-                try await store.perform(a, conversationId: conv.id, userId: p.id)
+                try await store.perform(a, conversationId: conv.id, userId: p.id, expectedSession: stamp)
                 try store.requireSession(stamp)
                 store.show(L("admin.done.\(a.rawValue)", ["name": p.name]))
             } catch is CancellationError {
@@ -319,7 +324,7 @@ private struct PersonRow: View {
             if !adminActions.isEmpty {
                 Section {
                     ForEach(adminActions) { a in
-                        Button(role: a.isDestructive ? .destructive : nil) { pendingAction = a } label: {
+                        Button(role: a.isDestructive ? .destructive : nil) { pendingAction = PendingAdminAction(action: a, session: store.sessionStamp) } label: {
                             Label(L(a.labelKey), systemImage: a.systemImage)
                         }
                         .accessibilityIdentifier("person.\(a.rawValue).\(p.id)")
@@ -334,13 +339,15 @@ private struct PersonRow: View {
             }
         }
         .sheet(isPresented: $report) { ReportContentSheet(userId: p.id) }
-        .confirmationDialog(pendingAction.map { L($0.confirmKey, ["name": p.name]) } ?? "",
+        .confirmationDialog(pendingAction.map { L($0.action.confirmKey, ["name": p.name]) } ?? "",
                             isPresented: Binding(get: { pendingAction != nil }, set: { if !$0 { pendingAction = nil } }),
-                            titleVisibility: .visible, presenting: pendingAction) { a in
-            Button(L(a.labelKey), role: a.isDestructive ? .destructive : nil) { run(a) }
+                            titleVisibility: .visible, presenting: pendingAction) { pending in
+            let a = pending.action
+            Button(L(a.labelKey), role: a.isDestructive ? .destructive : nil) { run(pending) }
                 .accessibilityIdentifier("person.confirm.\(a.rawValue)")
             Button(L("common.cancel"), role: .cancel) {}
         }
+        .onChange(of: store.sessionStamp) { _, _ in pendingAction = nil }
         .confirmationDialog(L(store.blockedUserIds.contains(p.id) ? "safety.unblock" : "safety.blockConfirm"), isPresented: $confirmBlock, titleVisibility: .visible) {
             Button(L(store.blockedUserIds.contains(p.id) ? "safety.unblock" : "safety.block"), role: .destructive) {
                 Task {

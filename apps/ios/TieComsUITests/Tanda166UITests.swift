@@ -391,7 +391,7 @@ extension Tanda166UITests {
         XCTAssertTrue(make.waitForExistence(timeout: 5))
         shot("admins-01-member-menu")
         make.tap()
-        let confirm = app.buttons["person.confirm.makeAdmin.\(f.b.id)"]
+        let confirm = app.buttons["person.confirm.makeAdmin"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         shot("admins-02-explicit-confirmation")
         app.buttons["Cancelar"].tap()
@@ -408,7 +408,7 @@ extension Tanda166UITests {
         let remove = app.buttons["person.removeAdmin.\(f.b.id)"]
         XCTAssertTrue(remove.waitForExistence(timeout: 5))
         remove.tap()
-        let confirmRemove = app.buttons["person.confirm.removeAdmin.\(f.b.id)"]
+        let confirmRemove = app.buttons["person.confirm.removeAdmin"]
         XCTAssertTrue(confirmRemove.waitForExistence(timeout: 5))
         confirmRemove.tap()
         let deadline = Date().addingTimeInterval(10)

@@ -590,12 +590,15 @@ extension AppStore {
     }
 
     /// Ejecuta una acción del menú de un participante.
-    func perform(_ action: GroupMemberAction, conversationId: String, userId: String) async throws {
+    func perform(_ action: GroupMemberAction, conversationId: String, userId: String, expectedSession: SessionStamp? = nil) async throws {
+        let stamp = expectedSession ?? sessionStamp
+        try requireSession(stamp)
         switch action {
         case .makeAdmin: try await setGroupAdmin(conversationId, userId: userId, admin: true)
         case .removeAdmin, .stepDown: try await setGroupAdmin(conversationId, userId: userId, admin: false)
         case .removeMember: try await removeMember(conversationId, userId: userId)
         }
+        try requireSession(stamp)
     }
 
     /// Salir de un chat grupal (DELETE de mi propia membresía).

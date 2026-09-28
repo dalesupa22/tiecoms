@@ -1032,6 +1032,42 @@ class TieComsClient(
         accessToken
     }
 
+    // ---------- Firmar PDFs ----------
+    /** Mis firmas guardadas (firma e iniciales), la más nueva primero. */
+    suspend fun listSignatures(): List<SignatureDTO> = withContext(dispatcher) {
+        req("GET", "/me/signatures", null, SignaturesPage.serializer()).signatures
+    }
+
+    /** POST /me/signatures: PNG crudo, recortado y transparente; kind signature|initials, source drawn|typed|uploaded. */
+    suspend fun createSignature(png: ByteArray, kind: String, source: String): SignatureDTO = withContext(dispatcher) {
+        if (png.size > Signing.MAX_PNG_BYTES) throw ApiException(413, "too_large", "La firma pesa más de 512 KB")
+        request("POST", "/me/signatures", null, SignatureDTO.serializer(),
+            HttpApi.RawBody(png, "image/png", mapOf("x-signature-kind" to kind, "x-signature-source" to source)))
+    }
+
+    suspend fun deleteSignature(id: String) = withContext(dispatcher) { req("DELETE", "/me/signatures/$id", null, JsonElement.serializer()); Unit }
+
+    /** Lo que el servidor sabe del PDF: firma digital, contraseña y firmas hechas en Chaggu. 422 not_pdf si no es PDF. */
+    suspend fun signInfo(attachmentId: String): SignInfoDTO = withContext(dispatcher) {
+        req("GET", "/attachments/$attachmentId/sign-info", null, SignInfoDTO.serializer())
+    }
+
+    /**
+     * Estampa las marcas en el servidor, que responde en el hilo con el PDF firmado (201; 200 si es un reintento del
+     * mismo clientMessageId). 409 has_digital_signature: repetir con acceptBreakingSignatures tras confirmarlo.
+     */
+    suspend fun signPdf(attachmentId: String, input: SignPdfInput): SignPdfResult = withContext(dispatcher) {
+        val r = request("POST", "/attachments/$attachmentId/sign", TcJson.encodeToString(SignPdfInput.serializer(), input), SignPdfResult.serializer())
+        // El mensaje también llega por el socket; así se ve de inmediato.
+        r.message?.let { if (it.id.isNotBlank() && it.conversationId.isNotBlank()) upsertLocal(it) }
+        r
+    }
+
+    /** «Documentos que firmé»: páginas hacia atrás con [before] (nextBefore de la anterior) y búsqueda [q]. */
+    suspend fun signings(before: String? = null, q: String? = null, limit: Int = 30): SigningHistoryPage = withContext(dispatcher) {
+        req("GET", "/me/signings" + q("limit" to limit.toString(), "before" to before, "q" to q?.trim()?.takeIf { it.isNotEmpty() }), null, SigningHistoryPage.serializer())
+    }
+
     // ---------- Foto del grupo (SPEC-v3 §1) ----------
     /** POST /conversations/:id/avatar con los bytes (JPEG 512×512 ya recortado). Devuelve la ruta relativa. */
     suspend fun setConversationAvatar(conversationId: String, jpeg: ByteArray): String? = withContext(dispatcher) {

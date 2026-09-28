@@ -256,6 +256,8 @@ data class AttachmentDTO(
     /** ≤ 64 valores 0–1 para dibujar la onda. */
     val waveform: List<Float>? = null,
     val transcript: TranscriptDTO? = null,
+    /** Solo en PDFs firmados con Chaggu: quién firmó, cuándo y las huellas (opcional, decodificación tolerante). */
+    @Serializable(with = LenientSigningSerializer::class) val signing: AttachmentSigningDTO? = null,
 ) {
     val isVoice: Boolean get() = kind == "voice"
     val isImage: Boolean get() = !isVoice && contentType.startsWith("image/")

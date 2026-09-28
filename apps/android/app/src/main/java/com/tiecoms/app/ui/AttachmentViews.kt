@@ -105,7 +105,9 @@ fun rememberAttachmentImage(a: AttachmentDTO, full: Boolean, px: Int): ImageBitm
 fun AttachmentsBlock(list: List<AttachmentDTO>, fg: Color, onOpenMedia: (Int) -> Unit, onOpenFile: (AttachmentDTO) -> Unit,
                      mine: Boolean = false, onCreateIssue: ((String) -> Unit)? = {},
                      /** Mantener una foto, video o archivo abre el menú del mensaje (reacciones), como el resto de la burbuja. */
-                     onLongPress: (() -> Unit)? = null) {
+                     onLongPress: (() -> Unit)? = null,
+                     /** PDFs: abrir el visor propio (false) o directo en modo firma (true). null = «Abrir con…» como cualquier archivo. */
+                     onOpenPdf: ((AttachmentDTO, Boolean) -> Unit)? = null) {
     if (list.isEmpty()) return
     val media = list.filter { it.isImage || it.isVideo }
     val voices = list.filter { it.isVoice }
@@ -129,7 +131,10 @@ fun AttachmentsBlock(list: List<AttachmentDTO>, fg: Color, onOpenMedia: (Int) ->
                 }
             }
         }
-        files.forEach { FileChip(it, fg, onLongPress) { onOpenFile(it) } }
+        files.forEach { f ->
+            if (onOpenPdf != null && com.tiecoms.app.core.Signing.isPdf(f)) PdfChip(f, fg, onLongPress) { sign -> onOpenPdf(f, sign) }
+            else FileChip(f, fg, onLongPress) { onOpenFile(f) }
+        }
     }
 }
 

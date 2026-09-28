@@ -89,7 +89,7 @@ class DerivadasUiTest {
             shot("01-alta-tarea")
             compose.onNodeWithTag("taskAddField").performImeAction()
             compose.waitUntil(10_000) { client.state.value.issues.values.any { it.parentIssueId == parent.id && it.title == "Revisar el copy" } }
-            val t1 = client.state.value.issues.values.first { it.title == "Revisar el copy" }
+            val t1 = client.state.value.issues.values.first { it.parentIssueId == parent.id && it.title == "Revisar el copy" }
             assertEquals("org", t1.visibility)
             // Otra para la persona de la otra empresa (queda para todo el chat si la elijo así).
             compose.onNodeWithTag("taskAddField").performTextInput("Aprobar el presupuesto")

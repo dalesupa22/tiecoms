@@ -808,8 +808,10 @@ class TieComsClient(
 
     // ---------- gg, el asistente (docs/ASISTENTE.md) ----------
     /** Un turno: los últimos 20 mensajes (con el resumen de acciones) → respuesta y tarjetas. */
-    suspend fun assistantTurn(messages: List<AssistantMessage>, timezone: String, lang: String): AssistantTurnDTO = withContext(dispatcher) {
+    suspend fun assistantTurn(messages: List<AssistantMessage>, timezone: String, lang: String, aiConsent: Boolean = false): AssistantTurnDTO = withContext(dispatcher) {
+        if (!aiConsent) throw ApiException(403, "ai_consent_required", "AI consent required")
         val body = buildJsonObject {
+            put("aiConsent", JsonPrimitive(true))
             put("messages", TcJson.encodeToJsonElement(ListSerializer(AssistantMessage.serializer()), messages))
             put("timezone", JsonPrimitive(timezone)); put("lang", JsonPrimitive(lang))
         }

@@ -9,6 +9,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.delay
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.graphics.SolidColor
@@ -138,6 +140,11 @@ class AssistantModel(private val client: TieComsClient, private val ctx: Context
     var speakOn by mutableStateOf(client.assistantSpeak()); private set
     /** Falta el permiso del micrófono: se explica antes de pedirlo. */
     var micWhy by mutableStateOf(false)
+    private data class ConsentRequest(val content: String, val voice: Boolean, val retry: Boolean, val redoId: String?)
+    private var consentGranted = false
+    private var consentSession = 0L
+    private var consentRequest: ConsentRequest? = null
+    var asksConsent by mutableStateOf(false); private set
     private var loaded = false
     private val listener = AssistantListener(ctx)
     private var speaker: AssistantSpeaker? = null
@@ -156,6 +163,8 @@ class AssistantModel(private val client: TieComsClient, private val ctx: Context
 
     fun close() {
         open = false
+        consentSession++; busy = false
+        consentGranted = false; consentRequest = null; asksConsent = false; micWhy = false
         listener.cancel(); listening = false; interim = ""
         speaker?.stop()
     }
@@ -228,23 +237,41 @@ class AssistantModel(private val client: TieComsClient, private val ctx: Context
     /** «Otra versión»: descarta el borrador y le pide a gg que lo redacte de nuevo. */
     fun redo(a: AssistantActionDTO) {
         if (busy) return
-        discard(a)
-        ask(ctx.getString(R.string.ai_redo_ask, a.target))
+        ask(ctx.getString(R.string.ai_redo_ask, a.target), redoId = a.id)
     }
 
     fun retry() { turns.lastOrNull()?.takeIf { it.role == "user" }?.let { ask(it.content, retry = true) } }
 
+    fun allowConsent() {
+        val request = consentRequest ?: return
+        consentGranted = true; consentRequest = null; asksConsent = false
+        ask(request.content, request.voice, request.retry, request.redoId)
+    }
+
+    /** El borrador (incluido el dictado) queda en el campo; no se envía ni se agrega al historial. */
+    fun cancelConsent() { consentRequest = null; asksConsent = false }
+
     /** [retry]: vuelve a mandar la última pregunta sin repetirla en el historial. */
-    fun ask(content: String, voice: Boolean = false, retry: Boolean = false) {
+    fun ask(content: String, voice: Boolean = false, retry: Boolean = false, redoId: String? = null) {
         val q = content.trim()
         if (q.isEmpty() || busy) return
+        if (!consentGranted) {
+            if (text.isEmpty()) text = content
+            interim = ""
+            consentRequest = ConsentRequest(q, voice, retry, redoId); asksConsent = true
+            return
+        }
+        if (redoId != null) patch(redoId) { copy(status = "undone", token = null) }
         error = null; text = ""; interim = ""
+        val requestSession = consentSession
         val pending = pendingAll
         // «Envíalos» con borradores pendientes: se confirman aquí mismo, sin volver a llamar al modelo.
         if (Assistant.isSendAll(q) && pending.isNotEmpty()) {
             commit(turns + AssistantTurn("user", q, at = System.currentTimeMillis()))
             scope.launch {
+                if (requestSession != consentSession) return@launch
                 pending.map { a -> async { runAction(a) } }.awaitAll()
+                if (requestSession != consentSession) return@launch
                 val done = if (pending.size == 1) ctx.getString(R.string.ai_sent_one) else ctx.getString(R.string.ai_sent_all, pending.size)
                 commit(turns + AssistantTurn("assistant", done, at = System.currentTimeMillis()))
                 say(done, voice)
@@ -256,16 +283,19 @@ class AssistantModel(private val client: TieComsClient, private val ctx: Context
         busy = true
         scope.launch {
             try {
-                val out = client.assistantTurn(Assistant.history(next), tz(), lang())
+                if (requestSession != consentSession) return@launch
+                val out = client.assistantTurn(Assistant.history(next), tz(), lang(), aiConsent = true)
+                if (requestSession != consentSession) return@launch
                 commit(turns + AssistantTurn("assistant", out.reply, out.actions, System.currentTimeMillis(), out.suggestions.filter { it.isNotBlank() }.take(3)))
                 say(out.reply, voice)
             } catch (e: Exception) {
+                if (requestSession != consentSession) return@launch
                 error = if (e is ApiException && e.status == 503) ctx.getString(R.string.ai_unavailable) else errorText(ctx, e)
-            } finally { busy = false }
+            } finally { if (requestSession == consentSession) busy = false }
         }
     }
 
-    fun dispose() { listener.cancel(); speaker?.shutdown(); speaker = null }
+    fun dispose() { close(); speaker?.shutdown(); speaker = null }
 }
 
 @Composable
@@ -387,6 +417,14 @@ fun AssistantPanel(model: AssistantModel, myName: String, onOpenLink: (Assistant
         dismissButton = { TextButton(onClick = { model.micWhy = false }) { Text(stringResource(R.string.cancel)) } },
     )
     if (!model.open) return
+    if (model.asksConsent) AlertDialog(
+        onDismissRequest = model::cancelConsent,
+        title = { Text(stringResource(R.string.gg_consent_title)) },
+        text = { Text(stringResource(R.string.gg_consent_body), modifier = Modifier.verticalScroll(rememberScrollState())) },
+        confirmButton = { TextButton(onClick = model::allowConsent, modifier = Modifier.testTag("ggConsentAllow")) { Text(stringResource(R.string.gg_consent_allow)) } },
+        dismissButton = { TextButton(onClick = model::cancelConsent, modifier = Modifier.testTag("ggConsentCancel")) { Text(stringResource(R.string.cancel)) } },
+        modifier = Modifier.testTag("ggConsentDialog"),
+    )
     BackHandler { model.close() }
     Box(Modifier.fillMaxSize().testTag("ggPanel")) {
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f))

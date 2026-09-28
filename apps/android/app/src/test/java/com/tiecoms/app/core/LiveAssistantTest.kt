@@ -28,7 +28,7 @@ class LiveAssistantTest {
         try {
             c.login(fx["email"]!!.jsonPrimitive.content, fx["pw"]!!.jsonPrimitive.content)
             var turns = listOf(AssistantTurn("user", "Escríbele a Laura que confirmo la reunión de mañana y a Juan que hoy le mando la factura"))
-            val out = c.assistantTurn(Assistant.history(turns), "America/Bogota", "es")
+            val out = c.assistantTurn(Assistant.history(turns), "America/Bogota", "es", aiConsent = true)
             println("gg> ${out.reply}\n  acciones: ${out.actions.map { "${it.kind}/${it.status} → ${it.target}: ${it.text}" }}\n  sugerencias: ${out.suggestions}")
             val drafts = out.actions.filter { it.status == "pending" && it.kind == "send_message" }
             assertTrue("gg dejó borradores", drafts.isNotEmpty())
@@ -43,7 +43,7 @@ class LiveAssistantTest {
             }
             assertTrue(Assistant.pending(turns).isEmpty())
             turns = turns + AssistantTurn("user", "márcalos todos como leídos")
-            val read = c.assistantTurn(Assistant.history(turns), "America/Bogota", "es")
+            val read = c.assistantTurn(Assistant.history(turns), "America/Bogota", "es", aiConsent = true)
             println("gg> ${read.reply}\n  acciones: ${read.actions.map { "${it.kind}/${it.status} → ${it.target}: ${it.text} undo=${it.undoToken != null}" }}")
             assertTrue(read.reply.isNotBlank())
         } finally { c.close() }

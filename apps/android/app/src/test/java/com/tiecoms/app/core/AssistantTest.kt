@@ -142,15 +142,31 @@ class AssistantTest {
         return c
     }
 
+    @Test fun `sin consentimiento no sale ninguna solicitud de IA`() = runBlocking {
+        val c = client(MemoryStorage())
+        try {
+            for (explicit in listOf(false, null)) {
+                val failure = runCatching {
+                    if (explicit == null) c.assistantTurn(listOf(AssistantMessage("user", "Private draft")), "UTC", "en")
+                    else c.assistantTurn(listOf(AssistantMessage("user", "Private draft")), "UTC", "en", aiConsent = explicit)
+                }.exceptionOrNull() as ApiException
+                assertEquals("ai_consent_required", failure.code)
+                assertEquals(403, failure.status)
+            }
+            assertTrue(requests.none { it.first.path == "/api/v1/assistant/turn" })
+        } finally { c.close() }
+    }
+
     @Test fun `turn y run con la sesion, y cerrar sesion borra el historial`() = runBlocking {
         val storage = MemoryStorage()
         val c = client(storage)
         try {
-            val out = c.assistantTurn(listOf(AssistantMessage("user", "Responde mis pendientes")), "America/Bogota", "es")
+            val out = c.assistantTurn(listOf(AssistantMessage("user", "Responde mis pendientes")), "America/Bogota", "es", aiConsent = true)
             val turnReq = requests.last { it.first.path == "/api/v1/assistant/turn" }
             assertEquals("Bearer t", turnReq.first.getHeader("authorization"))
             val body = TcJson.parseToJsonElement(turnReq.second).jsonObject
             assertEquals("America/Bogota", body["timezone"]!!.jsonPrimitive.content); assertEquals("es", body["lang"]!!.jsonPrimitive.content)
+            assertEquals(JsonPrimitive(true), body["aiConsent"])
             assertEquals("Responde mis pendientes", body["messages"]!!.jsonArray[0].jsonObject["content"]!!.jsonPrimitive.content)
             assertEquals("tok", out.actions.single().token)
 

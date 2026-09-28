@@ -45,4 +45,7 @@
     <string name="ai_redo">Otra versión</string>
     <string name="ai_redo_ask">Redacta otra versión del mensaje para %1$s</string>
     <string name="ai_retry">Reintentar</string>
+    <string name="gg_consent_title">¿Permitir que gg use DeepSeek?</string>
+    <string name="gg_consent_body">Mientras este panel de gg esté abierto, DeepSeek recibirá tu solicitud y hasta 20 turnos recientes de gg, tu nombre e ID, idioma y zona horaria, y el directorio al que tienes acceso: nombres, IDs, cargos y empresas de las personas; nombres e IDs de grupos y espacios y sus contadores de no leídos. Para responder a tus solicitudes, también puede recibir mensajes y autores, asuntos y reuniones a los que tienes acceso. DeepSeek es un proveedor externo de IA. Cancela para conservar el borrador sin enviarlo. Cerrar gg termina este permiso.</string>
+    <string name="gg_consent_allow">Permitir durante esta sesión</string>
 </resources>

@@ -6,11 +6,15 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 |---|---|
 | applicationId | `com.chaggu.app` (app nueva en Play desde 1.6.0 / 14; la anterior era `com.tiecoms.app`). El `namespace` y los paquetes Kotlin siguen siendo `com.tiecoms.app`. |
 | minSdk / target / compile | 26 / 36 / 36 |
-| Versión | `versionName 1.6.0`, `versionCode 14`. Sube el `versionCode` en cada envío a Play. |
+| Versión | `versionName 1.6.5`, `versionCode 24`. Sube el `versionCode` en cada envío a Play. |
 | Contrato | `2026-09-23` (valor actual de `BuildConfig.CONTRACT_VERSION`). Se envía en `x-tiecoms-contract` y en `device.contract`. |
 | API por defecto | `https://app.chaggu.com` (web pública: `https://www.chaggu.com`) |
 | Marca | **Chaggu** desde 1.6.0 (antes TieComs). Cambia solo lo visible: nombre, textos, dominios, ícono, splash y colores (tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`). Se publica como app nueva: `applicationId` `com.chaggu.app` y esquema propio `chaggu://` (el SSO pide `redirect_scheme=chaggu`), para convivir con la app TieComs instalada. Lo demás interno se mantiene: `namespace`/paquetes Kotlin `com.tiecoms.app`, clave de subida `tiecoms-upload`, proyecto Firebase `tiecoms`, headers `x-tiecoms-*`, claves de SharedPreferences, IDs de canales y nombres de sonidos. |
 | Toolchain | Gradle 8.14.3 (wrapper), AGP 8.13.2, Kotlin 2.3.21 y JDK 17 |
+
+## Entrega 1.6.5 (24)
+
+Integra gg, tareas derivadas, mensajes programados, horario de descanso y firma de PDFs. Antes de enviar la primera solicitud a gg, se explica el envío a DeepSeek y se pide permiso para la apertura actual del panel. Cancelar conserva el borrador y no envía la solicitud; cerrar gg o salir de la cuenta revoca ese permiso. El cliente manda `aiConsent: true` únicamente después de permitirlo. El dictado usa el servicio de reconocimiento de voz de Android, que puede procesar audio fuera del dispositivo.
 
 ## Qué hace
 

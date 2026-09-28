@@ -117,18 +117,18 @@ fun forwardMenu(ctx: Context, d: BootstrapDTO, conv: ConversationDTO, m: Message
     val author = Names.person(d, m.authorId)?.name ?: ""
     val title = titleOf(ctx, conv, d)
     val link = messageLink(m.conversationId, m.seq)
-    val plain = "$author: ${m.body}\n\n— $title · Chaggu\n$link"
+    val plain = "$author: ${m.body}\n\n— $title · chaggu\n$link"
     fun open(uri: String) = runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     return SheetItem(
         ctx.getString(R.string.menu_forward), "↪", tag = "menuForward",
         children = listOf(
             SheetItem(ctx.getString(R.string.fwd_whatsapp), "🟢", onClick = { open("https://wa.me/?text=" + Uri.encode(plain)) }),
             SheetItem(ctx.getString(R.string.fwd_slack), "#", onClick = {
-                copyToClipboard(ctx, ">" + m.body.split('\n').joinToString("\n>") + "\n— *$author* · $title · <$link|Chaggu>")
+                copyToClipboard(ctx, ">" + m.body.split('\n').joinToString("\n>") + "\n— *$author* · $title · <$link|chaggu>")
                 container.toast(ctx.getString(R.string.toast_slack_copied))
             }),
             SheetItem(ctx.getString(R.string.fwd_teams), "T", onClick = { copyToClipboard(ctx, plain); container.toast(ctx.getString(R.string.toast_teams_copied)) }),
-            SheetItem(ctx.getString(R.string.fwd_email), "✉", onClick = { open("mailto:?subject=" + Uri.encode("$title · Chaggu") + "&body=" + Uri.encode(plain)) }),
+            SheetItem(ctx.getString(R.string.fwd_email), "✉", onClick = { open("mailto:?subject=" + Uri.encode("$title · chaggu") + "&body=" + Uri.encode(plain)) }),
         ),
     )
 }

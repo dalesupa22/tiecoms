@@ -69,7 +69,7 @@ class ShareUiTest {
     private fun exists(tag: String) = runCatching { compose.onAllNodes(hasTestTag(tag), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }.getOrDefault(false)
 
     private fun expandUploadNotification() {
-        var node = device.wait(Until.findObject(By.text("Share to Chaggu")), 5_000)
+        var node = device.wait(Until.findObject(By.text("Share to chaggu")), 5_000)
         repeat(5) {
             val expand = node?.findObject(By.res(java.util.regex.Pattern.compile(".*:id/expand_button")))
             if (expand != null) { expand.click(); return }
@@ -155,14 +155,14 @@ class ShareUiTest {
         send.clipData = android.content.ClipData.newUri(ins.targetContext.contentResolver, "fotos", photos[0]).apply { photos.drop(1).forEach { addItem(android.content.ClipData.Item(it)) } }
         ins.targetContext.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
         val title = Names.conversationTitle(client.meta(convId)!!, client.state.value.data, "Interno", "Conversación")
-        device.wait(Until.hasObject(By.text("Chaggu")), 10_000)
+        device.wait(Until.hasObject(By.text("chaggu")), 10_000)
         Thread.sleep(1_500)
         // The old TieComs app can have a shortcut with the same conversation title.
         // Select the exact Chaggu app tile; shortcut publication was asserted above.
         val directShare = false
         shot("v4-03-hoja-sistema")
-        log("§B hoja del sistema: Chaggu ${if (device.hasObject(By.text("Chaggu"))) "aparece" else "NO aparece"}; conversación «$title» en Direct Share: $directShare")
-        val target = device.findObject(By.text("Chaggu"))
+        log("§B hoja del sistema: chaggu ${if (device.hasObject(By.text("chaggu"))) "aparece" else "NO aparece"}; conversación «$title» en Direct Share: $directShare")
+        val target = device.findObject(By.text("chaggu"))
         assertNotNull("Chaggu en la hoja de compartir", target)
         target!!.click()
 

@@ -129,11 +129,11 @@ class InviteRulesTest {
 
     @Test fun `texto de compartir en espanol e ingles`() {
         val es = InviteRules.shareText(string("values-es", "gshare_text"), string("values-es", "gshare_text_nocode"), "Pedidos Beta", "https://chaggu.com/invite/abc", "K7QM-4XPA")
-        assertEquals("Te invito a Pedidos Beta en Chaggu: https://chaggu.com/invite/abc (código K7QM-4XPA)", es)
+        assertEquals("Te invito a Pedidos Beta en chaggu: https://chaggu.com/invite/abc (código K7QM-4XPA)", es)
         val esNoCode = InviteRules.shareText(string("values-es", "gshare_text"), string("values-es", "gshare_text_nocode"), "Pedidos Beta", "https://chaggu.com/signup?org=t", null)
-        assertEquals("Te invito a Pedidos Beta en Chaggu: https://chaggu.com/signup?org=t", esNoCode)
+        assertEquals("Te invito a Pedidos Beta en chaggu: https://chaggu.com/signup?org=t", esNoCode)
         val en = InviteRules.shareText(string("values", "gshare_text"), string("values", "gshare_text_nocode"), "Beta orders", "https://chaggu.com/invite/abc", "K7QM-4XPA")
-        assertTrue(en, en.contains("Beta orders") && en.contains("https://chaggu.com/invite/abc") && en.contains("K7QM-4XPA") && en.contains("Chaggu"))
+        assertTrue(en, en.contains("Beta orders") && en.contains("https://chaggu.com/invite/abc") && en.contains("K7QM-4XPA") && en.contains("on chaggu"))
     }
 
     @Test fun `textos de la hoja en espanol e ingles`() {

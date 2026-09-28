@@ -185,7 +185,7 @@ fun <T> Segmented(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> 
 
 fun copyToClipboard(ctx: Context, text: String) {
     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    cm.setPrimaryClip(ClipData.newPlainText("Chaggu", text))
+    cm.setPrimaryClip(ClipData.newPlainText("chaggu", text))
 }
 
 fun convLink(id: String) = "${com.tiecoms.app.core.DeepLinks.APP_URL}/c/$id"

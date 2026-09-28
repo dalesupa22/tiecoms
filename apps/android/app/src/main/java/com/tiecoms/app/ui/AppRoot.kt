@@ -249,6 +249,7 @@ private fun MainNav() {
                 DeepLinks.SCREEN_SETTINGS -> tab("settings")
                 DeepLinks.SCREEN_TRAZO -> nav.navigate("trazo") { launchSingleTop = true }
                 DeepLinks.SCREEN_WHATSAPP -> nav.navigate("whatsapp") { launchSingleTop = true }
+                DeepLinks.SCREEN_SCHEDULED -> nav.navigate("scheduled") { launchSingleTop = true }
             }
             is DeepLink.Share -> { container.shareDraft = p; nav.navigate("share") { launchSingleTop = true } }
             is DeepLink.Signup -> Unit
@@ -376,6 +377,7 @@ private fun MainNav() {
             composable("event/{id}") {
                 EventDetailScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() }, onOpenChat = { c -> openConv(c) })
             }
+            composable("scheduled") { ScheduledScreen(onBack = { nav.popBackStack() }, onOpenConversation = { c -> openConv(c) }) }
             composable("reminders") { RemindersScreen(onBack = { nav.popBackStack() }, onOpen = { c, seq -> openConv(c, seq) }) }
             composable("trazo") { TrazoScreen(onBack = { nav.popBackStack() }, onOpen = { c -> openConv(c) }) }
             composable("whatsapp") { WhatsAppScreen(onBack = { nav.popBackStack() }, onOpenConversation = { c -> openConv(c) }) }

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.4 (23): mensajes programados (docs/PROGRAMADOS.md). -->
+<resources>
+    <string name="nav_scheduled">Programados</string>
+    <string name="sched_menu_title">Programar envío</string>
+    <string name="sched_in_hour">En 1 hora</string>
+    <string name="sched_this_afternoon">Esta tarde</string>
+    <string name="sched_tomorrow_morning">Mañana temprano</string>
+    <string name="sched_monday">El lunes temprano</string>
+    <string name="sched_pick">Elegir fecha y hora…</string>
+    <string name="sched_pick_title">¿Cuándo lo envío?</string>
+    <string name="sched_date">Día</string>
+    <string name="sched_time">Hora</string>
+    <string name="sched_will_send">Se enviará %1$s.</string>
+    <string name="sched_future">Elige una hora en el futuro.</string>
+    <string name="sched_confirm">Programar</string>
+    <string name="sched_today_at">hoy a las %1$s</string>
+    <string name="sched_tomorrow_at">mañana a las %1$s</string>
+    <string name="sched_day_at">el %1$s a las %2$s</string>
+    <string name="sched_done">Programado para %1$s</string>
+    <string name="sched_cancelled">Mensaje programado cancelado</string>
+    <string name="sched_sent_now">Enviado</string>
+    <string name="sched_moved">Ahora sale %1$s</string>
+    <string name="sched_failed">No se pudo enviar</string>
+    <string name="sched_failed_count">%1$d programado(s) no se pudieron enviar</string>
+    <string name="sched_one_here">1 mensaje programado</string>
+    <string name="sched_many_here">%1$d mensajes programados</string>
+    <string name="sched_next">el próximo sale %1$s</string>
+    <string name="sched_see">Ver</string>
+    <string name="sched_send_now">Enviar ahora</string>
+    <string name="sched_change">Cambiar hora</string>
+    <string name="sched_retry_later">Reintentar a otra hora</string>
+    <string name="sched_edit">Editar</string>
+    <string name="sched_save">Guardar</string>
+    <string name="sched_cancel">Cancelar envío</string>
+    <string name="sched_empty">No tienes mensajes programados.</string>
+    <string name="sched_title_here">Programados en este chat</string>
+    <string name="sched_page_sub">Escríbelo ahora y sale solo a la hora que elijas. Toca 🕒 junto a enviar (o mantén pulsado ➤). Solo tú los ves hasta que salen.</string>
+    <string name="sched_button">Programar envío</string>
+</resources>

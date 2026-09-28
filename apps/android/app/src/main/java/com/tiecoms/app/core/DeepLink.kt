@@ -31,6 +31,7 @@ object DeepLinks {
     const val SCREEN_TRAZO = "trazo"
     const val SCREEN_WHATSAPP = "whatsapp"
     const val SCREEN_SETTINGS = "settings"
+    const val SCREEN_SCHEDULED = "scheduled"
 
     /** Origen probable según la app que comparte (paquete del referrer). */
     fun sourceForPackage(pkg: String?): String {
@@ -76,6 +77,7 @@ object DeepLinks {
             "trazo" -> DeepLink.Screen(SCREEN_TRAZO)
             "whatsapp" -> DeepLink.Screen(SCREEN_WHATSAPP)
             "ajustes" -> DeepLink.Screen(SCREEN_SETTINGS)
+            "programados" -> DeepLink.Screen(SCREEN_SCHEDULED)
             "share" -> DeepLink.Share(listOfNotNull(query["title"], query["text"], query["url"]).joinToString("\n").trim())
             else -> null
         }

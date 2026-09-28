@@ -698,3 +698,22 @@ data class DriveTreeDTO(
 const val MAX_AVATAR_BYTES = 3 * 1024 * 1024
 const val MAX_DRIVE_FILE_BYTES = 25 * 1024 * 1024
 const val MAX_FORWARD_TARGETS = 10
+
+/** Mensaje programado (docs/PROGRAMADOS.md): solo lo ve quien lo escribió, hasta que sale. */
+@Serializable
+data class ScheduledMessageDTO(
+    val id: String = "",
+    val conversationId: String = "",
+    val body: String = "",
+    val mentions: List<MentionDTO> = emptyList(),
+    val replyTo: String? = null,
+    val sendAt: String = "",
+    /** pending | sending | sent | cancelled | failed */
+    val status: String = "pending",
+    val messageId: String? = null,
+    val error: String? = null,
+    val createdAt: String = "",
+    val sentAt: String? = null,
+)
+
+@Serializable data class ScheduledPage(val scheduled: List<ScheduledMessageDTO> = emptyList())

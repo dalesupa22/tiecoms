@@ -315,6 +315,8 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
             HorizontalDivider()
             NavRow("⏰ " + stringResource(R.string.rem_title), null, tag = "rowReminders") { onNavigate("reminders") }
             HorizontalDivider()
+            NavRow("🕒 " + stringResource(R.string.nav_scheduled) + if (state.scheduled.isNotEmpty()) " · ${state.scheduled.size}" else "", null, tag = "rowScheduled") { onNavigate("scheduled") }
+            HorizontalDivider()
             NavRow("⑂ " + stringResource(R.string.nav_trazo), null, tag = "rowTrazo") { onNavigate("trazo") }
             HorizontalDivider()
             TextSizeRow()

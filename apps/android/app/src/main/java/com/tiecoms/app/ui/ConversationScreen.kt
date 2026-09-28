@@ -6,6 +6,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -635,6 +636,8 @@ fun ConversationScreen(
                     val lastHuman = conv?.messages?.lastOrNull { it.kind == "text" && it.deletedAt == null }
                     if (lastHuman != null && lastHuman.authorId != me) SideQuickReplies(onSend = { t -> client.send(id, t) }, onAsk = { sideAddHere = true })
                 }
+                // Mensajes programados de este chat (solo los veo yo): «🕒 N programados · el próximo sale … · Ver».
+                ScheduledStrip(id)
                 Composer(
                 id, title, data, replyTo, editing,
                 onCancelReply = { replyTo = null }, onCancelEdit = { editing = null },
@@ -656,6 +659,7 @@ fun ConversationScreen(
                 placeholderOverride = if (meta.isSide) sidePlaceholder else null,
                 onNewEvent = { meeting = true to null }, onNewIssue = if (myWsRole != "guest") ({ newIssue = true to null }) else null,
                 autoFocus = embedded,
+                canSchedule = privateHere == null, onScheduled = { replyTo = null },
             ) } else ReadOnlyNotice()
         }
     }
@@ -799,6 +803,8 @@ private fun Composer(
     /** El «＋»: además de fotos y archivos, Evento y Asunto (null lo oculta, p. ej. Asunto para terceros). */
     onNewEvent: (() -> Unit)? = null, onNewIssue: (() -> Unit)? = null,
     autoFocus: Boolean = false,
+    /** Mensajes programados (1.6.4 / 23): 🕒 junto a enviar y pulsación larga en ➤. false en respuestas privadas. */
+    canSchedule: Boolean = false, onScheduled: () -> Unit = {},
 ) {
     val client = LocalClient.current
     val ctx = LocalContext.current
@@ -923,6 +929,17 @@ private fun Composer(
         }
     }
     var editText by rememberSaveable(editing?.id) { mutableStateOf(editing?.body ?: "") }
+    // Programar: solo texto (con menciones y respuesta); los adjuntos y las notas de voz salen al momento.
+    var scheduling by remember { mutableStateOf(false) }
+    val snackbar = LocalSnackbar.current
+    val view = LocalView.current
+    val schedulable = canSchedule && editing == null && files.isEmpty() && text.isNotBlank() && uploading == null
+    if (scheduling) ScheduleSheet(onDismiss = { scheduling = false }, onPick = { at ->
+        val body = text; val bodyMents = ments
+        text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0)
+        scheduleWithUndo(ctx, container, snackbar, id, body, bodyMents, replyTo?.id, at, onUndo = { b -> if (text.isBlank()) { text = b; ments = bodyMents; sel = androidx.compose.ui.text.TextRange(b.length) } })
+        onScheduled()
+    })
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Column {
             if (replyTo != null) Banner(stringResource(R.string.reply_to, Names.person(data, replyTo.authorId)?.name ?: "") + " · " + excerpt(replyTo.body, 100), stringResource(R.string.reply_cancel), onCancelReply, "replyBar")
@@ -990,8 +1007,28 @@ private fun Composer(
                         // Un toque rápido no descarta: deja la grabación bloqueada (manos libres) con Borrar y Enviar.
                         onRelease = { held -> if (com.tiecoms.app.core.VoiceRules.onRelease(held) == com.tiecoms.app.core.VoiceRules.Release.LOCK) locked = true else sendVoice() },
                         onCancel = { recorder.cancel(); container.toast(ctx.getString(R.string.voice_cancelled)) }, onLock = { locked = true }, onDrag = { gesture = it },
-                    ) else if (!rec.recording) FilledIconButton(onClick = { sendNow() }, enabled = uploading == null && (text.isNotBlank() || files.isNotEmpty()), modifier = Modifier.size(52.dp).testTag("send"),
-                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary)) { Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.send)) }
+                    ) else if (!rec.recording) {
+                        if (schedulable) {
+                            IconButton(onClick = { scheduling = true }, modifier = Modifier.size(48.dp).testTag("schedButton")) {
+                                Text("🕒", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = ctx.getString(R.string.sched_button) })
+                            }
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        val enabled = uploading == null && (text.isNotBlank() || files.isNotEmpty())
+                        val sendLabel = stringResource(R.string.send)
+                        val schedLabel = stringResource(R.string.sched_button)
+                        // ➤ con pulsación larga = el mismo menú de «Programar envío».
+                        androidx.compose.foundation.layout.Box(
+                            Modifier.size(52.dp).clip(CircleShape)
+                                .background(if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                                .combinedClickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClickLabel = sendLabel,
+                                    onLongClickLabel = if (schedulable) schedLabel else null,
+                                    onLongClick = if (schedulable) ({ view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); scheduling = true }) else null,
+                                    onClick = { sendNow() })
+                                .testTag("send"),
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.AutoMirrored.Filled.Send, sendLabel, tint = if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)) }
+                    }
                 }
             }
         }

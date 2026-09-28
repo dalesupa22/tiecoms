@@ -67,6 +67,8 @@ data class ClientState(
     val dndUntil: String? = null,
     /** El servidor no conoce PUT /me/dnd (404): «No molestar» vive solo en este dispositivo. */
     val dndLocalOnly: Boolean = false,
+    /** Mis mensajes programados pendientes o fallidos (docs/PROGRAMADOS.md). */
+    val scheduled: List<ScheduledMessageDTO> = emptyList(),
 )
 
 /** Avisos puntuales para sonidos y notificaciones. */
@@ -309,6 +311,7 @@ class TieComsClient(
         socket.start()
         scheduleFlush(0)
         scope.launch { runCatching { loadRemindersInternal() } }
+        scope.launch { runCatching { loadScheduled() } }
         // Asuntos abiertos bajo cada grupo (docs/GRUPOS.md); luego llegan por issue.updated.
         scope.launch { runCatching { loadOpenIssues() } }
     }
@@ -397,7 +400,7 @@ class TieComsClient(
     private fun onAccountEvent(e: AccountEvent) {
         when (e) {
             is AccountEvent.ScopeChanged -> {
-                scope.launch { runCatching { loadBlocks() }; scheduleBootstrap(); runCatching { loadOpenIssues() } }
+                scope.launch { runCatching { loadBlocks() }; scheduleBootstrap(); runCatching { loadOpenIssues() }; runCatching { loadScheduled() } }
             }
             is AccountEvent.ReadUpdated -> {
                 val c = meta(e.conversationId) ?: return
@@ -419,6 +422,7 @@ class TieComsClient(
             is AccountEvent.DriveUpdated -> setState { copy(driveRevision = driveRevision + 1) }
             AccountEvent.RemindersChanged -> scope.launch { runCatching { loadRemindersInternal() } }
             is AccountEvent.DndUpdated -> applyDnd(e.dndUntil, localOnly = false)
+            is AccountEvent.ScheduledUpdated -> setState { copy(scheduled = Scheduling.apply(scheduled, e.scheduled)) }
             is AccountEvent.Unknown -> Unit
         }
     }
@@ -786,6 +790,29 @@ class TieComsClient(
             applyDnd(before.first, before.second); throw e
         }
     }
+
+    // ---------- Mensajes programados (docs/PROGRAMADOS.md) ----------
+    suspend fun loadScheduled(conversationId: String? = null): List<ScheduledMessageDTO> = withContext(dispatcher) {
+        val r = req("GET", "/scheduled" + q("conversationId" to conversationId), null, ScheduledPage.serializer())
+        if (conversationId == null) setState { copy(scheduled = r.scheduled.sortedBy { it.sendAt }) }
+        else setState { copy(scheduled = (scheduled.filter { it.conversationId != conversationId } + r.scheduled).sortedBy { it.sendAt }) }
+        r.scheduled
+    }
+    private fun putScheduled(s0: ScheduledMessageDTO): ScheduledMessageDTO { setState { copy(scheduled = Scheduling.apply(scheduled, s0)) }; return s0 }
+    suspend fun scheduleMessage(conversationId: String, body: String, sendAt: Instant, mentions: List<MentionDTO> = emptyList(), replyTo: String? = null): ScheduledMessageDTO = withContext(dispatcher) {
+        val b = buildJsonObject {
+            put("body", JsonPrimitive(body)); put("sendAt", JsonPrimitive(sendAt.toString()))
+            if (mentions.isNotEmpty()) put("mentions", TcJson.encodeToJsonElement(ListSerializer(MentionDTO.serializer()), mentions))
+            replyTo?.let { put("replyTo", JsonPrimitive(it)) }
+        }
+        putScheduled(req("POST", "/conversations/$conversationId/scheduled", b, ScheduledMessageDTO.serializer()))
+    }
+    suspend fun updateScheduled(id: String, body: String? = null, sendAt: Instant? = null): ScheduledMessageDTO = withContext(dispatcher) {
+        val b = buildJsonObject { body?.let { put("body", JsonPrimitive(it)) }; sendAt?.let { put("sendAt", JsonPrimitive(it.toString())) } }
+        putScheduled(req("PATCH", "/scheduled/$id", b, ScheduledMessageDTO.serializer()))
+    }
+    suspend fun cancelScheduled(id: String): ScheduledMessageDTO = withContext(dispatcher) { putScheduled(req("DELETE", "/scheduled/$id", null, ScheduledMessageDTO.serializer())) }
+    suspend fun sendScheduledNow(id: String): ScheduledMessageDTO = withContext(dispatcher) { putScheduled(req("POST", "/scheduled/$id/send", buildJsonObject {}, ScheduledMessageDTO.serializer())) }
 
     // ---------- Preferencias, fijados, no leído, edición ----------
     /** pinned null = no cambia. mutedUntil: [UNCHANGED] = no cambia, null = reactivar. */

@@ -40,6 +40,8 @@ struct AgendaScreen: View {
     @State private var anchor = Date()
     @State private var error: String?
     @State private var creating: CreateAt?
+    /// Grupos ocultos con la leyenda (preferencia del dispositivo).
+    @State private var hidden = AgendaHidden.load()
 
     struct CreateAt: Identifiable { var start: Date; var id: Double { start.timeIntervalSince1970 } }
 
@@ -50,10 +52,11 @@ struct AgendaScreen: View {
         Group {
             if let d = store.data {
                 let visible = Set(d.conversations.map(\.id))
-                let list = store.events.values.filter { visible.contains($0.conversationId) && $0.start < range.end && $0.end > range.start && !$0.isCancelled }
-                    .sorted { $0.startsAt < $1.startsAt }
+                let inRange = CalendarGrid.sorted(store.events.values.filter { visible.contains($0.conversationId) && $0.start < range.end && $0.end > range.start && !$0.isCancelled }, cal)
+                let list = AgendaHidden.visible(inRange, hidden: hidden)
                 VStack(spacing: 0) {
                     header
+                    legend(d, AgendaHidden.legendIds(inRange))
                     switch mode {
                     case .day: dayView(list)
                     case .week: weekView(list)
@@ -110,6 +113,57 @@ struct AgendaScreen: View {
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
+    // MARK: Leyenda: un color por grupo; tocar oculta o muestra
+
+    @ViewBuilder
+    private func legend(_ d: BootstrapDTO, _ ids: [String]) -> some View {
+        let convs = ids.compactMap { id in d.conversations.first { $0.id == id } }
+        if !convs.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(convs) { c in
+                        let off = hidden.contains(c.id)
+                        let dot = GroupColor.dot(c.id)
+                        Button { setHidden(AgendaHidden.toggle(c.id, in: hidden)) } label: {
+                            HStack(spacing: 6) {
+                                Circle().fill(off ? Color.clear : dot).overlay(Circle().strokeBorder(dot, lineWidth: 1.5))
+                                    .frame(width: 10, height: 10)
+                                Text(Naming.title(d, c)).font(.caption.weight(.semibold)).lineLimit(1)
+                                    .foregroundStyle(off ? Theme.textSecondary : Theme.textPrimary)
+                                    .strikethrough(off)
+                            }
+                            .padding(.horizontal, 10).frame(minHeight: 32)
+                            .background(Capsule().fill(off ? Color.clear : GroupColor.background(c.id).opacity(0.55)))
+                            .overlay(Capsule().strokeBorder(Theme.textSecondary.opacity(off ? 0.35 : 0)))
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Naming.title(d, c))
+                        .accessibilityValue(off ? L("cal.groupHidden") : "")
+                        .accessibilityHint(off ? L("cal.showGroup") : L("cal.hideGroup"))
+                        .accessibilityAddTraits(off ? [] : .isSelected)
+                        .accessibilityIdentifier("cal.legend.\(c.id)")
+                    }
+                    if !hidden.isEmpty {
+                        Button(L("cal.showAll")) { setHidden([]) }
+                            .font(.caption.weight(.semibold)).buttonStyle(.bordered).controlSize(.small)
+                            .accessibilityIdentifier("cal.legend.showAll")
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .padding(.bottom, 6)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(L("cal.groups"))
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        }
+    }
+
+    private func setHidden(_ ids: [String]) {
+        hidden = ids
+        AgendaHidden.save(ids)
+    }
+
     private var title: String {
         let loc = L10n.locale
         switch mode {
@@ -123,10 +177,17 @@ struct AgendaScreen: View {
 
     private func dayView(_ list: [CalendarEventDTO]) -> some View {
         let day = cal.startOfDay(for: anchor)
-        let items = CalendarGrid.events(list, on: day, cal)
+        let all = CalendarGrid.events(list, on: day, cal)
+        // Los de día completo van en una franja arriba de las horas, no en la grilla.
+        let allDay = all.filter { CalendarGrid.isAllDay($0, cal) }
+        let items = all.filter { !CalendarGrid.isAllDay($0, cal) }
         let earlier = items.filter { $0.start < day }
         return ScrollViewReader { proxy in
             List {
+                if !allDay.isEmpty {
+                    Section(L("cal.allDay")) { ForEach(allDay) { e in eventLink(e) } }
+                        .accessibilityIdentifier("cal.allDayBand")
+                }
                 if !earlier.isEmpty {
                     Section(L("cal.continues")) { ForEach(earlier) { e in eventLink(e) } }
                 }
@@ -224,14 +285,14 @@ struct AgendaScreen: View {
                                 .background(Capsule().fill(today ? Theme.primaryFill : .clear))
                             ForEach(c.shown) { e in
                                 Text((CalendarGrid.isVideoLink(e.location) ? "📹" : "") + e.title)
-                                    .font(.caption2).lineLimit(1).truncationMode(.tail)
-                                    .foregroundStyle(Theme.textPrimary)
+                                    .font(.caption2.weight(.medium)).lineLimit(1).truncationMode(.tail)
+                                    .foregroundStyle(GroupColor.text(e.conversationId))
                                     .padding(.horizontal, 3)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(RoundedRectangle(cornerRadius: 4).fill(Theme.orange.opacity(0.14)))
+                                    .background(RoundedRectangle(cornerRadius: 4).fill(GroupColor.background(e.conversationId)))
                             }
                             if big && !items.isEmpty {
-                                HStack(spacing: 2) { ForEach(0..<min(items.count, 3), id: \.self) { _ in Circle().fill(Theme.orange).frame(width: 6, height: 6) } }
+                                HStack(spacing: 2) { ForEach(items.prefix(3)) { e in Circle().fill(GroupColor.dot(e.conversationId)).frame(width: 6, height: 6) } }
                             }
                             if c.more > 0 && !big {
                                 Text(L("cal.more", ["n": c.more])).font(.caption2.weight(.semibold)).foregroundStyle(Theme.accentText).lineLimit(1)
@@ -286,12 +347,13 @@ struct EventRow: View {
         let d = store.data
         let conv = store.meta(event.conversationId)
         let mine = event.invitees.first { $0.userId == d?.me.id }
-        let time = Text(AgendaTime.time(event.start))
+        // Un color por grupo (docs/AGENDA-COLORES.md); «Todo el día» en vez de la hora.
+        let time = Text(CalendarGrid.isAllDay(event) ? L("cal.allDay") : AgendaTime.time(event.start))
             .font(.caption.weight(.bold)).monospacedDigit()
             .lineLimit(1)
             .padding(.horizontal, 8).padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.orange.opacity(0.15)))
-            .foregroundStyle(Theme.accentText)
+            .background(RoundedRectangle(cornerRadius: 8).fill(GroupColor.background(event.conversationId)))
+            .foregroundStyle(GroupColor.text(event.conversationId))
             .fixedSize()
         let info = VStack(alignment: .leading, spacing: 2) {
             Text((CalendarGrid.isVideoLink(event.location) ? "📹 " : "") + event.title).font(.body.weight(.semibold)).strikethrough(event.isCancelled)
@@ -512,6 +574,15 @@ struct EventEditorSheet: View {
             busy = false
         }
     }
+}
+
+extension GroupColor {
+    /// Fondo del chip del evento: el claro de la paleta; en modo oscuro, el color de texto (con texto blanco).
+    static func background(_ conversationId: String) -> Color { let p = pair(conversationId); return Color(light: p.bg, dark: p.fg) }
+    /// Texto sobre ese fondo.
+    static func text(_ conversationId: String) -> Color { let p = pair(conversationId); return Color(light: p.fg, dark: 0xFFFFFF) }
+    /// Punto de la leyenda y marcas sueltas: el color de texto (aclarado en modo oscuro para que se vea sobre el fondo).
+    static func dot(_ conversationId: String) -> Color { let p = pair(conversationId); return Color(light: p.fg, dark: PersonColor.lighten(p.fg, 0.35)) }
 }
 
 private extension String {

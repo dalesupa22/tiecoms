@@ -1271,7 +1271,7 @@ struct EventCard: View {
             if let ev = store.events[eventId] {
                 let mine = ev.invitees.first { $0.userId == store.me?.id }
                 HStack(spacing: 10) {
-                    Image(systemName: "calendar").font(.title3).foregroundStyle(Theme.accentText)
+                    Image(systemName: "calendar").font(.title3).foregroundStyle(GroupColor.dot(ev.conversationId))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(ev.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textPrimary).strikethrough(ev.isCancelled)
                         Text(ev.isCancelled ? L("cal.cancelled") : L10n.eventWhen(ev)).font(.caption).foregroundStyle(Theme.textSecondary)
@@ -1283,7 +1283,7 @@ struct EventCard: View {
                 .padding(12)
                 .frame(maxWidth: 320)
                 .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surface))
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.orange.opacity(0.35)))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(GroupColor.dot(ev.conversationId).opacity(0.45)))
             } else {
                 Text(L("lin.open")).font(.footnote.weight(.semibold))
             }

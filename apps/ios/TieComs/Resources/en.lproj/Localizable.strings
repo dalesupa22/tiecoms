@@ -1867,3 +1867,9 @@
 "ws.onlyYours" = "You only see the groups you are in; the others do not reveal their name.";
 "ws.participants" = "Participants";
 "ws.yourGroups" = "Your groups in this space";
+"cal.allDay" = "All day";
+"cal.groups" = "Groups in the calendar";
+"cal.showAll" = "Show all";
+"cal.showGroup" = "Show this group";
+"cal.hideGroup" = "Hide this group";
+"cal.groupHidden" = "hidden";

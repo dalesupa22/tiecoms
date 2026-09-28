@@ -201,6 +201,10 @@ enum L10n {
     static func eventWhen(_ ev: CalendarEventDTO) -> String {
         let day = ev.start.formatted(Date.FormatStyle().weekday(.wide).day().month(.wide).locale(locale))
         let t = Date.FormatStyle(date: .omitted, time: .shortened).locale(locale)
+        #if !SHARE_EXTENSION
+        // Día completo (docs/AGENDA-COLORES.md): «Todo el día» en vez de «12:00 a. m.–11:59 p. m.».
+        if CalendarGrid.isAllDay(ev) { return "\(day.prefix(1).uppercased())\(day.dropFirst()) · \(L("cal.allDay"))" }
+        #endif
         return "\(day.prefix(1).uppercased())\(day.dropFirst()) · \(ev.start.formatted(t))–\(ev.end.formatted(t))"
     }
 

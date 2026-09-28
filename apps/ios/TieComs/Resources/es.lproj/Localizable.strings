@@ -1867,3 +1867,9 @@
 "ws.onlyYours" = "Solo ves los grupos en los que participas; los demás no revelan su nombre.";
 "ws.participants" = "Participantes";
 "ws.yourGroups" = "Tus grupos en este espacio";
+"cal.allDay" = "Todo el día";
+"cal.groups" = "Grupos en la agenda";
+"cal.showAll" = "Mostrar todos";
+"cal.showGroup" = "Mostrar este grupo";
+"cal.hideGroup" = "Ocultar este grupo";
+"cal.groupHidden" = "oculto";

@@ -67,13 +67,32 @@ enum CalendarGrid {
         }
     }
 
-    /// Eventos que tocan ese día (también los que empezaron antes), por hora de inicio.
+    /// Eventos que tocan ese día (también los que empezaron antes): primero los de día completo, luego por hora de inicio.
     static func events(_ list: [CalendarEventDTO], on day: Date, _ cal: Calendar) -> [CalendarEventDTO] {
         let s = cal.startOfDay(for: day)
         let e = cal.date(byAdding: .day, value: 1, to: s) ?? s.addingTimeInterval(86400)
-        return list.filter { !$0.isCancelled && $0.start < e && ($0.end > s || $0.start >= s) }
-            .sorted { $0.startsAt == $1.startsAt ? $0.id < $1.id : $0.start < $1.start }
+        return sorted(list.filter { !$0.isCancelled && $0.start < e && ($0.end > s || $0.start >= s) }, cal)
     }
+
+    /// Orden de las listas: los de día completo antes que los de hora; luego por inicio (y por id si empatan).
+    static func sorted(_ list: [CalendarEventDTO], _ cal: Calendar) -> [CalendarEventDTO] {
+        list.map { ($0, isAllDay($0, cal)) }
+            .sorted { a, b in
+                if a.1 != b.1 { return a.1 }
+                return a.0.start == b.0.start ? a.0.id < b.0.id : a.0.start < b.0.start
+            }
+            .map(\.0)
+    }
+
+    /// Día completo (docs/AGENDA-COLORES.md): en la hora local de quien mira empieza a las 00:00, termina a las 23:59
+    /// o a las 00:00 (del día siguiente o después) y dura al menos 23 h 59 min. Igual que isAllDayEvent de la web.
+    static func isAllDay(start: Date, end: Date, _ cal: Calendar) -> Bool {
+        let s = cal.dateComponents([.hour, .minute], from: start), e = cal.dateComponents([.hour, .minute], from: end)
+        guard s.hour == 0, s.minute == 0, end.timeIntervalSince(start) >= 86_340 else { return false }
+        return (e.hour == 23 && (e.minute ?? 0) >= 59) || (e.hour == 0 && e.minute == 0)
+    }
+
+    static func isAllDay(_ ev: CalendarEventDTO, _ cal: Calendar = CalendarGrid.calendar()) -> Bool { isAllDay(start: ev.start, end: ev.end, cal) }
 
     /// Lo que cabe en una celda del mes: hasta `max` títulos y «+N más».
     static func cell(_ list: [CalendarEventDTO], max: Int = 2) -> (shown: [CalendarEventDTO], more: Int) {
@@ -90,5 +109,53 @@ enum CalendarGrid {
         guard let s = location?.trimmingCharacters(in: .whitespaces), let u = URL(string: s), u.scheme?.lowercased() == "https",
               let h = u.host?.lowercased() else { return false }
         return h == "meet.google.com" || h == "teams.microsoft.com" || h == "teams.live.com" || h == "zoom.us" || h.hasSuffix(".zoom.us")
+    }
+}
+
+/// Un color por grupo en la Agenda, el mismo en web, iOS y Android (docs/AGENDA-COLORES.md,
+/// packages/client-core/src/group-colors.ts).
+enum GroupColor {
+    struct Pair: Equatable { let bg: UInt32; let fg: UInt32 }
+    static let palette: [Pair] = [
+        Pair(bg: 0xDCE8FB, fg: 0x1E4E9C), // azul
+        Pair(bg: 0xD7F0E2, fg: 0x17603D), // verde
+        Pair(bg: 0xE9DEFB, fg: 0x5B32A8), // morado
+        Pair(bg: 0xD3EEF0, fg: 0x0A5F67), // turquesa
+        Pair(bg: 0xFBDDEB, fg: 0x962868), // rosado
+        Pair(bg: 0xFDE8CF, fg: 0x8A4B0B), // naranja
+        Pair(bg: 0xE2E4F8, fg: 0x3C4196), // índigo
+        Pair(bg: 0xF9DADA, fg: 0x9B2525), // rojo
+        Pair(bg: 0xEEF3C9, fg: 0x5B6412), // oliva
+        Pair(bg: 0xF6EDC4, fg: 0x735600), // ámbar
+    ]
+
+    /// h = 0 (uint32); por cada unidad UTF-16 del id: h = h * 31 + código (mod 2^32); índice = h % 10.
+    static func index(_ conversationId: String) -> Int {
+        var h: UInt32 = 0
+        for code in conversationId.utf16 { h = h &* 31 &+ UInt32(code) }
+        return Int(h % UInt32(palette.count))
+    }
+
+    static func pair(_ conversationId: String) -> Pair { palette[index(conversationId)] }
+}
+
+/// Grupos ocultos en la Agenda: preferencia de este dispositivo (UserDefaults `chaggu.agenda.hidden`, como la web).
+enum AgendaHidden {
+    static let key = "chaggu.agenda.hidden"
+    static func load(_ defaults: UserDefaults = .standard) -> [String] { defaults.stringArray(forKey: key) ?? [] }
+    static func save(_ ids: [String], _ defaults: UserDefaults = .standard) {
+        if ids.isEmpty { defaults.removeObject(forKey: key) } else { defaults.set(ids, forKey: key) }
+    }
+    /// Tocar un grupo de la leyenda: lo oculta si se veía, lo muestra si estaba oculto.
+    static func toggle(_ id: String, in hidden: [String]) -> [String] { hidden.contains(id) ? hidden.filter { $0 != id } : hidden + [id] }
+    /// Grupos de la leyenda: los que tienen eventos en lo visible (también los ocultos), en orden de aparición.
+    static func legendIds(_ list: [CalendarEventDTO]) -> [String] {
+        var seen = Set<String>()
+        return list.compactMap { seen.insert($0.conversationId).inserted ? $0.conversationId : nil }
+    }
+    /// Lo que se pinta: sin los grupos ocultos.
+    static func visible(_ list: [CalendarEventDTO], hidden: [String]) -> [CalendarEventDTO] {
+        let h = Set(hidden)
+        return h.isEmpty ? list : list.filter { !h.contains($0.conversationId) }
     }
 }

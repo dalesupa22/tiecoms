@@ -91,4 +91,74 @@ final class CalendarGridTests: XCTestCase {
         let en = CalendarGrid.calendar(TimeZone(identifier: "UTC")!, locale: Locale(identifier: "en_US"))
         XCTAssertEqual(AgendaScreen.weekdaySymbols(en), ["M", "T", "W", "T", "F", "S", "S"])
     }
+
+    // MARK: Agenda: un color por grupo, día completo y grupos ocultos (docs/AGENDA-COLORES.md)
+
+    private func gev(_ id: String, conv: String, _ s: Date, _ e: Date) throws -> CalendarEventDTO {
+        try JSONDecoder().decode(CalendarEventDTO.self, from: Data(#"{"id":"\#(id)","conversationId":"\#(conv)","title":"E \#(id)","startsAt":"\#(ISODate.string(s))","endsAt":"\#(ISODate.string(e))"}"#.utf8))
+    }
+
+    func testGroupColorIndexMatchesWebSpec() {
+        // Los dos casos de la tabla de la spec (mismos que groupColorIndex de client-core).
+        XCTAssertEqual(GroupColor.index("3a916cc9-0411-4068-be9d-f22075045494"), 1)
+        XCTAssertEqual(GroupColor.index("e1c94905-862f-4e70-9653-5d0e195910e9"), 4)
+        XCTAssertEqual(GroupColor.pair("3a916cc9-0411-4068-be9d-f22075045494"), GroupColor.Pair(bg: 0xD7F0E2, fg: 0x17603D), "verde")
+        XCTAssertEqual(GroupColor.pair("e1c94905-862f-4e70-9653-5d0e195910e9"), GroupColor.Pair(bg: 0xFBDDEB, fg: 0x962868), "rosado")
+        XCTAssertEqual(GroupColor.palette.count, 10)
+        XCTAssertEqual(GroupColor.index(""), 0)
+        // Desborde de uint32 (ids largos) y unidades UTF-16 fuera del ASCII: sin fallar y siempre en 0…9.
+        XCTAssertTrue((0..<10).contains(GroupColor.index(String(repeating: "zz-éñ😀", count: 200))))
+        // "a" = 97 → 7; "ab" = 97*31 + 98 = 3105 → 5.
+        XCTAssertEqual(GroupColor.index("a"), 7)
+        XCTAssertEqual(GroupColor.index("ab"), 5)
+    }
+
+    func testAllDayRule() throws {
+        let c = cal()
+        let d0 = date(2026, 9, 30, 0, c)
+        let next = date(2026, 10, 1, 0, c)
+        let at2359 = c.date(bySettingHour: 23, minute: 59, second: 0, of: d0)!
+        XCTAssertTrue(CalendarGrid.isAllDay(start: d0, end: at2359, c), "00:00 → 23:59")
+        XCTAssertTrue(CalendarGrid.isAllDay(start: d0, end: next, c), "00:00 → 00:00 del día siguiente")
+        XCTAssertTrue(CalendarGrid.isAllDay(start: d0, end: date(2026, 10, 2, 0, c), c), "varios días")
+        XCTAssertFalse(CalendarGrid.isAllDay(start: d0, end: date(2026, 9, 30, 12, c), c), "medio día")
+        XCTAssertFalse(CalendarGrid.isAllDay(start: date(2026, 9, 30, 1, c), end: next, c), "no empieza a las 00:00")
+        XCTAssertFalse(CalendarGrid.isAllDay(start: d0, end: d0, c), "dura cero")
+        XCTAssertFalse(CalendarGrid.isAllDay(start: d0, end: date(2026, 10, 1, 12, c), c), "termina a mediodía")
+        // En la hora de quien mira: medianoche de Bogotá no es día completo visto desde Madrid.
+        let madrid = cal("Europe/Madrid")
+        XCTAssertFalse(CalendarGrid.isAllDay(start: d0, end: next, madrid))
+
+        // Orden: los de día completo antes que los de hora, en el día y en listas.
+        let list = try [gev("t8", conv: "g", date(2026, 9, 30, 8, c), date(2026, 9, 30, 9, c)),
+                        gev("all", conv: "g", d0, at2359),
+                        gev("t0", conv: "g", d0, date(2026, 9, 30, 1, c))]
+        XCTAssertEqual(CalendarGrid.events(list, on: d0, c).map(\.id), ["all", "t0", "t8"])
+        XCTAssertEqual(CalendarGrid.sorted(list, c).map(\.id), ["all", "t0", "t8"])
+    }
+
+    func testHiddenGroupsFilterLegendAndPersistence() throws {
+        let c = cal()
+        let a = "3a916cc9-0411-4068-be9d-f22075045494", b = "e1c94905-862f-4e70-9653-5d0e195910e9"
+        let list = try [gev("1", conv: a, date(2026, 9, 30, 8, c), date(2026, 9, 30, 9, c)),
+                        gev("2", conv: b, date(2026, 9, 30, 10, c), date(2026, 9, 30, 11, c)),
+                        gev("3", conv: a, date(2026, 9, 30, 12, c), date(2026, 9, 30, 13, c))]
+        XCTAssertEqual(AgendaHidden.legendIds(list), [a, b], "un grupo por color, en orden de aparición")
+        XCTAssertEqual(AgendaHidden.visible(list, hidden: []).map(\.id), ["1", "2", "3"])
+        var hidden = AgendaHidden.toggle(a, in: [])
+        XCTAssertEqual(hidden, [a])
+        XCTAssertEqual(AgendaHidden.visible(list, hidden: hidden).map(\.id), ["2"], "ocultar un grupo quita sus eventos")
+        XCTAssertEqual(AgendaHidden.legendIds(list), [a, b], "el oculto sigue en la leyenda para volver a mostrarlo")
+        hidden = AgendaHidden.toggle(b, in: hidden)
+        XCTAssertTrue(AgendaHidden.visible(list, hidden: hidden).isEmpty)
+        hidden = AgendaHidden.toggle(a, in: hidden)
+        XCTAssertEqual(hidden, [b], "tocar otra vez lo muestra")
+
+        let d = UserDefaults(suiteName: "agenda-\(UUID().uuidString)")!
+        XCTAssertEqual(AgendaHidden.load(d), [])
+        AgendaHidden.save(hidden, d)
+        XCTAssertEqual(AgendaHidden.load(d), [b], "se recuerda en UserDefaults")
+        AgendaHidden.save([], d)
+        XCTAssertEqual(AgendaHidden.load(d), [], "«Mostrar todos» limpia los ocultos")
+    }
 }

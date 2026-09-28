@@ -97,6 +97,8 @@ http {
             policies = [x.strip() for x in headers.splitlines() if x.startswith('referrer-policy:')]
             assert policies and all(x == 'referrer-policy: no-referrer' for x in policies), (path.split('?')[0], policies)
             checks.append({'path': '/api/hooks/[redacted]' if 'FAKE_' in path.split('?')[0] else path.split('?')[0], 'host': host, 'status': int(expected), 'noStore': True, 'noReferrer': True})
+        malformed = request('/api/%68ooks/local-id/FAKE_MALFORMED_REQUEST%ZZ')
+        assert malformed.splitlines()[0].split()[1] == '400'
         normal = request('/assets/fixture.js?normal=kept', referer='https://app.chaggu.com/ajustes?receipt=FAKE_REFERER_SECRET')
         assert 'referrer-policy: strict-origin-when-cross-origin' in normal
         request('/assets/fixture.js?other=kept', referer='https://app.chaggu.com/c/test?normal=kept')
@@ -104,14 +106,14 @@ http {
         request('/assets/fixture.js?encoded=kept', referer='https://app.chaggu.com/api/%68ooks/local-id/FAKE_REFERER_HOOK%ZZ')
         request('/assets/fixture.js?encoded-api=kept', referer='https://app.chaggu.com/%61pi%2Fhooks/local-id/FAKE_REFERER_PREFIX%ZZ')
         # Only synthetic local logs are inspected; never read production log contents.
-        access = (logs / 'tiecoms-app.access.log').read_text()
+        access = '\n'.join(p.read_text() for p in logs.glob('*access.log'))
         assert 'FAKE_' not in access
         assert '/assets/fixture.js?normal=kept HTTP/' in access
         assert 'https://app.chaggu.com/c/test?normal=kept' in access
         errors = '\n'.join(p.read_text() for p in logs.glob('*error.log'))
         assert 'FAKE_' not in errors
         print(json.dumps({'nginxSyntax': 'passed', 'containerImage': IMAGE, 'network': 'isolated local loopback',
-                          'routeChecks': checks, 'syntheticSecretsInAccessLogs': 0, 'syntheticSecretsInErrorLogs': 0,
+                          'routeChecks': checks, 'malformedEncodedHookStatus': 400, 'syntheticSecretsInAccessLogs': 0, 'syntheticSecretsInErrorLogs': 0,
                           'ordinaryQueryAndRefererPreserved': True}, indent=2))
     finally:
         command('docker', 'rm', '-f', NAME, check=False)

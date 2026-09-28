@@ -35,7 +35,7 @@ Microsoft uses the operation UUID as `transactionId`. Zoom has no equivalent key
 - Microsoft: `openid email offline_access https://graph.microsoft.com/Calendars.ReadWrite`. No email access is requested.
 - Zoom: user-level granular `meeting:write:meeting` for a new app, or existing `meeting:write` only if the actual app uses that legacy scope. No administrator or read scope is needed by the current implementation. Reconciliation does not list Zoom meetings or retry an uncertain POST. Verify the actual app configuration and real consent before release. [Zoom Create Meeting](https://developers.zoom.us/docs/isv/workflows/create-meeting/).
 
-Provider console configuration, consent, license availability and real meetings still require separate verification. Migration 029 adds pending confirmations and durable recovery metadata. Migration 030 preserves skipped unread history when the user sends a message; sending only advances an already caught-up cursor, including a new-history membership boundary.
+Provider console configuration, consent, license availability and real meetings still require separate verification. The existing `MEETINGS_ENABLED` switch is preserved and defaults to false. When off, start/callback/confirmation/create remain disabled and GET reads stored status without contacting a provider. Dedicated local fake-provider runs opt in with `MEETINGS_ENABLED=true`; this is not a production activation. Migration 029 adds pending confirmations and durable recovery metadata. Migration 030 preserves skipped unread history when the user sends a message; sending only advances an already caught-up cursor, including a new-history membership boundary.
 
 ## Focused local verification
 

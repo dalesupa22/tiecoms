@@ -12,7 +12,9 @@ extension AppStore {
     struct BlockedUsers: Decodable { let userIds: [String] }
 
     func loadBlockedUsers() async throws {
+        let stamp = sessionStamp
         let result: BlockedUsers = try await api.request("/blocks")
+        try requireSession(stamp)
         blockedUserIds = Set(result.userIds)
     }
 
@@ -147,24 +149,34 @@ extension AppStore {
         }.sorted { $0.remindAt < $1.remindAt }
     }
 
+    func canCacheIssue(_ issue: IssueDTO) -> Bool {
+        !issue.isPersonal || (me?.id != nil && issue.ownerId == me?.id)
+    }
+
     // MARK: Asuntos
 
     @discardableResult
     func loadIssues(workspaceId: String? = nil, conversationId: String? = nil, mine: Bool = false, open: Bool = false) async throws -> [IssueDTO] {
+        let stamp = sessionStamp
         var q: [String] = []
         if let workspaceId { q.append("workspaceId=\(workspaceId)") }
         if let conversationId { q.append("conversationId=\(conversationId)") }
         if mine { q.append("mine=1") }
         if open { q.append("open=1") }
         let r: ListOf<IssueDTO> = try await api.request("/issues?\(q.joined(separator: "&"))")
-        for i in r.items { issues[i.id] = i }
-        return r.items
+        try requireSession(stamp)
+        let visible = r.items.filter(canCacheIssue)
+        for i in visible { issues[i.id] = i }
+        return visible
     }
 
     @discardableResult
     func createIssue(conversationId: String, title: String, ownerId: String?, dueDate: String?, originMessageId: String?) async throws -> IssueDTO {
+        let stamp = sessionStamp
         let body: [String: Any] = ["title": title, "ownerId": ownerId ?? NSNull(), "dueDate": dueDate ?? NSNull(), "originMessageId": originMessageId ?? NSNull()]
         let i: IssueDTO = try await api.request("/conversations/\(conversationId)/issues", method: "POST", json: body)
+        try requireSession(stamp)
+        guard canCacheIssue(i) else { throw CancellationError() }
         issues[i.id] = i
         recountIssues(conversationId)
         return i
@@ -173,14 +185,20 @@ extension AppStore {
     /// Asunto personal (POST /issues): sin conversación y solo para mí; el servidor impone la privacidad.
     @discardableResult
     func createPersonalIssue(title: String, dueDate: String?) async throws -> IssueDTO {
+        let stamp = sessionStamp
         let i: IssueDTO = try await api.request("/issues", method: "POST", json: ["title": title, "dueDate": dueDate ?? NSNull()])
+        try requireSession(stamp)
+        guard canCacheIssue(i) else { throw CancellationError() }
         issues[i.id] = i
         return i
     }
 
     @discardableResult
     func updateIssue(_ id: String, _ patch: [String: Any]) async throws -> IssueDTO {
+        let stamp = sessionStamp
         let i: IssueDTO = try await api.request("/issues/\(id)", method: "PATCH", json: patch)
+        try requireSession(stamp)
+        guard canCacheIssue(i) else { throw CancellationError() }
         issues[i.id] = i
         recountIssues(i.conversationId)
         return i
@@ -189,6 +207,7 @@ extension AppStore {
     /// Cambia el estado de un asunto (pulsación larga en Grupos y en las listas): optimista y animado; si el API
     /// falla se revierte. Un asunto cerrado sale de las listas de activos y del conteo del grupo al instante.
     func setIssueStatus(_ id: String, _ status: IssueStatus) async throws {
+        let stamp = sessionStamp
         guard let prev = issues[id], prev.status != status else { return }
         var next = prev
         next.status = status
@@ -200,6 +219,7 @@ extension AppStore {
         do {
             try await updateIssue(id, ["status": status.rawValue])
         } catch {
+            try requireSession(stamp)
             withAnimation(.easeInOut(duration: 0.25)) {
                 issues[id] = prev
                 recountIssues(prev.conversationId)
@@ -209,14 +229,20 @@ extension AppStore {
     }
 
     func issueDetail(_ id: String) async throws -> IssueDetail {
+        let stamp = sessionStamp
         let r: IssueDetail = try await api.request("/issues/\(id)")
+        try requireSession(stamp)
+        guard canCacheIssue(r.issue), r.children.allSatisfy(canCacheIssue) else { throw CancellationError() }
         issues[r.issue.id] = r.issue
         for k in r.children { issues[k.id] = k }
         return r
     }
 
     func commentIssue(_ id: String, body: String) async throws {
+        let stamp = sessionStamp
         let i: IssueDTO = try await api.request("/issues/\(id)/comments", method: "POST", json: ["body": body])
+        try requireSession(stamp)
+        guard canCacheIssue(i) else { throw CancellationError() }
         issues[i.id] = i
     }
 
@@ -224,43 +250,55 @@ extension AppStore {
 
     @discardableResult
     func loadEvents(from: Date, to: Date, conversationId: String? = nil) async throws -> [CalendarEventDTO] {
+        let stamp = sessionStamp
         var q = "from=\(ISODate.string(from).addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")&to=\(ISODate.string(to).addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")"
         if let conversationId { q += "&conversationId=\(conversationId)" }
         let r: ListOf<CalendarEventDTO> = try await api.request("/events?\(q)")
+        try requireSession(stamp)
         for e in r.items { events[e.id] = e }
         return r.items
     }
 
     func loadEvent(_ id: String) async throws -> CalendarEventDTO {
+        let stamp = sessionStamp
         let e: CalendarEventDTO = try await api.request("/events/\(id)")
+        try requireSession(stamp)
         events[e.id] = e
         return e
     }
 
     @discardableResult
     func createEvent(conversationId: String, _ input: [String: Any]) async throws -> CalendarEventDTO {
+        let stamp = sessionStamp
         let e: CalendarEventDTO = try await api.request("/conversations/\(conversationId)/events", method: "POST", json: input)
+        try requireSession(stamp)
         events[e.id] = e
         return e
     }
 
     @discardableResult
     func updateEvent(_ id: String, _ patch: [String: Any]) async throws -> CalendarEventDTO {
+        let stamp = sessionStamp
         let e: CalendarEventDTO = try await api.request("/events/\(id)", method: "PATCH", json: patch)
+        try requireSession(stamp)
         events[e.id] = e
         return e
     }
 
     @discardableResult
     func cancelEvent(_ id: String) async throws -> CalendarEventDTO {
+        let stamp = sessionStamp
         let e: CalendarEventDTO = try await api.request("/events/\(id)", method: "DELETE")
+        try requireSession(stamp)
         events[e.id] = e
         return e
     }
 
     @discardableResult
     func rsvp(_ id: String, _ answer: Rsvp) async throws -> CalendarEventDTO {
+        let stamp = sessionStamp
         let e: CalendarEventDTO = try await api.request("/events/\(id)/rsvp", method: "POST", json: ["rsvp": answer.rawValue])
+        try requireSession(stamp)
         events[e.id] = e
         return e
     }
@@ -731,10 +769,13 @@ extension AppStore {
     @discardableResult
     func createChildIssue(_ parentId: String, title: String, ownerId: String?, dueDate: String? = nil, visibility: IssueVisibility,
                           viewerIds: [String] = [], conversationId: String? = nil) async throws -> IssueDTO {
+        let stamp = sessionStamp
         var body: [String: Any] = ["title": title, "ownerId": ownerId ?? NSNull(), "dueDate": dueDate ?? NSNull(), "visibility": visibility.rawValue]
         if !viewerIds.isEmpty { body["viewerIds"] = viewerIds }
         if let conversationId { body["conversationId"] = conversationId }
         let i: IssueDTO = try await api.request("/issues/\(parentId)/children", method: "POST", json: body)
+        try requireSession(stamp)
+        guard canCacheIssue(i) else { throw CancellationError() }
         issues[i.id] = i
         recountIssues(i.conversationId)
         return i

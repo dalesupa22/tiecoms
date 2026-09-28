@@ -567,7 +567,7 @@ struct IssuesScreen: View {
                 let visible = Set(d.conversations.map(\.id))
                 // Los restringidos pueden ser de un chat que no leo (me asignaron una tarea): el servidor ya filtró.
                 // Los personales (sin chat) son míos: el servidor solo me los manda a mí.
-                let scoped = store.issues.values.filter { $0.conversationId.map(visible.contains) ?? true || $0.isRestricted }
+                let scoped = store.issues.values.filter { store.canCacheIssue($0) && ($0.conversationId.map(visible.contains) ?? true || $0.isRestricted) }
                 let list = IssueTree.filter(Array(scoped), filter, me: d.me.id)
                     .sorted(by: filter == .closed ? IssueSort.recentlyClosed : IssueSort.order)
                 let groupBy = IssueTree.GroupBy(rawValue: groupByRaw) ?? .group

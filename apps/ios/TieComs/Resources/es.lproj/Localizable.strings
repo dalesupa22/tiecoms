@@ -1844,3 +1844,9 @@
 "ws.onlyYours" = "Solo ves los grupos en los que participas; los demás no revelan su nombre.";
 "ws.participants" = "Participantes";
 "ws.yourGroups" = "Tus grupos en este espacio";
+
+"chat.ios.unreadRetry" = "No se pudo ubicar el primer pendiente. Nada se marcó como leído. Toca para reintentar.";
+"meet.ios.pendingHint" = "Esta reunión espera confirmación. Sus datos están guardados: reintenta para comprobar la misma operación sin crear otra reunión.";
+"meet.ios.network" = "No se pudo confirmar el resultado. Reintenta esta misma reunión para consultar su estado; no crees otra.";
+"meet.ios.storage" = "No se puede recuperar o guardar la reunión pendiente en este dispositivo. No se enviará otra creación.";
+"chat.ios.readRetry" = "No se pudo confirmar la lectura. Los pendientes se conservan. Toca para reintentar.";

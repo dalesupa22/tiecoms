@@ -113,8 +113,9 @@ final class TreeReadTests: XCTestCase {
         try dec(MessageDTO.self, #"{"id":"m\#(seq)","conversationId":"\#(conv)","seq":\#(seq),"authorId":"bo","kind":"text","body":"hola","createdAt":"2026-09-27T10:00:00.000Z"\#(mention ? #","mentions":[{"userId":"me","start":0,"length":4}]"# : "")}"#)
     }
 
-    func testPartialReadOnlyAdvancesToWhatWasSeen() throws {
-        let s = AppStore(baseURL: URL(string: "http://127.0.0.1:9")!, secrets: MemorySecretStore(), outbox: OutboxStore(directory: tempDir()), feedback: nil)
+    func testPartialReadOnlyAdvancesToWhatWasSeen() async throws {
+        let s = try ControlledURLProtocol.store(user: "me")
+        ControlledURLProtocol.handler = { $0.respond("{}") }
         var d = try boot()
         let i = try XCTUnwrap(d.conversations.firstIndex { $0.id == "gen" })
         // 70 mensajes, leídos hasta el 30, con una mención en el 55 (fuera de la primera pantalla).
@@ -122,14 +123,141 @@ final class TreeReadTests: XCTestCase {
         let msgs = try (21...70).map { try message("gen", $0, mention: $0 == 55) }
         s.seedForTesting(d, conversations: ["gen": ConversationState(messages: msgs, lastEventSeq: 70, hasMore: true, loaded: true)])
         s.markRead("gen", upTo: 38)
+        XCTAssertEqual(s.meta("gen")?.lastReadSeq, 30, "not acknowledged yet")
+        await s.waitForReadForTesting("gen")
         XCTAssertEqual(s.meta("gen")?.lastReadSeq, 38)
         XCTAssertEqual(s.meta("gen")?.unread, 32, "lo que no se vio sigue sin leer")
         XCTAssertEqual(s.meta("gen")?.unreadMentions, 1, "la mención del 55 no se vio")
         s.markRead("gen", upTo: 35)
         XCTAssertEqual(s.meta("gen")?.lastReadSeq, 38, "nunca retrocede")
         s.markRead("gen", upTo: 60)
+        await s.waitForReadForTesting("gen")
         XCTAssertEqual(s.meta("gen")?.unreadMentions, 0, "ya pasó la mención")
         s.markRead("gen")
+        await s.waitForReadForTesting("gen")
         XCTAssertEqual(s.meta("gen")?.unread, 0)
+    }
+}
+
+extension TreeReadTests {
+    func testVisibleCursorCannotSkipUnseenMessagesWhenJumpingToMentionOrBottom() throws {
+        let messages = try (1...12).map { try message("gen", $0, mention: $0 == 10) }
+        XCTAssertEqual(ChatNav.visibleReadCursor(messages, after: 1, seen: [10, 11, 12], me: "me"), 1)
+        XCTAssertEqual(ChatNav.visibleReadCursor(messages, after: 1, seen: [2, 3, 4, 10, 11, 12], me: "me"), 4)
+        XCTAssertEqual(ChatNav.visibleReadCursor(messages, after: 4, seen: Set(5...12), me: "me"), 12)
+        XCTAssertFalse(ChatNav.isVisible(midY: -5, viewport: 800), "a row above the viewport was not seen")
+        XCTAssertFalse(ChatNav.isVisible(midY: 850, viewport: 800))
+        XCTAssertTrue(ChatNav.isVisible(midY: 400, viewport: 800))
+    }
+
+    func testFirstUnreadPaginatesBeyondThreePagesAndNeverMarksRead() async throws {
+        let s = try ControlledURLProtocol.store(user: "me")
+        var d = try boot(); d.conversations[0].lastReadSeq = 1; d.conversations[0].unread = 309; d.conversations[0].lastMessageSeq = 310
+        s.seedForTesting(d, conversations: ["gen": ConversationState(messages: try (261...310).map { try message("gen", $0) }, lastEventSeq: 310, hasMore: true, loaded: true)])
+        var pages = 0
+        ControlledURLProtocol.handler = { req in
+            Task { @MainActor in
+                pages += 1
+                let before = Int(URLComponents(url: req.request.url!, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "before" }!.value!)!
+                let low = max(1, before - 50)
+                let rows = (low..<before).map { #"{"id":"m\#($0)","conversationId":"gen","seq":\#($0),"authorId":"bo","kind":"text","body":"Synthetic"}"# }.joined(separator: ",")
+                req.respond(#"{"messages":[\#(rows)],"hasMore":\#(low > 1),"lastEventSeq":310}"#)
+            }
+        }
+        let first = try await s.firstUnreadMessage("gen", snapshot: .init(lastReadSeq: 1, unread: 309))
+        XCTAssertEqual(first?.seq, 2)
+        XCTAssertEqual(pages, 6)
+        XCTAssertEqual(s.meta("gen")?.lastReadSeq, 1)
+        XCTAssertEqual(s.meta("gen")?.unread, 309)
+    }
+
+    func testFailedRepeatedOrMissingHistoryFailsClosedAndCanRetry() async throws {
+        for mode in ["network", "repeated", "gap"] {
+            let s = try ControlledURLProtocol.store(user: "me")
+            var d = try boot(); d.conversations[0].lastReadSeq = 1; d.conversations[0].unread = 49; d.conversations[0].lastMessageSeq = 50
+            s.seedForTesting(d, conversations: ["gen": ConversationState(messages: try (41...50).map { try message("gen", $0) }, lastEventSeq: 50, hasMore: true, loaded: true)])
+            ControlledURLProtocol.handler = { req in
+                if mode == "network" { req.respond(503, #"{"error":{"code":"offline","message":"offline"}}"#) }
+                else if mode == "repeated" { req.respond(#"{"messages":[{"id":"m41","seq":41}],"hasMore":true}"#) }
+                else { req.respond(#"{"messages":[{"id":"m1","seq":1,"authorId":"bo"},{"id":"m3","seq":3,"authorId":"bo"}],"hasMore":false}"#) }
+            }
+            do { _ = try await s.firstUnreadMessage("gen", snapshot: .init(lastReadSeq: 1, unread: 49)); XCTFail(mode) } catch {}
+            XCTAssertEqual(s.meta("gen")?.lastReadSeq, 1)
+            XCTAssertEqual(s.meta("gen")?.unread, 49)
+            XCTAssertFalse(s.conversations["gen"]!.loading)
+        }
+    }
+}
+
+extension TreeReadTests {
+    func testReadFailurePreservesUnreadAndRetryOnlyAcknowledgesItsFixedCandidate() async throws {
+        let s = try ControlledURLProtocol.store(user: "me")
+        var d = try boot(); d.conversations[0].lastReadSeq = 30; d.conversations[0].lastMessageSeq = 70; d.conversations[0].unread = 40
+        s.seedForTesting(d)
+        ControlledURLProtocol.handler = { $0.respond(403, #"{"error":{"code":"forbidden","message":"denied"}}"#) }
+        s.markRead("gen", upTo: 38)
+        await s.waitForReadForTesting("gen")
+        XCTAssertEqual(s.meta("gen")?.lastReadSeq, 30)
+        XCTAssertEqual(s.meta("gen")?.unread, 40)
+        XCTAssertTrue(s.readFailures.contains("gen"))
+        var sentSeq: Int?
+        ControlledURLProtocol.handler = { req in Task { @MainActor in sentSeq = req.json["seq"] as? Int; req.respond("{}") } }
+        s.markRead("gen", upTo: 38)
+        s.patchMeta("gen") { $0.lastMessageSeq = 71; $0.unread = 41 }
+        await s.waitForReadForTesting("gen")
+        XCTAssertEqual(sentSeq, 38)
+        XCTAssertEqual(s.meta("gen")?.lastReadSeq, 38)
+        XCTAssertEqual(s.meta("gen")?.unread, 33, "new arrivals remain unread")
+        XCTAssertFalse(s.readFailures.contains("gen"))
+    }
+
+    func testOnlyOwnSystemAndDeletedHistoryCanFinishWithoutInventingAnUnreadRow() async throws {
+        let s = try ControlledURLProtocol.store(user: "me")
+        var d = try boot(); d.conversations[0].lastReadSeq = 0; d.conversations[0].lastMessageSeq = 3; d.conversations[0].unread = 3
+        let messages = try [
+            #"{"id":"m1","seq":1,"authorId":"me","kind":"text"}"#,
+            #"{"id":"m2","seq":2,"authorId":"bo","kind":"system"}"#,
+            #"{"id":"m3","seq":3,"authorId":"bo","kind":"text","deletedAt":"2026-09-28T00:00:00Z"}"#
+        ].map { try dec(MessageDTO.self, $0) }
+        s.seedForTesting(d, conversations: ["gen": ConversationState(messages: messages, lastEventSeq: 3, hasMore: false, loaded: true)])
+        let first = try await s.firstUnreadMessage("gen", snapshot: .init(lastReadSeq: 0, unread: 3))
+        XCTAssertNil(first)
+        XCTAssertEqual(s.meta("gen")?.lastReadSeq, 0, "positioning never acknowledges by itself")
+        XCTAssertEqual(ChatNav.visibleReadCursor(messages, after: 0, seen: [], me: "me"), 3)
+    }
+
+    func testLogoutCancelsHeldReadWithoutChangingNextAccount() async throws {
+        let s = try ControlledURLProtocol.store(user: "me")
+        var d = try boot(); d.conversations[0].lastReadSeq = 30; d.conversations[0].lastMessageSeq = 70; d.conversations[0].unread = 40
+        s.seedForTesting(d)
+        let started = expectation(description: "read retained")
+        var held: ControlledURLProtocol?
+        ControlledURLProtocol.handler = { req in Task { @MainActor in held = req; started.fulfill() } }
+        s.markRead("gen", upTo: 38)
+        await fulfillment(of: [started], timeout: 2)
+        await s.signOutLocally()
+        s.seedForTesting(try ControlledURLProtocol.boot("b"))
+        // A cancelled URLSession task may already have accepted the server's result; neither result can touch B.
+        held = nil
+        XCTAssertNil(s.meta("gen"))
+        XCTAssertTrue(s.readFailures.isEmpty)
+    }
+}
+
+extension TreeReadTests {
+    func testExplicitTreeReadOnlyAppliesConfirmedRowsOnOldServerPartialFailure() async throws {
+        let s = try ControlledURLProtocol.store(user: "me")
+        s.seedForTesting(try boot())
+        ControlledURLProtocol.handler = { req in
+            let path = req.request.url!.path
+            if path.hasSuffix("read-tree") { req.respond(404, #"{"error":{"code":"not_found","message":"old server"}}"#) }
+            else if path.contains("/diag/") { req.respond(403, #"{"error":{"code":"forbidden","message":"denied"}}"#) }
+            else { req.respond("{}") }
+        }
+        do { try await s.markTreeRead("gen"); XCTFail() } catch {}
+        XCTAssertEqual(s.meta("dec")?.lastReadSeq, 6)
+        XCTAssertEqual(s.meta("diag")?.lastReadSeq, 0)
+        XCTAssertEqual(s.meta("diag")?.unread, 5)
+        XCTAssertEqual(s.meta("side")?.unread, 3, "sidechats are outside the explicit group action")
     }
 }

@@ -212,10 +212,14 @@ final class Tanda166IntegrationTests: XCTestCase {
     }
     /// Conectar con el MOCK: POST /meetings/connect → auth del MOCK → callback del API → chaggu://meetings/connected.
     private func mockConnect(_ s: AppStore, _ p: MeetingProvider) async throws -> MeetingCallback? {
-        let r: AppStore.UrlResult = try await s.api.request("/meetings/connect/\(p.rawValue)", method: "POST", json: ["platform": "ios", "redirectScheme": "chaggu"])
+        let flow = MeetingAuthorization(stamp: s.sessionStamp, provider: p, connector: MeetingConnector())
+        s.meetingAuthorization = flow
+        defer { s.cancelMeetingAuthorization() }
+        let r: AppStore.UrlResult = try await s.api.request("/meetings/connect/\(p.rawValue)", method: "POST", json: ["platform": "ios", "redirectScheme": "chaggu", "proofChallenge": flow.proof.challenge])
         let back = try await location(try await location(try XCTUnwrap(URL(string: r.url))))
-        XCTAssertEqual(back.scheme, "chaggu", "vuelve a la app nativa: \(back)")
-        return MeetingCallback.parse(back)
+        XCTAssertEqual(back.scheme, "chaggu")
+        let callback = try XCTUnwrap(MeetingCallback.parse(back))
+        return try await s.confirmMeetingCallback(callback, flow: flow)
     }
 
     func test5MeetingsWithMockProvider() async throws {

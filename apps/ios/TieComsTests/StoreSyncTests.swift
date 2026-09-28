@@ -145,3 +145,14 @@ final class StoreSyncTests: XCTestCase {
         XCTAssertEqual(store.workspaceFilter, "w1")
     }
 }
+
+extension StoreSyncTests {
+    func testOwnMessageDoesNotReadEarlierPendingMessagesOrMissingSequences() {
+        store.onConversationEvent(created("c1", 6, seq: 3), live: true)
+        store.onConversationEvent(created("c1", 7, seq: 4, author: "me"), live: true)
+        XCTAssertEqual(store.meta("c1")?.lastReadSeq, 2)
+        XCTAssertGreaterThan(store.meta("c1")?.unread ?? 0, 0)
+        store.onConversationEvent(created("c2", 1, seq: 3, author: "me"), live: true)
+        XCTAssertEqual(store.meta("c2")?.lastReadSeq, 0, "missing seqs 1 and 2 cannot be assumed seen")
+    }
+}

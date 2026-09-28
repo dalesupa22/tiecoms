@@ -624,6 +624,7 @@ struct ApiErrorBody: Decodable {
     var details: [ErrorDetail]
     /// details.userIds (p. ej. side_outsider: quienes no se pueden sumar).
     var userIds: [String]
+    var meetingId: String?
     struct ErrorDetail: Decodable { var path: String? }
     init(from decoder: Decoder) throws {
         let root = try container(decoder)
@@ -631,6 +632,7 @@ struct ApiErrorBody: Decodable {
         code = c.v("code", "")
         message = c.v("message", "")
         details = c.v("details", [])
+        meetingId = (try? c.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey("details")))?.o("meetingId")
         userIds = ((try? c.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey("details")))?.v("userIds", [String]())) ?? []
     }
 }

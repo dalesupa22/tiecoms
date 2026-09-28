@@ -29,10 +29,10 @@ private struct ChatContentBottomKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
-/// Mayor seq de los mensajes no leídos que ya pasaron por la pantalla (el cursor de lectura solo avanza hasta ahí).
+/// Secuencias de filas cuyo centro está dentro de la pantalla; estar por encima no cuenta como visto.
 private struct ChatSeenSeqKey: PreferenceKey {
-    static let defaultValue = 0
-    static func reduce(value: inout Int, nextValue: () -> Int) { value = max(value, nextValue()) }
+    static let defaultValue: Set<Int> = []
+    static func reduce(value: inout Set<Int>, nextValue: () -> Set<Int>) { value.formUnion(nextValue()) }
 }
 private struct ChatDividerYKey: PreferenceKey {
     static let defaultValue: CGFloat? = nil
@@ -125,6 +125,7 @@ struct ConversationView: View {
     // 1.6.4 · Navegar un chat largo (SPEC-bandeja D).
     /// Lo no leído al abrir (antes de marcar leído); la línea «N mensajes nuevos» queda hasta salir del chat.
     @State private var unreadSnap: ChatNav.Snapshot?
+    @State private var readingSession: AppStore.SessionStamp?
     /// Primer mensaje no leído (la línea va justo antes).
     @State private var dividerId: String?
     /// Ya se colocó el chat al abrir (en el primer no leído o al final).
@@ -138,10 +139,14 @@ struct ConversationView: View {
     /// Menciones a mí sin leer al abrir, por visitar con el botón «@».
     @State private var mentionQueue: [String] = []
     @State private var viewportHeight: CGFloat = 0
-    /// Al final del chat (a menos de 40 pt): todo lo cargado está a la vista.
+    /// Al final del chat (a menos de 40 pt); esto no implica que se hayan visto las filas anteriores.
     @State private var atBottom = false
-    /// Mayor seq no leído a la vista ahora (o ya pasado): abrir o recorrer una parte no marca lo que no se vio.
-    @State private var seenSeq = 0
+    /// Filas visibles y visitadas desde la colocación inicial, sin saltar huecos del cursor.
+    @State private var visibleSeqs: Set<Int> = []
+    @State private var seenSeqs: Set<Int> = []
+    @State private var readPauseID: UUID?
+    @State private var positioning = false
+    @State private var positioningFailed = false
 
     var body: some View {
         Group {
@@ -419,6 +424,7 @@ struct ConversationView: View {
                             .padding(8)
                             .accessibilityLabel(L("chat.loadingOlder"))
                             .onAppear {
+                                guard positioned, !positioning else { return }
                                 let anchor = state.messages.first?.id
                                 Task {
                                     await store.loadOlder(conversationId)
@@ -440,7 +446,7 @@ struct ConversationView: View {
                                 if let seq = trackedSeq(item) {
                                     GeometryReader { g in
                                         Color.clear.preference(key: ChatSeenSeqKey.self,
-                                                               value: viewportHeight > 0 && g.frame(in: .named("chat.scroll")).midY < viewportHeight ? seq : 0)
+                                                               value: ChatNav.isVisible(midY: g.frame(in: .named("chat.scroll")).midY, viewport: viewportHeight) ? [seq] : [])
                                     }
                                 }
                             }
@@ -459,12 +465,9 @@ struct ConversationView: View {
                     .onAppear { viewportHeight = g.size.height }
                     .onChange(of: g.size.height) { _, h in viewportHeight = h }
             })
-            .onPreferenceChange(ChatSeenSeqKey.self) { seq in
-                // El último valor (no el máximo): antes de colocar el chat en el primer no leído la vista está un
-                // instante al final, y eso no cuenta como visto.
-                let grew = seq > seenSeq
-                seenSeq = seq
-                if grew && positioned { markReadIfVisible() }
+            .onPreferenceChange(ChatSeenSeqKey.self) { seqs in
+                visibleSeqs = seqs
+                if positioned { markReadIfVisible() }
             }
             .onPreferenceChange(ChatContentBottomKey.self) { maxY in
                 let far = ChatNav.showsJumpToLatest(distanceFromBottom: maxY - viewportHeight, viewport: viewportHeight)
@@ -484,7 +487,18 @@ struct ConversationView: View {
             }
             .overlay(alignment: .bottomTrailing) { jumpButtons(d, proxy) }
             .overlay(alignment: .top) {
-                if let n = unreadSnap?.unread, n > 0, dividerId != nil, dividerAbove {
+                if positioningFailed {
+                    Button { Task { await positionAtFirstUnread(proxy) } } label: {
+                        Label(L("chat.ios.unreadRetry"), systemImage: "arrow.clockwise").font(.footnote).padding(10)
+                            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
+                    }.accessibilityIdentifier("chat.retryUnread")
+                } else if store.readFailures.contains(conversationId) {
+                    Button { markReadIfVisible() } label: {
+                        Label(L("chat.ios.readRetry"), systemImage: "arrow.clockwise").font(.footnote).padding(10)
+                            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
+                    }.accessibilityIdentifier("chat.retryRead")
+                } else if positioning { ProgressView().padding(10).background(Theme.surface) }
+                else if let n = unreadSnap?.unread, n > 0, dividerId != nil, dividerAbove {
                     Button { jump(proxy, to: ChatNavIds.divider, anchor: .top) } label: {
                         Text(L("chat.newAbove", ["n": n])).font(.footnote.weight(.semibold)).foregroundStyle(.white)
                             .padding(.horizontal, 12).padding(.vertical, 6)
@@ -500,7 +514,7 @@ struct ConversationView: View {
             }
             .animation(.easeInOut(duration: 0.2), value: farFromBottom)
             .animation(.easeInOut(duration: 0.2), value: dividerAbove)
-            // Al abrir: si hay no leídos, al primero (cargando hasta 3 páginas antiguas) con la línea «N mensajes nuevos».
+            // Al abrir: si hay no leídos, al primero (cargando todas las páginas necesarias) con la línea «N mensajes nuevos».
             .task(id: state.loaded) {
                 guard state.loaded, !positioned else { return }
                 await positionAtFirstUnread(proxy)
@@ -511,6 +525,9 @@ struct ConversationView: View {
             // ?m=<seq>: cargar hacia atrás hasta el mensaje, centrarlo y resaltarlo.
             .task(id: store.jumpTo[conversationId]) {
                 guard let seq = store.jumpTo[conversationId] else { return }
+                let pause = UUID()
+                readPauseID = pause
+                defer { if readPauseID == pause { readPauseID = nil } }
                 if let id = await store.ensureMessage(conversationId, seq: seq) {
                     do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
                     guard store.jumpTo[conversationId] == seq else { return }
@@ -607,13 +624,15 @@ struct ConversationView: View {
         m.kind == "text" && m.deletedAt == nil && !Naming.isSide(c) && !embedded
     }
 
-    /// Avanza el cursor de lectura solo con lo que se vio: todo si estoy al final; si no, hasta el último mensaje no
-    /// leído que pasó por la pantalla. Antes de colocar el chat (en el primer no leído) no se marca nada.
+    /// Avanza sólo por una secuencia continua de filas vistas. Los saltos y el final no borran pendientes intermedios.
     private func markReadIfVisible() {
         guard scenePhase == .active, store.openConversationId == conversationId else { return }
         snapshotUnread()
-        guard positioned else { return }
-        if atBottom { store.markRead(conversationId) } else if seenSeq > 0 { store.markRead(conversationId, upTo: seenSeq) }
+        guard positioned, readPauseID == nil, readingSession == store.sessionStamp else { return }
+        seenSeqs.formUnion(visibleSeqs)
+        guard let c = store.meta(conversationId), let state = store.conversations[conversationId] else { return }
+        let cursor = ChatNav.visibleReadCursor(state.messages, after: max(c.lastReadSeq, c.historyFromSeq), seen: seenSeqs, me: store.me?.id ?? "")
+        if cursor > c.lastReadSeq { store.markRead(conversationId, upTo: cursor) }
     }
 
     /// Seq de una fila que cuenta para el cursor (mensajes y avisos posteriores a lo leído al abrir).
@@ -627,31 +646,33 @@ struct ConversationView: View {
     /// Guarda lo no leído al abrir, una vez y antes de marcar leído.
     private func snapshotUnread() {
         guard unreadSnap == nil, let c = store.meta(conversationId) else { return }
+        readingSession = store.sessionStamp
         unreadSnap = .init(lastReadSeq: c.lastReadSeq, unread: c.unread)
     }
 
     private func positionAtFirstUnread(_ proxy: ScrollViewProxy) async {
-        let me = store.data?.me.id ?? ""
-        defer {
+        guard !positioning else { return }
+        snapshotUnread()
+        guard let snap = unreadSnap else { return }
+        let retry = positioningFailed
+        positioning = true; positioningFailed = false; positioned = false; seenSeqs = []
+        defer { positioning = false }
+        do {
+            if retry { try await store.openConversation(conversationId, force: true) }
+            let first = try await store.firstUnreadMessage(conversationId, snapshot: snap)
+            if let first {
+                dividerId = first.id
+                mentionQueue = ChatNav.mentionIds(store.conversations[conversationId]?.messages ?? [], after: first.seq - 1, me: store.me?.id ?? "")
+                try await Task.sleep(nanoseconds: 200_000_000)
+                proxy.scrollTo(ChatNavIds.divider, anchor: .top)
+            }
+            try await Task.sleep(nanoseconds: 350_000_000)
             positioned = true
-            // Ya colocado: se marca lo que quedó a la vista (y nada más).
-            Task { try? await Task.sleep(nanoseconds: 350_000_000); markReadIfVisible() }
+            bottomSeq = store.conversations[conversationId]?.messages.last?.seq ?? 0
+            markReadIfVisible()
+        } catch {
+            if !Task.isCancelled { positioningFailed = true }
         }
-        bottomSeq = store.conversations[conversationId]?.messages.last?.seq ?? 0
-        guard let snap = unreadSnap, snap.unread > 0 else { return }
-        var pages = 0
-        while pages < ChatNav.maxOlderPages, let st = store.conversations[conversationId],
-              ChatNav.needsOlder(st.messages, snapshot: snap, me: me, hasMore: st.hasMore) {
-            await store.loadOlder(conversationId)
-            pages += 1
-        }
-        guard let st = store.conversations[conversationId],
-              let idx = ChatNav.firstUnreadIndex(st.messages, snapshot: snap, me: me, hasMore: st.hasMore) else { return }
-        let first = st.messages[idx]
-        dividerId = first.id
-        mentionQueue = ChatNav.mentionIds(Array(st.messages[idx...]), after: first.seq - 1, me: me)
-        try? await Task.sleep(nanoseconds: 200_000_000)
-        proxy.scrollTo(ChatNavIds.divider, anchor: .top)
     }
 
     /// Botones flotantes sobre el compositor: «@» (siguiente mención sin leer) y ⌄ «Ir al final» con los nuevos.
@@ -693,12 +714,16 @@ struct ConversationView: View {
 
     /// Salto animado; en una LazyVStack larga la animación se queda corta (alturas estimadas): se remata sin animar.
     private func jump(_ proxy: ScrollViewProxy, to id: String, anchor: UnitPoint) {
+        let pause = UUID()
+        readPauseID = pause
         withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(id, anchor: anchor) }
         Task {
             for _ in 0..<2 {
                 try? await Task.sleep(nanoseconds: 350_000_000)
                 proxy.scrollTo(id, anchor: anchor)
             }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            if readPauseID == pause { readPauseID = nil; markReadIfVisible() }
         }
     }
 

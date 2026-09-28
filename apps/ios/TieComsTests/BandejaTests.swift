@@ -117,14 +117,13 @@ final class BandejaTests: XCTestCase {
         XCTAssertNil(ChatNav.firstUnreadIndex(ms, snapshot: s, me: "me", hasMore: true))
         XCTAssertTrue(ChatNav.needsOlder(ms, snapshot: s, me: "me", hasMore: true))
         XCTAssertFalse(ChatNav.needsOlder(ms, snapshot: s, me: "me", hasMore: false), "sin más páginas: el primero cargado")
-        XCTAssertEqual(ChatNav.firstUnreadIndex(ms, snapshot: s, me: "me", hasMore: false), 0)
-        XCTAssertEqual(ChatNav.maxOlderPages, 3)
+        XCTAssertNil(ChatNav.firstUnreadIndex(ms, snapshot: s, me: "me", hasMore: false), "a missing history boundary must fail closed")
     }
 
-    func testFirstUnreadFallbackUsesLastNWhenLastReadUnknown() {
+    func testFirstUnreadStartsAtCursorWhenCountDisagrees() {
         let ms = [msg(1), msg(2), msg(3, "me"), msg(4), msg(5)]
         let i = ChatNav.firstUnreadIndex(ms, snapshot: .init(lastReadSeq: 0, unread: 2), me: "me")
-        XCTAssertEqual(i.map { ms[$0].seq }, 4, "los últimos `unread` mensajes de otros")
+        XCTAssertEqual(i.map { ms[$0].seq }, 1, "a count must not skip unseen messages")
     }
 
     func testUnreadMentionsAndJumpThreshold() {

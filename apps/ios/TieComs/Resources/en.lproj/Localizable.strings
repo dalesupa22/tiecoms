@@ -1844,3 +1844,9 @@
 "ws.onlyYours" = "You only see the groups you are in; the others do not reveal their name.";
 "ws.participants" = "Participants";
 "ws.yourGroups" = "Your groups in this space";
+
+"chat.ios.unreadRetry" = "Could not locate the first unread message. Nothing was marked as read. Tap to retry.";
+"meet.ios.pendingHint" = "This meeting is awaiting confirmation. Its details are saved: retry to check the same operation without creating another meeting.";
+"meet.ios.network" = "The result could not be confirmed. Retry this same meeting to check its status; do not create another one.";
+"meet.ios.storage" = "The pending meeting could not be recovered or saved on this device. Another creation will not be sent.";
+"chat.ios.readRetry" = "Read status could not be confirmed. Unread messages are preserved. Tap to retry.";

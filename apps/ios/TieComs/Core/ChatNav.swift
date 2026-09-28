@@ -9,22 +9,33 @@ enum ChatNav {
         var unread: Int
     }
 
-    /// Máximo de páginas antiguas que se cargan para llegar al primer no leído (si no, se abre al final).
-    static let maxOlderPages = 3
+    enum PositionError: Error { case historyGap }
 
-    /// Índice del primer mensaje no leído en `messages` (orden por seq), o nil si no hay o no está cargado.
-    /// Con `lastReadSeq` > 0: el primero después de él que no es mío ni de sistema. Sin él: los últimos `unread`.
-    /// `hasMore`: hay mensajes más antiguos sin cargar (entonces un primer mensaje cargado ya no leído no basta).
-    static func firstUnreadIndex(_ messages: [MessageDTO], snapshot s: Snapshot, me: String, hasMore: Bool = false) -> Int? {
-        guard s.unread > 0, !messages.isEmpty else { return nil }
-        let counted = messages.indices.filter { !messages[$0].isSystem && messages[$0].authorId != me }
-        if s.lastReadSeq > 0 {
-            // El primer no leído no está cargado todavía: lo cargado empieza después de lo leído y hay más atrás.
-            if hasMore, let first = messages.first, first.seq > s.lastReadSeq + 1 { return nil }
-            return counted.first(where: { messages[$0].seq > s.lastReadSeq })
+    /// A numeric read cursor cannot skip an unseen row, even after jumping to a mention or the bottom.
+    static func visibleReadCursor(_ messages: [MessageDTO], after cursor: Int, seen: Set<Int>, me: String) -> Int {
+        var result = cursor
+        for m in messages where m.seq > cursor {
+            guard m.seq == result + 1 else { break }
+            guard seen.contains(m.seq) || m.isSystem || m.deletedAt != nil || m.authorId == me else { break }
+            result = m.seq
         }
-        guard counted.count >= s.unread else { return hasMore ? nil : counted.first }
-        return counted[counted.count - s.unread]
+        return result
+    }
+
+    static func isVisible(midY: CGFloat, viewport: CGFloat) -> Bool { viewport > 0 && midY >= 0 && midY < viewport }
+
+
+    /// The unread boundary must be loaded without gaps; a count never proves that an older message was seen.
+    static func firstUnreadIndex(_ messages: [MessageDTO], snapshot s: Snapshot, me: String, hasMore: Bool = false) -> Int? {
+        guard s.unread > 0 else { return nil }
+        var cursor = s.lastReadSeq
+        for index in messages.indices where messages[index].seq > cursor {
+            let message = messages[index]
+            guard message.seq == cursor + 1 else { return nil }
+            cursor = message.seq
+            if !message.isSystem && message.deletedAt == nil && message.authorId != me { return index }
+        }
+        return nil
     }
 
     /// ¿Hay que cargar mensajes más antiguos para llegar al primer no leído?

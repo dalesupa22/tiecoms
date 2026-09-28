@@ -18,7 +18,8 @@ struct MeetingSheet: View {
     @State private var startsAt = MeetingSheet.nextSlot()
     @State private var duration = 30
     @State private var title = ""
-    @State private var idem = MeetingIdempotency()
+    private var pendingAttempt: MeetingAttempt? { store.meetingAttempts[conversationId] }
+    private var creating: Bool { pendingAttempt?.inFlight == true }
     @State private var error: MeetingError?
     @State private var connecting = false
     @State private var created: MeetingDTO?
@@ -43,15 +44,20 @@ struct MeetingSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(L(created == nil ? "common.cancel" : "common.close")) { dismiss() }.disabled(idem.inFlight)
+                    Button(L(created == nil ? "common.cancel" : "common.close")) { dismiss() }.disabled(creating)
                 }
             }
-            .interactiveDismissDisabled(idem.inFlight)
+            .interactiveDismissDisabled(creating)
             .task { await reload() }
             .onChange(of: store.meetingsRevision) { _, _ in Task { await reload() } }
+            .onDisappear { store.cancelMeetingAuthorization() }
+            .onChange(of: store.me?.id) { _, _ in connections = []; created = nil; error = nil; dismiss() }
             .onAppear {
                 instant = now
-                if title.isEmpty, let d = store.data, let c = store.meta(conversationId) { title = L("meet.defaultTitle", ["name": Naming.title(d, c)]) }
+                if let p = pendingAttempt?.payload {
+                    provider = p.provider; title = p.title; instant = p.startsAt == nil
+                    startsAt = p.startsAt ?? startsAt; duration = p.durationMin
+                } else if title.isEmpty, let d = store.data, let c = store.meta(conversationId) { title = L("meet.defaultTitle", ["name": Naming.title(d, c)]) }
             }
         }
         .sheetToasts()
@@ -101,12 +107,16 @@ struct MeetingSheet: View {
             .accessibilityIdentifier("meet.duration")
         }
 
+        .disabled(pendingAttempt != nil)
+
         Section(L("meet.titleField")) {
             TextField(L("meet.titleField"), text: $title, axis: .vertical).lineLimit(1...3)
                 .accessibilityIdentifier("meet.titleInput")
         }
 
-        Section { EmptyView() } footer: { Text(L("meet.createHint")) }
+        .disabled(pendingAttempt != nil)
+
+        Section { EmptyView() } footer: { Text(L(pendingAttempt != nil ? "meet.ios.pendingHint" : "meet.createHint")) }
     }
 
     /// Fija abajo: el error (si hay) y «Crear y compartir», siempre a la vista.
@@ -123,8 +133,8 @@ struct MeetingSheet: View {
             }
             Button { create() } label: {
                 HStack(spacing: 6) {
-                    if idem.inFlight { ProgressView(); Text(L("meet.creating")) }
-                    else { Text(L(error != nil && idem.pendingKey != nil ? "meet.retry" : "meet.create")).font(.headline) }
+                    if creating { ProgressView(); Text(L("meet.creating")) }
+                    else { Text(L(pendingAttempt != nil ? "meet.retry" : "meet.create")).font(.headline) }
                 }
                 .frame(maxWidth: .infinity, minHeight: 50)
             }
@@ -139,7 +149,9 @@ struct MeetingSheet: View {
     private var selected: MeetingConnectionDTO? { connections.first { $0.provider == provider } }
 
     private var canCreate: Bool {
-        guard let c = selected, c.canCreate, !idem.inFlight, !connecting else { return false }
+        guard !creating, !connecting else { return false }
+        if pendingAttempt != nil { return true }
+        guard let c = selected, c.canCreate else { return false }
         if case .unavailable = error { return false }
         return title.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2
     }
@@ -175,6 +187,7 @@ struct MeetingSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(pendingAttempt != nil || connecting)
         .accessibilityLabel("\(c.provider.label), \(sub)")
         .accessibilityAddTraits(on ? .isSelected : [])
         .accessibilityIdentifier("meet.chip.\(c.provider.rawValue)")
@@ -205,48 +218,55 @@ struct MeetingSheet: View {
     // MARK: Acciones
 
     private func reload() async {
+        let stamp = store.sessionStamp
         loading = true
         do {
             connections = try await store.loadMeetingConnections()
             if provider == nil { provider = connections.first(where: \.canCreate)?.provider ?? connections.first(where: \.available)?.provider ?? connections.first?.provider }
             if let c = selected, c.canCreate, error?.needsConnect == true { error = nil }
-        } catch { self.error = MeetingError(error); if provider == nil { provider = .google } }
+        } catch { guard stamp == store.sessionStamp else { return }; self.error = MeetingError(error); if provider == nil { provider = .google } }
+        guard stamp == store.sessionStamp else { return }
         loading = false
     }
 
     private func connect(_ p: MeetingProvider) {
         connecting = true
+        let stamp = store.sessionStamp
         Task {
             do {
                 switch try await store.connectMeetings(p) {
                 case .connected: store.show(L("meet.connectedToast", ["provider": p.label])); error = nil
+                case .receipt: break // Only authenticated confirmation may produce a connected result.
                 case .failed(_, let code): store.show(code == "cancelled" ? L("meet.connectCancelled") : L("meet.connectFailed", ["provider": p.label, "code": code]))
                 }
-            } catch { self.error = MeetingError(error) }
+            } catch { guard stamp == store.sessionStamp else { return }; self.error = MeetingError(error) }
+            guard stamp == store.sessionStamp else { return }
             await reload()
             connecting = false
         }
     }
 
     private func create() {
-        guard let p = provider, let key = idem.begin() else { return }
+        guard let p = provider, !creating else { return }
+        let stamp = store.sessionStamp
+        let payload = pendingAttempt?.payload ?? MeetingPayload(provider: p, conversationId: conversationId,
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines), startsAt: instant ? nil : startsAt,
+            durationMin: duration, timezone: TimeZone.current.identifier, share: true)
         error = nil
-        let when: Date? = instant ? nil : startsAt
-        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             do {
-                let m = try await store.createMeeting(p, conversationId: conversationId, idempotencyKey: key, title: t, startsAt: when, durationMin: duration)
-                guard m.confirmedURL != nil else { throw ApiRequestError(status: 502, code: "no_link", message: L("meet.err.noLink")) }
-                idem.succeeded()
+                let m = try await store.performMeetingAttempt(payload)
+                try store.requireSession(stamp)
                 Haptics.tap()
                 withAnimation { created = m }
             } catch {
-                idem.failed()
+                guard stamp == store.sessionStamp else { return }
                 self.error = MeetingError(error)
                 if self.error?.needsConnect == true { await reload() }
             }
         }
     }
+
 }
 
 // MARK: - Ajustes › Reuniones
@@ -265,6 +285,8 @@ struct MeetingsSettingsSection: View {
             if let error { Text(error).font(.footnote).foregroundStyle(.red) }
         } header: { Text(L("meet.settings")) } footer: { Text(L("meet.settingsHint")) }
         .task { await load() }
+        .onDisappear { store.cancelMeetingAuthorization() }
+        .onChange(of: store.me?.id) { _, _ in connections = []; error = nil; busy = nil; confirmDisconnect = nil }
         .onChange(of: store.meetingsRevision) { _, _ in Task { await load() } }
         .confirmationDialog(L("meet.disconnectConfirm", ["provider": confirmDisconnect?.label ?? ""]),
                             isPresented: Binding(get: { confirmDisconnect != nil }, set: { if !$0 { confirmDisconnect = nil } }), titleVisibility: .visible) {
@@ -303,23 +325,29 @@ struct MeetingsSettingsSection: View {
             }
         }
         .frame(minHeight: 44)
+        .disabled(busy != nil)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("meet.settings.\(c.provider.rawValue)")
     }
 
     private func load() async {
-        do { connections = try await store.loadMeetingConnections(); error = nil } catch { self.error = L10n.errorText(error) }
+        let stamp = store.sessionStamp
+        do { connections = try await store.loadMeetingConnections(); error = nil }
+        catch { guard stamp == store.sessionStamp else { return }; self.error = L10n.errorText(error) }
     }
 
     private func connect(_ p: MeetingProvider) {
         busy = p
+        let stamp = store.sessionStamp
         Task {
             do {
                 switch try await store.connectMeetings(p) {
                 case .connected: store.show(L("meet.connectedToast", ["provider": p.label]))
+                case .receipt: break // Only authenticated confirmation may produce a connected result.
                 case .failed(_, let code): store.show(code == "cancelled" ? L("meet.connectCancelled") : L("meet.connectFailed", ["provider": p.label, "code": code]))
                 }
-            } catch { self.error = MeetingError(error).text(p) }
+            } catch { guard stamp == store.sessionStamp else { return }; self.error = MeetingError(error).text(p) }
+            guard stamp == store.sessionStamp else { return }
             await load()
             busy = nil
         }
@@ -327,9 +355,11 @@ struct MeetingsSettingsSection: View {
 
     private func disconnect(_ p: MeetingProvider) {
         busy = p
+        let stamp = store.sessionStamp
         Task {
             do { try await store.disconnectMeetings(p); store.show(L("meet.disconnectedToast", ["provider": p.label])) }
-            catch { self.error = L10n.errorText(error) }
+            catch { guard stamp == store.sessionStamp else { return }; self.error = L10n.errorText(error) }
+            guard stamp == store.sessionStamp else { return }
             await load()
             busy = nil
         }

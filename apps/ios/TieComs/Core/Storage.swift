@@ -218,6 +218,18 @@ final class OutboxStore {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     }
 
+    /// Pending meeting operations contain no OAuth credentials. Use the same protected, atomic local storage as the outbox.
+    private func meetingsFile(_ userId: String) -> URL { dir.appendingPathComponent("meetings-\(userId).json") }
+    func loadMeetingAttempts(userId: String) throws -> Data? {
+        let url = meetingsFile(userId)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try Data(contentsOf: url)
+    }
+    func saveMeetingAttempts(_ data: Data, userId: String) throws {
+        try data.write(to: meetingsFile(userId), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+    func clearMeetingAttempts(userId: String) { try? FileManager.default.removeItem(at: meetingsFile(userId)) }
+
     private func file(_ userId: String) -> URL { dir.appendingPathComponent("outbox-\(userId).json") }
 
     func load(userId: String) -> [PendingMessage] {

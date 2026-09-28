@@ -158,6 +158,45 @@ final class AppStore {
     var dndTick = 0
     @ObservationIgnored var dndExpiryTask: Task<Void, Never>?
 
+    /// Every asynchronous account-scoped result must still belong to this login, including a login to the same account.
+    struct SessionStamp: Equatable { let generation: UUID; let userId: String? }
+    private var sessionGeneration = UUID()
+    var sessionStamp: SessionStamp { SessionStamp(generation: sessionGeneration, userId: me?.id) }
+    func requireSession(_ stamp: SessionStamp) throws {
+        guard stamp == sessionStamp, !Task.isCancelled else { throw CancellationError() }
+    }
+    private func invalidateSessionWork() {
+        sessionGeneration = UUID()
+        api.invalidateRequests()
+        cancelMeetingAuthorization()
+        if let userId = me?.id { outbox.clearMeetingAttempts(userId: userId) }
+        restoredMeetingUserId = nil
+        meetingAttemptStorageError = false
+        meetingAttempts = [:]
+        meetingPayloads = [:]
+        issues = [:]; events = [:]
+        for task in readTasks.values { task.cancel() }
+        readTasks = [:]; readTargets = [:]; readFailures = []
+    }
+    @ObservationIgnored private var restoredMeetingUserId: String?
+    var meetingAttemptStorageError = false
+    func restoreMeetingAttempts() {
+        guard let userId = me?.id, restoredMeetingUserId != userId else { return }
+        restoredMeetingUserId = userId
+        do {
+            let saved = try outbox.loadMeetingAttempts(userId: userId)
+            meetingAttempts = try saved.map { try JSONDecoder().decode([String: MeetingAttempt].self, from: $0) } ?? [:]
+            for key in meetingAttempts.keys { meetingAttempts[key]?.inFlight = false }
+        } catch { meetingAttemptStorageError = true }
+    }
+    func persistMeetingAttempts() throws {
+        guard let userId = me?.id else { throw CancellationError() }
+        try outbox.saveMeetingAttempts(JSONEncoder().encode(meetingAttempts), userId: userId)
+    }
+    var meetingPayloads: [String: MeetingPayload] = [:]
+    var meetingAttempts: [String: MeetingAttempt] = [:]
+    @ObservationIgnored var meetingAuthorization: MeetingAuthorization?
+
     // MARK: Dependencias
     let api: APIClient
     @ObservationIgnored let socket: SocketIOClient
@@ -169,6 +208,8 @@ final class AppStore {
     @ObservationIgnored private var bootstrapTask: Task<Void, Never>?
     @ObservationIgnored private var catchingUp: Set<String> = []
     @ObservationIgnored private var readTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var readTargets: [String: Int] = [:]
+    var readFailures: Set<String> = []
     @ObservationIgnored private var lastTypingSent: [String: Date] = [:]
     @ObservationIgnored private var pathMonitor: NWPathMonitor?
     @ObservationIgnored private var lastPathSatisfied = true
@@ -251,15 +292,21 @@ final class AppStore {
     }
 
     func login(email: String, password: String) async throws {
+        invalidateSessionWork()
+        let stamp = sessionStamp
         _ = try await api.login(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
+        try requireSession(stamp)
         try await afterLogin()
     }
 
     func signup(name: String, email: String, password: String, orgName: String?, orgInviteToken: String?, title: String?) async throws {
+        invalidateSessionWork()
+        let stamp = sessionStamp
         var input: [String: Any] = ["name": name, "email": email.trimmingCharacters(in: .whitespacesAndNewlines), "password": password]
         if let orgInviteToken { input["orgInviteToken"] = orgInviteToken } else if let orgName { input["orgName"] = orgName }
         if let title, !title.isEmpty { input["title"] = title }
         _ = try await api.signup(input)
+        try requireSession(stamp)
         try await afterLogin()
     }
 
@@ -276,12 +323,17 @@ final class AppStore {
     }
 
     func completeSSO(code: String, verifier: String) async throws {
+        invalidateSessionWork()
+        let stamp = sessionStamp
         _ = try await api.ssoExchange(code: code, verifier: verifier)
+        try requireSession(stamp)
         try await afterLogin()
     }
 
     private func afterLogin() async throws {
+        let generation = sessionGeneration
         try await loadBootstrap()
+        guard generation == sessionGeneration else { throw CancellationError() }
         guard let me = data?.me.id else { return }
         pending = outbox.load(userId: me).map { var p = $0; if p.status == .sending { p.status = .pending }; return p }
         status = .ready
@@ -306,10 +358,14 @@ final class AppStore {
     }
 
     func logout() async {
+        invalidateSessionWork()
+        let stamp = sessionStamp
         pushSigningOut = true
         // El logout del API ya borra el token de la sesión; se borra antes por si falla la red después.
         await unregisterPush()
+        guard stamp == sessionStamp else { return }
         await api.logout()
+        guard stamp == sessionStamp else { return }
         handleSignedOut()
     }
 
@@ -320,6 +376,7 @@ final class AppStore {
     }
 
     private func handleSignedOut() {
+        invalidateSessionWork()
         pushSigningOut = true
         pushTokenSync.endSession()
         PushRegistration.unregister()
@@ -348,11 +405,15 @@ final class AppStore {
     // MARK: - Snapshot
 
     func loadBootstrap() async throws {
+        let stamp = sessionStamp
         try await loadBlockedUsers()
+        try requireSession(stamp)
         var d: BootstrapDTO = try await api.request("/bootstrap")
+        try requireSession(stamp)
         d.conversations.sort { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
         defer { scheduleBadge() }
         data = d
+        restoreMeetingAttempts()
         loadLocalDnd()
         // Conversaciones que ya no están en mi alcance se purgan de la caché local.
         let allowed = Set(d.conversations.map(\.id))
@@ -453,10 +514,12 @@ final class AppStore {
         case .sleepChanged(let s): patchMe { $0.sleep = s }
         // Asuntos restringidos ('org' o 'private') llegan por la cuenta, no por la conversación.
         case .issueUpdated(let i):
+            guard canCacheIssue(i) else { return }
             issues[i.id] = i
             recountIssues(i.conversationId)
         // Mis asuntos personales (sin conversación): solo llegan a mi cuenta y no cuentan en ningún chat.
         case .issuePersonal(let i):
+            guard canCacheIssue(i) else { return }
             issues[i.id] = i
         case .issueHidden(let id, let conv):
             issues[id] = nil
@@ -577,7 +640,7 @@ final class AppStore {
             $0.lastMessageSeq = m.seq
             $0.lastMessageAt = m.createdAt
             $0.lastMessagePreview = String(L10n.messagePreview(m).prefix(140))
-            if mine { $0.lastReadSeq = m.seq }
+            if mine, max(c.lastReadSeq, c.historyFromSeq) >= c.lastMessageSeq, m.seq == c.lastMessageSeq + 1 { $0.lastReadSeq = m.seq }
             $0.unread = max(0, m.seq - max($0.lastReadSeq, $0.historyFromSeq))
             if let me = myId, MentionText.mentionsMe(m.mentions, me: me, authorId: m.authorId) { $0.unreadMentions += 1 }
         }
@@ -697,42 +760,61 @@ final class AppStore {
         }
     }
 
-    func loadOlder(_ id: String) async {
-        guard let local = conversations[id], local.loaded, local.hasMore, !local.loading, let before = local.messages.first?.seq else { return }
+    @discardableResult
+    func loadOlder(_ id: String) async -> Bool {
+        let stamp = sessionStamp
+        guard let local = conversations[id], local.loaded, local.hasMore, !local.loading, let before = local.messages.first?.seq else { return false }
         conversations[id]?.loading = true
+        defer { if stamp == sessionStamp { conversations[id]?.loading = false } }
         do {
             let page: MessagesPage = try await api.request("/conversations/\(id)/messages?before=\(before)&limit=50")
+            try requireSession(stamp)
             let cur = conversations[id]?.messages ?? []
             let known = Set(cur.map(\.id))
-            conversations[id]?.messages = page.messages.filter { !known.contains($0.id) }.sorted { $0.seq < $1.seq } + cur
+            let older = page.messages.filter { !known.contains($0.id) && $0.seq < before }.sorted { $0.seq < $1.seq }
+            guard !older.isEmpty || !page.hasMore else { throw ChatNav.PositionError.historyGap }
+            conversations[id]?.messages = older + cur
             conversations[id]?.hasMore = page.hasMore
-        } catch {}
-        conversations[id]?.loading = false
+            conversations[id]?.error = nil
+            return true
+        } catch {
+            if stamp == sessionStamp { conversations[id]?.error = L("chat.ios.unreadRetry") }
+            return false
+        }
     }
 
-    /// Marca como leído con debounce (400 ms). `upTo`: solo hasta ese seq (lo que se vio); sin él, todo lo conocido.
-    /// El cursor nunca retrocede; lo que llegue después sigue sin leer.
+    /// Debounce candidates without moving the local cursor until the server confirms this exact sequence.
     func markRead(_ id: String, upTo: Int? = nil) {
         guard let c = meta(id) else { return }
         let target = min(upTo ?? c.lastMessageSeq, c.lastMessageSeq)
-        guard target > c.lastReadSeq else { return }
-        // Menciones que siguen sin leer después del cursor (de lo cargado; el servidor recalcula al volver).
-        let myId = me?.id ?? ""
-        let left = target >= c.lastMessageSeq ? 0 : min(c.unreadMentions, (conversations[id]?.messages ?? [])
-            .filter { $0.seq > target && $0.deletedAt == nil && MentionText.mentionsMe($0.mentions, me: myId, authorId: $0.authorId) }.count)
-        patchMeta(id) {
-            $0.lastReadSeq = target
-            $0.unread = max(0, $0.lastMessageSeq - max(target, $0.historyFromSeq))
-            $0.unreadMentions = left
-        }
+        guard target > max(c.lastReadSeq, readTargets[id] ?? 0) else { return }
+        let stamp = sessionStamp
+        readTargets[id] = target
         readTasks[id]?.cancel()
         readTasks[id] = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard let self, !Task.isCancelled else { return }
-            let seq = self.meta(id)?.lastReadSeq ?? 0
-            _ = try? await self.api.requestData("/conversations/\(id)/read", method: "POST", json: ["seq": seq])
+            guard let self else { return }
+            defer {
+                if stamp == self.sessionStamp, self.readTargets[id] == target { self.readTargets[id] = nil; self.readTasks[id] = nil }
+            }
+            do {
+                try await Task.sleep(nanoseconds: 400_000_000)
+                try self.requireSession(stamp)
+                try await self.api.requestData("/conversations/\(id)/read", method: "POST", json: ["seq": target])
+                try self.requireSession(stamp)
+                let previous = self.meta(id)?.lastReadSeq ?? target
+                let newlySeenMentions = (self.conversations[id]?.messages ?? []).filter {
+                    $0.seq > previous && $0.seq <= target && $0.deletedAt == nil && MentionText.mentionsMe($0.mentions, me: stamp.userId ?? "", authorId: $0.authorId)
+                }.count
+                self.patchMeta(id) {
+                    ReadTree.applyRead(&$0, seq: target)
+                    if target < $0.lastMessageSeq { $0.unreadMentions = max(0, $0.unreadMentions - newlySeenMentions) }
+                }
+                self.readFailures.remove(id)
+                if target >= (self.meta(id)?.lastMessageSeq ?? Int.max) { AppFeedback.shared.clearNotifications(conversationId: id) }
+            } catch {
+                if stamp == self.sessionStamp, !Task.isCancelled { self.readFailures.insert(id) }
+            }
         }
-        if target >= c.lastMessageSeq { AppFeedback.shared.clearNotifications(conversationId: id) }
     }
 
     /// Aviso de "escribiendo", como máximo cada 2 s.
@@ -916,8 +998,8 @@ final class AppStore {
         // chaggu://auth/* es del flujo SSO (lo recibe ASWebAuthenticationSession), no es navegación.
         // chaggu://meetings/connected?… vuelve de conectar Meet/Teams/Zoom (normalmente lo recibe la sesión web).
         if MeetingCallback.isMeetings(url) {
-            meetingsRevision += 1
-            if case .connected(let p)? = MeetingCallback.parse(url) { show(L("meet.connectedToast", ["provider": p?.label ?? ""])) }
+            // A URL alone cannot connect an account. Only the in-memory flow may consume its receipt.
+            meetingAuthorization?.connector.receive(url)
             return
         }
         guard !SSOCallback.isReserved(url), let link = DeepLink.parse(url) else { return }
@@ -1050,10 +1132,14 @@ final class AppStore {
 extension AppStore {
     /// Solo pruebas: fija un snapshot sin red.
     func seedForTesting(_ d: BootstrapDTO, conversations: [String: ConversationState] = [:]) {
+        if me?.id != d.me.id { invalidateSessionWork() }
         data = d
+        restoreMeetingAttempts()
         self.conversations = conversations
         status = .ready
     }
+
+    func waitForReadForTesting(_ id: String) async { await readTasks[id]?.value }
 
     /// Un evento del socket tal como llega (nombre + JSON), sin red.
     func socketEventForTesting(_ name: String, _ json: String) {

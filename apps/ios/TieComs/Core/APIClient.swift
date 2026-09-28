@@ -8,6 +8,7 @@ struct ApiRequestError: Error, Equatable, LocalizedError {
     var paths: [String] = []
     /// details.userIds del error (personas que no se pueden sumar).
     var userIds: [String] = []
+    var meetingId: String? = nil
 
     /// Errores que no se arreglan reintentando (permiso, validación, conflicto).
     var permanent: Bool { status >= 400 && status < 500 && status != 408 && status != 429 && status != 401 }
@@ -119,6 +120,15 @@ final class APIClient {
     private let session: URLSession
     private let secrets: SecretStore
     private(set) var accessToken: String?
+    private var requestGeneration = UUID()
+    func invalidateRequests() {
+        requestGeneration = UUID()
+        refreshing?.cancel()
+        refreshing = nil
+    }
+    private func requireGeneration(_ value: UUID) throws {
+        guard requestGeneration == value, !Task.isCancelled else { throw CancellationError() }
+    }
     private var accessExp: Date = .distantPast
     private var refreshing: Task<RefreshOutcome, Never>?
     /// Se llama cuando el servidor da la sesión por terminada.
@@ -185,7 +195,7 @@ final class APIClient {
     nonisolated static func parseError(_ data: Data, status: Int) -> ApiRequestError {
         if let body = try? JSONDecoder().decode(ApiErrorBody.self, from: data) {
             return ApiRequestError(status: status, code: body.code.isEmpty ? "http_\(status)" : body.code, message: body.message,
-                                   paths: body.details.compactMap(\.path), userIds: body.userIds)
+                                   paths: body.details.compactMap(\.path), userIds: body.userIds, meetingId: body.meetingId)
         }
         return ApiRequestError(status: status, code: "http_\(status)", message: HTTPURLResponse.localizedString(forStatusCode: status))
     }
@@ -210,15 +220,20 @@ final class APIClient {
 
     @discardableResult
     func requestData(_ path: String, method: String = "GET", json: [String: Any]? = nil, body: RawBody? = nil) async throws -> Data {
+        let generation = requestGeneration
         if accessToken == nil || Date() > accessExp.addingTimeInterval(-30) { _ = await refresh() }
+        try requireGeneration(generation)
         var (data, res) = try await raw(path, method: method, json: json, body: body)
+        try requireGeneration(generation)
         if res.statusCode == 401 {
             let r = await refresh()
+            try requireGeneration(generation)
             if r == .ok { (data, res) = try await raw(path, method: method, json: json, body: body) }
             // Solo se cierra la sesión si el servidor rechaza el refresh; un fallo de red o un 5xx
             // (API reiniciándose) no la borra.
             else if r == .network { throw APIClient.parseError(data, status: 401) }
         }
+        try requireGeneration(generation)
         if res.statusCode == 401 {
             signedOut()
             throw APIClient.parseError(data, status: 401)
@@ -230,8 +245,11 @@ final class APIClient {
     /// Subida con progreso (0…1): adjuntos de hasta 25 MB. Reintenta una vez tras renovar el token ante 401.
     func uploadWithProgress<T: Decodable>(_ path: String, data: Data, contentType: String, headers: [String: String] = [:],
                                           progress: @escaping @Sendable (Double) -> Void) async throws -> T {
+        let generation = requestGeneration
         if accessToken == nil || Date() > accessExp.addingTimeInterval(-30) { _ = await refresh() }
+        try requireGeneration(generation)
         func attempt() async throws -> (Data, HTTPURLResponse) {
+            try requireGeneration(generation)
             var req = URLRequest(url: url(path))
             req.httpMethod = "POST"
             req.timeoutInterval = 300
@@ -248,13 +266,17 @@ final class APIClient {
             } catch let e as ApiRequestError { throw e } catch { throw ApiRequestError.network(error) }
         }
         var (body, res) = try await attempt()
+        try requireGeneration(generation)
         if res.statusCode == 401 {
-            switch await refresh() {
+            let result = await refresh()
+            try requireGeneration(generation)
+            switch result {
             case .ok: (body, res) = try await attempt()
             case .network: throw APIClient.parseError(body, status: 401)
             case .unauthorized: break
             }
         }
+        try requireGeneration(generation)
         if res.statusCode == 401 { signedOut(); throw APIClient.parseError(body, status: 401) }
         guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(body, status: res.statusCode) }
         progress(1)
@@ -276,18 +298,24 @@ final class APIClient {
     // MARK: Sesión
 
     func login(email: String, password: String) async throws -> AuthResult {
+        invalidateRequests()
+        let generation = requestGeneration
         let (data, res) = try await raw(AuthRoutes.login, method: "POST", json: ["email": email, "password": password, "device": device()], auth: false)
         guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(data, status: res.statusCode) }
+        try requireGeneration(generation)
         let r: AuthResult = try decode(data)
         apply(r)
         return r
     }
 
     func signup(_ input: [String: Any]) async throws -> AuthResult {
+        invalidateRequests()
+        let generation = requestGeneration
         var body = input
         body["device"] = device()
         let (data, res) = try await raw(AuthRoutes.signup, method: "POST", json: body, auth: false)
         guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(data, status: res.statusCode) }
+        try requireGeneration(generation)
         let r: AuthResult = try decode(data)
         apply(r)
         return r
@@ -295,9 +323,12 @@ final class APIClient {
 
     /// SSO: canjea el código de un solo uso (60 s) con el verifier PKCE.
     func ssoExchange(code: String, verifier: String) async throws -> AuthResult {
+        invalidateRequests()
+        let generation = requestGeneration
         let (data, res) = try await raw(AuthRoutes.ssoExchange, method: "POST",
                                         json: ["code": code, "code_verifier": verifier, "device": device()], auth: false)
         guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(data, status: res.statusCode) }
+        try requireGeneration(generation)
         let r: AuthResult = try decode(data)
         apply(r)
         return r
@@ -312,10 +343,12 @@ final class APIClient {
     /// Vuelo único: llamadas concurrentes esperan el mismo refresh.
     func refresh() async -> RefreshOutcome {
         if let refreshing { return await refreshing.value }
+        let generation = requestGeneration
         let t = Task { @MainActor () -> RefreshOutcome in
             guard let stored = self.secrets.get() else { return .unauthorized }
             do {
                 let (data, res) = try await self.raw(AuthRoutes.refresh, method: "POST", json: ["refreshToken": stored], auth: false)
+                try self.requireGeneration(generation)
                 if res.statusCode == 401 || res.statusCode == 403 {
                     self.accessToken = nil
                     return .unauthorized
@@ -329,7 +362,7 @@ final class APIClient {
         }
         refreshing = t
         let out = await t.value
-        refreshing = nil
+        if generation == requestGeneration { refreshing = nil }
         return out
     }
 
@@ -340,11 +373,14 @@ final class APIClient {
     }
 
     func logout() async {
+        let generation = requestGeneration
         if accessToken != nil { _ = try? await raw(AuthRoutes.logout, method: "POST", json: [:]) }
+        guard generation == requestGeneration else { return }
         clearCredentials()
     }
 
     func clearCredentials() {
+        invalidateRequests()
         accessToken = nil
         accessExp = .distantPast
         secrets.set(nil)

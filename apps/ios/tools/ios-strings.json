@@ -3002,5 +3002,25 @@
  "cal.openDay": [
   "Abre la vista Día",
   "Opens the Day view"
+ ],
+ "chat.ios.unreadRetry": [
+  "No se pudo ubicar el primer pendiente. Nada se marcó como leído. Toca para reintentar.",
+  "Could not locate the first unread message. Nothing was marked as read. Tap to retry."
+ ],
+ "meet.ios.pendingHint": [
+  "Esta reunión espera confirmación. Sus datos están guardados: reintenta para comprobar la misma operación sin crear otra reunión.",
+  "This meeting is awaiting confirmation. Its details are saved: retry to check the same operation without creating another meeting."
+ ],
+ "meet.ios.network": [
+  "No se pudo confirmar el resultado. Reintenta esta misma reunión para consultar su estado; no crees otra.",
+  "The result could not be confirmed. Retry this same meeting to check its status; do not create another one."
+ ],
+ "meet.ios.storage": [
+  "No se puede recuperar o guardar la reunión pendiente en este dispositivo. No se enviará otra creación.",
+  "The pending meeting could not be recovered or saved on this device. Another creation will not be sent."
+ ],
+ "chat.ios.readRetry": [
+  "No se pudo confirmar la lectura. Los pendientes se conservan. Toca para reintentar.",
+  "Read status could not be confirmed. Unread messages are preserved. Tap to retry."
  ]
 }

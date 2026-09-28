@@ -5,7 +5,7 @@ import UIKit
 // Reuniones reales con Google Meet, Microsoft Teams o Zoom, con la cuenta de cada persona
 // (docs/TANDA-LECTURA-REUNIONES.md §4). El enlace SOLO sale del proveedor: sin confirmación no hay enlace ni mensaje.
 
-enum MeetingProvider: String, CaseIterable, Identifiable, Sendable {
+enum MeetingProvider: String, CaseIterable, Identifiable, Sendable, Codable {
     case google, microsoft, zoom
     var id: String { rawValue }
     /// Nombre del producto (chips y Ajustes).
@@ -85,7 +85,7 @@ struct MeetingDTO: Decodable, Equatable, Identifiable, Sendable {
         let c = try container(decoder)
         id = c.v("id", "")
         provider = MeetingProvider(rawValue: c.v("provider", "google")) ?? .google
-        status = c.v("status", "created")
+        status = c.v("status", "unknown")
         title = c.v("title", "")
         startsAt = c.v("startsAt", "")
         endsAt = c.v("endsAt", "")
@@ -99,7 +99,7 @@ struct MeetingDTO: Decodable, Equatable, Identifiable, Sendable {
 
     /// Solo un enlace https confirmado cuenta como reunión creada.
     var confirmedURL: URL? {
-        guard status == "created", let s = joinUrl, let u = URL(string: s), u.scheme?.lowercased() == "https" else { return nil }
+        guard status == "created", let s = joinUrl, let u = URL(string: s), u.scheme?.lowercased() == "https", u.host?.isEmpty == false else { return nil }
         return u
     }
     var shared: Bool { messageId != nil }
@@ -136,8 +136,10 @@ enum MeetingError: Equatable {
 
     init(_ e: Error) {
         guard let a = e as? ApiRequestError else { self = .other(L10n.errorText(e)); return }
+        if a.code == "meeting_storage" { self = .other(a.message); return }
         if a.isNetwork { self = .network; return }
         switch a.code {
+        case "meeting_in_progress", "meeting_pending", "meeting_uncertain", "idempotency_mismatch": self = .other(L("meet.ios.pendingHint"))
         case "not_connected": self = .notConnected
         case "reconnect_required": self = .reconnectRequired
         case "no_teams": self = .noTeams
@@ -156,27 +158,72 @@ enum MeetingError: Equatable {
         case .noTeams: return L("meet.err.noTeams")
         case .unavailable(let why): return L("meet.unavailable") + ": " + why
         case .provider(let m): return m
-        case .network: return L("meet.err.network")
+        case .network: return L("meet.ios.network")
         case .other(let m): return m
         }
     }
 }
 
-/// Vuelta de la conexión: chaggu://meetings/connected?provider=…&connected=1 (o &error=cancelled|denied|…).
+/// The redirect is only a receipt. It never proves that an account was connected.
 enum MeetingCallback: Equatable {
+    case receipt(MeetingProvider, String)
     case connected(MeetingProvider?)
     case failed(MeetingProvider?, code: String)
 
     static func parse(_ url: URL) -> MeetingCallback? {
         guard let s = url.scheme?.lowercased(), SSOCallback.acceptedSchemes.contains(s), url.host?.lowercased() == "meetings",
               url.pathComponents.filter({ $0 != "/" }).first == "connected" else { return nil }
-        let q = Dictionary((URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { a, _ in a })
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        guard Set(items.map(\.name)).count == items.count else { return .failed(nil, code: "invalid_callback") }
+        let q = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
         let p = q["provider"].flatMap(MeetingProvider.init(rawValue:))
         if let e = q["error"], !e.isEmpty { return .failed(p, code: e) }
-        return q["connected"] == "1" ? .connected(p) : .failed(p, code: "invalid_callback")
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+        guard let p, let receipt = q["receipt"], receipt.count == 43,
+              receipt.unicodeScalars.allSatisfy(allowed.contains) else { return .failed(p, code: "invalid_callback") }
+        return .receipt(p, receipt)
     }
     static func isMeetings(_ url: URL) -> Bool {
         url.scheme.map { SSOCallback.acceptedSchemes.contains($0.lowercased()) } == true && url.host?.lowercased() == "meetings"
+    }
+}
+
+/// Frozen request: changing any field requires a new operation, never a retry under the old key.
+struct MeetingPayload: Equatable, Codable {
+    let provider: MeetingProvider
+    let conversationId: String?
+    let title: String
+    let startsAt: Date?
+    let durationMin: Int
+    let timezone: String
+    let share: Bool
+    var json: [String: Any] {
+        var value: [String: Any] = ["provider": provider.rawValue, "title": String(title.prefix(200)), "durationMin": durationMin,
+                                  "timezone": timezone, "share": share, "conversationId": conversationId ?? NSNull()]
+        if let startsAt { value["startsAt"] = ISODate.string(startsAt) }
+        return value
+    }
+}
+struct MeetingAttempt: Equatable, Codable {
+    let key: String
+    let payload: MeetingPayload
+    var inFlight = false
+    var meetingId: String?
+}
+
+@MainActor
+final class MeetingAuthorization {
+    let id = UUID()
+    let stamp: AppStore.SessionStamp
+    let provider: MeetingProvider
+    let proof: PKCE
+    let connector: MeetingConnector
+    var confirming = false
+    init(stamp: AppStore.SessionStamp, provider: MeetingProvider, connector: MeetingConnector) {
+        self.stamp = stamp; self.provider = provider; self.connector = connector
+        var bytes = [UInt8](repeating: 0, count: 32)
+        precondition(SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess)
+        proof = PKCE(verifier: PKCE.base64url(Data(bytes)))
     }
 }
 
@@ -194,22 +241,36 @@ enum MeetingOpener {
 @MainActor
 final class MeetingConnector: NSObject, ASWebAuthenticationPresentationContextProviding {
     private var session: ASWebAuthenticationSession?
+    private var completion: CheckedContinuation<MeetingCallback, Never>?
 
     func run(_ url: URL) async -> MeetingCallback {
-        await withCheckedContinuation { (cont: CheckedContinuation<MeetingCallback, Never>) in
-            let s = ASWebAuthenticationSession(url: url, callbackURLScheme: SSOCallback.scheme) { callback, error in
-                if let error {
-                    let cancelled = (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin
-                    cont.resume(returning: .failed(nil, code: cancelled ? "cancelled" : "session"))
-                    return
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { cont in
+                guard !Task.isCancelled else { cont.resume(returning: .failed(nil, code: "cancelled")); return }
+                completion = cont
+                let s = ASWebAuthenticationSession(url: url, callbackURLScheme: SSOCallback.scheme) { [weak self] callback, error in
+                    Task { @MainActor in
+                        if let callback { self?.receive(callback) }
+                        else {
+                            let cancelled = (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin
+                            self?.finish(.failed(nil, code: cancelled ? "cancelled" : "session"))
+                        }
+                    }
                 }
-                cont.resume(returning: callback.flatMap(MeetingCallback.parse) ?? .failed(nil, code: "invalid_callback"))
+                s.presentationContextProvider = self
+                s.prefersEphemeralWebBrowserSession = false
+                session = s
+                if !s.start() { finish(.failed(nil, code: "session")) }
             }
-            s.presentationContextProvider = self
-            s.prefersEphemeralWebBrowserSession = false
-            session = s
-            if !s.start() { cont.resume(returning: .failed(nil, code: "session")) }
-        }
+        } onCancel: { Task { @MainActor [weak self] in self?.cancel() } }
+    }
+
+    func receive(_ url: URL) { finish(MeetingCallback.parse(url) ?? .failed(nil, code: "invalid_callback")) }
+    func cancel() { session?.cancel(); finish(.failed(nil, code: "cancelled")) }
+    private func finish(_ value: MeetingCallback) {
+        let continuation = completion
+        completion = nil; session = nil
+        continuation?.resume(returning: value)
     }
 
     nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
@@ -222,38 +283,126 @@ final class MeetingConnector: NSObject, ASWebAuthenticationPresentationContextPr
 
 extension AppStore {
     func loadMeetingConnections() async throws -> [MeetingConnectionDTO] {
+        let stamp = sessionStamp
         let r: MeetingConnectionsList = try await api.request("/meetings/connections")
+        try requireSession(stamp)
         return r.connections
     }
+    struct UrlResult: Decodable { var url: String }
+    private struct ConfirmMeetingConnection: Decodable { let ok: Bool; let provider: MeetingProvider }
 
-    struct UrlResult: Decodable { var url: String; init(from d: Decoder) throws { url = (try container(d)).v("url", "") } }
+    func cancelMeetingAuthorization() {
+        let old = meetingAuthorization
+        meetingAuthorization = nil
+        old?.connector.cancel()
+    }
 
-    /// Conectar o reconectar: pide la URL al API y la abre en el navegador del sistema. Devuelve cómo volvió.
     func connectMeetings(_ p: MeetingProvider, connector: MeetingConnector? = nil) async throws -> MeetingCallback {
-        let connector = connector ?? MeetingConnector()
-        let r: UrlResult = try await api.request("/meetings/connect/\(p.rawValue)", method: "POST", json: ["platform": "ios", "redirectScheme": SSOCallback.scheme])
-        guard let u = URL(string: r.url), ["https", "http"].contains(u.scheme?.lowercased() ?? "") else { throw ApiRequestError(status: 502, code: "bad_url", message: L("meet.err.connect")) }
-        let out = await connector.run(u)
+        cancelMeetingAuthorization()
+        let flow = MeetingAuthorization(stamp: sessionStamp, provider: p, connector: connector ?? MeetingConnector())
+        guard flow.stamp.userId != nil else { throw CancellationError() }
+        meetingAuthorization = flow
+        defer { if meetingAuthorization?.id == flow.id { meetingAuthorization = nil } }
+        let r: UrlResult = try await api.request("/meetings/connect/\(p.rawValue)", method: "POST", json: [
+            "platform": "ios", "redirectScheme": SSOCallback.scheme, "proofChallenge": flow.proof.challenge])
+        try requireMeetingAuthorization(flow)
+        guard let url = URL(string: r.url), url.scheme == "https" || (url.scheme == "http" && ["localhost", "127.0.0.1", "::1"].contains(url.host ?? "")) else {
+            throw ApiRequestError(status: 502, code: "bad_url", message: L("meet.err.connect"))
+        }
+        let callback = await flow.connector.run(url)
+        return try await confirmMeetingCallback(callback, flow: flow)
+    }
+
+    private func requireMeetingAuthorization(_ flow: MeetingAuthorization) throws {
+        try requireSession(flow.stamp)
+        guard meetingAuthorization?.id == flow.id else { throw CancellationError() }
+    }
+
+    func confirmMeetingCallback(_ callback: MeetingCallback, flow: MeetingAuthorization) async throws -> MeetingCallback {
+        try requireMeetingAuthorization(flow)
+        guard case .receipt(let provider, let receipt) = callback else {
+            if case .failed = callback { return callback }
+            return .failed(flow.provider, code: "invalid_callback")
+        }
+        guard provider == flow.provider, !flow.confirming else { return .failed(flow.provider, code: "invalid_callback") }
+        flow.confirming = true
+        let result: ConfirmMeetingConnection = try await api.request("/meetings/connect/confirm", method: "POST", json: ["receipt": receipt, "proofVerifier": flow.proof.verifier])
+        try requireMeetingAuthorization(flow)
+        guard result.ok, result.provider == provider else { return .failed(provider, code: "invalid_callback") }
         meetingsRevision += 1
-        return out
+        return .connected(provider)
     }
 
     func disconnectMeetings(_ p: MeetingProvider) async throws {
+        let stamp = sessionStamp
         try await api.requestData("/meetings/connections/\(p.rawValue)", method: "DELETE")
+        try requireSession(stamp)
         meetingsRevision += 1
     }
 
-    /// Crea la reunión (sin `startsAt` = ahora). Solo con la confirmación del proveedor hay enlace y mensaje en el chat.
+    func performMeetingAttempt(_ payload: MeetingPayload) async throws -> MeetingDTO {
+        let stamp = sessionStamp
+        guard stamp.userId != nil, !meetingAttemptStorageError else { throw ApiRequestError(status: 0, code: "meeting_storage", message: L("meet.ios.storage")) }
+        let scope = payload.conversationId ?? "personal"
+        var attempt = meetingAttempts[scope] ?? MeetingAttempt(key: UUID().uuidString.lowercased(), payload: payload)
+        guard attempt.payload == payload else { throw ApiRequestError(status: 409, code: "idempotency_mismatch", message: L("meet.ios.pendingHint")) }
+        guard !attempt.inFlight else { throw ApiRequestError(status: 409, code: "meeting_in_progress", message: L("meet.ios.pendingHint")) }
+        attempt.inFlight = true
+        meetingAttempts[scope] = attempt
+        defer {
+            if stamp == sessionStamp {
+                meetingAttempts[scope]?.inFlight = false
+                try? persistMeetingAttempts()
+            }
+        }
+        do {
+            // Save the key and exact payload before a provider can receive the operation.
+            do { try persistMeetingAttempts() }
+            catch { throw ApiRequestError(status: 0, code: "meeting_storage", message: L("meet.ios.storage")) }
+            if let id = attempt.meetingId {
+                let known: MeetingDTO = try await api.request("/meetings/\(id)")
+                try requireSession(stamp)
+                if known.confirmedURL != nil { meetingAttempts[scope] = nil; return known }
+            }
+            let m = try await createMeeting(payload.provider, conversationId: payload.conversationId, idempotencyKey: attempt.key,
+                title: payload.title, startsAt: payload.startsAt, durationMin: payload.durationMin, timezone: payload.timezone, share: payload.share)
+            try requireSession(stamp)
+            guard m.confirmedURL != nil else {
+                meetingAttempts[scope]?.meetingId = m.id
+                throw ApiRequestError(status: 409, code: "meeting_pending", message: L("meet.ios.pendingHint"), meetingId: m.id)
+            }
+            meetingAttempts[scope] = nil
+            return m
+        } catch {
+            try requireSession(stamp)
+            if let e = error as? ApiRequestError {
+                if let id = e.meetingId { meetingAttempts[scope]?.meetingId = id }
+                // These failures precede a provider create. Other failures remain an unresolved operation.
+                if ["provider_unavailable", "validation"].contains(e.code), e.meetingId == nil {
+                    meetingAttempts[scope] = nil
+                }
+            }
+            throw error
+        }
+    }
+
     func createMeeting(_ p: MeetingProvider, conversationId: String?, idempotencyKey: String, title: String, startsAt: Date?,
                        durationMin: Int, timezone: String = TimeZone.current.identifier, share: Bool = true) async throws -> MeetingDTO {
-        var body: [String: Any] = ["provider": p.rawValue, "idempotencyKey": idempotencyKey, "title": String(title.prefix(200)),
-                                   "durationMin": durationMin, "timezone": timezone, "share": share,
-                                   "conversationId": conversationId ?? NSNull()]
-        if let startsAt { body["startsAt"] = ISODate.string(startsAt) }
+        let stamp = sessionStamp
+        let payload = MeetingPayload(provider: p, conversationId: conversationId, title: title, startsAt: startsAt, durationMin: durationMin, timezone: timezone, share: share)
+        if let previous = meetingPayloads[idempotencyKey], previous != payload {
+            throw ApiRequestError(status: 409, code: "idempotency_mismatch", message: L("meet.ios.pendingHint"))
+        }
+        meetingPayloads[idempotencyKey] = payload
+        var body = payload.json
+        body["idempotencyKey"] = idempotencyKey
         let m: MeetingDTO = try await api.request("/meetings", method: "POST", json: body)
-        // La reunión del calendario llega por calendar.updated; se pide por si el socket va atrasado.
+        try requireSession(stamp)
         if let conversationId, m.calendarEventId != nil {
-            Task { try? await self.loadEvents(from: Date().addingTimeInterval(-86400), to: Date().addingTimeInterval(120 * 86400), conversationId: conversationId) }
+            Task {
+                guard stamp == self.sessionStamp else { return }
+                _ = try? await self.loadEvents(from: Date().addingTimeInterval(-86400), to: Date().addingTimeInterval(120 * 86400), conversationId: conversationId)
+            }
         }
         return m
     }

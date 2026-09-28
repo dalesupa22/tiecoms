@@ -537,8 +537,8 @@ const es = {
   'ai.s.write': 'Escríbele a…', 'ai.s.group': 'Crea un grupo con…', 'ai.s.meeting': 'Agenda una reunión mañana a las 10 con…',
   'ai.s.issue': 'Crea un asunto para…', 'ai.s.cancel': 'Cancela la reunión de…',
   'ai.placeholder': 'Pídele algo a gg', 'ai.send': 'Enviar', 'ai.talk': 'Hablar', 'ai.stop': 'Listo', 'ai.listening': 'Te escucho… toca Listo cuando termines',
-  'ai.sendAll': 'Enviar todos ({n})', 'ai.sentAll': 'Listo, envié {n}.', 'ai.create': 'Crear', 'ai.confirm': 'Confirmar', 'ai.cancelEvent': 'Cancelar reunión',
-  'ai.edit': 'Editar', 'ai.discard': 'Descartar', 'ai.done': 'Hecho', 'ai.undone': 'Deshecho', 'ai.failed': 'No se pudo', 'ai.undo': 'Deshacer', 'ai.openIt': 'Abrir',
+  'ai.sendAll': 'Enviar todos ({n})', 'ai.sentAll': 'Listo, envié los {n}.', 'ai.sentOne': 'Listo, lo envié.', 'ai.create': 'Crear', 'ai.confirm': 'Confirmar', 'ai.cancelEvent': 'Cancelar reunión',
+  'ai.edit': 'Editar', 'ai.redo': 'Otra versión', 'ai.redoAsk': 'Redacta otra versión del mensaje para {name}', 'ai.retry': 'Reintentar', 'ai.discard': 'Descartar', 'ai.done': 'Hecho', 'ai.undone': 'Deshecho', 'ai.failed': 'No se pudo', 'ai.undo': 'Deshacer', 'ai.openIt': 'Abrir',
   'ai.clear': 'Nueva conversación', 'ai.speakOn': 'Leer respuestas en voz alta', 'ai.speakOff': 'No leer en voz alta',
   'ai.unavailable': 'gg no está disponible ahora mismo.',
 };
@@ -1048,8 +1048,8 @@ const en: Record<Key, string> = {
   'ai.s.write': 'Write to…', 'ai.s.group': 'Create a group with…', 'ai.s.meeting': 'Schedule a meeting tomorrow at 10 with…',
   'ai.s.issue': 'Create a subject for…', 'ai.s.cancel': 'Cancel the meeting about…',
   'ai.placeholder': 'Ask gg', 'ai.send': 'Send', 'ai.talk': 'Talk', 'ai.stop': 'Done', 'ai.listening': 'Listening… tap Done when finished',
-  'ai.sendAll': 'Send all ({n})', 'ai.sentAll': 'Done, I sent {n}.', 'ai.create': 'Create', 'ai.confirm': 'Confirm', 'ai.cancelEvent': 'Cancel meeting',
-  'ai.edit': 'Edit', 'ai.discard': 'Discard', 'ai.done': 'Done', 'ai.undone': 'Undone', 'ai.failed': 'Failed', 'ai.undo': 'Undo', 'ai.openIt': 'Open',
+  'ai.sendAll': 'Send all ({n})', 'ai.sentAll': 'Done, I sent all {n}.', 'ai.sentOne': 'Done, sent.', 'ai.create': 'Create', 'ai.confirm': 'Confirm', 'ai.cancelEvent': 'Cancel meeting',
+  'ai.edit': 'Edit', 'ai.redo': 'Another version', 'ai.redoAsk': 'Write another version of the message for {name}', 'ai.retry': 'Retry', 'ai.discard': 'Discard', 'ai.done': 'Done', 'ai.undone': 'Undone', 'ai.failed': 'Failed', 'ai.undo': 'Undo', 'ai.openIt': 'Open',
   'ai.clear': 'New conversation', 'ai.speakOn': 'Read replies aloud', 'ai.speakOff': 'Do not read aloud',
   'ai.unavailable': 'gg is not available right now.',
 };

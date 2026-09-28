@@ -9,7 +9,7 @@ import { errorText, getLang as lang, t } from '../i18n.ts';
  * Tocar abre el panel; mantener presionado abre y escucha (se envía al soltar).
  * El historial vive solo en este dispositivo y por persona (chaggu:assistant:<userId>); el de otras cuentas se borra.
  */
-interface Turn { role: 'user' | 'assistant'; content: string; actions?: AssistantActionDTO[]; at: number }
+interface Turn { role: 'user' | 'assistant'; content: string; actions?: AssistantActionDTO[]; suggestions?: string[]; at: number }
 const KEY = 'chaggu:assistant:';
 const SPEAK_KEY = 'chaggu:assistantSpeak';
 const MAX_KEEP = 40;
@@ -116,6 +116,7 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
   const patchAction = (id: string, patch: Partial<AssistantActionDTO>) =>
     setTurns((ts) => ts.map((x) => (x.actions?.some((a) => a.id === id) ? { ...x, actions: x.actions.map((a) => (a.id === id ? { ...a, ...patch } : a)) } : x)));
 
+  const lastTurn = turns[turns.length - 1];
   const pendingAll = turns.flatMap((x) => x.actions ?? []).filter((a) => a.status === 'pending');
 
   async function runAction(a: AssistantActionDTO, editedText?: string) {
@@ -136,7 +137,8 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
     } catch (e: any) { patchAction(a.id, { error: errorText(e) }); }
   }
 
-  async function ask(content: string) {
+  /** retry: vuelve a mandar la última pregunta (sin repetirla en el historial). */
+  async function ask(content: string, retry = false) {
     const q = content.trim();
     if (!q || busy) return;
     setError(null); setText(''); setInterim('');
@@ -145,13 +147,13 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
     if (SEND_ALL.test(q) && pendingAll.length) {
       setTurns((ts) => [...ts, { role: 'user', content: q, at: Date.now() }]);
       await Promise.all(pendingAll.map((a) => runAction(a)));
-      const done = t('ai.sentAll', { n: pendingAll.length });
+      const done = pendingAll.length === 1 ? t('ai.sentOne') : t('ai.sentAll', { n: pendingAll.length });
       setTurns((ts) => [...ts, { role: 'assistant', content: done, at: Date.now() }]);
       if (voice || speakOn) speak(done);
       return;
     }
-    const next = [...turns, { role: 'user' as const, content: q, at: Date.now() }];
-    setTurns(next);
+    const next = retry ? turns : [...turns, { role: 'user' as const, content: q, at: Date.now() }];
+    if (!retry) setTurns(next);
     setBusy(true);
     try {
       // El modelo recibe el texto y un resumen de lo que ya hizo o dejó pendiente (sin tokens).
@@ -160,7 +162,7 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
         content: x.actions?.length ? `${x.content}\n[${x.actions.map((a) => `${a.status}: ${a.kind} → ${a.target}: ${a.text}`).join(' | ')}]`.slice(0, 4000) : x.content.slice(0, 4000),
       }));
       const out = await client.request<AssistantTurnDTO>('/assistant/turn', { method: 'POST', json: { messages: history, timezone: tz(), lang: lang() } });
-      setTurns((ts) => [...ts, { role: 'assistant', content: out.reply, actions: out.actions, at: Date.now() }]);
+      setTurns((ts) => [...ts, { role: 'assistant', content: out.reply, actions: out.actions, suggestions: out.suggestions ?? [], at: Date.now() }]);
       if (voice || speakOn) speak(out.reply);
     } catch (e: any) {
       setError(e?.status === 503 ? t('ai.unavailable') : errorText(e));
@@ -252,7 +254,8 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
           {turns.map((x, i) => (
             <div key={i} className={`ai-turn ${x.role}`}>
               <div className="ai-say">{x.content}</div>
-              {!!x.actions?.length && <div className="ai-actions">{x.actions.map((a) => <ActionCard key={a.id} a={a} onRun={runAction} onUndo={undo} onDiscard={() => patchAction(a.id, { status: 'undone', token: undefined })} onOpen={(to) => { navigate(to); onClose(); }} />)}</div>}
+              {!!x.actions?.length && <div className="ai-actions">{x.actions.map((a) => <ActionCard key={a.id} a={a} onRun={runAction} onUndo={undo} onDiscard={() => patchAction(a.id, { status: 'undone', token: undefined })} onOpen={(to) => { navigate(to); onClose(); }}
+                onRedo={() => { patchAction(a.id, { status: 'undone', token: undefined }); void ask(t('ai.redoAsk', { name: a.target })); }} />)}</div>}
             </div>
           ))}
           {pendingAll.length > 1 && (
@@ -260,7 +263,14 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
           )}
           {transcribing && <div className="ai-turn user"><div className="ai-say muted">{t('ai.transcribing')}</div></div>}
           {busy && <div className="ai-turn assistant"><div className="ai-say ai-dots" aria-label={t('common.wait')}><i /><i /><i /></div></div>}
-          {error && <div className="ai-error" role="alert">{error}</div>}
+          {!busy && !transcribing && !listening && lastTurn?.role === 'assistant' && !!lastTurn.suggestions?.length && (
+            <div className="ai-chips ai-next">
+              {lastTurn.suggestions.map((q) => <button key={q} className="ai-chip" onClick={() => void ask(q)}>{q}</button>)}
+            </div>
+          )}
+          {error && <div className="ai-error" role="alert">{error}
+            {lastTurn?.role === 'user' && <button className="btn ai-retry" onClick={() => void ask(lastTurn.content, true)}>{t('ai.retry')}</button>}
+          </div>}
         </div>
 
         {listening && (
@@ -285,8 +295,8 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
 
 const KIND_ICON: Record<AssistantActionDTO['kind'], string> = { send_message: '✉', create_group: '▦', create_issue: '◆', update_issue: '✓', create_event: '▤', cancel_event: '⊘', mark_read: '◉' };
 
-function ActionCard({ a, onRun, onUndo, onDiscard, onOpen }: {
-  a: AssistantActionDTO; onRun: (a: AssistantActionDTO, text?: string) => void; onUndo: (a: AssistantActionDTO) => void; onDiscard: () => void; onOpen: (to: string) => void;
+function ActionCard({ a, onRun, onUndo, onDiscard, onOpen, onRedo }: {
+  a: AssistantActionDTO; onRun: (a: AssistantActionDTO, text?: string) => void; onUndo: (a: AssistantActionDTO) => void; onDiscard: () => void; onOpen: (to: string) => void; onRedo: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(a.text);
@@ -310,6 +320,7 @@ function ActionCard({ a, onRun, onUndo, onDiscard, onOpen }: {
         <div className="ai-card-btns">
           <button className={`btn ${danger ? 'danger' : 'primary'}`} onClick={() => onRun(a, editing && draft.trim() !== a.text ? draft.trim() : undefined)}>{verb}</button>
           {a.kind === 'send_message' && !editing && <button className="btn" onClick={() => setEditing(true)}>{t('ai.edit')}</button>}
+          {a.kind === 'send_message' && !editing && <button className="btn" onClick={onRedo}>{t('ai.redo')}</button>}
           <button className="btn" onClick={onDiscard}>{t('ai.discard')}</button>
         </div>
       )}

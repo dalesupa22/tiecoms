@@ -979,10 +979,13 @@ select.link-act { appearance: none; padding-right: 10px; }
 .ai-card-text.strike { text-decoration: line-through; }
 .ai-edit { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--card); resize: vertical; }
 .ai-card-btns { display: flex; gap: 6px; flex-wrap: wrap; }
-.ai-card-btns .btn { padding: 5px 12px; min-height: 30px; }
+.ai-card-btns .btn { padding: 4px 10px; min-height: 30px; font-size: 13px; }
 .ai-ok { color: var(--ok); font-size: 12px; font-weight: 700; }
 .ai-bad { color: var(--danger); font-size: 12px; font-weight: 600; }
 .ai-sendall { align-self: flex-start; }
+.ai-next { margin: 0; }
+.ai-next .ai-chip { background: var(--card); border-color: var(--accent); color: var(--accent-ink); }
+.ai-retry { margin-left: 8px; padding: 3px 10px; min-height: 26px; }
 .ai-error { color: var(--danger); font-size: 13px; }
 .ai-dots { display: inline-flex; gap: 4px; padding: 12px 14px; }
 .ai-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: ai-dot 1s infinite ease-in-out; }

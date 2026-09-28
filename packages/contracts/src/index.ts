@@ -1002,4 +1002,4 @@ export interface AssistantActionDTO {
   link?: string | null;
   error?: string | null;
 }
-export interface AssistantTurnDTO { reply: string; actions: AssistantActionDTO[] }
+export interface AssistantTurnDTO { reply: string; actions: AssistantActionDTO[]; /** 2-3 respuestas rápidas que el usuario probablemente dirá después (chips). */ suggestions?: string[] }

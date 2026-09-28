@@ -9,7 +9,7 @@ import { Modal, personById } from '../ui.tsx';
 /**
  * Temas del chat (docs/TEMAS.md): banderitas arriba del chat, con scroll horizontal.
  * Tocar una filtra el chat y lo que escribas sale con ese tema; «Todo» quita el filtro.
- * Mantener presionada (o clic derecho) abre renombrar, color, archivar y quitar. Máximo TOPIC_LIMIT activas.
+ * Mantener presionada (o clic derecho) abre renombrar, color, archivar y quitar. Sin límite práctico (TOPIC_LIMIT es un tope técnico).
  */
 const ICONS = ['🌐', '🌱', '💰', '📣', '📈', '🤝', '🎯', '🧾', '⚙️', '📦', '🎓', '⚖️'];
 const EMPTY: TopicDTO[] = [];
@@ -92,7 +92,6 @@ function NewTopicDialog({ conversationId, list, onClose, onCreated, edit }: { co
       <div className="topic-pick">{ICONS.map((i) => <button key={i} className={`topic-pick-icon ${i === icon ? 'is-on' : ''}`} onClick={() => setIcon(i)} aria-label={i}>{i}</button>)}</div>
       <div className="topic-pick">{TOPIC_COLORS.map((c) => <button key={c} className={`topic-swatch c-${c} ${c === color ? 'is-on' : ''}`} onClick={() => setColor(c)} aria-label={t(`topic.colors.${c}` as any)} title={t(`topic.colors.${c}` as any)} />)}</div>
       <div className="topic-preview"><span className={`topic-flag c-${color} is-on`}>{icon} {name.trim() || t('topic.namePh')}</span></div>
-      {!edit && <div className="small muted">{t('topic.left', { n: TOPIC_LIMIT - act.length, max: TOPIC_LIMIT })}</div>}
       <div className="modal-actions">
         <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
         <button className="btn primary" disabled={!name.trim() || busy} onClick={() => void save()}>{edit ? t('common.save') : t('topic.create')}</button>
@@ -128,7 +127,6 @@ export function TopicDock({ conv, list, filter, onFilter, counts }: {
   const d = useClient((s) => s.data)!;
   const act = activeTopics(list);
   const archived = list.filter((x) => x.archivedAt);
-  const free = TOPIC_LIMIT - act.length;
   const canEdit = conv.canPost;
   const flagMenu = (x: TopicDTO): MenuItem[] => [
     { label: t('topic.rename'), icon: '✎', onSelect: () => openDialog((close) => <NewTopicDialog conversationId={conv.id} list={list} edit={x} onClose={close} />) },
@@ -159,7 +157,7 @@ export function TopicDock({ conv, list, filter, onFilter, counts }: {
       ))}
       {canEdit && (
         <button className="topic-flag c-plain is-new" onClick={() => newTopicDialog(conv.id, list, (tp) => onFilter(tp.id))}>
-          ＋ {free > 0 ? (free === 1 ? t('topic.newFree', { n: free }) : t('topic.newFreeN', { n: free })) : t('topic.new')}
+          ＋ {t('topic.new')}
         </button>
       )}
       {archived.length > 0 && <button className="topic-flag c-gray" onClick={() => openDialog((close) => <ArchivedDialog list={list} onClose={close} />)}>🗄 {t('topic.archivedN', { n: archived.length })}</button>}

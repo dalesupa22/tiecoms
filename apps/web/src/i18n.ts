@@ -98,7 +98,7 @@ const es = {
   // Temas (docs/TEMAS.md)
   'topic.all': 'Todo', 'topic.new': 'Nuevo', 'topic.newFree': 'Nuevo · {n} libre', 'topic.newFreeN': 'Nuevo · {n} libres', 'topic.archivedN': 'Archivados {n}',
   'topic.bar': 'Temas del chat', 'topic.newTitle': 'Nuevo tema', 'topic.namePh': 'Finanzas', 'topic.left': 'Quedan {n} de {max}.', 'topic.create': 'Crear',
-  'topic.full': 'Ya hay {max} temas', 'topic.fullHint': 'Archiva uno para abrir espacio: mantén presionada su banderita (o clic derecho).',
+  'topic.full': 'Ya hay {max} temas', 'topic.fullHint': 'Archiva los que ya no uses: mantén presionada su banderita (o clic derecho).',
   'topic.rename': 'Renombrar', 'topic.renameTitle': 'Renombrar tema', 'topic.color': 'Cambiar color', 'topic.archive': 'Archivar', 'topic.archiveHint': 'Sale de la fila. Sus mensajes quedan con etiqueta gris.',
   'topic.remove': 'Quitar tema', 'topic.removeHint': 'Los mensajes quedan sin tema. No se borra nada.', 'topic.removeConfirm': '¿Quitar «{name}»? {n} mensajes quedan sin tema. No se borra ningún mensaje.',
   'topic.archived': 'Archivaste {name}', 'topic.removed': 'Quitaste {name}', 'topic.restored': 'Restauraste {name}', 'topic.restore': 'Restaurar', 'topic.archivedTitle': 'Temas archivados',
@@ -723,7 +723,7 @@ const en: Record<Key, string> = {
   // Topics (docs/TEMAS.md)
   'topic.all': 'All', 'topic.new': 'New', 'topic.newFree': 'New · {n} left', 'topic.newFreeN': 'New · {n} left', 'topic.archivedN': 'Archived {n}',
   'topic.bar': 'Chat topics', 'topic.newTitle': 'New topic', 'topic.namePh': 'Finance', 'topic.left': '{n} of {max} left.', 'topic.create': 'Create',
-  'topic.full': 'There are already {max} topics', 'topic.fullHint': 'Archive one to make room: long-press its flag (or right-click).',
+  'topic.full': 'There are already {max} topics', 'topic.fullHint': 'Archive the ones you no longer use: long-press its flag (or right-click).',
   'topic.rename': 'Rename', 'topic.renameTitle': 'Rename topic', 'topic.color': 'Change color', 'topic.archive': 'Archive', 'topic.archiveHint': 'Leaves the row. Its messages keep a gray tag.',
   'topic.remove': 'Remove topic', 'topic.removeHint': 'Messages become untagged. Nothing is deleted.', 'topic.removeConfirm': 'Remove “{name}”? {n} messages become untagged. No message is deleted.',
   'topic.archived': 'Archived {name}', 'topic.removed': 'Removed {name}', 'topic.restored': 'Restored {name}', 'topic.restore': 'Restore', 'topic.archivedTitle': 'Archived topics',

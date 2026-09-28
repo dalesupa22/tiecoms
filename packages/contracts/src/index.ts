@@ -682,7 +682,7 @@ export interface MessageDTO {
   deletedAt: string | null;
 }
 
-/** Tema fijo de una conversación: banderita con color e ícono. Máximo TOPIC_LIMIT activos. */
+/** Tema fijo de una conversación: banderita con color e ícono. TOPIC_LIMIT es solo un tope técnico. */
 export interface TopicDTO {
   id: string;
   conversationId: string;
@@ -694,7 +694,7 @@ export interface TopicDTO {
   createdBy: string;
   createdAt: string;
 }
-export const TOPIC_LIMIT = 5;
+export const TOPIC_LIMIT = 50;
 export const TOPIC_COLORS = ['blue', 'green', 'orange', 'violet', 'magenta', 'aqua', 'red', 'yellow'] as const;
 export type TopicColor = (typeof TOPIC_COLORS)[number];
 export const CreateTopicInput = z.object({

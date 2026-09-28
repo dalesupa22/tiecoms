@@ -8,12 +8,12 @@ Los temas no son hilos ni tareas:
 
 ## Reglas (iguales en web, iOS y Android)
 
-- Cada conversación tiene como máximo **5 temas activos** (`TOPIC_LIMIT`). Los archivados no cuentan para el límite.
+- No hay límite práctico de temas activos. Danny lo pidió el 28-sep-2026, después de probar con 5. `TOPIC_LIMIT` = 50 es solo un tope técnico, y los archivados no cuentan.
 - Cualquiera que pueda escribir en el chat puede crear, renombrar, cambiar de color, archivar o quitar un tema.
 - Cualquiera también puede etiquetar **cualquier mensaje**, sea suyo o de otra persona. Queda registrado quién le puso el tema (`topicBy`), y la interfaz muestra «tema puesto por X» cuando no fue el autor del mensaje.
 - **Fila de banderitas**: va debajo de los chips (Fijados, Tareas, Hilos, Agenda, Enlaces) y tiene scroll horizontal.
   - La primera es «Todo».
-  - Después van los temas activos y «＋ Nuevo · N libres».
+  - Después van los temas activos y «＋ Nuevo».
   - Al final va «Archivados N», si hay alguno.
 - **Tocar una banderita** filtra el chat a ese tema. Lo que se escribe mientras tanto sale con ese tema, y el campo lo indica con «Mensaje en X». Tocar «Todo» o la misma banderita otra vez quita el filtro.
 - **Mantener presionada una banderita** (o clic derecho) abre: Renombrar, Cambiar color, Archivar y Quitar tema.
@@ -26,7 +26,7 @@ Los temas no son hilos ni tareas:
 | Método | Ruta | Qué hace |
 | --- | --- | --- |
 | GET | `/conversations/:id/topics` | Lista activos y archivados |
-| POST | `/conversations/:id/topics` | Crea un tema con `{ name, color?, icon? }`. Responde 409 si ya hay 5 activos o si el nombre está repetido |
+| POST | `/conversations/:id/topics` | Crea un tema con `{ name, color?, icon? }`. Responde 409 si el nombre está repetido o se llega al tope técnico |
 | PATCH | `/topics/:id` | Cambia `{ name?, color?, icon?, archived?, position? }`. Restaurar también respeta el límite |
 | DELETE | `/topics/:id` | Quita el tema. Sus mensajes quedan con `topicId: null` |
 | PUT | `/messages/:id/topic` | Pone `{ topicId }` o `{ topicId: null }` |

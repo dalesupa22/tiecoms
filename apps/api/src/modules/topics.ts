@@ -5,7 +5,7 @@ import { badRequest, conflict, notFound } from '../errors.ts';
 import { appendEvent, toMessageDTO } from './messages.ts';
 
 /**
- * Temas de una conversación (docs/TEMAS.md): banderitas fijas, máximo TOPIC_LIMIT activas.
+ * Temas de una conversación (docs/TEMAS.md): banderitas fijas; TOPIC_LIMIT activas es solo un tope técnico.
  * Cualquiera que pueda escribir en el chat crea, edita, archiva o quita temas y etiqueta cualquier mensaje.
  */
 const toDTO = (r: any): TopicDTO => ({
@@ -49,7 +49,7 @@ export async function createTopic(userId: string, conversationId: string, input:
   return tx(async (c) => {
     await conversationAccess(c, userId, conversationId, 'post', true);
     const n = await activeCount(c, conversationId);
-    if (n >= TOPIC_LIMIT) throw conflict(`Máximo ${TOPIC_LIMIT} temas activos: archiva uno primero`);
+    if (n >= TOPIC_LIMIT) throw conflict(`Máximo ${TOPIC_LIMIT} temas activos: archiva los que ya no uses`);
     const { rows: used } = await c.query('SELECT color, max(position) OVER () AS top FROM conversation_topics WHERE conversation_id = $1', [conversationId]);
     const taken = new Set(used.map((r) => r.color));
     const color = input.color ?? TOPIC_COLORS.find((x) => !taken.has(x)) ?? TOPIC_COLORS[n % TOPIC_COLORS.length]!;
@@ -70,7 +70,7 @@ export async function updateTopic(userId: string, topicId: string, input: { name
     const t = await topicRow(c, userId, topicId);
     // Restaurar un archivado cuenta contra el límite.
     if (input.archived === false && t.archived_at && await activeCount(c, t.conversation_id) >= TOPIC_LIMIT) {
-      throw conflict(`Máximo ${TOPIC_LIMIT} temas activos: archiva uno primero`);
+      throw conflict(`Máximo ${TOPIC_LIMIT} temas activos: archiva los que ya no uses`);
     }
     try {
       await c.query(

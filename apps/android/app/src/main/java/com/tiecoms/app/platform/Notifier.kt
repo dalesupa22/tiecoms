@@ -80,7 +80,9 @@ class Notifier(private val context: Context) {
     }
 
     /** true la primera vez que se ve este messageId (socket y FCM no duplican). */
-    fun firstTime(messageId: String?): Boolean = ledger.claim(messageId, com.tiecoms.app.core.NoticeLedger.Decision.SHOWN) == null
+    fun firstTime(messageId: String?, session: Any): Boolean = ledger.deliver(
+        session, messageId, { com.tiecoms.app.core.Notices.Outcome.SHOW }, ownerChanged = ::clearPresented,
+    ) { true } == com.tiecoms.app.core.Notices.Outcome.SHOW
 
     private fun openIntent(uri: String, code: Int): PendingIntent {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri), context, MainActivity::class.java)
@@ -108,11 +110,12 @@ class Notifier(private val context: Context) {
         openUri: String? = null,
         /** Nombre del atajo y de la burbuja («Empresa - Grupo»); por defecto el título. */
         shortcutLabel: String = title,
-    ) {
-        if (!enabled()) return
+    ): Boolean {
+        if (!enabled()) return false
         val lines = history.getOrPut(conversationId) { ArrayDeque() }
+        val line = Line(authorKey, authorName, text, System.currentTimeMillis(), authorIcon)
         synchronized(lines) {
-            lines.addLast(Line(authorKey, authorName, text, System.currentTimeMillis(), authorIcon))
+            lines.addLast(line)
             while (lines.size > HISTORY) lines.removeFirst()
         }
         val me = Person.Builder().setName(context.getString(R.string.notif_you)).setKey("me").build()
@@ -159,12 +162,14 @@ class Notifier(private val context: Context) {
             .setSilent(silent)
             .setContentIntent(openIntent(openUri ?: (deep + (seq?.let { "?m=$it" } ?: "")), conversationId.hashCode()))
             .build()
-        notify(conversationId.hashCode(), n)
+        val posted = notify(conversationId.hashCode(), n)
+        if (!posted) synchronized(lines) { lines.remove(line) }
+        return posted
     }
 
     /** Recordatorios y reuniones: notificación simple con el mismo canal. */
-    fun showMessage(conversationId: String, title: String, text: String, silent: Boolean, tag: String = conversationId, seq: Long? = null, openUri: String? = null) {
-        if (!enabled()) return
+    fun showMessage(conversationId: String, title: String, text: String, silent: Boolean, tag: String = conversationId, seq: Long? = null, openUri: String? = null): Boolean {
+        if (!enabled()) return false
         val uri = openUri ?: ("chaggu://c/$conversationId" + (seq?.let { "?m=$it" } ?: ""))
         val channel = when {
             tag.startsWith("event:soon:") -> CHANNEL_SOON
@@ -178,7 +183,7 @@ class Notifier(private val context: Context) {
             .setCategory(NotificationCompat.CATEGORY_REMINDER).setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true).setSilent(silent).setContentIntent(openIntent(uri, tag.hashCode()))
             .build()
-        notify(tag.hashCode(), n)
+        return notify(tag.hashCode(), n)
     }
 
     /** Tras responder desde la notificación: se agrega «Tú: …» y se vuelve a publicar en silencio. */
@@ -190,16 +195,19 @@ class Notifier(private val context: Context) {
         synchronized(lines) { lines.removeLast() } // showConversation lo volvió a agregar
     }
 
-    private fun notify(id: Int, n: android.app.Notification) {
-        try { NotificationManagerCompat.from(context).notify(id, n) } catch (e: SecurityException) { Log.w("TieComs", "Sin permiso de notificaciones") }
-    }
+    private fun notify(id: Int, n: android.app.Notification): Boolean = try {
+        NotificationManagerCompat.from(context).notify(id, n); true
+    } catch (_: SecurityException) { Log.w("TieComs", "Sin permiso de notificaciones"); false }
 
-    fun cancel(conversationId: String) {
+    fun cancel(conversationId: String) = ledger.cancel {
         NotificationManagerCompat.from(context).cancel(conversationId.hashCode())
         history.remove(conversationId)
     }
 
-    fun cancelAll() { NotificationManagerCompat.from(context).cancelAll(); history.clear() }
+    /** Called under the ledger lock when its session owner changes. */
+    fun clearPresented() { NotificationManagerCompat.from(context).cancelAll(); history.clear() }
+    fun cancelAll() = ledger.cancel { clearPresented(); ledger.clear() }
+    fun cancelSession(session: Any) { ledger.clearOwned(session, ::clearPresented) }
 }
 
 /**
@@ -216,4 +224,3 @@ class NoopPushRegistrar : PushRegistrar {
         private set
     override fun onToken(token: String) { lastToken = token }
 }
-

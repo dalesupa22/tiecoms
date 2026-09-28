@@ -2,6 +2,10 @@ package com.tiecoms.app.core
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceTimeBy
@@ -151,5 +155,27 @@ class ChatRecoveryTest {
         val start = currentTime
         ChatRecovery.waitOrOnline(2_000, state)
         assertEquals(2_000L, currentTime - start)
+    }
+
+    @Test fun `cancelar durante la espera no vuelve a leer ni cambia pendientes`() {
+        val gets = serve { nginx502 }
+        val c = newClient()
+        val pending = c.state.value.pending
+        val enteredWait = CompletableDeferred<Unit>()
+        runBlocking {
+            val recovery = launch {
+                ChatRecovery.withRetry(attempt = { c.openConversation("dm-qa") }, wait = {
+                    enteredWait.complete(Unit)
+                    awaitCancellation()
+                })
+            }
+            enteredWait.await()
+            recovery.cancelAndJoin()
+        }
+        assertEquals(1, gets.get())
+        assertEquals(pending, c.state.value.pending)
+        assertEquals(2L, c.meta("dm-qa")!!.lastReadSeq)
+        assertFalse(c.state.value.conversations["dm-qa"]!!.loading)
+        assertEquals(emptyList<String>(), writes.filter { !it.endsWith("/login") })
     }
 }

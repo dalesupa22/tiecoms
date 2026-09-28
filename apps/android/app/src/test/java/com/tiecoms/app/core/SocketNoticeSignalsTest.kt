@@ -31,6 +31,8 @@ class SocketNoticeSignalsTest {
     private val server = MockWebServer()
     private var client: TieComsClient? = null
     @Volatile private var ws: WebSocket? = null
+    @Volatile private var failEvents = false
+    private val eventFailures = java.util.concurrent.atomic.AtomicInteger()
     private val scope = CoroutineScope(Dispatchers.Default)
 
     @After fun close() { scope.cancel(); client?.close(); server.shutdown() }
@@ -48,11 +50,17 @@ class SocketNoticeSignalsTest {
                         if (text.startsWith("40")) { webSocket.send("""40{"sid":"s1"}"""); webSocket.send("""42["ready",{}]""") }
                     }
                 })
+                if (path.endsWith("/events") && failEvents) {
+                    eventFailures.incrementAndGet()
+                    return MockResponse().setResponseCode(503).setBody("temporary failure")
+                }
                 val body = when (path) {
                     "$AUTH_BASE_PATH/login" -> """{"accessToken":"local","accessExpiresAt":"2099-01-01T00:00:00Z","refreshToken":"local","sessionId":"local","user":{"id":"me","name":"QA"}}"""
                     "/api/v1/bootstrap" -> """{"me":{"id":"me","name":"QA"},"people":[{"id":"peer","name":"Synthetic Peer"}],"conversations":[
                         {"id":"dm-open","kind":"direct","memberIds":["me","peer"],"lastMessageSeq":1,"lastReadSeq":1,"lastEventSeq":1},
                         {"id":"dm-muted","kind":"direct","memberIds":["me","peer"],"lastMessageSeq":1,"lastReadSeq":1,"lastEventSeq":1,"mutedUntil":"${Silence.FOREVER}"}]}"""
+                    "/api/v1/conversations/dm-open/messages" -> """{"messages":[{"id":"m1","conversationId":"dm-open","seq":1,"authorId":"peer","body":"Synthetic baseline"}],"hasMore":false,"lastEventSeq":1}"""
+                    "/api/v1/conversations/dm-open/events" -> """{"events":[],"lastEventSeq":1}"""
                     "/api/v1/blocks" -> """{"userIds":[]}"""
                     else -> """{}"""
                 }
@@ -114,4 +122,36 @@ class SocketNoticeSignalsTest {
         assertEquals(Notices.Outcome.DUPLICATE, fcm("dm-muted", "m-muted"))
         assertEquals(Notices.Outcome.DUPLICATE, fcm("dm-open", "m-live"))
     }
+    @Test fun `immediate consumer sees continuous event applied while gap keeps FCM fallback`() {
+        val (c, _) = start()
+        runBlocking { c.openConversation("dm-open") }
+        val appliedAtSignal = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+        // Unconfined deliberately inspects state within signal dispatch, not after a lucky scheduling delay.
+        val observer = scope.launch(Dispatchers.Unconfined) {
+            c.signals.collect { signal ->
+                if (signal is ClientSignal.Incoming) appliedAtSignal[signal.message.id] =
+                    c.state.value.conversations["dm-open"]!!.messages.any { it.id == signal.message.id }
+            }
+        }
+        try {
+            created("dm-open", "m-cont", 2, "2099-01-01T00:00:00Z")
+            waitFor("continuous signal") { appliedAtSignal.containsKey("m-cont") }
+            assertEquals(true, appliedAtSignal["m-cont"])
+            assertTrue(c.noticeContext("dm-open", "m-cont", "peer", true, "dm-open").openAndLoaded)
+
+            failEvents = true
+            created("dm-open", "m-gap", 4, "2099-01-01T00:00:00Z")
+            waitFor("gap signal and attempted recovery") { appliedAtSignal.containsKey("m-gap") && eventFailures.get() > 0 }
+            assertEquals(false, appliedAtSignal["m-gap"])
+            val ctx = c.noticeContext("dm-open", "m-gap", "peer", true, "dm-open")
+            assertEquals(false, ctx.openAndLoaded)
+            val ledger = NoticeLedger(); var posted = 0
+            assertEquals(Notices.Outcome.NOT_DELIVERED, Notices.forLive(ledger, "m-gap", ctx, false, present = { false }))
+            val push = PushMessage("message", "Peer", "", "Synthetic gap", 1, "dm-open", "TC_MESSAGE", "dm-open", "m-gap", "peer", "Peer", null, null, null)
+            assertEquals(Notices.Outcome.SHOW, Notices.forPush(ledger, push, ctx, present = { posted++; true }))
+            assertEquals(Notices.Outcome.DUPLICATE, Notices.forLive(ledger, "m-gap", ctx, false, present = { posted++; true }))
+            assertEquals(1, posted)
+        } finally { observer.cancel() }
+    }
+
 }

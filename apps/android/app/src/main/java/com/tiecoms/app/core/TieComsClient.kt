@@ -76,12 +76,12 @@ data class ClientState(
 /** Avisos puntuales para sonidos y notificaciones. */
 sealed interface ClientSignal {
     /** Mensaje de otra persona recibido EN VIVO (no en la recuperación masiva). */
-    data class Incoming(val message: MessageDTO) : ClientSignal
+    data class Incoming(val message: MessageDTO, val generation: Long = 0) : ClientSignal
     /** Mensaje de otra persona recibido EN VIVO que no avisa (chat silenciado o «No molestar»). */
-    data class Silenced(val messageId: String) : ClientSignal
+    data class Silenced(val messageId: String, val generation: Long = 0) : ClientSignal
     /** El servidor confirmó un mensaje propio. */
     data class Sent(val message: MessageDTO) : ClientSignal
-    data object SignedOut : ClientSignal
+    data class SignedOut(val generation: Long) : ClientSignal
     /** Recordatorio vencido (evento de cuenta `reminder.due`). */
     data class ReminderDue(val reminder: ReminderDTO) : ClientSignal
     /** Reunión nueva, movida o cancelada por otra persona, en vivo. kind: created | moved | cancelled */
@@ -111,6 +111,8 @@ class TieComsClient(
     okHttp: OkHttpClient,
     private val now: () -> Long = System::currentTimeMillis,
     private val meetingStore: SecretStore = MemorySecretStore(),
+    /** Synchronous local cleanup, before a new session can present notices; never await network here. */
+    private val onNoticeSessionEnded: () -> Unit = {},
 ) {
     val http = HttpApi(baseUrl, okHttp)
     val baseUrl: String get() = http.baseUrl
@@ -126,6 +128,26 @@ class TieComsClient(
     private var accessExp = 0L
     private var authSessionId: String? = null
     @Volatile var sessionGeneration: Long = 0; private set
+    /** Unlike request generation, first cold refresh preserves decisions already made by FCM. */
+    @Volatile var noticeGeneration: Long = 0; private set
+    /** Shared runtime policy context for socket and FCM, with the same clock and safety preferences. */
+    fun noticeContext(conversationId: String, messageId: String?, authorId: String?, foreground: Boolean, openConversationId: String?): Notices.PushContext {
+        val state = s
+        val conv = state.data?.conversations?.firstOrNull { it.id == conversationId }
+        return Notices.PushContext(foreground,
+            state.status == SessionStatus.READY && state.connection == ConnectionStatus.ONLINE,
+            dndActive(), conv != null, conv?.mutedUntil,
+            Notices.openAndLoaded(foreground, openConversationId, conversationId, state, messageId), now(),
+            authorId != null && authorId in state.blockedUserIds)
+    }
+    private val noticeSessionLock = Any()
+    fun clearNoticesIfSignedOut(action: () -> Unit) = synchronized(noticeSessionLock) {
+        if (s.status == SessionStatus.ANONYMOUS) action()
+    }
+    /** Publication and session invalidation must not pass one another. Cold restoration remains valid. */
+    fun <T> withNoticeSession(generation: Long, action: () -> T): T? = synchronized(noticeSessionLock) {
+        if (generation != noticeGeneration || s.status == SessionStatus.ANONYMOUS) null else action()
+    }
     @Volatile private var meetingProof: MeetingProof? = null
     private val meetingAttempts = java.util.concurrent.ConcurrentHashMap<String, MeetingAttempt>()
     private var meetingOwner: String? = null
@@ -239,24 +261,29 @@ class TieComsClient(
     private fun deviceId(): String = storage.get("device:id") ?: UUID.randomUUID().toString().also { storage.set("device:id", it) }
     private fun device() = DeviceInfo(deviceId = deviceId(), name = deviceName.take(120))
 
-    private fun applyAuth(r: AuthResult) {
+    private fun applyAuth(r: AuthResult, refreshingSession: Boolean = false): Unit = synchronized(noticeSessionLock) {
         if (authSessionId != r.sessionId) {
+            if (!refreshingSession || authSessionId != null) {
+                onNoticeSessionEnded()
+                noticeGeneration++
+            }
             sessionGeneration++; authSessionId = r.sessionId
             cancelMeetingConnect(); meetingAttempts.clear(); meetingOwner = null
         }
         accessToken = r.accessToken
         accessExp = runCatching { Instant.parse(r.accessExpiresAt).toEpochMilli() }.getOrElse { now() + 10 * 60_000 }
         r.refreshToken?.let { secrets.set(it) }
+        Unit
     }
 
     /** Arranque: intenta reanudar la sesión guardada. */
     suspend fun start() = withContext(dispatcher) {
         startRetryJob?.cancel()
         setState { copy(status = SessionStatus.LOADING) }
-        if (secrets.get() == null) { setState { copy(status = SessionStatus.ANONYMOUS) }; return@withContext }
+        if (secrets.get() == null) { handleSignedOut(); return@withContext }
         when (refresh()) {
             RefreshOutcome.OK -> try { afterLogin() } catch (e: NetworkException) { unreachable() }
-            RefreshOutcome.UNAUTHORIZED -> setState { copy(status = SessionStatus.ANONYMOUS) }
+            RefreshOutcome.UNAUTHORIZED -> handleSignedOut()
             RefreshOutcome.NETWORK -> unreachable()
         }
     }
@@ -322,7 +349,7 @@ class TieComsClient(
             } catch (e: NetworkException) { return@async RefreshOutcome.NETWORK }
             requireSession(generation)
             when {
-                r.ok -> { applyAuth(TcJson.decodeFromString(AuthResult.serializer(), r.body)); RefreshOutcome.OK }
+                r.ok -> { applyAuth(TcJson.decodeFromString(AuthResult.serializer(), r.body), refreshingSession = true); RefreshOutcome.OK }
                 r.code == 401 || r.code == 400 || r.code == 403 -> { accessToken = null; secrets.set(null); RefreshOutcome.UNAUTHORIZED }
                 else -> RefreshOutcome.NETWORK
             }
@@ -337,8 +364,10 @@ class TieComsClient(
         if (generation == sessionGeneration) handleSignedOut()
     }
 
-    private fun handleSignedOut() {
-        sessionGeneration++; authSessionId = null
+    private fun handleSignedOut(): Unit = synchronized(noticeSessionLock) {
+        val previousNoticeGeneration = noticeGeneration
+        onNoticeSessionEnded()
+        sessionGeneration++; noticeGeneration++; authSessionId = null
         cancelMeetingConnect(); meetingAttempts.clear(); meetingOwner = null; meetingStore.set(null)
         val me = s.data?.me?.id
         socket.stop()
@@ -352,7 +381,8 @@ class TieComsClient(
         storage.set(DND_KEY, null); storage.set(DND_LOCAL_KEY, null)
         val wasSignedIn = s.status != SessionStatus.ANONYMOUS
         _state.value = ClientState(status = SessionStatus.ANONYMOUS)
-        if (wasSignedIn) _signals.tryEmit(ClientSignal.SignedOut)
+        if (wasSignedIn) _signals.tryEmit(ClientSignal.SignedOut(previousNoticeGeneration))
+        Unit
     }
 
     private suspend fun afterLogin() {
@@ -538,6 +568,7 @@ class TieComsClient(
             }
             else -> Unit
         }
+        var messageNotice: ClientSignal? = null
         if (e is ConversationEvent.MessageCreated) {
             val fresh = bumpMeta(e.message)
             // Solo suena lo creado con la conexión ya en vivo: si el despacho del servidor llega tarde
@@ -546,19 +577,27 @@ class TieComsClient(
             // Silenciada: sin sonido ni notificación. Una mención a mí (o @todos) avisa aunque esté silenciada,
             // salvo el silencio «siempre» (como el push del servidor). «No molestar» apaga todo (SPEC-silencio).
             val mentioned = Mentions.mentionsMe(e.message, myId)
-            if (fresh && e.message.authorId != myId && e.message.authorId !in s.blockedUserIds && e.message.kind != "system" && createdAt >= liveSince) {
+            if (fresh && e.message.authorId != myId && e.message.kind != "system" && createdAt >= liveSince) {
                 // La decisión «sin aviso» también se anuncia: un FCM tardío del mismo mensaje no debe aparecer (Notices).
-                _signals.tryEmit(if (Silence.notifies(meta.mutedUntil, mentioned, dndUntil(), now())) ClientSignal.Incoming(e.message) else ClientSignal.Silenced(e.message.id))
+                messageNotice = if (e.message.authorId !in s.blockedUserIds && !dndActive() && Silence.notifies(meta.mutedUntil, mentioned, null, now()))
+                    ClientSignal.Incoming(e.message, noticeGeneration) else ClientSignal.Silenced(e.message.id, noticeGeneration)
             }
         }
         val local = s.conversations[e.conversationId]
         if (local?.loaded != true) {
             patchMeta(e.conversationId) { copy(lastEventSeq = maxOf(lastEventSeq, e.eventSeq)) }
+            messageNotice?.let { _signals.tryEmit(it) }
             return
         }
         if (e.eventSeq <= local.lastEventSeq) return // duplicado de transporte
-        if (e.eventSeq > local.lastEventSeq + 1) { scope.launch { catchUp(e.conversationId) }; return } // hueco
+        if (e.eventSeq > local.lastEventSeq + 1) {
+            scope.launch { catchUp(e.conversationId) }
+            messageNotice?.let { _signals.tryEmit(it) } // Not applied: the notification remains a fallback.
+            return
+        }
         applyEvent(e)
+        // A synchronous collector must see the applied message before deciding OPEN/receive sound.
+        messageNotice?.let { _signals.tryEmit(it) }
     }
 
     /** Actualiza la vista previa y los no leídos. Devuelve true si el mensaje es nuevo. */
@@ -1680,8 +1719,9 @@ class TieComsClient(
     fun debugDisconnect() { scope.launch { socket.stop() } }
     fun debugReconnect() { scope.launch { socket.start() } }
 
-    fun close() {
-        sessionGeneration++; cancelMeetingConnect(); meetingAttempts.clear()
+    fun close(): Unit = synchronized(noticeSessionLock) {
+        onNoticeSessionEnded()
+        sessionGeneration++; noticeGeneration++; cancelMeetingConnect(); meetingAttempts.clear()
         socket.stop()
         scope.cancel()
     }

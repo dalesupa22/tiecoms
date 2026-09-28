@@ -119,7 +119,12 @@ class AppContainer(private val app: Application) {
 
     val foreground: Boolean get() = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 
-    private fun newClient(url: String) = TieComsClient(url, deviceName, storage, secrets, okHttp, meetingStore = meetingStore)
+    private fun newClient(url: String): TieComsClient {
+        lateinit var created: TieComsClient
+        created = TieComsClient(url, deviceName, storage, secrets, okHttp, meetingStore = meetingStore,
+            onNoticeSessionEnded = { if (_client.value === created) notifier.cancelAll() })
+        return created
+    }
 
     /** Notas de voz: un solo reproductor para toda la app (reproducción continua). */
     val voice by lazy { com.tiecoms.app.platform.VoicePlayer(app, okHttp, settings) }
@@ -133,7 +138,7 @@ class AppContainer(private val app: Application) {
         notifier.ensureChannel()
         sounds.hashCode() // precarga SoundPool: el sonido del splash debe estar listo en t = 0,35 s
         scope.launch { _client.value.start() }
-        scope.launch { client.flatMapLatest { it.signals }.collect { onSignal(it) } }
+        scope.launch { client.flatMapLatest { c -> c.signals.map { c to it } }.collect { (origin, sig) -> onSignal(origin, sig) } }
         // Direct Share (SPEC-v4 §B): las conversaciones recientes como atajos de la hoja de compartir.
         scope.launch {
             client.flatMapLatest { it.state }
@@ -203,8 +208,11 @@ class AppContainer(private val app: Application) {
     }
 
     /** ¿La conversación está en pantalla, en primer plano y CARGADA? (un chat que falló al cargar no calla avisos). */
-    fun openAndLoaded(conversationId: String): Boolean =
-        com.tiecoms.app.core.Notices.openAndLoaded(foreground, openConversationId, conversationId, client.value.state.value)
+    fun openAndLoaded(conversationId: String, messageId: String?): Boolean =
+        com.tiecoms.app.core.Notices.openAndLoaded(foreground, openConversationId, conversationId, client.value.state.value, messageId)
+
+    private fun noticeContext(c: TieComsClient, conversationId: String, messageId: String?, authorId: String?) =
+        c.noticeContext(conversationId, messageId, authorId, foreground, openConversationId).copy(soundsEnabled = settings.soundsEnabled)
 
     /**
      * Push de FCM (SPEC-v3 §6). Ya no se descarta en bloque en primer plano con el socket en línea: el socket
@@ -215,20 +223,21 @@ class AppContainer(private val app: Application) {
      */
     fun showPush(p: com.tiecoms.app.core.PushMessage) {
         val c = client.value
-        val st = c.state.value
-        val conv = c.meta(p.conversationId)
-        val ctx = com.tiecoms.app.core.Notices.PushContext(
-            foreground = foreground,
-            live = st.status == com.tiecoms.app.core.SessionStatus.READY && st.connection == com.tiecoms.app.core.ConnectionStatus.ONLINE,
-            dnd = c.dndActive(),
-            convKnown = conv != null, convMutedUntil = conv?.mutedUntil,
-            openAndLoaded = openAndLoaded(p.conversationId),
-            nowMs = System.currentTimeMillis(),
-        )
-        if (com.tiecoms.app.core.Notices.forPush(notifier.ledger, p, ctx) != com.tiecoms.app.core.Notices.Outcome.SHOW) return
+        val generation = c.noticeGeneration
+        c.withNoticeSession(generation) {
+            if (client.value !== c) return@withNoticeSession
+            com.tiecoms.app.core.Notices.forPush(notifier.ledger, p,
+                noticeContext(c, p.conversationId, p.messageId, p.authorId), c to generation,
+                ownerChanged = notifier::clearPresented,
+                opened = { sounds.play(Sound.RECEIVE) },
+                present = { presentPush(p) })
+        }
+    }
+
+    private fun presentPush(p: com.tiecoms.app.core.PushMessage): Boolean {
         // FCM owns the process only until its callback returns. Post immediately; a remote
         // avatar must never delay the notification or escape into an untracked coroutine.
-        when (p.type) {
+        return when (p.type) {
             "side" -> {
                 // TC_SIDE: Responder (RemoteInput) escribe en el sidechat; tocar abre el origen con el sidechat desplegado
                 // si puedo leerlo (si no, el sidechat a pantalla completa con la tarjeta del ancla).
@@ -372,51 +381,57 @@ class AppContainer(private val app: Application) {
         settings.debugApiUrl = normalized
         val old = _client.value
         old.close()
+        notifier.cancelAll()
         secrets.set(null)
         val fresh = newClient(apiUrl)
         _client.value = fresh
         scope.launch { fresh.start() }
     }
 
-    private fun onSignal(sig: ClientSignal) {
+    private fun onSignal(origin: TieComsClient, sig: ClientSignal) {
+        if (client.value !== origin) return
         when (sig) {
             is ClientSignal.Sent -> sounds.play(Sound.SEND)
             is ClientSignal.Incoming -> {
                 val m = sig.message
-                val fg = foreground
-                val visible = openAndLoaded(m.conversationId)
-                when (com.tiecoms.app.core.Notices.forLive(notifier.ledger, m.id, visible)) {
-                    // El mensaje se ve en el chat abierto y cargado: solo el sonido de recepción.
-                    com.tiecoms.app.core.Notices.Outcome.OPEN -> { sounds.play(Sound.RECEIVE); return }
-                    com.tiecoms.app.core.Notices.Outcome.SHOW -> if (fg) sounds.play(Sound.NOTIFY)
-                    // Ya lo anunció (o lo calló) FCM: sin segunda notificación ni segundo sonido de aviso.
-                    else -> { if (visible) sounds.play(Sound.RECEIVE); return }
-                }
-                val c = client.value
-                val data = c.state.value.data
-                val conv = c.meta(m.conversationId)
-                val author = Names.person(data, m.authorId)
-                val authorName = author?.name ?: app.getString(R.string.former_participant)
-                val isGroup = conv != null && conv.kind != "direct"
-                // Sidechat: «💬 Sidechat de <autor>» y, al tocar, el chat de origen con el sidechat desplegado.
-                val side = conv?.takeIf { it.isSide }
-                val mentioned = com.tiecoms.app.core.Mentions.mentionsMe(m, data?.me?.id)
-                val chatTitle = when {
-                    mentioned -> app.getString(R.string.mention_mentioned_you, authorName) + (if (isGroup) " · " + conversationName(m.conversationId) else "")
-                    side != null -> app.getString(R.string.side_notif_title, authorName)
-                    isGroup -> conversationName(m.conversationId)
-                    else -> authorName
-                }
-                val open = side?.parentId?.let { p -> if (c.meta(p) != null) "chaggu://c/$p?side=${side.id}" else null }
-                scope.launch {
-                    val icon = loadAvatar(author?.avatarUrl)
-                    notifier.showConversation(m.conversationId, chatTitle, isGroup || side != null,
-                        m.authorId ?: "?", authorName, m.body.take(300), icon, silent = fg || !settings.soundsEnabled, badge = c.badge(), messageId = m.id, seq = m.seq, openUri = open,
-                        shortcutLabel = if (isGroup && side == null) conversationName(m.conversationId) else chatTitle)
+                val c = origin
+                c.withNoticeSession(sig.generation) {
+                    if (client.value !== c) return@withNoticeSession
+                    val ctx = noticeContext(c, m.conversationId, m.id, m.authorId)
+                    val data = c.state.value.data
+                    val conv = c.meta(m.conversationId)
+                    val author = Names.person(data, m.authorId)
+                    val authorName = author?.name ?: app.getString(R.string.former_participant)
+                    val isGroup = conv != null && conv.kind != "direct"
+                    // Sidechat: «💬 Sidechat de <autor>» y, al tocar, el chat de origen con el sidechat desplegado.
+                    val side = conv?.takeIf { it.isSide }
+                    val mentioned = com.tiecoms.app.core.Mentions.mentionsMe(m, data?.me?.id)
+                    val chatTitle = when {
+                        mentioned -> app.getString(R.string.mention_mentioned_you, authorName) + (if (isGroup) " · " + conversationName(m.conversationId) else "")
+                        side != null -> app.getString(R.string.side_notif_title, authorName)
+                        isGroup -> conversationName(m.conversationId)
+                        else -> authorName
+                    }
+                    val open = side?.parentId?.let { p -> if (c.meta(p) != null) "chaggu://c/$p?side=${side.id}" else null }
+                    val outcome = com.tiecoms.app.core.Notices.forLive(notifier.ledger, m.id, ctx, mentioned,
+                        c to sig.generation, ownerChanged = notifier::clearPresented,
+                        opened = { sounds.play(Sound.RECEIVE) }, present = {
+                            // No avatar request can postpone publication, escape logout, or consume FCM's fallback.
+                            notifier.showConversation(m.conversationId, chatTitle, isGroup || side != null,
+                                m.authorId ?: "?", authorName, m.body.take(300), cachedPushAvatar(author?.avatarUrl),
+                                silent = ctx.foreground || !settings.soundsEnabled, badge = c.badge(), messageId = m.id, seq = m.seq, openUri = open,
+                                shortcutLabel = if (isGroup && side == null) conversationName(m.conversationId) else chatTitle)
+                        })
+                    when (outcome) {
+                        com.tiecoms.app.core.Notices.Outcome.SHOW -> if (ctx.foreground) sounds.play(Sound.NOTIFY)
+                        else -> Unit
+                    }
                 }
             }
             // Silenciado o «No molestar»: se registra la decisión para que un FCM tardío tampoco avise.
-            is ClientSignal.Silenced -> com.tiecoms.app.core.Notices.silenced(notifier.ledger, sig.messageId)
+            is ClientSignal.Silenced -> origin.withNoticeSession(sig.generation) {
+                if (client.value === origin) com.tiecoms.app.core.Notices.silenced(notifier.ledger, sig.messageId, origin to sig.generation, notifier::clearPresented)
+            }
             is ClientSignal.ReminderDue -> {
                 val r = sig.reminder
                 val c = client.value
@@ -448,7 +463,7 @@ class AppContainer(private val app: Application) {
             // Aviso 10 min antes (SPEC-v4 §E): suena con tc_notify aunque la conversación esté silenciada.
             is ClientSignal.EventSoon -> {
                 val ev = sig.event
-                if (!notifier.firstTime("soon:" + ev.id)) return
+                if (!notifier.firstTime("soon:" + ev.id, origin to origin.noticeGeneration)) return
                 if (foreground) sounds.play(Sound.NOTIFY)
                 val whenText = runCatching {
                     java.time.Instant.parse(ev.startsAt).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT))
@@ -458,7 +473,12 @@ class AppContainer(private val app: Application) {
                     silent = !settings.soundsEnabled, tag = "event:soon:" + ev.id)
             }
             // Sin sesión: fuera sugerencias de Direct Share, burbujas y notificaciones de la cuenta anterior.
-            ClientSignal.SignedOut -> { com.tiecoms.app.platform.ConversationShortcuts.clear(app); notifier.cancelAll() }
+            is ClientSignal.SignedOut -> {
+                notifier.cancelSession(origin to sig.generation)
+                origin.clearNoticesIfSignedOut {
+                    if (client.value === origin) com.tiecoms.app.platform.ConversationShortcuts.clear(app)
+                }
+            }
         }
     }
 }

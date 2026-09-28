@@ -80,7 +80,7 @@ struct ReactionChips: View {
         let names = Reactions.reactorsText(d, r)
         return Button { onToggle(r.emoji) } label: {
             HStack(spacing: 4) {
-                Text(r.emoji).font(.system(size: 15))
+                Text(r.emoji).scaledFont(15, relativeTo: .subheadline)
                 Text("\(r.count)").font(.caption.weight(.bold)).monospacedDigit()
                     .foregroundStyle(me ? Theme.accentText : Theme.textSecondary)
             }

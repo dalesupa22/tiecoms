@@ -171,6 +171,12 @@ struct DndOptions: View {
             Button(L(o.labelKey)) { Task { await store.setDoNotDisturb(until: Silence.dndUntil(o)) } }
                 .accessibilityIdentifier("dnd.opt.\(o.id)")
         }
+        // «Todas las noches» va dentro de «No molestar», con desde y hasta.
+        Divider()
+        Button { store.showSleepSettings = true } label: {
+            Label("\(L("sleep.title")) · \(SleepRules.summary(store.data?.me.sleep))", systemImage: "moon.stars")
+        }
+        .accessibilityIdentifier("dnd.opt.sleep")
     }
 }
 
@@ -337,6 +343,7 @@ struct SettingsView: View {
             }
             Section {
                 DndRow()
+                SleepRow()
             } footer: {
                 Text(store.dndLocalOnly && store.dndActive ? L("dnd.hint") + " " + L("dnd.localOnly") : L("dnd.hint"))
                     .accessibilityIdentifier("settings.dnd.footer")
@@ -375,6 +382,10 @@ struct SettingsView: View {
                     .accessibilityIdentifier("settings.files")
                 NavigationLink(value: Route.whatsapp) { Label(L("settings.whatsapp"), systemImage: "message") }
                 NavigationLink(value: Route.reminders) { Label(L("rem.title"), systemImage: "alarm") }
+                NavigationLink(value: Route.scheduled) {
+                    Label(L("nav.scheduled") + (store.scheduled.isEmpty ? "" : " · \(store.scheduled.count)"), systemImage: "clock")
+                }
+                .accessibilityIdentifier("settings.scheduled")
                 NavigationLink(value: Route.trazo) { Label(L("nav.trazo"), systemImage: "arrow.triangle.branch") }
             } footer: { Text(L("settings.whatsappHint")) }
             Section(L("safety.title")) {
@@ -384,6 +395,7 @@ struct SettingsView: View {
                 Link(L("safety.terms"), destination: URL(string: L10n.lang == "es" ? AppConfig.website + "/terminos/" : AppConfig.website + "/en/terms/")!)
                 Link(L("safety.privacy"), destination: URL(string: L10n.lang == "es" ? AppConfig.website + "/privacidad/" : AppConfig.website + "/en/privacy/")!)
             }
+            TextSizeSection()
             Section {
                 Picker(selection: Binding(get: { L10n.choice }, set: { store.setLanguage($0) })) {
                     Text(L("settings.langSystem")).tag(L10n.Choice.system)
@@ -498,5 +510,50 @@ struct InviteView: View {
         store.rememberAfterLogin(.invite(token))
         store.inviteToken = nil
         if signup { store.signupOrgToken = nil; store.showSignup = true } else { store.showSignup = false }
+    }
+}
+
+/// «Tamaño del texto»: cinco pasos (A pequeña ··· A grande) con vista previa en vivo; toda la app cambia al instante.
+struct TextSizeSection: View {
+    @AppStorage(TextSize.key) private var raw = TextSize.normal.rawValue
+
+    var body: some View {
+        let size = TextSize(rawValue: raw) ?? .normal
+        Section {
+            HStack(spacing: 12) {
+                Text("A").font(.footnote.weight(.semibold)).accessibilityHidden(true)
+                Slider(value: Binding(get: { Double(raw) }, set: { v in
+                    let next = TextSize(rawValue: Int(v.rounded())) ?? .normal
+                    if next.rawValue != raw { Haptics.tap() }
+                    TextSize.save(next)
+                    raw = next.rawValue
+                }), in: 0...Double(TextSize.allCases.count - 1), step: 1)
+                .tint(Theme.accentText)
+                .accessibilityLabel(L("textSize.title"))
+                .accessibilityValue(L(size.labelKey))
+                .accessibilityIdentifier("settings.textSize")
+                Text("A").font(.title.weight(.semibold)).accessibilityHidden(true)
+            }
+            .frame(minHeight: 44)
+            // Vista previa: una fila como las de Grupos.
+            HStack(spacing: 10) {
+                Text("#").font(.headline.weight(.bold)).foregroundStyle(Theme.accentText)
+                    .frame(width: 36, height: 36).background(RoundedRectangle(cornerRadius: 9).fill(Theme.orange.opacity(0.12)))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("textSize.previewTitle")).font(.body.weight(.semibold)).foregroundStyle(Theme.textPrimary)
+                    Text(L("textSize.previewBody")).font(.subheadline).foregroundStyle(Theme.textSecondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("settings.textSize.preview")
+        } header: {
+            HStack {
+                Text(L("textSize.title"))
+                Spacer()
+                Text(L(size.labelKey)).textCase(nil).accessibilityIdentifier("settings.textSize.value")
+            }
+        } footer: { Text(L("textSize.hint")) }
     }
 }

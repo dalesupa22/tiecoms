@@ -203,6 +203,7 @@ extension AppStore {
     func issueDetail(_ id: String) async throws -> IssueDetail {
         let r: IssueDetail = try await api.request("/issues/\(id)")
         issues[r.issue.id] = r.issue
+        for k in r.children { issues[k.id] = k }
         return r
     }
 
@@ -712,4 +713,31 @@ struct PrivateReplyDraft: Equatable {
     var author: String?
     var sentAt: String
     var excerpt: String
+}
+
+// MARK: - Tareas derivadas (docs/TAREAS.md)
+
+extension AppStore {
+    /// POST /issues/:id/children { title, ownerId?, dueDate?, visibility?, viewerIds?, conversationId? }.
+    /// `conversationId` = un sidechat del chat del asunto (la tarea vive ahí y la ve solo el sidechat).
+    @discardableResult
+    func createChildIssue(_ parentId: String, title: String, ownerId: String?, dueDate: String? = nil, visibility: IssueVisibility,
+                          viewerIds: [String] = [], conversationId: String? = nil) async throws -> IssueDTO {
+        var body: [String: Any] = ["title": title, "ownerId": ownerId ?? NSNull(), "dueDate": dueDate ?? NSNull(), "visibility": visibility.rawValue]
+        if !viewerIds.isEmpty { body["viewerIds"] = viewerIds }
+        if let conversationId { body["conversationId"] = conversationId }
+        let i: IssueDTO = try await api.request("/issues/\(parentId)/children", method: "POST", json: body)
+        issues[i.id] = i
+        recountIssues(i.conversationId)
+        return i
+    }
+
+    /// «Hablar aparte»: sidechat desde el asunto con quienes elija (POST /conversations/:id/side { issueId, userIds }).
+    func createSideFromIssue(_ issue: IssueDTO, userIds: [String], question: String?) async throws -> String {
+        var body: [String: Any] = ["issueId": issue.id, "userIds": userIds]
+        if let q = question?.trimmingCharacters(in: .whitespacesAndNewlines), !q.isEmpty { body["question"] = String(q.prefix(4000)) }
+        let r: IdResult = try await api.request("/conversations/\(issue.conversationId)/side", method: "POST", json: body)
+        try await loadBootstrap()
+        return r.id
+    }
 }

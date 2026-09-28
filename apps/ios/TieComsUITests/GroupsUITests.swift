@@ -24,6 +24,11 @@ final class GroupsUITests: XCTestCase {
         /// 1.6.4: chat largo con 40 no leídos y una mención; grupo fijado.
         var longId: String?
         var pinnedId: String?
+        /// 1.6.4 (21): seed-tareas-programados.mjs (API con migraciones 025–027).
+        var dmBrunoId: String?
+        var parentIssueId: String?
+        var taskIds: [String]?
+        var sideId: String?
     }
 
     override func setUp() { continueAfterFailure = false }
@@ -401,10 +406,393 @@ final class GroupsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["issue.menu.reopen"].waitForExistence(timeout: 4))
         app.buttons["issue.menu.reopen"].tap()
         app.tabBars.buttons["Grupos"].tap()
-        XCTAssertTrue(app.buttons["grp.moreIssues.\(f.pagosId)"].waitForExistence(timeout: 5), "reabierto: vuelve bajo el grupo")
+        // El aviso de sistema al cerrar/reabrir sube la actividad del grupo: puede quedar más abajo en la Lista.
+        let back = app.buttons["grp.moreIssues.\(f.pagosId)"]
+        _ = back.waitForExistence(timeout: 3)
+        for _ in 0..<5 where !(back.exists && back.isHittable) { app.swipeUp() }
+        XCTAssertTrue(back.waitForExistence(timeout: 5), "reabierto: vuelve bajo el grupo")
+        for _ in 0..<5 { app.swipeDown() }
         // Deja el estado por defecto para las demás pruebas.
         foldMenu(app)
         app.buttons["home.fold.hideIssues"].tap()
+    }
+
+    /// 1.6.4 (20): asuntos como tareas. El círculo completa con «Deshacer» (Grupos, Asuntos y el chat), alta rápida con
+    /// Return, «Completados · N» plegable, Por grupo / Por responsable y el detalle con botones de un toque.
+    func testIssueTasksCheckQuickAddAndDetail() throws {
+        let f = try fixture()
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "no se prueba contra producción")
+        guard let overdue = f.overdueIssue else { throw XCTSkip("Fixture sin asunto vencido") }
+        let app = login(f)
+        let toggle = app.buttons["grp.issuesToggle.\(f.pagosId)"].firstMatch
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !toggle.exists { dismissSystemPrompts(app); usleep(300_000) }
+        dismissSystemPrompts(app)
+        if app.buttons["home.tab.all"].exists { app.buttons["home.tab.all"].tap() }
+        setView(app, "Árbol")
+
+        // 1. Árbol de Grupos: el círculo reemplaza al ◆ y completa sin entrar; «Deshacer» lo devuelve.
+        foldMenu(app)
+        app.buttons["home.fold.showIssues"].tap()
+        let line = app.buttons["grp.issue.\(overdue)"]
+        _ = line.waitForExistence(timeout: 3)
+        for _ in 0..<6 where !(line.exists && line.isHittable) { app.swipeUp() }
+        XCTAssertTrue(line.waitForExistence(timeout: 5))
+        let check = app.buttons["issue.check.\(overdue)"]
+        XCTAssertTrue(check.exists, "círculo para completar en la sub-fila")
+        XCTAssertEqual(check.label, "Completar")
+        XCTAssertLessThan(line.frame.height, 34, "la sub-fila sigue compacta")
+        sleep(1)
+        shot("01-grupos-arbol-circulo")
+        check.tap()
+        XCTAssertTrue(line.waitForNonExistence(timeout: 5), "completado: sale de Grupos")
+        let undo = app.buttons["toast.undo"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 3), "aviso con «Deshacer»")
+        XCTAssertTrue(app.staticTexts["Asunto completado"].exists)
+        shot("02-grupos-completado-deshacer")
+        undo.tap()
+        XCTAssertTrue(line.waitForExistence(timeout: 5), "Deshacer lo devuelve")
+        foldMenu(app)
+        app.buttons["home.fold.hideIssues"].tap()
+        setView(app, "Lista")
+
+        // 2. Pestaña Asuntos: Míos / Abiertos / Completados con contador, Por grupo / Por responsable.
+        app.tabBars.buttons["Asuntos"].tap()
+        let seg = app.segmentedControls["issues.filter"]
+        XCTAssertTrue(seg.waitForExistence(timeout: 5))
+        XCTAssertTrue(seg.buttons.element(boundBy: 0).label.hasPrefix("Míos"))
+        XCTAssertTrue(seg.buttons.element(boundBy: 2).label.hasPrefix("Completados"))
+        seg.buttons.element(boundBy: 1).tap()
+        let groupBy = app.segmentedControls["issues.groupBy"]
+        XCTAssertTrue(groupBy.exists)
+        groupBy.buttons["Por grupo"].tap()
+        let row = app.buttons["issue.row.\(overdue)"]
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'issue.row.'")).firstMatch.waitForExistence(timeout: 8))
+        sleep(1)
+        shot("03-asuntos-por-grupo")
+        groupBy.buttons["Por responsable"].tap()
+        // Según el API, un asunto sin responsable queda de quien lo creó o en «Sin responsable».
+        let mineSection = app.descendants(matching: .any)["issues.section.\(f.a.id)"]
+        let noneSection = app.descendants(matching: .any)["issues.section.__none"]
+        let sectionsBy = Date().addingTimeInterval(4)
+        while Date() < sectionsBy && !mineSection.exists && !noneSection.exists { usleep(300_000) }
+        XCTAssertTrue(mineSection.exists || noneSection.exists, "secciones por responsable")
+        if mineSection.exists {
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Ana Márquez (tú)'")).firstMatch.exists, "yo primero, marcado «(tú)»")
+        }
+        sleep(1)
+        shot("04-asuntos-por-responsable")
+        groupBy.buttons["Por grupo"].tap()
+
+        // 3. Alta rápida: responsable y fecha aparecen al escribir; Return crea y deja el campo listo.
+        let quick = app.textFields["issue.quickField"]
+        XCTAssertTrue(quick.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["issue.quickOwner"].exists, "vacío: una sola línea")
+        let openBefore = seg.buttons.element(boundBy: 1).label
+        quick.tap(); quick.typeText("Llamar al banco")
+        XCTAssertTrue(app.buttons["issue.quickOwner"].waitForExistence(timeout: 3), "responsable al escribir")
+        XCTAssertTrue(app.buttons["issue.quickDue"].exists, "fecha al escribir")
+        XCTAssertTrue(app.buttons["issue.quickOwner"].label.contains("Yo") || app.buttons["issue.quickOwner"].staticTexts["Yo"].exists, "Yo por defecto")
+        shot("05-alta-rapida")
+        quick.typeText("\n")
+        // Va al grupo o chat más reciente (puede quedar fuera de la pantalla): lo confirma el contador de «Abiertos».
+        let createdBy = Date().addingTimeInterval(8)
+        while Date() < createdBy && seg.buttons.element(boundBy: 1).label == openBefore { usleep(300_000) }
+        XCTAssertNotEqual(seg.buttons.element(boundBy: 1).label, openBefore, "creado con Return (\(openBefore))")
+        XCTAssertFalse(app.buttons["issue.quickOwner"].exists, "vacío otra vez: una sola línea")
+        XCTAssertEqual((quick.value as? String) ?? "", "Añadir asunto…", "el campo queda vacío")
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "listo para el siguiente")
+        app.swipeDown()
+
+        // 4. Detalle: el título es el grupo; preguntas con botones de un toque; botón grande para terminar.
+        // Los asuntos creados en corridas anteriores pueden dejar «Pagos» más abajo.
+        for _ in 0..<8 where !(row.exists && row.isHittable) { app.swipeUp() }
+        row.tap()
+        XCTAssertTrue(app.navigationBars["Pagos y facturación"].waitForExistence(timeout: 8), "título = nombre del grupo")
+        let markDone = app.buttons["issue.markDone"]
+        XCTAssertTrue(markDone.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["issue.alert"].label.contains("Se venció el"), "aviso en lenguaje simple")
+        XCTAssertTrue(app.staticTexts["¿Quién lo hace?"].exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '¿Para cuándo? · '")).firstMatch.exists, "con la fecha elegida")
+        XCTAssertTrue(app.staticTexts["¿Cómo va?"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["issue.statusPicker"].exists, "sin selector de 5 estados")
+        if let c = f.c {
+            let carlos = app.buttons["issue.who.\(c.id)"]
+            XCTAssertTrue(carlos.exists, "chip con el primer nombre")
+            XCTAssertEqual(carlos.label, "Carlos")
+            carlos.tap()
+            XCTAssertTrue(app.buttons["issue.who.none"].waitForExistence(timeout: 5), "con responsable aparece «Sin responsable»")
+        }
+        app.buttons["issue.when.issue.dTomorrow"].tap()
+        let whenDone = Date().addingTimeInterval(5)
+        while Date() < whenDone && app.descendants(matching: .any)["issue.alert"].exists { usleep(300_000) }
+        XCTAssertFalse(app.descendants(matching: .any)["issue.alert"].exists, "con fecha de mañana ya no está vencido")
+        app.buttons["issue.how.in_progress"].tap()
+        XCTAssertTrue(app.buttons["issue.how.in_progress"].waitForExistence(timeout: 3))
+        sleep(2)
+        shot("06-detalle")
+        let field = app.descendants(matching: .any)["issue.commentField"]
+        field.tap(); field.typeText("Hablé con tesorería, sale el lunes.")
+        app.buttons["issue.commentSend"].tap()
+        XCTAssertTrue(app.staticTexts["Hablé con tesorería, sale el lunes."].waitForExistence(timeout: 8), "comentario en Novedades")
+        app.swipeUp()
+        let history = app.buttons["issue.historyToggle"]
+        if history.waitForExistence(timeout: 3) { history.tap() }
+        sleep(1)
+        shot("07-detalle-novedades-cambios")
+        app.swipeDown(); app.swipeDown()
+        markDone.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["issue.doneBanner"].waitForExistence(timeout: 5), "banner «✓ Hecho»")
+        XCTAssertFalse(markDone.exists)
+        sleep(1)
+        shot("08-detalle-hecho")
+        app.buttons["issue.reopenBtn"].tap()
+        XCTAssertTrue(markDone.waitForExistence(timeout: 5), "reabierto")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // 5. Lista del chat: completar con el círculo → «Completados · 1» plegable.
+        app.tabBars.buttons["Grupos"].tap()
+        let pagos = app.buttons["conv.row.\(f.pagosId)"]
+        XCTAssertTrue(pagos.waitForExistence(timeout: 8))
+        pagos.tap()
+        let bar = app.buttons["chat.bar.issues"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 8))
+        bar.tap()
+        let chatCheck = app.buttons["issue.check.\(overdue)"]
+        XCTAssertTrue(chatCheck.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["issue.quickField"].exists, "alta rápida en la lista del chat")
+        sleep(1)
+        shot("09-lista-chat")
+        chatCheck.tap()
+        let doneToggle = app.buttons["issues.doneToggle"]
+        XCTAssertTrue(doneToggle.waitForExistence(timeout: 5), "«Completados · N»")
+        XCTAssertTrue(doneToggle.label.contains("Completados · "))
+        XCTAssertTrue(app.buttons["toast.undo"].waitForExistence(timeout: 3), "Deshacer también sobre la hoja")
+        doneToggle.tap()
+        XCTAssertTrue(app.buttons["issue.check.\(overdue)"].waitForExistence(timeout: 3))
+        XCTAssertEqual(app.buttons["issue.check.\(overdue)"].label, "Reabrir")
+        sleep(1)
+        shot("10-lista-chat-completados")
+        app.buttons["issue.check.\(overdue)"].tap()
+        XCTAssertTrue(app.buttons["issue.check.\(overdue)"].waitForExistence(timeout: 3))
+        let reopened = Date().addingTimeInterval(5)
+        while Date() < reopened && app.buttons["issue.check.\(overdue)"].label != "Completar" { usleep(300_000) }
+        XCTAssertEqual(app.buttons["issue.check.\(overdue)"].label, "Completar", "reabierto desde Completados")
+    }
+
+    /// 1.6.4 (20): «Tamaño del texto» en Tú: 5 pasos, vista previa en vivo y toda la app (Grupos) cambia al instante.
+    /// Con «Máximo» las filas no se cortan y la barra de pestañas queda limitada.
+    func testTextSizeSetting() throws {
+        let f = try fixture()
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "no se prueba contra producción")
+        let app = login(f)
+        let pagos = app.buttons["conv.row.\(f.pagosId)"]
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !pagos.exists { dismissSystemPrompts(app); usleep(300_000) }
+        dismissSystemPrompts(app)
+        func setSize(_ step: Int, _ name: String) {
+            app.tabBars.buttons["Tú"].tap()
+            let slider = app.sliders["settings.textSize"]
+            for _ in 0..<6 where !slider.isHittable { app.swipeUp() }
+            XCTAssertTrue(slider.waitForExistence(timeout: 5), "control de tamaño en Tú")
+            // adjust(toNormalizedSliderPosition:) no es exacto en un Slider con pasos: se corrige hasta dar con el paso.
+            let names = ["Pequeño", "Normal", "Grande", "Más grande", "Máximo"]
+            let value = app.staticTexts["settings.textSize.value"]
+            var pos = CGFloat(step) / 4
+            for _ in 0..<8 {
+                if step == 4 {
+                    // Arrastrar el pulgar más allá del extremo derecho.
+                    let from = CGFloat(names.firstIndex(of: value.label) ?? 0) / 4
+                    slider.coordinate(withNormalizedOffset: CGVector(dx: 0.04 + from * 0.92, dy: 0.5))
+                        .press(forDuration: 0.2, thenDragTo: slider.coordinate(withNormalizedOffset: CGVector(dx: 1.3, dy: 0.5)))
+                } else { slider.adjust(toNormalizedSliderPosition: pos) }
+                usleep(400_000)
+                guard let now = names.firstIndex(of: value.label), now != step else { break }
+                pos = min(1, max(0, pos + (now < step ? 0.06 : -0.06)))
+            }
+            XCTAssertEqual(value.label, name)
+        }
+        func groupsShot(_ name: String) {
+            app.tabBars.buttons["Grupos"].tap()
+            if !app.segmentedControls["grp.viewMode"].waitForExistence(timeout: 2) { app.tabBars.buttons["Grupos"].tap() }
+            for _ in 0..<3 { app.swipeDown() }
+            sleep(1)
+            shot(name)
+        }
+        setSize(1, "Normal")
+        XCTAssertTrue(app.descendants(matching: .any)["settings.textSize.preview"].exists, "vista previa")
+        sleep(1)
+        shot("11-tamano-texto-ajuste")
+        groupsShot("12-grupos-texto-normal")
+        let normalHeight = app.buttons["conv.row.\(f.pagosId)"].frame.height
+        setSize(2, "Grande")
+        sleep(1)
+        shot("13-tamano-texto-grande-ajuste")
+        groupsShot("14-grupos-texto-grande")
+        let largeRow = app.buttons["conv.row.\(f.pagosId)"]
+        XCTAssertGreaterThan(largeRow.frame.height, normalHeight, "Grande: la fila crece (\(normalHeight) → \(largeRow.frame.height))")
+        setSize(4, "Máximo")
+        groupsShot("15-grupos-texto-maximo")
+        let tab = app.tabBars.firstMatch
+        XCTAssertTrue(tab.buttons["Grupos"].isHittable, "la barra de pestañas sigue visible con «Máximo»")
+        XCTAssertLessThan(tab.frame.height, 140, "barra de pestañas limitada: \(tab.frame.height)")
+        // Vuelve a Normal para las demás pruebas.
+        setSize(1, "Normal")
+        app.tabBars.buttons["Grupos"].tap()
+    }
+
+    /// 1.6.4 (21): mensajes programados, «No molestar todas las noches» y tareas derivadas (docs/PROGRAMADOS.md, TAREAS.md).
+    func testScheduledSleepAndTasks() throws {
+        let f = try fixture()
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "no se prueba contra producción")
+        guard let dm = f.dmBrunoId, let parent = f.parentIssueId, let tasks = f.taskIds, let side = f.sideId else { throw XCTSkip("Fixture sin seed-tareas-programados") }
+        let app = login(f)
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !app.tabBars.firstMatch.exists { dismissSystemPrompts(app); usleep(300_000) }
+        dismissSystemPrompts(app)
+
+        // 1. Directo con Bruno (descansando): franja de programados y aviso.
+        app.tabBars.buttons["DMs"].tap()
+        let row = app.buttons["conv.row.\(dm)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        let strip = app.buttons["sched.strip"]
+        XCTAssertTrue(strip.waitForExistence(timeout: 10), "franja de programados")
+        XCTAssertTrue(strip.label.hasPrefix("🕒 ") && strip.label.contains("el próximo sale"), strip.label)
+        let before = strip.label
+        let notice = app.descendants(matching: .any)["sleep.notice.text"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 5), "aviso de descanso")
+        XCTAssertTrue(notice.label.hasPrefix("Bruno está descansando: le llega sin sonar. Lo verá"), notice.label)
+        XCTAssertFalse(app.buttons["sleep.scheduleWake"].exists, "el botón sale solo mientras escribo")
+        sleep(1)
+        shot("16-chat-programados-y-descansando")
+        let field = app.descendants(matching: .any)["composer.field"]
+        field.tap(); field.typeText("Te cuento mañana cómo quedó el cierre")
+        XCTAssertTrue(app.buttons["composer.schedule"].waitForExistence(timeout: 3), "🕒 junto a enviar con texto")
+        XCTAssertTrue(app.buttons["sleep.scheduleWake"].waitForExistence(timeout: 3), "🕒 Enviar a las …")
+        XCTAssertTrue(app.buttons["sleep.scheduleWake"].label.contains("Enviar a las"))
+        shot("17-compositor-programar-y-despertar")
+        app.buttons["composer.schedule"].tap()
+        let tomorrow = app.buttons["sched.opt.sched.tomorrowMorning"]
+        XCTAssertTrue(tomorrow.waitForExistence(timeout: 3), "menú de programar")
+        XCTAssertTrue(app.buttons["sched.opt.sched.inHour"].exists)
+        XCTAssertTrue(app.buttons["sched.opt.pick"].exists)
+        sleep(1)
+        shot("18-menu-programar")
+        tomorrow.tap()
+        XCTAssertTrue(app.buttons["toast.undo"].waitForExistence(timeout: 5), "aviso con Deshacer")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '🕒 Programado para mañana'")).firstMatch.exists)
+        let two = Date().addingTimeInterval(5)
+        while Date() < two && strip.label == before { usleep(300_000) }
+        XCTAssertTrue(strip.label.contains("mensajes programados") && strip.label != before, "uno más: \(before) → \(strip.label)")
+        let inChat = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sched.sendNow.'"))
+        shot("19-programado-con-deshacer")
+        strip.tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sched.sendNow.'")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(inChat.count, 2)
+        sleep(1)
+        shot("20-programados-del-chat")
+        app.buttons["Cerrar"].firstMatch.tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // 2. Tú: «Todas las noches» dentro de No molestar y la pantalla Programados.
+        app.tabBars.buttons["Tú"].tap()
+        let dnd = app.buttons["settings.dnd"]
+        for _ in 0..<5 where !(dnd.exists && dnd.isHittable) { app.swipeUp() }
+        XCTAssertTrue(app.buttons["settings.sleep"].exists, "fila Todas las noches")
+        dnd.tap()
+        let nightly = app.buttons["dnd.opt.sleep"]
+        XCTAssertTrue(nightly.waitForExistence(timeout: 3), "«Todas las noches» dentro de No molestar")
+        sleep(1)
+        shot("21-no-molestar-todas-las-noches")
+        nightly.tap()
+        XCTAssertTrue(app.switches["sleep.switch"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["sleep.from"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["sleep.to"].exists)
+        sleep(1)
+        shot("22-todas-las-noches-desde-hasta")
+        app.buttons["sleep.save"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'No molestar todas las noches de'")).firstMatch.waitForExistence(timeout: 5))
+        let schedRow = app.buttons["settings.scheduled"]
+        for _ in 0..<5 where !(schedRow.exists && schedRow.isHittable) { app.swipeUp() }
+        XCTAssertTrue(schedRow.label.hasPrefix("Programados · "), schedRow.label)
+        schedRow.tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sched.sendNow.'")).firstMatch.waitForExistence(timeout: 5))
+        sleep(1)
+        shot("23-pantalla-programados")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // 3. Tareas derivadas: chapita ☑, tareas sangradas, 🔒, menú y alta con ¿Quién la ve?
+        app.tabBars.buttons["Asuntos"].tap()
+        let seg = app.segmentedControls["issues.filter"]
+        XCTAssertTrue(seg.waitForExistence(timeout: 5))
+        seg.buttons.element(boundBy: 1).tap()
+        app.segmentedControls["issues.groupBy"].buttons["Por grupo"].tap()
+        let parentRow = app.buttons["issue.row.\(parent)"]
+        for _ in 0..<6 where !(parentRow.exists && parentRow.isHittable) { app.swipeUp() }
+        XCTAssertTrue(parentRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(parentRow.label.contains("1 de 4 tareas hechas"), "chapita de avance: \(parentRow.label)")
+        let orgTask = app.buttons["issue.row.\(tasks[1])"]
+        XCTAssertTrue(orgTask.exists, "tarea sangrada bajo el asunto")
+        XCTAssertTrue(orgTask.label.contains("🔒"), orgTask.label)
+        sleep(1)
+        shot("24-asuntos-con-tareas")
+        parentRow.press(forDuration: 1.2)
+        XCTAssertTrue(app.buttons["issue.menu.addTask"].waitForExistence(timeout: 4), "＋ Tarea derivada")
+        XCTAssertTrue(app.buttons["issue.menu.sidechat"].exists, "💬 Hablar aparte")
+        shot("25-menu-tarea-derivada")
+        app.buttons["issue.menu.addTask"].tap()
+        let tf = app.textFields["task.quickField"]
+        XCTAssertTrue(tf.waitForExistence(timeout: 5), "hoja de tareas del asunto")
+        tf.tap(); tf.typeText("Llamar al banco")
+        XCTAssertTrue(app.buttons["task.vis.org"].waitForExistence(timeout: 3), "¿Quién la ve?")
+        XCTAssertTrue(app.buttons["task.vis.all"].isSelected, "Pagos es de una sola empresa: por defecto, todo el chat")
+        XCTAssertTrue(app.buttons["task.otherPerson"].exists, "＋ Otra persona")
+        sleep(1)
+        shot("26-alta-tarea-quien-la-hace-quien-la-ve")
+        tf.typeText("\n")
+        let created = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'issue.row.' AND label CONTAINS 'Llamar al banco'")).firstMatch
+        XCTAssertTrue(created.waitForExistence(timeout: 8), "tarea creada en la hoja")
+        app.buttons["task.sheetDone"].tap()
+        XCTAssertTrue(parentRow.waitForExistence(timeout: 5))
+        let five = Date().addingTimeInterval(5)
+        while Date() < five && !parentRow.label.contains("1 de 5 tareas hechas") { usleep(300_000) }
+        XCTAssertTrue(parentRow.label.contains("1 de 5 tareas hechas"), parentRow.label)
+        parentRow.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["task.section"].waitForExistence(timeout: 8), "sección Tareas en el asunto")
+        app.swipeUp()
+        sleep(1)
+        shot("27-detalle-asunto-tareas")
+        let child = app.buttons["issue.row.\(tasks[1])"]
+        for _ in 0..<3 where !(child.exists && child.isHittable) { app.swipeUp() }
+        child.tap()
+        XCTAssertTrue(app.buttons["task.partOf"].waitForExistence(timeout: 8), "↑ Parte de «asunto»")
+        XCTAssertTrue(app.descendants(matching: .any)["issue.requested"].label.contains("🔒"), "🔒 Solo mi empresa")
+        sleep(1)
+        shot("28-tarea-parte-de")
+        app.buttons["task.partOf"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["task.section"].waitForExistence(timeout: 5), "vuelve al asunto")
+
+        // 4. Sidechat desde el asunto: franja «◆ asunto · ☑ · ＋ Tarea».
+        app.tabBars.buttons["DMs"].tap()
+        let sideRow = app.buttons["conv.row.\(side)"]
+        for _ in 0..<4 where !sideRow.exists { app.swipeUp() }
+        XCTAssertTrue(sideRow.waitForExistence(timeout: 8), "sidechat en DMs")
+        sideRow.tap()
+        let sideStrip = app.buttons["side.issue"]
+        XCTAssertTrue(sideStrip.waitForExistence(timeout: 10), "franja del asunto en el sidechat")
+        XCTAssertTrue(sideStrip.label.hasPrefix("◆ Cerrar facturación"), sideStrip.label)
+        XCTAssertTrue(app.buttons["side.addTask"].exists, "＋ Tarea")
+        sleep(1)
+        shot("29-sidechat-desde-el-asunto")
+        app.buttons["side.addTask"].tap()
+        XCTAssertTrue(app.buttons["task.sheetDone"].waitForExistence(timeout: 5))
+        let sf = app.textFields["task.quickField"]
+        sf.tap(); sf.typeText("Confirmar fecha")
+        XCTAssertTrue(app.buttons["task.vis.all"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["task.vis.all"].label.contains("Solo este sidechat"), app.buttons["task.vis.all"].label)
+        shot("30-tarea-en-el-sidechat")
+        app.buttons["task.sheetDone"].tap()
     }
 
     /// Barra de arriba (✏️ y «＋») en las cuatro pestañas, chat rápido desde «Mensaje nuevo» y búsqueda que encuentra

@@ -36,7 +36,8 @@ struct HomeView: View {
                 let hasGroups = viewMode == .list ? !flat.isEmpty : tree.hasGroups
                 let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
                 // Asuntos abiertos por conversación (se muestran bajo cada grupo).
-                let open = Dictionary(grouping: store.issues.values.filter { !$0.status.closed }, by: \.conversationId)
+                // Las tareas de un asunto que veo no van sueltas: se cuentan en su chapita «☑ 1/3».
+                let open = Dictionary(grouping: IssueTasks.tops(store.issues.values.filter { !$0.status.closed }, store.issues), by: \.conversationId)
                     .mapValues { $0.sorted(by: IssueSort.order) }
                 List {
                     if store.dndActive {
@@ -275,14 +276,18 @@ struct HomeView: View {
         let inset = EdgeInsets(top: 0, leading: 16 + CGFloat(indent) * 18 + 28, bottom: 0, trailing: 12)
         ForEach(shown) { i in
             let last = !more && i.id == shown.last?.id
-            Button { store.homePath.append(.issue(i.id)) } label: {
-                issueGuide(GroupIssueLine(issue: i), last: last)
-            }
-            .buttonStyle(RowPressStyle())
+            // El círculo completa sin entrar; el resto de la sub-fila abre el asunto.
+            issueGuide(HStack(spacing: 2) {
+                IssueCheck(issue: i, compact: true)
+                Button { store.homePath.append(.issue(i.id)) } label: {
+                    GroupIssueLine(issue: i).contentShape(Rectangle())
+                }
+                .buttonStyle(RowPressStyle())
+                .accessibilityIdentifier("grp.issue.\(i.id)")
+            }, last: last)
             .listRowInsets(inset)
             .listRowSeparator(.hidden, edges: .top)
             .listRowSeparator(last ? .automatic : .hidden, edges: .bottom)
-            .accessibilityIdentifier("grp.issue.\(i.id)")
             // Mantener presionado: completar o cambiar el estado sin entrar al asunto.
             .contextMenu { IssueStatusMenu(issue: i) { store.homePath.append(.issue(i.id)) } }
             .transition(.opacity.combined(with: .move(edge: .top)))
@@ -437,16 +442,27 @@ struct GroupSectionHeader: View {
     }
 }
 
-/// Asunto abierto bajo su grupo: «◆ título», fecha límite (roja si venció) y el estado si está en curso o esperando.
+/// Asunto abierto bajo su grupo: título, el primer nombre del responsable si no soy yo, la fecha límite (roja si
+/// venció) o el estado si está en curso o esperando. El círculo para completarlo va a la izquierda (IssueCheck).
 struct GroupIssueLine: View {
+    @Environment(AppStore.self) private var store
     let issue: IssueDTO
     var body: some View {
         let f = IssueSort.flags(issue)
-        // Una sola línea: «◆ título…» y, a la derecha y en pequeño, la fecha límite (roja si venció) o el estado.
+        let me = store.data?.me.id
+        let owner = store.data.flatMap { d in issue.ownerId.flatMap { Naming.person(d, $0) } }
+        let progress = issue.parentIssueId == nil ? IssueTasks.progress(store.issues, of: issue.id) : nil
         HStack(spacing: 6) {
-            Text("◆").font(.system(size: 9, weight: .bold)).foregroundStyle(f.overdue ? .red : Theme.accentText).accessibilityHidden(true)
-            Text(issue.title).font(.caption).foregroundStyle(Theme.textPrimary).lineLimit(1).truncationMode(.tail)
+            Text((issue.isRestricted ? "🔒 " : "") + issue.title).font(.caption).foregroundStyle(Theme.textPrimary).lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 4)
+            if let progress {
+                Text("☑ \(progress.done)/\(progress.total)").font(.caption2.weight(.bold)).monospacedDigit()
+                    .foregroundStyle(progress.done == progress.total ? Theme.doneGreen : Theme.textSecondary).fixedSize()
+            }
+            if let owner, owner.id != me {
+                Text(String(owner.name.split(separator: " ").first ?? Substring(owner.name)))
+                    .font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1).fixedSize()
+            }
             if issue.dueDate != nil {
                 Text(f.overdue ? L("issue.overdue") : f.dueToday ? L("issue.today") : IssueSort.dueLabel(issue))
                     .font(.caption2.weight(f.overdue ? .semibold : .regular)).foregroundStyle(f.overdue ? .red : Theme.textSecondary)
@@ -456,6 +472,7 @@ struct GroupIssueLine: View {
                     .foregroundStyle(issue.status == .waiting ? Color.purple : Theme.accentText).lineLimit(1).fixedSize()
             }
         }
+        .frame(minHeight: 22)
         .accessibilityElement(children: .combine)
     }
 }
@@ -620,6 +637,8 @@ struct UnreadPill: View {
 /// debajo, en letra pequeña, vista previa y hora; chip «◆ N asuntos» si hay asuntos abiertos.
 struct HierarchyConvRow: View {
     @Environment(AppStore.self) private var store
+    /// Con tamaños de accesibilidad (o «Máximo» en Tú) el nombre y la vista previa usan dos líneas.
+    @Environment(\.dynamicTypeSize) private var typeSize
     var d: BootstrapDTO
     var c: ConversationDTO
     var badgeColor: Color? = nil
@@ -646,7 +665,7 @@ struct HierarchyConvRow: View {
             ConvIcon(d: d, c: c, size: 30)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(title).font(.subheadline.weight(c.unread > 0 && !c.isMuted ? .bold : .medium)).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                    Text(title).font(.subheadline.weight(c.unread > 0 && !c.isMuted ? .bold : .medium)).foregroundStyle(Theme.textPrimary).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                     if showWs, let ws = d.workspaces.first(where: { $0.id == c.workspaceId }) {
                         Text("· \(ws.name)").font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
                     }
@@ -683,7 +702,7 @@ struct HierarchyConvRow: View {
                     }
                 }
                 HStack(spacing: 6) {
-                    Text(preview).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                    Text(preview).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                     Spacer(minLength: 4)
                     Text(time).font(.caption2).foregroundStyle(Theme.textSecondary)
                 }
@@ -728,7 +747,7 @@ struct HierarchyConvRow: View {
             HStack(spacing: 3) {
                 Text("◆ \(t.count)").foregroundStyle(Theme.accentText).monospacedDigit()
                 if t.overdue > 0 { Text("· \(t.overdue)!").foregroundStyle(.red).monospacedDigit() }
-                Image(systemName: "chevron.right").font(.system(size: 8, weight: .heavy)).foregroundStyle(Theme.accentText)
+                Image(systemName: "chevron.right").scaledFont(8, weight: .heavy, relativeTo: .caption).foregroundStyle(Theme.accentText)
                     .rotationEffect(.degrees(t.expanded ? 90 : 0))
             }
             .font(.caption2.weight(.bold))

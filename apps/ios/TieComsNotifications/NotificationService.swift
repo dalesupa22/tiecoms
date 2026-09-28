@@ -14,6 +14,13 @@ final class NotificationService: UNNotificationServiceExtension {
         best = content
         guard let p = PushPayload(userInfo: request.content.userInfo) else { contentHandler(content); return }
         content.threadIdentifier = p.threadId ?? p.conversationId
+        // «Te asignó una tarea» (type 'issue'): sin foto de remitente; si no estoy en el chat, agrupa por el asunto
+        // (el servidor ya no manda el nombre del grupo). Al tocarlo, la app abre el asunto (AppFeedback.onOpenIssue).
+        if p.kind == .issue {
+            if !p.inChat, let issue = p.issueId, p.threadId == nil { content.threadIdentifier = "issue-\(issue)" }
+            contentHandler(content)
+            return
+        }
         guard p.kind == .message || p.kind == .side || p.kind == .mention, let authorId = p.authorId else { contentHandler(content); return }
         let base = UserDefaults(suiteName: "group.com.chaggu.app")?.string(forKey: "apiURL").flatMap(URL.init(string:))
         Task {

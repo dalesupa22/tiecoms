@@ -62,10 +62,13 @@ struct UserDTO: Codable, Equatable, Sendable {
     var avatarUrl: String?
     /// «No molestar» hasta esta fecha (bootstrap `me.dndUntil`; null o ausente = apagado). SPEC-silencio §3.
     var dndUntil: String?
+    /// Modo sueño (bootstrap `me.sleep`, evento `me.sleep`); ausente = servidor anterior. docs/PROGRAMADOS.md.
+    var sleep: SleepDTO?
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))
+        sleep = c.o("sleep")
         name = c.v("name", "")
         email = c.o("email")
         kind = c.v("kind", "human")
@@ -74,6 +77,36 @@ struct UserDTO: Codable, Equatable, Sendable {
         primaryOrgId = c.o("primaryOrgId")
         avatarUrl = c.o("avatarUrl")
         dndUntil = c.o("dndUntil")
+    }
+}
+
+/// Modo sueño: todas las noches, de `start` a `end` (HH:MM en `tz`), no suena nada.
+struct SleepDTO: Codable, Equatable, Sendable {
+    var on: Bool
+    var start: String
+    var end: String
+    var tz: String
+    var tzAuto: Bool
+    init(on: Bool = true, start: String = "22:00", end: String = "07:00", tz: String = "America/Bogota", tzAuto: Bool = true) {
+        self.on = on; self.start = start; self.end = end; self.tz = tz; self.tzAuto = tzAuto
+    }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        on = c.v("on", true); start = c.v("start", "22:00"); end = c.v("end", "07:00")
+        tz = c.v("tz", "America/Bogota"); tzAuto = c.v("tzAuto", true)
+    }
+    var window: SleepWindow? { on ? SleepWindow(start: start, end: end, tz: tz) : nil }
+}
+
+/// Ventana de descanso de otra persona (`people[].sleep`).
+struct SleepWindow: Codable, Equatable, Sendable {
+    var start: String
+    var end: String
+    var tz: String
+    init(start: String, end: String, tz: String) { self.start = start; self.end = end; self.tz = tz }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        start = c.v("start", "22:00"); end = c.v("end", "07:00"); tz = c.v("tz", "America/Bogota")
     }
 }
 
@@ -117,10 +150,13 @@ struct PersonDTO: Codable, Equatable, Identifiable, Sendable {
     var guestUntil: String?
     /// Ruta relativa de la foto (/api/v1/avatars/<uuid>) o nil: se muestran iniciales.
     var avatarUrl: String?
+    /// Su horario de descanso (`people[].sleep`), o nil si lo tiene apagado.
+    var sleep: SleepWindow?
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))
+        sleep = c.o("sleep")
         name = c.v("name", "")
         kind = c.v("kind", "human")
         orgId = c.o("orgId")
@@ -190,6 +226,8 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
     var historyFromSeq: Int
     // Campos nuevos (bifurcaciones/issues): opcionales para convivir con API antiguos.
     var parentId: String?
+    /// Sidechat abierto desde un asunto: las tareas creadas aquí son hijas de él (docs/TAREAS.md).
+    var sideIssueId: String?
     var parentMessageId: String?
     var parentMessageSeq: Int?
     var deriveKind: String?
@@ -229,6 +267,7 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
         canManage = c.v("canManage", false)
         historyFromSeq = c.int("historyFromSeq")
         parentId = c.o("parentId")
+        sideIssueId = c.o("sideIssueId")
         parentMessageId = c.o("parentMessageId")
         parentMessageSeq = c.intOpt("parentMessageSeq")
         deriveKind = c.o("deriveKind")
@@ -516,6 +555,14 @@ enum AccountEvent: Decodable, Equatable, Sendable {
     case remindersChanged
     /// «No molestar» cambió en otra sesión (PUT /me/dnd): `{ type: "me.dnd", dndUntil }`.
     case dndChanged(until: String?)
+    /// Un mensaje programado mío cambió en cualquier dispositivo (docs/PROGRAMADOS.md).
+    case scheduledUpdated(ScheduledMessageDTO)
+    /// Cambió mi modo sueño (desde este u otro dispositivo).
+    case sleepChanged(SleepDTO)
+    /// Un asunto restringido que puedo ver cambió (no viaja por la conversación; sin eventSeq).
+    case issueUpdated(IssueDTO)
+    /// Perdí acceso a un asunto: sacarlo de la lista.
+    case issueHidden(issueId: String, conversationId: String)
     case other(type: String)
 
     init(from decoder: Decoder) throws {
@@ -533,6 +580,13 @@ enum AccountEvent: Decodable, Equatable, Sendable {
         case "drive.updated": self = .driveUpdated
         case "reminders.changed": self = .remindersChanged
         case "me.dnd": self = .dndChanged(until: c.o("dndUntil"))
+        case "issue.updated":
+            if let i: IssueDTO = c.o("issue") { self = .issueUpdated(i) } else { self = .other(type: type) }
+        case "issue.hidden": self = .issueHidden(issueId: c.v("issueId", ""), conversationId: c.v("conversationId", ""))
+        case "me.sleep":
+            if let x: SleepDTO = c.o("sleep") { self = .sleepChanged(x) } else { self = .other(type: type) }
+        case "scheduled.updated":
+            if let x: ScheduledMessageDTO = c.o("scheduled") { self = .scheduledUpdated(x) } else { self = .other(type: type) }
         default: self = .other(type: type)
         }
     }

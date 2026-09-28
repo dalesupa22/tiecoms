@@ -254,6 +254,6 @@ struct LogoView: View {
             .resizable()
             .scaledToFit()
             .frame(width: width)
-            .accessibilityLabel("Chaggu")
+            .accessibilityLabel("chaggu")
     }
 }

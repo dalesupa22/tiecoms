@@ -37,6 +37,7 @@ struct TieComsApp: App {
         AppFeedback.shared.onOpenConversation = { [weak s] id in s?.handle(.conversation(id)) }
         AppFeedback.shared.onOpenSide = { [weak s] origin, side in s?.openSide(origin: origin, side: side) }
         AppFeedback.shared.onOpenMessage = { [weak s] conv, mid in s?.openMessage(conv, messageId: mid) }
+        AppFeedback.shared.onOpenIssue = { [weak s] issue, conv, inChat in s?.openIssue(issue, conversationId: conv, inChat: inChat) }
         AppFeedback.shared.onReply = { [weak s] conv, text in await s?.replyFromNotification(conv, text: text) }
         AppFeedback.shared.onMarkRead = { [weak s] conv in await s?.markReadFromNotification(conv) }
         AppFeedback.shared.socketOnline = { [weak s] in s?.connection == .online && s?.appActive == true }
@@ -63,6 +64,7 @@ struct TieComsApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .appTextSize()
                 .environment(store)
                 .keyboardDismissable()
                 .task {

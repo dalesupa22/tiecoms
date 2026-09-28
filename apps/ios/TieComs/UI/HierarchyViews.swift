@@ -112,9 +112,8 @@ struct OpenIssuesBar: View {
                 if open {
                     VStack(spacing: 0) {
                         ForEach(list.prefix(6)) { i in
-                            NavigationLink(value: Route.issue(i.id)) { IssueRow(issue: i, showWhere: false).padding(.horizontal, 16).padding(.vertical, 6) }
-                                .buttonStyle(.plain)
-                                .contextMenu { IssueStatusMenu(issue: i) }
+                            IssueRow(issue: i, showWhere: false) { store.push(.issue(i.id)) }
+                                .padding(.horizontal, 12).padding(.vertical, 4)
                             Divider().padding(.leading, 16)
                         }
                     }

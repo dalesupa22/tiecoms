@@ -102,33 +102,52 @@ struct MainView: View {
         let d = store.data
         TabView(selection: $store.tab) {
             NavigationStack(path: $store.homePath) { HomeView().assistantListMargin().routes() }
+                .issueSheets(host: "tab.home")
+                .appTextSize()
                 .tabItem { Label(L("tab.groups"), systemImage: "person.3") }
                 .tag(AppTab.home)
                 .badge(d.map(Naming.groupsUnread) ?? 0)
                 .accessibilityIdentifier("tab.home")
             NavigationStack(path: $store.dmsPath) { DMsView().assistantListMargin().routes() }
+                .issueSheets(host: "tab.dms")
+                .appTextSize()
                 .tabItem { Label(L("tab.dms"), systemImage: "bubble.left.and.bubble.right") }
                 .tag(AppTab.dms)
                 .badge(d.map(Naming.dmsUnread) ?? 0)
             NavigationStack(path: $store.issuesPath) { IssuesScreen().assistantListMargin().routes() }
+                .issueSheets(host: "tab.issues")
+                .appTextSize()
                 .tabItem { Label(L("tab.issues"), systemImage: "checklist") }
                 .tag(AppTab.issues)
                 .badge(store.myOpenIssues)
             NavigationStack(path: $store.agendaPath) { AgendaScreen().assistantListMargin().routes() }
+                .issueSheets(host: "tab.agenda")
+                .appTextSize()
                 .tabItem { Label(L("tab.calendar"), systemImage: "calendar") }
                 .tag(AppTab.agenda)
             NavigationStack(path: $store.settingsPath) { SettingsView().assistantListMargin().routes() }
+                .issueSheets(host: "tab.settings")
+                .appTextSize()
                 .tabItem {
                     Label {
                         Text(L("tab.you"))
                     } icon: {
                         Image(uiImage: TabAvatar.image(name: d?.me.name ?? "", photo: myPhoto,
                                                        fill: UIColor(d.map { PersonColor.fill($0.me.id) } ?? Theme.bubbleMine),
-                                                       selected: store.tab == .settings, moon: store.dndActive))
+                                                       selected: store.tab == .settings, moon: store.dndActive || store.sleepActive))
                     }
                 }
                 .tag(AppTab.settings)
         }
+        // Cada minuto: la ventana de «No molestar todas las noches» (lunita y avisos) entra y sale sola.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                store.clockTick += 1
+            }
+        }
+        // La barra de pestañas no crece más allá de un tamaño razonable; cada pestaña aplica el tamaño elegido.
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         .task(id: myPhotoURL) {
             guard let url = myPhotoURL else { myPhoto = nil; return }
             if let hit = RemoteImageCache.shared.object(forKey: url as NSURL) { myPhoto = hit; return }
@@ -156,6 +175,7 @@ struct MainView: View {
         .animation(.spring(duration: 0.3), value: assistant.open)
         .overlay(alignment: .bottom) { ToastView() }
         .sheet(isPresented: $store.showPushPrompt) { PushPromptView() }
+        .sheet(isPresented: $store.showSleepSettings) { SleepSheet() }
         .sheet(isPresented: Binding(get: { store.shareText != nil }, set: { if !$0 { store.shareText = nil } })) {
             ShareIntoTieComsView(text: store.shareText ?? "")
         }
@@ -197,29 +217,62 @@ extension View {
             case .drive(let ws, let folder): DriveFolderView(workspaceId: ws, folderId: folder)
             case .oversight(let orgId): OversightView(orgId: orgId)
             case .oversightReader(let id, let name): OversightReaderView(conversationId: id, name: name)
+            case .scheduled: ScheduledScreen()
             }
         }
     }
 }
 
-/// Aviso breve en la parte inferior.
+/// Aviso breve en la parte inferior; con «Deshacer» cuando el aviso lo trae (asuntos completados o descartados).
+/// `inSheet`: la copia que muestra una hoja abierta (la de la pestaña queda tapada por la hoja). Solo la de la pestaña
+/// lo anuncia a VoiceOver, para no repetirlo.
 struct ToastView: View {
     @Environment(AppStore.self) private var store
+    var inSheet = false
     var body: some View {
         if let text = store.toast {
-            Text(text)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 16).padding(.vertical, 10)
-                .background(Capsule().fill(Theme.ink.opacity(0.92)))
-                .padding(.bottom, 64)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .accessibilityIdentifier("toast")
-                .task(id: text) {
-                    UIAccessibility.post(notification: .announcement, argument: text)
-                    try? await Task.sleep(nanoseconds: 2_400_000_000)
-                    withAnimation { if store.toast == text { store.toast = nil } }
+            let undo = store.toastUndo
+            HStack(spacing: 12) {
+                Text(text)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let undo {
+                    Button {
+                        store.toast = nil; store.toastUndo = nil
+                        undo()
+                    } label: {
+                        Text(L("issue.undo")).font(.subheadline.weight(.bold)).foregroundStyle(Theme.orangeLight)
+                            .frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("toast.undo")
                 }
+            }
+            .padding(.horizontal, 16).padding(.vertical, undo == nil ? 10 : 2)
+            .background(Capsule().fill(Theme.ink.opacity(0.92)))
+            .padding(.bottom, inSheet ? 16 : 64)
+            .padding(.horizontal, 16)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("toast")
+            .task(id: store.toastSeq) {
+                if !inSheet { UIAccessibility.post(notification: .announcement, argument: text) }
+                let seq = store.toastSeq
+                try? await Task.sleep(nanoseconds: undo == nil ? 2_400_000_000 : 5_000_000_000)
+                withAnimation { if store.toastSeq == seq { store.toast = nil; store.toastUndo = nil } }
+            }
         }
+    }
+}
+
+extension View {
+    /// Muestra los avisos (y su «Deshacer») encima de una hoja: la hoja tapa el aviso de la pestaña.
+    func sheetToasts() -> some View { modifier(SheetToasts()) }
+}
+
+private struct SheetToasts: ViewModifier {
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .bottom) { ToastView(inSheet: true) }
     }
 }

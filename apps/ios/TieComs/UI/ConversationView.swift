@@ -86,6 +86,9 @@ struct ConversationView: View {
     @State private var addingToSide = false
     /// Menciones del borrador (offsets UTF-16) y ficha de una persona mencionada.
     @State private var draftMentions: [Mention] = []
+    /// Programar envío: «Elegir fecha y hora…» y la lista de programados del chat.
+    @State private var pickingSchedule = false
+    @State private var showScheduled = false
     @State private var personCard: String?
     @State private var sideForPerson: String?
     @State private var highlighted: String?
@@ -886,17 +889,17 @@ struct ConversationView: View {
             Divider()
             let author = Naming.person(d, m.authorId)?.name ?? ""
             let link = "\(conversationLink(conversationId))?m=\(m.seq)"
-            let plain = "\(author): \(m.body)\n\n— \(Naming.title(d, c)) · Chaggu\n\(link)"
+            let plain = "\(author): \(m.body)\n\n— \(Naming.title(d, c)) · chaggu\n\(link)"
             Button(L("fwd.whatsapp")) {
                 if let u = URL(string: "https://wa.me/?text=\(plain.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")") { openURL(u) }
             }
             Button(L("fwd.slack")) {
-                UIPasteboard.general.string = ">\(m.body.replacingOccurrences(of: "\n", with: "\n>"))\n— *\(author)* · \(Naming.title(d, c)) · <\(link)|Chaggu>"
+                UIPasteboard.general.string = ">\(m.body.replacingOccurrences(of: "\n", with: "\n>"))\n— *\(author)* · \(Naming.title(d, c)) · <\(link)|chaggu>"
                 store.show(L("toast.slackCopied"))
             }
             Button(L("fwd.teams")) { UIPasteboard.general.string = plain; store.show(L("toast.teamsCopied")) }
             Button(L("fwd.email")) {
-                let subject = "\(Naming.title(d, c)) · Chaggu".addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+                let subject = "\(Naming.title(d, c)) · chaggu".addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
                 if let u = URL(string: "mailto:?subject=\(subject)&body=\(plain.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")") { openURL(u) }
             }
         } label: { Label(L("menu.forward"), systemImage: "arrowshape.turn.up.right") }
@@ -958,6 +961,9 @@ struct ConversationView: View {
             if showQuickReplies(d, c) {
                 SideQuickReplies(onSend: { store.send(conversationId, body: $0) }, onAskOther: { addingToSide = true })
             }
+            if let issueId = c.sideIssueId { SideIssueStrip(sideId: c.id, issueId: issueId) }
+            ScheduledStrip(conversationId: conversationId) { showScheduled = true }
+            SleepNoticeBar(conversation: c, typing: !trimmed.isEmpty && editing == nil, onSchedule: scheduleDraft)
             StagedAttachments(staged: $staged, progress: uploadProgress)
             if let v = failedVoice {
                 // La nota no se subió: queda aquí para reintentar o descartar.
@@ -1001,6 +1007,10 @@ struct ConversationView: View {
                 if editing == nil && trimmed.isEmpty && staged.isEmpty && !uploading && recorder.state != .locked {
                     VoiceRecordButton(recorder: recorder, onSend: sendVoice)
                 } else if !recorder.isActive {
+                // Con texto (sin adjuntos): 🕒 para programar el envío.
+                if canSchedule(trimmed) {
+                    ScheduleButton(onPick: scheduleDraft, onCustom: { pickingSchedule = true })
+                }
                 Button(action: submit) {
                     Image(systemName: editing != nil ? "checkmark" : "arrow.up")
                         .font(.system(size: 17, weight: .bold))
@@ -1011,11 +1021,37 @@ struct ConversationView: View {
                 .disabled((trimmed.isEmpty && staged.isEmpty) || uploading)
                 .accessibilityLabel(editing != nil ? L("edit.save") : L("chat.send"))
                 .accessibilityIdentifier("composer.send")
+                // Mantener presionado ➤: el mismo menú de programar.
+                .contextMenu {
+                    if canSchedule(trimmed) { ScheduleMenuItems(onPick: scheduleDraft, onCustom: { pickingSchedule = true }) }
+                }
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
         }
         .background(Theme.surface.ignoresSafeArea(edges: .bottom))
+        .sheet(isPresented: $pickingSchedule) { PickWhenSheet(onPick: scheduleDraft) }
+        .sheet(isPresented: $showScheduled) { ScheduledSheet(conversationId: conversationId) }
+    }
+
+    /// Solo se programa texto (con menciones y respuesta); adjuntos, notas de voz y respuestas privadas salen al momento.
+    private func canSchedule(_ trimmed: String) -> Bool {
+        editing == nil && !trimmed.isEmpty && staged.isEmpty && !uploading && store.privateReplies[conversationId] == nil
+    }
+
+    /// Programa el borrador: el compositor se vacía y el aviso trae «Deshacer» (devuelve el texto).
+    private func scheduleDraft(_ at: Date) {
+        // El texto tal cual (como al enviar): los offsets de las menciones se cuentan sobre él.
+        let body = draft
+        guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let ms = draftMentions, reply = replyTo?.id
+        draft = ""; draftMentions = []; replyTo = nil
+        Task {
+            let ok = await store.scheduleFromComposer(conversationId, body: body, at: at, mentions: ms, replyTo: reply) { text, mentions in
+                if draft.isEmpty { draft = text; draftMentions = mentions }
+            }
+            if !ok && draft.isEmpty { draft = body; draftMentions = ms }
+        }
     }
 
     /// Keep the recording on-device until the person chooses whether to use third-party AI.
@@ -1176,6 +1212,8 @@ struct EventCard: View {
 }
 
 struct MessageBubble: View {
+    /// Emojis solos (1 a 3): 40 pt que escalan con Dynamic Type y con el tamaño del texto de la app.
+    @ScaledMetric(relativeTo: .body) private var jumboSize: CGFloat = 40
     enum Status { case sending, failed }
     /// Columna del avatar a la izquierda de las burbujas ajenas (grupos, chats grupales, laterales).
     enum Leading { case none, spacer, person(name: String, photo: String?, id: String, agent: Bool) }
@@ -1252,7 +1290,7 @@ struct MessageBubble: View {
                         } else if linkify { Text(Linkify.attributed(text)) } else { Text(text) }
                     }
                     // Solo emojis (1 a 3): grandes, como en la web (isJumbo).
-                    .font(jumbo ? .system(size: 40) : .body)
+                    .font(jumbo ? .system(size: jumboSize) : .body)
                     .italic(italic)
                     .foregroundStyle(mine ? Color.white : Theme.textPrimary)
                     .tint(mine ? Color.white : Theme.accentText)

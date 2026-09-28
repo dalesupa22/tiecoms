@@ -14,6 +14,20 @@ final class V9LanguageSubjectsTests: XCTestCase {
         return try XCTUnwrap(NSDictionary(contentsOfFile: path) as? [String: String])
     }
 
+    /// La marca se escribe «chaggu», en minúscula, en todo texto visible (1.6.4 build 20).
+    func testBrandIsLowercaseEverywhere() throws {
+        for lang in ["es", "en"] {
+            let bad = try strings(lang).filter { $0.value.contains("Chaggu") }
+            XCTAssertTrue(bad.isEmpty, "\(lang): \(bad.keys.sorted())")
+            let path = try XCTUnwrap(Bundle.main.path(forResource: "InfoPlist", ofType: "strings", inDirectory: nil, forLocalization: lang))
+            let info = try XCTUnwrap(NSDictionary(contentsOfFile: path) as? [String: String])
+            XCTAssertEqual(info["CFBundleDisplayName"], "chaggu")
+            XCTAssertFalse(info.values.contains { $0.contains("Chaggu") }, lang)
+        }
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String, "chaggu")
+        XCTAssertEqual(Bundle.main.bundleIdentifier, "com.chaggu.app", "el bundle ID no cambia")
+    }
+
     func testNoEnglishTextSaysIssue() throws {
         let en = try strings("en")
         let leftovers = en.filter { $0.value.range(of: #"\bissues?\b"#, options: [.regularExpression, .caseInsensitive]) != nil }

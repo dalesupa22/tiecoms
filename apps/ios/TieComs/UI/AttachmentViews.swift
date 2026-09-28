@@ -83,6 +83,10 @@ struct AttachmentsBlock: View {
     @State private var viewer: ViewerStart?
     @State private var preview: URL?
     @State private var loadingFile: String?
+    @State private var pdf: PdfOpen?
+
+    /// PDF abierto en el visor (ver) o directo en modo firma.
+    struct PdfOpen: Identifiable { let att: AttachmentDTO; let sign: Bool; var id: String { att.id + (sign ? "-s" : "") } }
 
     struct ViewerStart: Identifiable { let index: Int; var id: Int { index } }
 
@@ -94,8 +98,11 @@ struct AttachmentsBlock: View {
                 VoiceNoteView(att: v, mine: mine, conversationId: conversationId, messageId: messageId, authorIsMe: mine)
             }
             if !media.isEmpty { grid(media) }
-            ForEach(files) { f in fileChip(f) }
+            ForEach(files) { f in
+                if f.isPdf { pdfChip(f) } else { fileChip(f) }
+            }
         }
+        .fullScreenCover(item: $pdf) { p in PdfSignScreen(att: p.att, startSigning: p.sign) }
         .fullScreenCover(item: $viewer) { v in MediaViewer(items: media, start: v.index) }
         .sheet(item: Binding(get: { preview.map(URLBox.init) }, set: { preview = $0?.url })) { box in QuickLookView(url: box.url).ignoresSafeArea() }
     }
@@ -134,8 +141,34 @@ struct AttachmentsBlock: View {
         return min(1.4, max(0.5, CGFloat(h) / CGFloat(w)))
     }
 
-    private func fileChip(_ f: AttachmentDTO) -> some View {
+    /// PDF: tocarlo abre el visor; «✍️ Firmar» abre directo en modo firma. Si ya viene firmado, lo dice.
+    private func pdfChip(_ f: AttachmentDTO) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            fileChip(f) { pdf = PdfOpen(att: f, sign: false) }
+            HStack(spacing: 8) {
+                Button { pdf = PdfOpen(att: f, sign: true) } label: {
+                    Text("✍️ " + L("att.signBtn")).font(.footnote.weight(.semibold))
+                        .padding(.horizontal, 14).frame(minHeight: 34)
+                        .background(Capsule().fill(mine ? Color.white.opacity(0.22) : Theme.surface))
+                        .foregroundStyle(mine ? Color.white : Theme.accentText)
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("att.sign.\(f.id)")
+                if let s = f.signing {
+                    Text(L("att.signedBy", ["name": s.signerName])).font(.caption.weight(.semibold))
+                        .foregroundStyle(mine ? Color.white : SignColors.ok)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("att.signed.\(f.id)")
+                }
+            }
+        }
+    }
+
+    private func fileChip(_ f: AttachmentDTO, open: (() -> Void)? = nil) -> some View {
         Button {
+            if let open { open(); return }
             loadingFile = f.id
             Task {
                 defer { loadingFile = nil }

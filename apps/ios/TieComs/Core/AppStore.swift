@@ -28,6 +28,8 @@ enum Route: Hashable {
     case deleteAccount
     case workspace(String)
     case profile
+    /// «Documentos que firmé» (historial de firmas y firmas guardadas).
+    case signed
     /// Archivos: raíz (lista de ámbitos) o una carpeta de un ámbito (workspaceId nil = «Mis archivos»).
     case files
     case drive(workspaceId: String?, folderId: String?)

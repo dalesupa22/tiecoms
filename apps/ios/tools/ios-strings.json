@@ -1682,5 +1682,341 @@
  "addinv.add": [
   "Agregar ({n})",
   "Add ({n})"
+ ],
+ "sign.duplicate": [
+  "Duplicar",
+  "Duplicate"
+ ],
+ "sign.sign": [
+  "Firmar",
+  "Sign"
+ ],
+ "sign.signature": [
+  "Firma",
+  "Signature"
+ ],
+ "sign.initials": [
+  "Iniciales",
+  "Initials"
+ ],
+ "sign.date": [
+  "Fecha",
+  "Date"
+ ],
+ "sign.text": [
+  "Texto",
+  "Text"
+ ],
+ "sign.finish": [
+  "Firmar",
+  "Sign"
+ ],
+ "sign.pageOf": [
+  "Página {i} de {n}",
+  "Page {i} of {n}"
+ ],
+ "sign.zoomIn": [
+  "Acercar",
+  "Zoom in"
+ ],
+ "sign.zoomOut": [
+  "Alejar",
+  "Zoom out"
+ ],
+ "sign.cantOpen": [
+  "No pude abrir este PDF",
+  "Could not open this PDF"
+ ],
+ "sign.encrypted": [
+  "Este PDF tiene contraseña: no se puede ver ni firmar aquí",
+  "This PDF is password-protected: it cannot be viewed or signed here"
+ ],
+ "sign.discard": [
+  "¿Salir sin firmar? Se pierden las marcas que pusiste.",
+  "Leave without signing? The marks you placed will be lost."
+ ],
+ "sign.hint": [
+  "Toca «Firma» abajo y arrástrala a su lugar. Con el círculo de la esquina la agrandas.",
+  "Tap “Signature” below and drag it into place. Use the corner circle to resize it."
+ ],
+ "sign.hasDigital": [
+  "Este PDF ya trae una firma digital con certificado. Si lo firmas aquí, esa firma deja de ser válida.",
+  "This PDF already has a certificate-based digital signature. Signing it here makes that signature invalid."
+ ],
+ "sign.signedBy": [
+  "Firmado por {name} · {when}",
+  "Signed by {name} · {when}"
+ ],
+ "sign.copied": [
+  "Copiada en {n} páginas más",
+  "Copied to {n} more pages"
+ ],
+ "sign.remove": [
+  "Quitar",
+  "Remove"
+ ],
+ "sign.allPages": [
+  "En todas",
+  "All pages"
+ ],
+ "sign.editText": [
+  "Editar",
+  "Edit"
+ ],
+ "sign.mySignatures": [
+  "Mis firmas",
+  "My signatures"
+ ],
+ "sign.myInitials": [
+  "Mis iniciales",
+  "My initials"
+ ],
+ "sign.newSignature": [
+  "Nueva firma",
+  "New signature"
+ ],
+ "sign.newInitials": [
+  "Nuevas iniciales",
+  "New initials"
+ ],
+ "sign.use": [
+  "Usar esta firma",
+  "Use this signature"
+ ],
+ "sign.delete": [
+  "Borrar firma",
+  "Delete signature"
+ ],
+ "sign.deleteConfirm": [
+  "¿Borrar esta firma guardada? Lo que ya firmaste no cambia.",
+  "Delete this saved signature? Documents you already signed do not change."
+ ],
+ "sign.tooMany": [
+  "Puedes guardar hasta {n} firmas. Borra alguna para crear otra.",
+  "You can save up to {n} signatures. Delete one to create another."
+ ],
+ "sign.tab.drawn": [
+  "Dibujar",
+  "Draw"
+ ],
+ "sign.tab.typed": [
+  "Escribir",
+  "Type"
+ ],
+ "sign.tab.uploaded": [
+  "Foto",
+  "Photo"
+ ],
+ "sign.ink": [
+  "Tinta",
+  "Ink"
+ ],
+ "sign.ink.blue": [
+  "Azul",
+  "Blue"
+ ],
+ "sign.ink.black": [
+  "Negra",
+  "Black"
+ ],
+ "sign.drawHere": [
+  "Firma aquí",
+  "Sign here"
+ ],
+ "sign.clear": [
+  "Borrar",
+  "Clear"
+ ],
+ "sign.typePh": [
+  "Tu nombre",
+  "Your name"
+ ],
+ "sign.empty": [
+  "Primero haz tu firma",
+  "Make your signature first"
+ ],
+ "sign.photoHint": [
+  "Firma en una hoja blanca y tómale una foto: quitamos el fondo.",
+  "Sign on a white sheet and take a photo: we remove the background."
+ ],
+ "sign.takePhoto": [
+  "Tomar foto",
+  "Take photo"
+ ],
+ "sign.pickImage": [
+  "Elegir imagen",
+  "Choose image"
+ ],
+ "sign.photoError": [
+  "No pude leer esa imagen",
+  "Could not read that image"
+ ],
+ "sign.keepColor": [
+  "Conservar el color original",
+  "Keep original color"
+ ],
+ "sign.cleanBg": [
+  "Limpiar el fondo",
+  "Clean background"
+ ],
+ "sign.privacy": [
+  "Tu firma queda guardada solo para ti. Nadie más puede verla ni usarla.",
+  "Your signature is saved only for you. Nobody else can see or use it."
+ ],
+ "sign.saveUse": [
+  "Guardar y usar",
+  "Save and use"
+ ],
+ "sign.textTitle": [
+  "Agregar texto",
+  "Add text"
+ ],
+ "sign.textPh": [
+  "Nombre, cargo, cédula…",
+  "Name, title, ID…"
+ ],
+ "sign.confirmTitle": [
+  "Firmar documento",
+  "Sign document"
+ ],
+ "sign.summary": [
+  "Vas a firmar «{name}» con {n} firma(s) en {p} de {total} página(s). El PDF firmado se responde en este chat.",
+  "You are signing “{name}” with {n} signature(s) on {p} of {total} page(s). The signed PDF is posted as a reply in this chat."
+ ],
+ "sign.bodyPh": [
+  "Mensaje (opcional): ✍️ Documento firmado",
+  "Message (optional): ✍️ Signed document"
+ ],
+ "sign.stamp": [
+  "Sello con fecha bajo la firma",
+  "Date seal under the signature"
+ ],
+ "sign.stampHelp": [
+  "Una línea pequeña: «Firmado electrónicamente por … · fecha y hora».",
+  "A small line: “Electronically signed by … · date and time”."
+ ],
+ "sign.certificate": [
+  "Agregar hoja de constancia",
+  "Add a signature record page"
+ ],
+ "sign.certificateHelp": [
+  "Una página al final con quién firmó, cuándo, desde dónde y la huella del original.",
+  "A final page with who signed, when, from where and the original’s fingerprint."
+ ],
+ "sign.acceptBreak": [
+  "Entiendo que la firma digital que ya trae el PDF deja de ser válida.",
+  "I understand the PDF’s existing digital signature will no longer be valid."
+ ],
+ "sign.legal": [
+  "Es una firma electrónica (Ley 527 de 1999). Chaggu guarda la huella del original y del firmado.",
+  "This is an electronic signature. Chaggu keeps the fingerprint of the original and the signed file."
+ ],
+ "sign.signing": [
+  "Firmando…",
+  "Signing…"
+ ],
+ "sign.signSend": [
+  "Firmar y enviar",
+  "Sign and send"
+ ],
+ "sign.done": [
+  "Documento firmado y enviado ✓",
+  "Document signed and sent ✓"
+ ],
+ "att.signBtn": [
+  "Firmar",
+  "Sign"
+ ],
+ "att.signedBy": [
+  "✓ Firmado por {name}",
+  "✓ Signed by {name}"
+ ],
+ "att.preview": [
+  "Ver PDF",
+  "View PDF"
+ ],
+ "signed.title": [
+  "Documentos que firmé",
+  "Documents I signed"
+ ],
+ "signed.search": [
+  "Documento, persona, grupo o referencia",
+  "Document, person, group or reference"
+ ],
+ "signed.empty": [
+  "Aún no has firmado documentos. Cuando firmes un PDF en un chat, la constancia queda aquí.",
+  "You have not signed any documents yet. When you sign a PDF in a chat, its record stays here."
+ ],
+ "signed.noResults": [
+  "Nada coincide con la búsqueda.",
+  "Nothing matches your search."
+ ],
+ "signed.requestedBy": [
+  "Pedido por {name}",
+  "Requested by {name}"
+ ],
+ "signed.marks": [
+  "{n} firma(s) en {p} de {total} páginas",
+  "{n} signature(s) on {p} of {total} pages"
+ ],
+ "signed.refLabel": [
+  "Ref. {ref}",
+  "Ref. {ref}"
+ ],
+ "signed.detailTitle": [
+  "Constancia de firma",
+  "Signature record"
+ ],
+ "signed.when": [
+  "Fecha",
+  "Date"
+ ],
+ "signed.signer": [
+  "Firmado por",
+  "Signed by"
+ ],
+ "signed.who": [
+  "Lo pidió",
+  "Requested by"
+ ],
+ "signed.where": [
+  "Dónde",
+  "Where"
+ ],
+ "signed.marksLabel": [
+  "Marcas",
+  "Marks"
+ ],
+ "signed.fingerprints": [
+  "Huellas SHA-256",
+  "SHA-256 fingerprints"
+ ],
+ "signed.hashOriginal": [
+  "Original",
+  "Original"
+ ],
+ "signed.hashSigned": [
+  "Firmado",
+  "Signed"
+ ],
+ "signed.viewPdf": [
+  "Ver PDF firmado",
+  "View signed PDF"
+ ],
+ "signed.goMessage": [
+  "Ir al mensaje",
+  "Go to message"
+ ],
+ "signed.noAccess": [
+  "Ya no tienes acceso al archivo, pero la constancia queda.",
+  "You no longer have access to the file, but the record remains."
+ ],
+ "signed.saved": [
+  "Mis firmas guardadas",
+  "My saved signatures"
+ ],
+ "signed.savedEmpty": [
+  "Aún no tienes firmas guardadas. Créalas una vez y reúsalas.",
+  "You have no saved signatures yet. Create them once and reuse them."
  ]
 }

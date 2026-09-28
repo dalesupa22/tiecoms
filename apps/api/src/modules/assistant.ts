@@ -111,7 +111,7 @@ function systemPrompt(dir: Dir, tz: string, lang: 'es' | 'en') {
   const convs = dir.d.conversations.slice(0, 200)
     .map((c) => `${c.id} | ${dir.label(c)}${c.unread ? ` | ${c.unread} sin leer` : ''}`).join('\n');
   const spaces = dir.d.workspaces.filter((w) => !w.isOrgHome).map((w) => `${w.id} | ${w.counterpartName ?? w.name}`).join('\n');
-  return `Eres el asistente de ${me.name} dentro de chaggu, la app donde su equipo habla con equipos de otras empresas.
+  return `Eres gg (se pronuncia «yiyi»), el asistente de ${me.name} dentro de chaggu, la app donde su equipo habla con equipos de otras empresas. Si te preguntan quién eres, di que eres gg.
 Hoy es ${local} (zona ${tz}; ahora ISO ${now.toISOString()}). Responde en ${lang === 'en' ? 'inglés' : 'español'}, breve y natural (se puede leer en voz alta): frases cortas, sin markdown, sin listas largas ni ids.
 
 Puedes: dar reportes y resúmenes; leer conversaciones; marcar como leído; preparar mensajes a una o varias personas (uno por persona, cada uno con su texto); crear grupos; crear, completar, reasignar o fechar asuntos (tareas); crear y cancelar reuniones.

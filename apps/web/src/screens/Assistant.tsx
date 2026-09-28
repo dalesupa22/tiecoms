@@ -31,7 +31,8 @@ function speak(text: string) {
   try {
     const s = window.speechSynthesis; if (!s || !text) return;
     s.cancel();
-    const u = new SpeechSynthesisUtterance(text);
+    // gg se pronuncia «yiyi».
+    const u = new SpeechSynthesisUtterance(text.replace(/\bgg\b/gi, 'yiyi'));
     u.lang = lang() === 'en' ? 'en-US' : 'es-CO';
     const v = s.getVoices().find((x) => x.lang.startsWith(lang() === 'en' ? 'en' : 'es'));
     if (v) u.voice = v;

@@ -7,6 +7,8 @@ package com.tiecoms.app.core
 object TextSize {
     val STEPS = listOf(0.9f, 1.0f, 1.15f, 1.3f, 1.45f)
     const val DEFAULT = 1.0f
+    /** Tope de las etiquetas de la barra inferior: con más, «Calendario» se corta. */
+    const val TAB_LABEL_MAX = 1.15f
 
     /** Paso más cercano a [factor] (0…4). */
     fun index(factor: Float): Int = STEPS.indices.minBy { kotlin.math.abs(STEPS[it] - factor) }

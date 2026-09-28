@@ -288,7 +288,15 @@ private fun MainNav() {
                         icon = {
                             if (t.badge > 0) BadgedBox(badge = { Badge { Text(if (t.badge > 99) "99+" else t.badge.toString()) } }) { t.icon() } else t.icon()
                         },
-                        label = { Text(stringResource(t.label), maxLines = 1) },
+                        // Con «Tamaño del texto» Máximo (o letra grande del sistema) «Calendario» no cabe: las etiquetas
+                        // de la barra crecen hasta 1,15× y no más, para que ninguna se corte.
+                        label = {
+                            val d = androidx.compose.ui.platform.LocalDensity.current
+                            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides
+                                androidx.compose.ui.unit.Density(d.density, minOf(d.fontScale, com.tiecoms.app.core.TextSize.TAB_LABEL_MAX))) {
+                                Text(stringResource(t.label), maxLines = 1, softWrap = false)
+                            }
+                        },
                         modifier = Modifier.testTag("tab-" + t.route.substringBefore('?')),
                     )
                 }

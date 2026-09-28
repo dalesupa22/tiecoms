@@ -102,7 +102,7 @@
     <string name="bar_threads_title">Hilos de este chat</string>
     <string name="bar_agenda_title">Agenda de este chat</string>
     <string name="bar_no_threads">Aún no hay hilos. Abre uno desde un mensaje: «Responder en un hilo» o «Sidechat privado».</string>
-    <string name="bar_no_agenda">Sin fechas todavía: reuniones, fechas límite de asuntos y tus recordatorios aparecen aquí.</string>
+    <string name="bar_no_agenda">Sin fechas todavía: reuniones, fechas límite de tareas y tus recordatorios aparecen aquí.</string>
     <string name="bar_new_issue">Tarea</string>
     <string name="bar_new_event">Evento</string>
     <string name="bar_plus">Adjuntar, evento o tarea</string>
@@ -127,7 +127,7 @@
     <string name="grp_archive_confirm">¿Archivar «%1$s»? Sale de la lista de todos sus participantes.</string>
     <string name="grp_archived">Grupo archivado</string>
     <plurals name="grp_more_issues">
-        <item quantity="one">+%1$d asunto</item>
-        <item quantity="other">+%1$d asuntos</item>
+        <item quantity="one">+%1$d tarea</item>
+        <item quantity="other">+%1$d tareas</item>
     </plurals>
 </resources>

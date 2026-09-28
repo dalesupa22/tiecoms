@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 1.6.4 (23): tareas derivadas y visibilidad (docs/TAREAS.md). -->
 <resources>
-    <string name="task_add">＋ Tarea derivada</string>
-    <string name="task_short">Tarea</string>
-    <string name="task_add_here">Tarea del asunto</string>
-    <string name="task_section">Tareas</string>
-    <string name="task_title">Tarea</string>
-    <string name="task_ph">Añadir tarea…</string>
-    <string name="task_hint">Divide el asunto en tareas para cada persona. Puedes hacer que solo tu empresa las vea.</string>
-    <string name="task_dialog_title">Tareas de «%1$s»</string>
+    <string name="task_add">＋ Subtarea</string>
+    <string name="task_short">Subtarea</string>
+    <string name="task_add_here">Subtarea de la tarea</string>
+    <string name="task_section">Subtareas</string>
+    <string name="task_title">Subtarea</string>
+    <string name="task_ph">Añadir subtarea…</string>
+    <string name="task_hint">Divide la tarea en subtareas para cada persona. Puedes hacer que solo tu empresa las vea.</string>
+    <string name="task_dialog_title">Subtareas de «%1$s»</string>
     <string name="task_who_sees">¿Quién la ve?</string>
     <string name="task_vis_all">Todo el chat</string>
     <string name="task_vis_org">Solo %1$s</string>
@@ -19,16 +19,16 @@
     <string name="task_pick_person">Elige a alguien…</string>
     <string name="task_outsider_hint">%1$s no está en este chat: la tarea queda restringida y solo verá la tarea, no el chat.</string>
     <string name="task_part_of">Parte de «%1$s»</string>
-    <string name="task_of_hidden">Tarea de un asunto que no ves</string>
+    <string name="task_of_hidden">Subtarea de una tarea que no ves</string>
     <string name="task_in_side">en sidechat</string>
-    <string name="task_progress">%1$d de %2$d tareas hechas</string>
+    <string name="task_progress">%1$d de %2$d subtareas hechas</string>
     <string name="task_sidechat">Hablar aparte (sidechat)</string>
-    <string name="task_side_explain">Abre un chat privado con quienes elijas para resolver «%1$s». Las tareas que creen ahí quedan en el asunto y solo las ven ustedes.</string>
+    <string name="task_side_explain">Abre un chat privado con quienes elijas para resolver «%1$s». Las subtareas que creen ahí quedan en la tarea y solo las ven ustedes.</string>
     <string name="task_side_first">Primer mensaje (opcional)</string>
     <string name="task_side_go">Abrir sidechat</string>
     <string name="task_ev_vis">cambió quién la ve</string>
     <string name="task_shared_with_me">Compartidas contigo</string>
     <string name="task_assigned">Te asignaron una tarea</string>
-    <string name="task_show">Mostrar tareas</string>
-    <string name="task_hide">Ocultar tareas</string>
+    <string name="task_show">Mostrar subtareas</string>
+    <string name="task_hide">Ocultar subtareas</string>
 </resources>

@@ -154,13 +154,13 @@
     <string name="issue_mine">Mine</string>
     <string name="issue_all_open">Open</string>
     <string name="issue_closed">Completed</string>
-    <string name="issue_empty">No subjects match this filter.</string>
+    <string name="issue_empty">No tasks match this filter.</string>
     <string name="issue_in">in %1$s</string>
-    <string name="issue_ev_created">opened the subject</string>
+    <string name="issue_ev_created">created the task</string>
     <string name="issue_ev_status">changed the status to %1$s</string>
     <string name="issue_ev_owner">changed the owner</string>
     <string name="issue_ev_due">changed the date to %1$s</string>
-    <string name="issue_ev_title">renamed the subject</string>
+    <string name="issue_ev_title">renamed the task</string>
     <string name="issue_ev_waiting">marked it as waiting on another company</string>
     <string name="issue_bottleneck">Possible bottleneck</string>
     <string name="common_none">Nobody</string>

@@ -26,7 +26,18 @@ class StringsAndLanguageTest {
         assertTrue("Quedan «Issue» en inglés: $left", left.isEmpty())
         val en = texts("values")
         assertTrue(en.values.contains("Tasks")) // pestaña y chips (docs/TEMAS.md)
-        assertTrue(en.any { it.key.startsWith("strings_v6.xml:grp_more_issues") || it.value == "+%1\$d subjects" })
+        assertTrue(en.values.contains("+%1\$d tasks"))
+    }
+
+    /** Asunto → Tarea (docs/TEMAS.md): no queda «asunto» ni «subject» visible, salvo el asunto de un correo importado. */
+    @Test fun `ningun asunto ni subject visible`() {
+        val es = texts("values-es").filterKeys { !it.contains(":imp_subject#") }.filterValues { Regex("\\basuntos?\\b", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+        assertTrue("Quedan «asunto»: $es", es.isEmpty())
+        val en = texts("values").filterKeys { !it.contains(":imp_subject#") }.filterValues { Regex("\\bsubjects?\\b", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+        assertTrue("Quedan «subject»: $en", en.isEmpty())
+        // Lo que eran «tareas» de un asunto ahora son subtareas de una tarea.
+        assertTrue(texts("values-es").values.contains("Subtarea de la tarea"))
+        assertTrue(texts("values").values.contains("Subtask of this task"))
     }
 
     @Test fun `en espanol la pestana dice Tareas`() {

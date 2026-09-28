@@ -16,8 +16,8 @@
     <string name="expand">Expand</string>
     <string name="collapse">Collapse</string>
     <string name="home_unread_in">%1$d unread</string>
-    <string name="issues_count_one">◆ 1 subject</string>
-    <string name="issues_count">◆ %1$d subjects</string>
+    <string name="issues_count_one">◆ 1 task</string>
+    <string name="issues_count">◆ %1$d tasks</string>
     <string name="issues_open_bar">Open tasks (%1$d)</string>
     <string name="issue_all">All</string>
     <string name="issue_comment_ph3">Write an update or a question…</string>

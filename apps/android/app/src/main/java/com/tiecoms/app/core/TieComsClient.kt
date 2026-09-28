@@ -861,7 +861,7 @@ class TieComsClient(
      */
     suspend fun setIssueStatus(id: String, status: String): IssueDTO = withContext(dispatcher) {
         val generation = sessionGeneration
-        val prev = s.issues[id] ?: throw ApiException(404, "not_found", "Asunto no encontrado")
+        val prev = s.issues[id] ?: throw ApiException(404, "not_found", "Tarea no encontrada")
         if (prev.status == status) return@withContext prev
         putIssues(listOf(prev.copy(status = status))); recountIssues(prev.conversationId)
         try {

@@ -142,7 +142,7 @@
     <string name="issue_origin">Ver mensaje de origen</string>
     <string name="issue_origin_out">El mensaje de origen quedó fuera de tu historial</string>
     <string name="issue_requested_by">Lo pidió %1$s</string>
-    <string name="issue_manual">Creado a mano</string>
+    <string name="issue_manual">Creada a mano</string>
     <string name="issue_stalled">Detenido hace %1$d días</string>
     <string name="issue_stalled_one">Detenido hace 1 día</string>
     <string name="issue_overdue">Vencido</string>
@@ -154,13 +154,13 @@
     <string name="issue_mine">Míos</string>
     <string name="issue_all_open">Abiertos</string>
     <string name="issue_closed">Completados</string>
-    <string name="issue_empty">No hay asuntos con este filtro.</string>
+    <string name="issue_empty">No hay tareas con este filtro.</string>
     <string name="issue_in">en %1$s</string>
-    <string name="issue_ev_created">abrió el asunto</string>
+    <string name="issue_ev_created">creó la tarea</string>
     <string name="issue_ev_status">cambió el estado a %1$s</string>
     <string name="issue_ev_owner">cambió el responsable</string>
     <string name="issue_ev_due">cambió la fecha a %1$s</string>
-    <string name="issue_ev_title">renombró el asunto</string>
+    <string name="issue_ev_title">renombró la tarea</string>
     <string name="issue_ev_waiting">marcó que se espera a otra empresa</string>
     <string name="issue_bottleneck">Posible cuello de botella</string>
     <string name="common_none">Nadie</string>

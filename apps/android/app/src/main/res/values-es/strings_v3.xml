@@ -16,8 +16,8 @@
     <string name="expand">Expandir</string>
     <string name="collapse">Contraer</string>
     <string name="home_unread_in">%1$d sin leer</string>
-    <string name="issues_count_one">◆ 1 asunto</string>
-    <string name="issues_count">◆ %1$d asuntos</string>
+    <string name="issues_count_one">◆ 1 tarea</string>
+    <string name="issues_count">◆ %1$d tareas</string>
     <string name="issues_open_bar">Tareas abiertas (%1$d)</string>
     <string name="issue_all">Todos</string>
     <string name="issue_comment_ph3">Escribe una actualización o una pregunta…</string>

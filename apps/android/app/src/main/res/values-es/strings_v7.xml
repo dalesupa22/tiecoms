@@ -3,24 +3,24 @@
 <resources>
     <!-- Asuntos plegables bajo cada grupo -->
     <plurals name="grp_issues_chip">
-        <item quantity="one">◆ %1$d asunto</item>
-        <item quantity="other">◆ %1$d asuntos</item>
+        <item quantity="one">◆ %1$d tarea</item>
+        <item quantity="other">◆ %1$d tareas</item>
     </plurals>
     <plurals name="grp_overdue_chip">
         <item quantity="one">%1$d vencido</item>
         <item quantity="other">%1$d vencidos</item>
     </plurals>
-    <string name="grp_issues_show">Mostrar asuntos</string>
-    <string name="grp_issues_hide">Ocultar asuntos</string>
+    <string name="grp_issues_show">Mostrar tareas</string>
+    <string name="grp_issues_hide">Ocultar tareas</string>
     <string name="menu_expand_all">Expandir todo</string>
-    <string name="menu_show_all_issues">Mostrar todos los asuntos</string>
-    <string name="menu_hide_all_issues">Contraer todos los asuntos</string>
+    <string name="menu_show_all_issues">Mostrar todas las tareas</string>
+    <string name="menu_hide_all_issues">Contraer todas las tareas</string>
 
     <!-- Completar un asunto con pulsación larga -->
     <string name="issue_act_done">Completar</string>
     <string name="issue_act_in_progress">Marcar en curso</string>
     <string name="issue_act_waiting">Marcar en espera</string>
-    <string name="issue_done_toast">Asunto completado: «%1$s»</string>
+    <string name="issue_done_toast">Tarea completada: «%1$s»</string>
     <string name="issue_status_toast">«%1$s» → %2$s</string>
 
     <!-- Reacciones -->
@@ -36,9 +36,9 @@
     <string name="react_done_hint">✅ Hecho: cierra tu recordatorio</string>
     <string name="react_look_done">👀 Te lo recuerdo el %1$s</string>
     <string name="react_done_reminders">✅ Recordatorio cerrado</string>
-    <string name="react_close_issue">¿Cerrar también el asunto «%1$s»?</string>
-    <string name="react_close_issue_btn">Cerrar asunto</string>
-    <string name="react_issue_closed">Asunto cerrado</string>
+    <string name="react_close_issue">¿Cerrar también la tarea «%1$s»?</string>
+    <string name="react_close_issue_btn">Cerrar tarea</string>
+    <string name="react_issue_closed">Tarea cerrada</string>
     <string name="react_max">Este mensaje ya tiene 20 emojis distintos. Súmate a uno de los que hay.</string>
     <string name="common_and">y</string>
     <!-- 1.6.2: notas de voz -->

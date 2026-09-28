@@ -3,11 +3,11 @@
 <resources>
     <string name="issue_mark_open">Mark open</string>
     <string name="issue_reopen">Reopen</string>
-    <string name="issue_completed">Subject completed</string>
-    <string name="issue_reopened_toast">Subject reopened</string>
+    <string name="issue_completed">Task completed</string>
+    <string name="issue_reopened_toast">Task reopened</string>
     <string name="issue_no_owner">No owner</string>
     <string name="issue_me">Me</string>
-    <string name="issue_quick_ph">Add a subject…</string>
+    <string name="issue_quick_ph">Add a task…</string>
     <string name="issue_add">Add</string>
     <string name="issue_done_count">Completed · %1$d</string>
     <string name="issue_group_by">Group by</string>
@@ -16,8 +16,8 @@
     <string name="issue_mark_done">Mark as done</string>
     <string name="issue_done_banner">✓ Done</string>
     <string name="issue_dropped_banner">Dropped</string>
-    <string name="issue_drop">Drop subject</string>
-    <string name="issue_dropped_toast">Subject dropped</string>
+    <string name="issue_drop">Drop task</string>
+    <string name="issue_dropped_toast">Task dropped</string>
     <string name="issue_q_who">Who does it?</string>
     <string name="issue_q_when">By when?</string>
     <string name="issue_q_how">How is it going?</string>

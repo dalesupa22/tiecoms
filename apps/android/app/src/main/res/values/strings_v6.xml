@@ -102,7 +102,7 @@
     <string name="bar_threads_title">Threads in this chat</string>
     <string name="bar_agenda_title">Agenda for this chat</string>
     <string name="bar_no_threads">No threads yet. Start one from a message: “Reply in a thread” or “Private sidechat”.</string>
-    <string name="bar_no_agenda">No dates yet: meetings, subject deadlines and your reminders show up here.</string>
+    <string name="bar_no_agenda">No dates yet: meetings, task deadlines and your reminders show up here.</string>
     <string name="bar_new_issue">Task</string>
     <string name="bar_new_event">Event</string>
     <string name="bar_plus">Attach, event or task</string>
@@ -127,7 +127,7 @@
     <string name="grp_archive_confirm">Archive “%1$s”? It leaves the list of everyone in it.</string>
     <string name="grp_archived">Group archived</string>
     <plurals name="grp_more_issues">
-        <item quantity="one">+%1$d subject</item>
-        <item quantity="other">+%1$d subjects</item>
+        <item quantity="one">+%1$d task</item>
+        <item quantity="other">+%1$d tasks</item>
     </plurals>
 </resources>

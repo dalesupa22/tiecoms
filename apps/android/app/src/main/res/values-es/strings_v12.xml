@@ -3,11 +3,11 @@
 <resources>
     <string name="issue_mark_open">Marcar abierto</string>
     <string name="issue_reopen">Reabrir</string>
-    <string name="issue_completed">Asunto completado</string>
-    <string name="issue_reopened_toast">Asunto reabierto</string>
+    <string name="issue_completed">Tarea completada</string>
+    <string name="issue_reopened_toast">Tarea reabierta</string>
     <string name="issue_no_owner">Sin responsable</string>
     <string name="issue_me">Yo</string>
-    <string name="issue_quick_ph">Añadir asunto…</string>
+    <string name="issue_quick_ph">Añadir tarea…</string>
     <string name="issue_add">Añadir</string>
     <string name="issue_done_count">Completados · %1$d</string>
     <string name="issue_group_by">Agrupar</string>
@@ -16,8 +16,8 @@
     <string name="issue_mark_done">Marcar como hecho</string>
     <string name="issue_done_banner">✓ Hecho</string>
     <string name="issue_dropped_banner">Descartado</string>
-    <string name="issue_drop">Descartar asunto</string>
-    <string name="issue_dropped_toast">Asunto descartado</string>
+    <string name="issue_drop">Descartar tarea</string>
+    <string name="issue_dropped_toast">Tarea descartada</string>
     <string name="issue_q_who">¿Quién lo hace?</string>
     <string name="issue_q_when">¿Para cuándo?</string>
     <string name="issue_q_how">¿Cómo va?</string>

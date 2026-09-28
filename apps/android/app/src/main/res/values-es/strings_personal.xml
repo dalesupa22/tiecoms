@@ -3,6 +3,6 @@
 <resources>
     <string name="issue_personal_option">🔒 Personal · solo tú</string>
     <string name="issue_personal_section">Personal · solo tú</string>
-    <string name="issue_personal_note">Solo tú lo ves. No está en ningún chat ni lo ve nadie más.</string>
+    <string name="issue_personal_note">Solo tú la ves. No está en ningún chat ni la ve nadie más.</string>
     <string name="issue_personal_short">Personal</string>
 </resources>

@@ -31,7 +31,7 @@ import java.util.concurrent.ConcurrentHashMap
  * Notificaciones de mensajes estilo conversación (SPEC-v3 §6): MessagingStyle con la persona y su foto,
  * shortcut de conversación con LocusId (Android 11+ la pone en «Conversaciones»), burbuja, acciones
  * Responder (RemoteInput) y Marcar como leído, canal «Mensajes» con tc_notify y badge.
- * La usan igual el socket (app viva) y FCM (app cerrada); [shown] evita duplicados por messageId.
+ * La usan igual el socket (app viva) y FCM (app cerrada); [ledger] evita duplicados por messageId.
  */
 class Notifier(private val context: Context) {
     companion object {
@@ -49,7 +49,8 @@ class Notifier(private val context: Context) {
     private val soundUri: Uri = Uri.parse("${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/${R.raw.tc_notify}")
     /** Últimos mensajes por conversación para el historial del MessagingStyle. */
     private val history = ConcurrentHashMap<String, ArrayDeque<Line>>()
-    private val shown = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+    /** Decisiones de aviso por messageId, compartidas por el socket y FCM (LRU de 300). */
+    val ledger = com.tiecoms.app.core.NoticeLedger(300)
 
     data class Line(val authorKey: String, val authorName: String, val text: String, val at: Long, val icon: Bitmap?)
 
@@ -79,14 +80,7 @@ class Notifier(private val context: Context) {
     }
 
     /** true la primera vez que se ve este messageId (socket y FCM no duplican). */
-    fun firstTime(messageId: String?): Boolean {
-        if (messageId == null) return true
-        synchronized(shown) {
-            if (!shown.add(messageId)) return false
-            while (shown.size > 300) shown.remove(shown.first())
-        }
-        return true
-    }
+    fun firstTime(messageId: String?): Boolean = ledger.claim(messageId, com.tiecoms.app.core.NoticeLedger.Decision.SHOWN) == null
 
     private fun openIntent(uri: String, code: Int): PendingIntent {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri), context, MainActivity::class.java)

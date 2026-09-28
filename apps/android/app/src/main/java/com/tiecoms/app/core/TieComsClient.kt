@@ -77,6 +77,8 @@ data class ClientState(
 sealed interface ClientSignal {
     /** Mensaje de otra persona recibido EN VIVO (no en la recuperación masiva). */
     data class Incoming(val message: MessageDTO) : ClientSignal
+    /** Mensaje de otra persona recibido EN VIVO que no avisa (chat silenciado o «No molestar»). */
+    data class Silenced(val messageId: String) : ClientSignal
     /** El servidor confirmó un mensaje propio. */
     data class Sent(val message: MessageDTO) : ClientSignal
     data object SignedOut : ClientSignal
@@ -544,7 +546,10 @@ class TieComsClient(
             // Silenciada: sin sonido ni notificación. Una mención a mí (o @todos) avisa aunque esté silenciada,
             // salvo el silencio «siempre» (como el push del servidor). «No molestar» apaga todo (SPEC-silencio).
             val mentioned = Mentions.mentionsMe(e.message, myId)
-            if (fresh && Silence.notifies(meta.mutedUntil, mentioned, dndUntil(), now()) && e.message.authorId != myId && e.message.authorId !in s.blockedUserIds && e.message.kind != "system" && createdAt >= liveSince) _signals.tryEmit(ClientSignal.Incoming(e.message))
+            if (fresh && e.message.authorId != myId && e.message.authorId !in s.blockedUserIds && e.message.kind != "system" && createdAt >= liveSince) {
+                // La decisión «sin aviso» también se anuncia: un FCM tardío del mismo mensaje no debe aparecer (Notices).
+                _signals.tryEmit(if (Silence.notifies(meta.mutedUntil, mentioned, dndUntil(), now())) ClientSignal.Incoming(e.message) else ClientSignal.Silenced(e.message.id))
+            }
         }
         val local = s.conversations[e.conversationId]
         if (local?.loaded != true) {

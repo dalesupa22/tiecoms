@@ -202,23 +202,30 @@ class AppContainer(private val app: Application) {
         return runCatching { images.load(url, 128)?.let { it.asAndroidBitmap() } }.getOrNull()
     }
 
+    /** ¿La conversación está en pantalla, en primer plano y CARGADA? (un chat que falló al cargar no calla avisos). */
+    fun openAndLoaded(conversationId: String): Boolean =
+        com.tiecoms.app.core.Notices.openAndLoaded(foreground, openConversationId, conversationId, client.value.state.value)
+
     /**
-     * Push de FCM (SPEC-v3 §6). Si la app está en primer plano con el socket en línea, el socket ya avisó;
-     * si el mensaje ya se mostró (socket o push repetido), no se duplica.
+     * Push de FCM (SPEC-v3 §6). Ya no se descarta en bloque en primer plano con el socket en línea: el socket
+     * no avisa de todo (conversación desconocida, hueco/catch-up, mensajes de antes de reconectar tras un
+     * despliegue). La decisión se comparte por messageId con el aviso local ([Notices]): lo ya anunciado, o
+     * decidido «sin aviso», no se repite; lo no anunciado se muestra con las reglas locales (DND, silencio,
+     * chat abierto y cargado).
      */
     fun showPush(p: com.tiecoms.app.core.PushMessage) {
         val c = client.value
-        if (foreground && c.state.value.status == com.tiecoms.app.core.SessionStatus.READY && c.state.value.connection == com.tiecoms.app.core.ConnectionStatus.ONLINE) return
-        // SPEC-silencio: con «No molestar» el servidor ya no manda push; si llega uno (servidor viejo, carrera), no se muestra.
-        if (c.dndActive()) return
-        // Chat silenciado: solo pasa la mención (salvo el silencio «siempre»), igual que el filtro del servidor.
+        val st = c.state.value
         val conv = c.meta(p.conversationId)
-        if (conv != null && p.type != "event" && p.type != "reminder" && p.type != "issue" &&
-            !com.tiecoms.app.core.Silence.notifies(conv.mutedUntil, p.type == "mention", null, System.currentTimeMillis())) return
-        // Aviso de reunión (minutes) vs. convocatoria: claves distintas para no taparse entre sí.
-        // Una reacción comparte el messageId con el aviso del mensaje: no se deduplica (la etiqueta la reemplaza).
-        val dedupe = if (p.type == "event" && p.minutes != null) "soon:" + p.eventId else if (p.type == "reaction") null else p.messageId
-        if (!notifier.firstTime(dedupe)) return
+        val ctx = com.tiecoms.app.core.Notices.PushContext(
+            foreground = foreground,
+            live = st.status == com.tiecoms.app.core.SessionStatus.READY && st.connection == com.tiecoms.app.core.ConnectionStatus.ONLINE,
+            dnd = c.dndActive(),
+            convKnown = conv != null, convMutedUntil = conv?.mutedUntil,
+            openAndLoaded = openAndLoaded(p.conversationId),
+            nowMs = System.currentTimeMillis(),
+        )
+        if (com.tiecoms.app.core.Notices.forPush(notifier.ledger, p, ctx) != com.tiecoms.app.core.Notices.Outcome.SHOW) return
         // FCM owns the process only until its callback returns. Post immediately; a remote
         // avatar must never delay the notification or escape into an untracked coroutine.
         when (p.type) {
@@ -377,9 +384,14 @@ class AppContainer(private val app: Application) {
             is ClientSignal.Incoming -> {
                 val m = sig.message
                 val fg = foreground
-                if (fg && openConversationId == m.conversationId) { sounds.play(Sound.RECEIVE); return }
-                if (fg) sounds.play(Sound.NOTIFY)
-                if (!notifier.firstTime(m.id)) return // ya llegó por push
+                val visible = openAndLoaded(m.conversationId)
+                when (com.tiecoms.app.core.Notices.forLive(notifier.ledger, m.id, visible)) {
+                    // El mensaje se ve en el chat abierto y cargado: solo el sonido de recepción.
+                    com.tiecoms.app.core.Notices.Outcome.OPEN -> { sounds.play(Sound.RECEIVE); return }
+                    com.tiecoms.app.core.Notices.Outcome.SHOW -> if (fg) sounds.play(Sound.NOTIFY)
+                    // Ya lo anunció (o lo calló) FCM: sin segunda notificación ni segundo sonido de aviso.
+                    else -> { if (visible) sounds.play(Sound.RECEIVE); return }
+                }
                 val c = client.value
                 val data = c.state.value.data
                 val conv = c.meta(m.conversationId)
@@ -403,6 +415,8 @@ class AppContainer(private val app: Application) {
                         shortcutLabel = if (isGroup && side == null) conversationName(m.conversationId) else chatTitle)
                 }
             }
+            // Silenciado o «No molestar»: se registra la decisión para que un FCM tardío tampoco avise.
+            is ClientSignal.Silenced -> com.tiecoms.app.core.Notices.silenced(notifier.ledger, sig.messageId)
             is ClientSignal.ReminderDue -> {
                 val r = sig.reminder
                 val c = client.value

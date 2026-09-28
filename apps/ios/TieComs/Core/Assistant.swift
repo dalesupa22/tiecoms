@@ -70,13 +70,17 @@ struct AssistantActionDTO: Codable, Equatable, Identifiable {
 struct AssistantTurnDTO: Decodable, Equatable {
     var reply: String
     var actions: [AssistantActionDTO]
-    init(reply: String, actions: [AssistantActionDTO]) { self.reply = reply; self.actions = actions }
+    /// Siguientes pasos (2 o 3 frases cortas) que se muestran como chips bajo la última respuesta.
+    var suggestions: [String]
+    init(reply: String, actions: [AssistantActionDTO], suggestions: [String] = []) { self.reply = reply; self.actions = actions; self.suggestions = suggestions }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         reply = (try? c.decode(String.self, forKey: .reply)) ?? ""
         actions = (try? c.decodeIfPresent([AssistantActionDTO].self, forKey: .actions)) ?? []
+        suggestions = ((try? c.decodeIfPresent([String].self, forKey: .suggestions)) ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
-    private enum CodingKeys: String, CodingKey { case reply, actions }
+    private enum CodingKeys: String, CodingKey { case reply, actions, suggestions }
 }
 
 /// Un turno de la conversación con gg (se guarda en el dispositivo).
@@ -86,6 +90,8 @@ struct AssistantTurn: Codable, Equatable, Identifiable {
     var role: Role
     var content: String
     var actions: [AssistantActionDTO]?
+    /// Chips de siguiente paso (opcional: el historial viejo no lo trae).
+    var suggestions: [String]?
     var at = Date()
 }
 
@@ -122,6 +128,15 @@ enum Assistant {
     static func pending(_ turns: [AssistantTurn]) -> [AssistantActionDTO] {
         turns.flatMap { $0.actions ?? [] }.filter { $0.status == .pending && $0.token != nil }
     }
+
+    /// Chips de siguiente paso: los de la última respuesta de gg, si no está pensando ni escuchando.
+    static func nextSteps(_ turns: [AssistantTurn], busy: Bool, listening: Bool) -> [String] {
+        guard !busy, !listening, let last = turns.last, last.role == .assistant else { return [] }
+        return last.suggestions ?? []
+    }
+
+    /// Lo que gg dice al confirmar en el dispositivo con «envíalo(s)».
+    static func sentText(_ n: Int) -> String { n == 1 ? L("ai.sentOne") : L("ai.sentAll", ["n": n]) }
 
     /// Cambia una acción donde esté.
     static func patch(_ turns: inout [AssistantTurn], _ id: String, _ change: (inout AssistantActionDTO) -> Void) {

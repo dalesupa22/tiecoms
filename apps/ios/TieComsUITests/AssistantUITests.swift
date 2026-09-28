@@ -35,7 +35,7 @@ final class AssistantUITests: XCTestCase {
     private func login(_ f: Fixture) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES", "-TCResetLanguage", "YES",
-                               "-AppleLanguages", "(es)", "-AppleLocale", "es_CO", "-tc.assistantSpeak", "NO"]
+                               "-AppleLanguages", "(es)", "-AppleLocale", "es_CO", "-tc.assistantSpeak", "NO", "-TCNoAnimations", "YES"]
         app.launch()
         let email = app.textFields["login.email"]
         let deadline = Date().addingTimeInterval(15)
@@ -141,5 +141,93 @@ final class AssistantUITests: XCTestCase {
             app.navigationBars.buttons.firstMatch.tap()
             XCTAssertTrue(bubble.waitForExistence(timeout: 8), "al volver a la lista vuelve la burbuja")
         }
+    }
+
+    private func answers(_ app: XCUIApplication) -> Int {
+        app.descendants(matching: .any).matching(identifier: "assistant.turn.assistant").count
+    }
+
+    /// Espera la siguiente respuesta de gg (hasta 2 min: DeepSeek real).
+    private func waitAnswer(_ app: XCUIApplication, after n: Int) {
+        let later = Date().addingTimeInterval(120)
+        while Date() < later && answers(app) <= n { usleep(500_000) }
+        XCTAssertGreaterThan(answers(app), n, "gg respondió")
+        sleep(1)
+    }
+
+    private func type(_ app: XCUIApplication, _ text: String) {
+        let input = app.textFields["assistant.input"].exists ? app.textFields["assistant.input"] : app.textViews["assistant.input"]
+        input.tap()
+        input.typeText(text)
+        app.buttons["assistant.send"].tap()
+    }
+
+    /// Chips de siguiente paso, «Otra versión», «envíalos» con la confirmación local y botones de la tarjeta en una línea.
+    func testNextStepsAnotherVersionAndSendIt() throws {
+        let f = try fixture()
+        let app = login(f)
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 20))
+        app.tabBars.buttons.element(boundBy: 1).tap()
+        let bubble = app.descendants(matching: .any)["assistant.bubble"]
+        XCTAssertTrue(bubble.waitForExistence(timeout: 10))
+        bubble.tap()
+        let clear = app.buttons["assistant.clear"]
+        if clear.waitForExistence(timeout: 2) { clear.tap() }
+        XCTAssertTrue(app.staticTexts["assistant.hello"].waitForExistence(timeout: 5))
+
+        app.buttons["assistant.chip.ai.s.pending"].tap()
+        waitAnswer(app, after: 0)
+        let run = app.buttons.matching(identifier: "assistant.card.run").firstMatch
+        XCTAssertTrue(run.waitForExistence(timeout: 5), "hay borradores")
+        // Enviar · Editar · Otra versión · Descartar en una sola línea.
+        let edit = app.buttons.matching(identifier: "assistant.card.edit").firstMatch
+        let redo = app.buttons.matching(identifier: "assistant.card.redo").firstMatch
+        let discard = app.buttons.matching(identifier: "assistant.card.discard").firstMatch
+        XCTAssertTrue(redo.exists && edit.exists && discard.exists)
+        XCTAssertEqual(redo.label, "Otra versión")
+        for b in [edit, redo, discard] { XCTAssertEqual(b.frame.midY, run.frame.midY, accuracy: 3, "\(b.label) en la misma línea") }
+        XCTAssertLessThanOrEqual(discard.frame.maxX, app.windows.firstMatch.frame.maxX - 12, "cabe en la tarjeta")
+        shot("09-botones-compactos")
+
+        // Chips de siguiente paso bajo la última respuesta.
+        let next = app.buttons.matching(identifier: "assistant.next")
+        XCTAssertTrue(next.firstMatch.waitForExistence(timeout: 3), "gg sugirió siguientes pasos")
+        app.swipeUp()
+        shot("10-siguientes-pasos")
+
+        // «Otra versión»: descarta ese borrador y pide otro.
+        let before = answers(app)
+        let pendingBefore = app.buttons.matching(identifier: "assistant.card.run").count
+        redo.tap()
+        let ask = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Redacta otra versión del mensaje para '")).firstMatch
+        XCTAssertTrue(ask.waitForExistence(timeout: 5), "se pidió otra versión")
+        waitAnswer(app, after: before)
+        let pendingNow = app.buttons.matching(identifier: "assistant.card.run").count
+        XCTAssertGreaterThanOrEqual(pendingNow, 1, "hay un borrador nuevo")
+        XCTAssertLessThanOrEqual(pendingNow, pendingBefore + 1)
+        shot("11-otra-version")
+
+        // «envíalos»: se confirman aquí mismo y gg lo dice.
+        let n = app.buttons.matching(identifier: "assistant.card.run").count
+        type(app, "envíalos")
+        let expected = n == 1 ? "Listo, lo envié." : "Listo, envié los \(n)."
+        XCTAssertTrue(app.staticTexts[expected].waitForExistence(timeout: 30), expected)
+        XCTAssertEqual(app.buttons.matching(identifier: "assistant.card.run").count, 0)
+        shot("12-envialos")
+
+        // Tocar un chip de siguiente paso lo envía como si lo hubiera escrito.
+        let before2 = answers(app)
+        type(app, "Qué vence hoy")
+        waitAnswer(app, after: before2)
+        XCTAssertTrue(next.firstMatch.waitForExistence(timeout: 3), "gg sugirió siguientes pasos")
+        shot("13-chips-tras-respuesta")
+        let chipText = next.firstMatch.label
+        let before3 = answers(app)
+        next.firstMatch.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "identifier == 'assistant.turn.user' AND label == %@", chipText)).firstMatch.waitForExistence(timeout: 5),
+                      "el chip se envió como pregunta")
+        waitAnswer(app, after: before3)
+        shot("14-chip-enviado")
+        app.buttons["assistant.close"].tap()
     }
 }

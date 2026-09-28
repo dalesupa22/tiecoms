@@ -1445,7 +1445,7 @@
 "ai.stop" = "Listo";
 "ai.listening" = "Te escucho…";
 "ai.sendAll" = "Enviar todos ({n})";
-"ai.sentAll" = "Listo, envié {n}.";
+"ai.sentAll" = "Listo, envié los {n}.";
 "ai.create" = "Crear";
 "ai.confirm" = "Confirmar";
 "ai.cancelEvent" = "Cancelar reunión";
@@ -1460,3 +1460,7 @@
 "ai.speakOn" = "Leer respuestas en voz alta";
 "ai.speakOff" = "No leer en voz alta";
 "ai.unavailable" = "gg no está disponible ahora mismo.";
+"ai.sentOne" = "Listo, lo envié.";
+"ai.redo" = "Otra versión";
+"ai.redoAsk" = "Redacta otra versión del mensaje para {name}";
+"ai.retry" = "Reintentar";

@@ -96,7 +96,21 @@ final class AssistantModel {
         await withTaskGroup(of: Void.self) { g in for a in all { g.addTask { await self.run(a, api: api) } } }
     }
 
-    func ask(_ content: String, api: APIClient? = nil) async {
+    /// Reintentar: la última pregunta falló; se vuelve a mandar sin repetirla en el historial.
+    var canRetry: Bool { error != nil && turns.last?.role == .user }
+    func retry(api: APIClient) async {
+        guard let last = turns.last, last.role == .user else { return }
+        await ask(last.content, api: api, retry: true)
+    }
+
+    /// «Otra versión»: descarta el borrador y le pide a gg que lo redacte de nuevo.
+    func redo(_ a: AssistantActionDTO, api: APIClient) async {
+        guard !busy else { return }
+        discard(a)
+        await ask(L("ai.redoAsk", ["name": a.target]), api: api)
+    }
+
+    func ask(_ content: String, api: APIClient? = nil, retry: Bool = false) async {
         let q = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !busy, let api = api ?? apiRef else { return }
         error = nil; text = ""
@@ -106,17 +120,18 @@ final class AssistantModel {
         if Assistant.isSendAll(q), !waiting.isEmpty {
             turns.append(AssistantTurn(role: .user, content: q)); persist()
             await sendAll(api: api)
-            let done = L("ai.sentAll", ["n": waiting.count])
+            let done = Assistant.sentText(waiting.count)
             turns.append(AssistantTurn(role: .assistant, content: done)); persist()
             if voice || speakOn { AssistantSpeaker.shared.speak(done) }
             return
         }
-        turns.append(AssistantTurn(role: .user, content: q)); persist()
+        if !retry { turns.append(AssistantTurn(role: .user, content: q)); persist() }
         busy = true
         defer { busy = false }
         do {
             let out = try await api.assistantTurn(turns)
-            turns.append(AssistantTurn(role: .assistant, content: out.reply, actions: out.actions.isEmpty ? nil : out.actions)); persist()
+            turns.append(AssistantTurn(role: .assistant, content: out.reply, actions: out.actions.isEmpty ? nil : out.actions,
+                                       suggestions: out.suggestions.isEmpty ? nil : out.suggestions)); persist()
             if voice || speakOn { AssistantSpeaker.shared.speak(out.reply) }
         } catch let e as ApiRequestError where e.status == 503 {
             error = L("ai.unavailable")
@@ -283,11 +298,34 @@ struct AssistantPanel: View {
                             .accessibilityIdentifier("assistant.sendAll")
                     }
                     if model.busy { ThinkingDots().id("busy") }
+                    let next = Assistant.nextSteps(model.turns, busy: model.busy, listening: model.listener.listening)
+                    if !next.isEmpty {
+                        FlowLayout(spacing: 8) {
+                            ForEach(next, id: \.self) { q in
+                                Button { Task { await model.ask(q, api: store.api) } } label: {
+                                    Text(q).font(.subheadline).foregroundStyle(Theme.accentText).multilineTextAlignment(.leading)
+                                        .padding(.horizontal, 12).padding(.vertical, 7)
+                                        .background(Capsule().fill(Theme.surface))
+                                        .overlay(Capsule().strokeBorder(Theme.accentText, lineWidth: 1))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("assistant.next")
+                            }
+                        }
+                    }
                     if let e = model.error {
-                        Text(e).font(.subheadline).foregroundStyle(Color.red)
-                            .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(RoundedRectangle(cornerRadius: 10).fill(Color.red.opacity(0.08)))
-                            .accessibilityIdentifier("assistant.error")
+                        HStack(spacing: 10) {
+                            Text(e).font(.subheadline).foregroundStyle(Color.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .accessibilityIdentifier("assistant.error")
+                            if model.canRetry {
+                                Button(L("ai.retry")) { Task { await model.retry(api: store.api) } }
+                                    .buttonStyle(CardButtonStyle(filled: false, tint: Theme.textPrimary))
+                                    .accessibilityIdentifier("assistant.retry")
+                            }
+                        }
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.red.opacity(0.08)))
                     }
                     Color.clear.frame(height: 1).id("end")
                 }
@@ -297,6 +335,7 @@ struct AssistantPanel: View {
             .onAppear { proxy.scrollTo("end", anchor: .bottom) }
             .onChange(of: model.turns.count) { _, _ in withAnimation { proxy.scrollTo("end", anchor: .bottom) } }
             .onChange(of: model.busy) { _, _ in withAnimation { proxy.scrollTo("end", anchor: .bottom) } }
+            .onChange(of: model.error) { _, _ in withAnimation { proxy.scrollTo("end", anchor: .bottom) } }
         }
     }
 
@@ -463,7 +502,7 @@ struct AssistantActionCard: View {
             if let d = action.detail, !d.isEmpty { Text(d).font(.caption).foregroundStyle(Theme.textSecondary) }
             if let e = action.error, !e.isEmpty { Text(e).font(.caption).foregroundStyle(Color.red) }
             if action.status == .pending {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Button(L(action.verbKey)) {
                         let edited = editing ? draft.trimmingCharacters(in: .whitespacesAndNewlines) : ""
                         let text = edited.isEmpty || edited == action.text ? nil : edited
@@ -476,6 +515,9 @@ struct AssistantActionCard: View {
                         Button(L("ai.edit")) { draft = action.text; editing = true }
                             .buttonStyle(CardButtonStyle(filled: false, tint: Theme.textPrimary))
                             .accessibilityIdentifier("assistant.card.edit")
+                        Button(L("ai.redo")) { Task { await model.redo(action, api: store.api) } }
+                            .buttonStyle(CardButtonStyle(filled: false, tint: Theme.textPrimary))
+                            .accessibilityIdentifier("assistant.card.redo")
                     }
                     Button(L("ai.discard")) { model.discard(action) }
                         .buttonStyle(CardButtonStyle(filled: false, tint: Theme.textPrimary))
@@ -515,9 +557,12 @@ private struct CardButtonStyle: ButtonStyle {
     var tint: Color
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.subheadline.weight(.semibold))
+            .font(.footnote.weight(.semibold))
+            .lineLimit(1)
+            .fixedSize()
             .foregroundStyle(filled ? Theme.onPrimary : tint)
-            .padding(.horizontal, 14).padding(.vertical, 7)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .frame(minHeight: 30)
             .background(Capsule().fill(filled ? tint : Theme.bubbleOther))
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
@@ -631,7 +676,8 @@ struct GGMark: View {
         .aspectRatio(Self.box.width / Self.box.height, contentMode: .fit)
         .accessibilityHidden(true)
         .task(id: animated && !reduceMotion) {
-            guard animated && !reduceMotion else { dim = [false, false, false]; return }
+            // Pruebas de interfaz (-TCNoAnimations YES): sin titileo, para que la app quede quieta entre consultas.
+            guard animated && !reduceMotion && !AppConfig.launchFlag("TCNoAnimations") else { dim = [false, false, false]; return }
             while !Task.isCancelled {
                 for (i, delay) in [(0, 0.0), (1, 0.5), (2, 1.1)] {
                     Task { @MainActor in

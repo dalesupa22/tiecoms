@@ -1445,7 +1445,7 @@
 "ai.stop" = "Done";
 "ai.listening" = "Listening…";
 "ai.sendAll" = "Send all ({n})";
-"ai.sentAll" = "Done, I sent {n}.";
+"ai.sentAll" = "Done, I sent all {n}.";
 "ai.create" = "Create";
 "ai.confirm" = "Confirm";
 "ai.cancelEvent" = "Cancel meeting";
@@ -1460,3 +1460,7 @@
 "ai.speakOn" = "Read replies aloud";
 "ai.speakOff" = "Do not read aloud";
 "ai.unavailable" = "gg is not available right now.";
+"ai.sentOne" = "Done, sent.";
+"ai.redo" = "Another version";
+"ai.redoAsk" = "Write another version of the message for {name}";
+"ai.retry" = "Retry";

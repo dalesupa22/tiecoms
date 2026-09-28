@@ -746,7 +746,7 @@ export async function createSideConversation(userId: string, parentId: string, i
     let issue: { id: string; title: string; origin_message_id: string | null } | null = null;
     if (input.issueId) {
       const { rows: ir } = await c.query("SELECT id, title, origin_message_id, conversation_id, visibility FROM issues WHERE id = $1", [input.issueId]);
-      if (!ir[0] || ir[0].conversation_id !== parentId || ir[0].visibility !== 'all') throw badRequest('El asunto no está en esta conversación');
+      if (!ir[0] || ir[0].conversation_id !== parentId || ir[0].visibility !== 'all') throw badRequest('La tarea no está en esta conversación');
       issue = ir[0];
     }
     const anchorId = input.messageId ?? issue?.origin_message_id ?? null;

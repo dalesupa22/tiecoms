@@ -18,7 +18,7 @@ import type {
 import { conversationAccess } from '../access.ts';
 import { config } from '../config.ts';
 import { audit, pool, tx, type Db, type Tx } from '../db.ts';
-import { ApiError, badRequest, forbidden, notFound, unauthorized } from '../errors.ts';
+import { ApiError, badRequest, forbidden, notFound, unauthorized, taskNotFound } from '../errors.ts';
 import { randomToken, sha256 } from '../security.ts';
 import * as issues from './issues.ts';
 import { seal, validateOutgoingUrl } from './integration-events.ts';
@@ -268,7 +268,7 @@ export async function postMessage(integ: IntegrationAuth, input: z.infer<typeof 
 
 async function issueOf(c: Db, integ: IntegrationAuth, issueId: string) {
   const { rows } = await c.query('SELECT id FROM issues WHERE id = $1 AND integration_id = $2', [issueId, integ.id]);
-  if (!rows[0]) throw notFound('Asunto');
+  if (!rows[0]) throw taskNotFound();
 }
 
 /** Un asunto por ticket. El mismo externalId devuelve el mismo asunto (idempotente). */
@@ -297,7 +297,7 @@ export async function createIssue(integ: IntegrationAuth, input: z.infer<typeof 
 
 export async function findIssue(integ: IntegrationAuth, externalId: string) {
   const { rows } = await pool.query('SELECT id FROM issues WHERE integration_id = $1 AND external_id = $2', [integ.id, externalId]);
-  if (!rows[0]) throw notFound('Asunto');
+  if (!rows[0]) throw taskNotFound();
   return getIssue(integ, rows[0].id);
 }
 

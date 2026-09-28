@@ -5,6 +5,8 @@ export class ApiError extends Error {
 }
 
 export const notFound = (what = 'Recurso') => new ApiError(404, 'not_found', `${what} no encontrado`);
+/** Las tareas (antes «asuntos») son femeninas: «Tarea no encontrada». */
+export const taskNotFound = () => new ApiError(404, 'not_found', 'Tarea no encontrada');
 export const forbidden = (msg = 'No tienes acceso a este recurso') => new ApiError(403, 'forbidden', msg);
 export const badRequest = (msg: string, details?: unknown) => new ApiError(400, 'bad_request', msg, details);
 export const conflict = (msg: string) => new ApiError(409, 'conflict', msg);

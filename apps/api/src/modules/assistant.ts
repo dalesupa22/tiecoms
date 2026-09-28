@@ -241,7 +241,7 @@ async function runTool(ctx: Ctx, name: string, args: any): Promise<unknown> {
       return { ok: true, asuntoId: i.id };
     }
     case 'actualizar_asunto': {
-      const cur = await issues.getIssue(userId, String(args.asuntoId ?? '')).catch(() => { throw new ToolError('No encontré ese asunto entre los tuyos.'); });
+      const cur = await issues.getIssue(userId, String(args.asuntoId ?? '')).catch(() => { throw new ToolError('No encontré esa tarea entre las tuyas.'); });
       const it: any = (cur as any).issue ?? cur;
       const patch: any = {};
       if (args.estado) patch.status = args.estado;
@@ -253,7 +253,7 @@ async function runTool(ctx: Ctx, name: string, args: any): Promise<unknown> {
       await issues.updateIssue(userId, it.id, patch);
       const what = patch.status === 'done' ? 'Completado' : patch.status === 'open' ? 'Reabierto' : patch.status === 'cancelled' ? 'Descartado'
         : patch.ownerId ? `Ahora lo tiene ${pname(patch.ownerId)}` : patch.dueDate ? `Para el ${patch.dueDate}` : 'Actualizado';
-      done(ctx, 'update_issue', it.conversationId && dir.convs.get(it.conversationId) ? dir.label(dir.convs.get(it.conversationId)!) : "Asunto", patch.title ?? it.title, what, it.conversationId ? `/c/${it.conversationId}` : `/asuntos?issue=${it.id}`,
+      done(ctx, 'update_issue', it.conversationId && dir.convs.get(it.conversationId) ? dir.label(dir.convs.get(it.conversationId)!) : "Tarea", patch.title ?? it.title, what, it.conversationId ? `/c/${it.conversationId}` : `/asuntos?issue=${it.id}`,
         sign({ u: userId, k: 'undo', a: { type: 'issue', id: it.id, prev } }, UNDO_TTL_MS));
       return { ok: true };
     }

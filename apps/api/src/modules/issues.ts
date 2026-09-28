@@ -2,7 +2,7 @@ import type { z } from 'zod';
 import type { CreateIssueInput, IssueDTO, IssueEventDTO, IssueVisibility, UpdateIssueInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Db, type Tx } from '../db.ts';
-import { badRequest, forbidden, notFound } from '../errors.ts';
+import { badRequest, forbidden, notFound, taskNotFound } from '../errors.ts';
 import { appendEvent, appendMessage } from './messages.ts';
 import { queueIntegrationEvent } from './integration-events.ts';
 
@@ -56,14 +56,14 @@ function toDTO(r: any): IssueDTO {
 
 async function load(db: Db, id: string): Promise<IssueDTO> {
   const { rows } = await db.query(`${SELECT} WHERE i.id = $1`, [id]);
-  if (!rows[0]) throw notFound('Asunto');
+  if (!rows[0]) throw taskNotFound();
   return toDTO(rows[0]);
 }
 
 /** El asunto, solo si esta persona lo puede ver (si no, «no encontrado»: no se confirma que exista). */
 async function loadVisible(db: Db, userId: string, id: string): Promise<IssueDTO> {
   const { rows } = await db.query(`${SELECT} ${VISIBLE} AND i.id = $2`, [userId, id]);
-  if (!rows[0]) throw notFound('Asunto');
+  if (!rows[0]) throw taskNotFound();
   return toDTO(rows[0]);
 }
 
@@ -82,7 +82,7 @@ async function audience(c: Db, issueId: string): Promise<string[]> {
 /** El responsable de un asunto de todo el chat debe poder leer la conversación: si no, se le volvería invisible. */
 async function assertMember(c: Tx, conversationId: string, userId: string) {
   const { rowCount } = await c.query('SELECT 1 FROM conversation_memberships WHERE conversation_id = $1 AND user_id = $2 AND removed_at IS NULL', [conversationId, userId]);
-  if (!rowCount) throw badRequest('El responsable debe participar en la conversación del asunto');
+  if (!rowCount) throw badRequest('El responsable debe participar en la conversación de la tarea');
 }
 
 /**
@@ -153,16 +153,16 @@ export async function createIssue(userId: string, conversationId: string, input:
   return inTransaction(existing, async (c) => {
     const a = await conversationAccess(c, userId, conversationId, 'post', true);
     // Los terceros invitados participan en los asuntos (comentan, cambian estado, pueden ser responsables) pero no los abren.
-    if (a.workspaceRole === 'guest') throw forbidden('Las personas invitadas de fuera participan en los asuntos, pero no pueden crearlos');
+    if (a.workspaceRole === 'guest') throw forbidden('Las personas invitadas de fuera participan en las tareas, pero no pueden crearlas');
     let parentId: string | null = null;
     if (input.parentIssueId) {
       // Una tarea hija nace en la conversación del asunto o en un sidechat que salió de ella. Un solo nivel.
       const parent = await loadVisible(c, userId, input.parentIssueId);
-      if (!parent.conversationId) throw badRequest('Los asuntos personales no tienen tareas derivadas');
-      if (parent.parentIssueId) throw badRequest('Las tareas no tienen subtareas: créala en el asunto principal');
+      if (!parent.conversationId) throw badRequest('Las tareas personales no tienen subtareas');
+      if (parent.parentIssueId) throw badRequest('Las subtareas no tienen subtareas: créala en la tarea principal');
       const conv = (await c.query('SELECT parent_conversation_id FROM conversations WHERE id = $1', [conversationId])).rows[0];
       if (parent.conversationId !== conversationId && conv?.parent_conversation_id !== parent.conversationId) {
-        throw badRequest('La tarea debe crearse en el chat del asunto o en un sidechat que salió de él');
+        throw badRequest('La subtarea debe crearse en el chat de la tarea o en un sidechat que salió de él');
       }
       parentId = parent.id;
     }
@@ -224,7 +224,7 @@ export async function createPersonalIssue(userId: string, input: { title: string
 /** Tarea hija. Sin conversationId, en la conversación del asunto; con él, en un sidechat que salió de ella. */
 export async function createChildIssue(userId: string, parentId: string, input: z.infer<typeof CreateIssueInput> & { conversationId?: string }) {
   const parent = await loadVisible(pool, userId, parentId);
-  if (!parent.conversationId) throw badRequest('Los asuntos personales no tienen tareas derivadas');
+  if (!parent.conversationId) throw badRequest('Las tareas personales no tienen subtareas');
   return createIssue(userId, input.conversationId ?? parent.conversationId, { ...input, parentIssueId: parentId });
 }
 
@@ -236,18 +236,18 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
   return inTransaction(existing, async (c) => {
     const { rows } = await c.query('SELECT * FROM issues WHERE id = $1 FOR UPDATE', [issueId]);
     const cur = rows[0];
-    if (!cur) throw notFound('Asunto');
+    if (!cur) throw taskNotFound();
     await loadVisible(c, userId, issueId);
     if (cur.visibility === 'all') await conversationAccess(c, userId, cur.conversation_id, 'post', true);
     if (!cur.conversation_id) {
       // Un asunto personal sigue siendo personal: no se reasigna, no se comparte ni espera a una empresa.
-      if (input.ownerId !== undefined && input.ownerId !== userId && input.ownerId !== null) throw badRequest('Un asunto personal solo es tuyo');
-      if (input.visibility !== undefined && input.visibility !== 'private') throw badRequest('Un asunto personal no se comparte');
-      if (input.viewerIds?.length) throw badRequest('Un asunto personal no se comparte');
-      if (input.waitingOnOrgId) throw badRequest('Un asunto personal no espera a una empresa');
+      if (input.ownerId !== undefined && input.ownerId !== userId && input.ownerId !== null) throw badRequest('Una tarea personal solo es tuya');
+      if (input.visibility !== undefined && input.visibility !== 'private') throw badRequest('Una tarea personal no se comparte');
+      if (input.viewerIds?.length) throw badRequest('Una tarea personal no se comparte');
+      if (input.waitingOnOrgId) throw badRequest('Una tarea personal no espera a una empresa');
     }
     const nextVis: IssueVisibility = input.visibility ?? cur.visibility;
-    if (input.visibility !== undefined && input.visibility !== cur.visibility && cur.created_by !== userId) throw forbidden('Solo quien creó el asunto cambia quién lo ve');
+    if (input.visibility !== undefined && input.visibility !== cur.visibility && cur.created_by !== userId) throw forbidden('Solo quien creó la tarea cambia quién lo ve');
     const before = cur.visibility !== 'all' || nextVis !== 'all' ? { visibility: cur.visibility as IssueVisibility, audience: await audience(c, issueId) } : null;
     const sets: string[] = ['updated_at = now()'];
     const vals: unknown[] = [issueId];
@@ -288,7 +288,7 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
     }
     let topicChanged = false;
     if (input.topicId !== undefined && input.topicId !== cur.topic_id) {
-      if (!cur.conversation_id) throw badRequest('Un asunto personal no lleva tema');
+      if (!cur.conversation_id) throw badRequest('Una tarea personal no lleva tema');
       if (input.topicId) await assertTopic(c, cur.conversation_id, input.topicId);
       add('topic_id', input.topicId); topicChanged = true;
     }
@@ -323,7 +323,7 @@ async function assertTopic(c: Tx, conversationId: string, topicId: string) {
 export async function commentIssue(userId: string, issueId: string, body: string, extra: { author?: string; at?: string } = {}, existing?: Tx) {
   return inTransaction(existing, async (c) => {
     const { rows } = await c.query('SELECT conversation_id, visibility, integration_id FROM issues WHERE id = $1 FOR UPDATE', [issueId]);
-    if (!rows[0]) throw notFound('Asunto');
+    if (!rows[0]) throw taskNotFound();
     await loadVisible(c, userId, issueId);
     if (rows[0].visibility === 'all') await conversationAccess(c, userId, rows[0].conversation_id, 'post', true);
     // `author`: quién lo escribió fuera de Chaggu (comentarios que trae una integración). Los clientes muestran el cuerpo.

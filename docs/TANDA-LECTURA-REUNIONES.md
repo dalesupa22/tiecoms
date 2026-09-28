@@ -59,7 +59,7 @@ Se quita el párrafo `issue.pageSub` («Lo que quedó pendiente…» / «What wa
 
 | Proveedor | Permiso | Qué no se pide |
 |---|---|---|
-| Google | `openid email https://www.googleapis.com/auth/calendar.events` | No se pide Gmail |
+| Google | `openid email https://www.googleapis.com/auth/calendar.events.owned` | No se pide Gmail |
 | Microsoft | `openid email offline_access Calendars.ReadWrite` (Graph; evento con `isOnlineMeeting` y `teamsForBusiness`) | No se pide correo |
 | Zoom | La app OAuth propia; crea reuniones en `/users/me/meetings` | — |
 

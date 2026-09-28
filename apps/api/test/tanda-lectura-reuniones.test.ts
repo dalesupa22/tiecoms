@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 const API = process.env.API_URL ?? 'http://localhost:3020';
@@ -140,13 +140,19 @@ describe('asuntos personales', () => {
 
 describe('reuniones (proveedor FALSO: no prueba OAuth real)', () => {
   const connect = async (a: A, provider: string) => {
-    const s = await call(`/meetings/connect/${provider}`, { token: a.token, body: { platform: 'web' } });
+    const proofVerifier = randomBytes(32).toString('base64url');
+    const proofChallenge = createHash('sha256').update(proofVerifier).digest('base64url');
+    const s = await call(`/meetings/connect/${provider}`, { token: a.token, body: { platform: 'web', proofChallenge } });
     expect(s.status).toBe(200);
     // El «consentimiento» del proveedor falso redirige a la callback del API con code y state.
     const r1 = await fetch(s.json.url, { redirect: 'manual' });
     const cb = r1.headers.get('location')!;
     const r2 = await fetch(cb, { redirect: 'manual' });
-    return r2.headers.get('location')!;
+    const back = r2.headers.get('location')!;
+    const receipt = new URL(back).searchParams.get('receipt');
+    expect(receipt).toBeTruthy();
+    expect((await call('/meetings/connect/confirm', { token: a.token, body: { receipt, proofVerifier } })).status).toBe(200);
+    return back;
   };
 
   it('conectar Google por la callback del login, crear Meet ahora y compartir sin duplicar', async () => {
@@ -154,20 +160,20 @@ describe('reuniones (proveedor FALSO: no prueba OAuth real)', () => {
     expect(before.json.connections.find((c: any) => c.provider === 'google')).toMatchObject({ status: 'none', available: true });
     const back = await connect(ana, 'google');
     expect(back).toContain('/ajustes?');
-    expect(back).toContain('connected=1');
+    expect(back).toContain('receipt=');
     const conn = (await call('/meetings/connections', { token: ana.token })).json.connections.find((c: any) => c.provider === 'google');
     expect(conn).toMatchObject({ status: 'active', accountEmail: 'mock.google@example.com' });
     // Beto no ve la conexión de Ana.
     expect((await call('/meetings/connections', { token: beto.token })).json.connections.find((c: any) => c.provider === 'google').status).toBe('none');
 
-    const stats0 = await (await fetch(`${FAKE}/stats`)).json();
+    const stats0: any = await (await fetch(`${FAKE}/stats`)).json();
     const key = randomUUID();
     const input = { provider: 'google', conversationId: groupId, idempotencyKey: key, title: 'Urgente: caída del envío', durationMin: 30, timezone: 'America/Bogota', share: true };
     const [a, b] = await Promise.all([call('/meetings', { token: ana.token, body: input }), call('/meetings', { token: ana.token, body: input })]);
     expect(a.status).toBe(200); expect(b.status).toBe(200);
     expect(a.json.id).toBe(b.json.id);
     expect(a.json.joinUrl).toMatch(/^https:\/\/meet\.google\.com\/mock-/);
-    const stats1 = await (await fetch(`${FAKE}/stats`)).json();
+    const stats1: any = await (await fetch(`${FAKE}/stats`)).json();
     expect(stats1.google - stats0.google).toBe(1);
     // Compartido: mensaje con el enlace y reunión en el calendario del grupo.
     const msgs = (await call(`/conversations/${groupId}/messages?limit=100`, { token: beto.token })).json.messages;
@@ -202,7 +208,7 @@ describe('reuniones (proveedor FALSO: no prueba OAuth real)', () => {
     const nc = await call('/meetings', { token: beto.token, body: { provider: 'google', conversationId: groupId, idempotencyKey: randomUUID(), title: 'Llamada', durationMin: 30, timezone: 'America/Bogota', share: true } });
     expect(nc.json.error.code).toBe('not_connected');
     // Cancelar el consentimiento vuelve con error y no conecta.
-    const s = await call('/meetings/connect/zoom', { token: beto.token, body: { platform: 'ios', redirectScheme: 'chaggu' } });
+    const s = await call('/meetings/connect/zoom', { token: beto.token, body: { platform: 'ios', redirectScheme: 'chaggu', proofChallenge: createHash('sha256').update(randomBytes(32)).digest('base64url') } });
     const r1 = await fetch(`${s.json.url}&deny=1`, { redirect: 'manual' });
     const r2 = await fetch(r1.headers.get('location')!, { redirect: 'manual' });
     expect(r2.headers.get('location')).toMatch(/^chaggu:\/\/meetings\/connected\?provider=zoom&error=cancelled/);

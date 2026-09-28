@@ -5,6 +5,7 @@
 //   MEETINGS_GOOGLE_AUTH=http://localhost:59300/google/auth  MEETINGS_GOOGLE_TOKEN=http://localhost:59300/google/token  MEETINGS_GOOGLE_API=http://localhost:59300/google/api
 //   MEETINGS_MS_AUTH=http://localhost:59300/ms/auth          MEETINGS_MS_TOKEN=http://localhost:59300/ms/token          MEETINGS_MS_API=http://localhost:59300/ms/api
 //   MEETINGS_ZOOM_AUTH=http://localhost:59300/zoom/auth      MEETINGS_ZOOM_TOKEN=http://localhost:59300/zoom/token      MEETINGS_ZOOM_API=http://localhost:59300/zoom/api
+// For isolated tests set MEETINGS_GOOGLE_REVOKE=http://localhost:59300/google/revoke too.
 // /…/auth redirige al redirect_uri con ?code=…&state=… (como si la persona aceptara). Con ?deny=1, error=access_denied.
 // POST /control { msNoTeams?: bool, revokeAll?: bool, failNext?: 'google'|'microsoft'|'zoom' } cambia el comportamiento.
 // GET /stats cuenta eventos creados por proveedor (para comprobar que un reintento no duplica).
@@ -12,7 +13,7 @@ import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 
 const port = Number(process.argv[2] ?? 59300);
-const state = { msNoTeams: false, revokeAll: false, failNext: null, created: { google: 0, microsoft: 0, zoom: 0 }, byKey: new Map(), events: new Map() };
+const state = { msNoTeams: false, revokeAll: false, failNext: null, dropAfterCreate: null, googlePending: false, googleFailed: false, created: { google: 0, microsoft: 0, zoom: 0 }, byKey: new Map(), events: new Map() };
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const idToken = (email) => `${b64({ alg: 'none' })}.${b64({ email, preferred_username: email })}.`;
 
@@ -46,13 +47,14 @@ http.createServer(async (req, res) => {
     if (state.failNext === prov) { state.failNext = null; return send(res, 503, { error: { message: 'Caído (mock)' } }); }
     const b = req.method === 'POST' ? await body(req) : {};
     if (prov === 'google') {
-      if (req.method === 'GET') { const ev = state.events.get(rest.at(-1)); return ev ? send(res, 200, ev) : send(res, 404, {}); }
-      const key = `g:${b.conferenceData?.createRequest?.requestId}`;
-      if (state.byKey.has(key)) return send(res, 200, state.byKey.get(key));
-      const id = randomUUID();
+      if (req.method === 'GET') { const ev = state.events.get(rest.at(-1)); return ev ? send(res, 200, state.googlePending || state.googleFailed ? { ...ev, hangoutLink: undefined, conferenceData: { createRequest: { status: { statusCode: state.googleFailed ? 'failure' : 'pending' } } } } : ev) : send(res, 404, {}); }
+      const id = b.id ?? randomUUID();
+      const key = `g:${id}`;
+      if (state.events.has(id)) return send(res, 409, { error: { status: 'conflict' } });
       const ev = { id, summary: b.summary, start: b.start, end: b.end, hangoutLink: `https://meet.google.com/mock-${id.slice(0, 4)}-${id.slice(4, 8)}`, conferenceData: { entryPoints: [{ entryPointType: 'video', uri: `https://meet.google.com/mock-${id.slice(0, 4)}-${id.slice(4, 8)}` }] } };
       state.byKey.set(key, ev); state.events.set(id, ev); state.created.google++;
-      return send(res, 200, ev);
+      if (state.dropAfterCreate === 'google') { state.dropAfterCreate = null; return res.destroy(); }
+      return send(res, 200, state.googlePending || state.googleFailed ? { ...ev, hangoutLink: undefined, conferenceData: { createRequest: { status: { statusCode: state.googleFailed ? 'failure' : 'pending' } } } } : ev);
     }
     if (prov === 'ms') {
       const key = `m:${b.transactionId}`;
@@ -65,8 +67,9 @@ http.createServer(async (req, res) => {
     if (prov === 'zoom') {
       const id = Math.floor(Math.random() * 1e10);
       state.created.zoom++;
+      if (state.dropAfterCreate === 'zoom') { state.dropAfterCreate = null; return res.destroy(); }
       return send(res, 201, { id, join_url: `https://zoom.us/j/${id}?mock=1`, topic: b.topic });
     }
   }
   send(res, 404, { error: 'not found' });
-}).listen(port, () => console.log(`[fake-meetings MOCK] http://localhost:${port}`));
+}).listen(port, '127.0.0.1', () => console.log(`[fake-meetings MOCK] http://localhost:${port}`));

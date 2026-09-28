@@ -64,8 +64,17 @@ export interface MeetingDTO {
   /** Enlace real devuelto por el proveedor (nunca inventado). */
   joinUrl: string | null; conversationId: string | null; calendarEventId: string | null; messageId: string | null; error: string | null;
 }
-/** POST /meetings/connect/:provider → { url } para abrir en el navegador del sistema. */
-export const MeetingConnectInput = z.object({ platform: z.enum(['web', 'ios', 'android', 'desktop']).default('web'), redirectScheme: z.enum(['chaggu', 'tiecoms']).optional() });
+/** The client retains a random verifier (32+ bytes); only its S256 challenge leaves at start.
+ * Callback returns a one-use receipt, NOT an active connection. Confirm on the original authenticated client. */
+export const MeetingConnectInput = z.object({
+  platform: z.enum(['web', 'ios', 'android', 'desktop']).default('web'),
+  redirectScheme: z.enum(['chaggu', 'tiecoms']).optional(),
+  proofChallenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+});
+export const MeetingConfirmInput = z.object({
+  receipt: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  proofVerifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/),
+});
 /** POST /meetings: sin startsAt = reunión ahora. share=true la publica en la conversación y el calendario. */
 export const CreateMeetingInput = z.object({
   provider: MeetingProvider,

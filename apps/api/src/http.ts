@@ -7,7 +7,7 @@ import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput, CreateGroupInput, JoinPolicyInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateChildIssueInput, CreatePersonalIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateScheduledInput, UpdateScheduledInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MarkTreeReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
-  UpdateProfileInput, DndInput, MeetingProvider, MeetingConnectInput, CreateMeetingInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
+  UpdateProfileInput, DndInput, MeetingProvider, MeetingConnectInput, MeetingConfirmInput, CreateMeetingInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
 } from '@tiecoms/contracts';
@@ -59,7 +59,11 @@ export async function buildHttp() {
   const app = Fastify({
     trustProxy: config.trustProxy,
     bodyLimit: 64 * 1024,
-    logger: { level: config.env === 'production' ? 'info' : 'debug', redact: ['req.headers.authorization', 'req.headers.cookie'] },
+    logger: {
+      level: config.env === 'production' ? 'info' : 'debug', redact: ['req.headers.authorization', 'req.headers.cookie'],
+      // OAuth codes/state/receipts and other URL credentials must never enter access logs.
+      serializers: { req: (req) => ({ method: req.method, url: req.url?.split('?')[0], hostname: req.hostname, remoteAddress: req.ip }) },
+    },
     genReqId: () => crypto.randomUUID(),
   });
 
@@ -140,7 +144,7 @@ export async function buildHttp() {
     // Conectar Meet/Teams vuelve por esta misma redirect URI registrada: el state lo distingue del login.
     if (meetings.isMeetingState(req.query.state)) {
       reply.header('cache-control', 'no-store'); reply.header('referrer-policy', 'no-referrer');
-      return reply.redirect(await meetings.finishConnect(req.query), 302);
+      return reply.redirect(await meetings.finishConnect(req.query, MeetingProvider.parse(req.params.provider)), 302);
     }
     const target = await sso.callback(sso.parseProvider(req.params.provider), req.query, req.cookies[SSO_COOKIE]);
     reply.clearCookie(SSO_COOKIE, { path: COOKIE_PATH });
@@ -150,7 +154,7 @@ export async function buildHttp() {
   });
   app.get<{ Querystring: Record<string, string | undefined> }>('/api/v1/meetings/zoom/callback', authLimit, async (req, reply) => {
     reply.header('cache-control', 'no-store'); reply.header('referrer-policy', 'no-referrer');
-    return reply.redirect(await meetings.finishConnect(req.query), 302);
+    return reply.redirect(await meetings.finishConnect(req.query, 'zoom'), 302);
   });
   app.post('/api/v1/auth/sso/exchange', authLimit, async (req, reply) => sendAuth(req, reply, await sso.exchange(SsoExchangeInput.parse(req.body))));
 
@@ -363,10 +367,11 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/scheduled/:id/send', async (req) => scheduled.sendScheduledNow(req.userId, req.params.id));
     // Reuniones con Meet, Teams o Zoom (cuenta de cada persona).
     priv.get('/api/v1/meetings/connections', async (req) => ({ connections: await meetings.listConnections(req.userId) }));
+    priv.post('/api/v1/meetings/connect/confirm', async (req, reply) => { reply.header('cache-control', 'no-store'); return meetings.confirmConnect(req.userId, MeetingConfirmInput.parse(req.body)); });
     priv.post<{ Params: { provider: string } }>('/api/v1/meetings/connect/:provider', async (req) => {
       const p = MeetingProvider.parse(req.params.provider);
       const b = MeetingConnectInput.parse(req.body ?? {});
-      return meetings.startConnect(req.userId, p, { platform: b.platform, redirectScheme: b.redirectScheme });
+      return meetings.startConnect(req.userId, p, { platform: b.platform, redirectScheme: b.redirectScheme, proofChallenge: b.proofChallenge });
     });
     priv.delete<{ Params: { provider: string } }>('/api/v1/meetings/connections/:provider', async (req) => meetings.disconnect(req.userId, MeetingProvider.parse(req.params.provider)));
     priv.post('/api/v1/meetings', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => meetings.createMeeting(req.userId, CreateMeetingInput.parse(req.body)));

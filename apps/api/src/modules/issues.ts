@@ -303,7 +303,8 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
     }
     const dto = await load(c, issueId);
     await publish(c, dto, before);
-    if (cur.integration_id) {
+    // Cambiar solo el tema es interno de Chaggu: no dispara el webhook de la integración.
+    if (cur.integration_id && events.length) {
       if (input.status !== undefined && input.status !== cur.status) await queueIntegrationEvent(c, issueId, userId, { type: 'issue.status_changed', from: cur.status, to: input.status });
       else await queueIntegrationEvent(c, issueId, userId, { type: 'issue.updated' });
     }

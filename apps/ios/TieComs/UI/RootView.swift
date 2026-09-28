@@ -176,24 +176,59 @@ extension View {
     }
 }
 
-/// Aviso breve en la parte inferior.
+/// Aviso breve en la parte inferior; con «Deshacer» cuando el aviso lo trae (asuntos completados o descartados).
+/// `inSheet`: la copia que muestra una hoja abierta (la de la pestaña queda tapada y no se anuncia dos veces).
 struct ToastView: View {
     @Environment(AppStore.self) private var store
+    var inSheet = false
     var body: some View {
-        if let text = store.toast {
-            Text(text)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 16).padding(.vertical, 10)
-                .background(Capsule().fill(Theme.ink.opacity(0.92)))
-                .padding(.bottom, 64)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .accessibilityIdentifier("toast")
-                .task(id: text) {
-                    UIAccessibility.post(notification: .announcement, argument: text)
-                    try? await Task.sleep(nanoseconds: 2_400_000_000)
-                    withAnimation { if store.toast == text { store.toast = nil } }
+        if let text = store.toast, inSheet || store.toastHosts == 0 {
+            let undo = store.toastUndo
+            HStack(spacing: 12) {
+                Text(text)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let undo {
+                    Button {
+                        store.toast = nil; store.toastUndo = nil
+                        undo()
+                    } label: {
+                        Text(L("issue.undo")).font(.subheadline.weight(.bold)).foregroundStyle(Theme.orangeLight)
+                            .frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("toast.undo")
                 }
+            }
+            .padding(.horizontal, 16).padding(.vertical, undo == nil ? 10 : 2)
+            .background(Capsule().fill(Theme.ink.opacity(0.92)))
+            .padding(.bottom, inSheet ? 16 : 64)
+            .padding(.horizontal, 16)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("toast")
+            .task(id: store.toastSeq) {
+                UIAccessibility.post(notification: .announcement, argument: text)
+                let seq = store.toastSeq
+                try? await Task.sleep(nanoseconds: undo == nil ? 2_400_000_000 : 5_000_000_000)
+                withAnimation { if store.toastSeq == seq { store.toast = nil; store.toastUndo = nil } }
+            }
         }
+    }
+}
+
+extension View {
+    /// Muestra los avisos (y su «Deshacer») encima de una hoja: la hoja tapa el aviso de la pestaña.
+    func sheetToasts() -> some View { modifier(SheetToasts()) }
+}
+
+private struct SheetToasts: ViewModifier {
+    @Environment(AppStore.self) private var store
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .bottom) { ToastView(inSheet: true) }
+            .onAppear { store.toastHosts += 1 }
+            .onDisappear { store.toastHosts = max(0, store.toastHosts - 1) }
     }
 }

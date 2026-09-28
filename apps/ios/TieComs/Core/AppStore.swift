@@ -75,6 +75,10 @@ final class AppStore {
     var driveRevision = 0
     /// Aviso breve (toast).
     var toast: String?
+    /// «Deshacer» del aviso actual (completar o descartar un asunto); se borra al cambiar el aviso.
+    var toastUndo: (() -> Void)?
+    /// Hojas abiertas que muestran su propio aviso (el de la pestaña queda tapado).
+    var toastHosts = 0
     /// Salto pendiente a un mensaje (?m=<seq>) por conversación.
     var jumpTo: [String: Int] = [:]
     /// Sidechat a desplegar al abrir una conversación de origen (push TC_SIDE).
@@ -90,7 +94,11 @@ final class AppStore {
     /// La app se abrió en frío por un enlace (splash corto).
     var launchedByLink = false
     var myOpenIssues: Int { guard let me = me?.id else { return 0 }; return issues.values.filter { $0.ownerId == me && !$0.status.closed }.count }
-    func show(_ message: String) { toast = message }
+    /// Sube con cada aviso: el mismo texto dos veces seguidas vuelve a contar su tiempo.
+    var toastSeq = 0
+    func show(_ message: String) { toastUndo = nil; toast = message; toastSeq += 1 }
+    /// Aviso con «Deshacer» (dura un poco más).
+    func show(_ message: String, undo: @escaping () -> Void) { toastUndo = undo; toast = message; toastSeq += 1 }
     var homePath: [Route] = []
     var dmsPath: [Route] = []
     var issuesPath: [Route] = []

@@ -272,47 +272,66 @@ struct NewIssueSheet: View {
     }
 }
 
+/// Fechas de los asuntos («yyyy-MM-dd») siempre en la hora LOCAL del teléfono: vencido y «hoy» se comparan con
+/// el día de aquí, no con UTC.
 enum IssueDates {
-    static func iso(_ d: Date) -> String {
-        let f = DateFormatter(); f.calendar = Calendar(identifier: .gregorian); f.dateFormat = "yyyy-MM-dd"; f.timeZone = .current
+    static func iso(_ d: Date, timeZone: TimeZone = .current) -> String {
+        let f = DateFormatter(); f.calendar = Calendar(identifier: .gregorian); f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"; f.timeZone = timeZone
         return f.string(from: d)
     }
     static func date(_ s: String?) -> Date? {
         guard let s else { return nil }
-        let f = DateFormatter(); f.calendar = Calendar(identifier: .gregorian); f.dateFormat = "yyyy-MM-dd HH:mm"; f.timeZone = .current
+        let f = DateFormatter(); f.calendar = Calendar(identifier: .gregorian); f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm"; f.timeZone = .current
         return f.date(from: "\(s) 12:00")
     }
     static func today() -> String { iso(Date()) }
+
+    /// Fechas de un toque (como la web): Hoy, Mañana, El viernes (solo si falta más de un día) y La otra semana
+    /// (el próximo lunes; si hoy es lunes, el de la semana que viene).
+    static func shortcuts(now: Date = Date(), calendar: Calendar = .current) -> [(key: String, iso: String)] {
+        var cal = calendar
+        cal.locale = Locale(identifier: "en_US_POSIX")
+        let plus = { (n: Int) in iso(cal.date(byAdding: .day, value: n, to: now) ?? now, timeZone: cal.timeZone) }
+        let dow = cal.component(.weekday, from: now) - 1 // 0 = domingo, como getDay()
+        let toFriday = (5 - dow + 7) % 7
+        let toMonday = (1 - dow + 7) % 7 == 0 ? 7 : (1 - dow + 7) % 7
+        var out: [(key: String, iso: String)] = [("issue.dToday", plus(0)), ("issue.dTomorrow", plus(1))]
+        if toFriday > 1 { out.append(("issue.dFriday", plus(toFriday))) }
+        out.append(("issue.dNextWeek", plus(toMonday)))
+        return out
+    }
 }
 
+/// Asuntos de un chat (barra ◆ del chat, «Asuntos aquí» y el «+N asuntos» de Grupos): alta rápida, activos por
+/// urgencia y «Completados · N» plegable, como la web.
 struct ConversationIssuesSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     let conversationId: String
-    @State private var creating = false
     var body: some View {
         NavigationStack {
-            // Con fecha límite primero (la más cercana arriba).
-            let list = store.issues.values.filter { $0.conversationId == conversationId && !$0.status.closed }
-                .sorted { ($0.dueDate ?? "9999", $0.createdAt) < ($1.dueDate ?? "9999", $1.createdAt) }
             List {
-                if list.isEmpty { Text(L("issue.noIssues")).foregroundStyle(Theme.textSecondary) }
-                ForEach(list) { i in
-                    Button { dismiss(); store.push(.issue(i.id)) } label: { IssueRow(issue: i, showWhere: false) }
-                        .contextMenu { IssueStatusMenu(issue: i) { dismiss(); store.push(.issue(i.id)) } }
+                // Los terceros participan en los asuntos, pero no los crean.
+                ConversationIssuesList(conversationId: conversationId, canCreate: canCreate) { id in
+                    dismiss(); store.push(.issue(id))
                 }
             }
             .navigationTitle(L("issue.here"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("common.close")) { dismiss() } }
-                // Los terceros participan en los asuntos, pero no los crean.
-                if !store.isGuest(conversationId) {
-                    ToolbarItem(placement: .primaryAction) { Button(L("issue.new")) { creating = true }.accessibilityIdentifier("issues.here.new") }
-                }
             }
-            .sheet(isPresented: $creating) { NewIssueSheet(conversationId: conversationId, origin: nil) }
+            // GET ?conversationId= trae también los cerrados (para «Completados»).
+            .task { _ = try? await store.loadIssues(conversationId: conversationId) }
         }
+        .sheetToasts()
+    }
+
+    private var canCreate: Bool {
+        guard let c = store.meta(conversationId) else { return false }
+        return c.canPost && !store.isGuest(conversationId)
     }
 }
 

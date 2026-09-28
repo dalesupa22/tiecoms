@@ -401,10 +401,171 @@ final class GroupsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["issue.menu.reopen"].waitForExistence(timeout: 4))
         app.buttons["issue.menu.reopen"].tap()
         app.tabBars.buttons["Grupos"].tap()
-        XCTAssertTrue(app.buttons["grp.moreIssues.\(f.pagosId)"].waitForExistence(timeout: 5), "reabierto: vuelve bajo el grupo")
+        // El aviso de sistema al cerrar/reabrir sube la actividad del grupo: puede quedar más abajo en la Lista.
+        let back = app.buttons["grp.moreIssues.\(f.pagosId)"]
+        _ = back.waitForExistence(timeout: 3)
+        for _ in 0..<5 where !(back.exists && back.isHittable) { app.swipeUp() }
+        XCTAssertTrue(back.waitForExistence(timeout: 5), "reabierto: vuelve bajo el grupo")
+        for _ in 0..<5 { app.swipeDown() }
         // Deja el estado por defecto para las demás pruebas.
         foldMenu(app)
         app.buttons["home.fold.hideIssues"].tap()
+    }
+
+    /// 1.6.4 (20): asuntos como tareas. El círculo completa con «Deshacer» (Grupos, Asuntos y el chat), alta rápida con
+    /// Return, «Completados · N» plegable, Por grupo / Por responsable y el detalle con botones de un toque.
+    func testIssueTasksCheckQuickAddAndDetail() throws {
+        let f = try fixture()
+        XCTAssertFalse((f.apiUrl.contains("app.chaggu.com") || f.apiUrl.contains("app.tiecoms.com")), "no se prueba contra producción")
+        guard let overdue = f.overdueIssue else { throw XCTSkip("Fixture sin asunto vencido") }
+        let app = login(f)
+        let toggle = app.buttons["grp.issuesToggle.\(f.pagosId)"].firstMatch
+        let until = Date().addingTimeInterval(20)
+        while Date() < until && !toggle.exists { dismissSystemPrompts(app); usleep(300_000) }
+        dismissSystemPrompts(app)
+        if app.buttons["home.tab.all"].exists { app.buttons["home.tab.all"].tap() }
+        setView(app, "Árbol")
+
+        // 1. Árbol de Grupos: el círculo reemplaza al ◆ y completa sin entrar; «Deshacer» lo devuelve.
+        foldMenu(app)
+        app.buttons["home.fold.showIssues"].tap()
+        let line = app.buttons["grp.issue.\(overdue)"]
+        _ = line.waitForExistence(timeout: 3)
+        for _ in 0..<6 where !(line.exists && line.isHittable) { app.swipeUp() }
+        XCTAssertTrue(line.waitForExistence(timeout: 5))
+        let check = app.buttons["issue.check.\(overdue)"]
+        XCTAssertTrue(check.exists, "círculo para completar en la sub-fila")
+        XCTAssertEqual(check.label, "Completar")
+        XCTAssertLessThan(line.frame.height, 34, "la sub-fila sigue compacta")
+        sleep(1)
+        shot("01-grupos-arbol-circulo")
+        check.tap()
+        XCTAssertTrue(line.waitForNonExistence(timeout: 5), "completado: sale de Grupos")
+        let undo = app.buttons["toast.undo"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 3), "aviso con «Deshacer»")
+        XCTAssertTrue(app.staticTexts["Asunto completado"].exists)
+        shot("02-grupos-completado-deshacer")
+        undo.tap()
+        XCTAssertTrue(line.waitForExistence(timeout: 5), "Deshacer lo devuelve")
+        foldMenu(app)
+        app.buttons["home.fold.hideIssues"].tap()
+        setView(app, "Lista")
+
+        // 2. Pestaña Asuntos: Míos / Abiertos / Completados con contador, Por grupo / Por responsable.
+        app.tabBars.buttons["Asuntos"].tap()
+        let seg = app.segmentedControls["issues.filter"]
+        XCTAssertTrue(seg.waitForExistence(timeout: 5))
+        XCTAssertTrue(seg.buttons.element(boundBy: 0).label.hasPrefix("Míos"))
+        XCTAssertTrue(seg.buttons.element(boundBy: 2).label.hasPrefix("Completados"))
+        seg.buttons.element(boundBy: 1).tap()
+        let groupBy = app.segmentedControls["issues.groupBy"]
+        XCTAssertTrue(groupBy.exists)
+        groupBy.buttons["Por grupo"].tap()
+        let row = app.buttons["issue.row.\(overdue)"]
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'issue.row.'")).firstMatch.waitForExistence(timeout: 8))
+        sleep(1)
+        shot("03-asuntos-por-grupo")
+        groupBy.buttons["Por responsable"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["issues.section.\(f.a.id)"].waitForExistence(timeout: 3), "sección con mis asuntos")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Ana Márquez (tú)'")).firstMatch.exists, "yo primero, marcado «(tú)»")
+        sleep(1)
+        shot("04-asuntos-por-responsable")
+        groupBy.buttons["Por grupo"].tap()
+
+        // 3. Alta rápida: responsable y fecha aparecen al escribir; Return crea y deja el campo listo.
+        let quick = app.textFields["issue.quickField"]
+        XCTAssertTrue(quick.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["issue.quickOwner"].exists, "vacío: una sola línea")
+        let openBefore = seg.buttons.element(boundBy: 1).label
+        quick.tap(); quick.typeText("Llamar al banco")
+        XCTAssertTrue(app.buttons["issue.quickOwner"].waitForExistence(timeout: 3), "responsable al escribir")
+        XCTAssertTrue(app.buttons["issue.quickDue"].exists, "fecha al escribir")
+        XCTAssertTrue(app.buttons["issue.quickOwner"].label.contains("Yo") || app.buttons["issue.quickOwner"].staticTexts["Yo"].exists, "Yo por defecto")
+        shot("05-alta-rapida")
+        quick.typeText("\n")
+        // Va al grupo o chat más reciente (puede quedar fuera de la pantalla): lo confirma el contador de «Abiertos».
+        let createdBy = Date().addingTimeInterval(8)
+        while Date() < createdBy && seg.buttons.element(boundBy: 1).label == openBefore { usleep(300_000) }
+        XCTAssertNotEqual(seg.buttons.element(boundBy: 1).label, openBefore, "creado con Return (\(openBefore))")
+        XCTAssertFalse(app.buttons["issue.quickOwner"].exists, "vacío otra vez: una sola línea")
+        XCTAssertEqual((quick.value as? String) ?? "", "Añadir asunto…", "el campo queda vacío")
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "listo para el siguiente")
+        app.swipeDown()
+
+        // 4. Detalle: el título es el grupo; preguntas con botones de un toque; botón grande para terminar.
+        // Los asuntos creados en corridas anteriores pueden dejar «Pagos» más abajo.
+        for _ in 0..<8 where !(row.exists && row.isHittable) { app.swipeUp() }
+        row.tap()
+        XCTAssertTrue(app.navigationBars["Pagos y facturación"].waitForExistence(timeout: 8), "título = nombre del grupo")
+        let markDone = app.buttons["issue.markDone"]
+        XCTAssertTrue(markDone.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["issue.alert"].label.contains("Se venció el"), "aviso en lenguaje simple")
+        XCTAssertTrue(app.staticTexts["¿Quién lo hace?"].exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '¿Para cuándo? · '")).firstMatch.exists, "con la fecha elegida")
+        XCTAssertTrue(app.staticTexts["¿Cómo va?"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["issue.statusPicker"].exists, "sin selector de 5 estados")
+        if let c = f.c {
+            let carlos = app.buttons["issue.who.\(c.id)"]
+            XCTAssertTrue(carlos.exists, "chip con el primer nombre")
+            XCTAssertEqual(carlos.label, "Carlos")
+            carlos.tap()
+            XCTAssertTrue(app.buttons["issue.who.none"].waitForExistence(timeout: 5), "con responsable aparece «Sin responsable»")
+        }
+        app.buttons["issue.when.issue.dTomorrow"].tap()
+        let whenDone = Date().addingTimeInterval(5)
+        while Date() < whenDone && app.descendants(matching: .any)["issue.alert"].exists { usleep(300_000) }
+        XCTAssertFalse(app.descendants(matching: .any)["issue.alert"].exists, "con fecha de mañana ya no está vencido")
+        app.buttons["issue.how.in_progress"].tap()
+        XCTAssertTrue(app.buttons["issue.how.in_progress"].waitForExistence(timeout: 3))
+        sleep(2)
+        shot("06-detalle")
+        let field = app.descendants(matching: .any)["issue.commentField"]
+        field.tap(); field.typeText("Hablé con tesorería, sale el lunes.")
+        app.buttons["issue.commentSend"].tap()
+        XCTAssertTrue(app.staticTexts["Hablé con tesorería, sale el lunes."].waitForExistence(timeout: 8), "comentario en Novedades")
+        app.swipeUp()
+        let history = app.buttons["issue.historyToggle"]
+        if history.waitForExistence(timeout: 3) { history.tap() }
+        sleep(1)
+        shot("07-detalle-novedades-cambios")
+        app.swipeDown(); app.swipeDown()
+        markDone.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["issue.doneBanner"].waitForExistence(timeout: 5), "banner «✓ Hecho»")
+        XCTAssertFalse(markDone.exists)
+        sleep(1)
+        shot("08-detalle-hecho")
+        app.buttons["issue.reopenBtn"].tap()
+        XCTAssertTrue(markDone.waitForExistence(timeout: 5), "reabierto")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // 5. Lista del chat: completar con el círculo → «Completados · 1» plegable.
+        app.tabBars.buttons["Grupos"].tap()
+        let pagos = app.buttons["conv.row.\(f.pagosId)"]
+        XCTAssertTrue(pagos.waitForExistence(timeout: 8))
+        pagos.tap()
+        let bar = app.buttons["chat.bar.issues"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 8))
+        bar.tap()
+        let chatCheck = app.buttons["issue.check.\(overdue)"]
+        XCTAssertTrue(chatCheck.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["issue.quickField"].exists, "alta rápida en la lista del chat")
+        sleep(1)
+        shot("09-lista-chat")
+        chatCheck.tap()
+        let doneToggle = app.buttons["issues.doneToggle"]
+        XCTAssertTrue(doneToggle.waitForExistence(timeout: 5), "«Completados · N»")
+        XCTAssertTrue(doneToggle.label.contains("Completados · "))
+        XCTAssertTrue(app.buttons["toast.undo"].waitForExistence(timeout: 3), "Deshacer también sobre la hoja")
+        doneToggle.tap()
+        XCTAssertTrue(app.buttons["issue.check.\(overdue)"].waitForExistence(timeout: 3))
+        XCTAssertEqual(app.buttons["issue.check.\(overdue)"].label, "Reabrir")
+        sleep(1)
+        shot("10-lista-chat-completados")
+        app.buttons["issue.check.\(overdue)"].tap()
+        XCTAssertTrue(app.buttons["issue.check.\(overdue)"].waitForExistence(timeout: 3))
+        let reopened = Date().addingTimeInterval(5)
+        while Date() < reopened && app.buttons["issue.check.\(overdue)"].label != "Completar" { usleep(300_000) }
+        XCTAssertEqual(app.buttons["issue.check.\(overdue)"].label, "Completar", "reabierto desde Completados")
     }
 
     /// Barra de arriba (✏️ y «＋») en las cuatro pestañas, chat rápido desde «Mensaje nuevo» y búsqueda que encuentra

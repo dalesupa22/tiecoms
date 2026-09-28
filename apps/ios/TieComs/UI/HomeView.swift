@@ -275,14 +275,18 @@ struct HomeView: View {
         let inset = EdgeInsets(top: 0, leading: 16 + CGFloat(indent) * 18 + 28, bottom: 0, trailing: 12)
         ForEach(shown) { i in
             let last = !more && i.id == shown.last?.id
-            Button { store.homePath.append(.issue(i.id)) } label: {
-                issueGuide(GroupIssueLine(issue: i), last: last)
-            }
-            .buttonStyle(RowPressStyle())
+            // El círculo completa sin entrar; el resto de la sub-fila abre el asunto.
+            issueGuide(HStack(spacing: 2) {
+                IssueCheck(issue: i, compact: true)
+                Button { store.homePath.append(.issue(i.id)) } label: {
+                    GroupIssueLine(issue: i).contentShape(Rectangle())
+                }
+                .buttonStyle(RowPressStyle())
+                .accessibilityIdentifier("grp.issue.\(i.id)")
+            }, last: last)
             .listRowInsets(inset)
             .listRowSeparator(.hidden, edges: .top)
             .listRowSeparator(last ? .automatic : .hidden, edges: .bottom)
-            .accessibilityIdentifier("grp.issue.\(i.id)")
             // Mantener presionado: completar o cambiar el estado sin entrar al asunto.
             .contextMenu { IssueStatusMenu(issue: i) { store.homePath.append(.issue(i.id)) } }
             .transition(.opacity.combined(with: .move(edge: .top)))
@@ -437,16 +441,22 @@ struct GroupSectionHeader: View {
     }
 }
 
-/// Asunto abierto bajo su grupo: «◆ título», fecha límite (roja si venció) y el estado si está en curso o esperando.
+/// Asunto abierto bajo su grupo: título, el primer nombre del responsable si no soy yo, la fecha límite (roja si
+/// venció) o el estado si está en curso o esperando. El círculo para completarlo va a la izquierda (IssueCheck).
 struct GroupIssueLine: View {
+    @Environment(AppStore.self) private var store
     let issue: IssueDTO
     var body: some View {
         let f = IssueSort.flags(issue)
-        // Una sola línea: «◆ título…» y, a la derecha y en pequeño, la fecha límite (roja si venció) o el estado.
+        let me = store.data?.me.id
+        let owner = store.data.flatMap { d in issue.ownerId.flatMap { Naming.person(d, $0) } }
         HStack(spacing: 6) {
-            Text("◆").font(.system(size: 9, weight: .bold)).foregroundStyle(f.overdue ? .red : Theme.accentText).accessibilityHidden(true)
             Text(issue.title).font(.caption).foregroundStyle(Theme.textPrimary).lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 4)
+            if let owner, owner.id != me {
+                Text(String(owner.name.split(separator: " ").first ?? Substring(owner.name)))
+                    .font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1).fixedSize()
+            }
             if issue.dueDate != nil {
                 Text(f.overdue ? L("issue.overdue") : f.dueToday ? L("issue.today") : IssueSort.dueLabel(issue))
                     .font(.caption2.weight(f.overdue ? .semibold : .regular)).foregroundStyle(f.overdue ? .red : Theme.textSecondary)
@@ -456,6 +466,7 @@ struct GroupIssueLine: View {
                     .foregroundStyle(issue.status == .waiting ? Color.purple : Theme.accentText).lineLimit(1).fixedSize()
             }
         }
+        .frame(minHeight: 22)
         .accessibilityElement(children: .combine)
     }
 }

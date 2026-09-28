@@ -10,9 +10,23 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Bundle ID | `com.chaggu.app` (app) · `com.chaggu.app.share` (Compartir) · `com.chaggu.app.notifications` (Notification Service Extension) · pruebas `com.chaggu.app.tests` / `com.chaggu.app.uitests` |
 | Team | `B76US7H3L3` (CERTILABOR SAS), firma automática |
 | App Group | `group.com.chaggu.app`: Keychain compartido (servicio `com.chaggu.app.session`) y lista de conversaciones para la extensión |
-| Versión | 1.6.5 (build 22), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
+| Versión | 1.6.6 (build 23), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.chaggu.com` por defecto (web: `https://www.chaggu.com`); `-TCApiURL <url>` al lanzar (pruebas) |
+
+## Tanda 1.6.6: lectura, asuntos personales, reuniones y calendario
+
+Contrato `2026-09-28` (docs/TANDA-LECTURA-REUNIONES.md). Necesita el API de la rama `tanda-lectura-reuniones` (migración 028).
+- **Pendientes del árbol** (`Core/ReadTree.swift`): grupo + derivadas no sidechat en «No leídos», «Menciones», el globo de
+  Grupos y el chip «⑂ N»; «Marcar como leído» con `POST /conversations/:id/read-tree` (seq conocido de cada una); franja
+  «⑂ N sin leer en X conversaciones de este grupo · Ver». El cursor del chat solo avanza con lo que se vio.
+- **Asuntos**: sin el párrafo `issue.pageSub`; **personales** (`POST /issues`, `conversationId: null`, evento `issue.personal`).
+- **Reuniones** (`Core/Meetings.swift`, `UI/MeetingViews.swift`): ＋ del chat y Ajustes › Reuniones; ASWebAuthenticationSession
+  con esquema `chaggu` (vuelve a `chaggu://meetings/connected`); `idempotencyKey` por toque, reusada al reintentar.
+- **Calendario** (`Core/CalendarGrid.swift`): Día / Semana / Mes, Semana por defecto (`calendarView`).
+- Pruebas: `TreeReadTests`, `PersonalIssueTests`, `MeetingTests`, `CalendarGridTests`, `Tanda166IntegrationTests` y
+  `Tanda166UITests` con `tools/fixtures/tanda166-fixture.mjs` (`TEST_RUNNER_TC_FIXTURE166`, `TEST_RUNNER_TC_FAKE_MEETINGS`
+  = el proveedor MOCK `apps/api/test/fake-meetings.mjs`). Con el MOCK no se prueba el OAuth real de Google/Microsoft/Zoom.
 
 ## Integración 1.6.5
 

@@ -515,8 +515,8 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
         fun count(f: String) = inView.count { IssueTasks.matches(f, it, mine) }
         LazyColumn(Modifier.padding(pad).fillMaxSize().imePadding().padding(horizontal = 16.dp).testTag("issues"), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = AssistantListInset)) {
             item(key = "head") {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(stringResource(R.string.issue_page_sub), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                // 1.6.6: sin el párrafo explicativo («Lo que quedó pendiente…»): los filtros van pegados al título.
+                Column(Modifier.padding(top = 2.dp).testTag("issuesHead"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Segmented(listOf(
                         "mine" to "${stringResource(R.string.issue_mine)} ${count("mine")}",
                         "open" to "${stringResource(R.string.issue_all_open)} ${count("open")}",

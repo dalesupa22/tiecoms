@@ -154,7 +154,6 @@
     <string name="issue_mine">Mine</string>
     <string name="issue_all_open">Open</string>
     <string name="issue_closed">Completed</string>
-    <string name="issue_page_sub">What was left pending in your conversations, with an owner and a date. Every subject keeps the message it came from, and only people who can read that conversation see it.</string>
     <string name="issue_empty">No subjects match this filter.</string>
     <string name="issue_in">in %1$s</string>
     <string name="issue_ev_created">opened the subject</string>

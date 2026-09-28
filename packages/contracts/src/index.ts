@@ -959,3 +959,35 @@ export const SOCKET_EVENTS = {
 export interface ApiErrorBody {
   error: { code: string; message: string; details?: unknown };
 }
+
+// ---------- Asistente (IA) ----------
+/** Una vuelta de la conversación con el asistente. El historial vive en el cliente (últimos 20 turnos). */
+export const AssistantTurnInput = z.object({
+  messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().trim().min(1).max(4000) })).min(1).max(20),
+  timezone: z.string().min(1).max(64).default('America/Bogota'),
+  lang: z.enum(['es', 'en']).default('es'),
+});
+/** Confirmar una acción pendiente (token firmado por el servidor) o deshacer una hecha. `text` = texto editado de un mensaje. */
+export const AssistantRunInput = z.object({ token: z.string().min(10).max(8000), text: z.string().trim().min(1).max(8000).optional() });
+
+export type AssistantActionKind = 'send_message' | 'create_group' | 'create_issue' | 'update_issue' | 'create_event' | 'cancel_event';
+export interface AssistantActionDTO {
+  id: string;
+  kind: AssistantActionKind;
+  /** pending = espera tu confirmación; done = hecho (quizá con undoToken); failed = no se pudo; undone = deshecho. */
+  status: 'pending' | 'done' | 'failed' | 'undone';
+  /** A quién o dónde: «Laura Méndez», «Andes · Operación». */
+  target: string;
+  /** Texto del mensaje, título del asunto o de la reunión. */
+  text: string;
+  /** Línea secundaria: fecha, responsable, invitados… */
+  detail?: string | null;
+  /** Para confirmar (status pending). */
+  token?: string;
+  /** Para deshacer (status done). */
+  undoToken?: string;
+  /** Ruta de la app para abrirlo (/c/…, /asuntos, /agenda). */
+  link?: string | null;
+  error?: string | null;
+}
+export interface AssistantTurnDTO { reply: string; actions: AssistantActionDTO[] }

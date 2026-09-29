@@ -273,3 +273,15 @@ final class CallsTests: XCTestCase {
         XCTAssertTrue(cat?.actions.first?.options.contains(.foreground) ?? false, "Contestar abre la app")
     }
 }
+
+/// 1.6.9: la barra inferior no se muestra en pantallas empujadas (chat, detalle, tarea…) ni con el teclado.
+@MainActor
+final class TabBarRuleTests: XCTestCase {
+    func testTabBarOnlyAtRootWithoutKeyboard() {
+        XCTAssertTrue(TabBarRule.visible(path: [], keyboard: false))
+        XCTAssertFalse(TabBarRule.visible(path: [.conversation("c1")], keyboard: false), "dentro de un chat no tapa el compositor")
+        XCTAssertFalse(TabBarRule.visible(path: [.callDetail("x")], keyboard: false))
+        XCTAssertFalse(TabBarRule.visible(path: [.issue("i")], keyboard: false))
+        XCTAssertFalse(TabBarRule.visible(path: [], keyboard: true))
+    }
+}

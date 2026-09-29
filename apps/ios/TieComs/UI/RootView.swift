@@ -146,6 +146,13 @@ struct MainView: View {
             if assistant.open {
                 AssistantPanel(model: assistant)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+                // Lo que queda debajo de la cápsula se desvanece (no se ve texto «fantasma» bajo el vidrio).
+                .background(alignment: .bottom) {
+                    LinearGradient(colors: [Theme.background.opacity(0), Theme.background.opacity(0.92)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: AppTabBar.height + 20)
+                        .ignoresSafeArea(edges: .bottom)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .animation(.spring(duration: 0.3), value: assistant.open)
@@ -193,7 +200,7 @@ extension MainView {
     fileprivate func youIcon(_ d: BootstrapDTO?) -> UIImage {
         TabAvatar.image(name: d?.me.name ?? "", photo: myPhoto,
                         fill: UIColor(d.map { PersonColor.fill($0.me.id) } ?? Theme.bubbleMine),
-                        selected: store.tab == .settings, moon: store.dndActive || store.sleepActive)
+                        selected: false, moon: store.dndActive || store.sleepActive)
     }
 
     fileprivate func badge(_ t: AppTab, _ d: BootstrapDTO?) -> Int {
@@ -218,19 +225,26 @@ extension MainView {
                 }
             }
         }
+        // Como hidesBottomBarWhenPushed (y .shell.in-conv de la web): dentro de un chat, un detalle o cualquier pantalla
+        // empujada no hay barra, así nunca tapa el compositor. Tampoco con el teclado.
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !keyboardVisible {
+            if TabBarRule.visible(path: store.currentPath, keyboard: keyboardVisible) {
                 AppTabBar(items: tabs.map { t in
-                    AppTabBar.Item(tab: t, label: TabInfo.title(t),
-                                   image: t == .settings ? youIcon(d) : AppTabBar.symbol(TabInfo.symbol(t)),
-                                   badge: badge(t, d), identifier: "tab.\(TabInfo.id(t))")
-                }, selected: store.tab) { t in
+                    AppTabBar.Item(tab: t, label: TabInfo.title(t), symbol: TabInfo.symbol(t), badge: badge(t, d), identifier: "tab.\(TabInfo.id(t))")
+                }, selected: store.tab, avatar: youIcon(d)) { t in
                     if store.tab == t { store.popToRoot(t) } else { store.tab = t }
                 }
-                .frame(height: 49)
-                .background(Theme.background.ignoresSafeArea(edges: .bottom))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                // Lo que queda debajo de la cápsula se desvanece (no se ve texto «fantasma» bajo el vidrio).
+                .background(alignment: .bottom) {
+                    LinearGradient(colors: [Theme.background.opacity(0), Theme.background.opacity(0.92)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: AppTabBar.height + 20)
+                        .ignoresSafeArea(edges: .bottom)
+                        .allowsHitTesting(false)
+                }
             }
         }
+        .animation(.easeOut(duration: 0.2), value: TabBarRule.visible(path: store.currentPath, keyboard: keyboardVisible))
         .onChange(of: store.tab, initial: true) { _, t in visited.insert(t) }
         .onChange(of: d?.callsEnabled) { _, on in if on != true, store.tab == .calls { store.tab = .home } }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
@@ -238,7 +252,7 @@ extension MainView {
     }
 
     /// Distancia de la burbuja al borde inferior del área segura: justo encima de la barra de pestañas.
-    fileprivate static let bubbleBottom: CGFloat = 72
+    fileprivate static let bubbleBottom: CGFloat = 78
 
     /// Solo en las listas (raíz de la pestaña), nunca dentro de un chat.
     fileprivate var assistantBubbleVisible: Bool {
@@ -333,6 +347,11 @@ private struct SheetToasts: ViewModifier {
     }
 }
 
+/// ¿Se ve la barra? Solo en la raíz de la pestaña y sin teclado.
+enum TabBarRule {
+    static func visible(path: [Route], keyboard: Bool) -> Bool { path.isEmpty && !keyboard }
+}
+
 /// Textos e íconos de la barra inferior.
 enum TabInfo {
     static func title(_ t: AppTab) -> String {
@@ -349,7 +368,7 @@ enum TabInfo {
         switch t {
         case .home: return "person.2"
         case .dms: return "bubble.left.and.bubble.right"
-        case .issues: return "checklist"
+        case .issues: return "checkmark.circle"
         case .agenda: return "calendar"
         case .calls: return "phone"
         case .settings: return "person.crop.circle"
@@ -367,69 +386,138 @@ enum TabInfo {
     }
 }
 
-/// Barra inferior: UITabBar suelta (sin UITabBarController, así no agrupa en «Más» con 6 pestañas), solo íconos de línea de
-/// ~22 pt (como TAB_ICONS de la web, Shell.tsx) y el avatar para «Tú». Cada ícono lleva el nombre completo para VoiceOver
-/// y las pruebas la siguen viendo como `tabBars`.
-struct AppTabBar: UIViewRepresentable {
+/// Barra inferior (1.6.9, pedido de Danny): cápsula flotante solo con íconos (Liquid Glass en iOS 26, material antes),
+/// íconos de 22 pt en gris y el elegido en su variante llena con el acento sobre una cápsula pequeña; globos pequeños
+/// arriba a la derecha del ícono; «Tú» con el avatar. Va dentro de una UITabBar vacía: VoiceOver y XCTest la ven como
+/// barra de pestañas (`tabBars`), cada botón con el nombre completo.
+struct AppTabBar: View {
     struct Item {
         var tab: AppTab
         var label: String
-        var image: UIImage?
+        /// SF Symbol (sin «.fill»: la variante llena se pone al elegirla).
+        var symbol: String
         var badge: Int
         var identifier: String
     }
     var items: [Item]
     var selected: AppTab
+    var avatar: UIImage?
     var onSelect: (AppTab) -> Void
 
-    final class Coordinator: NSObject, UITabBarDelegate {
-        var parent: AppTabBar
-        var tabs: [AppTab] = []
-        init(_ p: AppTabBar) { parent = p }
-        func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {
-            guard item.tag >= 0, item.tag < parent.items.count else { return }
-            parent.onSelect(parent.items[item.tag].tab)
-        }
+    static let height: CGFloat = 58
+
+    var body: some View {
+        TabBarAccessibilityHost(content: AnyView(row), labels: items.map(\.label))
+            .frame(height: Self.height)
+            .modifier(TabBarChrome())
+            .padding(.horizontal, 16)
+            .padding(.bottom, 6)
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    func makeUIView(context: Context) -> UITabBar {
-        let bar = UITabBar()
-        bar.delegate = context.coordinator
-        bar.tintColor = UIColor(Theme.accentText)
-        bar.itemPositioning = .fill
-        return bar
-    }
-
-    func updateUIView(_ bar: UITabBar, context: Context) {
-        context.coordinator.parent = self
-        let tabs = items.map(\.tab)
-        if context.coordinator.tabs != tabs || bar.items?.count != items.count {
-            bar.items = items.enumerated().map { i, it in
-                let ui = UITabBarItem(title: nil, image: it.image, tag: i)
-                return ui
+    private var row: some View {
+        HStack(spacing: 0) {
+            ForEach(items, id: \.tab) { it in
+                let on = it.tab == selected
+                Button {
+                    Haptics.tap()
+                    onSelect(it.tab)
+                } label: {
+                    icon(it, on: on)
+                        .frame(width: 48, height: 36)
+                        .background(Capsule().fill(on && it.tab != .settings ? Theme.accentText.opacity(0.12) : .clear))
+                        .overlay(alignment: .topTrailing) { badge(it.badge) }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(it.label)
+                .accessibilityValue(it.badge > 0 ? L("a11y.unread", ["n": it.badge]) : "")
+                .accessibilityAddTraits(on ? [.isSelected] : [])
+                .accessibilityIdentifier(it.identifier)
             }
-            context.coordinator.tabs = tabs
         }
-        for (i, it) in items.enumerated() {
-            guard let ui = bar.items?[i] else { continue }
-            if it.tab == .settings {
-                ui.image = it.image?.withRenderingMode(.alwaysOriginal); ui.selectedImage = ui.image
-            } else if ui.image == nil {
-                ui.image = it.image
-            }
-            ui.title = nil
-            ui.badgeValue = it.badge > 0 ? (it.badge > 99 ? "99+" : "\(it.badge)") : nil
-            ui.accessibilityLabel = it.label
-            ui.accessibilityIdentifier = it.identifier
-            ui.largeContentSizeImage = it.image
-        }
-        if let i = items.firstIndex(where: { $0.tab == selected }), bar.selectedItem !== bar.items?[i] { bar.selectedItem = bar.items?[i] }
+        .padding(.horizontal, 6)
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
     }
 
-    /// Ícono de línea de la barra (~22 pt).
-    static func symbol(_ name: String) -> UIImage? {
-        UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 21, weight: .regular))
+    @ViewBuilder private func icon(_ it: Item, on: Bool) -> some View {
+        if it.tab == .settings {
+            Group {
+                if let avatar { Image(uiImage: avatar).resizable().scaledToFill() } else { Image(systemName: "person.crop.circle").resizable().scaledToFit() }
+            }
+            .frame(width: 26, height: 26)
+            .clipShape(Circle())
+            .padding(2)
+            .overlay(Circle().stroke(on ? Theme.accentText : .clear, lineWidth: 2))
+        } else {
+            Image(systemName: it.symbol)
+                .symbolVariant(on ? .fill : .none)
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(on ? Theme.accentText : Theme.textSecondary)
+                .frame(height: 26)
+        }
     }
+
+    @ViewBuilder private func badge(_ n: Int) -> some View {
+        if n > 0 {
+            Text(n > 99 ? "99+" : "\(n)")
+                .font(.system(size: 10, weight: .semibold)).monospacedDigit()
+                .foregroundStyle(Theme.onPrimary)
+                .padding(.horizontal, 4)
+                .frame(minWidth: 16, minHeight: 16)
+                .background(Capsule().fill(Theme.primaryFill))
+                .overlay(Capsule().stroke(Theme.background, lineWidth: 1.5))
+                .fixedSize()
+                // Pegado arriba a la derecha del ícono (dentro de la celda de 48 pt: no tapa al vecino).
+                .offset(x: 2, y: -3)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+/// Fondo de la cápsula: Liquid Glass en iOS 26; antes, material con borde fino y sombra suave.
+private struct TabBarChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(.regular, in: Capsule())
+                .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
+        } else {
+            content
+                .background(Capsule().fill(.regularMaterial))
+                .overlay(Capsule().stroke(Theme.textSecondary.opacity(0.18), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.10), radius: 12, y: 4)
+        }
+    }
+}
+
+/// UITabBar vacía (sin ítems ni fondo) que aloja la fila de SwiftUI, para que la accesibilidad la anuncie como barra de pestañas.
+private struct TabBarAccessibilityHost: UIViewRepresentable {
+    var content: AnyView
+    var labels: [String]
+    final class Bar: UITabBar {
+        let host: UIHostingController<AnyView>
+        init(_ v: AnyView) {
+            host = UIHostingController(rootView: v)
+            super.init(frame: .zero)
+            let ap = UITabBarAppearance()
+            ap.configureWithTransparentBackground()
+            standardAppearance = ap
+            scrollEdgeAppearance = ap
+            backgroundImage = UIImage(); shadowImage = UIImage()
+            host.safeAreaRegions = []
+            host.view.backgroundColor = .clear
+            host.view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(host.view)
+            NSLayoutConstraint.activate([host.view.leadingAnchor.constraint(equalTo: leadingAnchor), host.view.trailingAnchor.constraint(equalTo: trailingAnchor),
+                                         host.view.topAnchor.constraint(equalTo: topAnchor), host.view.bottomAnchor.constraint(equalTo: bottomAnchor)])
+            accessibilityIdentifier = "tab.bar"
+        }
+        required init?(coder: NSCoder) { fatalError() }
+        // Solo la fila propia: sin ítems del sistema.
+        override var accessibilityElements: [Any]? { get { [host.view as Any] } set {} }
+        override func sizeThatFits(_ size: CGSize) -> CGSize { CGSize(width: size.width, height: AppTabBar.height) }
+    }
+    func makeUIView(context: Context) -> Bar { Bar(content) }
+    func updateUIView(_ v: Bar, context: Context) { v.host.rootView = content }
 }

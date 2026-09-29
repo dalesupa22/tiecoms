@@ -14,6 +14,14 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.chaggu.com` por defecto (web: `https://www.chaggu.com`); `-TCApiURL <url>` al lanzar (pruebas) |
 
+## 1.6.9 (26): barra inferior en cápsula y sin barra dentro del chat
+
+- Corrección de TestFlight 1.6.8: la barra propia quedaba encima del compositor. Ahora solo se ve en la raíz de cada pestaña
+  (`TabBarRule`, como `hidesBottomBarWhenPushed`) y nunca con el teclado. El aviso de descanso del otro es solo informativo.
+- Barra rediseñada: cápsula flotante (Liquid Glass en iOS 26, material antes), íconos de 22 pt, el elegido lleno en acento sobre
+  una cápsula pequeña, globos pequeños y el avatar para «Tú»; háptico al tocar. Sigue siendo `tabBars` para VoiceOver y XCTest.
+- Prueba: `LlamadasUITests/testChatHidesTabBarAndSleepingRecipientCanBeWritten`.
+
 ## 1.6.8 (25): llamadas (Chime), pestaña «Llamadas», sonidos y «Todo» de temas
 
 - **Llamadas** (docs/LLAMADAS.md; `Core/Calls.swift`, `Core/ChimeCallMedia.swift`, `Core/CallRecorder.swift`, `UI/CallViews.swift`):

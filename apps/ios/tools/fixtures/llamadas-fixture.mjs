@@ -71,7 +71,13 @@ await say(g.accessToken, multi.id, 'Subí el acta', pagos.id);
 await say(b.accessToken, multi.id, '¿Quién revisa el acta?');
 const live = await call(`/conversations/${multi.id}/call`, { token: b.accessToken, body: { kind: 'audio' } });
 
-const out = { apiUrl: API, password, tag, a: { email: a.user.email, id: a.user.id }, b: { email: b.user.email, id: b.user.id },
+// Gloria está en modo sueño AHORA (de hace 1 h a dentro de 3 h, en Bogotá): escribirle solo informa, nunca bloquea.
+const hhmm = (ms) => new Date(ms).toLocaleTimeString('en-GB', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hour12: false });
+await call('/me/sleep', { token: g.accessToken, method: 'PUT', body: { on: true, start: hhmm(Date.now() - 3600e3), end: hhmm(Date.now() + 3 * 3600e3), tz: 'America/Bogota', tzAuto: false } });
+const sleepDm = await call('/chats', { token: a.accessToken, body: { userIds: [g.user.id] } });
+await say(g.accessToken, sleepDm.id, 'Te respondo mañana temprano');
+
+const out = { sleepDmId: sleepDm.id, apiUrl: API, password, tag, a: { email: a.user.email, id: a.user.id }, b: { email: b.user.email, id: b.user.id },
   g: { email: g.user.email, id: g.user.id }, dmId: dm.id, finId: fin.id, obraId: obra.id, multiId: multi.id, pagosId: pagos.id,
   endedCallId: c1.call.id, missedCallId: missed.call.id, liveCallId: live.call.id, bToken: b.accessToken };
 writeFileSync(process.env.FIXTURE_OUT ?? '/dev/stdout', JSON.stringify(out, null, 2));

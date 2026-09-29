@@ -13,6 +13,7 @@ final class LlamadasUITests: XCTestCase {
         var multiId: String
         var endedCallId: String
         var liveCallId: String
+        var sleepDmId: String?
     }
 
     override func setUp() { continueAfterFailure = false }
@@ -56,6 +57,17 @@ final class LlamadasUITests: XCTestCase {
         return app
     }
 
+    /// Dentro de una pantalla empujada no hay barra (1.6.9): se vuelve a la raíz con «atrás» y se toca la pestaña.
+    private func goTab(_ app: XCUIApplication, _ id: String) {
+        for _ in 0..<5 where !app.tabBars.firstMatch.exists {
+            let back = app.navigationBars.buttons.element(boundBy: 0)
+            if back.exists { back.tap() } else { break }
+            _ = app.tabBars.firstMatch.waitForExistence(timeout: 2)
+        }
+        app.buttons["tab.\(id)"].firstMatch.tap()
+        sleep(1)
+    }
+
     func testCallsTabTopicsAndFakeCall() throws {
         let f = try fixture()
         let app = login(f)
@@ -95,15 +107,14 @@ final class LlamadasUITests: XCTestCase {
         app.buttons["call.share.copy.transcript"].tap()
 
         // Pestaña «Llamadas».
-        bar.buttons["Llamadas"].tap()
+        goTab(app, "calls")
         XCTAssertTrue(app.buttons["calls.row.\(f.endedCallId)"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["En curso"].exists)
         XCTAssertTrue(app.staticTexts["Sin respuesta"].exists || app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Sin respuesta")).firstMatch.exists)
         shot("06-pestana-llamadas")
 
         // Chat grupal: franja «Llamada en curso · Unirse» y la llamada (medios nulos).
-        bar.buttons["DMs"].tap()
-        bar.buttons["DMs"].tap() // otra vez: vuelve a la raíz de la pestaña
+        goTab(app, "dms")
         let multi = app.buttons["conv.row.\(f.multiId)"].firstMatch
         XCTAssertTrue(multi.waitForExistence(timeout: 10))
         multi.tap()
@@ -139,7 +150,7 @@ final class LlamadasUITests: XCTestCase {
         XCTAssertTrue(app.buttons["sound.pick.campana"].waitForExistence(timeout: 3))
         shot("12-detalles-sonido")
         app.buttons["sound.pick.campana"].tap()
-        bar.buttons["Tú"].tap()
+        goTab(app, "settings")
         let ring = app.buttons["settings.ringtone"].firstMatch
         for _ in 0..<6 where !ring.exists || !ring.isHittable { app.swipeUp() }
         shot("13-ajustes-sonidos")
@@ -162,11 +173,39 @@ final class LlamadasUITests: XCTestCase {
         let notNow = app.buttons.matching(NSPredicate(format: "label IN %@", ["Not Now", "Ahora no"])).firstMatch
         if notNow.waitForExistence(timeout: 5) { notNow.tap() }
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 15))
-        sleep(2)
+        sleep(3)
         let tag = env["TC_SHOT_TAG"] ?? lang
         shot("tabs-\(tag)-grupos")
-        app.tabBars.firstMatch.buttons.element(boundBy: 1).tap()
-        sleep(1)
+        for _ in 0..<3 where !app.navigationBars["DMs"].exists { app.buttons["tab.dms"].firstMatch.tap(); sleep(1) }
         shot("tabs-\(tag)-dms")
+    }
+
+    /// 1.6.9: dentro de un chat no hay barra de pestañas (no tapa el compositor) y el aviso de descanso del otro no bloquea escribir.
+    func testChatHidesTabBarAndSleepingRecipientCanBeWritten() throws {
+        let f = try fixture()
+        guard let sleepId = f.sleepDmId else { throw XCTSkip("Fixture sin sleepDmId") }
+        let app = login(f)
+        let bar = app.tabBars.firstMatch
+        let row = app.buttons["conv.row.\(sleepId)"].firstMatch
+        for _ in 0..<3 where !row.exists { app.buttons["tab.dms"].firstMatch.tap(); _ = row.waitForExistence(timeout: 4) }
+        XCTAssertTrue(row.waitForExistence(timeout: 6))
+        shot("20-dms-barra")
+        row.tap()
+        let field = app.textViews["composer.field"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "descansando")).firstMatch.waitForExistence(timeout: 5), "aviso de descanso")
+        XCTAssertFalse(bar.exists && bar.isHittable, "sin barra de pestañas dentro del chat")
+        XCTAssertTrue(field.isHittable, "el compositor no queda tapado")
+        shot("21-chat-descansando")
+        field.tap()
+        field.typeText("Hola Gloria, lo vemos mañana")
+        shot("22-escribiendo")
+        let send = app.buttons["composer.send"].firstMatch
+        XCTAssertTrue(send.waitForExistence(timeout: 3))
+        send.tap()
+        XCTAssertTrue(app.staticTexts["Hola Gloria, lo vemos mañana"].waitForExistence(timeout: 10))
+        shot("23-enviado")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(bar.waitForExistence(timeout: 5), "de vuelta en la lista, la barra vuelve")
     }
 }

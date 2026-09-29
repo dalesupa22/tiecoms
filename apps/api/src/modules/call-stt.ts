@@ -23,6 +23,21 @@ export function keepSegment(s: { text: string; no_speech_prob?: number; avg_logp
   return !HALLUCINATIONS.some((r) => r.test(t));
 }
 
+/**
+ * Nombres propios que Whisper escribe mal aunque vayan en el prompt («Certify» por «Xertify»). CALLS_STT_FIXES
+ * agrega más: «malo=>bueno;otro=>Bueno».
+ */
+const BUILTIN_FIXES: [RegExp, string][] = [[/\b(?:[CcSsXx]ertif(?:y|ai|i))\b/g, 'Xertify'], [/\b[Cc]h?ag+u\b/g, 'chaggu'], [/\bXertiflow\b|\b[CcSs]ertiflow\b/gi, 'Xertiflow']];
+export function fixNames(text: string): string {
+  let out = text;
+  for (const [re, to] of BUILTIN_FIXES) out = out.replace(re, to);
+  for (const pair of (process.env.CALLS_STT_FIXES ?? '').split(';')) {
+    const [from, to] = pair.split('=>').map((x) => x?.trim());
+    if (from && to) out = out.replace(new RegExp(`\\b${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'), to);
+  }
+  return out;
+}
+
 export const sttConfigured = () => process.env.CALLS_STT_PROVIDER === 'fake' || !!process.env.GROQ_API_KEY;
 
 export async function transcribeChunk(audio: Buffer, contentType: string, prompt: string): Promise<SttResult> {
@@ -50,6 +65,6 @@ export async function transcribeChunk(audio: Buffer, contentType: string, prompt
   const segs: any[] = Array.isArray(j.segments) ? j.segments : [{ start: 0, end: j.duration ?? 0, text: j.text ?? '' }];
   return {
     language: j.language ?? null,
-    segments: segs.filter(keepSegment).map((s) => ({ start: Number(s.start) || 0, end: Number(s.end) || 0, text: String(s.text).trim() })),
+    segments: segs.filter(keepSegment).map((s) => ({ start: Number(s.start) || 0, end: Number(s.end) || 0, text: fixNames(String(s.text).trim()) })),
   };
 }

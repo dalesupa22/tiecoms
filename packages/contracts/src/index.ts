@@ -9,7 +9,7 @@
 import { z } from 'zod';
 
 export const API_VERSION = 1;
-export const CONTRACT_VERSION = '2026-09-28';
+export const CONTRACT_VERSION = '2026-09-29';
 /** Clientes con un contrato anterior a este deben actualizarse. */
 export const MIN_CLIENT_CONTRACT = '2026-09-23';
 
@@ -678,7 +678,21 @@ export interface CalendarEventDTO {
   invitees: { userId: string; rsvp: Rsvp }[];
   cancelledAt: string | null;
   updatedAt: string;
+  /** Comentarios del evento (tanda 1.7). Ausente = servidor anterior. */
+  commentCount?: number;
+  /** Los 2 últimos comentarios, del más viejo al más nuevo. */
+  lastComments?: EventCommentDTO[];
 }
+
+/** Comentario de un evento del calendario (GET/POST /events/:id/comments). */
+export interface EventCommentDTO {
+  id: string;
+  eventId: string;
+  authorId: string;
+  body: string;
+  createdAt: string;
+}
+export const EventCommentInput = z.object({ body: z.string().trim().min(1).max(4000) });
 
 /** side = conversación lateral: consulta privada desde un mensaje (chat multi que cuelga de su origen). */
 export type DeriveKind = 'same' | 'internal' | 'directive' | 'side';
@@ -760,6 +774,20 @@ export interface MessageDTO {
   topicId?: string | null;
   /** Quién le puso el tema (cualquiera del chat puede). */
   topicBy?: string | null;
+  /** Etiquetas #Nombre a otras conversaciones (tanda 1.7). name = el nombre al enviar. Ausente = sin refs. */
+  refs?: MessageRefDTO[];
+  /**
+   * Mensaje de una sola vista (tanda 1.7). body llega '' y los adjuntos con url '' y thumbUrl null (conservan
+   * kind, contentType, name y durationMs): el contenido solo sale por POST /messages/:id/open.
+   */
+  viewOnce?: boolean;
+  /**
+   * Para quien no es autor: 'unopened' | 'opened'. Para el autor: 'sent'. En los eventos en vivo (iguales para
+   * todos) llega 'unopened': el cliente calcula 'sent' si authorId soy yo, y 'opened' si estoy en openedBy.
+   */
+  viewOnceState?: ViewOnceState;
+  /** Quién lo abrió y cuándo (el autor lo muestra como «Visto por …»). */
+  openedBy?: { userId: string; at: string }[];
   createdAt: string;
   editedAt: string | null;
   deletedAt: string | null;
@@ -1148,6 +1176,22 @@ export const MentionInput = z.object({
 });
 export interface MentionDTO { userId: string | 'all'; start: number; length: number }
 
+/**
+ * Etiqueta #Nombre a una conversación (tanda 1.7): tramo del body (offsets UTF-16, como las menciones) que
+ * empieza con «#». El servidor descarta sin error las que el autor no puede leer. Máximo 20.
+ */
+export const RefInput = z.object({
+  conversationId: z.uuid(),
+  start: z.number().int().min(0).max(8000),
+  length: z.number().int().min(2).max(200),
+});
+export interface MessageRefDTO { conversationId: string; name: string; start: number; length: number }
+export const MAX_REFS_PER_MESSAGE = 20;
+
+export type ViewOnceState = 'unopened' | 'opened' | 'sent';
+/** POST /messages/:id/open (una vez por persona; 410 already_opened la segunda). URLs firmadas de 60 s. */
+export interface ViewOnceOpenDTO { body: string; attachments: AttachmentDTO[] }
+
 export const SendMessageInput = z.object({
   clientMessageId: z.string().min(8).max(64),
   /** Puede ir vacío ('') si el mensaje lleva adjuntos. */
@@ -1162,9 +1206,42 @@ export const SendMessageInput = z.object({
   mentions: z.array(MentionInput).max(50).optional(),
   /** Tema activo de esta conversación (docs/TEMAS.md). */
   topicId: z.uuid().nullable().optional(),
+  /** #grupos etiquetados (tanda 1.7). */
+  refs: z.array(RefInput).max(MAX_REFS_PER_MESSAGE).optional(),
+  /** Una sola vista: texto, imágenes y notas de voz; no con archivos ni reenvíos (400). */
+  viewOnce: z.boolean().optional(),
 }).refine((v) => v.body.length > 0 || !!v.attachmentIds?.length || !!v.forwardAttachmentIds?.length, { message: 'body_or_attachments', path: ['body'] })
   .refine((v) => (v.attachmentIds?.length ?? 0) + (v.forwardAttachmentIds?.length ?? 0) <= 10, { message: 'max_10_attachments', path: ['attachmentIds'] });
-export const EditMessageInput = z.object({ body: z.string().trim().min(1).max(8000), mentions: z.array(MentionInput).max(50).optional() });
+export const EditMessageInput = z.object({ body: z.string().trim().min(1).max(8000), mentions: z.array(MentionInput).max(50).optional(), refs: z.array(RefInput).max(MAX_REFS_PER_MESSAGE).optional() });
+
+// ---------- Buscar dentro del chat (tanda 1.7) ----------
+/** GET /conversations/:id/search?q=&before=&limit= — before = seq del último resultado que ya tienes. */
+export const ChatSearchQuery = z.object({
+  q: z.string().trim().min(2).max(120),
+  before: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+export interface ChatSearchResultDTO {
+  message: MessageDTO;
+  /** Fragmento de texto alrededor de la coincidencia (cuerpo, nombre del adjunto o transcripción). */
+  snippet: string;
+  /** Coincidencias dentro de snippet: [inicio, largo] en unidades UTF-16. */
+  matches: [number, number][];
+  /** Dónde coincidió. */
+  field?: 'body' | 'attachment' | 'transcript';
+}
+export interface ChatSearchPageDTO { results: ChatSearchResultDTO[]; hasMore: boolean }
+
+// ---------- Mensajes de sistema nuevos (tanda 1.7): body = JSON.stringify({ k, ... }) ----------
+export const SYSTEM_KEYS_17 = ['event.today', 'issue.done', 'issue.overdue', 'issue.comments', 'event.comments'] as const;
+export type SystemBody17 =
+  | { k: 'event.today'; eventId: string; title: string; startsAt: string; timezone: string }
+  | { k: 'issue.done'; issueId: string; title: string; byId: string; byName: string }
+  /** dueDate = AAAA-MM-DD. */
+  | { k: 'issue.overdue'; issueId: string; title: string; ownerId: string | null; ownerName: string | null; dueDate: string }
+  /** Se actualiza con message.updated (count + 1) mientras esté entre los últimos 15 mensajes del chat. */
+  | { k: 'issue.comments'; issueId: string; title: string; count: number; lastById: string; lastByName: string; lastExcerpt: string }
+  | { k: 'event.comments'; eventId: string; title: string; count: number; lastById: string; lastByName: string; lastExcerpt: string };
 // ---------- Sonidos (docs/SONIDOS.md) ----------
 /** Sonidos de mensaje: se generan en cada cliente (web con WebAudio; móvil con archivos del mismo nombre). */
 export const MESSAGE_SOUNDS = ['pop', 'gota', 'campana', 'marimba', 'burbuja', 'cristal', 'acorde', 'silbido', 'tambor', 'brisa'] as const;

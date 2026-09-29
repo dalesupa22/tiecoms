@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ConversationDTO } from '@tiecoms/contracts';
-import { bucketOf, companyGroupLabel, compareConversations, withSeparators } from '../src/home-order.ts';
+import { bucketOf, companyUnder, compareConversations, withSeparators } from '../src/home-order.ts';
 import { firstUnread } from '../src/chat-nav.ts';
 
 // Orden único de la bandeja, separadores, etiqueta «Empresa · Grupo» y primer no leído (docs/GRUPOS.md, 27-sep-2026).
@@ -47,13 +47,17 @@ describe('orden de la bandeja', () => {
   });
 });
 
-describe('etiqueta «Empresa · Grupo»', () => {
-  it('pone la empresa delante', () => expect(companyGroupLabel('Ongoing', 'Mentoría 2')).toBe('Ongoing · Mentoría 2'));
+describe('empresa bajo el nombre', () => {
+  it('la empresa va aparte, debajo del grupo', () => expect(companyUnder('Ongoing', 'Mentoría 2')).toBe('Ongoing'));
   it('no la repite si el nombre ya empieza por ella (sin importar mayúsculas ni tildes)', () => {
-    expect(companyGroupLabel('Nestlé', 'Nestle proveedores')).toBe('Nestle proveedores');
-    expect(companyGroupLabel('Xertify', 'xertify · General')).toBe('xertify · General');
+    expect(companyUnder('Nestlé', 'Nestle proveedores')).toBeNull();
+    expect(companyUnder('Xertify', 'xertify · General')).toBeNull();
+    expect(companyUnder('Xertify', 'Xertify - Xertiflow')).toBeNull();
   });
-  it('sin empresa queda el grupo', () => expect(companyGroupLabel(null, 'General')).toBe('General'));
+  it('sin empresa no hay línea', () => {
+    expect(companyUnder(null, 'General')).toBeNull();
+    expect(companyUnder('  ', 'General')).toBeNull();
+  });
 });
 
 describe('primer no leído al abrir un chat', () => {

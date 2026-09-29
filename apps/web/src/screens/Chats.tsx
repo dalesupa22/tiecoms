@@ -8,7 +8,7 @@ import { groupWorkspaces } from './Shell.tsx';
 import { CreateGroupDialog } from './Groups.tsx';
 import { navigate } from '../router.ts';
 import { Avatar, ConvAvatar, Modal, OrgMark, conversationTitle, orgById, personById } from '../ui.tsx';
-import { destinationLabel, peopleByOrg, recentPeopleIds, searchGroups } from '../quick-search.ts';
+import { companyLine, peopleByOrg, recentPeopleIds, searchGroups } from '../quick-search.ts';
 import { openDirect } from './Quick.tsx';
 
 // ---------- Enlaces clicables en el texto ----------
@@ -160,7 +160,10 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
                 <button key={c.id} type="button" role="option" aria-selected={isActive(it)} data-active={isActive(it) || undefined}
                   className={`person-row ${isActive(it) ? 'is-active' : ''}`} onClick={() => openGroup(c)}>
                   <span className="compose-group-ico"><ConvAvatar c={c} size={26} /></span>
-                  <span className="grow ellipsis"><b>{destinationLabel(d, c, conversationTitle(d, c))}</b></span>
+                  <span className="grow" style={{ minWidth: 0 }}>
+                    <b className="ellipsis" style={{ display: 'block' }}>{conversationTitle(d, c)}</b>
+                    {companyLine(d, c, conversationTitle(d, c)) && <span className="conv-org ellipsis" style={{ display: 'block' }}>{companyLine(d, c, conversationTitle(d, c))}</span>}
+                  </span>
                 </button>
               );
             })}

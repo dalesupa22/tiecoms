@@ -19,8 +19,13 @@
   --side: 272px;
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
+  /* Sidechats: verde azulado sobrio, igual en web, iOS y Android (solo para lo que identifica un sidechat). */
+  --side-ink: #1F7A74;
+  --side-bg: #E0F2EF;
   color-scheme: light;
 }
+/* Tema oscuro (la web aún no lo tiene; los valores quedan listos y son los mismos de iOS y Android). */
+:root[data-theme="dark"] { --side-ink: #7FD3CA; --side-bg: #16312E; }
 
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
@@ -608,9 +613,9 @@ select.link-act { appearance: none; padding-right: 10px; }
 .side-panel > .conv { height: 100%; }
 .conv.is-embedded { grid-template-columns: minmax(0, 1fr); }
 .side-anchor { padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--card); display: grid; gap: 2px; border-left: 3px solid #0A7C87; }
-.side-chip { margin-top: 4px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid #b9dde0; background: #e9f5f6; color: #08636b; border-radius: 99px; font-size: 12px; font-weight: 600; padding: 2px 10px; }
-.side-chip.unread { border-color: #0A7C87; }
-.side-chip .pill { background: #0A7C87; }
+.side-chip { margin-top: 4px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid color-mix(in srgb, var(--side-ink) 30%, transparent); background: var(--side-bg); color: var(--side-ink); border-radius: 99px; font-size: 12px; font-weight: 600; padding: 2px 10px; }
+.side-chip.unread { border-color: var(--side-ink); }
+.side-chip .pill { background: var(--side-ink); }
 .side-sides { margin-left: 14px; border-left: 1px solid var(--line); padding-left: 4px; }
 .k-side { background: #e9f5f6; color: #08636b; }
 .conv-avatar { display: block; }
@@ -772,6 +777,10 @@ select.link-act { appearance: none; padding-right: 10px; }
 .quick-chat kbd { font: 11px/1 inherit; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px; background: var(--paper-3); }
 .group-issue .overdue { color: #c0392b; font-weight: 700; }
 .chip-side { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--paper-3); color: var(--ink-2); white-space: nowrap; }
+.chip-side.is-sidechat { background: var(--side-bg); color: var(--side-ink); flex: none; }
+.side-ico { display: inline-grid; place-items: center; flex: none; background: var(--side-bg); color: var(--side-ink); }
+/* Empresa bajo el nombre del grupo o la persona: pequeña, gris y de peso normal (la fila casi no crece). */
+.conv-org { display: block; font-size: 11px; line-height: 1.25; color: var(--muted); font-weight: 400; min-width: 0; }
 .share-invite { display: flex; flex-direction: column; gap: 12px; }
 .code-box { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; border: 1px dashed var(--line); border-radius: 14px; background: var(--paper-2); }
 .code-big { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 34px; font-weight: 800; letter-spacing: 0.08em; }
@@ -864,12 +873,14 @@ select.link-act { appearance: none; padding-right: 10px; }
 .conv-title { font-size: 13px; }
 .conv-time { flex: none; font-size: 11px; color: var(--muted); font-weight: 500; }
 .conv-sub { font-size: 12px; color: var(--muted); font-weight: 400; }
+.conv-lines > .ellipsis { min-width: 0; }
 .side-conv.unread .conv-sub { color: var(--ink-2); }
 .side-conv.unread .conv-time { color: #B45309; font-weight: 700; }
 @media (max-width: 860px) {
   .side-conv.has-preview { padding: 9px 8px; }
   .conv-title { font-size: 15px; }
   .conv-sub { font-size: 13.5px; }
+  .conv-org { font-size: 12px; }
   /* Asuntos abiertos bajo un grupo: sub-filas compactas con sangría, una línea cada una. */
   .group-issues { margin-left: 44px; }
   .group-issue { min-height: 32px; font-size: 13.5px; padding: 4px 8px; }

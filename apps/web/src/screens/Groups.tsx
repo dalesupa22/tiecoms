@@ -3,7 +3,7 @@ import type { BootstrapDTO, ConversationDTO, CreateGroupRequest, InvitationPrevi
 import { client, useClient } from '../app-client.ts';
 import { errorText, getLang, locale, t, tn } from '../i18n.ts';
 import { navigate, queryParam } from '../router.ts';
-import { Avatar, ConvAvatar, Modal, OrgMark, badgeColor, conversationPreview, conversationTitle, orgById, personById, timeLabel } from '../ui.tsx';
+import { Avatar, ConvAvatar, Modal, OrgMark, SideIcon, badgeColor, conversationPreview, conversationTitle, orgById, personById, timeLabel } from '../ui.tsx';
 import { conversationMenu, mutedText, openDialog } from '../actions.tsx';
 import { DndStrip } from './Silence.tsx';
 import { copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
@@ -12,9 +12,10 @@ import { InviteDialog } from './Dialogs.tsx';
 import { IssueCheck, NewIssueDialog, isClosed, issueQuickMenu, localIso } from './Issues.tsx';
 import { MessageText } from './Mentions.tsx';
 import { StackedAvatars } from './Chats.tsx';
+import { companyLine } from '../quick-search.ts';
 import { QuickActions, QuickSearchField, QuickSearchSections, openNewMessage } from './Quick.tsx';
 import { matchesTab, type HomeTab } from './Shell.tsx';
-import { activityOf, companyGroupLabel, compareConversations, pendingOf, treeOnlyPending, withSeparators, withTree } from '../home-order.ts';
+import { activityOf, compareConversations, pendingOf, treeOnlyPending, withSeparators, withTree } from '../home-order.ts';
 
 // ---------- Árbol de Grupos (mismas reglas en web, iOS y Android: docs/GRUPOS.md) ----------
 /** label: el nombre a mostrar; si dos grupos de la misma empresa se llaman igual, lleva delante el espacio de donde viene. */
@@ -231,10 +232,10 @@ function companyGroups(c: CompanyNode) {
 }
 
 /** Fila de grupo y, si la persona los abrió con el chip ◆, sus asuntos activos debajo. */
-function GroupEntry({ g, ws, issuesOpen, active, label, preview }: { g: GroupNode; ws: WorkspaceDTO; issuesOpen: IssuesOpen; active: boolean; label?: string; preview?: boolean }) {
+function GroupEntry({ g, ws, issuesOpen, active, label, preview, showOrg }: { g: GroupNode; ws: WorkspaceDTO; issuesOpen: IssuesOpen; active: boolean; label?: string; preview?: boolean; showOrg?: boolean }) {
   return (
     <div>
-      <ConvItem c={g.conv} active={active} label={label ?? g.label} preview={preview} threadUnread={treeOnlyPending(g.conv, g.derived)} treeMentions={g.derived.reduce((n, x) => n + (x.unreadMentions ?? 0), 0)} extraMenu={groupMenuExtra(g.conv, ws)}
+      <ConvItem c={g.conv} active={active} label={label ?? g.label} preview={preview} showOrg={showOrg} threadUnread={treeOnlyPending(g.conv, g.derived)} treeMentions={g.derived.reduce((n, x) => n + (x.unreadMentions ?? 0), 0)} extraMenu={groupMenuExtra(g.conv, ws)}
         issues={{ count: g.issues.length, overdue: overdueCount(g.issues), open: issuesOpen.open.has(g.conv.id), onToggle: () => issuesOpen.toggle(g.conv.id) }} />
       {g.issues.length > 0 && issuesOpen.open.has(g.conv.id) && <IssueLines g={g} />}
     </div>
@@ -314,7 +315,7 @@ export interface IssuesChip { count: number; overdue: number; open: boolean; onT
  * Fila de conversación (barra lateral, Grupos y DMs). Con `preview` ocupa dos líneas: título y hora arriba;
  * «Nombre: texto» del último mensaje, chips y globos abajo (vista Lista y «Todo»).
  */
-export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, treeMentions = 0, extraMenu = [], issues, preview = false }: { c: ConversationDTO; active: boolean; showWs?: boolean; label?: string; threadUnread?: number; treeMentions?: number; extraMenu?: MenuItem[]; issues?: IssuesChip; preview?: boolean }) {
+export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, treeMentions = 0, extraMenu = [], issues, preview = false, showOrg = false }: { c: ConversationDTO; active: boolean; showWs?: boolean; label?: string; threadUnread?: number; treeMentions?: number; extraMenu?: MenuItem[]; issues?: IssuesChip; preview?: boolean; showOrg?: boolean }) {
   const d = useClient((s) => s.data)!;
   const muted = isMuted(c);
   const other = c.kind === 'direct' ? personById(d, c.memberIds.find((m) => m !== d.me.id)) : null;
@@ -323,8 +324,13 @@ export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, t
   const origin = side && c.parentId ? d.conversations.find((x) => x.id === c.parentId) : null;
   const orgOfWs = c.workspaceId ? (() => { const w = d.workspaces.find((x) => x.id === c.workspaceId); return w ? placeWorkspace(d, w).org : null; })() : null;
   const title = label ?? (side ? sideTitle(conversationTitle(d, c)) : conversationTitle(d, c));
+  // Línea pequeña y gris bajo el nombre: la empresa (no en el Árbol, que ya agrupa por empresa). En la búsqueda
+  // de grupos también el espacio, si no es el de la casa de la empresa.
+  const company = showOrg ? companyLine(d, c, title) : null;
+  const orgLine = [company, ws && !ws.isOrgHome && ws.name.trim().toLowerCase() !== (company ?? '').trim().toLowerCase() ? ws.name : null].filter(Boolean).join(' · ');
   const avatar = other ? <Avatar person={other} org={orgById(d, other.orgId)} size={preview ? 32 : 22} />
     : c.kind === 'internal' ? <span className={`hash ${preview ? 'is-big' : ''}`} aria-hidden title={t('inbox.internal')}>🔒</span>
+    : side && !c.avatarUrl ? <SideIcon size={preview ? 32 : 22} />
     : <ConvAvatar c={c} size={preview ? 32 : 22} fallback={c.kind === 'multi' && !side ? <StackedAvatars c={c} size={preview ? 28 : 20} /> : undefined} />;
   const chips = <>
     {threadUnread > 0 && <span className="chip-side" title={t('tree.chipHelp', { n: threadUnread })}>⑂ {threadUnread}{treeMentions > 0 ? ' @' : ''}</span>}
@@ -349,23 +355,30 @@ export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, t
       {preview ? (
         <span className="conv-lines">
           <span className="conv-line">
-            {side && <span className="chip-side">{t('groups.sidechat')}</span>}
+            {side && <span className="chip-side is-sidechat">{t('groups.sidechat')}</span>}
             <span className="grow ellipsis conv-title">{title}</span>
             {pin}
             <span className="conv-time">{timeLabel(activityOf(c) || null)}</span>
           </span>
+          {orgLine && <span className="conv-org ellipsis">{orgLine}</span>}
           <span className="conv-line">
             <span className="grow ellipsis conv-sub">{conversationPreview(d, c) ?? ''}</span>
             {chips}
           </span>
         </span>
       ) : <>
-        {side && <span className="chip-side">{t('groups.sidechat')}</span>}
-        <span className="grow ellipsis">
-          {origin && <span className="muted small">{t('groups.fromOrigin', { name: conversationTitle(d, origin) })} · </span>}
-          {title}
-          {ws ? <span className="muted small"> · {ws.name}</span> : null}
-        </span>
+        {side && <span className="chip-side is-sidechat">{t('groups.sidechat')}</span>}
+        {orgLine ? (
+          <span className="grow conv-lines">
+            <span className="ellipsis">{title}</span>
+            <span className="conv-org ellipsis">{orgLine}</span>
+          </span>
+        ) : (
+          <span className="grow ellipsis">
+            {origin && <span className="muted small">{t('groups.fromOrigin', { name: conversationTitle(d, origin) })} · </span>}
+            {title}
+          </span>
+        )}
         {pin}
         {chips}
       </>}
@@ -386,17 +399,17 @@ function Separated<T>({ items, convOf, render, sepMenu }: { items: T[]; convOf: 
 export function DmsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; activeConv?: string | null }) {
   const d = useClient((s) => s.data)!;
   const list = dmConversations(d, tab);
-  return <Separated items={list} convOf={(c) => c} render={(c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />} />;
+  return <Separated items={list} convOf={(c) => c} render={(c) => <ConvItem key={c.id} c={c} showOrg active={activeConv === c.id} />} />;
 }
 
 // ---------- Vista Lista: todos los grupos en una sola lista ----------
 export interface GroupListItem { g: GroupNode; ws: WorkspaceDTO; company: string; label: string }
-/** Las mismas filas de grupo que el árbol (sin hilos), en una sola lista con el orden de la bandeja y «Empresa · Grupo». */
+/** Las mismas filas de grupo que el árbol (sin hilos), en una sola lista con el orden de la bandeja; la empresa va debajo del nombre. */
 export function groupListItems(sections: GroupSection[]): GroupListItem[] {
   const out: GroupListItem[] = [];
   for (const s of sections) for (const c of s.companies) {
     const company = s.kind === 'org' ? s.org?.name ?? c.name : c.name;
-    for (const w of c.workspaces) for (const g of w.groups) out.push({ g, ws: w.ws, company, label: companyGroupLabel(company, g.label ?? g.conv.name ?? '') });
+    for (const w of c.workspaces) for (const g of w.groups) out.push({ g, ws: w.ws, company, label: g.label ?? g.conv.name ?? '' });
   }
   return out.sort((a, b) => compareConversations(withTree(a.g.conv, a.g.derived), withTree(b.g.conv, b.g.derived)));
 }
@@ -411,7 +424,7 @@ export function GroupsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; 
     <div className="groups-list">
       {/* Menú de sección (clic derecho o pulsación larga en un separador): mostrar o contraer todos los asuntos. */}
       <Separated items={items} convOf={(x) => withTree(x.g.conv, x.g.derived)} sepMenu={() => treeMenuItems(treeControls(buildGroupTree(d, issues, tab))).slice(0, 2)}
-        render={(x) => <GroupEntry key={x.g.conv.id} g={x.g} ws={x.ws} label={x.label} preview issuesOpen={issuesOpen} active={activeConv === x.g.conv.id} />} />
+        render={(x) => <GroupEntry key={x.g.conv.id} g={x.g} ws={x.ws} label={x.label} preview showOrg issuesOpen={issuesOpen} active={activeConv === x.g.conv.id} />} />
     </div>
   );
 }
@@ -429,8 +442,8 @@ export function AllList({ tab = 'all', activeConv = null }: { tab?: HomeTab; act
   if (!items.length) return <div className="hint" style={{ padding: '8px 10px' }}>{t('inbox.nothing')}</div>;
   return <Separated items={items} convOf={(x) => x.c}
     render={(x) => x.group
-      ? <GroupEntry key={x.c.id} g={x.group.g} ws={x.group.ws} label={x.group.label} preview issuesOpen={issuesOpen} active={activeConv === x.c.id} />
-      : <ConvItem key={x.c.id} c={x.c} preview active={activeConv === x.c.id} />} />;
+      ? <GroupEntry key={x.c.id} g={x.group.g} ws={x.group.ws} label={x.group.label} preview showOrg issuesOpen={issuesOpen} active={activeConv === x.c.id} />
+      : <ConvItem key={x.c.id} c={x.c} preview showOrg active={activeConv === x.c.id} />} />;
 }
 
 // ---------- Selector de vista «Lista | Árbol» (por dispositivo) ----------

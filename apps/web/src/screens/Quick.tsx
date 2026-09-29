@@ -115,7 +115,7 @@ export function QuickSearchSections({ query, order }: { query: string; order: Pa
         if (!list.length) return null;
         return (
           <section key={part}>{head(part === 'groups' ? 'search.groups' : 'search.chats')}
-            {list.slice(0, LIMIT).map((c) => <ConvItem key={c.id} c={c} active={false} showWs={part === 'groups'} />)}
+            {list.slice(0, LIMIT).map((c) => <ConvItem key={c.id} c={c} active={false} showWs={part === 'groups'} showOrg />)}
           </section>
         );
       })}

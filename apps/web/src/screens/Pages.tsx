@@ -5,7 +5,7 @@ import { errorText, getLang, langPreference, locale, setLang, t, tn, useLang, ty
 import { navigate } from '../router.ts';
 import { openProfile } from './Profile.tsx';
 import { NewChatDialog, StackedAvatars } from './Chats.tsx';
-import { Avatar, ConvAvatar, OrgMark, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, conversationPreview, timeLabel } from '../ui.tsx';
+import { Avatar, ConvAvatar, OrgMark, SideIcon, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, conversationPreview, timeLabel } from '../ui.tsx';
 import { InviteDialog, NewGroupDialog } from './Dialogs.tsx';
 import { InviteResult, PendingInvitations } from './Invitations.tsx';
 import { IssueDrawer, IssueRow, isClosed } from './Issues.tsx';
@@ -34,9 +34,9 @@ function ConvCard({ c }: { c: ConversationDTO }) {
   const muted = isMuted(c);
   return (
     <button className={`card conv-card ${muted ? 'is-muted' : ''}`} onClick={() => navigate(`/c/${c.id}`)} {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
-      {other ? <Avatar person={other} org={org} size={38} /> : c.avatarUrl ? <ConvAvatar c={c} size={38} /> : c.deriveKind === 'side' ? <span className="mark" style={{ width: 38, height: 38, background: 'var(--paper-3)', fontSize: 18 }}>💬</span> : c.kind === 'multi' ? <StackedAvatars c={c} size={30} /> : <OrgMark org={org} size={38} />}
+      {other ? <Avatar person={other} org={org} size={38} /> : c.avatarUrl ? <ConvAvatar c={c} size={38} /> : c.deriveKind === 'side' ? <SideIcon size={38} /> : c.kind === 'multi' ? <StackedAvatars c={c} size={30} /> : <OrgMark org={org} size={38} />}
       <span className="grow" style={{ minWidth: 0 }}>
-        <span className="row"><b className="ellipsis grow">{conversationTitle(d, c)}</b><span className="small muted">{timeLabel(c.lastMessageAt)}</span></span>
+        <span className="row">{c.deriveKind === 'side' && <span className="chip-side is-sidechat">{t('groups.sidechat')}</span>}<b className="ellipsis grow">{c.deriveKind === 'side' ? conversationTitle(d, c).replace(/^(Sidechat|Consulta)\s*·\s*/i, '') : conversationTitle(d, c)}</b><span className="small muted">{timeLabel(c.lastMessageAt)}</span></span>
         <span className="small muted ellipsis" style={{ display: 'block' }}>{conversationSubtitle(d, c)}</span>
         <span className="small ellipsis" style={{ display: 'block', color: c.unread ? 'var(--ink)' : 'var(--muted)' }}>{conversationPreview(d, c) ?? t('conv.noMessages')}</span>
       </span>

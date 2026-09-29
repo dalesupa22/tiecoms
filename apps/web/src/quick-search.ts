@@ -1,5 +1,5 @@
 import type { BootstrapDTO, ConversationDTO, OrganizationDTO, PersonDTO, WorkspaceDTO } from '@tiecoms/contracts';
-import { activityOf, compareConversations } from './home-order.ts';
+import { activityOf, compareConversations, companyUnder } from './home-order.ts';
 
 /**
  * Búsqueda rápida de Grupos, DMs y «Mensaje nuevo»: personas, grupos y chats a la vez, para escribirle a alguien
@@ -29,6 +29,29 @@ function counterpartOf(d: BootstrapDTO, ws: WorkspaceDTO) {
   const mine = new Set(d.organizations.filter((o) => o.myRole).map((o) => o.id));
   return orgOf(d, ws.organizationIds.find((id) => !mine.has(id)) ?? ws.owningOrgId);
 }
+
+/**
+ * La empresa que va en la línea pequeña bajo el nombre (1.7.1, igual en iOS y Android). Grupos: la de la otra
+ * parte (Relaciones), la anfitriona si soy invitado, la pendiente de una relación sin aceptar o la mía.
+ * Directo 1:1: la empresa de la otra persona. Chats de varias personas y sidechats: ninguna.
+ */
+export function companyOf(d: BootstrapDTO, c: ConversationDTO): string | null {
+  if (c.kind === 'direct') {
+    const other = personOf(d, c.memberIds.find((m) => m !== d.me.id));
+    return orgOf(d, other?.orgId)?.name ?? null;
+  }
+  if (c.kind === 'multi' || c.deriveKind === 'side') return null;
+  const ws = wsOf(d, c);
+  if (!ws) return null;
+  if (ws.myRole === 'guest') return orgOf(d, ws.owningOrgId)?.name ?? null;
+  const mine = new Set(d.organizations.filter((o) => o.myRole).map((o) => o.id));
+  const other = ws.organizationIds.find((id) => !mine.has(id));
+  if (other) return orgOf(d, other)?.name ?? null;
+  return ws.counterpartName ?? orgOf(d, ws.owningOrgId)?.name ?? null;
+}
+
+/** La línea de empresa para una fila con ese título (null si no aplica o si el título ya la trae). */
+export const companyLine = (d: BootstrapDTO, c: ConversationDTO, title: string) => companyUnder(companyOf(d, c), title);
 
 /** Personas de mis directos, de la conversación más reciente a la más vieja (fila «Recientes»). */
 export function recentPeopleIds(d: BootstrapDTO): string[] {

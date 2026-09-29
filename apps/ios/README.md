@@ -14,6 +14,18 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.chaggu.com` por defecto (web: `https://www.chaggu.com`); `-TCApiURL <url>` al lanzar (pruebas) |
 
+## 1.6.8 (25): llamadas (Chime), pestaña «Llamadas», sonidos y «Todo» de temas
+
+- **Llamadas** (docs/LLAMADAS.md; `Core/Calls.swift`, `Core/ChimeCallMedia.swift`, `Core/CallRecorder.swift`, `UI/CallViews.swift`):
+  Amazon Chime SDK por SPM (`amazon-chime-sdk-ios-spm` 0.27.4). 📞/🎥 en el encabezado, franja «Unirse», aviso entrante (45 s,
+  tono elegido), pantalla de llamada, latido cada 30 s, ＋ agregar personas. Transcripción con Groq: pedazos de 12–20 s del
+  micrófono propio a `POST /calls/:id/audio`. Push `TC_CALL` (Contestar / Ahora no). Todo solo con `features.calls`.
+- **Barra inferior propia** (UITabBar suelta, solo íconos): 5 o 6 pestañas sin «Más».
+- **Sonidos** (docs/SONIDOS.md; `Core/Sounds.swift`, `tools/gen-sounds.py`): 10 sonidos + 3 tonos .caf.
+- **Temas**: «Todo» = sin tema + no leídos + saltos; número sin leer por banderita; abre en el tema si todo lo no leído está en uno.
+- Pruebas: `CallsTests`, `SoundsTests`, `LlamadasUITests` con `tools/fixtures/llamadas-fixture.mjs`
+  (API con `CALLS_ENABLED=true CALLS_PROVIDER=fake CALLS_STT_PROVIDER=fake`).
+
 ## 1.6.7 (24): temas, tarjeta de tarea y «Actualización disponible»
 
 - **Temas del chat** (docs/TEMAS.md; `Core/Topics.swift`, `UI/TopicViews.swift`) y **tarjeta de tarea** en el chat

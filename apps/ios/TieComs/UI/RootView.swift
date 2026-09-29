@@ -238,7 +238,7 @@ extension MainView {
     }
 
     /// Distancia de la burbuja al borde inferior del área segura: justo encima de la barra de pestañas.
-    fileprivate static let bubbleBottom: CGFloat = 58
+    fileprivate static let bubbleBottom: CGFloat = 72
 
     /// Solo en las listas (raíz de la pestaña), nunca dentro de un chat.
     fileprivate var assistantBubbleVisible: Bool {

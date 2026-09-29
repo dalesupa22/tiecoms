@@ -66,14 +66,16 @@ final class LlamadasUITests: XCTestCase {
         XCTAssertFalse(bar.buttons["Más"].exists || bar.buttons["More"].exists)
 
         // DMs › directo con todo lo no leído en «Finanzas»: abre filtrado ahí.
-        bar.buttons["DMs"].tap()
         let dm = app.buttons["conv.row.\(f.dmId)"].firstMatch
-        XCTAssertTrue(dm.waitForExistence(timeout: 10))
+        for _ in 0..<3 where !dm.exists { bar.buttons["DMs"].tap(); _ = dm.waitForExistence(timeout: 4) }
+        if !dm.waitForExistence(timeout: 6) { shot("00-sin-dm"); try? app.debugDescription.write(toFile: (env["TC_SHOTS"] ?? NSTemporaryDirectory()) + "/tree-dm.txt", atomically: true, encoding: .utf8) }
+        XCTAssertTrue(dm.exists)
         shot("01-dms-preview")
         dm.tap()
         let fin = app.buttons["topic.flag.Finanzas"]
         XCTAssertTrue(fin.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["¿Lo apruebas antes del viernes?"].waitForExistence(timeout: 5))
+        sleep(2); shot("02a-antes-de-elegir")
         let selected = NSPredicate(format: "isSelected == true")
         expectation(for: selected, evaluatedWith: fin); waitForExpectations(timeout: 5)
         XCTAssertTrue(app.buttons["call.start.audio"].exists, "📞 en el encabezado")

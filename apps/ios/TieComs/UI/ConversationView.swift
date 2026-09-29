@@ -614,8 +614,9 @@ struct ConversationView: View {
             .animation(.easeInOut(duration: 0.2), value: farFromBottom)
             .animation(.easeInOut(duration: 0.2), value: dividerAbove)
             // Al abrir: si hay no leídos, al primero (cargando todas las páginas necesarias) con la línea «N mensajes nuevos».
-            .task(id: state.loaded) {
-                guard state.loaded, !positioned else { return }
+            // Tras la recuperación (ios-avisos) la primera página llega con loaded y aún loading: se espera a que termine.
+            .task(id: state.loaded && !state.loading) {
+                guard state.loaded, !state.loading, !positioned else { return }
                 await positionAtFirstUnread(proxy)
             }
             .defaultScrollAnchor(.bottom)
@@ -769,6 +770,8 @@ struct ConversationView: View {
             let first = try await store.firstUnreadMessage(conversationId, snapshot: snap)
             if let first {
                 // Todo lo no leído está en un solo tema: el chat abre filtrado en esa banderita, en el primer no leído.
+                // Los temas se piden en paralelo: si aún no llegan, se esperan aquí (una petición corta).
+                if !embedded, store.topics[conversationId] == nil { try? await store.loadTopics(conversationId) }
                 if !embedded, topicFilter == nil, let me = store.me?.id,
                    let only = TopicRules.autoTopic(store.conversations[conversationId]?.messages ?? [], after: max(snap.lastReadSeq, store.meta(conversationId)?.historyFromSeq ?? 0),
                                                    me: me, active: activeTopicIds) {

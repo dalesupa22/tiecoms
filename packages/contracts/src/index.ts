@@ -13,6 +13,18 @@ export const CONTRACT_VERSION = '2026-09-28';
 /** Clientes con un contrato anterior a este deben actualizarse. */
 export const MIN_CLIENT_CONTRACT = '2026-09-23';
 
+/** GET /api/v1/app-version?platform=ios|android (público): última versión publicada (docs/ACTUALIZAR.md). */
+export interface AppVersionDTO {
+  platform: 'ios' | 'android';
+  latestVersion: string;
+  latestBuild: number;
+  /** Builds menores que este deben actualizar para seguir usando la app (0 = ninguno). */
+  minBuild: number;
+  /** Dónde se actualiza: TestFlight/App Store o Google Play. */
+  url: string;
+  notes: string | null;
+}
+
 export const Platform = z.enum(['web', 'macos', 'windows', 'android', 'ios', 'agent']);
 export type Platform = z.infer<typeof Platform>;
 

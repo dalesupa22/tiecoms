@@ -18,6 +18,7 @@ import { FilesScreen } from './screens/Files.tsx';
 import { DmsScreen, GroupsScreen, OversightScreen, ReadOnlyConversationScreen } from './screens/Groups.tsx';
 import { DialogHost } from './actions.tsx';
 import { MenuHost, ToastHost } from './menu.tsx';
+import { UpdateBanner } from './update.tsx';
 import { EmojiPickerHost } from './screens/Reactions.tsx';
 import { SavedLinksScreen } from './screens/Links.tsx';
 import { ScheduledScreen } from './screens/Scheduled.tsx';
@@ -82,6 +83,7 @@ export function App() {
       {route.name === 'workspace' && <WorkspaceScreen key={route.id} id={route.id} />}
       {route.name === 'conversation' && <ConversationScreen key={route.id + location.search} id={route.id} />}
     </Shell>
+    <UpdateBanner />
     <MenuHost />
     <DialogHost />
     <ToastHost />

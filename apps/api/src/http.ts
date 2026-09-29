@@ -15,7 +15,7 @@ import {
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
-import { ApiError, unauthorized } from './errors.ts';
+import { ApiError, notFound, unauthorized } from './errors.ts';
 import * as auth from './modules/auth.ts';
 import * as sso from './modules/sso.ts';
 import * as domains from './modules/domains.ts';
@@ -114,6 +114,18 @@ export async function buildHttp() {
     }
   });
   app.get('/api/v1/meta', async () => ({ apiVersion: API_VERSION, contract: CONTRACT_VERSION, minClientContract: MIN_CLIENT_CONTRACT }));
+  // «Actualización disponible» (docs/ACTUALIZAR.md): público, las apps lo piden al abrir y al volver al frente.
+  app.get<{ Querystring: { platform?: string; lang?: string } }>('/api/v1/app-version', async (req, reply) => {
+    const q = z.object({ platform: z.enum(['ios', 'android']), lang: z.string().max(10).optional() }).parse(req.query);
+    const { rows } = await pool.query('SELECT * FROM app_releases WHERE platform = $1', [q.platform]);
+    const r = rows[0];
+    if (!r) throw notFound('Versión');
+    reply.header('cache-control', 'no-store');
+    return {
+      platform: r.platform, latestVersion: r.latest_version, latestBuild: r.latest_build, minBuild: r.min_build, url: r.url,
+      notes: (q.lang?.startsWith('en') ? r.notes_en : r.notes_es) ?? null,
+    };
+  });
 
   // ---------- Auth ----------
   const authLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };

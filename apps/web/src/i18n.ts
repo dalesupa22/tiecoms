@@ -96,6 +96,7 @@ const es = {
   'link.remind': 'Recuérdame', 'link.remindEvening': 'Esta tarde', 'link.remindTomorrow': 'Mañana a las 9', 'link.remindFriday': 'El viernes', 'link.remindSet': '⏰ Te lo recuerdo',
   'link.settingsTitle': 'Enlaces y reacciones', 'link.digest': 'Resumen semanal de enlaces por correo',
   'link.digestHint': 'Los lunes: cuántos enlaces compartieron tus equipos y lo que tienes pendiente en «Ver después».',
+  'update.web': 'Hay una versión nueva de chaggu.', 'update.reload': 'Recargar',
   // Temas (docs/TEMAS.md)
   'topic.all': 'Todo', 'topic.new': 'Nuevo', 'topic.newFree': 'Nuevo · {n} libre', 'topic.newFreeN': 'Nuevo · {n} libres', 'topic.archivedN': 'Archivados {n}',
   'topic.bar': 'Temas del chat', 'topic.newTitle': 'Nuevo tema', 'topic.namePh': 'Finanzas', 'topic.left': 'Quedan {n} de {max}.', 'topic.create': 'Crear',
@@ -722,6 +723,7 @@ const en: Record<Key, string> = {
   'link.remind': 'Remind me', 'link.remindEvening': 'This evening', 'link.remindTomorrow': 'Tomorrow at 9', 'link.remindFriday': 'On Friday', 'link.remindSet': '⏰ I’ll remind you',
   'link.settingsTitle': 'Links and reactions', 'link.digest': 'Weekly link digest by email',
   'link.digestHint': 'On Mondays: how many links your teams shared and what’s pending in Watch later.',
+  'update.web': 'A new version of chaggu is available.', 'update.reload': 'Reload',
   // Topics (docs/TEMAS.md)
   'topic.all': 'All', 'topic.new': 'New', 'topic.newFree': 'New · {n} left', 'topic.newFreeN': 'New · {n} left', 'topic.archivedN': 'Archived {n}',
   'topic.bar': 'Chat topics', 'topic.newTitle': 'New topic', 'topic.namePh': 'Finance', 'topic.left': '{n} of {max} left.', 'topic.create': 'Create',

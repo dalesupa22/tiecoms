@@ -1220,3 +1220,7 @@ button.topic-tag:hover { filter: brightness(.96); }
 .week-allday { display: grid; grid-template-columns: 56px repeat(var(--cols, 7), minmax(0, 1fr)); border-bottom: 1px solid var(--line); padding: 4px 0; }
 .week-allday > span { padding: 2px 6px; align-self: center; }
 .week-allday > div { display: flex; flex-direction: column; gap: 2px; padding: 0 3px; min-width: 0; }
+
+/* «Hay una versión nueva» (docs/ACTUALIZAR.md): fija arriba hasta recargar. */
+.update-bar { position: fixed; left: 50%; top: calc(10px + var(--safe-t)); transform: translateX(-50%); z-index: 90; display: flex; align-items: center; gap: 10px; width: min(460px, calc(100% - 24px)); padding: 10px 12px 10px 14px; border-radius: 14px; background: var(--ink); color: #fff; font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+.update-bar .btn.primary { background: var(--orange); border-color: var(--orange); color: #fff; }

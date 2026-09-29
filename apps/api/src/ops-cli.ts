@@ -8,6 +8,8 @@
  *   node ops.js create-integration <correo> <conversationId> "<nombre>" [urlDeSalida]
  *   node ops.js import-events <correo> <conversationId> < eventos.json   agenda sin convocatorias ni avisos (idempotente)
  *   node ops.js purge-integration-issues <integrationId> <externalId,...>  borra esos asuntos y sus avisos del chat
+ *   node ops.js app-version <ios|android> <versión> <build> [minBuild] ["notas es"] ["notas en"]   última versión publicada (docs/ACTUALIZAR.md)
+ *   node ops.js app-version <ios|android>                  muestra la registrada
  *       imprime el JSON con el token (y el secreto de salida) UNA vez: redirígelo a un archivo protegido.
  */
 import { CreateGroupInput, CreateIntegrationInput } from '@tiecoms/contracts';
@@ -83,6 +85,20 @@ try {
       return { issues: ids.length, messages: msgs.length };
     });
     console.log(JSON.stringify(r));
+  } else if (command === 'app-version' && (a === 'ios' || a === 'android')) {
+    // Tras publicar una build: las apps con un build menor muestran «Actualización disponible» hasta instalarla.
+    if (b && c) {
+      const build = Number(c), min = d === undefined || d === '' ? null : Number(d);
+      if (!Number.isInteger(build) || build <= 0 || (min !== null && (!Number.isInteger(min) || min < 0 || min > build))) throw new Error('build y minBuild deben ser enteros (minBuild ≤ build)');
+      const [notesEs, notesEn] = process.argv.slice(7);
+      await pool.query(
+        `UPDATE app_releases SET latest_version = $2, latest_build = $3, min_build = COALESCE($4, min_build),
+           notes_es = COALESCE($5, notes_es), notes_en = COALESCE($6, notes_en), updated_at = now() WHERE platform = $1`,
+        [a, b, build, min, notesEs ?? null, notesEn ?? null],
+      );
+    }
+    const { rows } = await pool.query('SELECT * FROM app_releases WHERE platform = $1', [a]);
+    console.log(JSON.stringify(rows[0], null, 1));
   } else {
     throw new Error('Uso: ops.js members <dominio> | groups <correo> | create-group <correo> "<nombre>" [correos] | create-integration <correo> <conversationId> "<nombre>" [url]');
   }

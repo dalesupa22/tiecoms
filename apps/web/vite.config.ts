@@ -36,8 +36,18 @@ function pdfjsAssets(): Plugin {
   };
 }
 
+/**
+ * «Actualización disponible» (docs/ACTUALIZAR.md): cada build lleva un id propio (__BUILD_ID__) y publica
+ * /version.json con el mismo id. Si una pestaña abierta ve otro id, ya hay una versión nueva desplegada.
+ */
+const BUILD_ID = `${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`;
+function buildVersion(): Plugin {
+  return { name: 'chaggu-version', generateBundle() { this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ build: BUILD_ID }) }); } };
+}
+
 export default defineConfig({
-  plugins: [react(), pdfjsAssets()],
+  plugins: [react(), pdfjsAssets(), buildVersion()],
+  define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
   // app.tiecoms.com, Tauri y Capacitor sirven la app en la raíz. VITE_BASE permite montarla bajo una ruta.
   base: process.env.VITE_BASE ?? '/',
   server: {

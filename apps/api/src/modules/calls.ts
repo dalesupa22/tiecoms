@@ -14,7 +14,8 @@ import {
   ChimeSDKMeetingsClient, CreateAttendeeCommand, CreateMeetingCommand, DeleteMeetingCommand, GetMeetingCommand,
   StartMeetingTranscriptionCommand, StopMeetingTranscriptionCommand,
 } from '@aws-sdk/client-chime-sdk-meetings';
-import type { CallDTO, CallHistoryItemDTO, CallJoinDTO, CallKind, CallTranscriptDTO, CallTranscriptSegmentDTO } from '@tiecoms/contracts';
+import type { ActiveCallDTO, CallDTO, CallHistoryItemDTO, CallJoinDTO, CallKind, CallTranscriptDTO, CallTranscriptSegmentDTO } from '@tiecoms/contracts';
+import { LEGACY_DEVICE_KEY, callUserId } from '@tiecoms/contracts';
 import type { z } from 'zod';
 import type { CallTranscriptInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
@@ -41,7 +42,8 @@ function requireEnabled() {
 interface Attendee { AttendeeId: string; ExternalUserId: string; JoinToken: string }
 interface CallProvider {
   create(callId: string): Promise<{ externalId: string; mediaRegion: string; meeting: Record<string, unknown> }>;
-  attendee(externalId: string, userId: string): Promise<Attendee>;
+  /** externalUserId = "{userId}#{deviceKey}" (1.7.1) o solo userId (clientes 1.7.0). */
+  attendee(externalId: string, externalUserId: string): Promise<Attendee>;
   end(externalId: string): Promise<void>;
   transcription(externalId: string, on: boolean): Promise<void>;
 }
@@ -58,9 +60,9 @@ class ChimeProvider implements CallProvider {
     const m = out.Meeting!;
     return { externalId: m.MeetingId!, mediaRegion: m.MediaRegion!, meeting: m as unknown as Record<string, unknown> };
   }
-  async attendee(externalId: string, userId: string) {
+  async attendee(externalId: string, externalUserId: string) {
     try {
-      const out = await this.client.send(new CreateAttendeeCommand({ MeetingId: externalId, ExternalUserId: userId }));
+      const out = await this.client.send(new CreateAttendeeCommand({ MeetingId: externalId, ExternalUserId: externalUserId }));
       const a = out.Attendee!;
       return { AttendeeId: a.AttendeeId!, ExternalUserId: a.ExternalUserId!, JoinToken: a.JoinToken! };
     } catch (e: any) {
@@ -113,9 +115,9 @@ class FakeProvider implements CallProvider {
       meeting: { MeetingId: externalId, ExternalMeetingId: callId, MediaRegion: 'us-east-1', MediaPlacement: { AudioHostUrl: 'fake.invalid:3478', SignalingUrl: 'wss://fake.invalid/control', TurnControlUrl: 'https://fake.invalid/turn' } },
     };
   }
-  async attendee(externalId: string, userId: string) {
+  async attendee(externalId: string, externalUserId: string) {
     if (!this.meetings.has(externalId)) throw new MeetingGone();
-    return { AttendeeId: `att-${randomUUID()}`, ExternalUserId: userId, JoinToken: `tok-${randomUUID()}` };
+    return { AttendeeId: `att-${randomUUID()}`, ExternalUserId: externalUserId, JoinToken: `tok-${randomUUID()}` };
   }
   async end(externalId: string) { this.meetings.delete(externalId); }
   async transcription(externalId: string, on: boolean) {
@@ -128,18 +130,31 @@ class FakeProvider implements CallProvider {
 let provider: CallProvider | null = null;
 const getProvider = () => (provider ??= process.env.CALLS_PROVIDER === 'fake' ? new FakeProvider() : new ChimeProvider());
 
+// ---------- Dispositivos (1.7.1) ----------
+/** Desde qué dispositivo llega la petición: la llave que manda el cliente (o 'legacy') y la sesión para su nombre. */
+export interface CallDevice { key: string; sessionId: string }
+export const deviceOf = (sessionId: string, key?: string | null): CallDevice => ({ key: key || LEGACY_DEVICE_KEY, sessionId });
+const externalUserIdOf = (userId: string, key: string) => (key === LEGACY_DEVICE_KEY ? userId : `${userId}#${key}`);
+
 // ---------- Lectura ----------
-async function callDTO(db: Db, id: string): Promise<CallDTO> {
+/** viewerId: agrega myDevices (solo sus dispositivos dentro de la llamada). */
+async function callDTO(db: Db, id: string, viewerId?: string): Promise<CallDTO> {
   const { rows } = await db.query(
     `SELECT c.*,
-            COALESCE((SELECT array_agg(p.user_id ORDER BY p.first_joined_at) FROM call_participants p
-                       WHERE p.call_id = c.id AND p.left_at IS NULL), '{}') AS active,
+            COALESCE((SELECT array_agg(x.user_id ORDER BY x.first) FROM (SELECT p.user_id, min(p.first_joined_at) AS first FROM call_participants p
+                       WHERE p.call_id = c.id AND p.left_at IS NULL GROUP BY p.user_id) x), '{}') AS active,
+            CASE WHEN $2::uuid IS NULL THEN NULL ELSE COALESCE((SELECT jsonb_agg(jsonb_build_object('deviceKey', p.device_key, 'platform', COALESCE(p.platform, 'web'), 'label', COALESCE(p.label, ''))
+                       ORDER BY p.joined_at) FROM call_participants p WHERE p.call_id = c.id AND p.user_id = $2 AND p.left_at IS NULL), '[]'::jsonb) END AS my_devices,
             EXISTS (SELECT 1 FROM call_transcript_segments s WHERE s.call_id = c.id) AS has_transcript,
             ARRAY(SELECT i.user_id FROM call_invites i WHERE i.call_id = c.id ORDER BY i.created_at) AS invited,
+            (SELECT jsonb_agg(jsonb_build_object('userId', g.user_id, 'at', to_char(g.rung_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+                    'joined', EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id AND p.user_id = g.user_id AND p.joined_at >= g.rung_at - interval '5 seconds'))
+                    ORDER BY g.rung_at) FROM call_rings g WHERE g.call_id = c.id) AS rings,
             (SELECT jsonb_object_agg(u.id, u.name) FROM users u
-              WHERE u.id IN (SELECT p.user_id FROM call_participants p WHERE p.call_id = c.id UNION SELECT i.user_id FROM call_invites i WHERE i.call_id = c.id)) AS names
+              WHERE u.id IN (SELECT p.user_id FROM call_participants p WHERE p.call_id = c.id UNION SELECT i.user_id FROM call_invites i WHERE i.call_id = c.id
+                             UNION SELECT g.user_id FROM call_rings g WHERE g.call_id = c.id)) AS names
        FROM calls c WHERE c.id = $1`,
-    [id],
+    [id, viewerId ?? null],
   );
   const r = rows[0];
   if (!r) throw notFound('Llamada');
@@ -148,6 +163,8 @@ async function callDTO(db: Db, id: string): Promise<CallDTO> {
     startedAt: new Date(r.started_at).toISOString(), endedAt: r.ended_at ? new Date(r.ended_at).toISOString() : null,
     activeUserIds: r.active, transcribing: r.transcribing, hasTranscript: r.has_transcript,
     ...(r.invited?.length ? { invitedUserIds: r.invited } : {}), names: r.names ?? {},
+    ...(r.rings?.length ? { invited: r.rings } : {}),
+    ...(viewerId ? { myDevices: r.my_devices ?? [] } : {}),
   };
 }
 
@@ -156,7 +173,39 @@ async function publish(c: Tx, conversationId: string, callId: string) {
   await appendEvent(c, conversationId, { type: 'call.updated', conversationId, call });
   // Los agregados que no están en el chat no escuchan la conversación: les llega por su cuenta.
   if (call.invitedUserIds?.length) await enqueueOutbox(c, 'account.event', { userIds: call.invitedUserIds, event: { type: 'call.updated', call } });
+  // 1.7.1: a quien estuvo alguna vez en la llamada, por su cuenta, la misma llamada con SUS dispositivos (myDevices).
+  const { rows } = await c.query('SELECT DISTINCT user_id FROM call_participants WHERE call_id = $1', [callId]);
+  for (const r of rows) {
+    await enqueueOutbox(c, 'account.event', { userIds: [r.user_id], event: { type: 'call.updated', call: await callDTO(c, callId, r.user_id) } });
+  }
   return call;
+}
+
+/** GET /calls/active: llamadas sin terminar de mis conversaciones y a las que me agregaron, con su título. */
+export async function activeCalls(userId: string): Promise<{ calls: ActiveCallDTO[] }> {
+  const { rows } = await pool.query(
+    `SELECT c.id, cv.name AS title FROM calls c JOIN conversations cv ON cv.id = c.conversation_id AND cv.archived_at IS NULL
+      WHERE c.ended_at IS NULL AND (
+        EXISTS (SELECT 1 FROM conversation_memberships cm
+                  LEFT JOIN workspace_memberships wm ON wm.workspace_id = cv.workspace_id AND wm.user_id = cm.user_id
+                 WHERE cm.conversation_id = c.conversation_id AND cm.user_id = $1 AND cm.removed_at IS NULL
+                   AND (cv.workspace_id IS NULL OR (wm.user_id IS NOT NULL AND wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now()))))
+        OR EXISTS (SELECT 1 FROM call_invites i WHERE i.call_id = c.id AND i.user_id = $1))
+      ORDER BY c.started_at DESC LIMIT 50`,
+    [userId],
+  );
+  return { calls: await Promise.all(rows.map(async (r) => ({ call: await callDTO(pool, r.id, userId), title: r.title ?? null }))) };
+}
+
+/** Para el bootstrap: la llamada en la que estoy desde algún dispositivo (o null). */
+export async function myActiveCall(userId: string): Promise<CallDTO | null> {
+  if (!callsEnabled()) return null;
+  const { rows } = await pool.query(
+    `SELECT p.call_id FROM call_participants p JOIN calls c ON c.id = p.call_id AND c.ended_at IS NULL
+      WHERE p.user_id = $1 AND p.left_at IS NULL ORDER BY p.joined_at DESC LIMIT 1`,
+    [userId],
+  );
+  return rows[0] ? callDTO(pool, rows[0].call_id, userId) : null;
 }
 
 /** La llamada activa de la conversación, si hay (para pintar «Unirse»). */
@@ -216,7 +265,7 @@ export async function history(userId: string, q: { before?: string; limit: numbe
 
 // ---------- Empezar / entrar ----------
 /** Empieza la llamada o entra a la que está en curso. Devuelve lo que el SDK necesita para conectarse. */
-export async function startOrJoin(userId: string, conversationId: string, kind: CallKind): Promise<CallJoinDTO> {
+export async function startOrJoin(userId: string, conversationId: string, kind: CallKind, device: CallDevice = deviceOf('', null)): Promise<CallJoinDTO> {
   requireEnabled();
   for (let attempt = 0; attempt < 2; attempt++) {
     const { callId, created } = await tx(async (c) => {
@@ -228,7 +277,7 @@ export async function startOrJoin(userId: string, conversationId: string, kind: 
       return { callId: ins.rows[0].id as string, created: true };
     });
     try {
-      return await joinCall(userId, callId, created);
+      return await joinCall(userId, callId, created, device);
     } catch (e) {
       if (!(e instanceof MeetingGone)) throw e;
       // Chime ya cerró esa reunión: se da por terminada y se abre una nueva.
@@ -239,20 +288,20 @@ export async function startOrJoin(userId: string, conversationId: string, kind: 
 }
 
 /** Entrar a una llamada concreta (desde el aviso de «te están llamando»). */
-export async function join(userId: string, callId: string): Promise<CallJoinDTO> {
+export async function join(userId: string, callId: string, device: CallDevice = deviceOf('', null)): Promise<CallJoinDTO> {
   requireEnabled();
   const call = await callFor(pool, userId, callId, 'post');
   if (call.ended_at) throw new ApiError(409, 'call_ended', 'La llamada ya terminó');
   try {
-    return await joinCall(userId, callId, false);
+    return await joinCall(userId, callId, false, device);
   } catch (e) {
     if (!(e instanceof MeetingGone)) throw e;
     await finish(callId);
-    return startOrJoin(userId, call.conversation_id, call.kind);
+    return startOrJoin(userId, call.conversation_id, call.kind, device);
   }
 }
 
-async function joinCall(userId: string, callId: string, created: boolean): Promise<CallJoinDTO> {
+async function joinCall(userId: string, callId: string, created: boolean, device: CallDevice): Promise<CallJoinDTO> {
   let row = (await pool.query('SELECT * FROM calls WHERE id = $1', [callId])).rows[0];
   if (!row.meeting) {
     // Idempotente en Chime (ClientRequestToken): si dos entran a la vez, ambos reciben la misma reunión.
@@ -261,20 +310,25 @@ async function joinCall(userId: string, callId: string, created: boolean): Promi
       [callId, m.externalId, m.mediaRegion, JSON.stringify(m.meeting)]);
     row = (await pool.query('SELECT * FROM calls WHERE id = $1', [callId])).rows[0];
   }
-  const attendee = await getProvider().attendee(row.external_id, userId);
+  // Un attendee por dispositivo: la misma persona puede estar desde dos sin que Chime saque al primero.
+  const attendee = await getProvider().attendee(row.external_id, externalUserIdOf(userId, device.key));
   const call = await tx(async (c) => {
+    const ses = device.sessionId ? (await c.query('SELECT platform, device_name FROM sessions WHERE id = $1', [device.sessionId])).rows[0] : null;
+    const platform = ses?.platform ?? 'web', label = ses?.device_name ?? '';
     await c.query(
-      `INSERT INTO call_participants (call_id, user_id, attendee_id) VALUES ($1,$2,$3)
-       ON CONFLICT (call_id, user_id) DO UPDATE SET attendee_id = $3, joined_at = now(), last_seen_at = now(), left_at = NULL`,
-      [callId, userId, attendee.AttendeeId],
+      `INSERT INTO call_participants (call_id, user_id, attendee_id, device_key, platform, label) VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (call_id, user_id, device_key) DO UPDATE SET attendee_id = $3, platform = $5, label = $6, joined_at = now(), last_seen_at = now(), left_at = NULL`,
+      [callId, userId, attendee.AttendeeId, device.key, platform, label],
     );
+    // Mis otros dispositivos dejan de sonar (ignoran el aviso si deviceKey es el suyo).
+    await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'call.answered', callId, conversationId: row.conversation_id, deviceKey: device.key, platform, label } });
     if (created) {
       const msg = await appendMessage(c, { conversationId: row.conversation_id, authorId: userId, kind: 'system', body: sys('call.started', { kind: row.kind, callId }) });
       await c.query('UPDATE calls SET message_id = $2 WHERE id = $1', [callId, msg.id]);
     }
     const dto = await publish(c, row.conversation_id, callId);
     if (created) await ring(c, dto, userId);
-    return dto;
+    return callDTO(c, callId, userId);
   });
   return { call, meeting: { Meeting: row.meeting }, attendee: { Attendee: attendee } };
 }
@@ -296,12 +350,12 @@ async function ring(c: Tx, call: CallDTO, callerId: string) {
 }
 
 /** Aviso en vivo (socket) y push de llamada entrante (para la app cerrada). */
-async function ringUsers(c: Tx, call: CallDTO, userIds: string[], callerName: string, title: string | null) {
+async function ringUsers(c: Tx, call: CallDTO, userIds: string[], callerName: string, title: string | null, again = false) {
   if (!userIds.length) return;
   await enqueueOutbox(c, 'account.event', { userIds, event: { type: 'call.ringing', call, conversationTitle: title, callerName } });
   await c.query(
     "INSERT INTO jobs (kind, payload, max_attempts, dedupe_key) VALUES ('push.call', $1, 1, $2) ON CONFLICT (dedupe_key) DO NOTHING",
-    [JSON.stringify({ callId: call.id, userIds, callerName, title }), `push-call:${call.id}:${userIds.slice().sort().join(',').slice(0, 180)}`],
+    [JSON.stringify({ callId: call.id, userIds, callerName, title }), `push-call:${call.id}:${again ? `${Date.now()}:` : ''}${userIds.slice().sort().join(',').slice(0, 160)}`],
   );
 }
 
@@ -326,35 +380,48 @@ export async function invite(userId: string, callId: string, userIds: string[]) 
     for (const id of ids) if (!members.has(id)) {
       await c.query('INSERT INTO call_invites (call_id, user_id, invited_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [callId, id, userId]);
     }
+    // «Llamando…» / «No contestó» / «Volver a llamar»: volver a invitar renueva la hora y vuelve a sonar.
+    for (const id of ids) {
+      await c.query('INSERT INTO call_rings (call_id, user_id, rung_by) VALUES ($1,$2,$3) ON CONFLICT (call_id, user_id) DO UPDATE SET rung_at = now(), rung_by = $3', [callId, id, userId]);
+    }
     const info = (await c.query('SELECT (SELECT name FROM users WHERE id = $2) AS caller, (SELECT name FROM conversations WHERE id = $1) AS title', [call.conversation_id, userId])).rows[0];
     const dto = await publish(c, call.conversation_id, callId);
-    await ringUsers(c, dto, ids, info.caller ?? '', info.title ?? null);
+    await ringUsers(c, dto, ids, info.caller ?? '', info.title ?? null, true);
     return { call: dto };
   });
 }
 
 // ---------- Latido / salir / terminar ----------
-export async function heartbeat(userId: string, callId: string) {
+export async function heartbeat(userId: string, callId: string, deviceKey: string = LEGACY_DEVICE_KEY) {
+  // Latido por dispositivo. Un cliente 1.7.0 ('legacy') mantiene vivas sus filas sin llave propia.
   const { rowCount } = await pool.query(
     `UPDATE call_participants p SET last_seen_at = now() FROM calls c
-      WHERE p.call_id = $1 AND p.user_id = $2 AND p.left_at IS NULL AND c.id = p.call_id AND c.ended_at IS NULL`,
-    [callId, userId],
+      WHERE p.call_id = $1 AND p.user_id = $2 AND p.device_key = $3 AND p.left_at IS NULL AND c.id = p.call_id AND c.ended_at IS NULL`,
+    [callId, userId, deviceKey],
   );
   if (!rowCount) throw new ApiError(409, 'not_in_call', 'Ya no estás en esa llamada');
   return { ok: true };
 }
 
-export async function leave(userId: string, callId: string) {
+/** Sale un dispositivo mío (el propio al colgar, u otro con «Pasar aquí»). Sin deviceKey: 'legacy' (clientes 1.7.0). */
+export async function leave(userId: string, callId: string, deviceKey: string = LEGACY_DEVICE_KEY) {
   const call = await callFor(pool, userId, callId, 'read');
   const empty = await tx(async (c) => {
-    const r = await c.query('UPDATE call_participants SET left_at = now() WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL', [callId, userId]);
+    const r = await c.query('UPDATE call_participants SET left_at = now() WHERE call_id = $1 AND user_id = $2 AND device_key = $3 AND left_at IS NULL', [callId, userId, deviceKey]);
     if (!r.rowCount || call.ended_at) return false;
     const left = await c.query('SELECT 1 FROM call_participants WHERE call_id = $1 AND left_at IS NULL LIMIT 1', [callId]);
     if (left.rowCount) { await publish(c, call.conversation_id, callId); return false; }
     return true;
   });
   if (empty) await finish(callId);
-  return { call: await callDTO(pool, callId) };
+  return { call: await callDTO(pool, callId, userId) };
+}
+
+/** Rechazar en un dispositivo: todos los míos dejan de sonar. Para los demás no cambia nada. */
+export async function decline(userId: string, callId: string) {
+  const call = await callFor(pool, userId, callId, 'read');
+  await tx((c) => enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'call.declined', callId, conversationId: call.conversation_id } }));
+  return { ok: true };
 }
 
 /** Colgar para todos (cualquiera que pueda escribir en la conversación). */
@@ -457,7 +524,8 @@ export async function addSegments(userId: string, callId: string, input: z.infer
   const byAttendee = new Map(people.rows.map((r) => [r.attendee_id, r.user_id]));
   let saved = 0;
   for (const s of input.segments) {
-    const speaker = (s.externalUserId && byUser.has(s.externalUserId) ? s.externalUserId : s.attendeeId ? byAttendee.get(s.attendeeId) : null) ?? null;
+    const ext = s.externalUserId ? callUserId(s.externalUserId) : null;
+    const speaker = (ext && byUser.has(ext) ? ext : s.attendeeId ? byAttendee.get(s.attendeeId) : null) ?? null;
     const r = await pool.query(
       `INSERT INTO call_transcript_segments (call_id, result_id, speaker_user_id, speaker_name, language, body, start_ms, end_ms, reported_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (call_id, result_id) DO NOTHING`,

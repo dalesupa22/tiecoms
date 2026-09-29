@@ -12,7 +12,7 @@ import {
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
   ChatSearchQuery, EventCommentInput,
-  SetAdminInput, UpdateIntegrationInput, StartCallInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput,
+  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -445,12 +445,15 @@ export async function buildHttp() {
     priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/call', async (req) => ({ call: await calls.activeCall(req.userId, z.uuid().parse(req.params.id)) }));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/call', callLimit, async (req, reply) => {
       reply.header('cache-control', 'no-store');
-      return calls.startOrJoin(req.userId, z.uuid().parse(req.params.id), StartCallInput.parse(req.body ?? {}).kind);
+      const b = StartCallInput.parse(req.body ?? {});
+      return calls.startOrJoin(req.userId, z.uuid().parse(req.params.id), b.kind, calls.deviceOf(req.sessionId, b.deviceKey));
     });
-    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/join', callLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.join(req.userId, z.uuid().parse(req.params.id)); });
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/join', callLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.join(req.userId, z.uuid().parse(req.params.id), calls.deviceOf(req.sessionId, CallDeviceInput.parse(req.body ?? {}).deviceKey)); });
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/invite', callLimit, async (req) => calls.invite(req.userId, z.uuid().parse(req.params.id), CallInviteInput.parse(req.body).userIds));
-    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/heartbeat', async (req) => calls.heartbeat(req.userId, z.uuid().parse(req.params.id)));
-    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/leave', async (req) => calls.leave(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/heartbeat', async (req) => calls.heartbeat(req.userId, z.uuid().parse(req.params.id), CallDeviceInput.parse(req.body ?? {}).deviceKey));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/leave', async (req) => calls.leave(req.userId, z.uuid().parse(req.params.id), CallDeviceInput.parse(req.body ?? {}).deviceKey));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/decline', callLimit, async (req) => calls.decline(req.userId, z.uuid().parse(req.params.id)));
+    priv.get('/api/v1/calls/active', async (req) => calls.activeCalls(req.userId));
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/end', async (req) => calls.endForAll(req.userId, z.uuid().parse(req.params.id)));
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/transcription', callLimit, async (req) => {
       const b = CallTranscriptionInput.parse(req.body);

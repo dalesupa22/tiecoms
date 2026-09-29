@@ -386,6 +386,8 @@ export interface MessagePreviewDTO {
   body: string;
   attachments: AttachmentSummaryDTO | null;
   createdAt: string;
+  /** Una sola vista (tanda 1.7): mostrar «① Foto», «① Mensaje» o «① Nota de voz», nunca el contenido. */
+  viewOnce?: boolean;
 }
 
 /**

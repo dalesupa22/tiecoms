@@ -54,8 +54,11 @@ import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
 import { z } from 'zod';
 import { verifyAccess } from './security.ts';
+import { ByteLru } from './lru.ts';
 
 const REFRESH_COOKIE = 'tc_rt';
+/** Fotos de perfil y miniaturas de enlaces en memoria (inmutables por id). */
+export const imageCache = new ByteLru<{ body: Buffer; contentType: string }>(200, 20 * 1024 * 1024);
 const COOKIE_PATH = '/api/v1/auth';
 import { safeRequestPath } from './log-safety.ts';
 
@@ -570,16 +573,21 @@ export async function buildHttp() {
   });
 
   // Foto de perfil: el id cambia en cada subida, así que se puede cachear para siempre.
+  // En memoria (LRU 200 / 20 MB): cada foto iba a S3 en cada petición (p50 ≈ 96 ms).
   app.get<{ Params: { id: string } }>('/api/v1/avatars/:id', async (req, reply) => {
-    const f = await profile.readAvatar(z.uuid().parse(req.params.id));
+    const id = z.uuid().parse(req.params.id);
+    const f = await imageCache.through(`a:${id}`, () => profile.readAvatar(id));
     return reply.header('content-type', f.contentType).header('cache-control', 'public, max-age=31536000, immutable').send(f.body);
   });
 
   // Miniatura de una vista previa de enlace (guardada en S3 por el worker).
   app.get<{ Params: { id: string } }>('/api/v1/previews/:id', async (req, reply) => {
-    const key = await readPreviewImage(z.uuid().parse(req.params.id));
-    if (!key) return reply.status(404).send({ error: { code: 'not_found', message: 'No encontrada' } });
-    const f = await getObject(key);
+    const id = z.uuid().parse(req.params.id);
+    const f = await imageCache.through(`p:${id}`, async () => {
+      const key = await readPreviewImage(id);
+      return key ? getObject(key) : { body: Buffer.alloc(0), contentType: '' };
+    });
+    if (!f.body.length) return reply.status(404).send({ error: { code: 'not_found', message: 'No encontrada' } });
     return reply.header('content-type', f.contentType).header('cache-control', 'public, max-age=31536000, immutable').send(f.body);
   });
 

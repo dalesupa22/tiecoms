@@ -46,41 +46,67 @@ object Topics {
     fun counts(messages: List<MessageDTO>): Map<String, Int> =
         messages.filter { it.topicId != null && it.deletedAt == null }.groupingBy { it.topicId!! }.eachCount()
 
-    /** Filtro válido: solo un tema activo de la lista; archivado o quitado deja de filtrar. */
-    fun validFilter(list: List<TopicDTO>, filter: String?): String? = filter?.takeIf { f -> list.any { it.id == f && !it.archived } }
+    /** Filtro «Todo»: todos los mensajes, con y sin tema (el filtro null es «General»). */
+    const val ALL = "__all"
 
     /**
-     * Mensajes a mostrar con la banderita elegida (null = «Todo»): los de ese tema y las tarjetas de sus tareas
-     * ([issueTopic] da el tema de la tarea de un aviso `issue.created`).
+     * Filtro válido: un tema activo de la lista, o [ALL] si hay temas activos; si no, null («General»).
+     * Un tema archivado o quitado deja de filtrar; sin temas activos «General» y «Todo» son lo mismo.
+     */
+    fun validFilter(list: List<TopicDTO>, filter: String?): String? = when (filter) {
+        null -> null
+        ALL -> ALL.takeIf { list.any { !it.archived } }
+        else -> filter.takeIf { f -> list.any { it.id == f && !it.archived } }
+    }
+
+    /**
+     * Mensajes de un tema ([topicId]) y las tarjetas de sus tareas ([issueTopic] da el tema de la tarea de un aviso
+     * `issue.created`). Con null no filtra.
      */
     fun filter(messages: List<MessageDTO>, topicId: String?, issueTopic: (String) -> String? = { null }): List<MessageDTO> =
         if (topicId == null) messages
         else messages.filter { it.topicId == topicId || (it.kind == "system" && cardIssueId(it)?.let(issueTopic) == topicId) }
 
-    /** Ids de los temas activos (los archivados cuentan como «sin tema» en «Todo» y en los contadores). */
+    /** Ids de los temas activos (los archivados cuentan como «sin tema» en «General» y en los contadores). */
     fun activeIds(list: List<TopicDTO>): Set<String> = list.filter { !it.archived }.map { it.id }.toSet()
 
     /**
-     * «Todo» con temas activos (docs/TEMAS.md › «Todo», Conversation.tsx `hideTopicsInAll`): se ve lo sin tema, lo no leído
-     * de cualquier tema (según lo leído al abrir, [readFrom]) y los mensajes a los que se saltó ([revealed]).
-     * Lo ya leído con un tema activo queda solo en su banderita.
+     * «General» (docs/TEMAS.md, pedido de Danny del 29-sep-2026; web: Conversation.tsx generalOnly): solo lo que no tiene
+     * un tema activo, ni las tarjetas de tareas de un tema. Los mensajes de temas archivados o quitados cuentan como sin tema.
+     * Un mensaje al que se saltó ([revealed]) queda a la vista.
      */
-    fun visibleInAll(m: MessageDTO, activeIds: Set<String>, readFrom: Long, revealed: Set<Long>): Boolean {
-        val t = m.topicId ?: return true
-        if (t !in activeIds) return true
-        return m.seq > readFrom || m.seq in revealed
+    fun inGeneral(m: MessageDTO, activeIds: Set<String>, revealed: Set<Long>, issueTopic: (String) -> String? = { null }): Boolean {
+        if (m.seq in revealed) return true
+        if (m.topicId != null && m.topicId in activeIds) return false
+        if (m.kind == "system" && cardIssueId(m)?.let(issueTopic)?.let { it in activeIds } == true) return false
+        return true
     }
 
     /**
-     * Lo que se ve con la banderita [topicId] (null = «Todo»). Sin temas activos «Todo» muestra todo, como antes.
-     * [issueTopic] da el tema de la tarea de un aviso `issue.created`.
+     * Tres vistas: [filter] null = «General» (así abre el chat), [ALL] = «Todo» (todo, cada uno con su etiqueta) o el id de un
+     * tema (solo lo suyo). Sin temas activos «General» muestra todo, como antes.
      */
-    fun view(messages: List<MessageDTO>, topics: List<TopicDTO>, topicId: String?, readFrom: Long, revealed: Set<Long>,
+    fun view(messages: List<MessageDTO>, topics: List<TopicDTO>, filter: String?, revealed: Set<Long> = emptySet(),
              issueTopic: (String) -> String? = { null }): List<MessageDTO> {
-        if (topicId != null) return filter(messages, topicId, issueTopic)
+        val f = validFilter(topics, filter)
+        if (f == ALL) return messages
+        if (f != null) return filter(messages, f, issueTopic)
         val active = activeIds(topics)
         if (active.isEmpty()) return messages
-        return messages.filter { visibleInAll(it, active, readFrom, revealed) }
+        return messages.filter { inGeneral(it, active, revealed, issueTopic) }
+    }
+
+    /** El tema de lo que se escribe: el de la banderita elegida; en «General» y en «Todo», ninguno. */
+    fun composeTopic(topics: List<TopicDTO>, filter: String?): String? = validFilter(topics, filter)?.takeIf { it != ALL }
+
+    /**
+     * Saltar a un mensaje (búsqueda, mención, enlace o notificación): el filtro pasa a su tema, o a «General» si no tiene
+     * (o su tema ya no está activo). En «Todo» no cambia.
+     */
+    fun jumpFilter(topics: List<TopicDTO>, current: String?, target: MessageDTO?): String? {
+        val cur = validFilter(topics, current)
+        if (cur == ALL || target == null) return cur
+        return target.topicId?.takeIf { it in activeIds(topics) }
     }
 
     /** Lo que cuenta como «sin leer» en los números de las banderitas: texto de otra persona, no eliminado, después de [readSeq]. */
@@ -89,7 +115,7 @@ object Topics {
 
     /**
      * Sin leer por banderita, con lo leído en vivo ([readSeq] = max(lastReadSeq, historyFromSeq)). La clave "" es lo sin tema
-     * (el número de «Todo»); un tema archivado o quitado cuenta como sin tema. Los propios y los de sistema no cuentan.
+     * (el número de «General»); un tema archivado o quitado cuenta como sin tema. Los propios y los de sistema no cuentan.
      */
     fun unread(messages: List<MessageDTO>, activeIds: Set<String>, readSeq: Long, me: String?): Map<String, Int> {
         val n = HashMap<String, Int>()
@@ -103,7 +129,7 @@ object Topics {
 
     /**
      * Al abrir un chat con no leídos: si todos están en un solo tema activo, el id de ese tema (el chat abre filtrado ahí);
-     * si están repartidos, hay no leídos sin tema o no hay ninguno, null (abre en «Todo»).
+     * si están repartidos, hay no leídos sin tema o no hay ninguno, null (abre en «General»).
      */
     fun autoTopic(messages: List<MessageDTO>, activeIds: Set<String>, readFrom: Long, me: String?): String? {
         val keys = messages.filter { countsAsUnread(it, readFrom, me) }.map { it.topicId?.takeIf { t -> t in activeIds } ?: "" }.toSet()

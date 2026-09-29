@@ -3,6 +3,9 @@
 <resources>
     <string name="topic_bar">Chat topics</string>
     <string name="topic_all">All</string>
+    <string name="topic_general">General</string>
+    <string name="topic_general_hint">Only messages without a topic</string>
+    <string name="topic_all_hint">Every message, with or without a topic</string>
     <string name="topic_new">New</string>
     <string name="topic_archived_n">Archived %1$d</string>
     <string name="topic_new_title">New topic</string>

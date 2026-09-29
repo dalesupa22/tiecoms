@@ -22,7 +22,7 @@ import { UpdateBanner } from './update.tsx';
 import { EmojiPickerHost } from './screens/Reactions.tsx';
 import { SavedLinksScreen } from './screens/Links.tsx';
 import { ScheduledScreen } from './screens/Scheduled.tsx';
-import { CallDock, CallsScreen, IncomingCallHost } from './screens/Call.tsx';
+import { CallDock, CallsScreen, IncomingCallHost, OtherDeviceCallBar } from './screens/Call.tsx';
 /** «Documentos que firmé»: se carga aparte junto con el visor de PDF. */
 const SignedScreen = lazy(() => import('./screens/Signed.tsx'));
 
@@ -95,6 +95,7 @@ export function App() {
     <EmojiPickerHost />
     <CallDock />
     <IncomingCallHost />
+    <OtherDeviceCallBar />
     </>
   );
 }

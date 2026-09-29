@@ -1,3 +1,4 @@
+import { CallDot } from './Call.tsx';
 import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import type { BootstrapDTO, ConversationDTO, CreateGroupRequest, InvitationPreviewDTO, IssueDTO, MessageDTO, OrganizationDTO, OversightDTO, WorkspaceDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
@@ -341,7 +342,7 @@ export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, t
     {(c.unreadMentions ?? 0) > 0 && <span className="pill mention-pill" title={t('mention.youMentioned')}>@</span>}
     {c.unread > 0 && <span className={`pill ${muted ? 'is-muted' : ''}`} style={{ background: badgeColor(orgOfWs) }}>{c.unread}</span>}
   </>;
-  const pin = c.pinnedAt ? <span className="conv-pin" title={t('side.pinned')} aria-label={t('side.pinned')}>📌</span> : null;
+  const pin = <><CallDot conversationId={c.id} />{c.pinnedAt ? <span className="conv-pin" title={t('side.pinned')} aria-label={t('side.pinned')}>📌</span> : null}</>;
   return (
     <button className={`side-conv ${preview ? 'has-preview' : ''} ${active ? 'active' : ''} ${c.unread && !muted ? 'unread' : ''} ${muted ? 'is-muted' : ''}`} onClick={() => navigate(`/c/${c.id}`)}
       {...menuProps(() => [...conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }), ...extraMenu])}>

@@ -3,9 +3,9 @@
  * panel flotante de la llamada (con subtítulos y el interruptor de transcripción) y la transcripción guardada.
  */
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import type { CallDTO, CallHistoryItemDTO, CallTranscriptDTO, ConversationDTO } from '@tiecoms/contracts';
+import type { ActiveCallDTO, CallDTO, CallDeviceDTO, CallHistoryItemDTO, CallTranscriptDTO, ConversationDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
-import { bindTile, currentCall, hangUp, joinCall, setTranscription, startCall, subscribeCall, toggleCamera, toggleMute, type CallView } from '../call.ts';
+import { bindTile, chooseAudioInput, chooseAudioOutput, currentCall, hangUp, joinCall, listAudioInputs, listAudioOutputs, passHere, setTranscription, startCall, subscribeCall, toggleCamera, toggleMute, type CallView } from '../call.ts';
 import { errorText, locale, t } from '../i18n.ts';
 import { openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate } from '../router.ts';
@@ -60,6 +60,8 @@ export function showIncomingCall(call: CallDTO, callerName: string, title: strin
   ringTimer = setTimeout(dismissRing, 45_000);
 }
 function dismissRing() { stopRingtone(); ringing = null; ringListeners.forEach((l) => l()); }
+/** Contesté o rechacé en otro de mis dispositivos (call.answered / call.declined): aquí deja de sonar. */
+export function dismissIncomingCall(callId: string) { if (ringing?.call.id === callId) dismissRing(); }
 
 export function IncomingCallHost() {
   const r = useSyncExternalStore((l) => { ringListeners.add(l); return () => ringListeners.delete(l); }, () => ringing);
@@ -75,7 +77,7 @@ export function IncomingCallHost() {
         <strong className="ellipsis">{r.callerName}</strong>
         <div className="small muted ellipsis">{r.title ? t('call.incomingIn', { title: r.title }) : t('call.incoming')}</div>
       </div>
-      <button className="btn small" onClick={dismissRing}>{t('call.decline')}</button>
+      <button className="btn small" onClick={() => { const id = r.call.id; dismissRing(); void client.declineCall(id).catch(() => {}); }}>{t('call.decline')}</button>
       <button className="btn small" onClick={() => answer(false)} title={t('call.answerAudio')}>📞</button>
       {r.call.kind === 'video' && <button className="btn accent small" onClick={() => answer(true)} title={t('call.answerVideo')}>🎥</button>}
       {r.call.kind !== 'video' && <button className="btn accent small" onClick={() => answer(false)}>{t('call.answer')}</button>}
@@ -109,7 +111,10 @@ export function CallDock() {
   const conv = d.conversations.find((c) => c.id === v.call.conversationId);
   const others = v.call.activeUserIds.filter((id) => id !== d.me.id);
   const clock = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
-  const video = v.tiles.filter((x) => x.active || x.local);
+  // Cuadrícula en cuanto alguien tiene video: quien no tiene cámara sigue ahí como avatar.
+  const video = v.tiles.filter((x) => (x.local ? v.camera : x.active));
+  const videoBy = new Map(video.map((x) => [x.local ? d.me.id : x.userId, x] as const));
+  const pending = (v.call.invited ?? []).filter((x) => !x.joined && !v.call.activeUserIds.includes(x.userId));
   const toggleTranscript = () => {
     if (v.call.transcribing) { void setTranscription(false).catch(fail); return; }
     openDialog((close) => <TranscriptConsent onClose={close} onConfirm={(ai) => { close(); void setTranscription(true, ai).catch(fail); }} />);
@@ -127,13 +132,24 @@ export function CallDock() {
       {v.call.transcribing && <div className="call-rec" role="status">⏺ {t('call.transcribingAll')}</div>}
       {!min && <>
         {video.length > 0
-          ? <div className={`call-grid n${Math.min(video.length, 4)}`}>{video.map((x) => <Tile key={x.tileId} tileId={x.tileId} local={x.local} label={x.local ? t('call.you') : firstName(d, x.userId, v.call.names)} />)}</div>
+          ? <div className={`call-grid n${Math.min(v.call.activeUserIds.length, 4)}`}>{v.call.activeUserIds.map((id) => {
+              const x = videoBy.get(id);
+              const label = id === d.me.id ? t('call.you') : firstName(d, id, v.call.names);
+              const muted = id === d.me.id ? v.muted : v.mutedUsers.includes(id);
+              return x
+                ? <div key={id} className="call-cell"><Tile tileId={x.tileId} local={x.local} label={label} /><PersonBadges muted={muted} camera /></div>
+                : <div key={id} className={`call-tile is-avatar ${v.speaking.includes(id) ? 'is-speaking' : ''}`}>
+                    <Avatar person={personById(d, id)} size={56} /><span className="call-tile-name">{label}</span><PersonBadges muted={muted} camera={false} />
+                  </div>;
+            })}</div>
           : <div className="call-people">{v.call.activeUserIds.map((id) => (
               <div key={id} className={`call-person ${v.speaking.includes(id) ? 'is-speaking' : ''}`}>
                 <Avatar person={personById(d, id)} size={44} /><span className="small ellipsis">{id === d.me.id ? t('call.you') : firstName(d, id, v.call.names)}</span>
+                {(id === d.me.id ? v.muted : v.mutedUsers.includes(id)) && <span className="call-badge" title={t('call.personMuted')} aria-label={t('call.personMuted')}>🔇</span>}
               </div>))}
               {others.length === 0 && <div className="small muted">{t('call.waiting')}</div>}
             </div>}
+        {pending.length > 0 && <InvitedList call={v.call} pending={pending} />}
         {v.call.transcribing && v.captions.length > 0 && (
           <div className="call-captions" aria-live="polite">
             {v.captions.slice(-4).map((c) => <div key={c.resultId} className={c.partial ? 'is-partial' : ''}><b>{c.userId === d.me.id ? t('call.you') : firstName(d, c.userId, v.call.names) || '·'}:</b> {c.processing ? <span className="call-processing">⏳ {t('call.processing')}</span> : c.text}</div>)}
@@ -144,12 +160,134 @@ export function CallDock() {
         <button className={`call-ctl ${v.muted ? 'is-off' : ''}`} onClick={toggleMute} aria-pressed={v.muted} title={v.muted ? t('call.unmute') : t('call.mute')}>{v.muted ? '🔇' : '🎙️'}</button>
         <button className={`call-ctl ${v.camera ? '' : 'is-off'}`} onClick={() => void toggleCamera().catch(fail)} aria-pressed={!v.camera} title={v.camera ? t('call.cameraOff') : t('call.cameraOn')}>{v.camera ? '🎥' : '📷'}</button>
         <button className={`call-ctl ${v.call.transcribing ? 'is-rec' : ''}`} onClick={toggleTranscript} aria-pressed={v.call.transcribing} title={v.call.transcribing ? t('call.transcriptOff') : t('call.transcriptOn')}>📝</button>
-        <button className="call-ctl" onClick={() => openDialog((close) => <AddToCallDialog call={v.call} onClose={close} />)} title={t('call.add')} aria-label={t('call.add')}>＋</button>
+        <button className="call-ctl" onClick={(e) => void openAudioMenu(e.currentTarget, v)} title={t('call.audioMenu')} aria-label={t('call.audioMenu')}>🔊</button>
+        <button className="btn small call-add" onClick={() => openAddToCall(v.call)} title={t('call.add')}>{t('call.addShort')}</button>
         <span className="grow" />
         <button className="btn small call-hang" onClick={() => void hangUp()}>{t('call.hangUp')}</button>
       </div>
       {v.error && <div className="small" style={{ color: 'var(--danger)' }}>{v.error === 'no_camera' ? t('call.noCamera') : v.error}</div>}
     </aside>
+  );
+}
+
+/** Cámara apagada y micrófono silenciado de cada persona. */
+function PersonBadges({ muted, camera }: { muted: boolean; camera: boolean }) {
+  if (!muted && camera) return null;
+  return <span className="call-badges">
+    {!camera && <span className="call-badge" title={t('call.personNoCamera')} aria-label={t('call.personNoCamera')}>📷̸</span>}
+    {muted && <span className="call-badge" title={t('call.personMuted')} aria-label={t('call.personMuted')}>🔇</span>}
+  </span>;
+}
+
+/** Invitados con «＋ Agregar» que aún no entran: «Llamando…» y, a los 45 s, «No contestó» con «Volver a llamar». */
+function InvitedList({ call, pending }: { call: CallDTO; pending: NonNullable<CallDTO['invited']> }) {
+  const d = useClient((s) => s.data)!;
+  const [, tick] = useState(0);
+  useEffect(() => { const i = setInterval(() => tick((n) => n + 1), 5000); return () => clearInterval(i); }, []);
+  return (
+    <div className="call-invited">
+      {pending.map((x) => {
+        const late = Date.now() - Date.parse(x.at) > 45_000;
+        return (
+          <div key={x.userId} className="call-invited-row">
+            <Avatar person={personById(d, x.userId)} size={24} />
+            <span className="grow ellipsis small">{firstName(d, x.userId, call.names)}</span>
+            <span className={`small ${late ? 'muted' : 'call-ringing-text'}`}>{late ? t('call.inviteNoAnswer') : t('call.inviteRinging')}</span>
+            {late && <button className="btn ghost small" onClick={() => void client.inviteToCall(call.id, [x.userId]).catch(fail)}>{t('call.ringAgain')}</button>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export const openAddToCall = (call: CallDTO) => openDialog((close) => <AddToCallDialog call={call} onClose={close} />);
+
+/** Menú «Audio»: salida (altavoz, audífonos, Bluetooth) donde el navegador deja elegir, y micrófono. */
+async function openAudioMenu(el: HTMLElement, v: CallView) {
+  const r = el.getBoundingClientRect();
+  const [outs, ins] = await Promise.all([listAudioOutputs().catch(() => []), listAudioInputs().catch(() => [])]);
+  openMenuAt(r.left, r.top - 8, [
+    { label: t('call.audioOut'), disabled: true },
+    ...(outs.length ? outs.map((o) => ({ label: `${(v.audioOutput || 'default') === o.deviceId ? '✓ ' : ''}${o.label}`, onSelect: () => void chooseAudioOutput(o.deviceId).catch(fail) }))
+      : [{ label: t('call.noOutputChoice'), disabled: true }]),
+    { divider: true },
+    { label: t('call.micIn'), disabled: true },
+    ...ins.map((o) => ({ label: `${v.audioInput === o.deviceId ? '✓ ' : ''}${o.label}`, onSelect: () => void chooseAudioInput(o.deviceId).catch(fail) })),
+  ]);
+}
+
+/** Nombre del dispositivo para «En llamada en tu …». */
+export const deviceName = (dev: CallDeviceDTO) => {
+  const k = `call.dev.${dev.platform}` as Parameters<typeof t>[0];
+  const known = ['ios', 'android', 'macos', 'windows', 'web'].includes(dev.platform);
+  return known ? t(k) : (dev.label.replace(/^chaggu\s+/i, '') || t('call.dev.other'));
+};
+
+/**
+ * Franja fija arriba: estoy en una llamada desde otro de mis dispositivos. «Pasar aquí» entra desde este y saca
+ * al otro cuando conecta; «Unirme también» entra sin sacarlo.
+ */
+export function OtherDeviceCallBar() {
+  const d = useClient((s) => s.data);
+  const calls = useClient((s) => s.calls);
+  const v = useCallView();
+  const mine = client.deviceKey;
+  if (!d) return null;
+  const call = Object.values(calls).find((c): c is CallDTO => !!c && !c.endedAt && !!c.myDevices?.some((x) => x.deviceKey !== mine));
+  if (!call || v?.call.id === call.id) return null;
+  const other = call.myDevices!.find((x) => x.deviceKey !== mine)!;
+  const conv = d.conversations.find((c) => c.id === call.conversationId);
+  const chat = conv ? conversationTitle(d, conv) : t('call.title');
+  return (
+    <div className="call-other-device" role="status">
+      <span className="grow ellipsis">📞 {t('call.otherDevice', { device: deviceName(other), chat })}</span>
+      <button className="btn accent small" onClick={() => void passHere(call.id, other.deviceKey).catch(fail)}>{t('call.passHere')}</button>
+      <button className="btn small" onClick={() => void joinCall(call.id, false).catch(fail)}>{t('call.joinToo')}</button>
+      <button className="btn ghost small" onClick={() => openAddToCall(call)}>{t('call.addShort')}</button>
+    </div>
+  );
+}
+
+/** Punto verde 📞 junto a una conversación con llamada en curso (lista lateral). */
+export function CallDot({ conversationId }: { conversationId: string }) {
+  const live = useClient((s) => !!s.calls[conversationId] && !s.calls[conversationId]!.endedAt && s.calls[conversationId]!.activeUserIds.length > 0);
+  return live ? <span className="call-live-dot" title={t('call.inCallDot')} aria-label={t('call.inCallDot')}>📞</span> : null;
+}
+
+/** «En curso ahora» (pestaña Llamadas): quién está, Unirse y ＋ Agregar. */
+function LiveNow() {
+  const d = useClient((s) => s.data)!;
+  const calls = useClient((s) => s.calls);
+  const v = useCallView();
+  const [list, setList] = useState<ActiveCallDTO[]>([]);
+  // Solo cuando empieza o termina alguna llamada (no en cada cambio de quién está).
+  const key = Object.values(calls).map((c) => c?.id ?? '').sort().join(',');
+  useEffect(() => { client.loadActiveCalls().then(setList).catch(() => {}); }, [key]);
+  // Lo que llega en vivo (call.updated) manda sobre la lista pedida.
+  const live = list.map((x) => ({ ...x, call: calls[x.call.conversationId]?.id === x.call.id ? calls[x.call.conversationId]! : x.call })).filter((x) => !x.call.endedAt && calls[x.call.conversationId] !== null);
+  if (!live.length) return null;
+  return (
+    <section className="calls-live">
+      <div className="eyebrow">{t('calls.liveNow')}</div>
+      {live.map(({ call, title }) => {
+        const conv = d.conversations.find((c) => c.id === call.conversationId);
+        const inside = v?.call.id === call.id;
+        return (
+          <div key={call.id} className="call-row is-live">
+            <span className="stack" style={{ width: 22 + Math.max(0, Math.min(call.activeUserIds.length, 4) - 1) * 14, height: 30 }}>
+              {call.activeUserIds.slice(0, 4).map((id, k) => <span key={id} style={{ left: k * 14, zIndex: 4 - k }}><Avatar person={personById(d, id)} size={30} /></span>)}
+            </span>
+            <button className="grow call-row-main" onClick={() => navigate(`/c/${call.conversationId}`)}>
+              <strong className="ellipsis">{conv ? conversationTitle(d, conv) : title ?? t('call.title')}</strong>
+              <div className="small muted ellipsis">{call.kind === 'video' ? '🎥' : '📞'} {call.activeUserIds.map((id) => firstName(d, id, call.names)).join(', ')}</div>
+            </button>
+            <button className="btn ghost small" onClick={() => openAddToCall(call)}>{t('call.addShort')}</button>
+            {!inside && <button className="btn accent small" onClick={() => void joinCall(call.id, false).catch(fail)}>{t('call.join')}</button>}
+          </div>
+        );
+      })}
+    </section>
   );
 }
 
@@ -325,7 +463,7 @@ export function CallsScreen() {
   const [more, setMore] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // Recarga al cambiar alguna llamada en vivo (empezó, terminó, hay transcripción).
-  const rev = useClient((s) => s.calls);
+  const rev = useClient((s) => Object.values(s.calls).map((c) => `${c?.id ?? ''}:${c?.hasTranscript ? 1 : 0}`).sort().join(','));
   useEffect(() => {
     if (!on) return;
     client.callHistory().then((r) => { setItems(r.calls); setMore(r.hasMore); }, (e) => setErr(errorText(e)));
@@ -347,6 +485,7 @@ export function CallsScreen() {
       </div>
       {!on && <div className="hint">{t('err.calls_disabled')}</div>}
       {err && <div className="hint">{err}</div>}
+      {on && <LiveNow />}
       {on && items && items.length === 0 && <div className="hint">{t('calls.empty')}</div>}
       <div className="call-list">
         {(items ?? []).map((x) => <CallRow key={x.call.id} item={x} />)}

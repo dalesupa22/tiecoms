@@ -661,6 +661,13 @@ const es = {
   'att.signBtn': 'Firmar', 'att.signedBy': '✓ Firmado por {name}', 'att.preview': 'Ver PDF',
   'err.has_digital_signature': 'Este PDF ya tiene una firma digital', 'err.encrypted_pdf': 'Este PDF tiene contraseña: no se puede firmar',
   'err.not_pdf': 'Este archivo no es un PDF', 'err.invalid_pdf': 'No pude leer este PDF', 'err.too_many_signatures': 'Ya tienes demasiadas firmas guardadas',
+  // ---------- Llamadas 1.7.1 ----------
+  'call.addShort': '＋ Agregar', 'call.inviteRinging': 'Llamando…', 'call.inviteNoAnswer': 'No contestó', 'call.ringAgain': 'Volver a llamar',
+  'call.otherDevice': 'En llamada en tu {device} · {chat}', 'call.passHere': 'Pasar aquí', 'call.joinToo': 'Unirme también',
+  'call.dev.ios': 'iPhone', 'call.dev.android': 'Android', 'call.dev.macos': 'Mac', 'call.dev.windows': 'PC', 'call.dev.web': 'navegador', 'call.dev.other': 'otro dispositivo',
+  'calls.liveNow': 'En curso ahora', 'call.inCallDot': 'Llamada en curso',
+  'call.audioMenu': 'Audio', 'call.audioOut': 'Salida de audio', 'call.micIn': 'Micrófono', 'call.noOutputChoice': 'Este navegador no deja elegir la salida de audio',
+  'call.personMuted': 'Micrófono silenciado', 'call.personNoCamera': 'Cámara apagada',
   // ---------- Tanda 1.7 ----------
   'sys.event.today': 'Hoy: {title} a las {time}.', 'sys.issue.done': '✅ {byName} completó la tarea «{title}».',
   'sys.issue.overdue': 'No cumplimos: «{title}» venció el {date}.',
@@ -1314,6 +1321,13 @@ const en: Record<Key, string> = {
   'att.signBtn': 'Sign', 'att.signedBy': '✓ Signed by {name}', 'att.preview': 'View PDF',
   'err.has_digital_signature': 'This PDF already has a digital signature', 'err.encrypted_pdf': 'This PDF is password-protected and cannot be signed',
   'err.not_pdf': 'This file is not a PDF', 'err.invalid_pdf': 'Could not read this PDF', 'err.too_many_signatures': 'You already have too many saved signatures',
+  // ---------- Calls 1.7.1 ----------
+  'call.addShort': '＋ Add', 'call.inviteRinging': 'Calling…', 'call.inviteNoAnswer': 'No answer', 'call.ringAgain': 'Call again',
+  'call.otherDevice': 'On a call on your {device} · {chat}', 'call.passHere': 'Move here', 'call.joinToo': 'Join too',
+  'call.dev.ios': 'iPhone', 'call.dev.android': 'Android', 'call.dev.macos': 'Mac', 'call.dev.windows': 'PC', 'call.dev.web': 'browser', 'call.dev.other': 'other device',
+  'calls.liveNow': 'Happening now', 'call.inCallDot': 'Call in progress',
+  'call.audioMenu': 'Audio', 'call.audioOut': 'Audio output', 'call.micIn': 'Microphone', 'call.noOutputChoice': 'This browser cannot choose the audio output',
+  'call.personMuted': 'Microphone muted', 'call.personNoCamera': 'Camera off',
   // ---------- Tanda 1.7 ----------
   'sys.event.today': 'Today: {title} at {time}.', 'sys.issue.done': '✅ {byName} completed the task “{title}”.',
   'sys.issue.overdue': 'We missed it: “{title}” was due on {date}.',

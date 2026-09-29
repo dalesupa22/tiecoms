@@ -6,6 +6,7 @@
  *   al API en lotes para guardarlas (el API deduplica, todos los participantes las reportan).
  */
 import type { AccountEvent, CallDTO, CallJoinDTO, CallKind, CallTranscriptSegmentInput } from '@tiecoms/contracts';
+import { callUserId } from '@tiecoms/contracts';
 import { client } from './app-client.ts';
 
 export interface CallTile { tileId: number; local: boolean; userId: string | null; active: boolean }
@@ -19,6 +20,11 @@ export interface CallView {
   captions: Caption[];
   /** Quién suena ahora (ids de persona). */
   speaking: string[];
+  /** 1.7.1: quién tiene el micrófono silenciado (por persona, del indicador de volumen de Chime). */
+  mutedUsers: string[];
+  /** Salida de audio y micrófono elegidos (deviceId; '' = el predeterminado). */
+  audioOutput: string;
+  audioInput: string;
   error: string | null;
 }
 
@@ -81,7 +87,7 @@ export async function joinCall(callId: string, camera: boolean) {
 
 async function connect(j: CallJoinDTO, camera: boolean) {
   leaving = false;
-  view = { call: j.call, phase: 'connecting', muted: false, camera, tiles: [], captions: [], speaking: [], error: null };
+  view = { call: j.call, phase: 'connecting', muted: false, camera, tiles: [], captions: [], speaking: [], mutedUsers: [], audioOutput: '', audioInput: '', error: null };
   emit();
   try {
     // El SDK de Chime usa `global` (de Node); en el navegador es globalThis. Sin esto falla al cargar.
@@ -93,22 +99,36 @@ async function connect(j: CallJoinDTO, camera: boolean) {
     const av = session.audioVideo;
     const mics = await av.listAudioInputDevices();
     await av.startAudioInput(mics[0]?.deviceId ?? 'default');
+    view.audioInput = mics[0]?.deviceId ?? '';
     audioEl ??= Object.assign(document.createElement('audio'), { autoplay: true });
     await av.bindAudioElement(audioEl);
     av.addObserver({
-      audioVideoDidStart: () => patch({ phase: 'live' }),
+      audioVideoDidStart: () => { patch({ phase: 'live' }); const cb = onLive; onLive = null; cb?.(); },
       audioVideoDidStop: () => { if (!leaving) void teardown(); },
       videoTileDidUpdate: (t: any) => {
         if (!view || !t.tileId || t.isContent) return;
-        const tile: CallTile = { tileId: t.tileId, local: t.localTile, userId: t.boundExternalUserId ?? null, active: t.active };
+        // ExternalUserId = "{userId}#{deviceKey}" (1.7.1) o solo el id (clientes 1.7.0).
+        const tile: CallTile = { tileId: t.tileId, local: t.localTile, userId: t.boundExternalUserId ? callUserId(t.boundExternalUserId) : null, active: t.active };
         patch({ tiles: [...view.tiles.filter((x) => x.tileId !== t.tileId), tile] });
       },
       videoTileWasRemoved: (tileId: number) => { if (view) patch({ tiles: view.tiles.filter((x) => x.tileId !== tileId) }); },
     });
     av.realtimeSubscribeToMuteAndUnmuteLocalAudio((muted: boolean) => patch({ muted }));
     const attendeeUsers = new Map<string, string>();
+    const mutedBy = new Map<string, boolean>();
     av.realtimeSubscribeToAttendeeIdPresence((attendeeId: string, present: boolean, externalUserId?: string) => {
-      if (present && externalUserId) attendeeUsers.set(attendeeId, externalUserId);
+      if (present && externalUserId) {
+        attendeeUsers.set(attendeeId, callUserId(externalUserId));
+        // Micrófono silenciado por persona (una persona en varios dispositivos: silenciada si todos lo están).
+        av.realtimeSubscribeToVolumeIndicator(attendeeId, (_id: string, _vol: number | null, muted: boolean | null) => {
+          if (muted === null) return;
+          mutedBy.set(attendeeId, muted);
+          const byUser = new Map<string, boolean>();
+          for (const [a, m] of mutedBy) { const u = attendeeUsers.get(a); if (u) byUser.set(u, (byUser.get(u) ?? true) && m); }
+          patch({ mutedUsers: [...byUser].filter(([, m]) => m).map(([u]) => u) });
+        });
+      }
+      if (!present) { mutedBy.delete(attendeeId); av.realtimeUnsubscribeFromVolumeIndicator?.(attendeeId); }
     });
     av.subscribeToActiveSpeakerDetector(new sdk.DefaultActiveSpeakerPolicy(), (ids: string[]) => {
       patch({ speaking: ids.map((a) => attendeeUsers.get(a)).filter((x): x is string => !!x) });
@@ -142,11 +162,52 @@ async function startCamera() {
   patch({ camera: true });
 }
 
+/**
+ * Cámara en plena llamada, sin reconectar: prenderla empieza el recuadro local (los demás lo ven enseguida);
+ * apagarla lo quita y mi recuadro vuelve al avatar.
+ */
 export async function toggleCamera() {
   const av = session?.audioVideo;
   if (!av || !view) return;
-  if (view.camera) { av.stopLocalVideoTile(); await av.stopVideoInput(); patch({ camera: false }); }
-  else await startCamera();
+  if (view.camera) {
+    av.stopLocalVideoTile();
+    await av.stopVideoInput();
+    patch({ camera: false, tiles: view.tiles.filter((x) => !x.local) });
+  } else await startCamera();
+}
+
+// ---------- Salida de audio y micrófono (1.7.1) ----------
+export interface AudioDevice { deviceId: string; label: string }
+/** Salidas de audio (altavoz, audífonos, Bluetooth). Vacía si el navegador no deja elegir (sin setSinkId). */
+export async function listAudioOutputs(): Promise<AudioDevice[]> {
+  const av = session?.audioVideo;
+  if (!av || typeof (HTMLMediaElement.prototype as any).setSinkId !== 'function') return [];
+  return ((await av.listAudioOutputDevices()) as MediaDeviceInfo[]).map((x) => ({ deviceId: x.deviceId, label: x.label || x.deviceId }));
+}
+export async function listAudioInputs(): Promise<AudioDevice[]> {
+  const av = session?.audioVideo;
+  if (!av) return [];
+  return ((await av.listAudioInputDevices()) as MediaDeviceInfo[]).map((x) => ({ deviceId: x.deviceId, label: x.label || x.deviceId }));
+}
+export async function chooseAudioOutput(deviceId: string) {
+  const av = session?.audioVideo;
+  if (!av) return;
+  await av.chooseAudioOutput(deviceId);
+  patch({ audioOutput: deviceId });
+}
+export async function chooseAudioInput(deviceId: string) {
+  const av = session?.audioVideo;
+  if (!av) return;
+  await av.startAudioInput(deviceId);
+  patch({ audioInput: deviceId });
+}
+
+// ---------- «Pasar aquí» (1.7.1) ----------
+let onLive: (() => void) | null = null;
+/** Entra desde este dispositivo y, cuando conecta, saca al otro dispositivo mío (leave {deviceKey}). */
+export async function passHere(callId: string, otherDeviceKey: string, camera = false) {
+  onLive = () => { void client.leaveCall(callId, false, otherDeviceKey).catch(() => {}); };
+  try { await joinCall(callId, camera); } catch (e) { onLive = null; throw e; }
 }
 
 export function toggleMute() {
@@ -168,7 +229,7 @@ function onTranscript(e: any) {
     const text = String(alt?.transcript ?? '').trim();
     if (!text) continue;
     const who = alt.items?.find((i: any) => i.attendee)?.attendee;
-    const userId = who?.externalUserId ?? null;
+    const userId = who?.externalUserId ? callUserId(who.externalUserId) : null;
     captions = [...captions.filter((c) => c.resultId !== r.resultId), { resultId: r.resultId, userId, text, partial: r.isPartial }].slice(-6);
     if (!r.isPartial) {
       outbox.push({ resultId: r.resultId, attendeeId: who?.attendeeId ?? null, externalUserId: userId, language: r.languageCode ?? null, text: text.slice(0, 4000), startMs: Math.max(0, Math.round(r.startTimeMs)), endMs: Math.max(0, Math.round(r.endTimeMs)) });

@@ -6,7 +6,7 @@ import {
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type TopicColor, type TopicDTO, type UserDTO, normalizeEmoji,
   type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentDTO, type CallTranscriptSegmentInput,
-  type MessageRefDTO, type ChatSearchPageDTO, type ViewOnceOpenDTO, type EventCommentDTO, type ViewOnceState,
+  type ActiveCallDTO, type MessageRefDTO, type ChatSearchPageDTO, type ViewOnceOpenDTO, type EventCommentDTO, type ViewOnceState,
   type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO, type IntegrationDTO, type IntegrationSecretDTO,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
@@ -122,6 +122,8 @@ export type ClientNotice =
   | { kind: 'reaction'; conversationId: string; message: MessageDTO; userId: string; emoji: string }
   /** Me están llamando en una conversación. */
   | { kind: 'callRinging'; call: CallDTO; callerName: string; conversationTitle: string | null }
+  /** 1.7.1: contesté o rechacé la llamada en OTRO de mis dispositivos: aquí deja de sonar. */
+  | { kind: 'callHandled'; callId: string; how: 'answered' | 'declined'; label?: string }
   /** Transcripción por pedazos: uno se está procesando o ya trae sus frases. */
   | { kind: 'callTranscript'; event: Extract<AccountEvent, { type: 'call.processing' | 'call.transcript' }> };
 
@@ -460,6 +462,7 @@ export class TieComsClient {
     this.assertSession(generation);
     this.set({ status: 'ready', pending: pending.map((p) => ({ ...p, status: p.status === 'sending' ? 'pending' : p.status })) });
     this.needsLogin = false;
+    await this.device(); // deviceKey de las llamadas (1.7.1) disponible de forma síncrona
     this.connect();
     this.scheduleFlush(0);
     // Lo no crítico, después de la primera pintura. Grupos muestra los asuntos abiertos bajo cada grupo.
@@ -468,6 +471,8 @@ export class TieComsClient {
       void this.loadReminders().catch(() => {});
       void this.loadScheduled().catch(() => {});
       void this.loadIssues({ open: true }).catch(() => {});
+      // Punto verde 📞 en la lista: qué conversaciones tienen una llamada en curso.
+      if (this.state.data?.features?.calls) void this.loadActiveCalls().catch(() => {});
     });
     this.prefetch();
   }
@@ -485,6 +490,7 @@ export class TieComsClient {
     this.assertSession(generation);
     this.lastBootstrapAt = Date.now();
     this.set({ data, dndLocalOnly });
+    if (data.myActiveCall) this.putCall(data.myActiveCall);
     this.bootDirty = true; this.schedulePersist();
     // Conversaciones que ya no están en mi alcance: se purgan de la caché local.
     const allowed = new Set(data.conversations.map((c) => c.id));
@@ -571,6 +577,8 @@ export class TieComsClient {
     if (e.type === 'me.sleep') this.patchMe({ sleep: e.sleep });
     if (e.type === 'call.updated') this.putCall(e.call);
     if (e.type === 'call.processing' || e.type === 'call.transcript') this.opts.onNotice?.({ kind: 'callTranscript', event: e });
+    if (e.type === 'call.answered' && e.deviceKey !== this.deviceKey) this.opts.onNotice?.({ kind: 'callHandled', callId: e.callId, how: 'answered', label: e.label });
+    if (e.type === 'call.declined') this.opts.onNotice?.({ kind: 'callHandled', callId: e.callId, how: 'declined' });
     if (e.type === 'call.ringing') {
       this.putCall(e.call);
       if (!dndActive(this.state)) this.opts.onNotice?.({ kind: 'callRinging', call: e.call, callerName: e.callerName, conversationTitle: e.conversationTitle });
@@ -681,8 +689,25 @@ export class TieComsClient {
     const cur = this.state.calls[call.conversationId];
     // Una llamada terminada no pisa a otra más nueva que ya esté en curso.
     if (call.endedAt && cur && cur.id !== call.id) return;
-    this.set({ calls: { ...this.state.calls, [call.conversationId]: call.endedAt ? null : call } });
+    // El call.updated de la conversación no trae myDevices (solo el de mi cuenta): se conserva el último.
+    const next = !call.myDevices && cur && cur.id === call.id && cur.myDevices ? { ...call, myDevices: cur.myDevices } : call;
+    const value = call.endedAt ? null : next;
+    // Sin cambios, no se avisa (evita repintar y volver a pedir lo que depende de las llamadas).
+    if (cur !== undefined && JSON.stringify(cur) === JSON.stringify(value)) return;
+    this.set({ calls: { ...this.state.calls, [call.conversationId]: value } });
   }
+  /** Mi dispositivo en las llamadas (1.7.1): los primeros 8 caracteres del id de dispositivo. */
+  async callDeviceKey() { return (await this.device()).deviceId.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 8) || 'web'; }
+  /** callDeviceKey ya calculado (síncrono, para la interfaz). '' si aún no se conoce. */
+  get deviceKey() { return this.deviceId.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 8); }
+  /** Llamadas sin terminar de mis conversaciones (y a las que me agregaron), con título. */
+  async loadActiveCalls(): Promise<ActiveCallDTO[]> {
+    const r = await this.sharedGet<{ calls: ActiveCallDTO[] }>('/calls/active', 3000);
+    for (const x of r.calls) this.putCall(x.call);
+    return r.calls;
+  }
+  /** Rechazar en este dispositivo: todos los míos dejan de sonar (call.declined). */
+  declineCall(callId: string) { return this.request<{ ok: true }>(`/calls/${callId}/decline`, { method: 'POST', json: {} }); }
   async loadCall(conversationId: string) {
     const r = await this.request<{ call: CallDTO | null }>(`/conversations/${conversationId}/call`);
     this.set({ calls: { ...this.state.calls, [conversationId]: r.call } });
@@ -690,12 +715,12 @@ export class TieComsClient {
   }
   /** Empieza o entra a la llamada de la conversación: devuelve lo que necesita el SDK. */
   async startCall(conversationId: string, kind: CallKind) {
-    const r = await this.request<CallJoinDTO>(`/conversations/${conversationId}/call`, { method: 'POST', json: { kind } });
+    const r = await this.request<CallJoinDTO>(`/conversations/${conversationId}/call`, { method: 'POST', json: { kind, deviceKey: await this.callDeviceKey() } });
     this.putCall(r.call);
     return r;
   }
   async joinCall(callId: string) {
-    const r = await this.request<CallJoinDTO>(`/calls/${callId}/join`, { method: 'POST', json: {} });
+    const r = await this.request<CallJoinDTO>(`/calls/${callId}/join`, { method: 'POST', json: { deviceKey: await this.callDeviceKey() } });
     this.putCall(r.call);
     return r;
   }
@@ -705,9 +730,10 @@ export class TieComsClient {
     this.putCall(r.call);
     return r.call;
   }
-  callHeartbeat(callId: string) { return this.request<{ ok: true }>(`/calls/${callId}/heartbeat`, { method: 'POST', json: {} }); }
-  async leaveCall(callId: string, forAll = false) {
-    const r = await this.request<{ call: CallDTO }>(`/calls/${callId}/${forAll ? 'end' : 'leave'}`, { method: 'POST', json: {} });
+  async callHeartbeat(callId: string) { return this.request<{ ok: true }>(`/calls/${callId}/heartbeat`, { method: 'POST', json: { deviceKey: await this.callDeviceKey() } }); }
+  /** Salir (este dispositivo, u otro mío con deviceKey: «Pasar aquí»). forAll = colgar para todos. */
+  async leaveCall(callId: string, forAll = false, deviceKey?: string) {
+    const r = await this.request<{ call: CallDTO }>(`/calls/${callId}/${forAll ? 'end' : 'leave'}`, { method: 'POST', json: forAll ? {} : { deviceKey: deviceKey ?? await this.callDeviceKey() } });
     this.putCall(r.call);
     return r.call;
   }

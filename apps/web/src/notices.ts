@@ -8,7 +8,7 @@ import { placeWorkspace } from './screens/Groups.tsx';
 import type { BootstrapDTO, ConversationDTO } from '@tiecoms/contracts';
 import { activeUntil, mayAlert, shouldSound } from './silence.ts';
 import { playMessageSound, soundEnabled } from './sound.ts';
-import { showIncomingCall } from './screens/Call.tsx';
+import { dismissIncomingCall, showIncomingCall } from './screens/Call.tsx';
 import { onCallTranscriptEvent } from './call.ts';
 
 /** En el chat abierto, ¿la vista está arriba, lejos del final (más de una pantalla)? */
@@ -31,6 +31,9 @@ export function groupNoticeTitle(d: BootstrapDTO, c: ConversationDTO): string | 
  * y en un chat silenciado solo las menciones (salvo «hasta que lo reactive»), igual que el push.
  * Recordatorios y reuniones: toast siempre; notificación del sistema si hay permiso y no hay «No molestar».
  */
+/** Notificaciones del sistema de llamadas entrantes, para cerrarlas si contesto en otro dispositivo. */
+const callNotes = new Map<string, Notification>();
+
 export function handleNotice(n: ClientNotice) {
   const d = client.getState().data;
   if (!d) return;
@@ -83,6 +86,13 @@ export function handleNotice(n: ClientNotice) {
     return;
   }
   if (n.kind === 'callTranscript') { onCallTranscriptEvent(n.event); return; }
+  if (n.kind === 'callHandled') {
+    // Contesté o rechacé en otro de mis dispositivos: aquí deja de sonar y se cierra el aviso.
+    dismissIncomingCall(n.callId);
+    callNotes.get(n.callId)?.close();
+    callNotes.delete(n.callId);
+    return;
+  }
   if (n.kind === 'callRinging') {
     // El aviso en pantalla siempre (el cliente ya filtra «No molestar»); notificación del sistema si la pestaña está oculta.
     // Suena el tono de llamada (distinto de los mensajes) hasta contestar, rechazar o que termine.
@@ -90,6 +100,7 @@ export function handleNotice(n: ClientNotice) {
     if (document.visibilityState !== 'visible' && canNotify) {
       const note = new Notification(`${n.call.kind === 'video' ? '🎥' : '📞'} ${t('call.incomingFrom', { name: n.callerName })}`, { body: n.conversationTitle ?? '', tag: `call-${n.call.id}`, requireInteraction: true, icon: `${BASE}/icon-192.png` });
       note.onclick = () => { window.focus(); navigate(`/c/${n.call.conversationId}`); note.close(); };
+      callNotes.set(n.call.id, note);
     }
     return;
   }

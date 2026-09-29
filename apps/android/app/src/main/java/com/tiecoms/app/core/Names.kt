@@ -10,7 +10,9 @@ object Names {
      * Textos que dependen del idioma y se usan desde código puro (títulos de chats grupales).
      * La app los fija al arrancar con los recursos; por defecto, español.
      */
-    data class Labels(val groupChat: String = "Chat grupal", val andMore: String = "y %1\$d más", val sideName: String = "Sidechat · %1\$s")
+    data class Labels(val groupChat: String = "Chat grupal", val andMore: String = "y %1\$d más", val sideName: String = "Sidechat · %1\$s",
+                      /** El directo conmigo mismo (docs/GG-CHAT.md). */
+                      val self: String = "Tú")
 
     /** Sidechats viejos se llamaban «Consulta · …»: se muestran como «Sidechat · …» (side.defaultName). */
     val OLD_SIDE_PREFIXES = listOf("Consulta · ", "Consulta lateral · ", "Side conversation · ")
@@ -18,7 +20,10 @@ object Names {
         OLD_SIDE_PREFIXES.firstOrNull { name.startsWith(it) }?.let { labels.sideName.replace("%1\$s", name.removePrefix(it)) } ?: name
     @Volatile var labels = Labels()
 
-    fun person(data: BootstrapDTO?, id: String): PersonDTO? = data?.people?.firstOrNull { it.id == id }
+    fun person(data: BootstrapDTO?, id: String): PersonDTO? = data?.people?.firstOrNull { it.id == id }?.let { p ->
+        // gg siempre se llama «gg» (docs/GG-CHAT.md).
+        if (Gg.isGg(p.id, data)) p.copy(name = Gg.NAME, kind = "agent") else p
+    } ?: if (Gg.isGg(id, data)) PersonDTO(id = id, name = Gg.NAME, kind = "agent") else null
     fun org(data: BootstrapDTO?, id: String?): OrganizationDTO? = id?.let { oid -> data?.organizations?.firstOrNull { it.id == oid } }
 
     fun otherInDirect(c: ConversationDTO, data: BootstrapDTO?): PersonDTO? {
@@ -35,7 +40,7 @@ object Names {
     /** group → name; internal → name (con candado en la interfaz); direct → la otra persona; multi → name o primeros nombres. */
     fun conversationTitle(c: ConversationDTO, data: BootstrapDTO?, internalFallback: String, directFallback: String, labels: Labels = this.labels): String {
         val t = when (c.kind) {
-            "direct" -> otherInDirect(c, data)?.name ?: c.name ?: directFallback
+            "direct" -> if (Gg.isSelfChat(c, data)) labels.self else otherInDirect(c, data)?.name ?: c.name ?: directFallback
             "internal" -> c.name?.takeIf { it.isNotBlank() } ?: internalFallback
             "multi" -> c.name?.takeIf { it.isNotBlank() } ?: multiTitle(c, data, labels)
             else -> c.name?.takeIf { it.isNotBlank() } ?: directFallback

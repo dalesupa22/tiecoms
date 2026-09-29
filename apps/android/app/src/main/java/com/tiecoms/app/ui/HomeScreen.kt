@@ -843,7 +843,9 @@ internal fun ConversationRow(
 fun ConversationIcon(c: ConversationDTO, data: BootstrapDTO, size: androidx.compose.ui.unit.Dp) {
     when {
         c.avatarUrl != null -> Avatar(Names.conversationTitle(c, data, "", ""), MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant, size = size, square = c.kind != "multi", photo = c.avatarUrl)
-        c.kind == "direct" -> PersonAvatar(Names.otherInDirect(c, data), data, size)
+        // «Tú» (el directo conmigo mismo): mi propia foto.
+        c.kind == "direct" -> PersonAvatar(Names.otherInDirect(c, data) ?: if (com.tiecoms.app.core.Gg.isSelfChat(c, data))
+            Names.person(data, data.me.id) ?: com.tiecoms.app.core.PersonDTO(id = data.me.id, name = data.me.name, avatarUrl = data.me.avatarUrl, orgId = data.me.primaryOrgId) else null, data, size)
         c.isSide -> GlyphBox("💬", size)
         c.kind == "multi" -> StackedAvatars(c, data, size)
         c.parentId != null -> GlyphBox("⑂", size)

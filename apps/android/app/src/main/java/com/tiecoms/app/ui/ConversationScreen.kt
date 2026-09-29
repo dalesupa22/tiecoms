@@ -1358,6 +1358,8 @@ internal fun SystemRow(
 ) {
     val ctx = LocalContext.current
     val chat = LocalChatColors.current
+    // gg: lo que dejó listo (tarjetas para confirmar) y respuestas rápidas (docs/GG-CHAT.md).
+    com.tiecoms.app.core.Gg.parseActions(m)?.let { g -> GgActionsRow(m, g, data); return }
     // Correo y WhatsApp traídos al chat (docs/CORREO.md): nunca como JSON crudo.
     com.tiecoms.app.core.MailSystem.parse(m)?.let { b -> MailSystemRow(m, b, data, canPost, onOpenIssue); return }
     // Tanda 1.7: es hoy, tarea hecha/vencida y comentarios agrupados se ven como la tarjeta del evento o de la tarea.

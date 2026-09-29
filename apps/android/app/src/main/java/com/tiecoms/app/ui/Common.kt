@@ -118,6 +118,11 @@ fun systemText(ctx: Context, body: String, author: String? = null): String {
     com.tiecoms.app.core.Calls.systemCall(o)?.let { c -> return callSystemText(ctx, c) }
     // Tanda 1.7: es hoy, tarea hecha/vencida y comentarios agrupados.
     com.tiecoms.app.core.System17.parse(o)?.let { b -> return system17Text(ctx, b) }
+    // gg (docs/GG-CHAT.md): lo que dejó listo, como una línea; nunca el JSON.
+    if (str("k") == "gg.actions") {
+        val n = (o["actions"] as? JsonArray)?.size ?: 0
+        return if (n > 0) ctx.getString(R.string.gg_actions_preview, n) else "gg"
+    }
     // Correo y WhatsApp en el chat (docs/CORREO.md): el texto de sys.mail.* / sys.wa.shared, nunca el JSON.
     com.tiecoms.app.core.MailSystem.parse(o)?.let { b -> return mailSystemText(ctx, b) }
     return when (str("k")) {
@@ -258,12 +263,14 @@ fun personColor(id: String): Color {
 /** Avatar del autor en las burbujas: su foto o sus iniciales sobre su color estable (texto blanco). */
 @Composable
 fun AuthorAvatar(p: PersonDTO?, id: String, size: Dp = 28.dp, modifier: Modifier = Modifier) {
+    if (com.tiecoms.app.core.Gg.isGg(id)) { Box(modifier.size(size), contentAlignment = Alignment.Center) { GgMark(size * 0.9f) }; return }
     Avatar(p?.name ?: "?", Color(com.tiecoms.app.core.PersonColors.light(id)), Color.White, size = size, photo = p?.avatarUrl, modifier = modifier)
 }
 
 /** Avatar de una persona: su foto o sus iniciales sobre el color de su empresa; opcionalmente con el logo de la empresa en la esquina. */
 @Composable
 fun PersonAvatar(p: PersonDTO?, data: BootstrapDTO?, size: Dp = 40.dp, orgBadge: Boolean = false, modifier: Modifier = Modifier) {
+    if (com.tiecoms.app.core.Gg.isGg(p?.id, data)) { Box(modifier.size(size), contentAlignment = Alignment.Center) { GgMark(size * 0.9f) }; return }
     val org = Names.org(data, p?.orgId)
     Box(modifier.size(size)) {
         Avatar(p?.name ?: "?", parseColor(org?.colorBg, Brand.Black), parseColor(org?.colorFg, Color.White), size = size, photo = p?.avatarUrl)

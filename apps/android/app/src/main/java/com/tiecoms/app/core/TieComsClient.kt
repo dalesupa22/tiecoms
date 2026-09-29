@@ -1151,6 +1151,20 @@ class TieComsClient(
         val body = buildJsonObject { put("token", JsonPrimitive(token)); if (text != null) put("text", JsonPrimitive(text)) }
         req("POST", "/assistant/run", body, AssistantActionDTO.serializer())
     }
+    /**
+     * Confirmar (o deshacer, con undoToken) una acción de un mensaje gg.actions del chat: el servidor guarda el estado
+     * en el mensaje y lo publica con message.updated (docs/GG-CHAT.md).
+     */
+    suspend fun ggRunAction(token: String, messageId: String, actionId: String, text: String? = null): AssistantActionDTO = withContext(dispatcher) {
+        req("POST", "/assistant/run", buildJsonObject {
+            put("token", JsonPrimitive(token)); put("messageId", JsonPrimitive(messageId)); put("actionId", JsonPrimitive(actionId))
+            if (text != null) put("text", JsonPrimitive(text))
+        }, AssistantActionDTO.serializer())
+    }
+    suspend fun ggDiscardAction(messageId: String, actionId: String) = withContext(dispatcher) {
+        req("POST", "/assistant/actions/discard", buildJsonObject { put("messageId", JsonPrimitive(messageId)); put("actionId", JsonPrimitive(actionId)) }, JsonElement.serializer())
+        Unit
+    }
     /** Historial local de gg de la persona con sesión (el de otra cuenta se descarta). */
     fun assistantHistory(): List<AssistantTurn> = myId?.let { Assistant.load(storage, it) } ?: emptyList()
     fun saveAssistantHistory(turns: List<AssistantTurn>) { myId?.let { Assistant.save(storage, it, turns) } }

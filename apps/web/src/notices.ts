@@ -9,6 +9,7 @@ import type { BootstrapDTO, ConversationDTO } from '@tiecoms/contracts';
 import { activeUntil, mayAlert, shouldSound } from './silence.ts';
 import { playMessageSound, soundEnabled } from './sound.ts';
 import { showIncomingCall } from './screens/Call.tsx';
+import { onCallTranscriptEvent } from './call.ts';
 
 /** En el chat abierto, ¿la vista está arriba, lejos del final (más de una pantalla)? */
 function farFromEnd(conversationId: string) {
@@ -79,6 +80,7 @@ export function handleNotice(n: ClientNotice) {
     toast(t('mention.dropped', { names }));
     return;
   }
+  if (n.kind === 'callTranscript') { onCallTranscriptEvent(n.event); return; }
   if (n.kind === 'callRinging') {
     // El aviso en pantalla siempre (el cliente ya filtra «No molestar»); notificación del sistema si la pestaña está oculta.
     // Suena el tono de llamada (distinto de los mensajes) hasta contestar, rechazar o que termine.

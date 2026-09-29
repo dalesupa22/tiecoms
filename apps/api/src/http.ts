@@ -11,7 +11,7 @@ import {
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
-  SetAdminInput, UpdateIntegrationInput, StartCallInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput,
+  SetAdminInput, UpdateIntegrationInput, StartCallInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -432,6 +432,7 @@ export async function buildHttp() {
       return calls.startOrJoin(req.userId, z.uuid().parse(req.params.id), StartCallInput.parse(req.body ?? {}).kind);
     });
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/join', callLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.join(req.userId, z.uuid().parse(req.params.id)); });
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/invite', callLimit, async (req) => calls.invite(req.userId, z.uuid().parse(req.params.id), CallInviteInput.parse(req.body).userIds));
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/heartbeat', async (req) => calls.heartbeat(req.userId, z.uuid().parse(req.params.id)));
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/leave', async (req) => calls.leave(req.userId, z.uuid().parse(req.params.id)));
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/end', async (req) => calls.endForAll(req.userId, z.uuid().parse(req.params.id)));
@@ -441,6 +442,13 @@ export async function buildHttp() {
     });
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/transcript', { config: { rateLimit: { max: 240, timeWindow: '1 minute' } } }, async (req) =>
       calls.addSegments(req.userId, z.uuid().parse(req.params.id), CallTranscriptInput.parse(req.body)));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/audio', { bodyLimit: calls.MAX_CALL_AUDIO_BYTES, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => {
+      if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube el audio como application/octet-stream');
+      return calls.addAudio(req.userId, z.uuid().parse(req.params.id), {
+        body: req.body, type: String(req.headers['x-file-type'] ?? ''), segId: String(req.headers['x-seg-id'] ?? ''),
+        offsetMs: Math.max(0, Number(req.headers['x-offset-ms']) || 0), durationMs: Math.max(0, Number(req.headers['x-duration-ms']) || 0),
+      });
+    });
     priv.get<{ Params: { id: string } }>('/api/v1/calls/:id/transcript', async (req) => calls.transcript(req.userId, z.uuid().parse(req.params.id)));
     priv.get('/api/v1/calls', async (req) => calls.history(req.userId, CallHistoryQuery.parse(req.query)));
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/share', callLimit, async (req) => calls.share(req.userId, z.uuid().parse(req.params.id), CallShareInput.parse(req.body)));

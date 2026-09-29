@@ -12,7 +12,7 @@ import { cleanupExpired as cleanupSso } from './modules/sso.ts';
 import { previewMessage } from './modules/link-preview.ts';
 import { deletePersonalObject } from './storage.ts';
 import { notifyReport } from './modules/safety.ts';
-import { pushEvent, pushEventSoon, pushIssueAssigned, pushMessage, pushReaction, pushReminder } from './modules/push.ts';
+import { pushCall, pushEvent, pushEventSoon, pushIssueAssigned, pushMessage, pushReaction, pushReminder } from './modules/push.ts';
 import { digestFor, markDigestSent } from './modules/links.ts';
 import { linkDigestMail, trySendMail } from './mail.ts';
 import { config } from './config.ts';
@@ -45,6 +45,8 @@ const handlers: Record<string, Handler> = {
   async 'push.event_soon'(p) { await pushEventSoon(p.eventId, p.userIds, soonMinutes()); },
   /** Webhook de salida de una integración (firmado; reintenta con backoff hasta max_attempts). */
   async 'integration.deliver'(p) { await deliverIntegrationEvent(p.deliveryId); },
+  /** Llamada entrante: push para las apps cerradas. */
+  async 'push.call'(p) { await pushCall(p); },
   /** Resumen de la transcripción de una llamada (DeepSeek, si quien la prendió lo autorizó). */
   async 'call.summary'(p) { await summarizeCall(p.callId); },
   /** Vistas previas de los primeros 3 enlaces de un mensaje. */

@@ -1305,3 +1305,4 @@ button.topic-tag:hover { filter: brightness(.96); }
 .call-pick-hash { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: var(--paper-2); color: var(--ink-2); flex: none; }
 .call-row > .call-pick-hash { width: 38px; height: 38px; }
 .topic-unread { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; display: inline-grid; place-items: center; }
+.call-processing { opacity: 0.75; font-style: italic; }

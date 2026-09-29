@@ -73,3 +73,34 @@ transcribe:StartStreamTranscription, iam:CreateServiceLinkedRole (para AWSServic
 API con CALLS_ENABLED=true CALLS_PROVIDER=fake
 API_URL=http://localhost:<puerto> npx vitest run test/calls.test.ts
 ```
+
+## Transcripción con Groq Whisper (desde el 29-sep-2026, por defecto)
+
+Pedido de Danny: la opción más barata. Groq cobra ≈ US$0.04 por hora de audio con voz y mínimo 10 s por petición. Una llamada transcrita de una hora cuesta ≈ US$0.05, frente a los US$0.60 de Transcribe.
+
+- **Prender o apagar** sigue siendo `POST /calls/:id/transcription {on, aiSummary}`. Con Groq no se llama a Chime: solo cambia el estado. `CALLS_STT=chime` vuelve a Amazon Transcribe.
+- **Cada dispositivo graba su propio micrófono**, en una pista aparte con cancelación de eco, mientras la transcripción está prendida.
+  - Los pedazos duran de 12 a 20 s: se corta en el primer silencio después de 12 s, y a los 20 s como máximo.
+  - Un pedazo solo se manda si tiene ≥ 0,8 s de voz (RMS > 0,015) y el micrófono no está silenciado.
+  - Se envía a `POST /calls/:id/audio` como `application/octet-stream`, con las cabeceras `x-file-type` (audio/webm, audio/mp4…), `x-seg-id` (id del cliente: reintentar no duplica), `x-offset-ms` (desde el inicio de la llamada) y `x-duration-ms`.
+- **En el servidor:**
+  1. Avisa `call.processing {callId, userId, segId}` por la cuenta a quienes están dentro. Los clientes muestran «⏳ Procesando…» con el nombre.
+  2. Transcribe con `whisper-large-v3-turbo` (`verbose_json`), con la pista de ortografía `CALLS_STT_VOCAB` + los nombres de la llamada + el nombre del chat.
+  3. Filtra las alucinaciones típicas de Whisper en silencio.
+  4. Guarda las frases con `speaker` = quien mandó el pedazo.
+  5. Envía `call.transcript {callId, userId, segId, segments[]}`.
+- **Variables:** `GROQ_API_KEY` (se sube con `tiecoms/.secrets/push-groq-env.sh`), `GROQ_STT_MODEL` y `GROQ_STT_URL`. En pruebas, `CALLS_STT_PROVIDER=fake`.
+
+## Agregar personas a la llamada
+
+- `POST /calls/:id/invite {userIds}`. Quien agrega tiene que estar dentro, y solo puede agregar gente con la que comparte empresa o espacio.
+- **Si la persona está en el chat**, solo le vuelve a sonar.
+- **Si no está en el chat**, queda en `call_invites` (migración 036) y tiene acceso a ESA llamada: entrar (`/calls/:id/join`), latir, mandar audio, historial y detalle. No tiene acceso a los mensajes.
+  - Los cambios de la llamada le llegan por la cuenta, en `call.updated {call}`.
+  - `CallDTO.invitedUserIds` y `CallDTO.names` traen los nombres de quienes no están en su lista de personas.
+
+## Push de llamada entrante
+
+- Job `push.call`: `category` es `TC_CALL` y `data` es `{type: 'call', callId, conversationId, kind}`. Sale con el título de quien llama y el texto «📞 Te está llamando».
+- No sale con «No molestar» ni en modo sueño.
+- Las apps muestran Contestar / Ahora no y entran con `/calls/:id/join`.

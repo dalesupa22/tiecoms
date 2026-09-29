@@ -5,11 +5,11 @@
  * - Transcripción: el SDK entrega frases parciales (subtítulos en vivo) y finales; las finales se mandan
  *   al API en lotes para guardarlas (el API deduplica, todos los participantes las reportan).
  */
-import type { CallDTO, CallJoinDTO, CallKind, CallTranscriptSegmentInput } from '@tiecoms/contracts';
+import type { AccountEvent, CallDTO, CallJoinDTO, CallKind, CallTranscriptSegmentInput } from '@tiecoms/contracts';
 import { client } from './app-client.ts';
 
 export interface CallTile { tileId: number; local: boolean; userId: string | null; active: boolean }
-export interface Caption { resultId: string; userId: string | null; text: string; partial: boolean }
+export interface Caption { resultId: string; userId: string | null; text: string; partial: boolean; /** Pedazo de audio en Groq: «Procesando…». */ processing?: boolean }
 export interface CallView {
   call: CallDTO;
   phase: 'connecting' | 'live' | 'ended';
@@ -26,7 +26,7 @@ type Listener = (v: CallView | null) => void;
 let view: CallView | null = null;
 const listeners = new Set<Listener>();
 const emit = () => { for (const l of listeners) l(view); };
-const patch = (p: Partial<CallView>) => { if (view) { view = { ...view, ...p }; emit(); } };
+const patch = (p: Partial<CallView>) => { if (view) { view = { ...view, ...p }; emit(); syncRecorder(); } };
 export function subscribeCall(l: Listener) { listeners.add(l); l(view); return () => { listeners.delete(l); }; }
 export const currentCall = () => view;
 
@@ -191,6 +191,90 @@ async function flush() {
   if (outbox.length) flushTimer ??= setTimeout(() => void flush(), 500);
 }
 
+// ---------- Transcripción con Groq: pedazos del micrófono propio (docs/LLAMADAS.md) ----------
+/** Corta en el primer silencio después de 12 s, y a los 20 s como máximo (Groq cobra mínimo 10 s por pedazo). */
+const CHUNK_MIN_MS = 12_000;
+const CHUNK_MAX_MS = 20_000;
+/** Voz mínima dentro del pedazo para mandarlo (evita pagar silencios y las alucinaciones de Whisper). */
+const MIN_VOICE_MS = 800;
+const VOICE_RMS = 0.015;
+let rec: { stop: () => void } | null = null;
+
+function syncRecorder() {
+  const want = !!view && view.phase === 'live' && view.call.transcribing;
+  if (want && !rec) startRecorder();
+  if (!want && rec) { rec.stop(); rec = null; }
+}
+
+function startRecorder() {
+  if (!view || typeof MediaRecorder === 'undefined') return;
+  const callId = view.call.id;
+  const startedAt = Date.parse(view.call.startedAt);
+  let stopped = false;
+  rec = { stop: () => { stopped = true; } };
+  void (async () => {
+    let stream: MediaStream;
+    try {
+      // Pista aparte del mismo micrófono, con cancelación de eco para no transcribir a los demás.
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    } catch { rec = null; return; }
+    const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus'].find((m) => MediaRecorder.isTypeSupported(m)) ?? '';
+    const ac = new AudioContext();
+    const an = ac.createAnalyser();
+    an.fftSize = 1024;
+    ac.createMediaStreamSource(stream).connect(an);
+    const buf = new Float32Array(an.fftSize);
+    while (!stopped) {
+      const chunks: Blob[] = [];
+      const mr = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 24_000 } : undefined);
+      mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      const t0 = Date.now();
+      let voiced = 0;
+      let lastVoice = 0;
+      mr.start();
+      await new Promise<void>((resolve) => {
+        const iv = setInterval(() => {
+          an.getFloatTimeDomainData(buf);
+          let sum = 0;
+          for (const v of buf) sum += v * v;
+          const now = Date.now();
+          if (!view?.muted && Math.sqrt(sum / buf.length) > VOICE_RMS) { voiced += 100; lastVoice = now; }
+          const el = now - t0;
+          if (stopped || el >= CHUNK_MAX_MS || (el >= CHUNK_MIN_MS && now - lastVoice > 700)) { clearInterval(iv); resolve(); }
+        }, 100);
+      });
+      const done = new Promise((r) => { mr.onstop = r; });
+      mr.stop();
+      await done;
+      if (voiced >= MIN_VOICE_MS && chunks.length) void uploadChunk(callId, new Blob(chunks, { type: (mime || 'audio/webm').split(';')[0] }), t0 - startedAt, Date.now() - t0);
+    }
+    stream.getTracks().forEach((x) => x.stop());
+    void ac.close().catch(() => {});
+  })();
+}
+
+async function uploadChunk(callId: string, blob: Blob, offsetMs: number, durationMs: number) {
+  const segId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { await client.sendCallAudio(callId, blob, { segId, offsetMs: Math.max(0, offsetMs), durationMs }); return; }
+    catch (e: any) {
+      // Sin red o Groq caído: un reintento con el mismo segId (el servidor no duplica). Apagada o fuera: nada.
+      if (e?.status && e.status < 500) return;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+}
+
+/** «Procesando…» y luego las frases, para todos en la llamada (llegan por la cuenta). */
+export function onCallTranscriptEvent(e: Extract<AccountEvent, { type: 'call.processing' | 'call.transcript' }>) {
+  if (!view || e.callId !== view.call.id) return;
+  const key = `p:${e.segId}`;
+  let captions = view.captions.filter((c) => c.resultId !== key);
+  if (e.type === 'call.processing') captions = [...captions, { resultId: key, userId: e.userId, text: '', partial: true, processing: true }];
+  else for (const sg of e.segments) captions = [...captions.filter((c) => c.resultId !== sg.resultId), { resultId: sg.resultId, userId: sg.speakerUserId, text: sg.text, partial: false }];
+  patch({ captions: captions.slice(-8) });
+}
+
 export async function setTranscription(on: boolean, aiSummary = false) {
   if (!view) return;
   if (!on) await flush();
@@ -209,6 +293,7 @@ export async function hangUp(forAll = false) {
 
 async function teardown() {
   leaving = true;
+  if (rec) { rec.stop(); rec = null; }
   if (beat) clearInterval(beat);
   beat = null;
   removeEventListener('pagehide', onPageHide);

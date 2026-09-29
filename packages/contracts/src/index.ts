@@ -118,7 +118,13 @@ export interface CallDTO {
   transcribing: boolean;
   /** Hay transcripción guardada para leer. */
   hasTranscript: boolean;
+  /** Personas agregadas a la llamada que no están en el chat. */
+  invitedUserIds?: string[];
+  /** Nombres de quienes están o fueron agregados (para quien no los tiene en su lista de personas). */
+  names?: Record<string, string>;
 }
+/** POST /calls/:id/invite: suma personas a la llamada en curso (les suena aunque no estén en el chat). */
+export const CallInviteInput = z.object({ userIds: z.array(z.uuid()).min(1).max(20) });
 /** aiSummary: quien la prende autoriza que DeepSeek resuma la transcripción al colgar. */
 export const CallTranscriptionInput = z.object({ on: z.boolean(), aiSummary: z.boolean().default(false) });
 /** Frases finales que el cliente recibió del SDK (TranscriptEvent con isPartial=false). */
@@ -1239,8 +1245,11 @@ export const PushTokenInput = z.object({
  */
 export interface PushData {
   /** side = mensaje de un sidechat (categoría TC_SIDE; trae sideOf). reaction = reaccionaron a mi mensaje (abre el mensaje). */
-  type: 'message' | 'reminder' | 'event' | 'side' | 'mention' | 'reaction' | 'issue';
+  /** call = llamada entrante (categoría TC_CALL; trae callId y kind). */
+  type: 'message' | 'reminder' | 'event' | 'side' | 'mention' | 'reaction' | 'issue' | 'call';
   conversationId: string;
+  callId?: string;
+  kind?: 'audio' | 'video';
   /** type 'issue': me asignaron esta tarea. Abrir el asunto; si inChat es false, sin abrir el chat (no lo puedo leer). */
   issueId?: string;
   inChat?: boolean;
@@ -1372,6 +1381,12 @@ export type AccountEvent =
   | { type: 'me.dnd'; dndUntil: string | null }
   /** Me están llamando en una conversación (no llega a quien la empezó ni a quien tiene No molestar). */
   | { type: 'call.ringing'; call: CallDTO; conversationTitle: string | null; callerName: string }
+  /** La llamada a la que me agregaron cambió (no estoy en su chat, así que no me llega por la conversación). */
+  | { type: 'call.updated'; call: CallDTO }
+  /** Un pedazo de audio de `userId` se está transcribiendo: los clientes muestran «Procesando…». */
+  | { type: 'call.processing'; callId: string; userId: string; segId: string }
+  /** Frases de ese pedazo ya guardadas (vacío si no tenía voz; failed si Groq falló). */
+  | { type: 'call.transcript'; callId: string; userId: string; segId: string; segments: CallTranscriptSegmentDTO[]; failed?: boolean }
   /** Un asunto restringido (visibilidad 'org' o 'private') que puedo ver cambió: no viaja por la conversación. */
   | { type: 'issue.updated'; issue: IssueDTO }
   /** Mi asunto personal cambió (no tiene conversación). */

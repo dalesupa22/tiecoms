@@ -14,7 +14,9 @@ import { startRingtone, stopRingtone } from '../sound.ts';
 import { Avatar, ConvAvatar, Modal, conversationTitle, personById } from '../ui.tsx';
 
 const useCallView = () => useSyncExternalStore((l) => subscribeCall(() => l()), currentCall);
-const firstName = (d: ReturnType<typeof client.getState>['data'], id: string | null) => (id && personById(d!, id)?.name.split(' ')[0]) || '';
+/** Nombre corto; si la persona no está en mi lista (me agregaron a la llamada), sale de call.names. */
+const firstName = (d: ReturnType<typeof client.getState>['data'], id: string | null, names?: Record<string, string>) =>
+  ((id && (personById(d!, id)?.name ?? names?.[id])) || '').split(' ')[0] ?? '';
 const fail = (e: unknown) => toast(errorText(e));
 
 /** 📞 y 🎥 del encabezado (solo con las llamadas prendidas en el servidor y si puedo escribir). */
@@ -117,7 +119,7 @@ export function CallDock() {
       <div className="row call-dock-head">
         <span className={`call-dot ${v.phase === 'live' ? 'is-live' : ''}`} aria-hidden />
         <button className="grow ellipsis call-dock-title" onClick={() => navigate(`/c/${v.call.conversationId}`)}>
-          {conv ? (conv.name ?? others.map((id) => firstName(d, id)).join(', ')) || t('call.title') : t('call.title')}
+          {conv ? (conv.name ?? others.map((id) => firstName(d, id, v.call.names)).join(', ')) || t('call.title') : others.map((id) => firstName(d, id, v.call.names)).join(', ') || t('call.title')}
         </button>
         <span className="small muted">{v.phase === 'connecting' ? t('call.connecting') : clock}</span>
         <button className="icon-btn" aria-label={min ? t('call.expand') : t('call.minimize')} onClick={() => setMin(!min)}>{min ? '▢' : '–'}</button>
@@ -125,16 +127,16 @@ export function CallDock() {
       {v.call.transcribing && <div className="call-rec" role="status">⏺ {t('call.transcribingAll')}</div>}
       {!min && <>
         {video.length > 0
-          ? <div className={`call-grid n${Math.min(video.length, 4)}`}>{video.map((x) => <Tile key={x.tileId} tileId={x.tileId} local={x.local} label={x.local ? t('call.you') : firstName(d, x.userId)} />)}</div>
+          ? <div className={`call-grid n${Math.min(video.length, 4)}`}>{video.map((x) => <Tile key={x.tileId} tileId={x.tileId} local={x.local} label={x.local ? t('call.you') : firstName(d, x.userId, v.call.names)} />)}</div>
           : <div className="call-people">{v.call.activeUserIds.map((id) => (
               <div key={id} className={`call-person ${v.speaking.includes(id) ? 'is-speaking' : ''}`}>
-                <Avatar person={personById(d, id)} size={44} /><span className="small ellipsis">{id === d.me.id ? t('call.you') : firstName(d, id)}</span>
+                <Avatar person={personById(d, id)} size={44} /><span className="small ellipsis">{id === d.me.id ? t('call.you') : firstName(d, id, v.call.names)}</span>
               </div>))}
               {others.length === 0 && <div className="small muted">{t('call.waiting')}</div>}
             </div>}
         {v.call.transcribing && v.captions.length > 0 && (
           <div className="call-captions" aria-live="polite">
-            {v.captions.slice(-3).map((c) => <div key={c.resultId} className={c.partial ? 'is-partial' : ''}><b>{c.userId === d.me.id ? t('call.you') : firstName(d, c.userId) || '·'}:</b> {c.text}</div>)}
+            {v.captions.slice(-4).map((c) => <div key={c.resultId} className={c.partial ? 'is-partial' : ''}><b>{c.userId === d.me.id ? t('call.you') : firstName(d, c.userId, v.call.names) || '·'}:</b> {c.processing ? <span className="call-processing">⏳ {t('call.processing')}</span> : c.text}</div>)}
           </div>
         )}
       </>}
@@ -142,11 +144,49 @@ export function CallDock() {
         <button className={`call-ctl ${v.muted ? 'is-off' : ''}`} onClick={toggleMute} aria-pressed={v.muted} title={v.muted ? t('call.unmute') : t('call.mute')}>{v.muted ? '🔇' : '🎙️'}</button>
         <button className={`call-ctl ${v.camera ? '' : 'is-off'}`} onClick={() => void toggleCamera().catch(fail)} aria-pressed={!v.camera} title={v.camera ? t('call.cameraOff') : t('call.cameraOn')}>{v.camera ? '🎥' : '📷'}</button>
         <button className={`call-ctl ${v.call.transcribing ? 'is-rec' : ''}`} onClick={toggleTranscript} aria-pressed={v.call.transcribing} title={v.call.transcribing ? t('call.transcriptOff') : t('call.transcriptOn')}>📝</button>
+        <button className="call-ctl" onClick={() => openDialog((close) => <AddToCallDialog call={v.call} onClose={close} />)} title={t('call.add')} aria-label={t('call.add')}>＋</button>
         <span className="grow" />
         <button className="btn small call-hang" onClick={() => void hangUp()}>{t('call.hangUp')}</button>
       </div>
       {v.error && <div className="small" style={{ color: 'var(--danger)' }}>{v.error === 'no_camera' ? t('call.noCamera') : v.error}</div>}
     </aside>
+  );
+}
+
+/** Sumar personas a la llamada en curso: solo gente con la que comparto empresa o espacio (mi lista). */
+function AddToCallDialog({ call, onClose }: { call: CallDTO; onClose: () => void }) {
+  const d = useClient((s) => s.data);
+  const [q, setQ] = useState('');
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const [busy, setBusy] = useState(false);
+  if (!d) return null;
+  const inside = new Set([...call.activeUserIds, ...(call.invitedUserIds ?? []), d.me.id]);
+  const needle = q.trim().toLocaleLowerCase();
+  const list = d.people.filter((p) => !inside.has(p.id) && p.kind !== 'agent' && (!needle || p.name.toLocaleLowerCase().includes(needle))).slice(0, 80);
+  const toggle = (id: string) => setPicked((x) => { const n = new Set(x); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const send = () => {
+    setBusy(true);
+    client.inviteToCall(call.id, [...picked]).then(() => { toast(t('call.added', { n: picked.size })); onClose(); }, (e) => { setBusy(false); fail(e); });
+  };
+  return (
+    <Modal title={t('call.add')} onClose={onClose}>
+      <p className="small muted" style={{ marginTop: 0 }}>{t('call.addHint')}</p>
+      <input className="input" autoFocus placeholder={t('calls.search')} value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="call-pick">
+        {list.map((p) => (
+          <label key={p.id} className="call-pick-row">
+            <input type="checkbox" checked={picked.has(p.id)} onChange={() => toggle(p.id)} />
+            <Avatar person={p} size={30} />
+            <span className="grow ellipsis">{p.name}</span>
+          </label>
+        ))}
+        {list.length === 0 && <div className="hint">{t('call.addNone')}</div>}
+      </div>
+      <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
+        <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn accent" disabled={!picked.size || busy} onClick={send}>📞 {t('call.addSend', { n: picked.size })}</button>
+      </div>
+    </Modal>
   );
 }
 

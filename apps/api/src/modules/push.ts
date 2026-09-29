@@ -394,3 +394,27 @@ export async function pushIssueAssigned(issueId: string, ownerId: string, actorI
   }));
   return targets.length;
 }
+
+/**
+ * Llamada entrante (docs/LLAMADAS.md): push para quien tiene la app cerrada. category TC_CALL y data.type 'call'
+ * para que las apps muestren Contestar / Ahora no. No sale con «No molestar» ni en modo sueño (ACTIVE_SESSION).
+ */
+export async function pushCall(p: { callId: string; userIds: string[]; callerName: string; title: string | null }) {
+  if (!p.userIds?.length) return 0;
+  const { rows } = await pool.query('SELECT id, conversation_id, kind, ended_at FROM calls WHERE id = $1', [p.callId]);
+  const call = rows[0];
+  if (!call || call.ended_at) return 0;
+  const { rows: targets } = await pool.query<Target>(
+    `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
+       FROM users u ${ACTIVE_SESSION} WHERE u.id = ANY($1) AND u.disabled_at IS NULL`,
+    [p.userIds],
+  );
+  await deliver(targets, (t) => ({
+    title: clip(p.callerName, 80),
+    subtitle: p.title ? clip(p.title, 80) : null,
+    body: t.lang === 'en' ? (call.kind === 'video' ? '🎥 Video call' : '📞 Calling you') : (call.kind === 'video' ? '🎥 Videollamada' : '📞 Te está llamando'),
+    threadId: call.conversation_id, category: 'TC_CALL', collapseId: `call-${call.id}`,
+    data: { type: 'call', callId: call.id, conversationId: call.conversation_id, kind: call.kind },
+  }));
+  return targets.length;
+}

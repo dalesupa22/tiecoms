@@ -5,7 +5,7 @@ import {
   type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type TopicColor, type TopicDTO, type UserDTO, normalizeEmoji,
-  type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentInput,
+  type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentDTO, type CallTranscriptSegmentInput,
   type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO, type IntegrationDTO, type IntegrationSecretDTO,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
@@ -92,7 +92,9 @@ export type ClientNotice =
   /** Alguien reaccionó a un mensaje mío (conversación abierta en este dispositivo). */
   | { kind: 'reaction'; conversationId: string; message: MessageDTO; userId: string; emoji: string }
   /** Me están llamando en una conversación. */
-  | { kind: 'callRinging'; call: CallDTO; callerName: string; conversationTitle: string | null };
+  | { kind: 'callRinging'; call: CallDTO; callerName: string; conversationTitle: string | null }
+  /** Transcripción por pedazos: uno se está procesando o ya trae sus frases. */
+  | { kind: 'callTranscript'; event: Extract<AccountEvent, { type: 'call.processing' | 'call.transcript' }> };
 
 export interface ClientOptions {
   /** Origen del API, p. ej. https://app.chaggu.com. Vacío = mismo origen (web). */
@@ -417,6 +419,8 @@ export class TieComsClient {
       this.set({ issues: next }); this.recountIssues(e.conversationId);
     }
     if (e.type === 'me.sleep') this.patchMe({ sleep: e.sleep });
+    if (e.type === 'call.updated') this.putCall(e.call);
+    if (e.type === 'call.processing' || e.type === 'call.transcript') this.opts.onNotice?.({ kind: 'callTranscript', event: e });
     if (e.type === 'call.ringing') {
       this.putCall(e.call);
       if (!dndActive(this.state)) this.opts.onNotice?.({ kind: 'callRinging', call: e.call, callerName: e.callerName, conversationTitle: e.conversationTitle });
@@ -530,6 +534,12 @@ export class TieComsClient {
     this.putCall(r.call);
     return r;
   }
+  /** Suma personas a la llamada en curso (les suena aunque no estén en el chat). */
+  async inviteToCall(callId: string, userIds: string[]) {
+    const r = await this.request<{ call: CallDTO }>(`/calls/${callId}/invite`, { method: 'POST', json: { userIds } });
+    this.putCall(r.call);
+    return r.call;
+  }
   callHeartbeat(callId: string) { return this.request<{ ok: true }>(`/calls/${callId}/heartbeat`, { method: 'POST', json: {} }); }
   async leaveCall(callId: string, forAll = false) {
     const r = await this.request<{ call: CallDTO }>(`/calls/${callId}/${forAll ? 'end' : 'leave'}`, { method: 'POST', json: {} });
@@ -543,6 +553,13 @@ export class TieComsClient {
   }
   sendCallTranscript(callId: string, segments: CallTranscriptSegmentInput[]) {
     return this.request<{ saved: number }>(`/calls/${callId}/transcript`, { method: 'POST', json: { segments } });
+  }
+  /** Un pedazo del micrófono propio para transcribir (Groq). segId lo genera el cliente: reintentar no duplica. */
+  sendCallAudio(callId: string, chunk: Blob, meta: { segId: string; offsetMs: number; durationMs: number }) {
+    return this.request<{ saved: number; segments: CallTranscriptSegmentDTO[] }>(`/calls/${callId}/audio`, {
+      method: 'POST', body: chunk,
+      headers: { 'content-type': 'application/octet-stream', 'x-file-type': chunk.type || 'audio/webm', 'x-seg-id': meta.segId, 'x-offset-ms': String(Math.round(meta.offsetMs)), 'x-duration-ms': String(Math.round(meta.durationMs)) },
+    });
   }
   callTranscript(callId: string) { return this.request<CallTranscriptDTO>(`/calls/${callId}/transcript`); }
   /** Sonido predeterminado y tono de llamada (optimista). */

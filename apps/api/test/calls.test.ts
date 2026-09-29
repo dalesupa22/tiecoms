@@ -172,4 +172,68 @@ describe('llamadas', () => {
     await call(`/conversations/${chatId}/prefs`, { method: 'PUT', token: beto.token, body: { pinned: true } });
     expect((await call('/bootstrap', { token: beto.token })).json.conversations.find((c: any) => c.id === chatId).sound).toBe('tambor');
   });
+
+  it('transcripción con Groq por pedazos: «Procesando…», frases con quien habló, sin duplicar y sin voz no guarda nada', async () => {
+    const c = (await post(`/conversations/${chatId}/call`, ana.token, { kind: 'audio' })).json.call;
+    await post(`/conversations/${chatId}/call`, beto.token, {});
+    const up = (tok: string, text: string, segId: string, offsetMs = 0): Promise<{ status: number; json: any }> => fetch(`${API}/api/v1/calls/${c.id}/audio`, {
+      method: 'POST', body: Buffer.from(text),
+      headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/octet-stream', 'x-file-type': 'audio/webm;codecs=opus', 'x-seg-id': segId, 'x-offset-ms': String(offsetMs), 'x-duration-ms': '15000' },
+    }).then(async (r) => ({ status: r.status, json: await r.json() }));
+    // Apagada: no se acepta.
+    expect((await up(ana.token, 'texto:hola', 'seg-ana-0')).status).toBe(400);
+    await post(`/calls/${c.id}/transcription`, ana.token, { on: true });
+    const before = account.length;
+    const r1 = await up(ana.token, 'texto:Hola Beto, revisemos Xertify', 'seg-ana-1', 1000);
+    expect(r1.json).toMatchObject({ saved: 1, segments: [{ speakerUserId: ana.id, speakerName: 'Ana', text: 'Hola Beto, revisemos Xertify', startMs: 1000 }] });
+    // El mismo pedazo reintentado no duplica.
+    expect((await up(ana.token, 'texto:Hola Beto, revisemos Xertify', 'seg-ana-1', 1000)).json.saved).toBe(0);
+    // Sin voz (Whisper no devuelve frases) no guarda nada.
+    expect((await up(beto.token, 'silencio', 'seg-beto-1', 16000)).json.saved).toBe(0);
+    expect((await up(beto.token, 'texto:Listo, mañana lo firmo', 'seg-beto-2', 17000)).json.saved).toBe(1);
+    // Beto recibió «Procesando…» y luego las frases de Ana.
+    await waitFor(() => account.slice(before).find((e) => e.type === 'call.processing' && e.segId === 'seg-ana-1'), 'call.processing');
+    const tr: any = await waitFor(() => account.slice(before).find((e) => e.type === 'call.transcript' && e.segId === 'seg-ana-1'), 'call.transcript');
+    expect(tr.segments[0].text).toBe('Hola Beto, revisemos Xertify');
+    // Alguien de afuera no puede mandar audio.
+    expect((await up(extra.token, 'texto:intruso', 'seg-extra-1')).status).toBe(404);
+    await post(`/calls/${c.id}/end`, ana.token);
+    const t = await call(`/calls/${c.id}/transcript`, { token: beto.token });
+    expect(t.json.segments.map((x: any) => [x.speakerName, x.text])).toEqual([['Ana', 'Hola Beto, revisemos Xertify'], ['Beto', 'Listo, mañana lo firmo']]);
+  });
+
+  it('agregar personas: a Carla (misma empresa, no está en el chat) le suena, entra y ve solo la llamada', async () => {
+    const carla = await signup('Carla', (await post(`/organizations/${ana.orgId}/invitations`, ana.token)).json.token);
+    const cs: Socket = await new Promise((res, rej) => {
+      const s2 = io(API, { path: '/api/socket.io', transports: ['websocket'], auth: { token: carla.token } });
+      s2.once('ready', () => res(s2)); s2.once('connect_error', rej);
+    });
+    const carlaEvents: any[] = [];
+    cs.on('account.event', (e) => carlaEvents.push(e));
+    try {
+      const c = (await post(`/conversations/${chatId}/call`, ana.token, { kind: 'audio' })).json.call;
+      // Fuera de la llamada no se puede agregar; alguien sin relación (Extra, otra empresa) tampoco.
+      expect((await post(`/calls/${c.id}/invite`, beto.token, { userIds: [carla.id] })).status).toBe(409);
+      expect((await post(`/calls/${c.id}/invite`, ana.token, { userIds: [extra.id] })).status).toBe(403);
+      const inv = await post(`/calls/${c.id}/invite`, ana.token, { userIds: [carla.id] });
+      expect(inv.status).toBe(200);
+      expect(inv.json.call.invitedUserIds).toEqual([carla.id]);
+      expect(inv.json.call.names[carla.id]).toBe('Carla');
+      await waitFor(() => carlaEvents.find((e) => e.type === 'call.ringing' && e.call.id === c.id), 'ringing a Carla');
+      const j = await post(`/calls/${c.id}/join`, carla.token);
+      expect(j.status).toBe(200);
+      expect(j.json.attendee.Attendee.ExternalUserId).toBe(carla.id);
+      expect(j.json.call.activeUserIds.sort()).toEqual([ana.id, carla.id].sort());
+      // Le llegan los cambios de la llamada por su cuenta (no está en la sala del chat).
+      await post(`/conversations/${chatId}/call`, beto.token, {});
+      await waitFor(() => carlaEvents.find((e) => e.type === 'call.updated' && e.call.activeUserIds.includes(beto.id)), 'call.updated a Carla');
+      // No puede leer los mensajes del chat.
+      expect((await call(`/conversations/${chatId}/messages?limit=5`, { token: carla.token })).status).toBe(404);
+      expect((await post(`/calls/${c.id}/heartbeat`, carla.token)).status).toBe(200);
+      await post(`/calls/${c.id}/end`, ana.token);
+      // Después: la ve en su historial y puede abrir su detalle.
+      expect((await call('/calls?limit=5', { token: carla.token })).json.calls.map((x: any) => x.call.id)).toContain(c.id);
+      expect((await call(`/calls/${c.id}/transcript`, { token: carla.token })).status).toBe(200);
+    } finally { cs.disconnect(); }
+  });
 });

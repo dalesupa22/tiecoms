@@ -276,7 +276,8 @@ export async function removeMember(userId: string, conversationId: string, targe
  * A quién puedes escribir: personas con las que compartes un espacio activo o
  * tu empresa. Devuelve el subconjunto alcanzable de ids.
  */
-async function reachable(c: Tx, userId: string, ids: string[]): Promise<string[]> {
+/** Personas con las que `userId` comparte un espacio o su empresa (y sin bloqueos). */
+export async function reachable(c: Tx, userId: string, ids: string[]): Promise<string[]> {
   if (!ids.length) return [];
   await ensureNotBlocked(c, userId, ids);
   const { rows } = await c.query(

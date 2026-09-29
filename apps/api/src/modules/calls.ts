@@ -4,9 +4,9 @@
  * - La reunión de Chime se crea con ClientRequestToken = id de la llamada: dos personas que llaman a la vez
  *   terminan en la misma reunión. Nunca hay llamadas de red dentro de una transacción.
  * - Presencia por latido (cada 30 s). El worker saca a quien dejó de latir y cierra la llamada vacía.
- * - Transcripción en vivo (Amazon Transcribe vía Chime), se prende y apaga durante la llamada; los clientes
- *   mandan las frases finales que reciben del SDK y aquí se guardan deduplicadas por resultId.
- * Costos (28-sep-2026): Chime US$0.0017 por persona-minuto; Transcribe US$0.01 por minuto de llamada transcrita.
+ * - Transcripción que se prende y apaga durante la llamada. Por defecto con Groq Whisper: cada cliente manda
+ *   pedazos de su micrófono (addAudio). Con CALLS_STT=chime, Amazon Transcribe dentro de Chime (addSegments).
+ * Costos (28-sep-2026): Chime US$0.0017 por persona-minuto; Groq ≈ US$0.04 por hora de audio con voz.
  * CALLS_PROVIDER=fake usa un proveedor en memoria (pruebas y desarrollo sin AWS).
  */
 import { randomUUID } from 'node:crypto';
@@ -14,7 +14,7 @@ import {
   ChimeSDKMeetingsClient, CreateAttendeeCommand, CreateMeetingCommand, DeleteMeetingCommand, GetMeetingCommand,
   StartMeetingTranscriptionCommand, StopMeetingTranscriptionCommand,
 } from '@aws-sdk/client-chime-sdk-meetings';
-import type { CallDTO, CallHistoryItemDTO, CallJoinDTO, CallKind, CallTranscriptDTO } from '@tiecoms/contracts';
+import type { CallDTO, CallHistoryItemDTO, CallJoinDTO, CallKind, CallTranscriptDTO, CallTranscriptSegmentDTO } from '@tiecoms/contracts';
 import type { z } from 'zod';
 import type { CallTranscriptInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
@@ -22,6 +22,11 @@ import { pool, tx, type Db, type Tx, enqueueOutbox } from '../db.ts';
 import { ApiError, badRequest, notFound } from '../errors.ts';
 import { appendEvent, appendMessage, sendMessage } from './messages.ts';
 import { getSummarizer } from './voice-providers.ts';
+import { reachable } from './workspaces.ts';
+import { sttConfigured, transcribeChunk } from './call-stt.ts';
+
+/** CALLS_STT=chime vuelve a Amazon Transcribe dentro de Chime; por defecto, Groq Whisper por pedazos. */
+const chimeStt = () => process.env.CALLS_STT === 'chime';
 
 const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, ...p });
 /** Sin latido en este tiempo, la persona salió de la llamada. */
@@ -129,7 +134,10 @@ async function callDTO(db: Db, id: string): Promise<CallDTO> {
     `SELECT c.*,
             COALESCE((SELECT array_agg(p.user_id ORDER BY p.first_joined_at) FROM call_participants p
                        WHERE p.call_id = c.id AND p.left_at IS NULL), '{}') AS active,
-            EXISTS (SELECT 1 FROM call_transcript_segments s WHERE s.call_id = c.id) AS has_transcript
+            EXISTS (SELECT 1 FROM call_transcript_segments s WHERE s.call_id = c.id) AS has_transcript,
+            ARRAY(SELECT i.user_id FROM call_invites i WHERE i.call_id = c.id ORDER BY i.created_at) AS invited,
+            (SELECT jsonb_object_agg(u.id, u.name) FROM users u
+              WHERE u.id IN (SELECT p.user_id FROM call_participants p WHERE p.call_id = c.id UNION SELECT i.user_id FROM call_invites i WHERE i.call_id = c.id)) AS names
        FROM calls c WHERE c.id = $1`,
     [id],
   );
@@ -139,12 +147,15 @@ async function callDTO(db: Db, id: string): Promise<CallDTO> {
     id: r.id, conversationId: r.conversation_id, kind: r.kind, startedBy: r.started_by,
     startedAt: new Date(r.started_at).toISOString(), endedAt: r.ended_at ? new Date(r.ended_at).toISOString() : null,
     activeUserIds: r.active, transcribing: r.transcribing, hasTranscript: r.has_transcript,
+    ...(r.invited?.length ? { invitedUserIds: r.invited } : {}), names: r.names ?? {},
   };
 }
 
 async function publish(c: Tx, conversationId: string, callId: string) {
   const call = await callDTO(c, callId);
   await appendEvent(c, conversationId, { type: 'call.updated', conversationId, call });
+  // Los agregados que no están en el chat no escuchan la conversación: les llega por su cuenta.
+  if (call.invitedUserIds?.length) await enqueueOutbox(c, 'account.event', { userIds: call.invitedUserIds, event: { type: 'call.updated', call } });
   return call;
 }
 
@@ -167,7 +178,14 @@ async function callFor(db: Db, userId: string, callId: string, need: 'read' | 'p
   );
   const call = rows[0];
   if (!call) throw notFound('Llamada');
-  const a = await conversationAccess(db, userId, call.conversation_id, need);
+  let a;
+  try { a = await conversationAccess(db, userId, call.conversation_id, need); }
+  catch (e) {
+    // Agregado a la llamada sin estar en el chat: acceso a esta llamada, no a la conversación.
+    const inv = await db.query('SELECT 1 FROM call_invites WHERE call_id = $1 AND user_id = $2', [callId, userId]);
+    if (inv.rowCount) return { ...call, invited: true };
+    throw e;
+  }
   if (!call.was_in && call.message_seq != null && Number(call.message_seq) <= a.historyFromSeq) throw notFound('Llamada');
   return call;
 }
@@ -180,11 +198,12 @@ export async function history(userId: string, q: { before?: string; limit: numbe
             CASE WHEN c.ended_at IS NOT NULL THEN extract(epoch FROM c.ended_at - c.started_at)::int END AS secs,
             c.summary IS NOT NULL AS has_summary
        FROM calls c
-       JOIN conversation_memberships cm ON cm.conversation_id = c.conversation_id AND cm.user_id = $1 AND cm.removed_at IS NULL
+       LEFT JOIN conversation_memberships cm ON cm.conversation_id = c.conversation_id AND cm.user_id = $1 AND cm.removed_at IS NULL
        JOIN conversations cv ON cv.id = c.conversation_id AND cv.archived_at IS NULL
        LEFT JOIN messages m ON m.id = c.message_id
       WHERE ($2::timestamptz IS NULL OR c.started_at < $2)
-        AND (EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id AND p.user_id = $1) OR m.seq IS NULL OR m.seq > cm.history_from_seq)
+        AND (EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id AND p.user_id = $1)
+             OR (cm.user_id IS NOT NULL AND (m.seq IS NULL OR m.seq > cm.history_from_seq)))
       ORDER BY c.started_at DESC LIMIT $3`,
     [userId, q.before ?? null, q.limit + 1],
   );
@@ -273,9 +292,44 @@ async function ring(c: Tx, call: CallDTO, callerId: string) {
     'SELECT (SELECT name FROM users WHERE id = $2) AS caller, (SELECT name FROM conversations WHERE id = $1) AS title',
     [call.conversationId, callerId],
   )).rows[0];
-  await enqueueOutbox(c, 'account.event', {
-    userIds: rows.map((r) => r.user_id),
-    event: { type: 'call.ringing', call, conversationTitle: info.title ?? null, callerName: info.caller ?? '' },
+  await ringUsers(c, call, rows.map((r) => r.user_id), info.caller ?? '', info.title ?? null);
+}
+
+/** Aviso en vivo (socket) y push de llamada entrante (para la app cerrada). */
+async function ringUsers(c: Tx, call: CallDTO, userIds: string[], callerName: string, title: string | null) {
+  if (!userIds.length) return;
+  await enqueueOutbox(c, 'account.event', { userIds, event: { type: 'call.ringing', call, conversationTitle: title, callerName } });
+  await c.query(
+    "INSERT INTO jobs (kind, payload, max_attempts, dedupe_key) VALUES ('push.call', $1, 1, $2) ON CONFLICT (dedupe_key) DO NOTHING",
+    [JSON.stringify({ callId: call.id, userIds, callerName, title }), `push-call:${call.id}:${userIds.slice().sort().join(',').slice(0, 180)}`],
+  );
+}
+
+/**
+ * Agregar personas a la llamada en curso. Quien agrega tiene que estar dentro; solo se suma a gente con la que
+ * comparte empresa o espacio. A los que están en el chat solo les vuelve a sonar; a los demás se les da acceso
+ * a esta llamada (call_invites), no a la conversación.
+ */
+export async function invite(userId: string, callId: string, userIds: string[]) {
+  requireEnabled();
+  const call = await callFor(pool, userId, callId, 'read');
+  if (call.ended_at) throw new ApiError(409, 'call_ended', 'La llamada ya terminó');
+  const inCall = await pool.query('SELECT 1 FROM call_participants WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL', [callId, userId]);
+  if (!inCall.rowCount) throw new ApiError(409, 'not_in_call', 'Entra a la llamada para agregar personas');
+  const ids = [...new Set(userIds.filter((x) => x !== userId))];
+  return tx(async (c) => {
+    const ok = await reachable(c, userId, ids);
+    if (ok.length !== ids.length) throw new ApiError(403, 'forbidden', 'Solo puedes agregar personas con las que compartes un espacio o tu empresa');
+    const members = new Set((await c.query(
+      'SELECT user_id FROM conversation_memberships WHERE conversation_id = $1 AND removed_at IS NULL AND user_id = ANY($2)', [call.conversation_id, ids],
+    )).rows.map((r) => r.user_id));
+    for (const id of ids) if (!members.has(id)) {
+      await c.query('INSERT INTO call_invites (call_id, user_id, invited_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [callId, id, userId]);
+    }
+    const info = (await c.query('SELECT (SELECT name FROM users WHERE id = $2) AS caller, (SELECT name FROM conversations WHERE id = $1) AS title', [call.conversation_id, userId])).rows[0];
+    const dto = await publish(c, call.conversation_id, callId);
+    await ringUsers(c, dto, ids, info.caller ?? '', info.title ?? null);
+    return { call: dto };
   });
 }
 
@@ -366,7 +420,9 @@ export async function setTranscription(userId: string, callId: string, on: boole
   const inCall = await pool.query('SELECT 1 FROM call_participants WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL', [callId, userId]);
   if (!inCall.rowCount) throw new ApiError(409, 'not_in_call', 'Entra a la llamada para cambiar la transcripción');
   if (call.transcribing === on) return { call: await callDTO(pool, callId) };
-  try {
+  if (on && !chimeStt() && !sttConfigured()) throw new ApiError(503, 'transcription_unavailable', 'La transcripción todavía no está configurada');
+  // Con Groq (por defecto) cada cliente graba y manda su micrófono: aquí solo cambia el estado.
+  if (chimeStt()) try {
     await getProvider().transcription(call.external_id, on);
   } catch (e) {
     if (e instanceof MeetingGone) { await finish(callId); throw new ApiError(409, 'call_ended', 'La llamada ya terminó'); }
@@ -437,6 +493,75 @@ export async function transcript(userId: string, callId: string): Promise<CallTr
       text: r.body, startMs: Number(r.start_ms), endMs: Number(r.end_ms),
     })),
   };
+}
+
+/** Límite de un pedazo de audio de llamada (≈ 20 s de opus/aac pesan 40–120 KB). */
+export const MAX_CALL_AUDIO_BYTES = 3 * 1024 * 1024;
+
+async function activeParticipantIds(callId: string) {
+  const { rows } = await pool.query('SELECT user_id FROM call_participants WHERE call_id = $1 AND left_at IS NULL', [callId]);
+  return rows.map((r) => r.user_id as string);
+}
+
+/**
+ * Un pedazo del micrófono de quien lo manda (docs/LLAMADAS.md › Transcripción): avisa «Procesando…» a la llamada,
+ * lo transcribe con Groq, guarda las frases (speaker = quien lo mandó) y se las envía a quienes están dentro.
+ * segId lo genera el cliente: reintentar el mismo pedazo no duplica frases.
+ */
+export async function addAudio(userId: string, callId: string, input: { body: Buffer; type: string; offsetMs: number; durationMs: number; segId: string }) {
+  requireEnabled();
+  const call = await callFor(pool, userId, callId, 'post');
+  const inCall = await pool.query('SELECT 1 FROM call_participants WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL', [callId, userId]);
+  const late = call.ended_at ? Date.now() - new Date(call.ended_at).getTime() < 60_000 : false;
+  if (!inCall.rowCount && !late) throw new ApiError(409, 'not_in_call', 'No estás en esa llamada');
+  const justStopped = call.transcription_stopped_at && Date.now() - new Date(call.transcription_stopped_at).getTime() < 60_000;
+  if (!call.transcribing && !late && !justStopped) throw badRequest('La transcripción está apagada');
+  if (!/^[A-Za-z0-9_-]{6,64}$/.test(input.segId)) throw badRequest('segId inválido');
+  if (!/^audio\/(webm|ogg|mp4|m4a|x-m4a|aac|mpeg|wav)/.test(input.type)) throw badRequest('Formato de audio no soportado');
+  if (!input.body.length || input.body.length > MAX_CALL_AUDIO_BYTES) throw badRequest('Pedazo de audio vacío o muy grande');
+  const done = await pool.query('SELECT 1 FROM call_transcript_segments WHERE call_id = $1 AND result_id LIKE $2 LIMIT 1', [callId, `${input.segId}:%`]);
+  if (done.rowCount) return { saved: 0, segments: [] };
+  const me = (await pool.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name ?? '';
+  const people = await activeParticipantIds(callId);
+  await tx((c) => enqueueOutbox(c, 'account.event', { userIds: people, event: { type: 'call.processing', callId, userId, segId: input.segId } }));
+  // Pista de ortografía: nombres de la gente en la llamada y del chat.
+  const names = (await pool.query(
+    `SELECT string_agg(DISTINCT u.name, ', ') AS n FROM call_participants p JOIN users u ON u.id = p.user_id WHERE p.call_id = $1`, [callId],
+  )).rows[0]?.n ?? '';
+  const title = (await pool.query('SELECT name FROM conversations WHERE id = $1', [call.conversation_id])).rows[0]?.name ?? '';
+  let result;
+  try {
+    result = await transcribeChunk(input.body, input.type, [process.env.CALLS_STT_VOCAB ?? 'Xertify, chaggu', names, title].filter(Boolean).join('. '));
+  } catch (e: any) {
+    console.warn('[calls] stt', e?.message);
+    await tx((c) => enqueueOutbox(c, 'account.event', { userIds: people, event: { type: 'call.transcript', callId, segId: input.segId, userId, segments: [], failed: true } }));
+    throw new ApiError(502, 'transcription_failed', 'No se pudo transcribir ese pedazo');
+  }
+  const saved: CallTranscriptSegmentDTO[] = [];
+  for (const [i, sg] of result.segments.entries()) {
+    const startMs = Math.max(0, Math.round(input.offsetMs + sg.start * 1000));
+    const endMs = Math.max(startMs, Math.round(input.offsetMs + Math.min(sg.end * 1000, input.durationMs || sg.end * 1000)));
+    const r = await pool.query(
+      `INSERT INTO call_transcript_segments (call_id, result_id, speaker_user_id, speaker_name, language, body, start_ms, end_ms, reported_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$3) ON CONFLICT (call_id, result_id) DO NOTHING`,
+      [callId, `${input.segId}:${i}`, userId, me, result.language, sg.text.slice(0, 4000), startMs, endMs],
+    );
+    if (r.rowCount) saved.push({ resultId: `${input.segId}:${i}`, speakerUserId: userId, speakerName: me, language: result.language, text: sg.text, startMs, endMs });
+  }
+  await tx(async (c) => {
+    await enqueueOutbox(c, 'account.event', { userIds: people, event: { type: 'call.transcript', callId, segId: input.segId, userId, segments: saved } });
+    // Llegó después de colgar y la llamada aún no tenía el mensaje «Ver transcripción».
+    if (saved.length && call.ended_at) {
+      const cur = await c.query('SELECT transcript_message_id, started_by FROM calls WHERE id = $1 FOR UPDATE', [callId]);
+      if (!cur.rows[0].transcript_message_id) {
+        const m = await appendMessage(c, { conversationId: call.conversation_id, authorId: cur.rows[0].started_by, kind: 'system', body: sys('call.transcript', { callId }) });
+        await c.query('UPDATE calls SET transcript_message_id = $2 WHERE id = $1', [callId, m.id]);
+        if (call.ai_summary) await c.query("INSERT INTO jobs (kind, payload, max_attempts, dedupe_key) VALUES ('call.summary', $1, 3, $2) ON CONFLICT (dedupe_key) DO NOTHING", [JSON.stringify({ callId }), `call-summary:${callId}`]);
+        await publish(c, call.conversation_id, callId);
+      }
+    }
+  });
+  return { saved: saved.length, segments: saved };
 }
 
 /**

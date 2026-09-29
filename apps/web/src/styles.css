@@ -1331,7 +1331,7 @@ button.topic-tag:hover { filter: brightness(.96); }
 .compose-search.has-chips { flex-wrap: wrap; row-gap: 6px; }
 .compose-search .compose-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 3px; border-radius: 99px; background: var(--paper-2); border: 1px solid var(--line); font-size: 13px; }
 .compose-tip { padding: 2px 4px 6px; }
-.compose-check { width: 22px; height: 22px; border-radius: 99px; border: 1.5px solid var(--line); display: grid; place-items: center; flex: none; font-size: 12px; font-weight: 800; color: #fff; transition: background 0.12s, border-color 0.12s; }
+.compose-check { width: 22px; height: 22px; border-radius: 99px; border: 2px solid var(--faint); display: grid; place-items: center; flex: none; font-size: 12px; font-weight: 800; color: #fff; transition: background 0.12s, border-color 0.12s; }
 .compose-check.on { background: var(--accent); border-color: var(--accent); }
 .person-row.on { background: rgba(199, 58, 26, 0.06); }
 .person-row { cursor: pointer; }

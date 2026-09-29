@@ -99,6 +99,22 @@ Pedido de Danny: la opción más barata. Groq cobra ≈ US$0.04 por hora de audi
   - Los cambios de la llamada le llegan por la cuenta, en `call.updated {call}`.
   - `CallDTO.invitedUserIds` y `CallDTO.names` traen los nombres de quienes no están en su lista de personas.
 
+## Quién ve la llamada: huddle de la empresa (29-sep-2026)
+
+Pedido de Danny: las llamadas funcionan como los huddles de Slack. Por ahora solo las ve la empresa de quien la empezó.
+
+- En un chat con gente de otras empresas, a esas personas:
+  - no les suena;
+  - no la ven en curso (ni en `/calls/active`, ni en `GET /conversations/:id/call`, ni con el punto verde);
+  - no la ven en el historial y no pueden abrirla ni entrar (404).
+- En ese chat, `call.updated` no va por la conversación, porque lo recibirían todos. Va por la cuenta de cada persona de la empresa (los clientes 1.7.1 ya lo manejan).
+- En ese chat tampoco se dejan los mensajes de sistema: empezó, terminó, transcripción prendida o apagada, y «Ver transcripción».
+- Si alguien de la otra empresa intenta llamar mientras está la llamada, recibe `409 call_busy`.
+- Excepciones:
+  - quien la agregaron con «＋ Agregar» la ve y puede entrar;
+  - en un chat directo la ven los dos, aunque sean de empresas distintas.
+- Implementación: `seesCallSql` / `callAudience` / `callNote` en `apps/api/src/modules/calls.ts`. Pruebas en `apps/api/test/calls-huddle.test.ts`.
+
 ## Push de llamada entrante
 
 - Job `push.call`: `category` es `TC_CALL` y `data` es `{type: 'call', callId, conversationId, kind}`. Sale con el título de quien llama y el texto «📞 Te está llamando».

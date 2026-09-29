@@ -136,6 +136,42 @@ export interface CallDevice { key: string; sessionId: string }
 export const deviceOf = (sessionId: string, key?: string | null): CallDevice => ({ key: key || LEGACY_DEVICE_KEY, sessionId });
 const externalUserIdOf = (userId: string, key: string) => (key === LEGACY_DEVICE_KEY ? userId : `${userId}#${key}`);
 
+// ---------- Quién ve la llamada (huddle) ----------
+/**
+ * Como los huddles de Slack (pedido de Danny, 29-sep-2026): la llamada es de la empresa de quien la empezó. En un
+ * chat con gente de otras empresas, a ellos no les suena, no la ven en curso ni en el historial, salvo que alguien
+ * los agregue (＋ Agregar) o entren. En un chat directo la ven los dos. `c` es la fila de calls; `$u` el usuario.
+ */
+const seesCallSql = (u: string, c = 'c') => `(
+  ${c}.started_by = ${u}
+  OR EXISTS (SELECT 1 FROM conversations d WHERE d.id = ${c}.conversation_id AND d.kind = 'direct')
+  OR EXISTS (SELECT 1 FROM organization_memberships a JOIN organization_memberships b ON b.org_id = a.org_id WHERE a.user_id = ${c}.started_by AND b.user_id = ${u})
+  OR EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = ${c}.id AND p.user_id = ${u})
+  OR EXISTS (SELECT 1 FROM call_invites i WHERE i.call_id = ${c}.id AND i.user_id = ${u})
+  OR EXISTS (SELECT 1 FROM call_rings g WHERE g.call_id = ${c}.id AND g.user_id = ${u}))`;
+
+async function seesCall(db: Db, userId: string, callId: string) {
+  const r = await db.query(`SELECT 1 FROM calls c WHERE c.id = $1 AND ${seesCallSql('$2')}`, [callId, userId]);
+  return !!r.rowCount;
+}
+
+/** Miembros del chat que ven la llamada y si queda alguien por fuera (chat con otras empresas). */
+async function callAudience(db: Db, callId: string): Promise<{ members: string[]; mixed: boolean }> {
+  const { rows } = await db.query(
+    `SELECT m.user_id, ${seesCallSql('m.user_id')} AS sees FROM calls c
+       JOIN conversation_memberships m ON m.conversation_id = c.conversation_id AND m.removed_at IS NULL
+      WHERE c.id = $1`,
+    [callId],
+  );
+  return { members: rows.filter((r) => r.sees).map((r) => r.user_id), mixed: rows.some((r) => !r.sees) };
+}
+
+/** Mensaje de sistema de la llamada en el chat. En un chat con otras empresas no se deja: lo verían todos. */
+async function callNote(c: Tx, callId: string, msg: Parameters<typeof appendMessage>[1]) {
+  if ((await callAudience(c, callId)).mixed) return null;
+  return appendMessage(c, msg);
+}
+
 // ---------- Lectura ----------
 /** viewerId: agrega myDevices (solo sus dispositivos dentro de la llamada). */
 async function callDTO(db: Db, id: string, viewerId?: string): Promise<CallDTO> {
@@ -170,26 +206,34 @@ async function callDTO(db: Db, id: string, viewerId?: string): Promise<CallDTO> 
 
 async function publish(c: Tx, conversationId: string, callId: string) {
   const call = await callDTO(c, callId);
-  await appendEvent(c, conversationId, { type: 'call.updated', conversationId, call });
+  const { rows } = await c.query('SELECT DISTINCT user_id FROM call_participants WHERE call_id = $1', [callId]);
+  const aud = await callAudience(c, callId);
+  if (!aud.mixed) await appendEvent(c, conversationId, { type: 'call.updated', conversationId, call });
+  else {
+    // Chat con otras empresas: el evento de la conversación lo verían todos; va solo a la empresa, por su cuenta.
+    const been = new Set(rows.map((r) => r.user_id));
+    const ids = aud.members.filter((id) => !been.has(id));
+    if (ids.length) await enqueueOutbox(c, 'account.event', { userIds: ids, event: { type: 'call.updated', call } });
+  }
   // Los agregados que no están en el chat no escuchan la conversación: les llega por su cuenta.
   if (call.invitedUserIds?.length) await enqueueOutbox(c, 'account.event', { userIds: call.invitedUserIds, event: { type: 'call.updated', call } });
   // 1.7.1: a quien estuvo alguna vez en la llamada, por su cuenta, la misma llamada con SUS dispositivos (myDevices).
-  const { rows } = await c.query('SELECT DISTINCT user_id FROM call_participants WHERE call_id = $1', [callId]);
   for (const r of rows) {
     await enqueueOutbox(c, 'account.event', { userIds: [r.user_id], event: { type: 'call.updated', call: await callDTO(c, callId, r.user_id) } });
   }
   return call;
 }
 
-/** GET /calls/active: llamadas sin terminar de mis conversaciones y a las que me agregaron, con su título. */
+/** GET /calls/active: llamadas sin terminar de mis conversaciones (solo las de mi empresa) y a las que me agregaron, con su título. */
 export async function activeCalls(userId: string): Promise<{ calls: ActiveCallDTO[] }> {
   const { rows } = await pool.query(
     `SELECT c.id, cv.name AS title FROM calls c JOIN conversations cv ON cv.id = c.conversation_id AND cv.archived_at IS NULL
       WHERE c.ended_at IS NULL AND (
-        EXISTS (SELECT 1 FROM conversation_memberships cm
+        (EXISTS (SELECT 1 FROM conversation_memberships cm
                   LEFT JOIN workspace_memberships wm ON wm.workspace_id = cv.workspace_id AND wm.user_id = cm.user_id
                  WHERE cm.conversation_id = c.conversation_id AND cm.user_id = $1 AND cm.removed_at IS NULL
                    AND (cv.workspace_id IS NULL OR (wm.user_id IS NOT NULL AND wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now()))))
+         AND ${seesCallSql('$1')})
         OR EXISTS (SELECT 1 FROM call_invites i WHERE i.call_id = c.id AND i.user_id = $1))
       ORDER BY c.started_at DESC LIMIT 50`,
     [userId],
@@ -211,7 +255,7 @@ export async function myActiveCall(userId: string): Promise<CallDTO | null> {
 /** La llamada activa de la conversación, si hay (para pintar «Unirse»). */
 export async function activeCall(userId: string, conversationId: string): Promise<CallDTO | null> {
   await conversationAccess(pool, userId, conversationId, 'read');
-  const { rows } = await pool.query('SELECT id FROM calls WHERE conversation_id = $1 AND ended_at IS NULL', [conversationId]);
+  const { rows } = await pool.query(`SELECT id FROM calls c WHERE conversation_id = $1 AND ended_at IS NULL AND ${seesCallSql('$2')}`, [conversationId, userId]);
   return rows[0] ? callDTO(pool, rows[0].id) : null;
 }
 
@@ -236,6 +280,8 @@ async function callFor(db: Db, userId: string, callId: string, need: 'read' | 'p
     throw e;
   }
   if (!call.was_in && call.message_seq != null && Number(call.message_seq) <= a.historyFromSeq) throw notFound('Llamada');
+  // Llamada de otra empresa en un chat compartido: para mí no existe (huddle).
+  if (!(await seesCall(db, userId, callId))) throw notFound('Llamada');
   return call;
 }
 
@@ -252,7 +298,7 @@ export async function history(userId: string, q: { before?: string; limit: numbe
        LEFT JOIN messages m ON m.id = c.message_id
       WHERE ($2::timestamptz IS NULL OR c.started_at < $2)
         AND (EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id AND p.user_id = $1)
-             OR (cm.user_id IS NOT NULL AND (m.seq IS NULL OR m.seq > cm.history_from_seq)))
+             OR (cm.user_id IS NOT NULL AND (m.seq IS NULL OR m.seq > cm.history_from_seq) AND ${seesCallSql('$1')}))
       ORDER BY c.started_at DESC LIMIT $3`,
     [userId, q.before ?? null, q.limit + 1],
   );
@@ -271,7 +317,8 @@ export async function startOrJoin(userId: string, conversationId: string, kind: 
     const { callId, created } = await tx(async (c) => {
       const a = await conversationAccess(c, userId, conversationId, 'post', true);
       if (!a.canPost) throw new ApiError(403, 'forbidden', 'No puedes llamar en esta conversación');
-      const cur = await c.query('SELECT id FROM calls WHERE conversation_id = $1 AND ended_at IS NULL', [conversationId]);
+      const cur = await c.query(`SELECT id, ${seesCallSql('$2')} AS sees FROM calls c WHERE conversation_id = $1 AND ended_at IS NULL`, [conversationId, userId]);
+      if (cur.rows[0] && !cur.rows[0].sees) throw new ApiError(409, 'call_busy', 'Hay otra llamada en curso en este chat');
       if (cur.rows[0]) return { callId: cur.rows[0].id as string, created: false };
       const ins = await c.query('INSERT INTO calls (conversation_id, started_by, kind) VALUES ($1,$2,$3) RETURNING id', [conversationId, userId, kind]);
       return { callId: ins.rows[0].id as string, created: true };
@@ -323,8 +370,8 @@ async function joinCall(userId: string, callId: string, created: boolean, device
     // Mis otros dispositivos dejan de sonar (ignoran el aviso si deviceKey es el suyo).
     await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'call.answered', callId, conversationId: row.conversation_id, deviceKey: device.key, platform, label } });
     if (created) {
-      const msg = await appendMessage(c, { conversationId: row.conversation_id, authorId: userId, kind: 'system', body: sys('call.started', { kind: row.kind, callId }) });
-      await c.query('UPDATE calls SET message_id = $2 WHERE id = $1', [callId, msg.id]);
+      const msg = await callNote(c, callId, { conversationId: row.conversation_id, authorId: userId, kind: 'system', body: sys('call.started', { kind: row.kind, callId }) });
+      await c.query('UPDATE calls SET message_id = $2 WHERE id = $1', [callId, msg?.id ?? null]);
     }
     const dto = await publish(c, row.conversation_id, callId);
     if (created) await ring(c, dto, userId);
@@ -333,12 +380,14 @@ async function joinCall(userId: string, callId: string, created: boolean, device
   return { call, meeting: { Meeting: row.meeting }, attendee: { Attendee: attendee } };
 }
 
-/** Aviso «te están llamando» a los demás miembros (sin quien llama y sin quien tiene No molestar). */
+/** Aviso «te están llamando» a los demás miembros de la empresa de quien llama (o al otro en un directo), sin quien tiene No molestar. */
 async function ring(c: Tx, call: CallDTO, callerId: string) {
   const { rows } = await c.query(
     `SELECT m.user_id FROM conversation_memberships m JOIN users u ON u.id = m.user_id
       WHERE m.conversation_id = $1 AND m.removed_at IS NULL AND m.user_id <> $2 AND u.disabled_at IS NULL
-        AND (u.dnd_until IS NULL OR u.dnd_until <= now())`,
+        AND (u.dnd_until IS NULL OR u.dnd_until <= now())
+        AND (EXISTS (SELECT 1 FROM conversations d WHERE d.id = m.conversation_id AND d.kind = 'direct')
+             OR EXISTS (SELECT 1 FROM organization_memberships a JOIN organization_memberships b ON b.org_id = a.org_id WHERE a.user_id = $2 AND b.user_id = m.user_id))`,
     [call.conversationId, callerId],
   );
   if (!rows.length) return;
@@ -448,11 +497,11 @@ async function finish(callId: string) {
     const call = r.rows[0];
     if (!call) return;
     await c.query('UPDATE call_participants SET left_at = now() WHERE call_id = $1 AND left_at IS NULL', [callId]);
-    await appendMessage(c, { conversationId: call.conversation_id, authorId: call.started_by, kind: 'system', body: sys('call.ended', { callId, durationSec: call.secs }) });
+    await callNote(c, callId, { conversationId: call.conversation_id, authorId: call.started_by, kind: 'system', body: sys('call.ended', { callId, durationSec: call.secs }) });
     const seg = await c.query('SELECT 1 FROM call_transcript_segments WHERE call_id = $1 LIMIT 1', [callId]);
     if (seg.rowCount) {
-      const m = await appendMessage(c, { conversationId: call.conversation_id, authorId: call.started_by, kind: 'system', body: sys('call.transcript', { callId }) });
-      await c.query('UPDATE calls SET transcript_message_id = $2 WHERE id = $1', [callId, m.id]);
+      const m = await callNote(c, callId, { conversationId: call.conversation_id, authorId: call.started_by, kind: 'system', body: sys('call.transcript', { callId }) });
+      await c.query('UPDATE calls SET transcript_message_id = $2 WHERE id = $1', [callId, m?.id ?? null]);
       if (call.ai_summary) await c.query("INSERT INTO jobs (kind, payload, max_attempts, dedupe_key) VALUES ('call.summary', $1, 3, $2) ON CONFLICT (dedupe_key) DO NOTHING", [JSON.stringify({ callId }), `call-summary:${callId}`]);
     }
     await publish(c, call.conversation_id, callId);
@@ -500,7 +549,7 @@ export async function setTranscription(userId: string, callId: string, on: boole
     await c.query(`UPDATE calls SET transcribing = $2, ai_summary = ai_summary OR $3, transcription_stopped_at = CASE WHEN $2 THEN NULL ELSE now() END WHERE id = $1`, [callId, on, on && aiSummary]);
     const name = (await c.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name ?? '';
     // Queda en el chat quién la prendió o la apagó: todos saben que se está transcribiendo.
-    await appendMessage(c, { conversationId: call.conversation_id, authorId: userId, kind: 'system', body: sys(on ? 'call.transcription.on' : 'call.transcription.off', { name, callId }) });
+    await callNote(c, callId, { conversationId: call.conversation_id, authorId: userId, kind: 'system', body: sys(on ? 'call.transcription.on' : 'call.transcription.off', { name, callId }) });
     return publish(c, call.conversation_id, callId);
   });
   return { call: dto };
@@ -538,8 +587,8 @@ export async function addSegments(userId: string, callId: string, input: z.infer
     await tx(async (c) => {
       const cur = await c.query('SELECT transcript_message_id, started_by FROM calls WHERE id = $1 FOR UPDATE', [callId]);
       if (cur.rows[0].transcript_message_id) return;
-      const m = await appendMessage(c, { conversationId: call.conversation_id, authorId: cur.rows[0].started_by, kind: 'system', body: sys('call.transcript', { callId }) });
-      await c.query('UPDATE calls SET transcript_message_id = $2 WHERE id = $1', [callId, m.id]);
+      const m = await callNote(c, callId, { conversationId: call.conversation_id, authorId: cur.rows[0].started_by, kind: 'system', body: sys('call.transcript', { callId }) });
+      await c.query('UPDATE calls SET transcript_message_id = $2 WHERE id = $1', [callId, m?.id ?? null]);
       if (call.ai_summary) await c.query("INSERT INTO jobs (kind, payload, max_attempts, dedupe_key) VALUES ('call.summary', $1, 3, $2) ON CONFLICT (dedupe_key) DO NOTHING", [JSON.stringify({ callId }), `call-summary:${callId}`]);
       await publish(c, call.conversation_id, callId);
     });
@@ -622,8 +671,8 @@ export async function addAudio(userId: string, callId: string, input: { body: Bu
     if (saved.length && call.ended_at) {
       const cur = await c.query('SELECT transcript_message_id, started_by FROM calls WHERE id = $1 FOR UPDATE', [callId]);
       if (!cur.rows[0].transcript_message_id) {
-        const m = await appendMessage(c, { conversationId: call.conversation_id, authorId: cur.rows[0].started_by, kind: 'system', body: sys('call.transcript', { callId }) });
-        await c.query('UPDATE calls SET transcript_message_id = $2 WHERE id = $1', [callId, m.id]);
+        const m = await callNote(c, callId, { conversationId: call.conversation_id, authorId: cur.rows[0].started_by, kind: 'system', body: sys('call.transcript', { callId }) });
+        await c.query('UPDATE calls SET transcript_message_id = $2 WHERE id = $1', [callId, m?.id ?? null]);
         if (call.ai_summary) await c.query("INSERT INTO jobs (kind, payload, max_attempts, dedupe_key) VALUES ('call.summary', $1, 3, $2) ON CONFLICT (dedupe_key) DO NOTHING", [JSON.stringify({ callId }), `call-summary:${callId}`]);
         await publish(c, call.conversation_id, callId);
       }

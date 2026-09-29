@@ -126,7 +126,7 @@ const es = {
   'cal.card': 'Evento de {name}', 'cal.cardGoing': '{n} de {total} asistirán', 
   'update.web': 'Hay una versión nueva de chaggu.', 'update.reload': 'Recargar',
   // Temas (docs/TEMAS.md)
-  'topic.unreadN': '{n} sin leer', 'topic.all': 'Todo', 'topic.new': 'Nuevo', 'topic.newFree': 'Nuevo · {n} libre', 'topic.newFreeN': 'Nuevo · {n} libres', 'topic.archivedN': 'Archivados {n}',
+  'topic.unreadN': '{n} sin leer', 'topic.all': 'Todo', 'topic.general': 'General', 'topic.generalHint': 'Solo los mensajes sin tema', 'topic.allHint': 'Todos los mensajes, con y sin tema', 'topic.new': 'Nuevo', 'topic.newFree': 'Nuevo · {n} libre', 'topic.newFreeN': 'Nuevo · {n} libres', 'topic.archivedN': 'Archivados {n}',
   'topic.bar': 'Temas del chat', 'topic.newTitle': 'Nuevo tema', 'topic.namePh': 'Finanzas', 'topic.left': 'Quedan {n} de {max}.', 'topic.create': 'Crear',
   'topic.full': 'Ya hay {max} temas', 'topic.fullHint': 'Archiva los que ya no uses: mantén presionada su banderita (o clic derecho).',
   'topic.rename': 'Renombrar', 'topic.renameTitle': 'Renombrar tema', 'topic.color': 'Cambiar color', 'topic.archive': 'Archivar', 'topic.archiveHint': 'Sale de la fila. Sus mensajes quedan con etiqueta gris.',
@@ -963,7 +963,7 @@ const en: Record<Key, string> = {
   'cal.card': 'Event by {name}', 'cal.cardGoing': '{n} of {total} going', 
   'update.web': 'A new version of chaggu is available.', 'update.reload': 'Reload',
   // Topics (docs/TEMAS.md)
-  'topic.unreadN': '{n} unread', 'topic.all': 'All', 'topic.new': 'New', 'topic.newFree': 'New · {n} left', 'topic.newFreeN': 'New · {n} left', 'topic.archivedN': 'Archived {n}',
+  'topic.unreadN': '{n} unread', 'topic.all': 'All', 'topic.general': 'General', 'topic.generalHint': 'Only messages without a topic', 'topic.allHint': 'Every message, with or without a topic', 'topic.new': 'New', 'topic.newFree': 'New · {n} left', 'topic.newFreeN': 'New · {n} left', 'topic.archivedN': 'Archived {n}',
   'topic.bar': 'Chat topics', 'topic.newTitle': 'New topic', 'topic.namePh': 'Finance', 'topic.left': '{n} of {max} left.', 'topic.create': 'Create',
   'topic.full': 'There are already {max} topics', 'topic.fullHint': 'Archive the ones you no longer use: long-press its flag (or right-click).',
   'topic.rename': 'Rename', 'topic.renameTitle': 'Rename topic', 'topic.color': 'Change color', 'topic.archive': 'Archive', 'topic.archiveHint': 'Leaves the row. Its messages keep a gray tag.',

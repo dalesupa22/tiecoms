@@ -166,6 +166,9 @@ function ArchivedDialog({ list, onClose }: { list: TopicDTO[]; onClose: () => vo
   );
 }
 
+/** Filtro «Todo»: todos los mensajes, con y sin tema. */
+export const TOPIC_ALL = '__all';
+
 export function TopicDock({ conv, list, filter, onFilter, counts, unread = {} }: {
   conv: ConversationDTO; list: TopicDTO[]; filter: string | null; onFilter: (id: string | null) => void; counts: Record<string, number>;
   /** Sin leer por tema; '' = sin tema (va en «Todo»). */
@@ -197,7 +200,13 @@ export function TopicDock({ conv, list, filter, onFilter, counts, unread = {} }:
   if (!act.length && !archived.length && !canEdit) return null;
   return (
     <div ref={dock} className="topic-dock" role="tablist" aria-label={t('topic.bar')}>
-      <button role="tab" aria-selected={!filter} className={`topic-flag c-plain ${!filter ? 'is-on' : ''}`} onClick={() => onFilter(null)}>💬 {t('topic.all')}{unread[''] && act.length > 0 ? <span className="topic-unread" aria-label={t('topic.unreadN', { n: unread['']! })}>{unread['']}</span> : null}</button>
+      {/* Sin temas activos, «General» y «Todo» son lo mismo: una sola banderita. */}
+      <button role="tab" aria-selected={!filter} className={`topic-flag c-plain ${!filter ? 'is-on' : ''}`} onClick={() => onFilter(null)}
+        title={act.length ? t('topic.generalHint') : undefined}>💬 {act.length ? t('topic.general') : t('topic.all')}{unread[''] && act.length > 0 ? <span className="topic-unread" aria-label={t('topic.unreadN', { n: unread['']! })}>{unread['']}</span> : null}</button>
+      {act.length > 0 && (
+        <button role="tab" aria-selected={filter === TOPIC_ALL} className={`topic-flag c-plain ${filter === TOPIC_ALL ? 'is-on' : ''}`} onClick={() => onFilter(filter === TOPIC_ALL ? null : TOPIC_ALL)}
+          title={t('topic.allHint')}>☰ {t('topic.all')}</button>
+      )}
       {act.map((x) => (
         <button key={x.id} role="tab" aria-selected={filter === x.id} className={`topic-flag c-${x.color} ${filter === x.id ? 'is-on' : ''}`}
           title={personById(d, x.createdBy)?.name}

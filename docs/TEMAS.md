@@ -12,13 +12,17 @@ Los temas no son hilos ni tareas:
 - Cualquiera que pueda escribir en el chat puede crear, renombrar, cambiar de color, archivar o quitar un tema.
 - Cualquiera también puede etiquetar **cualquier mensaje**, sea suyo o de otra persona. Queda registrado quién le puso el tema (`topicBy`), y la interfaz muestra «tema puesto por X» cuando no fue el autor del mensaje.
 - **Fila de banderitas**: va debajo de los chips (Fijados, Tareas, Hilos, Agenda, Enlaces) y tiene scroll horizontal.
-  - La primera es «Todo».
+  - La primera es «💬 General» y la segunda «☰ Todo» (sin temas activos, una sola banderita «Todo»).
   - Después van los temas activos y «＋ Nuevo».
   - Al final va «Archivados N», si hay alguno.
-- **Tocar una banderita** filtra el chat a ese tema. Lo que se escribe mientras tanto sale con ese tema, y el campo lo indica con «Mensaje en X». Tocar «Todo» o la misma banderita otra vez quita el filtro.
-- **«Todo» con temas activos** (pedido de Danny, 29-sep-2026): se ven los mensajes **sin tema**, más los **no leídos** de cualquier tema, que llegan con su etiqueta. Lo ya leído que tiene tema solo se ve en su banderita, así «Todo» no se llena de ruido. Los mensajes de temas archivados cuentan como sin tema. Si se salta a un mensaje con tema (una mención, un enlace o `?m=`), ese mensaje queda a la vista en «Todo».
-- **El número de cada banderita** es lo que tiene **sin leer**. En «Todo» es lo sin leer que no tiene tema. Sin pendientes, no sale número. Los mensajes propios y los de sistema no cuentan.
-- **Al abrir un chat con no leídos**: si todo lo no leído está en un solo tema, el chat abre filtrado en esa banderita, en el primer no leído y con la línea «N mensajes nuevos». Si está repartido o hay no leídos sin tema, abre en «Todo».
+- **Tres vistas** (pedido de Danny, 29-sep-2026, reemplaza la regla anterior de «Todo» con los no leídos):
+  - **General** (así abre el chat): solo los mensajes **sin tema**, sin las tarjetas de tareas de un tema. Los mensajes de temas archivados cuentan como sin tema.
+  - **Todo**: todos los mensajes, cada uno con su etiqueta.
+  - **Un tema**: solo sus mensajes y las tarjetas de sus tareas. Tocar la misma banderita otra vez vuelve a General.
+- **Lo que se escribe** en General o en Todo sale sin tema. Dentro de un tema sale con ese tema, y el campo lo indica con «Mensaje en X».
+- **Saltar a un mensaje** (búsqueda, mención, enlace o `?m=`) cambia el filtro a su tema, o a General si no tiene. En Todo no cambia nada.
+- **El número de cada banderita** es lo que tiene **sin leer**. En General es lo sin leer que no tiene tema. Así no se pierde lo que llega a un tema mientras estás en General. Sin pendientes, no sale número. Los mensajes propios y los de sistema no cuentan.
+- **Al abrir un chat con no leídos**: si todo lo no leído está en un solo tema, el chat abre filtrado en esa banderita, en el primer no leído y con la línea «N mensajes nuevos». Si no, abre en General.
 - **Mantener presionada una banderita** (o clic derecho) abre: Renombrar, Cambiar color, Archivar y Quitar tema.
   - **Archivar** saca la banderita de la fila. Los mensajes conservan la etiqueta en gris y el tema se puede restaurar si hay espacio.
   - **Quitar** borra el tema y deja sus mensajes sin tema. Pide confirmación y no borra ningún mensaje.

@@ -843,6 +843,9 @@ select.link-act { appearance: none; padding-right: 10px; }
 .side-tab { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; border-radius: 8px; padding: 6px 4px; font-weight: 700; font-size: 12.5px; white-space: nowrap; color: var(--ink-2); display: inline-flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; }
 .side-tab.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
 .side-tab-n { font-size: 10.5px; font-weight: 700; background: #B45309; color: #fff; border-radius: 99px; padding: 0 6px; min-width: 18px; text-align: center; }
+.side-search { padding: 0 10px 4px; }
+.side-search .search-field { margin-top: 4px; min-height: 36px; }
+.side-search .search-field input { min-height: 34px; }
 .side-tools { gap: 6px 4px; padding: 4px 10px 2px; flex-wrap: wrap; }
 .side-filters { display: flex; gap: 4px; flex: 1 0 auto; }
 .side-tools .seg { margin-right: auto; }

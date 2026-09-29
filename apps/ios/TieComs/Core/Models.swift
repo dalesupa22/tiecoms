@@ -64,11 +64,16 @@ struct UserDTO: Codable, Equatable, Sendable {
     var dndUntil: String?
     /// Modo sueño (bootstrap `me.sleep`, evento `me.sleep`); ausente = servidor anterior. docs/PROGRAMADOS.md.
     var sleep: SleepDTO?
+    /// Sonido predeterminado de los chats y tono de llamada (docs/SONIDOS.md); nil = los de fábrica (pop, clasico).
+    var messageSound: String?
+    var ringtone: String?
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))
         sleep = c.o("sleep")
+        messageSound = c.o("messageSound")
+        ringtone = c.o("ringtone")
         name = c.v("name", "")
         email = c.o("email")
         kind = c.v("kind", "human")
@@ -242,6 +247,8 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
     var lastHumanPreview: HumanPreview?
     /// Preferencia personal: silenciada hasta esta fecha (no avisa).
     var mutedUntil: String?
+    /// Sonido de este chat (docs/SONIDOS.md): uno de MESSAGE_SOUNDS, "none" o nil = el predeterminado.
+    var sound: String?
     /// Menciones a mí (o @todos) sin leer (SPEC-v4 H).
     var unreadMentions: Int = 0
     /// Admins explícitos del grupo (orden de ingreso). Solo en group/internal/multi; nil = servidor anterior
@@ -284,6 +291,7 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
         unreadMentions = c.int("unreadMentions")
         openIssues = c.int("openIssues")
         mutedUntil = c.o("mutedUntil")
+        sound = c.o("sound")
         adminIds = c.o("adminIds")
         createdBy = c.o("createdBy")
     }

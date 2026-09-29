@@ -3342,5 +3342,9 @@
  "tab.calls": [
   "Llamadas",
   "Calls"
+ ],
+ "sound.defaultHintIos": [
+  "Cada chat puede tener el suyo (mantén presionado el chat › Sonido).",
+  "Each chat can have its own (long-press the chat › Sound)."
  ]
 }

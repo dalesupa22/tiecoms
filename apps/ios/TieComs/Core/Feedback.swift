@@ -10,11 +10,19 @@ protocol FeedbackSink: AnyObject {
     func playReceive()
     /// Mensaje de otra persona en una conversación que no está abierta (app en primer plano).
     func notifyIncoming(conversationId: String, title: String, author: String, body: String)
+    /// Con el sonido del chat (docs/SONIDOS.md). Por defecto, las de arriba.
+    func playReceive(sound: String, mention: Bool)
+    func notifyIncoming(conversationId: String, title: String, author: String, body: String, sound: String?)
     /// Aviso de reunión 10 min antes (evento de cuenta `event.soon`).
     func notifyEventSoon(conversationId: String, eventId: String, title: String, subtitle: String?, body: String)
 }
 
 extension FeedbackSink {
+    /// Sonido del chat (docs/SONIDOS.md): por defecto, el de siempre.
+    func playReceive(sound: String, mention: Bool) { playReceive() }
+    func notifyIncoming(conversationId: String, title: String, author: String, body: String, sound: String?) {
+        notifyIncoming(conversationId: conversationId, title: title, author: author, body: body)
+    }
     func notifyEventSoon(conversationId: String, eventId: String, title: String, subtitle: String?, body: String) {
         notifyIncoming(conversationId: conversationId, title: title, author: subtitle ?? "", body: body)
     }
@@ -108,11 +116,18 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     func playSend() { sounds.play(.send); Haptics.tap() }
     func playSplash() { sounds.play(.splash) }
     func playReceive() { sounds.play(.receive) }
+    /// Mensaje en vivo con el sonido del chat ("none" = nada).
+    func playReceive(sound: String, mention: Bool) { ChoiceSoundPlayer.shared.play(ChatSounds.file(sound, mention: mention)) }
 
     func notifyIncoming(conversationId: String, title: String, author: String, body: String) {
+        notifyIncoming(conversationId: conversationId, title: title, author: author, body: body, sound: SoundName.notify.rawValue)
+    }
+
+    /// `sound`: archivo del sonido del chat (sin extensión); nil = sin sonido.
+    func notifyIncoming(conversationId: String, title: String, author: String, body: String, sound: String?) {
         let appActive = UIApplication.shared.applicationState == .active
         guard Prefs.notificationsEnabled, authorized else {
-            if appActive { sounds.play(.notify) }
+            if appActive, let sound { ChoiceSoundPlayer.shared.play(sound) }
             return
         }
         let content = UNMutableNotificationContent()
@@ -122,7 +137,7 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
         content.threadIdentifier = conversationId
         content.userInfo = ["conversationId": conversationId]
         content.categoryIdentifier = PushPayload.messageCategory
-        if Prefs.soundsEnabled { content.sound = UNNotificationSound(named: UNNotificationSoundName("tc_notify.caf")) }
+        if Prefs.soundsEnabled, let sound { content.sound = UNNotificationSound(named: UNNotificationSoundName("\(sound).caf")) }
         let req = UNNotificationRequest(identifier: "msg-\(conversationId)-\(UUID().uuidString)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req)
     }

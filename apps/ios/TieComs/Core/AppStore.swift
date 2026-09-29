@@ -664,13 +664,16 @@ final class AppStore {
             muted: c.isMuted, mutedForever: MentionText.mutedForever(c),
             mentionsMe: MentionText.mentionsMe(msg.mentions, me: d.me.id, authorId: msg.authorId), dnd: dndActive))
         let author = Naming.person(d, msg.authorId)?.name ?? L("common.participant")
+        // Sonido del chat (docs/SONIDOS.md): el suyo, el predeterminado o ninguno; la mención, una quinta más aguda.
+        let sound = soundFor(c)
         switch outcome {
         case .none: break
-        case .sound: feedback?.playReceive()
+        case .sound: feedback?.playReceive(sound: sound, mention: false)
         case .mention:
-            feedback?.notifyIncoming(conversationId: c.id, title: L("mention.mentionedYou", ["name": author]), author: Naming.notificationTitle(d, c), body: msg.body)
+            feedback?.notifyIncoming(conversationId: c.id, title: L("mention.mentionedYou", ["name": author]), author: Naming.notificationTitle(d, c), body: msg.body,
+                                     sound: ChatSounds.file(sound, mention: true))
         case .notify:
-            feedback?.notifyIncoming(conversationId: c.id, title: Naming.notificationTitle(d, c), author: author, body: msg.body)
+            feedback?.notifyIncoming(conversationId: c.id, title: Naming.notificationTitle(d, c), author: author, body: msg.body, sound: ChatSounds.file(sound))
         }
     }
 

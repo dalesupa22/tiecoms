@@ -48,6 +48,7 @@ struct ConversationDetailsView: View {
                         .accessibilityElement(children: .combine)
                     }
                     MuteSection(conv: c)
+                    ChatSoundRow(conv: c)
                     if Self.canChangePhoto(c) {
                         Section {
                             Button { choosePhoto = true } label: { Label(c.avatarUrl == nil ? L("group.addPhoto") : L("group.changePhoto"), systemImage: "camera") }
@@ -413,6 +414,7 @@ struct SettingsView: View {
                 Toggle(L("settings.sounds"), isOn: $sounds)
                     .onChange(of: sounds) { _, v in Prefs.soundsEnabled = v }
                     .accessibilityIdentifier("settings.sounds")
+                DefaultSoundsRows()
                 Toggle(L("settings.notifications"), isOn: $notifications)
                     .onChange(of: notifications) { _, v in
                         let update = store.setNotificationsEnabled(v)

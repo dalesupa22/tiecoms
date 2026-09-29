@@ -535,8 +535,8 @@ final class CallCenter: CallMediaDelegate {
             // Suena y vibra hasta 45 s o hasta que se conteste, se rechace o termine.
             let until = Date().addingTimeInterval(TimeInterval(CallRules.ringSeconds))
             while !Task.isCancelled, Date() < until {
-                if !AppConfig.isRunningUnitTests { RingTone.play() }
-                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                RingTone.play(self?.store?.me?.ringtone)
+                try? await Task.sleep(nanoseconds: UInt64(ChatSounds.ringEvery * 1_000_000_000))
             }
             if !Task.isCancelled, self?.ringing?.call.id == call.id { self?.ringing = nil }
         }
@@ -544,6 +544,7 @@ final class CallCenter: CallMediaDelegate {
 
     func dismissRing() {
         ringTask?.cancel(); ringTask = nil
+        RingTone.stop(store?.me?.ringtone)
         ringing = nil
     }
 
@@ -637,14 +638,20 @@ final class CallCenter: CallMediaDelegate {
 
     static func deactivateAudioSession() {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        // De vuelta al modo de los sonidos de la app (no interrumpen otra música y respetan el modo silencio).
+        try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default, options: [.mixWithOthers])
     }
 }
 
-/// Timbre corto mientras suena el aviso (sonido del sistema + vibración).
+/// Tono de llamada elegido (docs/SONIDOS.md), un ciclo cada 2,2 s, con vibración. No depende de «Sonido de mensajes».
+@MainActor
 enum RingTone {
-    static func play() {
-        AudioServicesPlayAlertSound(SystemSoundID(1151))
+    static func play(_ ringtone: String?) {
+        guard !AppConfig.isRunningUnitTests else { return }
+        ChoiceSoundPlayer.shared.play(ChatSounds.ringFile(ringtone), force: true)
+        AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
     }
+    static func stop(_ ringtone: String?) { ChoiceSoundPlayer.shared.stop(ChatSounds.ringFile(ringtone)) }
 }
 
 // MARK: - Red

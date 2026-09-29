@@ -304,6 +304,7 @@ private fun MainNav() {
         onJoinCode = { code -> nav.navigate("invite/$code") { launchSingleTop = true } },
     )
 
+    val callLauncher = rememberCallLauncher()
     // El aviso se lanza en un scope propio: al consumir el enlace cambia la clave del efecto y lo cancelaría.
     LaunchedEffect(pending, state.data != null, backStack != null) {
         val p = pending ?: return@LaunchedEffect
@@ -337,6 +338,12 @@ private fun MainNav() {
             }
             is DeepLink.Share -> { container.shareDraft = p; nav.navigate("share") { launchSingleTop = true } }
             is DeepLink.CallDetail -> nav.navigate("call/${p.id}") { launchSingleTop = true }
+            // «Contestar» del aviso de llamada (push TC_CALL): pide el micrófono y entra con /calls/:id/join.
+            is DeepLink.CallJoin -> {
+                com.tiecoms.app.platform.CallService.cancelIncoming(ctx, p.id)
+                if (container.calls.ringing.value?.call?.id == p.id) container.calls.dismissRing()
+                callLauncher.launch(p.camera) { cam -> container.calls.join(p.id, cam) }
+            }
             is DeepLink.Signup -> Unit
         }
     }

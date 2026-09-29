@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
@@ -85,7 +86,9 @@ private val CallInk = Color(0xFFF7F3EE)
 private val CallBg = Color(0xFF161412)
 private val HangRed = Color(0xFFD93B2B)
 
-private fun firstName(data: BootstrapDTO?, id: String?): String = id?.let { Names.person(data, it)?.name?.substringBefore(' ') } ?: ""
+/** Nombre corto; si la persona no está en mi lista (me agregaron a la llamada), sale de call.names. */
+private fun firstName(data: BootstrapDTO?, id: String?, call: com.tiecoms.app.core.CallDTO? = null): String =
+    Calls.firstName(id?.let { Names.person(data, it)?.name }, call, id)
 private fun dateTime(iso: String): String = parseInstant(iso)?.atZone(java.time.ZoneId.systemDefault())
     ?.format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)) ?: iso
 
@@ -254,6 +257,7 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
     val others = v.call.activeUserIds.filter { it != me }
     val clock = rememberClock(v.call.startedAt)
     var consent by remember { mutableStateOf(false) }
+    var adding by remember { mutableStateOf(false) }
     val cameraPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) container.calls.toggleCamera() else container.toast(ctx.getString(R.string.call_perm_camera_denied))
     }
@@ -264,8 +268,9 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
                 IconButton(onClick = { container.calls.setExpanded(false) }, modifier = Modifier.testTag("callMinimize")) {
                     Icon(Icons.Filled.KeyboardArrowDown, stringResource(R.string.call_minimize), tint = CallInk)
                 }
-                Column(Modifier.weight(1f).clickable { container.calls.setExpanded(false); onOpenConversation(v.call.conversationId) }) {
-                    Text(conv?.let { titleOf(ctx, it, data) } ?: stringResource(R.string.call_title), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                Column(Modifier.weight(1f).clickable(enabled = conv != null) { container.calls.setExpanded(false); onOpenConversation(v.call.conversationId) }) {
+                    // Si me agregaron a una llamada de un chat en el que no estoy: los nombres de quienes están (call.names).
+                    Text(conv?.let { titleOf(ctx, it, data) } ?: others.map { firstName(data, it, v.call) }.filter { it.isNotEmpty() }.joinToString(", ").ifEmpty { stringResource(R.string.call_title) }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.semantics { heading() })
                     Text(if (v.phase == CallManager.Phase.CONNECTING) stringResource(R.string.call_connecting) else clock, style = MaterialTheme.typography.bodySmall,
                         color = CallInk.copy(alpha = 0.7f), modifier = Modifier.testTag("callClock"))
@@ -288,7 +293,7 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
                 if (video.isNotEmpty()) {
                     val cols = if (video.size <= 1) 1 else 2
                     LazyVerticalGrid(GridCells.Fixed(cols), Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(video, key = { it.tileId }) { t -> VideoTile(t, if (t.local) stringResource(R.string.call_you) else firstName(data, t.userId), rows = (video.size + cols - 1) / cols) }
+                        items(video, key = { it.tileId }) { t -> VideoTile(t, if (t.local) stringResource(R.string.call_you) else firstName(data, t.userId, v.call), rows = (video.size + cols - 1) / cols) }
                     }
                 } else Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -298,7 +303,7 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
                                 Box(Modifier.size(84.dp).border(if (speaking) 3.dp else 0.dp, if (speaking) Color(0xFF3CCB7F) else Color.Transparent, CircleShape).padding(4.dp)) {
                                     PersonAvatar(Names.person(data, id), data, size = 76.dp)
                                 }
-                                Text(if (id == me) stringResource(R.string.call_you) else firstName(data, id), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(if (id == me) stringResource(R.string.call_you) else firstName(data, id, v.call), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -307,9 +312,10 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
             }
             if (v.call.transcribing && v.captions.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp).background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
                 .padding(10.dp).semantics { liveRegion = LiveRegionMode.Polite }.testTag("callCaptions")) {
-                v.captions.takeLast(3).forEach { c ->
-                    val who = if (c.userId == me) stringResource(R.string.call_you) else firstName(data, c.userId).ifEmpty { "·" }
-                    Text("$who: ${c.text}", style = MaterialTheme.typography.bodyMedium, color = if (c.partial) CallInk.copy(alpha = 0.65f) else CallInk)
+                v.captions.takeLast(4).forEach { c ->
+                    val who = if (c.userId == me) stringResource(R.string.call_you) else firstName(data, c.userId, v.call).ifEmpty { "·" }
+                    Text("$who: " + (if (c.processing) "⏳ " + stringResource(R.string.call_processing) else c.text), style = MaterialTheme.typography.bodyMedium,
+                        color = if (c.partial) CallInk.copy(alpha = 0.65f) else CallInk, modifier = if (c.processing) Modifier.testTag("callProcessing") else Modifier)
                 }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
@@ -320,6 +326,7 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
                 }
                 if (v.camera) CallControl(Icons.Filled.Cameraswitch, stringResource(R.string.call_switch_camera), off = false, tag = "callSwitch") { container.calls.switchCamera() }
                 CallControl(Icons.AutoMirrored.Filled.VolumeUp, stringResource(R.string.call_speaker), off = !v.speaker, tag = "callSpeaker") { container.calls.toggleSpeaker() }
+                CallControl(Icons.Filled.PersonAdd, stringResource(R.string.call_add), off = false, tag = "callAdd") { adding = true }
                 CallControl(Icons.Filled.ClosedCaption, stringResource(if (v.call.transcribing) R.string.call_transcript_off else R.string.call_transcript_on), off = false, rec = v.call.transcribing, tag = "callTranscript") {
                     if (v.call.transcribing) container.scope.launch { runCatching { container.calls.setTranscription(false) }.onFailure { container.toast(errorText(ctx, it)) } }
                     else consent = true
@@ -330,6 +337,7 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
             }
         }
     }
+    if (adding) AddToCallSheet(v.call, data, onDismiss = { adding = false })
     if (consent) TranscriptConsentDialog(onDismiss = { consent = false }) { ai ->
         consent = false
         container.scope.launch { runCatching { container.calls.setTranscription(true, ai) }.onFailure { container.toast(errorText(ctx, it)) } }
@@ -380,6 +388,49 @@ fun TranscriptConsentDialog(onDismiss: () -> Unit, onConfirm: (aiSummary: Boolea
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
         modifier = Modifier.testTag("callConsent"),
     )
+}
+
+/** Sumar personas a la llamada en curso: selector múltiple de mi lista, sin los que ya están o fueron agregados. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddToCallSheet(call: com.tiecoms.app.core.CallDTO, data: BootstrapDTO, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    val container = LocalContainer.current
+    var q by rememberSaveable { mutableStateOf("") }
+    val picked = remember { mutableStateListOf<String>() }
+    var busy by remember { mutableStateOf(false) }
+    val list = Calls.addable(data.people, call, data.me.id, q)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), modifier = Modifier.testTag("callAddSheet")) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 16.dp)) {
+            Text(stringResource(R.string.call_add), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+            Text(stringResource(R.string.call_add_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 6.dp))
+            OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth(), singleLine = true, leadingIcon = { Icon(Icons.Filled.Search, null) }, placeholder = { Text(stringResource(R.string.calls_search)) })
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp).padding(top = 6.dp)) {
+                if (list.isEmpty()) item { EmptyNote(stringResource(R.string.call_add_none)) }
+                items(list, key = { it.id }) { p ->
+                    val on = p.id in picked
+                    Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable { if (on) picked.remove(p.id) else picked.add(p.id) }.testTag("callAdd-${p.id}"),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = on, onCheckedChange = null)
+                        Spacer(Modifier.width(8.dp)); PersonAvatar(p, data, size = 32.dp); Spacer(Modifier.width(10.dp))
+                        Text(p.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+                Button(enabled = picked.isNotEmpty() && !busy, onClick = {
+                    busy = true
+                    val ids = picked.toList()
+                    container.scope.launch {
+                        runCatching { container.calls.invite(ids) }
+                            .onSuccess { container.toast(ctx.getString(R.string.call_added, ids.size)); onDismiss() }
+                            .onFailure { busy = false; container.toast(errorText(ctx, it)) }
+                    }
+                }, modifier = Modifier.testTag("callAddSend")) { Text("📞 " + stringResource(R.string.call_add_send, picked.size)) }
+            }
+        }
+    }
 }
 
 // ---------- Elegir conversación (para llamar o para compartir) ----------
@@ -498,7 +549,7 @@ private fun CallRow(item: CallHistoryItemDTO, data: BootstrapDTO, onOpen: () -> 
     val conv = data.conversations.firstOrNull { it.id == c.conversationId }
     val others = item.participantIds.filter { it != me }
     val group = Calls.isGroup(item, conv, me)
-    val name = conv?.let { titleOf(ctx, it, data) } ?: others.mapNotNull { Names.person(data, it)?.name }.joinToString(", ")
+    val name = conv?.let { titleOf(ctx, it, data) } ?: others.mapNotNull { Names.person(data, it)?.name ?: c.names[it] }.joinToString(", ")
     val missed = Calls.isMissed(item)
     val live = Calls.isLive(item)
     val who = if (group) others.take(3).map { firstName(data, it) }.filter { it.isNotEmpty() }.joinToString(", ") else ""

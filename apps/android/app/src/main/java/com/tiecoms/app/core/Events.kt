@@ -52,6 +52,10 @@ sealed interface AccountEvent {
     data class IssuePersonal(val issue: IssueDTO) : AccountEvent
     /** Perdí acceso a un asunto: sacarlo de la lista. */
     data class IssueHidden(val issueId: String, val conversationId: String) : AccountEvent
+    /** `call.updated {call}` por la cuenta: me agregaron a una llamada de un chat en el que no estoy. */
+    data class CallUpdated(val call: CallDTO) : AccountEvent
+    /** `call.processing` / `call.transcript`: un pedazo de audio en Groq y luego sus frases. */
+    data class CallCaption(val event: CallCaptionEvent) : AccountEvent
     /** `call.ringing`: me están llamando (el servidor no lo manda a quien tiene No molestar). */
     data class CallRinging(val call: CallDTO, val conversationTitle: String?, val callerName: String) : AccountEvent
     data class Unknown(val type: String) : AccountEvent
@@ -113,6 +117,14 @@ fun decodeAccountEvent(el: JsonElement): AccountEvent {
         "issue.personal" -> obj(o, "issue", IssueDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { AccountEvent.IssuePersonal(it.copy(conversationId = null)) } ?: AccountEvent.Unknown(type)
         "issue.hidden" -> o.str("issueId")?.let { AccountEvent.IssueHidden(it, o.str("conversationId") ?: "") } ?: AccountEvent.Unknown(type)
         "me.sleep" -> obj(o, "sleep", SleepDTO.serializer())?.let { AccountEvent.SleepUpdated(it) } ?: AccountEvent.Unknown(type)
+        "call.updated" -> Calls.decode(o["call"])?.takeIf { it.conversationId.isNotEmpty() }?.let { AccountEvent.CallUpdated(it) } ?: AccountEvent.Unknown(type)
+        "call.processing", "call.transcript" -> {
+            val callId = o.str("callId"); val segId = o.str("segId")
+            if (callId == null || segId == null) AccountEvent.Unknown(type)
+            else AccountEvent.CallCaption(CallCaptionEvent(callId, o.str("userId") ?: "", segId, type == "call.processing",
+                obj(o, "segments", kotlinx.serialization.builtins.ListSerializer(CallTranscriptSegmentDTO.serializer())) ?: emptyList(),
+                (o["failed"] as? JsonPrimitive)?.contentOrNull == "true"))
+        }
         "call.ringing" -> Calls.decode(o["call"])?.takeIf { it.conversationId.isNotEmpty() }
             ?.let { AccountEvent.CallRinging(it, o.str("conversationTitle"), o.str("callerName") ?: "") } ?: AccountEvent.Unknown(type)
         "me.dnd" -> if (o.containsKey("dndUntil")) AccountEvent.DndUpdated(o.str("dndUntil")) else AccountEvent.Unknown(type)

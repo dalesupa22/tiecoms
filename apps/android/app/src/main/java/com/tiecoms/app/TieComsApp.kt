@@ -240,7 +240,7 @@ class AppContainer(private val app: Application) {
         if (c.dndActive()) return
         // Chat silenciado: solo pasa la mención (salvo el silencio «siempre»), igual que el filtro del servidor.
         val conv = c.meta(p.conversationId)
-        if (conv != null && p.type != "event" && p.type != "reminder" && p.type != "issue" &&
+        if (conv != null && p.type != "event" && p.type != "reminder" && p.type != "issue" && p.type != "call" &&
             !com.tiecoms.app.core.Silence.notifies(conv.mutedUntil, p.type == "mention", null, System.currentTimeMillis())) return
         // Aviso de reunión (minutes) vs. convocatoria: claves distintas para no taparse entre sí.
         // Una reacción comparte el messageId con el aviso del mensaje: no se deduplica (la etiqueta la reemplaza).
@@ -249,6 +249,9 @@ class AppContainer(private val app: Application) {
         // FCM owns the process only until its callback returns. Post immediately; a remote
         // avatar must never delay the notification or escape into an untracked coroutine.
         when (p.type) {
+            // Llamada entrante con la app cerrada (TC_CALL): Contestar / Ahora no y mi tono.
+            "call" -> calls.ring(com.tiecoms.app.core.CallDTO(id = p.callId ?: return, conversationId = p.conversationId, kind = p.kind ?: "audio"),
+                p.title, p.subtitle.ifBlank { null })
             "side" -> {
                 // TC_SIDE: Responder (RemoteInput) escribe en el sidechat; tocar abre el origen con el sidechat desplegado
                 // si puedo leerlo (si no, el sidechat a pantalla completa con la tarjeta del ancla).
@@ -476,6 +479,7 @@ class AppContainer(private val app: Application) {
                     silent = !settings.soundsEnabled, tag = "event:soon:" + ev.id)
             }
             // Te están llamando (docs/LLAMADAS.md): aviso con Contestar / Ahora no; deja de sonar a los 45 s.
+            is ClientSignal.CallCaption -> calls.onCaption(sig.event)
             is ClientSignal.CallRinging -> calls.ring(sig.call, sig.callerName.ifBlank { Names.person(client.value.state.value.data, sig.call.startedBy)?.name ?: "" }, sig.conversationTitle)
             // Sin sesión: fuera sugerencias de Direct Share, burbujas y notificaciones de la cuenta anterior.
             ClientSignal.SignedOut -> {

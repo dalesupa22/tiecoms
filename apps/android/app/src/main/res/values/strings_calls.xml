@@ -43,7 +43,14 @@
     <string name="call_transcript_off">Stop transcription</string>
     <string name="call_transcript_start">Start transcribing</string>
     <string name="call_transcribing_short">transcribing</string>
-    <string name="call_transcribing_all">Transcription is on: everyone in the call can see it</string>
+    <string name="call_transcribing_all">Transcription is on: everyone in the call can see it · text arrives every ~15 s</string>
+    <string name="call_processing">Processing…</string>
+    <string name="call_add">Add to call</string>
+    <string name="call_add_hint">Their phone rings even if they are not in this chat. They only see the call, not the messages.</string>
+    <string name="call_add_none">Nobody else to add.</string>
+    <string name="call_add_send">Call (%1$d)</string>
+    <string name="call_added">Calling %1$d…</string>
+    <string name="call_notif_incoming_channel">Incoming calls · %1$s</string>
     <string name="call_consent_body">Everything said from now on will be written down and saved in this conversation. Everyone in the call will see the notice, and the chat will show who turned it on. You can turn it off at any time.</string>
     <string name="call_consent_ai">When the call ends, summarize the transcript with AI (DeepSeek)</string>
     <string name="call_transcript_title">Call transcript</string>

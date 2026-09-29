@@ -17,6 +17,8 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <!-- Aviso de llamada entrante a pantalla completa (app de llamadas; en Android 14+ el sistema puede negarlo). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.front" android:required="false" />
 
@@ -186,6 +188,11 @@
             android:name=".platform.CallService"
             android:exported="false"
             android:foregroundServiceType="microphone|camera" />
+
+        <!-- «Ahora no» del aviso de llamada entrante. -->
+        <receiver
+            android:name=".platform.CallDeclineReceiver"
+            android:exported="false" />
 
         <!-- Burbuja de conversación (SPEC-v3 §6) -->
         <activity

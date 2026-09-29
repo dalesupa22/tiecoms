@@ -9,8 +9,6 @@ import androidx.core.content.ContextCompat
 import com.amazonaws.services.chime.sdk.meetings.audiovideo.AttendeeInfo
 import com.amazonaws.services.chime.sdk.meetings.audiovideo.AudioVideoObserver
 import com.amazonaws.services.chime.sdk.meetings.audiovideo.SignalUpdate
-import com.amazonaws.services.chime.sdk.meetings.audiovideo.Transcript
-import com.amazonaws.services.chime.sdk.meetings.audiovideo.TranscriptEvent
 import com.amazonaws.services.chime.sdk.meetings.audiovideo.VolumeUpdate
 import com.amazonaws.services.chime.sdk.meetings.audiovideo.audio.activespeakerdetector.ActiveSpeakerObserver
 import com.amazonaws.services.chime.sdk.meetings.audiovideo.audio.activespeakerpolicy.DefaultActiveSpeakerPolicy
@@ -23,7 +21,6 @@ import com.amazonaws.services.chime.sdk.meetings.audiovideo.video.gl.DefaultEglC
 import com.amazonaws.services.chime.sdk.meetings.audiovideo.video.gl.EglCoreFactory
 import com.amazonaws.services.chime.sdk.meetings.device.MediaDeviceType
 import com.amazonaws.services.chime.sdk.meetings.realtime.RealtimeObserver
-import com.amazonaws.services.chime.sdk.meetings.realtime.TranscriptEventObserver
 import com.amazonaws.services.chime.sdk.meetings.session.Attendee
 import com.amazonaws.services.chime.sdk.meetings.session.CreateAttendeeResponse
 import com.amazonaws.services.chime.sdk.meetings.session.CreateMeetingResponse
@@ -111,7 +108,19 @@ class CallManager(private val app: Application, private val container: AppContai
     private val client get() = container.client.value
     private fun patch(f: View.() -> View) = _view.update { it?.f() }
 
+    /** Grabación por pedazos para Groq: corre mientras la llamada está viva y se transcribe (syncRecorder de la web). */
+    private var recorder: CallRecorder? = null
+
     init {
+        scope.launch {
+            _view.map { v -> v?.takeIf { it.phase == Phase.LIVE && it.call.transcribing }?.call?.id }.distinctUntilChanged().collect { callId ->
+                recorder?.stop(); recorder = null
+                if (callId != null && hasPermission(Manifest.permission.RECORD_AUDIO)) {
+                    val startedAt = _view.value?.call?.startedAt?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() } ?: System.currentTimeMillis()
+                    recorder = CallRecorder(app, muted = { _view.value?.muted == true }) { bytes, t0, dur -> uploadChunk(callId, bytes, t0 - startedAt, dur) }.also { it.start() }
+                }
+            }
+        }
         // Estado que llega por el socket (quién está, si transcribe) sin tocar la conexión; terminada → se cierra.
         scope.launch {
             container.client.flatMapLatest { it.state }.map { it.calls }.distinctUntilChanged().collect { calls ->
@@ -180,7 +189,6 @@ class CallManager(private val app: Application, private val container: AppContai
             av.addRealtimeObserver(rtObserver)
             av.addVideoTileObserver(tileObserver)
             av.addActiveSpeakerObserver(DefaultActiveSpeakerPolicy(), speakerObserver)
-            av.addRealtimeTranscriptEventObserver(transcriptObserver)
             av.start()
             av.startRemoteVideo()
             if (cam) av.startLocalVideo()
@@ -239,6 +247,29 @@ class CallManager(private val app: Application, private val container: AppContai
         if (call != null) patch { copy(call = call, captions = if (on) captions else emptyList()) }
     }
 
+    /** Sube un pedazo; un reintento (mismo segId: el servidor no duplica) si no hay red o el servidor falla. */
+    private fun uploadChunk(callId: String, bytes: ByteArray, offsetMs: Long, durationMs: Long) {
+        val segId = java.lang.Long.toString(System.currentTimeMillis(), 36) + java.util.UUID.randomUUID().toString().take(6)
+        scope.launch {
+            for (attempt in 0 until 2) {
+                try { client.sendCallAudio(callId, bytes, "audio/mp4", segId, offsetMs, durationMs); return@launch }
+                catch (e: Exception) { if (!Calls.retryBatch(e)) return@launch; delay(2_000) }
+            }
+        }
+    }
+
+    /** «⏳ Procesando…» con el nombre y luego las frases de ese pedazo (eventos de la cuenta). */
+    fun onCaption(e: com.tiecoms.app.core.CallCaptionEvent) {
+        if (_view.value?.call?.id != e.callId) return
+        patch { copy(captions = Calls.applyCaptionEvent(captions, e)) }
+    }
+
+    /** Sumar personas a la llamada en curso. */
+    suspend fun invite(userIds: List<String>) {
+        val v = _view.value ?: return
+        client.inviteToCall(v.call.id, userIds)?.let { c -> patch { copy(call = c) } }
+    }
+
     /** Una frase del SDK (parcial o final): subtítulos y, si es final, a la cola de envío. */
     fun onPiece(p: TranscriptPiece) {
         patch { copy(captions = Calls.mergeCaption(captions, p)) }
@@ -271,6 +302,7 @@ class CallManager(private val app: Application, private val container: AppContai
 
     private fun teardown() {
         leaving = true
+        recorder?.stop(); recorder = null
         beat?.cancel(); beat = null
         flushJob?.cancel(); flushJob = null
         val s = session
@@ -278,7 +310,7 @@ class CallManager(private val app: Application, private val container: AppContai
         if (s != null) runCatching {
             val av = s.audioVideo
             av.removeAudioVideoObserver(avObserver); av.removeRealtimeObserver(rtObserver); av.removeVideoTileObserver(tileObserver)
-            av.removeActiveSpeakerObserver(speakerObserver); av.removeRealtimeTranscriptEventObserver(transcriptObserver)
+            av.removeActiveSpeakerObserver(speakerObserver)
             av.stopLocalVideo(); av.stopRemoteVideo(); av.stop()
         }
         _view.value = null
@@ -383,16 +415,5 @@ class CallManager(private val app: Application, private val container: AppContai
         override fun onVideoTilePaused(tileState: VideoTileState) { patch { copy(tiles = tiles.map { if (it.tileId == tileState.tileId) it.copy(paused = true) else it }) } }
         override fun onVideoTileResumed(tileState: VideoTileState) { patch { copy(tiles = tiles.map { if (it.tileId == tileState.tileId) it.copy(paused = false) else it }) } }
         override fun onVideoTileSizeChanged(tileState: VideoTileState) {}
-    }
-
-    private val transcriptObserver = object : TranscriptEventObserver {
-        override fun onTranscriptEventReceived(transcriptEvent: TranscriptEvent) {
-            val t = transcriptEvent as? Transcript ?: return
-            for (r in t.results) {
-                val alt = r.alternatives.firstOrNull() ?: continue
-                val who = alt.items.firstOrNull()?.attendee
-                onPiece(TranscriptPiece(r.resultId, r.isPartial, alt.transcript, who?.attendeeId, who?.externalUserId, r.languageCode, r.startTimeMs, r.endTimeMs))
-            }
-        }
     }
 }

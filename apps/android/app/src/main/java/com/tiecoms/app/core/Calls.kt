@@ -27,6 +27,10 @@ data class CallDTO(
     val transcribing: Boolean = false,
     /** Hay transcripción guardada para leer. */
     val hasTranscript: Boolean = false,
+    /** Personas agregadas a la llamada que no están en el chat (POST /calls/:id/invite). */
+    val invitedUserIds: List<String> = emptyList(),
+    /** Nombres de quienes están o fueron agregados, para quien no los tiene en su lista de personas. */
+    val names: Map<String, String> = emptyMap(),
 ) {
     val isVideo: Boolean get() = kind == "video"
     val ended: Boolean get() = endedAt != null
@@ -133,8 +137,15 @@ data class ChimeJoin(
     }
 }
 
-/** Subtítulo en vivo: parciales se reemplazan por resultId hasta que llega la final. */
-data class Caption(val resultId: String, val userId: String?, val text: String, val partial: Boolean)
+/** Subtítulo en vivo: parciales se reemplazan por resultId hasta que llega la final. [processing]: pedazo en Groq («⏳ Procesando…»). */
+data class Caption(val resultId: String, val userId: String?, val text: String, val partial: Boolean, val processing: Boolean = false)
+
+/** `call.processing` / `call.transcript` por la cuenta (transcripción con Groq Whisper por pedazos). */
+data class CallCaptionEvent(val callId: String, val userId: String, val segId: String, val processing: Boolean,
+                            val segments: List<CallTranscriptSegmentDTO> = emptyList(), val failed: Boolean = false)
+
+@Serializable data class CallInviteResult(val call: CallDTO? = null)
+@Serializable data class CallAudioResult(val saved: Int = 0, val segments: List<CallTranscriptSegmentDTO> = emptyList())
 
 /** Frase del SDK ya normalizada (TranscriptResult → primera alternativa), sin tipos del SDK. */
 data class TranscriptPiece(
@@ -177,6 +188,48 @@ object Calls {
         if (what != "transcript" && !t.summary.isNullOrBlank()) parts += "$summaryLabel:\n${t.summary}"
         if (what != "summary" && t.segments.isNotEmpty()) parts += "$transcriptLabel:\n" + t.segments.joinToString("\n") { "[${stamp(it.startMs)}] ${speaker(it)}: ${it.text}" }
         return parts.joinToString("\n\n")
+    }
+
+    /** Pedazos de audio para Groq (docs/LLAMADAS.md): 12–20 s, corte en el primer silencio (> 700 ms) después de 12 s. */
+    const val CHUNK_MIN_MS = 12_000L
+    const val CHUNK_MAX_MS = 20_000L
+    const val SILENCE_CUT_MS = 700L
+    /** Solo se manda un pedazo con ≥ 0,8 s de voz (RMS > 0,015) y con el micrófono abierto. */
+    const val MIN_VOICE_MS = 800L
+    const val VOICE_RMS = 0.015
+    const val MAX_CAPTIONS_GROQ = 8
+
+    fun shouldCut(elapsedMs: Long, msSinceVoice: Long): Boolean =
+        elapsedMs >= CHUNK_MAX_MS || (elapsedMs >= CHUNK_MIN_MS && msSinceVoice > SILENCE_CUT_MS)
+
+    /** RMS de un bloque PCM de 16 bits normalizado a [0, 1]. */
+    fun rms(pcm: ShortArray, n: Int = pcm.size): Double {
+        if (n <= 0) return 0.0
+        var sum = 0.0
+        for (i in 0 until n) { val v = pcm[i] / 32768.0; sum += v * v }
+        return kotlin.math.sqrt(sum / n)
+    }
+
+    fun worthSending(voicedMs: Long): Boolean = voicedMs >= MIN_VOICE_MS
+
+    /** «Procesando…» y luego las frases (onCallTranscriptEvent de la web). */
+    fun applyCaptionEvent(list: List<Caption>, e: CallCaptionEvent): List<Caption> {
+        val key = "p:${e.segId}"
+        var out = list.filter { it.resultId != key }
+        if (e.processing) out = out + Caption(key, e.userId, "", partial = true, processing = true)
+        else for (s in e.segments) out = out.filter { it.resultId != s.resultId } + Caption(s.resultId, s.speakerUserId ?: e.userId, s.text, partial = false)
+        return out.takeLast(MAX_CAPTIONS_GROQ)
+    }
+
+    /** Nombre corto: el de mi lista de personas o, si me agregaron a la llamada y no lo conozco, el de call.names. */
+    fun firstName(personName: String?, call: CallDTO?, id: String?): String =
+        (personName ?: id?.let { call?.names?.get(it) } ?: "").substringBefore(' ')
+
+    /** A quién puedo agregar: mi lista, sin agentes, sin los que están dentro, invitados ni yo. */
+    fun addable(people: List<PersonDTO>, call: CallDTO, me: String, query: String = ""): List<PersonDTO> {
+        val inside = (call.activeUserIds + call.invitedUserIds + me).toSet()
+        val q = query.trim().lowercase()
+        return people.filter { it.id !in inside && it.kind != "agent" && (q.isEmpty() || it.name.lowercase().contains(q)) }.take(80)
     }
 
     /** Aplica una frase a los subtítulos: reemplaza la del mismo resultId y deja las últimas [MAX_CAPTIONS]. */

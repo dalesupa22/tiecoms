@@ -97,6 +97,8 @@ sealed interface ClientSignal {
     data class MentionsDropped(val conversationId: String, val userIds: List<String>) : ClientSignal
     /** La reunión empieza pronto (evento de cuenta `event.soon`). */
     data class EventSoon(val event: CalendarEventDTO, val minutes: Int) : ClientSignal
+    /** «⏳ Procesando…» o las frases de un pedazo de audio de la llamada (Groq). */
+    data class CallCaption(val event: CallCaptionEvent) : ClientSignal
     /** Me están llamando (`call.ringing`), salvo con «No molestar» o modo sueño. */
     data class CallRinging(val call: CallDTO, val callerName: String, val conversationTitle: String?) : ClientSignal
 }
@@ -519,6 +521,8 @@ class TieComsClient(
             is AccountEvent.IssuePersonal -> putIssues(listOf(e.issue))
             is AccountEvent.IssueHidden -> { setState { copy(issues = issues - e.issueId) }; if (e.conversationId.isNotEmpty()) recountIssues(e.conversationId) }
             is AccountEvent.ScheduledUpdated -> setState { copy(scheduled = Scheduling.apply(scheduled, e.scheduled)) }
+            is AccountEvent.CallUpdated -> putCall(e.call)
+            is AccountEvent.CallCaption -> _signals.tryEmit(ClientSignal.CallCaption(e.event))
             is AccountEvent.CallRinging -> {
                 putCall(e.call)
                 if (e.call.startedBy != myId && !dndActive()) _signals.tryEmit(ClientSignal.CallRinging(e.call, e.callerName, e.conversationTitle))
@@ -1159,6 +1163,15 @@ class TieComsClient(
     }
     suspend fun joinCall(callId: String): CallJoinDTO = withContext(dispatcher) {
         req("POST", callsPath(callId, "join"), buildJsonObject {}, CallJoinDTO.serializer()).also { putCall(it.call) }
+    }
+    /** Sumar personas a la llamada en curso (les suena aunque no estén en el chat). */
+    suspend fun inviteToCall(callId: String, userIds: List<String>): CallDTO? = withContext(dispatcher) {
+        req("POST", callsPath(callId, "invite"), buildJsonObject { put("userIds", kotlinx.serialization.json.JsonArray(userIds.map { JsonPrimitive(it) })) }, CallInviteResult.serializer()).call?.also { putCall(it) }
+    }
+    /** Un pedazo del micrófono propio para Groq Whisper; reintentar con el mismo [segId] no duplica. */
+    suspend fun sendCallAudio(callId: String, bytes: ByteArray, fileType: String, segId: String, offsetMs: Long, durationMs: Long): CallAudioResult = withContext(dispatcher) {
+        request("POST", callsPath(callId, "audio"), null, CallAudioResult.serializer(), HttpApi.RawBody(bytes, "application/octet-stream", mapOf(
+            "x-file-type" to fileType, "x-seg-id" to segId, "x-offset-ms" to maxOf(0L, offsetMs).toString(), "x-duration-ms" to maxOf(0L, durationMs).toString())))
     }
     suspend fun callHeartbeat(callId: String) = withContext(dispatcher) { req("POST", callsPath(callId, "heartbeat"), buildJsonObject {}, JsonElement.serializer()); Unit }
     /** Colgar (o terminarla para todos con [forAll]). */

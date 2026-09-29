@@ -71,6 +71,8 @@ class CallService : Service() {
 
     companion object {
         const val CHANNEL = "calls"
+        const val EXTRA_RINGING = "ringing"
+        const val EXTRA_CALL = "callId"
         private const val NOTIF_ID = 7301
         private const val ACTION_HANG_UP = "com.tiecoms.app.CALL_HANG_UP"
 
@@ -88,21 +90,67 @@ class CallService : Service() {
 
         fun stop(ctx: Context) { runCatching { ctx.stopService(Intent(ctx, CallService::class.java)) } }
 
-        /** Te llaman con la app en segundo plano (el socket sigue vivo): aviso normal que abre el chat. */
+        /** Canal del aviso de llamada con MI tono (Android fija el sonido por canal): calls_ring_<tono>. */
+        private fun ringChannel(ctx: Context, ringtone: String): String {
+            val id = "calls_ring_" + com.tiecoms.app.core.Sounds.ringtone(ringtone)
+            val nm = ctx.getSystemService(NotificationManager::class.java)
+            if (nm.getNotificationChannel(id) == null) {
+                val attrs = android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+                runCatching { nm.createNotificationChannel(NotificationChannel(id, ctx.getString(R.string.call_notif_incoming_channel, SoundFiles.ringLabel(ctx, com.tiecoms.app.core.Sounds.ringtone(ringtone))), NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = ctx.getString(R.string.call_notif_channel_desc)
+                    setSound(SoundFiles.uri(ctx, SoundFiles.ring(ringtone)), attrs)
+                    enableVibration(true); vibrationPattern = longArrayOf(0, 800, 600, 800)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                }) }
+            }
+            return id
+        }
+
+        /**
+         * Te llaman con la app en segundo plano o cerrada (push TC_CALL o `call.ringing` con el socket vivo):
+         * alta prioridad con Contestar / Ahora no, pantalla completa si está permitido y mi tono repetido (FLAG_INSISTENT).
+         */
         fun notifyIncoming(ctx: Context, call: CallDTO, callerName: String, title: String?) {
             ensureChannel(ctx)
-            val open = PendingIntent.getActivity(ctx, call.id.hashCode(), Intent(Intent.ACTION_VIEW, Uri.parse("chaggu://c/${call.conversationId}"), ctx, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            val n = NotificationCompat.Builder(ctx, CHANNEL)
+            val ringtone = runCatching { ctx.container.client.value.state.value.data?.me?.ringtone }.getOrNull()
+            fun activity(code: Int, uri: String, extra: Boolean = false) = PendingIntent.getActivity(ctx, code,
+                Intent(Intent.ACTION_VIEW, Uri.parse(uri), ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    .apply { if (extra) putExtra(EXTRA_RINGING, true) },
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val answer = activity(call.id.hashCode() + 1, "chaggu://call/${call.id}")
+            val open = activity(call.id.hashCode(), "chaggu://c/${call.conversationId}", extra = true)
+            val decline = PendingIntent.getBroadcast(ctx, call.id.hashCode() + 2, Intent(ctx, CallDeclineReceiver::class.java).putExtra(EXTRA_CALL, call.id),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val nm = ctx.getSystemService(NotificationManager::class.java)
+            val fullScreen = Build.VERSION.SDK_INT < 34 || nm.canUseFullScreenIntent()
+            val person = Person.Builder().setName(callerName.ifBlank { ctx.getString(R.string.call_title) }).setImportant(true).build()
+            val n = NotificationCompat.Builder(ctx, ringChannel(ctx, ringtone ?: ""))
                 .setSmallIcon(R.drawable.ic_stat_chaggu).setColor(0xFFFF5A36.toInt())
                 .setContentTitle((if (call.isVideo) "🎥 " else "📞 ") + ctx.getString(R.string.call_notif_incoming, callerName))
                 .setContentText(title?.let { ctx.getString(R.string.call_incoming_in, it) } ?: ctx.getString(R.string.call_incoming))
-                .setCategory(NotificationCompat.CATEGORY_CALL).setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setAutoCancel(true).setContentIntent(open).setTimeoutAfter(com.tiecoms.app.core.Calls.RING_MS)
+                .setCategory(NotificationCompat.CATEGORY_CALL).setPriority(NotificationCompat.PRIORITY_MAX)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setAutoCancel(true).setOngoing(true).setContentIntent(open).setTimeoutAfter(com.tiecoms.app.core.Calls.RING_MS)
+                .addAction(R.drawable.ic_stat_chaggu, ctx.getString(R.string.call_decline), decline)
+                .addAction(R.drawable.ic_stat_chaggu, ctx.getString(R.string.call_answer), answer)
+                .apply { if (fullScreen) setFullScreenIntent(open, true) }
+                .addPerson(person)
                 .build()
+            n.flags = n.flags or android.app.Notification.FLAG_INSISTENT
             runCatching { NotificationManagerCompat.from(ctx).notify("call:" + call.id, 1, n) }
         }
 
         fun cancelIncoming(ctx: Context, callId: String) { runCatching { NotificationManagerCompat.from(ctx).cancel("call:$callId", 1) } }
+    }
+}
+
+/** «Ahora no» del aviso de llamada: deja de sonar sin abrir la app. */
+class CallDeclineReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val id = intent.getStringExtra(CallService.EXTRA_CALL) ?: return
+        CallService.cancelIncoming(context, id)
+        val calls = context.container.calls
+        if (calls.ringing.value?.call?.id == id) calls.dismissRing()
     }
 }

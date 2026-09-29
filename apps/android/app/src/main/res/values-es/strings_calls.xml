@@ -43,7 +43,14 @@
     <string name="call_transcript_off">Detener la transcripción</string>
     <string name="call_transcript_start">Empezar a transcribir</string>
     <string name="call_transcribing_short">transcribiendo</string>
-    <string name="call_transcribing_all">Se está transcribiendo: todos en la llamada lo ven</string>
+    <string name="call_transcribing_all">Se está transcribiendo: todos en la llamada lo ven · el texto llega cada ~15 s</string>
+    <string name="call_processing">Procesando…</string>
+    <string name="call_add">Agregar a la llamada</string>
+    <string name="call_add_hint">Le suena aunque no esté en este chat. Solo verá la llamada, no los mensajes.</string>
+    <string name="call_add_none">No hay más personas para agregar.</string>
+    <string name="call_add_send">Llamar (%1$d)</string>
+    <string name="call_added">Llamando a %1$d…</string>
+    <string name="call_notif_incoming_channel">Llamadas entrantes · %1$s</string>
     <string name="call_consent_body">Todo lo que se diga desde ahora quedará escrito y guardado en esta conversación. Todos en la llamada verán el aviso y quedará en el chat quién la prendió. Puedes apagarla cuando quieras.</string>
     <string name="call_consent_ai">Al colgar, resumir la transcripción con IA (DeepSeek)</string>
     <string name="call_transcript_title">Transcripción de la llamada</string>

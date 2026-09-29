@@ -20,6 +20,8 @@ sealed interface DeepLink {
     data class Share(val text: String, val source: String = "other") : DeepLink
     /** Detalle de una llamada (resumen y transcripción): «Ver transcripción» del chat e historial (docs/LLAMADAS.md). */
     data class CallDetail(val id: String) : DeepLink
+    /** Contestar una llamada desde su notificación (chaggu://call/<id>?camera=1): entra con /calls/:id/join. */
+    data class CallJoin(val id: String, val camera: Boolean = false) : DeepLink
 }
 
 object DeepLinks {
@@ -83,6 +85,7 @@ object DeepLinks {
             "whatsapp" -> DeepLink.Screen(SCREEN_WHATSAPP)
             "ajustes" -> DeepLink.Screen(SCREEN_SETTINGS)
             "programados" -> DeepLink.Screen(SCREEN_SCHEDULED)
+            "call" -> arg?.let { DeepLink.CallJoin(it, query["camera"] == "1") }
             "share" -> DeepLink.Share(listOfNotNull(query["title"], query["text"], query["url"]).joinToString("\n").trim())
             else -> null
         }

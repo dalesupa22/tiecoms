@@ -62,6 +62,10 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         intent ?: return
+        // Aviso de llamada a pantalla completa: se muestra sobre la pantalla bloqueada y la enciende.
+        if (intent.getBooleanExtra(com.tiecoms.app.platform.CallService.EXTRA_RINGING, false) && android.os.Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(true); setTurnScreenOn(true)
+        }
         // Solo debug: `adb shell am start -n com.chaggu.app/com.tiecoms.app.MainActivity -e apiUrl http://10.0.2.2:3021`
         if (BuildConfig.DEBUG) intent.getStringExtra("apiUrl")?.let { container.setDebugApiUrl(it) }
         // «Compartir» desde otras apps llega a ShareActivity (SPEC-v4 §B), no aquí.

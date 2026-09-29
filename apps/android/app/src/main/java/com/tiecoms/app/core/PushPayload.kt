@@ -29,17 +29,22 @@ data class PushMessage(
     /** Push «te asignó una tarea» (type issue, docs/TAREAS.md): el asunto y si puedo leer su chat. */
     val issueId: String? = null,
     val inChat: Boolean = true,
+    /** Llamada entrante (type call, category TC_CALL, docs/LLAMADAS.md › Push). */
+    val callId: String? = null,
+    /** audio | video */
+    val kind: String? = null,
 )
 
 object PushPayload {
     /** reaction: reaccionaron a un mensaje mío (un aviso agrupado por mensaje; abre la conversación en él). */
-    val TYPES = setOf("message", "reminder", "event", "side", "mention", "reaction", "issue")
+    val TYPES = setOf("message", "reminder", "event", "side", "mention", "reaction", "issue", "call")
 
     fun parse(data: Map<String, String?>): PushMessage? {
         fun s(k: String) = data[k]?.trim()?.takeIf { it.isNotEmpty() }
         val type = s("type") ?: "message"
         if (type !in TYPES) return null
         val conv = s("conversationId") ?: return null
+        if (type == "call" && s("callId") == null) return null
         return PushMessage(
             type = type,
             title = s("title") ?: s("authorName") ?: "chaggu",
@@ -47,7 +52,7 @@ object PushPayload {
             body = s("body") ?: "",
             badge = s("badge")?.toIntOrNull()?.coerceAtLeast(0) ?: 0,
             threadId = s("threadId") ?: conv,
-            category = s("category") ?: when (type) { "reminder" -> "TC_REMINDER"; "event" -> "TC_EVENT"; "side" -> "TC_SIDE"; else -> "TC_MESSAGE" },
+            category = s("category") ?: when (type) { "reminder" -> "TC_REMINDER"; "event" -> "TC_EVENT"; "side" -> "TC_SIDE"; "call" -> "TC_CALL"; else -> "TC_MESSAGE" },
             conversationId = conv,
             messageId = s("messageId"),
             authorId = s("authorId"),
@@ -61,6 +66,8 @@ object PushPayload {
             sideOfExcerpt = s("sideOfExcerpt") ?: sideOf(s("sideOf"), "excerpt"),
             issueId = s("issueId"),
             inChat = s("inChat")?.lowercase() != "false",
+            callId = s("callId"),
+            kind = s("kind"),
         )
     }
 

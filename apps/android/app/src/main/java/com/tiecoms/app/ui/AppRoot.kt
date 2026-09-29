@@ -68,6 +68,13 @@ import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material.icons.rounded.Forum
+import androidx.compose.material.icons.rounded.Checklist
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.Group
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Forum
@@ -210,48 +217,77 @@ private fun AuthNav() {
  */
 private val TABS = listOf("home?ws={ws}", "dms", "issues", "agenda", "calls", "settings")
 
-private class BottomTab(val route: String, val label: Int, val badge: Int, val showLabel: Boolean = false, val icon: @Composable () -> Unit)
+/**
+ * Una pestaña: [outlined] en reposo y [filled] (Material Symbols Rounded) seleccionada; [custom] dibuja el ícono a mano
+ * («Tú» con el avatar) y recibe si está seleccionada.
+ */
+private class BottomTab(
+    val route: String, val label: Int, val badge: Int,
+    val outlined: androidx.compose.ui.graphics.vector.ImageVector? = null, val filled: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    val custom: (@Composable (Boolean) -> Unit)? = null,
+)
 
 /**
- * Barra inferior solo con íconos de línea (Material outlined, como TAB_ICONS de la web): 5 o 6 pestañas caben en 360 dp.
- * Cada pestaña dice su nombre completo a los lectores de pantalla; el indicador es una pastilla angosta y el
- * globo de no leídos queda dentro de su propia celda.
+ * Barra inferior flotante (1.6.9, pedido de Danny; referentes Telegram/Instagram/WhatsApp): solo íconos, sin texto.
+ * - Superficie elevada surfaceContainer con leve transparencia, esquinas de 28 dp, borde sutil, ~60 dp de alto y 16 dp de margen.
+ * - Íconos Rounded de 24 dp en onSurfaceVariant; el seleccionado va relleno en el acento, con una píldora del acento
+ *   al 12 % (56×32 dp) solo detrás del ícono.
+ * - Globos pequeños (mín. 16 dp, 10 sp, acento, borde 1,5 dp del fondo) arriba a la derecha, dentro de su celda.
+ * - Cada pestaña dice su nombre completo a los lectores de pantalla; al tocar, un háptico ligero.
  */
 @Composable
 private fun BottomTabs(items: List<BottomTab>, selected: String?, onSelect: (String) -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth().testTag("tabs")) {
-        androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().navigationBarsPadding().height(60.dp).padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            items.forEach { t ->
-                val on = selected == t.route
-                val name = stringResource(t.label)
-                val badgeCd = if (t.badge > 0) " · " + t.badge else ""
-                Box(
-                    Modifier.weight(1f).fillMaxHeight()
-                        .androidx_selectable(on, name + badgeCd) { onSelect(t.route) }
-                        .testTag("tab-" + t.route.substringBefore('?')),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    androidx.compose.foundation.layout.Row(
-                        Modifier.clearAndSetSemantics {}.background(if (on) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, androidx.compose.foundation.shape.RoundedCornerShape(50))
-                            .padding(horizontal = 14.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+    val cs = MaterialTheme.colorScheme
+    val view = androidx.compose.ui.platform.LocalView.current
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp)
+    Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 10.dp)) {
+        Surface(
+            shape = shape, color = cs.surfaceContainer.copy(alpha = 0.94f), shadowElevation = 8.dp, tonalElevation = 2.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, cs.outlineVariant.copy(alpha = 0.55f)),
+            modifier = Modifier.fillMaxWidth().height(60.dp).testTag("tabs"),
+        ) {
+            androidx.compose.foundation.layout.Row(Modifier.fillMaxSize().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                items.forEach { t ->
+                    val on = selected == t.route
+                    val name = stringResource(t.label)
+                    val badgeCd = if (t.badge > 0) " · " + t.badge else ""
+                    Box(
+                        Modifier.weight(1f).fillMaxHeight()
+                            .androidx_selectable(on, name + badgeCd) {
+                                view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                onSelect(t.route)
+                            }
+                            .testTag("tab-" + t.route.substringBefore('?')),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        val tint = if (on) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides tint) {
-                            if (t.badge > 0) BadgedBox(badge = { Badge(Modifier.offset(x = (-2).dp)) { Text(if (t.badge > 99) "99+" else t.badge.toString(), maxLines = 1) } }) { t.icon() } else t.icon()
-                            if (t.showLabel) {
-                                Spacer(Modifier.width(if (t.badge > 0) 10.dp else 6.dp))
-                                val d = androidx.compose.ui.platform.LocalDensity.current
-                                androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides
-                                    androidx.compose.ui.unit.Density(d.density, minOf(d.fontScale, com.tiecoms.app.core.TextSize.TAB_LABEL_MAX))) {
-                                    Text(name, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelLarge, fontWeight = if (on) androidx.compose.ui.text.font.FontWeight.SemiBold else null)
-                                }
+                        Box(Modifier.clearAndSetSemantics {}.size(width = 56.dp, height = 32.dp)
+                            .background(if (on && t.custom == null) cs.primary.copy(alpha = 0.12f) else androidx.compose.ui.graphics.Color.Transparent, androidx.compose.foundation.shape.RoundedCornerShape(50)),
+                            contentAlignment = Alignment.Center) {
+                            Box {
+                                if (t.custom != null) t.custom.invoke(on)
+                                else Icon(if (on) (t.filled ?: t.outlined!!) else t.outlined!!, null, Modifier.size(24.dp), tint = if (on) cs.primary else cs.onSurfaceVariant)
+                                if (t.badge > 0) TabBadge(t.badge, Modifier.align(Alignment.TopEnd).offset(x = 9.dp, y = (-5).dp))
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/** Globo de no leídos: mín. 16 dp, 10 sp, acento, con borde de 1,5 dp del color de la barra. */
+@Composable
+private fun TabBadge(n: Int, modifier: Modifier) {
+    val cs = MaterialTheme.colorScheme
+    Box(modifier.height(16.dp).widthIn(min = 16.dp)
+        .border(1.5.dp, cs.surfaceContainer, androidx.compose.foundation.shape.RoundedCornerShape(50))
+        .padding(1.5.dp).background(cs.primary, androidx.compose.foundation.shape.RoundedCornerShape(50)).padding(horizontal = 3.dp).testTag("tabBadge"),
+        contentAlignment = Alignment.Center) {
+        val d = androidx.compose.ui.platform.LocalDensity.current
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density, 1f)) {
+            Text(if (n > 99) "99+" else n.toString(), color = cs.onPrimary, fontSize = 10.sp, lineHeight = 10.sp, maxLines = 1,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
         }
     }
 }
@@ -360,14 +396,14 @@ private fun MainNav() {
                 val dmsBadge = data?.let { com.tiecoms.app.core.GroupsTree.dmsUnread(it, now) } ?: 0
                 // Solo íconos de línea, sin texto (pedido de Danny, 29-sep-2026): [label] es el nombre completo para lectores de pantalla.
                 val items = listOfNotNull(
-                    BottomTab("home?ws={ws}", R.string.nav_groups, groupsBadge) { Icon(Icons.Outlined.Group, null, Modifier.size(24.dp)) },
-                    BottomTab("dms", R.string.nav_dms, dmsBadge) { Icon(Icons.Outlined.Forum, null, Modifier.size(24.dp)) },
-                    BottomTab("issues", R.string.nav_issues, 0) { Icon(Icons.Outlined.Checklist, null, Modifier.size(24.dp)) },
-                    BottomTab("agenda", R.string.nav_agenda, 0) { Icon(Icons.Outlined.CalendarMonth, null, Modifier.size(24.dp)) },
+                    BottomTab("home?ws={ws}", R.string.nav_groups, groupsBadge, Icons.Outlined.Group, Icons.Rounded.Group),
+                    BottomTab("dms", R.string.nav_dms, dmsBadge, Icons.Outlined.Forum, Icons.Rounded.Forum),
+                    BottomTab("issues", R.string.nav_issues, 0, Icons.Outlined.Checklist, Icons.Rounded.Checklist),
+                    BottomTab("agenda", R.string.nav_agenda, 0, Icons.Outlined.CalendarMonth, Icons.Rounded.CalendarMonth),
                     // Llamadas (docs/LLAMADAS.md): sexto ícono, solo si el servidor las tiene prendidas.
-                    BottomTab("calls", R.string.nav_calls, 0) { Icon(Icons.Outlined.Call, null, Modifier.size(24.dp)) }.takeIf { data?.callsEnabled == true },
-                    // «Tú»: la foto de la persona como ícono (como el perfil de Instagram).
-                    BottomTab("settings", R.string.nav_you, 0) {
+                    BottomTab("calls", R.string.nav_calls, 0, Icons.Outlined.Call, Icons.Rounded.Call).takeIf { data?.callsEnabled == true },
+                    // «Tú»: la foto de la persona (26 dp) con anillo del acento si está seleccionada.
+                    BottomTab("settings", R.string.nav_you, 0) { on ->
                         val me = data?.me
                         val org = com.tiecoms.app.core.Names.org(data, me?.primaryOrgId)
                         // «No molestar» activo: la lunita sobre la foto (SPEC-silencio §3).
@@ -375,7 +411,7 @@ private fun MainNav() {
                         DndMoonBadge(com.tiecoms.app.core.Silence.active(state.dndUntil, dndNow) || mySleepingNow()) {
                         Avatar(me?.name ?: "?", parseColor(org?.colorBg, com.tiecoms.app.ui.theme.Brand.Black), parseColor(org?.colorFg, androidx.compose.ui.graphics.Color.White),
                             size = 26.dp, photo = me?.avatarUrl,
-                            modifier = if (route == "settings") Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, androidx.compose.foundation.shape.CircleShape) else Modifier)
+                            modifier = if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, androidx.compose.foundation.shape.CircleShape) else Modifier)
                         }
                     },
                 )

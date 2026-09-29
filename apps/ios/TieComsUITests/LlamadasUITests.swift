@@ -9,6 +9,8 @@ final class LlamadasUITests: XCTestCase {
         var apiUrl: String
         var password: String
         var a: Person
+        var b: Person
+        var g: Person
         var dmId: String
         var multiId: String
         var endedCallId: String
@@ -207,5 +209,47 @@ final class LlamadasUITests: XCTestCase {
         shot("23-enviado")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(bar.waitForExistence(timeout: 5), "de vuelta en la lista, la barra vuelve")
+    }
+
+    /// 1.6.10 · Mensaje nuevo: marcar dos personas y crear el chat; el 💬 abre el directo de una vez.
+    func testNewChatPickTwoAndDirectShortcut() throws {
+        let f = try fixture()
+        let app = login(f)
+        app.buttons["tab.dms"].firstMatch.tap()
+        let compose = app.buttons["quick.compose"].firstMatch
+        XCTAssertTrue(compose.waitForExistence(timeout: 10))
+        compose.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["compose.tip"].waitForExistence(timeout: 5), "texto de ayuda")
+        XCTAssertFalse(app.buttons["compose.multi"].exists, "ya no hay «Chat con varias personas»")
+        XCTAssertTrue(app.buttons["compose.space"].exists, "sin selección: «Grupo en un espacio»")
+        shot("30-mensaje-nuevo")
+        let bruno = app.buttons["picker.person.\(f.b.id)"].firstMatch
+        XCTAssertTrue(bruno.waitForExistence(timeout: 5))
+        bruno.tap()
+        XCTAssertTrue(app.buttons["picker.chip.\(f.b.id)"].waitForExistence(timeout: 3), "chip en «Para:»")
+        XCTAssertTrue(app.buttons["newChat.create"].label.contains("Bruno"), "con 1: «Abrir chat con Bruno»")
+        shot("31-uno-marcado")
+        // Buscar a Gloria y marcarla: la búsqueda se limpia para seguir eligiendo.
+        let field = app.textFields["compose.search"]
+        field.tap(); field.typeText("Glor")
+        let gloria = app.buttons["picker.person.\(f.g.id)"].firstMatch
+        XCTAssertTrue(gloria.waitForExistence(timeout: 5))
+        gloria.tap()
+        XCTAssertEqual(field.value as? String == "Glor", false, "se limpió la búsqueda")
+        XCTAssertTrue(app.textFields["newChat.name"].waitForExistence(timeout: 3), "con 2+: nombre opcional")
+        app.textFields["newChat.name"].tap(); app.textFields["newChat.name"].typeText("Comité QA")
+        shot("32-dos-marcados")
+        XCTAssertTrue(app.buttons["newChat.create"].label.contains("3"))
+        app.buttons["newChat.create"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["composer.field"].waitForExistence(timeout: 10), "abre el chat creado")
+        shot("33-chat-creado")
+        goTab(app, "dms")
+        app.buttons["quick.compose"].firstMatch.tap()
+        let direct = app.buttons["compose.direct.\(f.b.id)"].firstMatch
+        XCTAssertTrue(direct.waitForExistence(timeout: 5))
+        direct.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["composer.field"].waitForExistence(timeout: 10), "💬 abre el directo")
+        XCTAssertTrue(app.staticTexts["Bruno Ortega"].exists || app.buttons["chat.header"].label.contains("Bruno"))
+        shot("34-directo")
     }
 }

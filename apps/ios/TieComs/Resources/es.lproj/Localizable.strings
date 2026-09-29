@@ -400,6 +400,7 @@
 "chat.quick" = "Mensaje nuevo";
 "chat.quickHint" = "Mensaje nuevo ({key})";
 "chat.readOnly" = "Solo lectura: no puedes publicar en esta conversación.";
+"chat.reconnecting" = "Reconectando…";
 "chat.remove" = "Quitar del grupo";
 "chat.removeConfirm" = "¿Quitar a {name} de este grupo?";
 "chat.retry" = "Reintentar";
@@ -418,6 +419,7 @@
 "chat.spaceMembers" = "Participantes del espacio";
 "chat.typingMany" = "{names} están escribiendo…";
 "chat.typingOne" = "{names} está escribiendo…";
+"chat.updatingRetrying" = "chaggu se está actualizando, reintentando…";
 "common.agents" = "Agentes";
 "common.all" = "Todos";
 "common.and" = "y";
@@ -449,12 +451,14 @@
 "common.wait" = "Un momento…";
 "common.you" = "(tú)";
 "common.youShort" = "Tú";
+"compose.addMore" = "Agregar a alguien más…";
 "compose.multi" = "Chat con varias personas";
 "compose.multiHint" = "Elige a 2 o más personas. Pueden ser de tu equipo o de otras empresas.";
+"compose.openWith" = "Abrir chat con {name}";
 "compose.recent" = "Recientes";
 "compose.search" = "Buscar persona, empresa o grupo";
-"chat.updatingRetrying" = "chaggu se está actualizando, reintentando…";
-"chat.reconnecting" = "Reconectando…";
+"compose.tip" = "Toca una o varias personas. El 💬 abre su chat directo.";
+"compose.to" = "Para:";
 "conn.connecting" = "Conectando…";
 "conn.offline" = "Sin conexión. Tus mensajes quedan en cola y se envían al volver.";
 "conn.retryHint" = "Revisa tu conexión. Tu sesión sigue guardada en este dispositivo.";

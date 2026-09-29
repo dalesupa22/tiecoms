@@ -14,6 +14,13 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.chaggu.com` por defecto (web: `https://www.chaggu.com`); `-TCApiURL <url>` al lanzar (pruebas) |
 
+## 1.6.10 (27): «Mensaje nuevo» como WhatsApp/Slack
+
+- Sin la fila «Chat con varias personas»: tocar a una persona la marca (círculo) y queda como chip en «Para:» (×; borrar en vacío
+  quita el último; al marcar desde una búsqueda se limpia el texto). Abajo: «Abrir chat con X» (1), nombre opcional + «Crear chat
+  de N» (2+), o Cancelar / «Grupo en un espacio» (0). El 💬 de la fila (o mantenerla presionada) abre el directo al instante.
+  `ComposeRules` en `UI/ChatsViews.swift`; pruebas `ComposeTests` y `LlamadasUITests/testNewChatPickTwoAndDirectShortcut`.
+
 ## 1.6.9 (26): barra inferior en cápsula y sin barra dentro del chat
 
 - Corrección de TestFlight 1.6.8: la barra propia quedaba encima del compositor. Ahora solo se ve en la raíz de cada pestaña

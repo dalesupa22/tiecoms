@@ -856,7 +856,7 @@ final class GroupsUITests: XCTestCase {
         // Por nombre: el simulador puede conservar la sesión de un fixture anterior (otros ids, mismos nombres).
         let carlos = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'picker.person.' AND label CONTAINS 'Carlos'")).firstMatch
         XCTAssertTrue(carlos.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["compose.multi"].exists, "«Chat con varias personas»")
+        XCTAssertTrue(app.descendants(matching: .any)["compose.tip"].exists, "1.6.10: tocar marca; el 💬 abre el directo")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'compose.recent.' AND label CONTAINS 'Bruno'")).firstMatch.exists, "Bruno en Recientes")
         shot("25-mensaje-nuevo")
         let field = app.textFields["compose.search"]
@@ -864,8 +864,9 @@ final class GroupsUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'compose.group.'")).firstMatch.waitForExistence(timeout: 3), "grupos al buscar en Mensaje nuevo")
         shot("26-mensaje-nuevo-buscar-grupo")
         app.buttons["Borrar"].tap()
-        carlos.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["composer.field"].waitForExistence(timeout: 10), "un toque abre el directo")
+        let carlosDirect = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'compose.direct.' AND label CONTAINS 'Carlos'")).firstMatch
+        carlosDirect.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["composer.field"].waitForExistence(timeout: 10), "el 💬 abre el directo")
         shot("27-directo-abierto")
     }
 

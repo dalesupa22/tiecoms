@@ -298,8 +298,7 @@ final class ChatFlowUITests: XCTestCase {
 
         // Nuevo chat: personas por empresa, con 2+ elegidas muestra logos y nombre opcional.
         app.buttons["quick.compose"].tap()
-        XCTAssertTrue(app.buttons["compose.multi"].waitForExistence(timeout: 5))
-        app.buttons["compose.multi"].tap()
+        // 1.6.10: sin paso «Chat con varias personas»: tocar marca.
         XCTAssertTrue(app.buttons["picker.person.\(f.b.id)"].waitForExistence(timeout: 5))
         shot(app, "v3-07-nuevo-chat")
         app.buttons["picker.person.\(f.b.id)"].tap()

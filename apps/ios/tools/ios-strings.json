@@ -3358,5 +3358,21 @@
  "chat.reconnecting": [
   "Reconectando…",
   "Reconnecting…"
+ ],
+ "compose.to": [
+  "Para:",
+  "To:"
+ ],
+ "compose.tip": [
+  "Toca una o varias personas. El 💬 abre su chat directo.",
+  "Tap one or more people. 💬 opens their direct chat."
+ ],
+ "compose.addMore": [
+  "Agregar a alguien más…",
+  "Add someone else…"
+ ],
+ "compose.openWith": [
+  "Abrir chat con {name}",
+  "Open chat with {name}"
  ]
 }

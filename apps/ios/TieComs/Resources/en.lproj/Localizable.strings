@@ -400,6 +400,7 @@
 "chat.quick" = "New message";
 "chat.quickHint" = "New message ({key})";
 "chat.readOnly" = "Read only: you cannot post in this conversation.";
+"chat.reconnecting" = "Reconnecting…";
 "chat.remove" = "Remove from group";
 "chat.removeConfirm" = "Remove {name} from this group?";
 "chat.retry" = "Retry";
@@ -418,6 +419,7 @@
 "chat.spaceMembers" = "Space participants";
 "chat.typingMany" = "{names} are typing…";
 "chat.typingOne" = "{names} is typing…";
+"chat.updatingRetrying" = "chaggu is updating, retrying…";
 "common.agents" = "Agents";
 "common.all" = "All";
 "common.and" = "and";
@@ -449,12 +451,14 @@
 "common.wait" = "One moment…";
 "common.you" = "(you)";
 "common.youShort" = "You";
+"compose.addMore" = "Add someone else…";
 "compose.multi" = "Chat with several people";
 "compose.multiHint" = "Pick 2 or more people. They can be on your team or at other companies.";
+"compose.openWith" = "Open chat with {name}";
 "compose.recent" = "Recent";
 "compose.search" = "Search a person, company or group";
-"chat.updatingRetrying" = "chaggu is updating, retrying…";
-"chat.reconnecting" = "Reconnecting…";
+"compose.tip" = "Tap one or more people. 💬 opens their direct chat.";
+"compose.to" = "To:";
 "conn.connecting" = "Connecting…";
 "conn.offline" = "Offline. Your messages are queued and will be sent when you reconnect.";
 "conn.retryHint" = "Check your connection. Your session is still saved on this device.";

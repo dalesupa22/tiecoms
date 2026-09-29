@@ -113,6 +113,8 @@ struct PersonPickRow: View {
     let d: BootstrapDTO
     let p: PersonDTO
     var selected: Bool?
+    /// Sin el círculo ni la burbuja de la derecha (la fila de «Mensaje nuevo» pone los suyos).
+    var trailing = true
 
     var body: some View {
         let org = Naming.org(d, p.orgId)
@@ -126,7 +128,9 @@ struct PersonPickRow: View {
                     .font(.subheadline).foregroundStyle(Theme.textSecondary).lineLimit(1)
             }
             Spacer()
-            if let selected {
+            if !trailing {
+                EmptyView()
+            } else if let selected {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
                     .foregroundStyle(selected ? Theme.accentText : Theme.textSecondary.opacity(0.5))

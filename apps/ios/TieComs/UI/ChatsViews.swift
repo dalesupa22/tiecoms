@@ -163,18 +163,41 @@ struct PeoplePicker: View {
 
 // MARK: - Mensaje nuevo
 
-/// «Mensaje nuevo» (✏️): tocar a una persona abre el chat de una vez (directo; si no existe, se crea).
-/// Arriba, «Recientes» con quienes hablé hace poco; «Chat con varias personas» cambia a selección múltiple.
-/// Al buscar también salen los grupos que coinciden, para entrar sin pasar por su empresa.
+/// Reglas puras de «Mensaje nuevo» (las usan la hoja y las pruebas).
+enum ComposeRules {
+    enum Action: Equatable { case none, openDirect(String), createChat([String]) }
+    /// Marca o desmarca (el orden de los chips es el de selección).
+    static func toggle(_ picked: [String], _ id: String) -> [String] {
+        picked.contains(id) ? picked.filter { $0 != id } : picked + [id]
+    }
+    /// Borrar con el campo vacío quita el último chip.
+    static func backspace(_ picked: [String], query: String) -> [String] {
+        query.isEmpty && !picked.isEmpty ? Array(picked.dropLast()) : picked
+    }
+    /// El botón de abajo: con 1, su directo; con 2 o más, un chat grupal.
+    static func action(_ picked: [String]) -> Action {
+        switch picked.count {
+        case 0: return .none
+        case 1: return .openDirect(picked[0])
+        default: return .createChat(picked)
+        }
+    }
+}
+
+/// «Mensaje nuevo» (✏️), como WhatsApp o Slack (web: Chats.tsx › NewChatDialog, bf9c180): tocar a una persona la marca
+/// (una o varias, de cualquier empresa) y queda como chip en «Para:»; abajo «Abrir chat con X» con una o «Crear chat de N»
+/// con varias (nombre opcional). El 💬 de la fila (o mantenerla presionada) abre el directo al instante. Al buscar también
+/// salen los grupos, que se abren al tocarlos.
 struct NewChatSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
-    @State private var multi = false
     @State private var picked: [String] = []
     @State private var name = ""
     @State private var busy = false
     @State private var error: String?
+    @State private var spaceGroup = false
+    @FocusState private var nameFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -182,79 +205,90 @@ struct NewChatSheet: View {
                 if let d = store.data { list(d) } else { ProgressView() }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                InlineSearchField(text: $query, prompt: L("compose.search"), identifier: "compose.search")
+                if let d = store.data { toField(d) }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let d = store.data { footer(d) }
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle(multi ? L("compose.multi") : L("dm.new"))
+            .navigationTitle(L("dm.new"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    if multi {
-                        Button(L("common.back")) { withAnimation { multi = false; picked = []; name = "" } }
-                            .accessibilityIdentifier("compose.back")
-                    } else {
-                        Button(L("common.cancel")) { dismiss() }
-                    }
-                }
-                if multi {
-                    ToolbarItem(placement: .confirmationAction) {
-                        if busy { ProgressView() } else {
-                            Button(picked.count > 1 ? L("chat.createGroup", ["n": picked.count + 1]) : L("chat.openDirect"), action: createMulti)
-                                .disabled(picked.isEmpty)
-                                .accessibilityIdentifier("newChat.create")
-                        }
-                    }
-                }
+                ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
             }
-            .overlay { if busy && !multi { ProgressView().controlSize(.large) } }
+            .overlay { if busy { ProgressView().controlSize(.large) } }
             .disabled(busy)
+            .sheet(isPresented: $spaceGroup) { NewGroupSheet(preset: .none) }
         }
     }
+
+    // MARK: «Para:» con chips
+
+    private func toField(_ d: BootstrapDTO) -> some View {
+        HStack(alignment: .center, spacing: 6) {
+            Text(L("compose.to")).font(.subheadline).foregroundStyle(Theme.textSecondary)
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(picked, id: \.self) { id in chip(d, id) }
+                        BackspaceField(text: $query, placeholder: picked.isEmpty ? L("compose.search") : L("compose.addMore"),
+                                       identifier: "compose.search") { picked = ComposeRules.backspace(picked, query: query) }
+                            .frame(minWidth: 140, maxWidth: .infinity)
+                            .frame(height: 30)
+                            .id("field")
+                    }
+                    .padding(.vertical, 2)
+                }
+                .onChange(of: picked) { _, _ in withAnimation { proxy.scrollTo("field", anchor: .trailing) } }
+            }
+            if !query.isEmpty {
+                Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary) }
+                    .buttonStyle(.plain).accessibilityLabel(L("common.clear"))
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color(uiColor: .tertiarySystemFill)))
+        .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 8)
+        .background(Color(uiColor: .systemGroupedBackground))
+    }
+
+    private func chip(_ d: BootstrapDTO, _ id: String) -> some View {
+        let p = Naming.person(d, id)
+        return Button { toggle(id) } label: {
+            HStack(spacing: 4) {
+                Avatar(person: p, org: Naming.org(d, p?.orgId), size: 22)
+                Text(p?.name.split(separator: " ").first.map(String.init) ?? "?").font(.subheadline)
+                Image(systemName: "xmark").font(.caption2.weight(.bold))
+            }
+            .padding(.leading, 3).padding(.trailing, 9).padding(.vertical, 3)
+            .background(Capsule().fill(Theme.orange.opacity(0.14)))
+            .foregroundStyle(Theme.textPrimary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(L("common.remove")) \(p?.name ?? "")")
+        .accessibilityIdentifier("picker.chip.\(id)")
+    }
+
+    // MARK: Lista
 
     @ViewBuilder private func list(_ d: BootstrapDTO) -> some View {
         let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
         let orgs = Naming.peopleByOrg(d, query: query)
-        let groups = multi ? [] : QuickSearch.groups(d, query: query)
+        let groups = picked.isEmpty ? QuickSearch.groups(d, query: query) : []
         List {
-            if multi {
+            if picked.isEmpty && !searching {
                 Section {
-                    Text(L("compose.multiHint")).font(.footnote).foregroundStyle(Theme.textSecondary)
-                    if !picked.isEmpty { pickedChips(d) }
-                    if picked.count > 1 {
-                        TextField(L("chat.groupNamePh"), text: $name)
-                            .onChange(of: name) { _, v in if v.count > 120 { name = String(v.prefix(120)) } }
-                            .accessibilityIdentifier("newChat.name")
-                    }
+                    Text(L("compose.tip")).font(.footnote).foregroundStyle(Theme.textSecondary)
+                        .accessibilityIdentifier("compose.tip")
                 }
-            } else if !searching {
-                Section {
-                    Button { withAnimation { multi = true } } label: {
-                        Label { Text(L("compose.multi")).foregroundStyle(Theme.textPrimary) } icon: {
-                            Image(systemName: "person.2.fill").font(.footnote).foregroundStyle(Theme.onPrimary)
-                                .frame(width: 32, height: 32).background(Circle().fill(Theme.primaryFill))
-                        }
-                    }
-                    .accessibilityIdentifier("compose.multi")
-                }
+            }
+            if !searching {
                 let recents = QuickSearch.recentPeopleIds(d).prefix(8).compactMap { Naming.person(d, $0) }
                 if !recents.isEmpty {
                     Section {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(alignment: .top, spacing: 14) {
-                                ForEach(recents) { p in
-                                    Button { open(p) } label: {
-                                        VStack(spacing: 4) {
-                                            Avatar(person: p, org: Naming.org(d, p.orgId), size: 52)
-                                            Text(p.name.split(separator: " ").first.map(String.init) ?? p.name)
-                                                .font(.caption).foregroundStyle(Theme.textPrimary).lineLimit(1)
-                                        }
-                                        .frame(width: 60)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel(p.name)
-                                    .accessibilityHint(L("search.opensChat"))
-                                    .accessibilityIdentifier("compose.recent.\(p.id)")
-                                }
+                                ForEach(recents) { p in recent(d, p) }
                             }
                             .padding(.vertical, 4)
                         }
@@ -280,10 +314,7 @@ struct NewChatSheet: View {
             }
             ForEach(orgs) { g in
                 Section {
-                    ForEach(g.people) { p in
-                        Button { multi ? toggle(p.id) : open(p) } label: { PersonPickRow(d: d, p: p, selected: multi ? picked.contains(p.id) : nil) }
-                            .accessibilityIdentifier("picker.person.\(p.id)")
-                    }
+                    ForEach(g.people) { p in personRow(d, p) }
                 } header: {
                     HStack(spacing: 6) {
                         if let org = g.org { OrgMark(org: org, size: 18) }
@@ -305,35 +336,107 @@ struct NewChatSheet: View {
         .scrollDismissesKeyboard(.immediately)
     }
 
-    private func pickedChips(_ d: BootstrapDTO) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(picked, id: \.self) { id in
-                    let p = Naming.person(d, id)
-                    Button { toggle(id) } label: {
-                        HStack(spacing: 4) {
-                            Avatar(person: p, org: Naming.org(d, p?.orgId), size: 22)
-                            Text(p?.name.split(separator: " ").first.map(String.init) ?? "?").font(.subheadline)
-                            Image(systemName: "xmark").font(.caption2.weight(.bold))
+    private func recent(_ d: BootstrapDTO, _ p: PersonDTO) -> some View {
+        let on = picked.contains(p.id)
+        return Button { toggle(p.id) } label: {
+            VStack(spacing: 4) {
+                Avatar(person: p, org: Naming.org(d, p.orgId), size: 52)
+                    .overlay(alignment: .bottomTrailing) {
+                        if on {
+                            Image(systemName: "checkmark.circle.fill").font(.system(size: 18)).foregroundStyle(Theme.accentText)
+                                .background(Circle().fill(Theme.surface))
                         }
-                        .padding(.leading, 3).padding(.trailing, 9).padding(.vertical, 3)
-                        .background(Capsule().fill(Theme.orange.opacity(0.14)))
-                        .foregroundStyle(Theme.textPrimary)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(L("common.remove")) \(p?.name ?? "")")
-                    .accessibilityIdentifier("picker.chip.\(id)")
-                }
+                Text(p.name.split(separator: " ").first.map(String.init) ?? p.name)
+                    .font(.caption).foregroundStyle(Theme.textPrimary).lineLimit(1)
             }
-            .padding(.vertical, 2)
+            .frame(width: 60)
         }
+        .buttonStyle(.plain)
+        .contextMenu { Button { open(p) } label: { Label(L("search.opensChat"), systemImage: "bubble.left") } }
+        .accessibilityLabel(p.name)
+        .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityIdentifier("compose.recent.\(p.id)")
     }
 
+    private func personRow(_ d: BootstrapDTO, _ p: PersonDTO) -> some View {
+        let on = picked.contains(p.id)
+        return HStack(spacing: 10) {
+            Button { toggle(p.id) } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(on ? Theme.accentText : Theme.textSecondary.opacity(0.5))
+                    PersonPickRow(d: d, p: p, selected: nil, trailing: false)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
+            .accessibilityIdentifier("picker.person.\(p.id)")
+            // Atajo de un toque: el directo al instante.
+            Button { open(p) } label: {
+                Text("💬").font(.title3).frame(width: 40, height: 40).contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("\(L("search.opensChat")): \(p.name)")
+            .accessibilityIdentifier("compose.direct.\(p.id)")
+        }
+        .contextMenu { Button { open(p) } label: { Label(L("search.opensChat"), systemImage: "bubble.left") } }
+    }
+
+    // MARK: Botón de abajo
+
+    @ViewBuilder private func footer(_ d: BootstrapDTO) -> some View {
+        VStack(spacing: 10) {
+            switch ComposeRules.action(picked) {
+            case .none:
+                HStack(spacing: 10) {
+                    Button(L("common.cancel")) { dismiss() }
+                        .buttonStyle(.bordered).controlSize(.large)
+                    Button { spaceGroup = true } label: { Label(L("chat.mode.space"), systemImage: "square.grid.2x2") .frame(maxWidth: .infinity) }
+                        .buttonStyle(.bordered).controlSize(.large)
+                        .accessibilityIdentifier("compose.space")
+                }
+            case .openDirect(let id):
+                let first = Naming.person(d, id)?.name.split(separator: " ").first.map(String.init) ?? ""
+                Button(action: create) { Text(L("compose.openWith", ["name": first])).frame(maxWidth: .infinity) }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .accessibilityIdentifier("newChat.create")
+            case .createChat(let ids):
+                let orgs = Array(Set([d.me.primaryOrgId] + ids.map { Naming.person(d, $0)?.orgId })).compactMap { $0 }
+                HStack(spacing: 6) {
+                    ForEach(orgs, id: \.self) { o in if let org = Naming.org(d, o) { OrgMark(org: org, size: 18) } }
+                    Text(orgs.count > 1 ? L("chat.crossCompany", ["n": orgs.count]) : L("chat.sameCompany"))
+                        .font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                TextField(L("chat.groupNamePh"), text: $name)
+                    .focused($nameFocused)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color(uiColor: .tertiarySystemFill)))
+                    .onChange(of: name) { _, v in if v.count > 120 { name = String(v.prefix(120)) } }
+                    .accessibilityIdentifier("newChat.name")
+                Button(action: create) { Text(L("chat.createGroup", ["n": ids.count + 1])).frame(maxWidth: .infinity) }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .accessibilityIdentifier("newChat.create")
+            }
+        }
+        .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 8)
+        .background(.bar)
+    }
+
+    // MARK: Acciones
+
+    /// Marca o desmarca; al buscar, limpia el texto para seguir eligiendo (como el «Para:» de Slack).
     private func toggle(_ id: String) {
-        if let i = picked.firstIndex(of: id) { picked.remove(at: i) } else { picked.append(id) }
+        picked = ComposeRules.toggle(picked, id)
+        if !query.isEmpty { query = "" }
+        Haptics.tap()
     }
 
-    /// Un toque: el directo con esa persona (el que ya existe o uno nuevo).
+    /// Un toque en 💬 (o mantener presionada la fila): el directo con esa persona (el que ya existe o uno nuevo).
     private func open(_ p: PersonDTO) {
         busy = true; error = nil
         Task {
@@ -342,19 +445,65 @@ struct NewChatSheet: View {
         }
     }
 
-    private func createMulti() {
+    private func create() {
+        let action = ComposeRules.action(picked)
         busy = true; error = nil
         Task {
             do {
-                if picked.count == 1 { try await store.openDirect(with: picked[0]) }
-                else {
-                    let r = try await store.createChat(userIds: picked, name: name)
+                switch action {
+                case .none: break
+                case .openDirect(let id): try await store.openDirect(with: id)
+                case .createChat(let ids):
+                    let r = try await store.createChat(userIds: ids, name: name)
                     store.navigate(to: .conversation(r.id))
                 }
                 dismiss()
             } catch { self.error = L10n.errorText(error) }
             busy = false
         }
+    }
+}
+
+/// Campo de texto que avisa del borrado con el campo vacío (para quitar el último chip).
+struct BackspaceField: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var identifier: String
+    var onEmptyBackspace: () -> Void
+
+    final class Field: UITextField {
+        var onEmptyBackspace: (() -> Void)?
+        override func deleteBackward() {
+            if (text ?? "").isEmpty { onEmptyBackspace?() }
+            super.deleteBackward()
+        }
+    }
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: BackspaceField
+        init(_ p: BackspaceField) { parent = p }
+        @objc func changed(_ f: UITextField) { parent.text = f.text ?? "" }
+        func textFieldShouldReturn(_ f: UITextField) -> Bool { f.resignFirstResponder(); return true }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeUIView(context: Context) -> Field {
+        let f = Field()
+        f.delegate = context.coordinator
+        f.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .editingChanged)
+        f.autocapitalizationType = .none
+        f.autocorrectionType = .no
+        f.returnKeyType = .search
+        f.font = .preferredFont(forTextStyle: .body)
+        f.adjustsFontForContentSizeCategory = true
+        f.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        f.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return f
+    }
+    func updateUIView(_ f: Field, context: Context) {
+        context.coordinator.parent = self
+        if f.text != text { f.text = text }
+        f.placeholder = placeholder
+        f.accessibilityIdentifier = identifier
+        f.onEmptyBackspace = onEmptyBackspace
     }
 }
 

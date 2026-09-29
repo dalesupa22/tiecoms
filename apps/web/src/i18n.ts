@@ -865,6 +865,8 @@ const es = {
   'search.messages': 'Mensajes',
   'search.noMessages': 'Ningún mensaje con eso.',
   'search.moreMessages': 'Ver más mensajes',
+  'card.forward': 'Reenviar',
+  'card.forwardTitle': 'Reenviar a otros chats',
 };
 type Key = keyof typeof es;
 
@@ -1699,6 +1701,8 @@ const en: Record<Key, string> = {
   'search.messages': 'Messages',
   'search.noMessages': 'No messages match.',
   'search.moreMessages': 'More messages',
+  'card.forward': 'Forward',
+  'card.forwardTitle': 'Forward to other chats',
 };
 const dicts: Record<Lang, Record<Key, string>> = { es, en };
 const STORE_KEY = 'tiecoms:lang';
@@ -1760,10 +1764,23 @@ export function errorText(e: any): string {
 }
 
 /** Los mensajes de sistema llegan como {"k": clave, ...datos}; los antiguos, como texto plano. */
+/**
+ * La vista previa de la lista llega cortada a 140 caracteres: si el JSON no cierra, se toman las claves completas
+ * ("k":"…", "subject":"…", números). Así no se ve JSON crudo en la barra.
+ */
+function lenientJson(body: string): any {
+  try { return JSON.parse(body); } catch {}
+  const out: Record<string, unknown> = {};
+  for (const m of body.matchAll(/"(\w+)":("(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?|true|false|null)/g)) {
+    try { out[m[1]!] = JSON.parse(m[2]!); } catch {}
+  }
+  if (typeof out.k !== 'string') throw new Error('not a system message');
+  return out;
+}
 export function systemText(body: string): string {
   if (!body.startsWith('{')) return body;
   try {
-    const p = JSON.parse(body);
+    const p = lenientJson(body);
     const key = (p.k === 'members.added' && p.history === 'all' ? 'sys.members.added.all' : p.k === 'side.started' && p.parentName ? 'sys.side.startedIn' : `sys.${p.k}`) as Key;
     if (typeof p.durationSec === 'number') p.duration = `${Math.floor(p.durationSec / 60)}:${String(p.durationSec % 60).padStart(2, '0')}`;
     if (p.startsAt) p.when = new Date(p.startsAt).toLocaleString(locale(), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });

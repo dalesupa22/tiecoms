@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import type { z } from 'zod';
 import type {
   MailAddressDTO, MailAttachmentInfoDTO, MailConnectionDTO, MailListDTO, MailListItemDTO, MailListQuery, MailMessageDTO, MailProvider,
-  MailReplyInput, MailTaskInput, MessageDTO, ShareMailInput, ShareWaInput, SharedMailCommentDTO, SharedMailDTO,
+  ForwardSharedInput, MailReplyInput, MailTaskInput, MessageDTO, ShareMailInput, ShareWaInput, SharedMailCommentDTO, SharedMailDTO,
 } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { config } from '../config.ts';
@@ -943,4 +943,46 @@ export async function shareWhatsApp(userId: string, input: z.infer<typeof ShareW
     });
   }
   return { message: messages[0]!, messages, emails };
+}
+
+
+// ---------- Reenviar una tarjeta ----------
+/**
+ * Reenviar un correo o WhatsApp ya compartido a otros chats (sin volver a pedirlo al buzón). La copia conserva el
+ * dueño del buzón (shared_by: de ahí salen los adjuntos y solo él responde el correo); la tarjeta la publica quien reenvía.
+ */
+export async function forwardShared(userId: string, id: string, input: z.infer<typeof ForwardSharedInput>) {
+  const e = await readable(pool, userId, id);
+  const targets = [...new Set(input.conversationIds)].filter((cid) => cid !== e.conversation_id);
+  if (!targets.length) throw badRequest('Elige otro chat');
+  for (const cid of targets) await conversationAccess(pool, userId, cid, 'post');
+  const src = (await pool.query('SELECT body FROM messages WHERE id = $1', [e.message_id])).rows[0];
+  let payload: any = {};
+  try { payload = JSON.parse(src?.body ?? '{}'); } catch {}
+  const emails: SharedMailDTO[] = [];
+  for (const cid of targets) {
+    emails.push(await tx(async (c) => {
+      const a = await conversationAccess(c, userId, cid, 'post', true);
+      const ins = await c.query(
+        `INSERT INTO shared_emails (conversation_id, shared_by, provider, account_email, external_id, thread_id, internet_id, direction, from_name, from_email,
+           to_list, cc_list, subject, snippet, body_text, body_trimmed, sent_at, attachments, comment, meta, status, replied_at, replied_by)
+         SELECT $2, shared_by, provider, account_email, external_id, thread_id, internet_id, direction, from_name, from_email,
+           to_list, cc_list, subject, snippet, body_text, body_trimmed, sent_at, attachments, $3, meta,
+           CASE WHEN status = 'replied' THEN 'replied' ELSE 'pending' END, replied_at, replied_by
+           FROM shared_emails WHERE id = $1 RETURNING id`,
+        [id, cid, input.comment || null],
+      );
+      const nid: string = ins.rows[0].id;
+      const { comment: _old, ...rest } = payload;
+      const k = e.provider === 'whatsapp' ? 'wa.shared' : 'mail.shared';
+      const m = await appendMessage(c, {
+        conversationId: cid, authorId: userId, kind: 'system',
+        body: sys(k, { ...rest, emailId: nid, forwardedFrom: e.conversation_id, ...(input.comment ? { comment: clip(input.comment, 4000) } : {}) }),
+      });
+      await c.query('UPDATE shared_emails SET message_id = $2 WHERE id = $1', [nid, m.id]);
+      await audit(c, userId, 'mail.forwarded', { type: 'conversation', id: cid, workspaceId: a.workspaceId }, { provider: e.provider });
+      return publish(c, nid);
+    }));
+  }
+  return { emails };
 }

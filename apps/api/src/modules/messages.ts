@@ -132,6 +132,15 @@ function sameBody(row: any, input: { body: string; attachmentIds?: string[]; for
  * Envío idempotente: reintentar con el mismo clientMessageId devuelve el mismo
  * mensaje; reutilizarlo con otro contenido se rechaza. El ACK sale solo tras el commit.
  */
+/** Texto para citar la tarjeta de un correo o un WhatsApp compartido (mail.shared / wa.shared); null si no es una. */
+export function cardExcerpt(body: string): string | null {
+  if (!body.startsWith('{"k":"mail.shared"') && !body.startsWith('{"k":"wa.shared"')) return null;
+  try {
+    const p = JSON.parse(body);
+    return p.k === 'mail.shared' ? `✉ ${p.subject || '(sin asunto)'}${p.from ? ` · ${p.from}` : ''}` : `WhatsApp${p.chatName ? ` · ${p.chatName}` : ''}: ${p.text ?? ''}`;
+  } catch { return null; }
+}
+
 export async function sendMessage(userId: string, conversationId: string, input: SendMessageInput,
   afterCreate?: (c: Tx, message: MessageDTO) => Promise<void>,
 ): Promise<{ message: MessageDTO; duplicate: boolean; droppedMentions?: string[] }> {
@@ -168,9 +177,11 @@ export async function sendMessage(userId: string, conversationId: string, input:
           // «Responder en privado»: el mensaje original debe ser visible para quien responde.
           // El extracto lo pone el servidor desde el original (no lo declara el cliente).
           const o = src ? (await c.query('SELECT seq, body, kind, deleted_at, view_once FROM messages WHERE id = $1 AND conversation_id = $2', [originalId, from])).rows[0] : null;
-          if (!o || o.seq <= src!.historyFromSeq || o.kind !== 'text' || o.deleted_at) throw badRequest('El mensaje original no está en la conversación de origen');
+          // También se responde en privado a la tarjeta de un correo o un WhatsApp compartido.
+          const card = o?.kind === 'system' ? cardExcerpt(String(o.body)) : null;
+          if (!o || o.seq <= src!.historyFromSeq || (o.kind !== 'text' && !card) || o.deleted_at) throw badRequest('El mensaje original no está en la conversación de origen');
           if (o.view_once) throw viewOnceConflict();
-          const flat = String(o.body).replace(/\s+/g, ' ').trim();
+          const flat = (card ?? String(o.body)).replace(/\s+/g, ' ').trim();
           quote = { messageSeq: o.seq, excerpt: flat.length > 200 ? `${flat.slice(0, 199)}…` : flat };
         }
         forwarded = { source: input.forwarded.source, author: input.forwarded.author ?? null, sentAt: input.forwarded.sentAt ?? null, fromConversationId: from, messageId: originalId, ...(quote ?? {}) };

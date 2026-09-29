@@ -11,7 +11,7 @@ import {
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
-  ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput,
+  ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput, ForwardSharedInput,
   SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
@@ -542,6 +542,7 @@ export async function buildHttp() {
       mailbox.reply(req.userId, z.uuid().parse(req.params.id), MailReplyInput.parse(req.body)));
     priv.delete<{ Params: { id: string } }>('/api/v1/mail/shared/:id/reply', async (req) => mailbox.cancelReply(req.userId, z.uuid().parse(req.params.id)));
     priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/task', async (req, reply) => reply.status(201).send(await mailbox.createTask(req.userId, z.uuid().parse(req.params.id), MailTaskInput.parse(req.body))));
+    priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/forward', mailLimit, async (req, reply) => reply.status(201).send(await mailbox.forwardShared(req.userId, z.uuid().parse(req.params.id), ForwardSharedInput.parse(req.body))));
     priv.post('/api/v1/whatsapp/share', mailLimit, async (req, reply) => reply.status(201).send(await mailbox.shareWhatsApp(req.userId, ShareWaInput.parse(req.body))));
     priv.get('/api/v1/reminders', async (req) => ({ reminders: await reminders.listReminders(req.userId) }));
     priv.post('/api/v1/reminders', async (req) => reminders.createReminder(req.userId, CreateReminderInput.parse(req.body)));

@@ -1201,6 +1201,12 @@ export class TieComsClient {
     this.putMail(r.email);
     return r;
   }
+  /** Reenviar la tarjeta de un correo o WhatsApp a otros chats (cada uno con su hilo). */
+  async forwardShared(id: string, conversationIds: string[], comment?: string) {
+    const r = await this.request<{ emails: import('@tiecoms/contracts').SharedMailDTO[] }>(`/mail/shared/${id}/forward`, { method: 'POST', json: { conversationIds, comment } });
+    r.emails.forEach((e) => this.putMail(e));
+    return r;
+  }
   async shareWhatsApp(input: { accountId: string; jid: string; messageId: string; conversationIds: string[]; comment?: string }) {
     const r = await this.request<{ message: MessageDTO; messages: MessageDTO[]; emails: import('@tiecoms/contracts').SharedMailDTO[] }>('/whatsapp/share', { method: 'POST', json: input });
     r.emails?.forEach((e) => this.putMail(e));

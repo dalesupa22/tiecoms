@@ -1565,3 +1565,10 @@ mark { background: #f5e3b3; color: inherit; border-radius: 3px; padding: 0 1px; 
 .msg-search-row:hover { background: var(--paper-2); }
 .msg-search-snip { color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .msg-search .link-btn { align-self: flex-start; margin-left: 10px; }
+/* Tarjetas de correo y WhatsApp: responder, en privado y reenviar al pasar el cursor (como un mensaje). */
+.card-msg { position: relative; }
+.card-actions-bar { position: absolute; top: -6px; left: min(560px, calc(100% - 120px)); display: none; gap: 2px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 2px; box-shadow: 0 4px 14px rgba(0,0,0,.08); z-index: 2; }
+.card-actions-bar button { border: 0; background: none; width: 30px; height: 28px; border-radius: 8px; font-size: 15px; cursor: pointer; color: var(--ink-2); }
+.card-actions-bar button:hover { background: var(--paper-2); color: var(--ink); }
+.card-msg:hover .card-actions-bar, .card-msg:focus-within .card-actions-bar { display: flex; }
+@media (hover: none) { .card-actions-bar { display: none !important; } }

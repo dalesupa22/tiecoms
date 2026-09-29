@@ -801,6 +801,8 @@ export const MailTaskInput = z.object({
   closeOnReply: z.boolean().default(true),
 });
 /** «Comentar en chaggu» desde un mensaje de WhatsApp. */
+/** Reenviar una tarjeta de correo o WhatsApp a otros chats: cada chat recibe su copia con hilo propio. */
+export const ForwardSharedInput = z.object({ conversationIds: z.array(z.uuid()).min(1).max(10), comment: z.string().trim().max(4000).optional() });
 export const ShareWaInput = z.object({
   accountId: z.uuid(), jid: z.string().min(3).max(200), messageId: z.string().min(1).max(200),
   conversationId: z.uuid().optional(), conversationIds: z.array(z.uuid()).min(1).max(10).optional(),

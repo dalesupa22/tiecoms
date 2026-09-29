@@ -388,10 +388,15 @@ export function ActionCard({ a, onRun, onUndo, onDiscard, onOpen, onRedo }: {
 
 // ---------- gg como chat (docs/GG-CHAT.md) ----------
 let ggChatId: string | null = null;
+/** Recién creado, el chat aún no está en la lista: se recarga antes de abrirlo (si no, «no existe»). */
+async function ensureKnown(id: string) {
+  if (!client.getState().data?.conversations.some((c) => c.id === id)) await client.loadBootstrap();
+}
 /** Abre (y crea la primera vez) tu chat con gg. */
 export async function openGgChat() {
   try {
     ggChatId ??= (await client.request<{ id: string }>('/assistant/chat', { method: 'POST', json: {} })).id;
+    await ensureKnown(ggChatId);
     navigate(`/c/${ggChatId}`);
   } catch (e) { toastError(e); }
 }
@@ -400,6 +405,7 @@ let selfChatId: string | null = null;
 export async function openSelfChat() {
   try {
     selfChatId ??= (await client.request<{ id: string }>('/me/notes', { method: 'POST', json: {} })).id;
+    await ensureKnown(selfChatId);
     navigate(`/c/${selfChatId}`);
   } catch (e) { toastError(e); }
 }
@@ -407,6 +413,7 @@ export async function openSelfChat() {
 export async function saveToSelf(m: { body: string; conversationId: string; createdAt: string; authorId: string }, author: string | null) {
   try {
     selfChatId ??= (await client.request<{ id: string }>('/me/notes', { method: 'POST', json: {} })).id;
+    await ensureKnown(selfChatId);
     await client.send(selfChatId, m.body, null, { source: 'tiecoms', author, sentAt: m.createdAt, fromConversationId: m.conversationId });
     const id = selfChatId;
     toastMsg(t('self.saved'), { label: t('lin.open'), run: () => navigate(`/c/${id}`) });

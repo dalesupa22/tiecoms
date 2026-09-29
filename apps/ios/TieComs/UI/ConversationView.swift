@@ -44,6 +44,8 @@ private struct PendingVoiceSend {
     let durationMs: Int
     let waveform: [Double]
     let replyTo: String?
+    /// Una sola vista (el ① estaba prendido al grabar).
+    var viewOnce = false
     /// Permiso de IA elegido para esta nota (se conserva al reintentar la subida).
     var aiConsent = false
 }
@@ -116,6 +118,13 @@ struct ConversationView: View {
     @State private var editing: MessageDTO?
     /// «Comenta esta tarea…» desde su tarjeta: lo que se escribe va como comentario de la tarea (no al chat).
     @State private var commentingIssue: IssueDTO?
+    /// «Responder» de la franja de comentarios de un evento (tanda 1.7 §5): el compositor comenta el evento.
+    @State private var commentingEvent: CalendarEventDTO?
+    /// Buscar dentro del chat (tanda 1.7 §6).
+    @State private var search = ChatSearchState()
+    @FocusState private var searchFocused: Bool
+    /// ① «una vista» para el próximo mensaje (tanda 1.7 §7).
+    @State private var viewOnceNext = false
     @State private var sheet: ChatSheet?
     @State private var confirmDelete: MessageDTO?
     /// Banderita elegida: filtra el chat y es el tema de lo que escribo (nil = «Todo»).
@@ -191,6 +200,7 @@ struct ConversationView: View {
                 VoicePlayer.next(after: finished, in: store?.conversations[id]?.messages ?? [])
             }
         }
+        .modifier(BurstLayer(conversationId: conversationId))
         .onDisappear {
             store.cancelConversationRecovery(conversationId)
             if store.openConversationId == conversationId { store.openConversationId = nil }
@@ -232,6 +242,7 @@ struct ConversationView: View {
         // Tocar una mención abre la ficha de la persona.
         .environment(\.openURL, OpenURLAction { url in
             if url.scheme == "chaggu-mention", let id = url.host { personCard = id; return .handled }
+            if url.scheme == "chaggu-ref", let id = url.host { openRef(id); return .handled }
             return .systemAction
         })
         .onChange(of: sidePanel) { _, v in if v == nil { store.openConversationId = conversationId } }
@@ -382,6 +393,7 @@ struct ConversationView: View {
                           onArchived: { sheet = .archivedTopics })
                 TreeUnreadStrip(conversationId: conversationId) { sheet = .treePending }
                 CallBanner(conversationId: conversationId)
+                if search.active { searchBar }
             }
             if let state, state.loaded {
                 messages(d, c, state)
@@ -444,6 +456,11 @@ struct ConversationView: View {
             }
             ToolbarItem(placement: .topBarTrailing) { CallHeaderButtons(conv: c) }
             ToolbarItem(placement: .topBarTrailing) {
+                Button { openSearch() } label: { Image(systemName: "magnifyingglass") }
+                    .accessibilityLabel(L("search.inChat"))
+                    .accessibilityIdentifier("chat.search")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     ConversationMenuItems(conv: c, onRemindCustom: { sheet = .reminder(nil) },
                                           onMeeting: c.canPost ? { sheet = .newEvent(nil) } : nil)
@@ -452,6 +469,7 @@ struct ConversationView: View {
                         Button { sheet = .issuesHere } label: { Label("\(L("issue.here")) · \(c.openIssues)", systemImage: "checklist") }
                     }
                     if (store.pins[conversationId]?.count ?? 0) > 0 { Button { sheet = .pins } label: { Label(L("pins.title"), systemImage: "pin") } }
+                    Button { openSearch() } label: { Label(L("search.inChat"), systemImage: "magnifyingglass") }
                     NavigationLink(value: Route.details(conversationId)) { Label(L("chat.details"), systemImage: "info.circle") }
                 } label: { Image(systemName: "ellipsis.circle") }
                 .accessibilityLabel(L("menu.open"))
@@ -685,6 +703,105 @@ struct ConversationView: View {
     }
 
     /// «@consulta» justo antes del cursor, en cualquier posición (no si ese "@" ya es un token).
+    /// Comentando una tarea o un evento desde su tarjeta.
+    private var commenting: Bool { commentingIssue != nil || commentingEvent != nil }
+
+    /// «#consulta» justo antes del cursor (no si ese "#" ya es un token).
+    private var refQuery: (start: Int, query: String)? {
+        let u = Array(draft.utf16)
+        let cur = min(max(0, draftCursor), u.count)
+        let prefix = String(utf16CodeUnits: Array(u[..<cur]), count: cur)
+        guard let q = RefText.activeQuery(in: prefix), !draftMentions.contains(where: { q.start >= $0.start && q.start < $0.end }) else { return nil }
+        return q
+    }
+
+    private func pickRef(_ d: BootstrapDTO, _ target: ConversationDTO, at start: Int) {
+        let cur = min(max(start, draftCursor), (draft as NSString).length)
+        let r = MentionText.insert(name: Naming.title(d, target), userId: "#" + target.id, into: draft, replacing: start, cur, mentions: draftMentions, sigil: "#")
+        draftMentions = r.mentions
+        draftCursor = r.cursor
+        draft = r.text
+        Haptics.tap()
+    }
+
+    /// Tocar #grupo: lo abre si está en mi lista; si no, «No tienes acceso a #Nombre» (no navega).
+    private func openRef(_ id: String) {
+        if store.meta(id) != nil { store.push(.conversation(id)) }
+        else { store.show(L("ref.noAccess", ["name": store.refName(id)])) }
+    }
+
+    // MARK: Buscar en el chat (tanda 1.7 §6)
+
+    private func openSearch() {
+        search.active = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { searchFocused = true }
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Theme.textSecondary)
+            TextField(L("search.inChatPh"), text: $search.query)
+                .focused($searchFocused)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .submitLabel(.search)
+                .onSubmit { goSearch(0) }
+                .accessibilityIdentifier("chat.searchField")
+            if search.loading { ProgressView().controlSize(.small) }
+            else if search.query.count >= ChatSearch.minChars {
+                Text(search.counter).font(.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                    .accessibilityIdentifier("chat.searchCounter")
+            }
+            Button { searchStep(older: true) } label: { Image(systemName: "chevron.up") }
+                .disabled(!search.canOlder).accessibilityLabel(L("search.older")).accessibilityIdentifier("chat.searchOlder")
+            Button { searchStep(older: false) } label: { Image(systemName: "chevron.down") }
+                .disabled(!search.canNewer).accessibilityLabel(L("search.newer")).accessibilityIdentifier("chat.searchNewer")
+            Button { search = ChatSearchState(); searchFocused = false } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary) }
+                .accessibilityLabel(L("common.close")).accessibilityIdentifier("chat.searchClose")
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(Theme.surface)
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.textSecondary.opacity(0.15)).frame(height: 0.5) }
+        .task(id: search.query) {
+            // Espera 250 ms mientras se escribe.
+            let q = search.query.trimmingCharacters(in: .whitespaces)
+            guard q.count >= ChatSearch.minChars else { search.results = []; search.hasMore = false; return }
+            try? await Task.sleep(nanoseconds: ChatSearch.debounceMs * 1_000_000)
+            guard !Task.isCancelled else { return }
+            search.loading = true
+            defer { search.loading = false }
+            if let page = try? await store.searchConversation(conversationId, query: q), search.query.trimmingCharacters(in: .whitespaces) == q {
+                search.results = page.results.map(\.message); search.hasMore = page.hasMore; search.index = 0
+                goSearch(0)
+            }
+        }
+    }
+
+    /// ↑ más viejo (pide la página siguiente al llegar al final), ↓ más nuevo.
+    private func searchStep(older: Bool) {
+        if older && search.index >= search.results.count - 1 && search.hasMore, let last = search.results.last {
+            let q = search.query
+            Task {
+                if let page = try? await store.searchConversation(conversationId, query: q, before: last.createdAt) {
+                    search.results += page.results.map(\.message).filter { n in !search.results.contains { $0.id == n.id } }
+                    search.hasMore = page.hasMore
+                    search.older(); goSearch(search.index)
+                }
+            }
+            return
+        }
+        if older { search.older() } else { search.newer() }
+        goSearch(search.index)
+    }
+
+    /// Salta al resultado (con filtro de tema se quita para que se vea) y lo resalta.
+    private func goSearch(_ i: Int) {
+        guard let m = search.current else { return }
+        if topicFilter != nil, m.topicId != topicFilter { topicFilter = nil }
+        revealed.insert(m.seq)
+        store.jumpTo[conversationId] = m.seq
+    }
+
     private var mentionQuery: (start: Int, query: String)? {
         let u = Array(draft.utf16)
         let cur = min(max(0, draftCursor), u.count)
@@ -714,6 +831,7 @@ struct ConversationView: View {
         }
         if Naming.isSide(c) { return L("side.placeholderMany") }
         if commentingIssue != nil { return L("task.cardComment") }
+        if commentingEvent != nil { return L("cal.commentPh") }
         if let t = activeTopic { return L("topic.placeholder", ["name": t.name]) }
         return L("chat.placeholder", ["name": Naming.title(d, c)])
     }
@@ -881,12 +999,14 @@ struct ConversationView: View {
                 .accessibilityAddTraits(.isHeader)
         case .system(let m):
             // Una tarea nueva se ve como tarjeta completa (docs/TEMAS.md), no como la línea «Creó la tarea…».
-            if let eventId = EventCardRule.eventId(m) {
-                // Evento nuevo: tarjeta con fecha, Unirse, quiénes van y la respuesta ahí mismo (en vez de «Agendó…»).
-                EventChatCard(eventId: eventId, creatorId: m.authorId)
-            } else if let issueId = TaskCard.issueId(m) {
-                IssueChatCard(issueId: issueId, creatorId: m.authorId, canPost: c.canPost) { i in
-                    commentingIssue = i; replyTo = nil; editing = nil; composerFocused = true
+            // Tanda 1.7: «Es hoy», completada, vencida y comentarios también van como la tarjeta de su evento o tarea.
+            if let k = ChatCards.kind(m), let eventId = k.eventId {
+                EventChatCard(eventId: eventId, creatorId: m.authorId, kind: k, onComment: c.canPost ? { ev in
+                    commentingEvent = ev; commentingIssue = nil; replyTo = nil; editing = nil; composerFocused = true
+                } : nil)
+            } else if let k = ChatCards.kind(m), let issueId = k.issueId {
+                IssueChatCard(issueId: issueId, creatorId: m.authorId, canPost: c.canPost, kind: k) { i in
+                    commentingIssue = i; commentingEvent = nil; replyTo = nil; editing = nil; composerFocused = true
                 }
             } else {
                 SystemRow(message: m)
@@ -913,14 +1033,19 @@ struct ConversationView: View {
                 linkPreview: m.deletedAt == nil ? m.linkPreview : nil,
                 attachments: m.deletedAt == nil ? m.attachments : [],
                 messageId: m.id, conversationId: conversationId,
-                mentions: m.deletedAt == nil ? m.mentions : [],
+                mentions: m.deletedAt == nil ? m.mentions + RefText.tokens(m.refs) : [],
+                highlight: search.active && search.matchIds.contains(m.id) ? search.query : nil,
                 mentionsMe: m.deletedAt == nil && MentionText.mentionsMe(m.mentions, me: d.me.id, authorId: m.authorId),
                 sideAnchor: activeAnchor == m.id,
                 topic: embedded || m.deletedAt != nil ? nil : m.topicId.flatMap { id in store.topics[conversationId]?.first { $0.id == id } },
                 topicBy: TopicRules.byLine(m, me: d.me.id) { Naming.person(d, $0)?.name }
             )
             Group {
-                if m.deletedAt == nil {
+                if m.viewOnce && m.deletedAt == nil {
+                    // Una sola vista: burbuja cerrada, sin menú (no se copia, reenvía, fija ni convierte en tarea).
+                    ViewOnceBubble(message: m, mine: mine, time: L10n.clock(m.createdAt))
+                        .padding(.leading, !mine && ChatGrouping.showsAvatars(c.kind) ? 40 : 0)
+                } else if m.deletedAt == nil {
                     // Pulsación larga como en iPhone: vista previa de la burbuja + barra rápida de reacciones + menú.
                     bubble.contextMenu {
                         if c.canPost && !m.isSystem {
@@ -1158,6 +1283,10 @@ struct ConversationView: View {
                            detail: excerpt(r.body, 100), cancelLabel: L("reply.cancel")) { replyTo = nil }
                     .accessibilityIdentifier("composer.replyBar")
             }
+            if let ce = commentingEvent {
+                ContextBar(icon: "calendar", title: L("cal.commentingOn"), detail: ce.title, cancelLabel: L("common.cancel")) { commentingEvent = nil }
+                    .accessibilityIdentifier("composer.eventCommentBar")
+            }
             if let ci = commentingIssue {
                 ContextBar(icon: "text.bubble", title: L("task.commentingOn"), detail: ci.title, cancelLabel: L("common.cancel")) { commentingIssue = nil }
                     .accessibilityIdentifier("composer.taskCommentBar")
@@ -1167,6 +1296,9 @@ struct ConversationView: View {
                     editing = nil; draft = ""; draftMentions = []
                 }
                 .accessibilityIdentifier("composer.editBar")
+            }
+            if mentionQuery == nil, let q = refQuery {
+                RefPicker(d: d, query: q.query) { target in pickRef(d, target, at: q.start) }
             }
             if let q = mentionQuery {
                 MentionPicker(d: d, c: c, query: q.query, messages: store.conversations[conversationId]?.messages ?? [],
@@ -1205,11 +1337,12 @@ struct ConversationView: View {
                     VoiceRecordingBar(recorder: recorder, onSend: sendVoice, onDiscard: { store.show(L("voice.cancelled")) }, onError: { store.show($0) })
                 } else {
                 // «＋»: fotos, archivos y, aparte, evento o asunto del chat.
-                if editing == nil && commentingIssue == nil {
+                if editing == nil && !commenting {
                     AttachButton(staged: $staged, onEvent: embedded ? nil : { sheet = .newEvent(nil) },
                                  onIssue: embedded || !canOpenIssues ? nil : { sheet = .newIssue(nil) },
                                  onMeeting: embedded ? nil : { now in sheet = .meeting(now: now) }) { store.show($0) }
                 }
+                if editing == nil && !commenting && !embedded { ViewOnceToggle(on: $viewOnceNext) }
                 // UITextView: tokens resaltados, cursor real y retroceso que borra el token entero.
                 ComposerTextView(text: $draft, mentions: $draftMentions, cursor: $draftCursor, focused: $composerFocused,
                                  placeholder: composerPlaceholder(d, c), accessibilityLabel: L("chat.composerLabel"),
@@ -1224,7 +1357,7 @@ struct ConversationView: View {
                     .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.textSecondary.opacity(0.25)))
                 }
                 // Compositor vacío: micrófono (mantener pulsado para grabar). Con texto o adjuntos: enviar.
-                if editing == nil && commentingIssue == nil && trimmed.isEmpty && staged.isEmpty && !uploading && recorder.state != .locked {
+                if editing == nil && !commenting && trimmed.isEmpty && staged.isEmpty && !uploading && recorder.state != .locked {
                     VoiceRecordButton(recorder: recorder, onSend: sendVoice)
                 } else if !recorder.isActive {
                 // Con texto (sin adjuntos): 🕒 para programar el envío.
@@ -1256,7 +1389,7 @@ struct ConversationView: View {
 
     /// Solo se programa texto (con menciones y respuesta); adjuntos, notas de voz y respuestas privadas salen al momento.
     private func canSchedule(_ trimmed: String) -> Bool {
-        editing == nil && commentingIssue == nil && !trimmed.isEmpty && staged.isEmpty && !uploading && store.privateReplies[conversationId] == nil
+        editing == nil && !commenting && !viewOnceNext && !trimmed.isEmpty && staged.isEmpty && !uploading && store.privateReplies[conversationId] == nil
     }
 
     /// Programa el borrador: el compositor se vacía y el aviso trae «Deshacer» (devuelve el texto).
@@ -1277,7 +1410,8 @@ struct ConversationView: View {
     /// Keep the recording on-device until the person chooses whether to use third-party AI.
     private func sendVoice(_ data: Data, _ durationMs: Int, _ waveform: [Double]) {
         guard !uploading, pendingVoice == nil else { return }
-        pendingVoice = PendingVoiceSend(data: data, durationMs: durationMs, waveform: waveform, replyTo: replyTo?.id)
+        pendingVoice = PendingVoiceSend(data: data, durationMs: durationMs, waveform: waveform, replyTo: replyTo?.id, viewOnce: viewOnceNext)
+        viewOnceNext = false
         showingVoiceAIConsent = true
     }
 
@@ -1290,7 +1424,7 @@ struct ConversationView: View {
             defer { uploading = false }
             do {
                 let a = try await store.api.uploadVoiceNote(conversationId, data: voice.data, durationMs: voice.durationMs, waveform: voice.waveform, aiConsent: aiConsent)
-                store.send(conversationId, body: "", replyTo: voice.replyTo, attachments: [a], topicId: activeTopic?.id)
+                store.send(conversationId, body: "", replyTo: voice.replyTo, attachments: [a], topicId: activeTopic?.id, viewOnce: voice.viewOnce)
                 replyTo = nil
             } catch {
                 failedVoice = voice
@@ -1302,6 +1436,17 @@ struct ConversationView: View {
     private func submit() {
         let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty || !staged.isEmpty, !uploading else { return }
+        if let ce = commentingEvent {
+            guard !body.isEmpty else { return }
+            commentingEvent = nil
+            draft = ""; draftMentions = []
+            act { try await store.commentEvent(ce.id, body: body) }
+            return
+        }
+        if viewOnceNext && !ViewOnceRules.allowed(staged) {
+            store.show(L("vo.onlyMedia"))
+            return
+        }
         if let ci = commentingIssue {
             // Comentario de la tarea (POST /issues/:id/comments); la tarjeta muestra los últimos al recargar.
             guard !body.isEmpty else { return }
@@ -1320,7 +1465,8 @@ struct ConversationView: View {
         }
         if !staged.isEmpty {
             // Adjuntos: se suben (con progreso) y luego se envía el mensaje con sus ids.
-            let files = staged, text = draft, reply = replyTo?.id, ms = draftMentions, topic = activeTopic?.id
+            let files = staged, text = draft, reply = replyTo?.id, ms = draftMentions, topic = activeTopic?.id, vo = viewOnceNext
+            viewOnceNext = false
             uploading = true
             Task {
                 defer { uploading = false; uploadProgress = [:] }
@@ -1336,7 +1482,7 @@ struct ConversationView: View {
                         return
                     }
                 }
-                store.send(conversationId, body: text, replyTo: reply, attachments: done, mentions: ms, topicId: topic)
+                store.send(conversationId, body: text, replyTo: reply, attachments: done, mentions: ms, topicId: topic, viewOnce: vo)
                 staged = []
                 draftMentions = []
                 draft = ""
@@ -1348,7 +1494,8 @@ struct ConversationView: View {
             store.sendPrivateReply(pr, body: draft)
         } else {
             // Con una banderita elegida, lo que escribo sale con ese tema.
-            store.send(conversationId, body: draft, replyTo: replyTo?.id, mentions: draftMentions, topicId: activeTopic?.id)
+            store.send(conversationId, body: draft, replyTo: replyTo?.id, mentions: draftMentions, topicId: activeTopic?.id, viewOnce: viewOnceNext)
+            viewOnceNext = false
         }
         replyTo = nil
         draftMentions = []
@@ -1469,6 +1616,8 @@ struct MessageBubble: View {
     var messageId: String? = nil
     var conversationId: String? = nil
     var mentions: [Mention] = []
+    /// Búsqueda en el chat: lo que coincide va resaltado.
+    var highlight: String? = nil
     var mentionsMe = false
     /// Ancla del sidechat abierto: halo y posición exacta de la burbuja para el conector.
     var sideAnchor = false
@@ -1518,9 +1667,9 @@ struct MessageBubble: View {
                     if !attachments.isEmpty { AttachmentsBlock(attachments: attachments, mine: mine, messageId: messageId, conversationId: conversationId) }
                     if !text.isEmpty || attachments.isEmpty {
                     Group {
-                        if !mentions.isEmpty {
+                        if !mentions.isEmpty || highlight != nil {
                             // Cada mención con el color de SU persona (y tocable); los enlaces http con el color de enlace.
-                            RichMessageText(text: text, mentions: mentions, mine: mine, linkify: linkify) { id in
+                            RichMessageText(text: text, mentions: mentions, mine: mine, linkify: linkify, highlight: highlight) { id in
                                 if let u = URL(string: "chaggu-mention://\(id)") { openURL(u) }
                             }
                         } else if linkify { Text(Linkify.attributed(text)) } else { Text(text) }

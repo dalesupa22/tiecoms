@@ -57,6 +57,10 @@ struct EventChatCard: View {
     @Environment(AppStore.self) private var store
     let eventId: String
     let creatorId: String
+    /// Qué aviso la dibuja (tanda 1.7): creado, «Es hoy» o comentarios.
+    var kind: ChatCardKind? = nil
+    /// «Responder» de la franja de comentarios (comenta el evento).
+    var onComment: ((CalendarEventDTO) -> Void)? = nil
     @State private var missing = false
 
     var body: some View {
@@ -83,8 +87,11 @@ struct EventChatCard: View {
         let mine = ev.invitees.first { $0.userId == d.me.id }
         let cancelled = ev.isCancelled
         VStack(alignment: .leading, spacing: 8) {
-            Text("📅 " + L("cal.card", ["name": creator]).uppercased(with: L10n.locale) + (cancelled ? " · " + L("cal.cancelled") : ""))
-                .font(.caption2.weight(.bold)).kerning(0.4).foregroundStyle(Theme.textSecondary).lineLimit(1)
+            let today: Bool = { if case .eventToday = kind { return true }; return false }()
+            Text(today ? "📅 " + L("card.today", ["time": ev.start.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(L10n.locale))]).uppercased(with: L10n.locale)
+                 : "📅 " + L("cal.card", ["name": creator]).uppercased(with: L10n.locale) + (cancelled ? " · " + L("cal.cancelled") : ""))
+                .font(.caption2.weight(.bold)).kerning(0.4).foregroundStyle(today ? Theme.accentText : Theme.textSecondary).lineLimit(1)
+                .accessibilityIdentifier("eventCard.header")
             HStack(alignment: .top, spacing: 10) {
                 VStack(spacing: 0) {
                     Text(ev.start.formatted(Date.FormatStyle().month(.abbreviated).locale(L10n.locale)).replacingOccurrences(of: ".", with: ""))
@@ -132,6 +139,9 @@ struct EventChatCard: View {
                 .frame(width: 22 + CGFloat(max(0, min(ev.invitees.count, 5) - 1)) * 12, height: 22, alignment: .leading)
                 .accessibilityHidden(true)
                 Text(L("cal.cardGoing", ["n": EventCardRule.going(ev), "total": ev.invitees.count])).font(.caption).foregroundStyle(Theme.textSecondary)
+            }
+            if case .eventComments(_, let info) = kind {
+                CommentsStrip(info: info, onReply: onComment.map { f in { f(ev) } })
             }
             if let mine, EventCardRule.canAnswer(ev, me: d.me.id) {
                 HStack(spacing: 6) {

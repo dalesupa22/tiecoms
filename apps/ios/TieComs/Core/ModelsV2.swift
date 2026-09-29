@@ -99,6 +99,26 @@ struct ReminderDTO: Codable, Equatable, Identifiable, Sendable {
 
 enum Rsvp: String, Codable, CaseIterable, Sendable { case pending, yes, no, maybe }
 
+/// Comentario de un evento (GET/POST /events/:id/comments).
+struct EventCommentDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var eventId: String
+    var authorId: String
+    var body: String
+    var createdAt: String
+    init(id: String, eventId: String, authorId: String, body: String, createdAt: String) {
+        self.id = id; self.eventId = eventId; self.authorId = authorId; self.body = body; self.createdAt = createdAt
+    }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = c.v("id", UUID().uuidString)
+        eventId = c.v("eventId", "")
+        authorId = c.o("authorId") ?? c.v("userId", "")
+        body = c.v("body", "")
+        createdAt = c.v("createdAt", "")
+    }
+}
+
 struct CalendarEventDTO: Codable, Equatable, Identifiable, Sendable {
     struct Invitee: Codable, Equatable, Sendable {
         var userId: String
@@ -110,6 +130,9 @@ struct CalendarEventDTO: Codable, Equatable, Identifiable, Sendable {
         }
     }
     var id: String
+    /// Comentarios del evento (tanda 1.7 §5): cuántos y los 2 últimos.
+    var commentCount: Int = 0
+    var lastComments: [EventCommentDTO] = []
     /// nil en directos, multi y laterales (SPEC-v4 E).
     var workspaceId: String?
     var conversationId: String
@@ -132,6 +155,8 @@ struct CalendarEventDTO: Codable, Equatable, Identifiable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))
+        commentCount = c.int("commentCount")
+        lastComments = c.lossyArray("lastComments")
         workspaceId = c.o("workspaceId")
         conversationId = c.v("conversationId", "")
         originMessageId = c.o("originMessageId")
@@ -607,6 +632,35 @@ struct HumanPreview: Codable, Equatable, Sendable {
 }
 
 /// Mención con @ (SPEC-v4 H): offsets en unidades UTF-16 sobre `body`; el tramo empieza con "@". `userId` puede ser 'all'.
+/// `#Nombre` de una conversación en el texto (docs/TANDA-1.7.md §1). `name` es el nombre al enviar; offsets UTF-16 sobre body.
+struct MessageRef: Codable, Equatable, Hashable, Sendable {
+    var conversationId: String
+    var name: String
+    var start: Int
+    var length: Int
+    var end: Int { start + length }
+    init(conversationId: String, name: String, start: Int, length: Int) {
+        self.conversationId = conversationId; self.name = name; self.start = start; self.length = length
+    }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        conversationId = c.v("conversationId", ""); name = c.v("name", ""); start = c.int("start"); length = c.int("length")
+    }
+    /// Lo que se envía (el servidor pone el nombre).
+    var json: [String: Any] { ["conversationId": conversationId, "start": start, "length": length] }
+}
+
+/// Quién abrió un mensaje de una sola vista (solo lo ve el autor).
+struct ViewOnceOpen: Codable, Equatable, Sendable {
+    var userId: String
+    var at: String
+    init(userId: String, at: String) { self.userId = userId; self.at = at }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        userId = c.v("userId", ""); at = c.v("at", "")
+    }
+}
+
 struct Mention: Codable, Equatable, Hashable, Sendable {
     static let all = "all"
     var userId: String

@@ -96,7 +96,13 @@ enum L10n {
         }
         // El API envía startsAt; la plantilla usa una fecha localizada para {when}.
         if let startsAt = obj["startsAt"] as? String, let date = ISODate.parse(startsAt) {
-            vars["when"] = dateTime(date)
+            // «Es hoy» (tanda 1.7): solo la hora.
+            vars["when"] = k == "event.today" ? date.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(locale)) : dateTime(date)
+        }
+        // Tarea vencida: «venció el vie, 3 oct».
+        if let due = obj["dueDate"] as? String {
+            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX")
+            vars["due"] = f.date(from: String(due.prefix(10))).map { $0.formatted(Date.FormatStyle().weekday(.abbreviated).day().month(.abbreviated).locale(locale)) } ?? due
         }
         // Llamadas: «Terminó la llamada · m:ss» (el API manda durationSec).
         if let secs = (obj["durationSec"] as? NSNumber)?.intValue ?? (obj["durationSec"] as? String).flatMap(Int.init) {
@@ -185,6 +191,12 @@ enum L10n {
     }
 
     static func messagePreview(_ m: MessageDTO) -> String {
+        // Una sola vista: nunca el contenido (tanda 1.7 §7).
+        if m.viewOnce {
+            if m.attachments.contains(where: \.isVoice) { return L("vo.voice") }
+            if m.attachments.contains(where: \.isImage) { return L("vo.photo") }
+            return L("vo.message")
+        }
         guard let att = attachmentsLabel(m.attachments) else { return m.body }
         let text = m.body.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? att : "\(att) · \(text)"

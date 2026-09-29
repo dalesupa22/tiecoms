@@ -29,9 +29,9 @@ enum MentionText {
     static let maxAllMembers = 100
 
     /// «@consulta» que se está escribiendo al final del texto (al inicio o tras un espacio): offset UTF-16 del "@" y la consulta.
-    static func activeQuery(in text: String) -> (start: Int, query: String)? {
+    static func activeQuery(in text: String, sigil: UInt16 = 0x40) -> (start: Int, query: String)? {
         let u = Array(text.utf16)
-        guard let at = u.lastIndex(of: 0x40) else { return nil } // "@"
+        guard let at = u.lastIndex(of: sigil) else { return nil } // "@" (o "#" para las refs)
         if at > 0, let prev = Unicode.Scalar(u[at - 1]), !CharacterSet.whitespacesAndNewlines.contains(prev) { return nil }
         let q = String(utf16CodeUnits: Array(u[(at + 1)...]), count: u.count - at - 1)
         guard q.count <= 30, !q.contains("\n"), q.split(separator: " ").count <= 2, !q.hasSuffix("  ") else { return nil }
@@ -50,11 +50,11 @@ enum MentionText {
     }
 
     /// Inserta «@Nombre » reemplazando [start, end) (la consulta hasta el cursor) en cualquier posición; corre las menciones de después.
-    static func insert(name: String, userId: String, into text: String, replacing start: Int, _ end: Int, mentions: [Mention]) -> (text: String, mentions: [Mention], cursor: Int) {
+    static func insert(name: String, userId: String, into text: String, replacing start: Int, _ end: Int, mentions: [Mention], sigil: String = "@") -> (text: String, mentions: [Mention], cursor: Int) {
         var u = Array(text.utf16)
         guard start >= 0, start <= end, end <= u.count else { return (text, clamped(mentions, length: u.count), min(max(0, end), u.count)) }
         let mentions = clamped(mentions, length: u.count)
-        let token = Array(("@" + name).utf16), ins = token + Array(" ".utf16)
+        let token = Array((sigil + name).utf16), ins = token + Array(" ".utf16)
         u.replaceSubrange(start..<end, with: ins)
         let delta = ins.count - (end - start)
         var out = mentions.filter { $0.end <= start || $0.start >= end }.map { $0.start >= end ? Mention(userId: $0.userId, start: $0.start + delta, length: $0.length) : $0 }
@@ -137,7 +137,7 @@ enum MentionText {
         let u = Array(text.utf16)
         var last = -1
         return Array(mentions.sorted { $0.start < $1.start }.filter { m in
-            guard m.start >= 0, m.length > 1, m.end <= u.count, u[m.start] == 0x40, m.start >= last else { return false }
+            guard m.start >= 0, m.length > 1, m.end <= u.count, u[m.start] == (m.isRef ? 0x23 : 0x40), m.start >= last else { return false }
             last = m.end
             return true
         }.prefix(maxMentions))
@@ -171,6 +171,13 @@ enum MentionText {
                   let lo = String.Index(lo16, within: text), let hi = String.Index(hi16, within: text),
                   let alo = AttributedString.Index(lo, within: out), let ahi = AttributedString.Index(hi, within: out) else { continue }
             out[alo..<ahi].font = .body.bold()
+            if let conv = m.refConversationId {
+                // #grupo (tanda 1.7 §1): pastilla del acento; tocarla abre el chat o avisa «No tienes acceso».
+                out[alo..<ahi].foregroundColor = mine ? .white : Theme.accentText
+                out[alo..<ahi].backgroundColor = mine ? Color.white.opacity(0.22) : Theme.accentText.opacity(0.12)
+                if links { out[alo..<ahi].link = URL(string: "chaggu-ref://\(conv)") }
+                continue
+            }
             out[alo..<ahi].foregroundColor = mine ? .white : (m.isAll ? Theme.accentText : PersonColor.text(m.userId))
             if links && !m.isAll { out[alo..<ahi].link = URL(string: "chaggu-mention://\(m.userId)") }
         }
@@ -209,5 +216,52 @@ enum MentionText {
         guard q.count >= 2 else { return [] }
         let members = Set(c.memberIds)
         return d.people.filter { !members.contains($0.id) && $0.kind == "human" && fold($0.name).split(separator: " ").contains { $0.hasPrefix(q) } }.prefix(3).map { $0 }
+    }
+}
+
+
+// MARK: - #grupos (tanda 1.7 §1)
+
+/// Una ref `#Nombre` viaja en el compositor como una «mención» con userId "#<conversationId>": así reusa los tokens
+/// (resaltado, borrar entero, correr offsets). Al enviar se separa en `refs`.
+extension Mention {
+    var isRef: Bool { userId.hasPrefix("#") }
+    var refConversationId: String? { isRef ? String(userId.dropFirst()) : nil }
+}
+
+enum RefText {
+    static let maxRefs = 20
+
+    /// «#consulta» que se está escribiendo.
+    static func activeQuery(in text: String) -> (start: Int, query: String)? { MentionText.activeQuery(in: text, sigil: 0x23) }
+
+    /// Menciones de personas y refs de conversaciones.
+    static func split(_ all: [Mention]) -> (mentions: [Mention], refs: [Mention]) {
+        (all.filter { !$0.isRef }, Array(all.filter(\.isRef).prefix(maxRefs)))
+    }
+
+    static func json(_ m: Mention) -> [String: Any] {
+        ["conversationId": m.refConversationId ?? "", "start": m.start, "length": m.length]
+    }
+
+    /// Para pintar un mensaje: sus refs como tokens.
+    static func tokens(_ refs: [MessageRef]) -> [Mention] {
+        refs.map { Mention(userId: "#" + $0.conversationId, start: $0.start, length: $0.length) }
+    }
+
+    /// Nombre del token en el texto (sin el «#»).
+    static func name(in text: String, _ m: Mention) -> String {
+        let u = Array(text.utf16)
+        guard m.start >= 0, m.end <= u.count, m.length > 1 else { return "" }
+        return String(utf16CodeUnits: Array(u[(m.start + 1)..<m.end]), count: m.length - 1)
+    }
+
+    /// Conversaciones que puedo ver que coinciden (grupos, chats y directos), para sugerir al escribir «#».
+    static func candidates(_ d: BootstrapDTO, query: String, limit: Int = 8) -> [ConversationDTO] {
+        let q = query.trimmingCharacters(in: .whitespaces).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+        return d.conversations
+            .filter { c in q.isEmpty || Naming.title(d, c).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).contains(q) }
+            .sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
+            .prefix(limit).map { $0 }
     }
 }

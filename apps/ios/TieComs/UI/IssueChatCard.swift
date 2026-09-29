@@ -22,7 +22,7 @@ enum TaskCard {
     /// Con una banderita elegida: los mensajes de ese tema y las tarjetas de las tareas de ese tema. Sin filtro, todo.
     static func matches(_ m: MessageDTO, filter: String?, issues: [String: IssueDTO]) -> Bool {
         guard let filter else { return true }
-        if m.isSystem { return issueId(m).flatMap { issues[$0]?.topicId } == filter }
+        if m.isSystem { return ChatCards.kind(m)?.issueId.flatMap { issues[$0]?.topicId } == filter }
         return m.topicId == filter
     }
 
@@ -48,6 +48,8 @@ struct IssueChatCard: View {
     let issueId: String
     let creatorId: String
     let canPost: Bool
+    /// Qué aviso la dibuja (tanda 1.7): creada, completada, vencida o comentarios.
+    var kind: ChatCardKind? = nil
     /// «Comenta esta tarea…»: el compositor del chat pasa a comentar esta tarea.
     var onComment: ((IssueDTO) -> Void)? = nil
     @State private var missing = false
@@ -86,13 +88,27 @@ struct IssueChatCard: View {
         let owner = i.ownerId.flatMap { Naming.person(d, $0) }
         let creator = Naming.person(d, creatorId)?.name.split(separator: " ").first.map(String.init) ?? ""
         let f = IssueSort.flags(i)
-        let edge = TaskCard.edge(i)
+        let edge: TaskCard.Edge = {
+            if case .issueDone = kind { return .done }
+            if case .issueOverdue = kind, !i.status.closed { return .overdue }
+            return TaskCard.edge(i)
+        }()
         let closed = i.status.closed
         let edgeColor: Color = switch edge { case .done: Theme.doneGreen; case .overdue: .red; case .normal: Theme.orange }
+        let header: String = {
+            switch kind {
+            case .issueDone(_, let by): return "✅ " + L("card.doneBy", ["name": by.isEmpty ? creator : by])
+            case .issueOverdue(_, let due): return "😢 " + L("card.overdue", ["date": due.map(IssueSort.shortDate) ?? IssueSort.dueLabel(i)])
+            default: return "☑ " + L("task.card", ["name": creator]).uppercased(with: L10n.locale)
+            }
+        }()
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Text("☑ " + L("task.card", ["name": creator]).uppercased(with: L10n.locale))
-                    .font(.caption2.weight(.bold)).kerning(0.4).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                Text(header)
+                    .font(.caption2.weight(.bold)).kerning(0.4)
+                    .foregroundStyle(edge == .done && kind?.isDone == true ? Theme.doneGreen : edge == .overdue && kind?.isOverdue == true ? .red : Theme.textSecondary)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("taskCard.header")
                 Spacer(minLength: 4)
                 IssueTopicTag(issue: i, canEdit: canPost)
             }
@@ -123,7 +139,11 @@ struct IssueChatCard: View {
                 if i.commentCount > 0 { Text("💬 \(i.commentCount)").font(.caption).foregroundStyle(Theme.textSecondary) }
             }
             .foregroundStyle(Theme.textPrimary)
-            if !comments.isEmpty {
+            if case .issueOverdue = kind, !closed, canPost { OverdueActions(issue: i) }
+            if case .issueComments(_, let info) = kind {
+                CommentsStrip(info: info, onReply: canPost && !closed && onComment != nil ? { onComment?(i) } : nil)
+            }
+            if !comments.isEmpty, kind?.isComments != true {
                 Divider()
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(comments) { e in

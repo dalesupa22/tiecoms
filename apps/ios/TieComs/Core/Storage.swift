@@ -268,6 +268,8 @@ struct PendingMessage: Codable, Equatable, Identifiable, Sendable {
     var mentions: [Mention]? = nil
     /// Tema con el que sale (la banderita elegida al escribir; docs/TEMAS.md).
     var topicId: String? = nil
+    /// Una sola vista (tanda 1.7 §7).
+    var viewOnce: Bool? = nil
     var createdAt: String
     var attempts: Int
     var status: Status

@@ -309,6 +309,9 @@ final class AppStore {
     /// Pantalla previa al permiso de notificaciones.
     var showPushPrompt = false
     @ObservationIgnored var onLiveMessage: ((MessageDTO) -> Void)?
+    /// Tarea completada o vencida que llegó en vivo con su chat a la vista (confeti / carita triste, tanda 1.7).
+    struct LiveBurst: Equatable { var messageId: String; var conversationId: String; var kind: ChatCards.Burst }
+    var liveBurst: LiveBurst?
     @ObservationIgnored var onReady: (() -> Void)?
 
     init(baseURL: URL, secrets: SecretStore, outbox: OutboxStore = OutboxStore(), feedback: FeedbackSink?, session: URLSession? = nil) {
@@ -735,7 +738,12 @@ final class AppStore {
         apply(e)
         if live {
             liveEventsApplied += 1
-            if case .messageCreated(_, _, let msg) = e { announce(msg); onLiveMessage?(msg) }
+            if case .messageCreated(_, _, let msg) = e {
+                announce(msg); onLiveMessage?(msg)
+                if let b = ChatCards.burst(msg), msg.conversationId == openConversationId, appActive {
+                    liveBurst = LiveBurst(messageId: msg.id, conversationId: msg.conversationId, kind: b)
+                }
+            }
         }
     }
 
@@ -1130,7 +1138,7 @@ final class AppStore {
     @discardableResult
     func send(_ conversationId: String, body: String, replyTo: String? = nil, forwarded: ForwardedInfo? = nil,
               attachments: [AttachmentDTO] = [], forwardAttachments: [AttachmentDTO] = [], mentions: [Mention] = [],
-              topicId: String? = nil, clientMessageId: String = UUID().uuidString.lowercased()) -> PendingMessage? {
+              topicId: String? = nil, viewOnce: Bool = false, clientMessageId: String = UUID().uuidString.lowercased()) -> PendingMessage? {
         // El servidor recorta el texto: se recorta aquí y se corren las menciones.
         let (text, mentionsTrimmed) = MentionText.trimmed(body, mentions: mentions)
         // Con adjuntos el texto puede ir vacío.
@@ -1140,7 +1148,7 @@ final class AppStore {
                                forwardAttachmentIds: forwardAttachments.isEmpty ? nil : forwardAttachments.map(\.id),
                                attachments: (attachments + forwardAttachments).isEmpty ? nil : attachments + forwardAttachments,
                                mentions: mentionsTrimmed.isEmpty ? nil : MentionText.valid(mentionsTrimmed, in: String(text.prefix(8000))),
-                               topicId: topicId, createdAt: ISODate.string(), attempts: 0, status: .pending, error: nil, nextAttemptAt: 0)
+                               topicId: topicId, viewOnce: viewOnce ? true : nil, createdAt: ISODate.string(), attempts: 0, status: .pending, error: nil, nextAttemptAt: 0)
         Donations.donate(self, conversationId: conversationId)
         // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
         savePending(pending + [p])
@@ -1222,7 +1230,12 @@ final class AppStore {
                                       "replyTo": p.replyTo ?? NSNull(), "forwarded": p.forwarded?.json ?? NSNull()]
         if let ids = p.attachmentIds, !ids.isEmpty { payload["attachmentIds"] = ids }
         if let ids = p.forwardAttachmentIds, !ids.isEmpty { payload["forwardAttachmentIds"] = ids }
-        if let ms = p.mentions, !ms.isEmpty { payload["mentions"] = ms.map(\.json) }
+        if let ms = p.mentions, !ms.isEmpty {
+            let parts = RefText.split(ms)
+            if !parts.mentions.isEmpty { payload["mentions"] = parts.mentions.map(\.json) }
+            if !parts.refs.isEmpty { payload["refs"] = parts.refs.map(RefText.json) }
+        }
+        if p.viewOnce == true { payload["viewOnce"] = true }
         if let t = p.topicId { payload["topicId"] = t }
         if socket.state == .connected {
             do {

@@ -373,6 +373,7 @@ struct EventDetailView: View {
                     .accessibilityIdentifier("event.rsvp")
                 }
             }
+            EventCommentsSection(event: ev)
             Section("\(L("cal.invitees")) · \(ev.invitees.count)") {
                 ForEach(ev.invitees, id: \.userId) { i in
                     let p = Naming.person(d, i.userId)
@@ -517,4 +518,49 @@ struct EventEditorSheet: View {
 private extension String {
     /// «lunes, 28 de septiembre» → «Lunes, 28 de septiembre».
     var calTitleCase: String { prefix(1).uppercased() + dropFirst() }
+}
+
+
+/// Comentarios del evento (tanda 1.7 §5): lista y campo para comentar.
+struct EventCommentsSection: View {
+    @Environment(AppStore.self) private var store
+    let event: CalendarEventDTO
+    @State private var comments: [EventCommentDTO] = []
+    @State private var draft = ""
+    @State private var sending = false
+
+    var body: some View {
+        Section("\(L("cal.comments")) · \(max(event.commentCount, comments.count))") {
+            if let d = store.data {
+                ForEach(comments) { c in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Naming.person(d, c.authorId)?.name ?? L("common.participant")).font(.caption.weight(.semibold))
+                        Text(c.body)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            HStack {
+                TextField(L("cal.commentPh"), text: $draft, axis: .vertical).lineLimit(1...4)
+                    .accessibilityIdentifier("event.commentField")
+                Button(L("issue.comment")) { send() }
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sending)
+                    .accessibilityIdentifier("event.commentSend")
+            }
+        }
+        .task(id: event.commentCount) { if let c = try? await store.eventComments(event.id) { comments = c } }
+    }
+
+    private func send() {
+        let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return }
+        sending = true
+        Task {
+            do {
+                if let c = try await store.commentEvent(event.id, body: body) { comments.append(c) }
+                draft = ""
+            } catch { store.show(L10n.errorText(error)) }
+            sending = false
+        }
+    }
 }

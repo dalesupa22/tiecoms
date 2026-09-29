@@ -35,8 +35,9 @@ extension AppStore {
     /// Siempre manda las menciones (reemplazan a las anteriores).
     func editMessage(_ id: String, body: String, mentions: [Mention] = []) async throws {
         let (text, ms) = MentionText.trimmed(body, mentions: mentions)
+        let parts = RefText.split(MentionText.valid(ms, in: text))
         let r: EditResult = try await api.request("/messages/\(id)", method: "PATCH",
-                                                  json: ["body": text, "mentions": MentionText.valid(ms, in: text).map(\.json)])
+                                                  json: ["body": text, "mentions": parts.mentions.map(\.json), "refs": parts.refs.map(RefText.json)])
         upsertLocal(r.message)
         reportDroppedMentions(r.droppedMentions)
     }

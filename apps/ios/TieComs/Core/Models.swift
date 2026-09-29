@@ -322,6 +322,14 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
     var topicId: String?
     /// Quién le puso el tema (cualquiera del chat puede).
     var topicBy: String?
+    /// `#Nombre` de conversaciones en el texto (tanda 1.7 §1).
+    var refs: [MessageRef] = []
+    /// Una sola vista (tanda 1.7 §7): el contenido solo sale por POST /messages/:id/open.
+    var viewOnce = false
+    /// 'unopened' | 'opened' (para quien no es autor) o 'sent' (para el autor).
+    var viewOnceState: String?
+    /// Solo para el autor: quién lo abrió.
+    var openedBy: [ViewOnceOpen] = []
     var createdAt: String
     var editedAt: String?
     var deletedAt: String?
@@ -352,6 +360,10 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
         reactions = c.lossyArray("reactions")
         topicId = c.o("topicId")
         topicBy = c.o("topicBy")
+        refs = c.lossyArray("refs")
+        viewOnce = c.v("viewOnce", false)
+        viewOnceState = c.o("viewOnceState")
+        openedBy = c.lossyArray("openedBy")
         createdAt = c.v("createdAt", "")
         editedAt = c.o("editedAt")
         deletedAt = c.o("deletedAt")

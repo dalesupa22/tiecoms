@@ -3374,5 +3374,173 @@
  "compose.openWith": [
   "Abrir chat con {name}",
   "Open chat with {name}"
+ ],
+ "sys.event.today": [
+  "Hoy: {title} a las {when}.",
+  "Today: {title} at {when}."
+ ],
+ "sys.issue.done": [
+  "{byName} completó la tarea «{title}».",
+  "{byName} completed the task “{title}”."
+ ],
+ "sys.issue.overdue": [
+  "No cumplimos: «{title}» venció el {due}.",
+  "We missed it: “{title}” was due {due}."
+ ],
+ "sys.issue.comments": [
+  "{lastByName} comentó la tarea «{title}».",
+  "{lastByName} commented on the task “{title}”."
+ ],
+ "sys.event.comments": [
+  "{lastByName} comentó el evento «{title}».",
+  "{lastByName} commented on the event “{title}”."
+ ],
+ "card.doneBy": [
+  "{name} completó la tarea",
+  "{name} completed the task"
+ ],
+ "card.overdue": [
+  "No cumplimos · venció el {date}",
+  "We missed it · due {date}"
+ ],
+ "card.today": [
+  "Es hoy · {time}",
+  "Today · {time}"
+ ],
+ "card.commentAdded": [
+  "Comentario añadido",
+  "Comment added"
+ ],
+ "card.commentsNew": [
+  "{n} comentarios nuevos",
+  "{n} new comments"
+ ],
+ "card.reply": [
+  "Responder",
+  "Reply"
+ ],
+ "card.newDate": [
+  "Nueva fecha",
+  "New date"
+ ],
+ "card.markDone": [
+  "Marcar hecha",
+  "Mark done"
+ ],
+ "card.reassign": [
+  "Reasignar",
+  "Reassign"
+ ],
+ "due.today": [
+  "Hoy",
+  "Today"
+ ],
+ "due.tomorrow": [
+  "Mañana",
+  "Tomorrow"
+ ],
+ "due.nextMonday": [
+  "Próximo lunes",
+  "Next Monday"
+ ],
+ "due.pick": [
+  "Elegir fecha",
+  "Pick a date"
+ ],
+ "cal.comments": [
+  "Comentarios",
+  "Comments"
+ ],
+ "cal.commentPh": [
+  "Comenta este evento…",
+  "Comment on this event…"
+ ],
+ "cal.commentingOn": [
+  "Comentando el evento",
+  "Commenting on the event"
+ ],
+ "ref.noAccess": [
+  "No tienes acceso a #{name}",
+  "You don't have access to #{name}"
+ ],
+ "search.inChat": [
+  "Buscar en el chat",
+  "Search in chat"
+ ],
+ "search.inChatPh": [
+  "Buscar en este chat",
+  "Search this chat"
+ ],
+ "search.counter": [
+  "{i} de {n}",
+  "{i} of {n}"
+ ],
+ "search.none": [
+  "Sin resultados",
+  "No results"
+ ],
+ "search.older": [
+  "Anterior",
+  "Previous"
+ ],
+ "search.newer": [
+  "Siguiente",
+  "Next"
+ ],
+ "vo.message": [
+  "① Mensaje",
+  "① Message"
+ ],
+ "vo.photo": [
+  "① Foto",
+  "① Photo"
+ ],
+ "vo.voice": [
+  "① Nota de voz",
+  "① Voice note"
+ ],
+ "vo.oneView": [
+  "una vista",
+  "view once"
+ ],
+ "vo.seenBy": [
+  "Visto por {names}",
+  "Seen by {names}"
+ ],
+ "vo.opened": [
+  "Abierto",
+  "Opened"
+ ],
+ "vo.tapToOpen": [
+  "Toca para abrir",
+  "Tap to open"
+ ],
+ "vo.captureHidden": [
+  "Se oculta mientras se graba o comparte la pantalla",
+  "Hidden while the screen is being recorded or shared"
+ ],
+ "vo.screenshot": [
+  "Se tomó una captura de pantalla",
+  "A screenshot was taken"
+ ],
+ "vo.alreadyOpened": [
+  "Ya abriste este mensaje.",
+  "You already opened this message."
+ ],
+ "vo.onlyMedia": [
+  "Una vista sirve para texto, fotos y notas de voz.",
+  "View once works for text, photos and voice notes."
+ ],
+ "vo.toggle": [
+  "Una sola vista",
+  "View once"
+ ],
+ "vo.on": [
+  "Activado",
+  "On"
+ ],
+ "vo.off": [
+  "Desactivado",
+  "Off"
  ]
 }

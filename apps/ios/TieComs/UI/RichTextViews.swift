@@ -11,11 +11,12 @@ enum RichText {
 
     static func mentionColor(_ m: Mention, mine: Bool) -> UIColor {
         if mine { return .white }
+        if m.isRef { return UIColor(Theme.accentText) }
         return UIColor(m.isAll ? Theme.accentText : PersonColor.text(m.userId))
     }
 
     /// Texto de la burbuja: http subrayado con el color de enlace; menciones en negrita y color de su persona (link chaggu-mention://).
-    static func bubble(_ text: String, mentions: [Mention], mine: Bool, linkify: Bool) -> NSAttributedString {
+    static func bubble(_ text: String, mentions: [Mention], mine: Bool, linkify: Bool, highlight: String? = nil) -> NSAttributedString {
         let out = NSMutableAttributedString(string: text, attributes: [.font: baseFont(), .foregroundColor: mine ? UIColor.white : UIColor(Theme.textPrimary)])
         if linkify {
             for (r, url) in Linkify.links(in: text) {
@@ -27,7 +28,20 @@ enum RichText {
             let nr = NSRange(location: m.start, length: m.length)
             out.addAttributes([.font: boldFont(), .foregroundColor: mentionColor(m, mine: mine)], range: nr)
             out.removeAttribute(.underlineStyle, range: nr)
+            if let conv = m.refConversationId {
+                // #grupo: pastilla del acento que abre el chat (o avisa «No tienes acceso»).
+                out.addAttribute(.backgroundColor, value: mine ? UIColor.white.withAlphaComponent(0.22) : UIColor(Theme.accentText).withAlphaComponent(0.12), range: nr)
+                if let u = URL(string: "chaggu-ref://\(conv)") { out.addAttribute(.link, value: u, range: nr) }
+                continue
+            }
             if !m.isAll, let u = URL(string: "chaggu-mention://\(m.userId)") { out.addAttribute(.link, value: u, range: nr) } else { out.removeAttribute(.link, range: nr) }
+        }
+        // Búsqueda en el chat (tanda 1.7 §6): lo que coincide, resaltado (sin mayúsculas ni tildes).
+        if let highlight, highlight.count >= 2 {
+            for r in ChatSearch.ranges(of: highlight, in: text) {
+                out.addAttribute(.backgroundColor, value: UIColor.systemYellow.withAlphaComponent(mine ? 0.55 : 0.45), range: r)
+                if !mine { out.addAttribute(.foregroundColor, value: UIColor.label, range: r) }
+            }
         }
         return out
     }
@@ -51,6 +65,7 @@ struct RichMessageText: UIViewRepresentable {
     let mentions: [Mention]
     let mine: Bool
     let linkify: Bool
+    var highlight: String? = nil
     var onMention: (String) -> Void
     @Environment(\.openURL) private var openURL
 
@@ -71,7 +86,7 @@ struct RichMessageText: UIViewRepresentable {
 
     func updateUIView(_ v: UITextView, context: Context) {
         context.coordinator.parent = self
-        v.attributedText = RichText.bubble(text, mentions: mentions, mine: mine, linkify: linkify)
+        v.attributedText = RichText.bubble(text, mentions: mentions, mine: mine, linkify: linkify, highlight: highlight)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {

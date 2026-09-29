@@ -266,7 +266,7 @@ class ShareUiTest {
         compose.onNodeWithTag("tab-dms").performClick()
         compose.waitUntilAtLeastOneExists(hasTestTag("quick.compose"), 10_000)
         compose.onNodeWithTag("quick.compose").performClick()
-        compose.waitUntilAtLeastOneExists(hasTestTag("compose.multi"), 10_000)
+        compose.waitUntilAtLeastOneExists(hasTestTag("compose.tip"), 10_000)
         assertTrue("Mensaje nuevo: buscador fijo arriba", exists("compose.search"))
         Thread.sleep(400); shot("v4-09-nuevo-chat-persona")
         compose.onNodeWithTag("back").performClick()

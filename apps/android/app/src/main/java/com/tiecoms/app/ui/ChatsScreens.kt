@@ -57,6 +57,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -187,11 +196,13 @@ internal fun PersonPickRow(p: PersonDTO, data: BootstrapDTO, on: Boolean?, tag: 
 
 // ---------- Mensaje nuevo ----------
 /**
- * «Mensaje nuevo» (✏️, docs/GRUPOS.md › Barra de arriba; igual que iOS): tocar a una persona abre el chat de una vez
- * (su directo; si no existe, se crea). Arriba, «Recientes» con quienes hablé hace poco y «Chat con varias personas»,
- * que cambia a selección múltiple (1 → directo, 2+ → chat grupal de una o varias empresas). Al buscar también salen
- * los grupos que coinciden, para entrar sin pasar por su empresa. El buscador va fijo arriba, fuera de la lista.
+ * «Mensaje nuevo» (1.6.10, como WhatsApp/Slack; web: Chats.tsx NewChatDialog). Tocar a una persona (lista o «Recientes»)
+ * la marca y sale como chip en «Para:» (× la quita; borrar con el campo vacío quita la última). Al marcar desde una
+ * búsqueda se limpia el texto para seguir eligiendo. Abajo: con 1, «Abrir chat con X» (su directo); con 2 o más, el nombre
+ * opcional y «Crear chat (n+1)» (POST /chats); sin nadie, Cancelar y «Grupo en un espacio». El 💬 de cada fila (o
+ * mantener presionado) abre el directo al instante; los grupos de la búsqueda se abren al tocar.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun NewChatScreen(onBack: () -> Unit, onOpened: (String) -> Unit) {
     val ctx = LocalContext.current
@@ -200,19 +211,17 @@ fun NewChatScreen(onBack: () -> Unit, onOpened: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val data = client.state.collectAsStateWithLifecycle().value.data ?: return
     var query by rememberSaveable { mutableStateOf("") }
-    var multi by rememberSaveable { mutableStateOf(false) }
     var picked by rememberSaveable { mutableStateOf(listOf<String>()) }
     var name by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var spaceGroup by remember { mutableStateOf(false) }
     val internalFallback = stringResource(R.string.internal_default)
     val convFallback = stringResource(R.string.conversation)
     val title: (com.tiecoms.app.core.ConversationDTO) -> String = { Names.conversationTitle(it, data, internalFallback, convFallback) }
-    fun exitMulti() { multi = false; picked = emptyList(); name = "" }
-    // Atrás en selección múltiple vuelve a «Mensaje nuevo» (no cierra la pantalla).
-    androidx.activity.compose.BackHandler(enabled = multi) { exitMulti() }
-    // Al elegir o pasar a varias personas se baja el teclado: la lista queda a la vista (iOS lo baja al desplazar).
-    val focus = androidx.compose.ui.platform.LocalFocusManager.current
-    fun toggle(id: String) { focus.clearFocus(); picked = if (id in picked) picked - id else picked + id }
+    fun toggle(id: String) {
+        picked = com.tiecoms.app.core.NewChat.toggle(picked, id)
+        if (query.isNotBlank()) query = com.tiecoms.app.core.NewChat.queryAfterToggle(query)
+    }
     /** Abre la conversación en el hilo principal (la respuesta puede volver en el hilo del cliente). */
     fun launchOpen(block: suspend () -> String) {
         if (busy) return
@@ -223,53 +232,41 @@ fun NewChatScreen(onBack: () -> Unit, onOpened: (String) -> Unit) {
             catch (e: Exception) { container.toast(errorText(ctx, e)) } finally { busy = false }
         }
     }
-    /** Un toque: el directo con esa persona (el que ya existe o uno nuevo). */
+    /** El 💬 o mantener presionado: el directo con esa persona (el que ya existe o uno nuevo). */
     fun open(p: PersonDTO) = launchOpen { openDirect(client, data, p.id) }
 
     val searching = query.isNotBlank()
     val orgs = remember(data, query) { Names.peopleByOrg(data, query) }
-    val groups = remember(data, query, multi) { if (multi) emptyList() else QuickSearch.groups(data, query, title) }
+    val groups = remember(data, query, picked.isEmpty()) { if (com.tiecoms.app.core.NewChat.showGroups(picked, query)) QuickSearch.groups(data, query, title) else emptyList() }
     val recents = remember(data) { QuickSearch.recentPeopleIds(data).take(8).mapNotNull { Names.person(data, it) } }
-    SimpleScaffold(title = stringResource(if (multi) R.string.compose_multi else R.string.dm_new), onBack = { if (multi) exitMulti() else onBack() }) {
-        SearchField(query, placeholder = stringResource(R.string.compose_search), tag = "compose.search") { query = it }
+    SimpleScaffold(title = stringResource(R.string.dm_new), onBack = onBack) {
+        ToField(data, picked, query, onQuery = { query = it }, onRemove = { toggle(it) },
+            onBackspaceEmpty = { picked = com.tiecoms.app.core.NewChat.backspace(picked, query) })
         Box(Modifier.fillMaxWidth().weight(1f)) {
             LazyColumn(Modifier.fillMaxSize().testTag("peopleList")) {
-                if (multi) {
-                    item(key = "multiHint") {
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(stringResource(R.string.compose_multi_hint), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (picked.isNotEmpty()) PickedChips(data, picked) { toggle(it) }
-                            if (picked.size > 1) OutlinedTextField(name, { name = it.take(120) }, placeholder = { Text(stringResource(R.string.chat_group_name_ph)) }, singleLine = true,
-                                modifier = Modifier.fillMaxWidth().testTag("newChat.name"))
-                        }
-                    }
-                } else if (!searching) {
-                    item(key = "multi") {
-                        Row(Modifier.fillMaxWidth().clickable { focus.clearFocus(); multi = true }.heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 6.dp).testTag("compose.multi"),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.primary, CircleShape), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Filled.Groups, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onPrimary)
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Text(stringResource(R.string.compose_multi), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    if (recents.isNotEmpty()) item(key = "recents") {
-                        Column {
-                            QuickHeader(R.string.compose_recent)
-                            val opens = stringResource(R.string.search_opens_chat)
-                            LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("compose.recents")) {
-                                items(recents, key = { it.id }) { p ->
-                                    Column(
-                                        Modifier.width(68.dp).clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = opens) { open(p) }.padding(vertical = 6.dp)
-                                            .semantics(mergeDescendants = true) { contentDescription = p.name }.testTag("compose.recent.${p.id}"),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                    ) {
+                if (picked.isEmpty() && !searching) item(key = "tip") {
+                    Text(stringResource(R.string.compose_tip), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp).testTag("compose.tip"))
+                }
+                if (!searching && recents.isNotEmpty()) item(key = "recents") {
+                    Column {
+                        QuickHeader(R.string.compose_recent)
+                        LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("compose.recents")) {
+                            items(recents, key = { it.id }) { p ->
+                                val on = p.id in picked
+                                Column(
+                                    Modifier.width(68.dp).clip(RoundedCornerShape(12.dp))
+                                        .combinedClickable(onClick = { toggle(p.id) }, onLongClick = { open(p) })
+                                        .padding(vertical = 6.dp)
+                                        .semantics(mergeDescendants = true) { contentDescription = p.name; selected = on }.testTag("compose.recent.${p.id}"),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    Box {
                                         PersonAvatar(p, data, size = 52.dp, orgBadge = true)
-                                        Spacer(Modifier.heightIn(min = 4.dp))
-                                        Text(p.name.substringBefore(' '), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (on) SelectCircle(true, Modifier.align(Alignment.BottomEnd).offset(x = 2.dp, y = 2.dp))
                                     }
+                                    Spacer(Modifier.heightIn(min = 4.dp))
+                                    Text(p.name.substringBefore(' '), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                             }
                         }
@@ -284,22 +281,109 @@ fun NewChatScreen(onBack: () -> Unit, onOpened: (String) -> Unit) {
                 if (orgs.isEmpty() && groups.isEmpty()) item(key = "none") { EmptyNote(stringResource(R.string.chat_nobody)) }
                 orgs.forEach { g ->
                     item(key = "g:" + g.key) { OrgHeader(g) }
-                    items(g.people, key = { "p:" + it.id }) { p ->
-                        PersonPickRow(p, data, on = if (multi) p.id in picked else null, tag = "picker.person.${p.id}") { if (multi) toggle(p.id) else open(p) }
-                    }
+                    items(g.people, key = { "p:" + it.id }) { p -> ComposePersonRow(p, data, p.id in picked, onToggle = { toggle(p.id) }, onOpen = { open(p) }) }
                 }
                 item(key = "end") { Spacer(Modifier.heightIn(min = 24.dp)) }
             }
-            if (busy && !multi) androidx.compose.material3.CircularProgressIndicator(Modifier.align(Alignment.Center).testTag("compose.busy"))
+            if (busy) androidx.compose.material3.CircularProgressIndicator(Modifier.align(Alignment.Center).testTag("compose.busy"))
         }
-        if (multi) Button(
-            enabled = picked.isNotEmpty() && !busy,
-            onClick = {
-                val ids = picked; val chatName = name
-                launchOpen { if (ids.size == 1) openDirect(client, data, ids[0]) else client.createChat(ids, chatName).id }
-            },
-            modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(16.dp).heightIn(min = 52.dp).testTag("newChat.create"),
-        ) { Text(if (picked.size > 1) stringResource(R.string.chat_create_group, picked.size + 1) else stringResource(R.string.chat_open_direct), fontWeight = FontWeight.SemiBold) }
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            when (com.tiecoms.app.core.NewChat.action(picked)) {
+                com.tiecoms.app.core.NewChat.Action.NONE -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    androidx.compose.material3.OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("newChat.cancel")) { Text(stringResource(R.string.cancel)) }
+                    androidx.compose.material3.OutlinedButton(onClick = { spaceGroup = true }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("newChat.space")) {
+                        Text(stringResource(R.string.chat_mode_space), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                com.tiecoms.app.core.NewChat.Action.DIRECT -> {
+                    val first = Names.person(data, picked[0])?.name?.substringBefore(' ') ?: ""
+                    Button(enabled = !busy, onClick = { val id = picked[0]; launchOpen { openDirect(client, data, id) } },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("newChat.create")) {
+                        Text(stringResource(R.string.chat_open_with, first), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                com.tiecoms.app.core.NewChat.Action.GROUP -> {
+                    OutlinedTextField(name, { name = it.take(120) }, placeholder = { Text(stringResource(R.string.chat_group_name_ph)) }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("newChat.name"))
+                    Button(enabled = !busy, onClick = {
+                        val ids = picked; val chatName = com.tiecoms.app.core.NewChat.chatName(name)
+                        launchOpen { client.createChat(ids, chatName).id }
+                    }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("newChat.create")) {
+                        Text(stringResource(R.string.chat_create_n, com.tiecoms.app.core.NewChat.memberCount(picked)), fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+    }
+    if (spaceGroup) NewGroupSheet(NewGroupPreset(company = true), onClose = { spaceGroup = false }, onCreated = { r, _ -> spaceGroup = false; onOpened(r.conversationId) })
+}
+
+/** «Para:» con los chips elegidos (× quita) y el campo de búsqueda; borrar con el campo vacío quita el último. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ToField(data: BootstrapDTO, picked: List<String>, query: String, onQuery: (String) -> Unit, onRemove: (String) -> Unit, onBackspaceEmpty: () -> Unit) {
+    val remove = stringResource(R.string.common_remove)
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).testTag("compose.to")) {
+        androidx.compose.foundation.layout.FlowRow(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(R.string.compose_to), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.CenterVertically))
+            picked.forEach { id ->
+                val p = Names.person(data, id)
+                InputChip(selected = true, onClick = { onRemove(id) }, label = { Text(p?.name?.substringBefore(' ') ?: "?") },
+                    avatar = { PersonAvatar(p, data, size = 22.dp) }, trailingIcon = { Icon(Icons.Filled.Close, remove, Modifier.size(16.dp)) },
+                    modifier = Modifier.testTag("picker.chip.$id"))
+            }
+            androidx.compose.foundation.text.BasicTextField(query, onQuery, singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                modifier = Modifier.widthIn(min = 120.dp).weight(1f).align(Alignment.CenterVertically).heightIn(min = 36.dp)
+                    .onPreviewKeyEvent { e ->
+                        if (e.key == androidx.compose.ui.input.key.Key.Backspace && e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown && query.isEmpty() && picked.isNotEmpty()) { onBackspaceEmpty(); true } else false
+                    }.testTag("compose.search"),
+                decorationBox = { inner ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (query.isEmpty()) Text(stringResource(if (picked.isEmpty()) R.string.compose_search else R.string.compose_add_more),
+                            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        inner()
+                    }
+                })
+        }
+    }
+}
+
+/** Persona en «Mensaje nuevo»: círculo de selección, foto y nombre (tocar marca), y 💬 que abre su directo al instante. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun ComposePersonRow(p: PersonDTO, data: BootstrapDTO, on: Boolean, onToggle: () -> Unit, onOpen: () -> Unit) {
+    val org = Names.org(data, p.orgId)
+    val line = Names.roleLine(p).ifEmpty { if (p.guest) stringResource(R.string.common_guest) else org?.name ?: "" }
+    val openCd = stringResource(R.string.compose_open_direct, p.name)
+    Row(
+        Modifier.fillMaxWidth().combinedClickable(onClick = onToggle, onLongClick = onOpen, onLongClickLabel = openCd, role = Role.Checkbox)
+            .semantics { selected = on }.heightIn(min = 60.dp).padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp).testTag("picker.person.${p.id}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SelectCircle(on)
+        Spacer(Modifier.width(10.dp))
+        PersonAvatar(p, data, size = 40.dp, orgBadge = true)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(p.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        androidx.compose.material3.IconButton(onClick = onOpen, modifier = Modifier.testTag("picker.open.${p.id}")) { Text("💬", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = openCd }) }
+    }
+}
+
+/** Círculo de selección: vacío con borde, o relleno del acento con ✓. */
+@Composable
+private fun SelectCircle(on: Boolean, modifier: Modifier = Modifier) {
+    val cs = MaterialTheme.colorScheme
+    Box(modifier.size(22.dp).clip(CircleShape).background(if (on) cs.primary else Color.Transparent)
+        .then(if (on) Modifier.border(2.dp, cs.surface, CircleShape) else Modifier.border(2.dp, cs.outline, CircleShape)), contentAlignment = Alignment.Center) {
+        if (on) Icon(Icons.Filled.Check, null, Modifier.size(15.dp), tint = cs.onPrimary)
     }
 }
 

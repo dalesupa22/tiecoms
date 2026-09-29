@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- «Mensaje nuevo» 1.6.10: elegir una o varias personas directamente (como WhatsApp/Slack). -->
+<resources>
+    <string name="compose_tip">Toca una o varias personas. El 💬 abre su chat directo.</string>
+    <string name="compose_to">Para:</string>
+    <string name="compose_add_more">Agregar más…</string>
+    <string name="chat_open_with">Abrir chat con %1$s</string>
+    <string name="chat_create_n">Crear chat (%1$d)</string>
+    <string name="compose_open_direct">Abrir chat directo con %1$s</string>
+</resources>

@@ -197,6 +197,8 @@ struct ConversationView: View {
             let id = conversationId
             Task { try? await store.loadTopics(id) }
             Task { _ = try? await store.loadIssues(conversationId: id) }
+            // Llamada en curso (franja «Unirse»); después llega en vivo con call.updated.
+            if store.data?.callsEnabled == true, !embedded { Task { await store.loadCall(id) } }
             try? await store.openConversation(conversationId)
             // Sugerencias de la hoja de compartir: abrir una conversación también cuenta (como mucho una vez por hora).
             Donations.donate(store, conversationId: conversationId, minInterval: 3600)

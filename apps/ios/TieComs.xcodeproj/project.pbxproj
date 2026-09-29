@@ -120,6 +120,7 @@
 		916991654E1A3974F65F06CE /* ChatNav.swift in Sources */ = {isa = PBXBuildFile; fileRef = A533581A82A3D8834C30DBED /* ChatNav.swift */; };
 		91C244FFC2747DB60736CE3C /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7B7D04AEB3A584685873097 /* Theme.swift */; };
 		92B838B4EDD1F56EA574710C /* AssistantUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE4840348E1744F41C5D7E32 /* AssistantUITests.swift */; };
+		9316FC12EAB042C8BC0561FF /* LlamadasUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F473836045F17BB1F0EB203 /* LlamadasUITests.swift */; };
 		94314AB98FC3D69091F7856E /* UpdateUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 637AC517AB3F0783C71B2F77 /* UpdateUITests.swift */; };
 		946150438681EBBE8EBA8E48 /* SignTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 807D4F6583A0E19D1793BBE2 /* SignTests.swift */; };
 		9723C3D12BFBB6BC6BF3F6F5 /* MeetingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4531FCBB80CCAB8CACFCE4E /* MeetingTests.swift */; };
@@ -337,6 +338,7 @@
 		8A1E930E8CE6C195EE296120 /* SidechatUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidechatUITests.swift; sourceTree = "<group>"; };
 		8CAC11B8FB41588155418642 /* V6MentionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V6MentionTests.swift; sourceTree = "<group>"; };
 		8D00FFEF737CC563C49DFBB2 /* TieComsShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TieComsShare.entitlements; sourceTree = "<group>"; };
+		8F473836045F17BB1F0EB203 /* LlamadasUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamadasUITests.swift; sourceTree = "<group>"; };
 		91B0C07E6212B358778CA533 /* EventChatCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventChatCard.swift; sourceTree = "<group>"; };
 		923D2E3C2F53E9B60B7EAF56 /* IssuesViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssuesViews.swift; sourceTree = "<group>"; };
 		92E328380AAD4AD20697FDC7 /* IssueTasks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueTasks.swift; sourceTree = "<group>"; };
@@ -434,6 +436,7 @@
 				5B97CA8A60F4AA2EDD7059F7 /* GroupsUITests.swift */,
 				A4B7D9519A4BAD02FAF7B7D2 /* InviteUITests.swift */,
 				A77B2FAE28CB7CE545D42DA1 /* KeyboardUITests.swift */,
+				8F473836045F17BB1F0EB203 /* LlamadasUITests.swift */,
 				0952105F81FFF3E626279A80 /* ShareUITests.swift */,
 				8A1E930E8CE6C195EE296120 /* SidechatUITests.swift */,
 				3D248B9E2FAA3250DD6B020C /* SignUITests.swift */,
@@ -1014,6 +1017,7 @@
 				079EDD034AA3C8F4A679028B /* GroupsUITests.swift in Sources */,
 				756DEB775B5CA040E27968CB /* InviteUITests.swift in Sources */,
 				694D75BB708C435FACB2B7AA /* KeyboardUITests.swift in Sources */,
+				9316FC12EAB042C8BC0561FF /* LlamadasUITests.swift in Sources */,
 				16CDD74C6B7E738BE578E52D /* ShareUITests.swift in Sources */,
 				82DE85395C5D1215D2EA8616 /* SidechatUITests.swift in Sources */,
 				AE2921B315E0793666CBBFCE /* SignUITests.swift in Sources */,

@@ -67,9 +67,6 @@ struct CallBanner: View {
                 .accessibilityIdentifier("call.banner")
             }
         }
-        .task(id: conversationId) {
-            if store.data?.callsEnabled == true, !store.callsChecked.contains(conversationId) { await store.loadCall(conversationId) }
-        }
     }
 }
 

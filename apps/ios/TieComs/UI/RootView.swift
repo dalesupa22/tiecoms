@@ -113,10 +113,8 @@ struct MainView: View {
     var body: some View {
         @Bindable var store = store
         let d = store.data
-        Group {
-            // Con llamadas son 6 pestañas: el TabView del sistema pondría «Más» en iPhone, así que va una barra propia.
-            if d?.callsEnabled == true { sixTabs(d) } else { fiveTabs(d) }
-        }
+        // Barra propia (con llamadas son 6 pestañas y el TabView del sistema pondría «Más» en iPhone): solo íconos, salvo «DMs».
+        tabShell(d, tabs: AppTab.allCases.filter { $0 != .calls || d?.callsEnabled == true })
         // Cada minuto: la ventana de «No molestar todas las noches» (lunita y avisos) entra y sale sola.
         .task {
             while !Task.isCancelled {
@@ -207,37 +205,10 @@ extension MainView {
         }
     }
 
-    /// Sin llamadas: las 5 pestañas del sistema (como hasta 1.6.7).
-    fileprivate func fiveTabs(_ d: BootstrapDTO?) -> some View {
-        @Bindable var store = store
-        return TabView(selection: $store.tab) {
-            stack(.home)
-                .tabItem { Label(L("tab.groups"), systemImage: "person.3") }
-                .tag(AppTab.home)
-                .badge(badge(.home, d))
-                .accessibilityIdentifier("tab.home")
-            stack(.dms)
-                .tabItem { Label(L("tab.dms"), systemImage: "bubble.left.and.bubble.right") }
-                .tag(AppTab.dms)
-                .badge(badge(.dms, d))
-            stack(.issues)
-                .tabItem { Label(L("tab.issues"), systemImage: "checklist") }
-                .tag(AppTab.issues)
-                .badge(badge(.issues, d))
-            stack(.agenda)
-                .tabItem { Label(L("tab.calendar"), systemImage: "calendar") }
-                .tag(AppTab.agenda)
-            stack(.settings)
-                .tabItem { Label { Text(L("tab.you")) } icon: { Image(uiImage: youIcon(d)) } }
-                .tag(AppTab.settings)
-        }
-    }
-
-    /// Con llamadas: 6 pestañas (Grupos · DMs · Tareas · Calendario · Llamadas · Tú) con una UITabBar propia, que no agrupa en «Más».
     /// Cada pila se crea al visitarla y se conserva; la barra se esconde con el teclado (como la del sistema, que queda debajo).
-    fileprivate func sixTabs(_ d: BootstrapDTO?) -> some View {
+    fileprivate func tabShell(_ d: BootstrapDTO?, tabs: [AppTab]) -> some View {
         ZStack {
-            ForEach(AppTab.allCases, id: \.self) { t in
+            ForEach(tabs, id: \.self) { t in
                 if visited.contains(t) || store.tab == t {
                     stack(t)
                         .opacity(store.tab == t ? 1 : 0)
@@ -249,8 +220,9 @@ extension MainView {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !keyboardVisible {
-                AppTabBar(items: AppTab.allCases.map { t in
-                    AppTabBar.Item(tab: t, title: TabInfo.title(t), image: t == .settings ? youIcon(d) : UIImage(systemName: TabInfo.symbol(t)),
+                AppTabBar(items: tabs.map { t in
+                    AppTabBar.Item(tab: t, label: TabInfo.title(t),
+                                   image: t == .settings ? youIcon(d) : AppTabBar.symbol(TabInfo.symbol(t)),
                                    badge: badge(t, d), identifier: "tab.\(TabInfo.id(t))")
                 }, selected: store.tab) { t in
                     if store.tab == t { store.popToRoot(t) } else { store.tab = t }
@@ -260,6 +232,7 @@ extension MainView {
             }
         }
         .onChange(of: store.tab, initial: true) { _, t in visited.insert(t) }
+        .onChange(of: d?.callsEnabled) { _, on in if on != true, store.tab == .calls { store.tab = .home } }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
     }
@@ -367,14 +340,14 @@ enum TabInfo {
         case .home: return L("tab.groups")
         case .dms: return L("tab.dms")
         case .issues: return L("tab.issues")
-        case .agenda: return L("tab.calendar")
+        case .agenda: return L("bar.agenda")
         case .calls: return L("tab.calls")
         case .settings: return L("tab.you")
         }
     }
     static func symbol(_ t: AppTab) -> String {
         switch t {
-        case .home: return "person.3"
+        case .home: return "person.2"
         case .dms: return "bubble.left.and.bubble.right"
         case .issues: return "checklist"
         case .agenda: return "calendar"
@@ -394,11 +367,13 @@ enum TabInfo {
     }
 }
 
-/// UITabBar suelta (sin UITabBarController): muestra las 6 pestañas sin «Más» y las pruebas la siguen viendo como `tabBars`.
+/// Barra inferior: UITabBar suelta (sin UITabBarController, así no agrupa en «Más» con 6 pestañas), solo íconos de línea de
+/// ~22 pt (como TAB_ICONS de la web, Shell.tsx) y el avatar para «Tú». Cada ícono lleva el nombre completo para VoiceOver
+/// y las pruebas la siguen viendo como `tabBars`.
 struct AppTabBar: UIViewRepresentable {
-    struct Item: Equatable {
+    struct Item {
         var tab: AppTab
-        var title: String
+        var label: String
         var image: UIImage?
         var badge: Int
         var identifier: String
@@ -409,7 +384,7 @@ struct AppTabBar: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITabBarDelegate {
         var parent: AppTabBar
-        var titles: [String] = []
+        var tabs: [AppTab] = []
         init(_ p: AppTabBar) { parent = p }
         func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {
             guard item.tag >= 0, item.tag < parent.items.count else { return }
@@ -429,17 +404,32 @@ struct AppTabBar: UIViewRepresentable {
 
     func updateUIView(_ bar: UITabBar, context: Context) {
         context.coordinator.parent = self
-        let titles = items.map(\.title)
-        if context.coordinator.titles != titles || bar.items?.count != items.count {
-            bar.items = items.enumerated().map { i, it in UITabBarItem(title: it.title, image: it.image, tag: i) }
-            context.coordinator.titles = titles
+        let tabs = items.map(\.tab)
+        if context.coordinator.tabs != tabs || bar.items?.count != items.count {
+            bar.items = items.enumerated().map { i, it in
+                let ui = UITabBarItem(title: nil, image: it.image, tag: i)
+                return ui
+            }
+            context.coordinator.tabs = tabs
         }
         for (i, it) in items.enumerated() {
             guard let ui = bar.items?[i] else { continue }
-            if it.tab == .settings { ui.image = it.image?.withRenderingMode(.alwaysOriginal); ui.selectedImage = ui.image }
-            ui.badgeValue = it.badge > 0 ? "\(it.badge)" : nil
+            if it.tab == .settings {
+                ui.image = it.image?.withRenderingMode(.alwaysOriginal); ui.selectedImage = ui.image
+            } else if ui.image == nil {
+                ui.image = it.image
+            }
+            ui.title = nil
+            ui.badgeValue = it.badge > 0 ? (it.badge > 99 ? "99+" : "\(it.badge)") : nil
+            ui.accessibilityLabel = it.label
             ui.accessibilityIdentifier = it.identifier
+            ui.largeContentSizeImage = it.image
         }
         if let i = items.firstIndex(where: { $0.tab == selected }), bar.selectedItem !== bar.items?[i] { bar.selectedItem = bar.items?[i] }
+    }
+
+    /// Ícono de línea de la barra (~22 pt).
+    static func symbol(_ name: String) -> UIImage? {
+        UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 21, weight: .regular))
     }
 }

@@ -79,7 +79,8 @@ export async function reply(messageId: string) {
     const out = await respond(asker.id, history, { tz: asker.sleep_tz ?? 'America/Bogota', lang: 'es', scope: inDm ? null : conv.id, scopeName, askedBy: asker.name });
     await tx(async (c) => {
       await post(c, conv.id, out.reply, replyTo);
-      if (out.actions.length || out.suggestions?.length) {
+      // En los grupos, las respuestas rápidas no se publican (las ve todo el chat y las apps anteriores no las pintan).
+      if (out.actions.length || (inDm && out.suggestions?.length)) {
         await appendMessage(c, { conversationId: conv.id, authorId: GG_ID, kind: 'system', body: sys('gg.actions', { forUserId: asker.id, actions: out.actions, suggestions: out.suggestions ?? [] }) });
       }
     });

@@ -36,6 +36,8 @@ let beat: ReturnType<typeof setInterval> | null = null;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let outbox: CallTranscriptSegmentInput[] = [];
 let leaving = false;
+/** Último error al conectar (para mostrarlo). */
+export let lastError: string | null = null;
 
 // Estado de la llamada que llega por el socket (quién está, si transcribe) sin tocar la conexión.
 client.subscribe(() => {
@@ -45,9 +47,26 @@ client.subscribe(() => {
   if (c === null && view.phase !== 'ended') void teardown();
 });
 
+/**
+ * Pide micrófono (y cámara) antes de tocar el API: si el navegador no deja, no se crea una llamada vacía
+ * que deje «Empezó / Terminó 0:00» en el chat ni hace sonar a los demás.
+ */
+async function askDevices(camera: boolean) {
+  if (!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error(''), { code: 'mic_denied' });
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: camera });
+    s.getTracks().forEach((x) => x.stop());
+  } catch (e: any) {
+    if (camera) return askDevices(false); // sin cámara se entra solo con voz
+    lastError = e?.message ?? 'mic_denied';
+    throw Object.assign(new Error(''), { code: 'mic_denied' });
+  }
+}
+
 /** Llama o entra a la llamada en curso de la conversación. */
 export async function startCall(conversationId: string, kind: CallKind) {
   if (view && view.call.conversationId === conversationId && view.phase !== 'ended') return;
+  await askDevices(kind === 'video');
   if (view) await hangUp();
   await connect(await client.startCall(conversationId, kind), kind === 'video');
 }
@@ -55,6 +74,7 @@ export async function startCall(conversationId: string, kind: CallKind) {
 /** Entrar desde el aviso «te están llamando». */
 export async function joinCall(callId: string, camera: boolean) {
   if (view?.call.id === callId && view.phase !== 'ended') return;
+  await askDevices(camera);
   if (view) await hangUp();
   await connect(await client.joinCall(callId), camera);
 }
@@ -64,6 +84,8 @@ async function connect(j: CallJoinDTO, camera: boolean) {
   view = { call: j.call, phase: 'connecting', muted: false, camera, tiles: [], captions: [], speaking: [], error: null };
   emit();
   try {
+    // El SDK de Chime usa `global` (de Node); en el navegador es globalThis. Sin esto falla al cargar.
+    (globalThis as any).global ??= globalThis;
     const sdk = await import('amazon-chime-sdk-js');
     const logger = new sdk.ConsoleLogger('chime', sdk.LogLevel.WARN);
     const devices = new sdk.DefaultDeviceController(logger, { enableWebAudio: false });
@@ -97,8 +119,11 @@ async function connect(j: CallJoinDTO, camera: boolean) {
     beat = setInterval(() => { if (view) client.callHeartbeat(view.call.id).catch((err) => { if (err?.code === 'not_in_call') void teardown(); }); }, 30_000);
     addEventListener('pagehide', onPageHide);
   } catch (e: any) {
-    patch({ error: e?.message ?? String(e) });
+    console.error('[call] no se pudo conectar', e);
+    lastError = e?.name === 'NotAllowedError' || e?.name === 'PermissionDeniedError' ? 'mic_denied' : (e?.message ?? String(e));
     await hangUp();
+    // Sin mensaje propio: errorText muestra el texto traducido del código.
+    throw Object.assign(new Error(''), { code: lastError === 'mic_denied' ? 'mic_denied' : 'call_connect_failed' });
   }
 }
 

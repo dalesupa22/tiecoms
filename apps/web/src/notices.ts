@@ -10,6 +10,7 @@ import { activeUntil, mayAlert, shouldSound } from './silence.ts';
 import { playMessageSound, soundEnabled } from './sound.ts';
 import { dismissIncomingCall, showIncomingCall } from './screens/Call.tsx';
 import { onCallTranscriptEvent } from './call.ts';
+import { showMessageBubble } from './bubbles.tsx';
 
 /** En el chat abierto, ¿la vista está arriba, lejos del final (más de una pantalla)? */
 function farFromEnd(conversationId: string) {
@@ -61,6 +62,15 @@ export function handleNotice(n: ClientNotice) {
         ? new Notification(group, { body: `${who}: ${body}`, tag: n.conversationId, icon: `${BASE}/icon-192.png` })
         : new Notification(`${who} · ${conv ? conversationTitle(d, conv) : 'chaggu'}`, { body, tag: n.conversationId, icon: `${BASE}/icon-192.png` });
       note.onclick = () => { window.focus(); navigate(`/c/${n.conversationId}?m=${n.message.seq}`); note.close(); };
+    } else if (!hidden && !current) {
+      // Pestaña a la vista pero en otra pantalla: burbuja con quién, dónde y el mensaje; un clic abre el chat.
+      const group = conv ? groupNoticeTitle(d, conv) : null;
+      const person = personById(d, n.message.authorId) ?? null;
+      showMessageBubble({
+        conversationId: n.conversationId, seq: n.message.seq, person, mentioned: !!n.mentioned, body,
+        title: n.mentioned ? t('mention.mentionedYou', { name: who }) : who,
+        place: group ?? (conv && conv.kind !== 'direct' ? conversationTitle(d, conv) : null),
+      });
     }
     return;
   }

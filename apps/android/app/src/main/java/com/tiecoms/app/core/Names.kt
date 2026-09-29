@@ -69,6 +69,17 @@ object Names {
         return (p.pendingName ?: org(data, p.orgId)?.name)?.trim()?.takeIf { it.isNotEmpty() }
     }
 
+    /** 1.7.1: empresa de la otra persona en un directo 1:1 (línea pequeña bajo su nombre); null si no se sabe. */
+    fun directCompany(c: ConversationDTO, data: BootstrapDTO?): String? =
+        if (c.kind != "direct") null else org(data, otherInDirect(c, data)?.orgId)?.name?.trim()?.takeIf { it.isNotEmpty() }
+
+    /** Línea de empresa bajo el título de una fila (búsqueda, encabezado): grupo → su empresa sin repetir; 1:1 → la de la persona. */
+    fun rowCompany(c: ConversationDTO, data: BootstrapDTO?, internalFallback: String, directFallback: String): String? = when {
+        c.kind == "direct" -> directCompany(c, data)
+        c.isChat || c.isSide -> null
+        else -> GroupsTree.companyLine(companyOf(c, data), conversationTitle(c, data, internalFallback, directFallback))
+    }
+
     /** Chat grupal sin nombre: primeros nombres de los demás («Mateo, Ana, Laura y 2 más»). */
     fun multiTitle(c: ConversationDTO, data: BootstrapDTO?, labels: Labels = this.labels): String {
         val names = others(c, data).mapNotNull { p -> p.name.trim().split(Regex("\\s+")).firstOrNull()?.takeIf { it.isNotEmpty() } }

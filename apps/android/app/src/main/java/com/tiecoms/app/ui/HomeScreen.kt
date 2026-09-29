@@ -276,7 +276,7 @@ fun GroupsScreen(
                                     issuesFold = if (row.pinnedSection || row.issueCount <= 0) null
                                         else IssuesFold(row.issueCount, row.overdueCount, row.issuesExpanded) { toggleIssues(row) },
                                     pinMark = view == GroupsTree.View.LIST && row.c.pinnedAt != null,
-                                    titleOverride = row.label, threadUnread = row.threadUnread, threadMentions = tree[row.c.id]?.threadMentions ?: 0,
+                                    titleOverride = row.label, companyLine = row.company, threadUnread = row.threadUnread, threadMentions = tree[row.c.id]?.threadMentions ?: 0,
                                     tagLine = if (row.c.kind == "internal") stringResource(R.string.grp_internal_only, Names.org(data, row.c.internalOrgId ?: ws?.owningOrgId)?.name ?: "") else null,
                                     menuOpen = menuKey == row.key,
                                     menuItems = {
@@ -471,6 +471,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                         val origin = GroupsTree.sideOrigin(data, c)
                         Box(Modifier.animateItem()) {
                             ConversationRow(c, data, internalFallback, convFallback, indent = 16.dp, iconSize = 44.dp, showIssuesChip = true,
+                                companyLine = if (c.kind == "direct") Names.directCompany(c, data) else null,
                                 badge = if (c.isSide) sidechat else null, threadUnread = threadTree[c.id]?.threads ?: 0, threadMentions = threadTree[c.id]?.threadMentions ?: 0,
                                 tagLine = origin?.let { stringResource(R.string.dm_from, Names.conversationTitle(it, data, internalFallback, convFallback)) },
                                 menuOpen = menuFor == c.id,
@@ -739,6 +740,8 @@ internal fun ConversationRow(
     tagLine: String? = null,
     /** «{espacio} · {grupo}» cuando dos grupos de la empresa se llaman igual. */
     titleOverride: String? = null,
+    /** 1.7.1: empresa en una línea pequeña y gris bajo el nombre del grupo o de la persona. */
+    companyLine: String? = null,
     /** No leídos de sus hilos y ramas: chip «⑂ N» (los hilos no se listan en el árbol). */
     threadUnread: Int = 0,
     /** Menciones sin leer en sus hilos y ramas: también encienden la «@» de la fila. */
@@ -769,7 +772,7 @@ internal fun ConversationRow(
     val muted = c.mutedAt(System.currentTimeMillis())
     val mutedCd = stringResource(R.string.side_muted)
     val treeText = if (threadUnread > 0) pluralStringResource(R.plurals.tree_chip_cd, threadUnread, threadUnread) else null
-    val a11y = listOfNotNull(title, badge, tagLine, if (c.kind == "internal") internalCd else null, if (muted) mutedCd else null, preview, time, unreadText, treeText).joinToString(". ")
+    val a11y = listOfNotNull(title, companyLine, badge, tagLine, if (c.kind == "internal") internalCd else null, if (muted) mutedCd else null, preview, time, unreadText, treeText).joinToString(". ")
     val big = iconSize >= 40.dp
     Box {
         Row(
@@ -791,8 +794,9 @@ internal fun ConversationRow(
                     )
                     if (badge != null) {
                         Spacer(Modifier.width(6.dp))
-                        Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(8.dp)) {
-                            Text(badge, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.SemiBold,
+                        val side = com.tiecoms.app.ui.theme.LocalSideColors.current
+                        Surface(color = side.bg, shape = RoundedCornerShape(8.dp)) {
+                            Text(badge, style = MaterialTheme.typography.labelSmall, color = side.fg, fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp).testTag("sideBadge-${c.id}"))
                         }
                     }
@@ -808,6 +812,8 @@ internal fun ConversationRow(
                         }
                     }
                 }
+                if (companyLine != null) Text(companyLine, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("company-${c.id}"))
                 if (tagLine != null) Text(tagLine, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(preview, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -842,7 +848,7 @@ fun ConversationIcon(c: ConversationDTO, data: BootstrapDTO, size: androidx.comp
     when {
         c.avatarUrl != null -> Avatar(Names.conversationTitle(c, data, "", ""), MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant, size = size, square = c.kind != "multi", photo = c.avatarUrl)
         c.kind == "direct" -> PersonAvatar(Names.otherInDirect(c, data), data, size)
-        c.isSide -> GlyphBox("💬", size)
+        c.isSide -> com.tiecoms.app.ui.theme.LocalSideColors.current.let { GlyphBox("💬", size, it.bg, it.fg) }
         c.kind == "multi" -> StackedAvatars(c, data, size)
         c.parentId != null -> GlyphBox("⑂", size)
         c.kind == "internal" -> Box(Modifier.size(size).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
@@ -854,9 +860,9 @@ fun ConversationIcon(c: ConversationDTO, data: BootstrapDTO, size: androidx.comp
 }
 
 @Composable
-internal fun GlyphBox(g: String, size: androidx.compose.ui.unit.Dp) {
-    Box(Modifier.size(size).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp)).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
-        Text(g, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = with(androidx.compose.ui.platform.LocalDensity.current) { (size * 0.5f).toSp() })
+internal fun GlyphBox(g: String, size: androidx.compose.ui.unit.Dp, bg: Color = MaterialTheme.colorScheme.primaryContainer, fg: Color = MaterialTheme.colorScheme.primary) {
+    Box(Modifier.size(size).background(bg, RoundedCornerShape(8.dp)).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
+        Text(g, color = fg, fontWeight = FontWeight.Bold, fontSize = with(androidx.compose.ui.platform.LocalDensity.current) { (size * 0.5f).toSp() })
     }
 }
 

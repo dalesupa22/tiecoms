@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.7.1: mensajes largos, deslizar para responder e imágenes pegadas. -->
+<resources>
+    <string name="msg_see_more">Ver más</string>
+    <string name="msg_see_less">Ver menos</string>
+    <string name="swipe_reply_cd">Responder</string>
+    <string name="paste_image_failed">No se pudo adjuntar la imagen pegada</string>
+</resources>

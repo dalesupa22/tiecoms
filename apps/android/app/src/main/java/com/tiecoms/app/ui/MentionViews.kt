@@ -118,9 +118,13 @@ fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: Bo
                 /** En listas (bandeja) el toque es de la fila: sin enlaces propios. */
                 interactive: Boolean = true,
                 /** Búsqueda en el chat (tanda 1.7): se resalta lo que coincide, sin mayúsculas ni tildes. */
-                highlight: String? = null) {
+                highlight: String? = null,
+                /** Mensaje muy largo plegado (1.7.1, «Ver más»). */
+                maxLines: Int = Int.MAX_VALUE,
+                /** Con [maxLines]: avisa si el texto quedó cortado (para mostrar «Ver más»). */
+                onOverflow: ((Boolean) -> Unit)? = null) {
     val hits = remember(text, highlight) { if (highlight.isNullOrBlank()) emptyList() else com.tiecoms.app.core.matchRanges(text, highlight) }
-    if (mentions.isEmpty() && hits.isEmpty()) { LinkifiedText(text, color, modifier); return }
+    if (mentions.isEmpty() && hits.isEmpty()) { LinkifiedText(text, color, modifier, maxLines, onOverflow); return }
     val ctx = LocalContext.current
     val container = LocalContainer.current
     val me = data.me.id
@@ -168,7 +172,9 @@ fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: Bo
             hits.forEach { r -> addStyle(SpanStyle(background = hitBg, fontWeight = FontWeight.SemiBold), r.first, r.last + 1) }
         }
     }
-    Text(annotated, color = color, style = MaterialTheme.typography.bodyLarge, modifier = modifier)
+    Text(annotated, color = color, style = MaterialTheme.typography.bodyLarge, modifier = modifier, maxLines = maxLines,
+        overflow = if (maxLines == Int.MAX_VALUE) androidx.compose.ui.text.style.TextOverflow.Clip else androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        onTextLayout = onOverflow?.let { f -> { r: androidx.compose.ui.text.TextLayoutResult -> f(r.hasVisualOverflow) } } ?: {})
 }
 
 /** Lista sobre el compositor al escribir «#»: grupos, chats y directos que puedo ver (tanda 1.7). */

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Batch 1.7 (docs/TANDA-1.7.md): #groups, «Today», task done/overdue, grouped comments, search in chat and view once. -->
+<resources>
+    <string name="ref_no_access">You don\'t have access to %1$s</string>
+    <!-- System messages (sys.*) -->
+    <string name="sys_event_today">Today: %1$s at %2$s</string>
+    <string name="sys_issue_done">%1$s completed the task “%2$s”.</string>
+    <string name="sys_issue_overdue">We missed it: %1$s was due on %2$s</string>
+    <string name="sys_issue_comments_one">%1$s commented on the task “%2$s”: %3$s</string>
+    <string name="sys_issue_comments_n">%1$d new comments on the task “%2$s”</string>
+    <string name="sys_event_comments_one">%1$s commented on the event “%2$s”: %3$s</string>
+    <string name="sys_event_comments_n">%1$d new comments on the event “%2$s”</string>
+    <!-- Cards -->
+    <string name="card_today">IT\'S TODAY · %1$s</string>
+    <string name="card_done">%1$s completed the task</string>
+    <string name="card_overdue">We missed it: %1$s was due on %2$s</string>
+    <string name="od_new_date">New date</string>
+    <string name="od_mark_done">Mark done</string>
+    <string name="od_reassign">Reassign</string>
+    <string name="od_today">Today</string>
+    <string name="od_tomorrow">Tomorrow</string>
+    <string name="od_next_monday">Next Monday</string>
+    <string name="od_pick">Pick a date</string>
+    <string name="cm_added">💬 Comment added</string>
+    <string name="cm_new_n">💬 %1$d new comments</string>
+    <string name="cm_reply">Reply</string>
+    <string name="cm_comment">Comment</string>
+    <string name="cm_event_ph">Comment on this event…</string>
+    <!-- Search in chat -->
+    <string name="cs_open">Search in chat</string>
+    <string name="cs_placeholder">Search in this chat</string>
+    <string name="cs_none">No results</string>
+    <string name="cs_of">%1$d of %2$d</string>
+    <string name="cs_older">Previous result</string>
+    <string name="cs_newer">Next result</string>
+    <!-- View once -->
+    <string name="vo_toggle_on">View once: on for the next message</string>
+    <string name="vo_toggle_off">View once: off</string>
+    <string name="vo_next">The next message is view once</string>
+    <string name="vo_only_photos">View once works with text, photos or a voice note (not with files).</string>
+    <string name="vo_photo">Photo</string>
+    <string name="vo_voice">Voice note</string>
+    <string name="vo_message">Message</string>
+    <string name="vo_once">view once</string>
+    <string name="vo_seen_by">Seen by %1$s</string>
+    <string name="vo_opened">Opened</string>
+    <string name="vo_tap">Tap to view</string>
+    <string name="vo_already">You already opened this message.</string>
+</resources>

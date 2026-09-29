@@ -67,6 +67,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -335,6 +336,33 @@ fun ConversationScreen(
         }
     }
 
+    // ---------- Buscar dentro del chat (tanda 1.7) ----------
+    var searchOpen by rememberSaveable(id) { mutableStateOf(false) }
+    var searchQ by rememberSaveable(id) { mutableStateOf("") }
+    var searchNav by remember(id) { mutableStateOf(com.tiecoms.app.core.ChatSearchNav()) }
+    var searchLoading by remember(id) { mutableStateOf(false) }
+    LaunchedEffect(searchOpen, searchQ) {
+        if (!searchOpen || !com.tiecoms.app.core.ChatSearchNav.ready(searchQ)) { searchNav = com.tiecoms.app.core.ChatSearchNav(); return@LaunchedEffect }
+        delay(com.tiecoms.app.core.ChatSearchNav.DEBOUNCE_MS)
+        searchLoading = true
+        try { searchNav = com.tiecoms.app.core.ChatSearchNav().append(client.searchConversation(id, searchQ)) }
+        catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; container.toast(errorText(ctx, e)) }
+        finally { searchLoading = false }
+    }
+    fun searchOlder() {
+        val nav = searchNav
+        if (nav.needsMore) scope.launch {
+            searchLoading = true
+            runCatching { client.searchConversation(id, searchQ, before = nav.before) }.onSuccess { searchNav = nav.append(it).older() }
+            searchLoading = false
+        } else searchNav = nav.older()
+    }
+    val searchHighlight = if (searchOpen && com.tiecoms.app.core.ChatSearchNav.ready(searchQ)) searchQ else null
+    // ---------- Confeti y carita triste (tanda 1.7): solo lo que llega en vivo con el chat a la vista ----------
+    var confetti by remember(id) { mutableIntStateOf(0) }
+    val liveFx = remember(id) { androidx.compose.runtime.mutableStateListOf<String>() }
+    var openMax by remember(id) { mutableStateOf<Long?>(null) }
+
     LaunchedEffect(id, reloadKey) {
         runCatching { client.loadBlocks() }
         loadError = null
@@ -510,6 +538,20 @@ fun ConversationScreen(
     }
 
 
+    LaunchedEffect(searchNav.current?.message?.id) { searchNav.current?.let { jumpTo(it.message.seq) } }
+    LaunchedEffect(conv?.loaded) { if (conv?.loaded == true && openMax == null) openMax = conv.messages.maxOfOrNull { it.seq } ?: 0L }
+    LaunchedEffect(conv?.messages, openMax) {
+        val base = openMax ?: return@LaunchedEffect
+        if (!lifecycleState.isAtLeast(Lifecycle.State.RESUMED)) return@LaunchedEffect
+        conv?.messages.orEmpty().filter { it.seq > base && it.kind == "system" }.forEach { m ->
+            val b = com.tiecoms.app.core.System17.parse(m) ?: return@forEach
+            if ((b.key == "issue.done" || b.key == "issue.overdue") && Fx.firstTime(ctx, m.id) && !Fx.reduceMotion(ctx)) {
+                liveFx.add(m.id)
+                if (b.key == "issue.done") confetti++
+            }
+        }
+    }
+
     val typers = (state.typing[id] ?: emptyList()).filter { it.until > System.currentTimeMillis() && it.userId != me }
         .mapNotNull { Names.person(data, it.userId)?.name?.substringBefore(' ') }
     val chat = LocalChatColors.current
@@ -528,6 +570,13 @@ fun ConversationScreen(
     fun messageMenu(m: MessageDTO): List<SheetItem?> {
         val mine = m.authorId == me
         val isPinned = m.id in pinned
+        // Una sola vista (tanda 1.7): sin editar, reenviar, copiar, fijar ni convertir en tarea (el servidor responde 409).
+        if (com.tiecoms.app.core.ViewOnce.blocksActions(m)) return buildList {
+            if (meta.canPost) add(SheetItem(ctx.getString(R.string.menu_reply), "↩", tag = "menuReply") { replyTo = m; editing = null })
+            add(SheetItem(ctx.getString(R.string.menu_mark_unread), "●", tag = "menuUnread") { act { client.markUnread(id, m.seq); container.toast(ctx.getString(R.string.toast_marked_unread)) } })
+            if (!mine) add(SheetItem(ctx.getString(R.string.safety_report_message), "⚑", danger = true, tag = "menuReport") { reportMessage = m })
+            if (mine) add(SheetItem(ctx.getString(R.string.menu_delete), "🗑", danger = true, tag = "menuDelete") { confirmDelete = m })
+        }
         return buildList {
             if (meta.canPost) add(SheetItem(ctx.getString(R.string.menu_reply), "↩", tag = "menuReply") { replyTo = m; editing = null })
             // Bloque 1 (docs/GRUPOS.md): responder aquí o en privado por DM al autor (SPEC-v3 §7, en grupos y chats grupales).
@@ -642,6 +691,10 @@ fun ConversationScreen(
                     }
                 },
                 actions = {
+                    // 🔎 Buscar en el chat (tanda 1.7).
+                    IconButton(onClick = { searchOpen = !searchOpen; if (!searchOpen) searchQ = "" }, modifier = Modifier.testTag("chatSearch")) {
+                        Icon(Icons.Filled.Search, stringResource(R.string.cs_open))
+                    }
                     // 📞 y 🎥 (docs/LLAMADAS.md): solo con features.calls y si puedo escribir.
                     if (!meta.isSide && !blockedDirect) CallHeaderButtons(meta, data)
                     IconButton(onClick = { convMenu = true }, modifier = Modifier.testTag("convMenu")) { Icon(Icons.Filled.MoreVert, stringResource(R.string.menu_more)) }
@@ -654,6 +707,8 @@ fun ConversationScreen(
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize().navigationBarsPadding().imePadding()) {
             ConnectionBanner(state.connection)
+            if (searchOpen && !embedded) ChatSearchBar(searchQ, { searchQ = it.take(120) }, searchNav, searchLoading,
+                onOlder = { searchOlder() }, onNewer = { searchNav = searchNav.newer() }, onClose = { searchOpen = false; searchQ = "" })
             // «Llamada en curso · Unirse» (GET /conversations/:id/call y el evento call.updated).
             if (!embedded) CallBanner(id, data)
             // Dentro del panel del sidechat, «Llevar al hilo» ya está en ⋯ y la tarjeta del ancla hace de linaje.
@@ -705,7 +760,8 @@ fun ConversationScreen(
                         items(items, key = { it.key }) { item ->
                             when (item) {
                                 is ChatItem.Day -> DaySeparator(dayText(ctx, item.date))
-                                is ChatItem.Msg -> if (item.m.kind == "system") SystemRow(item.m, data, state.events, onOpenConversation, onOpenIssue, onOpenEvent, canPost = meta.canPost && !blockedDirect)
+                                is ChatItem.Msg -> if (item.m.kind == "system") SystemRow(item.m, data, state.events, onOpenConversation, onOpenIssue, onOpenEvent, canPost = meta.canPost && !blockedDirect,
+                                    animate = item.m.id in liveFx)
                                 else MessageBubble(
                                     item, data, quoted = item.m.replyTo?.let { byId[it] }, pinnedHere = item.m.id in pinned, highlighted = highlight == item.m.seq,
                                     issue = openHere.firstOrNull { it.originMessageId == item.m.id },
@@ -728,6 +784,7 @@ fun ConversationScreen(
                                     canReact = canReact(item.m), reactionActions = reactionActions,
                                     onReact = { e, on -> react(item.m, e, on) }, onMoreReactions = { pickerFor = item.m },
                                     topic = if (embedded || item.m.deletedAt != null) null else item.m.topicId?.let { topicById[it] },
+                                    highlightQuery = searchHighlight,
                                     topicBy = com.tiecoms.app.core.Topics.setBy(item.m)?.let { by -> if (by == me) stringResource(R.string.common_you_short) else Names.person(data, by)?.name?.substringBefore(' ') ?: "" },
                                 )
                                 is ChatItem.Pending -> PendingBubble(item.p, onRetry = { client.retry(item.p.clientMessageId) }, onDiscard = { client.discard(item.p.clientMessageId) })
@@ -738,6 +795,7 @@ fun ConversationScreen(
                         }
                     } }
                 }
+                ConfettiOverlay(confetti)
                 if (conv?.loaded == true && items.isNotEmpty()) {
                     // Píldora «↑ N nuevos»: la línea de no leídos quedó arriba; tocar salta a ella.
                     if (dividerAbove && entry.second > 0) {
@@ -796,18 +854,18 @@ fun ConversationScreen(
                 Composer(
                 id, title, data, replyTo, editing,
                 onCancelReply = { replyTo = null }, onCancelEdit = { editing = null },
-                onSend = { text, att, mentions ->
+                onSend = { text, att, mentions, once ->
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     if (privateHere != null) {
                         val src = privateHere.source
                         client.send(id, text, null, com.tiecoms.app.core.ForwardedInfo("tiecoms", privateHere.authorName, src.createdAt, src.conversationId, src.id), attachments = att, mentions = mentions)
                         container.privateReply.value = null
-                    } else client.send(id, text, replyTo?.id, attachments = att, mentions = mentions, topicId = activeTopic?.id)
+                    } else client.send(id, text, replyTo?.id, attachments = att, mentions = mentions, topicId = activeTopic?.id, viewOnce = once)
                     replyTo = null
                 },
                 onSaveEdit = { m, text, mentions ->
                     editing = null
-                    if (text.isNotBlank() && (text.trim() != m.body || mentions != m.mentions)) act { client.editMessage(m.id, text, mentions) }
+                    if (text.isNotBlank() && (text.trim() != m.body || mentions != m.mentions + com.tiecoms.app.core.Refs.tokens(m))) act { client.editMessage(m.id, text, mentions) }
                 },
                 onAskSide = { pid -> conv?.messages?.lastOrNull { it.kind == "text" && it.deletedAt == null }?.let { last -> sidePreselect = listOf(pid); sideStart = last } },
                 onBring = { bringing = true },
@@ -866,7 +924,8 @@ fun ConversationScreen(
         val mineSet = live.reactions.filter { data.me.id in it.userIds }.map { it.emoji }.toSet()
         EmojiPickerSheet(mineSet, reactionActions, onPick = { e -> react(live, e, e !in mineSet) }, onClose = { pickerFor = null })
     }
-    if (convMenu) ActionSheet(title, conversationMenu(ctx, meta, data, onMeeting = { meeting = true to null }, onRemindCustom = { reminderCustom = true to null }, onLeave = { confirmLeave = true })) { convMenu = false }
+    if (convMenu) ActionSheet(title, listOf(SheetItem(ctx.getString(R.string.cs_open), "🔎", tag = "menuSearch") { searchOpen = true }) +
+        conversationMenu(ctx, meta, data, onMeeting = { meeting = true to null }, onRemindCustom = { reminderCustom = true to null }, onLeave = { confirmLeave = true })) { convMenu = false }
     viewer?.let { (list, i) -> MediaViewer(list, i) { viewer = null } }
     pdfViewer?.let { (a, sign) -> PdfSheet(a, startSigning = sign && meta.canPost, onClose = { pdfViewer = null; pdfSaved = null }) }
     voiceIssue?.let { (t, m) -> NewIssueDialog(id, m.id, t, onClose = { voiceIssue = null }, onCreated = onOpenIssue) }
@@ -960,7 +1019,7 @@ private fun LinChip(text: String, onClick: () -> Unit) {
 @Composable
 private fun Composer(
     id: String, title: String, data: BootstrapDTO, replyTo: MessageDTO?, editing: MessageDTO?,
-    onCancelReply: () -> Unit, onCancelEdit: () -> Unit, onSend: (String, List<com.tiecoms.app.core.AttachmentDTO>, List<com.tiecoms.app.core.MentionDTO>) -> Unit,
+    onCancelReply: () -> Unit, onCancelEdit: () -> Unit, onSend: (String, List<com.tiecoms.app.core.AttachmentDTO>, List<com.tiecoms.app.core.MentionDTO>, Boolean) -> Unit,
     onSaveEdit: (MessageDTO, String, List<com.tiecoms.app.core.MentionDTO>) -> Unit, onBring: () -> Unit,
     placeholderOverride: String? = null,
     /** «Preguntarle en un sidechat» a alguien que no está en el chat (desde el buscador de menciones). */
@@ -981,7 +1040,9 @@ private fun Composer(
     // Menciones con @ (SPEC-v4 §H): tokens sobre el texto (UTF-16) y el cursor para el buscador.
     var ments by remember(id) { mutableStateOf(listOf<com.tiecoms.app.core.MentionDTO>()) }
     var sel by remember(id) { mutableStateOf(androidx.compose.ui.text.TextRange(0)) }
-    var editMents by remember(editing?.id) { mutableStateOf(editing?.mentions.orEmpty()) }
+    var editMents by remember(editing?.id) { mutableStateOf(editing?.let { it.mentions + com.tiecoms.app.core.Refs.tokens(it) }.orEmpty()) }
+    // ① Una sola vista (tanda 1.7) para el próximo mensaje: texto, fotos o nota de voz.
+    var viewOnce by remember(id) { mutableStateOf(false) }
     var editSel by remember(editing?.id) { mutableStateOf(androidx.compose.ui.text.TextRange(editing?.body?.length ?: 0)) }
     // Adjuntos elegidos (copiados a caché) antes de enviar; se suben al pulsar Enviar (SPEC-v4).
     var files by remember(id) { mutableStateOf(listOf<com.tiecoms.app.core.Attachments.Shared>()) }
@@ -1014,6 +1075,8 @@ private fun Composer(
     }
     fun hasMic() = androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
     fun uploadVoice(r: com.tiecoms.app.platform.VoiceRecorder.Result, aiConsent: Boolean) {
+        val viewOnceVoice = viewOnce
+        viewOnce = false
         pendingVoice = null
         attError = null
         com.tiecoms.app.platform.VoiceDrafts.take(id)
@@ -1023,7 +1086,7 @@ private fun Composer(
             try {
                 val a = client.uploadAttachment(id, r.file, ctx.getString(R.string.voice_note) + ".m4a", "audio/mp4",
                     voice = com.tiecoms.app.core.TieComsClient.Voice(r.durationMs, r.waveform, aiConsent)) { sent, total -> uploading = 0 to (if (total > 0) sent.toFloat() / total else 0f) }
-                onSend("", listOf(a), emptyList())
+                onSend("", listOf(a), emptyList(), viewOnceVoice)
                 r.file.delete()
             } catch (e: Exception) {
                 val msg = when (com.tiecoms.app.core.VoiceRules.uploadError(e)) {
@@ -1076,7 +1139,11 @@ private fun Composer(
     fun sendNow() {
         val body = text
         val bodyMents = ments
-        if (files.isEmpty()) { if (body.isNotBlank()) { onSend(body, emptyList(), bodyMents); text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0) }; return }
+        // ① solo con texto, fotos o nota de voz: con otros archivos no se manda (el servidor respondería 400).
+        if (viewOnce && !files.all { it.contentType?.startsWith("image/") == true }) { attError = ctx.getString(R.string.vo_only_photos); return }
+        val once = viewOnce
+        viewOnce = false
+        if (files.isEmpty()) { if (body.isNotBlank()) { onSend(body, emptyList(), bodyMents, once); text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0) }; return }
         attError = null
         scope.launch {
             val done = mutableListOf<com.tiecoms.app.core.AttachmentDTO>()
@@ -1094,7 +1161,7 @@ private fun Composer(
                 }
             }
             uploading = null
-            onSend(body, done, bodyMents)
+            onSend(body, done, bodyMents, once)
             files.forEach { java.io.File(it.path).delete() }
             files = emptyList(); text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0)
         }
@@ -1142,7 +1209,15 @@ private fun Composer(
                         }
                     }.onFailure { attError = errorText(ctx, it) }
                 } }, onAskSide = { p -> onAskSide(p.id) })
+                // #grupos (tanda 1.7): al escribir «#» se sugieren las conversaciones que puedo ver.
+                val rq = if (q == null) com.tiecoms.app.core.Refs.query(cur, cursor, if (editing != null) editMents else ments) else null
+                if (rq != null) RefPicker(rq.second, data, id) { cid, name ->
+                    if (editing != null) { val (t, m, c) = com.tiecoms.app.core.Refs.insert(editText, editMents, rq.first, cursor, name, cid); editText = t; editMents = m; editSel = androidx.compose.ui.text.TextRange(c) }
+                    else { val (t, m, c) = com.tiecoms.app.core.Refs.insert(text, ments, rq.first, cursor, name, cid); text = t; ments = m; sel = androidx.compose.ui.text.TextRange(c) }
+                }
             }
+            if (viewOnce && editing == null) Text("① " + stringResource(R.string.vo_next), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("viewOnceOn"))
             if (editing == null && files.isNotEmpty()) PendingFiles(files, uploading, onRemove = { f -> if (uploading == null) { files = files - f; java.io.File(f.path).delete() } })
             if (editing == null && draft != null && !rec.recording) VoiceDraftBar(draft, busy = uploading != null,
                 onRetry = { if (draft.aiConsent != null) uploadVoice(draft.result, draft.aiConsent) else { com.tiecoms.app.platform.VoiceDrafts.take(id); pendingVoice = draft.result } },
@@ -1173,6 +1248,7 @@ private fun Composer(
                     visualTransformation = MentionHighlight(if (editing != null) editMents else ments, MaterialTheme.colorScheme.primary),
                     placeholder = { Text(placeholderOverride ?: stringResource(R.string.placeholder, title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     maxLines = 6, shape = RoundedCornerShape(24.dp),
+                    trailingIcon = if (editing == null) ({ ViewOnceToggle(viewOnce) { viewOnce = !viewOnce } }) else null,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surface, focusedContainerColor = MaterialTheme.colorScheme.surface),
                     modifier = Modifier.weight(1f).focusRequester(focus).testTag("composer"),
@@ -1251,9 +1327,17 @@ internal fun SystemRow(
     onOpenConversation: (String, Long?) -> Unit, onOpenIssue: (String) -> Unit, onOpenEvent: (String) -> Unit,
     /** Quien puede escribir comenta y marca la tarjeta de tarea. */
     canPost: Boolean = false,
+    /** Llegó en vivo con el chat a la vista (tanda 1.7): la carita triste de la tarea vencida se anima una vez. */
+    animate: Boolean = false,
 ) {
     val ctx = LocalContext.current
     val chat = LocalChatColors.current
+    // Tanda 1.7: es hoy, tarea hecha/vencida y comentarios agrupados se ven como la tarjeta del evento o de la tarea.
+    com.tiecoms.app.core.System17.parse(m)?.let { b ->
+        val fb = systemText(ctx, m.body, Names.person(data, m.authorId)?.name)
+        if (b.eventId != null) { EventChatCard(b.eventId, m.authorId, data, onOpenEvent, sys = b, canPost = canPost, fallback = fb); return }
+        if (b.issueId != null) { IssueChatCard(b.issueId, m.authorId, data, canPost, onOpenIssue, sys = b, animate = animate, fallback = fb); return }
+    }
     // Una tarea nueva se ve como tarjeta completa, con sus comentarios y para comentar ahí mismo (docs/TEMAS.md).
     com.tiecoms.app.core.Topics.cardIssueId(m)?.let { iid -> IssueChatCard(iid, m.authorId, data, canPost, onOpenIssue); return }
     // Un evento nuevo: tarjeta con fecha, «Unirse», quiénes van y responder ahí mismo.
@@ -1310,6 +1394,8 @@ internal fun MessageBubble(
     /** Tema del mensaje (docs/TEMAS.md) y, si no lo puso el autor, quién («Tú» si fui yo). */
     topic: com.tiecoms.app.core.TopicDTO? = null,
     topicBy: String? = null,
+    /** Búsqueda en el chat abierta (tanda 1.7): resalta lo que coincide. */
+    highlightQuery: String? = null,
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val openMenu = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onLongPress() }
@@ -1430,17 +1516,21 @@ internal fun MessageBubble(
                     if (child != null) TextButton(onClick = { onOpenConversation(child.id, null) }) { Text(stringResource(R.string.lin_open), color = fg) }
                 }
             }
-            if (!deleted && m.attachments.isNotEmpty()) {
+            // Una sola vista (tanda 1.7): burbuja cerrada «① Foto / Mensaje / Nota de voz»; el contenido solo en el visor.
+            if (!deleted && m.viewOnce) ViewOnceBubble(m, data, fg, item.mine)
+            else if (!deleted && m.attachments.isNotEmpty()) {
                 val media = m.attachments.filter { it.isImage || it.isVideo }
                 AttachmentsBlock(m.attachments, fg, onOpenMedia = { i -> onOpenMedia(media, i) }, onOpenFile = onOpenFile, mine = item.mine, onCreateIssue = onVoiceIssue,
                     onLongPress = openMenu, onOpenPdf = onOpenPdf)
             }
             if (deleted) Text(body, color = fg, style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
+            else if (m.viewOnce) Unit
             // Solo emojis (1 a 3): grandes, como en la web (isJumbo).
-            else if (m.attachments.isEmpty() && m.mentions.isEmpty() && com.tiecoms.app.core.Reactions.isJumbo(body))
+            else if (m.attachments.isEmpty() && m.mentions.isEmpty() && m.refs.isEmpty() && highlightQuery == null && com.tiecoms.app.core.Reactions.isJumbo(body))
                 Text(body.trim(), color = fg, fontSize = if ((com.tiecoms.app.core.Reactions.clusters(body.filterNot { it.isWhitespace() })?.size ?: 3) == 1) 44.sp else 34.sp,
                     lineHeight = 52.sp, modifier = Modifier.testTag("body-${m.seq}"))
-            else if (body.isNotBlank() || m.attachments.isEmpty()) MessageText(body, m.mentions, fg, data, onPerson = onPerson, modifier = Modifier.testTag("body-${m.seq}"))
+            else if (body.isNotBlank() || m.attachments.isEmpty()) MessageText(body, m.mentions + com.tiecoms.app.core.Refs.tokens(m), fg, data, onPerson = onPerson,
+                modifier = Modifier.testTag("body-${m.seq}"), highlight = highlightQuery)
             m.linkPreview?.takeIf { !deleted && it.usable }?.let { LinkPreviewCard(it, fg, Modifier.padding(top = 6.dp)) }
             FlowRow(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End), verticalArrangement = Arrangement.Center) {
                 if (topic != null) TopicTag(topic, topicBy, Modifier.align(Alignment.CenterVertically))

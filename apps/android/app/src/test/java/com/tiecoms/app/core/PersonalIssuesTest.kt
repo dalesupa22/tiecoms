@@ -80,7 +80,7 @@ class PersonalIssuesTest {
             val i = c.createPersonalIssue("Renovar el pasaporte", null)
             assertTrue(i.personal)
             val post = requests.first { it.first.path == "/api/v1/issues" && it.first.method == "POST" }
-            assertEquals("2026-09-28", post.first.getHeader("x-tiecoms-contract"))
+            assertEquals(CONTRACT_VERSION, post.first.getHeader("x-tiecoms-contract"))
             val body = TcJson.parseToJsonElement(post.second).jsonObject
             assertEquals("Renovar el pasaporte", body["title"]!!.jsonPrimitive.content)
             assertEquals(JsonNull, body["dueDate"])

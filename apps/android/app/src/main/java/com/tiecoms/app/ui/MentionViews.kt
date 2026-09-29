@@ -116,12 +116,23 @@ fun MentionPicker(query: String, conv: ConversationDTO, data: BootstrapDTO, onPi
 @Composable
 fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: BootstrapDTO, onPerson: (String) -> Unit, modifier: Modifier = Modifier,
                 /** En listas (bandeja) el toque es de la fila: sin enlaces propios. */
-                interactive: Boolean = true) {
-    if (mentions.isEmpty()) { LinkifiedText(text, color, modifier); return }
+                interactive: Boolean = true,
+                /** Búsqueda en el chat (tanda 1.7): se resalta lo que coincide, sin mayúsculas ni tildes. */
+                highlight: String? = null) {
+    val hits = remember(text, highlight) { if (highlight.isNullOrBlank()) emptyList() else com.tiecoms.app.core.matchRanges(text, highlight) }
+    if (mentions.isEmpty() && hits.isEmpty()) { LinkifiedText(text, color, modifier); return }
     val ctx = LocalContext.current
+    val container = LocalContainer.current
     val me = data.me.id
-    val colors = mentions.associate { it.userId to (if (it.userId == Mentions.ALL) color else personColor(it.userId)) }
-    val annotated = remember(text, mentions, color, interactive) {
+    val accent = MaterialTheme.colorScheme.primary
+    val hitBg = Color(0x66FDE047)
+    val colors = mentions.associate { it.userId to (if (it.userId == Mentions.ALL || com.tiecoms.app.core.Refs.isRef(it)) color else personColor(it.userId)) }
+    /** #Nombre: la abro si la tengo en mi lista; si no, «No tienes acceso a #Nombre» y no navega. */
+    fun openRef(convId: String, label: String) {
+        if (com.tiecoms.app.core.Refs.canOpen(container.client.value.state.value.data, convId)) container.pendingLink.value = com.tiecoms.app.core.DeepLink.Conversation(convId)
+        else container.toast(ctx.getString(R.string.ref_no_access, label))
+    }
+    val annotated = remember(text, mentions, color, interactive, hits) {
         buildAnnotatedString {
             val valid = mentions.filter { it.start >= 0 && it.start + it.length <= text.length }.sortedBy { it.start }
             var i = 0
@@ -137,17 +148,50 @@ fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: Bo
             valid.forEach { m ->
                 if (m.start < i) return@forEach
                 plain(m.start)
-                val mine = m.userId == me || m.userId == Mentions.ALL
-                val style = SpanStyle(fontWeight = FontWeight.Bold, color = if (mine) Color(0xFF9A3412) else colors[m.userId] ?: color,
-                    background = if (mine) Color(0x33FDBA74) else Color.Transparent)
-                if (interactive && m.userId != Mentions.ALL) withLink(LinkAnnotation.Clickable("mention:${m.userId}", TextLinkStyles(style = style)) { onPerson(m.userId) }) { append(text.substring(m.start, m.start + m.length)) }
-                else withStyle(style) { append(text.substring(m.start, m.start + m.length)) }
+                val label = text.substring(m.start, m.start + m.length)
+                if (com.tiecoms.app.core.Refs.isRef(m)) {
+                    // #grupo: pastilla del color del acento.
+                    val style = SpanStyle(fontWeight = FontWeight.SemiBold, color = accent, background = accent.copy(alpha = 0.14f))
+                    val convId = m.userId.removePrefix(com.tiecoms.app.core.Refs.TOKEN)
+                    if (interactive) withLink(LinkAnnotation.Clickable("ref:$convId", TextLinkStyles(style = style)) { openRef(convId, label) }) { append(label) }
+                    else withStyle(style) { append(label) }
+                } else {
+                    val mine = m.userId == me || m.userId == Mentions.ALL
+                    val style = SpanStyle(fontWeight = FontWeight.Bold, color = if (mine) Color(0xFF9A3412) else colors[m.userId] ?: color,
+                        background = if (mine) Color(0x33FDBA74) else Color.Transparent)
+                    if (interactive && m.userId != Mentions.ALL) withLink(LinkAnnotation.Clickable("mention:${m.userId}", TextLinkStyles(style = style)) { onPerson(m.userId) }) { append(label) }
+                    else withStyle(style) { append(label) }
+                }
                 i = m.start + m.length
             }
             plain(text.length)
+            hits.forEach { r -> addStyle(SpanStyle(background = hitBg, fontWeight = FontWeight.SemiBold), r.first, r.last + 1) }
         }
     }
     Text(annotated, color = color, style = MaterialTheme.typography.bodyLarge, modifier = modifier)
+}
+
+/** Lista sobre el compositor al escribir «#»: grupos, chats y directos que puedo ver (tanda 1.7). */
+@Composable
+fun RefPicker(query: String, data: BootstrapDTO, currentId: String, onPick: (String, String) -> Unit) {
+    val ctx = LocalContext.current
+    val internal = androidx.compose.ui.res.stringResource(R.string.internal_default)
+    val conv = androidx.compose.ui.res.stringResource(R.string.conversation)
+    val list = remember(query, data) { com.tiecoms.app.core.Refs.candidates(data, query, { Names.conversationTitle(it, data, internal, conv) }, exclude = null) }
+    if (list.isEmpty()) return
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp).testTag("refPicker")) {
+        LazyColumn {
+            items(list, key = { it.first.id }) { (c, name) ->
+                Row(Modifier.fillMaxWidth().clickable { onPick(c.id, name) }.heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 6.dp).testTag("refPick-${c.id}"),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("#", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, modifier = Modifier.width(22.dp))
+                    Text(name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(ctx.getString(if (c.kind == "direct") R.string.calls_direct else R.string.calls_group), style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
 }
 
 /** Tarjeta de la persona al tocar una mención: Enviar mensaje. */

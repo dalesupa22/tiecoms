@@ -744,15 +744,19 @@ class TieComsClient(
         mentions: List<MentionDTO> = emptyList(),
         /** Banderita elegida (docs/TEMAS.md): el mensaje sale con ese tema. */
         topicId: String? = null,
+        /** Una sola vista (tanda 1.7): solo texto, imágenes o nota de voz. */
+        viewOnce: Boolean = false,
     ): String? {
-        // El servidor recorta el body: se recorta aquí y se corren los offsets de las menciones.
-        val (text, ments) = Mentions.trim(body, mentions)
+        // El servidor recorta el body: se recorta aquí y se corren los offsets de las menciones y de las #etiquetas
+        // (que llegan del compositor como tokens con prefijo, ver [Refs]).
+        val (text, ments, refs) = Refs.split(body, mentions)
         if (text.isEmpty() && attachments.isEmpty() && forwardAttachments.isEmpty()) return null
         val fwd = forwardAttachments.take((Attachments.MAX_PER_MESSAGE - attachments.size).coerceAtLeast(0))
         val p = PendingMessage(
             clientMessageId = UUID.randomUUID().toString(), conversationId = conversationId, body = text,
             replyTo = replyTo, forwarded = forwarded, createdAt = Instant.ofEpochMilli(now()).toString(),
             attachments = attachments.take(Attachments.MAX_PER_MESSAGE), forwardAttachments = fwd, mentions = ments, topicId = topicId,
+            refs = refs, viewOnce = viewOnce && forwarded == null && fwd.isEmpty() && ViewOnce.allowed(attachments),
         )
         // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
         scope.launch {
@@ -830,7 +834,8 @@ class TieComsClient(
         if (socket.connected) {
             try {
                 val payload = TcJson.encodeToJsonElement(SocketSendBody.serializer(), SocketSendBody(p.conversationId, p.clientMessageId, p.body, p.replyTo, p.forwarded,
-                    p.attachments.map { it.id }.ifEmpty { null }, p.forwardAttachments.map { it.id }.ifEmpty { null }, p.mentions.ifEmpty { null }, p.topicId))
+                    p.attachments.map { it.id }.ifEmpty { null }, p.forwardAttachments.map { it.id }.ifEmpty { null }, p.mentions.ifEmpty { null }, p.topicId,
+                    p.refs.ifEmpty { null }, p.viewOnce.takeIf { it }))
                 val r = socket.emitWithAck("message.send", payload, 8000).firstOrNull() as? JsonObject
                 if ((r?.get("ok") as? JsonPrimitive)?.booleanOrNull == true) {
                     val m = r["message"]?.let { runCatching { TcJson.decodeFromJsonElement(MessageDTO.serializer(), it) }.getOrNull() }
@@ -853,7 +858,8 @@ class TieComsClient(
         val r = request(
             "POST", "/conversations/${p.conversationId}/messages",
             TcJson.encodeToString(SendBody.serializer(), SendBody(p.clientMessageId, p.body, p.replyTo, p.forwarded,
-                p.attachments.map { it.id }.ifEmpty { null }, p.forwardAttachments.map { it.id }.ifEmpty { null }, p.mentions.ifEmpty { null }, p.topicId)), SendResult.serializer(),
+                p.attachments.map { it.id }.ifEmpty { null }, p.forwardAttachments.map { it.id }.ifEmpty { null }, p.mentions.ifEmpty { null }, p.topicId,
+                p.refs.ifEmpty { null }, p.viewOnce.takeIf { it })), SendResult.serializer(),
         )
         sentViaHttp++
         if (r.droppedMentions.isNotEmpty()) _signals.tryEmit(ClientSignal.MentionsDropped(p.conversationId, r.droppedMentions))
@@ -1165,10 +1171,11 @@ class TieComsClient(
     }
     /** Siempre manda las menciones (con mentions reemplaza las anteriores; sin ellas se quitarían al cambiar el texto). */
     suspend fun editMessage(id: String, body: String, mentions: List<MentionDTO> = emptyList()): MessageDTO = withContext(dispatcher) {
-        val (text, ments) = Mentions.trim(body, mentions)
+        val (text, ments, refs) = Refs.split(body, mentions)
         val payload = buildJsonObject {
             put("body", JsonPrimitive(text))
             put("mentions", TcJson.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(MentionDTO.serializer()), ments))
+            put("refs", TcJson.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(RefInput.serializer()), refs))
         }
         req("PATCH", "/messages/$id", payload, MessageDTO.serializer()).also { upsertLocal(it) }
     }
@@ -1191,6 +1198,29 @@ class TieComsClient(
     }
 
     // ---------- Temas (docs/TEMAS.md) ----------
+    // ---------- Tanda 1.7 (docs/TANDA-1.7.md) ----------
+    /** Buscar dentro del chat: sin mayúsculas ni tildes, también adjuntos y transcripciones; before = seq del último resultado. */
+    suspend fun searchConversation(conversationId: String, query: String, before: Long? = null, limit: Int = 30): ChatSearchPageDTO = withContext(dispatcher) {
+        req("GET", "/conversations/${enc(conversationId)}/search" + q("q" to query.trim(), "before" to before?.toString(), "limit" to limit.toString()), null, ChatSearchPageDTO.serializer())
+    }
+    /** Abrir un mensaje de una sola vista (una vez por persona; 410 already_opened la segunda). */
+    suspend fun openViewOnce(m: MessageDTO): ViewOnceOpenDTO = withContext(dispatcher) {
+        try {
+            req("POST", "/messages/${m.id}/open", buildJsonObject {}, ViewOnceOpenDTO.serializer())
+        } finally {
+            // Abierto (o ya abierto antes): queda «Abierto» aunque el evento llegue después.
+            upsertLocal(m.copy(viewOnceState = "opened"))
+        }
+    }
+    suspend fun eventComments(eventId: String): List<EventCommentDTO> = withContext(dispatcher) {
+        decodeEventComments(req("GET", "/events/${enc(eventId)}/comments", null, JsonElement.serializer()))
+    }
+    suspend fun commentEvent(eventId: String, body: String) = withContext(dispatcher) {
+        req("POST", "/events/${enc(eventId)}/comments", buildJsonObject { put("body", JsonPrimitive(body.trim())) }, JsonElement.serializer())
+        runCatching { getEventInternal(eventId) }
+        Unit
+    }
+
     // ---------- Llamadas (docs/LLAMADAS.md) ----------
     private fun putCall(call: CallDTO) = setState { copy(calls = Calls.put(calls, call), callsRevision = callsRevision + 1) }
     private fun callsPath(id: String, tail: String) = "/calls/${enc(id)}/$tail"
@@ -1348,7 +1378,8 @@ class TieComsClient(
         val r = req("GET", "/events" + q("from" to from.toString(), "to" to to.toString(), "conversationId" to conversationId), null, CalendarPage.serializer())
         putEvents(r.events); r.events
     }
-    suspend fun getEvent(id: String): CalendarEventDTO = withContext(dispatcher) { req("GET", "/events/$id", null, CalendarEventDTO.serializer()).also { putEvents(listOf(it)) } }
+    suspend fun getEvent(id: String): CalendarEventDTO = withContext(dispatcher) { getEventInternal(id) }
+    private suspend fun getEventInternal(id: String): CalendarEventDTO = req("GET", "/events/$id", null, CalendarEventDTO.serializer()).also { putEvents(listOf(it)) }
     /** input: title, description, location, startsAt, endsAt, timezone, inviteeIds, originMessageId */
     suspend fun createEvent(conversationId: String, input: JsonObject): CalendarEventDTO = withContext(dispatcher) {
         req("POST", "/conversations/$conversationId/events", input, CalendarEventDTO.serializer()).also { putEvents(listOf(it)) }

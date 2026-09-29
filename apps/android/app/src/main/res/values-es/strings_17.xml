@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tanda 1.7 (docs/TANDA-1.7.md): #grupos, «Es hoy», tarea hecha/vencida, comentarios agrupados, búsqueda en el chat y una sola vista. -->
+<resources>
+    <string name="ref_no_access">No tienes acceso a %1$s</string>
+    <!-- Mensajes de sistema (sys.*) -->
+    <string name="sys_event_today">Hoy: %1$s a las %2$s</string>
+    <string name="sys_issue_done">%1$s completó la tarea «%2$s».</string>
+    <string name="sys_issue_overdue">No cumplimos: %1$s venció el %2$s</string>
+    <string name="sys_issue_comments_one">%1$s comentó la tarea «%2$s»: %3$s</string>
+    <string name="sys_issue_comments_n">%1$d comentarios nuevos en la tarea «%2$s»</string>
+    <string name="sys_event_comments_one">%1$s comentó el evento «%2$s»: %3$s</string>
+    <string name="sys_event_comments_n">%1$d comentarios nuevos en el evento «%2$s»</string>
+    <!-- Tarjetas -->
+    <string name="card_today">ES HOY · %1$s</string>
+    <string name="card_done">%1$s completó la tarea</string>
+    <string name="card_overdue">No cumplimos: %1$s venció el %2$s</string>
+    <string name="od_new_date">Nueva fecha</string>
+    <string name="od_mark_done">Marcar hecha</string>
+    <string name="od_reassign">Reasignar</string>
+    <string name="od_today">Hoy</string>
+    <string name="od_tomorrow">Mañana</string>
+    <string name="od_next_monday">Próximo lunes</string>
+    <string name="od_pick">Elegir fecha</string>
+    <string name="cm_added">💬 Comentario añadido</string>
+    <string name="cm_new_n">💬 %1$d comentarios nuevos</string>
+    <string name="cm_reply">Responder</string>
+    <string name="cm_comment">Comentar</string>
+    <string name="cm_event_ph">Comenta este evento…</string>
+    <!-- Buscar en el chat -->
+    <string name="cs_open">Buscar en el chat</string>
+    <string name="cs_placeholder">Buscar en este chat</string>
+    <string name="cs_none">Sin resultados</string>
+    <string name="cs_of">%1$d de %2$d</string>
+    <string name="cs_older">Resultado anterior</string>
+    <string name="cs_newer">Resultado siguiente</string>
+    <!-- Una sola vista -->
+    <string name="vo_toggle_on">Una vista: prender para el próximo mensaje</string>
+    <string name="vo_toggle_off">Una vista: apagar</string>
+    <string name="vo_next">El próximo mensaje es de una sola vista</string>
+    <string name="vo_only_photos">Una vista funciona con texto, fotos o una nota de voz (no con archivos).</string>
+    <string name="vo_photo">Foto</string>
+    <string name="vo_voice">Nota de voz</string>
+    <string name="vo_message">Mensaje</string>
+    <string name="vo_once">una vista</string>
+    <string name="vo_seen_by">Visto por %1$s</string>
+    <string name="vo_opened">Abierto</string>
+    <string name="vo_tap">Toca para ver</string>
+    <string name="vo_already">Ya abriste este mensaje.</string>
+</resources>

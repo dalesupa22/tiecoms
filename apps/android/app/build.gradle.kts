@@ -73,7 +73,7 @@ android {
         versionName = "1.6.10"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "DEFAULT_API_URL", "\"https://app.chaggu.com\"")
-        buildConfigField("String", "CONTRACT_VERSION", "\"2026-09-28\"")
+        buildConfigField("String", "CONTRACT_VERSION", "\"2026-09-29\"")
     }
 
     signingConfigs {

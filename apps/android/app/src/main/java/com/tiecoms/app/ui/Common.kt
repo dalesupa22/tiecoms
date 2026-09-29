@@ -116,6 +116,8 @@ fun systemText(ctx: Context, body: String, author: String? = null): String {
     }
     // Llamadas (docs/LLAMADAS.md): call.started, call.ended · m:ss, transcripción prendida/apagada y guardada.
     com.tiecoms.app.core.Calls.systemCall(o)?.let { c -> return callSystemText(ctx, c) }
+    // Tanda 1.7: es hoy, tarea hecha/vencida y comentarios agrupados.
+    com.tiecoms.app.core.System17.parse(o)?.let { b -> return system17Text(ctx, b) }
     return when (str("k")) {
         "workspace.created" -> ctx.getString(R.string.sys_workspace_created, str("name"))
         "group.created" -> ctx.getString(R.string.sys_group_created, str("name"))
@@ -153,6 +155,17 @@ fun callSystemText(ctx: Context, c: com.tiecoms.app.core.Calls.SystemCall): Stri
     "call.transcription.off" -> ctx.getString(R.string.sys_call_transcription_off, c.name)
     else -> ctx.getString(R.string.sys_call_transcript)
 }
+
+fun system17Text(ctx: Context, b: com.tiecoms.app.core.System17.Body): String = when (b.key) {
+    "event.today" -> ctx.getString(R.string.sys_event_today, b.title, parseInstant(b.startsAt)?.atZone(ZoneId.systemDefault())?.format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)) ?: "")
+    "issue.done" -> ctx.getString(R.string.sys_issue_done, b.byName ?: "", b.title)
+    "issue.overdue" -> ctx.getString(R.string.sys_issue_overdue, b.title, dueDateText(b.dueDate))
+    "issue.comments" -> if (b.count <= 1) ctx.getString(R.string.sys_issue_comments_one, b.lastByName ?: "", b.title, b.lastExcerpt ?: "") else ctx.getString(R.string.sys_issue_comments_n, b.count, b.title)
+    else -> if (b.count <= 1) ctx.getString(R.string.sys_event_comments_one, b.lastByName ?: "", b.title, b.lastExcerpt ?: "") else ctx.getString(R.string.sys_event_comments_n, b.count, b.title)
+}
+
+/** AAAA-MM-DD → fecha local media («29 sept 2026»). */
+fun dueDateText(d: String?): String = d?.let { runCatching { LocalDate.parse(it.take(10)).format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)) }.getOrNull() } ?: (d ?: "")
 
 fun roleText(ctx: Context, role: String) = ctx.getString(
     when (role) { "admin" -> R.string.role_admin; "guest" -> R.string.role_guest; "lead" -> R.string.role_lead; else -> R.string.role_member },

@@ -5,7 +5,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
 /** Versión del contrato que habla esta app (packages/contracts CONTRACT_VERSION). */
-const val CONTRACT_VERSION = "2026-09-28"
+const val CONTRACT_VERSION = "2026-09-29"
 const val PLATFORM = "android"
 
 @Serializable
@@ -240,6 +240,13 @@ data class MessageDTO(
     val topicId: String? = null,
     /** Quién le puso el tema (cualquiera del chat puede etiquetar cualquier mensaje). */
     val topicBy: String? = null,
+    /** Etiquetas #Nombre a otras conversaciones (tanda 1.7); name = el nombre al enviar. */
+    val refs: List<MessageRefDTO> = emptyList(),
+    /** Una sola vista (tanda 1.7): body '' y adjuntos sin url; el contenido solo sale por POST /messages/:id/open. */
+    val viewOnce: Boolean = false,
+    /** unopened | opened (quien no es autor) | sent (autor); en vivo llega unopened: ver [ViewOnce.state]. */
+    val viewOnceState: String? = null,
+    val openedBy: List<OpenedBy> = emptyList(),
 )
 
 /** Reacción agregada: quién reaccionó con [emoji]; [external] llegó por un puente (WhatsApp), sin cuenta en Chaggu. */
@@ -500,6 +507,10 @@ data class SendBody(
     val attachmentIds: List<String>? = null, val forwardAttachmentIds: List<String>? = null, val mentions: List<MentionDTO>? = null,
     /** Tema con el que sale (docs/TEMAS.md); null no se envía (explicitNulls = false). */
     val topicId: String? = null,
+    /** #grupos etiquetados (tanda 1.7); null no se envía. */
+    val refs: List<RefInput>? = null,
+    /** Una sola vista (tanda 1.7): texto, imágenes o nota de voz; null no se envía. */
+    val viewOnce: Boolean? = null,
 )
 
 @Serializable
@@ -507,6 +518,7 @@ data class SocketSendBody(
     val conversationId: String, val clientMessageId: String, val body: String,
     val replyTo: String? = null, val forwarded: ForwardedInfo? = null, val attachmentIds: List<String>? = null,
     val forwardAttachmentIds: List<String>? = null, val mentions: List<MentionDTO>? = null, val topicId: String? = null,
+    val refs: List<RefInput>? = null, val viewOnce: Boolean? = null,
 )
 
 @Serializable
@@ -528,6 +540,8 @@ data class PendingMessage(
     val mentions: List<MentionDTO> = emptyList(),
     /** Tema de la banderita elegida al escribir (docs/TEMAS.md). */
     val topicId: String? = null,
+    val refs: List<RefInput> = emptyList(),
+    val viewOnce: Boolean = false,
     val attempts: Int = 0,
     /** pending | sending | failed */
     val status: String = "pending",
@@ -568,6 +582,10 @@ data class CalendarEventDTO(
     val invitees: List<Invitee> = emptyList(),
     val cancelledAt: String? = null,
     val updatedAt: String = "",
+    /** Comentarios del evento (tanda 1.7); 0 en servidores anteriores. */
+    val commentCount: Int = 0,
+    /** Los 2 últimos, del más viejo al más nuevo. */
+    val lastComments: List<EventCommentDTO> = emptyList(),
 )
 
 @Serializable

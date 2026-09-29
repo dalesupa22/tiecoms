@@ -67,7 +67,13 @@ import kotlinx.serialization.json.contentOrNull
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun IssueChatCard(issueId: String, creatorId: String, data: BootstrapDTO, canPost: Boolean, onOpen: (String) -> Unit) {
+fun IssueChatCard(issueId: String, creatorId: String, data: BootstrapDTO, canPost: Boolean, onOpen: (String) -> Unit,
+                  /** Tanda 1.7: issue.done (verde), issue.overdue (rojo, carita triste y acciones) o issue.comments (franja). */
+                  sys: com.tiecoms.app.core.System17.Body? = null,
+                  /** Llegó en vivo con el chat a la vista: la carita triste se anima una vez. */
+                  animate: Boolean = false,
+                  /** Sin acceso a la tarea: el texto del aviso. */
+                  fallback: String? = null) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val container = LocalContainer.current
@@ -91,12 +97,18 @@ fun IssueChatCard(issueId: String, creatorId: String, data: BootstrapDTO, canPos
         // Sin acceso (restringida) o borrada: no se muestra nada; mientras carga, un marcador.
         if (!missing) Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.widthIn(max = maxW).fillMaxWidth().height(56.dp)) {}
-        }
+        } else if (fallback != null) Text(fallback, style = MaterialTheme.typography.bodySmall, color = com.tiecoms.app.ui.theme.LocalChatColors.current.system, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp).testTag("system"))
         return
     }
     val f = issueFlags(i)
     val done = i.status == "done"
-    val edge = when { done -> Color(0xFF15803D); f.overdue -> MaterialTheme.colorScheme.error; else -> Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE) }
+    val edge = when {
+        sys?.key == "issue.done" || done -> Color(0xFF15803D)
+        sys?.key == "issue.overdue" || f.overdue -> MaterialTheme.colorScheme.error
+        else -> Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE)
+    }
+    val tint = when (sys?.key) { "issue.done" -> Color(0xFF15803D).copy(alpha = 0.08f); "issue.overdue" -> MaterialTheme.colorScheme.error.copy(alpha = 0.07f); else -> Color.Transparent }
     val owner = i.ownerId?.let { Names.person(data, it) }
     val creator = Names.person(data, creatorId)?.name?.substringBefore(' ') ?: ""
     val topic = i.topicId?.let { tid -> st.topics[i.conversationId ?: ""]?.firstOrNull { it.id == tid } }
@@ -122,8 +134,19 @@ fun IssueChatCard(issueId: String, creatorId: String, data: BootstrapDTO, canPos
         Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, shadowElevation = 1.dp,
             modifier = Modifier.widthIn(max = maxW).fillMaxWidth().testTag("taskCard-${i.id}")) {
             // Borde izquierdo dibujado detrás (sin medidas intrínsecas: los FlowRow que saltan de línea se miden bien).
-            Row(Modifier.drawBehind { drawRect(edge, size = androidx.compose.ui.geometry.Size(4.dp.toPx(), size.height)) }) {
+            Row(Modifier.background(tint).drawBehind { drawRect(edge, size = androidx.compose.ui.geometry.Size(4.dp.toPx(), size.height)) }) {
                 Column(Modifier.padding(start = 14.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    when (sys?.key) {
+                        "issue.done" -> Text("✅ " + stringResource(R.string.card_done, sys.byName ?: ""), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
+                            color = Color(0xFF15803D), modifier = Modifier.testTag("taskCardDone"))
+                        "issue.overdue" -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.testTag("taskCardOverdue")) {
+                            SadFace(animate)
+                            Spacer(Modifier.width(6.dp))
+                            Text(stringResource(R.string.card_overdue, sys.title.ifBlank { i.title }, dueDateText(sys.dueDate)), style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                        }
+                        else -> Unit
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("☑ " + stringResource(R.string.task_card, creator).uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
@@ -154,7 +177,9 @@ fun IssueChatCard(issueId: String, creatorId: String, data: BootstrapDTO, canPos
                         Box(Modifier.align(Alignment.CenterVertically)) { StatusPill(i.status) }
                         if (i.commentCount > 0) Text("💬 ${i.commentCount}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.align(Alignment.CenterVertically))
                     }
-                    if (comments.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(top = 2.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp)).padding(8.dp),
+                    if (sys?.key == "issue.comments") CommentsStrip(sys, data)
+                    if (sys?.key == "issue.overdue" && !i.closed && canPost) OverdueActions(i, data)
+                    if (comments.isNotEmpty() && sys?.key != "issue.comments") Column(Modifier.fillMaxWidth().padding(top = 2.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp)).padding(8.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         comments.forEach { c ->
                             val who = if (c.actorId == data.me.id) stringResource(R.string.common_you_short) else Names.person(data, c.actorId)?.name?.substringBefore(' ') ?: ""

@@ -456,7 +456,7 @@ class AppContainer(private val app: Application) {
                         opened = { sounds.play(Sound.RECEIVE) }, present = {
                             // No avatar request can postpone publication, escape logout, or consume FCM's fallback.
                             notifier.showConversation(m.conversationId, chatTitle, isGroup || side != null,
-                                m.authorId ?: "?", authorName, m.body.take(300), cachedPushAvatar(author?.avatarUrl),
+                                m.authorId ?: "?", authorName, if (m.viewOnce) com.tiecoms.app.core.ViewOnce.preview(m, app.getString(R.string.vo_photo), app.getString(R.string.vo_voice), app.getString(R.string.vo_message)) else m.body.take(300), cachedPushAvatar(author?.avatarUrl),
                                 silent = ctx.foreground || !settings.soundsEnabled, badge = c.badge(), messageId = m.id, seq = m.seq, openUri = open,
                                 shortcutLabel = if (isGroup && side == null) conversationName(m.conversationId) else chatTitle, sound = chatSound)
                         })

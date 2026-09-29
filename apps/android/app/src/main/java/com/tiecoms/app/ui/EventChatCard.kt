@@ -64,7 +64,9 @@ import java.util.Locale
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun EventChatCard(eventId: String, creatorId: String, data: BootstrapDTO, onOpen: (String) -> Unit) {
+fun EventChatCard(eventId: String, creatorId: String, data: BootstrapDTO, onOpen: (String) -> Unit,
+                  /** Tanda 1.7: event.today («📅 ES HOY · 3:00 p. m.») o event.comments (franja de comentarios). */
+                  sys: com.tiecoms.app.core.System17.Body? = null, canPost: Boolean = true, fallback: String? = null) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val container = LocalContainer.current
@@ -80,7 +82,8 @@ fun EventChatCard(eventId: String, creatorId: String, data: BootstrapDTO, onOpen
     if (ev == null) {
         if (!missing) Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.widthIn(max = maxW).fillMaxWidth().height(64.dp)) {}
-        }
+        } else if (fallback != null) Text(fallback, style = MaterialTheme.typography.bodySmall, color = com.tiecoms.app.ui.theme.LocalChatColors.current.system, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp).testTag("system"))
         return
     }
     val (bg, fg) = eventColors(data, ev)
@@ -104,7 +107,9 @@ fun EventChatCard(eventId: String, creatorId: String, data: BootstrapDTO, onOpen
             // Borde izquierdo dibujado detrás (sin medidas intrínsecas: los FlowRow que saltan de línea se miden bien).
             Row(Modifier.drawBehind { drawRect(fg, size = androidx.compose.ui.geometry.Size(4.dp.toPx(), size.height)) }) {
                 Column(Modifier.padding(start = 14.dp, end = 12.dp, top = 10.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("📅 " + (stringResource(R.string.ev_card, creator) + if (cancelled) " · " + stringResource(R.string.cal_cancelled) else "").uppercase(),
+                    if (sys?.key == "event.today") Text("📅 " + stringResource(R.string.card_today, hm(ev.startsAt)), style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("eventCardToday"))
+                    else Text("📅 " + (stringResource(R.string.ev_card, creator) + if (cancelled) " · " + stringResource(R.string.cal_cancelled) else "").uppercase(),
                         style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.size(width = 46.dp, height = 50.dp).background(bg, RoundedCornerShape(10.dp)), horizontalAlignment = Alignment.CenterHorizontally,
@@ -136,6 +141,8 @@ fun EventChatCard(eventId: String, creatorId: String, data: BootstrapDTO, onOpen
                         Text(stringResource(R.string.ev_card_going, EventCards.going(ev), ev.invitees.size), style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp).testTag("eventCardGoing"))
                     }
+                    if (sys?.key == "event.comments") CommentsStrip(sys, data)
+                    EventCommentsBlock(ev, data, canPost, startOpen = sys?.key == "event.comments")
                     if (mine != null && EventCards.canRsvp(ev, data.me.id)) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("yes", "maybe", "no").forEach { r ->
                             val label = rsvpIcon(r) + " " + rsvpLabel(ctx, r)

@@ -8,6 +8,9 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ActivityScenario
@@ -32,6 +35,8 @@ import java.time.Instant
  * escribirle a Alicia, que descansaba). Aquí: la barra solo existe en las 5–6 pestañas, nunca dentro de una conversación
  * ni en pantallas empujadas, y el aviso de descanso del destinatario es informativo: se escribe y se envía igual.
  * Argumentos: apiUrl, email, password y peerId (la persona que descansa ahora).
+ * 1.7.0: además, con el aviso visible, la barra de búsqueda abierta y el teclado arriba, el campo y Enviar se ven y
+ * se tocan; también con alguien en «No molestar» (peerDndId) y en un chat grupal (groupId).
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -49,6 +54,39 @@ class Barra169UiTest {
         compose.waitForIdle(); Thread.sleep(800)
         val bmp = ins.uiAutomation.takeScreenshot() ?: return
         File(ins.targetContext.getExternalFilesDir(null), "barra-$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    /**
+     * Con la búsqueda abierta y el teclado arriba: el campo y ➤ se ven, quedan por encima del teclado y se envía.
+     * Devuelve el texto enviado.
+     */
+    private fun composerUsable(conversationId: String, label: String): String {
+        val client = app.container.client.value
+        compose.onNodeWithTag("chatSearch").performClick()
+        compose.waitUntilAtLeastOneExists(hasTestTag("chatSearchBar"), 5_000)
+        compose.onNodeWithTag("composer").performClick() // enfoca: sube el teclado
+        compose.waitForIdle(); Thread.sleep(1200)
+        val text = "$label ${System.currentTimeMillis() % 100000}"
+        compose.onNodeWithTag("composer").performTextInput(text)
+        compose.onNodeWithTag("composer").assertIsDisplayed()
+        compose.onNodeWithTag("send").assertIsDisplayed()
+        // Por encima del teclado: el borde inferior de ➤ no pasa del alto de la ventana menos el teclado.
+        var imeBottom = 0; var rootH = 0
+        ins.runOnMainSync {
+            val root = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).first().window.decorView
+            val insets = androidx.core.view.ViewCompat.getRootWindowInsets(root)
+            imeBottom = insets?.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())?.bottom ?: 0
+            rootH = root.height
+        }
+        val density = ins.targetContext.resources.displayMetrics.density
+        val sendBottomPx = compose.onNodeWithTag("send").getBoundsInRoot().bottom.value * density
+        assertTrue("➤ por encima del teclado (send=$sendBottomPx, alto=$rootH, teclado=$imeBottom)", sendBottomPx <= rootH - imeBottom + 2)
+        shot("$label-teclado")
+        compose.onNodeWithTag("send").performClick()
+        compose.waitUntil(15_000) { client.state.value.conversations[conversationId]?.messages?.any { it.body == text } == true }
+        compose.onNodeWithTag("chatSearchClose").performClick()
+        return text
     }
 
     @Test
@@ -90,6 +128,29 @@ class Barra169UiTest {
             compose.waitUntil(15_000) { client.state.value.conversations[direct]?.messages?.any { it.body == text } == true }
             assertTrue("Se envió aunque la otra persona descanse", client.state.value.pending.none { it.body == text })
             shot("03-enviado")
+
+            // 1.7.0: aviso de descanso + búsqueda abierta + teclado: se ve y se toca el campo y ➤.
+            composerUsable(direct, "descansa")
+
+            // Alguien en «No molestar» (no solo sueño): mismo resultado.
+            val dnd = arg("peerDndId")
+            if (dnd.isNotBlank()) {
+                val d2 = runBlocking { client.openDirect(dnd) }
+                ins.runOnMainSync { app.container.pendingLink.value = com.tiecoms.app.core.DeepLink.Conversation(d2) }
+                compose.waitUntilAtLeastOneExists(hasTestTag("composer"), 15_000)
+                compose.waitUntil(5_000) { !exists("tabs") }
+                composerUsable(d2, "nomolestar")
+            }
+            // Un chat grupal (con alguien que descansa dentro).
+            val group = arg("groupId")
+            if (group.isNotBlank()) {
+                ins.runOnMainSync { app.container.pendingLink.value = com.tiecoms.app.core.DeepLink.Conversation(group) }
+                compose.waitUntilAtLeastOneExists(hasTestTag("composer"), 15_000)
+                compose.waitUntil(5_000) { !exists("tabs") }
+                composerUsable(group, "grupo")
+            }
+            ins.runOnMainSync { app.container.pendingLink.value = com.tiecoms.app.core.DeepLink.Conversation(direct) }
+            compose.waitUntilAtLeastOneExists(hasTestTag("composer"), 15_000)
 
             // Pantallas empujadas: detalles del chat, sin barra.
             compose.onNodeWithTag("details").performClick()

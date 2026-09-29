@@ -113,31 +113,6 @@ struct CallHistoryPage: Decodable, Sendable {
     }
 }
 
-struct CallTranscriptSegmentDTO: Decodable, Equatable, Identifiable, Sendable {
-    var resultId: String
-    var speakerUserId: String?
-    var speakerName: String?
-    var language: String?
-    var text: String
-    var startMs: Int
-    var endMs: Int
-    var id: String { resultId }
-    init(from decoder: Decoder) throws {
-        let c = try container(decoder)
-        resultId = c.v("resultId", UUID().uuidString)
-        speakerUserId = c.o("speakerUserId")
-        speakerName = c.o("speakerName")
-        language = c.o("language")
-        text = c.v("text", "")
-        startMs = c.int("startMs")
-        endMs = c.int("endMs")
-    }
-    init(resultId: String, speakerUserId: String?, speakerName: String?, text: String, startMs: Int, endMs: Int = 0) {
-        self.resultId = resultId; self.speakerUserId = speakerUserId; self.speakerName = speakerName
-        self.text = text; self.startMs = startMs; self.endMs = endMs
-    }
-}
-
 struct CallTranscriptDTO: Decodable, Equatable, Sendable {
     var call: CallDTO
     var summary: String?
@@ -185,6 +160,8 @@ struct Caption: Equatable, Identifiable, Sendable {
     var userId: String?
     var text: String
     var partial: Bool
+    /// Pedazo de audio en Groq: «⏳ Procesando…».
+    var processing = false
     var id: String { resultId }
 }
 
@@ -352,7 +329,7 @@ struct CallView: Equatable {
 @MainActor
 @Observable
 final class CallCenter: CallMediaDelegate {
-    private(set) var view: CallView?
+    private(set) var view: CallView? { didSet { syncRecorder() } }
     private(set) var ringing: IncomingCall?
     /// Pantalla completa de la llamada (si no, la píldora de arriba).
     var expanded = false
@@ -363,8 +340,18 @@ final class CallCenter: CallMediaDelegate {
         if j.isFake || AppConfig.launchFlag("TCFakeCallMedia") { return NullCallMedia() }
         return ChimeCallMedia(join: j)
     }
-    /// Solo pruebas: con NullCallMedia, al prender la transcripción llegan dos frases de ejemplo (parcial y final).
+    /// Solo pruebas (CALLS_STT_PROVIDER=fake): en vez del micrófono se manda un pedazo «texto:…».
     @ObservationIgnored var fakeCaptions = AppConfig.launchFlag("TCFakeCaptions")
+    /// Grabador de pedazos para Groq (docs/LLAMADAS.md); las pruebas lo cambian.
+    @ObservationIgnored var makeRecorder: (CallCenter, CallDTO) -> CallChunkRecorder = { center, call in
+        let upload: (AudioChunk) -> Void = { [weak center] chunk in
+            guard let store = center?.store else { return }
+            Task { await store.sendCallAudio(call.id, chunk) }
+        }
+        if center.fakeCaptions || center.media is NullCallMedia && !AppConfig.launchFlag("TCRealMic") { return FakeChunkRecorder(upload: upload) }
+        return MicChunkRecorder(callStartedAt: ISODate.parse(call.startedAt) ?? Date(), isMuted: { [weak center] in center?.view?.muted ?? true }, upload: upload)
+    }
+    @ObservationIgnored private(set) var recorder: CallChunkRecorder?
     @ObservationIgnored private(set) var media: CallMedia?
     @ObservationIgnored private var beat: Task<Void, Never>?
     @ObservationIgnored private var flushTask: Task<Void, Never>?
@@ -454,13 +441,42 @@ final class CallCenter: CallMediaDelegate {
         let call = try await store.setCallTranscriptionRequest(v.call.id, on: on, aiSummary: aiSummary)
         if let call { view?.call = call }
         if !on { view?.captions = [] }
-        if on, fakeCaptions, media is NullCallMedia, let me = store.me?.id {
-            let t0 = Int(Date().timeIntervalSince1970 * 1000) % 100_000
-            mediaTranscript([TranscriptPiece(resultId: "fake-\(v.call.id)-1", isPartial: true, text: L("call.fakeCaption"), attendeeId: nil,
-                                             externalUserId: me, language: "es-US", startMs: t0, endMs: t0 + 800)])
-            mediaTranscript([TranscriptPiece(resultId: "fake-\(v.call.id)-1", isPartial: false, text: L("call.fakeCaption"), attendeeId: nil,
-                                             externalUserId: me, language: "es-US", startMs: t0, endMs: t0 + 1600)])
+    }
+
+    /// Graba el micrófono propio mientras la llamada está en vivo y se transcribe (como syncRecorder de la web).
+    private func syncRecorder() {
+        let want = view.map { $0.phase == .live && $0.call.transcribing } ?? false
+        if want, recorder == nil, let call = view?.call {
+            let r = makeRecorder(self, call)
+            recorder = r
+            r.start()
+        } else if !want, let r = recorder {
+            r.stop()
+            recorder = nil
         }
+    }
+
+    /// `call.processing` / `call.transcript` (por la cuenta): «⏳ Procesando…» con el nombre y luego las frases.
+    func onTranscriptEvent(callId: String, userId: String, segId: String, segments: [CallTranscriptSegmentDTO]?) {
+        guard var v = view, v.call.id == callId else { return }
+        let key = "p:\(segId)"
+        var caps = v.captions.filter { $0.resultId != key }
+        if let segments {
+            for s in segments {
+                caps.removeAll { $0.resultId == s.resultId }
+                caps.append(Caption(resultId: s.resultId, userId: s.speakerUserId ?? userId, text: s.text, partial: false))
+            }
+        } else {
+            caps.append(Caption(resultId: key, userId: userId, text: "", partial: true, processing: true))
+        }
+        v.captions = Array(caps.suffix(8))
+        view = v
+    }
+
+    /// Sumar personas a la llamada en curso.
+    func invite(_ userIds: [String]) async throws {
+        guard let id = view?.call.id, let store, !userIds.isEmpty else { return }
+        try await store.inviteToCall(id, userIds: userIds)
     }
 
     // MARK: Colgar

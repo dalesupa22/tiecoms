@@ -494,6 +494,10 @@ struct CallDTO: Codable, Equatable, Identifiable, Sendable {
     var transcribing: Bool
     /// Hay transcripción guardada para leer.
     var hasTranscript: Bool
+    /// Agregados a la llamada que no están en el chat (POST /calls/:id/invite).
+    var invitedUserIds: [String] = []
+    /// Nombres de quienes no están en mi lista de personas (p. ej. si me agregaron a la llamada).
+    var names: [String: String] = [:]
 
     var isVideo: Bool { kind == "video" }
     var isLive: Bool { endedAt == nil }
@@ -509,12 +513,39 @@ struct CallDTO: Codable, Equatable, Identifiable, Sendable {
         activeUserIds = c.v("activeUserIds", [])
         transcribing = c.v("transcribing", false)
         hasTranscript = c.v("hasTranscript", false)
+        invitedUserIds = c.v("invitedUserIds", [])
+        names = c.v("names", [:])
     }
 
     init(id: String, conversationId: String, kind: String = "audio", startedBy: String = "", startedAt: String = "", endedAt: String? = nil,
          activeUserIds: [String] = [], transcribing: Bool = false, hasTranscript: Bool = false) {
         self.id = id; self.conversationId = conversationId; self.kind = kind; self.startedBy = startedBy; self.startedAt = startedAt
         self.endedAt = endedAt; self.activeUserIds = activeUserIds; self.transcribing = transcribing; self.hasTranscript = hasTranscript
+    }
+}
+
+struct CallTranscriptSegmentDTO: Decodable, Equatable, Identifiable, Sendable {
+    var resultId: String
+    var speakerUserId: String?
+    var speakerName: String?
+    var language: String?
+    var text: String
+    var startMs: Int
+    var endMs: Int
+    var id: String { resultId }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        resultId = c.v("resultId", UUID().uuidString)
+        speakerUserId = c.o("speakerUserId")
+        speakerName = c.o("speakerName")
+        language = c.o("language")
+        text = c.v("text", "")
+        startMs = c.int("startMs")
+        endMs = c.int("endMs")
+    }
+    init(resultId: String, speakerUserId: String?, speakerName: String?, text: String, startMs: Int, endMs: Int = 0) {
+        self.resultId = resultId; self.speakerUserId = speakerUserId; self.speakerName = speakerName
+        self.text = text; self.startMs = startMs; self.endMs = endMs
     }
 }
 
@@ -701,6 +732,11 @@ enum AccountEvent: Decodable, Equatable, Sendable {
     case issueHidden(issueId: String, conversationId: String)
     /// Me están llamando (no llega a quien la empezó ni a quien tiene No molestar).
     case callRinging(call: CallDTO, conversationTitle: String?, callerName: String)
+    /// Una llamada a la que me agregaron sin estar en el chat cambió (llega por la cuenta).
+    case callUpdated(CallDTO)
+    /// Transcripción por pedazos (Groq): uno se está procesando o ya trae sus frases.
+    case callProcessing(callId: String, userId: String, segId: String)
+    case callTranscript(callId: String, userId: String, segId: String, segments: [CallTranscriptSegmentDTO], failed: Bool)
     case other(type: String)
 
     init(from decoder: Decoder) throws {
@@ -727,6 +763,13 @@ enum AccountEvent: Decodable, Equatable, Sendable {
             if let x: SleepDTO = c.o("sleep") { self = .sleepChanged(x) } else { self = .other(type: type) }
         case "scheduled.updated":
             if let x: ScheduledMessageDTO = c.o("scheduled") { self = .scheduledUpdated(x) } else { self = .other(type: type) }
+        case "call.updated":
+            if let x: CallDTO = c.o("call") { self = .callUpdated(x) } else { self = .other(type: type) }
+        case "call.processing":
+            self = .callProcessing(callId: c.v("callId", ""), userId: c.v("userId", ""), segId: c.v("segId", ""))
+        case "call.transcript":
+            self = .callTranscript(callId: c.v("callId", ""), userId: c.v("userId", ""), segId: c.v("segId", ""),
+                                   segments: c.lossyArray("segments"), failed: c.v("failed", false))
         case "call.ringing":
             if let x: CallDTO = c.o("call") { self = .callRinging(call: x, conversationTitle: c.o("conversationTitle"), callerName: c.v("callerName", "")) }
             else { self = .other(type: type) }

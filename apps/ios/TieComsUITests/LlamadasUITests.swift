@@ -126,5 +126,44 @@ final class LlamadasUITests: XCTestCase {
         app.buttons["call.pill"].tap()
         app.buttons["call.hangUp"].tap()
         XCTAssertFalse(app.buttons["call.pill"].waitForExistence(timeout: 2))
+
+        // Sonidos (docs/SONIDOS.md): Detalles › Sonido y Tú › predeterminado y tono de llamada.
+        app.buttons["chat.header"].tap()
+        let soundRow = app.buttons["details.sound"]
+        for _ in 0..<4 where !soundRow.isHittable { app.swipeUp() }
+        XCTAssertTrue(soundRow.waitForExistence(timeout: 5))
+        soundRow.tap()
+        XCTAssertTrue(app.buttons["sound.pick.campana"].waitForExistence(timeout: 3))
+        shot("12-detalles-sonido")
+        app.buttons["sound.pick.campana"].tap()
+        bar.buttons["Tú"].tap()
+        let ring = app.buttons["settings.ringtone"].firstMatch
+        for _ in 0..<6 where !ring.exists || !ring.isHittable { app.swipeUp() }
+        shot("13-ajustes-sonidos")
+    }
+
+    /// Solo capturas de la barra de pestañas (TEST_RUNNER_TC_LANG=es|en, TEST_RUNNER_TC_SHOT_TAG para el nombre).
+    func testTabBarShots() throws {
+        let f = try fixture()
+        let lang = env["TC_LANG"] ?? "es"
+        let app = XCUIApplication()
+        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES", "-TCResetLanguage", "YES",
+                               "-AppleLanguages", "(\(lang))", "-AppleLocale", lang == "es" ? "es_CO" : "en_US"]
+        app.launch()
+        let email = app.textFields["login.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 15))
+        email.tap(); email.typeText(f.a.email)
+        let pw = app.secureTextFields["login.password"]
+        pw.tap(); pw.typeText(f.password)
+        app.buttons["login.submit"].tap()
+        let notNow = app.buttons.matching(NSPredicate(format: "label IN %@", ["Not Now", "Ahora no"])).firstMatch
+        if notNow.waitForExistence(timeout: 5) { notNow.tap() }
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 15))
+        sleep(2)
+        let tag = env["TC_SHOT_TAG"] ?? lang
+        shot("tabs-\(tag)-grupos")
+        app.tabBars.firstMatch.buttons.element(boundBy: 1).tap()
+        sleep(1)
+        shot("tabs-\(tag)-dms")
     }
 }

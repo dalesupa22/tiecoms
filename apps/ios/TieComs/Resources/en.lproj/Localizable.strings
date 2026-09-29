@@ -283,6 +283,11 @@
 "cal.view.week" = "Week";
 "cal.week" = "Week of {date}";
 "cal.yourTz" = "Your time";
+"call.add" = "Add to call";
+"call.addHint" = "Their phone rings even if they are not in this chat. They only see the call, not the messages.";
+"call.addNone" = "Nobody else to add.";
+"call.addSend" = "Call ({n})";
+"call.added" = "Calling {n}…";
 "call.answer" = "Answer";
 "call.answerAudio" = "Answer without camera";
 "call.answerVideo" = "Answer with camera";
@@ -308,10 +313,11 @@
 "call.minimize" = "Minimize";
 "call.mute" = "Mute microphone";
 "call.noCamera" = "No camera found";
+"call.processing" = "Processing…";
 "call.summary" = "Summary";
 "call.switchCamera" = "Switch camera";
 "call.title" = "Call";
-"call.transcribingAll" = "Transcription is on: everyone in the call can see it";
+"call.transcribingAll" = "Transcription is on: everyone in the call can see it · text arrives every ~15 s";
 "call.transcribingShort" = "transcribing";
 "call.transcriptEmpty" = "No lines saved yet.";
 "call.transcriptOff" = "Stop transcription";

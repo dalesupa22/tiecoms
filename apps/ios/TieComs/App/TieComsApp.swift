@@ -38,6 +38,7 @@ struct TieComsApp: App {
         _updates = State(initialValue: AppUpdateChecker(baseURL: base))
         AppFeedback.shared.openConversationId = { [weak s] in s?.appActive == true ? s?.openConversationId : nil }
         AppFeedback.shared.onOpenConversation = { [weak s] id in s?.handle(.conversation(id)) }
+        AppFeedback.shared.onAnswerCall = { [weak s] callId in s?.answerCallFromPush(callId) }
         AppFeedback.shared.onOpenSide = { [weak s] origin, side in s?.openSide(origin: origin, side: side) }
         AppFeedback.shared.onOpenMessage = { [weak s] conv, mid in s?.openMessage(conv, messageId: mid) }
         AppFeedback.shared.onOpenIssue = { [weak s] issue, conv, inChat in s?.openIssue(issue, conversationId: conv, inChat: inChat) }

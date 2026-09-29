@@ -222,6 +222,17 @@ final class AppStore {
     var callsRevision = 0
     /// La llamada de este dispositivo y el aviso de llamada entrante.
     let callCenter = CallCenter()
+    /// «Contestar» desde el push con la app cerrada: se entra al tener sesión.
+    @ObservationIgnored var pendingCallJoin: String?
+
+    /// Push de llamada (TC_CALL): Contestar entra con /calls/:id/join (ya o al terminar de abrir).
+    func answerCallFromPush(_ callId: String) {
+        guard status == .ready else { pendingCallJoin = callId; return }
+        pendingCallJoin = nil
+        callCenter.dismissRing()
+        let center = callCenter
+        Task { do { try await center.join(callId, camera: false) } catch { show(L10n.errorText(error)) } }
+    }
     var meetingAttempts: [String: MeetingAttempt] = [:]
     @ObservationIgnored var meetingAuthorization: MeetingAuthorization?
 
@@ -374,6 +385,7 @@ final class AppStore {
         startPathMonitor()
         scheduleFlush(0)
         consumePendingLink()
+        if let callId = pendingCallJoin { answerCallFromPush(callId) }
         #if DEBUG
         // Solo pruebas/diagnóstico: abrir una conversación al entrar (-TCOpenConversation <id>).
         if let id = AppConfig.launchValue("TCOpenConversation") { navigate(to: .conversation(id)) }
@@ -462,6 +474,7 @@ final class AppStore {
             if callCenter.view != nil || callCenter.ringing != nil { callCenter.reset() }
         }
         ShareTargets.save(d, apiURL: api.baseURL)
+        ChatSounds.shareRingtone(d.me.ringtone)
     }
 
     func scheduleBootstrap() {
@@ -564,6 +577,13 @@ final class AppStore {
             guard data?.callsEnabled == true else { return }
             putCall(call)
             if NotifyRule.accountAlert(dnd: dndActive) { callCenter.showIncoming(call, callerName: caller, title: title) }
+        case .callUpdated(let call):
+            guard data?.callsEnabled == true else { return }
+            putCall(call)
+        case .callProcessing(let callId, let userId, let segId):
+            callCenter.onTranscriptEvent(callId: callId, userId: userId, segId: segId, segments: nil)
+        case .callTranscript(let callId, let userId, let segId, let segments, _):
+            callCenter.onTranscriptEvent(callId: callId, userId: userId, segId: segId, segments: segments)
         case .other: break
         }
     }

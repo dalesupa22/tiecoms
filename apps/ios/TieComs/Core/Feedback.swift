@@ -83,6 +83,8 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     var onOpenIssue: ((String, String, Bool) -> Void)?
     /// Acción «Responder» desde la notificación (envía por HTTP).
     var onReply: ((String, String) async -> Void)?
+    /// Push de llamada: «Contestar» (o tocarlo) entra a la llamada.
+    var onAnswerCall: ((String) -> Void)?
     /// Acción «Marcar como leído».
     var onMarkRead: ((String) async -> Void)?
     /// El socket está en línea: los push en primer plano sobran (el aviso local ya salió).
@@ -182,6 +184,8 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
         let isEventSoon = (info["type"] as? String) == "event" && info["minutes"] != nil
         // El aviso de reunión se muestra siempre (aunque sea el chat abierto), salvo el push duplicado del aviso local.
         if isEventSoon { return isRemote && online ? [] : [.banner, .list, .sound] }
+        // Llamada: con la app abierta y en línea ya suena el aviso propio (call.ringing).
+        if (info["type"] as? String) == "call" { return online ? [] : [.banner, .list, .sound] }
         // En primer plano: nada si es la conversación abierta (ya sonó tc_receive).
         if let conv, conv == open { return [] }
         // Con el socket en línea el aviso local ya salió: el push remoto sería un duplicado.
@@ -197,10 +201,16 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
             if !text.isEmpty, let reply = await MainActor.run(body: { AppFeedback.shared.onReply }) { await reply(conv, text) }
         case PushRegistration.markReadAction:
             if let mark = await MainActor.run(body: { AppFeedback.shared.onMarkRead }) { await mark(conv) }
+        case PushRegistration.callDeclineAction, UNNotificationDismissActionIdentifier:
+            break
+        case PushRegistration.callAnswerAction where PushPayload(userInfo: response.notification.request.content.userInfo)?.callId != nil:
+            let id = PushPayload(userInfo: response.notification.request.content.userInfo)?.callId ?? ""
+            await MainActor.run { AppFeedback.shared.onAnswerCall?(id) }
         default:
             let p = PushPayload(userInfo: response.notification.request.content.userInfo)
             await MainActor.run {
-                if p?.kind == .issue, let issue = p?.issueId { AppFeedback.shared.onOpenIssue?(issue, conv, p?.inChat ?? true) }
+                if p?.kind == .call, let callId = p?.callId { AppFeedback.shared.onAnswerCall?(callId) }
+                else if p?.kind == .issue, let issue = p?.issueId { AppFeedback.shared.onOpenIssue?(issue, conv, p?.inChat ?? true) }
                 else if p?.kind == .side, let origin = p?.sideOfConversationId { AppFeedback.shared.onOpenSide?(origin, conv) }
                 else if p?.kind == .reaction, let mid = p?.messageId, let open = AppFeedback.shared.onOpenMessage { open(conv, mid) }
                 else { AppFeedback.shared.onOpenConversation?(conv) }
@@ -234,6 +244,8 @@ enum PushRegistration {
     }
 
     static let replyAction = "TC_REPLY"
+    static let callAnswerAction = "TC_CALL_ANSWER"
+    static let callDeclineAction = "TC_CALL_DECLINE"
     static let markReadAction = "TC_MARK_READ"
 
     /// Categorías: TC_MESSAGE con Responder (texto) y Marcar como leído; TC_REMINDER y TC_EVENT abren la conversación.
@@ -249,6 +261,11 @@ enum PushRegistration {
             // Sidechat: «Responder» en línea envía al sidechat sin abrir la app.
             UNNotificationCategory(identifier: PushPayload.sideCategory, actions: [reply, read], intentIdentifiers: ["INSendMessageIntent"],
                                    options: [.hiddenPreviewsShowTitle]),
+            // Llamada entrante: Contestar abre la app y entra; Ahora no solo cierra el aviso.
+            UNNotificationCategory(identifier: PushPayload.callCategory,
+                                   actions: [UNNotificationAction(identifier: callAnswerAction, title: L("call.answer"), options: [.foreground]),
+                                             UNNotificationAction(identifier: callDeclineAction, title: L("call.decline"), options: [.destructive])],
+                                   intentIdentifiers: [], options: [.customDismissAction]),
         ]
     }
 }

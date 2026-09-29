@@ -5,7 +5,8 @@ import Foundation
 struct PushPayload: Equatable {
     /// reaction = reaccionaron a un mensaje mío: abre la conversación en `messageId`.
     /// issue = me asignaron una tarea (docs/TAREAS.md): abre el asunto; si `inChat` es false, sin abrir el chat.
-    enum Kind: String { case message, reminder, event, side, mention, reaction, issue }
+    /// call = llamada entrante (docs/LLAMADAS.md › Push): Contestar entra con /calls/:id/join.
+    enum Kind: String { case message, reminder, event, side, mention, reaction, issue, call }
 
     var kind: Kind
     var conversationId: String
@@ -26,6 +27,9 @@ struct PushPayload: Equatable {
     var sideOfExcerpt: String?
     /// Solo en el aviso de 10 min antes (la convocatoria no lo trae).
     var minutes: Int?
+    /// Push de llamada (type 'call').
+    var callId: String?
+    var callKind: String?
     var title: String
     var subtitle: String?
     var body: String
@@ -37,6 +41,9 @@ struct PushPayload: Equatable {
     static let reminderCategory = "TC_REMINDER"
     static let eventCategory = "TC_EVENT"
     static let sideCategory = "TC_SIDE"
+    static let callCategory = "TC_CALL"
+    /// Archivo del tono elegido para el push de llamada (lo guarda la app en el grupo compartido; lo lee la extensión).
+    static let ringtoneKey = "tc.ringtoneFile"
 
     init?(userInfo: [AnyHashable: Any]) {
         func str(_ k: String) -> String? {
@@ -54,6 +61,8 @@ struct PushPayload: Equatable {
         reminderId = str("reminderId")
         eventId = str("eventId")
         issueId = str("issueId")
+        callId = str("callId")
+        callKind = str("kind")
         if let b = userInfo["inChat"] as? Bool { inChat = b } else if let s = str("inChat") { inChat = !(s == "false" || s == "0") }
         minutes = str("minutes").flatMap(Int.init)
         var sideOf = userInfo["sideOf"] as? [String: Any]

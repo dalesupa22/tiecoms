@@ -283,6 +283,11 @@
 "cal.view.week" = "Semana";
 "cal.week" = "Semana del {date}";
 "cal.yourTz" = "Tu hora";
+"call.add" = "Agregar a la llamada";
+"call.addHint" = "Le suena aunque no esté en este chat. Solo verá la llamada, no los mensajes.";
+"call.addNone" = "No hay más personas para agregar.";
+"call.addSend" = "Llamar ({n})";
+"call.added" = "Llamando a {n}…";
 "call.answer" = "Contestar";
 "call.answerAudio" = "Contestar sin cámara";
 "call.answerVideo" = "Contestar con cámara";
@@ -308,10 +313,11 @@
 "call.minimize" = "Minimizar";
 "call.mute" = "Silenciar micrófono";
 "call.noCamera" = "No encontramos una cámara";
+"call.processing" = "Procesando…";
 "call.summary" = "Resumen";
 "call.switchCamera" = "Cambiar de cámara";
 "call.title" = "Llamada";
-"call.transcribingAll" = "Se está transcribiendo: todos en la llamada lo ven";
+"call.transcribingAll" = "Se está transcribiendo: todos en la llamada lo ven · el texto llega cada ~15 s";
 "call.transcribingShort" = "transcribiendo";
 "call.transcriptEmpty" = "Todavía no hay frases guardadas.";
 "call.transcriptOff" = "Detener la transcripción";

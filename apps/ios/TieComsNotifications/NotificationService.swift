@@ -14,6 +14,14 @@ final class NotificationService: UNNotificationServiceExtension {
         best = content
         guard let p = PushPayload(userInfo: request.content.userInfo) else { contentHandler(content); return }
         content.threadIdentifier = p.threadId ?? p.conversationId
+        // Llamada entrante: suena el tono elegido (ring_<nombre>.caf del bundle de la app), no el de mensaje.
+        if p.kind == .call {
+            let file = UserDefaults(suiteName: "group.com.chaggu.app")?.string(forKey: PushPayload.ringtoneKey) ?? "ring_clasico"
+            content.sound = UNNotificationSound(named: UNNotificationSoundName("\(file).caf"))
+            content.categoryIdentifier = PushPayload.callCategory
+            contentHandler(content)
+            return
+        }
         // «Te asignó una tarea» (type 'issue'): sin foto de remitente; si no estoy en el chat, agrupa por el asunto
         // (el servidor ya no manda el nombre del grupo). Al tocarlo, la app abre el asunto (AppFeedback.onOpenIssue).
         if p.kind == .issue {

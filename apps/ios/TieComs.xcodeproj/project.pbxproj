@@ -163,6 +163,7 @@
 		B8C38482ADBC425E9FD69738 /* QuickSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 302C28C3E4BA05FEF2C7DA1B /* QuickSearch.swift */; };
 		BCEBBE1E4545F6632C9F1E56 /* SilenceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 893473FDBFD159D372AAD1A7 /* SilenceUITests.swift */; };
 		BF823CAF90098A4FBD5EF2A3 /* AttachmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 787E89B5DD3CCB47B23CF7B9 /* AttachmentViews.swift */; };
+		C0D257FDB7A4EA4084B2DA84 /* CallRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = C335C5192C1E3560004AD1C4 /* CallRecorder.swift */; };
 		C1FE08A06C676C845F640EE1 /* SleepViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FA9EAB28848181435FA4D36 /* SleepViews.swift */; };
 		C266980A6A153DE0496A274B /* Attachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E9802F016F0B0A5FD993D1 /* Attachments.swift */; };
 		C267D7565F6DF8D77BE41AEC /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5512C5E20A20FE9F456CC2F /* HomeView.swift */; };
@@ -423,6 +424,7 @@
 		BC9F4FC91E577352D1412556 /* V9LanguageSubjectsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V9LanguageSubjectsTests.swift; sourceTree = "<group>"; };
 		BE4840348E1744F41C5D7E32 /* AssistantUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantUITests.swift; sourceTree = "<group>"; };
 		C0EE4F0835A244D173D5CE5E /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		C335C5192C1E3560004AD1C4 /* CallRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallRecorder.swift; sourceTree = "<group>"; };
 		C3C077B49624604810EB0C19 /* snd_marimba_m.caf */ = {isa = PBXFileReference; path = snd_marimba_m.caf; sourceTree = "<group>"; };
 		C65C910BCFA9055C4CAEF2A6 /* snd_cristal_m.caf */ = {isa = PBXFileReference; path = snd_cristal_m.caf; sourceTree = "<group>"; };
 		C9588E3F5C22848C8993510F /* TieComs.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TieComs.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -523,6 +525,7 @@
 				15B56935C512DB24578AC9B0 /* AssistantVoice.swift */,
 				E4E9802F016F0B0A5FD993D1 /* Attachments.swift */,
 				F1F26A8663845155717B1EED /* CalendarGrid.swift */,
+				C335C5192C1E3560004AD1C4 /* CallRecorder.swift */,
 				075C265E661534831521432C /* Calls.swift */,
 				A533581A82A3D8834C30DBED /* ChatNav.swift */,
 				0A88C6E97C73AB1E986EE459 /* ChimeCallMedia.swift */,
@@ -1007,6 +1010,7 @@
 				252B7B0B0F9F47FF693A5FD0 /* Attachments.swift in Sources */,
 				5C5A90EE8D7AFC7E28E68DF0 /* AuthViews.swift in Sources */,
 				684594BBF3A68C08608001B2 /* CalendarGrid.swift in Sources */,
+				C0D257FDB7A4EA4084B2DA84 /* CallRecorder.swift in Sources */,
 				CCFE51781A6060B6ED4DD580 /* CallViews.swift in Sources */,
 				ACD77B05FD80DAA8B940A2FB /* Calls.swift in Sources */,
 				4E59CFA741A2A59474D6B018 /* ChatBarViews.swift in Sources */,
@@ -1399,7 +1403,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 25;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = B76US7H3L3;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -1421,7 +1425,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
-				MARKETING_VERSION = 1.6.7;
+				MARKETING_VERSION = 1.6.8;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -1508,7 +1512,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 25;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = B76US7H3L3;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -1524,7 +1528,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
-				MARKETING_VERSION = 1.6.7;
+				MARKETING_VERSION = 1.6.8;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

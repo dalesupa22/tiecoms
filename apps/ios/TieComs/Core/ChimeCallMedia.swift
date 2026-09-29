@@ -33,7 +33,7 @@ final class ChimeCallMedia: NSObject, CallMedia {
         av.addRealtimeObserver(observer: self)
         av.addVideoTileObserver(observer: self)
         av.addActiveSpeakerObserver(policy: DefaultActiveSpeakerPolicy(), observer: self)
-        av.addRealtimeTranscriptEventObserver?(observer: self)
+        // La transcripción va por Groq (pedazos del micrófono, CallRecorder.swift): no se usa el TranscriptEvent de Chime.
         try av.start(audioVideoConfiguration: AudioVideoConfiguration(audioMode: .mono48K, callKitEnabled: false))
         av.startRemoteVideo()
     }

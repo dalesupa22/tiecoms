@@ -35,6 +35,9 @@ enum ChatSounds {
 
     static func ringFile(_ r: String?) -> String { "ring_\(ringtone(r))" }
 
+    /// La extensión de notificaciones pone este tono al push de llamada.
+    static func shareRingtone(_ r: String?) { L10n.defaults.set(ringFile(r), forKey: PushPayload.ringtoneKey) }
+
     static func label(_ s: String) -> String { s == none ? L("sound.none") : L("sound.n.\(s)") }
     static func ringLabel(_ r: String) -> String { L("ring.n.\(r)") }
 }
@@ -78,6 +81,7 @@ extension AppStore {
             if let messageSound { $0.messageSound = messageSound }
             if let ringtone { $0.ringtone = ringtone }
         }
+        ChatSounds.shareRingtone(me?.ringtone)
         try await api.requestData("/me/sounds", method: "PUT", json: body)
     }
 

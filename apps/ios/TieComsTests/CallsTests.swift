@@ -221,4 +221,55 @@ final class CallsTests: XCTestCase {
         XCTAssertNil(TopicRules.autoTopic([msg(2, topic: "fin")], after: 2, me: "a", active: active), "sin no leídos")
         XCTAssertEqual(TopicRules.autoTopic([msg(2, topic: "fin"), msg(3, kind: "system")], after: 1, me: "a", active: active), "fin", "lo de sistema no cuenta")
     }
+
+    // MARK: 1.6.8: Groq por pedazos, agregar personas y push de llamada
+
+    func testDecodesInvitesAndTranscriptEvents() throws {
+        let c = try dec(CallDTO.self, #"{"id":"x","conversationId":"c9","activeUserIds":["b"],"invitedUserIds":["z"],"names":{"z":"Zoe Ruiz"}}"#)
+        XCTAssertEqual(c.invitedUserIds, ["z"]); XCTAssertEqual(c.names["z"], "Zoe Ruiz")
+        XCTAssertEqual(try dec(CallDTO.self, #"{"id":"x"}"#).names, [:])
+        guard case .callUpdated(let u) = try dec(AccountEvent.self, #"{"type":"call.updated","call":\#(callJSON)}"#) else { return XCTFail() }
+        XCTAssertEqual(u.id, "call1")
+        guard case .callProcessing(let cid, let uid, let seg) = try dec(AccountEvent.self, #"{"type":"call.processing","callId":"call1","userId":"b","segId":"s1"}"#) else { return XCTFail() }
+        XCTAssertEqual([cid, uid, seg], ["call1", "b", "s1"])
+        let t = try dec(AccountEvent.self, #"{"type":"call.transcript","callId":"call1","userId":"b","segId":"s1","segments":[{"resultId":"s1:0","speakerUserId":"b","speakerName":"Bruno","text":"Hola","startMs":1000,"endMs":2000}]}"#)
+        guard case .callTranscript(_, _, _, let segs, let failed) = t else { return XCTFail() }
+        XCTAssertEqual(segs.map(\.text), ["Hola"]); XCTAssertFalse(failed)
+    }
+
+    func testProcessingThenPhrasesReplaceCaption() async throws {
+        let s = try ControlledURLProtocol.store()
+        s.seedForTesting(try dec(BootstrapDTO.self, #"{"me":{"id":"a","name":"Ana"},"features":{"calls":true},"conversations":[{"id":"c1","kind":"direct","memberIds":["a","b"],"canPost":true}]}"#))
+        ControlledURLProtocol.handler = { req in Task { @MainActor in req.respond(joinJSON) } }
+        try await s.callCenter.start("c1", kind: "audio")
+        s.socketEventForTesting("account.event", #"{"type":"call.processing","callId":"call1","userId":"b","segId":"s1"}"#)
+        XCTAssertEqual(s.callCenter.view?.captions.map(\.processing), [true])
+        s.socketEventForTesting("account.event", #"{"type":"call.transcript","callId":"call1","userId":"b","segId":"s1","segments":[{"resultId":"s1:0","speakerUserId":"b","text":"Hola a todos","startMs":0,"endMs":1}]}"#)
+        XCTAssertEqual(s.callCenter.view?.captions.map(\.text), ["Hola a todos"], "las frases reemplazan el «Procesando…»")
+        s.socketEventForTesting("account.event", #"{"type":"call.processing","callId":"otra","userId":"b","segId":"s2"}"#)
+        XCTAssertEqual(s.callCenter.view?.captions.count, 1, "otra llamada: se ignora")
+        s.callCenter.reset()
+    }
+
+    func testChunkRules() {
+        XCTAssertFalse(ChunkRules.shouldCut(elapsed: 11_900, sinceVoice: 5000), "antes de 12 s no corta")
+        XCTAssertTrue(ChunkRules.shouldCut(elapsed: 12_100, sinceVoice: 800), "silencio después de 12 s")
+        XCTAssertFalse(ChunkRules.shouldCut(elapsed: 15_000, sinceVoice: 200), "sigue hablando")
+        XCTAssertTrue(ChunkRules.shouldCut(elapsed: 20_000, sinceVoice: 0), "máximo 20 s")
+        XCTAssertFalse(ChunkRules.shouldSend(voicedMs: 700)); XCTAssertTrue(ChunkRules.shouldSend(voicedMs: 800))
+        XCTAssertTrue(ChunkRules.isVoice(rms: 0.05, muted: false)); XCTAssertFalse(ChunkRules.isVoice(rms: 0.05, muted: true), "silenciado no cuenta")
+        XCTAssertFalse(ChunkRules.isVoice(rms: ChunkRules.rms(fromDecibels: -50), muted: false))
+        XCTAssertTrue(ChunkRules.isVoice(rms: ChunkRules.rms(fromDecibels: -30), muted: false))
+        let id = ChunkRules.segId()
+        XCTAssertNotNil(id.range(of: #"^[A-Za-z0-9_-]{6,64}$"#, options: .regularExpression)); XCTAssertNotEqual(id, ChunkRules.segId())
+    }
+
+    func testCallPushPayloadAndCategory() {
+        let p = PushPayload(userInfo: ["aps": ["alert": ["title": "Bruno", "body": "📞 Te está llamando"], "category": "TC_CALL"],
+                                       "type": "call", "callId": "call1", "conversationId": "c1", "kind": "video"])
+        XCTAssertEqual(p?.kind, .call); XCTAssertEqual(p?.callId, "call1"); XCTAssertEqual(p?.callKind, "video"); XCTAssertEqual(p?.category, PushPayload.callCategory)
+        let cat = PushRegistration.categories().first { $0.identifier == PushPayload.callCategory }
+        XCTAssertEqual(cat?.actions.map(\.identifier), [PushRegistration.callAnswerAction, PushRegistration.callDeclineAction])
+        XCTAssertTrue(cat?.actions.first?.options.contains(.foreground) ?? false, "Contestar abre la app")
+    }
 }

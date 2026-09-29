@@ -5,8 +5,9 @@ import UIKit
 // pantalla de la llamada (con subtítulos y transcripción), detalle con resumen y transcripción, y pestaña «Llamadas».
 // Paridad con apps/web/src/screens/Call.tsx. Todo aparece solo con `features.calls` del bootstrap.
 
-private func firstName(_ d: BootstrapDTO, _ id: String?) -> String {
-    guard let id, let n = Naming.person(d, id)?.name else { return "" }
+/// Nombre corto; si la persona no está en mi lista (me agregaron a la llamada), sale de `call.names`.
+private func firstName(_ d: BootstrapDTO, _ id: String?, _ names: [String: String] = [:]) -> String {
+    guard let id, let n = Naming.person(d, id)?.name ?? names[id] else { return "" }
     return n.split(separator: " ").first.map(String.init) ?? n
 }
 
@@ -152,7 +153,11 @@ struct ActiveCallPill: View {
 enum CallTitle {
     static func text(_ d: BootstrapDTO, _ call: CallDTO) -> String {
         if let c = d.conversations.first(where: { $0.id == call.conversationId }) { return Naming.title(d, c) }
-        return L("call.title")
+        // Me agregaron a una llamada de un chat donde no estoy: los nombres de quienes están.
+        let others = (call.activeUserIds + call.invitedUserIds).filter { $0 != d.me.id }.map { firstName(d, $0, call.names) }.filter { !$0.isEmpty }
+        var seen = Set<String>()
+        let uniq = others.filter { seen.insert($0).inserted }
+        return uniq.isEmpty ? L("call.title") : uniq.joined(separator: ", ")
     }
 }
 
@@ -177,6 +182,7 @@ private struct CallVideoTile: UIViewRepresentable {
 struct CallScreen: View {
     @Environment(AppStore.self) private var store
     @State private var consent = false
+    @State private var adding = false
 
     var body: some View {
         let center = store.callCenter
@@ -208,6 +214,7 @@ struct CallScreen: View {
             }
             .presentationDetents([.medium])
         }
+        .sheet(isPresented: $adding) { AddToCallSheet() }
         .overlay(alignment: .bottom) { ToastView(inSheet: true) }
     }
 
@@ -226,7 +233,10 @@ struct CallScreen: View {
                 .accessibilityIdentifier("call.clock")
             }
             .frame(maxWidth: .infinity)
-            Color.clear.frame(width: 44, height: 44)
+            Button { adding = true } label: {
+                Image(systemName: "person.badge.plus").font(.headline).foregroundStyle(.white).frame(width: 44, height: 44)
+            }
+            .accessibilityLabel(L("call.add")).accessibilityIdentifier("call.add")
         }
     }
 
@@ -241,7 +251,7 @@ struct CallScreen: View {
                         .aspectRatio(video.count > 1 ? 3 / 4 : 3 / 4, contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                         .overlay(alignment: .bottomLeading) {
-                            Text(t.local ? L("call.you") : firstName(d, t.userId)).font(.caption.weight(.semibold)).foregroundStyle(.white)
+                            Text(t.local ? L("call.you") : firstName(d, t.userId, v.call.names)).font(.caption.weight(.semibold)).foregroundStyle(.white)
                                 .padding(.horizontal, 8).padding(.vertical, 3).background(Capsule().fill(.black.opacity(0.5))).padding(6)
                         }
                         .id(t.tileId)
@@ -260,7 +270,7 @@ struct CallScreen: View {
                             Avatar(person: Naming.person(d, id), org: nil, size: 76)
                                 .overlay(Circle().stroke(Color.green, lineWidth: speaking ? 4 : 0).padding(-4))
                                 .animation(.easeOut(duration: 0.15), value: speaking)
-                            Text(id == d.me.id ? L("call.you") : firstName(d, id)).font(.footnote).foregroundStyle(.white).lineLimit(1)
+                            Text(id == d.me.id ? L("call.you") : firstName(d, id, v.call.names)).font(.footnote).foregroundStyle(.white).lineLimit(1)
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("call.person.\(id)")
@@ -275,8 +285,9 @@ struct CallScreen: View {
 
     private func captions(_ d: BootstrapDTO, _ v: CallView) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            ForEach(v.captions.suffix(3)) { c in
-                (Text("\(c.userId == d.me.id ? L("call.you") : (firstName(d, c.userId).isEmpty ? "·" : firstName(d, c.userId))): ").bold() + Text(c.text))
+            ForEach(v.captions.suffix(4)) { c in
+                let who = c.userId == d.me.id ? L("call.you") : firstName(d, c.userId, v.call.names)
+                (Text("\(who.isEmpty ? "·" : who): ").bold() + Text(c.processing ? "⏳ \(L("call.processing"))" : c.text))
                     .font(.subheadline).foregroundStyle(.white.opacity(c.partial ? 0.65 : 1))
             }
         }
@@ -343,6 +354,62 @@ struct TranscriptConsentSheet: View {
             }
         }
         .preferredColorScheme(nil)
+    }
+}
+
+/// Sumar personas a la llamada: solo gente de mi lista (empresa o espacio), sin quienes ya están o están invitados.
+struct AddToCallSheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var picked: Set<String> = []
+    @State private var busy = false
+    var body: some View {
+        NavigationStack {
+            if let d = store.data, let call = store.callCenter.view?.call {
+                let inside = Set(call.activeUserIds + call.invitedUserIds + [d.me.id])
+                let q = query.trimmingCharacters(in: .whitespaces)
+                let list = d.people.filter { !inside.contains($0.id) && $0.kind != "agent" && (q.isEmpty || $0.name.localizedCaseInsensitiveContains(q)) }.prefix(80)
+                List {
+                    Section {
+                        if list.isEmpty { Text(L("call.addNone")).foregroundStyle(Theme.textSecondary) }
+                        ForEach(Array(list)) { p in
+                            let on = picked.contains(p.id)
+                            Button { if on { picked.remove(p.id) } else { picked.insert(p.id) } } label: {
+                                HStack(spacing: 12) {
+                                    Avatar(person: p, org: Naming.org(d, p.orgId), size: 34)
+                                    Text(p.name).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                                    Spacer()
+                                    Image(systemName: on ? "checkmark.circle.fill" : "circle").font(.title3)
+                                        .foregroundStyle(on ? Theme.accentText : Theme.textSecondary.opacity(0.5))
+                                }
+                            }
+                            .accessibilityAddTraits(on ? .isSelected : [])
+                            .accessibilityIdentifier("call.add.\(p.id)")
+                        }
+                    } footer: { Text(L("call.addHint")) }
+                }
+                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: L("calls.search"))
+                .navigationTitle(L("call.add"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(L("call.addSend", ["n": picked.count])) { send() }
+                            .disabled(picked.isEmpty || busy)
+                            .accessibilityIdentifier("call.add.send")
+                    }
+                }
+            }
+        }
+    }
+    private func send() {
+        busy = true
+        let ids = Array(picked), n = picked.count
+        Task {
+            do { try await store.callCenter.invite(ids); store.show(L("call.added", ["n": n])); dismiss() }
+            catch { busy = false; store.show(L10n.errorText(error)) }
+        }
     }
 }
 

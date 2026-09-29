@@ -117,6 +117,7 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     var onReply: ((String, String) async -> Void)?
     /// Push de llamada: «Contestar» (o tocarlo) entra a la llamada.
     var onAnswerCall: ((String) -> Void)?
+    var onDeclineCall: ((String) -> Void)?
     /// Acción «Marcar como leído».
     var onMarkRead: ((String) async -> Void)?
     /// El socket está en línea: los push en primer plano que no son de mensajes (recordatorio, reacción, tarea,
@@ -295,7 +296,12 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
             if !text.isEmpty, let reply = await MainActor.run(body: { AppFeedback.shared.onReply }) { await reply(conv, text) }
         case PushRegistration.markReadAction:
             if let mark = await MainActor.run(body: { AppFeedback.shared.onMarkRead }) { await mark(conv) }
-        case PushRegistration.callDeclineAction, UNNotificationDismissActionIdentifier:
+        case PushRegistration.callDeclineAction:
+            // «Ahora no» desde la notificación: deja de sonar en todos mis dispositivos.
+            if let id = PushPayload(userInfo: response.notification.request.content.userInfo)?.callId {
+                await MainActor.run { AppFeedback.shared.onDeclineCall?(id) }
+            }
+        case UNNotificationDismissActionIdentifier:
             break
         case PushRegistration.callAnswerAction where PushPayload(userInfo: response.notification.request.content.userInfo)?.callId != nil:
             let id = PushPayload(userInfo: response.notification.request.content.userInfo)?.callId ?? ""

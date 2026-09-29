@@ -610,6 +610,7 @@ final class AppStore {
         Prefs.lastUserId = d.me.id
         scheduleSnapshot()
         ChatSounds.shareRingtone(d.me.ringtone)
+        if let c = d.myActiveCall { putCall(c) }
     }
 
     func scheduleBootstrap(signal: String? = nil) {
@@ -749,6 +750,11 @@ final class AppStore {
         case .callUpdated(let call):
             guard data?.callsEnabled == true else { return }
             putCall(call)
+        case .callAnswered(let callId, let key, _, _):
+            // Contesté en otro dispositivo (si es este mismo, no hace nada).
+            if key != CallRules.deviceKey { callCenter.stopRinging(callId: callId) }
+        case .callDeclined(let callId):
+            callCenter.stopRinging(callId: callId)
         case .callProcessing(let callId, let userId, let segId):
             callCenter.onTranscriptEvent(callId: callId, userId: userId, segId: segId, segments: nil)
         case .callTranscript(let callId, let userId, let segId, let segments, _):
@@ -790,7 +796,7 @@ final class AppStore {
                 feedback?.notifyIncoming(conversationId: cid, title: ev.title, author: Naming.notificationTitle(d, c), body: L10n.eventWhen(ev))
             }
         case .callUpdated(_, _, let call):
-            putCall(call)
+            putCall(call, keepDevices: true)
         case .messageUpdated(let cid, _, let m):
             // Antes de aplicar: se compara con la versión que tenía para avisar de una reacción nueva a un mensaje mío.
             if live { noticeReaction(conversations[cid]?.messages.first { $0.id == m.id }, m) }

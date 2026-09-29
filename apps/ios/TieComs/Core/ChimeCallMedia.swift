@@ -22,7 +22,7 @@ final class ChimeCallMedia: NSObject, CallMedia {
                                                  createAttendeeResponse: CreateAttendeeResponse(attendee: attendee))
         session = DefaultMeetingSession(configuration: config, logger: ConsoleLogger(name: "chime", level: .ERROR))
         localAttendee = j.attendee.attendeeId
-        attendeeUsers[j.attendee.attendeeId] = j.attendee.externalUserId
+        attendeeUsers[j.attendee.attendeeId] = CallRules.personId(j.attendee.externalUserId)
         super.init()
     }
 
@@ -50,6 +50,16 @@ final class ChimeCallMedia: NSObject, CallMedia {
     }
 
     func startCamera() throws { try av.startLocalVideo() }
+
+    // Salida de audio (1.7.1): auricular, altavoz, Bluetooth o audífonos, con la lista de Chime.
+    func audioDevices() -> [CallAudioDevice] {
+        av.listAudioDevices().map { CallAudioDevice(id: $0.label + "|\($0.type.rawValue)", label: $0.label, kind: CallAudioDevice.Kind($0.type)) }
+    }
+    func activeAudioDevice() -> String? { av.getActiveAudioDevice().map { $0.label + "|\($0.type.rawValue)" } }
+    func chooseAudioDevice(_ id: String) {
+        guard let d = av.listAudioDevices().first(where: { $0.label + "|\($0.type.rawValue)" == id }) else { return }
+        av.chooseAudioDevice(mediaDevice: d)
+    }
     func stopCamera() { av.stopLocalVideo() }
     func switchCamera() { av.switchCamera() }
 
@@ -94,13 +104,20 @@ extension ChimeCallMedia: RealtimeObserver {
     nonisolated func volumeDidChange(volumeUpdates: [VolumeUpdate]) {}
     nonisolated func signalStrengthDidChange(signalUpdates: [SignalUpdate]) {}
     nonisolated func attendeesDidJoin(attendeeInfo: [AttendeeInfo]) {
-        let pairs = attendeeInfo.map { ($0.attendeeId, $0.externalUserId) }
+        // 1.7.1: un attendee por dispositivo («{userId}#{deviceKey}»): la persona es lo de antes del «#».
+        let pairs = attendeeInfo.map { ($0.attendeeId, CallRules.personId($0.externalUserId)) }
         main { for (a, u) in pairs { self.attendeeUsers[a] = u } }
     }
     nonisolated func attendeesDidLeave(attendeeInfo: [AttendeeInfo]) {}
     nonisolated func attendeesDidDrop(attendeeInfo: [AttendeeInfo]) {}
-    nonisolated func attendeesDidMute(attendeeInfo: [AttendeeInfo]) {}
-    nonisolated func attendeesDidUnmute(attendeeInfo: [AttendeeInfo]) {}
+    nonisolated func attendeesDidMute(attendeeInfo: [AttendeeInfo]) {
+        let ids = attendeeInfo.map { CallRules.personId($0.externalUserId) }
+        main { self.delegate?.mediaRemoteMute(ids, muted: true) }
+    }
+    nonisolated func attendeesDidUnmute(attendeeInfo: [AttendeeInfo]) {
+        let ids = attendeeInfo.map { CallRules.personId($0.externalUserId) }
+        main { self.delegate?.mediaRemoteMute(ids, muted: false) }
+    }
 }
 
 extension ChimeCallMedia: VideoTileObserver {
@@ -128,7 +145,8 @@ extension ChimeCallMedia: VideoTileObserver {
 extension ChimeCallMedia: ActiveSpeakerObserver {
     nonisolated var observerId: String { "chaggu.call.speaker" }
     nonisolated func activeSpeakerDidDetect(attendeeInfo: [AttendeeInfo]) {
-        let ids = attendeeInfo.map(\.externalUserId)
+        var seen = Set<String>()
+        let ids = attendeeInfo.map { CallRules.personId($0.externalUserId) }.filter { seen.insert($0).inserted }
         main { self.delegate?.mediaSpeaking(ids) }
     }
 }
@@ -140,10 +158,23 @@ extension ChimeCallMedia: TranscriptEventObserver {
             guard let alt = r.alternatives.first else { return nil }
             let who = alt.items.first?.attendee
             return TranscriptPiece(resultId: r.resultId, isPartial: r.isPartial, text: alt.transcript,
-                                   attendeeId: who?.attendeeId, externalUserId: who?.externalUserId, language: r.languageCode,
+                                   attendeeId: who?.attendeeId, externalUserId: who.map { CallRules.personId($0.externalUserId) }, language: r.languageCode,
                                    startMs: Int(r.startTimeMs), endMs: Int(r.endTimeMs))
         }
         guard !pieces.isEmpty else { return }
         main { self.delegate?.mediaTranscript(pieces) }
+    }
+}
+
+
+extension MediaDeviceType: MediaKindRaw {
+    var kind: CallAudioDevice.Kind {
+        switch self {
+        case .audioHandset: return .receiver
+        case .audioBuiltInSpeaker: return .speaker
+        case .audioBluetooth: return .bluetooth
+        case .audioWiredHeadset: return .wired
+        default: return .other
+        }
     }
 }

@@ -3542,5 +3542,49 @@
  "vo.off": [
   "Desactivado",
   "Off"
+ ],
+ "call.out.receiver": [
+  "Auricular",
+  "Receiver"
+ ],
+ "call.out.speaker": [
+  "Altavoz",
+  "Speaker"
+ ],
+ "call.mutedPerson": [
+  "Micrófono silenciado",
+  "Microphone muted"
+ ],
+ "call.cameraOffPerson": [
+  "Cámara apagada",
+  "Camera off"
+ ],
+ "call.inviteRinging": [
+  "Llamando…",
+  "Calling…"
+ ],
+ "call.inviteNoAnswer": [
+  "No contestó",
+  "No answer"
+ ],
+ "call.addShort": [
+  "Agregar",
+  "Add"
+ ],
+ "call.otherDevice": [
+  "En llamada en tu {device} · {chat}",
+  "On a call on your {device} · {chat}"
+ ],
+ "call.moveHere": [
+  "Pasar aquí",
+  "Move here"
+ ],
+ "call.joinToo": [
+  "Unirme también",
+  "Join too"
+ ],
+ "calls.activeNow": [
+  "En curso ahora",
+  "Live now"
  ]
 }

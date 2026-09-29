@@ -17,6 +17,7 @@ final class LlamadasUITests: XCTestCase {
         var liveCallId: String
         var sleepDmId: String?
         var dndDmId: String?
+        var bToken: String?
     }
 
     override func setUp() { continueAfterFailure = false }
@@ -262,5 +263,49 @@ final class LlamadasUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["composer.field"].waitForExistence(timeout: 10), "💬 abre el directo")
         XCTAssertTrue(app.staticTexts["Bruno Ortega"].exists || app.buttons["chat.header"].label.contains("Bruno"))
         shot("34-directo")
+    }
+
+    /// 1.7.1: «En curso ahora», altavoz, «Agregar» con texto, cámara en plena llamada (cuadrícula) y cambiar cámara.
+    func testLiveNowSpeakerAddAndCamera() throws {
+        let f = try fixture()
+        // Una llamada en curso fresca de Bruno en el chat grupal (el worker cierra las que no laten).
+        var liveId = f.liveCallId
+        if let tok = f.bToken, let url = URL(string: f.apiUrl + "/api/v1/conversations/\(f.multiId)/call") {
+            var req = URLRequest(url: url); req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "content-type"); req.setValue("Bearer \(tok)", forHTTPHeaderField: "authorization")
+            req.httpBody = Data(#"{"kind":"audio","deviceKey":"fixture1"}"#.utf8)
+            let done = expectation(description: "llamada")
+            URLSession.shared.dataTask(with: req) { data, _, _ in
+                if let data, let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let c = j["call"] as? [String: Any], let id = c["id"] as? String { liveId = id }
+                done.fulfill()
+            }.resume()
+            wait(for: [done], timeout: 10)
+        }
+        let app = login(f)
+        goTab(app, "calls")
+        let live = app.descendants(matching: .any)["calls.active.\(liveId)"]
+        XCTAssertTrue(live.waitForExistence(timeout: 10), "«En curso ahora»")
+        XCTAssertTrue(app.buttons["calls.active.add.\(liveId)"].exists, "Agregar también desde «En curso ahora»")
+        shot("50-en-curso-ahora")
+        app.buttons["calls.active.join.\(liveId)"].tap()
+        let speaker = app.buttons["call.speaker"]
+        XCTAssertTrue(speaker.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["call.addButton"].label.contains("Agregar") || app.buttons["call.addButton"].staticTexts["Agregar"].exists, "«Agregar» con texto")
+        XCTAssertFalse(speaker.isSelected, "voz: empieza en el auricular")
+        shot("51-llamada-voz")
+        speaker.tap()
+        XCTAssertTrue(speaker.isSelected, "🔊 altavoz")
+        // Cámara en plena llamada: cuadrícula con mi recuadro y el avatar de quien no tiene video.
+        app.buttons["call.camera"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["call.video.\(f.a.id)"].waitForExistence(timeout: 5), "mi video en la cuadrícula")
+        XCTAssertTrue(app.buttons["call.switchCamera"].exists, "cambiar cámara")
+        shot("52-camara-cuadricula")
+        app.buttons["call.addButton"].tap()
+        XCTAssertTrue(app.buttons["call.add.send"].waitForExistence(timeout: 5))
+        shot("53-agregar")
+        app.buttons.matching(NSPredicate(format: "label IN %@", ["Cancelar", "Cancel"])).firstMatch.tap()
+        app.buttons["call.camera"].tap()
+        XCTAssertFalse(app.descendants(matching: .any)["call.video.\(f.a.id)"].waitForExistence(timeout: 2), "sin cámara vuelve el avatar")
+        app.buttons["call.hangUp"].tap()
     }
 }

@@ -164,6 +164,7 @@ struct MainView: View {
             VStack(spacing: 6) {
                 IncomingCallBanner()
                 ActiveCallPill()
+                OtherDeviceCallBanner()
             }
             .animation(.spring(duration: 0.3), value: store.callCenter.ringing?.id)
             .animation(.spring(duration: 0.3), value: store.callCenter.expanded)

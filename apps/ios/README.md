@@ -14,6 +14,18 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.chaggu.com` por defecto (web: `https://www.chaggu.com`); `-TCApiURL <url>` al lanzar (pruebas) |
 
+## 1.7.1 (29): llamadas en varios dispositivos, altavoz, «En curso ahora» y agregar gente
+
+- docs/LLAMADAS.md › «Varios dispositivos, altavoz y llamadas en curso» (contrato `2026-09-29.1`): `deviceKey` (8 primeros
+  caracteres del id del dispositivo) en call/join/heartbeat/leave; la persona es `externalUserId.split('#')[0]`;
+  `call.answered` / `call.declined` dejan de sonar y quitan la notificación `call-{id}`; «Ahora no» = `POST /calls/:id/decline`;
+  franja «En llamada en tu {dispositivo}» (Pasar aquí / Unirme también / Agregar) desde `myDevices` y `myActiveCall`;
+  «En curso ahora» en la pestaña Llamadas (`GET /calls/active`).
+- Pantalla de llamada: 🔊 Altavoz (auricular en voz, altavoz en video; lista de Chime con Bluetooth/audífonos), «Agregar» con
+  texto, invitados «Llamando…» / «No contestó» + «Volver a llamar» (`CallDTO.invited`), cámara en plena llamada con cuadrícula
+  (avatar para quien no tiene video), silenciado y cámara apagada por persona, cambiar cámara.
+- Pruebas: `Calls171Tests`, `LlamadasUITests/testLiveNowSpeakerAddAndCamera`.
+
 ## 1.7.0 (28): tanda 1.7 y velocidad
 
 - Tanda 1.7 (docs/TANDA-1.7.md; `UI/Tanda17Cards.swift`, `UI/ViewOnceViews.swift`, `UI/RefViews.swift`, `Core/ChatSearch.swift`,

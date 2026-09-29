@@ -3,6 +3,7 @@ import AudioToolbox
 import Foundation
 import Observation
 import UIKit
+import UserNotifications
 
 // Llamadas de voz y video con Amazon Chime SDK (docs/LLAMADAS.md). Paridad con apps/web/src/call.ts y screens/Call.tsx:
 // - el API crea la reunión y el attendee; aquí solo se conecta el audio y el video (CallMedia);
@@ -73,6 +74,35 @@ struct CallJoinDTO: Decodable, Sendable {
         meeting = try m.decode(Meeting.self, forKey: AnyKey("Meeting"))
         let a = try c.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey("attendee"))
         attendee = try a.decode(Attendee.self, forKey: AnyKey("Attendee"))
+    }
+}
+
+/// GET /calls/active → { calls }.
+struct ActiveCallDTO: Decodable, Identifiable, Sendable {
+    var call: CallDTO
+    var title: String?
+    var id: String { call.id }
+    init(call: CallDTO, title: String?) { self.call = call; self.title = title }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        call = try c.decode(CallDTO.self, forKey: AnyKey("call"))
+        title = c.o("title")
+    }
+}
+struct ActiveCallsPage: Decodable, Sendable {
+    var calls: [ActiveCallDTO]
+    init(from decoder: Decoder) throws { calls = try container(decoder).lossyArray("calls") }
+}
+
+/// Quita la notificación push de una llamada (collapseId `call-{id}`) cuando otro dispositivo contesta o rechaza.
+enum CallPushCleanup {
+    static func remove(callId: String) {
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: ["call-\(callId)"])
+        center.getDeliveredNotifications { list in
+            let ids = list.filter { ($0.request.content.userInfo["callId"] as? String) == callId }.map(\.request.identifier)
+            if !ids.isEmpty { center.removeDeliveredNotifications(withIdentifiers: ids) }
+        }
     }
 }
 
@@ -193,6 +223,11 @@ enum CallRules {
     /// m:ss
     static func clock(_ seconds: Int) -> String { L10n.clockDuration(seconds) }
 
+    /// 1.7.1: el ExternalUserId es «{userId}#{deviceKey}» (un attendee por dispositivo); la persona es lo de antes del «#».
+    static func personId(_ externalUserId: String) -> String {
+        String(externalUserId.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first ?? Substring(externalUserId))
+    }
+
     /// Sin respuesta: terminó y nunca entraron dos personas.
     static func isMissed(_ item: CallHistoryItemDTO) -> Bool { item.call.endedAt != nil && item.participantIds.count < 2 }
 
@@ -237,6 +272,29 @@ enum CallRules {
         return (out, finals)
     }
 
+    /// «Llamando…» los primeros 45 s; después, «No contestó».
+    static func inviteState(since: Date, now: Date = Date()) -> CallCenter.InviteState {
+        now.timeIntervalSince(since) < TimeInterval(ringSeconds) ? .ringing : .noAnswer
+    }
+
+    /// Salida por defecto al conectar: auricular en voz y altavoz en video; Bluetooth o audífonos conectados mandan.
+    static func defaultOutput(_ devices: [CallAudioDevice], video: Bool) -> String? {
+        if let ext = devices.first(where: { $0.kind == .bluetooth || $0.kind == .wired }) { return ext.id }
+        return devices.first { $0.kind == (video ? .speaker : .receiver) }?.id
+    }
+
+    /// Estoy en esta llamada desde otro dispositivo (myDevices) y no desde este.
+    static func onOtherDevice(_ call: CallDTO, inCallHere: String?, myKey: String = CallRules.deviceKey) -> CallDTO.MyDevice? {
+        guard call.endedAt == nil, call.id != inCallHere else { return nil }
+        return call.myDevices.first { $0.deviceKey != myKey }
+    }
+
+    /// Este dispositivo en la llamada (contrato 1.7.1): los primeros 8 caracteres del id del dispositivo.
+    static var deviceKey: String {
+        let k = Prefs.deviceId.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }.prefix(8)
+        return k.isEmpty ? "ios" : String(k)
+    }
+
     /// Una llamada terminada no pisa a otra más nueva que ya esté en curso (putCall de client-core).
     static func merge(_ current: CallDTO?, _ incoming: CallDTO) -> CallDTO? {
         if incoming.endedAt != nil, let current, current.id != incoming.id { return current }
@@ -262,6 +320,8 @@ protocol CallMediaDelegate: AnyObject {
     func mediaTileRemoved(_ tileId: Int)
     func mediaSpeaking(_ userIds: [String])
     func mediaTranscript(_ pieces: [TranscriptPiece])
+    /// Alguien silenció o activó su micrófono (ids de persona).
+    func mediaRemoteMute(_ userIds: [String], muted: Bool)
 }
 
 /// Sesión de audio y video. `ChimeCallMedia` usa el SDK; `NullCallMedia` sirve para el proveedor falso del API y las pruebas.
@@ -279,7 +339,34 @@ protocol CallMedia: AnyObject {
     func unbind(tileId: Int)
     /// Vista para pintar un video (DefaultVideoRenderView con el SDK).
     func makeVideoView() -> UIView
+    /// Salidas de audio disponibles y la activa (1.7.1).
+    func audioDevices() -> [CallAudioDevice]
+    func activeAudioDevice() -> String?
+    func chooseAudioDevice(_ id: String)
 }
+
+/// Una salida de audio de la llamada.
+struct CallAudioDevice: Equatable, Identifiable, Sendable {
+    enum Kind: Equatable, Sendable {
+        case receiver, speaker, bluetooth, wired, other
+        init(_ t: MediaKindRaw) { self = t.kind }
+        var symbol: String {
+            switch self {
+            case .receiver: return "iphone"
+            case .speaker: return "speaker.wave.3.fill"
+            case .bluetooth: return "airpodspro"
+            case .wired: return "headphones"
+            case .other: return "hifispeaker"
+            }
+        }
+    }
+    var id: String
+    var label: String
+    var kind: Kind
+}
+
+/// Tipo del SDK sin importar AmazonChimeSDK aquí (lo adapta ChimeCallMedia).
+protocol MediaKindRaw { var kind: CallAudioDevice.Kind { get } }
 
 /// Sin conexión real: la llamada queda «en vivo» al instante. Para CALLS_PROVIDER=fake y pruebas.
 @MainActor
@@ -294,12 +381,19 @@ final class NullCallMedia: CallMedia {
     }
     func stop() { started = false }
     func setMuted(_ m: Bool) { muted = m; delegate?.mediaMuteChanged(m) }
-    func startCamera() throws { camera = true }
-    func stopCamera() { camera = false }
+    /// Con cámara, un recuadro local (vacío) para ver la cuadrícula en pruebas.
+    func startCamera() throws { camera = true; delegate?.mediaTileAdded(CallTile(tileId: 1, local: true, userId: nil, active: true)) }
+    func stopCamera() { if camera { delegate?.mediaTileRemoved(1) }; camera = false }
     func switchCamera() {}
     func bind(_ view: UIView, tileId: Int) {}
     func unbind(tileId: Int) {}
     func makeVideoView() -> UIView { UIView() }
+    private(set) var active = "receiver"
+    func audioDevices() -> [CallAudioDevice] {
+        [CallAudioDevice(id: "receiver", label: L("call.out.receiver"), kind: .receiver), CallAudioDevice(id: "speaker", label: L("call.out.speaker"), kind: .speaker)]
+    }
+    func activeAudioDevice() -> String? { active }
+    func chooseAudioDevice(_ id: String) { active = id }
 }
 
 // MARK: - La llamada en curso
@@ -324,6 +418,13 @@ struct CallView: Equatable {
     /// Quién suena ahora (ids de persona).
     var speaking: [String] = []
     var error: String?
+    /// Salida de audio (1.7.1): la elegida y las disponibles.
+    var audioOut: String?
+    var audioDevices: [CallAudioDevice] = []
+    /// Personas con el micrófono silenciado (indicador por persona).
+    var mutedUsers: Set<String> = []
+    /// Agregados que aún no entran: cuándo se les llamó («Llamando…»; a los 45 s, «No contestó»).
+    var invites: [String: Date] = [:]
 }
 
 @MainActor
@@ -358,6 +459,8 @@ final class CallCenter: CallMediaDelegate {
     @ObservationIgnored private var ringTask: Task<Void, Never>?
     @ObservationIgnored private(set) var outbox: [CallSegmentInput] = []
     @ObservationIgnored private var leaving = false
+    /// «Pasar aquí»: dispositivo mío que sale cuando este conecta.
+    @ObservationIgnored var handOffFrom: String?
     @ObservationIgnored private var attendeeUsers: [String: String] = [:]
     /// Lotes enviados (pruebas y diagnóstico).
     @ObservationIgnored private(set) var sentBatches = 0
@@ -385,7 +488,7 @@ final class CallCenter: CallMediaDelegate {
     private func connect(_ j: CallJoinDTO, camera: Bool) async {
         leaving = false
         outbox = []
-        attendeeUsers = [j.attendee.attendeeId: j.attendee.externalUserId]
+        attendeeUsers = [j.attendee.attendeeId: CallRules.personId(j.attendee.externalUserId)]
         view = CallView(call: j.call, camera: false)
         expanded = true
         let m = makeMedia(j)
@@ -473,10 +576,18 @@ final class CallCenter: CallMediaDelegate {
         view = v
     }
 
-    /// Sumar personas a la llamada en curso.
-    func invite(_ userIds: [String]) async throws {
-        guard let id = view?.call.id, let store, !userIds.isEmpty else { return }
+    /// Sumar personas a la llamada en curso (o a la de mi otro dispositivo, `callId`).
+    func invite(_ userIds: [String], callId: String? = nil) async throws {
+        guard let id = callId ?? view?.call.id, let store, !userIds.isEmpty else { return }
         try await store.inviteToCall(id, userIds: userIds)
+        if view?.call.id == id { let now = Date(); for u in userIds { view?.invites[u] = now } }
+    }
+
+    /// Estado de un agregado que aún no entra.
+    enum InviteState: Equatable { case ringing, noAnswer }
+    func inviteState(_ userId: String, now: Date = Date()) -> InviteState? {
+        guard let v = view, !v.call.activeUserIds.contains(userId), let at = v.invites[userId] else { return nil }
+        return CallRules.inviteState(since: at, now: now)
     }
 
     // MARK: Colgar
@@ -535,8 +646,17 @@ final class CallCenter: CallMediaDelegate {
     /// `call.updated` / respuestas del API: quién está, si transcribe, si terminó.
     func callChanged(_ c: CallDTO) {
         if var v = view, v.call.id == c.id {
+            // Los agregados sin chat (invitedUserIds) que aún no entran cuentan como «Llamando…» desde que se ven.
+            let now = Date()
+            for u in c.invitedUserIds where v.invites[u] == nil && !c.activeUserIds.contains(u) { v.invites[u] = now }
+            // 1.7.1: el servidor manda cuándo se llamó a cada agregado y si ya entró.
+            for i in c.invited {
+                if i.joined { v.invites[i.userId] = nil } else if let at = ISODate.parse(i.at), !c.activeUserIds.contains(i.userId) { v.invites[i.userId] = at }
+            }
+            for u in c.activeUserIds { v.invites[u] = nil }
             if c.endedAt != nil, v.phase != .ended { Task { await teardown() }; return }
-            if v.call != c { v.call = c; view = v }
+            v.call = c
+            if v != view { view = v }
         }
         if let r = ringing, r.call.id == c.id, c.endedAt != nil || (store?.me.map { c.activeUserIds.contains($0.id) } ?? false) { dismissRing() }
     }
@@ -556,6 +676,25 @@ final class CallCenter: CallMediaDelegate {
             }
             if !Task.isCancelled, self?.ringing?.call.id == call.id { self?.ringing = nil }
         }
+    }
+
+    /// «Ahora no»: deja de sonar en todos mis dispositivos (POST /calls/:id/decline → call.declined).
+    func decline() {
+        guard let r = ringing else { return }
+        dismissRing()
+        if let store { Task { try? await store.declineCallRequest(r.call.id) } }
+    }
+
+    /// Otro dispositivo mío contestó o rechazó (call.answered / call.declined): deja de sonar y quita el aviso.
+    func stopRinging(callId: String) {
+        if ringing?.call.id == callId { dismissRing() }
+        CallPushCleanup.remove(callId: callId)
+    }
+
+    /// «Pasar aquí» desde la franja de llamada en otro dispositivo.
+    func handOff(_ call: CallDTO, from deviceKey: String?) {
+        handOffFrom = deviceKey
+        Task { do { try await join(call.id, camera: false) } catch { store?.show(L10n.errorText(error)) } }
     }
 
     func dismissRing() {
@@ -607,7 +746,40 @@ final class CallCenter: CallMediaDelegate {
 
     // MARK: CallMediaDelegate
 
-    func mediaDidStart() { if view?.phase == .connecting { view?.phase = .live } }
+    func mediaDidStart() {
+        guard view?.phase == .connecting else { return }
+        view?.phase = .live
+        // Auricular por defecto en voz, altavoz en video (si hay Bluetooth o audífonos, se quedan esos).
+        refreshAudio()
+        if let v = view, let target = CallRules.defaultOutput(v.audioDevices, video: v.camera || v.call.isVideo) { chooseAudio(target) }
+        // «Pasar aquí»: ya conectado, se saca a mi otro dispositivo.
+        if let key = handOffFrom, let id = view?.call.id, let store {
+            handOffFrom = nil
+            Task { _ = try? await store.leaveCallRequest(id, deviceKey: key) }
+        }
+    }
+
+    /// Lee las salidas de audio disponibles y la activa.
+    func refreshAudio() {
+        guard let media else { return }
+        view?.audioDevices = media.audioDevices()
+        view?.audioOut = media.activeAudioDevice()
+    }
+
+    func chooseAudio(_ id: String) {
+        media?.chooseAudioDevice(id)
+        view?.audioOut = id
+        refreshAudio()
+        if view?.audioOut == nil { view?.audioOut = id }
+    }
+
+    /// 🔊: con solo auricular y altavoz, alterna; con más salidas la vista muestra la lista.
+    func toggleSpeaker() {
+        guard let v = view else { return }
+        let onSpeaker = v.audioDevices.first { $0.id == v.audioOut }?.kind == .speaker
+        let target = v.audioDevices.first { $0.kind == (onSpeaker ? .receiver : .speaker) }
+        if let target { chooseAudio(target.id) }
+    }
     func mediaDidStop(error: String?) {
         guard !leaving, let v = view else { return }
         if let error { view?.error = error }
@@ -623,6 +795,11 @@ final class CallCenter: CallMediaDelegate {
     }
     func mediaTileRemoved(_ tileId: Int) { view?.tiles.removeAll { $0.tileId == tileId } }
     func mediaSpeaking(_ userIds: [String]) { if view?.speaking != userIds { view?.speaking = userIds } }
+    func mediaRemoteMute(_ userIds: [String], muted: Bool) {
+        guard var v = view else { return }
+        if muted { v.mutedUsers.formUnion(userIds) } else { v.mutedUsers.subtract(userIds) }
+        view = v
+    }
     func mediaTranscript(_ pieces: [TranscriptPiece]) {
         guard let v = view else { return }
         let r = CallRules.applyTranscript(v.captions, pieces)
@@ -674,9 +851,15 @@ enum RingTone {
 
 extension AppStore {
     /// Estado local de la llamada activa de una conversación (null en el API = no hay).
-    func putCall(_ call: CallDTO) {
+    /// `keepDevices`: el call.updated de la conversación no trae myDevices: se conserva el último conocido.
+    func putCall(_ call: CallDTO, keepDevices: Bool = false) {
         let cid = call.conversationId
-        liveCalls[cid] = CallRules.merge(liveCalls[cid], call)
+        var call = call
+        if keepDevices, call.myDevices.isEmpty, let prev = liveCalls[cid], prev.id == call.id { call.myDevices = prev.myDevices }
+        let next = CallRules.merge(liveCalls[cid], call)
+        // Sin cambios no sube la revisión (la pestaña Llamadas recarga con ella: evita recargar sin fin).
+        if next == liveCalls[cid], callsChecked.contains(cid) { callCenter.callChanged(call); return }
+        liveCalls[cid] = next
         callsChecked.insert(cid)
         callsRevision += 1
         callCenter.callChanged(call)
@@ -691,24 +874,38 @@ extension AppStore {
     }
 
     func startCallRequest(_ conversationId: String, kind: String) async throws -> CallJoinDTO {
-        let j: CallJoinDTO = try await api.request("/conversations/\(conversationId)/call", method: "POST", json: ["kind": kind])
+        let j: CallJoinDTO = try await api.request("/conversations/\(conversationId)/call", method: "POST", json: ["kind": kind, "deviceKey": CallRules.deviceKey])
         putCall(j.call)
         return j
     }
 
     func joinCallRequest(_ callId: String) async throws -> CallJoinDTO {
-        let j: CallJoinDTO = try await api.request("/calls/\(callId)/join", method: "POST", json: [:])
+        let j: CallJoinDTO = try await api.request("/calls/\(callId)/join", method: "POST", json: ["deviceKey": CallRules.deviceKey])
         putCall(j.call)
         return j
     }
 
     func callHeartbeatRequest(_ callId: String) async throws {
-        try await api.requestData("/calls/\(callId)/heartbeat", method: "POST", json: [:])
+        try await api.requestData("/calls/\(callId)/heartbeat", method: "POST", json: ["deviceKey": CallRules.deviceKey])
     }
 
+    /// «Ahora no»: deja de sonar en todos mis dispositivos (los demás no se enteran).
+    func declineCallRequest(_ callId: String) async throws {
+        try await api.requestData("/calls/\(callId)/decline", method: "POST", json: [:])
+    }
+
+    /// Llamadas sin terminar de mis conversaciones (y a las que me invitaron): «En curso ahora».
+    func activeCalls() async throws -> [ActiveCallDTO] {
+        let r: ActiveCallsPage = try await api.request("/calls/active")
+        for c in r.calls { putCall(c.call) }
+        return r.calls
+    }
+
+    /// `deviceKey`: saca solo a ese dispositivo mío («Pasar aquí»).
     @discardableResult
-    func leaveCallRequest(_ callId: String, forAll: Bool = false) async throws -> CallDTO? {
-        let r: CallResult = try await api.request("/calls/\(callId)/\(forAll ? "end" : "leave")", method: "POST", json: [:])
+    func leaveCallRequest(_ callId: String, forAll: Bool = false, deviceKey: String? = nil) async throws -> CallDTO? {
+        let body: [String: Any] = ["deviceKey": deviceKey ?? CallRules.deviceKey]
+        let r: CallResult = try await api.request("/calls/\(callId)/\(forAll ? "end" : "leave")", method: "POST", json: body)
         if let c = r.call { putCall(c) }
         return r.call
     }

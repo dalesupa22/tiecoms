@@ -90,7 +90,7 @@ struct IncomingCallBanner: View {
                         .font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
-                Button { center.dismissRing() } label: {
+                Button { center.decline() } label: {
                     Image(systemName: "phone.down.fill").foregroundStyle(.white).frame(width: 40, height: 40).background(Circle().fill(Color.red))
                 }
                 .accessibilityLabel(L("call.decline")).accessibilityIdentifier("call.ring.decline")
@@ -161,6 +161,89 @@ enum CallTitle {
     }
 }
 
+/// 1.7.1: «📞 En llamada en tu iPhone · {chat}» cuando estoy en una llamada desde otro dispositivo mío:
+/// Pasar aquí (entra y saca al otro), Unirme también y Agregar.
+struct OtherDeviceCallBanner: View {
+    @Environment(AppStore.self) private var store
+    @State private var adding: CallDTO?
+    var body: some View {
+        let center = store.callCenter
+        let here = center.view?.call.id
+        if let d = store.data, d.callsEnabled,
+           let call = store.liveCalls.values.sorted(by: { $0.startedAt > $1.startedAt }).first(where: { CallRules.onOtherDevice($0, inCallHere: here) != nil }),
+           let dev = CallRules.onOtherDevice(call, inCallHere: here) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("📞 " + L("call.otherDevice", ["device": dev.label.isEmpty ? dev.platform : dev.label, "chat": CallTitle.text(d, call)]))
+                    .font(.footnote.weight(.semibold)).foregroundStyle(.white).lineLimit(2)
+                HStack(spacing: 8) {
+                    Button(L("call.moveHere")) { center.handOff(call, from: dev.deviceKey) }
+                        .buttonStyle(.borderedProminent).tint(.white).foregroundStyle(Color(hex: 0x1F8F4E)).controlSize(.small)
+                        .accessibilityIdentifier("call.moveHere")
+                    Button(L("call.joinToo")) { Task { do { try await center.join(call.id, camera: false) } catch { store.show(L10n.errorText(error)) } } }
+                        .buttonStyle(.bordered).tint(.white).controlSize(.small)
+                        .accessibilityIdentifier("call.joinToo")
+                    Button { adding = call } label: { Label(L("call.addShort"), systemImage: "person.badge.plus") }
+                        .buttonStyle(.bordered).tint(.white).controlSize(.small)
+                        .accessibilityIdentifier("call.otherDevice.add")
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color(hex: 0x1F8F4E)))
+            .padding(.horizontal, 12)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("call.otherDeviceBanner")
+            .sheet(item: $adding) { c in AddToCallSheet(call: c) }
+        }
+    }
+}
+
+/// «En curso ahora» (pestaña Llamadas): llamadas sin terminar de mis chats, con quién está, Unirse y Agregar.
+struct ActiveCallsSection: View {
+    @Environment(AppStore.self) private var store
+    let items: [ActiveCallDTO]
+    @State private var adding: CallDTO?
+    var body: some View {
+        if let d = store.data, !items.isEmpty {
+            Section {
+                ForEach(items) { a in
+                    let c = store.liveCalls[a.call.conversationId].flatMap { $0.id == a.call.id ? $0 : nil } ?? a.call
+                    let mineHere = store.callCenter.view?.call.id == c.id
+                    HStack(spacing: 10) {
+                        ZStack(alignment: .leading) {
+                            ForEach(Array(c.activeUserIds.prefix(4).enumerated()), id: \.offset) { k, id in
+                                Avatar(person: Naming.person(d, id), org: nil, size: 30).overlay(Circle().stroke(Theme.surface, lineWidth: 1.5))
+                                    .offset(x: CGFloat(k) * 16).zIndex(Double(4 - k))
+                            }
+                        }
+                        .frame(width: 30 + CGFloat(max(0, min(c.activeUserIds.count, 4) - 1)) * 16, height: 30, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(a.title ?? CallTitle.text(d, c)).font(.subheadline.weight(.semibold)).lineLimit(1)
+                            Text([c.isVideo ? "🎥" : "📞", c.activeUserIds.compactMap { Naming.person(d, $0)?.name.split(separator: " ").first.map(String.init) ?? c.names[$0] }.joined(separator: ", ")].joined(separator: " "))
+                                .font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 4)
+                        Button { adding = c } label: { Image(systemName: "person.badge.plus") }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel(L("call.add")).accessibilityIdentifier("calls.active.add.\(c.id)")
+                        if !mineHere {
+                            Button(L("call.join")) {
+                                let center = store.callCenter
+                                Task { do { try await center.join(c.id, camera: false) } catch { store.show(L10n.errorText(error)) } }
+                            }
+                            .buttonStyle(.borderedProminent).tint(Theme.primaryFill).controlSize(.small)
+                            .accessibilityIdentifier("calls.active.join.\(c.id)")
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("calls.active.\(c.id)")
+                }
+            } header: { Text(L("calls.activeNow")) }
+            .sheet(item: $adding) { c in AddToCallSheet(call: c) }
+        }
+    }
+}
+
 // MARK: - Pantalla de la llamada
 
 private struct CallVideoTile: UIViewRepresentable {
@@ -201,6 +284,7 @@ struct CallScreen: View {
                     stage(d, v, center)
                     if v.call.transcribing && !v.captions.isEmpty { captions(d, v) }
                     if let e = v.error { Text(e).font(.footnote).foregroundStyle(.orange) }
+                    secondary(v, center)
                     controls(v, center)
                 }
                 .padding(.horizontal, 16).padding(.bottom, 12)
@@ -243,44 +327,104 @@ struct CallScreen: View {
     @ViewBuilder
     private func stage(_ d: BootstrapDTO, _ v: CallView, _ center: CallCenter) -> some View {
         let video = v.tiles.filter { $0.active || $0.local }
+        // Quienes están (yo siempre) y los agregados que aún no entran.
+        let inside = v.call.activeUserIds.contains(d.me.id) ? v.call.activeUserIds : [d.me.id] + v.call.activeUserIds
+        let invited = v.invites.keys.filter { !inside.contains($0) }.sorted()
         if !video.isEmpty {
-            let cols = video.count > 1 ? [GridItem(.flexible()), GridItem(.flexible())] : [GridItem(.flexible())]
-            LazyVGrid(columns: cols, spacing: 8) {
-                ForEach(video) { t in
-                    CallVideoTile(tileId: t.tileId, center: center)
-                        .aspectRatio(video.count > 1 ? 3 / 4 : 3 / 4, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .overlay(alignment: .bottomLeading) {
-                            Text(t.local ? L("call.you") : firstName(d, t.userId, v.call.names)).font(.caption.weight(.semibold)).foregroundStyle(.white)
-                                .padding(.horizontal, 8).padding(.vertical, 3).background(Capsule().fill(.black.opacity(0.5))).padding(6)
+            // Con al menos un video: cuadrícula; quien no tiene cámara va como avatar en su recuadro.
+            let cells = inside + invited
+            let cols = cells.count > 1 ? [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)] : [GridItem(.flexible())]
+            ScrollView {
+                LazyVGrid(columns: cols, spacing: 8) {
+                    ForEach(cells, id: \.self) { id in
+                        let tile = id == d.me.id ? video.first(where: \.local) : video.first { !$0.local && $0.userId == id }
+                        ZStack {
+                            if let tile {
+                                CallVideoTile(tileId: tile.tileId, center: center)
+                            } else {
+                                Color.white.opacity(0.08)
+                                personAvatar(d, v, center, id, size: 64)
+                            }
                         }
-                        .id(t.tileId)
+                        .aspectRatio(3 / 4, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.green, lineWidth: v.speaking.contains(id) ? 3 : 0))
+                        .overlay(alignment: .bottomLeading) { nameTag(d, v, id, hasVideo: tile != nil) }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier(tile != nil ? "call.video.\(id)" : "call.person.\(id)")
+                    }
                 }
             }
             .frame(maxHeight: .infinity)
         } else {
-            let others = v.call.activeUserIds.filter { $0 != d.me.id }
             VStack(spacing: 18) {
                 Spacer()
                 let cols = [GridItem(.adaptive(minimum: 96), spacing: 14)]
                 LazyVGrid(columns: cols, spacing: 18) {
-                    ForEach(v.call.activeUserIds, id: \.self) { id in
-                        let speaking = v.speaking.contains(id)
+                    ForEach(inside + invited, id: \.self) { id in
                         VStack(spacing: 6) {
-                            Avatar(person: Naming.person(d, id), org: nil, size: 76)
-                                .overlay(Circle().stroke(Color.green, lineWidth: speaking ? 4 : 0).padding(-4))
-                                .animation(.easeOut(duration: 0.15), value: speaking)
+                            personAvatar(d, v, center, id, size: 76)
                             Text(id == d.me.id ? L("call.you") : firstName(d, id, v.call.names)).font(.footnote).foregroundStyle(.white).lineLimit(1)
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("call.person.\(id)")
                     }
                 }
-                if others.isEmpty { Text(L("call.waiting")).font(.subheadline).foregroundStyle(.white.opacity(0.7)) }
+                if v.call.activeUserIds.filter({ $0 != d.me.id }).isEmpty && invited.isEmpty {
+                    Text(L("call.waiting")).font(.subheadline).foregroundStyle(.white.opacity(0.7))
+                }
                 Spacer()
             }
             .frame(maxHeight: .infinity)
         }
+    }
+
+    /// Avatar con quién habla, micrófono silenciado y, si es un agregado que no entra, «Llamando…» / «No contestó».
+    @ViewBuilder
+    private func personAvatar(_ d: BootstrapDTO, _ v: CallView, _ center: CallCenter, _ id: String, size: CGFloat) -> some View {
+        let speaking = v.speaking.contains(id)
+        let muted = id == d.me.id ? v.muted : v.mutedUsers.contains(id)
+        VStack(spacing: 6) {
+            Avatar(person: Naming.person(d, id), org: nil, size: size)
+                .overlay(Circle().stroke(Color.green, lineWidth: speaking ? 4 : 0).padding(-4))
+                .overlay(alignment: .bottomTrailing) {
+                    if muted {
+                        Image(systemName: "mic.slash.fill").font(.caption2).foregroundStyle(.white)
+                            .padding(5).background(Circle().fill(Color.red)).accessibilityLabel(L("call.mutedPerson"))
+                    }
+                }
+                .opacity(center.inviteState(id) != nil ? 0.55 : 1)
+                .animation(.easeOut(duration: 0.15), value: speaking)
+            if let st = center.inviteState(id) {
+                TimelineView(.periodic(from: .now, by: 5)) { ctx in
+                    let state = center.inviteState(id, now: ctx.date) ?? st
+                    if state == .ringing {
+                        Text(L("call.inviteRinging")).font(.caption2).foregroundStyle(.white.opacity(0.8))
+                            .accessibilityIdentifier("call.invite.ringing.\(id)")
+                    } else {
+                        VStack(spacing: 2) {
+                            Text(L("call.inviteNoAnswer")).font(.caption2).foregroundStyle(.orange)
+                            Button(L("calls.callBack")) {
+                                Task { do { try await center.invite([id]) } catch { store.show(L10n.errorText(error)) } }
+                            }
+                            .font(.caption2.weight(.bold)).foregroundStyle(.white)
+                            .accessibilityIdentifier("call.invite.again.\(id)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func nameTag(_ d: BootstrapDTO, _ v: CallView, _ id: String, hasVideo: Bool) -> some View {
+        let muted = id == d.me.id ? v.muted : v.mutedUsers.contains(id)
+        return HStack(spacing: 4) {
+            if muted { Image(systemName: "mic.slash.fill").foregroundStyle(.red) }
+            if !hasVideo { Image(systemName: "video.slash.fill").accessibilityLabel(L("call.cameraOffPerson")) }
+            Text(id == d.me.id ? L("call.you") : firstName(d, id, v.call.names))
+        }
+        .font(.caption.weight(.semibold)).foregroundStyle(.white)
+        .padding(.horizontal, 8).padding(.vertical, 3).background(Capsule().fill(.black.opacity(0.5))).padding(6)
     }
 
     private func captions(_ d: BootstrapDTO, _ v: CallView) -> some View {
@@ -296,6 +440,42 @@ struct CallScreen: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(.black.opacity(0.45)))
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("call.captions")
+    }
+
+    /// 🔊 Altavoz (con lista si hay Bluetooth o audífonos) y «Agregar», con texto para que se encuentren.
+    private func secondary(_ v: CallView, _ center: CallCenter) -> some View {
+        let current = v.audioDevices.first { $0.id == v.audioOut }
+        let onSpeaker = current?.kind == .speaker
+        return HStack(spacing: 10) {
+            if v.audioDevices.count > 2 {
+                Menu {
+                    ForEach(v.audioDevices) { dev in
+                        Button { center.chooseAudio(dev.id) } label: {
+                            Label(dev.label, systemImage: dev.id == v.audioOut ? "checkmark" : dev.kind.symbol)
+                        }
+                    }
+                } label: { chip(current?.kind.symbol ?? "speaker.wave.2.fill", current?.label ?? L("call.out.speaker"), on: current?.kind != .receiver) }
+                .accessibilityIdentifier("call.speaker")
+            } else {
+                Button { center.toggleSpeaker(); Haptics.tap() } label: { chip(onSpeaker ? "speaker.wave.3.fill" : "speaker.fill", L("call.out.speaker"), on: onSpeaker) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L("call.out.speaker"))
+                    .accessibilityValue(onSpeaker ? L("vo.on") : L("vo.off"))
+                    .accessibilityAddTraits(onSpeaker ? .isSelected : [])
+                    .accessibilityIdentifier("call.speaker")
+            }
+            Button { adding = true } label: { chip("person.badge.plus", L("call.addShort"), on: false) }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L("call.add"))
+                .accessibilityIdentifier("call.addButton")
+        }
+    }
+
+    private func chip(_ icon: String, _ text: String, on: Bool) -> some View {
+        Label(text, systemImage: icon).font(.subheadline.weight(.semibold)).lineLimit(1)
+            .foregroundStyle(on ? Color.black : .white)
+            .padding(.horizontal, 14).frame(height: 38)
+            .background(Capsule().fill(on ? Color.white : Color.white.opacity(0.16)))
     }
 
     private func controls(_ v: CallView, _ center: CallCenter) -> some View {
@@ -361,12 +541,14 @@ struct TranscriptConsentSheet: View {
 struct AddToCallSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
+    /// La llamada (si no, la de este dispositivo): así se agrega también desde «En llamada en tu …» y «En curso ahora».
+    var call: CallDTO? = nil
     @State private var query = ""
     @State private var picked: Set<String> = []
     @State private var busy = false
     var body: some View {
         NavigationStack {
-            if let d = store.data, let call = store.callCenter.view?.call {
+            if let d = store.data, let call = call ?? store.callCenter.view?.call {
                 let inside = Set(call.activeUserIds + call.invitedUserIds + [d.me.id])
                 let q = query.trimmingCharacters(in: .whitespaces)
                 let list = d.people.filter { !inside.contains($0.id) && $0.kind != "agent" && (q.isEmpty || $0.name.localizedCaseInsensitiveContains(q)) }.prefix(80)
@@ -407,7 +589,7 @@ struct AddToCallSheet: View {
         busy = true
         let ids = Array(picked), n = picked.count
         Task {
-            do { try await store.callCenter.invite(ids); store.show(L("call.added", ["n": n])); dismiss() }
+            do { try await store.callCenter.invite(ids, callId: call?.id); store.show(L("call.added", ["n": n])); dismiss() }
             catch { busy = false; store.show(L10n.errorText(error)) }
         }
     }
@@ -596,9 +778,12 @@ struct CallsScreen: View {
     @State private var more = false
     @State private var error: String?
     @State private var picking: String?
+    @State private var active: [ActiveCallDTO] = []
 
     var body: some View {
         List {
+            // Solo las que siguen en curso (call.updated las va quitando).
+            ActiveCallsSection(items: active.filter { store.liveCalls[$0.call.conversationId]?.id == $0.call.id })
             if let error { Text(error).foregroundStyle(Theme.textSecondary) }
             if let items, items.isEmpty {
                 Text(L("calls.empty")).font(.subheadline).foregroundStyle(Theme.textSecondary)
@@ -634,9 +819,12 @@ struct CallsScreen: View {
     }
 
     private func load() async {
+        if let a = try? await store.activeCalls() { active = a }
         do {
             let r = try await store.callHistory()
             items = r.calls; more = r.hasMore; error = nil
+        } catch is CancellationError {
+        } catch let e as ApiRequestError where e.isNetwork && Task.isCancelled {
         } catch { if items == nil { self.error = L10n.errorText(error) } }
     }
 

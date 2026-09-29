@@ -2,7 +2,7 @@ import Foundation
 
 /// Versión del contrato que habla esta app (ver packages/contracts).
 enum Contract {
-    static let version = "2026-09-29"
+    static let version = "2026-09-29.1"
 }
 
 // MARK: - Decodificación tolerante
@@ -465,12 +465,16 @@ struct BootstrapDTO: Codable, Equatable, Sendable {
     /// Funciones que el servidor tiene prendidas (aditivo: un servidor viejo no lo manda).
     var features: FeaturesDTO?
 
+    /// 1.7.1: mi llamada en curso (en cualquiera de mis dispositivos).
+    var myActiveCall: CallDTO?
+
     /// Llamadas de voz y video (docs/LLAMADAS.md): sin esto no hay botones, franja ni pestaña.
     var callsEnabled: Bool { features?.calls == true }
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         features = c.o("features")
+        myActiveCall = c.o("myActiveCall")
         contract = c.v("contract", "")
         serverTime = c.v("serverTime", "")
         me = try c.decode(UserDTO.self, forKey: AnyKey("me"))
@@ -510,6 +514,32 @@ struct CallDTO: Codable, Equatable, Identifiable, Sendable {
     var invitedUserIds: [String] = []
     /// Nombres de quienes no están en mi lista de personas (p. ej. si me agregaron a la llamada).
     var names: [String: String] = [:]
+    /// 1.7.1: mis dispositivos dentro de la llamada (solo los míos).
+    struct MyDevice: Codable, Equatable, Sendable {
+        var deviceKey: String
+        var platform: String
+        var label: String
+        init(deviceKey: String, platform: String, label: String) { self.deviceKey = deviceKey; self.platform = platform; self.label = label }
+        init(from decoder: Decoder) throws {
+            let c = try container(decoder)
+            deviceKey = c.v("deviceKey", ""); platform = c.v("platform", ""); label = c.v("label", "")
+        }
+    }
+    var myDevices: [MyDevice] = []
+    /// 1.7.1: a quién se llamó con «＋ Agregar» y si ya entró («Llamando…» / «No contestó»).
+    struct Invited: Codable, Equatable, Sendable {
+        var userId: String
+        var at: String
+        var joined: Bool
+        init(userId: String, at: String, joined: Bool) { self.userId = userId; self.at = at; self.joined = joined }
+        init(from decoder: Decoder) throws {
+            let c = try container(decoder)
+            userId = c.v("userId", ""); at = c.v("at", ""); joined = c.v("joined", false)
+        }
+    }
+    var invited: [Invited] = []
+    /// Título de la conversación (GET /calls/active).
+    var title: String?
 
     var isVideo: Bool { kind == "video" }
     var isLive: Bool { endedAt == nil }
@@ -527,6 +557,9 @@ struct CallDTO: Codable, Equatable, Identifiable, Sendable {
         hasTranscript = c.v("hasTranscript", false)
         invitedUserIds = c.v("invitedUserIds", [])
         names = c.v("names", [:])
+        myDevices = c.lossyArray("myDevices")
+        invited = c.lossyArray("invited")
+        title = c.o("title")
     }
 
     init(id: String, conversationId: String, kind: String = "audio", startedBy: String = "", startedAt: String = "", endedAt: String? = nil,
@@ -746,6 +779,9 @@ enum AccountEvent: Decodable, Equatable, Sendable {
     case callRinging(call: CallDTO, conversationTitle: String?, callerName: String)
     /// Una llamada a la que me agregaron sin estar en el chat cambió (llega por la cuenta).
     case callUpdated(CallDTO)
+    /// 1.7.1: otro dispositivo mío contestó o rechazó la llamada: dejar de sonar.
+    case callAnswered(callId: String, deviceKey: String, platform: String, label: String)
+    case callDeclined(callId: String)
     /// Transcripción por pedazos (Groq): uno se está procesando o ya trae sus frases.
     case callProcessing(callId: String, userId: String, segId: String)
     case callTranscript(callId: String, userId: String, segId: String, segments: [CallTranscriptSegmentDTO], failed: Bool)
@@ -777,6 +813,10 @@ enum AccountEvent: Decodable, Equatable, Sendable {
             if let x: ScheduledMessageDTO = c.o("scheduled") { self = .scheduledUpdated(x) } else { self = .other(type: type) }
         case "call.updated":
             if let x: CallDTO = c.o("call") { self = .callUpdated(x) } else { self = .other(type: type) }
+        case "call.answered":
+            self = .callAnswered(callId: c.v("callId", ""), deviceKey: c.v("deviceKey", ""), platform: c.v("platform", ""), label: c.v("label", ""))
+        case "call.declined":
+            self = .callDeclined(callId: c.v("callId", ""))
         case "call.processing":
             self = .callProcessing(callId: c.v("callId", ""), userId: c.v("userId", ""), segId: c.v("segId", ""))
         case "call.transcript":

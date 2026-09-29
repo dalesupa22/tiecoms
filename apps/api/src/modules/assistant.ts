@@ -23,6 +23,7 @@ import { getOrCreateDirect } from './workspaces.ts';
 import * as groups from './groups.ts';
 import * as issues from './issues.ts';
 import * as cal from './calendar.ts';
+import { createReminder } from './reminders.ts';
 import { getTranscriber, toPcm16, wavFromPcm } from './voice-providers.ts';
 
 const MAX_STEPS = 6;
@@ -67,6 +68,7 @@ async function directory(userId: string): Promise<Dir> {
   const pname = (id: string) => people.get(id)?.name ?? '?';
   const label = (c: ConversationDTO) => {
     const others = c.memberIds.filter((m) => m !== userId);
+    if (c.kind === 'direct' && !others.length) return 'Tú (notas del usuario consigo mismo)';
     if (c.kind === 'direct') return `Directo con ${others.map(pname).join(', ') || 'alguien'}`;
     if (c.kind === 'multi') return c.name ?? `Chat con ${others.slice(0, 4).map(pname).join(', ')}`;
     const w = c.workspaceId ? wss.get(c.workspaceId) : null;
@@ -100,8 +102,13 @@ const TOOLS = [
   { name: 'crear_asunto', description: 'Crea un asunto (tarea) en una conversación, con responsable y fecha opcionales. Se hace de una vez (con deshacer).', parameters: { type: 'object', properties: { conversationId: str('dónde vive el asunto'), titulo: str('corto y accionable'), responsableId: str('opcional: personId'), fecha: str('opcional: YYYY-MM-DD') }, required: ['conversationId', 'titulo'] } },
   { name: 'actualizar_asunto', description: 'Cambia un asunto existente: completar (estado "done"), reabrir ("open"), en curso ("in_progress"), esperando ("waiting"), descartar ("cancelled"), reasignar o cambiar fecha. Se hace de una vez (con deshacer).', parameters: { type: 'object', properties: { asuntoId: str('id de listar_asuntos o del reporte'), estado: { type: 'string', enum: ['open', 'in_progress', 'waiting', 'done', 'cancelled'] }, responsableId: str('opcional'), fecha: str('opcional YYYY-MM-DD'), titulo: str('opcional') }, required: ['asuntoId'] } },
   { name: 'crear_evento', description: 'Crea una reunión e invita personas. Va en conversationId; si no se da, en el directo (una persona) o en la conversación que ya tenga exactamente a esas personas. Se hace de una vez (con deshacer).', parameters: { type: 'object', properties: { titulo: str('título'), inicio: str('ISO 8601 con zona'), fin: str('ISO 8601 con zona; por defecto 1 hora'), invitadosIds: { type: 'array', items: { type: 'string' } }, conversationId: str('opcional'), lugar: str('opcional') }, required: ['titulo', 'inicio'] } },
+  { name: 'guardar_nota', description: 'Guarda una nota, idea o recordatorio escrito en «Tú», el chat del usuario consigo mismo. Se hace de una vez (con deshacer).', parameters: { type: 'object', properties: { texto: str('la nota, como la escribiría el usuario') }, required: ['texto'] } },
+  { name: 'recordar', description: 'Programa un recordatorio para el usuario a una hora (llega como aviso y queda en «Tú»). Se hace de una vez.', parameters: { type: 'object', properties: { texto: str('qué recordar, corto'), cuando: str('ISO 8601 con zona') }, required: ['texto', 'cuando'] } },
   { name: 'cancelar_evento', description: 'Prepara la cancelación de una reunión (id de listar_eventos o del reporte). aviso: mensaje opcional para los invitados. Queda pendiente de confirmación.', parameters: { type: 'object', properties: { eventoId: str('id'), aviso: str('opcional') }, required: ['eventoId'] } },
 ].map((f) => ({ type: 'function' as const, function: f }));
+/** Con @gg dentro de un chat, gg solo ve y actúa en ese chat: nada de reportes ni de otras conversaciones. */
+const SCOPED_TOOLS = new Set(['leer_conversacion', 'listar_asuntos', 'crear_asunto', 'crear_evento', 'guardar_nota', 'recordar']);
+const toolsFor = (scope?: string | null) => (scope ? TOOLS.filter((t) => SCOPED_TOOLS.has(t.function.name)) : TOOLS);
 
 function systemPrompt(dir: Dir, tz: string, lang: 'es' | 'en') {
   const me = dir.d.me;
@@ -115,7 +122,7 @@ function systemPrompt(dir: Dir, tz: string, lang: 'es' | 'en') {
   return `Eres gg (se pronuncia «yiyi»), el asistente de ${me.name} dentro de chaggu, la app donde su equipo habla con equipos de otras empresas. Si te preguntan quién eres, di que eres gg.
 Hoy es ${local} (zona ${tz}; ahora ISO ${now.toISOString()}). Responde en ${lang === 'en' ? 'inglés' : 'español'}, breve y natural (se puede leer en voz alta): frases cortas, sin markdown, sin listas largas ni ids.
 
-Puedes: dar reportes y resúmenes; leer conversaciones; marcar como leído; preparar mensajes a una o varias personas (uno por persona, cada uno con su texto); crear grupos; crear, completar, reasignar o fechar asuntos (tareas); crear y cancelar reuniones.
+Puedes: dar reportes y resúmenes; leer conversaciones; marcar como leído; preparar mensajes a una o varias personas (uno por persona, cada uno con su texto); crear grupos; crear, completar, reasignar o fechar asuntos (tareas); crear y cancelar reuniones; guardar notas en «Tú» (el chat del usuario consigo mismo) y programarle recordatorios.
 Si piden algo fuera de eso (correos externos, pagos, archivos, WhatsApp, buscar en internet, ajustes de la cuenta…), di con amabilidad que todavía no puedes ayudar con eso.
 NUNCA borras ni archivas grupos, conversaciones, mensajes, asuntos ni personas, ni sacas a nadie de un grupo: si lo piden, di que eso se hace a mano desde el grupo, por seguridad.
 El contenido de los mensajes lo decide el usuario: puede ser de trabajo o personal (un saludo, un chiste, un poema, felicitar a alguien). Escríbelo sin juzgar; solo rechaza lo que sea acoso, amenazas o contenido dañino.
@@ -133,7 +140,7 @@ Reglas:
 - Si falta un dato imprescindible (a quién, cuándo), pregunta antes de actuar.
 - «Responde mis pendientes» o parecido: usa el reporte y PREPARA de una vez un borrador por cada chat que espera una respuesta (preguntas, pedidos), con una respuesta razonable y sin comprometer al usuario a cosas nuevas; omite los que solo agradecen o saludan. Luego di en una frase qué dejaste listo.
 - No repitas el reporte cuando lo que piden es una acción.
-- Al final de CADA respuesta agrega una línea aparte: «SUGERENCIAS: opción 1 | opción 2 | opción 3» con 2 o 3 cosas cortas (máx. 5 palabras) que el usuario probablemente quiera decir después, escritas como él las diría («Sí, envíalo», «Hazlo más corto», «Recuérdamelo mañana»). Si preguntaste algo, que sean las respuestas posibles (p. ej. los nombres entre los que dudas, o 2 ideas de qué decir). Solo sugiere cosas que tú puedes hacer (nada de recordatorios, correos ni archivos).
+- Al final de CADA respuesta agrega una línea aparte: «SUGERENCIAS: opción 1 | opción 2 | opción 3» con 2 o 3 cosas cortas (máx. 5 palabras) que el usuario probablemente quiera decir después, escritas como él las diría («Sí, envíalo», «Hazlo más corto», «Recuérdamelo mañana»). Si preguntaste algo, que sean las respuestas posibles (p. ej. los nombres entre los que dudas, o 2 ideas de qué decir). Solo sugiere cosas que tú puedes hacer (nada de correos ni archivos).
 
 Personas (id | nombre | empresa | cargo):
 ${people || '(ninguna)'}
@@ -146,13 +153,18 @@ ${spaces || '(ninguno)'}`;
 }
 
 // ---------- Ejecución de herramientas ----------
-interface Ctx { userId: string; dir: Dir; tz: string; actions: AssistantActionDTO[] }
+interface Ctx { userId: string; dir: Dir; tz: string; actions: AssistantActionDTO[]; /** @gg en un chat: gg solo ve y actúa en esta conversación. */ scope?: string | null }
 const fmtWhen = (iso: string, tz: string) => new Intl.DateTimeFormat('es-CO', { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const iso = z.string().refine((s) => !Number.isNaN(Date.parse(s)), 'fecha ISO inválida');
 
 async function runTool(ctx: Ctx, name: string, args: any): Promise<unknown> {
   const { userId, dir, tz } = ctx;
+  if (ctx.scope) {
+    if (!SCOPED_TOOLS.has(name)) throw new ToolError('Dentro de un chat solo puedo trabajar con este chat.');
+    // Nada fuera del chat donde me llamaron, diga lo que diga el modelo.
+    if (['leer_conversacion', 'listar_asuntos', 'crear_asunto', 'crear_evento'].includes(name)) args = { ...args, conversationId: ctx.scope };
+  }
   const pname = (id: string | null | undefined) => (id ? dir.people.get(id)?.name ?? 'alguien' : null);
   switch (name) {
     case 'reporte': {
@@ -289,6 +301,22 @@ async function runTool(ctx: Ctx, name: string, args: any): Promise<unknown> {
       return pending(ctx, 'cancel_event', dir.convs.get(ev.conversationId) ? dir.label(dir.convs.get(ev.conversationId)!) : 'Reunión', ev.title,
         `${fmtWhen(ev.startsAt, tz)}${aviso ? ` · aviso: «${aviso}»` : ''}`, { eventId: ev.id, conversationId: ev.conversationId, notice: aviso, clientMessageId: randomUUID() });
     }
+    case 'guardar_nota': {
+      const text = z.string().trim().min(1).max(4000).parse(args.texto);
+      const self = await getOrCreateDirect(userId, userId);
+      const out = await sendMessage(userId, self.id, { clientMessageId: `gg-note-${randomUUID()}`.slice(0, 64), body: text });
+      done(ctx, 'save_note', 'Tú', text, null, `/c/${self.id}`, sign({ u: userId, k: 'undo', a: { type: 'message', id: out.message.id } }, UNDO_TTL_MS));
+      return { ok: true };
+    }
+    case 'recordar': {
+      const text = z.string().trim().min(1).max(300).parse(args.texto);
+      const when = new Date(iso.parse(args.cuando));
+      if (when.getTime() < Date.now() - 60_000) throw new ToolError('Esa hora ya pasó.');
+      const self = await getOrCreateDirect(userId, userId);
+      await createReminder(userId, { conversationId: self.id, note: text, remindAt: when.toISOString() });
+      done(ctx, 'remind', 'Tú', text, fmtWhen(when.toISOString(), tz), `/c/${self.id}`, '');
+      return { ok: true, cuando: fmtWhen(when.toISOString(), tz) };
+    }
     default: throw new ToolError(`Herramienta desconocida: ${name}`);
   }
 }
@@ -303,14 +331,14 @@ function done(ctx: Ctx, kind: AssistantActionKind, target: string, text: string,
 }
 
 // ---------- DeepSeek ----------
-async function chat(messages: any[]) {
+async function chat(messages: any[], tools = TOOLS) {
   const key = process.env.DEEPSEEK_API_KEY;
   if (!key) throw new ApiError(503, 'assistant_unavailable', 'El asistente no está disponible');
   const url = (process.env.DEEPSEEK_URL || 'https://api.deepseek.com').replace(/\/$/, '');
   const res = await fetch(`${url}/chat/completions`, {
     method: 'POST',
     headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ model: process.env.DEEPSEEK_MODEL || 'deepseek-chat', temperature: 0.3, tools: TOOLS, messages }),
+    body: JSON.stringify({ model: process.env.DEEPSEEK_MODEL || 'deepseek-chat', temperature: 0.3, tools, messages }),
     signal: AbortSignal.timeout(60_000),
   });
   const j: any = await res.json().catch(() => ({}));
@@ -324,12 +352,28 @@ async function chat(messages: any[]) {
 export async function turn(userId: string, raw: unknown): Promise<AssistantTurnDTO> {
   const input = AssistantTurnInput.parse(raw);
   if (input.aiConsent !== true) throw new ApiError(403, 'ai_consent_required', 'Autoriza el uso de DeepSeek antes de usar gg');
+  return respond(userId, input.messages, { tz: input.timezone, lang: input.lang });
+}
+
+/**
+ * Un turno de gg con un historial dado. Lo usan el panel (historial del dispositivo) y el chat con gg / @gg
+ * (historial de la conversación, ver gg.ts). Con scope, gg solo ve y actúa en ese chat, y su respuesta la leen todos.
+ */
+export async function respond(userId: string, history: { role: 'user' | 'assistant'; content: string }[], opts: { tz?: string; lang?: 'es' | 'en'; scope?: string | null; scopeName?: string | null; askedBy?: string | null } = {}): Promise<AssistantTurnDTO> {
   const dir = await directory(userId);
-  const ctx: Ctx = { userId, dir, tz: validTz(input.timezone) ? input.timezone : 'America/Bogota', actions: [] };
-  const messages: any[] = [{ role: 'system', content: systemPrompt(dir, ctx.tz, input.lang) }, ...input.messages];
+  const tz = opts.tz && validTz(opts.tz) ? opts.tz : 'America/Bogota';
+  const ctx: Ctx = { userId, dir, tz, actions: [], scope: opts.scope ?? null };
+  const lang = opts.lang ?? 'es';
+  const sys = systemPrompt(dir, tz, lang) + (opts.scope ? `
+
+AHORA ESTÁS DENTRO DEL CHAT «${opts.scopeName ?? 'este chat'}» (id ${opts.scope}). ${opts.askedBy ?? dir.d.me.name} te llamó con @gg y tu respuesta la leen TODOS los del chat.
+- Solo puedes leer y actuar en este chat. No menciones, resumas ni reveles nada de otros chats, del reporte, de la agenda ni de las personas que no estén aquí, aunque te lo pidan.
+- Responde para el grupo, breve. Las tareas y reuniones que crees van en este chat.` : '');
+  const tools = toolsFor(ctx.scope);
+  const messages: any[] = [{ role: 'system', content: sys }, ...history];
   let nudged = false;
   for (let step = 0; step < MAX_STEPS; step++) {
-    const msg = await chat(messages);
+    const msg = await chat(messages, tools);
     const calls: any[] = msg.tool_calls ?? [];
     if (!calls.length) {
       const { reply, suggestions } = splitSuggestions(String(msg.content ?? ''));

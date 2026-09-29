@@ -1,3 +1,4 @@
+import { asset } from './router.ts';
 import { useEffect, type ReactNode } from 'react';
 import type { BootstrapDTO, ConversationDTO, OrganizationDTO, PersonDTO } from '@tiecoms/contracts';
 import { attachmentSummaryText, locale, systemText, t } from './i18n.ts';
@@ -40,7 +41,15 @@ export function personColor(id: string | null | undefined): string {
   return PERSON_COLORS[h % PERSON_COLORS.length]!;
 }
 
+/** gg, el asistente: participante bot con id fijo (docs/GG-CHAT.md). */
+export const GG_ID = '0a9a9a9a-0000-4000-8000-000000000066';
+/** En un directo, la otra persona; en «Tú» (directo contigo mismo), tú. */
+export const directOtherId = (d: BootstrapDTO, c: ConversationDTO) => c.memberIds.find((m) => m !== d.me.id) ?? d.me.id;
+export const isSelfChat = (d: BootstrapDTO, c: ConversationDTO) => c.kind === 'direct' && c.memberIds.every((m) => m === d.me.id);
+export const isGgChat = (c: ConversationDTO) => c.kind === 'direct' && c.memberIds.includes(GG_ID);
+
 export function Avatar({ person, org, size = 34 }: { person?: PersonDTO | null; org?: OrganizationDTO | null; size?: number }) {
+  if (person?.id === GG_ID) return <span className="avatar gg-avatar" style={{ width: size, height: size }}><img src={asset('/gg-mark.svg')} alt="gg" draggable={false} /></span>;
   // Sin foto: iniciales sobre el color estable de la persona; la empresa va en la insignia.
   const bg = person?.kind === 'agent' ? '#1b1917' : person ? personColor(person.id) : '#e0dace';
   const fg = person?.kind === 'agent' ? '#f4f1ea' : person ? '#ffffff' : '#5c554c';
@@ -86,6 +95,7 @@ export const personById = (d: BootstrapDTO, id: string | null | undefined) => d.
 
 export function conversationTitle(d: BootstrapDTO, c: ConversationDTO) {
   if (c.kind === 'direct') {
+    if (isSelfChat(d, c)) return t('self.title');
     const other = c.memberIds.find((m) => m !== d.me.id);
     return personById(d, other)?.name ?? t('chat.aDirect');
   }
@@ -102,7 +112,7 @@ export function conversationTitle(d: BootstrapDTO, c: ConversationDTO) {
 
 export function conversationSubtitle(d: BootstrapDTO, c: ConversationDTO) {
   if (c.kind === 'direct') {
-    const other = personById(d, c.memberIds.find((m) => m !== d.me.id));
+    const other = personById(d, directOtherId(d, c));
     return other ? [other.title, orgById(d, other.orgId)?.name ?? (other.guest ? t('common.guest') : null)].filter(Boolean).join(' · ') : '';
   }
   if (c.kind === 'multi') {

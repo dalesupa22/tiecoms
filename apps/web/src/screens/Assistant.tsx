@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { AssistantActionDTO, AssistantTurnDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { asset, navigate } from '../router.ts';
+import { GG_ID, personById } from '../ui.tsx';
+import { toast } from '../menu.tsx';
 import { errorText, getLang as lang, t } from '../i18n.ts';
 import { Modal } from '../ui.tsx';
 
@@ -67,7 +69,8 @@ export function AssistantBubble({ hidden, inConv = false }: { hidden: boolean; i
     if (!p) return;
     clearTimeout(p.timer);
     if (p.long) window.dispatchEvent(new Event('chaggu:assistant-release'));
-    else { setListenOnOpen(false); setOpen(true); }
+    // Tocar abre tu chat con gg (queda guardado); mantener presionado sigue siendo hablarle.
+    else void openGgChat();
   };
 
   return (
@@ -341,9 +344,9 @@ function AssistantPanel({ userId, listenOnOpen, onClose }: { userId: string; lis
   );
 }
 
-const KIND_ICON: Record<AssistantActionDTO['kind'], string> = { send_message: '✉', create_group: '▦', create_issue: '◆', update_issue: '✓', create_event: '▤', cancel_event: '⊘', mark_read: '◉' };
+const KIND_ICON: Record<AssistantActionDTO['kind'], string> = { send_message: '✉', create_group: '▦', create_issue: '◆', update_issue: '✓', create_event: '▤', cancel_event: '⊘', mark_read: '◉', save_note: '✎', remind: '⏰' };
 
-function ActionCard({ a, onRun, onUndo, onDiscard, onOpen, onRedo }: {
+export function ActionCard({ a, onRun, onUndo, onDiscard, onOpen, onRedo }: {
   a: AssistantActionDTO; onRun: (a: AssistantActionDTO, text?: string) => void; onUndo: (a: AssistantActionDTO) => void; onDiscard: () => void; onOpen: (to: string) => void; onRedo: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -380,4 +383,113 @@ function ActionCard({ a, onRun, onUndo, onDiscard, onOpen, onRedo }: {
       )}
     </div>
   );
+}
+
+
+// ---------- gg como chat (docs/GG-CHAT.md) ----------
+let ggChatId: string | null = null;
+/** Recién creado, el chat aún no está en la lista: se recarga antes de abrirlo (si no, «no existe»). */
+async function ensureKnown(id: string) {
+  if (!client.getState().data?.conversations.some((c) => c.id === id)) await client.loadBootstrap();
+}
+/** Abre (y crea la primera vez) tu chat con gg. */
+export async function openGgChat() {
+  try {
+    ggChatId ??= (await client.request<{ id: string }>('/assistant/chat', { method: 'POST', json: {} })).id;
+    await ensureKnown(ggChatId);
+    navigate(`/c/${ggChatId}`);
+  } catch (e) { toastError(e); }
+}
+let selfChatId: string | null = null;
+/** Abre (y crea la primera vez) «Tú», tu chat contigo mismo. */
+export async function openSelfChat() {
+  try {
+    selfChatId ??= (await client.request<{ id: string }>('/me/notes', { method: 'POST', json: {} })).id;
+    await ensureKnown(selfChatId);
+    navigate(`/c/${selfChatId}`);
+  } catch (e) { toastError(e); }
+}
+/** Guardar un mensaje en «Tú» (reenviado, con su origen). */
+export async function saveToSelf(m: { body: string; conversationId: string; createdAt: string; authorId: string }, author: string | null) {
+  try {
+    selfChatId ??= (await client.request<{ id: string }>('/me/notes', { method: 'POST', json: {} })).id;
+    await ensureKnown(selfChatId);
+    await client.send(selfChatId, m.body, null, { source: 'tiecoms', author, sentAt: m.createdAt, fromConversationId: m.conversationId });
+    const id = selfChatId;
+    toastMsg(t('self.saved'), { label: t('lin.open'), run: () => navigate(`/c/${id}`) });
+  } catch (e) { toastError(e); }
+}
+function toastError(e: unknown) { toastMsg(errorText(e)); }
+function toastMsg(text: string, action?: { label: string; run: () => void }) { toast(text, action); }
+
+/** Permiso para usar IA con gg, guardado en tu cuenta (sirve para su chat y para @gg). */
+export function GgConsentBanner() {
+  const consent = useClient((s) => s.data?.me.aiConsent === true);
+  const [busy, setBusy] = useState(false);
+  if (consent) return null;
+  const allow = async () => {
+    setBusy(true);
+    try { await client.request('/assistant/consent', { method: 'POST', json: { on: true } }); await client.loadBootstrap(); } catch (e) { toastError(e); } finally { setBusy(false); }
+  };
+  return (
+    <div className="gg-consent">
+      <img src={asset('/gg-mark.svg')} alt="" width={28} height={28} />
+      <span className="grow small">{t('gg.consentText')}</span>
+      <button className="btn small primary" disabled={busy} onClick={() => void allow()}>{t('gg.consentAllow')}</button>
+    </div>
+  );
+}
+
+/** Mensaje de sistema {k:'gg.actions'}: las tarjetas de lo que gg dejó listo, y respuestas rápidas. Solo quien lo pidió confirma. */
+export function GgActionsRow({ messageId, conversationId, p }: { messageId: string; conversationId: string; p: { forUserId: string; actions: AssistantActionDTO[]; suggestions?: string[] } }) {
+  const d = useClient((s) => s.data)!;
+  const mine = p.forUserId === d.me.id;
+  const [local, setLocal] = useState<Record<string, Partial<AssistantActionDTO>>>({});
+  const list = p.actions.map((a) => ({ ...a, ...local[a.id] }));
+  const patch = (id: string, v: Partial<AssistantActionDTO>) => setLocal((x) => ({ ...x, [id]: { ...x[id], ...v } }));
+  const run = async (a: AssistantActionDTO, text?: string) => {
+    if (!a.token) return;
+    patch(a.id, { status: 'done', error: null, ...(text ? { text } : {}) });
+    try { await client.request('/assistant/run', { method: 'POST', json: { token: a.token, ...(text ? { text } : {}), messageId, actionId: a.id } }); }
+    catch (e) { patch(a.id, { status: 'failed', error: errorText(e) }); }
+  };
+  const undo = async (a: AssistantActionDTO) => {
+    if (!a.undoToken) return;
+    try { await client.request('/assistant/run', { method: 'POST', json: { token: a.undoToken, messageId, actionId: a.id } }); patch(a.id, { status: 'undone', undoToken: undefined }); }
+    catch (e) { patch(a.id, { error: errorText(e) }); }
+  };
+  const discard = async (a: AssistantActionDTO) => {
+    patch(a.id, { status: 'failed', error: t('ai.discarded') });
+    await client.request('/assistant/actions/discard', { method: 'POST', json: { messageId, actionId: a.id } }).catch(() => {});
+  };
+  const say = (text: string) => void client.send(conversationId, text).catch(toastError);
+  return (
+    <div className="msg-card-row gg-actions">
+      {list.map((a) => (mine
+        ? <ActionCard key={a.id} a={a} onRun={run} onUndo={undo} onDiscard={() => void discard(a)} onOpen={(to) => navigate(to)} onRedo={() => say(t('ai.redoAsk'))} />
+        : <div key={a.id} className="ai-card small muted">{t('gg.forOther', { name: personById(d, p.forUserId)?.name.split(' ')[0] ?? '' })}: {a.target} · {a.text}</div>))}
+      {mine && !!p.suggestions?.length && (
+        <div className="chips gg-suggest">{p.suggestions.map((s) => <button key={s} className="chip" onClick={() => say(s)}>{s}</button>)}</div>
+      )}
+    </div>
+  );
+}
+
+/** Arreglo vacío fijo: un `?? []` dentro del selector de useClient es nuevo en cada render y React entra en bucle (pantalla en blanco). */
+const NO_MESSAGES: readonly never[] = [];
+
+/** «gg está pensando…»: después de escribirle, mientras no conteste (máx. 90 s). */
+export function GgThinking({ conversationId, inDm }: { conversationId: string; inDm: boolean }) {
+  const d = useClient((s) => s.data)!;
+  const msgs = useClient((s) => s.conversations[conversationId]?.messages ?? NO_MESSAGES);
+  const [, tick] = useState(0);
+  useEffect(() => { const h = setInterval(() => tick((x) => x + 1), 5000); return () => clearInterval(h); }, []);
+  let lastAsk = -1, lastGg = -1;
+  msgs.forEach((m, i) => {
+    if (m.authorId === GG_ID) lastGg = i;
+    else if (m.authorId === d.me.id && m.kind === 'text' && (inDm || /(^|\s)@gg\b/i.test(m.body))) lastAsk = i;
+  });
+  const ask = msgs[lastAsk];
+  if (!ask || lastGg > lastAsk || Date.now() - Date.parse(ask.createdAt) > 90_000) return null;
+  return <div className="gg-thinking"><img src={asset('/gg-mark-animado.svg')} alt="" width={22} height={22} /> {t('gg.thinking')}</div>;
 }

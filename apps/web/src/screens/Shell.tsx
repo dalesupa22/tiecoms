@@ -8,7 +8,7 @@ import type { ConversationDTO } from '@tiecoms/contracts';
 import { t } from '../i18n.ts';
 import { openAccountMenu } from './Profile.tsx';
 import { AllList, DmsList, GroupsBody, GroupsViewButton, GroupsViewToggle, dmConversations, useGroupsView } from './Groups.tsx';
-import { QuickSearchField, QuickSearchSections, isMac, openCreateMenu, openNewMessage, quickKey } from './Quick.tsx';
+import { QuickSearchField, QuickSearchSections, isMac, openCreateMenu, openNewMessage, quickKey, MessageSearchSection, useQuickResults } from './Quick.tsx';
 import { activityOf, isMuted, pendingOf } from '../home-order.ts';
 import { DndStrip, MeAvatar } from './Silence.tsx';
 import { AssistantBubble } from './Assistant.tsx';
@@ -153,6 +153,8 @@ function Sidebar({ route }: { route: Route }) {
   // Buscar un chat desde la barra (pedido de Danny, 29-sep-2026): chats, grupos y personas; se limpia al abrir uno.
   const [sq, setSq] = useState('');
   const sideSearching = !!sq.trim();
+  const quickR = useQuickResults(sq);
+  const quickHas = !!(quickR.people.length || quickR.groups.length || quickR.chats.length);
   const routeKey = route.name === 'conversation' ? route.id : route.name;
   useEffect(() => { setSq(''); }, [routeKey]);
   const sideInput = useRef<HTMLInputElement>(null);
@@ -210,7 +212,7 @@ function Sidebar({ route }: { route: Route }) {
         {sideTab === 'groups' && view === 'tree' && filter !== 'mentions' && <GroupsViewButton tab={filter} />}
       </div>}
       <div className="side-scroll">
-        {sideSearching ? <QuickSearchSections query={sq} order={['chats', 'groups', 'people']} />
+        {sideSearching ? <><QuickSearchSections query={sq} order={['chats', 'groups', 'people']} withMessages /><MessageSearchSection query={sq} hasQuick={quickHas} /></>
           : filter === 'mentions' ? <MentionsInbox />
           : sideTab === 'all' ? <AllList tab={filter} activeConv={activeConv} />
           : sideTab === 'groups' ? <GroupsBody tab={filter} activeConv={activeConv} />

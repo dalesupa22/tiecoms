@@ -311,10 +311,10 @@ function MailMeta({ from, to, cc, date, provider }: { from: SharedMailDTO['from'
 
 // ---------- Llevar a un chat ----------
 /** Elegir uno o varios chats (hasta 10) para llevar un correo o un WhatsApp. */
-function ChatPicker({ picked, setPicked }: { picked: string[]; setPicked: (v: string[]) => void }) {
+function ChatPicker({ picked, setPicked, exclude }: { picked: string[]; setPicked: (v: string[]) => void; exclude?: string }) {
   const d = useClient((s) => s.data)!;
   const [q, setQ] = useState('');
-  const list = useMemo(() => d.conversations.filter((c) => c.canPost && (!q || conversationTitle(d, c).toLowerCase().includes(q.toLowerCase()))).slice(0, 80), [d, q]);
+  const list = useMemo(() => d.conversations.filter((c) => c.canPost && c.id !== exclude && (!q || conversationTitle(d, c).toLowerCase().includes(q.toLowerCase()))).slice(0, 80), [d, q, exclude]);
   const toggle = (id: string) => setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : picked.length >= 10 ? picked : [...picked, id]);
   return (
     <>
@@ -541,11 +541,54 @@ export function CommentsNoticeLine({ count, title, lastByName, lastExcerpt, icon
 }
 
 /** Mensaje de sistema «mail.shared»: se ve como un mensaje de quien lo trajo, con su comentario y la tarjeta. */
-export function MailSharedRow({ m, p, onIssue }: { m: MessageDTO; p: { emailId: string; comment?: string }; onIssue: (id: string) => void }) {
+/** Responder, responder en privado y reenviar la tarjeta, como un mensaje normal (clic derecho o los botones al pasar). */
+export interface CardActions { reply: () => void; replyPrivately?: () => void; forward: () => void; menu: Record<string, unknown> }
+function CardHoverBar({ a }: { a: CardActions }) {
+  return (
+    <div className="card-actions-bar" role="toolbar">
+      <button onClick={a.reply} title={t('menu.reply')} aria-label={t('menu.reply')}>↩</button>
+      {a.replyPrivately && <button onClick={a.replyPrivately} title={t('preply.action')} aria-label={t('preply.action')}>✉</button>}
+      <button onClick={a.forward} title={t('card.forward')} aria-label={t('card.forward')}>↪</button>
+    </div>
+  );
+}
+export const openForwardCard = (emailId: string) => openDialog((close) => <ForwardCardDialog emailId={emailId} onClose={close} />);
+function ForwardCardDialog({ emailId, onClose }: { emailId: string; onClose: () => void }) {
+  const d = useClient((s) => s.data)!;
+  const email = useClient((s) => s.mails[emailId]);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [comment, setComment] = useState('');
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    if (!picked.length || busy) return;
+    setBusy(true);
+    try {
+      await client.forwardShared(emailId, picked, comment.trim() || undefined);
+      const first = picked[0]!;
+      toast(picked.length > 1 ? t('mail.sharedMany', { n: picked.length }) : t('mail.shared'), { label: t('lin.open'), run: () => navigate(`/c/${first}`) });
+      onClose();
+    } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title={t('card.forwardTitle')} onClose={onClose}>
+      {email && (
+        <div className="xcard mini"><div className="xcard-top"><span className={`src-ico ${email.provider === 'whatsapp' ? 'wa' : ''}`}><SrcIcon provider={email.provider} size={20} /></span>
+          <div style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{email.provider === 'whatsapp' ? email.wa?.chatName ?? email.subject : email.subject || t('mail.noSubject')}</b><span className="small muted ellipsis" style={{ display: 'block' }}>{email.snippet}</span></div></div></div>
+      )}
+      <ChatPicker picked={picked} setPicked={setPicked} exclude={email?.conversationId} />
+      <textarea className="input" rows={2} maxLength={4000} placeholder={t('mail.commentPh')} value={comment} onChange={(e) => setComment(e.target.value)} />
+      <WhoSees picked={picked} />
+      <div className="modal-actions"><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" disabled={!picked.length || busy} onClick={() => void go()}>{busy ? t('mail.sharing') : shareLabel(d, picked)}</button></div>
+    </Modal>
+  );
+}
+
+export function MailSharedRow({ m, p, onIssue, actions }: { m: MessageDTO; p: { emailId: string; comment?: string }; onIssue: (id: string) => void; actions?: CardActions }) {
   const d = useClient((s) => s.data)!;
   const author = personById(d, m.authorId);
   return (
-    <div id={`msg-${m.conversationId}-${m.seq}`} className="msg">
+    <div id={`msg-${m.conversationId}-${m.seq}`} data-mid={m.id} className="msg card-msg" {...(actions?.menu ?? {})}>
+      {actions && <CardHoverBar a={actions} />}
       <div><Avatar person={author} org={orgById(d, author?.orgId)} size={34} /></div>
       <div style={{ minWidth: 0 }}>
         <div className="msg-meta"><span className="msg-author">{author?.name ?? t('common.participant')}</span><span className="msg-time">{new Date(m.createdAt).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })}</span></div>
@@ -783,11 +826,12 @@ function MailTaskDialog({ email, onClose }: { email: SharedMailDTO; onClose: () 
 
 // ---------- WhatsApp ----------
 export type WaShared = { accountId: string; jid: string; waMessageId: string; accountKind: 'personal' | 'business'; chatName: string | null; isGroup: boolean; author: string | null; fromMe: boolean; text: string; sentAt: string | null; comment?: string };
-export function WaSharedRow({ m, p, onIssue }: { m: MessageDTO; p: WaShared & { emailId?: string }; onIssue?: (id: string) => void }) {
+export function WaSharedRow({ m, p, onIssue, actions }: { m: MessageDTO; p: WaShared & { emailId?: string }; onIssue?: (id: string) => void; actions?: CardActions }) {
   const d = useClient((s) => s.data)!;
   const author = personById(d, m.authorId);
   return (
-    <div id={`msg-${m.conversationId}-${m.seq}`} className="msg">
+    <div id={`msg-${m.conversationId}-${m.seq}`} data-mid={m.id} className="msg card-msg" {...(actions?.menu ?? {})}>
+      {actions && <CardHoverBar a={actions} />}
       <div><Avatar person={author} org={orgById(d, author?.orgId)} size={34} /></div>
       <div style={{ minWidth: 0 }}>
         <div className="msg-meta"><span className="msg-author">{author?.name ?? t('common.participant')}</span><span className="msg-time">{new Date(m.createdAt).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })}</span></div>
@@ -855,4 +899,15 @@ export function MailConnectNudge() {
       <button className="icon-btn" aria-label={t('common.close')} onClick={close}>×</button>
     </div>
   );
+}
+
+/** Cómo se cita la tarjeta de un correo o un WhatsApp compartido al responderla. */
+export function cardQuote(m: { kind: string; body: string }): string | null {
+  if (m.kind !== 'system') return null;
+  try {
+    const p = JSON.parse(m.body);
+    if (p.k === 'mail.shared') return `✉ ${p.subject || t('mail.noSubject')}${p.from ? ` · ${p.from}` : ''}`;
+    if (p.k === 'wa.shared') return `WhatsApp${p.chatName ? ` · ${p.chatName}` : ''}: ${p.text ?? ''}`;
+  } catch {}
+  return null;
 }

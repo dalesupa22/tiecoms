@@ -1103,6 +1103,10 @@ export class TieComsClient {
 
   // ---------- Tanda 1.7: buscar en el chat, una sola vista, comentarios de eventos ----------
   /** Busca dentro de una conversación (q ≥ 2 caracteres; admite from:Nombre). before = seq del último resultado. */
+  /** Buscar en todos mis chats (mensajes, adjuntos, notas de voz, correos y WhatsApps compartidos). */
+  searchAll(q: string, before?: string, limit = 20, signal?: AbortSignal) {
+    return this.request<import('@tiecoms/contracts').GlobalSearchPageDTO>(`/search/messages?q=${encodeURIComponent(q)}&limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`, { signal });
+  }
   searchChat(conversationId: string, q: string, before?: number, limit = 30, signal?: AbortSignal) {
     return this.request<ChatSearchPageDTO>(`/conversations/${conversationId}/search?q=${encodeURIComponent(q)}&limit=${limit}${before ? `&before=${before}` : ''}`, { signal });
   }
@@ -1195,6 +1199,12 @@ export class TieComsClient {
   async mailTask(id: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; closeOnReply?: boolean }) {
     const r = await this.request<{ issue: IssueDTO; email: import('@tiecoms/contracts').SharedMailDTO }>(`/mail/shared/${id}/task`, { method: 'POST', json: input });
     this.putMail(r.email);
+    return r;
+  }
+  /** Reenviar la tarjeta de un correo o WhatsApp a otros chats (cada uno con su hilo). */
+  async forwardShared(id: string, conversationIds: string[], comment?: string) {
+    const r = await this.request<{ emails: import('@tiecoms/contracts').SharedMailDTO[] }>(`/mail/shared/${id}/forward`, { method: 'POST', json: { conversationIds, comment } });
+    r.emails.forEach((e) => this.putMail(e));
     return r;
   }
   async shareWhatsApp(input: { accountId: string; jid: string; messageId: string; conversationIds: string[]; comment?: string }) {

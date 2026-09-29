@@ -11,7 +11,7 @@ import {
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
-  ChatSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput,
+  ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput, ForwardSharedInput,
   SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
@@ -42,6 +42,8 @@ import * as attachments from './modules/attachments.ts';
 import * as voice from './modules/voice.ts';
 import * as calls from './modules/calls.ts';
 import * as assistant from './modules/assistant.ts';
+import * as gg from './modules/gg.ts';
+import { getOrCreateDirect } from './modules/workspaces.ts';
 import * as signatures from './modules/signatures.ts';
 import * as mentions from './modules/mentions.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
@@ -50,7 +52,7 @@ import * as links from './modules/links.ts';
 import * as topics from './modules/topics.ts';
 import * as integrations from './modules/integrations.ts';
 import { openViewOnce, fetchOnce } from './modules/view-once.ts';
-import { searchConversation } from './modules/chat-search.ts';
+import { searchAll, searchConversation } from './modules/chat-search.ts';
 import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
 import { z } from 'zod';
@@ -380,7 +382,22 @@ export async function buildHttp() {
     priv.post('/api/v1/assistant/turn', { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } }, async (req) => assistant.turn(req.userId, req.body));
     priv.post<{ Querystring: { lang?: string } }>('/api/v1/assistant/transcribe', { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } },
       async (req) => assistant.transcribe(req.userId, req.body, req.headers['x-file-type'] as string | undefined, req.query.lang, req.headers['x-ai-consent'] === '1'));
-    priv.post('/api/v1/assistant/run', { config: { rateLimit: { max: 60, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } }, async (req) => assistant.run(req.userId, req.body));
+    priv.post('/api/v1/assistant/run', { config: { rateLimit: { max: 60, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } }, async (req) => {
+      // Desde la tarjeta del chat con gg: además de hacerlo, queda guardado el estado en el mensaje.
+      const { messageId, actionId, ...body } = (req.body ?? {}) as any;
+      const extra = z.object({ messageId: z.uuid().optional(), actionId: z.string().max(80).optional() }).parse({ messageId, actionId });
+      const out = await assistant.run(req.userId, body);
+      if (extra.messageId && extra.actionId) await gg.markAction(req.userId, extra.messageId, extra.actionId, { ...out, id: extra.actionId });
+      return out;
+    });
+    priv.post('/api/v1/assistant/actions/discard', async (req) => {
+      const b = z.object({ messageId: z.uuid(), actionId: z.string().max(80) }).parse(req.body);
+      return gg.markAction(req.userId, b.messageId, b.actionId, { status: 'failed', error: 'Descartado' });
+    });
+    priv.post('/api/v1/assistant/consent', async (req) => gg.setConsent(req.userId, z.object({ on: z.boolean() }).parse(req.body).on));
+    // Tu chat con gg y «Tú» (notas para ti): se crean al abrirlos.
+    priv.post('/api/v1/assistant/chat', async (req) => getOrCreateDirect(req.userId, gg.GG_ID));
+    priv.post('/api/v1/me/notes', async (req) => getOrCreateDirect(req.userId, req.userId));
     priv.post('/api/v1/directs', async (req) => ws.getOrCreateDirect(req.userId, CreateDirectInput.parse(req.body).userId));
     priv.post('/api/v1/chats', async (req) => ws.createChat(req.userId, CreateChatInput.parse(req.body)));
 
@@ -407,6 +424,8 @@ export async function buildHttp() {
     // Tanda 1.7: buscar dentro del chat y abrir un mensaje de una sola vista (una vez por persona).
     priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/search', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) =>
       searchConversation(req.userId, z.uuid().parse(req.params.id), ChatSearchQuery.parse(req.query)));
+    // Buscar en todos mis chats (mensajes, adjuntos, notas de voz y correos o WhatsApps compartidos).
+    priv.get('/api/v1/search/messages', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => searchAll(req.userId, GlobalSearchQuery.parse(req.query)));
     priv.post<{ Params: { id: string } }>('/api/v1/messages/:id/open', async (req) => openViewOnce(req.userId, z.uuid().parse(req.params.id)));
     // Bandeja «Menciones»: before = createdAt del último que ya tienes.
     priv.get<{ Querystring: { before?: string; limit?: string } }>('/api/v1/mentions', async (req) => {
@@ -523,6 +542,7 @@ export async function buildHttp() {
       mailbox.reply(req.userId, z.uuid().parse(req.params.id), MailReplyInput.parse(req.body)));
     priv.delete<{ Params: { id: string } }>('/api/v1/mail/shared/:id/reply', async (req) => mailbox.cancelReply(req.userId, z.uuid().parse(req.params.id)));
     priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/task', async (req, reply) => reply.status(201).send(await mailbox.createTask(req.userId, z.uuid().parse(req.params.id), MailTaskInput.parse(req.body))));
+    priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/forward', mailLimit, async (req, reply) => reply.status(201).send(await mailbox.forwardShared(req.userId, z.uuid().parse(req.params.id), ForwardSharedInput.parse(req.body))));
     priv.post('/api/v1/whatsapp/share', mailLimit, async (req, reply) => reply.status(201).send(await mailbox.shareWhatsApp(req.userId, ShareWaInput.parse(req.body))));
     priv.get('/api/v1/reminders', async (req) => ({ reminders: await reminders.listReminders(req.userId) }));
     priv.post('/api/v1/reminders', async (req) => reminders.createReminder(req.userId, CreateReminderInput.parse(req.body)));

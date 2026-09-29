@@ -11,7 +11,7 @@ import { conversationMenu, forwardMenu, messageLink, muteMenu, muteOptions, mute
 import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate, queryParam } from '../router.ts';
-import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, orgById, personById, personColor } from '../ui.tsx';
+import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, isGgChat, isSelfChat, orgById, personById, personColor } from '../ui.tsx';
 import { PhotoCropDialog, pickImage } from './PhotoCrop.tsx';
 import { AttachmentsView, DraftTray, pickFiles, useDrafts } from './Attachments.tsx';
 import { VoiceRecorder } from './Voice.tsx';
@@ -23,7 +23,8 @@ import { SleepNotice } from './Sleep.tsx';
 import { createChatRecovery } from '../chat-recovery.ts';
 import { DerivedPendingStrip } from './Pending.tsx';
 import { MeetingDialog } from './Meetings.tsx';
-import { CommentsNoticeLine, MailPickDialog, MailSharedRow, WaIcon, WaSharedRow, openMailDrawer, type WaShared } from './Mail.tsx';
+import { GgActionsRow, GgConsentBanner, GgThinking, saveToSelf } from './Assistant.tsx';
+import { CommentsNoticeLine, MailPickDialog, MailSharedRow, WaIcon, WaSharedRow, cardQuote, openForwardCard, openMailDrawer, type CardActions, type WaShared } from './Mail.tsx';
 import { CallBanner, CallButtons, openTranscript } from './Call.tsx';
 import { ScheduledStrip, openScheduleMenu, scheduleMenu, whenLabel } from './Scheduled.tsx';
 import { SideIssueStrip, TasksDialog } from './Issues.tsx';
@@ -518,6 +519,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   };
 
   const title = conversationTitle(d, conv);
+  // gg: su chat (responde a todo) o cualquier chat (responde a @gg).
+  const ggDm = isGgChat(conv);
+  const ggHere = ggDm || conv.kind !== 'direct';
   const openHere = Object.values(allIssues).filter((i: IssueDTO) => i.conversationId === id && !isClosed(i));
   const issueOf = (mid: string) => openHere.find((i) => i.originMessageId === mid);
   // Asuntos, reuniones e hilos en todas (también directos y chats grupales). Fuera de un espacio el hilo es con
@@ -552,6 +556,21 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     void toggleReaction(m, emoji, !mine, { actions: reactionActions });
   };
   const pickReaction = (m: MessageDTO, x: number, y: number) => openEmojiPicker(x, y, (emoji) => react(m, emoji), { quick: true, actions: reactionActions });
+  /** Tarjetas de correo o WhatsApp: responder aquí, en privado y reenviar, como un mensaje normal. */
+  const cardActionsFor = (m: MessageDTO, emailId: string | undefined): CardActions => {
+    const mine = m.authorId === d.me.id;
+    const reply = () => { setReplyTo(m); input.current?.focus(); };
+    const priv = !mine && conv.kind !== 'direct' ? () => void replyPrivately(m) : undefined;
+    const forward = () => { if (emailId) openForwardCard(emailId); };
+    const items: MenuItem[] = [
+      ...(conv.canPost ? [{ label: t('menu.reply'), icon: '↩', onSelect: reply }] : []),
+      ...(priv ? [{ label: t('preply.action'), icon: '✉', hint: t('menu.hintDm', { name: personById(d, m.authorId)?.name.split(' ')[0] ?? '' }), onSelect: priv }] : []),
+      ...(emailId ? [{ label: t('card.forward'), icon: '↪', onSelect: forward }] : []),
+      { divider: true },
+      { label: t('menu.copyLink'), icon: '⛓', onSelect: async () => { await copyText(messageLink(m)); toast(t('toast.linkCopied')); } },
+    ];
+    return { reply: conv.canPost ? reply : () => {}, replyPrivately: priv, forward, menu: menuProps(() => items) as Record<string, unknown> };
+  };
   const messageMenu = (m: MessageDTO): MenuItem[] => {
     const mine = m.authorId === d.me.id;
     const isPinned = pinned.has(m.id);
@@ -593,6 +612,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       ] : []),
       { label: t('menu.forwardChat'), icon: '↪', onSelect: () => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />) },
       forwardMenu(d, conv, m, () => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />)),
+      ...(!isSelfChat(d, conv) && m.kind === 'text' && m.body ? [{ label: t('self.saveHere'), icon: '✎', onSelect: () => void saveToSelf(m, personById(d, m.authorId)?.name ?? null) }] : []),
       ...(mine ? [
         { divider: true },
         { label: t('menu.edit'), icon: '✎', onSelect: () => setEditing({ id: m.id, text: m.body }) },
@@ -673,7 +693,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
             if (r.kind === 'links') return <LinkGroup key={r.key} d={d} msgs={r.msgs} onExpand={() => setExpandedGroups((g) => new Set(g).add(r.key))} />;
             if (r.kind === 'pending') return <PendingRow key={r.key} p={r.p} />;
             const m = r.m;
-            if (m.kind === 'system') return <SystemRow key={r.key} m={m} onIssue={setOpenIssue} canPost={conv.canPost} live={liveFrom.current != null && m.seq > liveFrom.current} />;
+            if (m.kind === 'system') return <SystemRow key={r.key} m={m} onIssue={setOpenIssue} canPost={conv.canPost} live={liveFrom.current != null && m.seq > liveFrom.current} cardActions={cardActionsFor} />;
             const author = personById(d, m.authorId);
             const org = orgById(d, author?.orgId);
             const quoted = m.replyTo ? byId.get(m.replyTo) : null;
@@ -699,7 +719,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                   })()}
                   {m.replyTo && (
                     <button className="msg-quote" onClick={() => quoted && jumpTo(quoted.seq)}>
-                      {quoted ? <><b>{personById(d, quoted.authorId)?.name}</b> {quoted.deletedAt ? t('chat.deleted') : excerpt(quoted.body, 120)}</> : t('reply.quoteMissing')}
+                      {quoted ? <><b>{personById(d, quoted.authorId)?.name}</b> {quoted.deletedAt ? t('chat.deleted') : excerpt(cardQuote(quoted) ?? quoted.body, 120)}</> : t('reply.quoteMissing')}
                     </button>
                   )}
                   {m.forwarded && <ForwardedTag d={d} m={m} />}
@@ -735,6 +755,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               </div>
             );
           })}
+          {ggHere && <GgThinking conversationId={id} inDm={ggDm} />}
         </div>
         {(showJump || (pendingMentions.length > 0 && !nav.bottom)) && (
           <div className="jump-stack">
@@ -759,16 +780,17 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
         <div className="composer">
           {privateReply && (
             <div className="reply-bar is-private">
-              <span className="grow ellipsis"><b>✉ {t('preply.bar', { name: personById(d, privateReply.authorId)?.name ?? '' })}</b> · {excerpt(privateReply.body, 100)}</span>
+              <span className="grow ellipsis"><b>✉ {t('preply.bar', { name: personById(d, privateReply.authorId)?.name ?? '' })}</b> · {excerpt(cardQuote(privateReply) ?? privateReply.body, 100)}</span>
               <button className="icon-btn" aria-label={t('preply.cancel')} onClick={() => setPrivateReply(null)}>×</button>
             </div>
           )}
           {replyTo && (
             <div className="reply-bar">
-              <span className="grow ellipsis"><b>{t('reply.to', { name: personById(d, replyTo.authorId)?.name ?? '' })}</b> · {excerpt(replyTo.body, 100)}</span>
+              <span className="grow ellipsis"><b>{t('reply.to', { name: personById(d, replyTo.authorId)?.name ?? '' })}</b> · {excerpt(cardQuote(replyTo) ?? replyTo.body, 100)}</span>
               <button className="icon-btn" aria-label={t('reply.cancel')} onClick={() => setReplyTo(null)}>×</button>
             </div>
           )}
+          {ggDm && <GgConsentBanner />}
           {conv.canPost && <SleepNotice conv={conv} typing={!!text.trim()} onSchedule={canSchedule ? schedule : undefined} />}
           {conv.sideIssueId && <SideIssueStrip sideId={id} issueId={conv.sideIssueId} onOpen={setOpenIssue} />}
           {conv.canPost && <ScheduledStrip conversationId={id} />}
@@ -975,13 +997,17 @@ function PinsDialog({ conv, onJump, onClose }: { conv: ConversationDTO; onJump: 
 }
 
 /** Mensajes de sistema: algunos enlazan a un asunto, una reunión o la conversación derivada (si la puedes ver). */
-function SystemRow({ m, onIssue, canPost, live }: { m: MessageDTO; onIssue: (id: string) => void; canPost: boolean; live: boolean }) {
+function SystemRow({ m, onIssue, canPost, live, cardActions }: { m: MessageDTO; onIssue: (id: string) => void; canPost: boolean; live: boolean; cardActions?: (m: MessageDTO, emailId: string | undefined) => CardActions }) {
   const d = useClient((s) => s.data)!;
+  // gg: lo que dejó listo (tarjetas para confirmar) y respuestas rápidas (docs/GG-CHAT.md).
+  if (m.body.startsWith('{"k":"gg.actions"')) {
+    try { const g = JSON.parse(m.body); return <GgActionsRow key={m.id} messageId={m.id} conversationId={m.conversationId} p={g} />; } catch { return null; }
+  }
   // Correo y WhatsApp traídos al chat (docs/CORREO.md): mensaje de quien lo trajo + tarjeta.
   let px: any = null;
   try { px = m.body.startsWith('{"k":"mail.') || m.body.startsWith('{"k":"wa.') ? JSON.parse(m.body) : null; } catch {}
-  if (px?.k === 'mail.shared' && px.emailId) return <MailSharedRow m={m} p={px} onIssue={onIssue} />;
-  if (px?.k === 'wa.shared' && px.text != null) return <WaSharedRow m={m} p={px as WaShared} onIssue={onIssue} />;
+  if (px?.k === 'mail.shared' && px.emailId) return <MailSharedRow m={m} p={px} onIssue={onIssue} actions={cardActions?.(m, px.emailId)} />;
+  if (px?.k === 'wa.shared' && px.text != null) return <WaSharedRow m={m} p={px as WaShared} onIssue={onIssue} actions={cardActions?.(m, px.emailId)} />;
   if (px?.k === 'mail.comments' && px.emailId) return (
     <div id={`msg-${m.conversationId}-${m.seq}`} className="msg-card-row">
       {/* Una línea, no otra tarjeta: la tarjeta original ya muestra los comentarios. */}

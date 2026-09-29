@@ -257,6 +257,8 @@ export interface UserDTO {
   ringtone?: Ringtone | null;
   /** Solo en bootstrap.me: mi modo sueño (horario de descanso diario). Ausente = servidor anterior. */
   sleep?: SleepDTO;
+  /** Solo en bootstrap.me: autorizó usar IA con gg (su chat y @gg). */
+  aiConsent?: boolean;
 }
 
 /** Modo sueño: todas las noches, de `start` a `end` (HH:MM en `tz`), no suena nada. */
@@ -799,6 +801,8 @@ export const MailTaskInput = z.object({
   closeOnReply: z.boolean().default(true),
 });
 /** «Comentar en chaggu» desde un mensaje de WhatsApp. */
+/** Reenviar una tarjeta de correo o WhatsApp a otros chats: cada chat recibe su copia con hilo propio. */
+export const ForwardSharedInput = z.object({ conversationIds: z.array(z.uuid()).min(1).max(10), comment: z.string().trim().max(4000).optional() });
 export const ShareWaInput = z.object({
   accountId: z.uuid(), jid: z.string().min(3).max(200), messageId: z.string().min(1).max(200),
   conversationId: z.uuid().optional(), conversationIds: z.array(z.uuid()).min(1).max(10).optional(),
@@ -943,6 +947,8 @@ export interface BootstrapDTO {
   people: PersonDTO[];
   /** Funciones que el servidor tiene prendidas (aditivo: clientes viejos lo ignoran). */
   features?: { calls: boolean; mail?: boolean };
+  /** Id de gg (participante bot): su chat es el directo con este id; «Tú» es el directo con uno mismo. */
+  assistantId?: string;
   /** 1.7.1: la llamada en la que estoy desde algún dispositivo (con myDevices), o null. Ausente = servidor anterior. */
   myActiveCall?: CallDTO | null;
 }
@@ -1341,8 +1347,15 @@ export interface ChatSearchResultDTO {
   /** Coincidencias dentro de snippet: [inicio, largo] en unidades UTF-16. */
   matches: [number, number][];
   /** Dónde coincidió. */
-  field?: 'body' | 'attachment' | 'transcript';
+  field?: 'body' | 'attachment' | 'transcript' | 'mail';
 }
+/** GET /search/messages: buscar en todos mis chats (más recientes primero). before = createdAt ISO del último recibido. */
+export const GlobalSearchQuery = z.object({
+  q: z.string().trim().min(2).max(120),
+  before: z.iso.datetime({ offset: true }).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+export interface GlobalSearchPageDTO { results: ChatSearchResultDTO[]; hasMore: boolean }
 export interface ChatSearchPageDTO { results: ChatSearchResultDTO[]; hasMore: boolean }
 
 // ---------- Mensajes de sistema nuevos (tanda 1.7): body = JSON.stringify({ k, ... }) ----------
@@ -1625,7 +1638,7 @@ export const AssistantTurnInput = z.object({
 /** Confirmar una acción pendiente (token firmado por el servidor) o deshacer una hecha. `text` = texto editado de un mensaje. */
 export const AssistantRunInput = z.object({ token: z.string().min(10).max(8000), text: z.string().trim().min(1).max(8000).optional() });
 
-export type AssistantActionKind = 'send_message' | 'create_group' | 'create_issue' | 'update_issue' | 'create_event' | 'cancel_event' | 'mark_read';
+export type AssistantActionKind = 'send_message' | 'create_group' | 'create_issue' | 'update_issue' | 'create_event' | 'cancel_event' | 'mark_read' | 'save_note' | 'remind';
 export interface AssistantActionDTO {
   id: string;
   kind: AssistantActionKind;

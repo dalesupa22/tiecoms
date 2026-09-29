@@ -1,12 +1,12 @@
-import type { Ref } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { MailPickDialog } from './Mail.tsx';
-import type { BootstrapDTO, ConversationDTO, PersonDTO } from '@tiecoms/contracts';
+import type { BootstrapDTO, ChatSearchResultDTO, ConversationDTO, PersonDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { openDialog } from '../actions.tsx';
 import { errorText, t } from '../i18n.ts';
 import { openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate } from '../router.ts';
-import { Avatar, conversationSubtitle, conversationTitle, orgById } from '../ui.tsx';
+import { Avatar, conversationSubtitle, conversationTitle, orgById, personById } from '../ui.tsx';
 import { directWith, issueDestinations, quickSearch, type Namer, type QuickResults } from '../quick-search.ts';
 import { NewChatDialog } from './Chats.tsx';
 import { ConvItem, JoinWithCodeDialog, openCreateGroup } from './Groups.tsx';
@@ -100,11 +100,12 @@ export function firstResult(r: QuickResults, order: Part[]): (() => void) | null
 }
 
 /** Al buscar en Grupos o DMs también salen personas (clic = escribirle), grupos y chats; quien tiene su directo en Chats no se repite. */
-export function QuickSearchSections({ query, order }: { query: string; order: Part[] }) {
+export function QuickSearchSections({ query, order, withMessages = false }: { query: string; order: Part[]; withMessages?: boolean }) {
   const d = useClient((s) => s.data)!;
   const r = useQuickResults(query);
   const empty = !r.people.length && !r.groups.length && !r.chats.length;
-  if (empty) return <div className="empty">{t('search.none', { q: query.trim() })}</div>;
+  // Si abajo se buscan mensajes, el «sin resultados» lo decide esa sección.
+  if (empty) return withMessages ? null : <div className="empty">{t('search.none', { q: query.trim() })}</div>;
   const head = (k: 'search.people' | 'search.groups' | 'search.chats') => <div className="eyebrow quick-head">{t(k)}</div>;
   return (
     <div className="quick-results">
@@ -141,5 +142,68 @@ export function QuickSearchField({ value, onChange, placeholder, order, inputRef
       {value ? <button type="button" className="search-clear" onClick={() => onChange('')} aria-label={t('common.clear')}>×</button>
         : hint ? <kbd className="search-kbd" aria-hidden>{hint}</kbd> : null}
     </div>
+  );
+}
+
+
+/**
+ * Buscar en todos los chats (pedido de Danny, 29-sep-2026): debajo de chats, grupos y personas, los mensajes que
+ * coinciden, del más nuevo al más viejo, con «Ver más». Tocar uno abre el chat en ese mensaje.
+ */
+export function MessageSearchSection({ query, hasQuick }: { query: string; hasQuick: boolean }) {
+  const d = useClient((s) => s.data)!;
+  const [results, setResults] = useState<ChatSearchResultDTO[] | null>(null);
+  const [more, setMore] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const ctl = useRef<AbortController | null>(null);
+  const q = query.trim();
+  const load = async (before?: string) => {
+    ctl.current?.abort();
+    const c = new AbortController(); ctl.current = c;
+    setBusy(true);
+    try {
+      const r = await client.searchAll(q, before, 20, c.signal);
+      if (c.signal.aborted) return;
+      setResults((x) => (before ? [...(x ?? []), ...r.results] : r.results)); setMore(r.hasMore);
+    } catch (e: any) { if (!c.signal.aborted && e?.name !== 'AbortError') setResults((x) => x ?? []); }
+    finally { if (!c.signal.aborted) setBusy(false); }
+  };
+  useEffect(() => {
+    setResults(null); setMore(false);
+    if (q.length < 2) return;
+    const h = setTimeout(() => void load(), 350);
+    return () => { clearTimeout(h); ctl.current?.abort(); };
+  }, [q]);
+  if (q.length < 2) return null;
+  const hl = (snippet: string, matches: [number, number][]) => {
+    const out: ReactNode[] = []; let at = 0;
+    matches.forEach(([s, l], i) => { out.push(snippet.slice(at, s)); out.push(<mark key={i}>{snippet.slice(s, s + l)}</mark>); at = s + l; });
+    out.push(snippet.slice(at));
+    return out;
+  };
+  const when = (iso: string) => { const dt = new Date(iso); const today = new Date().toDateString() === dt.toDateString(); return dt.toLocaleString(undefined, today ? { hour: 'numeric', minute: '2-digit' } : { day: 'numeric', month: 'short' }); };
+  return (
+    <section className="msg-search">
+      <div className="eyebrow quick-head">{t('search.messages')}{busy && !results ? ' · …' : ''}</div>
+      {results?.length === 0 && !hasQuick && <div className="empty">{t('search.none', { q })}</div>}
+      {results?.length === 0 && hasQuick && <div className="hint" style={{ padding: '4px 10px' }}>{t('search.noMessages')}</div>}
+      {results?.map((r) => {
+        const conv = d.conversations.find((c) => c.id === r.message.conversationId);
+        const author = personById(d, r.message.authorId);
+        return (
+          <button key={r.message.id} className="msg-search-row" onClick={() => navigate(`/c/${r.message.conversationId}?m=${r.message.seq}`)}>
+            <span className="row" style={{ gap: 6 }}>
+              <b className="ellipsis grow">{conv ? conversationTitle(d, conv) : t('chat.aConversation')}</b>
+              <span className="small muted">{when(r.message.createdAt)}</span>
+            </span>
+            <span className="small msg-search-snip">
+              {r.field === 'mail' ? '✉ ' : r.field === 'attachment' ? '📎 ' : r.field === 'transcript' ? '🎙 ' : ''}
+              <b>{r.message.authorId === d.me.id ? t('common.youShort') : author?.name.split(' ')[0] ?? ''}</b>{': '}{hl(r.snippet, r.matches)}
+            </span>
+          </button>
+        );
+      })}
+      {more && <button className="link-btn small" disabled={busy} onClick={() => void load(results?.at(-1)?.message.createdAt)}>{busy ? t('common.loading') : t('search.moreMessages')}</button>}
+    </section>
   );
 }

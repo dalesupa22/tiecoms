@@ -11,7 +11,7 @@ import { openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate } from '../router.ts';
 import { openDialog } from '../actions.tsx';
 import { startRingtone, stopRingtone } from '../sound.ts';
-import { Avatar, ConvAvatar, Modal, conversationTitle, personById } from '../ui.tsx';
+import { directOtherId, Avatar, ConvAvatar, Modal, conversationTitle, personById } from '../ui.tsx';
 
 const useCallView = () => useSyncExternalStore((l) => subscribeCall(() => l()), currentCall);
 /** Nombre corto; si la persona no está en mi lista (me agregaron a la llamada), sale de call.names. */
@@ -441,7 +441,7 @@ function PickConversationDialog({ title, onClose, onPick }: { title: string; onC
       <input className="input" autoFocus placeholder={t('calls.search')} value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="call-pick">
         {list.map(({ c, name }) => {
-          const other = c.kind === 'direct' ? personById(d, c.memberIds.find((m) => m !== d.me.id)) : null;
+          const other = c.kind === 'direct' ? personById(d, directOtherId(d, c)) : null;
           return (
             <button key={c.id} className="call-pick-row" onClick={() => onPick(c)}>
               {other ? <Avatar person={other} size={30} /> : <ConvAvatar c={c} size={30} fallback={<span className="call-pick-hash">#</span>} />}

@@ -7,7 +7,7 @@ import { openDialog } from '../actions.tsx';
 import { groupWorkspaces } from './Shell.tsx';
 import { CreateGroupDialog } from './Groups.tsx';
 import { navigate } from '../router.ts';
-import { Avatar, ConvAvatar, Modal, OrgMark, conversationTitle, orgById, personById } from '../ui.tsx';
+import { directOtherId, Avatar, ConvAvatar, Modal, OrgMark, conversationTitle, orgById, personById } from '../ui.tsx';
 import { destinationLabel, peopleByOrg, recentPeopleIds, searchGroups } from '../quick-search.ts';
 import { openDirect } from './Quick.tsx';
 
@@ -348,7 +348,7 @@ export function ForwardToChatsDialog({ source, onClose }: { source: MessageDTO; 
 }
 
 function ChatOption({ d, c, on, onToggle }: { d: BootstrapDTO; c: ConversationDTO; on: boolean; onToggle: () => void }) {
-  const other = c.kind === 'direct' ? personById(d, c.memberIds.find((m) => m !== d.me.id)) : null;
+  const other = c.kind === 'direct' ? personById(d, directOtherId(d, c)) : null;
   const ws = d.workspaces.find((w) => w.id === c.workspaceId);
   const orgIds = [...new Set(c.memberIds.map((m) => personById(d, m)?.orgId).filter(Boolean) as string[])];
   const sub = other ? [other.title, orgById(d, other.orgId)?.name].filter(Boolean).join(' · ')

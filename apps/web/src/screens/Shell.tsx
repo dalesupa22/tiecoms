@@ -8,7 +8,7 @@ import type { ConversationDTO } from '@tiecoms/contracts';
 import { t } from '../i18n.ts';
 import { openAccountMenu } from './Profile.tsx';
 import { AllList, DmsList, GroupsBody, GroupsViewButton, GroupsViewToggle, dmConversations, useGroupsView } from './Groups.tsx';
-import { isMac, openCreateMenu, openNewMessage, quickKey } from './Quick.tsx';
+import { QuickSearchField, QuickSearchSections, isMac, openCreateMenu, openNewMessage, quickKey } from './Quick.tsx';
 import { activityOf, isMuted, pendingOf } from '../home-order.ts';
 import { DndStrip, MeAvatar } from './Silence.tsx';
 import { AssistantBubble } from './Assistant.tsx';
@@ -150,6 +150,11 @@ function Sidebar({ route }: { route: Route }) {
   const [filter, setFilterState] = useState<HomeTab>(storedFilter);
   const [sideTab, setSideTabState] = useState<SideTab>(storedSideTab);
   const view = useGroupsView();
+  // Buscar un chat desde la barra (pedido de Danny, 29-sep-2026): chats, grupos y personas; se limpia al abrir uno.
+  const [sq, setSq] = useState('');
+  const sideSearching = !!sq.trim();
+  const routeKey = route.name === 'conversation' ? route.id : route.name;
+  useEffect(() => { setSq(''); }, [routeKey]);
   // Las secciones menos usadas van bajo «Más» para que los grupos y las relaciones quepan sin scroll.
   const [navMore, setNavMore] = useState(() => { try { return localStorage.getItem(NAV_MORE_KEY) === '1'; } catch { return false; } });
   const toggleNavMore = () => { const v = !navMore; setNavMore(v); try { localStorage.setItem(NAV_MORE_KEY, v ? '1' : '0'); } catch {} };
@@ -181,15 +186,17 @@ function Sidebar({ route }: { route: Route }) {
         </button>
       </nav>
       <DndStrip />
-      <SideTabs d={d} tab={sideTab} onTab={setSideTab} />
-      <div className="home-tabs-row side-tools">
+      <div className="side-search"><QuickSearchField value={sq} onChange={setSq} placeholder={t('side.searchChats')} order={['chats', 'groups', 'people']} /></div>
+      {!sideSearching && <SideTabs d={d} tab={sideTab} onTab={setSideTab} />}
+      {!sideSearching && <div className="home-tabs-row side-tools">
         <SideFilters d={d} filter={filter} onFilter={setFilter} />
         {/* Lista | Árbol vive junto a ☰; ☰ (plegar) solo aplica en Árbol. */}
         {sideTab === 'groups' && filter !== 'mentions' && <GroupsViewToggle />}
         {sideTab === 'groups' && view === 'tree' && filter !== 'mentions' && <GroupsViewButton tab={filter} />}
-      </div>
+      </div>}
       <div className="side-scroll">
-        {filter === 'mentions' ? <MentionsInbox />
+        {sideSearching ? <QuickSearchSections query={sq} order={['chats', 'groups', 'people']} />
+          : filter === 'mentions' ? <MentionsInbox />
           : sideTab === 'all' ? <AllList tab={filter} activeConv={activeConv} />
           : sideTab === 'groups' ? <GroupsBody tab={filter} activeConv={activeConv} />
           : <>

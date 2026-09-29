@@ -64,9 +64,31 @@ async function askDevices(camera: boolean) {
     s.getTracks().forEach((x) => x.stop());
   } catch (e: any) {
     if (camera) return askDevices(false); // sin cámara se entra solo con voz
-    lastError = e?.message ?? 'mic_denied';
-    throw Object.assign(new Error(''), { code: 'mic_denied' });
+    const code = await micErrorCode(e);
+    lastError = e?.message || code;
+    throw Object.assign(new Error(''), { code });
   }
+}
+
+/**
+ * Por qué no hay micrófono, para decir dónde se arregla:
+ * - mic_blocked_os: el sitio tiene permiso pero Windows o macOS se lo niegan al navegador
+ *   (Chrome/Edge dicen «Permission denied by system»; o el permiso del sitio ya está en granted).
+ * - mic_busy: otra app lo tiene tomado (Teams, Zoom; muy común en Windows).
+ * - mic_missing: no hay micrófono conectado.
+ * - mic_denied: la persona o el navegador lo bloquearon para este sitio (candado).
+ */
+async function micErrorCode(e: any): Promise<string> {
+  const name = String(e?.name ?? '');
+  const msg = String(e?.message ?? '');
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') return 'mic_missing';
+  if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') return 'mic_busy';
+  if (/by system/i.test(msg)) return 'mic_blocked_os';
+  try {
+    const st = await navigator.permissions?.query({ name: 'microphone' as PermissionName });
+    if (st?.state === 'granted') return 'mic_blocked_os';
+  } catch { /* Firefox/Safari viejos no conocen «microphone» */ }
+  return 'mic_denied';
 }
 
 /** Llama o entra a la llamada en curso de la conversación. */
@@ -140,10 +162,11 @@ async function connect(j: CallJoinDTO, camera: boolean) {
     addEventListener('pagehide', onPageHide);
   } catch (e: any) {
     console.error('[call] no se pudo conectar', e);
-    lastError = e?.name === 'NotAllowedError' || e?.name === 'PermissionDeniedError' ? 'mic_denied' : (e?.message ?? String(e));
+    const mic = /^(NotAllowed|PermissionDenied|NotFound|DevicesNotFound|NotReadable|TrackStart|Overconstrained)Error$/.test(String(e?.name)) ? await micErrorCode(e) : null;
+    lastError = mic ?? (e?.message ?? String(e));
     await hangUp();
     // Sin mensaje propio: errorText muestra el texto traducido del código.
-    throw Object.assign(new Error(''), { code: lastError === 'mic_denied' ? 'mic_denied' : 'call_connect_failed' });
+    throw Object.assign(new Error(''), { code: mic ?? 'call_connect_failed' });
   }
 }
 

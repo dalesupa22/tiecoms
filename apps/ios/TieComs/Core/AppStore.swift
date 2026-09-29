@@ -248,6 +248,65 @@ final class AppStore {
     let callCenter = CallCenter()
     /// «Contestar» desde el push con la app cerrada: se entra al tener sesión.
     @ObservationIgnored var pendingCallJoin: String?
+    @ObservationIgnored var snapshotTask: Task<Void, Never>?
+    @ObservationIgnored var lastBootstrapAt = Date.distantPast
+
+    // MARK: Caché local (1.7.0)
+
+    /// Pinta desde la caché de la última cuenta; la red revalida después (afterLogin).
+    func restoreSnapshot() -> Bool {
+        guard let user = Prefs.lastUserId, let host = api.baseURL.host, let s = SnapshotCache.load(userId: user, apiHost: host) else { return false }
+        var d = s.bootstrap
+        d.conversations.sort { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
+        data = d
+        blockedUserIds = Set(s.blocked)
+        var convs: [String: ConversationState] = [:]
+        for (id, c) in s.conversations {
+            convs[id] = ConversationState(messages: c.messages, lastEventSeq: c.lastEventSeq, hasMore: c.hasMore, loaded: true, loading: false)
+        }
+        conversations = convs
+        pending = outbox.load(userId: d.me.id).map { var p = $0; if p.status == .sending { p.status = .pending }; return p }
+        restoreMeetingAttempts()
+        loadLocalDnd()
+        return true
+    }
+
+    /// Guarda la caché unos segundos después del último cambio (bootstrap, mensajes).
+    func scheduleSnapshot() {
+        snapshotTask?.cancel()
+        snapshotTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.saveSnapshotNow()
+        }
+    }
+
+    func saveSnapshotNow() {
+        guard status == .ready, let d = data, let host = api.baseURL.host else { return }
+        SnapshotCache.save(SnapshotCache.make(d, blocked: blockedUserIds, conversations: conversations), apiHost: host)
+    }
+
+    /// Conversaciones que conviene tener listas: con no leídos o fijadas, las más recientes primero.
+    static func prefetchCandidates(_ d: BootstrapDTO, loaded: Set<String>, limit: Int = 8) -> [String] {
+        d.conversations.filter { ($0.unread > 0 || $0.pinnedAt != nil) && !loaded.contains($0.id) }
+            .sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
+            .prefix(limit).map(\.id)
+    }
+
+    /// Precarga en segundo plano (de a 2) sin marcar nada como leído.
+    func prefetchConversations() async {
+        guard let d = data else { return }
+        let ids = AppStore.prefetchCandidates(d, loaded: Set(conversations.filter { $0.value.loaded }.map(\.key)))
+        guard !ids.isEmpty else { return }
+        let stamp = sessionStamp
+        for pair in stride(from: 0, to: ids.count, by: 2).map({ Array(ids[$0..<min($0 + 2, ids.count)]) }) {
+            guard stamp == sessionStamp else { return }
+            await withTaskGroup(of: Void.self) { g in
+                for id in pair { g.addTask { @MainActor [weak self] in _ = try? await self?.openConversation(id) } }
+            }
+        }
+        scheduleSnapshot()
+    }
 
     /// Push de llamada (TC_CALL): Contestar entra con /calls/:id/join (ya o al terminar de abrir).
     func answerCallFromPush(_ callId: String) {
@@ -354,6 +413,31 @@ final class AppStore {
     func start() async {
         status = .loading
         guard api.hasStoredSession else { status = .anonymous; return }
+        // 1.7.0: con caché de esta cuenta, la lista sale al instante y la red revalida detrás.
+        if restoreSnapshot() {
+            Perf.mark("ready.cache")
+            status = .ready
+            let r = await api.refresh()
+            Perf.mark("refresh.done")
+            switch r {
+            case .ok: do { try await afterLogin() } catch {}
+            case .unauthorized: handleSignedOut()
+            case .network:
+                // Sin red: se queda con la caché y reintenta la sesión cada pocos segundos.
+                connection = .offline
+                Task { @MainActor [weak self] in
+                    while let self, self.status == .ready, self.socket.state != .connected {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        switch await self.api.refresh() {
+                        case .ok: try? await self.afterLogin(); return
+                        case .unauthorized: self.handleSignedOut(); return
+                        case .network: continue
+                        }
+                    }
+                }
+            }
+            return
+        }
         switch await api.refresh() {
         case .ok:
             do { try await afterLogin() } catch { status = api.accessToken == nil ? .anonymous : .unreachable }
@@ -424,12 +508,20 @@ final class AppStore {
         // Solo pruebas/diagnóstico: abrir una conversación al entrar (-TCOpenConversation <id>).
         if let id = AppConfig.launchValue("TCOpenConversation") { navigate(to: .conversation(id)) }
         #endif
-        Task { try? await loadReminders() }
-        Task { await loadOpenIssues() }
-        Task { await loadScheduled() }
-        Task { await syncSleepTimeZone() }
+        Perf.mark("ready.network")
         onReady?()
-        Task { await retryPushRegistration() }
+        // Lo no crítico (tareas, recordatorios, programados, zona horaria, push) después del primer render.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let self, generation == self.sessionGeneration else { return }
+            Task { try? await self.loadReminders() }
+            Task { await self.loadOpenIssues() }
+            Task { await self.loadScheduled() }
+            Task { await self.syncSleepTimeZone() }
+            Task { await self.retryPushRegistration() }
+        }
+        // Precarga los chats con no leídos y los fijados (máx. 8, de a 2).
+        Task { await prefetchConversations() }
     }
 
     func logout() async {
@@ -452,6 +544,9 @@ final class AppStore {
 
     private func handleSignedOut() {
         invalidateSessionWork()
+        snapshotTask?.cancel(); snapshotTask = nil
+        SnapshotCache.clearAll()
+        Prefs.lastUserId = nil
         pushSigningOut = true
         pushTokenSync.endSession()
         PushRegistration.unregister()
@@ -483,9 +578,12 @@ final class AppStore {
 
     func loadBootstrap() async throws {
         let stamp = sessionStamp
-        try await loadBlockedUsers()
-        try requireSession(stamp)
+        // Bloqueos y bootstrap en paralelo (antes, uno tras otro: un viaje de red más al abrir).
+        async let blocked: Void = loadBlockedUsers()
         var d: BootstrapDTO = try await api.request("/bootstrap")
+        Perf.mark("bootstrap.done")
+        lastBootstrapAt = Date()
+        try await blocked
         try requireSession(stamp)
         d.conversations.sort { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
         defer { scheduleBadge() }
@@ -509,6 +607,8 @@ final class AppStore {
             if callCenter.view != nil || callCenter.ringing != nil { callCenter.reset() }
         }
         ShareTargets.save(d, apiURL: api.baseURL)
+        Prefs.lastUserId = d.me.id
+        scheduleSnapshot()
         ChatSounds.shareRingtone(d.me.ringtone)
     }
 
@@ -577,7 +677,8 @@ final class AppStore {
         let stamp = sessionStamp
         do {
             try requireSession(stamp)
-            try await loadBootstrap()
+            // El socket conecta justo después de entrar: si el bootstrap es de hace un momento, no se pide otra vez.
+            if Date().timeIntervalSince(lastBootstrapAt) > 3 { try await loadBootstrap() }
             try requireSession(stamp)
             Task { await loadOpenIssues() }
             Task { await loadScheduled() }
@@ -979,6 +1080,7 @@ final class AppStore {
                 guard self.conversationLoads[id]?.owner == owner else { throw CancellationError() }
                 self.conversations[id]?.loading = false
                 self.conversationLoads[id] = nil
+                self.scheduleSnapshot()
             } catch {
                 if stamp == self.sessionStamp, self.conversationLoads[id]?.owner == owner {
                     self.conversationLoads[id] = nil
@@ -1414,7 +1516,7 @@ final class AppStore {
         Task { await resync() }
     }
 
-    func enteredBackground() { appActive = false }
+    func enteredBackground() { appActive = false; saveSnapshotNow() }
 
     private func startPathMonitor() {
         guard pathMonitor == nil else { return }

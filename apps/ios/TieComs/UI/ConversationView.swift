@@ -120,6 +120,8 @@ struct ConversationView: View {
     @State private var commentingIssue: IssueDTO?
     /// «Responder» de la franja de comentarios de un evento (tanda 1.7 §5): el compositor comenta el evento.
     @State private var commentingEvent: CalendarEventDTO?
+    /// Para medir de tocar el chat a ver sus mensajes (Perf).
+    @State private var openedAt = Date()
     /// Buscar dentro del chat (tanda 1.7 §6).
     @State private var search = ChatSearchState()
     @FocusState private var searchFocused: Bool
@@ -635,6 +637,7 @@ struct ConversationView: View {
             // Tras la recuperación (ios-avisos) la primera página llega con loaded y aún loading: se espera a que termine.
             .task(id: state.loaded && !state.loading) {
                 guard state.loaded, !state.loading, !positioned else { return }
+                Perf.mark("chat.loaded", "\(Int(Date().timeIntervalSince(openedAt) * 1000)) ms desde abrir")
                 await positionAtFirstUnread(proxy)
             }
             .defaultScrollAnchor(.bottom)
@@ -782,7 +785,7 @@ struct ConversationView: View {
         if older && search.index >= search.results.count - 1 && search.hasMore, let last = search.results.last {
             let q = search.query
             Task {
-                if let page = try? await store.searchConversation(conversationId, query: q, before: last.createdAt) {
+                if let page = try? await store.searchConversation(conversationId, query: q, before: last.seq) {
                     search.results += page.results.map(\.message).filter { n in !search.results.contains { $0.id == n.id } }
                     search.hasMore = page.hasMore
                     search.older(); goSearch(search.index)

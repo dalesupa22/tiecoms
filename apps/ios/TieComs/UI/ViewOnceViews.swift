@@ -22,7 +22,10 @@ enum ViewOnceRules {
     }
     /// Solo texto, fotos y notas de voz (archivos o videos: el servidor responde 400).
     static func allowed(_ staged: [LocalAttachment]) -> Bool { staged.allSatisfy { $0.contentType.hasPrefix("image/") } }
-    static func opened(_ m: MessageDTO) -> Bool { m.viewOnceState == "opened" }
+    /// En los eventos en vivo llega 'unopened' para todos: también cuenta si estoy en openedBy (contrato 1.7).
+    static func opened(_ m: MessageDTO, me: String? = nil) -> Bool {
+        m.viewOnceState == "opened" || (me.map { id in m.openedBy.contains { $0.userId == id } } ?? false)
+    }
     /// Para el autor: «Visto por Ana y Bruno».
     static func seenBy(_ m: MessageDTO, name: (String) -> String?) -> String? {
         let names = m.openedBy.compactMap { name($0.userId)?.split(separator: " ").first.map(String.init) }
@@ -75,7 +78,7 @@ struct ViewOnceBubble: View {
     @State private var viewing = false
 
     var body: some View {
-        let opened = ViewOnceRules.opened(message)
+        let opened = ViewOnceRules.opened(message, me: store.me?.id)
         let canOpen = !mine && !opened
         Button { if canOpen { viewing = true } } label: {
             HStack(spacing: 10) {
@@ -84,7 +87,8 @@ struct ViewOnceBubble: View {
                     .overlay(Circle().stroke(lineWidth: 1.6))
                     .opacity(opened ? 0.5 : 1)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(ViewOnceRules.label(message)).font(.subheadline.weight(.semibold))
+                    // El «①» ya va en el círculo.
+                    Text(ViewOnceRules.label(message).replacingOccurrences(of: "① ", with: "")).font(.subheadline.weight(.semibold))
                     Text(sub(opened: opened)).font(.caption2).opacity(0.8)
                 }
                 Text(time).font(.caption2).opacity(0.7)
@@ -94,7 +98,7 @@ struct ViewOnceBubble: View {
             .background(RoundedRectangle(cornerRadius: 18).fill(mine ? Theme.bubbleMine : Theme.bubbleOther))
         }
         .buttonStyle(.plain)
-        .disabled(!canOpen)
+        .allowsHitTesting(canOpen)
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
         .accessibilityIdentifier("vo.bubble.\(message.id)")
         .fullScreenCover(isPresented: $viewing) { ViewOnceViewer(message: message) }
@@ -140,9 +144,15 @@ struct ViewOnceViewer: View {
                         .accessibilityIdentifier("vo.play")
                     }
                     if !content.body.isEmpty {
-                        ScrollView { Text(content.body).font(.title3).foregroundStyle(.white).padding(24).accessibilityIdentifier("vo.text") }
+                        ScrollView {
+                            Text(content.body).font(.title2.weight(.medium)).foregroundStyle(.white).multilineTextAlignment(.center)
+                                .padding(24).frame(maxWidth: .infinity).accessibilityIdentifier("vo.text")
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                        .frame(maxHeight: 420)
                     }
                 }
+                .padding(.top, 70).padding(.bottom, 30)
             } else {
                 ProgressView().tint(.white)
             }
@@ -157,7 +167,7 @@ struct ViewOnceViewer: View {
             .accessibilityIdentifier("vo.close")
         }
         .overlay(alignment: .top) {
-            Text("① " + ViewOnceRules.label(message)).font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.8)).padding(.top, 18)
+            Text(ViewOnceRules.label(message)).font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.8)).padding(.top, 18)
         }
         .task { await load() }
         .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) { _ in captured = UIScreen.main.isCaptured }

@@ -14,6 +14,17 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.chaggu.com` por defecto (web: `https://www.chaggu.com`); `-TCApiURL <url>` al lanzar (pruebas) |
 
+## 1.7.0 (28): tanda 1.7 y velocidad
+
+- Tanda 1.7 (docs/TANDA-1.7.md; `UI/Tanda17Cards.swift`, `UI/ViewOnceViews.swift`, `UI/RefViews.swift`, `Core/ChatSearch.swift`,
+  `Core/Tanda17.swift`): #grupos, «Es hoy», tarea hecha (confeti) y vencida (carita triste, Nueva fecha / Marcar hecha /
+  Reasignar), comentarios agrupados de tareas y eventos (y comentar eventos), buscar en el chat y mensajes de una sola vista.
+  Contrato `2026-09-29`. Pruebas: `Tanda17Tests`, `Tanda17UITests` con `tools/fixtures/tanda17-fixture.mjs`.
+- Velocidad (`Core/SnapshotCache.swift`): la lista sale de la caché local (bootstrap + últimos 50 mensajes de 30 chats, por
+  usuario y servidor) y la red revalida detrás; bloqueos y bootstrap en paralelo; lo no crítico tras el primer render; precarga
+  de los chats con no leídos o fijados (8, de a 2). Marcas `Perf` (os_signpost, subsistema com.chaggu.app/perf).
+  `PerfUITests` + `tools/fixtures/latency-proxy.mjs` (100 ms por viaje).
+
 ## 1.6.10 (27): «Mensaje nuevo» como WhatsApp/Slack
 
 - Sin la fila «Chat con varias personas»: tocar a una persona la marca (círculo) y queda como chip en «Para:» (×; borrar en vacío

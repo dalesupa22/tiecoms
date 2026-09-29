@@ -16,6 +16,7 @@ final class LlamadasUITests: XCTestCase {
         var endedCallId: String
         var liveCallId: String
         var sleepDmId: String?
+        var dndDmId: String?
     }
 
     override func setUp() { continueAfterFailure = false }
@@ -182,33 +183,43 @@ final class LlamadasUITests: XCTestCase {
         shot("tabs-\(tag)-dms")
     }
 
-    /// 1.6.9: dentro de un chat no hay barra de pestañas (no tapa el compositor) y el aviso de descanso del otro no bloquea escribir.
+    /// Regla fija (1.6.9 → 1.7.0): el descanso o «No molestar» del destinatario NUNCA impide escribir. Sin barra de pestañas en
+    /// el chat; con el aviso visible, la barra de búsqueda abierta y el teclado, el campo y enviar se ven y se tocan.
+    /// En un directo con modo sueño, en uno con «No molestar» y en un chat grupal.
     func testChatHidesTabBarAndSleepingRecipientCanBeWritten() throws {
         let f = try fixture()
-        guard let sleepId = f.sleepDmId else { throw XCTSkip("Fixture sin sleepDmId") }
+        guard let sleepId = f.sleepDmId, let dndId = f.dndDmId else { throw XCTSkip("Fixture sin sleepDmId/dndDmId") }
         let app = login(f)
-        let bar = app.tabBars.firstMatch
-        let row = app.buttons["conv.row.\(sleepId)"].firstMatch
-        for _ in 0..<3 where !row.exists { app.buttons["tab.dms"].firstMatch.tap(); _ = row.waitForExistence(timeout: 4) }
-        XCTAssertTrue(row.waitForExistence(timeout: 6))
-        shot("20-dms-barra")
-        row.tap()
-        let field = app.textViews["composer.field"].firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "descansando")).firstMatch.waitForExistence(timeout: 5), "aviso de descanso")
-        XCTAssertFalse(bar.exists && bar.isHittable, "sin barra de pestañas dentro del chat")
-        XCTAssertTrue(field.isHittable, "el compositor no queda tapado")
-        shot("21-chat-descansando")
-        field.tap()
-        field.typeText("Hola Gloria, lo vemos mañana")
-        shot("22-escribiendo")
-        let send = app.buttons["composer.send"].firstMatch
-        XCTAssertTrue(send.waitForExistence(timeout: 3))
-        send.tap()
-        XCTAssertTrue(app.staticTexts["Hola Gloria, lo vemos mañana"].waitForExistence(timeout: 10))
-        shot("23-enviado")
-        app.navigationBars.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(bar.waitForExistence(timeout: 5), "de vuelta en la lista, la barra vuelve")
+        for (n, conv, text) in [(0, sleepId, "Hola Gloria, lo vemos mañana"), (1, dndId, "Hugo, te dejo esto"), (2, f.multiId, "Comité: listo el acta")] {
+            let row = app.buttons["conv.row.\(conv)"].firstMatch
+            for _ in 0..<3 where !row.exists { goTab(app, "dms"); _ = row.waitForExistence(timeout: 4) }
+            XCTAssertTrue(row.waitForExistence(timeout: 6), "fila \(conv)")
+            if n == 0 { shot("20-dms-barra") }
+            row.tap()
+            let field = app.textViews["composer.field"].firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: 10))
+            if n == 0 {
+                XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "descansando")).firstMatch.waitForExistence(timeout: 5), "aviso de descanso")
+            }
+            XCTAssertFalse(app.tabBars.firstMatch.exists && app.tabBars.firstMatch.isHittable, "sin barra de pestañas dentro del chat")
+            // Barra de búsqueda abierta (1.7) + teclado en el compositor.
+            app.buttons["chat.search"].firstMatch.tap()
+            XCTAssertTrue(app.textFields["chat.searchField"].waitForExistence(timeout: 3))
+            XCTAssertTrue(app.buttons["composer.viewOnce"].exists, "① visible")
+            field.tap()
+            field.typeText(text)
+            let send = app.buttons["composer.send"].firstMatch
+            XCTAssertTrue(send.waitForExistence(timeout: 3))
+            XCTAssertTrue(field.isHittable, "el campo se ve y se toca con aviso + búsqueda + teclado")
+            XCTAssertTrue(send.isHittable, "enviar se ve y se toca")
+            shot("2\(n + 1)-escribiendo-\(n == 0 ? "sueno" : n == 1 ? "dnd" : "grupo")")
+            send.tap()
+            XCTAssertTrue(app.staticTexts[text].waitForExistence(timeout: 10), "se envió")
+            app.buttons["chat.searchClose"].firstMatch.tap()
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+            XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 5), "de vuelta en la lista, la barra vuelve")
+        }
+        shot("24-enviados")
     }
 
     /// 1.6.10 · Mensaje nuevo: marcar dos personas y crear el chat; el 💬 abre el directo de una vez.

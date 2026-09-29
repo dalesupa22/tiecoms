@@ -623,9 +623,12 @@ struct HumanPreview: Codable, Equatable, Sendable {
     var body: String
     var attachments: Counts?
     var createdAt: String?
+    /// Una sola vista (tanda 1.7): «① Foto», «① Mensaje» o «① Nota de voz», nunca el contenido.
+    var viewOnce = false
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
+        viewOnce = c.v("viewOnce", false)
         messageId = c.o("messageId"); seq = c.int("seq"); authorId = c.o("authorId"); body = c.v("body", "")
         attachments = c.o("attachments"); createdAt = c.o("createdAt")
     }

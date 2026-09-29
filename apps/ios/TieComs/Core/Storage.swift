@@ -191,6 +191,12 @@ enum Prefs {
         return v
     }
 
+    /// Última cuenta con sesión en este dispositivo (para pintar su caché al abrir, antes de la red).
+    static var lastUserId: String? {
+        get { defaults.string(forKey: "tc.lastUserId") }
+        set { defaults.set(newValue, forKey: "tc.lastUserId") }
+    }
+
     static var soundsEnabled: Bool {
         get { defaults.object(forKey: soundsKey) as? Bool ?? true }
         set { defaults.set(newValue, forKey: soundsKey) }

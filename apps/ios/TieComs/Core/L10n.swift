@@ -145,6 +145,11 @@ enum L10n {
 
     /// Vista previa de lista: prefiere el último mensaje de una persona si el último fue de sistema (lastHumanPreview).
     static func listPreview(_ c: ConversationDTO) -> String? {
+        if let h = c.lastHumanPreview, h.viewOnce {
+            if let a = h.attachments, a.voices > 0 { return L("vo.voice") }
+            if let a = h.attachments, a.images > 0 { return L("vo.photo") }
+            return L("vo.message")
+        }
         if let h = c.lastHumanPreview {
             let text = h.body.trimmingCharacters(in: .whitespacesAndNewlines)
             let att = h.attachments.flatMap { countsLabel($0) }

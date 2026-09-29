@@ -86,7 +86,9 @@ struct IssueChatCard: View {
 
     @ViewBuilder private func card(_ d: BootstrapDTO, _ i: IssueDTO) -> some View {
         let owner = i.ownerId.flatMap { Naming.person(d, $0) }
-        let creator = Naming.person(d, creatorId)?.name.split(separator: " ").first.map(String.init) ?? ""
+        // En los avisos nuevos (hecha, vencida, comentarios) el autor del mensaje no es quien creó la tarea.
+        let creatorRef = kind.map { if case .issueCreated = $0 { return creatorId }; return i.createdBy } ?? creatorId
+        let creator = Naming.person(d, creatorRef)?.name.split(separator: " ").first.map(String.init) ?? ""
         let f = IssueSort.flags(i)
         let edge: TaskCard.Edge = {
             if case .issueDone = kind { return .done }
@@ -157,7 +159,7 @@ struct IssueChatCard: View {
                 }
             }
             // Comentar ahí mismo; no aparece si la tarea está cerrada.
-            if canPost && !closed && onComment != nil {
+            if canPost && !closed && onComment != nil && kind?.isComments != true {
                 // Un campo de texto dentro de la LazyVStack del chat la dejaba reubicándose sin fin al abrir el teclado
                 // (SwiftUI o UIKit): tocar aquí pasa el compositor del chat a «comentar esta tarea» (onComment).
                 Button { onComment?(i) } label: {

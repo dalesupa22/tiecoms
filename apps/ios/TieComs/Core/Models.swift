@@ -2,7 +2,7 @@ import Foundation
 
 /// Versión del contrato que habla esta app (ver packages/contracts).
 enum Contract {
-    static let version = "2026-09-28"
+    static let version = "2026-09-29"
 }
 
 // MARK: - Decodificación tolerante

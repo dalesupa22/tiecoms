@@ -13,7 +13,7 @@ final class PersonalIssueTests: XCTestCase {
     }
 
     func testContractAndNullConversationDecode() throws {
-        XCTAssertEqual(Contract.version, "2026-09-28", "GET /issues solo manda personales con contrato ≥ 2026-09-28")
+        XCTAssertGreaterThanOrEqual(Contract.version, "2026-09-28", "GET /issues solo manda personales con contrato ≥ 2026-09-28")
         let p = try issue("p", conv: nil)
         XCTAssertNil(p.conversationId)
         XCTAssertTrue(p.isPersonal)

@@ -115,6 +115,7 @@ struct MainView: View {
         let d = store.data
         // Barra propia (con llamadas son 6 pestañas y el TabView del sistema pondría «Más» en iPhone): solo íconos, salvo «DMs».
         tabShell(d, tabs: AppTab.allCases.filter { $0 != .calls || d?.callsEnabled == true })
+            .onAppear { Perf.mark("list.visible") }
         // Cada minuto: la ventana de «No molestar todas las noches» (lunita y avisos) entra y sale sola.
         .task {
             while !Task.isCancelled {

@@ -3376,8 +3376,8 @@
   "Open chat with {name}"
  ],
  "sys.event.today": [
-  "Hoy: {title} a las {when}.",
-  "Today: {title} at {when}."
+  "Hoy: {title} a las {when}",
+  "Today: {title} at {when}"
  ],
  "sys.issue.done": [
   "{byName} completó la tarea «{title}».",

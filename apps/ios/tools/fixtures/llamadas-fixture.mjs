@@ -77,7 +77,13 @@ await call('/me/sleep', { token: g.accessToken, method: 'PUT', body: { on: true,
 const sleepDm = await call('/chats', { token: a.accessToken, body: { userIds: [g.user.id] } });
 await say(g.accessToken, sleepDm.id, 'Te respondo mañana temprano');
 
-const out = { sleepDmId: sleepDm.id, apiUrl: API, password, tag, a: { email: a.user.email, id: a.user.id }, b: { email: b.user.email, id: b.user.id },
+// Hugo tiene «No molestar» por 2 horas: escribirle tampoco se bloquea.
+const h = await join('Hugo Rivas', 'hugo');
+await call('/me/dnd', { token: h.accessToken, method: 'PUT', body: { until: new Date(Date.now() + 2 * 3600e3).toISOString() } });
+const dndDm = await call('/chats', { token: a.accessToken, body: { userIds: [h.user.id] } });
+await say(h.accessToken, dndDm.id, 'Hablamos luego');
+
+const out = { sleepDmId: sleepDm.id, dndDmId: dndDm.id, apiUrl: API, password, tag, a: { email: a.user.email, id: a.user.id }, b: { email: b.user.email, id: b.user.id },
   g: { email: g.user.email, id: g.user.id }, dmId: dm.id, finId: fin.id, obraId: obra.id, multiId: multi.id, pagosId: pagos.id,
   endedCallId: c1.call.id, missedCallId: missed.call.id, liveCallId: live.call.id, bToken: b.accessToken };
 writeFileSync(process.env.FIXTURE_OUT ?? '/dev/stdout', JSON.stringify(out, null, 2));

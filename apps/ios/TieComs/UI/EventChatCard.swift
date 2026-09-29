@@ -82,7 +82,8 @@ struct EventChatCard: View {
     }
 
     @ViewBuilder private func card(_ d: BootstrapDTO, _ ev: CalendarEventDTO) -> some View {
-        let creator = Naming.person(d, creatorId)?.name.split(separator: " ").first.map(String.init) ?? ""
+        let creatorRef = kind.map { if case .eventCreated = $0 { return creatorId }; return ev.organizerId } ?? creatorId
+        let creator = Naming.person(d, creatorRef)?.name.split(separator: " ").first.map(String.init) ?? ""
         let fg = GroupColor.fg(ev.conversationId), bg = GroupColor.bg(ev.conversationId)
         let mine = ev.invitees.first { $0.userId == d.me.id }
         let cancelled = ev.isCancelled

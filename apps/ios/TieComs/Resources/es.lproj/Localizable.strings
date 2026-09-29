@@ -1760,7 +1760,7 @@
 "sys.event.comments" = "{lastByName} comentó el evento «{title}».";
 "sys.event.created" = "Agendó «{title}» para el {when}.";
 "sys.event.moved" = "Movió «{title}» al {when}.";
-"sys.event.today" = "Hoy: {title} a las {when}.";
+"sys.event.today" = "Hoy: {title} a las {when}";
 "sys.group.created" = "Grupo «{name}» creado.";
 "sys.group.photo_changed" = "Cambió la foto del grupo.";
 "sys.group.photo_removed" = "Quitó la foto del grupo.";

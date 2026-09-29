@@ -70,9 +70,10 @@ enum ChatSearch {
 }
 
 extension AppStore {
-    func searchConversation(_ id: String, query: String, before: String? = nil) async throws -> ChatSearchPage {
+    /// `before` = seq del último resultado que ya tengo (contrato 1.7).
+    func searchConversation(_ id: String, query: String, before: Int? = nil) async throws -> ChatSearchPage {
         var path = "/conversations/\(id)/search?limit=30&q=" + (query.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")
-        if let before, let b = before.addingPercentEncoding(withAllowedCharacters: .alphanumerics) { path += "&before=\(b)" }
+        if let before { path += "&before=\(before)" }
         return try await api.request(path)
     }
 }

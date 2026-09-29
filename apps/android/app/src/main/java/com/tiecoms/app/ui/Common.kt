@@ -118,6 +118,8 @@ fun systemText(ctx: Context, body: String, author: String? = null): String {
     com.tiecoms.app.core.Calls.systemCall(o)?.let { c -> return callSystemText(ctx, c) }
     // Tanda 1.7: es hoy, tarea hecha/vencida y comentarios agrupados.
     com.tiecoms.app.core.System17.parse(o)?.let { b -> return system17Text(ctx, b) }
+    // Correo y WhatsApp en el chat (docs/CORREO.md): el texto de sys.mail.* / sys.wa.shared, nunca el JSON.
+    com.tiecoms.app.core.MailSystem.parse(o)?.let { b -> return mailSystemText(ctx, b) }
     return when (str("k")) {
         "workspace.created" -> ctx.getString(R.string.sys_workspace_created, str("name"))
         "group.created" -> ctx.getString(R.string.sys_group_created, str("name"))
@@ -144,8 +146,18 @@ fun systemText(ctx: Context, body: String, author: String? = null): String {
         "group.photo_removed" -> listOfNotNull(author?.takeIf { it.isNotBlank() }, ctx.getString(R.string.sys_group_photo_removed)).joinToString(" · ")
         "side.started" -> if (str("parentName").isNotEmpty()) ctx.getString(R.string.sys_side_started_in, str("authorName"), str("parentName"), str("excerpt"))
             else ctx.getString(R.string.sys_side_started, str("authorName"), str("excerpt"))
-        else -> body
+        // Una clave que esta versión no conoce: nunca se muestra el JSON crudo.
+        else -> if (str("k").isEmpty()) body else ctx.getString(R.string.system_message)
     }
+}
+
+/** Texto de los mensajes de sistema del correo y de WhatsApp (mismos textos que la web: sys.mail.*, sys.wa.shared). */
+fun mailSystemText(ctx: Context, b: com.tiecoms.app.core.MailSystem.Body): String = when (b.key) {
+    "mail.shared" -> ctx.getString(R.string.web_sys_mail_shared, b.subject.ifEmpty { ctx.getString(R.string.web_mail_noSubject) })
+    "mail.comments" -> ctx.getString(R.string.web_sys_mail_comments, b.lastByName ?: "", b.subject.ifEmpty { ctx.getString(R.string.web_mail_noSubject) }, b.lastExcerpt ?: "")
+    "mail.replied" -> ctx.getString(R.string.web_sys_mail_replied, b.byName ?: "", b.subject.ifEmpty { ctx.getString(R.string.web_mail_noSubject) })
+    "mail.reply_failed" -> ctx.getString(R.string.web_sys_mail_reply_failed, b.subject.ifEmpty { ctx.getString(R.string.web_mail_noSubject) }, b.error ?: "")
+    else -> ctx.getString(R.string.web_sys_wa_shared)
 }
 
 fun callSystemText(ctx: Context, c: com.tiecoms.app.core.Calls.SystemCall): String = when (c.key) {

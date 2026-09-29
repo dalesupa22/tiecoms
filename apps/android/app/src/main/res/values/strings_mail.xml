@@ -1,0 +1,316 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Correo y WhatsApp en el chat (docs/CORREO.md). Generado desde apps/web/src/i18n.ts: mismos textos que la web. -->
+<resources>
+    <!-- lin.open -->
+    <string name="web_lin_open">Open</string>
+    <!-- comments.one -->
+    <string name="web_comments_one">💬 Comment added</string>
+    <!-- comments.many (n) -->
+    <string name="web_comments_many">💬 %1$s new comments</string>
+    <!-- comments.reply -->
+    <string name="web_comments_reply">Reply</string>
+    <!-- mail.title -->
+    <string name="web_mail_title">Email</string>
+    <!-- mail.accounts -->
+    <string name="web_mail_accounts">Accounts</string>
+    <!-- mail.apply -->
+    <string name="web_mail_apply">Apply</string>
+    <!-- mail.remove -->
+    <string name="web_mail_remove">Remove</string>
+    <!-- mail.clear -->
+    <string name="web_mail_clear">Clear search</string>
+    <!-- mail.intro -->
+    <string name="web_mail_intro">Connect Gmail or Outlook to bring an email into a group, a DM or a task and discuss it with your team. Your inbox is read live: chaggu does not store it.</string>
+    <!-- mail.privacyHint -->
+    <string name="web_mail_privacyHint">chaggu only stores the text of the emails you bring into a chat. Attachments are fetched from your mailbox when someone opens them.</string>
+    <!-- mail.connect -->
+    <string name="web_mail_connect">Connect</string>
+    <!-- mail.reconnect -->
+    <string name="web_mail_reconnect">Reconnect</string>
+    <!-- mail.disconnect -->
+    <string name="web_mail_disconnect">Disconnect</string>
+    <!-- mail.connectHint -->
+    <string name="web_mail_connectHint">Read, search, reply and schedule replies.</string>
+    <!-- mail.connectedAs (email) -->
+    <string name="web_mail_connectedAs">Connected as %1$s</string>
+    <!-- mail.reconnectHint -->
+    <string name="web_mail_reconnectHint">Permission expired. Connect again.</string>
+    <!-- mail.connectedToast (name) -->
+    <string name="web_mail_connectedToast">%1$s connected</string>
+    <!-- mail.cancelledToast -->
+    <string name="web_mail_cancelledToast">You cancelled the connection</string>
+    <!-- mail.failedToast (code) -->
+    <string name="web_mail_failedToast">Could not connect (%1$s)</string>
+    <!-- mail.box -->
+    <string name="web_mail_box">Folder</string>
+    <!-- mail.box.inbox -->
+    <string name="web_mail_box_inbox">Inbox</string>
+    <!-- mail.box.sent -->
+    <string name="web_mail_box_sent">Sent</string>
+    <!-- mail.box.all -->
+    <string name="web_mail_box_all">All</string>
+    <!-- mail.cat -->
+    <string name="web_mail_cat">Tab</string>
+    <!-- mail.cat.primary -->
+    <string name="web_mail_cat_primary">Primary</string>
+    <!-- mail.cat.promotions -->
+    <string name="web_mail_cat_promotions">Promotions</string>
+    <!-- mail.cat.updates -->
+    <string name="web_mail_cat_updates">Updates</string>
+    <!-- mail.cat.social -->
+    <string name="web_mail_cat_social">Social</string>
+    <!-- mail.cat.forums -->
+    <string name="web_mail_cat_forums">Forums</string>
+    <!-- mail.cat.focused -->
+    <string name="web_mail_cat_focused">Focused</string>
+    <!-- mail.cat.other -->
+    <string name="web_mail_cat_other">Other</string>
+    <!-- mail.cat.any -->
+    <string name="web_mail_cat_any">All</string>
+    <!-- mail.search -->
+    <string name="web_mail_search">Search email</string>
+    <!-- mail.searchPh -->
+    <string name="web_mail_searchPh">Search all your email: words, person, subject…</string>
+    <!-- mail.f.date -->
+    <string name="web_mail_f_date">Date</string>
+    <!-- mail.f.from -->
+    <string name="web_mail_f_from">From</string>
+    <!-- mail.f.to -->
+    <string name="web_mail_f_to">To</string>
+    <!-- mail.f.attachments -->
+    <string name="web_mail_f_attachments">Has attachments</string>
+    <!-- mail.f.unread -->
+    <string name="web_mail_f_unread">Unread</string>
+    <!-- mail.f.label -->
+    <string name="web_mail_f_label">Label</string>
+    <!-- mail.f.category -->
+    <string name="web_mail_f_category">Category</string>
+    <!-- mail.date.today -->
+    <string name="web_mail_date_today">Today</string>
+    <!-- mail.date.7 -->
+    <string name="web_mail_date_7">Last 7 days</string>
+    <!-- mail.date.30 -->
+    <string name="web_mail_date_30">Last 30 days</string>
+    <!-- mail.date.year -->
+    <string name="web_mail_date_year">This year</string>
+    <!-- mail.date.older -->
+    <string name="web_mail_date_older">Older than a year</string>
+    <!-- mail.date.between -->
+    <string name="web_mail_date_between">Between dates…</string>
+    <!-- mail.date.any -->
+    <string name="web_mail_date_any">Any date</string>
+    <!-- mail.date.from -->
+    <string name="web_mail_date_from">From</string>
+    <!-- mail.date.until -->
+    <string name="web_mail_date_until">Until</string>
+    <!-- mail.latest.inbox -->
+    <string name="web_mail_latest_inbox">Latest 50 · inbox</string>
+    <!-- mail.latest.sent -->
+    <string name="web_mail_latest_sent">Latest 50 · sent</string>
+    <!-- mail.latest.all -->
+    <string name="web_mail_latest_all">Latest 50 · all</string>
+    <!-- mail.results (n, name) -->
+    <string name="web_mail_results">%1$s results in all your %2$s</string>
+    <!-- mail.searching -->
+    <string name="web_mail_searching">Searching…</string>
+    <!-- mail.noResults -->
+    <string name="web_mail_noResults">No emails match. Try fewer filters.</string>
+    <!-- mail.empty -->
+    <string name="web_mail_empty">No emails here.</string>
+    <!-- mail.more -->
+    <string name="web_mail_more">Load 50 more</string>
+    <!-- mail.liveFoot (name) -->
+    <string name="web_mail_liveFoot">Read live from %1$s. chaggu does not store your inbox.</string>
+    <!-- mail.searchFoot (name) -->
+    <string name="web_mail_searchFoot">%1$s searches your whole mailbox, old emails too.</string>
+    <!-- mail.toShort -->
+    <string name="web_mail_toShort">To:</string>
+    <!-- mail.noSubject -->
+    <string name="web_mail_noSubject">(no subject)</string>
+    <!-- mail.noBody -->
+    <string name="web_mail_noBody">(no text)</string>
+    <!-- mail.bring -->
+    <string name="web_mail_bring">Bring to a chat</string>
+    <!-- mail.pickHere -->
+    <string name="web_mail_pickHere">Discuss here</string>
+    <!-- mail.pickTitle -->
+    <string name="web_mail_pickTitle">Choose an email</string>
+    <!-- mail.shareTitle -->
+    <string name="web_mail_shareTitle">Bring to a chat</string>
+    <!-- mail.pickChat -->
+    <string name="web_mail_pickChat">Search group, person or chat</string>
+    <!-- mail.commentPh -->
+    <string name="web_mail_commentPh">Your comment: “Look at this email, how do we answer?”</string>
+    <!-- mail.whoSees (n, name) -->
+    <string name="web_mail_whoSees">All %1$s people in %2$s will see the sender, subject and text. Attachments open from your mailbox only when someone asks.</string>
+    <!-- mail.share -->
+    <string name="web_mail_share">Share</string>
+    <!-- mail.shareIn (name) -->
+    <string name="web_mail_shareIn">Share in %1$s</string>
+    <!-- mail.sharing -->
+    <string name="web_mail_sharing">Sharing…</string>
+    <!-- mail.shared -->
+    <string name="web_mail_shared">Shared in the chat</string>
+    <!-- mail.fromChat -->
+    <string name="web_mail_fromChat">Email</string>
+    <!-- wa.fromChat -->
+    <string name="web_wa_fromChat">WhatsApp message</string>
+    <!-- mail.kind.in (name) -->
+    <string name="web_mail_kind_in">Email received · %1$s</string>
+    <!-- mail.kind.out (name) -->
+    <string name="web_mail_kind_out">Email sent · %1$s</string>
+    <!-- mail.unavailable -->
+    <string name="web_mail_unavailable">This email is no longer available.</string>
+    <!-- mail.openAttachment -->
+    <string name="web_mail_openAttachment">Open (fetched from the mailbox now)</string>
+    <!-- mail.pending -->
+    <string name="web_mail_pending">Needs reply</string>
+    <!-- mail.sentMail -->
+    <string name="web_mail_sentMail">Sent</string>
+    <!-- mail.sentByYou -->
+    <string name="web_mail_sentByYou">Sent by you</string>
+    <!-- mail.repliedByYou (when) -->
+    <string name="web_mail_repliedByYou">Replied by you · %1$s</string>
+    <!-- mail.dir.in -->
+    <string name="web_mail_dir_in">Email received</string>
+    <!-- mail.dir.out -->
+    <string name="web_mail_dir_out">Email sent</string>
+    <!-- mail.scheduled -->
+    <string name="web_mail_scheduled">Reply scheduled</string>
+    <!-- mail.scheduledFor (when) -->
+    <string name="web_mail_scheduledFor">Reply scheduled · %1$s</string>
+    <!-- mail.repliedBy (name, when) -->
+    <string name="web_mail_repliedBy">Replied by %1$s · %2$s</string>
+    <!-- mail.comments -->
+    <string name="web_mail_comments">Comments</string>
+    <!-- mail.task -->
+    <string name="web_mail_task">Task</string>
+    <!-- mail.seeTask -->
+    <string name="web_mail_seeTask">See task</string>
+    <!-- mail.hasTask -->
+    <string name="web_mail_hasTask">Has a task</string>
+    <!-- mail.reply -->
+    <string name="web_mail_reply">Reply</string>
+    <!-- mail.openIn (name) -->
+    <string name="web_mail_openIn">Open in %1$s</string>
+    <!-- mail.cancelSchedule -->
+    <string name="web_mail_cancelSchedule">Cancel scheduled reply</string>
+    <!-- mail.scheduleCancelled -->
+    <string name="web_mail_scheduleCancelled">Scheduled reply cancelled</string>
+    <!-- mail.meta.from -->
+    <string name="web_mail_meta_from">From</string>
+    <!-- mail.meta.to -->
+    <string name="web_mail_meta_to">To</string>
+    <!-- mail.meta.date -->
+    <string name="web_mail_meta_date">Date</string>
+    <!-- mail.less -->
+    <string name="web_mail_less">Show less</string>
+    <!-- mail.moreBody -->
+    <string name="web_mail_moreBody">Show the whole email</string>
+    <!-- mail.attachmentsOnDemand (name) -->
+    <string name="web_mail_attachmentsOnDemand">Attachments · fetched from %1$s when opened</string>
+    <!-- mail.open -->
+    <string name="web_mail_open">Open</string>
+    <!-- mail.thread -->
+    <string name="web_mail_thread">Email thread</string>
+    <!-- mail.noComments -->
+    <string name="web_mail_noComments">No comments yet.</string>
+    <!-- mail.toTeam -->
+    <string name="web_mail_toTeam">Comment to the team</string>
+    <!-- mail.replyTo (name) -->
+    <string name="web_mail_replyTo">Reply to %1$s</string>
+    <!-- mail.commentTeamPh -->
+    <string name="web_mail_commentTeamPh">Write to the team…</string>
+    <!-- mail.teamOnly (name) -->
+    <string name="web_mail_teamOnly">%1$s does not see these comments.</string>
+    <!-- mail.from -->
+    <string name="web_mail_from">From</string>
+    <!-- mail.ccPh -->
+    <string name="web_mail_ccPh">name@company.com, other@company.com</string>
+    <!-- mail.badCc -->
+    <string name="web_mail_badCc">Check the CC addresses.</string>
+    <!-- mail.replyPh -->
+    <string name="web_mail_replyPh">Write the reply…</string>
+    <!-- mail.gg -->
+    <string name="web_mail_gg">Draft with gg</string>
+    <!-- mail.ggWorking -->
+    <string name="web_mail_ggWorking">gg is writing…</string>
+    <!-- mail.ggHint (n) -->
+    <string name="web_mail_ggHint">Uses what was said in the thread (%1$s comments).</string>
+    <!-- mail.ggHintNone -->
+    <string name="web_mail_ggHintNone">No comments in the thread yet.</string>
+    <!-- mail.attachFromChat -->
+    <string name="web_mail_attachFromChat">Attach files from the chat</string>
+    <!-- mail.attachN (n) -->
+    <string name="web_mail_attachN">%1$s files from the chat</string>
+    <!-- mail.pickTime -->
+    <string name="web_mail_pickTime">Pick date and time…</string>
+    <!-- mail.schedule -->
+    <string name="web_mail_schedule">Schedule</string>
+    <!-- mail.sentVia (name) -->
+    <string name="web_mail_sentVia">Sent from your %1$s</string>
+    <!-- mail.send -->
+    <string name="web_mail_send">Send</string>
+    <!-- mail.sending -->
+    <string name="web_mail_sending">Sending…</string>
+    <!-- mail.scheduleMenu -->
+    <string name="web_mail_scheduleMenu">Schedule send</string>
+    <!-- mail.sentToast -->
+    <string name="web_mail_sentToast">Reply sent</string>
+    <!-- mail.scheduledToast (when) -->
+    <string name="web_mail_scheduledToast">Reply scheduled for %1$s</string>
+    <!-- mail.taskTitle -->
+    <string name="web_mail_taskTitle">New task from the email</string>
+    <!-- mail.taskName -->
+    <string name="web_mail_taskName">Task</string>
+    <!-- mail.taskOwner -->
+    <string name="web_mail_taskOwner">Owner</string>
+    <!-- mail.taskNoOwner -->
+    <string name="web_mail_taskNoOwner">No owner</string>
+    <!-- mail.taskDue -->
+    <string name="web_mail_taskDue">Due date</string>
+    <!-- mail.taskClose -->
+    <string name="web_mail_taskClose">Close the task when the email is answered</string>
+    <!-- mail.taskHint -->
+    <string name="web_mail_taskHint">The task stays linked to the email and its thread.</string>
+    <!-- mail.taskCreate -->
+    <string name="web_mail_taskCreate">Create task</string>
+    <!-- mail.taskCreated -->
+    <string name="web_mail_taskCreated">Task created</string>
+    <!-- mail.taskPrefix -->
+    <string name="web_mail_taskPrefix">Reply to</string>
+    <!-- wa.commentIn -->
+    <string name="web_wa_commentIn">Discuss in chaggu…</string>
+    <!-- wa.groupShort -->
+    <string name="web_wa_groupShort">group </string>
+    <!-- wa.seeIn -->
+    <string name="web_wa_seeIn">See in WhatsApp</string>
+    <!-- mail.bringOne -->
+    <string name="web_mail_bringOne">Bring an email</string>
+    <!-- mail.nudgeTitle -->
+    <string name="web_mail_nudgeTitle">Discuss your emails with the team</string>
+    <!-- mail.nudgeBody -->
+    <string name="web_mail_nudgeBody">Connect Gmail or Outlook and bring any email into a chat. Your inbox is not stored.</string>
+    <!-- mail.settingsRow -->
+    <string name="web_mail_settingsRow">Gmail and Outlook</string>
+    <!-- mail.settingsHint -->
+    <string name="web_mail_settingsHint">Find an email and bring it to a chat. Also from the ＋ in any chat.</string>
+    <!-- wa.commentPh -->
+    <string name="web_wa_commentPh">Your comment: “Look at this WhatsApp I got”</string>
+    <!-- sys.mail.shared (subject) -->
+    <string name="web_sys_mail_shared">✉ Shared the email “%1$s”</string>
+    <!-- sys.mail.comments (lastByName, title, lastExcerpt) -->
+    <string name="web_sys_mail_comments">💬 %1$s commented on the email “%2$s”: %3$s</string>
+    <!-- sys.mail.replied (byName, subject) -->
+    <string name="web_sys_mail_replied">✉ %1$s replied to the email “%2$s”</string>
+    <!-- sys.mail.reply_failed (subject, error) -->
+    <string name="web_sys_mail_reply_failed">⚠ The reply to “%1$s” was not sent: %2$s</string>
+    <!-- sys.wa.shared -->
+    <string name="web_sys_wa_shared">Shared a WhatsApp message</string>
+    <!-- mail.refresh -->
+    <string name="web_mail_refresh">Refresh</string>
+    <!-- mail.showHistory -->
+    <string name="web_mail_showHistory">Show quoted history and signature</string>
+    <!-- mail.hideHistory -->
+    <string name="web_mail_hideHistory">Hide history</string>
+</resources>

@@ -1341,6 +1341,8 @@ internal fun SystemRow(
 ) {
     val ctx = LocalContext.current
     val chat = LocalChatColors.current
+    // Correo y WhatsApp traídos al chat (docs/CORREO.md): nunca como JSON crudo.
+    com.tiecoms.app.core.MailSystem.parse(m)?.let { b -> MailSystemText(m, b, data); return }
     // Tanda 1.7: es hoy, tarea hecha/vencida y comentarios agrupados se ven como la tarjeta del evento o de la tarea.
     com.tiecoms.app.core.System17.parse(m)?.let { b ->
         val fb = systemText(ctx, m.body, Names.person(data, m.authorId)?.name)

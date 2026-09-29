@@ -29,11 +29,11 @@ class StringsAndLanguageTest {
         assertTrue(en.values.contains("+%1\$d tasks"))
     }
 
-    /** Asunto → Tarea (docs/TEMAS.md): no queda «asunto» ni «subject» visible, salvo el asunto de un correo importado. */
+    /** Asunto → Tarea (docs/TEMAS.md): no queda «asunto» ni «subject» visible, salvo el asunto de un correo (importado o del correo en el chat). */
     @Test fun `ningun asunto ni subject visible`() {
-        val es = texts("values-es").filterKeys { !it.contains(":imp_subject#") }.filterValues { Regex("\\basuntos?\\b", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+        val es = texts("values-es").filterKeys { !it.contains(":imp_subject#") && !it.startsWith("strings_mail.xml:") }.filterValues { Regex("\\basuntos?\\b", RegexOption.IGNORE_CASE).containsMatchIn(it) }
         assertTrue("Quedan «asunto»: $es", es.isEmpty())
-        val en = texts("values").filterKeys { !it.contains(":imp_subject#") }.filterValues { Regex("\\bsubjects?\\b", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+        val en = texts("values").filterKeys { !it.contains(":imp_subject#") && !it.startsWith("strings_mail.xml:") }.filterValues { Regex("\\bsubjects?\\b", RegexOption.IGNORE_CASE).containsMatchIn(it) }
         assertTrue("Quedan «subject»: $en", en.isEmpty())
         // Lo que eran «tareas» de un asunto ahora son subtareas de una tarea.
         assertTrue(texts("values-es").values.contains("Subtarea de la tarea"))

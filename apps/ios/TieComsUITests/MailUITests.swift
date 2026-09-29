@@ -72,7 +72,7 @@ final class MailUITests: XCTestCase {
     func el(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
 
     /// Toque por coordenada: en la lista de Grupos la ventana de avisos a veces tapa los botones para XCTest.
-    func tapC(_ e: XCUIElement) { e.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
+    func tapC(_ e: XCUIElement) { if e.isHittable { e.tap() } else { e.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() } }
 
     func openChat(_ app: XCUIApplication, _ f: Fixture) {
         let row = app.buttons["conv.row.\(f.chatId)"]
@@ -229,25 +229,34 @@ final class MailUITests: XCTestCase {
 
     func test3TodayNudgeAndSettings() throws {
         let f = try fixture()
-        let app = login(f, as: f.b)
+        let app = login(f, as: f.c)
         let nudge = el(app, "mail.nudge")
         XCTAssertTrue(waitFor(nudge, 20, app), "sin correo conectado: la invitación")
         shot("correo-10-hoy-invitacion")
-        tapC(app.buttons["mail.nudge.connect"])
+        // ✕ la cierra y no vuelve.
+        let close = app.buttons["mail.nudge.close"]
+        shot("correo-10b-antes-de-cerrar")
+        tapC(close)
+        let until = Date().addingTimeInterval(5)
+        while Date() < until && nudge.exists { usleep(300_000) }
+        XCTAssertFalse(nudge.exists, "✕ la cierra")
+
+        // Tú › Correo · Gmail y Outlook: tarjetas para conectar.
+        tapC(app.tabBars.buttons.element(boundBy: app.tabBars.buttons.count - 1))
+        let row = app.buttons["settings.mail"]
+        for _ in 0..<5 where !row.exists { app.swipeUp() }
+        XCTAssertTrue(row.exists, "Tú › Correo")
+        tapC(row)
         XCTAssertTrue(app.buttons["mail.connect.google"].waitForExistence(timeout: 10), "tarjetas para conectar")
         XCTAssertTrue(app.buttons["mail.connect.microsoft"].exists)
         shot("correo-11-conectar")
-        app.navigationBars.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(app.buttons["mail.nudge.close"].waitForExistence(timeout: 5))
-        tapC(app.buttons["mail.nudge.close"])
-        let until = Date().addingTimeInterval(5)
-        while Date() < until && nudge.exists { usleep(300_000) }
-        XCTAssertFalse(nudge.exists, "✕ la cierra y no vuelve")
-        // Tú › Correo · Gmail y Outlook.
-        let you = app.tabBars.buttons.element(boundBy: app.tabBars.buttons.count - 1)
-        tapC(you)
-        let row = app.buttons["settings.mail"]
-        for _ in 0..<4 where !row.exists { app.swipeUp() }
-        XCTAssertTrue(row.exists, "Tú › Correo")
+        // Conectar Gmail (proveedor FALSO: redirige solo): ASWebAuthenticationSession → chaggu://mail/connected → confirm.
+        tapC(app.buttons["mail.connect.google"])
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let cont = springboard.buttons.matching(NSPredicate(format: "label IN %@", ["Continuar", "Continue"])).firstMatch
+        if cont.waitForExistence(timeout: 8) { cont.tap() }
+        XCTAssertTrue(app.buttons["mail.accounts"].waitForExistence(timeout: 20), "Gmail conectado: aparece la lista")
+        XCTAssertTrue(app.buttons["mail.row.g1"].waitForExistence(timeout: 15), "la lista en vivo")
+        shot("correo-12-conectado-lista")
     }
 }

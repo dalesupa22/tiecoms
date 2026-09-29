@@ -442,9 +442,15 @@ struct BootstrapDTO: Codable, Equatable, Sendable {
     var workspaces: [WorkspaceDTO]
     var conversations: [ConversationDTO]
     var people: [PersonDTO]
+    /// Funciones que el servidor tiene prendidas (aditivo: un servidor viejo no lo manda).
+    var features: FeaturesDTO?
+
+    /// Llamadas de voz y video (docs/LLAMADAS.md): sin esto no hay botones, franja ni pestaña.
+    var callsEnabled: Bool { features?.calls == true }
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
+        features = c.o("features")
         contract = c.v("contract", "")
         serverTime = c.v("serverTime", "")
         me = try c.decode(UserDTO.self, forKey: AnyKey("me"))
@@ -452,6 +458,55 @@ struct BootstrapDTO: Codable, Equatable, Sendable {
         workspaces = c.lossyArray("workspaces")
         conversations = c.lossyArray("conversations")
         people = c.lossyArray("people")
+    }
+}
+
+struct FeaturesDTO: Codable, Equatable, Sendable {
+    var calls: Bool
+    init(calls: Bool) { self.calls = calls }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        calls = c.v("calls", false)
+    }
+}
+
+// Llamadas (docs/LLAMADAS.md). Aquí y no en Calls.swift: los eventos de este archivo los usa también la extensión Compartir.
+/// Una llamada de una conversación (a lo sumo una activa por conversación).
+struct CallDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var conversationId: String
+    /// 'audio' | 'video'
+    var kind: String
+    var startedBy: String
+    var startedAt: String
+    var endedAt: String?
+    /// Quienes están dentro ahora mismo.
+    var activeUserIds: [String]
+    /// La transcripción está prendida (todos lo ven en la llamada).
+    var transcribing: Bool
+    /// Hay transcripción guardada para leer.
+    var hasTranscript: Bool
+
+    var isVideo: Bool { kind == "video" }
+    var isLive: Bool { endedAt == nil }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        conversationId = c.v("conversationId", "")
+        kind = c.v("kind", "audio")
+        startedBy = c.v("startedBy", "")
+        startedAt = c.v("startedAt", "")
+        endedAt = c.o("endedAt")
+        activeUserIds = c.v("activeUserIds", [])
+        transcribing = c.v("transcribing", false)
+        hasTranscript = c.v("hasTranscript", false)
+    }
+
+    init(id: String, conversationId: String, kind: String = "audio", startedBy: String = "", startedAt: String = "", endedAt: String? = nil,
+         activeUserIds: [String] = [], transcribing: Bool = false, hasTranscript: Bool = false) {
+        self.id = id; self.conversationId = conversationId; self.kind = kind; self.startedBy = startedBy; self.startedAt = startedAt
+        self.endedAt = endedAt; self.activeUserIds = activeUserIds; self.transcribing = transcribing; self.hasTranscript = hasTranscript
     }
 }
 
@@ -568,18 +623,20 @@ enum ConversationEvent: Decodable, Equatable, Sendable {
     /// Temas del chat: trae la lista completa (activos y archivados) y reemplaza la local.
     case topicsChanged(conversationId: String, eventSeq: Int, topics: [TopicDTO])
     case calendarUpdated(conversationId: String, eventSeq: Int, event: CalendarEventDTO)
+    /// Empezó, cambió quién está dentro o terminó una llamada de la conversación.
+    case callUpdated(conversationId: String, eventSeq: Int, call: CallDTO)
     case other(type: String, conversationId: String, eventSeq: Int)
 
     var conversationId: String {
         switch self {
         case .messageCreated(let c, _, _), .messageUpdated(let c, _, _), .membersChanged(let c, _, _, _), .issueUpdated(let c, _, _),
-             .pinsChanged(let c, _, _), .topicsChanged(let c, _, _), .calendarUpdated(let c, _, _), .other(_, let c, _): return c
+             .pinsChanged(let c, _, _), .topicsChanged(let c, _, _), .calendarUpdated(let c, _, _), .callUpdated(let c, _, _), .other(_, let c, _): return c
         }
     }
     var eventSeq: Int {
         switch self {
         case .messageCreated(_, let s, _), .messageUpdated(_, let s, _), .membersChanged(_, let s, _, _), .issueUpdated(_, let s, _),
-             .pinsChanged(_, let s, _), .topicsChanged(_, let s, _), .calendarUpdated(_, let s, _), .other(_, _, let s): return s
+             .pinsChanged(_, let s, _), .topicsChanged(_, let s, _), .calendarUpdated(_, let s, _), .callUpdated(_, let s, _), .other(_, _, let s): return s
         }
     }
 
@@ -603,6 +660,8 @@ enum ConversationEvent: Decodable, Equatable, Sendable {
             self = .topicsChanged(conversationId: conv, eventSeq: seq, topics: c.lossyArray("topics")); return
         case "calendar.updated":
             if let e: CalendarEventDTO = c.o("event") { self = .calendarUpdated(conversationId: conv, eventSeq: seq, event: e); return }
+        case "call.updated":
+            if let x: CallDTO = c.o("call") { self = .callUpdated(conversationId: conv, eventSeq: seq, call: x); return }
         default: break
         }
         self = .other(type: type, conversationId: conv, eventSeq: seq)
@@ -632,6 +691,8 @@ enum AccountEvent: Decodable, Equatable, Sendable {
     case issuePersonal(IssueDTO)
     /// Perdí acceso a un asunto: sacarlo de la lista.
     case issueHidden(issueId: String, conversationId: String)
+    /// Me están llamando (no llega a quien la empezó ni a quien tiene No molestar).
+    case callRinging(call: CallDTO, conversationTitle: String?, callerName: String)
     case other(type: String)
 
     init(from decoder: Decoder) throws {
@@ -658,6 +719,9 @@ enum AccountEvent: Decodable, Equatable, Sendable {
             if let x: SleepDTO = c.o("sleep") { self = .sleepChanged(x) } else { self = .other(type: type) }
         case "scheduled.updated":
             if let x: ScheduledMessageDTO = c.o("scheduled") { self = .scheduledUpdated(x) } else { self = .other(type: type) }
+        case "call.ringing":
+            if let x: CallDTO = c.o("call") { self = .callRinging(call: x, conversationTitle: c.o("conversationTitle"), callerName: c.v("callerName", "")) }
+            else { self = .other(type: type) }
         default: self = .other(type: type)
         }
     }

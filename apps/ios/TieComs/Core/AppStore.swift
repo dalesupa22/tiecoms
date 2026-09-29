@@ -38,10 +38,12 @@ enum Route: Hashable {
     case oversightReader(conversationId: String, name: String)
     /// Mis mensajes programados (Tú › Programados).
     case scheduled
+    /// Detalle de una llamada: resumen, transcripción y Compartir (docs/LLAMADAS.md).
+    case callDetail(String)
 }
 
-/// Barra inferior (docs/GRUPOS.md): Grupos (`home`) · DMs · Asuntos · Calendario · Tú (`settings`).
-enum AppTab: Hashable { case home, dms, issues, agenda, settings }
+/// Barra inferior (docs/GRUPOS.md): Grupos (`home`) · DMs · Asuntos · Calendario · Llamadas (solo con `features.calls`) · Tú (`settings`).
+enum AppTab: Hashable, CaseIterable { case home, dms, issues, agenda, calls, settings }
 
 struct AppAlert: Identifiable, Equatable {
     let id = UUID()
@@ -125,6 +127,7 @@ final class AppStore {
     var issuesPath: [Route] = []
     var agendaPath: [Route] = []
     var settingsPath: [Route] = []
+    var callsPath: [Route] = []
     var workspaceFilter: String?
     /// Pila de la pestaña visible.
     var currentPath: [Route] {
@@ -133,6 +136,7 @@ final class AppStore {
         case .dms: return dmsPath
         case .issues: return issuesPath
         case .agenda: return agendaPath
+        case .calls: return callsPath
         case .settings: return settingsPath
         }
     }
@@ -143,7 +147,19 @@ final class AppStore {
         case .dms: dmsPath.append(r)
         case .issues: issuesPath.append(r)
         case .agenda: agendaPath.append(r)
+        case .calls: callsPath.append(r)
         case .settings: settingsPath.append(r)
+        }
+    }
+    /// Volver a tocar la pestaña visible: vuelve a su raíz.
+    func popToRoot(_ t: AppTab) {
+        switch t {
+        case .home: homePath = []
+        case .dms: dmsPath = []
+        case .issues: issuesPath = []
+        case .agenda: agendaPath = []
+        case .calls: callsPath = []
+        case .settings: settingsPath = []
         }
     }
     var alert: AppAlert?
@@ -199,6 +215,13 @@ final class AppStore {
         try outbox.saveMeetingAttempts(JSONEncoder().encode(meetingAttempts), userId: userId)
     }
     var meetingPayloads: [String: MeetingPayload] = [:]
+    /// Llamada activa por conversación (docs/LLAMADAS.md); sin clave = no hay o no se ha preguntado (ver callsChecked).
+    var liveCalls: [String: CallDTO] = [:]
+    @ObservationIgnored var callsChecked: Set<String> = []
+    /// Sube con cada cambio de una llamada (el historial se vuelve a pedir).
+    var callsRevision = 0
+    /// La llamada de este dispositivo y el aviso de llamada entrante.
+    let callCenter = CallCenter()
     var meetingAttempts: [String: MeetingAttempt] = [:]
     @ObservationIgnored var meetingAuthorization: MeetingAuthorization?
 
@@ -275,6 +298,7 @@ final class AppStore {
             }
         }
         socket.onEvent = { [weak self] name, payload in self?.onSocketEvent(name, payload) }
+        callCenter.store = self
     }
 
     var me: UserDTO? { data?.me }
@@ -401,7 +425,8 @@ final class AppStore {
         issues = [:]; pins = [:]; topics = [:]; taskCardComments = [:]; reminders = []; events = [:]; scheduled = []
         blockedUserIds = []
         localDndUntil = nil; dndLocalOnly = false; dndExpiryTask?.cancel(); dndExpiryTask = nil
-        homePath = []; dmsPath = []; issuesPath = []; agendaPath = []; settingsPath = []
+        homePath = []; dmsPath = []; issuesPath = []; agendaPath = []; settingsPath = []; callsPath = []
+        callCenter.reset(); liveCalls = [:]; callsChecked = []
         tab = .home
         workspaceFilter = nil
         openConversationId = nil
@@ -430,6 +455,12 @@ final class AppStore {
         if keep(dmsPath) != dmsPath { dmsPath = keep(dmsPath) }
         if keep(issuesPath) != issuesPath { issuesPath = keep(issuesPath) }
         if keep(agendaPath) != agendaPath { agendaPath = keep(agendaPath) }
+        if keep(callsPath) != callsPath { callsPath = keep(callsPath) }
+        // Sin llamadas en el servidor no hay pestaña: se vuelve a Grupos y se cuelga lo que hubiera.
+        if !d.callsEnabled {
+            if tab == .calls { tab = .home }
+            if callCenter.view != nil || callCenter.ringing != nil { callCenter.reset() }
+        }
         ShareTargets.save(d, apiURL: api.baseURL)
     }
 
@@ -529,6 +560,10 @@ final class AppStore {
         case .issueHidden(let id, let conv):
             issues[id] = nil
             recountIssues(conv)
+        case .callRinging(let call, let title, let caller):
+            guard data?.callsEnabled == true else { return }
+            putCall(call)
+            if NotifyRule.accountAlert(dnd: dndActive) { callCenter.showIncoming(call, callerName: caller, title: title) }
         case .other: break
         }
     }
@@ -565,6 +600,8 @@ final class AppStore {
                NotifyRule.accountAlert(dnd: dndActive, muted: c.isMuted, respectsMute: true) {
                 feedback?.notifyIncoming(conversationId: cid, title: ev.title, author: Naming.notificationTitle(d, c), body: L10n.eventWhen(ev))
             }
+        case .callUpdated(_, _, let call):
+            putCall(call)
         case .messageUpdated(let cid, _, let m):
             // Antes de aplicar: se compara con la versión que tenía para avisar de una reacción nueva a un mensaje mío.
             if live { noticeReaction(conversations[cid]?.messages.first { $0.id == m.id }, m) }
@@ -664,7 +701,7 @@ final class AppStore {
         case .membersChanged(let id, _, let ids, let admins):
             patchMeta(id) { $0.memberIds = ids; if let admins { $0.adminIds = admins } }
             scheduleBootstrap()
-        case .issueUpdated, .pinsChanged, .topicsChanged, .calendarUpdated:
+        case .issueUpdated, .pinsChanged, .topicsChanged, .calendarUpdated, .callUpdated:
             break // sus efectos van en sideEffects (también sin mensajes cargados)
         case .other:
             break // redacted o tipos futuros: solo avanzan el cursor

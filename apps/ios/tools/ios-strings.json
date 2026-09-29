@@ -3326,5 +3326,21 @@
  "cal.allDay": [
   "Todo el día",
   "All day"
+ ],
+ "call.fakeCaption": [
+  "Frase de prueba de la transcripción.",
+  "Sample transcript line."
+ ],
+ "call.micDenied": [
+  "chaggu no tiene permiso para usar el micrófono. Actívalo en Ajustes › chaggu para llamar.",
+  "chaggu is not allowed to use the microphone. Turn it on in Settings › chaggu to make calls."
+ ],
+ "call.switchCamera": [
+  "Cambiar de cámara",
+  "Switch camera"
+ ],
+ "tab.calls": [
+  "Llamadas",
+  "Calls"
  ]
 }

@@ -22,6 +22,8 @@ struct TopicFlagShape: Shape {
 private struct TopicFlag: View {
     var text: String
     var count: Int? = nil
+    /// Sin leer: pastilla de acento (como .topic-unread de la web). Sin pendientes, nada.
+    var unread: Int? = nil
     var bg: Color
     var ink: Color
     var on = false
@@ -31,6 +33,12 @@ private struct TopicFlag: View {
         HStack(spacing: 6) {
             Text(text).font(.footnote.weight(muted ? .regular : .semibold)).lineLimit(1)
             if let count, count > 0 { Text("\(count)").font(.caption2.weight(.bold)).monospacedDigit().opacity(0.7) }
+            if let unread, unread > 0 {
+                Text("\(unread)").font(.caption2.weight(.bold)).monospacedDigit().foregroundStyle(Theme.onPrimary)
+                    .padding(.horizontal, 5).frame(minWidth: 18, minHeight: 18)
+                    .background(Capsule().fill(Theme.primaryFill))
+                    .accessibilityIdentifier("topic.unread")
+            }
         }
         .foregroundStyle(muted ? Theme.textSecondary : ink)
         .padding(.leading, 11).padding(.trailing, 18)
@@ -53,6 +61,8 @@ struct TopicDock: View {
     /// Filtro efectivo (tema activo) o nil = Todo.
     let filter: String?
     let counts: [String: Int]
+    /// Sin leer por tema ("" = sin tema, va en «Todo»): la pastilla de acento de cada banderita.
+    var unread: [String: Int] = [:]
     var onFilter: (String?) -> Void
     var onNew: () -> Void
     var onRename: (TopicDTO) -> Void
@@ -68,20 +78,21 @@ struct TopicDock: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 4) {
                         Button { onFilter(nil) } label: {
-                            TopicFlag(text: "💬 \(L("topic.all"))", bg: Theme.background, ink: Theme.textSecondary, on: filter == nil)
+                            TopicFlag(text: "💬 \(L("topic.all"))", unread: unread[""], bg: Theme.background, ink: Theme.textSecondary, on: filter == nil)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel([L("topic.all"), (unread[""] ?? 0) > 0 ? L("topic.unreadN", ["n": unread[""] ?? 0]) : nil].compactMap { $0 }.joined(separator: ", "))
                         .accessibilityAddTraits(filter == nil ? .isSelected : [])
                         .accessibilityIdentifier("topic.all")
                         ForEach(active) { t in
                             Button { onFilter(filter == t.id ? nil : t.id) } label: {
-                                TopicFlag(text: "\(t.icon) \(t.name)", count: counts[t.id], bg: TopicPalette.bg(t.color), ink: TopicPalette.ink(t.color), on: filter == t.id)
+                                TopicFlag(text: "\(t.icon) \(t.name)", unread: unread[t.id], bg: TopicPalette.bg(t.color), ink: TopicPalette.ink(t.color), on: filter == t.id)
                             }
                             .buttonStyle(.plain)
                             .id(t.id)
                             // Mantener presionada: Renombrar, Cambiar color, Archivar y Quitar tema.
                             .contextMenu { if conv.canPost { flagMenu(t) } }
-                            .accessibilityLabel(L("topic.a11yCount", ["name": t.name, "n": counts[t.id] ?? 0]))
+                            .accessibilityLabel([t.name, (unread[t.id] ?? 0) > 0 ? L("topic.unreadN", ["n": unread[t.id] ?? 0]) : nil].compactMap { $0 }.joined(separator: ", "))
                             .accessibilityHint(conv.canPost ? L("topic.a11yHint") : "")
                             .accessibilityAddTraits(filter == t.id ? .isSelected : [])
                             .accessibilityIdentifier("topic.flag.\(t.name)")

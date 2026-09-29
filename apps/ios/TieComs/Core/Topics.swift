@@ -33,6 +33,38 @@ enum TopicRules {
     /// ¿Se ve este mensaje con el filtro? Sin filtro, todos.
     static func matches(_ m: MessageDTO, filter: String?) -> Bool { filter == nil || m.topicId == filter }
 
+    // «Todo» con temas activos (docs/TEMAS.md › «Todo», 29-sep-2026; web Conversation.tsx hideTopicsInAll/topicUnread).
+
+    /// Ids de los temas activos (los archivados cuentan como sin tema).
+    static func activeIds(_ list: [TopicDTO]) -> Set<String> { Set(list.filter { !$0.isArchived }.map(\.id)) }
+
+    /// En «Todo» se esconde lo ya leído (al abrir) que tiene un tema activo, salvo los mensajes a los que se saltó.
+    static func hiddenInAll(_ m: MessageDTO, filter: String?, active: Set<String>, baseRead: Int, revealed: Set<Int>) -> Bool {
+        guard filter == nil, !active.isEmpty, let t = m.topicId, active.contains(t) else { return false }
+        return m.seq <= baseRead && !revealed.contains(m.seq)
+    }
+
+    /// ¿Cuenta como no leído para las banderitas? Texto de otra persona, no eliminado, después de lo leído.
+    static func countsAsUnread(_ m: MessageDTO, after read: Int, me: String) -> Bool {
+        m.seq > read && m.deletedAt == nil && m.kind == "text" && m.authorId != me
+    }
+
+    /// Sin leer por tema activo; la clave "" es lo sin tema (el número de «Todo»). Sin pendientes, no hay clave.
+    static func unreadCounts(_ messages: [MessageDTO], read: Int, me: String, active: Set<String>) -> [String: Int] {
+        var n: [String: Int] = [:]
+        for m in messages where countsAsUnread(m, after: read, me: me) {
+            n[m.topicId.flatMap { active.contains($0) ? $0 : nil } ?? "", default: 0] += 1
+        }
+        return n
+    }
+
+    /// Al abrir con no leídos: si todos están en un solo tema activo, ese tema (el chat abre filtrado); si no, nil («Todo»).
+    static func autoTopic(_ messages: [MessageDTO], after read: Int, me: String, active: Set<String>) -> String? {
+        let keys = Set(unreadCounts(messages, read: read, me: me, active: active).keys)
+        guard keys.count == 1, let only = keys.first, !only.isEmpty else { return nil }
+        return only
+    }
+
     /// Primer ícono y color que el chat aún no usa (como la web).
     static func suggestedIcon(_ list: [TopicDTO]) -> String { icons.first { i in !list.contains { $0.icon == i } } ?? icons[0] }
     static func suggestedColor(_ list: [TopicDTO]) -> String { colors.first { c in !list.contains { $0.color == c } } ?? "blue" }

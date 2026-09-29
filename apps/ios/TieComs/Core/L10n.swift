@@ -98,6 +98,10 @@ enum L10n {
         if let startsAt = obj["startsAt"] as? String, let date = ISODate.parse(startsAt) {
             vars["when"] = dateTime(date)
         }
+        // Llamadas: «Terminó la llamada · m:ss» (el API manda durationSec).
+        if let secs = (obj["durationSec"] as? NSNumber)?.intValue ?? (obj["durationSec"] as? String).flatMap(Int.init) {
+            vars["duration"] = clockDuration(secs)
+        }
         var out = s
         for (k, v) in vars { out = out.replacingOccurrences(of: "{\(k)}", with: v.description) }
         // Variables que no llegaron (vista previa cortada): se quitan sin dejar llaves.
@@ -115,7 +119,20 @@ enum L10n {
             let value = (try? JSONSerialization.jsonObject(with: Data("\"\(raw)\"".utf8), options: .fragmentsAllowed)) as? String ?? raw
             out[ns.substring(with: m.range(at: 1))] = value
         }
+        // Números completos ("durationSec":83), p. ej. el fin de una llamada.
+        if let num = try? NSRegularExpression(pattern: #""(\w+)"\s*:\s*(-?\d+)(?=[,}])"#) {
+            for m in num.matches(in: body, range: NSRange(location: 0, length: ns.length)) {
+                let key = ns.substring(with: m.range(at: 1))
+                if out[key] == nil, let n = Int(ns.substring(with: m.range(at: 2))) { out[key] = NSNumber(value: n) }
+            }
+        }
         return out["k"] == nil ? nil : out
+    }
+
+    /// m:ss a partir de segundos (duración de una llamada, como la web).
+    static func clockDuration(_ seconds: Int) -> String {
+        let s = max(0, seconds)
+        return "\(s / 60):" + String(format: "%02d", s % 60)
     }
 
     static func preview(_ body: String?) -> String? { body.map(systemText) }

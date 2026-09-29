@@ -1,0 +1,224 @@
+import XCTest
+@testable import TieComs
+
+private func dec<T: Decodable>(_ t: T.Type, _ s: String) throws -> T { try JSONDecoder().decode(T.self, from: Data(s.utf8)) }
+
+private let callJSON = #"{"id":"call1","conversationId":"c1","kind":"video","startedBy":"b","startedAt":"2026-09-29T10:00:00.000Z","endedAt":null,"activeUserIds":["b"],"transcribing":false,"hasTranscript":false}"#
+private let joinJSON = #"""
+{"call":\#(callJSON),
+ "meeting":{"Meeting":{"MeetingId":"fake-call1","ExternalMeetingId":"call1","MediaRegion":"us-east-1",
+   "MediaPlacement":{"AudioHostUrl":"fake.invalid:3478","SignalingUrl":"wss://fake.invalid/control","TurnControlUrl":"https://fake.invalid/turn"}}},
+ "attendee":{"Attendee":{"AttendeeId":"att-1","ExternalUserId":"a","JoinToken":"tok-1"}}}
+"""#
+
+private func msg(_ seq: Int, topic: String? = nil, author: String = "b", kind: String = "text", deleted: Bool = false) -> MessageDTO {
+    var m = MessageDTO(id: "m\(seq)", conversationId: "c1", seq: seq, authorId: author, clientMessageId: nil, kind: kind, body: "x", createdAt: "")
+    m.topicId = topic
+    if deleted { m.deletedAt = "2026-09-29T00:00:00Z" }
+    return m
+}
+
+/// Llamadas (docs/LLAMADAS.md) y la regla nueva de «Todo» en temas (docs/TEMAS.md).
+@MainActor
+final class CallsTests: XCTestCase {
+    // MARK: Decodificación
+
+    func testDecodesCallDTOsAndBootstrapFeature() throws {
+        let c = try dec(CallDTO.self, callJSON)
+        XCTAssertEqual(c.id, "call1"); XCTAssertTrue(c.isVideo); XCTAssertTrue(c.isLive); XCTAssertEqual(c.activeUserIds, ["b"])
+        let partial = try dec(CallDTO.self, #"{"id":"x","activeUserIds":null,"transcribing":"yes"}"#)
+        XCTAssertEqual(partial.kind, "audio"); XCTAssertEqual(partial.activeUserIds, []); XCTAssertFalse(partial.transcribing)
+
+        let j = try dec(CallJoinDTO.self, joinJSON)
+        XCTAssertEqual(j.meeting.meetingId, "fake-call1")
+        XCTAssertEqual(j.meeting.mediaPlacement.signalingUrl, "wss://fake.invalid/control")
+        XCTAssertEqual(j.meeting.mediaPlacement.audioFallbackUrl, "", "falta en el falso: queda vacío")
+        XCTAssertEqual(j.attendee.joinToken, "tok-1")
+        XCTAssertTrue(j.isFake)
+
+        let page = try dec(CallHistoryPage.self, #"{"calls":[{"call":\#(callJSON),"participantIds":["b","a"],"durationSec":83,"hasSummary":true},{"broken":1}],"hasMore":true}"#)
+        XCTAssertEqual(page.calls.count, 1, "una fila defectuosa se descarta"); XCTAssertEqual(page.calls[0].durationSec, 83); XCTAssertTrue(page.hasMore)
+
+        let t = try dec(CallTranscriptDTO.self, #"{"call":\#(callJSON),"summary":null,"segments":[{"resultId":"r1","speakerUserId":"b","speakerName":"Bruno","language":"es-US","text":"Hola","startMs":1500,"endMs":2000}]}"#)
+        XCTAssertNil(t.summary); XCTAssertEqual(t.segments.first?.speakerName, "Bruno")
+
+        let on = try dec(BootstrapDTO.self, #"{"me":{"id":"a","name":"A"},"features":{"calls":true}}"#)
+        XCTAssertTrue(on.callsEnabled)
+        let old = try dec(BootstrapDTO.self, #"{"me":{"id":"a","name":"A"}}"#)
+        XCTAssertFalse(old.callsEnabled, "servidor sin features: sin llamadas")
+    }
+
+    func testDecodesCallEvents() throws {
+        let e = try dec(ConversationEvent.self, #"{"type":"call.updated","conversationId":"c1","eventSeq":12,"call":\#(callJSON)}"#)
+        guard case .callUpdated(let cid, let seq, let call) = e else { return XCTFail("\(e)") }
+        XCTAssertEqual(cid, "c1"); XCTAssertEqual(seq, 12); XCTAssertEqual(call.id, "call1")
+        XCTAssertEqual(e.eventSeq, 12); XCTAssertEqual(e.conversationId, "c1")
+        let broken = try dec(ConversationEvent.self, #"{"type":"call.updated","conversationId":"c1","eventSeq":13}"#)
+        XCTAssertEqual(broken, .other(type: "call.updated", conversationId: "c1", eventSeq: 13), "sin llamada solo avanza el cursor")
+
+        let r = try dec(AccountEvent.self, #"{"type":"call.ringing","call":\#(callJSON),"conversationTitle":"Obra","callerName":"Bruno Ortega"}"#)
+        guard case .callRinging(let rc, let title, let caller) = r else { return XCTFail("\(r)") }
+        XCTAssertEqual(rc.id, "call1"); XCTAssertEqual(title, "Obra"); XCTAssertEqual(caller, "Bruno Ortega")
+    }
+
+    // MARK: Textos de sistema
+
+    func testCallSystemTextsEsEn() {
+        let saved = L10n.choice
+        defer { L10n.choice = saved }
+        let bodies = [#"{"k":"call.started","kind":"audio","callId":"c"}"#, #"{"k":"call.ended","callId":"c","durationSec":83}"#,
+                      #"{"k":"call.transcription.on","name":"Ana","callId":"c"}"#, #"{"k":"call.transcription.off","name":"Ana","callId":"c"}"#,
+                      #"{"k":"call.transcript","callId":"c"}"#]
+        L10n.choice = .es
+        XCTAssertEqual(bodies.map(L10n.systemText), ["Empezó una llamada.", "Terminó la llamada · 1:23.", "Ana prendió la transcripción de la llamada.",
+                                                      "Ana apagó la transcripción de la llamada.", "Quedó guardada la transcripción de la llamada."])
+        L10n.choice = .en
+        XCTAssertEqual(bodies.map(L10n.systemText), ["A call started.", "The call ended · 1:23.", "Ana turned on call transcription.",
+                                                      "Ana turned off call transcription.", "The call transcript was saved."])
+        L10n.choice = .es
+        // Vista previa de la lista: el API la corta a 140 caracteres (JSON incompleto), con números completos.
+        XCTAssertEqual(L10n.systemText(#"{"k":"call.ended","callId":"8b8c0d7e-6d9a-4a57-9f59-3a5b0e2f1c11","durationSec":605,"#), "Terminó la llamada · 10:05.")
+        XCTAssertEqual(L10n.systemText(#"{"k":"call.transcript","callId":"8b8c0d7e-6d9a"#), "Quedó guardada la transcripción de la llamada.")
+        XCTAssertFalse(L10n.systemText(#"{"k":"call.started","kind":"video"}"#).hasPrefix("{"))
+    }
+
+    // MARK: Reglas
+
+    func testTranscriptCaptionsAndFinals() {
+        let p1 = TranscriptPiece(resultId: "r1", isPartial: true, text: "Hol", attendeeId: "att", externalUserId: "b", language: nil, startMs: 10, endMs: 20)
+        var r = CallRules.applyTranscript([], [p1])
+        XCTAssertEqual(r.captions.map(\.text), ["Hol"]); XCTAssertTrue(r.finals.isEmpty, "una parcial no se manda")
+        var p2 = p1; p2.isPartial = false; p2.text = "  Hola a todos "
+        r = CallRules.applyTranscript(r.captions, [p2])
+        XCTAssertEqual(r.captions.count, 1, "la final reemplaza la parcial del mismo resultId")
+        XCTAssertEqual(r.captions[0].text, "Hola a todos"); XCTAssertFalse(r.captions[0].partial)
+        XCTAssertEqual(r.finals, [CallSegmentInput(resultId: "r1", attendeeId: "att", externalUserId: "b", language: nil, text: "Hola a todos", startMs: 10, endMs: 20)])
+        let many = (0..<9).map { TranscriptPiece(resultId: "x\($0)", isPartial: false, text: "t\($0)", attendeeId: nil, externalUserId: nil, language: "es-US", startMs: -5, endMs: 0) }
+        r = CallRules.applyTranscript(r.captions, many)
+        XCTAssertEqual(r.captions.count, CallRules.maxCaptions); XCTAssertEqual(r.captions.last?.text, "t8")
+        XCTAssertEqual(r.finals.count, 9); XCTAssertEqual(r.finals[0].startMs, 0, "nunca negativo")
+        XCTAssertTrue(CallRules.applyTranscript([], [TranscriptPiece(resultId: "e", isPartial: false, text: "  ", attendeeId: nil, externalUserId: nil, language: nil, startMs: 0, endMs: 0)]).finals.isEmpty)
+        let json = r.finals[0].json
+        XCTAssertTrue(json["attendeeId"] is NSNull); XCTAssertEqual(json["language"] as? String, "es-US")
+    }
+
+    func testShareOptionsTextMissedAndMerge() throws {
+        let call = try dec(CallDTO.self, callJSON)
+        let seg = [CallTranscriptSegmentDTO(resultId: "r1", speakerUserId: "b", speakerName: "Bruno", text: "Hola", startMs: 65_000)]
+        let both = CallTranscriptDTO(call: call, summary: "Acordamos X", segments: seg)
+        XCTAssertEqual(CallRules.shareOptions(both), [.summary, .transcript, .both])
+        XCTAssertEqual(CallRules.shareOptions(CallTranscriptDTO(call: call, summary: nil, segments: seg)), [.transcript])
+        XCTAssertEqual(CallRules.shareOptions(CallTranscriptDTO(call: call, summary: "", segments: [])), [])
+        let saved = L10n.choice; defer { L10n.choice = saved }
+        L10n.choice = .es
+        XCTAssertEqual(CallRules.shareText(both, .transcript) { $0.speakerName ?? "?" }, "Transcripción de la llamada:\n[1:05] Bruno: Hola")
+        XCTAssertEqual(CallRules.shareText(both, .both) { $0.speakerName ?? "?" }, "Resumen:\nAcordamos X\n\nTranscripción de la llamada:\n[1:05] Bruno: Hola")
+
+        var ended = call; ended.endedAt = "2026-09-29T10:05:00Z"
+        XCTAssertTrue(CallRules.isMissed(CallHistoryItemDTO(call: ended, participantIds: ["b"], durationSec: 300, hasSummary: false)))
+        XCTAssertFalse(CallRules.isMissed(CallHistoryItemDTO(call: ended, participantIds: ["b", "a"], durationSec: 300, hasSummary: false)))
+        XCTAssertFalse(CallRules.isMissed(CallHistoryItemDTO(call: call, participantIds: ["b"], durationSec: nil, hasSummary: false)), "en curso no es sin respuesta")
+        XCTAssertTrue(CallRules.isGroup(CallHistoryItemDTO(call: call, participantIds: ["a", "b", "c"], durationSec: nil, hasSummary: false), conv: nil, me: "a"))
+        XCTAssertEqual(CallRules.clock(83), "1:23")
+
+        XCTAssertEqual(CallRules.merge(nil, call), call)
+        XCTAssertNil(CallRules.merge(call, ended), "la misma llamada terminó")
+        var newer = call; newer.id = "call2"
+        XCTAssertEqual(CallRules.merge(newer, ended), newer, "una terminada no pisa a otra más nueva en curso")
+        XCTAssertTrue(CallRules.dropBatch(ApiRequestError(status: 409, code: "not_in_call", message: "")))
+        XCTAssertFalse(CallRules.dropBatch(ApiRequestError.network(URLError(.notConnectedToInternet))), "sin red se reintenta")
+        XCTAssertFalse(CallRules.dropBatch(ApiRequestError(status: 500, code: "internal", message: "")))
+    }
+
+    // MARK: Flujo con el API (URLProtocol) y medios falsos
+
+    func testStartTranscribeFlushAndHangUp() async throws {
+        let s = try ControlledURLProtocol.store()
+        s.seedForTesting(try dec(BootstrapDTO.self, #"{"me":{"id":"a","name":"Ana"},"features":{"calls":true},"conversations":[{"id":"c1","kind":"direct","memberIds":["a","b"],"canPost":true}]}"#))
+        var paths: [String] = []
+        var bodies: [String: [String: Any]] = [:]
+        ControlledURLProtocol.handler = { req in Task { @MainActor in
+            let p = req.request.url!.path
+            paths.append(p); bodies[p] = req.json
+            switch p {
+            case "/api/v1/conversations/c1/call": req.respond(joinJSON)
+            case "/api/v1/calls/call1/transcription":
+                req.respond(#"{"call":\#(callJSON.replacingOccurrences(of: #""transcribing":false"#, with: #""transcribing":true"#))}"#)
+            case "/api/v1/calls/call1/transcript": req.respond(#"{"saved":1}"#)
+            case "/api/v1/calls/call1/leave": req.respond(#"{"call":\#(callJSON.replacingOccurrences(of: #""endedAt":null"#, with: #""endedAt":"2026-09-29T10:05:00Z""#))}"#)
+            default: req.respond(404, #"{"error":{"code":"not_found","message":"x"}}"#)
+            }
+        } }
+        let center = s.callCenter
+        center.fakeCaptions = false
+        try await center.start("c1", kind: "audio")
+        XCTAssertTrue(center.media is NullCallMedia, "el proveedor falso no abre el SDK")
+        XCTAssertEqual(bodies["/api/v1/conversations/c1/call"]?["kind"] as? String, "audio")
+        XCTAssertEqual(s.liveCalls["c1"]?.id, "call1")
+        try await waitUntil(2, "en vivo") { center.view?.phase == .live }
+        XCTAssertTrue(center.expanded)
+
+        try await center.setTranscription(true, aiSummary: true)
+        XCTAssertEqual(bodies["/api/v1/calls/call1/transcription"]?["aiSummary"] as? Bool, true)
+        XCTAssertEqual(center.view?.call.transcribing, true)
+        center.mediaTranscript([TranscriptPiece(resultId: "r1", isPartial: false, text: "Hola", attendeeId: "att-1", externalUserId: "a", language: "es-US", startMs: 1, endMs: 2)])
+        XCTAssertEqual(center.outbox.count, 1)
+        await center.flush()
+        let segs = bodies["/api/v1/calls/call1/transcript"]?["segments"] as? [[String: Any]]
+        XCTAssertEqual(segs?.first?["text"] as? String, "Hola"); XCTAssertEqual(segs?.first?["resultId"] as? String, "r1")
+        XCTAssertEqual(center.sentBatches, 1); XCTAssertTrue(center.outbox.isEmpty)
+
+        await center.hangUp()
+        XCTAssertNil(center.view)
+        XCTAssertTrue(paths.contains("/api/v1/calls/call1/leave"))
+        XCTAssertNil(s.liveCalls["c1"], "la llamada terminó")
+    }
+
+    func testRingingAnsweredEndedAndDnd() throws {
+        let s = try ControlledURLProtocol.store()
+        s.seedForTesting(try dec(BootstrapDTO.self, #"{"me":{"id":"a","name":"Ana"},"features":{"calls":true},"conversations":[{"id":"c1","kind":"direct","memberIds":["a","b"],"canPost":true}]}"#))
+        s.socketEventForTesting("account.event", #"{"type":"call.ringing","call":\#(callJSON),"conversationTitle":null,"callerName":"Bruno"}"#)
+        XCTAssertEqual(s.callCenter.ringing?.callerName, "Bruno")
+        XCTAssertEqual(s.liveCalls["c1"]?.id, "call1")
+        // Terminó: el aviso se va.
+        s.socketEventForTesting("conv.event", #"{"type":"call.updated","conversationId":"c1","eventSeq":1,"call":\#(callJSON.replacingOccurrences(of: #""endedAt":null"#, with: #""endedAt":"2026-09-29T10:01:00Z""#))}"#)
+        XCTAssertNil(s.callCenter.ringing)
+        XCTAssertNil(s.liveCalls["c1"])
+        // Sin features.calls no suena.
+        s.seedForTesting(try dec(BootstrapDTO.self, #"{"me":{"id":"a","name":"Ana"},"conversations":[]}"#))
+        s.socketEventForTesting("account.event", #"{"type":"call.ringing","call":\#(callJSON),"callerName":"Bruno"}"#)
+        XCTAssertNil(s.callCenter.ringing)
+    }
+
+    // MARK: Temas: «Todo», contadores y auto-selección
+
+    func testAllHidesReadTopicMessagesButShowsUnreadAndRevealed() {
+        let active: Set<String> = ["fin"]
+        XCTAssertTrue(TopicRules.hiddenInAll(msg(3, topic: "fin"), filter: nil, active: active, baseRead: 5, revealed: []), "leído con tema: solo en su banderita")
+        XCTAssertFalse(TopicRules.hiddenInAll(msg(6, topic: "fin"), filter: nil, active: active, baseRead: 5, revealed: []), "no leído: se ve en «Todo»")
+        XCTAssertFalse(TopicRules.hiddenInAll(msg(3), filter: nil, active: active, baseRead: 5, revealed: []), "sin tema: siempre")
+        XCTAssertFalse(TopicRules.hiddenInAll(msg(3, topic: "old"), filter: nil, active: active, baseRead: 5, revealed: []), "tema archivado cuenta como sin tema")
+        XCTAssertFalse(TopicRules.hiddenInAll(msg(3, topic: "fin"), filter: nil, active: active, baseRead: 5, revealed: [3]), "mensaje al que se saltó")
+        XCTAssertFalse(TopicRules.hiddenInAll(msg(3, topic: "fin"), filter: "fin", active: active, baseRead: 5, revealed: []), "con filtro no aplica")
+        XCTAssertFalse(TopicRules.hiddenInAll(msg(3, topic: "fin"), filter: nil, active: [], baseRead: 5, revealed: []), "sin temas activos, todo")
+        let list = [TopicDTO(id: "fin", conversationId: "c1", name: "Finanzas"), TopicDTO(id: "old", conversationId: "c1", name: "Viejo", archivedAt: "2026-09-01")]
+        XCTAssertEqual(TopicRules.activeIds(list), ["fin"])
+    }
+
+    func testUnreadCountsPerFlag() {
+        let ms = [msg(1, topic: "fin"), msg(2, topic: "fin"), msg(3, topic: "fin"), msg(4), msg(5, topic: "ops"),
+                  msg(6, topic: "fin", author: "a"), msg(7, kind: "system"), msg(8, topic: "fin", deleted: true), msg(9, topic: "old")]
+        let n = TopicRules.unreadCounts(ms, read: 2, me: "a", active: ["fin", "ops"])
+        XCTAssertEqual(n, ["fin": 1, "": 2, "ops": 1], "propios, de sistema y eliminados no cuentan; el archivado va a «Todo»")
+        XCTAssertEqual(TopicRules.unreadCounts(ms, read: 9, me: "a", active: ["fin"]), [:], "sin pendientes, sin número")
+    }
+
+    func testAutoTopicOnlyWhenAllUnreadInOneTopic() {
+        let active: Set<String> = ["fin", "ops"]
+        XCTAssertEqual(TopicRules.autoTopic([msg(1), msg(2, topic: "fin"), msg(3, topic: "fin"), msg(4, author: "a")], after: 1, me: "a", active: active), "fin")
+        XCTAssertNil(TopicRules.autoTopic([msg(2, topic: "fin"), msg(3, topic: "ops")], after: 1, me: "a", active: active), "repartido: «Todo»")
+        XCTAssertNil(TopicRules.autoTopic([msg(2, topic: "fin"), msg(3)], after: 1, me: "a", active: active), "hay no leídos sin tema: «Todo»")
+        XCTAssertNil(TopicRules.autoTopic([msg(2, topic: "fin")], after: 2, me: "a", active: active), "sin no leídos")
+        XCTAssertEqual(TopicRules.autoTopic([msg(2, topic: "fin"), msg(3, kind: "system")], after: 1, me: "a", active: active), "fin", "lo de sistema no cuenta")
+    }
+}

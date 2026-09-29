@@ -121,6 +121,10 @@ struct ConversationView: View {
     /// Banderita elegida: filtra el chat y es el tema de lo que escribo (nil = «Todo»).
     @State private var topicFilter: String?
     @State private var confirmRemoveTopic: TopicDTO?
+    /// Mensajes con tema a los que se saltó desde «Todo»: quedan a la vista aunque «Todo» esconda lo leído de los temas.
+    @State private var revealed: Set<Int> = []
+    /// El filtro lo puso la apertura (todo lo no leído en un tema): no se baja al final, se queda en el primer no leído.
+    @State private var autoFiltered = false
     /// Borde inferior del contenido en la vista (para detectar el hueco en blanco al final, ver ChatContentBottomKey).
     @State private var contentBottom: CGFloat = 0
     @State private var gapFix: Task<Void, Never>?
@@ -298,6 +302,14 @@ struct ConversationView: View {
     }
 
     private var topicCounts: [String: Int] { TopicRules.counts(store.conversations[conversationId]?.messages ?? []) }
+    private var activeTopicIds: Set<String> { embedded ? [] : TopicRules.activeIds(store.topics[conversationId] ?? []) }
+    /// Lo leído al abrir (la regla de «Todo» no cambia mientras se lee).
+    private var baseRead: Int { max(unreadSnap?.lastReadSeq ?? store.meta(conversationId)?.lastReadSeq ?? 0, store.meta(conversationId)?.historyFromSeq ?? 0) }
+    /// Sin leer por banderita, con lo leído en vivo.
+    private var topicUnread: [String: Int] {
+        guard let c = store.meta(conversationId), let me = store.me?.id else { return [:] }
+        return TopicRules.unreadCounts(store.conversations[conversationId]?.messages ?? [], read: max(c.lastReadSeq, c.historyFromSeq), me: me, active: activeTopicIds)
+    }
 
     /// Asuntos: solo quien puede escribir y no es tercero (el API responde 403 a los terceros).
     private var canOpenIssues: Bool {
@@ -355,11 +367,12 @@ struct ConversationView: View {
                         onThreads: { sheet = .threads }, onAgenda: { sheet = .agenda })
                 // Lo que falta por leer en sus hilos y ramas (aunque este chat ya esté leído).
                 // Temas: banderitas con scroll horizontal justo debajo de la barra de accesos.
-                TopicDock(conv: c, filter: activeTopic?.id, counts: topicCounts,
-                          onFilter: { topicFilter = $0; Haptics.tap() }, onNew: { sheet = .newTopic(nil) },
+                TopicDock(conv: c, filter: activeTopic?.id, counts: topicCounts, unread: topicUnread,
+                          onFilter: { topicFilter = $0; autoFiltered = false; Haptics.tap() }, onNew: { sheet = .newTopic(nil) },
                           onRename: { sheet = .renameTopic($0) }, onRemove: { confirmRemoveTopic = $0 },
                           onArchived: { sheet = .archivedTopics })
                 TreeUnreadStrip(conversationId: conversationId) { sheet = .treePending }
+                CallBanner(conversationId: conversationId)
             }
             if let state, state.loaded {
                 messages(d, c, state)
@@ -408,6 +421,7 @@ struct ConversationView: View {
                 .accessibilityHint(L("chat.details"))
                 .accessibilityIdentifier("chat.header")
             }
+            ToolbarItem(placement: .topBarTrailing) { CallHeaderButtons(conv: c) }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     ConversationMenuItems(conv: c, onRemindCustom: { sheet = .reminder(nil) },
@@ -433,8 +447,11 @@ struct ConversationView: View {
         var prevDate: Date?
         let cal = Calendar.current
         let filter = activeTopic?.id
-        // Con una banderita elegida solo van los mensajes de ese tema y las tarjetas de sus tareas.
-        for m in state.messages where !store.blockedUserIds.contains(m.authorId) && (filter == nil || TaskCard.matches(m, filter: filter, issues: store.issues)) {
+        let active = activeTopicIds, read = baseRead
+        // Con una banderita elegida solo van los mensajes de ese tema y las tarjetas de sus tareas. En «Todo» con temas activos:
+        // lo sin tema, lo no leído de los temas y los mensajes a los que se saltó (docs/TEMAS.md › «Todo»).
+        for m in state.messages where !store.blockedUserIds.contains(m.authorId) && (filter == nil || TaskCard.matches(m, filter: filter, issues: store.issues))
+            && !TopicRules.hiddenInAll(m, filter: filter, active: active, baseRead: read, revealed: revealed) {
             let date = ISODate.parse(m.createdAt) ?? Date()
             let day = cal.dateComponents([.year, .month, .day], from: date)
             if day != lastDay {
@@ -590,6 +607,7 @@ struct ConversationView: View {
                 readPauseID = pause
                 defer { if readPauseID == pause { readPauseID = nil } }
                 if let id = await store.ensureMessage(conversationId, seq: seq) {
+                    revealed.insert(seq)
                     do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
                     guard store.jumpTo[conversationId] == seq else { return }
                     withAnimation { proxy.scrollTo(id, anchor: .center) }
@@ -632,6 +650,7 @@ struct ConversationView: View {
             }
             // Cambiar de banderita lleva al final del chat filtrado.
             .onChange(of: topicFilter) { _, _ in
+                if autoFiltered { return }
                 DispatchQueue.main.async { proxy.scrollTo(ChatNavIds.bottom, anchor: .bottom) }
             }
             .onChange(of: composerFocused) { _, focused in
@@ -728,6 +747,13 @@ struct ConversationView: View {
             if retry { try await store.openConversation(conversationId, force: true) }
             let first = try await store.firstUnreadMessage(conversationId, snapshot: snap)
             if let first {
+                // Todo lo no leído está en un solo tema: el chat abre filtrado en esa banderita, en el primer no leído.
+                if !embedded, topicFilter == nil, let me = store.me?.id,
+                   let only = TopicRules.autoTopic(store.conversations[conversationId]?.messages ?? [], after: max(snap.lastReadSeq, store.meta(conversationId)?.historyFromSeq ?? 0),
+                                                   me: me, active: activeTopicIds) {
+                    autoFiltered = true
+                    topicFilter = only
+                }
                 dividerId = first.id
                 mentionQueue = ChatNav.mentionIds(store.conversations[conversationId]?.messages ?? [], after: first.seq - 1, me: store.me?.id ?? "")
                 try await Task.sleep(nanoseconds: 200_000_000)
@@ -751,6 +777,7 @@ struct ConversationView: View {
             if let next = mentionQueue.first {
                 Button {
                     mentionQueue.removeFirst()
+                    if let seq = store.conversations[conversationId]?.messages.first(where: { $0.id == next })?.seq { revealed.insert(seq) }
                     jump(proxy, to: next, anchor: .center)
                     highlighted = next
                     Task {
@@ -1350,6 +1377,10 @@ struct SystemRow: View {
                 NavigationLink(value: Route.issue(issueId)) { Text(L("lin.open")).font(.footnote.weight(.semibold)) }
             }
             if let eventId { EventCard(eventId: eventId) }
+            if (p?["k"] as? String) == "call.transcript", let callId = p?["callId"] as? String {
+                NavigationLink(value: Route.callDetail(callId)) { Text(L("call.transcriptOpen")).font(.footnote.weight(.semibold)) }
+                    .accessibilityIdentifier("call.transcriptOpen")
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 6)

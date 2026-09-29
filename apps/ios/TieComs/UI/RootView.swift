@@ -106,47 +106,16 @@ struct MainView: View {
     /// gg: burbuja ✦ y panel (docs/ASISTENTE.md).
     @State private var assistant = AssistantModel()
 
+    /// Pestañas ya abiertas en la barra propia (se crean al visitarlas y conservan su pila).
+    @State private var visited: Set<AppTab> = []
+    @State private var keyboardVisible = false
+
     var body: some View {
         @Bindable var store = store
         let d = store.data
-        TabView(selection: $store.tab) {
-            NavigationStack(path: $store.homePath) { HomeView().assistantListMargin().routes() }
-                .issueSheets(host: "tab.home")
-                .appTextSize()
-                .tabItem { Label(L("tab.groups"), systemImage: "person.3") }
-                .tag(AppTab.home)
-                .badge(d.map(Naming.groupsUnread) ?? 0)
-                .accessibilityIdentifier("tab.home")
-            NavigationStack(path: $store.dmsPath) { DMsView().assistantListMargin().routes() }
-                .issueSheets(host: "tab.dms")
-                .appTextSize()
-                .tabItem { Label(L("tab.dms"), systemImage: "bubble.left.and.bubble.right") }
-                .tag(AppTab.dms)
-                .badge(d.map(Naming.dmsUnread) ?? 0)
-            NavigationStack(path: $store.issuesPath) { IssuesScreen().assistantListMargin().routes() }
-                .issueSheets(host: "tab.issues")
-                .appTextSize()
-                .tabItem { Label(L("tab.issues"), systemImage: "checklist") }
-                .tag(AppTab.issues)
-                .badge(store.myOpenIssues)
-            NavigationStack(path: $store.agendaPath) { AgendaScreen().assistantListMargin().routes() }
-                .issueSheets(host: "tab.agenda")
-                .appTextSize()
-                .tabItem { Label(L("tab.calendar"), systemImage: "calendar") }
-                .tag(AppTab.agenda)
-            NavigationStack(path: $store.settingsPath) { SettingsView().assistantListMargin().routes() }
-                .issueSheets(host: "tab.settings")
-                .appTextSize()
-                .tabItem {
-                    Label {
-                        Text(L("tab.you"))
-                    } icon: {
-                        Image(uiImage: TabAvatar.image(name: d?.me.name ?? "", photo: myPhoto,
-                                                       fill: UIColor(d.map { PersonColor.fill($0.me.id) } ?? Theme.bubbleMine),
-                                                       selected: store.tab == .settings, moon: store.dndActive || store.sleepActive))
-                    }
-                }
-                .tag(AppTab.settings)
+        Group {
+            // Con llamadas son 6 pestañas: el TabView del sistema pondría «Más» en iPhone, así que va una barra propia.
+            if d?.callsEnabled == true { sixTabs(d) } else { fiveTabs(d) }
         }
         // Cada minuto: la ventana de «No molestar todas las noches» (lunita y avisos) entra y sale sola.
         .task {
@@ -184,6 +153,17 @@ struct MainView: View {
         .animation(.spring(duration: 0.3), value: assistant.open)
         .onDisappear { assistant.close() }
         .overlay(alignment: .bottom) { ToastView() }
+        // Llamadas: aviso de llamada entrante y la llamada minimizada, encima de todo.
+        .overlay(alignment: .top) {
+            VStack(spacing: 6) {
+                IncomingCallBanner()
+                ActiveCallPill()
+            }
+            .animation(.spring(duration: 0.3), value: store.callCenter.ringing?.id)
+            .animation(.spring(duration: 0.3), value: store.callCenter.expanded)
+        }
+        .fullScreenCover(isPresented: Binding(get: { store.callCenter.expanded && store.callCenter.view != nil },
+                                              set: { if !$0 { store.callCenter.expanded = false } })) { CallScreen() }
         .sheet(isPresented: $store.showPushPrompt) { PushPromptView() }
         .sheet(isPresented: $store.showSleepSettings) { SleepSheet() }
         .sheet(isPresented: Binding(get: { store.shareText != nil }, set: { if !$0 { store.shareText = nil } })) {
@@ -193,6 +173,97 @@ struct MainView: View {
 }
 
 extension MainView {
+    /// Pila de navegación de una pestaña (la misma en la barra del sistema y en la propia).
+    @ViewBuilder fileprivate func stack(_ t: AppTab) -> some View {
+        @Bindable var store = store
+        switch t {
+        case .home:
+            NavigationStack(path: $store.homePath) { HomeView().assistantListMargin().routes() }.issueSheets(host: "tab.home").appTextSize()
+        case .dms:
+            NavigationStack(path: $store.dmsPath) { DMsView().assistantListMargin().routes() }.issueSheets(host: "tab.dms").appTextSize()
+        case .issues:
+            NavigationStack(path: $store.issuesPath) { IssuesScreen().assistantListMargin().routes() }.issueSheets(host: "tab.issues").appTextSize()
+        case .agenda:
+            NavigationStack(path: $store.agendaPath) { AgendaScreen().assistantListMargin().routes() }.issueSheets(host: "tab.agenda").appTextSize()
+        case .calls:
+            NavigationStack(path: $store.callsPath) { CallsScreen().assistantListMargin().routes() }.issueSheets(host: "tab.calls").appTextSize()
+        case .settings:
+            NavigationStack(path: $store.settingsPath) { SettingsView().assistantListMargin().routes() }.issueSheets(host: "tab.settings").appTextSize()
+        }
+    }
+
+    fileprivate func youIcon(_ d: BootstrapDTO?) -> UIImage {
+        TabAvatar.image(name: d?.me.name ?? "", photo: myPhoto,
+                        fill: UIColor(d.map { PersonColor.fill($0.me.id) } ?? Theme.bubbleMine),
+                        selected: store.tab == .settings, moon: store.dndActive || store.sleepActive)
+    }
+
+    fileprivate func badge(_ t: AppTab, _ d: BootstrapDTO?) -> Int {
+        switch t {
+        case .home: return d.map(Naming.groupsUnread) ?? 0
+        case .dms: return d.map(Naming.dmsUnread) ?? 0
+        case .issues: return store.myOpenIssues
+        default: return 0
+        }
+    }
+
+    /// Sin llamadas: las 5 pestañas del sistema (como hasta 1.6.7).
+    fileprivate func fiveTabs(_ d: BootstrapDTO?) -> some View {
+        @Bindable var store = store
+        return TabView(selection: $store.tab) {
+            stack(.home)
+                .tabItem { Label(L("tab.groups"), systemImage: "person.3") }
+                .tag(AppTab.home)
+                .badge(badge(.home, d))
+                .accessibilityIdentifier("tab.home")
+            stack(.dms)
+                .tabItem { Label(L("tab.dms"), systemImage: "bubble.left.and.bubble.right") }
+                .tag(AppTab.dms)
+                .badge(badge(.dms, d))
+            stack(.issues)
+                .tabItem { Label(L("tab.issues"), systemImage: "checklist") }
+                .tag(AppTab.issues)
+                .badge(badge(.issues, d))
+            stack(.agenda)
+                .tabItem { Label(L("tab.calendar"), systemImage: "calendar") }
+                .tag(AppTab.agenda)
+            stack(.settings)
+                .tabItem { Label { Text(L("tab.you")) } icon: { Image(uiImage: youIcon(d)) } }
+                .tag(AppTab.settings)
+        }
+    }
+
+    /// Con llamadas: 6 pestañas (Grupos · DMs · Tareas · Calendario · Llamadas · Tú) con una UITabBar propia, que no agrupa en «Más».
+    /// Cada pila se crea al visitarla y se conserva; la barra se esconde con el teclado (como la del sistema, que queda debajo).
+    fileprivate func sixTabs(_ d: BootstrapDTO?) -> some View {
+        ZStack {
+            ForEach(AppTab.allCases, id: \.self) { t in
+                if visited.contains(t) || store.tab == t {
+                    stack(t)
+                        .opacity(store.tab == t ? 1 : 0)
+                        .allowsHitTesting(store.tab == t)
+                        .accessibilityHidden(store.tab != t)
+                        .zIndex(store.tab == t ? 1 : 0)
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !keyboardVisible {
+                AppTabBar(items: AppTab.allCases.map { t in
+                    AppTabBar.Item(tab: t, title: TabInfo.title(t), image: t == .settings ? youIcon(d) : UIImage(systemName: TabInfo.symbol(t)),
+                                   badge: badge(t, d), identifier: "tab.\(TabInfo.id(t))")
+                }, selected: store.tab) { t in
+                    if store.tab == t { store.popToRoot(t) } else { store.tab = t }
+                }
+                .frame(height: 49)
+                .background(Theme.background.ignoresSafeArea(edges: .bottom))
+            }
+        }
+        .onChange(of: store.tab, initial: true) { _, t in visited.insert(t) }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
+    }
+
     /// Distancia de la burbuja al borde inferior del área segura: justo encima de la barra de pestañas.
     fileprivate static let bubbleBottom: CGFloat = 58
 
@@ -229,6 +300,7 @@ extension View {
             case .oversight(let orgId): OversightView(orgId: orgId)
             case .oversightReader(let id, let name): OversightReaderView(conversationId: id, name: name)
             case .scheduled: ScheduledScreen()
+            case .callDetail(let id): CallDetailView(callId: id)
             }
         }
     }
@@ -285,5 +357,89 @@ extension View {
 private struct SheetToasts: ViewModifier {
     func body(content: Content) -> some View {
         content.overlay(alignment: .bottom) { ToastView(inSheet: true) }
+    }
+}
+
+/// Textos e íconos de la barra inferior.
+enum TabInfo {
+    static func title(_ t: AppTab) -> String {
+        switch t {
+        case .home: return L("tab.groups")
+        case .dms: return L("tab.dms")
+        case .issues: return L("tab.issues")
+        case .agenda: return L("tab.calendar")
+        case .calls: return L("tab.calls")
+        case .settings: return L("tab.you")
+        }
+    }
+    static func symbol(_ t: AppTab) -> String {
+        switch t {
+        case .home: return "person.3"
+        case .dms: return "bubble.left.and.bubble.right"
+        case .issues: return "checklist"
+        case .agenda: return "calendar"
+        case .calls: return "phone"
+        case .settings: return "person.crop.circle"
+        }
+    }
+    static func id(_ t: AppTab) -> String {
+        switch t {
+        case .home: return "home"
+        case .dms: return "dms"
+        case .issues: return "issues"
+        case .agenda: return "agenda"
+        case .calls: return "calls"
+        case .settings: return "settings"
+        }
+    }
+}
+
+/// UITabBar suelta (sin UITabBarController): muestra las 6 pestañas sin «Más» y las pruebas la siguen viendo como `tabBars`.
+struct AppTabBar: UIViewRepresentable {
+    struct Item: Equatable {
+        var tab: AppTab
+        var title: String
+        var image: UIImage?
+        var badge: Int
+        var identifier: String
+    }
+    var items: [Item]
+    var selected: AppTab
+    var onSelect: (AppTab) -> Void
+
+    final class Coordinator: NSObject, UITabBarDelegate {
+        var parent: AppTabBar
+        var titles: [String] = []
+        init(_ p: AppTabBar) { parent = p }
+        func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {
+            guard item.tag >= 0, item.tag < parent.items.count else { return }
+            parent.onSelect(parent.items[item.tag].tab)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UITabBar {
+        let bar = UITabBar()
+        bar.delegate = context.coordinator
+        bar.tintColor = UIColor(Theme.accentText)
+        bar.itemPositioning = .fill
+        return bar
+    }
+
+    func updateUIView(_ bar: UITabBar, context: Context) {
+        context.coordinator.parent = self
+        let titles = items.map(\.title)
+        if context.coordinator.titles != titles || bar.items?.count != items.count {
+            bar.items = items.enumerated().map { i, it in UITabBarItem(title: it.title, image: it.image, tag: i) }
+            context.coordinator.titles = titles
+        }
+        for (i, it) in items.enumerated() {
+            guard let ui = bar.items?[i] else { continue }
+            if it.tab == .settings { ui.image = it.image?.withRenderingMode(.alwaysOriginal); ui.selectedImage = ui.image }
+            ui.badgeValue = it.badge > 0 ? "\(it.badge)" : nil
+            ui.accessibilityIdentifier = it.identifier
+        }
+        if let i = items.firstIndex(where: { $0.tab == selected }), bar.selectedItem !== bar.items?[i] { bar.selectedItem = bar.items?[i] }
     }
 }

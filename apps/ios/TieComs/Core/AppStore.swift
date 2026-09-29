@@ -42,6 +42,8 @@ enum Route: Hashable {
     case scheduled
     /// Detalle de una llamada: resumen, transcripción y Compartir (docs/LLAMADAS.md).
     case callDetail(String)
+    /// Correo compartido en un chat, en pantalla completa (docs/CORREO.md). `mode`: read | comments | reply.
+    case mail(String, mode: String)
 }
 
 /// Barra inferior (docs/GRUPOS.md): Grupos (`home`) · DMs · Asuntos · Calendario · Llamadas (solo con `features.calls`) · Tú (`settings`).
@@ -99,6 +101,12 @@ final class AppStore {
     var driveRevision = 0
     /// Cambió una conexión de reuniones (Meet/Teams/Zoom): el diálogo y Ajustes vuelven a pedir el estado.
     var meetingsRevision = 0
+    /// Correos compartidos en los chats (tarjetas), por id. docs/CORREO.md.
+    var mails: [String: SharedMailDTO] = [:]
+    /// Correos que el servidor ya no deja ver (la tarjeta dice «ya no está disponible»).
+    var mailsMissing: Set<String> = []
+    /// Sube al conectar o desconectar Gmail/Outlook: la lista y Hoy vuelven a pedir las conexiones.
+    var mailRevision = 0
     /// Aviso breve (toast).
     var toast: String?
     /// «Deshacer» del aviso actual (completar o descartar un asunto); se borra al cambiar el aviso.
@@ -219,7 +227,7 @@ final class AppStore {
         meetingAttemptStorageError = false
         meetingAttempts = [:]
         meetingPayloads = [:]
-        issues = [:]; events = [:]
+        issues = [:]; events = [:]; mails = [:]; mailsMissing = []
         for task in readTasks.values { task.cancel() }
         readTasks = [:]; readTargets = [:]; readFailures = []
     }
@@ -318,6 +326,10 @@ final class AppStore {
     }
     var meetingAttempts: [String: MeetingAttempt] = [:]
     @ObservationIgnored var meetingAuthorization: MeetingAuthorization?
+    @ObservationIgnored var mailAuthorization: MailAuthorization?
+    /// Tarjetas de correo pedidas y aún no enviadas (se piden juntas, hasta 50 por petición).
+    @ObservationIgnored var mailWanted: [String] = []
+    @ObservationIgnored var mailBatchScheduled = false
 
     // MARK: Dependencias
     let api: APIClient
@@ -564,6 +576,7 @@ final class AppStore {
         pending = []
         typing = [:]
         issues = [:]; pins = [:]; topics = [:]; taskCardComments = [:]; reminders = []; events = [:]; scheduled = []
+        mails = [:]; mailsMissing = []; mailWanted = []
         blockedUserIds = []
         localDndUntil = nil; dndLocalOnly = false; dndExpiryTask?.cancel(); dndExpiryTask = nil
         homePath = []; dmsPath = []; issuesPath = []; agendaPath = []; settingsPath = []; callsPath = []
@@ -797,6 +810,9 @@ final class AppStore {
             }
         case .callUpdated(_, _, let call):
             putCall(call, keepDevices: true)
+        case .mailUpdated(_, _, let email):
+            // Llega sin cuerpo: no se borra el que ya estaba cargado.
+            putMail(email, live: true)
         case .messageUpdated(let cid, _, let m):
             // Antes de aplicar: se compara con la versión que tenía para avisar de una reacción nueva a un mensaje mío.
             if live { noticeReaction(conversations[cid]?.messages.first { $0.id == m.id }, m) }
@@ -951,7 +967,7 @@ final class AppStore {
         case .membersChanged(let id, _, let ids, let admins):
             patchMeta(id) { $0.memberIds = ids; if let admins { $0.adminIds = admins } }
             scheduleBootstrap()
-        case .issueUpdated, .pinsChanged, .topicsChanged, .calendarUpdated, .callUpdated:
+        case .issueUpdated, .pinsChanged, .topicsChanged, .calendarUpdated, .callUpdated, .mailUpdated:
             break // sus efectos van en sideEffects (también sin mensajes cargados)
         case .other:
             break // redacted o tipos futuros: solo avanzan el cursor
@@ -1413,6 +1429,11 @@ final class AppStore {
     func handle(url: URL) {
         // chaggu://auth/* es del flujo SSO (lo recibe ASWebAuthenticationSession), no es navegación.
         // chaggu://meetings/connected?… vuelve de conectar Meet/Teams/Zoom (normalmente lo recibe la sesión web).
+        if MailCallback.isMail(url) {
+            // Igual que Reuniones: solo el flujo en memoria que tiene la prueba PKCE canjea el recibo.
+            mailAuthorization?.connector.receive(url)
+            return
+        }
         if MeetingCallback.isMeetings(url) {
             // A URL alone cannot connect an account. Only the in-memory flow may consume its receipt.
             meetingAuthorization?.connector.receive(url)

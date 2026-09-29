@@ -86,8 +86,14 @@ enum L10n {
         guard let k = obj["k"] as? String else { return body }
         var key = (k == "members.added" && (obj["history"] as? String) == "all") ? "sys.members.added.all" : "sys.\(k)"
         if k == "side.started", let p = obj["parentName"] as? String, !p.isEmpty { key = "sys.side.startedIn" }
-        let s = L(key)
-        if s == key { return body }
+        var s = L(key)
+        // Un aviso que esta versión no conoce nunca se muestra como JSON crudo (docs/CORREO.md: «mostrar el texto de sys.* o ignorarlos»).
+        if s == key {
+            if k.hasPrefix("mail.") { s = L("mail.fromChat") }
+            else if k.hasPrefix("wa.") { s = L("wa.fromChat") }
+            else { s = L("sys.unknown") }
+            if s == "sys.unknown" { return "…" }
+        }
         var vars: [String: CustomStringConvertible] = [:]
         for (name, value) in obj {
             if let v = value as? String { vars[name] = v }

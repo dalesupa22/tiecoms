@@ -152,7 +152,8 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(L10n.systemText("texto plano"), "texto plano")
         let s = L10n.systemText(#"{"k":"group.created","name":"Obra"}"#)
         XCTAssertTrue(s.contains("Obra"), s)
-        XCTAssertEqual(L10n.systemText(#"{"k":"clave.desconocida"}"#), #"{"k":"clave.desconocida"}"#)
+        // Un aviso que esta versión no conoce nunca se ve como JSON crudo (docs/CORREO.md).
+        XCTAssertEqual(L10n.systemText(#"{"k":"clave.desconocida"}"#), L("sys.unknown"))
     }
 
     func testMeetingSystemTextFormatsStartDate() {

@@ -1003,7 +1003,10 @@ struct ConversationView: View {
         case .system(let m):
             // Una tarea nueva se ve como tarjeta completa (docs/TEMAS.md), no como la línea «Creó la tarea…».
             // Tanda 1.7: «Es hoy», completada, vencida y comentarios también van como la tarjeta de su evento o tarea.
-            if let k = ChatCards.kind(m), let eventId = k.eventId {
+            if let mk = MailChatKind.parse(m.systemPayload) {
+                // Correo y WhatsApp traídos al chat (docs/CORREO.md): mensaje de quien lo trajo + tarjeta, o la línea con «Abrir».
+                MailChatRow(message: m, kind: mk, canPost: c.canPost)
+            } else if let k = ChatCards.kind(m), let eventId = k.eventId {
                 EventChatCard(eventId: eventId, creatorId: m.authorId, kind: k, onComment: c.canPost ? { ev in
                     commentingEvent = ev; commentingIssue = nil; replyTo = nil; editing = nil; composerFocused = true
                 } : nil)

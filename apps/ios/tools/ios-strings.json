@@ -3586,5 +3586,9 @@
  "calls.activeNow": [
   "En curso ahora",
   "Live now"
+ ],
+ "sys.unknown": [
+  "Actualización en el chat",
+  "Chat update"
  ]
 }

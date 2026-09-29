@@ -41,13 +41,18 @@ final class V9LanguageSubjectsTests: XCTestCase {
         XCTAssertEqual(es["grp.moreIssues"], "+{n} tareas")
         XCTAssertEqual(es["issue.completed"], "Tarea completada")
         XCTAssertEqual(es["task.addHere"], "Subtarea de la tarea")
-        XCTAssertTrue(es.values.allSatisfy { $0.range(of: #"\b(issue|subject)s?\b"#, options: [.regularExpression, .caseInsensitive]) == nil })
+        // Las variables ({subject} del correo compartido, docs/CORREO.md) no son texto visible.
+        XCTAssertTrue(es.values.allSatisfy { Self.visible($0).range(of: #"\b(issue|subject)s?\b"#, options: [.regularExpression, .caseInsensitive]) == nil })
     }
 
-    /// Ningún texto visible dice «asunto» ni «subject»; solo el asunto de un correo importado («Asunto: {s}»).
+    private static func visible(_ s: String) -> String { s.replacingOccurrences(of: #"\{\w+\}"#, with: "", options: .regularExpression) }
+
+    /// Ningún texto visible dice «asunto» ni «subject»; solo el asunto de un correo: el importado («Asunto: {s}») y
+    /// el de Gmail/Outlook en «Correo en el chat» (docs/CORREO.md: «(sin asunto)», buscar por asunto, quién ve el asunto).
     func testNoTextSaysAsuntoOrSubject() throws {
+        let emailSubject: Set<String> = ["imp.subject", "mail.noSubject", "mail.searchPh", "mail.whoSees"]
         for (lang, word) in [("es", "asunto"), ("en", "subject")] {
-            let left = try strings(lang).filter { $0.key != "imp.subject" && $0.value.range(of: word, options: .caseInsensitive) != nil }
+            let left = try strings(lang).filter { !emailSubject.contains($0.key) && Self.visible($0.value).range(of: word, options: .caseInsensitive) != nil }
             XCTAssertTrue(left.isEmpty, "\(lang): \(left.keys.sorted())")
         }
         XCTAssertEqual(try strings("es")["imp.subject"], "Asunto: {s}")

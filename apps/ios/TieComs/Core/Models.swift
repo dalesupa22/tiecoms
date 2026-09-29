@@ -470,6 +470,8 @@ struct BootstrapDTO: Codable, Equatable, Sendable {
 
     /// Llamadas de voz y video (docs/LLAMADAS.md): sin esto no hay botones, franja ni pestaña.
     var callsEnabled: Bool { features?.calls == true }
+    /// Correo en el chat: sin esto no hay ＋ › Correo, ni Tú › Correo, ni tarjeta en Hoy.
+    var mailEnabled: Bool { features?.mail == true }
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -487,10 +489,13 @@ struct BootstrapDTO: Codable, Equatable, Sendable {
 
 struct FeaturesDTO: Codable, Equatable, Sendable {
     var calls: Bool
-    init(calls: Bool) { self.calls = calls }
+    /// Correo y WhatsApp en el chat (docs/CORREO.md, MAIL_ENABLED). Ausente = servidor anterior (apagado).
+    var mail: Bool = false
+    init(calls: Bool, mail: Bool = false) { self.calls = calls; self.mail = mail }
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         calls = c.v("calls", false)
+        mail = c.v("mail", false)
     }
 }
 
@@ -709,18 +714,20 @@ enum ConversationEvent: Decodable, Equatable, Sendable {
     case calendarUpdated(conversationId: String, eventSeq: Int, event: CalendarEventDTO)
     /// Empezó, cambió quién está dentro o terminó una llamada de la conversación.
     case callUpdated(conversationId: String, eventSeq: Int, call: CallDTO)
+    /// Un correo compartido cambió (comentario, respuesta, tarea). Llega SIN cuerpo (docs/CORREO.md).
+    case mailUpdated(conversationId: String, eventSeq: Int, email: SharedMailDTO)
     case other(type: String, conversationId: String, eventSeq: Int)
 
     var conversationId: String {
         switch self {
         case .messageCreated(let c, _, _), .messageUpdated(let c, _, _), .membersChanged(let c, _, _, _), .issueUpdated(let c, _, _),
-             .pinsChanged(let c, _, _), .topicsChanged(let c, _, _), .calendarUpdated(let c, _, _), .callUpdated(let c, _, _), .other(_, let c, _): return c
+             .pinsChanged(let c, _, _), .topicsChanged(let c, _, _), .calendarUpdated(let c, _, _), .callUpdated(let c, _, _), .mailUpdated(let c, _, _), .other(_, let c, _): return c
         }
     }
     var eventSeq: Int {
         switch self {
         case .messageCreated(_, let s, _), .messageUpdated(_, let s, _), .membersChanged(_, let s, _, _), .issueUpdated(_, let s, _),
-             .pinsChanged(_, let s, _), .topicsChanged(_, let s, _), .calendarUpdated(_, let s, _), .callUpdated(_, let s, _), .other(_, _, let s): return s
+             .pinsChanged(_, let s, _), .topicsChanged(_, let s, _), .calendarUpdated(_, let s, _), .callUpdated(_, let s, _), .mailUpdated(_, let s, _), .other(_, _, let s): return s
         }
     }
 
@@ -746,6 +753,8 @@ enum ConversationEvent: Decodable, Equatable, Sendable {
             if let e: CalendarEventDTO = c.o("event") { self = .calendarUpdated(conversationId: conv, eventSeq: seq, event: e); return }
         case "call.updated":
             if let x: CallDTO = c.o("call") { self = .callUpdated(conversationId: conv, eventSeq: seq, call: x); return }
+        case "mail.updated":
+            if let x: SharedMailDTO = c.o("email") { self = .mailUpdated(conversationId: conv, eventSeq: seq, email: x); return }
         default: break
         }
         self = .other(type: type, conversationId: conv, eventSeq: seq)

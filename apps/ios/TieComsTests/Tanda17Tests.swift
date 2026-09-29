@@ -31,12 +31,12 @@ final class Tanda17Tests: XCTestCase {
     func testSystemTextsEsEn() {
         let saved = L10n.choice; defer { L10n.choice = saved }
         L10n.choice = .es
-        XCTAssertEqual(L10n.systemText(#"{"k":"issue.done","issueId":"i","title":"Cerrar el mes","byId":"a","byName":"Ana"}"#), "Ana completó la tarea «Cerrar el mes».")
+        XCTAssertEqual(L10n.systemText(#"{"k":"issue.done","issueId":"i","title":"Cerrar el mes","byId":"a","byName":"Ana"}"#), "✅ Ana completó la tarea «Cerrar el mes».")
         XCTAssertTrue(L10n.systemText(#"{"k":"issue.overdue","issueId":"i","title":"Informe","ownerId":"b","ownerName":"Bruno","dueDate":"2026-09-25"}"#).hasPrefix("No cumplimos: «Informe» venció el "))
         XCTAssertTrue(L10n.systemText(#"{"k":"event.today","eventId":"e","title":"Demo","startsAt":"2026-09-29T20:00:00Z","timezone":"America/Bogota"}"#).hasPrefix("Hoy: Demo a las "))
-        XCTAssertEqual(L10n.systemText(#"{"k":"issue.comments","issueId":"i","title":"Informe","count":2,"lastById":"b","lastByName":"Bruno","lastExcerpt":"listo"}"#), "Bruno comentó la tarea «Informe».")
+        XCTAssertEqual(L10n.systemText(#"{"k":"issue.comments","issueId":"i","title":"Informe","count":2,"lastById":"b","lastByName":"Bruno","lastExcerpt":"listo"}"#), "💬 Bruno comentó en «Informe»: listo")
         L10n.choice = .en
-        XCTAssertEqual(L10n.systemText(#"{"k":"event.comments","eventId":"e","title":"Demo","count":1,"lastByName":"Bruno","lastExcerpt":"ok"}"#), "Bruno commented on the event “Demo”.")
+        XCTAssertEqual(L10n.systemText(#"{"k":"event.comments","eventId":"e","title":"Demo","count":1,"lastByName":"Bruno","lastExcerpt":"ok"}"#), "💬 Bruno commented on “Demo”: ok")
         // Una sola vista: la vista previa nunca muestra el contenido.
         var m = MessageDTO(id: "v", conversationId: "c", seq: 1, authorId: "b", clientMessageId: nil, body: "", createdAt: "")
         m.viewOnce = true

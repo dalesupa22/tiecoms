@@ -290,6 +290,7 @@ extension View {
             case .oversightReader(let id, let name): OversightReaderView(conversationId: id, name: name)
             case .scheduled: ScheduledScreen()
             case .callDetail(let id): CallDetailView(callId: id)
+            case .mail(let id, let mode): MailDetailView(emailId: id, mode: mode)
             }
         }
     }

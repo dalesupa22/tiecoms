@@ -283,8 +283,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {children}
       </main>
       <MobileTabs route={route} />
-      {/* Como en WhatsApp: en las listas sí, dentro de un chat no. */}
-      <AssistantBubble hidden={inConv} />
+      {/* gg siempre a mano (Danny, 29-sep-2026): también dentro de un chat, por encima del campo de escribir. */}
+      <AssistantBubble hidden={false} inConv={inConv} />
     </div>
   );
 }

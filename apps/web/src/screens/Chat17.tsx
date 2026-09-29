@@ -15,7 +15,8 @@ import { navigate } from '../router.ts';
 import { quickSearch } from '../quick-search.ts';
 import { compareConversations } from '../home-order.ts';
 import { Avatar, ConvAvatar, Modal, conversationTitle, orgById, personById } from '../ui.tsx';
-import { EventChatCard, EventComments } from './Calendar.tsx';
+import { EventChatCard, EventComments, openEvent } from './Calendar.tsx';
+import { CommentsNoticeLine } from './Mail.tsx';
 import { IssueChatCard, issueFlags } from './Issues.tsx';
 import { openDialog } from '../actions.tsx';
 
@@ -303,19 +304,13 @@ export function Notice17Row({ m, p, canPost, live, onIssue }: { m: MessageDTO; p
       banner={<><span className="sad-face" aria-hidden>😢</span> {t('overdue.banner', { title: p.title, date: dueDateLabel(p.dueDate) })}</>}
       footer={canPost ? <OverdueActions issueId={p.issueId} conversationId={m.conversationId} /> : null} />);
   }
-  const strip = (
-    <div className="comments-strip">
-      <span className="grow" style={{ minWidth: 0 }}>
-        <b>{p.count > 1 ? t('comments.many', { n: p.count }) : t('comments.one')}</b>
-        <span className="small ellipsis" style={{ display: 'block' }}><b>{p.lastByName.split(' ')[0]}</b> {p.lastExcerpt}</span>
-      </span>
-      {canPost && <button className="btn small" onClick={() => setReplying((v) => !v)}>{t('comments.reply')}</button>}
-    </div>
-  );
-  if (p.k === 'issue.comments') {
-    return row(<IssueChatCard issueId={p.issueId} creatorId={issueCreator} canPost={canPost} onOpen={onIssue} tone="comments" hideReply={!replying} banner={strip} />);
+  // Comentarios agrupados: una línea que lleva a la tarea o al evento, sin repetir la tarjeta.
+  if (p.k === 'issue.comments' || p.k === 'event.comments') {
+    const q = p;
+    return row(<CommentsNoticeLine count={q.count} title={q.title} lastByName={q.lastByName} lastExcerpt={q.lastExcerpt}
+      icon={<span aria-hidden>{q.k === 'issue.comments' ? '☑' : '📅'}</span>} onOpen={() => (q.k === 'issue.comments' ? onIssue(q.issueId) : openEvent(q.eventId))} />);
   }
-  return row(<EventChatCard eventId={p.eventId} creatorId={eventCreator} tone="comments" banner={strip} footer={replying ? <EventReply eventId={p.eventId} /> : null} />);
+  return null;
 }
 
 function EventReply({ eventId }: { eventId: string }) {

@@ -758,14 +758,18 @@ export const MailListQuery = z.object({
 export const ShareMailInput = z.object({
   provider: MailProvider,
   messageId: z.string().min(1).max(500),
-  conversationId: z.uuid(),
+  /** Un chat (clientes anteriores) o varios a la vez (conversationIds, hasta 10). */
+  conversationId: z.uuid().optional(),
+  conversationIds: z.array(z.uuid()).min(1).max(10).optional(),
   comment: z.string().trim().max(4000).optional(),
   topicId: z.uuid().nullable().optional(),
-});
+}).refine((x) => x.conversationId || x.conversationIds?.length, { message: 'Elige al menos un chat' });
 export type SharedMailStatus = 'pending' | 'scheduled' | 'replied';
 export interface SharedMailCommentDTO { id: string; emailId: string; authorId: string; body: string; createdAt: string }
 export interface SharedMailDTO {
-  id: string; conversationId: string; sharedBy: string; provider: MailProvider; accountEmail: string | null;
+  /** provider 'whatsapp': un mensaje de WhatsApp llevado al chat (sin responder desde chaggu; datos en wa). */
+  id: string; conversationId: string; sharedBy: string; provider: MailProvider | 'whatsapp'; accountEmail: string | null;
+  wa?: { chatName: string | null; isGroup: boolean; accountKind: 'personal' | 'business'; accountId: string; jid: string } | null;
   direction: 'in' | 'out'; from: MailAddressDTO | null; to: MailAddressDTO[]; cc: MailAddressDTO[];
   /** body solo llega con full=true (GET /mail/shared/:id?full=1); en tarjetas y en vivo va ''. */
   subject: string; snippet: string; body: string; full?: boolean;
@@ -797,8 +801,9 @@ export const MailTaskInput = z.object({
 /** «Comentar en chaggu» desde un mensaje de WhatsApp. */
 export const ShareWaInput = z.object({
   accountId: z.uuid(), jid: z.string().min(3).max(200), messageId: z.string().min(1).max(200),
-  conversationId: z.uuid(), comment: z.string().trim().max(4000).optional(),
-});
+  conversationId: z.uuid().optional(), conversationIds: z.array(z.uuid()).min(1).max(10).optional(),
+  comment: z.string().trim().max(4000).optional(),
+}).refine((x) => x.conversationId || x.conversationIds?.length, { message: 'Elige al menos un chat' });
 
 /** side = conversación lateral: consulta privada desde un mensaje (chat multi que cuelga de su origen). */
 export type DeriveKind = 'same' | 'internal' | 'directive' | 'side';

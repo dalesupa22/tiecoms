@@ -309,16 +309,20 @@ function ChatPanel({ c, revision, onClose, onPatch }: { c: WaChatDTO; revision: 
       <div className="wa-msgs" ref={box}>
         {messages === null && <div className="hint">{t('common.loading')}</div>}
         {messages?.length === 0 && <div className="hint">{t('wa.noMessages')}</div>}
-        {messages?.map((m) => (
+        {messages?.map((m) => {
+          const bring = () => openDialog((close) => <WaShareDialog accountId={c.accountId} jid={c.jid} chatName={c.name} isGroup={c.isGroup} message={m} onClose={close} />);
+          return (
           <div key={m.id} className={`wa-msg ${m.fromMe ? 'me' : ''}`} {...(mailOn ? menuProps(() => [
-            { label: t('wa.commentIn'), icon: '⤴', onSelect: () => openDialog((close) => <WaShareDialog accountId={c.accountId} jid={c.jid} chatName={c.name} message={m} onClose={close} />) },
+            { label: t('wa.bring'), icon: '⤴', onSelect: bring },
             { label: t('common.copy'), icon: '⧉', onSelect: () => void copyText(m.body).then(() => toast(t('common.copied'))) },
           ]) : {})}>
             {!m.fromMe && c.isGroup && <div className={m.author ? 'wa-author' : 'wa-author unknown'}>{m.author ?? t('wa.someone')}</div>}
             <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{m.body}</div>
             <div className="wa-time">{new Date(m.sentAt).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+            {mailOn && <button className="wa-bring" onClick={bring} title={t('wa.bring')}>⤴ {t('wa.bringShort')}</button>}
           </div>
-        ))}
+          );
+        })}
       </div>
       <div className="wa-panel-foot">
         <div className="row" style={{ flexWrap: 'wrap' }}>

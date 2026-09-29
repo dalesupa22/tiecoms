@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import type { z } from 'zod';
 import type {
   MailAddressDTO, MailAttachmentInfoDTO, MailConnectionDTO, MailListDTO, MailListItemDTO, MailListQuery, MailMessageDTO, MailProvider,
-  MailReplyInput, MailTaskInput, ShareMailInput, ShareWaInput, SharedMailCommentDTO, SharedMailDTO,
+  MailReplyInput, MailTaskInput, MessageDTO, ShareMailInput, ShareWaInput, SharedMailCommentDTO, SharedMailDTO,
 } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { config } from '../config.ts';
@@ -596,7 +596,7 @@ async function loadMany(db: Db, ids: string[], viewerId?: string, full = false):
   const { rows } = await db.query(
     `SELECT e.id, e.conversation_id, e.shared_by, e.provider, e.account_email, e.external_id, e.direction, e.from_name, e.from_email, e.to_list, e.cc_list,
             e.subject, e.snippet, e.body_trimmed, ${full ? 'e.body_text,' : ''} e.sent_at, e.attachments, e.message_id, e.comment, e.status, e.replied_at, e.replied_by,
-            e.issue_id, e.created_at,
+            e.issue_id, e.created_at, e.meta,
             (SELECT count(*) FROM shared_email_comments x WHERE x.email_id = e.id)::int AS comment_count,
             (SELECT json_agg(y ORDER BY y.created_at) FROM (SELECT * FROM shared_email_comments x WHERE x.email_id = e.id ORDER BY x.created_at DESC LIMIT 2) y) AS last_comments,
             (SELECT json_build_object('id', r.id, 'sendAt', r.send_at, 'userId', r.user_id) FROM mail_replies r WHERE r.email_id = e.id AND r.status = 'queued' LIMIT 1) AS queued
@@ -604,11 +604,12 @@ async function loadMany(db: Db, ids: string[], viewerId?: string, full = false):
   const byId = new Map(rows.map((r) => [r.id as string, r]));
   return ids.map((id) => byId.get(id)).filter(Boolean).map((r: any): SharedMailDTO => ({
     id: r.id, conversationId: r.conversation_id, sharedBy: r.shared_by, provider: r.provider, accountEmail: r.account_email, direction: r.direction,
-    from: r.from_email ? { name: r.from_name, email: r.from_email } : null, to: r.to_list, cc: r.cc_list, subject: r.subject, snippet: r.snippet, body: full ? r.body_text : '', full, trimmed: r.body_trimmed,
+    from: r.from_email || r.from_name ? { name: r.from_name, email: r.from_email ?? '' } : null, to: r.to_list, cc: r.cc_list, subject: r.subject, snippet: r.snippet, body: full ? r.body_text : '', full, trimmed: r.body_trimmed,
     sentAt: iso(r.sent_at), attachments: r.attachments, messageId: r.message_id, comment: r.comment, status: r.status, repliedAt: iso(r.replied_at), repliedBy: r.replied_by,
     scheduledReply: r.queued && (!viewerId || r.queued.userId === viewerId) ? { id: r.queued.id, sendAt: iso(r.queued.sendAt)! } : null,
     issueId: r.issue_id, commentCount: r.comment_count ?? 0,
-    webLink: viewerId && viewerId === r.shared_by ? (r.provider === 'google'
+    wa: r.provider === 'whatsapp' ? r.meta ?? null : null,
+    webLink: viewerId && viewerId === r.shared_by && r.provider !== 'whatsapp' ? (r.provider === 'google'
       ? `https://mail.google.com/mail/u/?authuser=${encodeURIComponent(r.account_email ?? '')}#all/${encodeURIComponent(r.external_id)}`
       : `https://outlook.office.com/mail/deeplink/read/${encodeURIComponent(r.external_id)}`) : null,
     lastComments: (r.last_comments ?? []).map(commentDTO), createdAt: iso(r.created_at)!,
@@ -627,37 +628,48 @@ async function readable(db: Db, userId: string, id: string, need: 'read' | 'post
   return e;
 }
 
+/** Llevar un correo a uno o varios chats (hasta 10). Se pide al proveedor una sola vez; cada chat tiene su tarjeta e hilo. */
 export async function shareMail(userId: string, input: z.infer<typeof ShareMailInput>) {
-  const a = await conversationAccess(pool, userId, input.conversationId, 'post');
-  if (a.workspaceRole === 'guest') throw forbidden('Las personas invitadas de fuera no pueden traer correos a este chat');
+  const targets = [...new Set(input.conversationIds ?? (input.conversationId ? [input.conversationId] : []))];
+  for (const cid of targets) {
+    const a = await conversationAccess(pool, userId, cid, 'post');
+    if (a.workspaceRole === 'guest') throw forbidden('Las personas invitadas de fuera no pueden traer correos a este chat');
+  }
   const full = await fullMail(userId, input.provider, input.messageId);
   const clean = cleanBody(full.body);
   const conn = (await pool.query('SELECT account_email FROM mail_connections WHERE user_id = $1 AND provider = $2', [userId, input.provider])).rows[0];
   const mine = conn?.account_email?.toLowerCase() ?? null;
   const direction = full.box === 'sent' || (!!mine && full.from?.email === mine) ? 'out' : 'in';
-  return tx(async (c) => {
-    await conversationAccess(c, userId, input.conversationId, 'post', true);
-    if (input.topicId) {
-      const { rowCount } = await c.query('SELECT 1 FROM conversation_topics WHERE id = $1 AND conversation_id = $2 AND archived_at IS NULL', [input.topicId, input.conversationId]);
-      if (!rowCount) throw badRequest('Ese tema no está activo en esta conversación');
-    }
-    const ins = await c.query(
-      `INSERT INTO shared_emails (conversation_id, shared_by, provider, account_email, external_id, thread_id, internet_id, direction, from_name, from_email,
-         to_list, cc_list, subject, snippet, body_text, body_trimmed, sent_at, attachments, comment)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$19,$16,$17,$18) RETURNING id`,
-      [input.conversationId, userId, input.provider, mine, full.id, full.threadId, [full.internetId, full.references].filter(Boolean).length ? JSON.stringify({ id: full.internetId, refs: full.references }) : null,
-        direction, full.from?.name ?? null, full.from?.email ?? null, JSON.stringify(full.to), JSON.stringify(full.cc), clip(full.subject, 500),
-        clip(flat(clean.text || full.snippet), 300), clean.text, full.date, JSON.stringify(full.attachments), input.comment || null, clean.trimmed],
-    );
-    const id: string = ins.rows[0].id;
-    const m = await appendMessage(c, {
-      conversationId: input.conversationId, authorId: userId, kind: 'system', topicId: input.topicId ?? null,
-      body: sys('mail.shared', { emailId: id, provider: input.provider, subject: clip(full.subject, 200), from: full.from?.name ?? full.from?.email ?? null, ...(input.comment ? { comment: clip(input.comment, 4000) } : {}) }),
-    });
-    await c.query('UPDATE shared_emails SET message_id = $2 WHERE id = $1', [id, m.id]);
-    await audit(c, userId, 'mail.shared', { type: 'conversation', id: input.conversationId, workspaceId: a.workspaceId }, { provider: input.provider, attachments: full.attachments.length });
-    return publish(c, id);
-  });
+  const emails: SharedMailDTO[] = [];
+  for (const cid of targets) {
+    emails.push(await tx(async (c) => {
+      const a = await conversationAccess(c, userId, cid, 'post', true);
+      // El tema solo aplica al chat desde el que se compartió.
+      const topicId = input.topicId && cid === (input.conversationId ?? targets[0]) ? input.topicId : null;
+      if (topicId) {
+        const { rowCount } = await c.query('SELECT 1 FROM conversation_topics WHERE id = $1 AND conversation_id = $2 AND archived_at IS NULL', [topicId, cid]);
+        if (!rowCount) throw badRequest('Ese tema no está activo en esta conversación');
+      }
+      const ins = await c.query(
+        `INSERT INTO shared_emails (conversation_id, shared_by, provider, account_email, external_id, thread_id, internet_id, direction, from_name, from_email,
+           to_list, cc_list, subject, snippet, body_text, body_trimmed, sent_at, attachments, comment)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$19,$16,$17,$18) RETURNING id`,
+        [cid, userId, input.provider, mine, full.id, full.threadId, [full.internetId, full.references].filter(Boolean).length ? JSON.stringify({ id: full.internetId, refs: full.references }) : null,
+          direction, full.from?.name ?? null, full.from?.email ?? null, JSON.stringify(full.to), JSON.stringify(full.cc), clip(full.subject, 500),
+          clip(flat(clean.text || full.snippet), 300), clean.text, full.date, JSON.stringify(full.attachments), input.comment || null, clean.trimmed],
+      );
+      const id: string = ins.rows[0].id;
+      const m = await appendMessage(c, {
+        conversationId: cid, authorId: userId, kind: 'system', topicId,
+        body: sys('mail.shared', { emailId: id, provider: input.provider, subject: clip(full.subject, 200), from: full.from?.name ?? full.from?.email ?? null, ...(input.comment ? { comment: clip(input.comment, 4000) } : {}) }),
+      });
+      await c.query('UPDATE shared_emails SET message_id = $2 WHERE id = $1', [id, m.id]);
+      await audit(c, userId, 'mail.shared', { type: 'conversation', id: cid, workspaceId: a.workspaceId }, { provider: input.provider, attachments: full.attachments.length, chats: targets.length });
+      return publish(c, id);
+    }));
+  }
+  // Un solo chat (clientes anteriores): la tarjeta; varios: la lista.
+  return input.conversationIds ? { emails } : emails[0]!;
 }
 
 export async function getShared(userId: string, id: string, full = false) {
@@ -677,6 +689,7 @@ export async function getSharedMany(userId: string, ids: string[]) {
 /** El correo tal como está en el buzón (con historial citado y firma), en vivo y sin guardarlo. */
 export async function original(userId: string, id: string) {
   const e = await readable(pool, userId, id);
+  if (e.provider === 'whatsapp') return { body: e.body_text as string };
   try {
     const m = await fullMail(e.shared_by, e.provider, e.external_id);
     return { body: m.body };
@@ -701,7 +714,7 @@ export async function comment(userId: string, id: string, body: string) {
     const ins = await c.query('INSERT INTO shared_email_comments (email_id, author_id, body) VALUES ($1,$2,$3) RETURNING *', [id, userId, body]);
     await c.query('UPDATE shared_emails SET updated_at = now() WHERE id = $1', [id]);
     const actorName = (await c.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name ?? '';
-    await bumpCommentNotice(c, { kind: 'mail', conversationId: e.conversation_id, itemId: id, title: e.subject || '(sin asunto)', actorId: userId, actorName, body });
+    await bumpCommentNotice(c, { kind: 'mail', conversationId: e.conversation_id, itemId: id, title: e.subject || '(sin asunto)', actorId: userId, actorName, body, extra: { provider: e.provider } });
     const email = await publish(c, id);
     return { comment: commentDTO(ins.rows[0]), email };
   });
@@ -710,6 +723,7 @@ export async function comment(userId: string, id: string, body: string) {
 /** Adjunto bajo demanda: se baja del buzón de quien compartió el correo y se entrega sin guardarlo. */
 export async function fetchAttachment(userId: string, id: string, attachmentId: string) {
   const e = await readable(pool, userId, id);
+  if (e.provider === 'whatsapp') throw notFound('Adjunto');
   const info = (e.attachments as MailAttachmentInfoDTO[]).find((x) => x.id === attachmentId);
   if (!info) throw notFound('Adjunto');
   if (info.size > MAX_ATTACHMENT) throw new ApiError(413, 'attachment_too_large', 'Este adjunto pesa más de 25 MB. Ábrelo desde el correo.');
@@ -745,6 +759,7 @@ export async function reply(userId: string, id: string, input: z.infer<typeof Ma
   if (when && when.getTime() > Date.now() + 90 * 86_400_000) throw badRequest('Se puede programar hasta 90 días');
   const row = await tx(async (c) => {
     const e = await readable(c, userId, id, 'post', true);
+    if (e.provider === 'whatsapp') throw badRequest('Los mensajes de WhatsApp se responden en WhatsApp');
     if (e.shared_by !== userId) throw forbidden('Solo quien trajo el correo puede responderlo: sale de su buzón');
     for (const aid of input.attachmentIds ?? []) {
       const ok = await c.query('SELECT 1 FROM attachments WHERE id = $1 AND conversation_id = $2 AND message_id IS NOT NULL', [aid, e.conversation_id]);
@@ -847,6 +862,7 @@ export async function fireDueMailReplies(): Promise<number> {
 // ---------- gg redacta ----------
 export async function draftReply(userId: string, id: string, lang: 'es' | 'en' = 'es') {
   const e = await readable(pool, userId, id);
+  if (e.provider === 'whatsapp') throw badRequest('Los mensajes de WhatsApp se responden en WhatsApp');
   if (e.shared_by !== userId) throw forbidden('Solo quien trajo el correo puede responderlo');
   const key = process.env.DEEPSEEK_API_KEY;
   if (!key) throw new ApiError(503, 'assistant_unavailable', 'gg no está disponible en este momento');
@@ -896,16 +912,35 @@ export async function shareWhatsApp(userId: string, input: z.infer<typeof ShareW
   if (!m) throw notFound('Mensaje de WhatsApp');
   const chat = (await pool.query('SELECT name, is_group FROM wa_chats WHERE account_id = $1 AND jid = $2', [input.accountId, input.jid])).rows[0];
   const me = (await pool.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name ?? null;
-  return tx(async (c) => {
-    const a = await conversationAccess(c, userId, input.conversationId, 'post', true);
-    const msg = await appendMessage(c, {
-      conversationId: input.conversationId, authorId: userId, kind: 'system',
-      body: sys('wa.shared', {
-        accountId: acc.id, jid: input.jid, waMessageId: m.id, accountKind: acc.kind, chatName: chat?.name ?? null, isGroup: !!chat?.is_group,
-        author: m.from_me ? me : m.author_name ?? null, fromMe: m.from_me, text: clip(m.body, 2000), sentAt: iso(m.sent_at), ...(input.comment ? { comment: clip(input.comment, 4000) } : {}),
-      }),
+  const targets = [...new Set(input.conversationIds ?? (input.conversationId ? [input.conversationId] : []))];
+  for (const cid of targets) await conversationAccess(pool, userId, cid, 'post');
+  const author = m.from_me ? me : m.author_name ?? null;
+  const text = clip(String(m.body ?? ''), 2000);
+  const meta = { chatName: chat?.name ?? null, isGroup: !!chat?.is_group, accountKind: acc.kind, accountId: acc.id, jid: input.jid };
+  const messages: MessageDTO[] = [];
+  const emails: SharedMailDTO[] = [];
+  for (const cid of targets) {
+    await tx(async (c) => {
+      const a = await conversationAccess(c, userId, cid, 'post', true);
+      // Mismo registro que un correo compartido: hilo de comentarios y tarea. Solo guarda este mensaje.
+      const ins = await c.query(
+        `INSERT INTO shared_emails (conversation_id, shared_by, provider, account_email, external_id, thread_id, direction, from_name, subject, snippet, body_text, sent_at, comment, meta)
+         VALUES ($1,$2,'whatsapp',NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+        [cid, userId, m.id, input.jid, m.from_me ? 'out' : 'in', author, clip(chat?.name ?? 'WhatsApp', 500), clip(flat(text), 300), text, m.sent_at, input.comment || null, JSON.stringify(meta)],
+      );
+      const id: string = ins.rows[0].id;
+      const msg = await appendMessage(c, {
+        conversationId: cid, authorId: userId, kind: 'system',
+        body: sys('wa.shared', {
+          emailId: id, accountId: acc.id, jid: input.jid, waMessageId: m.id, accountKind: acc.kind, chatName: chat?.name ?? null, isGroup: !!chat?.is_group,
+          author, fromMe: m.from_me, text, sentAt: iso(m.sent_at), ...(input.comment ? { comment: clip(input.comment, 4000) } : {}),
+        }),
+      });
+      await c.query('UPDATE shared_emails SET message_id = $2 WHERE id = $1', [id, msg.id]);
+      await audit(c, userId, 'wa.shared', { type: 'conversation', id: cid, workspaceId: a.workspaceId }, { chats: targets.length });
+      messages.push(msg);
+      emails.push(await publish(c, id));
     });
-    await audit(c, userId, 'wa.shared', { type: 'conversation', id: input.conversationId, workspaceId: a.workspaceId });
-    return { message: msg };
-  });
+  }
+  return { message: messages[0]!, messages, emails };
 }

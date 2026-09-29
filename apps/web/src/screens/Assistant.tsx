@@ -51,7 +51,7 @@ let openExternal: ((listen?: boolean) => void) | null = null;
 /** Abre el asistente desde otra parte de la app. */
 export const openAssistant = (listen = false) => openExternal?.(listen);
 
-export function AssistantBubble({ hidden }: { hidden: boolean }) {
+export function AssistantBubble({ hidden, inConv = false }: { hidden: boolean; inConv?: boolean }) {
   const me = useClient((s) => s.data?.me.id);
   const [open, setOpen] = useState(false);
   const [listenOnOpen, setListenOnOpen] = useState(false);
@@ -73,7 +73,7 @@ export function AssistantBubble({ hidden }: { hidden: boolean }) {
   return (
     <>
       {!hidden && !open && (
-        <button className="ai-bubble" aria-label={t('ai.open')} title={t('ai.bubbleHint')}
+        <button className={`ai-bubble ${inConv ? 'in-conv' : ''}`} aria-label={t('ai.open')} title={t('ai.bubbleHint')}
           onPointerDown={down} onPointerUp={up} onPointerLeave={() => { if (press.current && !press.current.long) { clearTimeout(press.current.timer); press.current = null; } }}
           onContextMenu={(e) => e.preventDefault()}>
           <img src={asset('/gg-mark-animado.svg')} alt="" width={34} height={34} draggable={false} />

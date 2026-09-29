@@ -1163,8 +1163,10 @@ export class TieComsClient {
   getMail(provider: import('@tiecoms/contracts').MailProvider, id: string) {
     return this.request<import('@tiecoms/contracts').MailMessageDTO>(`/mail/messages/${provider}/${encodeURIComponent(id)}`);
   }
-  async shareMail(input: { provider: import('@tiecoms/contracts').MailProvider; messageId: string; conversationId: string; comment?: string; topicId?: string | null }) {
-    return this.putMail(await this.request<import('@tiecoms/contracts').SharedMailDTO>('/mail/share', { method: 'POST', json: input }));
+  /** Llevar un correo a uno o varios chats (conversationIds, hasta 10). */
+  async shareMail(input: { provider: import('@tiecoms/contracts').MailProvider; messageId: string; conversationIds: string[]; comment?: string; topicId?: string | null }) {
+    const r = await this.request<{ emails: import('@tiecoms/contracts').SharedMailDTO[] }>('/mail/share', { method: 'POST', json: input });
+    return r.emails.map((e) => this.putMail(e));
   }
   loadSharedMail(id: string): Promise<import('@tiecoms/contracts').SharedMailDTO> {
     return new Promise((resolve, reject) => {
@@ -1195,8 +1197,10 @@ export class TieComsClient {
     this.putMail(r.email);
     return r;
   }
-  shareWhatsApp(input: { accountId: string; jid: string; messageId: string; conversationId: string; comment?: string }) {
-    return this.request<{ message: MessageDTO }>('/whatsapp/share', { method: 'POST', json: input });
+  async shareWhatsApp(input: { accountId: string; jid: string; messageId: string; conversationIds: string[]; comment?: string }) {
+    const r = await this.request<{ message: MessageDTO; messages: MessageDTO[]; emails: import('@tiecoms/contracts').SharedMailDTO[] }>('/whatsapp/share', { method: 'POST', json: input });
+    r.emails?.forEach((e) => this.putMail(e));
+    return r;
   }
   /** Bandeja «Menciones»: más recientes primero; before = createdAt del último que ya tienes. */
   listMentions(before?: string, limit = 50) {

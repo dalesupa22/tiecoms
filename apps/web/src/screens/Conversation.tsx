@@ -23,7 +23,7 @@ import { SleepNotice } from './Sleep.tsx';
 import { createChatRecovery } from '../chat-recovery.ts';
 import { DerivedPendingStrip } from './Pending.tsx';
 import { MeetingDialog } from './Meetings.tsx';
-import { MailCard, MailPickDialog, MailSharedRow, WaSharedRow, openMailDrawer, type WaShared } from './Mail.tsx';
+import { CommentsNoticeLine, MailPickDialog, MailSharedRow, WaIcon, WaSharedRow, openMailDrawer, type WaShared } from './Mail.tsx';
 import { CallBanner, CallButtons, openTranscript } from './Call.tsx';
 import { ScheduledStrip, openScheduleMenu, scheduleMenu, whenLabel } from './Scheduled.tsx';
 import { SideIssueStrip, TasksDialog } from './Issues.tsx';
@@ -981,17 +981,12 @@ function SystemRow({ m, onIssue, canPost, live }: { m: MessageDTO; onIssue: (id:
   let px: any = null;
   try { px = m.body.startsWith('{"k":"mail.') || m.body.startsWith('{"k":"wa.') ? JSON.parse(m.body) : null; } catch {}
   if (px?.k === 'mail.shared' && px.emailId) return <MailSharedRow m={m} p={px} onIssue={onIssue} />;
-  if (px?.k === 'wa.shared' && px.text != null) return <WaSharedRow m={m} p={px as WaShared} />;
+  if (px?.k === 'wa.shared' && px.text != null) return <WaSharedRow m={m} p={px as WaShared} onIssue={onIssue} />;
   if (px?.k === 'mail.comments' && px.emailId) return (
     <div id={`msg-${m.conversationId}-${m.seq}`} className="msg-card-row">
-      <MailCard emailId={px.emailId} onIssue={onIssue} banner={
-        <div className="comments-strip">
-          <span className="grow" style={{ minWidth: 0 }}>
-            <b>{px.count > 1 ? t('comments.many', { n: px.count }) : t('comments.one')}</b>
-            <span className="small ellipsis" style={{ display: 'block' }}><b>{String(px.lastByName ?? '').split(' ')[0]}</b> {px.lastExcerpt}</span>
-          </span>
-          {canPost && <button className="btn small" onClick={() => openMailDrawer(px.emailId, 'comments')}>{t('comments.reply')}</button>}
-        </div>} />
+      {/* Una línea, no otra tarjeta: la tarjeta original ya muestra los comentarios. */}
+      <CommentsNoticeLine count={px.count} title={px.title} lastByName={px.lastByName} lastExcerpt={px.lastExcerpt}
+        icon={px.provider === 'whatsapp' ? <WaIcon size={14} /> : <span aria-hidden>✉</span>} onOpen={() => openMailDrawer(px.emailId, 'comments')} />
     </div>
   );
   if ((px?.k === 'mail.replied' || px?.k === 'mail.reply_failed') && px.emailId) return (

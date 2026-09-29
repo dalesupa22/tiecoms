@@ -3,6 +3,9 @@
 <resources>
     <string name="topic_bar">Temas del chat</string>
     <string name="topic_all">Todo</string>
+    <string name="topic_general">General</string>
+    <string name="topic_general_hint">Solo los mensajes sin tema</string>
+    <string name="topic_all_hint">Todos los mensajes, con y sin tema</string>
     <string name="topic_new">Nuevo</string>
     <string name="topic_archived_n">Archivados %1$d</string>
     <string name="topic_new_title">Nuevo tema</string>

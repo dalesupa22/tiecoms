@@ -342,6 +342,8 @@ data class BootstrapDTO(
     val people: List<PersonDTO> = emptyList(),
     /** Funciones prendidas en el servidor (aditivo): `features.calls` muestra 📞/🎥, la franja y la pestaña «Llamadas». */
     val features: FeaturesDTO = FeaturesDTO(),
+    /** gg, el asistente, como participante (docs/GG-CHAT.md); ausente = servidor anterior. */
+    val assistantId: String? = null,
     /** 1.7.1: la llamada en la que estoy ahora desde algún dispositivo (franja «En llamada en tu …»). */
     val myActiveCall: CallDTO? = null,
 ) {

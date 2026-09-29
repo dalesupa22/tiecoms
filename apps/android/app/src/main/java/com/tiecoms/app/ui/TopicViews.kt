@@ -103,6 +103,8 @@ private fun TopicFlag(
     onClick: () -> Unit, onLongClick: (() -> Unit)? = null, stripe: Color = ink.copy(alpha = 0.22f), bold: Boolean = true,
     /** Sin leer en esta banderita (pastilla de acento); 0 = sin número. */
     unread: Int = 0,
+    /** Qué muestra la banderita («Solo los mensajes sin tema»), para TalkBack (en la web es el title). */
+    hint: String? = null,
 ) {
     val density = androidx.compose.ui.platform.LocalDensity.current
     val tailPx = with(density) { 9.dp.toPx() }
@@ -118,7 +120,7 @@ private fun TopicFlag(
         Modifier.height(h).background(bg, shape)
             .drawBehind { drawRect(stripe, size = androidx.compose.ui.geometry.Size(with(density) { 5.dp.toPx() }, size.height)) }
             .combinedClickable(role = Role.Tab, onClick = onClick, onLongClick = onLongClick, onLongClickLabel = if (onLongClick != null) menuLabel else null)
-            .semantics { this.selected = selected }
+            .semantics { this.selected = selected; if (hint != null) contentDescription = hint }
             .padding(start = 11.dp, end = 18.dp)
             .testTag(tag),
         contentAlignment = Alignment.Center,
@@ -186,9 +188,18 @@ fun TopicDock(conv: ConversationDTO, topics: List<TopicDTO>, filter: String?, co
             Modifier.fillMaxWidth().height(40.dp).semantics { contentDescription = cd },
             contentPadding = PaddingValues(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Top,
         ) {
-            item(key = "all") {
-                TopicFlag("💬 " + stringResource(R.string.topic_all), MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurfaceVariant,
-                    selected = filter == null, tag = "topicAll", onClick = { onFilter(null) }, stripe = MaterialTheme.colorScheme.outlineVariant, unread = unread[""] ?: 0)
+            // «💬 General» (solo lo sin tema; así abre el chat) y «☰ Todo» (todo, con su etiqueta). Sin temas activos son lo
+            // mismo: una sola banderita «Todo» (docs/TEMAS.md).
+            item(key = "general") {
+                TopicFlag("💬 " + stringResource(if (active.isNotEmpty()) R.string.topic_general else R.string.topic_all), MaterialTheme.colorScheme.surface,
+                    MaterialTheme.colorScheme.onSurfaceVariant, selected = filter == null, tag = if (active.isNotEmpty()) "topicGeneral" else "topicAll", onClick = { onFilter(null) },
+                    stripe = MaterialTheme.colorScheme.outlineVariant, unread = if (active.isNotEmpty()) unread[""] ?: 0 else 0,
+                    hint = if (active.isNotEmpty()) stringResource(R.string.topic_general_hint) else null)
+            }
+            if (active.isNotEmpty()) item(key = "all") {
+                TopicFlag("☰ " + stringResource(R.string.topic_all), MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurfaceVariant,
+                    selected = filter == Topics.ALL, tag = "topicAll", onClick = { onFilter(if (filter == Topics.ALL) null else Topics.ALL) },
+                    stripe = MaterialTheme.colorScheme.outlineVariant, hint = stringResource(R.string.topic_all_hint))
             }
             items(active, key = { it.id }) { t ->
                 val (bg, ink) = topicColors(t.color)

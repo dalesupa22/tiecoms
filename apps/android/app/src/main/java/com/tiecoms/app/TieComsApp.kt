@@ -165,7 +165,8 @@ class AppContainer(private val app: Application) {
 
     fun init() {
         // Títulos de chats grupales sin nombre, en el idioma del teléfono (código puro de core/Names).
-        Names.labels = Names.Labels(app.getString(R.string.chat_group_chat), app.getString(R.string.chat_and_more), app.getString(R.string.side_default_name))
+        Names.labels = Names.Labels(app.getString(R.string.chat_group_chat), app.getString(R.string.chat_and_more), app.getString(R.string.side_default_name),
+            app.getString(R.string.common_you_short))
         notifier.ensureChannel()
         sounds.hashCode() // precarga SoundPool: el sonido del splash debe estar listo en t = 0,35 s
         scope.launch { _client.value.start() }

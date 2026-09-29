@@ -273,10 +273,12 @@ fun ConversationScreen(
     var pickerFor by remember { mutableStateOf<MessageDTO?>(null) }
     /** Reunión con enlace real (1.6.6): true = ahora, false = agendada; null = cerrado. */
     var meetingLink by rememberSaveable { mutableStateOf<Boolean?>(null) }
-    // Temas (docs/TEMAS.md): la banderita elegida filtra el chat y es el tema de lo que escribo.
+    // Temas (docs/TEMAS.md): null = «General» (así abre el chat), Topics.ALL = «Todo», o el id de un tema, que además es
+    // el tema de lo que escribo.
     val topics = state.topics[id].orEmpty()
     var topicFilter by rememberSaveable(id) { mutableStateOf<String?>(null) }
-    val activeTopic = com.tiecoms.app.core.Topics.validFilter(topics, topicFilter)?.let { f -> topics.firstOrNull { it.id == f } }
+    val shownFilter = com.tiecoms.app.core.Topics.validFilter(topics, topicFilter)
+    val activeTopic = com.tiecoms.app.core.Topics.composeTopic(topics, topicFilter)?.let { f -> topics.firstOrNull { it.id == f } }
     val topicById = remember(topics) { topics.associateBy { it.id } }
     /** «＋ Nuevo tema» desde el menú de un mensaje: al crearlo, el mensaje queda con ese tema. */
     var topicNewFor by remember { mutableStateOf<MessageDTO?>(null) }
@@ -298,21 +300,20 @@ fun ConversationScreen(
     var dividerSeq by remember(id) { mutableStateOf<Long?>(null) }
     /** Ya se colocó la vista al abrir (en el primer no leído o al final); hasta entonces no se marca leído. */
     var positioned by remember(id) { mutableStateOf(entry.second <= 0 || (jumpSeq ?: 0) > 0 || jumpMessageId != null) }
-    /** Hasta dónde había leído al abrir: «Todo» esconde lo ya leído que tiene tema (docs/TEMAS.md › «Todo»). */
-    val readFrom = maxOf(entry.first, meta.historyFromSeq)
-    /** Mensajes con tema a los que se saltó desde «Todo» (mención, enlace, ?m=): quedan a la vista. */
+    /** Mensajes a los que se saltó (mención, enlace, ?m=): quedan a la vista. */
     val revealed = remember(id) { androidx.compose.runtime.mutableStateListOf<Long>() }
     val activeTopicIds = remember(topics) { com.tiecoms.app.core.Topics.activeIds(topics) }
-    val items = remember(conv?.messages, pending, conv?.hasMore, conv?.loading, state.blockedUserIds, dividerSeq, activeTopic?.id, if (activeTopic != null) state.issues else null,
+    val items = remember(conv?.messages, pending, conv?.hasMore, conv?.loading, state.blockedUserIds, dividerSeq, shownFilter, if (activeTopicIds.isNotEmpty()) state.issues else null,
         activeTopicIds, revealed.toList()) {
         val tid = activeTopic?.id
-        // Con un tema elegido se ven sus mensajes y las tarjetas de sus tareas; en «Todo», lo sin tema y lo no leído de los temas.
-        buildItems(com.tiecoms.app.core.Topics.view((conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }, topics, tid, readFrom, revealed.toSet()) { iid -> state.issues[iid]?.topicId },
-            if (tid == null) pending else pending.filter { it.topicId == tid }, me, conv?.hasMore ?: false, conv?.loading ?: false, meta.historyFromSeq > 0,
+        // Un tema: sus mensajes y las tarjetas de sus tareas. «General»: lo sin tema. «Todo»: todo, con su etiqueta.
+        buildItems(com.tiecoms.app.core.Topics.view((conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }, topics, shownFilter, revealed.toSet()) { iid -> state.issues[iid]?.topicId },
+            when { shownFilter == com.tiecoms.app.core.Topics.ALL -> pending; tid != null -> pending.filter { it.topicId == tid }
+                else -> pending.filter { it.topicId == null || it.topicId !in activeTopicIds } }, me, conv?.hasMore ?: false, conv?.loading ?: false, meta.historyFromSeq > 0,
             dividerSeq, entry.second)
     }
     val topicCounts = remember(conv?.messages) { com.tiecoms.app.core.Topics.counts(conv?.messages.orEmpty()) }
-    // Sin leer por banderita (clave "" = sin tema, el número de «Todo»), con lo leído en vivo.
+    // Sin leer por banderita (clave "" = sin tema, el número de «General»), con lo leído en vivo.
     val readNow = maxOf(meta.lastReadSeq, meta.historyFromSeq)
     val topicUnread = remember(conv?.messages, readNow, activeTopicIds, me) { com.tiecoms.app.core.Topics.unread(conv?.messages.orEmpty(), activeTopicIds, readNow, me) }
     val itemsNow by androidx.compose.runtime.rememberUpdatedState(items)
@@ -327,10 +328,11 @@ fun ConversationScreen(
     val byId = remember(conv?.messages, state.blockedUserIds) { (conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }.associateBy { it.id } }
 
     fun jumpTo(seq: Long) {
-        // El salto busca en el chat completo: se quita el filtro de tema, y el mensaje queda a la vista en «Todo» aunque tenga tema.
-        topicFilter = null
         scope.launch {
             if (!client.ensureMessage(id, seq)) { readLoadFailed = true; return@launch }
+            // El filtro pasa al tema del mensaje, o a «General» si no tiene; en «Todo» no cambia (docs/TEMAS.md).
+            val target = client.state.value.conversations[id]?.messages?.firstOrNull { it.seq == seq }
+            topicFilter = com.tiecoms.app.core.Topics.jumpFilter(client.state.value.topics[id].orEmpty(), topicFilter, target)
             if (seq !in revealed) revealed.add(seq)
             var idx = -1
             for (i in 0 until 10) {
@@ -737,7 +739,7 @@ fun ConversationScreen(
                 onPins = { showPins = true }, onOpenIssue = onOpenIssue, onNewIssue = { newIssue = true to null }, onNewEvent = { meeting = true to null },
                 onOpenEvent = onOpenEvent, onOpenThread = { t -> sideOpen = t })
             // Temas (docs/TEMAS.md): banderitas bajo la barra de accesos, con scroll horizontal.
-            if (!embedded) TopicDock(meta, topics, activeTopic?.id, topicCounts, topicUnread, onFilter = { f ->
+            if (!embedded) TopicDock(meta, topics, shownFilter, topicCounts, topicUnread, onFilter = { f ->
                 topicFilter = f
                 scope.launch { runCatching { listState.scrollToItem(0) }; follow = true }
             })
@@ -1356,6 +1358,8 @@ internal fun SystemRow(
 ) {
     val ctx = LocalContext.current
     val chat = LocalChatColors.current
+    // gg: lo que dejó listo (tarjetas para confirmar) y respuestas rápidas (docs/GG-CHAT.md).
+    com.tiecoms.app.core.Gg.parseActions(m)?.let { g -> GgActionsRow(m, g, data); return }
     // Correo y WhatsApp traídos al chat (docs/CORREO.md): nunca como JSON crudo.
     com.tiecoms.app.core.MailSystem.parse(m)?.let { b -> MailSystemRow(m, b, data, canPost, onOpenIssue); return }
     // Tanda 1.7: es hoy, tarea hecha/vencida y comentarios agrupados se ven como la tarjeta del evento o de la tarea.

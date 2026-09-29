@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- gg como chat y «Tú» (docs/GG-CHAT.md): mismos textos que la web. -->
+<resources>
+    <string name="gg_for_other">Para %1$s</string>
+    <string name="ai_discarded">Descartado</string>
+    <string name="gg_actions_preview">gg dejó %1$d cosas listas</string>
+</resources>

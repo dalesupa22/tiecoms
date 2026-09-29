@@ -151,6 +151,7 @@
 		9AA25DAFAF89715401A83969 /* Tanda17.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2982F3F2155D87E8241D45FD /* Tanda17.swift */; };
 		9BDE9B49EC0E555C4CC7E332 /* snd_tambor.caf in Resources */ = {isa = PBXBuildFile; fileRef = 86C7F2D63EF39C79C3689D28 /* snd_tambor.caf */; };
 		9CB9EF5B8A800F0AAA84EB02 /* TextSize.swift in Sources */ = {isa = PBXBuildFile; fileRef = A67CAE73897FE30F38663CD4 /* TextSize.swift */; };
+		9D0CE7D4D9DF72646C9D4099 /* MailUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F04D631D239414BFF3E31AB /* MailUITests.swift */; };
 		9DBE47EDA779C39EC355A77A /* TaskViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7BB04361EC3CE0A153DC738 /* TaskViews.swift */; };
 		9E1D0A9C091E7AA54F30FD1D /* snd_brisa_m.caf in Resources */ = {isa = PBXBuildFile; fileRef = BC7091EF3CF417ADE10FD1B2 /* snd_brisa_m.caf */; };
 		A047E88E4473FEA16C6B437E /* PushPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A059E228D363070DFB05BB /* PushPayload.swift */; };
@@ -362,6 +363,7 @@
 		5CDA44DC6302797DC800B44D /* TieComsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TieComsApp.swift; sourceTree = "<group>"; };
 		5CF65CD0606CB7EB53F0E78F /* snd_cristal.caf */ = {isa = PBXFileReference; path = snd_cristal.caf; sourceTree = "<group>"; };
 		5EE2B1313EBAD028D7C39324 /* GatewayRecoveryUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayRecoveryUITests.swift; sourceTree = "<group>"; };
+		5F04D631D239414BFF3E31AB /* MailUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailUITests.swift; sourceTree = "<group>"; };
 		5FA9EAB28848181435FA4D36 /* SleepViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepViews.swift; sourceTree = "<group>"; };
 		5FB5F68EF387B128DA56C4DE /* GreatVibes-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "GreatVibes-Regular.ttf"; sourceTree = "<group>"; };
 		6007AF61ABA46E846A215384 /* snd_campana_m.caf */ = {isa = PBXFileReference; path = snd_campana_m.caf; sourceTree = "<group>"; };
@@ -531,6 +533,7 @@
 				A4B7D9519A4BAD02FAF7B7D2 /* InviteUITests.swift */,
 				A77B2FAE28CB7CE545D42DA1 /* KeyboardUITests.swift */,
 				8F473836045F17BB1F0EB203 /* LlamadasUITests.swift */,
+				5F04D631D239414BFF3E31AB /* MailUITests.swift */,
 				9B94D3E89C5F287D3BED370A /* PerfUITests.swift */,
 				0952105F81FFF3E626279A80 /* ShareUITests.swift */,
 				8A1E930E8CE6C195EE296120 /* SidechatUITests.swift */,
@@ -1194,6 +1197,7 @@
 				756DEB775B5CA040E27968CB /* InviteUITests.swift in Sources */,
 				694D75BB708C435FACB2B7AA /* KeyboardUITests.swift in Sources */,
 				9316FC12EAB042C8BC0561FF /* LlamadasUITests.swift in Sources */,
+				9D0CE7D4D9DF72646C9D4099 /* MailUITests.swift in Sources */,
 				C0DFF21BBD9AF47BB0AF61E2 /* PerfUITests.swift in Sources */,
 				16CDD74C6B7E738BE578E52D /* ShareUITests.swift in Sources */,
 				82DE85395C5D1215D2EA8616 /* SidechatUITests.swift in Sources */,

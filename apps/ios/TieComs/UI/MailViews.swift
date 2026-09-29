@@ -198,29 +198,10 @@ struct MailCard: View {
                     }
                 }
             }
-            HStack(spacing: 6) {
-                MailStatusPill(email: e)
-                Spacer(minLength: 4)
-                Button { store.push(.mail(e.id, mode: "comments")) } label: { pill("💬" + (e.commentCount > 0 ? " \(e.commentCount)" : "")) }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(L("mail.comments") + (e.commentCount > 0 ? " \(e.commentCount)" : ""))
-                    .accessibilityIdentifier("mailCard.comments")
-                if let issueId = e.issueId {
-                    Button { store.push(.issue(issueId)) } label: { pill("◆ " + L("mail.seeTask")) }.buttonStyle(.plain)
-                        .accessibilityIdentifier("mailCard.seeTask")
-                } else if canPost {
-                    Button { task = true } label: { pill("◆ " + L("mail.task")) }.buttonStyle(.plain)
-                        .accessibilityIdentifier("mailCard.task")
-                }
-                if mine && e.status != "replied" && e.status != "scheduled" {
-                    Button { store.push(.mail(e.id, mode: "reply")) } label: {
-                        Text(L("mail.reply")).font(.caption.weight(.bold)).foregroundStyle(Theme.onPrimary)
-                            .padding(.horizontal, 10).frame(minHeight: 30)
-                            .background(Capsule().fill(Theme.primaryFill))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("mailCard.reply")
-                }
+            // En pantallas angostas (tarjeta con avatar al lado) el estado va arriba y los botones abajo.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { MailStatusPill(email: e).fixedSize(); Spacer(minLength: 4); actions(e, mine: mine) }
+                VStack(alignment: .leading, spacing: 6) { MailStatusPill(email: e); HStack(spacing: 6) { actions(e, mine: mine) } }
             }
         }
         .padding(12)
@@ -233,8 +214,31 @@ struct MailCard: View {
         .accessibilityIdentifier("mailCard.\(e.id)")
     }
 
+    @ViewBuilder private func actions(_ e: SharedMailDTO, mine: Bool) -> some View {
+        Button { store.push(.mail(e.id, mode: "comments")) } label: { pill("💬" + (e.commentCount > 0 ? " \(e.commentCount)" : "")) }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L("mail.comments") + (e.commentCount > 0 ? " \(e.commentCount)" : ""))
+            .accessibilityIdentifier("mailCard.comments")
+        if let issueId = e.issueId {
+            Button { store.push(.issue(issueId)) } label: { pill("◆ " + L("mail.seeTask")) }.buttonStyle(.plain)
+                .accessibilityIdentifier("mailCard.seeTask")
+        } else if canPost {
+            Button { task = true } label: { pill("◆ " + L("mail.task")) }.buttonStyle(.plain)
+                .accessibilityIdentifier("mailCard.task")
+        }
+        if mine && e.status != "replied" && e.status != "scheduled" {
+            Button { store.push(.mail(e.id, mode: "reply")) } label: {
+                Text(L("mail.reply")).font(.caption.weight(.bold)).foregroundStyle(Theme.onPrimary).lineLimit(1).fixedSize()
+                    .padding(.horizontal, 10).frame(minHeight: 30)
+                    .background(Capsule().fill(Theme.primaryFill))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("mailCard.reply")
+        }
+    }
+
     private func pill(_ t: String) -> some View {
-        Text(t).font(.caption.weight(.semibold)).lineLimit(1).foregroundStyle(Theme.textPrimary)
+        Text(t).font(.caption.weight(.semibold)).lineLimit(1).fixedSize().foregroundStyle(Theme.textPrimary)
             .padding(.horizontal, 10).frame(minHeight: 30)
             .background(Capsule().fill(Theme.textSecondary.opacity(0.1)))
     }

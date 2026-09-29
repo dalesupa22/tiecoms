@@ -6,7 +6,7 @@ import { errorText, getLang, langPreference, locale, setLang, t, tn, useLang, ty
 import { navigate } from '../router.ts';
 import { openProfile } from './Profile.tsx';
 import { NewChatDialog, StackedAvatars } from './Chats.tsx';
-import { Avatar, ConvAvatar, OrgMark, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, conversationPreview, timeLabel } from '../ui.tsx';
+import { directOtherId, Avatar, ConvAvatar, OrgMark, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, conversationPreview, timeLabel } from '../ui.tsx';
 import { InviteDialog, NewGroupDialog } from './Dialogs.tsx';
 import { InviteResult, PendingInvitations } from './Invitations.tsx';
 import { IssueDrawer, IssueRow, isClosed } from './Issues.tsx';
@@ -30,7 +30,7 @@ function greeting() {
 
 function ConvCard({ c }: { c: ConversationDTO }) {
   const d = useClient((s) => s.data)!;
-  const other = c.kind === 'direct' ? personById(d, c.memberIds.find((m) => m !== d.me.id)) : null;
+  const other = c.kind === 'direct' ? personById(d, directOtherId(d, c)) : null;
   const org = other ? orgById(d, other.orgId) : c.workspaceId ? counterpartOrg(d, c.workspaceId) : null;
   const muted = isMuted(c);
   return (

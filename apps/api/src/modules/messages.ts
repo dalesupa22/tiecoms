@@ -4,6 +4,7 @@ import { enqueueOutbox, pool, tx, type Tx } from '../db.ts';
 import { badRequest, conflict, forbidden, notFound, viewOnceConflict } from '../errors.ts';
 import { sha256 } from '../security.ts';
 import { claimForMessage, hideForMessage, linkToMessage } from './attachments.ts';
+import { maybeQueue as ggQueue } from './gg.ts';
 import { markMentionsRead, normalizeMentions, saveMentions } from './mentions.ts';
 import { dropLinks, indexLinks } from './links.ts';
 import { normalizeRefs } from './refs.ts';
@@ -194,6 +195,8 @@ export async function sendMessage(userId: string, conversationId: string, input:
       }
       // Datos asociados que deben quedar confirmados junto al mensaje (sin I/O externo).
       if (afterCreate) await afterCreate(c, m);
+      // gg: su chat o @gg en cualquier chat (el worker responde; aquí solo se encola).
+      await ggQueue(c, m);
       return m;
     });
     return { message: forViewer(message, userId), duplicate: false, ...(dropped.length ? { droppedMentions: dropped } : {}) };

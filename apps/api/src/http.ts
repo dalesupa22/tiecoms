@@ -42,6 +42,8 @@ import * as attachments from './modules/attachments.ts';
 import * as voice from './modules/voice.ts';
 import * as calls from './modules/calls.ts';
 import * as assistant from './modules/assistant.ts';
+import * as gg from './modules/gg.ts';
+import { getOrCreateDirect } from './modules/workspaces.ts';
 import * as signatures from './modules/signatures.ts';
 import * as mentions from './modules/mentions.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
@@ -380,7 +382,22 @@ export async function buildHttp() {
     priv.post('/api/v1/assistant/turn', { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } }, async (req) => assistant.turn(req.userId, req.body));
     priv.post<{ Querystring: { lang?: string } }>('/api/v1/assistant/transcribe', { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } },
       async (req) => assistant.transcribe(req.userId, req.body, req.headers['x-file-type'] as string | undefined, req.query.lang, req.headers['x-ai-consent'] === '1'));
-    priv.post('/api/v1/assistant/run', { config: { rateLimit: { max: 60, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } }, async (req) => assistant.run(req.userId, req.body));
+    priv.post('/api/v1/assistant/run', { config: { rateLimit: { max: 60, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } }, async (req) => {
+      // Desde la tarjeta del chat con gg: además de hacerlo, queda guardado el estado en el mensaje.
+      const { messageId, actionId, ...body } = (req.body ?? {}) as any;
+      const extra = z.object({ messageId: z.uuid().optional(), actionId: z.string().max(80).optional() }).parse({ messageId, actionId });
+      const out = await assistant.run(req.userId, body);
+      if (extra.messageId && extra.actionId) await gg.markAction(req.userId, extra.messageId, extra.actionId, { ...out, id: extra.actionId });
+      return out;
+    });
+    priv.post('/api/v1/assistant/actions/discard', async (req) => {
+      const b = z.object({ messageId: z.uuid(), actionId: z.string().max(80) }).parse(req.body);
+      return gg.markAction(req.userId, b.messageId, b.actionId, { status: 'failed', error: 'Descartado' });
+    });
+    priv.post('/api/v1/assistant/consent', async (req) => gg.setConsent(req.userId, z.object({ on: z.boolean() }).parse(req.body).on));
+    // Tu chat con gg y «Tú» (notas para ti): se crean al abrirlos.
+    priv.post('/api/v1/assistant/chat', async (req) => getOrCreateDirect(req.userId, gg.GG_ID));
+    priv.post('/api/v1/me/notes', async (req) => getOrCreateDirect(req.userId, req.userId));
     priv.post('/api/v1/directs', async (req) => ws.getOrCreateDirect(req.userId, CreateDirectInput.parse(req.body).userId));
     priv.post('/api/v1/chats', async (req) => ws.createChat(req.userId, CreateChatInput.parse(req.body)));
 

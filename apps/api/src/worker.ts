@@ -3,6 +3,7 @@
  * Reclama jobs con lease (FOR UPDATE SKIP LOCKED) en una transacción corta y
  * los ejecuta fuera de ella; reintenta con backoff y deja el fallo inspeccionable.
  */
+import { reply as ggReply } from './modules/gg.ts';
 import { hostname } from 'node:os';
 import { migrate } from './migrate.ts';
 import { enqueueOutbox, pool, tx } from './db.ts';
@@ -31,6 +32,8 @@ const LEASE_SECONDS = 120;
 type Handler = (payload: any) => Promise<void>;
 
 const handlers: Record<string, Handler> = {
+  /** gg responde en su chat o donde lo llamaron con @gg (docs/GG-CHAT.md). */
+  async 'gg.reply'(p) { await ggReply(p.messageId); },
   async 'account.delete_file'(p) {
     await deletePersonalObject(p.key);
     await pool.query('DELETE FROM files WHERE id = $1 AND deleted_at IS NOT NULL', [p.fileId]);

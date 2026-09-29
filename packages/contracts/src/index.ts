@@ -257,6 +257,8 @@ export interface UserDTO {
   ringtone?: Ringtone | null;
   /** Solo en bootstrap.me: mi modo sueño (horario de descanso diario). Ausente = servidor anterior. */
   sleep?: SleepDTO;
+  /** Solo en bootstrap.me: autorizó usar IA con gg (su chat y @gg). */
+  aiConsent?: boolean;
 }
 
 /** Modo sueño: todas las noches, de `start` a `end` (HH:MM en `tz`), no suena nada. */
@@ -943,6 +945,8 @@ export interface BootstrapDTO {
   people: PersonDTO[];
   /** Funciones que el servidor tiene prendidas (aditivo: clientes viejos lo ignoran). */
   features?: { calls: boolean; mail?: boolean };
+  /** Id de gg (participante bot): su chat es el directo con este id; «Tú» es el directo con uno mismo. */
+  assistantId?: string;
   /** 1.7.1: la llamada en la que estoy desde algún dispositivo (con myDevices), o null. Ausente = servidor anterior. */
   myActiveCall?: CallDTO | null;
 }

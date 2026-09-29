@@ -11,7 +11,7 @@ import { conversationMenu, forwardMenu, messageLink, muteMenu, muteOptions, mute
 import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate, queryParam } from '../router.ts';
-import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, orgById, personById, personColor } from '../ui.tsx';
+import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, isGgChat, isSelfChat, orgById, personById, personColor } from '../ui.tsx';
 import { PhotoCropDialog, pickImage } from './PhotoCrop.tsx';
 import { AttachmentsView, DraftTray, pickFiles, useDrafts } from './Attachments.tsx';
 import { VoiceRecorder } from './Voice.tsx';
@@ -23,6 +23,7 @@ import { SleepNotice } from './Sleep.tsx';
 import { createChatRecovery } from '../chat-recovery.ts';
 import { DerivedPendingStrip } from './Pending.tsx';
 import { MeetingDialog } from './Meetings.tsx';
+import { GgActionsRow, GgConsentBanner, GgThinking, saveToSelf } from './Assistant.tsx';
 import { CommentsNoticeLine, MailPickDialog, MailSharedRow, WaIcon, WaSharedRow, openMailDrawer, type WaShared } from './Mail.tsx';
 import { CallBanner, CallButtons, openTranscript } from './Call.tsx';
 import { ScheduledStrip, openScheduleMenu, scheduleMenu, whenLabel } from './Scheduled.tsx';
@@ -518,6 +519,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   };
 
   const title = conversationTitle(d, conv);
+  // gg: su chat (responde a todo) o cualquier chat (responde a @gg).
+  const ggDm = isGgChat(conv);
+  const ggHere = ggDm || conv.kind !== 'direct';
   const openHere = Object.values(allIssues).filter((i: IssueDTO) => i.conversationId === id && !isClosed(i));
   const issueOf = (mid: string) => openHere.find((i) => i.originMessageId === mid);
   // Asuntos, reuniones e hilos en todas (también directos y chats grupales). Fuera de un espacio el hilo es con
@@ -593,6 +597,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       ] : []),
       { label: t('menu.forwardChat'), icon: '↪', onSelect: () => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />) },
       forwardMenu(d, conv, m, () => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />)),
+      ...(!isSelfChat(d, conv) && m.kind === 'text' && m.body ? [{ label: t('self.saveHere'), icon: '✎', onSelect: () => void saveToSelf(m, personById(d, m.authorId)?.name ?? null) }] : []),
       ...(mine ? [
         { divider: true },
         { label: t('menu.edit'), icon: '✎', onSelect: () => setEditing({ id: m.id, text: m.body }) },
@@ -735,6 +740,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               </div>
             );
           })}
+          {ggHere && <GgThinking conversationId={id} inDm={ggDm} />}
         </div>
         {(showJump || (pendingMentions.length > 0 && !nav.bottom)) && (
           <div className="jump-stack">
@@ -769,6 +775,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               <button className="icon-btn" aria-label={t('reply.cancel')} onClick={() => setReplyTo(null)}>×</button>
             </div>
           )}
+          {ggDm && <GgConsentBanner />}
           {conv.canPost && <SleepNotice conv={conv} typing={!!text.trim()} onSchedule={canSchedule ? schedule : undefined} />}
           {conv.sideIssueId && <SideIssueStrip sideId={id} issueId={conv.sideIssueId} onOpen={setOpenIssue} />}
           {conv.canPost && <ScheduledStrip conversationId={id} />}
@@ -977,6 +984,10 @@ function PinsDialog({ conv, onJump, onClose }: { conv: ConversationDTO; onJump: 
 /** Mensajes de sistema: algunos enlazan a un asunto, una reunión o la conversación derivada (si la puedes ver). */
 function SystemRow({ m, onIssue, canPost, live }: { m: MessageDTO; onIssue: (id: string) => void; canPost: boolean; live: boolean }) {
   const d = useClient((s) => s.data)!;
+  // gg: lo que dejó listo (tarjetas para confirmar) y respuestas rápidas (docs/GG-CHAT.md).
+  if (m.body.startsWith('{"k":"gg.actions"')) {
+    try { const g = JSON.parse(m.body); return <GgActionsRow key={m.id} messageId={m.id} conversationId={m.conversationId} p={g} />; } catch { return null; }
+  }
   // Correo y WhatsApp traídos al chat (docs/CORREO.md): mensaje de quien lo trajo + tarjeta.
   let px: any = null;
   try { px = m.body.startsWith('{"k":"mail.') || m.body.startsWith('{"k":"wa.') ? JSON.parse(m.body) : null; } catch {}

@@ -16,12 +16,13 @@ const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expire
  */
 export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   const me = await loadUser(pool, userId);
-  const digest = await pool.query('SELECT link_digest, dnd_until, sleep_on, sleep_start, sleep_end, sleep_tz, sleep_tz_auto, message_sound, ringtone FROM users WHERE id = $1', [userId]);
+  const digest = await pool.query('SELECT link_digest, dnd_until, sleep_on, sleep_start, sleep_end, sleep_tz, sleep_tz_auto, message_sound, ringtone, ai_consent_at FROM users WHERE id = $1', [userId]);
   me.linkDigest = !!digest.rows[0]?.link_digest;
   me.dndUntil = activeDnd(digest.rows[0]?.dnd_until);
   me.sleep = toSleep(digest.rows[0]);
   me.messageSound = digest.rows[0]?.message_sound ?? null;
   me.ringtone = digest.rows[0]?.ringtone ?? null;
+  me.aiConsent = !!digest.rows[0]?.ai_consent_at;
 
   const [ws, convs, people] = await Promise.all([
     pool.query(
@@ -81,6 +82,8 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
            JOIN organization_memberships o ON o.org_id = mine.org_id
           WHERE mine.user_id = $1
          UNION SELECT $1::uuid
+         -- gg, el asistente (docs/GG-CHAT.md).
+         UNION SELECT '0a9a9a9a-0000-4000-8000-000000000066'::uuid
        )
        SELECT u.id, u.name, u.kind, u.primary_org_id, u.avatar_file_id, om.title, om.area, u.sleep_on, u.sleep_start, u.sleep_end, u.sleep_tz,
               (SELECT bool_and(g.role = 'guest') FROM workspace_memberships g WHERE g.user_id = u.id AND g.revoked_at IS NULL) AS guest,
@@ -153,7 +156,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
     ...(r.my_role ? { reactionActions: r.reaction_actions } : {}),
   }));
 
-  return { contract: CONTRACT_VERSION, serverTime: new Date().toISOString(), me, organizations, workspaces, conversations, people: personList, features: { calls: callsEnabled(), mail: mailEnabled() }, myActiveCall: await myActiveCall(userId).catch(() => null) };
+  return { contract: CONTRACT_VERSION, serverTime: new Date().toISOString(), me, organizations, workspaces, conversations, people: personList, features: { calls: callsEnabled(), mail: mailEnabled() }, assistantId: '0a9a9a9a-0000-4000-8000-000000000066', myActiveCall: await myActiveCall(userId).catch(() => null) };
 }
 
 function legacyAttachmentPreview(list: { contentType: string; name: string }[]) {

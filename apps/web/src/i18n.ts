@@ -852,6 +852,16 @@ const es = {
   'wa.bring': 'Llevar a un chat…',
   'wa.bringShort': 'Llevar a un chat',
   'wa.bringTitle': 'Llevar un WhatsApp a un chat',
+  'self.title': 'Tú',
+  'self.rowHint': 'notas para ti',
+  'self.saved': 'Guardado en Tú',
+  'self.saveHere': 'Guardar en Tú',
+  'gg.rowHint': 'tu asistente',
+  'gg.consentText': 'gg usa IA (DeepSeek) para leer lo que le pides y los chats que le indiques. ¿Lo autorizas? Sirve para este chat y para @gg en tus grupos.',
+  'gg.consentAllow': 'Autorizar gg',
+  'gg.forOther': 'Para {name}',
+  'gg.thinking': 'gg está pensando…',
+  'ai.discarded': 'Descartado',
 };
 type Key = keyof typeof es;
 
@@ -1673,6 +1683,16 @@ const en: Record<Key, string> = {
   'wa.bring': 'Bring to a chat…',
   'wa.bringShort': 'Bring to a chat',
   'wa.bringTitle': 'Bring a WhatsApp message to a chat',
+  'self.title': 'You',
+  'self.rowHint': 'notes to self',
+  'self.saved': 'Saved to You',
+  'self.saveHere': 'Save to You',
+  'gg.rowHint': 'your assistant',
+  'gg.consentText': 'gg uses AI (DeepSeek) to read what you ask and the chats you point it to. Do you allow it? It applies here and to @gg in your groups.',
+  'gg.consentAllow': 'Allow gg',
+  'gg.forOther': 'For {name}',
+  'gg.thinking': 'gg is thinking…',
+  'ai.discarded': 'Discarded',
 };
 const dicts: Record<Lang, Record<Key, string>> = { es, en };
 const STORE_KEY = 'tiecoms:lang';

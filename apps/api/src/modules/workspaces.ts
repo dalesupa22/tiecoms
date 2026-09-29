@@ -1,3 +1,4 @@
+import { GG_ID } from './gg.ts';
 import type { z } from 'zod';
 import type {
   AcceptInvitationInput, AddMembersInput, CreateConversationInput, CreateInvitationInput, CreateWorkspaceInput, InvitationPreviewDTO,
@@ -314,10 +315,15 @@ export async function createChat(userId: string, input: { userIds: string[]; nam
   });
 }
 
+/**
+ * Directo con otra persona. Dos casos especiales (docs/GG-CHAT.md): otherId = userId es «Tú» (notas para ti, con un solo
+ * miembro) y otherId = gg es tu chat con gg (gg no necesita compartir empresa).
+ */
 export async function getOrCreateDirect(userId: string, otherId: string) {
-  if (otherId === userId) throw badRequest('No puedes abrir un directo contigo');
+  const self = otherId === userId;
+  const gg = otherId === GG_ID;
   return tx(async (c) => {
-    if ((await reachable(c, userId, [otherId])).length !== 1) throw forbidden('Solo puedes escribir a personas con las que compartes un espacio o tu empresa');
+    if (!self && !gg && (await reachable(c, userId, [otherId])).length !== 1) throw forbidden('Solo puedes escribir a personas con las que compartes un espacio o tu empresa');
     const key = [userId, otherId].sort().join(':');
     const ins = await c.query(
       "INSERT INTO conversations (kind, dm_key, created_by) VALUES ('direct',$1,$2) ON CONFLICT (dm_key) DO NOTHING RETURNING id",
@@ -325,10 +331,10 @@ export async function getOrCreateDirect(userId: string, otherId: string) {
     );
     if (ins.rowCount) {
       const id: string = ins.rows[0].id;
-      for (const uid of [userId, otherId]) {
+      for (const uid of self ? [userId] : [userId, otherId]) {
         await c.query('INSERT INTO conversation_memberships (conversation_id, user_id, added_by) VALUES ($1,$2,$3)', [id, uid, userId]);
       }
-      await scopeChanged(c, [userId, otherId], 'direct.created', { conversationId: id });
+      await scopeChanged(c, self || gg ? [userId] : [userId, otherId], 'direct.created', { conversationId: id });
       return { id, created: true };
     }
     const { rows } = await c.query('SELECT id FROM conversations WHERE dm_key = $1', [key]);

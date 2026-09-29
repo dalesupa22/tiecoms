@@ -4,7 +4,9 @@ import type { BootstrapDTO, ConversationDTO, CreateGroupRequest, InvitationPrevi
 import { client, useClient } from '../app-client.ts';
 import { errorText, getLang, locale, t, tn } from '../i18n.ts';
 import { navigate, queryParam } from '../router.ts';
-import { Avatar, ConvAvatar, Modal, OrgMark, badgeColor, conversationPreview, conversationTitle, orgById, personById, timeLabel } from '../ui.tsx';
+import { directOtherId, Avatar, ConvAvatar, Modal, OrgMark, badgeColor, conversationPreview, conversationTitle, orgById, personById, timeLabel, isGgChat, isSelfChat } from '../ui.tsx';
+import { openGgChat, openSelfChat } from './Assistant.tsx';
+import { asset } from '../router.ts';
 import { conversationMenu, mutedText, openDialog } from '../actions.tsx';
 import { DndStrip } from './Silence.tsx';
 import { copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
@@ -318,7 +320,7 @@ export interface IssuesChip { count: number; overdue: number; open: boolean; onT
 export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, treeMentions = 0, extraMenu = [], issues, preview = false }: { c: ConversationDTO; active: boolean; showWs?: boolean; label?: string; threadUnread?: number; treeMentions?: number; extraMenu?: MenuItem[]; issues?: IssuesChip; preview?: boolean }) {
   const d = useClient((s) => s.data)!;
   const muted = isMuted(c);
-  const other = c.kind === 'direct' ? personById(d, c.memberIds.find((m) => m !== d.me.id)) : null;
+  const other = c.kind === 'direct' ? personById(d, directOtherId(d, c)) : null;
   const ws = showWs ? d.workspaces.find((w) => w.id === c.workspaceId) : null;
   const side = c.deriveKind === 'side';
   const origin = side && c.parentId ? d.conversations.find((x) => x.id === c.parentId) : null;
@@ -386,8 +388,35 @@ function Separated<T>({ items, convOf, render, sepMenu }: { items: T[]; convOf: 
 
 export function DmsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; activeConv?: string | null }) {
   const d = useClient((s) => s.data)!;
-  const list = dmConversations(d, tab);
-  return <Separated items={list} convOf={(c) => c} render={(c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />} />;
+  // gg y «Tú» van fijos arriba (docs/GG-CHAT.md), no en la lista.
+  const list = dmConversations(d, tab).filter((c) => !isGgChat(c) && !isSelfChat(d, c));
+  return (
+    <>
+      {tab === 'all' && <AssistantRows activeConv={activeConv} />}
+      <Separated items={list} convOf={(c) => c} render={(c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />} />
+    </>
+  );
+}
+
+/** Siempre a mano: tu chat con gg y «Tú» (notas para ti). Se crean al tocarlos. */
+export function AssistantRows({ activeConv = null }: { activeConv?: string | null }) {
+  const d = useClient((s) => s.data)!;
+  const ggConv = d.conversations.find((c) => isGgChat(c));
+  const selfConv = d.conversations.find((c) => isSelfChat(d, c));
+  const me = personById(d, d.me.id);
+  return (
+    <div className="assistant-rows">
+      <button className={`nav-item conv-row ${ggConv && activeConv === ggConv.id ? 'active' : ''}`} onClick={() => void openGgChat()}>
+        <img src={asset('/gg-mark.svg')} alt="" width={22} height={22} />
+        <span className="grow ellipsis"><b>gg</b> <span className="muted small">{t('gg.rowHint')}</span></span>
+        {!!ggConv?.unread && <span className="pill">{ggConv.unread}</span>}
+      </button>
+      <button className={`nav-item conv-row ${selfConv && activeConv === selfConv.id ? 'active' : ''}`} onClick={() => void openSelfChat()}>
+        <Avatar person={me} org={null} size={22} />
+        <span className="grow ellipsis"><b>{t('self.title')}</b> <span className="muted small">{t('self.rowHint')}</span></span>
+      </button>
+    </div>
+  );
 }
 
 // ---------- Vista Lista: todos los grupos en una sola lista ----------

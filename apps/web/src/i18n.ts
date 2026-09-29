@@ -62,7 +62,7 @@ const es = {
   'calls.callBack': 'Volver a llamar', 'calls.pick': '¿A quién llamas?', 'calls.search': 'Buscar persona o grupo',
   'calls.share': 'Compartir', 'calls.shareChat': 'Enviar a un chat', 'calls.shareSystem': 'Compartir con otra app', 'calls.shareWhat': '¿Qué compartes?',
   'calls.shareSummary': 'Resumen', 'calls.shareTranscript': 'Transcripción', 'calls.shareBoth': 'Resumen y transcripción', 'calls.shared': 'Enviado a {name}',
-  'calls.pickChat': 'Enviar a…', 'calls.noSummary': 'Sin resumen. Se genera al colgar si quien prendió la transcripción lo autorizó.', 'err.calls_disabled': 'Las llamadas todavía no están activas.', 'err.mic_denied': 'El navegador no dio permiso al micrófono. Actívalo en el candado de la barra de direcciones.', 'err.call_connect_failed': 'No se pudo conectar la llamada. Intenta de nuevo.', 'calls.noContent': 'Esta llamada no tiene resumen ni transcripción.',
+  'calls.pickChat': 'Enviar a…', 'calls.noSummary': 'Sin resumen. Se genera al colgar si quien prendió la transcripción lo autorizó.', 'err.calls_disabled': 'Las llamadas todavía no están activas.', 'err.mic_denied': 'El navegador no dio permiso al micrófono. Actívalo en el candado de la barra de direcciones.', 'err.call_connect_failed': 'No se pudo conectar la llamada. Intenta de nuevo.', 'err.call_busy': 'Otra empresa del chat tiene una llamada en curso. Intenta cuando termine.', 'calls.noContent': 'Esta llamada no tiene resumen ni transcripción.',
   'call.audio': 'Llamada de voz', 'call.video': 'Videollamada', 'call.title': 'Llamada', 'call.inProgress': 'Llamada en curso', 'call.join': 'Unirse',
   'call.incoming': 'Te están llamando', 'call.incomingIn': 'Te llama en {title}', 'call.incomingFrom': '{name} te está llamando', 'call.decline': 'Ahora no', 'call.answer': 'Contestar',
   'call.answerAudio': 'Contestar sin cámara', 'call.answerVideo': 'Contestar con cámara', 'call.connecting': 'Conectando…', 'call.waiting': 'Esperando a que alguien entre…',
@@ -585,7 +585,7 @@ const es = {
   'mention.dropped': 'No se pudo mencionar a: {names}', 'mention.picker': 'Mencionar a alguien', 'mention.noMatch': 'Nadie coincide en este chat.',
   'home.tab.mentions': 'Menciones', 'mention.loadMore': 'Ver más', 'mention.inConv': 'en {name}', 'mention.allLabel': '@todos',
   // Barra de arriba: ✎ Mensaje nuevo · ＋ Crear, y búsqueda de personas, grupos y chats (docs/GRUPOS.md)
-  'quick.create': 'Crear', 'issue.where': 'Grupo o chat', 'compose.multi': 'Chat con varias personas', 'compose.tip': 'Toca una o varias personas. El 💬 abre su chat directo.', 'compose.addMore': 'Agregar a alguien más…', 'compose.openWith': 'Abrir chat con {name}',
+  'quick.create': 'Crear', 'issue.where': 'Grupo o chat', 'compose.multi': 'Chat con varias personas', 'compose.tip': 'Toca una o varias personas. El 💬 abre su chat directo.', 'compose.addMore': 'Agregar a alguien más…', 'compose.tipSearch': 'Toca o pulsa Enter para marcar y sigue buscando. El 💬 abre su chat directo.', 'compose.openWith': 'Abrir chat con {name}',
   'compose.multiHint': 'Elige a 2 o más personas. Pueden ser de tu equipo o de otras empresas.', 'compose.recent': 'Recientes',
   'compose.search': 'Buscar persona, empresa o grupo', 'search.people': 'Personas', 'search.groups': 'Grupos', 'search.chats': 'Chats',
   'search.opensChat': 'Abre el chat', 'search.none': 'Nada coincide con «{q}».', 'common.clear': 'Borrar', 'grp.foldMenu': 'Plegar y desplegar',
@@ -661,6 +661,13 @@ const es = {
   'att.signBtn': 'Firmar', 'att.signedBy': '✓ Firmado por {name}', 'att.preview': 'Ver PDF',
   'err.has_digital_signature': 'Este PDF ya tiene una firma digital', 'err.encrypted_pdf': 'Este PDF tiene contraseña: no se puede firmar',
   'err.not_pdf': 'Este archivo no es un PDF', 'err.invalid_pdf': 'No pude leer este PDF', 'err.too_many_signatures': 'Ya tienes demasiadas firmas guardadas',
+  // ---------- Llamadas 1.7.1 ----------
+  'call.addShort': '＋ Agregar', 'call.inviteRinging': 'Llamando…', 'call.inviteNoAnswer': 'No contestó', 'call.ringAgain': 'Volver a llamar',
+  'call.otherDevice': 'En llamada en tu {device} · {chat}', 'call.passHere': 'Pasar aquí', 'call.joinToo': 'Unirme también',
+  'call.dev.ios': 'iPhone', 'call.dev.android': 'Android', 'call.dev.macos': 'Mac', 'call.dev.windows': 'PC', 'call.dev.web': 'navegador', 'call.dev.other': 'otro dispositivo',
+  'calls.liveNow': 'En curso ahora', 'call.inCallDot': 'Llamada en curso',
+  'call.audioMenu': 'Audio', 'call.audioOut': 'Salida de audio', 'call.micIn': 'Micrófono', 'call.noOutputChoice': 'Este navegador no deja elegir la salida de audio',
+  'call.personMuted': 'Micrófono silenciado', 'call.personNoCamera': 'Cámara apagada',
   // ---------- Tanda 1.7 ----------
   'sys.event.today': 'Hoy: {title} a las {time}.', 'sys.issue.done': '✅ {byName} completó la tarea «{title}».',
   'sys.issue.overdue': 'No cumplimos: «{title}» venció el {date}.',
@@ -892,7 +899,7 @@ const en: Record<Key, string> = {
   'calls.callBack': 'Call again', 'calls.pick': 'Who are you calling?', 'calls.search': 'Search person or group',
   'calls.share': 'Share', 'calls.shareChat': 'Send to a chat', 'calls.shareSystem': 'Share with another app', 'calls.shareWhat': 'What do you share?',
   'calls.shareSummary': 'Summary', 'calls.shareTranscript': 'Transcript', 'calls.shareBoth': 'Summary and transcript', 'calls.shared': 'Sent to {name}',
-  'calls.pickChat': 'Send to…', 'calls.noSummary': 'No summary. It is created when the call ends if whoever turned on transcription allowed it.', 'err.calls_disabled': 'Calls are not enabled yet.', 'err.mic_denied': 'The browser blocked the microphone. Allow it from the lock icon in the address bar.', 'err.call_connect_failed': 'The call could not connect. Try again.', 'calls.noContent': 'This call has no summary or transcript.',
+  'calls.pickChat': 'Send to…', 'calls.noSummary': 'No summary. It is created when the call ends if whoever turned on transcription allowed it.', 'err.calls_disabled': 'Calls are not enabled yet.', 'err.mic_denied': 'The browser blocked the microphone. Allow it from the lock icon in the address bar.', 'err.call_connect_failed': 'The call could not connect. Try again.', 'err.call_busy': 'Another company in this chat is on a call. Try again when it ends.', 'calls.noContent': 'This call has no summary or transcript.',
   'call.audio': 'Voice call', 'call.video': 'Video call', 'call.title': 'Call', 'call.inProgress': 'Call in progress', 'call.join': 'Join',
   'call.incoming': 'Incoming call', 'call.incomingIn': 'Calling you in {title}', 'call.incomingFrom': '{name} is calling you', 'call.decline': 'Not now', 'call.answer': 'Answer',
   'call.answerAudio': 'Answer without camera', 'call.answerVideo': 'Answer with camera', 'call.connecting': 'Connecting…', 'call.waiting': 'Waiting for someone to join…',
@@ -1392,7 +1399,7 @@ const en: Record<Key, string> = {
   'mention.dropped': 'Could not mention: {names}', 'mention.picker': 'Mention someone', 'mention.noMatch': 'Nobody in this chat matches.',
   'home.tab.mentions': 'Mentions', 'mention.loadMore': 'Load more', 'mention.inConv': 'in {name}', 'mention.allLabel': '@all',
   // Top bar: ✎ New message · ＋ Create, and search for people, groups and chats (docs/GRUPOS.md)
-  'quick.create': 'Create', 'issue.where': 'Group or chat', 'compose.multi': 'Chat with several people', 'compose.tip': 'Tap one or more people. 💬 opens their direct chat.', 'compose.addMore': 'Add someone else…', 'compose.openWith': 'Open chat with {name}',
+  'quick.create': 'Create', 'issue.where': 'Group or chat', 'compose.multi': 'Chat with several people', 'compose.tip': 'Tap one or more people. 💬 opens their direct chat.', 'compose.addMore': 'Add someone else…', 'compose.tipSearch': 'Tap or press Enter to pick, then keep searching. 💬 opens their direct chat.', 'compose.openWith': 'Open chat with {name}',
   'compose.multiHint': 'Pick 2 or more people. They can be on your team or at other companies.', 'compose.recent': 'Recent',
   'compose.search': 'Search a person, company or group', 'search.people': 'People', 'search.groups': 'Groups', 'search.chats': 'Chats',
   'search.opensChat': 'Opens the chat', 'search.none': 'Nothing matches “{q}”.', 'common.clear': 'Clear', 'grp.foldMenu': 'Collapse and expand',
@@ -1467,6 +1474,13 @@ const en: Record<Key, string> = {
   'att.signBtn': 'Sign', 'att.signedBy': '✓ Signed by {name}', 'att.preview': 'View PDF',
   'err.has_digital_signature': 'This PDF already has a digital signature', 'err.encrypted_pdf': 'This PDF is password-protected and cannot be signed',
   'err.not_pdf': 'This file is not a PDF', 'err.invalid_pdf': 'Could not read this PDF', 'err.too_many_signatures': 'You already have too many saved signatures',
+  // ---------- Calls 1.7.1 ----------
+  'call.addShort': '＋ Add', 'call.inviteRinging': 'Calling…', 'call.inviteNoAnswer': 'No answer', 'call.ringAgain': 'Call again',
+  'call.otherDevice': 'On a call on your {device} · {chat}', 'call.passHere': 'Move here', 'call.joinToo': 'Join too',
+  'call.dev.ios': 'iPhone', 'call.dev.android': 'Android', 'call.dev.macos': 'Mac', 'call.dev.windows': 'PC', 'call.dev.web': 'browser', 'call.dev.other': 'other device',
+  'calls.liveNow': 'Happening now', 'call.inCallDot': 'Call in progress',
+  'call.audioMenu': 'Audio', 'call.audioOut': 'Audio output', 'call.micIn': 'Microphone', 'call.noOutputChoice': 'This browser cannot choose the audio output',
+  'call.personMuted': 'Microphone muted', 'call.personNoCamera': 'Camera off',
   // ---------- Tanda 1.7 ----------
   'sys.event.today': 'Today: {title} at {time}.', 'sys.issue.done': '✅ {byName} completed the task “{title}”.',
   'sys.issue.overdue': 'We missed it: “{title}” was due on {date}.',

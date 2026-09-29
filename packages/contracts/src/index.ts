@@ -9,7 +9,7 @@
 import { z } from 'zod';
 
 export const API_VERSION = 1;
-export const CONTRACT_VERSION = '2026-09-29';
+export const CONTRACT_VERSION = '2026-09-29.1';
 /** Clientes con un contrato anterior a este deben actualizarse. */
 export const MIN_CLIENT_CONTRACT = '2026-09-23';
 
@@ -103,8 +103,23 @@ export type SsoProvider = z.infer<typeof SsoProvider>;
 // ---------- Llamadas (Amazon Chime SDK) ----------
 export const CallKind = z.enum(['audio', 'video']);
 export type CallKind = z.infer<typeof CallKind>;
+/**
+ * Dispositivo dentro de una llamada (1.7.1, docs/LLAMADAS.md › Varios dispositivos): los primeros 8 caracteres del
+ * id de sesión o de dispositivo. El attendee de Chime queda con ExternalUserId = "{userId}#{deviceKey}"; los
+ * clientes toman el id de la persona con externalUserId.split('#')[0]. Sin deviceKey (clientes 1.7.0) = 'legacy'.
+ */
+export const CallDeviceKey = z.string().regex(/^[A-Za-z0-9_-]{1,16}$/);
+export const LEGACY_DEVICE_KEY = 'legacy';
+/** La persona de un externalUserId de Chime ("{userId}#{deviceKey}" o solo "{userId}"). */
+export const callUserId = (externalUserId: string) => externalUserId.split('#')[0]!;
 /** POST /conversations/:id/call: empieza la llamada o entra a la que ya está en curso. */
-export const StartCallInput = z.object({ kind: CallKind.default('audio') });
+export const StartCallInput = z.object({ kind: CallKind.default('audio'), deviceKey: CallDeviceKey.optional() });
+/** POST /calls/:id/join y /heartbeat: desde qué dispositivo. POST /calls/:id/leave: qué dispositivo mío sale («Pasar aquí» = el otro). */
+export const CallDeviceInput = z.object({ deviceKey: CallDeviceKey.optional() });
+/** Un dispositivo mío que está dentro de la llamada. platform y label vienen de la sesión («iPhone», «Navegador»). */
+export interface CallDeviceDTO { deviceKey: string; platform: string; label: string }
+/** GET /calls/active: llamadas sin terminar de mis conversaciones (y a las que me agregaron). */
+export interface ActiveCallDTO { call: CallDTO; title: string | null }
 export interface CallDTO {
   id: string;
   conversationId: string;
@@ -122,6 +137,17 @@ export interface CallDTO {
   invitedUserIds?: string[];
   /** Nombres de quienes están o fueron agregados (para quien no los tiene en su lista de personas). */
   names?: Record<string, string>;
+  /**
+   * 1.7.1: mis dispositivos dentro de la llamada. Solo llega en eventos de MI cuenta (call.updated por la cuenta),
+   * en /calls/active y en BootstrapDTO.myActiveCall; el call.updated de la conversación no lo trae (el cliente
+   * conserva el último que recibió para esa llamada).
+   */
+  myDevices?: CallDeviceDTO[];
+  /**
+   * 1.7.1: a quién se llamó con «＋ Agregar» (POST /calls/:id/invite), del chat o de fuera, y si ya entró después de
+   * esa llamada. Los clientes muestran «Llamando…» y, pasados 45 s sin entrar, «No contestó» con «Volver a llamar».
+   */
+  invited?: { userId: string; at: string; joined: boolean }[];
 }
 /** POST /calls/:id/invite: suma personas a la llamada en curso (les suena aunque no estén en el chat). */
 export const CallInviteInput = z.object({ userIds: z.array(z.uuid()).min(1).max(20) });
@@ -912,6 +938,8 @@ export interface BootstrapDTO {
   people: PersonDTO[];
   /** Funciones que el servidor tiene prendidas (aditivo: clientes viejos lo ignoran). */
   features?: { calls: boolean; mail?: boolean };
+  /** 1.7.1: la llamada en la que estoy desde algún dispositivo (con myDevices), o null. Ausente = servidor anterior. */
+  myActiveCall?: CallDTO | null;
 }
 
 // ---------- Espacios y conversaciones ----------
@@ -1539,8 +1567,15 @@ export type AccountEvent =
   | { type: 'me.dnd'; dndUntil: string | null }
   /** Me están llamando en una conversación (no llega a quien la empezó ni a quien tiene No molestar). */
   | { type: 'call.ringing'; call: CallDTO; conversationTitle: string | null; callerName: string }
-  /** La llamada a la que me agregaron cambió (no estoy en su chat, así que no me llega por la conversación). */
+  /**
+   * La llamada a la que me agregaron cambió (no estoy en su chat), o (1.7.1) cambiaron mis dispositivos en ella:
+   * entonces trae myDevices.
+   */
   | { type: 'call.updated'; call: CallDTO }
+  /** 1.7.1: contesté desde un dispositivo: los demás dejan de sonar y cierran el aviso (ignorar si deviceKey es el mío). */
+  | { type: 'call.answered'; callId: string; conversationId: string; deviceKey: string; platform: string; label: string }
+  /** 1.7.1: rechacé en un dispositivo (POST /calls/:id/decline): todos mis dispositivos dejan de sonar. */
+  | { type: 'call.declined'; callId: string; conversationId: string }
   /** Un pedazo de audio de `userId` se está transcribiendo: los clientes muestran «Procesando…». */
   | { type: 'call.processing'; callId: string; userId: string; segId: string }
   /** Frases de ese pedazo ya guardadas (vacío si no tenía voz; failed si Groq falló). */

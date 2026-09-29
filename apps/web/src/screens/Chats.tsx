@@ -53,7 +53,6 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
     ...groups.map((c) => ({ kind: 'group' as const, c })),
     ...orgs.flatMap((g) => g.people.map((p) => ({ kind: 'person' as const, p }))),
   ];
-  const people = items.filter((x) => x.kind === 'person');
   const at = Math.min(active, Math.max(0, items.length - 1));
   useEffect(() => { setActive(0); }, [q]);
   useEffect(() => { list.current?.querySelector('[data-active]')?.scrollIntoView({ block: 'nearest' }); }, [at]);
@@ -91,8 +90,7 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
       e.preventDefault();
       // ⌘/Ctrl+Enter, o Enter sin búsqueda con gente marcada: abre o crea el chat.
       if ((e.metaKey || e.ctrlKey || !searching) && picked.length) { void create(); return; }
-      // Nadie marcado y un solo resultado: su directo, sin más pasos.
-      if (!picked.length && items.length === 1 && people.length === 1) { void open((people[0] as { p: PersonDTO }).p); return; }
+      // Al buscar, Enter marca a la persona (no abre su directo): se pueden buscar y juntar varias (pedido de Danny, 29-sep-2026).
       if (searching) choose(items[at]);
     }
   };
@@ -132,7 +130,7 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
           <input className="input" maxLength={120} placeholder={t('chat.groupNamePh')} value={name} onChange={(e) => setName(e.target.value)} />
         </div>
       )}
-      {!picked.length && !searching && <div className="small muted compose-tip">{t('compose.tip')}</div>}
+      {!picked.length && <div className="small muted compose-tip">{t(searching ? 'compose.tipSearch' : 'compose.tip')}</div>}
       <div className="compose-list" id="compose-list" ref={list} role="listbox" aria-multiselectable aria-busy={busy}>
         {!searching && recents.length > 0 && (
           <section>

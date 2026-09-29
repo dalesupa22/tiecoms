@@ -99,8 +99,61 @@ Pedido de Danny: la opción más barata. Groq cobra ≈ US$0.04 por hora de audi
   - Los cambios de la llamada le llegan por la cuenta, en `call.updated {call}`.
   - `CallDTO.invitedUserIds` y `CallDTO.names` traen los nombres de quienes no están en su lista de personas.
 
+## Quién ve la llamada: huddle de la empresa (29-sep-2026)
+
+Pedido de Danny: las llamadas funcionan como los huddles de Slack. Por ahora solo las ve la empresa de quien la empezó.
+
+- En un chat con gente de otras empresas, a esas personas:
+  - no les suena;
+  - no la ven en curso (ni en `/calls/active`, ni en `GET /conversations/:id/call`, ni con el punto verde);
+  - no la ven en el historial y no pueden abrirla ni entrar (404).
+- En ese chat, `call.updated` no va por la conversación, porque lo recibirían todos. Va por la cuenta de cada persona de la empresa (los clientes 1.7.1 ya lo manejan).
+- En ese chat tampoco se dejan los mensajes de sistema: empezó, terminó, transcripción prendida o apagada, y «Ver transcripción».
+- Si alguien de la otra empresa intenta llamar mientras está la llamada, recibe `409 call_busy`.
+- Excepciones:
+  - quien la agregaron con «＋ Agregar» la ve y puede entrar;
+  - en un chat directo la ven los dos, aunque sean de empresas distintas.
+- Implementación: `seesCallSql` / `callAudience` / `callNote` en `apps/api/src/modules/calls.ts`. Pruebas en `apps/api/test/calls-huddle.test.ts`.
+
 ## Push de llamada entrante
 
 - Job `push.call`: `category` es `TC_CALL` y `data` es `{type: 'call', callId, conversationId, kind}`. Sale con el título de quien llama y el texto «📞 Te está llamando».
 - No sale con «No molestar» ni en modo sueño.
 - Las apps muestran Contestar / Ahora no y entran con `/calls/:id/join`.
+
+## Varios dispositivos, altavoz y llamadas en curso (1.7.1, 29-sep-2026)
+
+Pedido de Danny. César lo llamó, contestó en el iPhone y el PC siguió sonando.
+
+- **Un attendee por dispositivo.**
+  - `CreateAttendee` usa `ExternalUserId = "{userId}#{deviceKey}"`, donde `deviceKey` son los primeros 8 caracteres del id de sesión o de dispositivo; en total son como mucho 45 caracteres.
+  - Así la misma persona puede estar en la llamada desde dos dispositivos sin que Chime saque al primero (antes, reusar el attendee daba `AudioJoinedFromAnotherDevice`).
+  - Los clientes toman el id de la persona con `externalUserId.split('#')[0]`, tanto para los nombres y quién habla como para la transcripción; el API también acepta el id sin `#`.
+  - Migración 038: `call_participants` pasa a tener la clave `(call_id, user_id, device_key)`, con el latido por dispositivo.
+  - `CallDTO.activeUserIds` sigue con las **personas** (sin repetir). Se agrega `CallDTO.myDevices?: { deviceKey, platform, label }[]`, solo con los míos.
+- **Contestar o rechazar se coordina entre mis dispositivos.**
+  - Al entrar (`join`/`startOrJoin`), el servidor manda a **mis otras sesiones** por la cuenta `call.answered { callId, deviceKey, platform, label }`. Esos dispositivos dejan de sonar y cierran el aviso y la notificación.
+  - `POST /calls/:id/decline` (nuevo) manda `call.declined { callId }` a mis sesiones. Todas dejan de sonar. Para los demás no cambia nada: si nadie contesta, la llamada termina sola.
+  - En iOS y Android, al recibir `call.answered` o `call.declined`, también se quita la notificación push de esa llamada (collapseId `call-{id}`). El push de llamada lleva `callId` para identificarla.
+- **«Llamada en curso en otro dispositivo».** Si estoy en una llamada en un dispositivo, los demás muestran una franja fija arriba: «📞 En llamada en tu iPhone · {chat}», con dos botones:
+  - **Pasar aquí:** entra desde este dispositivo y, cuando conecta, llama a `POST /calls/:id/leave {deviceKey: el otro}`, que saca solo a ese dispositivo.
+  - **Unirme también.**
+  - El estado sale de `CallDTO.myDevices` en `call.updated` y del bootstrap (`BootstrapDTO.myActiveCall?: CallDTO`).
+- **Llamadas en curso.**
+  - `GET /calls/active` devuelve las llamadas sin terminar de mis conversaciones (y a las que me invitaron): `CallDTO` con `activeUserIds` y el título.
+  - **Web:** en la pestaña Llamadas, una sección «En curso ahora» arriba del historial, con avatares de quién está y el botón Unirse. Además, un punto verde 📞 junto a la conversación en la lista lateral, sacado de `calls[convId]` o de `call.updated`.
+  - **Móvil:** la misma sección en la pestaña Llamadas.
+- **Altavoz.**
+  - **iOS:** botón 🔊 en la pantalla de llamada. Por defecto va el auricular en voz y el altavoz en video. Alterna con `overrideOutputAudioPort(.speaker/.none)` o con la lista de dispositivos de audio de Chime (`listAudioDevices`/`chooseAudioDevice`), mostrando Bluetooth y audífonos si hay.
+  - **Android:** lo mismo con `audioVideo.listAudioDevices()` y `chooseAudioDevice(...)` de Chime (auricular, altavoz, Bluetooth, cable).
+  - **Web:** menú «Salida de audio» con `chooseAudioOutput` del SDK (`setSinkId`) donde el navegador lo permita, y micrófono con `listAudioInputDevices`.
+
+### Implementación 1.7.1 (API y web, 29-sep-2026)
+
+- **Contrato** (`contratos 1.7.1`, `CONTRACT_VERSION = '2026-09-29.1'`): `CallDeviceKey`, `LEGACY_DEVICE_KEY = 'legacy'`, `callUserId(externalUserId)`, `StartCallInput.deviceKey`, `CallDeviceInput { deviceKey? }` para `join`, `heartbeat` y `leave`, `CallDeviceDTO`, `CallDTO.myDevices`, `ActiveCallDTO { call, title }`, `BootstrapDTO.myActiveCall` y los eventos de cuenta `call.answered { callId, conversationId, deviceKey, platform, label }` y `call.declined { callId, conversationId }`.
+- **La llave la manda el cliente** (`deviceKey`: en la web, los primeros 8 caracteres del id de dispositivo). Sin llave (clientes 1.7.0) es `'legacy'`: el attendee queda con `ExternalUserId = userId` como antes. `platform` y `label` salen de la sesión que entra.
+- **`myDevices`** solo viaja por la cuenta: después de cada `call.updated` de la conversación, cada persona que estuvo en la llamada recibe por su cuenta la misma llamada con sus dispositivos. El cliente conserva el último `myDevices` cuando el evento de la conversación no lo trae. `call.answered` llega a todas mis sesiones (incluida la que entra): se ignora si `deviceKey` es el propio.
+- **«＋ Agregar» con estado** (pedido aparte): `CallDTO.invited?: { userId, at, joined }[]` (tabla `call_rings`, migración 038). Cada `POST /calls/:id/invite` renueva `at` y vuelve a sonar (el push de llamada ya no se deduplica en un segundo intento). La web muestra el botón con texto «＋ Agregar» en la barra de la llamada, en la franja «En llamada en tu …» y en cada tarjeta de «En curso ahora»; en el panel, los invitados que no han entrado salen «Llamando…» y, a los 45 s, «No contestó» con «Volver a llamar».
+- **Cámara en plena llamada (web):** `toggleCamera` prende o apaga el recuadro local sin reconectar (`startVideoInput` + `startLocalVideoTile`; al apagar, `stopLocalVideoTile` y mi recuadro vuelve al avatar). Con al menos un video el panel pasa a cuadrícula con **todas** las personas: quien no tiene cámara se ve como avatar dentro de la cuadrícula. Cada persona lleva los indicadores de cámara apagada y micrófono silenciado (`realtimeSubscribeToVolumeIndicator`, `muted` por attendee; con varios dispositivos, silenciada si lo están todos).
+- **Audio (web):** botón 🔊 en la barra con «Salida de audio» (`listAudioOutputDevices` / `chooseAudioOutput`, solo donde existe `setSinkId`; si no, lo dice) y «Micrófono» (`listAudioInputDevices` / `startAudioInput`).
+- **Web, resto:** «Ahora no» llama a `POST /calls/:id/decline`; `call.answered` de otro dispositivo o `call.declined` cierran el aviso, el tono y la notificación del sistema. Franja fija «📞 En llamada en tu iPhone · {chat}» con Pasar aquí / Unirme también / ＋ Agregar. «En curso ahora» arriba del historial (`GET /calls/active`). Punto verde 📞 en la lista lateral (`calls[convId]`, que se llena con `/calls/active` tras el arranque y con `call.updated`).

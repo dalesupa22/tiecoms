@@ -1,4 +1,4 @@
-import { callsEnabled } from './calls.ts';
+import { callsEnabled, myActiveCall } from './calls.ts';
 import { mailEnabled } from './mailbox.ts';
 import { CONTRACT_VERSION, type BootstrapDTO, type ConversationDTO, type OrganizationDTO, type PersonDTO, type WorkspaceDTO } from '@tiecoms/contracts';
 import { pool } from '../db.ts';
@@ -153,7 +153,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
     ...(r.my_role ? { reactionActions: r.reaction_actions } : {}),
   }));
 
-  return { contract: CONTRACT_VERSION, serverTime: new Date().toISOString(), me, organizations, workspaces, conversations, people: personList, features: { calls: callsEnabled(), mail: mailEnabled() } };
+  return { contract: CONTRACT_VERSION, serverTime: new Date().toISOString(), me, organizations, workspaces, conversations, people: personList, features: { calls: callsEnabled(), mail: mailEnabled() }, myActiveCall: await myActiveCall(userId).catch(() => null) };
 }
 
 function legacyAttachmentPreview(list: { contentType: string; name: string }[]) {

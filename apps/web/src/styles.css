@@ -1331,7 +1331,7 @@ button.topic-tag:hover { filter: brightness(.96); }
 .compose-search.has-chips { flex-wrap: wrap; row-gap: 6px; }
 .compose-search .compose-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 3px; border-radius: 99px; background: var(--paper-2); border: 1px solid var(--line); font-size: 13px; }
 .compose-tip { padding: 2px 4px 6px; }
-.compose-check { width: 22px; height: 22px; border-radius: 99px; border: 1.5px solid var(--line); display: grid; place-items: center; flex: none; font-size: 12px; font-weight: 800; color: #fff; transition: background 0.12s, border-color 0.12s; }
+.compose-check { width: 22px; height: 22px; border-radius: 99px; border: 2px solid var(--faint); display: grid; place-items: center; flex: none; font-size: 12px; font-weight: 800; color: #fff; transition: background 0.12s, border-color 0.12s; }
 .compose-check.on { background: var(--accent); border-color: var(--accent); }
 .person-row.on { background: rgba(199, 58, 26, 0.06); }
 .person-row { cursor: pointer; }
@@ -1509,3 +1509,23 @@ mark { background: #f5e3b3; color: inherit; border-radius: 3px; padding: 0 1px; 
 .mail-browser.is-compact { max-height: none; }
 .mail-browser.is-compact .mail-list { max-height: min(46vh, 420px); }
 .mail-nudge { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin: 14px 0 4px; flex-wrap: wrap; }
+/* ---------- Llamadas 1.7.1 ---------- */
+.call-live-dot { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #2f9e5a; font-size: 10px; flex: none; box-shadow: 0 0 0 2px rgba(47, 158, 90, .25); }
+.call-other-device { position: fixed; top: calc(8px + var(--safe-t)); left: 50%; transform: translateX(-50%); z-index: 900; display: flex; align-items: center; gap: 8px;
+  width: min(640px, calc(100vw - 16px)); padding: 8px 10px; border-radius: 14px; background: #1f5f3a; color: #fff; box-shadow: 0 10px 28px rgba(0, 0, 0, .2); }
+.call-other-device .btn:not(.accent) { color: #fff; background: transparent; border-color: rgba(255, 255, 255, .45); }
+.call-add { white-space: nowrap; }
+.call-cell { position: relative; }
+.call-tile.is-avatar { display: grid; place-items: center; background: #2a2724; min-height: 120px; }
+.call-tile.is-avatar.is-speaking { box-shadow: 0 0 0 3px #2f9e5a inset; }
+.call-badges { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; }
+.call-person { position: relative; }
+.call-badge { display: inline-grid; place-items: center; min-width: 22px; height: 22px; border-radius: 11px; background: rgba(0, 0, 0, .55); color: #fff; font-size: 11px; padding: 0 4px; }
+.call-person .call-badge { position: absolute; top: 0; right: 0; }
+.call-invited { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; border-top: 1px solid rgba(255, 255, 255, .12); }
+.call-invited-row { display: flex; align-items: center; gap: 8px; }
+.call-ringing-text { color: #7fd6a0; animation: call-ringing 1.2s ease-in-out infinite; }
+@keyframes call-ringing { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .call-ringing-text { animation: none; } }
+.calls-live { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+.call-row.is-live { border-color: #2f9e5a; }

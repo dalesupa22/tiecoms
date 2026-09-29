@@ -106,14 +106,14 @@ fun fmtWhen(ev: CalendarEventDTO): String {
 
 private fun isUrl(s: String?) = s != null && Regex("^https?://", RegexOption.IGNORE_CASE).containsMatchIn(s.trim())
 
-private fun eventColors(d: BootstrapDTO, ev: CalendarEventDTO): Pair<Color, Color> {
+internal fun eventColors(d: BootstrapDTO, ev: CalendarEventDTO): Pair<Color, Color> {
     val ws = d.workspaces.firstOrNull { it.id == ev.workspaceId }
     // Empresa contraparte: la primera del espacio que no es la mía.
     val org = ws?.organizationIds?.firstOrNull { it != d.me.primaryOrgId }?.let { Names.org(d, it) } ?: Names.org(d, ws?.owningOrgId)
     return parseColor(org?.colorBg, Color(0xFFE0DACE)) to parseColor(org?.colorFg, Color(0xFF1B1917))
 }
 
-private fun rsvpIcon(r: String) = when (r) { "yes" -> "✓"; "no" -> "✕"; "maybe" -> "?"; else -> "·" }
+internal fun rsvpIcon(r: String) = when (r) { "yes" -> "✓"; "no" -> "✕"; "maybe" -> "?"; else -> "·" }
 fun rsvpLabel(ctx: android.content.Context, r: String) = ctx.getString(when (r) { "yes" -> R.string.cal_rsvp_yes; "no" -> R.string.cal_rsvp_no; "maybe" -> R.string.cal_rsvp_maybe; else -> R.string.cal_rsvp_pending })
 
 // ---------- Crear / editar ----------

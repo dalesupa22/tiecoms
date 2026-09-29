@@ -1191,6 +1191,8 @@ internal fun SystemRow(
     val chat = LocalChatColors.current
     // Una tarea nueva se ve como tarjeta completa, con sus comentarios y para comentar ahí mismo (docs/TEMAS.md).
     com.tiecoms.app.core.Topics.cardIssueId(m)?.let { iid -> IssueChatCard(iid, m.authorId, data, canPost, onOpenIssue); return }
+    // Un evento nuevo: tarjeta con fecha, «Unirse», quiénes van y responder ahí mismo.
+    com.tiecoms.app.core.EventCards.cardEventId(m)?.let { eid -> EventChatCard(eid, m.authorId, data, onOpenEvent); return }
     val p = systemPayload(m.body)
     // Los hilos no ensucian el chat: el aviso «se abrió un hilo» lo reemplaza el chip bajo su mensaje.
     if (p?.s("k") == "derived.from") return

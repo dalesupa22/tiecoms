@@ -44,4 +44,7 @@
     <string name="task_card_all">See all %1$d comments</string>
     <string name="topic_untagged_task">Task untagged</string>
     <string name="topic_remove_from_task">Remove the task topic</string>
+    <!-- Event card in the chat -->
+    <string name="ev_card">Event by %1$s</string>
+    <string name="ev_card_going">%1$d of %2$d going</string>
 </resources>

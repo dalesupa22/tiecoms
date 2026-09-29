@@ -35,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
@@ -120,9 +121,9 @@ fun IssueChatCard(issueId: String, creatorId: String, data: BootstrapDTO, canPos
     Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
         Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, shadowElevation = 1.dp,
             modifier = Modifier.widthIn(max = maxW).fillMaxWidth().testTag("taskCard-${i.id}")) {
-            Row(Modifier.height(IntrinsicSize.Min)) {
-                Box(Modifier.width(4.dp).fillMaxHeight().background(edge).testTag("taskCardEdge"))
-                Column(Modifier.padding(start = 10.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Borde izquierdo dibujado detrás (sin medidas intrínsecas: los FlowRow que saltan de línea se miden bien).
+            Row(Modifier.drawBehind { drawRect(edge, size = androidx.compose.ui.geometry.Size(4.dp.toPx(), size.height)) }) {
+                Column(Modifier.padding(start = 14.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("☑ " + stringResource(R.string.task_card, creator).uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))

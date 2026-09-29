@@ -44,4 +44,7 @@
     <string name="task_card_all">Ver los %1$d comentarios</string>
     <string name="topic_untagged_task">Tarea sin tema</string>
     <string name="topic_remove_from_task">Quitar el tema de la tarea</string>
+    <!-- Tarjeta del evento en el chat -->
+    <string name="ev_card">Evento de %1$s</string>
+    <string name="ev_card_going">%1$d de %2$d asistirán</string>
 </resources>

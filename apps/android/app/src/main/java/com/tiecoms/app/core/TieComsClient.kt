@@ -1058,6 +1058,24 @@ class TieComsClient(
         }
         Unit
     }
+    /** Sonido de un chat (docs/SONIDOS.md): null = mi predeterminado; "none" = sin sonido. */
+    suspend fun setConversationSound(id: String, sound: String?) = withContext(dispatcher) {
+        val before = meta(id)?.sound
+        patchMeta(id) { copy(sound = sound) }
+        try { req("PUT", "/conversations/$id/prefs", buildJsonObject { put("sound", sound?.let { JsonPrimitive(it) } ?: JsonNull) }, JsonElement.serializer()) }
+        catch (e: Exception) { patchMeta(id) { copy(sound = before) }; throw e }
+        Unit
+    }
+    /** Mi sonido predeterminado y mi tono de llamada (PUT /me/sounds). Solo se manda lo que cambia; null = el de fábrica. */
+    suspend fun setMySounds(messageSound: String? = UNCHANGED, ringtone: String? = UNCHANGED) = withContext(dispatcher) {
+        val body = buildJsonObject {
+            if (messageSound !== UNCHANGED) put("messageSound", messageSound?.let { JsonPrimitive(it) } ?: JsonNull)
+            if (ringtone !== UNCHANGED) put("ringtone", ringtone?.let { JsonPrimitive(it) } ?: JsonNull)
+        }
+        val r = req("PUT", "/me/sounds", body, MySounds.serializer())
+        setState { copy(data = data?.copy(me = data.me.copy(messageSound = r.messageSound, ringtone = r.ringtone))) }
+        r
+    }
     suspend fun setWorkspacePinned(id: String, pinned: Boolean) = withContext(dispatcher) {
         setState { copy(data = data?.copy(workspaces = data.workspaces.map { if (it.id == id) it.copy(pinnedAt = if (pinned) Instant.ofEpochMilli(now()).toString() else null) else it })) }
         req("PUT", "/workspaces/$id/prefs", buildJsonObject { put("pinned", JsonPrimitive(pinned)) }, JsonElement.serializer()); Unit

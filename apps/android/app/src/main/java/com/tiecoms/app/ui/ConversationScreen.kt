@@ -879,6 +879,8 @@ fun conversationMenu(ctx: android.content.Context, conv: ConversationDTO, data: 
         })
         // SPEC-silencio §2: 1 hora · 8 horas · 1 semana · Hasta que lo reactive, o «Reactivar notificaciones».
         add(muteMenuItem(ctx, conv))
+        // Sonido de este chat (docs/SONIDOS.md): Predeterminado · Sin sonido · los 10.
+        add(soundMenuItem(ctx, conv))
         add(remindMenu(ctx, conv, null, onRemindCustom))
         if (onMeeting != null && conv.canPost) add(SheetItem(ctx.getString(R.string.menu_meeting), "📅", onClick = onMeeting))
         add(null)

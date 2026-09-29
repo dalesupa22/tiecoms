@@ -71,6 +71,27 @@ class Notifier(private val context: Context) {
         ))
     }
 
+    /**
+     * Canal por sonido (Android fija el sonido en el canal, no en cada aviso): «Mensajes · Gota», etc.
+     * Se crea la primera vez que un chat lo usa; "none" es un canal sin sonido.
+     */
+    fun messageChannel(sound: String): String {
+        val id = com.tiecoms.app.core.Sounds.channelId(sound)
+        val nm = context.getSystemService(NotificationManager::class.java)
+        if (nm.getNotificationChannel(id) == null) {
+            val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+            val ch = NotificationChannel(id, context.getString(R.string.sound_channel, SoundFiles.label(context, sound)), NotificationManager.IMPORTANCE_HIGH).apply {
+                description = context.getString(R.string.notif_channel_messages_desc)
+                val res = SoundFiles.message(sound)
+                if (res != null) setSound(SoundFiles.uri(context, res), attrs) else setSound(null, null)
+                enableVibration(true); setShowBadge(true)
+                if (Build.VERSION.SDK_INT >= 29) setAllowBubbles(true)
+            }
+            runCatching { nm.createNotificationChannel(ch) }
+        }
+        return id
+    }
+
     fun enabled(): Boolean {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -114,6 +135,8 @@ class Notifier(private val context: Context) {
         openUri: String? = null,
         /** Nombre del atajo y de la burbuja («Empresa - Grupo»); por defecto el título. */
         shortcutLabel: String = title,
+        /** Sonido del chat ya resuelto (docs/SONIDOS.md): usa el canal de ese sonido; null = el canal «Mensajes» de siempre. */
+        sound: String? = null,
     ) {
         if (!enabled()) return
         val lines = history.getOrPut(conversationId) { ArrayDeque() }
@@ -149,7 +172,7 @@ class Notifier(private val context: Context) {
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY).setShowsUserInterface(false).setAllowGeneratedReplies(true).build()
         val read = NotificationCompat.Action.Builder(R.drawable.ic_stat_chaggu, context.getString(R.string.notif_mark_read), actionIntent(ACTION_MARK_READ, conversationId, mutable = false))
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ).setShowsUserInterface(false).build()
-        val n = NotificationCompat.Builder(context, CHANNEL_ID)
+        val n = NotificationCompat.Builder(context, sound?.let { messageChannel(it) } ?: CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_chaggu)
             .setColor(0xFFFF5A36.toInt())
             .setStyle(style)

@@ -40,6 +40,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.style.TextAlign
@@ -56,6 +63,11 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Forum
@@ -198,6 +210,56 @@ private fun AuthNav() {
  */
 private val TABS = listOf("home?ws={ws}", "dms", "issues", "agenda", "calls", "settings")
 
+private class BottomTab(val route: String, val label: Int, val badge: Int, val showLabel: Boolean = false, val icon: @Composable () -> Unit)
+
+/**
+ * Barra inferior solo con íconos de línea (Material outlined, como TAB_ICONS de la web): 5 o 6 pestañas caben en 360 dp.
+ * Cada pestaña dice su nombre completo a los lectores de pantalla; el indicador es una pastilla angosta y el
+ * globo de no leídos queda dentro de su propia celda.
+ */
+@Composable
+private fun BottomTabs(items: List<BottomTab>, selected: String?, onSelect: (String) -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth().testTag("tabs")) {
+        androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().navigationBarsPadding().height(60.dp).padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            items.forEach { t ->
+                val on = selected == t.route
+                val name = stringResource(t.label)
+                val badgeCd = if (t.badge > 0) " · " + t.badge else ""
+                Box(
+                    Modifier.weight(1f).fillMaxHeight()
+                        .androidx_selectable(on, name + badgeCd) { onSelect(t.route) }
+                        .testTag("tab-" + t.route.substringBefore('?')),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.foundation.layout.Row(
+                        Modifier.clearAndSetSemantics {}.background(if (on) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, androidx.compose.foundation.shape.RoundedCornerShape(50))
+                            .padding(horizontal = 14.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        val tint = if (on) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides tint) {
+                            if (t.badge > 0) BadgedBox(badge = { Badge(Modifier.offset(x = (-2).dp)) { Text(if (t.badge > 99) "99+" else t.badge.toString(), maxLines = 1) } }) { t.icon() } else t.icon()
+                            if (t.showLabel) {
+                                Spacer(Modifier.width(if (t.badge > 0) 10.dp else 6.dp))
+                                val d = androidx.compose.ui.platform.LocalDensity.current
+                                androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides
+                                    androidx.compose.ui.unit.Density(d.density, minOf(d.fontScale, com.tiecoms.app.core.TextSize.TAB_LABEL_MAX))) {
+                                    Text(name, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelLarge, fontWeight = if (on) androidx.compose.ui.text.font.FontWeight.SemiBold else null)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun Modifier.androidx_selectable(selected: Boolean, label: String, onClick: () -> Unit): Modifier =
+    this.selectable(selected = selected, role = androidx.compose.ui.semantics.Role.Tab, onClick = onClick)
+        .semantics { contentDescription = label }
+
 @Composable
 private fun MainNav() {
     val nav = rememberNavController()
@@ -284,21 +346,21 @@ private fun MainNav() {
     Box(Modifier.fillMaxSize()) {
     Scaffold(
         bottomBar = {
-            if (route in TABS) NavigationBar(modifier = Modifier.testTag("tabs")) {
+            if (route in TABS) {
                 val data = state.data
                 val now = System.currentTimeMillis()
                 val groupsBadge = data?.let { com.tiecoms.app.core.GroupsTree.groupsUnread(it, now) } ?: 0
                 val dmsBadge = data?.let { com.tiecoms.app.core.GroupsTree.dmsUnread(it, now) } ?: 0
-                data class Tab(val route: String, val label: Int, val badge: Int, val icon: @Composable () -> Unit)
-                val items = listOf(
-                    Tab("home?ws={ws}", R.string.nav_groups, groupsBadge) { Icon(Icons.Filled.Groups, null) },
-                    Tab("dms", R.string.nav_dms, dmsBadge) { Icon(Icons.Filled.Forum, null) },
-                    Tab("issues", R.string.nav_issues, 0) { Icon(Icons.Filled.CheckCircle, null) },
-                    Tab("agenda", R.string.nav_calendar, 0) { Icon(Icons.Filled.DateRange, null) },
+                // Solo íconos de línea, sin texto (pedido de Danny, 29-sep-2026): [label] es el nombre completo para lectores de pantalla.
+                val items = listOfNotNull(
+                    BottomTab("home?ws={ws}", R.string.nav_groups, groupsBadge) { Icon(Icons.Outlined.Group, null, Modifier.size(24.dp)) },
+                    BottomTab("dms", R.string.nav_dms, dmsBadge) { Icon(Icons.Outlined.Forum, null, Modifier.size(24.dp)) },
+                    BottomTab("issues", R.string.nav_issues, 0) { Icon(Icons.Outlined.Checklist, null, Modifier.size(24.dp)) },
+                    BottomTab("agenda", R.string.nav_agenda, 0) { Icon(Icons.Outlined.CalendarMonth, null, Modifier.size(24.dp)) },
                     // Llamadas (docs/LLAMADAS.md): sexto ícono, solo si el servidor las tiene prendidas.
-                    Tab("calls", R.string.nav_calls, 0) { Icon(Icons.Filled.Call, null) }.takeIf { data?.callsEnabled == true },
+                    BottomTab("calls", R.string.nav_calls, 0) { Icon(Icons.Outlined.Call, null, Modifier.size(24.dp)) }.takeIf { data?.callsEnabled == true },
                     // «Tú»: la foto de la persona como ícono (como el perfil de Instagram).
-                    Tab("settings", R.string.nav_you, 0) {
+                    BottomTab("settings", R.string.nav_you, 0) {
                         val me = data?.me
                         val org = com.tiecoms.app.core.Names.org(data, me?.primaryOrgId)
                         // «No molestar» activo: la lunita sobre la foto (SPEC-silencio §3).
@@ -310,24 +372,7 @@ private fun MainNav() {
                         }
                     },
                 )
-                items.filterNotNull().forEach { t ->
-                    NavigationBarItem(
-                        selected = route == t.route, onClick = { tab(if (t.route.startsWith("home")) "home" else t.route) },
-                        icon = {
-                            if (t.badge > 0) BadgedBox(badge = { Badge { Text(if (t.badge > 99) "99+" else t.badge.toString()) } }) { t.icon() } else t.icon()
-                        },
-                        // Con «Tamaño del texto» Máximo (o letra grande del sistema) «Calendario» no cabe: las etiquetas
-                        // de la barra crecen hasta 1,15× y no más, para que ninguna se corte.
-                        label = {
-                            val d = androidx.compose.ui.platform.LocalDensity.current
-                            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides
-                                androidx.compose.ui.unit.Density(d.density, minOf(d.fontScale, com.tiecoms.app.core.TextSize.TAB_LABEL_MAX))) {
-                                Text(stringResource(t.label), maxLines = 1, softWrap = false)
-                            }
-                        },
-                        modifier = Modifier.testTag("tab-" + t.route.substringBefore('?')),
-                    )
-                }
+                BottomTabs(items, selected = route) { r -> tab(if (r.startsWith("home")) "home" else r) }
             }
         },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),

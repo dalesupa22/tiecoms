@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sounds (docs/SONIDOS.md): one per chat, the default one and the ringtone. Same texts as the web. -->
+<resources>
+    <string name="sound_chat">Sound</string>
+    <string name="sound_default">Default</string>
+    <string name="sound_default_named">Default (%1$s)</string>
+    <string name="sound_none">No sound</string>
+    <string name="sound_set">Sound: %1$s</string>
+    <string name="sound_default_title">Default chat sound</string>
+    <string name="sound_default_hint">each chat can have its own (long-press › Sound)</string>
+    <string name="sound_n_pop">Pop</string>
+    <string name="sound_n_gota">Drop</string>
+    <string name="sound_n_campana">Bell</string>
+    <string name="sound_n_marimba">Marimba</string>
+    <string name="sound_n_burbuja">Bubble</string>
+    <string name="sound_n_cristal">Crystal</string>
+    <string name="sound_n_acorde">Chord</string>
+    <string name="sound_n_silbido">Whistle</string>
+    <string name="sound_n_tambor">Drum</string>
+    <string name="sound_n_brisa">Breeze</string>
+    <string name="ring_title">Ringtone</string>
+    <string name="ring_n_clasico">Classic</string>
+    <string name="ring_n_suave">Soft</string>
+    <string name="ring_n_marimba">Marimba</string>
+    <string name="sound_channel">Messages · %1$s</string>
+</resources>

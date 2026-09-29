@@ -47,6 +47,10 @@ data class UserDTO(
     val dndUntil: String? = null,
     /** Solo en bootstrap.me: mi «No molestar todas las noches»; ausente = servidor anterior. */
     val sleep: SleepDTO? = null,
+    /** Sonido predeterminado de mis chats (docs/SONIDOS.md): uno de [Sounds.MESSAGE] o "none"; null = el de fábrica (pop). */
+    val messageSound: String? = null,
+    /** Mi tono de llamada ([Sounds.RINGTONES]); null = el de fábrica (clasico). */
+    val ringtone: String? = null,
 )
 
 /** Modo sueño: todas las noches, de [start] a [end] (HH:MM en [tz]), no suena nada. */
@@ -163,6 +167,8 @@ data class ConversationDTO(
     val adminIds: List<String>? = null,
     /** Quién creó el grupo: no se le quita el admin ni se le saca. null = servidor viejo o directo. */
     val createdBy: String? = null,
+    /** Sonido de este chat (docs/SONIDOS.md): uno de [Sounds.MESSAGE] o "none"; null = mi predeterminado. */
+    val sound: String? = null,
 ) {
     /** Directos y chats grupales van juntos en la lista: no pertenecen a un espacio. */
     val isChat: Boolean get() = kind == "direct" || kind == "multi"

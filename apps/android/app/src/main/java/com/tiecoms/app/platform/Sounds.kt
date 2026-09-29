@@ -25,6 +25,9 @@ class SoundPlayer(context: Context, private val settings: AppSettings) {
         ).build()
     private val loaded = HashSet<Int>()
     private val ids: Map<Sound, Int>
+    /** Sonidos por chat (docs/SONIDOS.md): res/raw → id de SoundPool, precargados (son de pocos KB). */
+    private val chatIds = HashMap<Int, Int>()
+    private val ctx = context.applicationContext
 
     init {
         pool.setOnLoadCompleteListener { _, id, status -> if (status == 0) synchronized(loaded) { loaded += id } }
@@ -34,6 +37,28 @@ class SoundPlayer(context: Context, private val settings: AppSettings) {
             Sound.NOTIFY to pool.load(context, R.raw.tc_notify, 1),
             Sound.SPLASH to pool.load(context, R.raw.tc_splash, 1),
         )
+        (com.tiecoms.app.core.Sounds.MESSAGE).forEach { s ->
+            listOf(false, true).forEach { m -> SoundFiles.message(s, m)?.let { res -> chatIds[res] = pool.load(context, res, 1) } }
+        }
+    }
+
+    /**
+     * Sonido de mensaje del chat ([sound] ya resuelto con Sounds.effective). "none" no suena; la mención, una quinta más aguda.
+     * [force] (vista previa al elegir) ignora el interruptor de Ajustes y el modo silencio.
+     */
+    fun playMessage(sound: String, mention: Boolean = false, force: Boolean = false) {
+        if (!force && (!settings.soundsEnabled || audio.ringerMode != AudioManager.RINGER_MODE_NORMAL)) return
+        val res = SoundFiles.message(sound, mention) ?: return
+        val id = chatIds[res] ?: return
+        if (synchronized(loaded) { id !in loaded }) return
+        pool.play(id, 0.9f, 0.9f, 1, 0, 1f)
+    }
+
+    private var preview: android.media.MediaPlayer? = null
+    /** Vista previa de un tono de llamada (un ciclo). */
+    fun previewRingtone(name: String) {
+        runCatching { preview?.release() }
+        preview = runCatching { android.media.MediaPlayer.create(ctx, SoundFiles.ring(name))?.apply { setOnCompletionListener { it.release(); if (preview === it) preview = null }; start() } }.getOrNull()
     }
 
     fun play(sound: Sound) {

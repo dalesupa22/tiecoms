@@ -265,7 +265,9 @@ class AppContainer(private val app: Application) {
                 // El servidor manda «Empresa - Grupo» en title; el atajo usa la misma etiqueta local si ya hay snapshot.
                 notifier.showConversation(p.conversationId, p.title, isGroup, p.authorId?.takeIf { it.isNotBlank() } ?: author, author, p.body,
                     cachedPushAvatar(p.authorAvatarUrl), silent = !settings.soundsEnabled, badge = p.badge, messageId = p.messageId,
-                    shortcutLabel = if (isGroup) conversationName(p.conversationId).ifBlank { p.title } else p.title)
+                    shortcutLabel = if (isGroup) conversationName(p.conversationId).ifBlank { p.title } else p.title,
+                    // Sonido del chat si ya hay snapshot (el push remoto todavía no trae el nombre: docs/SONIDOS.md › pendiente).
+                    sound = conv?.let { com.tiecoms.app.core.Sounds.effective(it.sound, c.state.value.data?.me?.messageSound) })
             }
             // «Laura reaccionó 👍» (TC_MESSAGE, collapseId react-<id>): tocar abre la conversación en ese mensaje.
             // «Laura te asignó una tarea»: tocar abre el asunto (y antes el chat, si lo puedo leer).
@@ -404,8 +406,11 @@ class AppContainer(private val app: Application) {
             is ClientSignal.Incoming -> {
                 val m = sig.message
                 val fg = foreground
+                // Sonido del chat (docs/SONIDOS.md): el del chat, si no mi predeterminado; la mención, más aguda.
+                val chatSound = com.tiecoms.app.core.Sounds.effective(client.value.meta(m.conversationId)?.sound, client.value.state.value.data?.me?.messageSound)
+                val mentionedMe = com.tiecoms.app.core.Mentions.mentionsMe(m, client.value.state.value.data?.me?.id)
                 if (fg && openConversationId == m.conversationId) { sounds.play(Sound.RECEIVE); return }
-                if (fg) sounds.play(Sound.NOTIFY)
+                if (fg) sounds.playMessage(chatSound, mentionedMe)
                 if (!notifier.firstTime(m.id)) return // ya llegó por push
                 val c = client.value
                 val data = c.state.value.data
@@ -427,7 +432,7 @@ class AppContainer(private val app: Application) {
                     val icon = loadAvatar(author?.avatarUrl)
                     notifier.showConversation(m.conversationId, chatTitle, isGroup || side != null,
                         m.authorId ?: "?", authorName, m.body.take(300), icon, silent = fg || !settings.soundsEnabled, badge = c.badge(), messageId = m.id, seq = m.seq, openUri = open,
-                        shortcutLabel = if (isGroup && side == null) conversationName(m.conversationId) else chatTitle)
+                        shortcutLabel = if (isGroup && side == null) conversationName(m.conversationId) else chatTitle, sound = chatSound)
                 }
             }
             is ClientSignal.ReminderDue -> {

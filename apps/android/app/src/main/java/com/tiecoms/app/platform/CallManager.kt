@@ -3,7 +3,6 @@ package com.tiecoms.app.platform
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
-import android.media.RingtoneManager
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -104,7 +103,7 @@ class CallManager(private val app: Application, private val container: AppContai
     private var beat: Job? = null
     private var flushJob: Job? = null
     private var ringJob: Job? = null
-    private var ringtone: android.media.Ringtone? = null
+    private var ringtone: android.media.MediaPlayer? = null
     private val outbox = TranscriptOutbox()
     private val attendees = java.util.concurrent.ConcurrentHashMap<String, String>()
     @Volatile private var leaving = false
@@ -305,15 +304,21 @@ class CallManager(private val app: Application, private val container: AppContai
         if (r != null) CallService.cancelIncoming(app, r.call.id)
     }
 
+    /** Mi tono de llamada (docs/SONIDOS.md) en bucle: un ciclo de 2,2 s repetido. No depende del interruptor de sonidos de mensaje. */
     private fun startRingtone() {
-        if (!container.settings.soundsEnabled) return
-        runCatching {
-            stopRingtone()
-            val uri = RingtoneManager.getActualDefaultRingtoneUri(app, RingtoneManager.TYPE_RINGTONE) ?: return
-            ringtone = RingtoneManager.getRingtone(app, uri)?.apply { if (Build.VERSION.SDK_INT >= 28) isLooping = true; play() }
-        }
+        stopRingtone()
+        val name = client.state.value.data?.me?.ringtone
+        ringtone = runCatching {
+            android.media.MediaPlayer().apply {
+                setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+                app.resources.openRawResourceFd(SoundFiles.ring(name)).use { fd -> setDataSource(fd.fileDescriptor, fd.startOffset, fd.length) }
+                isLooping = true
+                prepare(); start()
+            }
+        }.getOrNull()
     }
-    private fun stopRingtone() { runCatching { ringtone?.stop() }; ringtone = null }
+    private fun stopRingtone() { runCatching { ringtone?.stop(); ringtone?.release() }; ringtone = null }
 
     // ---------- Observadores del SDK ----------
     private val avObserver = object : AudioVideoObserver {

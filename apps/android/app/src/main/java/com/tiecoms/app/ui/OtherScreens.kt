@@ -181,7 +181,7 @@ fun DetailsScreen(
                 }
             }
             // SPEC-silencio §2: interruptor «Silenciar» con el tiempo restante.
-            item(key = "mute") { HorizontalDivider(); MuteSwitchRow(meta); HorizontalDivider(); Spacer(Modifier.height(8.dp)) }
+            item(key = "mute") { HorizontalDivider(); MuteSwitchRow(meta); HorizontalDivider(); ChatSoundRow(meta); HorizontalDivider(); Spacer(Modifier.height(8.dp)) }
             if (canWork) {
                 item {
                     Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -427,6 +427,9 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
                 Spacer(Modifier.width(12.dp))
                 Switch(checked = sounds, onCheckedChange = null)
             }
+            HorizontalDivider()
+            // Sonido predeterminado de los chats y tono de llamada (docs/SONIDOS.md), guardados en el servidor.
+            SoundSettingsRows()
             HorizontalDivider()
             Column(
                 Modifier.fillMaxWidth().clickable {

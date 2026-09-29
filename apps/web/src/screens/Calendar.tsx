@@ -418,3 +418,57 @@ export function TodayAgenda() {
     </section>
   );
 }
+
+/**
+ * Tarjeta del evento dentro del chat (reemplaza el aviso «Agendó…»): fecha y hora, enlace para unirse,
+ * quiénes van y los botones para responder ahí mismo.
+ */
+export function EventChatCard({ eventId, creatorId }: { eventId: string; creatorId: string }) {
+  const d = useClient((s) => s.data)!;
+  const ev = useClient((s) => s.events[eventId]);
+  const [missing, setMissing] = useState(false);
+  useEffect(() => {
+    if (ev) return;
+    client.request<CalendarEventDTO>(`/events/${eventId}`).then((e) => client.loadEvents(new Date(Date.parse(e.startsAt) - 1), new Date(Date.parse(e.endsAt) + 1), e.conversationId)).catch(() => setMissing(true));
+  }, [eventId, !!ev]);
+  if (!ev) return missing ? null : <div className="card event-card is-loading" aria-busy>…</div>;
+  const c = eventColors(d, ev);
+  const creator = personById(d, creatorId);
+  const mine = ev.invitees.find((i) => i.userId === d.me.id);
+  const past = Date.parse(ev.endsAt) < Date.now();
+  const start = new Date(ev.startsAt);
+  const day = start.toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long' });
+  const time = allDay(ev) ? t('cal.allDay') : `${fmtTime(ev.startsAt)} – ${fmtTime(ev.endsAt)}`;
+  const going = ev.invitees.filter((i) => i.rsvp === 'yes').length;
+  const answer = (r: Exclude<Rsvp, 'pending'>) => void client.rsvp(ev.id, r).catch((e) => toast(errorText(e)));
+  return (
+    <div className={`card event-card ${ev.cancelledAt ? 'is-cancelled' : ''} ${past ? 'is-past' : ''}`} style={{ borderLeftColor: c.fg }} onContextMenu={contextHandler(() => eventMenu(ev))}>
+      <div className="event-card-kind">📅 {t('cal.card', { name: creator?.name.split(' ')[0] ?? '' })}{ev.cancelledAt ? ` · ${t('cal.cancelled')}` : ''}</div>
+      <div className="event-card-main">
+        <div className="event-card-date" style={{ background: c.bg, color: c.fg }}>
+          <span>{start.toLocaleDateString(locale(), { month: 'short' }).replace('.', '')}</span><b>{start.getDate()}</b>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <button className="event-card-title" onClick={() => openEvent(ev.id)}>{ev.title}</button>
+          <div className="small muted">{day} · {time}</div>
+        </div>
+      </div>
+      {ev.location && (isMeetingUrl(ev.location)
+        ? <a className="btn small primary event-card-join" href={ev.location} target="_blank" rel="noreferrer">📹 {t('cal.join')}</a>
+        : <div className="small">📍 {ev.location}</div>)}
+      <div className="event-card-people">
+        <span className="stack" style={{ width: 20 + Math.max(0, Math.min(ev.invitees.length, 5) - 1) * 12, height: 22 }}>
+          {ev.invitees.slice(0, 5).map((i, k) => <span key={i.userId} style={{ left: k * 12, zIndex: 5 - k }} title={`${personById(d, i.userId)?.name ?? ''} · ${t(`cal.rsvp.${i.rsvp}`)}`}><Avatar person={personById(d, i.userId)} org={null} size={22} /></span>)}
+        </span>
+        <span className="small muted">{t('cal.cardGoing', { n: going, total: ev.invitees.length })}</span>
+      </div>
+      {mine && !ev.cancelledAt && !past && (
+        <div className="event-card-rsvp">
+          {(['yes', 'maybe', 'no'] as const).map((r) => (
+            <button key={r} className={`btn small ${mine.rsvp === r ? 'is-on' : 'ghost'}`} onClick={() => answer(r)}>{RSVP_ICON[r]} {t(`cal.rsvp.${r}`)}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

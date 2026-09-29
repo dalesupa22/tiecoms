@@ -17,7 +17,7 @@ import { VoiceRecorder } from './Voice.tsx';
 import { MentionMirror, MessageText, backspaceToken, mentionsFor, mentionsMe, useMentionPicker, type MentionToken } from './Mentions.tsx';
 import { QuickReplies, SideChip, SideConnector, SideDialog, replyPrivately, sidesOf, takePrivateDraft } from './Side.tsx';
 import { BringDialog } from './Bring.tsx';
-import { ConversationAgenda, newEvent, openEvent } from './Calendar.tsx';
+import { ConversationAgenda, EventChatCard, newEvent, openEvent } from './Calendar.tsx';
 import { SleepNotice } from './Sleep.tsx';
 import { DerivedPendingStrip } from './Pending.tsx';
 import { MeetingDialog } from './Meetings.tsx';
@@ -844,6 +844,10 @@ function SystemRow({ m, onIssue, canPost }: { m: MessageDTO; onIssue: (id: strin
   let p: any = null;
   try { p = m.body.startsWith('{') ? JSON.parse(m.body) : null; } catch {}
   // Una tarea nueva se ve como tarjeta completa, con sus comentarios y para comentar ahí mismo.
+  // Igual con un evento nuevo: tarjeta con fecha, enlace para unirse y respuesta ahí mismo.
+  if (p?.k === 'event.created' && p.eventId) return (
+    <div id={`msg-${m.conversationId}-${m.seq}`} className="msg-card-row"><EventChatCard eventId={p.eventId} creatorId={m.authorId} /></div>
+  );
   if (p?.k === 'issue.created' && p.issueId && !p.parentIssueId) return (
     <div id={`msg-${m.conversationId}-${m.seq}`} className="msg-card-row"><IssueChatCard issueId={p.issueId} creatorId={m.authorId} canPost={canPost} onOpen={onIssue} /></div>
   );

@@ -1224,3 +1224,23 @@ button.topic-tag:hover { filter: brightness(.96); }
 /* «Hay una versión nueva» (docs/ACTUALIZAR.md): fija arriba hasta recargar. */
 .update-bar { position: fixed; left: 50%; top: calc(10px + var(--safe-t)); transform: translateX(-50%); z-index: 90; display: flex; align-items: center; gap: 10px; width: min(460px, calc(100% - 24px)); padding: 10px 12px 10px 14px; border-radius: 14px; background: var(--ink); color: #fff; font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
 .update-bar .btn.primary { background: var(--orange); border-color: var(--orange); color: #fff; }
+
+/* Tarjeta del evento en el chat. */
+.event-card { max-width: 520px; padding: 12px 14px; border-left: 4px solid var(--accent); display: flex; flex-direction: column; gap: 10px; }
+.event-card.is-cancelled { opacity: .6; }
+.event-card.is-cancelled .event-card-title { text-decoration: line-through; }
+.event-card.is-past { opacity: .8; }
+.event-card.is-loading { min-height: 64px; color: var(--faint); }
+.event-card-kind { font-size: 11.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.event-card-main { display: flex; gap: 12px; align-items: center; }
+.event-card-date { flex: none; width: 46px; height: 50px; border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.05; }
+.event-card-date span { font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.event-card-date b { font-size: 20px; }
+.event-card-title { border: 0; background: none; padding: 0; font: inherit; font-size: 15.5px; font-weight: 700; color: var(--ink); text-align: left; cursor: pointer; }
+.event-card-title:hover { text-decoration: underline; }
+.event-card-join { align-self: flex-start; text-decoration: none; }
+.event-card-people { display: flex; align-items: center; gap: 8px; }
+.event-card-people .stack { position: relative; display: inline-block; }
+.event-card-people .stack > span { position: absolute; top: 0; }
+.event-card-rsvp { display: flex; gap: 6px; flex-wrap: wrap; }
+.event-card-rsvp .btn.is-on { background: var(--ink); color: #fff; border-color: var(--ink); }

@@ -1660,6 +1660,7 @@
 "task.card" = "Tarea de {name}";
 "task.cardAll" = "Ver los {n} comentarios";
 "task.cardComment" = "Comenta esta tarea…";
+"task.commentingOn" = "Comentario para la tarea";
 "task.dialogTitle" = "Subtareas de «{title}»";
 "task.evVis" = "cambió quién la ve";
 "task.hint" = "Divide la tarea en subtareas para cada persona. Puedes hacer que solo tu empresa las vea.";
@@ -1796,6 +1797,9 @@
 "tree.title" = "Sin leer en este grupo";
 "tree.titleChat" = "Sin leer en este chat";
 "tree.view" = "Ver";
+"update.action" = "Actualizar";
+"update.available" = "Actualización disponible";
+"update.blocked" = "Esta versión ya no funciona. Actualiza chaggu para seguir.";
 "voice.cancelled" = "Nota descartada";
 "voice.copied" = "Transcripción copiada";
 "voice.copy" = "Copiar transcripción";

@@ -1660,6 +1660,7 @@
 "task.card" = "Task by {name}";
 "task.cardAll" = "See all {n} comments";
 "task.cardComment" = "Comment on this task…";
+"task.commentingOn" = "Comment on the task";
 "task.dialogTitle" = "Subtasks of “{title}”";
 "task.evVis" = "changed who can see it";
 "task.hint" = "Split the task into subtasks for each person. You can make them visible only to your company.";
@@ -1796,6 +1797,9 @@
 "tree.title" = "Unread in this group";
 "tree.titleChat" = "Unread in this chat";
 "tree.view" = "View";
+"update.action" = "Update";
+"update.available" = "Update available";
+"update.blocked" = "This version no longer works. Update chaggu to continue.";
 "voice.cancelled" = "Note discarded";
 "voice.copied" = "Transcript copied";
 "voice.copy" = "Copy transcript";

@@ -2,14 +2,20 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppStore.self) private var store
+    @Environment(AppUpdateChecker.self) private var updates
     /// Splash solo en arranque en frío (este estado vive mientras viva el proceso).
     @State private var showSplash = !AppConfig.launchFlag("TCNoSplash")
     @State private var splashSeconds: Double?
 
     var body: some View {
         @Bindable var store = store
+        let update = updates.state
         ZStack(alignment: .topLeading) {
-            content
+            // La franja va en la misma columna que el contenido: lo empuja hacia abajo (no tapa cabecera ni chat).
+            VStack(spacing: 0) {
+                if case .available(let info) = update { UpdateBanner(info: info) { updates.openUpdate() } }
+                content
+            }
             // Solo pruebas de interfaz (-TCMetrics YES): duración real del splash.
             if AppConfig.launchFlag("TCMetrics"), let s = splashSeconds {
                 Text("\(Int(s * 1000))").font(.system(size: 2)).opacity(0.05)
@@ -22,6 +28,9 @@ struct RootView: View {
                 }
                 .transition(.opacity)
                 .zIndex(1)
+            }
+            if case .blocked(let info) = update {
+                UpdateBlockedView(info: info) { updates.openUpdate() }.zIndex(2)
             }
         }
     }

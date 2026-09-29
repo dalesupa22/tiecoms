@@ -10,9 +10,20 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Bundle ID | `com.chaggu.app` (app) · `com.chaggu.app.share` (Compartir) · `com.chaggu.app.notifications` (Notification Service Extension) · pruebas `com.chaggu.app.tests` / `com.chaggu.app.uitests` |
 | Team | `B76US7H3L3` (CERTILABOR SAS), firma automática |
 | App Group | `group.com.chaggu.app`: Keychain compartido (servicio `com.chaggu.app.session`) y lista de conversaciones para la extensión |
-| Versión | 1.6.6 (build 23), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
+| Versión | 1.6.7 (build 24), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.chaggu.com` por defecto (web: `https://www.chaggu.com`); `-TCApiURL <url>` al lanzar (pruebas) |
+
+## 1.6.7 (24): temas, tarjeta de tarea y «Actualización disponible»
+
+- **Temas del chat** (docs/TEMAS.md; `Core/Topics.swift`, `UI/TopicViews.swift`) y **tarjeta de tarea** en el chat
+  (`UI/IssueChatCard.swift`). En la interfaz los asuntos se llaman **tareas** y sus tareas, **subtareas**.
+- **Actualización disponible** (`Core/AppUpdate.swift`, `UI/UpdateViews.swift`): `GET /api/v1/app-version?platform=ios&lang=`
+  (público) al abrir y al volver al frente, una petición a la vez. Build < `latestBuild`: franja fija arriba con «Actualizar»
+  (TestFlight: `itms-beta://`; si no, la `url` de la tienda). Build < `minBuild`: pantalla que bloquea. En Debug,
+  `-TCBuildOverride <n>` simula otro build. Pruebas: `AppUpdateTests`, `UpdateUITests`.
+- El chat usa una VStack (y la LazyVStack solo con más de 200 filas): con la perezosa, abrir el teclado con una tarjeta
+  alta en pantalla congelaba la app.
 
 ## Tanda 1.6.6: lectura, asuntos personales, reuniones y calendario
 

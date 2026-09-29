@@ -48,9 +48,9 @@ struct IssueChatCard: View {
     let issueId: String
     let creatorId: String
     let canPost: Bool
+    /// «Comenta esta tarea…»: el compositor del chat pasa a comentar esta tarea.
+    var onComment: ((IssueDTO) -> Void)? = nil
     @State private var missing = false
-    @State private var text = ""
-    @State private var busy = false
 
     var body: some View {
         Group {
@@ -137,21 +137,22 @@ struct IssueChatCard: View {
                 }
             }
             // Comentar ahí mismo; no aparece si la tarea está cerrada.
-            if canPost && !closed {
-                HStack(spacing: 6) {
-                    // UITextField y no TextField: un TextField de SwiftUI dentro de la LazyVStack del chat dejaba la lista
-                    // reubicándose sin fin al abrir el teclado del compositor (igual que el compositor, que es UIKit).
-                    CardTextField(text: $text, placeholder: L("task.cardComment"), identifier: "taskCard.comment.\(i.id)", onSubmit: send)
-                        .frame(height: 34)
-                        .padding(.horizontal, 10)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.background))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.textSecondary.opacity(0.25)))
-                    Button(L("issue.comment"), action: send)
-                        .font(.footnote.weight(.semibold))
-                        .buttonStyle(.bordered)
-                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
-                        .accessibilityIdentifier("taskCard.send.\(i.id)")
+            if canPost && !closed && onComment != nil {
+                // Un campo de texto dentro de la LazyVStack del chat la dejaba reubicándose sin fin al abrir el teclado
+                // (SwiftUI o UIKit): tocar aquí pasa el compositor del chat a «comentar esta tarea» (onComment).
+                Button { onComment?(i) } label: {
+                    HStack(spacing: 6) {
+                        Text(L("task.cardComment")).font(.footnote).foregroundStyle(Theme.textSecondary.opacity(0.8))
+                        Spacer(minLength: 4)
+                        Text(L("issue.comment")).font(.footnote.weight(.semibold)).foregroundStyle(Theme.accentText)
+                    }
+                    .padding(.horizontal, 10).frame(height: 34)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Theme.background))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.textSecondary.opacity(0.25)))
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("taskCard.comment.\(i.id)")
             }
         }
         .padding(.leading, 14).padding(.trailing, 12).padding(.vertical, 12)
@@ -164,22 +165,6 @@ struct IssueChatCard: View {
         .contextMenu { IssueStatusMenu(issue: i) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("msg.taskCard.\(i.id)")
-    }
-
-    private func send() {
-        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty, !busy else { return }
-        busy = true
-        Task {
-            defer { busy = false }
-            do {
-                try await store.commentIssue(issueId, body: body)
-                text = ""
-                // Sin @FocusState en filas de la LazyVStack (con el teclado del compositor la lista no dejaba de reubicarse).
-                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                await loadComments(force: true)
-            } catch { store.show(L10n.errorText(error)) }
-        }
     }
 }
 
@@ -216,42 +201,5 @@ struct IssueTopicTag: View {
                 }
             } catch { store.show(L10n.errorText(error)) }
         }
-    }
-}
-
-/// Campo de una línea en UIKit para comentar desde la tarjeta (Enviar con la tecla de retorno).
-struct CardTextField: UIViewRepresentable {
-    @Binding var text: String
-    var placeholder: String
-    var identifier: String
-    var onSubmit: () -> Void
-
-    func makeUIView(context: Context) -> UITextField {
-        let f = UITextField()
-        f.placeholder = placeholder
-        f.font = .preferredFont(forTextStyle: .footnote)
-        f.adjustsFontForContentSizeCategory = true
-        f.returnKeyType = .send
-        f.accessibilityIdentifier = identifier
-        f.delegate = context.coordinator
-        f.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .editingChanged)
-        f.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        f.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return f
-    }
-
-    func updateUIView(_ f: UITextField, context: Context) {
-        context.coordinator.parent = self
-        if f.text != text { f.text = text }
-        f.placeholder = placeholder
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    final class Coordinator: NSObject, UITextFieldDelegate {
-        var parent: CardTextField
-        init(_ p: CardTextField) { parent = p }
-        @objc func changed(_ f: UITextField) { parent.text = f.text ?? "" }
-        func textFieldShouldReturn(_ f: UITextField) -> Bool { parent.onSubmit(); return false }
     }
 }

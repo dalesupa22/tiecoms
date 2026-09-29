@@ -125,12 +125,15 @@ final class TemasUITests: XCTestCase {
         app.buttons["topic.flag.\(f.topicName)"].tap()
         let untag = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "taskCard.untag.")).firstMatch
         XCTAssertTrue(untag.waitForExistence(timeout: 10), "la tarjeta de la tarea del tema se ve filtrada, con su ✕")
-        let field = app.textFields.matching(NSPredicate(format: "identifier BEGINSWITH %@", "taskCard.comment.")).firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 5), "campo «Comenta esta tarea…»")
+        // «Comenta esta tarea…» pasa el compositor del chat a comentar la tarea.
+        let commentButton = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "taskCard.comment.")).firstMatch
+        XCTAssertTrue(commentButton.waitForExistence(timeout: 5), "«Comenta esta tarea…»")
+        commentButton.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["composer.taskCommentBar"].waitForExistence(timeout: 5), "barra «Comentario para la tarea»")
         let text = "Comentario iOS \(Int(Date().timeIntervalSince1970) % 10000)"
-        field.tap()
+        let field = app.descendants(matching: .any)["composer.field"]
         field.typeText(text)
-        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "taskCard.send.")).firstMatch.tap()
+        app.buttons["composer.send"].tap()
         let comment = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
         XCTAssertTrue(comment.waitForExistence(timeout: 10), "el comentario aparece en la tarjeta")
         sleep(1)

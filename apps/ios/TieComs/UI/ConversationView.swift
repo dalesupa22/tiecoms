@@ -114,11 +114,16 @@ struct ConversationView: View {
     @State private var askSide: MessageDTO?
     @State private var replyTo: MessageDTO?
     @State private var editing: MessageDTO?
+    /// «Comenta esta tarea…» desde su tarjeta: lo que se escribe va como comentario de la tarea (no al chat).
+    @State private var commentingIssue: IssueDTO?
     @State private var sheet: ChatSheet?
     @State private var confirmDelete: MessageDTO?
     /// Banderita elegida: filtra el chat y es el tema de lo que escribo (nil = «Todo»).
     @State private var topicFilter: String?
     @State private var confirmRemoveTopic: TopicDTO?
+    /// Borde inferior del contenido en la vista (para detectar el hueco en blanco al final, ver ChatContentBottomKey).
+    @State private var contentBottom: CGFloat = 0
+    @State private var gapFix: Task<Void, Never>?
     @State private var blockUserId: String?
     @State private var recorder = VoiceRecorder()
     @State private var pendingVoice: PendingVoiceSend?
@@ -456,10 +461,11 @@ struct ConversationView: View {
     @ViewBuilder
     private func messages(_ d: BootstrapDTO, _ c: ConversationDTO, _ state: ConversationState) -> some View {
         let items = buildItems(state, pending: store.pendingFor(conversationId))
+        let lazyRows = items.count > ChatStackRule.lazyAbove
         let byId = Dictionary(state.messages.filter { !store.blockedUserIds.contains($0.authorId) }.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 4) {
+                ChatStack(lazy: lazyRows) {
                     if state.hasMore {
                         ProgressView()
                             .padding(8)
@@ -515,6 +521,16 @@ struct ConversationView: View {
                 if positioned { markReadIfVisible() }
             }
             .onPreferenceChange(ChatContentBottomKey.self) { maxY in
+                contentBottom = maxY
+                // La LazyVStack re-estima el alto de filas que aún no ha dibujado (tarjetas de tarea): tras ubicar el chat
+                // podía quedar pasada del final, con la pantalla en blanco. Si el hueco sigue un momento después, al final.
+                if positioned, viewportHeight > 0, maxY < viewportHeight - 80, gapFix == nil {
+                    gapFix = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 350_000_000)
+                        if !Task.isCancelled, contentBottom < viewportHeight - 80 { proxy.scrollTo(ChatNavIds.bottom, anchor: .bottom) }
+                        gapFix = nil
+                    }
+                }
                 let far = ChatNav.showsJumpToLatest(distanceFromBottom: maxY - viewportHeight, viewport: viewportHeight)
                 if far != farFromBottom { farFromBottom = far }
                 let bottom = viewportHeight > 0 && maxY - viewportHeight < 40
@@ -656,6 +672,7 @@ struct ConversationView: View {
             return L("side.placeholder", ["name": name.split(separator: " ").first.map(String.init) ?? name])
         }
         if Naming.isSide(c) { return L("side.placeholderMany") }
+        if commentingIssue != nil { return L("task.cardComment") }
         if let t = activeTopic { return L("topic.placeholder", ["name": t.name]) }
         return L("chat.placeholder", ["name": Naming.title(d, c)])
     }
@@ -814,7 +831,9 @@ struct ConversationView: View {
         case .system(let m):
             // Una tarea nueva se ve como tarjeta completa (docs/TEMAS.md), no como la línea «Creó la tarea…».
             if let issueId = TaskCard.issueId(m) {
-                IssueChatCard(issueId: issueId, creatorId: m.authorId, canPost: c.canPost)
+                IssueChatCard(issueId: issueId, creatorId: m.authorId, canPost: c.canPost) { i in
+                    commentingIssue = i; replyTo = nil; editing = nil; composerFocused = true
+                }
             } else {
                 SystemRow(message: m)
             }
@@ -1085,6 +1104,10 @@ struct ConversationView: View {
                            detail: excerpt(r.body, 100), cancelLabel: L("reply.cancel")) { replyTo = nil }
                     .accessibilityIdentifier("composer.replyBar")
             }
+            if let ci = commentingIssue {
+                ContextBar(icon: "text.bubble", title: L("task.commentingOn"), detail: ci.title, cancelLabel: L("common.cancel")) { commentingIssue = nil }
+                    .accessibilityIdentifier("composer.taskCommentBar")
+            }
             if let e = editing {
                 ContextBar(icon: "pencil", title: L("menu.edit"), detail: excerpt(e.body, 100), cancelLabel: L("common.cancel")) {
                     editing = nil; draft = ""; draftMentions = []
@@ -1128,7 +1151,7 @@ struct ConversationView: View {
                     VoiceRecordingBar(recorder: recorder, onSend: sendVoice, onDiscard: { store.show(L("voice.cancelled")) }, onError: { store.show($0) })
                 } else {
                 // «＋»: fotos, archivos y, aparte, evento o asunto del chat.
-                if editing == nil {
+                if editing == nil && commentingIssue == nil {
                     AttachButton(staged: $staged, onEvent: embedded ? nil : { sheet = .newEvent(nil) },
                                  onIssue: embedded || !canOpenIssues ? nil : { sheet = .newIssue(nil) },
                                  onMeeting: embedded ? nil : { now in sheet = .meeting(now: now) }) { store.show($0) }
@@ -1147,7 +1170,7 @@ struct ConversationView: View {
                     .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.textSecondary.opacity(0.25)))
                 }
                 // Compositor vacío: micrófono (mantener pulsado para grabar). Con texto o adjuntos: enviar.
-                if editing == nil && trimmed.isEmpty && staged.isEmpty && !uploading && recorder.state != .locked {
+                if editing == nil && commentingIssue == nil && trimmed.isEmpty && staged.isEmpty && !uploading && recorder.state != .locked {
                     VoiceRecordButton(recorder: recorder, onSend: sendVoice)
                 } else if !recorder.isActive {
                 // Con texto (sin adjuntos): 🕒 para programar el envío.
@@ -1179,7 +1202,7 @@ struct ConversationView: View {
 
     /// Solo se programa texto (con menciones y respuesta); adjuntos, notas de voz y respuestas privadas salen al momento.
     private func canSchedule(_ trimmed: String) -> Bool {
-        editing == nil && !trimmed.isEmpty && staged.isEmpty && !uploading && store.privateReplies[conversationId] == nil
+        editing == nil && commentingIssue == nil && !trimmed.isEmpty && staged.isEmpty && !uploading && store.privateReplies[conversationId] == nil
     }
 
     /// Programa el borrador: el compositor se vacía y el aviso trae «Deshacer» (devuelve el texto).
@@ -1225,6 +1248,14 @@ struct ConversationView: View {
     private func submit() {
         let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty || !staged.isEmpty, !uploading else { return }
+        if let ci = commentingIssue {
+            // Comentario de la tarea (POST /issues/:id/comments); la tarjeta muestra los últimos al recargar.
+            guard !body.isEmpty else { return }
+            commentingIssue = nil
+            draft = ""; draftMentions = []
+            act { try await store.commentIssue(ci.id, body: body) }
+            return
+        }
         if let e = editing {
             editing = nil
             draft = ""
@@ -1561,5 +1592,19 @@ struct LineageBar: View {
             .padding(.horizontal, 10).padding(.vertical, 4)
             .background(Capsule().fill(tint ? Theme.orange.opacity(0.15) : Theme.bubbleOther))
             .foregroundStyle(Theme.textPrimary)
+    }
+}
+
+/// Pila de filas del chat. Hasta `lazyAbove` filas va una VStack normal: con la LazyVStack, abrir el teclado con una
+/// tarjeta alta en pantalla (tarea, evento) dejaba la lista reubicando filas sin fin y la app congelada (medido en el
+/// simulador: 4 de 4 sin congelarse con VStack; con LazyVStack se congelaba la mayoría de las veces). Con historiales muy
+/// largos (se cargaron muchas páginas) vuelve a la perezosa para no dibujar cientos de filas en cada tecla.
+enum ChatStackRule { static let lazyAbove = 200 }
+
+struct ChatStack<Content: View>: View {
+    let lazy: Bool
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        if lazy { LazyVStack(spacing: 4, content: content) } else { VStack(spacing: 4, content: content) }
     }
 }

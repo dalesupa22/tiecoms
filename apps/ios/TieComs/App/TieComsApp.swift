@@ -23,6 +23,8 @@ struct TieComsApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @Environment(\.scenePhase) private var scenePhase
     @State private var store: AppStore
+    /// «Actualización disponible» (público, también sin sesión).
+    @State private var updates: AppUpdateChecker
 
     init() {
         let base = AppConfig.apiBaseURL
@@ -33,6 +35,7 @@ struct TieComsApp: App {
         if AppConfig.launchFlag("TCResetLanguage") { L10n.choice = .system }
         let s = AppStore(baseURL: base, secrets: secrets, feedback: AppFeedback.shared)
         _store = State(initialValue: s)
+        _updates = State(initialValue: AppUpdateChecker(baseURL: base))
         AppFeedback.shared.openConversationId = { [weak s] in s?.appActive == true ? s?.openConversationId : nil }
         AppFeedback.shared.onOpenConversation = { [weak s] id in s?.handle(.conversation(id)) }
         AppFeedback.shared.onOpenSide = { [weak s] origin, side in s?.openSide(origin: origin, side: side) }
@@ -66,7 +69,12 @@ struct TieComsApp: App {
             RootView()
                 .appTextSize()
                 .environment(store)
+                .environment(updates)
                 .keyboardDismissable()
+                .task {
+                    guard !AppConfig.isRunningUnitTests else { return }
+                    await updates.check()
+                }
                 .task {
                     // Las pruebas unitarias se alojan en la app: no se arranca la sesión real.
                     guard !AppConfig.isRunningUnitTests else { return }
@@ -80,7 +88,10 @@ struct TieComsApp: App {
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
-            case .active: store.becameActive()
+            case .active:
+                store.becameActive()
+                // Vuelta al frente: una petición (el arranque ya pidió una; check() descarta la repetida).
+                if !AppConfig.isRunningUnitTests { Task { await updates.check() } }
             case .background: store.enteredBackground()
             default: break
             }

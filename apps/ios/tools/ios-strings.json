@@ -3298,5 +3298,21 @@
  "topic.a11yHint": [
   "Mantén presionado para renombrar, cambiar color, archivar o quitar",
   "Long-press to rename, recolor, archive or remove"
+ ],
+ "update.available": [
+  "Actualización disponible",
+  "Update available"
+ ],
+ "update.action": [
+  "Actualizar",
+  "Update"
+ ],
+ "update.blocked": [
+  "Esta versión ya no funciona. Actualiza chaggu para seguir.",
+  "This version no longer works. Update chaggu to continue."
+ ],
+ "task.commentingOn": [
+  "Comentario para la tarea",
+  "Comment on the task"
  ]
 }

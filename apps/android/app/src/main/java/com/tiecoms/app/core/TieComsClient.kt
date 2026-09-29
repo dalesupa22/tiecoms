@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
@@ -126,6 +129,8 @@ class TieComsClient(
     private val meetingStore: SecretStore = MemorySecretStore(),
     /** Synchronous local cleanup, before a new session can present notices; never await network here. */
     private val onNoticeSessionEnded: () -> Unit = {},
+    /** Velocidad (1.7.0): copia local de la sesión por usuario (en Android, un archivo privado sin respaldo). */
+    private val snapshots: SnapshotCache = NoSnapshotCache,
 ) {
     val http = HttpApi(baseUrl, okHttp)
     val baseUrl: String get() = http.baseUrl
@@ -137,6 +142,27 @@ class TieComsClient(
     private val _signals = MutableSharedFlow<ClientSignal>(extraBufferCapacity = 64)
     val signals: SharedFlow<ClientSignal> = _signals.asSharedFlow()
 
+    /** Velocidad (1.7.0): la sesión se pintó desde la caché local antes de hablar con el servidor. */
+    @Volatile var paintedFromCache = false; private set
+    /** La sesión ya habló con el servidor (bootstrap fresco, tiempo real encendido). Antes solo se ve la copia local. */
+    @Volatile private var live = false
+    /** Primer fotograma de la app: lo no crítico del arranque (tareas, recordatorios, programados) espera a esto. */
+    private val firstFrame = kotlinx.coroutines.CompletableDeferred<Unit>()
+    fun firstFrameDrawn() { firstFrame.complete(Unit) }
+    private suspend fun afterFirstFrame() { kotlinx.coroutines.withTimeoutOrNull(Speed.FIRST_FRAME_WAIT_MS) { firstFrame.await() } }
+    private val snapshotLock = Any()
+    private var prefetchJob: Job? = null
+
+    init {
+        // Copia local: tras cada ráfaga de cambios (lista, mensajes, bloqueos), fuera del hilo del cliente.
+        @OptIn(kotlinx.coroutines.FlowPreview::class)
+        if (snapshots !== NoSnapshotCache) scope.launch(Dispatchers.IO) {
+            state.map { st -> if (st.status == SessionStatus.READY) Triple(st.data, st.conversations, st.blockedUserIds) else null }
+                .distinctUntilChanged()
+                .debounce(Speed.SAVE_DEBOUNCE_MS)
+                .collect { if (it != null) saveSnapshot() }
+        }
+    }
     private var accessToken: String? = null
     private var accessExp = 0L
     private var authSessionId: String? = null
@@ -246,6 +272,9 @@ class TieComsClient(
 
     // ---------- HTTP con sesión ----------
     private suspend fun <T> request(method: String, path: String, body: String? = null, serializer: KSerializer<T>, raw: HttpApi.RawBody? = null): T {
+        // Con la copia local a la vista, la sesión se está recuperando (el primer refresh cambia la generación):
+        // se espera ese refresh para no descartar lo que la persona hace en el primer segundo.
+        if (accessToken == null && refreshing != null) runCatching { refresh() }
         val generation = sessionGeneration
         if (accessToken != null && now() > accessExp - 30_000) refresh()
         requireSession(generation)
@@ -291,9 +320,19 @@ class TieComsClient(
 
     /** Arranque: intenta reanudar la sesión guardada. */
     suspend fun start() = withContext(dispatcher) {
+        // Una sola a la vez (al abrir, wake() de primer plano llega mientras el primer start() refresca).
+        if (starting) return@withContext
+        starting = true
+        try { startInternal() } finally { starting = false }
+    }
+
+    private var starting = false
+
+    private suspend fun startInternal() {
         startRetryJob?.cancel()
-        setState { copy(status = SessionStatus.LOADING) }
-        if (secrets.get() == null) { handleSignedOut(); return@withContext }
+        if (secrets.get() == null) { handleSignedOut(); return }
+        // Velocidad (1.7.0): con copia local se pinta ya la lista y los chats recientes; el servidor revalida detrás.
+        if (s.data == null && !paintFromCache()) setState { copy(status = SessionStatus.LOADING) }
         when (refresh()) {
             RefreshOutcome.OK -> try { afterLogin() } catch (e: NetworkException) { unreachable() }
             RefreshOutcome.UNAUTHORIZED -> handleSignedOut()
@@ -301,9 +340,36 @@ class TieComsClient(
         }
     }
 
+    /** Pinta la sesión guardada del último usuario (si la hay): lista, chats recientes, bloqueos y cola de salida. */
+    private fun paintFromCache(): Boolean {
+        val userId = storage.get(LAST_USER_KEY) ?: return false
+        val snap = Speed.decode(runCatching { snapshots.read(userId) }.getOrNull(), userId, now()) ?: return false
+        val saved = storage.get("u:$userId:outbox")?.let { runCatching { TcJson.decodeFromString(ListSerializer(PendingMessage.serializer()), it) }.getOrNull() } ?: emptyList()
+        setState {
+            copy(status = SessionStatus.READY, data = snap.data, conversations = Speed.restore(snap), blockedUserIds = snap.blockedUserIds.toSet(),
+                pending = saved.map { if (it.status == "sending") it.copy(status = "pending") else it },
+                dndUntil = storage.get(DND_KEY), dndLocalOnly = storage.get(DND_LOCAL_KEY) == "1")
+        }
+        paintedFromCache = true
+        return true
+    }
+
+    private fun saveSnapshot() {
+        val st = s
+        if (!live || st.status != SessionStatus.READY) return
+        val snap = Speed.snapshot(st, now()) ?: return
+        val json = Speed.encode(snap)
+        synchronized(snapshotLock) {
+            // Se cerró la sesión mientras se armaba la copia: no se escribe.
+            if (!live || s.data?.me?.id != snap.userId) return
+            runCatching { snapshots.write(snap.userId, json) }
+        }
+    }
+
     private var startAttempts = 0
     private fun unreachable() {
-        setState { copy(status = SessionStatus.UNREACHABLE) }
+        // Con la copia local a la vista, sin red se sigue mostrando (desconectado) y se reintenta detrás.
+        if (!(s.status == SessionStatus.READY && s.data != null)) setState { copy(status = SessionStatus.UNREACHABLE) }
         val wait = minOf(30_000L, 1000L shl minOf(startAttempts++, 5))
         startRetryJob = scope.launch { delay(wait); start() }
     }
@@ -372,6 +438,8 @@ class TieComsClient(
     }
 
     suspend fun logout() = withContext(dispatcher) {
+        // Salir mientras la sesión pintada desde la copia se recupera: primero termina ese refresh.
+        refreshing?.let { runCatching { it.await() } }
         val generation = sessionGeneration
         try { requestUnit("POST", "$AUTH_BASE_PATH/logout", "{}") } catch (_: Exception) {}
         if (generation == sessionGeneration) handleSignedOut()
@@ -389,6 +457,9 @@ class TieComsClient(
         accessToken = null
         secrets.set(null)
         if (me != null) storage.clearPrefix("u:$me:")
+        synchronized(snapshotLock) { live = false; paintedFromCache = false; runCatching { snapshots.clear(me ?: storage.get(LAST_USER_KEY)) } }
+        prefetchJob?.cancel()
+        storage.set(LAST_USER_KEY, null)
         // gg: el historial vive solo en el dispositivo y se borra al cerrar sesión (docs/ASISTENTE.md).
         Assistant.clear(storage)
         storage.set(DND_KEY, null); storage.set(DND_LOCAL_KEY, null)
@@ -400,18 +471,44 @@ class TieComsClient(
 
     private suspend fun afterLogin() {
         startAttempts = 0
+        val cached = paintedFromCache && s.status == SessionStatus.READY
+        // Load safety preferences before showing content or starting realtime. Van en paralelo con el bootstrap
+        // (antes iban una tras otra); con la copia local, los bloqueos guardados ya están aplicados y se revalidan detrás.
+        val blocks = scope.async { runCatching { loadBlocks() } }
         loadBootstrapInternal()
-        // Load safety preferences before showing content or starting realtime.
-        loadBlocks()
+        if (!cached) blocks.await().getOrThrow()
         val me = s.data!!.me.id
-        val saved = storage.get("u:$me:outbox")?.let { runCatching { TcJson.decodeFromString(ListSerializer(PendingMessage.serializer()), it) }.getOrNull() } ?: emptyList()
+        storage.set(LAST_USER_KEY, me)
+        val fromDisk = storage.get("u:$me:outbox")?.let { runCatching { TcJson.decodeFromString(ListSerializer(PendingMessage.serializer()), it) }.getOrNull() } ?: emptyList()
+        // Lo que ya estaba en pantalla (copia local) puede traer mensajes nuevos en la cola: se conserva.
+        val saved = if (cached) (s.pending + fromDisk).distinctBy { it.clientMessageId } else fromDisk
         setState { copy(status = SessionStatus.READY, pending = saved.map { if (it.status == "sending") it.copy(status = "pending") else it }) }
+        live = true
         socket.start()
         scheduleFlush(0)
-        scope.launch { runCatching { loadRemindersInternal() } }
-        scope.launch { runCatching { loadScheduled() } }
+        prefetchJob?.cancel()
+        prefetchJob = scope.launch { afterFirstFrame(); prefetch() }
+        // No crítico: después del primer fotograma.
+        scope.launch { afterFirstFrame(); runCatching { loadRemindersInternal() } }
+        scope.launch { afterFirstFrame(); runCatching { loadScheduled() } }
         // Asuntos abiertos bajo cada grupo (docs/GRUPOS.md); luego llegan por issue.updated.
-        scope.launch { runCatching { loadOpenIssues() } }
+        scope.launch { afterFirstFrame(); runCatching { loadOpenIssues() } }
+        saveSnapshot()
+    }
+
+    /** Velocidad (1.7.0): mensajes de los chats con no leídos o fijados, como mucho 8, de a 2 a la vez. */
+    private suspend fun prefetch() {
+        val d = s.data ?: return
+        val targets = Speed.prefetchTargets(d, s.conversations, now())
+        val gate = kotlinx.coroutines.sync.Semaphore(Speed.PREFETCH_PARALLEL)
+        kotlinx.coroutines.coroutineScope {
+            for (id in targets) launch {
+                gate.acquire()
+                try {
+                    if (s.conversations[id]?.loaded == true) catchUp(id) else runCatching { openInternal(id, false) }
+                } finally { gate.release() }
+            }
+        }
     }
 
     // ---------- Snapshot ----------
@@ -495,7 +592,7 @@ class TieComsClient(
     suspend fun resync() = withContext(dispatcher) { resyncInternal() }
 
     private suspend fun resyncInternal() {
-        if (s.status != SessionStatus.READY) return
+        if (s.status != SessionStatus.READY || !live) return
         try {
             loadBootstrapInternal()
             runCatching { loadBlocks() }
@@ -512,6 +609,8 @@ class TieComsClient(
         scope.launch {
             when (s.status) {
                 SessionStatus.READY -> {
+                    // Solo la copia local a la vista: primero la sesión.
+                    if (!live) { if (startRetryJob?.isActive != true) start(); return@launch }
                     if (s.connection == ConnectionStatus.ONLINE && !forceReconnect) resyncInternal()
                     else socket.reconnectNow(force = forceReconnect)
                     scheduleFlush(0)
@@ -630,12 +729,12 @@ class TieComsClient(
         val lastRead = if (mine && readThroughPrevious) m.seq else c.lastReadSeq
         patchMeta(c.id) {
             copy(
-                lastMessageSeq = m.seq, lastMessageAt = m.createdAt, lastMessagePreview = m.body.take(140), lastReadSeq = lastRead,
+                lastMessageSeq = m.seq, lastMessageAt = m.createdAt, lastMessagePreview = if (m.viewOnce) "①" else m.body.take(140), lastReadSeq = lastRead,
                 unread = maxOf(0L, m.seq - maxOf(lastRead, historyFromSeq)).toInt(),
                 unreadMentions = if (mine && readThroughPrevious) 0 else unreadMentions + if (!mine && Mentions.mentionsMe(m, myId)) 1 else 0,
                 lastHumanPreview = if (m.kind == "system") lastHumanPreview else LastHumanPreviewDTO(m.id, m.seq, m.authorId, m.body,
                     m.attachments.takeIf { it.isNotEmpty() }?.let { a -> AttachmentSummaryDTO(a.size, a.count { it.isImage }, a.count { it.isVideo }, a.count { !it.isImage && !it.isVideo && !it.isVoice },
-                        a.firstOrNull()?.name, a.count { it.isVoice }, a.firstOrNull { it.isVoice }?.durationMs) }, m.createdAt),
+                        a.firstOrNull()?.name, a.count { it.isVoice }, a.firstOrNull { it.isVoice }?.durationMs) }, m.createdAt, viewOnce = m.viewOnce),
             )
         }
         setState { copy(data = data?.copy(conversations = data.conversations.sortedByDescending { it.lastMessageAt ?: "" })) }
@@ -1915,6 +2014,8 @@ object SideOutsiders {
 internal const val DND_KEY = "dnd:until"
 internal const val SLEEP_KEY = "sleep:me"
 internal const val DND_LOCAL_KEY = "dnd:local"
+/** Último usuario con sesión en este dispositivo: de quién es la copia local que se pinta al abrir. */
+internal const val LAST_USER_KEY = "speed:lastUser"
 
 @JvmField val UNCHANGED: String = String(charArrayOf('\u0000'))
 

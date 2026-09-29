@@ -188,6 +188,8 @@ data class LastHumanPreviewDTO(
     val body: String = "",
     val attachments: AttachmentSummaryDTO? = null,
     val createdAt: String = "",
+    /** Una sola vista (1.7, 4a46c1d): la lista muestra «① Foto / ① Mensaje / ① Nota de voz», nunca el contenido. */
+    val viewOnce: Boolean = false,
 )
 
 @Serializable

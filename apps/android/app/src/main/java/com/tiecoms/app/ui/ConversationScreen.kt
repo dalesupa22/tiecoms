@@ -216,6 +216,14 @@ fun ConversationScreen(
     }
 
     val conv = state.conversations[id]
+    // Velocidad (1.7.0): tocar el chat → primer fotograma con mensajes (TcPerf).
+    val perfEnteredAt = remember(id) { android.os.SystemClock.uptimeMillis() }
+    val perfFromMemory = remember(id) { client.state.value.conversations[id]?.loaded == true }
+    var perfDone by remember(id) { mutableStateOf(false) }
+    if (!perfDone && conv?.messages?.isNotEmpty() == true) LaunchedEffect(id) {
+        androidx.compose.runtime.withFrameNanos { }; perfDone = true
+        com.tiecoms.app.platform.Perf.chatDrawn(id, perfEnteredAt, perfFromMemory)
+    }
     val title = titleOf(ctx, meta, data)
     val orgs = Names.participantOrgs(meta, data).joinToString(" · ") { it.name }
     val muted = meta.mutedAt(System.currentTimeMillis())
@@ -364,7 +372,8 @@ fun ConversationScreen(
     var openMax by remember(id) { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(id, reloadKey) {
-        runCatching { client.loadBlocks() }
+        // Velocidad (1.7.0): los bloqueos ya se conocen desde el arranque; se revalidan en paralelo, sin demorar los mensajes.
+        launch { runCatching { client.loadBlocks() } }
         loadError = null
         loadRetrying = null
         try {

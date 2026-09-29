@@ -157,8 +157,12 @@ fun ViewOnceBubble(m: MessageDTO, data: BootstrapDTO, fg: Color, mine: Boolean) 
         container.scope.launch {
             try { opened = client.openViewOnce(m) }
             catch (e: Exception) {
-                val gone = (e as? com.tiecoms.app.core.ApiException)?.status == 410
-                container.toast(if (gone) ctx.getString(R.string.vo_already) else errorText(ctx, e))
+                val api = e as? com.tiecoms.app.core.ApiException
+                container.toast(when {
+                    api?.status == 410 && api.code == "expired" -> ctx.getString(R.string.vo_expired)
+                    api?.status == 410 -> ctx.getString(R.string.vo_already)
+                    else -> errorText(ctx, e)
+                })
             } finally { busy = false }
         }
     } else Modifier).padding(vertical = 4.dp).testTag("viewOnceBubble-${m.seq}"), verticalAlignment = Alignment.CenterVertically) {
@@ -178,8 +182,10 @@ fun ViewOnceBubble(m: MessageDTO, data: BootstrapDTO, fg: Color, mine: Boolean) 
 /** Visor de pantalla completa con FLAG_SECURE: no se puede capturar ni grabar; al cerrarlo queda «Abierto». */
 @Composable
 fun ViewOnceViewer(content: ViewOnceOpenDTO, kind: ViewOnce.Kind, onClose: () -> Unit) {
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
+        // Sin capturas ni grabación de pantalla (y negro en «Recientes»): lo pone Compose en la ventana del diálogo.
+        securePolicy = androidx.compose.ui.window.SecureFlagPolicy.SecureOn)) {
+        val window = (LocalView.current.parent as? DialogWindowProvider)?.window ?: (LocalView.current.rootView.parent as? DialogWindowProvider)?.window
         DisposableEffect(window) {
             window?.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
             onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }

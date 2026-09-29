@@ -126,6 +126,8 @@ class Barra169UiTest {
             shot("02-chat-descansa")
             compose.onNodeWithTag("send").performClick()
             compose.waitUntil(15_000) { client.state.value.conversations[direct]?.messages?.any { it.body == text } == true }
+            // El eco en vivo puede llegar antes que la confirmación: se espera a que salga de la cola.
+            compose.waitUntil(5_000) { client.state.value.pending.none { it.body == text } }
             assertTrue("Se envió aunque la otra persona descanse", client.state.value.pending.none { it.body == text })
             shot("03-enviado")
 

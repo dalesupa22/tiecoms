@@ -178,7 +178,8 @@ fun IssueChatCard(issueId: String, creatorId: String, data: BootstrapDTO, canPos
                         if (i.commentCount > 0) Text("💬 ${i.commentCount}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.align(Alignment.CenterVertically))
                     }
                     if (sys?.key == "issue.comments") CommentsStrip(sys, data)
-                    if (sys?.key == "issue.overdue" && !i.closed && canPost) OverdueActions(i, data)
+                    // Los botones desaparecen cuando la tarea ya no está vencida (nueva fecha, hecha).
+                    if (sys?.key == "issue.overdue" && !i.closed && f.overdue && canPost) OverdueActions(i, data)
                     if (comments.isNotEmpty() && sys?.key != "issue.comments") Column(Modifier.fillMaxWidth().padding(top = 2.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp)).padding(8.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         comments.forEach { c ->

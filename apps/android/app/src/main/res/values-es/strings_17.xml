@@ -45,5 +45,6 @@
     <string name="vo_seen_by">Visto por %1$s</string>
     <string name="vo_opened">Abierto</string>
     <string name="vo_tap">Toca para ver</string>
+    <string name="vo_expired">Este mensaje ya no está disponible.</string>
     <string name="vo_already">Ya abriste este mensaje.</string>
 </resources>

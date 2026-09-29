@@ -122,7 +122,8 @@ class AppContainer(private val app: Application) {
     private fun newClient(url: String): TieComsClient {
         lateinit var created: TieComsClient
         created = TieComsClient(url, deviceName, storage, secrets, okHttp, meetingStore = meetingStore,
-            onNoticeSessionEnded = { if (_client.value === created) notifier.cancelAll() })
+            onNoticeSessionEnded = { if (_client.value === created) notifier.cancelAll() },
+            snapshots = com.tiecoms.app.platform.FileSnapshotCache(app, url))
         return created
     }
 

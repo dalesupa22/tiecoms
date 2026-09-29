@@ -283,7 +283,8 @@ fun SideChip(sides: List<ConversationDTO>, onOpen: (String) -> Unit) {
         return
     }
     val n = (s.lastMessageSeq - 1).coerceAtLeast(0).toInt()
-    val last = s.lastHumanPreview?.let { h -> com.tiecoms.app.core.Attachments.preview(h.attachments, h.body, attLabels(ctx)) }
+    val last = s.lastHumanPreview?.let { h -> if (h.viewOnce) com.tiecoms.app.core.ViewOnce.preview(h.attachments, ctx.getString(R.string.vo_photo), ctx.getString(R.string.vo_voice), ctx.getString(R.string.vo_message))
+        else com.tiecoms.app.core.Attachments.preview(h.attachments, h.body, attLabels(ctx)) }
         ?: s.lastMessagePreview?.takeIf { !it.startsWith("{") }
     Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.secondaryContainer,
         modifier = Modifier.padding(top = 4.dp).widthIn(max = 300.dp).clickable { onOpen(s.id) }.testTag("sideChip")) {

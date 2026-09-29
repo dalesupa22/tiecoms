@@ -128,6 +128,9 @@ fun GroupsScreen(
     val snackbar = LocalSnackbar.current
     val scope = rememberCoroutineScope()
     val (data, state) = visibleData() ?: return
+    // Velocidad (1.7.0): primer fotograma con la lista → reportFullyDrawn y marca TcPerf.
+    val perfActivity = LocalContext.current as? android.app.Activity
+    androidx.compose.runtime.LaunchedEffect(Unit) { androidx.compose.runtime.withFrameNanos { }; com.tiecoms.app.platform.Perf.listDrawn(perfActivity, client.paintedFromCache) }
     var query by rememberSaveable { mutableStateOf("") }
     var refreshing by remember { mutableStateOf(false) }
     val internalFallback = stringResource(R.string.internal_default)
@@ -751,7 +754,8 @@ internal fun ConversationRow(
     val title = titleOverride ?: Names.conversationTitle(c, data, internalFallback, convFallback)
     // SPEC-v4 §C: se prefiere el último mensaje de una persona (lastHumanPreview) sobre los de sistema.
     val human = c.lastHumanPreview?.let { h ->
-        val text = com.tiecoms.app.core.Attachments.preview(h.attachments, h.body, attLabels(ctx))
+        val text = if (h.viewOnce) com.tiecoms.app.core.ViewOnce.preview(h.attachments, ctx.getString(R.string.vo_photo), ctx.getString(R.string.vo_voice), ctx.getString(R.string.vo_message))
+            else com.tiecoms.app.core.Attachments.preview(h.attachments, h.body, attLabels(ctx))
         if (text.isBlank()) null
         else if (c.kind == "direct" || h.authorId.isBlank()) text
         else (if (h.authorId == data.me.id) stringResource(R.string.common_you_short) else Names.person(data, h.authorId)?.name?.substringBefore(' ') ?: "") .let { a -> if (a.isBlank()) text else "$a: $text" }

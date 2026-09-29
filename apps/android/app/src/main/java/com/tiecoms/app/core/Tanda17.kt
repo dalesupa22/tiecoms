@@ -144,6 +144,11 @@ object ViewOnce {
     fun openedNames(m: MessageDTO, name: (String) -> String?): List<String> = m.openedBy.mapNotNull { name(it.userId) }
 
     /** Vista previa y notificación: «① Foto», «① Mensaje», «① Nota de voz», nunca el contenido. */
+    fun preview(s: AttachmentSummaryDTO?, photo: String, voice: String, text: String): String = "① " + when {
+        (s?.images ?: 0) > 0 -> photo
+        (s?.voices ?: 0) > 0 -> voice
+        else -> text
+    }
     fun preview(m: MessageDTO, photo: String, voice: String, text: String): String = "① " + when (kind(m)) { Kind.PHOTO -> photo; Kind.VOICE -> voice; Kind.TEXT -> text }
 }
 

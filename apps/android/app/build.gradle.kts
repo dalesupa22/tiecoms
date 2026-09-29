@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.baselineprofile)
 }
 
 /**
@@ -69,8 +70,8 @@ android {
         applicationId = "com.chaggu.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 29
-        versionName = "1.6.10"
+        versionCode = 30
+        versionName = "1.7.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "DEFAULT_API_URL", "\"https://app.chaggu.com\"")
         buildConfigField("String", "CONTRACT_VERSION", "\"2026-09-29\"")
@@ -120,6 +121,26 @@ android {
     }
 }
 
+/*
+ * Velocidad (1.7.0): Baseline Profile (src/main/generated/baselineProfiles, se genera con
+ * `./gradlew :app:generateBaselineProfile` en un emulador) y variantes de medición.
+ * nonMinifiedRelease y benchmarkRelease (las crea el plugin, firmadas con la llave de depuración, nunca se
+ * publican) apuntan al API de pruebas local, jamás a producción: -PtcBenchApi=http://10.0.2.2:<puerto>.
+ */
+baselineProfile {
+    automaticGenerationDuringBuild = false
+    saveInSrc = true
+    dexLayoutOptimization = true
+}
+val benchApi = (project.findProperty("tcBenchApi") as String?)?.takeIf { it.isNotBlank() } ?: "http://10.0.2.2:3079"
+androidComponents {
+    onVariants { v ->
+        if (v.buildType == "nonMinifiedRelease" || v.buildType == "benchmarkRelease") {
+            v.buildConfigFields?.put("DEFAULT_API_URL", com.android.build.api.variant.BuildConfigField("String", "\"$benchApi\"", "API de pruebas (medición)"))
+        }
+    }
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
@@ -128,6 +149,9 @@ kotlin {
 
 dependencies {
     implementation(libs.androidx.core.ktx)
+    // Instala el Baseline Profile en el primer arranque también fuera de Play.
+    implementation(libs.androidx.profileinstaller)
+    baselineProfile(project(":baselineprofile"))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

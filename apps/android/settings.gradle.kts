@@ -14,3 +14,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = "Chaggu"
 include(":app")
+// Velocidad (1.7.0): genera el Baseline Profile y mide el arranque (Macrobenchmark). No se publica.
+include(":baselineprofile")

@@ -179,7 +179,7 @@ fun RefPicker(query: String, data: BootstrapDTO, currentId: String, onPick: (Str
     val conv = androidx.compose.ui.res.stringResource(R.string.conversation)
     val list = remember(query, data) { com.tiecoms.app.core.Refs.candidates(data, query, { Names.conversationTitle(it, data, internal, conv) }, exclude = null) }
     if (list.isEmpty()) return
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp).testTag("refPicker")) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth().heightIn(max = 150.dp).testTag("refPicker")) {
         LazyColumn {
             items(list, key = { it.first.id }) { (c, name) ->
                 Row(Modifier.fillMaxWidth().clickable { onPick(c.id, name) }.heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 6.dp).testTag("refPick-${c.id}"),

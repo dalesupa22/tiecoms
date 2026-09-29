@@ -110,8 +110,8 @@ fun AppRoot() {
     val splash by container.splashMode.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { container.toasts.collect { snackbar.showSnackbar(it) } }
     CompositionLocalProvider(LocalClient provides client, LocalContainer provides container, LocalSnackbar provides snackbar) {
-        // En debug las etiquetas de prueba se exponen como resource-id (UiAutomator del test del splash).
-        val rootMod = if (com.tiecoms.app.BuildConfig.DEBUG) Modifier.semantics { testTagsAsResourceId = true } else Modifier
+        // Las etiquetas de prueba se exponen como resource-id (UiAutomator del splash y Macrobenchmark/Baseline Profile).
+        val rootMod = Modifier.semantics { testTagsAsResourceId = true }
         Surface(Modifier.fillMaxSize().then(rootMod).dismissKeyboardOnOutsideInteraction(), color = MaterialTheme.colorScheme.background) {
             // Actualización disponible (GET /app-version): franja fija arriba que empuja la app, o pantalla que bloquea.
             val latest by container.appVersion.collectAsStateWithLifecycle()
@@ -126,7 +126,11 @@ fun AppRoot() {
                             SessionStatus.LOADING -> Splash()
                             SessionStatus.UNREACHABLE -> Unreachable()
                             SessionStatus.ANONYMOUS -> AuthNav()
-                            SessionStatus.READY -> TaskDialogsHost { MainNav() }
+                            SessionStatus.READY -> {
+                                // Velocidad (1.7.0): lo no crítico del arranque espera a este primer fotograma.
+                                androidx.compose.runtime.LaunchedEffect(client) { androidx.compose.runtime.withFrameNanos { }; client.firstFrameDrawn() }
+                                TaskDialogsHost { MainNav() }
+                            }
                         }
                     }
                 }
@@ -330,7 +334,7 @@ private fun MainNav() {
     )
 
     fun openConv(id: String, seq: Long? = null, side: String? = null, messageId: String? = null) =
-        nav.navigate("conv/$id?m=${seq ?: ""}&side=${side ?: ""}&mid=${messageId ?: ""}") { launchSingleTop = true }
+        com.tiecoms.app.platform.Perf.chatTapped().let { nav.navigate("conv/$id?m=${seq ?: ""}&side=${side ?: ""}&mid=${messageId ?: ""}") { launchSingleTop = true } }
     fun tab(r: String) = nav.navigate(r) { popUpTo(nav.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true }
     // ✏️ y «＋ Crear» de Grupos, DMs, Asuntos y Calendario (docs/GRUPOS.md › Barra de arriba).
     val quick = QuickNav(

@@ -25,7 +25,16 @@ import java.util.concurrent.ConcurrentHashMap
  * una sola descarga por URL a la vez y reducción al decodificar. Sin dependencias nuevas.
  */
 class ImageLoader(context: Context, base: OkHttpClient) {
-    private val http = base.newBuilder().cache(Cache(File(context.cacheDir, "images"), 40L * 1024 * 1024)).build()
+    private val http = base.newBuilder().cache(Cache(File(context.cacheDir, "images"), 40L * 1024 * 1024))
+        // Velocidad (1.7.0): las fotos de perfil (/avatars/<uuid>) son inmutables (una foto nueva = una URL nueva):
+        // se guardan en disco un año y se sirven sin red, aunque el servidor no mande cabeceras de caché.
+        .addNetworkInterceptor { chain ->
+            val r = chain.proceed(chain.request())
+            if (r.isSuccessful && isAvatar(chain.request().url.encodedPath))
+                r.newBuilder().removeHeader("pragma").header("cache-control", "public, max-age=31536000, immutable").build()
+            else r
+        }
+        .build()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val memory = object : LruCache<String, ImageBitmap>(24 * 1024 * 1024) {
         override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
@@ -35,6 +44,10 @@ class ImageLoader(context: Context, base: OkHttpClient) {
     private val failedAt = ConcurrentHashMap<String, Long>()
 
     private fun key(url: String, px: Int) = "$url#$px"
+
+    companion object {
+        fun isAvatar(path: String) = path.contains("/avatars/")
+    }
 
     fun cached(url: String, px: Int): ImageBitmap? = memory.get(key(url, px))
 

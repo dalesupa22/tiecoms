@@ -103,7 +103,11 @@ data class CallHistoryItemDTO(
 @Serializable data class CallShareResult(val message: MessageDTO? = null)
 
 /** Bootstrap: funciones que el servidor tiene prendidas (aditivo; un servidor viejo no lo manda → todo apagado). */
-@Serializable data class FeaturesDTO(val calls: Boolean = false)
+@Serializable data class FeaturesDTO(
+    val calls: Boolean = false,
+    /** Correo y WhatsApp en el chat (docs/CORREO.md); ausente = servidor anterior o apagado. */
+    val mail: Boolean = false,
+)
 
 /**
  * Datos de Chime para `MeetingSessionConfiguration`, sacados del JSON de CreateMeeting / CreateAttendee sin depender del SDK

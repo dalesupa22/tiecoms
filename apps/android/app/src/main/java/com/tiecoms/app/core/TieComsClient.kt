@@ -83,6 +83,10 @@ data class ClientState(
     val calls: Map<String, CallDTO?> = emptyMap(),
     /** Sube cuando alguna llamada cambia (empezó, terminó, hay transcripción): la pestaña «Llamadas» recarga. */
     val callsRevision: Int = 0,
+    /** Correos compartidos en los chats (tarjetas), por id (docs/CORREO.md). */
+    val mails: Map<String, SharedMailDTO> = emptyMap(),
+    /** Mis conexiones de correo (null = aún no se pidieron). */
+    val mailConnections: List<MailConnectionDTO>? = null,
 )
 
 /** Avisos puntuales para sonidos y notificaciones. */
@@ -313,6 +317,7 @@ class TieComsClient(
             }
             sessionGeneration++; authSessionId = r.sessionId
             cancelMeetingConnect(); meetingAttempts.clear(); meetingOwner = null
+            cancelMailConnect()
         }
         accessToken = r.accessToken
         accessExp = runCatching { Instant.parse(r.accessExpiresAt).toEpochMilli() }.getOrElse { now() + 10 * 60_000 }
@@ -685,6 +690,7 @@ class TieComsClient(
             is ConversationEvent.PinsChanged -> setState { copy(pins = pins + (e.conversationId to e.messageIds)) }
             is ConversationEvent.TopicsChanged -> putTopics(e.conversationId, e.topics)
             is ConversationEvent.CallUpdated -> putCall(e.call)
+            is ConversationEvent.MailUpdated -> putMailLive(e.email)
             is ConversationEvent.CalendarUpdated -> {
                 val prev = s.events[e.event.id]
                 putEvents(listOf(e.event))
@@ -766,6 +772,7 @@ class TieComsClient(
             is ConversationEvent.CalendarUpdated -> putEvents(listOf(e.event))
             is ConversationEvent.TopicsChanged -> putTopics(e.conversationId, e.topics)
             is ConversationEvent.CallUpdated -> Unit // ya se aplicó en onConversationEvent (también con el chat cerrado)
+            is ConversationEvent.MailUpdated -> putMailLive(e.email) // también en la recuperación (catch-up)
             is ConversationEvent.CursorOnly -> Unit
         }
         setConv(e.conversationId) { copy(messages = messages, lastEventSeq = maxOf(lastEventSeq, e.eventSeq)) }
@@ -1880,6 +1887,153 @@ class TieComsClient(
         req("GET", "/whatsapp/chats/${c.accountId}/${enc(c.jid)}/messages?limit=80", null, WaMessagesPage.serializer()).messages
     }
     suspend fun waOrganize(): WaOrganizeResult = withContext(dispatcher) { req("POST", "/whatsapp/organize", buildJsonObject {}, WaOrganizeResult.serializer()) }
+
+    // ---------- Correo en el chat (docs/CORREO.md) ----------
+    private fun putMail(m: SharedMailDTO): SharedMailDTO {
+        var out = m
+        setState { out = Mail.merge(mails[m.id], m); copy(mails = mails + (m.id to out)) }
+        return out
+    }
+    /** `mail.updated`: sin cuerpo, sin respuesta programada ni enlace; conserva lo que ya sabía. */
+    private fun putMailLive(m: SharedMailDTO) = setState { copy(mails = mails + (m.id to Mail.fromLive(mails[m.id], m))) }
+
+    // Tarjetas del chat: se piden juntas (hasta 50 por petición) en vez de una por tarjeta.
+    private val mailWanted = LinkedHashMap<String, MutableList<kotlinx.coroutines.CompletableDeferred<SharedMailDTO>>>()
+    private var mailBatchJob: Job? = null
+    /** La tarjeta de un correo compartido; se junta con las demás que se pidan en el mismo instante (GET /mail/shared?ids=). */
+    suspend fun loadSharedMail(id: String): SharedMailDTO {
+        s.mails[id]?.let { return it }
+        val d = kotlinx.coroutines.CompletableDeferred<SharedMailDTO>()
+        synchronized(mailWanted) {
+            mailWanted.getOrPut(id) { mutableListOf() } += d
+            if (mailBatchJob?.isActive != true) mailBatchJob = scope.launch { delay(16); flushMailBatches() }
+        }
+        return d.await()
+    }
+    private suspend fun flushMailBatches() {
+        while (true) {
+            val batch = synchronized(mailWanted) {
+                val b = mailWanted.entries.take(Mail.BATCH).map { it.key to it.value.toList() }
+                b.forEach { mailWanted.remove(it.first) }
+                b
+            }
+            if (batch.isEmpty()) return
+            try {
+                val r = req("GET", "/mail/shared?ids=" + batch.joinToString(",") { it.first }, null, SharedMailsPage.serializer())
+                val got = r.emails.associate { it.id to putMail(it) }
+                for ((id, waiters) in batch) {
+                    val e = got[id]
+                    waiters.forEach { if (e != null) it.complete(e) else it.completeExceptionally(ApiException(404, "not_found", "Correo no disponible")) }
+                }
+            } catch (e: Exception) {
+                batch.forEach { (_, w) -> w.forEach { it.completeExceptionally(e) } }
+            }
+        }
+    }
+    /** El correo con su cuerpo (al abrirlo). */
+    suspend fun loadSharedMailFull(id: String): SharedMailDTO = withContext(dispatcher) { putMail(req("GET", "/mail/shared/$id?full=1", null, SharedMailDTO.serializer())) }
+    /** El correo tal como está en el buzón (con historial citado y firma), en vivo y sin guardar. */
+    suspend fun mailOriginal(id: String): String = withContext(dispatcher) { req("GET", "/mail/shared/$id/original", null, MailBodyResult.serializer()).body }
+    suspend fun mailComments(id: String): List<SharedMailCommentDTO> = withContext(dispatcher) { req("GET", "/mail/shared/$id/comments", null, MailCommentsPage.serializer()).comments }
+    suspend fun commentMail(id: String, body: String): MailCommentResult = withContext(dispatcher) {
+        val r = req("POST", "/mail/shared/$id/comments", buildJsonObject { put("body", JsonPrimitive(body)) }, MailCommentResult.serializer())
+        setState { copy(mails = mails + (id to Mail.afterComment(mails[id], r.email))) }
+        r
+    }
+    /** gg redacta la respuesta con lo que dijo el hilo. */
+    suspend fun draftMailReply(id: String, lang: String): String = withContext(dispatcher) {
+        req("POST", "/mail/shared/$id/draft", buildJsonObject { put("lang", JsonPrimitive(if (lang == "en") "en" else "es")) }, MailBodyResult.serializer()).body
+    }
+    /** Responder ya o programar ([sendAt]); sale del buzón de quien trajo el correo. */
+    suspend fun replyMail(id: String, body: String, cc: List<String>, attachmentIds: List<String>, sendAt: Instant?): SharedMailDTO = withContext(dispatcher) {
+        putMail(req("POST", "/mail/shared/$id/reply", buildJsonObject {
+            put("body", JsonPrimitive(body))
+            put("cc", kotlinx.serialization.json.JsonArray(cc.map { JsonPrimitive(it) }))
+            put("attachmentIds", kotlinx.serialization.json.JsonArray(attachmentIds.map { JsonPrimitive(it) }))
+            sendAt?.let { put("sendAt", JsonPrimitive(it.toString())) }
+            put("notifyChat", JsonPrimitive(true))
+        }, SharedMailDTO.serializer()))
+    }
+    suspend fun cancelMailReply(id: String): SharedMailDTO = withContext(dispatcher) { putMail(req("DELETE", "/mail/shared/$id/reply", null, SharedMailDTO.serializer())) }
+    suspend fun mailTask(id: String, title: String, ownerId: String?, dueDate: String?, closeOnReply: Boolean): MailTaskResult = withContext(dispatcher) {
+        val r = req("POST", "/mail/shared/$id/task", buildJsonObject {
+            put("title", JsonPrimitive(title)); put("ownerId", ownerId?.let { JsonPrimitive(it) } ?: JsonNull)
+            put("dueDate", dueDate?.let { JsonPrimitive(it) } ?: JsonNull); put("closeOnReply", JsonPrimitive(closeOnReply))
+        }, MailTaskResult.serializer())
+        putMail(r.email); r.issue?.let { putIssues(listOf(it)) }
+        r
+    }
+    /** Adjunto bajo demanda (con Bearer), al archivo [dest]. Un 409 trae «pídeselo a …». */
+    suspend fun downloadMailAttachment(emailId: String, attachmentId: String, dest: java.io.File) = withContext(dispatcher) {
+        val path = "/mail/shared/$emailId/attachments/${enc(attachmentId)}"
+        if (accessToken != null && now() > accessExp - 30_000) refresh()
+        var r = http.downloadResult(path, accessToken, dest)
+        if (r.code == 401 && refresh() == RefreshOutcome.OK) r = http.downloadResult(path, accessToken, dest)
+        if (!r.ok) throw HttpApi.parseError(r)
+    }
+
+    // Lista en vivo, conexión y compartir.
+    suspend fun loadMailConnections(): List<MailConnectionDTO> = withContext(dispatcher) {
+        val l = req("GET", "/mail/connections", null, MailConnectionsPage.serializer()).connections
+        setState { copy(mailConnections = l) }; l
+    }
+    suspend fun listMail(provider: String, f: Mail.Filters, category: String?, page: String? = null, fresh: Boolean = false): MailListDTO = withContext(dispatcher) {
+        req("GET", Mail.listQuery(provider, f, category, page, fresh), null, MailListDTO.serializer())
+    }
+    suspend fun getMail(provider: String, id: String): MailMessageDTO = withContext(dispatcher) {
+        req("GET", "/mail/messages/${enc(provider)}/${enc(id)}", null, MailMessageDTO.serializer())
+    }
+    /** Llevar un correo a uno o varios chats (hasta 10): una tarjeta e hilo por chat. */
+    suspend fun shareMail(provider: String, messageId: String, conversationIds: List<String>, comment: String?, topicId: String? = null): List<SharedMailDTO> = withContext(dispatcher) {
+        req("POST", "/mail/share", buildJsonObject {
+            put("provider", JsonPrimitive(provider)); put("messageId", JsonPrimitive(messageId))
+            put("conversationIds", kotlinx.serialization.json.JsonArray(conversationIds.map { JsonPrimitive(it) }))
+            comment?.takeIf { it.isNotBlank() }?.let { put("comment", JsonPrimitive(it.trim())) }
+            topicId?.let { put("topicId", JsonPrimitive(it)) }
+        }, SharedMailsPage.serializer()).emails.map { putMail(it) }
+    }
+    /** «Comentar en chaggu…» desde un mensaje de WhatsApp (solo el dueño de la cuenta). */
+    suspend fun shareWhatsApp(accountId: String, jid: String, messageId: String, conversationIds: List<String>, comment: String?): WaShareResult = withContext(dispatcher) {
+        req("POST", "/whatsapp/share", buildJsonObject {
+            put("accountId", JsonPrimitive(accountId)); put("jid", JsonPrimitive(jid)); put("messageId", JsonPrimitive(messageId))
+            put("conversationIds", kotlinx.serialization.json.JsonArray(conversationIds.map { JsonPrimitive(it) }))
+            comment?.takeIf { it.isNotBlank() }?.let { put("comment", JsonPrimitive(it.trim())) }
+        }, WaShareResult.serializer()).also { r -> r.emails.forEach { putMail(it) } }
+    }
+
+    @Volatile private var mailProof: MeetingProof? = null
+    fun cancelMailConnect() { mailProof = null }
+    /** URL del proveedor para Custom Tabs; vuelve por chaggu://mail/connected (igual que Reuniones, con su propia prueba PKCE). */
+    suspend fun startMailConnect(provider: String): String = withContext(dispatcher) {
+        val userId = myId ?: throw ApiException(401, "unauthorized", "")
+        val proof = MeetingProof(provider, userId, sessionGeneration, now())
+        mailProof = proof
+        try {
+            val url = req("POST", "/mail/connect/${enc(provider)}", buildJsonObject {
+                put("platform", JsonPrimitive(PLATFORM)); put("redirectScheme", JsonPrimitive(DeepLinks.SCHEME)); put("proofChallenge", JsonPrimitive(proof.challenge))
+            }, MailConnectResult.serializer()).url
+            if (mailProof !== proof) throw kotlinx.coroutines.CancellationException("Connection cancelled")
+            url
+        } catch (e: Exception) { if (mailProof === proof) mailProof = null; throw e }
+    }
+    /** El recibo solo no conecta nada: se canjea con la prueba de un uso de esta sesión. */
+    suspend fun confirmMailConnect(provider: String, receipt: String): MailConfirmResult = withContext(dispatcher) {
+        val proof = mailProof
+        mailProof = null
+        if (proof == null || proof.provider != provider || proof.userId != myId || proof.session != sessionGeneration || now() - proof.startedAt > 15 * 60_000)
+            throw ApiException(409, "mail_confirmation_invalid", "")
+        val r = req("POST", "/mail/connect/confirm", buildJsonObject {
+            put("receipt", JsonPrimitive(receipt)); put("proofVerifier", JsonPrimitive(proof.verifier))
+        }, MailConfirmResult.serializer())
+        if (!r.ok || r.provider != provider) throw ApiException(409, "mail_confirmation_invalid", "")
+        r
+    }
+    suspend fun disconnectMail(provider: String) = withContext(dispatcher) {
+        cancelMailConnect()
+        req("DELETE", "/mail/connections/${enc(provider)}", null, JsonElement.serializer())
+        setState { copy(mailConnections = mailConnections?.map { if (it.provider == provider) it.copy(status = "none", accountEmail = null) else it }) }
+        Unit
+    }
 
     // ---------- Invitaciones ----------
     suspend fun previewInvitation(token: String): InvitationPreviewDTO = withContext(dispatcher) {

@@ -86,12 +86,15 @@ class HttpApi(val baseUrl: String, private val client: OkHttpClient) {
     }
 
     /** Descarga autenticada a [dest] (adjuntos). Devuelve el código HTTP; el archivo solo queda si fue 2xx. */
-    suspend fun download(path: String, token: String?, dest: java.io.File, onProgress: ((Long, Long) -> Unit)? = null): Int {
+    suspend fun download(path: String, token: String?, dest: java.io.File, onProgress: ((Long, Long) -> Unit)? = null): Int = downloadResult(path, token, dest, onProgress).code
+
+    /** Como [download], pero si falla trae el cuerpo del error (p. ej. «pídeselo a Laura» de un adjunto de correo). */
+    suspend fun downloadResult(path: String, token: String?, dest: java.io.File, onProgress: ((Long, Long) -> Unit)? = null): HttpResult {
         val b = Request.Builder().url(url(path)).header("x-tiecoms-client", PLATFORM).header("x-tiecoms-contract", CONTRACT_VERSION)
         if (token != null) b.header("authorization", "Bearer $token")
         uploadClient.newCall(b.get().build()).await().use { res ->
-            if (!res.isSuccessful) return res.code
-            val body = res.body ?: return res.code
+            if (!res.isSuccessful) return HttpResult(res.code, runCatching { res.body?.string()?.take(4000) }.getOrNull() ?: "")
+            val body = res.body ?: return HttpResult(res.code, "")
             val total = body.contentLength()
             val tmp = java.io.File(dest.parentFile, dest.name + ".part")
             try {
@@ -101,7 +104,7 @@ class HttpApi(val baseUrl: String, private val client: OkHttpClient) {
                 } }
             } catch (e: IOException) { tmp.delete(); throw NetworkException(e) }
             if (!tmp.renameTo(dest)) { tmp.copyTo(dest, overwrite = true); tmp.delete() }
-            return res.code
+            return HttpResult(res.code, "")
         }
     }
 

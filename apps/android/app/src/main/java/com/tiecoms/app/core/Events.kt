@@ -24,6 +24,9 @@ sealed interface ConversationEvent {
     /** `call.updated` (docs/LLAMADAS.md): quién está en la llamada y si se transcribe; terminada = endedAt. */
     data class CallUpdated(override val conversationId: String, override val eventSeq: Long, val call: CallDTO) : ConversationEvent
 
+    /** `mail.updated` (docs/CORREO.md): la tarjeta del correo, sin cuerpo; no borra un cuerpo ya cargado. */
+    data class MailUpdated(override val conversationId: String, override val eventSeq: Long, val email: SharedMailDTO) : ConversationEvent
+
     /** `redacted` o cualquier tipo nuevo: solo avanza el cursor. */
     data class CursorOnly(override val conversationId: String, override val eventSeq: Long, val type: String) : ConversationEvent
 }
@@ -88,6 +91,7 @@ fun decodeConversationEvent(el: JsonElement): ConversationEvent? {
         "calendar.updated" -> obj(o, "event", CalendarEventDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { ConversationEvent.CalendarUpdated(conv, seq, it) }
         "topics.changed" -> obj(o, "topics", kotlinx.serialization.builtins.ListSerializer(TopicDTO.serializer()))
             ?.filter { it.id.isNotEmpty() }?.map { it.copy(conversationId = it.conversationId.ifEmpty { conv }) }?.let { ConversationEvent.TopicsChanged(conv, seq, it) }
+        "mail.updated" -> obj(o, "email", SharedMailDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { ConversationEvent.MailUpdated(conv, seq, it) }
         "call.updated" -> Calls.decode(o["call"])?.let { ConversationEvent.CallUpdated(conv, seq, it.copy(conversationId = it.conversationId.ifEmpty { conv })) }
         else -> null
     } ?: ConversationEvent.CursorOnly(conv, seq, type)

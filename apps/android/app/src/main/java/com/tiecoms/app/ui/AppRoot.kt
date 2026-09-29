@@ -96,6 +96,7 @@ import com.tiecoms.app.container
 import com.tiecoms.app.core.DeepLink
 import com.tiecoms.app.core.SessionStatus
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -337,8 +338,18 @@ private fun MainNav() {
         dismissButton = { androidx.compose.material3.TextButton(onClick = { askPush = false; container.settings.askedNotificationPermission = true }) { Text(stringResource(R.string.push_later)) } },
     )
 
-    fun openConv(id: String, seq: Long? = null, side: String? = null, messageId: String? = null) =
+    /** El mismo chat ya está abierto y se pide un mensaje: salta ahí mismo (conserva el filtro de temas «Todo»). */
+    fun jumpHere(id: String, seq: Long?, side: String?, messageId: String?): Boolean {
+        if (seq == null || seq <= 0 || side != null || messageId != null || container.openConversationId != id) return false
+        val top = nav.currentBackStackEntry ?: return false
+        if (top.destination.route?.startsWith("conv/") != true || top.arguments?.getString("id") != id) return false
+        container.chatJump.value = id to seq
+        return true
+    }
+    fun openConv(id: String, seq: Long? = null, side: String? = null, messageId: String? = null) {
+        if (jumpHere(id, seq, side, messageId)) return
         com.tiecoms.app.platform.Perf.chatTapped().let { nav.navigate("conv/$id?m=${seq ?: ""}&side=${side ?: ""}&mid=${messageId ?: ""}") { launchSingleTop = true } }
+    }
     fun tab(r: String) = nav.navigate(r) { popUpTo(nav.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true }
     // ✏️ y «＋ Crear» de Grupos, DMs, Asuntos y Calendario (docs/GRUPOS.md › Barra de arriba).
     val quick = QuickNav(
@@ -359,7 +370,9 @@ private fun MainNav() {
         container.pendingLink.value = null
         when (p) {
             is DeepLink.Conversation ->
-                if (data.conversations.any { it.id == p.id }) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.id, p.seq, p.side, p.messageId) }
+                if (data.conversations.any { it.id == p.id }) {
+                    if (!jumpHere(p.id, p.seq, p.side, p.messageId)) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.id, p.seq, p.side, p.messageId) }
+                }
                 // Sidechat de un chat que no puedo leer (colega que no está en el grupo): el sidechat a pantalla completa.
                 else if (p.side != null && data.conversations.any { it.id == p.side }) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.side) }
                 else uiScope.launch { container.toast(ctx.getString(R.string.no_access)) }
@@ -429,6 +442,15 @@ private fun MainNav() {
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
+        // Correo en el chat (docs/CORREO.md): a dónde van los botones de las tarjetas.
+        val mailNav = remember(nav) {
+            MailNav(
+                openMail = { id, mode -> nav.navigate("mail/$id?mode=$mode") { launchSingleTop = true } },
+                openList = { c -> nav.navigate("mailbox?conv=${c ?: ""}") { launchSingleTop = true } },
+                openWhatsApp = { nav.navigate("whatsapp") { launchSingleTop = true } },
+            )
+        }
+        CompositionLocalProvider(LocalMailNav provides mailNav) {
         NavHost(nav, startDestination = "home?ws={ws}", modifier = Modifier.fillMaxSize()) {
             composable("home?ws={ws}", arguments = listOf(navArgument("ws") { type = NavType.StringType; nullable = true; defaultValue = null })) {
                 GroupsScreen(
@@ -519,6 +541,24 @@ private fun MainNav() {
             composable("reminders") { RemindersScreen(onBack = { nav.popBackStack() }, onOpen = { c, seq -> openConv(c, seq) }) }
             composable("trazo") { TrazoScreen(onBack = { nav.popBackStack() }, onOpen = { c -> openConv(c) }) }
             composable("whatsapp") { WhatsAppScreen(onBack = { nav.popBackStack() }, onOpenConversation = { c -> openConv(c) }) }
+            // Correo: la lista (con ?conv= el destino ya viene elegido) y el correo abierto (mode: read | comments | reply).
+            composable("mailbox?conv={conv}", arguments = listOf(navArgument("conv") { type = NavType.StringType; defaultValue = "" })) {
+                val conv = it.arguments?.getString("conv")?.takeIf { c -> c.isNotBlank() }
+                MailListScreen(conv, onBack = { nav.popBackStack() }, onShared = { c, mid ->
+                    if (c == conv) nav.popBackStack() else { nav.popBackStack(); openConv(c) }
+                    // En el chat, salta a la tarjeta recién compartida (cuando llega su mensaje).
+                    if (mid != null) uiScope.launch {
+                        val seq = kotlinx.coroutines.withTimeoutOrNull(8_000) {
+                            client.state.first { st -> st.conversations[c]?.messages?.any { m -> m.id == mid } == true }.conversations[c]!!.messages.first { m -> m.id == mid }.seq
+                        }
+                        if (seq != null) container.chatJump.value = c to seq
+                    }
+                })
+            }
+            composable("mail/{id}?mode={mode}", arguments = listOf(navArgument("mode") { type = NavType.StringType; defaultValue = "read" })) {
+                MailDetailScreen(it.arguments?.getString("id") ?: "", it.arguments?.getString("mode") ?: "read", onBack = { nav.popBackStack() },
+                    onOpenIssue = { i -> nav.navigate("issue/$i") })
+            }
             composable("share") {
                 val draft = container.shareDraft
                 ShareScreen(draft?.text ?: "", draft?.source ?: "other", onBack = { container.shareDraft = null; if (!nav.popBackStack()) tab("home") },
@@ -552,6 +592,7 @@ private fun MainNav() {
                     },
                 )
             }
+        }
         }
         AssistantBubble(gg, visible = route in TABS && !gg.open, modifier = Modifier.align(Alignment.BottomEnd))
         }

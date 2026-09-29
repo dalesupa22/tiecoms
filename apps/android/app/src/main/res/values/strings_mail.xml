@@ -1,14 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Correo y WhatsApp en el chat (docs/CORREO.md). Generado desde apps/web/src/i18n.ts: mismos textos que la web. -->
 <resources>
+    <!-- common.done -->
+    <string name="web_common_done">Done</string>
     <!-- lin.open -->
     <string name="web_lin_open">Open</string>
+    <!-- wa.someone -->
+    <string name="web_wa_someone">Participant</string>
     <!-- comments.one -->
     <string name="web_comments_one">💬 Comment added</string>
     <!-- comments.many (n) -->
     <string name="web_comments_many">💬 %1$s new comments</string>
     <!-- comments.reply -->
     <string name="web_comments_reply">Reply</string>
+    <!-- comments.send -->
+    <string name="web_comments_send">Comment</string>
     <!-- mail.title -->
     <string name="web_mail_title">Email</string>
     <!-- mail.accounts -->
@@ -313,4 +319,20 @@
     <string name="web_mail_showHistory">Show quoted history and signature</string>
     <!-- mail.hideHistory -->
     <string name="web_mail_hideHistory">Hide history</string>
+    <!-- mail.whoSeesMany (n, chats) -->
+    <string name="web_mail_whoSeesMany">%1$s people in %2$s chats will see the sender, subject and text. Each chat gets its own card and thread.</string>
+    <!-- mail.shareInMany (n) -->
+    <string name="web_mail_shareInMany">Share in %1$s chats</string>
+    <!-- mail.sharedMany (n) -->
+    <string name="web_mail_sharedMany">Shared in %1$s chats</string>
+    <!-- mail.commentCardPh -->
+    <string name="web_mail_commentCardPh">Comment on this email…</string>
+    <!-- mail.commentWaPh -->
+    <string name="web_mail_commentWaPh">Comment on this message…</string>
+    <!-- wa.bring -->
+    <string name="web_wa_bring">Bring to a chat…</string>
+    <!-- wa.bringShort -->
+    <string name="web_wa_bringShort">Bring to a chat</string>
+    <!-- wa.bringTitle -->
+    <string name="web_wa_bringTitle">Bring a WhatsApp message to a chat</string>
 </resources>

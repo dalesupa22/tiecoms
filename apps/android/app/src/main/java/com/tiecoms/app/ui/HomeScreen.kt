@@ -244,6 +244,8 @@ fun GroupsScreen(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 LazyColumn(Modifier.fillMaxSize().testTag("conversationList"), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = AssistantListInset)) {
+                    // Correo (docs/CORREO.md; en la web va en Hoy): «Comenta tus correos con el equipo · Conectar», solo sin cuenta conectada.
+                    item(key = "mailNudge") { val mailNav = LocalMailNav.current; MailConnectNudge(onOpen = { mailNav.openList(null) }) }
                     if (dueReminders > 0) item(key = "dueReminders") {
                         Row(Modifier.fillMaxWidth().clickable(onClick = onReminders).heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp).testTag("home.dueReminders"),
                             verticalAlignment = Alignment.CenterVertically) {

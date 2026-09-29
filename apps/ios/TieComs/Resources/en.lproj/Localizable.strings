@@ -2073,3 +2073,5 @@
 "ws.onlyYours" = "You only see the groups you are in; the others do not reveal their name.";
 "ws.participants" = "Participants";
 "ws.yourGroups" = "Your groups in this space";
+"chat.readMore" = "Show more";
+"chat.readLess" = "Show less";

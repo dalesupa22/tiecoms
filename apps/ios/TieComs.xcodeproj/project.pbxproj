@@ -59,6 +59,7 @@
 		39170673C86561E1D51BEB5E /* AssistantVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B56935C512DB24578AC9B0 /* AssistantVoice.swift */; };
 		395C42AB3815C8D709205EEB /* Donations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F816EA3E07F011F2A8F49A6 /* Donations.swift */; };
 		39896F3C58B3F47E1EE343C2 /* snd_marimba.caf in Resources */ = {isa = PBXBuildFile; fileRef = 803208A97EA747D7846268CA /* snd_marimba.caf */; };
+		3BCE3A639DB59885D77A01CD /* SwipeToReply.swift in Sources */ = {isa = PBXBuildFile; fileRef = 913E113F3642DB737660EF6B /* SwipeToReply.swift */; };
 		3D53B4758E7E3CFB64F70708 /* ring_suave.caf in Resources */ = {isa = PBXBuildFile; fileRef = B4E231628C4FBB5BDAE32F1B /* ring_suave.caf */; };
 		3F8172550A64ECA0C549BB92 /* SharedText.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD8AAAA7104EA6BD0C5C7B6D /* SharedText.swift */; };
 		3FFDC3BF8E2B6DF516EAEADF /* Menus.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB336317C73EE48E2442822 /* Menus.swift */; };
@@ -75,6 +76,7 @@
 		49295EDDD244A7B70F8B9949 /* TreeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C77B7CEAEE4E4843A522E11 /* TreeViews.swift */; };
 		4978B8BF5227EDF98629FB01 /* snd_gota.caf in Resources */ = {isa = PBXBuildFile; fileRef = 6288B7C2FCEAC067F66A8C66 /* snd_gota.caf */; };
 		4B52B46CAD5586151694B22C /* OFL-Caveat.txt in Resources */ = {isa = PBXBuildFile; fileRef = FF73F2C50044493C18615592 /* OFL-Caveat.txt */; };
+		4BB18FB1FF37B0C2B2C1F728 /* ChatScrollUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19A92EC6EF41E0571A816D5B /* ChatScrollUITests.swift */; };
 		4CF0EA01DA1BF95D7F94BB30 /* V9LanguageSubjectsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC9F4FC91E577352D1412556 /* V9LanguageSubjectsTests.swift */; };
 		4E2E49A1EBCDEC5A426728AA /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0EE4F0835A244D173D5CE5E /* APIClient.swift */; };
 		4E59CFA741A2A59474D6B018 /* ChatBarViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E3C4FF55AD5EFBB6F904775 /* ChatBarViews.swift */; };
@@ -301,6 +303,7 @@
 		16F45C167BD5B6CEC4D71FDC /* OFL-GreatVibes.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "OFL-GreatVibes.txt"; sourceTree = "<group>"; };
 		180B56319E81B9EDD1A43C5A /* GroupsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupsViews.swift; sourceTree = "<group>"; };
 		1951BFBA02D7E02999833CBE /* V8VoiceNotificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V8VoiceNotificationTests.swift; sourceTree = "<group>"; };
+		19A92EC6EF41E0571A816D5B /* ChatScrollUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatScrollUITests.swift; sourceTree = "<group>"; };
 		1C9E3914E2722F0FB50EB2D2 /* OFL-DancingScript.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "OFL-DancingScript.txt"; sourceTree = "<group>"; };
 		1E26426F68CC74D0DA72B78B /* SnapshotCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotCacheTests.swift; sourceTree = "<group>"; };
 		1F1FB42FA08DF6BC0C3115C7 /* CommunicationNotification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunicationNotification.swift; sourceTree = "<group>"; };
@@ -403,6 +406,7 @@
 		8CAC11B8FB41588155418642 /* V6MentionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V6MentionTests.swift; sourceTree = "<group>"; };
 		8D00FFEF737CC563C49DFBB2 /* TieComsShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TieComsShare.entitlements; sourceTree = "<group>"; };
 		8F473836045F17BB1F0EB203 /* LlamadasUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamadasUITests.swift; sourceTree = "<group>"; };
+		913E113F3642DB737660EF6B /* SwipeToReply.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeToReply.swift; sourceTree = "<group>"; };
 		91B0C07E6212B358778CA533 /* EventChatCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventChatCard.swift; sourceTree = "<group>"; };
 		923D2E3C2F53E9B60B7EAF56 /* IssuesViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssuesViews.swift; sourceTree = "<group>"; };
 		92E328380AAD4AD20697FDC7 /* IssueTasks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueTasks.swift; sourceTree = "<group>"; };
@@ -513,6 +517,7 @@
 			children = (
 				BE4840348E1744F41C5D7E32 /* AssistantUITests.swift */,
 				9435F794DD29ECC6D280393D /* ChatFlowUITests.swift */,
+				19A92EC6EF41E0571A816D5B /* ChatScrollUITests.swift */,
 				4E78DF1225B902F778EF28DE /* EventCardUITests.swift */,
 				A16D843AE33D30C155EB369E /* FeedbackUITests.swift */,
 				5EE2B1313EBAD028D7C39324 /* GatewayRecoveryUITests.swift */,
@@ -707,6 +712,7 @@
 				93F0BD37016C7BF372899575 /* SignViews.swift */,
 				5FA9EAB28848181435FA4D36 /* SleepViews.swift */,
 				3792730DDF81227D7735C79E /* Splash.swift */,
+				913E113F3642DB737660EF6B /* SwipeToReply.swift */,
 				374489C8A2878E0FC9D3DC8F /* Tanda17Cards.swift */,
 				F7BB04361EC3CE0A153DC738 /* TaskViews.swift */,
 				E7B7D04AEB3A584685873097 /* Theme.swift */,
@@ -1124,6 +1130,7 @@
 				95B920D193BBFD6EAF1F8081 /* Sounds.swift in Sources */,
 				787E7E59AC77EAC8C71369E1 /* Splash.swift in Sources */,
 				3398EFD5E838BD6D49484EC1 /* Storage.swift in Sources */,
+				3BCE3A639DB59885D77A01CD /* SwipeToReply.swift in Sources */,
 				9AA25DAFAF89715401A83969 /* Tanda17.swift in Sources */,
 				CBF01DC119770A2414CD16D7 /* Tanda17Cards.swift in Sources */,
 				9DBE47EDA779C39EC355A77A /* TaskViews.swift in Sources */,
@@ -1167,6 +1174,7 @@
 			files = (
 				92B838B4EDD1F56EA574710C /* AssistantUITests.swift in Sources */,
 				8A1233EC493B295510B8946F /* ChatFlowUITests.swift in Sources */,
+				4BB18FB1FF37B0C2B2C1F728 /* ChatScrollUITests.swift in Sources */,
 				AFB489AAB3CA82F08E7068DF /* EventCardUITests.swift in Sources */,
 				40E1ED0AC0107DD7EF91B4D8 /* FeedbackUITests.swift in Sources */,
 				57FE35C297871FD2F9C69742 /* GatewayRecoveryUITests.swift in Sources */,

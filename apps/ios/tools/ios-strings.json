@@ -3542,5 +3542,13 @@
  "vo.off": [
   "Desactivado",
   "Off"
+ ],
+ "chat.readMore": [
+  "Ver más",
+  "Show more"
+ ],
+ "chat.readLess": [
+  "Ver menos",
+  "Show less"
  ]
 }

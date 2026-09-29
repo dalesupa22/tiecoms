@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// Estilos de texto con menciones (UIKit): cada mención con el color de SU persona; los enlaces http con el acento.
 enum RichText {
@@ -66,6 +67,8 @@ struct RichMessageText: UIViewRepresentable {
     let mine: Bool
     let linkify: Bool
     var highlight: String? = nil
+    /// 0 = sin tope (mensaje muy largo plegado: 30).
+    var maxLines = 0
     var onMention: (String) -> Void
     @Environment(\.openURL) private var openURL
 
@@ -86,7 +89,16 @@ struct RichMessageText: UIViewRepresentable {
 
     func updateUIView(_ v: UITextView, context: Context) {
         context.coordinator.parent = self
-        v.attributedText = RichText.bubble(text, mentions: mentions, mine: mine, linkify: linkify, highlight: highlight)
+        let key = RichText.Key(text: text, mentions: mentions, mine: mine, linkify: linkify, highlight: highlight)
+        if context.coordinator.key != key {
+            context.coordinator.key = key
+            v.attributedText = RichText.cachedBubble(key)
+        }
+        if v.textContainer.maximumNumberOfLines != maxLines {
+            v.textContainer.maximumNumberOfLines = maxLines
+            v.textContainer.lineBreakMode = maxLines > 0 ? .byTruncatingTail : .byWordWrapping
+            v.invalidateIntrinsicContentSize()
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
@@ -103,6 +115,7 @@ struct RichMessageText: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: RichMessageText
+        var key: RichText.Key?
         init(_ p: RichMessageText) { parent = p }
         func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
             guard case .link(let url) = textItem.content else { return defaultAction }
@@ -126,10 +139,13 @@ struct ComposerTextView: UIViewRepresentable {
     var placeholder: String
     var accessibilityLabel: String
     var onChange: (String) -> Void = { _ in }
+    /// Pegar imágenes (menú Pegar o ⌘V, 1.7.1): se adjuntan como si se eligieran de Fotos. nil = solo texto.
+    var onPasteAttachments: (([LocalAttachment]) -> Void)? = nil
     static let maxLines: CGFloat = 5
 
     func makeUIView(context: Context) -> UITextView {
-        let v = UITextView()
+        let v = PastingTextView()
+        v.onPasteAttachments = onPasteAttachments
         v.font = RichText.baseFont()
         v.adjustsFontForContentSizeCategory = true
         v.backgroundColor = .clear
@@ -152,6 +168,7 @@ struct ComposerTextView: UIViewRepresentable {
     func updateUIView(_ v: UITextView, context: Context) {
         let c = context.coordinator
         c.parent = self
+        (v as? PastingTextView)?.onPasteAttachments = onPasteAttachments
         if v.text != text {
             c.applying = true
             // Texto que llega de fuera (elegir una mención, enviar, editar): primero se cierra el texto marcado
@@ -266,6 +283,75 @@ struct ComposerTextView: UIViewRepresentable {
             parent.text = text
             parent.onChange(text)
             textView.invalidateIntrinsicContentSize()
+        }
+    }
+}
+
+/// UITextView del compositor que también pega imágenes del portapapeles (capturas, fotos copiadas desde Fotos o Safari):
+/// «Pegar» aparece en el menú aunque no haya texto y ⌘V con teclado pasa por aquí. Si además hay texto (no solo un enlace
+/// de la imagen), el texto también se pega.
+final class PastingTextView: UITextView {
+    var onPasteAttachments: (([LocalAttachment]) -> Void)?
+    /// Portapapeles a usar (las pruebas pasan uno propio).
+    var pasteboard: UIPasteboard = .general
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)), onPasteAttachments != nil, PasteImages.hasImages(pasteboard) { return true }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        guard let cb = onPasteAttachments, PasteImages.hasImages(pasteboard) else { super.paste(sender); return }
+        let raw = PasteImages.raw(pasteboard)
+        if PasteImages.hasPlainText(pasteboard) { super.paste(sender) }
+        // Decodificar y reducir una foto de 12 MP toma ~100 ms: fuera del hilo principal.
+        Task.detached(priority: .userInitiated) {
+            let list = PasteImages.prepare(raw)
+            await MainActor.run { if !list.isEmpty { cb(list) } }
+        }
+    }
+}
+
+/// Imágenes del portapapeles → adjuntos listos (mismas reglas que al elegir de Fotos: ImagePrep).
+enum PasteImages {
+    enum Raw: @unchecked Sendable { case data(Data, UTType), image(UIImage) }
+
+    static func hasImages(_ pb: UIPasteboard) -> Bool { pb.hasImages || pb.contains(pasteboardTypes: [UTType.image.identifier]) }
+
+    /// Texto que vale la pena pegar además de la imagen (no el enlace de la imagen que agrega Safari).
+    static func hasPlainText(_ pb: UIPasteboard) -> Bool {
+        guard pb.hasStrings, let s = pb.string?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return false }
+        if let u = URL(string: s), u.scheme?.hasPrefix("http") == true, !s.contains(" ") { return false }
+        return true
+    }
+
+    /// Lee cada elemento del portapapeles en el hilo principal (UIPasteboard no es seguro fuera de él).
+    static func raw(_ pb: UIPasteboard) -> [Raw] {
+        var out: [Raw] = []
+        let preferred: [UTType] = [.png, .jpeg, .heic, .heif, .gif, .webP, .tiff, .image]
+        for item in pb.items {
+            var found: Raw?
+            for t in preferred {
+                guard let key = item.keys.first(where: { UTType($0)?.conforms(to: t) == true }) else { continue }
+                if let d = item[key] as? Data { found = .data(d, UTType(key) ?? t) }
+                else if let img = item[key] as? UIImage { found = .image(img) }
+                if found != nil { break }
+            }
+            if let found { out.append(found) }
+        }
+        if out.isEmpty, let imgs = pb.images { out = imgs.map { .image($0) } }
+        return Array(out.prefix(AttachmentRules.maxPerMessage))
+    }
+
+    static func prepare(_ raw: [Raw]) -> [LocalAttachment] {
+        raw.enumerated().compactMap { i, r in
+            switch r {
+            case .data(let d, let t):
+                let ext = t.preferredFilenameExtension ?? "png"
+                return ImagePrep.prepare(d, name: "pegada-\(i + 1).\(ext)", contentType: t.preferredMIMEType ?? "image/png")
+            case .image(let img):
+                return ImagePrep.jpeg(img).map { LocalAttachment(name: "pegada-\(i + 1).jpg", contentType: "image/jpeg", data: $0) }
+            }
         }
     }
 }

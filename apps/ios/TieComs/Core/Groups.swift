@@ -14,6 +14,8 @@ struct GroupsTree {
     /// `threadUnread`: respuestas sin leer de sus hilos (los hilos no se listan: viven en la barra del chat).
     struct ConvNode: Identifiable {
         var conv: ConversationDTO; var label: String? = nil; var threadUnread: Int = 0
+        /// Vista Lista (1.7.1): empresa bajo el nombre (nil en el Árbol, que ya agrupa por empresa).
+        var company: String? = nil
         /// Pendientes del árbol de la fila (grupo + derivadas).
         var tree = TreePending()
         var id: String { conv.id }
@@ -252,8 +254,9 @@ extension Naming {
         return fold(group).hasPrefix(fold(co)) ? group : "\(co) · \(group)"
     }
 
-    /// Lista: las mismas filas de grupo del árbol (sin hilos) en una sola lista con el orden único (HomeOrder) y
-    /// el título «{Empresa} · {Grupo}» (la empresa del árbol: la mía, la contraparte o la anfitriona).
+    /// Lista: las mismas filas de grupo del árbol (sin hilos) en una sola lista con el orden único (HomeOrder).
+    /// 1.7.1: arriba solo el nombre del grupo; la empresa del árbol (la mía, la contraparte o la anfitriona) va en
+    /// `company`, que la fila pinta debajo en gris pequeño (nil si el nombre ya empieza por la empresa).
     static func groupsList(_ d: BootstrapDTO, query: String = "", filterWorkspace: String? = nil, tab: HomeFilter = .all) -> [GroupsTree.ConvNode] {
         let tree = groupsTree(d, query: query, filterWorkspace: filterWorkspace, tab: tab)
         var out: [GroupsTree.ConvNode] = []
@@ -261,13 +264,37 @@ extension Naming {
             for co in s.companies {
                 let company = co.org?.name ?? co.name
                 for var n in co.groups {
-                    n.label = listLabel(company: company, group: n.label ?? title(d, n.conv))
+                    n.company = companyBelow(company: company, title: n.label ?? title(d, n.conv))
                     out.append(n)
                 }
             }
             out += s.orphans
         }
         return out.sorted { HomeOrder.before($0.conv, $1.conv) }
+    }
+
+    /// Empresa para la línea pequeña bajo el nombre: nil si no hay o si el nombre ya empieza por ella
+    /// («Xertify - Xertiflow» no repite «Xertify»). Sin tildes ni mayúsculas.
+    static func companyBelow(company: String?, title: String) -> String? {
+        let co = (company ?? "").trimmingCharacters(in: .whitespaces)
+        guard !co.isEmpty else { return nil }
+        let fold: (String) -> String = { $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
+        return fold(title.trimmingCharacters(in: .whitespaces)).hasPrefix(fold(co)) ? nil : co
+    }
+
+    /// Línea de empresa bajo el nombre (1.7.1) en listas, búsqueda y cabecera del chat: la empresa del árbol en un grupo
+    /// y la de la otra persona en un directo 1:1. Nada en chats de varias personas ni sidechats (llevan su propia línea).
+    static func companyLine(_ d: BootstrapDTO, _ c: ConversationDTO, title shown: String? = nil) -> String? {
+        let t = shown ?? title(d, c)
+        switch c.kind {
+        case .direct:
+            guard let o = otherInDirect(d, c) else { return nil }
+            return companyBelow(company: org(d, o.orgId)?.name ?? (o.guest ? L("common.guest") : nil), title: t)
+        case .multi: return nil
+        case .group, .internal:
+            guard !isSide(c), let w = d.workspaces.first(where: { $0.id == c.workspaceId }) else { return nil }
+            return companyBelow(company: companyName(d, w), title: t)
+        }
     }
 
     // MARK: DMs

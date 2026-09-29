@@ -25,6 +25,10 @@ enum Theme {
     static let onPrimary = Color(light: 0xFFFFFF, dark: 0x17161F)
     /// Burbuja propia: mandarina sobria (#E8472A en claro, #C73E24 en oscuro), con texto blanco.
     static let bubbleMine = Color(light: 0xE8472A, dark: 0xC73E24)
+    /// Sidechat (1.7.1): verde azulado sobrio, idéntico en web, iOS y Android. Texto/ícono #1F7A74 sobre #E0F2EF en claro;
+    /// #7FD3CA sobre #16312E en oscuro. Solo para lo que identifica sidechats (píldora, ícono de fila, chip, panel).
+    static let sideText = Color(light: 0x1F7A74, dark: 0x7FD3CA)
+    static let sideFill = Color(light: 0xE0F2EF, dark: 0x16312E)
 }
 
 extension Theme {

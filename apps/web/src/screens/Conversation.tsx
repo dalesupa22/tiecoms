@@ -781,7 +781,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               />
               </div>
               {!privateReply && <button type="button" className={`bring-btn once-btn ${viewOnce ? 'is-on' : ''}`} aria-pressed={viewOnce} title={viewOnce ? t('once.on') : t('once.toggle')} aria-label={t('once.toggle')}
-                onClick={() => { setViewOnce((v) => { toast(v ? t('once.off') : t('once.on')); return !v; }); input.current?.focus(); }}><span className="once-ico" aria-hidden>1</span></button>}
+                onClick={() => { const next = !viewOnce; setViewOnce(next); toast(next ? t('once.on') : t('once.off')); input.current?.focus(); }}><span className="once-ico" aria-hidden>1</span></button>}
               {/* Con el compositor vacío, el micrófono: mantener pulsado graba una nota de voz. */}
               {!text.trim() && !drafts.drafts.length && !privateReply
                 ? <VoiceRecorder conversationId={id} viewOnce={viewOnce} onSent={() => { atBottom.current = true; setReplyTo(null); setViewOnce(false); }} />

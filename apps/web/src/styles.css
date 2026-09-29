@@ -1367,7 +1367,7 @@ button.topic-tag:hover { filter: brightness(.96); }
 @media (prefers-reduced-motion: reduce) { .sad-face, .fx-sad { animation: none; } }
 
 /* Buscar dentro del chat. */
-.chat-search { position: relative; border-bottom: 1px solid var(--line); background: var(--card); z-index: 5; }
+.chat-search { position: relative; border-bottom: 1px solid var(--line); background: var(--card); z-index: 40; }
 .chat-search-bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; }
 .chat-search-bar .input { height: 32px; min-width: 0; }
 .chat-search-count { white-space: nowrap; min-width: 56px; text-align: right; }

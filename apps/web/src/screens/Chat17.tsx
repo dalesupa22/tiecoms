@@ -16,7 +16,7 @@ import { quickSearch } from '../quick-search.ts';
 import { compareConversations } from '../home-order.ts';
 import { Avatar, ConvAvatar, Modal, conversationTitle, orgById, personById } from '../ui.tsx';
 import { EventChatCard, EventComments } from './Calendar.tsx';
-import { IssueChatCard } from './Issues.tsx';
+import { IssueChatCard, issueFlags } from './Issues.tsx';
 import { openDialog } from '../actions.tsx';
 
 // ---------- #grupos ----------
@@ -219,23 +219,25 @@ export function ViewOnceBubble({ m }: { m: MessageDTO }) {
   const seen = (m.openedBy ?? []).map((o) => personById(d, o.userId)?.name.split(' ')[0]).filter(Boolean) as string[];
   const status = state === 'sent' ? (seen.length ? t('once.seenBy', { names: seen.join(', ') }) : t('once.sent'))
     : state === 'opened' ? t('once.opened') : t('once.tapToOpen');
-  const canOpen = state === 'unopened';
+  const [busy, setBusy] = useState(false);
+  const canOpen = state === 'unopened' && !busy;
   const open = async () => {
     if (!canOpen) return;
+    setBusy(true);
     try {
       const r = await client.openViewOnce(m);
       openDialog((close) => <ViewOnceViewer m={m} content={r} onClose={close} />);
     } catch (e: any) {
       if (e?.code === 'already_opened' || e?.code === 'expired') client.markViewOnceOpened(m);
       toast(errorText(e));
-    }
+    } finally { setBusy(false); }
   };
   return (
     <button type="button" className={`once-bubble is-${state}`} onClick={() => void open()} disabled={!canOpen} aria-label={`${label} · ${status}`}>
       <span className="once-ico" aria-hidden>1</span>
       <span className="grow" style={{ textAlign: 'left' }}>
         <b style={{ display: 'block' }}>{label.replace(/^①\s*/, '')}</b>
-        <span className="small muted">{status}</span>
+        <span className="small muted">{busy ? t('common.loading') : status}</span>
       </span>
     </button>
   );
@@ -285,16 +287,19 @@ export function Notice17Row({ m, p, canPost, live, onIssue }: { m: MessageDTO; p
   const ref = useRef<HTMLDivElement>(null);
   useLiveEffect(m, live && (p.k === 'issue.done' || p.k === 'issue.overdue'), p.k === 'issue.overdue' ? 'sad' : 'confetti', ref);
   const [replying, setReplying] = useState(false);
+  // «Tarea de Ana» / «Evento de Ana»: quien la creó, no quien la completó, venció o comentó.
+  const issueCreator = useClient((s) => ('issueId' in p ? s.issues[p.issueId]?.createdBy : undefined)) ?? m.authorId;
+  const eventCreator = useClient((s) => ('eventId' in p ? s.events[p.eventId]?.organizerId : undefined)) ?? m.authorId;
   const row = (child: React.ReactNode) => <div ref={ref} id={`msg-${m.conversationId}-${m.seq}`} data-notice={p.k} className="msg-card-row">{child}</div>;
   if (p.k === 'event.today') {
     const time = new Date(p.startsAt).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' });
-    return row(<EventChatCard eventId={p.eventId} creatorId={m.authorId} tone="today" banner={t('today.banner', { time })} />);
+    return row(<EventChatCard eventId={p.eventId} creatorId={eventCreator} tone="today" banner={t('today.banner', { time })} />);
   }
   if (p.k === 'issue.done') {
-    return row(<IssueChatCard issueId={p.issueId} creatorId={m.authorId} canPost={canPost} onOpen={onIssue} tone="done" hideReply banner={t('done.banner', { name: p.byName })} />);
+    return row(<IssueChatCard issueId={p.issueId} creatorId={issueCreator} canPost={canPost} onOpen={onIssue} tone="done" hideReply banner={t('done.banner', { name: p.byName })} />);
   }
   if (p.k === 'issue.overdue') {
-    return row(<IssueChatCard issueId={p.issueId} creatorId={m.authorId} canPost={canPost} onOpen={onIssue} tone="overdue" hideReply
+    return row(<IssueChatCard issueId={p.issueId} creatorId={issueCreator} canPost={canPost} onOpen={onIssue} tone="overdue" hideReply
       banner={<><span className="sad-face" aria-hidden>😢</span> {t('overdue.banner', { title: p.title, date: dueDateLabel(p.dueDate) })}</>}
       footer={canPost ? <OverdueActions issueId={p.issueId} conversationId={m.conversationId} /> : null} />);
   }
@@ -308,9 +313,9 @@ export function Notice17Row({ m, p, canPost, live, onIssue }: { m: MessageDTO; p
     </div>
   );
   if (p.k === 'issue.comments') {
-    return row(<IssueChatCard issueId={p.issueId} creatorId={m.authorId} canPost={canPost} onOpen={onIssue} tone="comments" hideReply={!replying} banner={strip} />);
+    return row(<IssueChatCard issueId={p.issueId} creatorId={issueCreator} canPost={canPost} onOpen={onIssue} tone="comments" hideReply={!replying} banner={strip} />);
   }
-  return row(<EventChatCard eventId={p.eventId} creatorId={m.authorId} tone="comments" banner={strip} footer={replying ? <EventReply eventId={p.eventId} /> : null} />);
+  return row(<EventChatCard eventId={p.eventId} creatorId={eventCreator} tone="comments" banner={strip} footer={replying ? <EventReply eventId={p.eventId} /> : null} />);
 }
 
 function EventReply({ eventId }: { eventId: string }) {
@@ -323,7 +328,8 @@ function EventReply({ eventId }: { eventId: string }) {
 function OverdueActions({ issueId, conversationId }: { issueId: string; conversationId: string }) {
   const d = useClient((s) => s.data)!;
   const i = useClient((s) => s.issues[issueId]);
-  if (!i || i.status === 'done' || i.status === 'cancelled') return null;
+  // Ya con otra fecha (o cerrada), la tarjeta queda como registro y sin botones.
+  if (!i || i.status === 'done' || i.status === 'cancelled' || !issueFlags(i).overdue) return null;
   const setDue = (dueDate: string) => client.updateIssue(issueId, { dueDate }).then(() => toast(t('overdue.moved', { date: dueDateLabel(dueDate) }))).catch((e) => toast(errorText(e)));
   const dateMenu = (el: HTMLElement) => {
     const q = quickDueDates();

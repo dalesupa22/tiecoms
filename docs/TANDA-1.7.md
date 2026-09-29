@@ -90,3 +90,22 @@ Todos los mensajes de sistema nuevos llevan el cuerpo `{"k": clave, ...}`. Los c
   - una vista: contenido oculto, se abre una vez, 410 la segunda, 409 al reenviar, sin URL en los endpoints generales.
 - **Web:** pruebas unitarias de las utilidades de render (refs, búsqueda) y una pasada en el navegador.
 - **Móvil:** decodificación de los DTO nuevos, textos de sistema, la barra de búsqueda y el visor de una sola vista.
+
+## Decisiones de la implementación (API y web, 29-sep-2026)
+
+Contratos en `packages/contracts` (commits `ea9536e` «contratos 1.7» y `4a46c1d`). Lo que no decía la especificación:
+
+- **Contrato:** `CONTRACT_VERSION = '2026-09-29'`. Nuevos: `RefInput`, `MessageRefDTO`, `MAX_REFS_PER_MESSAGE`, `ViewOnceState`, `ViewOnceOpenDTO`, `EventCommentDTO`, `EventCommentInput`, `ChatSearchQuery`, `ChatSearchResultDTO` (con `field: 'body' | 'attachment' | 'transcript'`), `ChatSearchPageDTO`, `SYSTEM_KEYS_17` y `SystemBody17` (forma exacta de los cuerpos nuevos). `MessagePreviewDTO.viewOnce` (segundo commit) para que la lista muestre «① Foto / ① Mensaje / ① Nota de voz».
+- **#grupos:** el nombre guardado es el de la conversación; si no tiene (directos, chats sin nombre), los nombres de las otras personas. Un mensaje de una sola vista no lleva menciones ni refs (se descartan).
+- **Tarea hecha:** `issue.done` reemplaza a `issue.closed` cuando el estado pasa a `done` (cancelar sigue publicando `issue.closed`). También sale en tareas hijas visibles para todos.
+- **Tarea vencida:** la migración marca como ya avisadas las que estaban vencidas al desplegar (no se anuncian todas de golpe). Las tareas restringidas (`org`/`private`) y las personales no publican en el chat, solo el push al responsable (trabajo `push.issue_overdue`, título «😢 No cumplimos»). El autor del mensaje de sistema es el responsable (o quien la creó). El worker revisa cada minuto (`OVERDUE_CHECK_MS` para pruebas).
+- **Es hoy:** el autor del mensaje es quien organiza. Si el evento cambia de día (en su zona), vuelve a avisar ese día. La migración marca como avisados los eventos que ya terminaron.
+- **Comentarios:** comentar un evento exige poder escribir en su chat. `bumpCommentNotice` bloquea la conversación para no crear dos avisos a la vez. Los comentarios que trae una integración usan el nombre externo (`author`).
+- **Búsqueda:** sin depender de `unaccent`: función `tiecoms_fold(text)` (1 a 1, conserva posiciones) y, si se puede crear `pg_trgm`, índice trigram sobre `tiecoms_fold(body)`. Solo mensajes de texto. `matches` son posiciones dentro de `snippet`. `from:Nombre` (o `from:"Nombre Apellido"`) funciona. `before` es el `seq` del último resultado.
+- **Una sola vista:**
+  - La fila guarda `body = ''` y los adjuntos «sellados» (`url: ''`, `name: ''`, `thumbUrl: null`, sin onda ni transcripción); el texto real está en `messages.view_once_body`. Así ninguna vista previa, push, integración o búsqueda puede filtrarlo.
+  - Los eventos en vivo son iguales para todos: llegan con `viewOnceState: 'unopened'` y `openedBy`. Cada cliente calcula su estado (`viewOnceStateFor` en client-core): autor → `sent`; estoy en `openedBy` → `opened`. Los REST (`/messages`, envío) ya lo traen calculado para quien pide.
+  - `POST /messages/:id/open`: 403 al autor y a la supervisión; 410 `already_opened` la segunda vez; 410 `expired` si ya se borró. URL firmada: `GET /api/v1/once?t=<token>` (sin Bearer, 60 s, solo para quien lo abrió).
+  - Retención: cada 10 min el worker borra el texto y marca los adjuntos como borrados cuando todos los destinatarios lo abrieron (hace más de 2 min) o a los 14 días.
+  - `lastMessagePreview` llega como `'①'` para clientes viejos.
+- **Web:** el confeti es propio (canvas, sin librería) y la carita triste es CSS; ninguno se anima con «reducir movimiento». El resaltado de la búsqueda usa CSS Custom Highlight (sin tocar el DOM de React). Los botones de «No cumplimos» desaparecen cuando la tarea ya no está vencida.

@@ -830,7 +830,10 @@ struct ConversationView: View {
                 .accessibilityAddTraits(.isHeader)
         case .system(let m):
             // Una tarea nueva se ve como tarjeta completa (docs/TEMAS.md), no como la línea «Creó la tarea…».
-            if let issueId = TaskCard.issueId(m) {
+            if let eventId = EventCardRule.eventId(m) {
+                // Evento nuevo: tarjeta con fecha, Unirse, quiénes van y la respuesta ahí mismo (en vez de «Agendó…»).
+                EventChatCard(eventId: eventId, creatorId: m.authorId)
+            } else if let issueId = TaskCard.issueId(m) {
                 IssueChatCard(issueId: issueId, creatorId: m.authorId, canPost: c.canPost) { i in
                     commentingIssue = i; replyTo = nil; editing = nil; composerFocused = true
                 }

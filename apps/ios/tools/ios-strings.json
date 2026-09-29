@@ -3314,5 +3314,17 @@
  "task.commentingOn": [
   "Comentario para la tarea",
   "Comment on the task"
+ ],
+ "cal.card": [
+  "Evento de {name}",
+  "Event by {name}"
+ ],
+ "cal.cardGoing": [
+  "{n} de {total} asistirán",
+  "{n} of {total} going"
+ ],
+ "cal.allDay": [
+  "Todo el día",
+  "All day"
  ]
 }

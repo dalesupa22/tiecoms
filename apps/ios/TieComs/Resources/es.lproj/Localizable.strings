@@ -226,9 +226,12 @@
 "cal.addGoogle" = "Google Calendar";
 "cal.addOutlook" = "Outlook";
 "cal.addTo" = "Agregar a tu calendario";
+"cal.allDay" = "Todo el día";
 "cal.cancel" = "Cancelar reunión";
 "cal.cancelConfirm" = "¿Cancelar esta reunión? Se avisará en el grupo.";
 "cal.cancelled" = "Cancelada";
+"cal.card" = "Evento de {name}";
+"cal.cardGoing" = "{n} de {total} asistirán";
 "cal.channelSoon" = "Avisos de reunión";
 "cal.channelSoonDesc" = "Aviso 10 minutos antes de tus reuniones";
 "cal.chatsSection" = "Chats";

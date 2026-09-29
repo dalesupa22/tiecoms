@@ -458,12 +458,48 @@ struct BootstrapDTO: Codable, Equatable, Sendable {
     var contract: String
     var serverTime: String
     var me: UserDTO
-    var organizations: [OrganizationDTO]
+    var organizations: [OrganizationDTO] { didSet { lookup = Lookup() } }
     var workspaces: [WorkspaceDTO]
     var conversations: [ConversationDTO]
-    var people: [PersonDTO]
+    var people: [PersonDTO] { didSet { lookup = Lookup() } }
     /// Funciones que el servidor tiene prendidas (aditivo: un servidor viejo no lo manda).
     var features: FeaturesDTO?
+    /// Índices por id (1.7.1): `Naming.person`/`org` se llaman miles de veces por pintada (autor de cada burbuja,
+    /// filas de Inicio). Se arman la primera vez y se descartan al cambiar `people`/`organizations`.
+    private var lookup = Lookup()
+
+    private enum CodingKeys: String, CodingKey { case contract, serverTime, me, organizations, workspaces, conversations, people, features }
+
+    static func == (a: BootstrapDTO, b: BootstrapDTO) -> Bool {
+        a.contract == b.contract && a.serverTime == b.serverTime && a.me == b.me && a.organizations == b.organizations
+            && a.workspaces == b.workspaces && a.conversations == b.conversations && a.people == b.people && a.features == b.features
+    }
+
+    func person(id: String) -> PersonDTO? { lookup.person(id, people) }
+    func organization(id: String) -> OrganizationDTO? { lookup.org(id, organizations) }
+
+    final class Lookup: @unchecked Sendable {
+        private let lock = NSLock()
+        private var people: [String: Int]?
+        private var orgs: [String: Int]?
+        func person(_ id: String, _ list: [PersonDTO]) -> PersonDTO? {
+            lock.lock(); defer { lock.unlock() }
+            if people == nil { people = Self.index(list.map(\.id)) }
+            return people?[id].map { list[$0] }
+        }
+        func org(_ id: String, _ list: [OrganizationDTO]) -> OrganizationDTO? {
+            lock.lock(); defer { lock.unlock() }
+            if orgs == nil { orgs = Self.index(list.map(\.id)) }
+            return orgs?[id].map { list[$0] }
+        }
+        /// El primero con cada id (como `first { $0.id == id }`).
+        private static func index(_ ids: [String]) -> [String: Int] {
+            var out: [String: Int] = [:]
+            out.reserveCapacity(ids.count)
+            for (i, id) in ids.enumerated() where out[id] == nil { out[id] = i }
+            return out
+        }
+    }
 
     /// Llamadas de voz y video (docs/LLAMADAS.md): sin esto no hay botones, franja ni pestaña.
     var callsEnabled: Bool { features?.calls == true }
@@ -854,9 +890,22 @@ enum ISODate {
     private static let plain: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f
     }()
+    /// 1.7.1: el chat vuelve a leer las mismas fechas en cada pintada (días, hora de cada burbuja); ISO8601DateFormatter
+    /// cuesta microsegundos por llamada. Memoria acotada: se vacía al pasar de 8000 fechas.
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var memo: [String: Date] = [:]
     static func parse(_ s: String?) -> Date? {
         guard let s, !s.isEmpty else { return nil }
-        return withFraction.date(from: s) ?? plain.date(from: s)
+        lock.lock()
+        if let d = memo[s] { lock.unlock(); return d }
+        lock.unlock()
+        PerfCounters.bump("iso.parse")
+        guard let d = withFraction.date(from: s) ?? plain.date(from: s) else { return nil }
+        lock.lock()
+        if memo.count >= 8000 { memo.removeAll(keepingCapacity: true) }
+        memo[s] = d
+        lock.unlock()
+        return d
     }
     static func string(_ d: Date = Date()) -> String { withFraction.string(from: d) }
 }

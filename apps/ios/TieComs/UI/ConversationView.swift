@@ -136,7 +136,14 @@ struct ConversationView: View {
     /// El filtro lo puso la apertura (todo lo no leído en un tema): no se baja al final, se queda en el primer no leído.
     @State private var autoFiltered = false
     /// Borde inferior del contenido en la vista (para detectar el hueco en blanco al final, ver ChatContentBottomKey).
-    @State private var contentBottom: CGFloat = 0
+    /// Medidas del scroll que cambian en cada fotograma (fondo del contenido, filas visibles y vistas). Viven en una
+    /// referencia: escribirlas no vuelve a pintar el chat entero (1.7.1; antes, una pintada por cada arrastre).
+    @State private var track = ScrollTrack()
+    final class ScrollTrack {
+        var contentBottom: CGFloat = 0
+        var visibleSeqs: Set<Int> = []
+        var seenSeqs: Set<Int> = []
+    }
     @State private var gapFix: Task<Void, Never>?
     @State private var blockUserId: String?
     @State private var recorder = VoiceRecorder()
@@ -169,13 +176,12 @@ struct ConversationView: View {
     /// Al final del chat (a menos de 40 pt); esto no implica que se hayan visto las filas anteriores.
     @State private var atBottom = false
     /// Filas visibles y visitadas desde la colocación inicial, sin saltar huecos del cursor.
-    @State private var visibleSeqs: Set<Int> = []
-    @State private var seenSeqs: Set<Int> = []
     @State private var readPauseID: UUID?
     @State private var positioning = false
     @State private var positioningFailed = false
 
     var body: some View {
+        let _ = PerfCounters.bump("chat.body")
         Group {
             if let d = store.data, let c = store.meta(conversationId) {
                 content(d, c).modifier(removeTopicDialog)
@@ -527,7 +533,7 @@ struct ConversationView: View {
 
     @ViewBuilder
     private func messages(_ d: BootstrapDTO, _ c: ConversationDTO, _ state: ConversationState) -> some View {
-        let items = buildItems(state, pending: store.pendingFor(conversationId))
+        let items = PerfCounters.measure("chat.buildItems") { buildItems(state, pending: store.pendingFor(conversationId)) }
         let lazyRows = items.count > ChatStackRule.lazyAbove
         let byId = Dictionary(state.messages.filter { !store.blockedUserIds.contains($0.authorId) }.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         ScrollViewReader { proxy in
@@ -584,17 +590,17 @@ struct ConversationView: View {
                     .onChange(of: g.size.height) { _, h in viewportHeight = h }
             })
             .onPreferenceChange(ChatSeenSeqKey.self) { seqs in
-                visibleSeqs = seqs
+                track.visibleSeqs = seqs
                 if positioned { markReadIfVisible() }
             }
             .onPreferenceChange(ChatContentBottomKey.self) { maxY in
-                contentBottom = maxY
+                track.contentBottom = maxY
                 // La LazyVStack re-estima el alto de filas que aún no ha dibujado (tarjetas de tarea): tras ubicar el chat
                 // podía quedar pasada del final, con la pantalla en blanco. Si el hueco sigue un momento después, al final.
                 if positioned, viewportHeight > 0, maxY < viewportHeight - 80, gapFix == nil {
                     gapFix = Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 350_000_000)
-                        if !Task.isCancelled, contentBottom < viewportHeight - 80 { proxy.scrollTo(ChatNavIds.bottom, anchor: .bottom) }
+                        if !Task.isCancelled, track.contentBottom < viewportHeight - 80 { proxy.scrollTo(ChatNavIds.bottom, anchor: .bottom) }
                         gapFix = nil
                     }
                 }
@@ -875,9 +881,9 @@ struct ConversationView: View {
         guard scenePhase == .active, store.openConversationId == conversationId else { return }
         snapshotUnread()
         guard positioned, readPauseID == nil, readingSession == store.sessionStamp else { return }
-        seenSeqs.formUnion(visibleSeqs)
+        track.seenSeqs.formUnion(track.visibleSeqs)
         guard let c = store.meta(conversationId), let state = store.conversations[conversationId] else { return }
-        let cursor = ChatNav.visibleReadCursor(state.messages, after: max(c.lastReadSeq, c.historyFromSeq), seen: seenSeqs, me: store.me?.id ?? "")
+        let cursor = ChatNav.visibleReadCursor(state.messages, after: max(c.lastReadSeq, c.historyFromSeq), seen: track.seenSeqs, me: store.me?.id ?? "")
         if cursor > c.lastReadSeq { store.markRead(conversationId, upTo: cursor) }
     }
 
@@ -901,7 +907,7 @@ struct ConversationView: View {
         snapshotUnread()
         guard let snap = unreadSnap else { return }
         let retry = positioningFailed
-        positioning = true; positioningFailed = false; positioned = false; seenSeqs = []
+        positioning = true; positioningFailed = false; positioned = false; track.seenSeqs = []
         defer { positioning = false }
         do {
             if retry { try await store.openConversation(conversationId, force: true) }
@@ -1644,6 +1650,7 @@ struct MessageBubble: View {
     @State private var expanded = false
 
     var body: some View {
+        let _ = PerfCounters.bump("chat.bubble.body")
         HStack(alignment: .top, spacing: 8) {
             if mine { Spacer(minLength: 48) }
             switch leading {
@@ -1851,7 +1858,7 @@ enum LongText {
 
 enum ChatStackRule {
     /// `-TCLazyAbove <n>` (pruebas) fuerza la pila perezosa con menos filas.
-    static let lazyAbove: Int = (UserDefaults.standard.object(forKey: "TCLazyAbove") as? Int) ?? 200
+    static let lazyAbove: Int = UserDefaults.standard.object(forKey: "TCLazyAbove") != nil ? UserDefaults.standard.integer(forKey: "TCLazyAbove") : 200
 }
 
 struct ChatStack<Content: View>: View {

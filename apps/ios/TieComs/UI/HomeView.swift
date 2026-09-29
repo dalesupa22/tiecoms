@@ -19,6 +19,9 @@ enum GroupsSheet: Identifiable {
 struct HomeView: View {
     @Environment(AppStore.self) private var store
     @State private var query = ""
+    /// Último árbol sin búsqueda de esta pintada (referencia: escribirlo no vuelve a pintar).
+    @State private var treeMemo = TreeMemo()
+    final class TreeMemo { var tree: GroupsTree? }
     @State private var sheet: GroupsSheet?
     @State private var collapsed = HomeCollapse.load()
     @State private var tab = HomeFilter.savedGroups
@@ -39,8 +42,11 @@ struct HomeView: View {
         @Bindable var store = store
         Group {
             if let d = store.data {
-                let tree = Naming.groupsTree(d, query: query, filterWorkspace: store.workspaceFilter, tab: tab)
-                let flat = viewMode == .list ? Naming.groupsList(d, query: query, filterWorkspace: store.workspaceFilter, tab: tab) : []
+                let _ = PerfCounters.bump("home.body")
+                let tree = PerfCounters.measure("home.groupsTree") { Naming.groupsTree(d, query: query, filterWorkspace: store.workspaceFilter, tab: tab) }
+                let flat = viewMode == .list ? PerfCounters.measure("home.groupsList") { Naming.groupsList(d, from: tree) } : []
+                // El menú de plegar usa el árbol sin búsqueda: sin búsqueda es este mismo (no se arma otra vez).
+                let _ = { treeMemo.tree = query.trimmingCharacters(in: .whitespaces).isEmpty ? tree : nil }()
                 let hasGroups = viewMode == .list ? !flat.isEmpty : tree.hasGroups
                 let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
                 // Asuntos abiertos por conversación (se muestran bajo cada grupo).
@@ -138,7 +144,7 @@ struct HomeView: View {
             // Vista (plegar/desplegar): a la izquierda, aparte de ✏️ y «＋», que son para escribir y crear.
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
-                    if let d = store.data { foldMenu(Naming.groupsTree(d, filterWorkspace: store.workspaceFilter, tab: tab), issuesOnly: viewMode == .list) }
+                    if let d = store.data { foldMenu(treeMemo.tree ?? Naming.groupsTree(d, filterWorkspace: store.workspaceFilter, tab: tab), issuesOnly: viewMode == .list) }
                 } label: { Image(systemName: "list.bullet.indent") }
                 .accessibilityLabel(L("grp.foldMenu"))
                 .accessibilityIdentifier("home.fold")

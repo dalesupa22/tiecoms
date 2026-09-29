@@ -47,6 +47,41 @@ enum RichText {
         return out
     }
 
+    /// Clave de la caché de burbujas (1.7.1): mismo texto, menciones, lado, enlaces, resaltado y tamaño de letra.
+    struct Key: Hashable {
+        var text: String
+        var mentions: [Mention]
+        var mine: Bool
+        var linkify: Bool
+        var highlight: String?
+        /// Dynamic Type: la fuente va dentro del texto con atributos, así que cambia la clave.
+        var sizeCategory: String = ""
+    }
+
+    private final class KeyBox: NSObject {
+        let key: Key
+        init(_ k: Key) { key = k }
+        override var hash: Int { key.hashValue }
+        override func isEqual(_ object: Any?) -> Bool { (object as? KeyBox)?.key == key }
+    }
+
+    private static let bubbleCache: NSCache<KeyBox, NSAttributedString> = {
+        let c = NSCache<KeyBox, NSAttributedString>()
+        c.countLimit = 600
+        return c
+    }()
+
+    /// Igual que `bubble(...)`, pero reutiliza el resultado: al volver a pintar una fila (scroll, teclado, llegada de
+    /// otro mensaje) no se recorren de nuevo enlaces, menciones ni resaltados. Los colores son dinámicos (claro/oscuro).
+    static func cachedBubble(_ key: Key) -> NSAttributedString {
+        let box = KeyBox(key)
+        if let hit = bubbleCache.object(forKey: box) { RichTextStats.hits += 1; return hit }
+        RichTextStats.misses += 1
+        let v = bubble(key.text, mentions: key.mentions, mine: key.mine, linkify: key.linkify, highlight: key.highlight)
+        bubbleCache.setObject(v, forKey: box, cost: key.text.utf16.count)
+        return v
+    }
+
     /// Compositor: tokens resaltados con el color de la persona y un fondo suave.
     static func applyComposerStyle(_ storage: NSTextStorage, mentions: [Mention]) {
         let full = NSRange(location: 0, length: storage.length)
@@ -89,7 +124,8 @@ struct RichMessageText: UIViewRepresentable {
 
     func updateUIView(_ v: UITextView, context: Context) {
         context.coordinator.parent = self
-        let key = RichText.Key(text: text, mentions: mentions, mine: mine, linkify: linkify, highlight: highlight)
+        let key = RichText.Key(text: text, mentions: mentions, mine: mine, linkify: linkify, highlight: highlight,
+                              sizeCategory: v.traitCollection.preferredContentSizeCategory.rawValue)
         if context.coordinator.key != key {
             context.coordinator.key = key
             v.attributedText = RichText.cachedBubble(key)

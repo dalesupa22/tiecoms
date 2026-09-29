@@ -4,12 +4,12 @@ import Foundation
 enum Naming {
     static func org(_ d: BootstrapDTO, _ id: String?) -> OrganizationDTO? {
         guard let id else { return nil }
-        return d.organizations.first { $0.id == id }
+        return PerfCounters.measure("naming.org") { d.organization(id: id) }
     }
 
     static func person(_ d: BootstrapDTO, _ id: String?) -> PersonDTO? {
         guard let id else { return nil }
-        return d.people.first { $0.id == id }
+        return PerfCounters.measure("naming.person") { d.person(id: id) }
     }
 
     static func otherInDirect(_ d: BootstrapDTO, _ c: ConversationDTO) -> PersonDTO? {

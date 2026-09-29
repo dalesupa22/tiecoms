@@ -27,6 +27,7 @@ struct TieComsApp: App {
     @State private var updates: AppUpdateChecker
 
     init() {
+        PerfCounters.start()
         let base = AppConfig.apiBaseURL
         let secrets = KeychainSecretStore(apiURL: base)
         // Solo para pruebas de interfaz: empezar sin sesión guardada.

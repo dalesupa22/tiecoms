@@ -152,6 +152,7 @@ extension Naming {
     /// Solo hay grupos y asuntos: ningún espacio se muestra; los grupos de todos los espacios van bajo su empresa.
     /// `tab` es el filtro de chips (Todo/No leídos/Menciones/Asuntos); chats y sidechats viven en DMs.
     static func groupsTree(_ d: BootstrapDTO, query: String = "", filterWorkspace: String? = nil, tab: HomeFilter = .all) -> GroupsTree {
+        PerfCounters.bump("groups.tree.calls")
         let fold: (String) -> String = { $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
         let q = fold(query.trimmingCharacters(in: .whitespaces))
         let mine = myOrgIds(d)
@@ -258,7 +259,11 @@ extension Naming {
     /// 1.7.1: arriba solo el nombre del grupo; la empresa del árbol (la mía, la contraparte o la anfitriona) va en
     /// `company`, que la fila pinta debajo en gris pequeño (nil si el nombre ya empieza por la empresa).
     static func groupsList(_ d: BootstrapDTO, query: String = "", filterWorkspace: String? = nil, tab: HomeFilter = .all) -> [GroupsTree.ConvNode] {
-        let tree = groupsTree(d, query: query, filterWorkspace: filterWorkspace, tab: tab)
+        groupsList(d, from: groupsTree(d, query: query, filterWorkspace: filterWorkspace, tab: tab))
+    }
+
+    /// La Lista a partir de un árbol ya armado (Inicio lo arma una vez por pintada para Lista y Árbol).
+    static func groupsList(_ d: BootstrapDTO, from tree: GroupsTree) -> [GroupsTree.ConvNode] {
         var out: [GroupsTree.ConvNode] = []
         for s in tree.sections {
             for co in s.companies {

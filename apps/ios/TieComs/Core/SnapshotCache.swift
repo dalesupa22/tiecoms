@@ -91,3 +91,4 @@ enum Perf {
         log.notice("\(name, privacy: .public) +\(Int(Date().timeIntervalSince(processStart) * 1000), privacy: .public) ms \(detail, privacy: .public)")
     }
 }
+

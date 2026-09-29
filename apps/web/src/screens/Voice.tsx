@@ -31,7 +31,7 @@ interface Rec { recorder: MediaRecorder; stream: MediaStream; ctx: AudioContext;
  * Micrófono del compositor: mantener pulsado graba, soltar envía, deslizar a la izquierda cancela y
  * deslizar arriba bloquea (manos libres con Enviar / Descartar). Onda en vivo y contador; máximo 15 min.
  */
-export function VoiceRecorder({ conversationId, onSent }: { conversationId: string; onSent?: () => void }) {
+export function VoiceRecorder({ conversationId, onSent, viewOnce }: { conversationId: string; onSent?: () => void; /** Una sola vista (tanda 1.7). */ viewOnce?: boolean }) {
   const rec = useRef<Rec | null>(null);
   const origin = useRef({ x: 0, y: 0 });
   const [state, setState] = useState<'idle' | 'holding' | 'locked' | 'sending'>('idle');
@@ -107,7 +107,7 @@ export function VoiceRecorder({ conversationId, onSent }: { conversationId: stri
     try {
       const ext = out.blob.type.includes('mp4') ? 'm4a' : out.blob.type.includes('ogg') ? 'ogg' : 'webm';
       const att = await client.uploadAttachment(conversationId, out.blob, `nota-de-voz.${ext}`, { durationMs: out.durationMs, waveform: out.waveform, aiConsent });
-      await client.send(conversationId, '', null, null, { attachments: [att] });
+      await client.send(conversationId, '', null, null, { attachments: [att], ...(viewOnce ? { viewOnce: true } : {}) });
       onSent?.();
     } catch (e) { toast(errorText(e)); } finally { setState('idle'); }
   }

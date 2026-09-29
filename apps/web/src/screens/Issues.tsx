@@ -737,7 +737,11 @@ export function SideIssueStrip({ sideId, issueId, onOpen }: { sideId: string; is
  * Tarjeta de la tarea dentro del chat (reemplaza el aviso «Abrió la tarea…»): se ve completa, se marca hecha,
  * muestra los últimos comentarios y se comenta ahí mismo sin abrirla.
  */
-export function IssueChatCard({ issueId, creatorId, canPost, onOpen }: { issueId: string; creatorId: string; canPost: boolean; onOpen: (id: string) => void }) {
+export function IssueChatCard({ issueId, creatorId, canPost, onOpen, banner, tone, footer, hideReply }: {
+  issueId: string; creatorId: string; canPost: boolean; onOpen: (id: string) => void;
+  /** Tanda 1.7: franja de arriba («✅ Ana completó la tarea», «No cumplimos…», «💬 3 comentarios nuevos»). */
+  banner?: React.ReactNode; tone?: 'done' | 'overdue' | 'comments'; footer?: React.ReactNode; hideReply?: boolean;
+}) {
   const d = useClient((s) => s.data)!;
   const i = useClient((s) => s.issues[issueId]);
   const [comments, setComments] = useState<IssueEventDTO[]>([]);
@@ -765,7 +769,8 @@ export function IssueChatCard({ issueId, creatorId, canPost, onOpen }: { issueId
     try { await client.commentIssue(i.id, body); setText(''); } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
   };
   return (
-    <div className={`card task-card ${done ? 'is-done' : ''} ${f.overdue ? 'is-overdue' : ''}`} {...menuProps(() => issueQuickMenu(i))}>
+    <div className={`card task-card ${done ? 'is-done' : ''} ${f.overdue ? 'is-overdue' : ''} ${tone ? `tone-${tone}` : ''}`} {...menuProps(() => issueQuickMenu(i))}>
+      {banner && <div className={`task-card-banner ${tone ? `is-${tone}` : ''}`}>{banner}</div>}
       <div className="task-card-top">
         <span className="task-card-kind">☑ {t('task.card', { name: creator?.name.split(' ')[0] ?? '' })}</span>
         <IssueTopicTag issueId={i.id} conversationId={i.conversationId} topicId={i.topicId} canEdit={canPost} />
@@ -790,7 +795,8 @@ export function IssueChatCard({ issueId, creatorId, canPost, onOpen }: { issueId
           {i.commentCount > comments.length && <button className="link-btn small" onClick={() => onOpen(i.id)}>{t('task.cardAll', { n: i.commentCount })}</button>}
         </div>
       )}
-      {canPost && !done && (
+      {footer}
+      {canPost && !done && !hideReply && (
         <div className="task-card-reply">
           <input className="input" value={text} placeholder={t('task.cardComment')} onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} />

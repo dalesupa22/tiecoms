@@ -6,6 +6,7 @@ import {
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type TopicColor, type TopicDTO, type UserDTO, normalizeEmoji,
   type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentDTO, type CallTranscriptSegmentInput,
+  type MessageRefDTO, type ChatSearchPageDTO, type ViewOnceOpenDTO, type EventCommentDTO, type ViewOnceState,
   type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO, type IntegrationDTO, type IntegrationSecretDTO,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
@@ -23,6 +24,10 @@ export interface PendingMessage {
   mentions?: MentionDTO[];
   /** Tema con el que sale (docs/TEMAS.md). */
   topicId?: string | null;
+  /** #grupos (tanda 1.7): conversationId + tramo del body. */
+  refs?: Omit<MessageRefDTO, 'name'>[];
+  /** Una sola vista (tanda 1.7). */
+  viewOnce?: boolean;
   createdAt: string;
   attempts: number;
   status: 'pending' | 'sending' | 'failed';
@@ -73,6 +78,16 @@ export const isMutedForever = (until: string | null | undefined) => !!until && D
 export const isActiveUntil = (until: string | null | undefined) => !!until && Date.parse(until) > Date.now();
 /** «No molestar» activo en este momento. */
 export const dndActive = (s: Pick<ClientState, 'data'>) => isActiveUntil(s.data?.me.dndUntil);
+/**
+ * Estado de un mensaje de una sola vista para mí: los eventos en vivo llegan iguales para todos, así que se
+ * calcula con el autor y openedBy (docs/TANDA-1.7.md §7). null si no es de una sola vista.
+ */
+export const viewOnceStateFor = (m: Pick<MessageDTO, 'viewOnce' | 'viewOnceState' | 'authorId' | 'openedBy'>, meId: string | undefined): ViewOnceState | null => {
+  if (!m.viewOnce) return null;
+  if (m.authorId === meId) return 'sent';
+  if (m.viewOnceState === 'opened' || (m.openedBy ?? []).some((o) => o.userId === meId)) return 'opened';
+  return 'unopened';
+};
 /** ¿El mensaje me menciona (a mí o a @todos)? */
 export const mentionsUser = (m: Pick<MessageDTO, 'mentions'>, userId: string | undefined) =>
   !!userId && !!m.mentions?.some((x) => x.userId === userId || x.userId === 'all');
@@ -475,7 +490,7 @@ export class TieComsClient {
     const mine = m.authorId === this.state.data?.me.id;
     const lastReadSeq = mine && m.seq === c.lastMessageSeq + 1 && Math.max(c.lastReadSeq, c.historyFromSeq) >= c.lastMessageSeq ? m.seq : c.lastReadSeq;
     this.patchConversationMeta(c.id, {
-      lastMessageSeq: m.seq, lastMessageAt: m.createdAt, lastMessagePreview: m.body.slice(0, 140), lastReadSeq,
+      lastMessageSeq: m.seq, lastMessageAt: m.createdAt, lastMessagePreview: m.viewOnce ? '①' : m.body.slice(0, 140), lastReadSeq,
       // La pestaña «Enlaces» suma los enlaces nuevos sin esperar otro bootstrap.
       ...(m.kind === 'text' && c.linkCount !== undefined ? { linkCount: c.linkCount + new Set(m.body.match(/\bhttps?:\/\/[^\s<>"'`]+/gi) ?? []).size } : {}),
       unread: Math.max(0, m.seq - Math.max(lastReadSeq, c.historyFromSeq)),
@@ -648,11 +663,12 @@ export class TieComsClient {
 
   // ---------- Envío con cola persistente ----------
   async send(conversationId: string, body: string, replyTo: string | null = null, forwarded: ForwardedInfo | null = null,
-    extra: { attachments?: AttachmentDTO[]; forwardAttachmentIds?: string[]; mentions?: MentionDTO[]; topicId?: string | null } = {}) {
+    extra: { attachments?: AttachmentDTO[]; forwardAttachmentIds?: string[]; mentions?: MentionDTO[]; topicId?: string | null; refs?: Omit<MessageRefDTO, 'name'>[]; viewOnce?: boolean } = {}) {
     const text = body.trim();
-    // Las menciones se miden sobre el texto recortado (como lo guarda el servidor).
+    // Las menciones (y los #grupos) se miden sobre el texto recortado (como lo guarda el servidor).
     const lead = body.length - body.trimStart().length;
     const mentions = (extra.mentions ?? []).map((m) => ({ ...m, start: m.start - lead })).filter((m) => m.start >= 0 && m.start + m.length <= text.length);
+    const refs = (extra.refs ?? []).map((r) => ({ ...r, start: r.start - lead })).filter((r) => r.start >= 0 && r.start + r.length <= text.length);
     if (!text && !extra.attachments?.length && !extra.forwardAttachmentIds?.length) return;
     const p: PendingMessage = {
       clientMessageId: uid(), conversationId, body: text, replyTo, forwarded, createdAt: new Date().toISOString(),
@@ -660,6 +676,8 @@ export class TieComsClient {
       ...(extra.forwardAttachmentIds?.length ? { forwardAttachmentIds: extra.forwardAttachmentIds } : {}),
       ...(mentions.length ? { mentions } : {}),
       ...(extra.topicId ? { topicId: extra.topicId } : {}),
+      ...(refs.length ? { refs } : {}),
+      ...(extra.viewOnce ? { viewOnce: true } : {}),
       attempts: 0, status: 'pending', nextAttemptAt: 0,
     };
     // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
@@ -736,13 +754,15 @@ export class TieComsClient {
       ...(p.forwardAttachmentIds?.length ? { forwardAttachmentIds: p.forwardAttachmentIds } : {}),
       ...(p.mentions?.length ? { mentions: p.mentions } : {}),
       ...(p.topicId ? { topicId: p.topicId } : {}),
+      ...(p.refs?.length ? { refs: p.refs } : {}),
+      ...(p.viewOnce ? { viewOnce: true } : {}),
     };
     const payload = { conversationId: p.conversationId, clientMessageId: p.clientMessageId, body: p.body, replyTo: p.replyTo, forwarded: p.forwarded ?? null, ...files };
     if (this.socket?.connected) {
       try {
         const r: any = await this.socket.timeout(8000).emitWithAck(SOCKET_EVENTS.send, payload);
         if (r?.ok) { this.noteDropped(p.conversationId, r.droppedMentions); return r.message; }
-        const status = r?.error?.code === 'forbidden' ? 403 : r?.error?.code === 'not_found' ? 404 : r?.error?.code === 'conflict' ? 409 : r?.error?.code === 'bad_request' ? 400 : 503;
+        const status = r?.error?.code === 'forbidden' ? 403 : r?.error?.code === 'not_found' ? 404 : r?.error?.code === 'conflict' || r?.error?.code === 'view_once' ? 409 : r?.error?.code === 'bad_request' ? 400 : 503;
         throw new ApiRequestError(status, r?.error?.code ?? 'error', r?.error?.message ?? 'No se pudo enviar');
       } catch (e) {
         if (e instanceof ApiRequestError) throw e;
@@ -886,7 +906,31 @@ export class TieComsClient {
     if (local?.loaded) this.setConv(m.conversationId, { messages: upsertMessage(local.messages, m) });
     this.patchPreviewIfLast(m);
   }
-  async editMessage(id: string, body: string, mentions?: MentionDTO[]) { const m = await this.request<MessageDTO>(`/messages/${id}`, { method: 'PATCH', json: { body, ...(mentions ? { mentions } : {}) } }); this.upsertLocal(m); }
+  async editMessage(id: string, body: string, mentions?: MentionDTO[], refs?: Omit<MessageRefDTO, 'name'>[]) { const m = await this.request<MessageDTO>(`/messages/${id}`, { method: 'PATCH', json: { body, ...(mentions ? { mentions } : {}), ...(refs ? { refs } : {}) } }); this.upsertLocal(m); }
+
+  // ---------- Tanda 1.7: buscar en el chat, una sola vista, comentarios de eventos ----------
+  /** Busca dentro de una conversación (q ≥ 2 caracteres; admite from:Nombre). before = seq del último resultado. */
+  searchChat(conversationId: string, q: string, before?: number, limit = 30, signal?: AbortSignal) {
+    return this.request<ChatSearchPageDTO>(`/conversations/${conversationId}/search?q=${encodeURIComponent(q)}&limit=${limit}${before ? `&before=${before}` : ''}`, { signal });
+  }
+  /** Abre un mensaje de una sola vista (una vez). Localmente queda «Abierto» aunque no llegue el evento. */
+  async openViewOnce(m: MessageDTO): Promise<ViewOnceOpenDTO> {
+    const r = await this.request<ViewOnceOpenDTO>(`/messages/${m.id}/open`, { method: 'POST', json: {} });
+    const me = this.state.data?.me.id;
+    if (me) this.upsertLocal({ ...m, viewOnceState: 'opened', openedBy: [...(m.openedBy ?? []).filter((o) => o.userId !== me), { userId: me, at: new Date().toISOString() }] });
+    return r;
+  }
+  /** Marca «Abierto» localmente (p. ej. el servidor respondió 410 already_opened desde otro dispositivo). */
+  markViewOnceOpened(m: MessageDTO) {
+    const me = this.state.data?.me.id;
+    if (me) this.upsertLocal({ ...m, viewOnceState: 'opened', openedBy: [...(m.openedBy ?? []).filter((o) => o.userId !== me), { userId: me, at: new Date().toISOString() }] });
+  }
+  async eventComments(eventId: string) { return (await this.request<{ comments: EventCommentDTO[] }>(`/events/${eventId}/comments`)).comments; }
+  async commentEvent(eventId: string, body: string) {
+    const r = await this.request<{ comment: EventCommentDTO; event: CalendarEventDTO }>(`/events/${eventId}/comments`, { method: 'POST', json: { body } });
+    this.set({ events: { ...this.state.events, [r.event.id]: r.event } });
+    return r;
+  }
   /** Bandeja «Menciones»: más recientes primero; before = createdAt del último que ya tienes. */
   listMentions(before?: string, limit = 50) {
     return this.request<{ mentions: MentionItemDTO[]; hasMore: boolean }>(`/mentions?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`);

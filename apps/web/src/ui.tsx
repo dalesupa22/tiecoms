@@ -140,14 +140,16 @@ export function dayLabel(iso: string) {
 }
 
 /** Vista previa de la barra lateral: los mensajes de sistema se traducen. */
-export const previewText = (body: string | null) => (body ? systemText(body) : null);
+export const previewText = (body: string | null) => (body === '①' ? t('once.message') : body ? systemText(body) : null);
 
 /** Vista previa de una conversación: prefiere el último mensaje de una persona (con sus adjuntos) sobre los avisos de sistema. */
 export function conversationPreview(d: BootstrapDTO, c: ConversationDTO): string | null {
   const h = c.lastHumanPreview;
   if (h) {
     const who = h.authorId === d.me.id ? t('common.youShort') : c.kind !== 'direct' ? personById(d, h.authorId)?.name.split(' ')[0] : null;
-    const text = [h.attachments ? attachmentSummaryText(h.attachments) : '', h.body.replace(/\s+/g, ' ').trim()].filter(Boolean).join(' · ');
+    // Una sola vista: «① Foto», «① Mensaje» o «① Nota de voz», nunca el contenido.
+    const text = h.viewOnce ? (h.attachments?.voices ? t('once.voice') : h.attachments?.images ? t('once.photo') : t('once.message'))
+      : [h.attachments ? attachmentSummaryText(h.attachments) : '', h.body.replace(/\s+/g, ' ').trim()].filter(Boolean).join(' · ');
     if (text) return who ? `${who}: ${text}` : text;
   }
   return previewText(c.lastMessagePreview);

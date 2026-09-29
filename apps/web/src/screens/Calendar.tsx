@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import type { BootstrapDTO, CalendarEventDTO, ConversationDTO, Rsvp } from '@tiecoms/contracts';
+import type { BootstrapDTO, CalendarEventDTO, ConversationDTO, EventCommentDTO, Rsvp } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { openDialog } from '../actions.tsx';
 import { errorText, locale, t } from '../i18n.ts';
@@ -209,6 +209,7 @@ export function EventDrawer({ id, onClose }: { id: string; onClose: () => void }
         <a className="btn small" href={outlookLink(ev)} target="_blank" rel="noopener noreferrer">{t('cal.addOutlook')}</a>
         <button className="btn small" onClick={() => downloadIcs(ev)}>{t('cal.ics')}</button>
       </div>
+      <EventComments ev={ev} canPost={!!conv?.canPost} />
       {error && <div className="error">{error}</div>}
       <div className="modal-actions">
         {conv && <button className="btn ghost" onClick={() => { onClose(); navigate(`/c/${conv.id}`); }}>{t('cal.openChat')}</button>}
@@ -423,7 +424,11 @@ export function TodayAgenda() {
  * Tarjeta del evento dentro del chat (reemplaza el aviso «Agendó…»): fecha y hora, enlace para unirse,
  * quiénes van y los botones para responder ahí mismo.
  */
-export function EventChatCard({ eventId, creatorId }: { eventId: string; creatorId: string }) {
+export function EventChatCard({ eventId, creatorId, banner, tone, footer }: {
+  eventId: string; creatorId: string;
+  /** Tanda 1.7: «📅 ES HOY · 3:00 p. m.» o «💬 2 comentarios nuevos». */
+  banner?: React.ReactNode; tone?: 'today' | 'comments'; footer?: React.ReactNode;
+}) {
   const d = useClient((s) => s.data)!;
   const ev = useClient((s) => s.events[eventId]);
   const [missing, setMissing] = useState(false);
@@ -442,7 +447,8 @@ export function EventChatCard({ eventId, creatorId }: { eventId: string; creator
   const going = ev.invitees.filter((i) => i.rsvp === 'yes').length;
   const answer = (r: Exclude<Rsvp, 'pending'>) => void client.rsvp(ev.id, r).catch((e) => toast(errorText(e)));
   return (
-    <div className={`card event-card ${ev.cancelledAt ? 'is-cancelled' : ''} ${past ? 'is-past' : ''}`} style={{ borderLeftColor: c.fg }} onContextMenu={contextHandler(() => eventMenu(ev))}>
+    <div className={`card event-card ${ev.cancelledAt ? 'is-cancelled' : ''} ${past ? 'is-past' : ''} ${tone ? `tone-${tone}` : ''}`} style={{ borderLeftColor: c.fg }} onContextMenu={contextHandler(() => eventMenu(ev))}>
+      {banner && <div className={`event-card-banner ${tone ? `is-${tone}` : ''}`}>{banner}</div>}
       <div className="event-card-kind">📅 {t('cal.card', { name: creator?.name.split(' ')[0] ?? '' })}{ev.cancelledAt ? ` · ${t('cal.cancelled')}` : ''}</div>
       <div className="event-card-main">
         <div className="event-card-date" style={{ background: c.bg, color: c.fg }}>
@@ -467,6 +473,46 @@ export function EventChatCard({ eventId, creatorId }: { eventId: string; creator
           {(['yes', 'maybe', 'no'] as const).map((r) => (
             <button key={r} className={`btn small ${mine.rsvp === r ? 'is-on' : 'ghost'}`} onClick={() => answer(r)}>{RSVP_ICON[r]} {t(`cal.rsvp.${r}`)}</button>
           ))}
+        </div>
+      )}
+      {footer}
+    </div>
+  );
+}
+
+/** Comentarios del evento (tanda 1.7): lista y campo para comentar; el chat recibe el aviso agrupado. */
+export function EventComments({ ev, canPost, autoFocus }: { ev: CalendarEventDTO; canPost: boolean; autoFocus?: boolean }) {
+  const d = useClient((s) => s.data)!;
+  const [list, setList] = useState<EventCommentDTO[] | null>(null);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    client.eventComments(ev.id).then((c) => { if (live) setList(c); }).catch(() => { if (live) setList(ev.lastComments ?? []); });
+    return () => { live = false; };
+  }, [ev.id, ev.commentCount ?? 0]);
+  const send = async () => {
+    const body = text.trim();
+    if (!body || busy) return;
+    setBusy(true);
+    try { const r = await client.commentEvent(ev.id, body); setText(''); setList((x) => [...(x ?? []), r.comment]); }
+    catch (e) { toast(errorText(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="event-comments">
+      <div className="eyebrow">{t('comments.title')}{list?.length ? ` · ${list.length}` : ''}</div>
+      {list === null && <div className="hint">{t('common.loading')}</div>}
+      {list?.length === 0 && <div className="hint">{t('comments.empty')}</div>}
+      {list?.map((c) => (
+        <div key={c.id} className="task-card-comment">
+          <b>{c.authorId === d.me.id ? t('common.youShort') : personById(d, c.authorId)?.name.split(' ')[0]}</b> {c.body}
+        </div>
+      ))}
+      {canPost && (
+        <div className="task-card-reply">
+          <input className="input" value={text} autoFocus={autoFocus} placeholder={t('comments.placeholder')} onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} />
+          <button className="btn small" disabled={!text.trim() || busy} onClick={() => void send()}>{t('comments.send')}</button>
         </div>
       )}
     </div>

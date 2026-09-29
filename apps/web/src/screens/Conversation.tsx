@@ -32,6 +32,8 @@ import { AddMembersDialog } from './Dialogs.tsx';
 import { firstUnread, readThroughVisible, isReadTransparentMessage } from '../chat-nav.ts';
 import { IntegrationsPanel } from './Integrations.tsx';
 import { TopicDock, TopicTag, openTopicMenu, topicMenu, useTopics } from './Topics.tsx';
+import { ChatSearchBar, Notice17Row, ViewOnceBubble, parseNotice, useRefPicker } from './Chat17.tsx';
+import { backspaceRef, refsFor, viewOnceAllowed, type RefToken } from '../chat17.ts';
 
 type Row =
   | { kind: 'day'; key: string; label: string }
@@ -118,6 +120,23 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   // Menciones: tokens «@Nombre» del compositor y lista que aparece al escribir «@».
   const [tokens, setTokens] = useState<MentionToken[]>([]);
   const [caret, setCaret] = useState(0);
+  // Tanda 1.7: #grupos del compositor, «una sola vista» para el próximo mensaje y la búsqueda dentro del chat.
+  const [refTokens, setRefTokens] = useState<RefToken[]>([]);
+  const [viewOnce, setViewOnce] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const refPicker = useRefPicker({
+    text, caret, exclude: id,
+    onPick: (range, token) => {
+      const insert = `#${token.label} `;
+      const next = text.slice(0, range.start) + insert + text.slice(range.end);
+      const pos = range.start + insert.length;
+      setText(next); setCaret(pos);
+      setRefTokens((ts) => [...ts.filter((x) => !(x.conversationId === token.conversationId && x.label === token.label)), token]);
+      requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(pos, pos); });
+    },
+  });
+  // Lo que llega con seq mayor que esto después de abrir el chat es «en vivo» (confeti y carita triste).
+  const liveFrom = useRef<number | null>(null);
   const picker = useMentionPicker({
     conv, text, caret, messages: local?.messages ?? [],
     onPick: (range, token) => {
@@ -202,6 +221,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   // Borrador local por conversación: sobrevive recargas y cambios de conversación.
   useEffect(() => { try { if (text) localStorage.setItem(draftKey(id), text); else localStorage.removeItem(draftKey(id)); } catch {} }, [id, text]);
 
+  useEffect(() => { if (local?.loaded && liveFrom.current == null) liveFrom.current = conv?.lastMessageSeq ?? 0; }, [local?.loaded]);
   const pending = useMemo(() => pendingAll.filter((p) => p.conversationId === id), [pendingAll, id]);
   const byId = useMemo(() => new Map((local?.messages ?? []).map((m) => [m.id, m])), [local?.messages]);
   const issueTopicOf = (m: MessageDTO) => {
@@ -397,21 +417,25 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     if (drafts.busy) { toast(t('att.uploading')); return; }
     const attachments = drafts.ready;
     if ((!body && !attachments.length) || !conv.canPost) return;
+    const once = viewOnce && !privateReply;
+    if (once && !viewOnceAllowed(attachments)) { toast(t('once.onlyMedia')); return; }
     atBottom.current = true;
     if (privateReply) {
       // «Responder en privado»: el directo lleva la referencia al mensaje original (el servidor pone la cita).
       const author = personById(d, privateReply.authorId)?.name ?? null;
       void client.send(id, body, null, { source: 'tiecoms', author, sentAt: privateReply.createdAt, fromConversationId: privateReply.conversationId, messageId: privateReply.id }, { attachments });
-    } else void client.send(id, text, replyTo?.id ?? null, null, { attachments, mentions: mentionsFor(text, tokens), topicId: activeFilter });
+    } else void client.send(id, text, replyTo?.id ?? null, null, { attachments, mentions: once ? [] : mentionsFor(text, tokens), topicId: activeFilter, refs: once ? [] : refsFor(text, refTokens), viewOnce: once });
     drafts.clear();
     setTokens([]);
+    setRefTokens([]);
+    setViewOnce(false);
     setText('');
     setReplyTo(null);
     setPrivateReply(null);
     input.current?.focus();
   };
   /** Programar: sale solo a la hora elegida. Solo texto (con menciones y respuesta); los adjuntos se envían al momento. */
-  const canSchedule = !!text.trim() && !drafts.drafts.length && !privateReply;
+  const canSchedule = !!text.trim() && !drafts.drafts.length && !privateReply && !viewOnce;
   const schedule = (when: Date) => {
     const lead = text.length - text.trimStart().length;
     const body = text.trim();
@@ -431,6 +455,14 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (emoji.onKeyDown(e)) return;
     if (picker.onKeyDown(e)) return;
+    if (refPicker.onKeyDown(e)) return;
+    if (e.key === 'Backspace' && refTokens.length) {
+      const el = e.currentTarget;
+      if (el.selectionStart === el.selectionEnd) {
+        const r = backspaceRef(text, el.selectionStart, refTokens);
+        if (r) { e.preventDefault(); setText(r.text); setCaret(r.caret); requestAnimationFrame(() => el.setSelectionRange(r.caret, r.caret)); return; }
+      }
+    }
     if (e.key === 'Backspace' && tokens.length) {
       const el = e.currentTarget;
       if (el.selectionStart === el.selectionEnd) {
@@ -444,7 +476,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     if (e.key === 'Escape' && privateReply) setPrivateReply(null);
     // Flecha arriba con el campo vacío: editar mi último mensaje (como en Slack).
     if (e.key === 'ArrowUp' && !text) {
-      const mine = [...(local?.messages ?? [])].reverse().find((m) => m.authorId === d.me.id && m.kind === 'text' && !m.deletedAt);
+      const mine = [...(local?.messages ?? [])].reverse().find((m) => m.authorId === d.me.id && m.kind === 'text' && !m.deletedAt && !m.viewOnce);
       if (mine) { e.preventDefault(); setEditing({ id: mine.id, text: mine.body }); }
     }
   };
@@ -456,7 +488,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     if (!body || body === orig?.body) return;
     // Conserva las menciones que siguen en el texto editado.
     const kept: MentionToken[] = (orig?.mentions ?? []).map((m) => ({ userId: m.userId, label: (orig?.body ?? '').slice(m.start + 1, m.start + m.length) }));
-    try { await client.editMessage(editing.id, body, mentionsFor(body, kept)); } catch (e) { toast(errorText(e)); }
+    // Y los #grupos que siguen en el texto.
+    const keptRefs: RefToken[] = (orig?.refs ?? []).map((r) => ({ conversationId: r.conversationId, label: (orig?.body ?? '').slice(r.start + 1, r.start + r.length) }));
+    try { await client.editMessage(editing.id, body, mentionsFor(body, kept), refsFor(body, keptRefs)); } catch (e) { toast(errorText(e)); }
   };
 
   const title = conversationTitle(d, conv);
@@ -497,6 +531,13 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const messageMenu = (m: MessageDTO): MenuItem[] => {
     const mine = m.authorId === d.me.id;
     const isPinned = pinned.has(m.id);
+    // Una sola vista: sin copiar, reenviar, fijar, editar ni convertir en tarea (el servidor responde 409).
+    if (m.viewOnce) return [
+      ...(conv.canPost ? [{ label: t('menu.reply'), icon: '↩', onSelect: () => { setReplyTo(m); input.current?.focus(); } }] : []),
+      remindMenu(conv, m),
+      { label: t('menu.markUnread'), icon: '●', onSelect: () => client.markUnread(id, m.seq).then(() => toast(t('toast.markedUnread'))).catch((e) => toast(errorText(e))) },
+      ...(mine ? [{ divider: true }, { label: t('menu.delete'), icon: '🗑', danger: true, onSelect: () => { if (confirm(t('menu.deleteConfirm'))) void client.deleteMessage(m.id).catch((e) => toast(errorText(e))); } }] : []),
+    ];
     return [
       ...(conv.canPost ? [{
         label: t('react.menu'), icon: '☺',
@@ -558,12 +599,14 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           {embedded && conv.canManage && conv.kind !== 'direct' && <button className="btn ghost small" onClick={() => openDialog((close) => <AddMembersDialog conversationId={id} onClose={close} />)} title={t('bar.addPeople')}>＋ {t('bar.people')}</button>}
           {ws && !embedded && <button className="btn ghost small only-desktop" onClick={() => navigate(`/w/${ws.id}`)}>{t('chat.space')}</button>}
           {!isSide && <CallButtons conv={conv} />}
-          <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) })); }}>⋯</button>
+          <button className={`icon-btn only-desktop ${searching ? 'is-on' : ''}`} aria-label={t('csearch.open')} title={t('csearch.open')} aria-pressed={searching} onClick={() => setSearching((v) => !v)}>🔎</button>
+          <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, [{ label: t('csearch.open'), icon: '🔎', onSelect: () => setSearching(true) }, { divider: true }, ...conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) })]); }}>⋯</button>
           {embedded ? <>
             <button className="icon-btn" aria-label={t('side.openFull')} title={t('side.openFull')} onClick={() => navigate(`/c/${id}`)}>⤢</button>
             <button className="icon-btn" aria-label={t('side.close')} title={t('side.close')} onClick={embedded.onClose}>×</button>
           </> : <button className="icon-btn" aria-label={t('chat.details')} onClick={() => setPanel(!panelPref)}>ⓘ</button>}
         </header>
+        {searching && <ChatSearchBar conv={conv} scroller={scroller} onJump={jumpTo} onClose={() => { setSearching(false); input.current?.focus(); }} />}
         {!isSide && <CallBanner conversationId={id} />}
         {isSide && (embedded?.anchor || anchorExcerpt) && (
           <div className="side-anchor" style={{ borderLeftColor: personColor(embedded?.anchor?.authorId ?? null) }}>
@@ -606,7 +649,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
             if (r.kind === 'links') return <LinkGroup key={r.key} d={d} msgs={r.msgs} onExpand={() => setExpandedGroups((g) => new Set(g).add(r.key))} />;
             if (r.kind === 'pending') return <PendingRow key={r.key} p={r.p} />;
             const m = r.m;
-            if (m.kind === 'system') return <SystemRow key={r.key} m={m} onIssue={setOpenIssue} canPost={conv.canPost} />;
+            if (m.kind === 'system') return <SystemRow key={r.key} m={m} onIssue={setOpenIssue} canPost={conv.canPost} live={liveFrom.current != null && m.seq > liveFrom.current} />;
             const author = personById(d, m.authorId);
             const org = orgById(d, author?.orgId);
             const quoted = m.replyTo ? byId.get(m.replyTo) : null;
@@ -643,11 +686,11 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                         onKeyDown={(e) => { if (e.key === 'Escape') setEditing(null); if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void saveEdit(); } }} />
                       <div className="row small"><span className="muted grow">{t('edit.hint')}</span><button className="btn ghost small" onClick={() => setEditing(null)}>{t('common.cancel')}</button><button className="btn primary small" onClick={saveEdit}>{t('edit.save')}</button></div>
                     </div>
-                  ) : (
-                    (m.body || m.deletedAt || !m.attachments?.length) && <div className={`msg-body ${!m.deletedAt && isJumbo(m.body) ? 'is-jumbo' : ''}`}>{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <MessageText d={d} body={m.body} mentions={m.mentions} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
+                  ) : m.viewOnce && !m.deletedAt ? <ViewOnceBubble m={m} /> : (
+                    (m.body || m.deletedAt || !m.attachments?.length) && <div className={`msg-body ${!m.deletedAt && isJumbo(m.body) ? 'is-jumbo' : ''}`}>{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <MessageText d={d} body={m.body} mentions={m.mentions} refs={m.refs} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
                   )}
-                  {!m.deletedAt && !!m.attachments?.length && <AttachmentsView list={m.attachments} onCreateIssue={canOpenIssues ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
-                  {!m.deletedAt && !isEditing && <MessageLinks m={m} mode={conv.linkPreviews ?? 'large'} onIssue={canOpenIssues ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
+                  {!m.deletedAt && !m.viewOnce && !!m.attachments?.length && <AttachmentsView list={m.attachments} onCreateIssue={canOpenIssues ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
+                  {!m.deletedAt && !isEditing && !m.viewOnce && <MessageLinks m={m} mode={conv.linkPreviews ?? 'large'} onIssue={canOpenIssues ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
                   {!m.deletedAt && <ReactionBar d={d} m={m} canReact={conv.canPost} actions={reactionActions} onIssue={setOpenIssue} />}
                   {!embedded && <ThreadChip d={d} threads={threadsOf(d, id, m.id).filter((c) => c.deriveKind !== 'side')} onOpen={setSideId} />}
                   {!embedded && <SideChip d={d} sides={sidesOf(d, id, m.id)} onOpen={setSideId} />}
@@ -657,10 +700,10 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                       {conv.canPost && <button className="msg-act-react" aria-label={t('react.add')} title={t('react.add')} onClick={(e) => { const rr = (e.currentTarget as HTMLElement).getBoundingClientRect(); pickReaction(m, rr.left, rr.bottom + 6); }}>☺</button>}
                       {conv.canPost && QUICK_REACTIONS.slice(0, 3).map((e) => <button key={e} className="msg-act-quick" aria-label={e} onClick={() => react(m, e)}>{e}</button>)}
                       {conv.canPost && <button onClick={() => { setReplyTo(m); input.current?.focus(); }}>↩ {t('menu.reply')}</button>}
-                      <button onClick={() => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />)}>↪ {t('menu.forward')}</button>
-                      {canDerive && myWsRole !== 'guest' && <button onClick={() => setDeriving(m)}>{t('derive.action')}</button>}
-                      {canOpenIssues && <button onClick={() => setNewIssue({ origin: m })}>{t('issue.fromMessage')}</button>}
-                      {conv.canPost && !embedded && m.kind === 'text' && <button onClick={(e) => openTopicMenu(e.currentTarget as HTMLElement, m, topics)}>🏷 {t('topic.set')}</button>}
+                      {!m.viewOnce && <button onClick={() => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />)}>↪ {t('menu.forward')}</button>}
+                      {canDerive && myWsRole !== 'guest' && !m.viewOnce && <button onClick={() => setDeriving(m)}>{t('derive.action')}</button>}
+                      {canOpenIssues && !m.viewOnce && <button onClick={() => setNewIssue({ origin: m })}>{t('issue.fromMessage')}</button>}
+                      {conv.canPost && !embedded && m.kind === 'text' && !m.viewOnce && <button onClick={(e) => openTopicMenu(e.currentTarget as HTMLElement, m, topics)}>🏷 {t('topic.set')}</button>}
                       <button aria-label={t('menu.open')} onClick={(e) => { const rr = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(rr.left, rr.bottom + 4, messageMenu(m)); }}>⋯</button>
                     </div>
                   )}
@@ -726,8 +769,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
               <button className="bring-btn composer-emoji" title={t('react.insert')} aria-label={t('react.insert')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openEmojiPicker(r.left, r.top - 8, insertEmoji); }}>☺</button>
               <div className="mention-wrap">
               {picker.view}
+              {refPicker.view}
               {emoji.view}
-              <MentionMirror text={text} tokens={tokens} taRef={input} />
+              <MentionMirror text={text} tokens={tokens} taRef={input} refRanges={refsFor(text, refTokens)} />
               <textarea
                 ref={input} rows={1} value={text} placeholder={isSide ? (sideOthers.length === 1 ? t('side.placeholder', { name: personById(d, sideOthers[0])?.name.split(' ')[0] ?? '' }) : t('side.placeholderMany')) : activeFilter ? t('topic.placeholder', { name: topicById.get(activeFilter)!.name }) : t('chat.placeholder', { name: title })} aria-label={t('common.message')}
                 onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
@@ -736,9 +780,11 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                 onPaste={(e) => { const files = [...e.clipboardData.files]; if (files.length) { e.preventDefault(); drafts.add(files); } }}
               />
               </div>
+              {!privateReply && <button type="button" className={`bring-btn once-btn ${viewOnce ? 'is-on' : ''}`} aria-pressed={viewOnce} title={viewOnce ? t('once.on') : t('once.toggle')} aria-label={t('once.toggle')}
+                onClick={() => { setViewOnce((v) => { toast(v ? t('once.off') : t('once.on')); return !v; }); input.current?.focus(); }}><span className="once-ico" aria-hidden>1</span></button>}
               {/* Con el compositor vacío, el micrófono: mantener pulsado graba una nota de voz. */}
               {!text.trim() && !drafts.drafts.length && !privateReply
-                ? <VoiceRecorder conversationId={id} onSent={() => { atBottom.current = true; setReplyTo(null); }} />
+                ? <VoiceRecorder conversationId={id} viewOnce={viewOnce} onSent={() => { atBottom.current = true; setReplyTo(null); setViewOnce(false); }} />
                 : <>
                   {canSchedule && <button className="bring-btn sched-btn" title={t('sched.menuTitle')} aria-label={t('sched.menuTitle')} onClick={(e) => openScheduleMenu(e.currentTarget, schedule)}>🕒</button>}
                   <button className="send" onClick={send} disabled={(!text.trim() && !drafts.ready.length) || drafts.busy} aria-label={t('chat.send')}
@@ -904,8 +950,11 @@ function PinsDialog({ conv, onJump, onClose }: { conv: ConversationDTO; onJump: 
 }
 
 /** Mensajes de sistema: algunos enlazan a un asunto, una reunión o la conversación derivada (si la puedes ver). */
-function SystemRow({ m, onIssue, canPost }: { m: MessageDTO; onIssue: (id: string) => void; canPost: boolean }) {
+function SystemRow({ m, onIssue, canPost, live }: { m: MessageDTO; onIssue: (id: string) => void; canPost: boolean; live: boolean }) {
   const d = useClient((s) => s.data)!;
+  // Tanda 1.7: es hoy, tarea hecha, tarea vencida y comentarios agrupados, como tarjetas.
+  const notice = parseNotice(m.body);
+  if (notice) return <Notice17Row m={m} p={notice} canPost={canPost} live={live} onIssue={onIssue} />;
   let p: any = null;
   try { p = m.body.startsWith('{') ? JSON.parse(m.body) : null; } catch {}
   // Una tarea nueva se ve como tarjeta completa, con sus comentarios y para comentar ahí mismo.

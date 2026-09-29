@@ -661,6 +661,28 @@ const es = {
   'att.signBtn': 'Firmar', 'att.signedBy': '✓ Firmado por {name}', 'att.preview': 'Ver PDF',
   'err.has_digital_signature': 'Este PDF ya tiene una firma digital', 'err.encrypted_pdf': 'Este PDF tiene contraseña: no se puede firmar',
   'err.not_pdf': 'Este archivo no es un PDF', 'err.invalid_pdf': 'No pude leer este PDF', 'err.too_many_signatures': 'Ya tienes demasiadas firmas guardadas',
+  // ---------- Tanda 1.7 ----------
+  'sys.event.today': 'Hoy: {title} a las {time}.', 'sys.issue.done': '✅ {byName} completó la tarea «{title}».',
+  'sys.issue.overdue': 'No cumplimos: «{title}» venció el {date}.',
+  'sys.issue.comments': '💬 {lastByName} comentó en «{title}»: {lastExcerpt}', 'sys.event.comments': '💬 {lastByName} comentó en «{title}»: {lastExcerpt}',
+  'ref.noAccess': 'No tienes acceso a #{name}', 'ref.picker': 'Etiquetar una conversación', 'ref.noMatch': 'Ninguna conversación coincide',
+  'today.banner': '📅 ES HOY · {time}', 'today.bannerNow': '📅 ES HOY · ahora',
+  'done.banner': '✅ {name} completó la tarea', 'overdue.banner': 'No cumplimos: {title} venció el {date}',
+  'overdue.newDate': 'Nueva fecha', 'overdue.markDone': 'Marcar hecha', 'overdue.reassign': 'Reasignar',
+  'overdue.today': 'Hoy', 'overdue.tomorrow': 'Mañana', 'overdue.monday': 'Próximo lunes', 'overdue.pick': 'Elegir fecha…',
+  'overdue.moved': 'Nueva fecha: {date}', 'overdue.reassigned': 'Ahora la tiene {name}', 'overdue.pickTitle': 'Nueva fecha límite',
+  'comments.one': '💬 Comentario añadido', 'comments.many': '💬 {n} comentarios nuevos', 'comments.reply': 'Responder', 'comments.placeholder': 'Escribe un comentario…',
+  'comments.title': 'Comentarios', 'comments.empty': 'Aún no hay comentarios.', 'comments.send': 'Comentar',
+  'csearch.open': 'Buscar en el chat', 'csearch.placeholder': 'Buscar en el chat (from:Nombre para filtrar)', 'csearch.of': '{i} de {n}', 'csearch.none': 'Sin resultados',
+  'csearch.prev': 'Anterior (más viejo)', 'csearch.next': 'Siguiente (más nuevo)', 'csearch.close': 'Cerrar búsqueda', 'csearch.min': 'Escribe al menos 2 letras',
+  'csearch.inAttachment': '📎 en el adjunto', 'csearch.inVoice': '🎤 en la nota de voz', 'csearch.loading': 'Buscando…',
+  'once.toggle': 'Una sola vista', 'once.on': 'Una sola vista: activado para el próximo mensaje', 'once.off': 'Una sola vista: desactivado',
+  'once.photo': '① Foto', 'once.message': '① Mensaje', 'once.voice': '① Nota de voz',
+  'once.tapToOpen': 'Toca para abrir', 'once.opened': 'Abierto', 'once.sent': 'Una vista · sin abrir', 'once.seenBy': 'Una vista · Visto por {names}',
+  'once.onlyMedia': 'Una sola vista solo aplica a texto, fotos y notas de voz', 'once.close': 'Cerrar', 'once.hint': 'Solo se puede ver una vez',
+  'once.already': 'Ya abriste este mensaje', 'once.expired': 'Este mensaje ya no está disponible',
+  'err.view_once': 'Los mensajes de una sola vista no se pueden editar, reenviar, fijar ni convertir en tarea',
+  'err.already_opened': 'Ya abriste este mensaje', 'err.expired': 'Este mensaje ya no está disponible',
 };
 
 type Key = keyof typeof es;
@@ -1292,6 +1314,28 @@ const en: Record<Key, string> = {
   'att.signBtn': 'Sign', 'att.signedBy': '✓ Signed by {name}', 'att.preview': 'View PDF',
   'err.has_digital_signature': 'This PDF already has a digital signature', 'err.encrypted_pdf': 'This PDF is password-protected and cannot be signed',
   'err.not_pdf': 'This file is not a PDF', 'err.invalid_pdf': 'Could not read this PDF', 'err.too_many_signatures': 'You already have too many saved signatures',
+  // ---------- Tanda 1.7 ----------
+  'sys.event.today': 'Today: {title} at {time}.', 'sys.issue.done': '✅ {byName} completed the task “{title}”.',
+  'sys.issue.overdue': 'We missed it: “{title}” was due on {date}.',
+  'sys.issue.comments': '💬 {lastByName} commented on “{title}”: {lastExcerpt}', 'sys.event.comments': '💬 {lastByName} commented on “{title}”: {lastExcerpt}',
+  'ref.noAccess': 'You do not have access to #{name}', 'ref.picker': 'Tag a conversation', 'ref.noMatch': 'No conversation matches',
+  'today.banner': '📅 TODAY · {time}', 'today.bannerNow': '📅 TODAY · now',
+  'done.banner': '✅ {name} completed the task', 'overdue.banner': 'We missed it: {title} was due on {date}',
+  'overdue.newDate': 'New date', 'overdue.markDone': 'Mark done', 'overdue.reassign': 'Reassign',
+  'overdue.today': 'Today', 'overdue.tomorrow': 'Tomorrow', 'overdue.monday': 'Next Monday', 'overdue.pick': 'Pick a date…',
+  'overdue.moved': 'New date: {date}', 'overdue.reassigned': '{name} has it now', 'overdue.pickTitle': 'New due date',
+  'comments.one': '💬 Comment added', 'comments.many': '💬 {n} new comments', 'comments.reply': 'Reply', 'comments.placeholder': 'Write a comment…',
+  'comments.title': 'Comments', 'comments.empty': 'No comments yet.', 'comments.send': 'Comment',
+  'csearch.open': 'Search in chat', 'csearch.placeholder': 'Search in chat (from:Name to filter)', 'csearch.of': '{i} of {n}', 'csearch.none': 'No results',
+  'csearch.prev': 'Previous (older)', 'csearch.next': 'Next (newer)', 'csearch.close': 'Close search', 'csearch.min': 'Type at least 2 letters',
+  'csearch.inAttachment': '📎 in the attachment', 'csearch.inVoice': '🎤 in the voice note', 'csearch.loading': 'Searching…',
+  'once.toggle': 'View once', 'once.on': 'View once: on for the next message', 'once.off': 'View once: off',
+  'once.photo': '① Photo', 'once.message': '① Message', 'once.voice': '① Voice note',
+  'once.tapToOpen': 'Tap to open', 'once.opened': 'Opened', 'once.sent': 'View once · not opened', 'once.seenBy': 'View once · Seen by {names}',
+  'once.onlyMedia': 'View once only works with text, photos and voice notes', 'once.close': 'Close', 'once.hint': 'Can only be viewed once',
+  'once.already': 'You already opened this message', 'once.expired': 'This message is no longer available',
+  'err.view_once': 'View-once messages cannot be edited, forwarded, pinned or turned into a task',
+  'err.already_opened': 'You already opened this message', 'err.expired': 'This message is no longer available',
 };
 
 const dicts: Record<Lang, Record<Key, string>> = { es, en };
@@ -1361,6 +1405,8 @@ export function systemText(body: string): string {
     const key = (p.k === 'members.added' && p.history === 'all' ? 'sys.members.added.all' : p.k === 'side.started' && p.parentName ? 'sys.side.startedIn' : `sys.${p.k}`) as Key;
     if (typeof p.durationSec === 'number') p.duration = `${Math.floor(p.durationSec / 60)}:${String(p.durationSec % 60).padStart(2, '0')}`;
     if (p.startsAt) p.when = new Date(p.startsAt).toLocaleString(locale(), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    if (p.startsAt) p.time = new Date(p.startsAt).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' });
+    if (typeof p.dueDate === 'string') p.date = dueDateLabel(p.dueDate);
     return key in es ? t(key, p) : body;
   } catch { return body; }
 }
@@ -1376,4 +1422,11 @@ export function attachmentSummaryText(a: { count: number; images: number; videos
   if (a.videos === a.count) return a.count === 1 ? t('att.video') : t('att.videos', { n: a.count });
   if (a.images + a.videos === a.count) return t('att.media', { n: a.count });
   return a.count === 1 ? t('att.file', { name: a.firstName ?? '' }) : t('att.files', { n: a.count });
+}
+
+/** «30 sep» a partir de AAAA-MM-DD (sin corrimiento de zona). */
+export function dueDateLabel(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString(locale(), { day: 'numeric', month: 'short' });
 }

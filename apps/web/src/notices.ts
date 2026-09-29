@@ -47,14 +47,16 @@ export function handleNotice(n: ClientNotice) {
     if (!mayAlert(check)) return;
     if (shouldSound(check)) playMessageSound(conv?.sound ?? d.me.messageSound, !!n.mentioned);
     const who = personById(d, n.message.authorId)?.name ?? '';
+    // Una sola vista: nunca el contenido en la notificación.
+    const body = n.message.viewOnce ? (n.message.attachments?.some((x) => x.kind === 'voice') ? t('once.voice') : n.message.attachments?.length ? t('once.photo') : t('once.message')) : n.message.body.slice(0, 160);
     if (hidden && canNotify) {
       const group = conv ? groupNoticeTitle(d, conv) : null;
       const title = n.mentioned ? t('mention.mentionedYou', { name: who }) : null;
       const note = title
-        ? new Notification(title, { body: `${group ?? (conv ? conversationTitle(d, conv) : 'chaggu')}: ${n.message.body.slice(0, 160)}`, tag: n.conversationId, icon: `${BASE}/icon-192.png` })
+        ? new Notification(title, { body: `${group ?? (conv ? conversationTitle(d, conv) : 'chaggu')}: ${body}`, tag: n.conversationId, icon: `${BASE}/icon-192.png` })
         : group
-        ? new Notification(group, { body: `${who}: ${n.message.body.slice(0, 160)}`, tag: n.conversationId, icon: `${BASE}/icon-192.png` })
-        : new Notification(`${who} · ${conv ? conversationTitle(d, conv) : 'chaggu'}`, { body: n.message.body.slice(0, 160), tag: n.conversationId, icon: `${BASE}/icon-192.png` });
+        ? new Notification(group, { body: `${who}: ${body}`, tag: n.conversationId, icon: `${BASE}/icon-192.png` })
+        : new Notification(`${who} · ${conv ? conversationTitle(d, conv) : 'chaggu'}`, { body, tag: n.conversationId, icon: `${BASE}/icon-192.png` });
       note.onclick = () => { window.focus(); navigate(`/c/${n.conversationId}?m=${n.message.seq}`); note.close(); };
     }
     return;

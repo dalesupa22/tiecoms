@@ -219,6 +219,10 @@ fun ConversationScreen(
     val orgs = Names.participantOrgs(meta, data).joinToString(" · ") { it.name }
     val muted = meta.mutedAt(System.currentTimeMillis())
     var loadError by remember { mutableStateOf<String?>(null) }
+    /** Reintentando la carga tras un fallo transitorio (502 durante un despliegue, red): «Reconectando…». */
+    var loadRetrying by remember { mutableStateOf<com.tiecoms.app.core.ChatRecovery.Kind?>(null) }
+    /** El último fallo de carga fue transitorio: al volver el socket se reintenta solo. */
+    var loadTransient by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableIntStateOf(0) }
     var highlight by remember { mutableStateOf<Long?>(null) }
     var menuFor by remember { mutableStateOf<MessageDTO?>(null) }
@@ -334,7 +338,23 @@ fun ConversationScreen(
     LaunchedEffect(id, reloadKey) {
         runCatching { client.loadBlocks() }
         loadError = null
-        try { client.openConversation(id, force = reloadKey > 0) } catch (e: Exception) { loadError = errorText(ctx, e) }
+        loadRetrying = null
+        try {
+            com.tiecoms.app.core.ChatRecovery.withRetry(
+                attempt = { client.openConversation(id, force = reloadKey > 0) },
+                onRetrying = { kind, _ -> loadRetrying = kind },
+                wait = { ms -> com.tiecoms.app.core.ChatRecovery.waitOrOnline(ms, client.state) },
+            )
+            loadRetrying = null; loadTransient = false
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            loadRetrying = null
+            loadTransient = com.tiecoms.app.core.ChatRecovery.transient(e)
+            // Transitorio agotado: texto claro en vez de «HTTP 502»; permanente (403, 404): el mensaje del servidor.
+            loadError = if (loadTransient) ctx.getString(R.string.chat_load_paused) else errorText(ctx, e)
+            // Sin mensajes no hay nada que posicionar ni marcar como leído.
+            if (client.state.value.conversations[id]?.loaded != true) return@LaunchedEffect
+        }
         launch { runCatching { client.loadIssues(conversationId = id) } }
         launch { runCatching { client.loadPins(id) } }
         launch { runCatching { client.loadTopics(id) } }
@@ -384,6 +404,16 @@ fun ConversationScreen(
             if (e is kotlinx.coroutines.CancellationException) throw e
             readLoadFailed = true
         }
+    }
+
+    // Tras agotar los reintentos, el socket de vuelta en línea reintenta la carga (el borrador sigue en el compositor).
+    LaunchedEffect(state.connection) {
+        if (state.connection == com.tiecoms.app.core.ConnectionStatus.ONLINE && loadTransient && loadError != null &&
+            client.state.value.conversations[id]?.loaded != true) reloadKey++
+    }
+    // Un aviso publicado mientras el chat abierto aún no cargaba se retira al verse el contenido.
+    LaunchedEffect(conv?.loaded == true) {
+        if (conv?.loaded == true && !embedded && container.openConversationId == id) container.notifier.cancel(id)
     }
 
     // A full-screen conversation clears its notification. Embedded bubble content must
@@ -648,10 +678,18 @@ fun ConversationScreen(
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
-                    conv?.loaded != true && loadError != null -> Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    conv?.loaded != true && loadRetrying != null -> Column(Modifier.align(Alignment.Center).padding(24.dp).testTag("chatRecovering"), horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(12.dp))
+                        Text(stringResource(if (loadRetrying == com.tiecoms.app.core.ChatRecovery.Kind.UPDATING) R.string.chat_updating_retrying else R.string.chat_reconnecting),
+                            textAlign = TextAlign.Center, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                        Spacer(Modifier.height(12.dp))
+                        TextButton(onClick = { reloadKey++ }, modifier = Modifier.testTag("chatRetryNow")) { Text(stringResource(R.string.retry)) }
+                    }
+                    conv?.loaded != true && loadError != null -> Column(Modifier.align(Alignment.Center).padding(24.dp).testTag("chatLoadError"), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(loadError!!, textAlign = TextAlign.Center)
                         Spacer(Modifier.height(12.dp))
-                        Button(onClick = { reloadKey++ }) { Text(stringResource(R.string.retry)) }
+                        Button(onClick = { reloadKey++ }, modifier = Modifier.testTag("chatRetry")) { Text(stringResource(R.string.retry)) }
                     }
                     conv?.loaded != true -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     activeTopic != null && items.none { it is ChatItem.Msg || it is ChatItem.Pending } ->

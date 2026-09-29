@@ -2178,6 +2178,7 @@
 "topic.a11yCount" = "{name}, {n} mensajes";
 "topic.a11yHint" = "Mantén presionado para renombrar, cambiar color, archivar o quitar";
 "topic.all" = "Todo";
+"topic.allHint" = "Todos los mensajes, con y sin tema";
 "topic.archive" = "Archivar";
 "topic.archiveHint" = "Sale de la fila. Sus mensajes quedan con etiqueta gris.";
 "topic.archived" = "Archivaste {name}";
@@ -2201,6 +2202,8 @@
 "topic.empty" = "Todavía no hay mensajes en {name}. Lo que escribas ahora queda en este tema.";
 "topic.full" = "Ya hay {max} temas";
 "topic.fullHint" = "Archiva los que ya no uses: mantén presionada su banderita (o clic derecho).";
+"topic.general" = "General";
+"topic.generalHint" = "Solo los mensajes sin tema";
 "topic.icon" = "Ícono";
 "topic.left" = "Quedan {n} de {max}.";
 "topic.name" = "Nombre";

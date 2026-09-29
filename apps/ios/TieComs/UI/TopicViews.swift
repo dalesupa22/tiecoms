@@ -54,14 +54,14 @@ private struct TopicFlag: View {
     }
 }
 
-/// Fila de banderitas: «💬 Todo», los temas activos, «＋ Nuevo» y «🗄 Archivados N». Scroll horizontal.
+/// Fila de banderitas: «💬 General», «☰ Todo» (solo con temas activos), los temas activos, «＋ Nuevo» y «🗄 Archivados N». Scroll horizontal.
 struct TopicDock: View {
     @Environment(AppStore.self) private var store
     let conv: ConversationDTO
-    /// Filtro efectivo (tema activo) o nil = Todo.
+    /// Filtro efectivo: un tema activo, `TopicRules.all` («Todo») o nil («General»).
     let filter: String?
     let counts: [String: Int]
-    /// Sin leer por tema ("" = sin tema, va en «Todo»): la pastilla de acento de cada banderita.
+    /// Sin leer por tema ("" = sin tema, va en «General»): la pastilla de acento de cada banderita.
     var unread: [String: Int] = [:]
     var onFilter: (String?) -> Void
     var onNew: () -> Void
@@ -77,13 +77,26 @@ struct TopicDock: View {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 4) {
+                        // Sin temas activos, «General» y «Todo» son lo mismo: una sola banderita «Todo».
+                        let general = active.isEmpty ? L("topic.all") : L("topic.general")
                         Button { onFilter(nil) } label: {
-                            TopicFlag(text: "💬 \(L("topic.all"))", unread: unread[""], bg: Theme.background, ink: Theme.textSecondary, on: filter == nil)
+                            TopicFlag(text: "💬 \(general)", unread: active.isEmpty ? nil : unread[""], bg: Theme.background, ink: Theme.textSecondary, on: filter == nil)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel([L("topic.all"), (unread[""] ?? 0) > 0 ? L("topic.unreadN", ["n": unread[""] ?? 0]) : nil].compactMap { $0 }.joined(separator: ", "))
+                        .accessibilityLabel([general, !active.isEmpty && (unread[""] ?? 0) > 0 ? L("topic.unreadN", ["n": unread[""] ?? 0]) : nil].compactMap { $0 }.joined(separator: ", "))
+                        .accessibilityHint(active.isEmpty ? "" : L("topic.generalHint"))
                         .accessibilityAddTraits(filter == nil ? .isSelected : [])
-                        .accessibilityIdentifier("topic.all")
+                        .accessibilityIdentifier("topic.general")
+                        if !active.isEmpty {
+                            Button { onFilter(filter == TopicRules.all ? nil : TopicRules.all) } label: {
+                                TopicFlag(text: "☰ \(L("topic.all"))", bg: Theme.background, ink: Theme.textSecondary, on: filter == TopicRules.all)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(L("topic.all"))
+                            .accessibilityHint(L("topic.allHint"))
+                            .accessibilityAddTraits(filter == TopicRules.all ? .isSelected : [])
+                            .accessibilityIdentifier("topic.all")
+                        }
                         ForEach(active) { t in
                             Button { onFilter(filter == t.id ? nil : t.id) } label: {
                                 TopicFlag(text: "\(t.icon) \(t.name)", unread: unread[t.id], bg: TopicPalette.bg(t.color), ink: TopicPalette.ink(t.color), on: filter == t.id)

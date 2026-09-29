@@ -1,0 +1,110 @@
+import XCTest
+
+/// Temas con tres vistas (docs/TEMAS.md, 29-sep-2026): «💬 General» (así abre el chat, solo lo sin tema), «☰ Todo» (todo, con
+/// su etiqueta) y un tema (solo lo suyo). Lo escrito en General va sin tema; saltar a un mensaje cambia al filtro de su tema.
+///
+/// Fixture: `tools/fixtures/temas-general-fixture.mjs` por `TEST_RUNNER_TC_FIXTURE_TEMAS_GENERAL`; capturas con `TEST_RUNNER_TC_SHOTS`.
+final class TemasGeneralUITests: XCTestCase {
+    struct Fixture: Decodable {
+        struct Person: Decodable { var email: String; var id: String }
+        var apiUrl: String
+        var password: String
+        var a: Person
+        var conversationId: String
+    }
+
+    override func setUp() { continueAfterFailure = false }
+
+    func fixture() throws -> Fixture {
+        guard let path = ProcessInfo.processInfo.environment["TC_FIXTURE_TEMAS_GENERAL"], !path.isEmpty else { throw XCTSkip("Sin TC_FIXTURE_TEMAS_GENERAL") }
+        let f = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        XCTAssertFalse(f.apiUrl.contains("chaggu.com") || f.apiUrl.contains("tiecoms.com"), "no se prueba contra producción")
+        return f
+    }
+
+    func shot(_ name: String) {
+        let s = XCUIScreen.main.screenshot()
+        let a = XCTAttachment(screenshot: s); a.name = name; a.lifetime = .keepAlways; add(a)
+        if let dir = ProcessInfo.processInfo.environment["TC_SHOTS"], !dir.isEmpty {
+            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            try? s.pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
+        }
+    }
+
+    func text(_ app: XCUIApplication, _ s: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", s)).firstMatch
+    }
+
+    func testGeneralAllAndTopicViews() throws {
+        let f = try fixture()
+        let app = XCUIApplication()
+        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES",
+                               "-AppleLanguages", "(es)", "-AppleLocale", "es_CO", "-TCResetLanguage", "YES"]
+        app.launch()
+        let email = app.textFields["login.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 20))
+        email.tap(); email.typeText(f.a.email)
+        let pw = app.secureTextFields["login.password"]
+        pw.tap(); pw.typeText(f.password)
+        app.buttons["login.submit"].tap()
+        let notNow = app.buttons.matching(NSPredicate(format: "label IN %@", ["Not Now", "Ahora no"])).firstMatch
+        if notNow.waitForExistence(timeout: 5) { notNow.tap() }
+        let row = app.buttons["conv.row.\(f.conversationId)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 25))
+        let until = Date().addingTimeInterval(6)
+        while Date() < until && !row.isHittable { usleep(300_000) }
+        row.tap()
+
+        // 1. Abre en «General» (los no leídos están repartidos): solo lo sin tema, con su número de sin leer.
+        let general = app.buttons["topic.general"]
+        XCTAssertTrue(general.waitForExistence(timeout: 10))
+        XCTAssertTrue(general.label.hasPrefix("General"), general.label)
+        let selected = NSPredicate(format: "isSelected == true")
+        expectation(for: selected, evaluatedWith: general); waitForExpectations(timeout: 8)
+        XCTAssertTrue(general.label.contains("1 sin leer"), "sin leer sin tema: \(general.label)")
+        XCTAssertTrue(text(app, "Nos vemos mañana en la oficina").waitForExistence(timeout: 8))
+        XCTAssertTrue(text(app, "Hola Ana, ¿cómo vas?").exists)
+        XCTAssertFalse(text(app, "Ya pagué la factura de agosto").exists, "con tema: no va en General")
+        XCTAssertFalse(text(app, "Falta el extracto de septiembre").exists, "aunque no esté leído")
+        XCTAssertFalse(text(app, "El camión llega el lunes").exists)
+        shot("temas-01-general")
+
+        // 2. «☰ Todo»: todo, con su etiqueta.
+        let all = app.buttons["topic.all"]
+        XCTAssertTrue(all.exists, "«Todo» aparece porque hay temas activos")
+        all.tap()
+        XCTAssertTrue(text(app, "Falta el extracto de septiembre").waitForExistence(timeout: 5))
+        XCTAssertTrue(text(app, "El camión llega el lunes").exists)
+        XCTAssertTrue(text(app, "Nos vemos mañana en la oficina").exists)
+        shot("temas-02-todo")
+
+        // 3. Un tema: solo lo suyo; tocarlo otra vez vuelve a General.
+        let fin = app.buttons["topic.flag.Finanzas"]
+        fin.tap()
+        XCTAssertTrue(text(app, "Falta el extracto de septiembre").waitForExistence(timeout: 5))
+        XCTAssertFalse(text(app, "Nos vemos mañana en la oficina").exists)
+        XCTAssertFalse(text(app, "El camión llega el lunes").exists)
+        shot("temas-03-finanzas")
+        fin.tap()
+        expectation(for: selected, evaluatedWith: general); waitForExpectations(timeout: 5)
+        XCTAssertFalse(text(app, "Falta el extracto de septiembre").exists)
+
+        // 4. Lo escrito en General va sin tema (se sigue viendo en General).
+        let field = app.descendants(matching: .any)["composer.field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        let mine = "Desde General \(Int(Date().timeIntervalSince1970) % 10000)"
+        field.tap(); field.typeText(mine)
+        app.buttons["composer.send"].tap()
+        XCTAssertTrue(text(app, mine).waitForExistence(timeout: 10))
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", mine, "Tema:")).firstMatch.exists, "sin tema")
+
+        // 5. Saltar a un mensaje con tema (búsqueda) cambia el filtro a su tema.
+        app.buttons["chat.search"].tap()
+        let search = app.textFields["chat.searchField"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap(); search.typeText("extracto de septiembre\n")
+        expectation(for: selected, evaluatedWith: fin); waitForExpectations(timeout: 10)
+        XCTAssertTrue(text(app, "Falta el extracto de septiembre").exists)
+        shot("temas-04-salto-a-tema")
+    }
+}

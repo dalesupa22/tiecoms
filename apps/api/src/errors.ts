@@ -11,3 +11,5 @@ export const forbidden = (msg = 'No tienes acceso a este recurso') => new ApiErr
 export const badRequest = (msg: string, details?: unknown) => new ApiError(400, 'bad_request', msg, details);
 export const conflict = (msg: string) => new ApiError(409, 'conflict', msg);
 export const unauthorized = (msg = 'Sesión inválida o vencida') => new ApiError(401, 'unauthorized', msg);
+/** Mensaje de una sola vista: no se edita, reenvía, fija ni convierte en tarea (docs/TANDA-1.7.md §7). */
+export const viewOnceConflict = () => new ApiError(409, 'view_once', 'Los mensajes de una sola vista no se pueden editar, reenviar, fijar ni convertir en tarea');

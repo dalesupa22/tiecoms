@@ -1,11 +1,12 @@
 import type { ConversationEvent, EventsPage, ForwardedInfo, MessageDTO, SendMessageInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { enqueueOutbox, pool, tx, type Tx } from '../db.ts';
-import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import { badRequest, conflict, forbidden, notFound, viewOnceConflict } from '../errors.ts';
 import { sha256 } from '../security.ts';
 import { claimForMessage, hideForMessage, linkToMessage } from './attachments.ts';
 import { markMentionsRead, normalizeMentions, saveMentions } from './mentions.ts';
 import { dropLinks, indexLinks } from './links.ts';
+import { normalizeRefs } from './refs.ts';
 
 /** Si el texto trae un enlace, el worker arma su vista previa (fuera de la transacción del envío). */
 async function queuePreview(c: Tx, messageId: string, body: string) {
@@ -49,11 +50,26 @@ export function toMessageDTO(r: any): MessageDTO {
     mentions: deleted ? [] : r.mentions ?? [],
     topicId: deleted ? null : r.topic_id ?? null,
     topicBy: deleted ? null : r.topic_by ?? null,
+    ...(!deleted && r.refs?.length ? { refs: r.refs } : {}),
+    // Una sola vista: la fila ya guarda body '' y adjuntos sin URL; el estado personal lo pone forViewer.
+    ...(r.view_once ? { viewOnce: true, viewOnceState: 'unopened' as const, openedBy: r.view_once_opened ?? [] } : {}),
     createdAt: new Date(r.created_at).toISOString(),
     editedAt: r.edited_at ? new Date(r.edited_at).toISOString() : null,
     deletedAt: deleted ? new Date(r.deleted_at).toISOString() : null,
   };
 }
+
+/** Estado de una sola vista para esta persona: 'sent' si es su autor, 'opened' si ya lo abrió. */
+export function forViewer(m: MessageDTO, userId: string): MessageDTO {
+  if (!m.viewOnce) return m;
+  const state = m.authorId === userId ? 'sent' : (m.openedBy ?? []).some((o) => o.userId === userId) ? 'opened' : 'unopened';
+  return { ...m, viewOnceState: state };
+}
+
+/** Adjunto de una sola vista tal como lo ven todos: sin URL, nombre, onda ni transcripción. */
+export const sealAttachment = (a: import('@tiecoms/contracts').AttachmentDTO): import('@tiecoms/contracts').AttachmentDTO => ({
+  ...a, name: '', url: '', thumbUrl: null, ...(a.kind === 'voice' ? { waveform: null, transcript: null } : {}),
+});
 
 /** Reserva el siguiente event_seq. La fila de la conversación queda bloqueada hasta el commit. */
 export async function appendEvent(c: Tx, conversationId: string, event: Omit<ConversationEvent, 'eventSeq'> & Record<string, unknown>, messageId: string | null = null) {
@@ -79,12 +95,15 @@ export async function appendMessage(c: Tx, p: {
   conversationId: string; authorId: string; body: string; kind?: 'text' | 'system';
   clientMessageId?: string | null; replyTo?: string | null; mergedFrom?: string | null; forwarded?: ForwardedInfo | null;
   attachments?: import('@tiecoms/contracts').AttachmentDTO[] | null; hash?: Buffer | null; mentions?: import('@tiecoms/contracts').MentionDTO[] | null;
-  topicId?: string | null;
+  topicId?: string | null; refs?: import('@tiecoms/contracts').MessageRefDTO[] | null;
+  /** Una sola vista: el contenido real (body queda ''). */
+  viewOnceBody?: string | null;
 }): Promise<MessageDTO> {
-  const { rows } = await c.query('SELECT tiecoms_append_message($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) AS m', [
+  const { rows } = await c.query('SELECT tiecoms_append_message($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) AS m', [
     p.conversationId, p.authorId, p.clientMessageId ?? null, p.kind ?? 'text', p.body, p.replyTo ?? null, p.mergedFrom ?? null,
     p.forwarded ? JSON.stringify(p.forwarded) : null, p.attachments?.length ? JSON.stringify(p.attachments) : null, p.hash ?? null,
     p.mentions?.length ? JSON.stringify(p.mentions) : null, p.topicId ?? null,
+    p.refs?.length ? JSON.stringify(p.refs) : null, p.viewOnceBody ?? null,
   ]);
   const m = rows[0].m as MessageDTO;
   if ((p.kind ?? 'text') === 'text') await queuePush(c, m.id, p.conversationId, p.authorId);
@@ -120,8 +139,10 @@ export async function sendMessage(userId: string, conversationId: string, input:
     // Aun así revalida el acceso: un duplicado no debe filtrar datos a quien perdió permiso.
     await conversationAccess(pool, userId, conversationId, 'read');
     if (!sameBody(existing, input)) throw conflict('clientMessageId reutilizado con otro contenido');
-    return { message: toMessageDTO(existing), duplicate: true };
+    return { message: forViewer(toMessageDTO(existing), userId), duplicate: true };
   }
+  // Una sola vista: texto, fotos y notas de voz propias; nunca reenvíos (docs/TANDA-1.7.md §7).
+  if (input.viewOnce && (input.forwarded || input.forwardAttachmentIds?.length)) throw badRequest('Un mensaje de una sola vista no puede ser un reenvío');
   try {
     let dropped: string[] = [];
     const message = await tx(async (c) => {
@@ -145,35 +166,42 @@ export async function sendMessage(userId: string, conversationId: string, input:
         if (originalId) {
           // «Responder en privado»: el mensaje original debe ser visible para quien responde.
           // El extracto lo pone el servidor desde el original (no lo declara el cliente).
-          const o = src ? (await c.query('SELECT seq, body, kind, deleted_at FROM messages WHERE id = $1 AND conversation_id = $2', [originalId, from])).rows[0] : null;
+          const o = src ? (await c.query('SELECT seq, body, kind, deleted_at, view_once FROM messages WHERE id = $1 AND conversation_id = $2', [originalId, from])).rows[0] : null;
           if (!o || o.seq <= src!.historyFromSeq || o.kind !== 'text' || o.deleted_at) throw badRequest('El mensaje original no está en la conversación de origen');
+          if (o.view_once) throw viewOnceConflict();
           const flat = String(o.body).replace(/\s+/g, ' ').trim();
           quote = { messageSeq: o.seq, excerpt: flat.length > 200 ? `${flat.slice(0, 199)}…` : flat };
         }
         forwarded = { source: input.forwarded.source, author: input.forwarded.author ?? null, sentAt: input.forwarded.sentAt ?? null, fromConversationId: from, messageId: originalId, ...(quote ?? {}) };
       }
       const claimed = await claimForMessage(c, userId, conversationId, input.attachmentIds ?? [], input.forwardAttachmentIds ?? []);
-      const mentions = await normalizeMentions(c, conversationId, userId, input.body, input.mentions, access);
+      const once = input.viewOnce === true;
+      if (once && claimed.some((x) => x.dto.kind !== 'voice' && !x.dto.contentType.startsWith('image/'))) throw badRequest('Una sola vista solo aplica a texto, fotos y notas de voz');
+      // En una sola vista no hay menciones, #grupos, enlaces indexados ni vista previa: nada del contenido sale de la fila.
+      const mentions = once ? { mentions: [], dropped: (input.mentions ?? []).map((x) => x.userId), userIds: [], all: false } : await normalizeMentions(c, conversationId, userId, input.body, input.mentions, access);
       dropped = mentions.dropped;
+      const refs = once ? [] : await normalizeRefs(c, userId, input.body, input.refs);
       const m = await appendMessage(c, {
-        conversationId, authorId: userId, body: input.body, clientMessageId: input.clientMessageId, replyTo: input.replyTo ?? null, forwarded,
-        attachments: claimed.map((x) => x.dto), hash: contentHash(input.body, input.attachmentIds, input.forwardAttachmentIds), mentions: mentions.mentions,
-        topicId: input.topicId ?? null,
+        conversationId, authorId: userId, body: once ? '' : input.body, clientMessageId: input.clientMessageId, replyTo: input.replyTo ?? null, forwarded,
+        attachments: claimed.map((x) => (once ? sealAttachment(x.dto) : x.dto)), hash: contentHash(input.body, input.attachmentIds, input.forwardAttachmentIds), mentions: mentions.mentions,
+        topicId: input.topicId ?? null, refs, viewOnceBody: once ? input.body : null,
       });
       if (claimed.length) await linkToMessage(c, m.id, claimed.map((x) => x.id));
-      if (mentions.userIds.length) await saveMentions(c, m.id, conversationId, m.seq, mentions);
-      await indexLinks(c, { id: m.id, conversation_id: conversationId, seq: m.seq, author_id: userId, body: input.body, created_at: m.createdAt });
-      await queuePreview(c, m.id, input.body);
+      if (mentions.userIds.length) await saveMentions(c, m.id, conversationId, m.seq, mentions as any);
+      if (!once) {
+        await indexLinks(c, { id: m.id, conversation_id: conversationId, seq: m.seq, author_id: userId, body: input.body, created_at: m.createdAt });
+        await queuePreview(c, m.id, input.body);
+      }
       // Datos asociados que deben quedar confirmados junto al mensaje (sin I/O externo).
       if (afterCreate) await afterCreate(c, m);
       return m;
     });
-    return { message, duplicate: false, ...(dropped.length ? { droppedMentions: dropped } : {}) };
+    return { message: forViewer(message, userId), duplicate: false, ...(dropped.length ? { droppedMentions: dropped } : {}) };
   } catch (err: any) {
     // Dos reintentos simultáneos: el segundo choca con la restricción única y devuelve el primero.
     if (err?.code === '23505') {
       const row = await findByClientId(conversationId, userId, input.clientMessageId);
-      if (row && sameBody(row, input)) return { message: toMessageDTO(row), duplicate: true };
+      if (row && sameBody(row, input)) return { message: forViewer(toMessageDTO(row), userId), duplicate: true };
       if (row) throw conflict('clientMessageId reutilizado con otro contenido');
     }
     throw err;
@@ -187,7 +215,7 @@ export async function listMessages(userId: string, conversationId: string, befor
       ORDER BY seq DESC LIMIT $4`,
     [conversationId, a.historyFromSeq, before ?? null, limit],
   );
-  const messages = rows.reverse().map(toMessageDTO);
+  const messages = rows.reverse().map((r) => forViewer(toMessageDTO(r), userId));
   return { messages, hasMore: rows.length === limit && (messages[0]?.seq ?? 0) > a.historyFromSeq + 1, lastEventSeq: a.lastEventSeq };
 }
 
@@ -271,15 +299,24 @@ async function ownMessage(c: Tx, userId: string, messageId: string) {
   return Object.assign(m, { access });
 }
 
-export async function editMessage(userId: string, messageId: string, body: string, mentionsInput?: { userId: string; start: number; length: number }[]) {
+async function editableMessage(c: Tx, userId: string, messageId: string) {
+  const m = await ownMessage(c, userId, messageId);
+  if (m.view_once) throw viewOnceConflict();
+  return m;
+}
+
+export async function editMessage(userId: string, messageId: string, body: string, mentionsInput?: { userId: string; start: number; length: number }[],
+  refsInput?: { conversationId: string; start: number; length: number }[]) {
   return tx(async (c) => {
-    const m = await ownMessage(c, userId, messageId);
+    const m = await editableMessage(c, userId, messageId);
     // Menciones: las nuevas si llegan; si no llegan y el texto cambió, las anteriores ya no apuntan bien y se quitan.
     const mentions = await normalizeMentions(c, m.conversation_id, userId, body, mentionsInput ?? (body === m.body ? m.mentions ?? [] : []), m.access);
     await saveMentions(c, messageId, m.conversation_id, m.seq, mentions);
     // Otro texto, otra vista previa: se quita la anterior y el worker lee el enlace nuevo.
-    const { rows } = await c.query('UPDATE messages SET body = $2, body_sha256 = $3, edited_at = now(), link_preview = NULL, link_previews = NULL, mentions = $4 WHERE id = $1 RETURNING *',
-      [messageId, body, sha256(body), mentions.mentions.length ? JSON.stringify(mentions.mentions) : null]);
+    // #grupos: igual que las menciones (las nuevas si llegan; si el texto cambió sin refs, se quitan).
+    const refs = await normalizeRefs(c, userId, body, refsInput ?? (body === m.body ? m.refs ?? [] : []));
+    const { rows } = await c.query('UPDATE messages SET body = $2, body_sha256 = $3, edited_at = now(), link_preview = NULL, link_previews = NULL, mentions = $4, refs = $5 WHERE id = $1 RETURNING *',
+      [messageId, body, sha256(body), mentions.mentions.length ? JSON.stringify(mentions.mentions) : null, refs.length ? JSON.stringify(refs) : null]);
     await indexLinks(c, rows[0]);
     await queuePreview(c, messageId, body);
     const message = toMessageDTO(rows[0]);
@@ -292,7 +329,7 @@ export async function deleteMessage(userId: string, messageId: string) {
   return tx(async (c) => {
     const m = await ownMessage(c, userId, messageId);
     // Borrado lógico: se conserva el orden y queda la marca; el contenido deja de servirse.
-    const { rows } = await c.query("UPDATE messages SET body = '', attachments = NULL, mentions = NULL, link_preview = NULL, link_previews = NULL, reactions = NULL, external_reactions = NULL, deleted_at = now() WHERE id = $1 RETURNING *", [messageId]);
+    const { rows } = await c.query("UPDATE messages SET body = '', attachments = NULL, mentions = NULL, refs = NULL, view_once_body = NULL, link_preview = NULL, link_previews = NULL, reactions = NULL, external_reactions = NULL, deleted_at = now() WHERE id = $1 RETURNING *", [messageId]);
     await c.query('DELETE FROM message_mentions WHERE message_id = $1', [messageId]);
     await c.query('DELETE FROM message_reactions WHERE message_id = $1', [messageId]);
     await dropLinks(c, messageId);
@@ -327,10 +364,11 @@ async function pinIds(c: Tx | typeof pool, conversationId: string) {
 
 export async function setPin(userId: string, messageId: string, pinned: boolean) {
   return tx(async (c) => {
-    const { rows } = await c.query('SELECT conversation_id, seq, kind, deleted_at FROM messages WHERE id = $1', [messageId]);
+    const { rows } = await c.query('SELECT conversation_id, seq, kind, deleted_at, view_once FROM messages WHERE id = $1', [messageId]);
     const m = rows[0];
     if (!m) throw notFound('Mensaje');
     const a = await conversationAccess(c, userId, m.conversation_id, 'post', true);
+    if (m.view_once && pinned) throw viewOnceConflict();
     if (m.seq <= a.historyFromSeq || m.kind !== 'text' || m.deleted_at) throw badRequest('Ese mensaje no se puede fijar');
     if (pinned) await c.query('INSERT INTO message_pins (conversation_id, message_id, pinned_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [m.conversation_id, messageId, userId]);
     else await c.query('DELETE FROM message_pins WHERE conversation_id = $1 AND message_id = $2', [m.conversation_id, messageId]);
@@ -348,5 +386,5 @@ export async function listPins(userId: string, conversationId: string) {
       WHERE p.conversation_id = $1 AND m.seq > $2 AND m.deleted_at IS NULL ORDER BY p.pinned_at DESC`,
     [conversationId, a.historyFromSeq],
   );
-  return rows.map(toMessageDTO);
+  return rows.map((r) => forViewer(toMessageDTO(r), userId));
 }

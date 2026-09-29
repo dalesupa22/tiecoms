@@ -12,7 +12,9 @@ import { cleanupExpired as cleanupSso } from './modules/sso.ts';
 import { previewMessage } from './modules/link-preview.ts';
 import { deletePersonalObject } from './storage.ts';
 import { notifyReport } from './modules/safety.ts';
-import { pushCall, pushEvent, pushEventSoon, pushIssueAssigned, pushMessage, pushReaction, pushReminder } from './modules/push.ts';
+import { pushCall, pushEvent, pushEventSoon, pushIssueAssigned, pushIssueOverdue, pushMessage, pushReaction, pushReminder } from './modules/push.ts';
+import { fireOverdueIssues, fireTodayEvents } from './modules/chat-notices.ts';
+import { purgeViewOnce } from './modules/view-once.ts';
 import { digestFor, markDigestSent } from './modules/links.ts';
 import { linkDigestMail, trySendMail } from './mail.ts';
 import { config } from './config.ts';
@@ -39,6 +41,8 @@ const handlers: Record<string, Handler> = {
   async 'push.message'(p) { await pushMessage(p.messageId); },
   async 'push.reminder'(p) { await pushReminder(p.reminderId); },
   async 'push.issue'(p) { await pushIssueAssigned(p.issueId, p.ownerId, p.actorId); },
+  /** «No cumplimos»: la tarea venció (al responsable, categoría de tarea). */
+  async 'push.issue_overdue'(p) { await pushIssueOverdue(p.issueId, p.ownerId, p.dueDate); },
   async 'push.event'(p) { await pushEvent(p.eventId); },
   /** Nota de voz: variante AAC, transcripción y resumen (Inworld / DeepSeek). */
   async 'voice.transcribe'(p) { await transcribeAttachment(p.attachmentId); },
@@ -99,6 +103,8 @@ const handlers: Record<string, Handler> = {
     await pool.query("DELETE FROM audit_events WHERE created_at < now() - interval '24 months'");
     await pool.query("DELETE FROM safety_reports WHERE created_at < now() - interval '24 months'");
     await cleanupSso();
+    const once = await purgeViewOnce();
+    if (once) console.log(`[worker] mensajes de una sola vista vencidos o ya vistos: ${once}`);
     const stale = await cleanupAttachments();
     if (stale) console.log(`[worker] adjuntos pendientes borrados: ${stale}`);
   },
@@ -155,15 +161,23 @@ let stop = false;
 async function loop() {
   let lastSchedule = 0;
   let lastReminders = 0;
+  let lastOverdue = 0;
+  // «No cumplimos» cada minuto (OVERDUE_CHECK_MS para pruebas); los mensajes de una sola vista, cada 10 min.
+  const overdueEvery = Math.max(1000, Number(process.env.OVERDUE_CHECK_MS ?? 60_000));
+  let lastPurge = 0;
   while (!stop) {
     try {
       // Recordatorios: revisión cada 15 s; el aviso llega por el outbox a los dispositivos de la persona.
       if (Date.now() - lastReminders > 15_000) { lastReminders = Date.now(); const n = await fireDueReminders(); if (n) console.log(`[worker] recordatorios disparados: ${n}`);
         const s = await fireSoonEvents(); if (s) console.log(`[worker] avisos de reunión: ${s}`);
+        // «Es hoy» (tanda 1.7), en el mismo ciclo que «empieza pronto».
+        const td = await fireTodayEvents(); if (td) console.log(`[worker] avisos «es hoy»: ${td}`);
         // Mensajes programados, en el mismo ciclo de 15 s (índice parcial: sin pendientes no cuesta nada).
         const p = await sendDueScheduled(); if (p) console.log(`[worker] programados enviados: ${p}`);
         // Llamadas: quien dejó de latir sale; la llamada vacía se cierra (y se borra la reunión en Chime).
         const k = await reapCalls(); if (k) console.log(`[worker] llamadas actualizadas: ${k}`); }
+      if (Date.now() - lastOverdue > overdueEvery) { lastOverdue = Date.now(); const o = await fireOverdueIssues(); if (o) console.log(`[worker] tareas vencidas: ${o}`); }
+      if (Date.now() - lastPurge > 600_000) { lastPurge = Date.now(); await purgeViewOnce(); }
       if (Date.now() - lastSchedule > 30_000) { await schedule(); lastSchedule = Date.now(); }
       const worked = await runOne();
       if (!worked) await new Promise((r) => setTimeout(r, 1000));

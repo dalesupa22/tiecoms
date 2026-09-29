@@ -45,12 +45,12 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
               COALESCE(rc.last_read_seq, 0) AS last_read_seq,
               ARRAY(SELECT user_id FROM conversation_memberships x WHERE x.conversation_id = c.id AND x.removed_at IS NULL ORDER BY x.joined_at) AS member_ids,
               ARRAY(SELECT user_id FROM conversation_memberships x WHERE x.conversation_id = c.id AND x.removed_at IS NULL AND x.can_manage ORDER BY x.joined_at) AS admin_ids, c.created_by,
-              (SELECT CASE WHEN lm.deleted_at IS NULL THEN left(lm.body, 140) ELSE '' END FROM messages lm
+              (SELECT CASE WHEN lm.deleted_at IS NOT NULL THEN '' WHEN lm.view_once THEN '①' ELSE left(lm.body, 140) END FROM messages lm
                 WHERE lm.conversation_id = c.id AND lm.seq = c.last_message_seq AND lm.seq > m.history_from_seq) AS preview,
               (SELECT lm.attachments FROM messages lm
                 WHERE lm.conversation_id = c.id AND lm.seq = c.last_message_seq AND lm.seq > m.history_from_seq AND lm.deleted_at IS NULL) AS preview_attachments,
               -- Último mensaje de una persona (o agente) entre los últimos 20 visibles, aunque después haya avisos de sistema.
-              (SELECT json_build_object('id', hm.id, 'seq', hm.seq, 'authorId', hm.author_id, 'body', left(hm.body, 140), 'attachments', hm.attachments, 'createdAt', hm.created_at)
+              (SELECT json_build_object('id', hm.id, 'seq', hm.seq, 'authorId', hm.author_id, 'body', left(hm.body, 140), 'attachments', hm.attachments, 'createdAt', hm.created_at, 'viewOnce', hm.view_once)
                  FROM messages hm WHERE hm.conversation_id = c.id AND hm.kind = 'text' AND hm.deleted_at IS NULL
                   AND hm.seq > GREATEST(m.history_from_seq, c.last_message_seq - 20)
                 ORDER BY hm.seq DESC LIMIT 1) AS human
@@ -123,6 +123,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
       lastHumanPreview: r.human ? {
         messageId: r.human.id, seq: Number(r.human.seq), authorId: r.human.authorId, body: r.human.body ?? '',
         attachments: summarize(r.human.attachments), createdAt: new Date(r.human.createdAt).toISOString(),
+        ...(r.human.viewOnce ? { viewOnce: true } : {}),
       } : null,
     };
   });

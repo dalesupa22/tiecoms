@@ -65,8 +65,15 @@ async function badges(userIds: string[]): Promise<Map<string, number>> {
 }
 
 /** «📷 2 fotos · texto» o solo el texto (≤ 180). */
-function messageText(body: string, atts: any, lang: Lang) {
+function messageText(body: string, atts: any, lang: Lang, viewOnce = false) {
   const sum = summarize(atts);
+  // Una sola vista: nunca el contenido (docs/TANDA-1.7.md §7).
+  if (viewOnce) {
+    const en = lang === 'en';
+    if (sum?.voices) return en ? '① Voice note' : '① Nota de voz';
+    if (sum?.images) return en ? '① Photo' : '① Foto';
+    return en ? '① Message' : '① Mensaje';
+  }
   const text = [sum ? summaryText(sum, lang) : '', body.replace(/\s+/g, ' ').trim()].filter(Boolean).join(' · ');
   return clip(text, 180) || (lang === 'en' ? 'New message' : 'Mensaje nuevo');
 }
@@ -196,7 +203,7 @@ export async function groupLabels(conversationId: string, userIds: string[]): Pr
 /** Mensaje de texto nuevo. */
 export async function pushMessage(messageId: string) {
   const { rows } = await pool.query(
-    `SELECT m.id, m.conversation_id, m.seq, m.author_id, m.body, m.attachments, m.deleted_at, m.kind, c.kind AS conv_kind, c.name AS conv_name,
+    `SELECT m.id, m.conversation_id, m.seq, m.author_id, m.body, m.attachments, m.deleted_at, m.kind, m.view_once, c.kind AS conv_kind, c.name AS conv_name,
             c.derive_kind, c.parent_conversation_id, c.parent_message_id,
             u.name AS author_name, u.avatar_file_id, o.name AS org_name
        FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN users u ON u.id = m.author_id
@@ -231,7 +238,7 @@ export async function pushMessage(messageId: string) {
   const mentionNote = (t: Target): Note => ({
     title: t.lang === 'en' ? `${m.author_name} mentioned you` : `${m.author_name} te mencionó`,
     subtitle: direct ? null : convTitle(t) || null,
-    body: messageText(m.body, m.attachments, t.lang),
+    body: messageText(m.body, m.attachments, t.lang, m.view_once),
     threadId: m.conversation_id, category: 'TC_MESSAGE', collapseId: m.id,
     data: { type: 'mention', conversationId: m.conversation_id, messageId: m.id, authorId: m.author_id, authorName: m.author_name, authorAvatarUrl: avatar },
   });
@@ -246,7 +253,7 @@ export async function pushMessage(messageId: string) {
     await deliver(targets, (t) => ({
       title: t.lang === 'en' ? `💬 Sidechat from ${m.author_name}` : `💬 Sidechat de ${m.author_name}`,
       subtitle: excerpt ? `${t.lang === 'en' ? 'About' : 'Sobre'}: «${excerpt}»` : null,
-      body: messageText(m.body, m.attachments, t.lang),
+      body: messageText(m.body, m.attachments, t.lang, m.view_once),
       threadId: m.conversation_id, category: 'TC_SIDE', collapseId: m.id,
       data: { type: 'side', conversationId: m.conversation_id, messageId: m.id, authorId: m.author_id, authorName: m.author_name, authorAvatarUrl: avatar, sideOf },
     }));
@@ -255,7 +262,7 @@ export async function pushMessage(messageId: string) {
   await deliver(targets, (t) => ({
     title: direct ? m.author_name : convTitle(t) || m.author_name,
     subtitle: direct ? null : [m.author_name, m.org_name].filter(Boolean).join(' · '),
-    body: messageText(m.body, m.attachments, t.lang),
+    body: messageText(m.body, m.attachments, t.lang, m.view_once),
     threadId: m.conversation_id, category: 'TC_MESSAGE', collapseId: m.id,
     data: { type: 'message', conversationId: m.conversation_id, messageId: m.id, authorId: m.author_id, authorName: m.author_name, authorAvatarUrl: avatar },
   }));
@@ -417,6 +424,32 @@ export async function pushIssueAssigned(issueId: string, ownerId: string, actorI
     body: clip(r.title, 180),
     threadId: r.in_chat ? r.conversation_id : `issue-${r.id}`, category: 'TC_ISSUE', collapseId: `issue-${r.id}`,
     data: { type: 'issue', issueId: r.id, conversationId: r.conversation_id, inChat: !!r.in_chat },
+  }));
+  return targets.length;
+}
+
+/** «No cumplimos» (tanda 1.7): la tarea venció. Al responsable, con la categoría de tarea. */
+export async function pushIssueOverdue(issueId: string, ownerId: string, dueDate: string) {
+  const { rows } = await pool.query(
+    `SELECT i.id, i.title, i.conversation_id, i.owner_id, i.status, to_char(i.due_date, 'YYYY-MM-DD') AS due,
+            EXISTS (SELECT 1 FROM conversation_memberships cm WHERE cm.conversation_id = i.conversation_id AND cm.user_id = $2 AND cm.removed_at IS NULL) AS in_chat
+       FROM issues i WHERE i.id = $1`,
+    [issueId, ownerId],
+  );
+  const r = rows[0];
+  if (!r || r.owner_id !== ownerId || r.status === 'done' || r.status === 'cancelled' || r.due !== dueDate) return 0;
+  const { rows: targets } = await pool.query<Target>(
+    `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
+       FROM users u ${ACTIVE_SESSION} WHERE u.id = $1 AND u.disabled_at IS NULL`,
+    [ownerId],
+  );
+  const labels = r.in_chat && r.conversation_id ? await groupLabels(r.conversation_id, [ownerId]) : new Map<string, string>();
+  await deliver(targets, (t) => ({
+    title: t.lang === 'en' ? '😢 We missed it' : '😢 No cumplimos',
+    subtitle: labels.get(t.user_id) ?? null,
+    body: clip(t.lang === 'en' ? `${r.title} was due on ${r.due}` : `${r.title} venció el ${r.due}`, 180),
+    threadId: r.in_chat ? r.conversation_id : `issue-${r.id}`, category: 'TC_ISSUE', collapseId: `issue-overdue-${r.id}`,
+    data: { type: 'issue', issueId: r.id, conversationId: r.conversation_id ?? '', inChat: !!r.in_chat },
   }));
   return targets.length;
 }

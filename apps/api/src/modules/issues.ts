@@ -5,6 +5,8 @@ import { audit, enqueueOutbox, pool, tx, type Db, type Tx } from '../db.ts';
 import { badRequest, forbidden, notFound, taskNotFound } from '../errors.ts';
 import { appendEvent, appendMessage } from './messages.ts';
 import { queueIntegrationEvent } from './integration-events.ts';
+import { bumpCommentNotice } from './chat-notices.ts';
+import { viewOnceConflict } from '../errors.ts';
 
 /** Mensaje de sistema estructurado: cada cliente lo muestra en su idioma. */
 const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, ...p });
@@ -169,8 +171,9 @@ export async function createIssue(userId: string, conversationId: string, input:
     let requestedBy: string | null = null;
     let topicId: string | null = input.topicId ?? null;
     if (input.originMessageId) {
-      const m = await c.query('SELECT author_id, seq, topic_id FROM messages WHERE id = $1 AND conversation_id = $2', [input.originMessageId, conversationId]);
+      const m = await c.query('SELECT author_id, seq, topic_id, view_once FROM messages WHERE id = $1 AND conversation_id = $2', [input.originMessageId, conversationId]);
       if (!m.rows[0] || m.rows[0].seq <= a.historyFromSeq) throw badRequest('El mensaje de origen no está en esta conversación');
+      if (m.rows[0].view_once) throw viewOnceConflict();
       requestedBy = m.rows[0].author_id;
       // La tarea que sale de un mensaje con tema hereda su tema (docs/TEMAS.md).
       if (input.topicId === undefined && m.rows[0].topic_id) topicId = m.rows[0].topic_id;
@@ -297,8 +300,14 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
     for (const [kind, payload] of events) {
       await c.query('INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,$3,$4)', [issueId, userId, kind, JSON.stringify(payload)]);
     }
-    // Cerrar o reabrir se avisa en la conversación (solo si todo el chat ve el asunto y no es una tarea hija).
-    if (nextVis === 'all' && !cur.parent_issue_id && input.status && input.status !== cur.status && (CLOSED.has(input.status) || CLOSED.has(cur.status))) {
+    // Tarea hecha (tanda 1.7): «✅ Ana completó la tarea» con confeti, también en las hijas. Cada cierre publica uno.
+    const doneNow = nextVis === 'all' && input.status === 'done' && cur.status !== 'done';
+    if (doneNow) {
+      const byName = (await c.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name ?? '';
+      await appendMessage(c, { conversationId: cur.conversation_id, authorId: userId, kind: 'system', body: sys('issue.done', { issueId, title: input.title ?? cur.title, byId: userId, byName }) });
+    }
+    // Cancelar o reabrir se avisa en la conversación (solo si todo el chat ve el asunto y no es una tarea hija).
+    else if (nextVis === 'all' && !cur.parent_issue_id && input.status && input.status !== cur.status && (CLOSED.has(input.status) || CLOSED.has(cur.status))) {
       await appendMessage(c, { conversationId: cur.conversation_id, authorId: userId, kind: 'system', body: sys(CLOSED.has(input.status) ? 'issue.closed' : 'issue.reopened', { title: input.title ?? cur.title, issueId }) });
     }
     const dto = await load(c, issueId);
@@ -322,7 +331,7 @@ async function assertTopic(c: Tx, conversationId: string, topicId: string) {
 
 export async function commentIssue(userId: string, issueId: string, body: string, extra: { author?: string; at?: string } = {}, existing?: Tx) {
   return inTransaction(existing, async (c) => {
-    const { rows } = await c.query('SELECT conversation_id, visibility, integration_id FROM issues WHERE id = $1 FOR UPDATE', [issueId]);
+    const { rows } = await c.query('SELECT conversation_id, visibility, integration_id, title FROM issues WHERE id = $1 FOR UPDATE', [issueId]);
     if (!rows[0]) throw taskNotFound();
     await loadVisible(c, userId, issueId);
     if (rows[0].visibility === 'all') await conversationAccess(c, userId, rows[0].conversation_id, 'post', true);
@@ -330,6 +339,11 @@ export async function commentIssue(userId: string, issueId: string, body: string
     await c.query("INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,'comment',$3)", [issueId, userId, JSON.stringify({ body, ...extra })]);
     await c.query('UPDATE issues SET updated_at = now() WHERE id = $1', [issueId]);
     if (rows[0].integration_id) await queueIntegrationEvent(c, issueId, userId, { type: 'issue.commented', body });
+    // Aviso agrupado en el chat (tanda 1.7): solo lo que ve todo el chat.
+    if (rows[0].visibility === 'all' && rows[0].conversation_id) {
+      const actorName = extra.author || (await c.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name || '';
+      await bumpCommentNotice(c, { kind: 'issue', conversationId: rows[0].conversation_id, itemId: issueId, title: rows[0].title, actorId: userId, actorName, body });
+    }
     const dto = await load(c, issueId);
     await publish(c, dto);
     return dto;

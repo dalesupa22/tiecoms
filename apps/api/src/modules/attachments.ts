@@ -10,7 +10,7 @@ import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_VOICE_MS, type V
 import { transcriptionEnabled } from './voice-providers.ts';
 import { conversationAccess } from '../access.ts';
 import { pool, type Tx } from '../db.ts';
-import { ApiError, badRequest, forbidden, notFound } from '../errors.ts';
+import { ApiError, badRequest, forbidden, notFound, viewOnceConflict } from '../errors.ts';
 import { deleteObject, getObject, objectKey, putObject } from '../storage.ts';
 
 export const MAX_THUMB_BYTES = 512 * 1024;
@@ -219,7 +219,7 @@ export async function claimForMessage(c: Tx, userId: string, conversationId: str
   }
   if (fwd.length) {
     const { rows } = await c.query(
-      `SELECT a.*, m.seq AS message_seq FROM attachments a JOIN messages m ON m.id = a.message_id
+      `SELECT a.*, m.seq AS message_seq, m.view_once FROM attachments a JOIN messages m ON m.id = a.message_id
         WHERE a.id = ANY($1) AND a.deleted_at IS NULL AND m.deleted_at IS NULL`,
       [fwd],
     );
@@ -227,6 +227,7 @@ export async function claimForMessage(c: Tx, userId: string, conversationId: str
     for (const id of fwd) {
       const r = byId.get(id);
       if (!r) throw badRequest('Algún adjunto reenviado no existe');
+      if (r.view_once) throw viewOnceConflict();
       const acc = await conversationAccess(c, userId, r.conversation_id, 'read');
       if (r.message_seq <= acc.historyFromSeq) throw badRequest('Algún adjunto reenviado no existe');
       const copy = await c.query(
@@ -255,7 +256,7 @@ export async function hideForMessage(c: Tx, messageId: string) {
 /** Solo quien puede leer el mensaje (respeta historyFromSeq). Los pendientes, solo su dueño. */
 export async function readable(userId: string, attachmentId: string) {
   const { rows } = await pool.query(
-    'SELECT a.*, m.seq AS message_seq, m.deleted_at AS message_deleted_at FROM attachments a LEFT JOIN messages m ON m.id = a.message_id WHERE a.id = $1',
+    'SELECT a.*, m.seq AS message_seq, m.deleted_at AS message_deleted_at, m.view_once FROM attachments a LEFT JOIN messages m ON m.id = a.message_id WHERE a.id = $1',
     [attachmentId],
   );
   const a = rows[0];
@@ -263,6 +264,8 @@ export async function readable(userId: string, attachmentId: string) {
   if (!a.message_id) { if (a.owner_id !== userId) throw notFound('Adjunto'); return a; }
   const acc = await conversationAccess(pool, userId, a.conversation_id, 'read').catch(() => { throw notFound('Adjunto'); });
   if (a.message_seq <= acc.historyFromSeq) throw forbidden('Este adjunto está fuera de tu historial');
+  // Una sola vista: solo por la URL firmada que entrega POST /messages/:id/open.
+  if (a.view_once) throw forbidden('Este adjunto es de una sola vista');
   return a;
 }
 

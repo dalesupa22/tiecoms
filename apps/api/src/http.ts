@@ -11,6 +11,7 @@ import {
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
+  ChatSearchQuery, EventCommentInput,
   SetAdminInput, UpdateIntegrationInput, StartCallInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
@@ -47,6 +48,8 @@ import * as reactions from './modules/reactions.ts';
 import * as links from './modules/links.ts';
 import * as topics from './modules/topics.ts';
 import * as integrations from './modules/integrations.ts';
+import { openViewOnce, fetchOnce } from './modules/view-once.ts';
+import { searchConversation } from './modules/chat-search.ts';
 import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
 import { z } from 'zod';
@@ -113,6 +116,12 @@ export async function buildHttp() {
     } catch {
       return reply.status(503).send({ ok: false });
     }
+  });
+  // Adjunto de una sola vista: URL firmada de 60 s (sin Bearer) que solo entrega POST /messages/:id/open.
+  app.get<{ Querystring: { t?: string } }>('/api/v1/once', async (req, reply) => {
+    const f = await fetchOnce(String(req.query.t ?? ''));
+    return reply.header('content-type', f.contentType).header('content-disposition', 'inline').header('cache-control', 'no-store')
+      .header('x-content-type-options', 'nosniff').header('content-security-policy', "default-src 'none'; sandbox").send(f.body);
   });
   app.get('/api/v1/meta', async () => ({ apiVersion: API_VERSION, contract: CONTRACT_VERSION, minClientContract: MIN_CLIENT_CONTRACT }));
   // «Actualización disponible» (docs/ACTUALIZAR.md): público, las apps lo piden al abrir y al volver al frente.
@@ -385,7 +394,11 @@ export async function buildHttp() {
     priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/prefs', async (req) => prefs.setConversationPrefs(req.userId, req.params.id, ConversationPrefsInput.parse(req.body)));
     priv.put<{ Params: { id: string } }>('/api/v1/workspaces/:id/prefs', async (req) => prefs.setWorkspacePrefs(req.userId, req.params.id, WorkspacePrefsInput.parse(req.body).pinned));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/unread', async (req) => markUnread(req.userId, req.params.id, MarkUnreadInput.parse(req.body).seq));
-    priv.patch<{ Params: { id: string } }>('/api/v1/messages/:id', async (req) => { const e = EditMessageInput.parse(req.body); return editMessage(req.userId, req.params.id, e.body, e.mentions); });
+    priv.patch<{ Params: { id: string } }>('/api/v1/messages/:id', async (req) => { const e = EditMessageInput.parse(req.body); return editMessage(req.userId, req.params.id, e.body, e.mentions, e.refs); });
+    // Tanda 1.7: buscar dentro del chat y abrir un mensaje de una sola vista (una vez por persona).
+    priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/search', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) =>
+      searchConversation(req.userId, z.uuid().parse(req.params.id), ChatSearchQuery.parse(req.query)));
+    priv.post<{ Params: { id: string } }>('/api/v1/messages/:id/open', async (req) => openViewOnce(req.userId, z.uuid().parse(req.params.id)));
     // Bandeja «Menciones»: before = createdAt del último que ya tienes.
     priv.get<{ Querystring: { before?: string; limit?: string } }>('/api/v1/mentions', async (req) => {
       const q = z.object({ before: z.iso.datetime().optional(), limit: z.coerce.number().int().min(1).max(100).default(50) }).parse(req.query);
@@ -476,6 +489,9 @@ export async function buildHttp() {
     priv.get<{ Params: { id: string } }>('/api/v1/events/:id', async (req) => cal.getEvent(req.userId, req.params.id));
     priv.patch<{ Params: { id: string } }>('/api/v1/events/:id', async (req) => cal.updateEvent(req.userId, req.params.id, UpdateEventInput.parse(req.body)));
     priv.delete<{ Params: { id: string } }>('/api/v1/events/:id', async (req) => cal.cancelEvent(req.userId, req.params.id));
+    priv.get<{ Params: { id: string } }>('/api/v1/events/:id/comments', async (req) => cal.listEventComments(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/events/:id/comments', async (req, reply) =>
+      reply.status(201).send(await cal.commentEvent(req.userId, z.uuid().parse(req.params.id), EventCommentInput.parse(req.body).body)));
     priv.post<{ Params: { id: string } }>('/api/v1/events/:id/rsvp', async (req) => cal.rsvp(req.userId, req.params.id, RsvpInput.parse(req.body).rsvp));
 
     // Bifurcaciones

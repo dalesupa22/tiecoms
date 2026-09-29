@@ -1016,7 +1016,10 @@ struct ConversationView: View {
         case .system(let m):
             // Una tarea nueva se ve como tarjeta completa (docs/TEMAS.md), no como la línea «Creó la tarea…».
             // Tanda 1.7: «Es hoy», completada, vencida y comentarios también van como la tarjeta de su evento o tarea.
-            if let mk = MailChatKind.parse(m.systemPayload) {
+            if let gp = GG.actions(m) {
+                // gg como chat (docs/GG-CHAT.md): lo que gg dejó listo; solo quien lo pidió confirma.
+                GgActionsRow(message: m, payload: gp)
+            } else if let mk = MailChatKind.parse(m.systemPayload) {
                 // Correo y WhatsApp traídos al chat (docs/CORREO.md): mensaje de quien lo trajo + tarjeta, o la línea con «Abrir».
                 MailChatRow(message: m, kind: mk, canPost: c.canPost)
             } else if let k = ChatCards.kind(m), k.isComments {

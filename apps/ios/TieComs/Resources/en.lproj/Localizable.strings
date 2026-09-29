@@ -73,6 +73,7 @@
 "ai.consentTitle" = "Allow gg to use DeepSeek?";
 "ai.create" = "Create";
 "ai.discard" = "Discard";
+"ai.discarded" = "Discarded";
 "ai.done" = "Done";
 "ai.edit" = "Edit";
 "ai.failed" = "Failed";
@@ -767,6 +768,11 @@
 "fwd.tiecoms" = "To another chaggu conversation…";
 "fwd.title" = "Forward to another chat";
 "fwd.whatsapp" = "Via WhatsApp";
+"gg.consentAllow" = "Allow gg";
+"gg.consentText" = "gg uses AI (DeepSeek) to read what you ask and the chats you point it to. Do you allow it? It applies here and to @gg in your groups.";
+"gg.forOther" = "For {name}";
+"gg.rowHint" = "your assistant";
+"gg.thinking" = "gg is thinking…";
 "group.addPhoto" = "Add group photo";
 "group.changePhoto" = "Change group photo";
 "group.photo" = "Group photo";
@@ -1785,11 +1791,18 @@
 "search.groups" = "Groups";
 "search.inChat" = "Search in chat";
 "search.inChatPh" = "Search this chat";
+"search.messages" = "Messages";
+"search.moreMessages" = "More messages";
 "search.newer" = "Next";
+"search.noMessages" = "No messages match.";
 "search.none" = "Nothing matches “{q}”.";
 "search.older" = "Previous";
 "search.opensChat" = "Opens the chat";
 "search.people" = "People";
+"self.rowHint" = "notes to self";
+"self.saveHere" = "Save to You";
+"self.saved" = "Saved to You";
+"self.title" = "You";
 "settings.alerts" = "Alerts";
 "settings.closeSession" = "Sign out";
 "settings.devices" = "Devices with an open session";
@@ -2074,6 +2087,7 @@
 "sys.event.created" = "Scheduled “{title}” for {when}.";
 "sys.event.moved" = "Moved “{title}” to {when}.";
 "sys.event.today" = "Today: {title} at {time}.";
+"sys.gg.actions" = "✦ gg has something ready to confirm";
 "sys.group.created" = "Group “{name}” created.";
 "sys.group.photo_changed" = "Changed the group photo.";
 "sys.group.photo_removed" = "Removed the group photo.";

@@ -73,6 +73,7 @@
 "ai.consentTitle" = "¿Permitir que gg use DeepSeek?";
 "ai.create" = "Crear";
 "ai.discard" = "Descartar";
+"ai.discarded" = "Descartado";
 "ai.done" = "Hecho";
 "ai.edit" = "Editar";
 "ai.failed" = "No se pudo";
@@ -767,6 +768,11 @@
 "fwd.tiecoms" = "A otra conversación de chaggu…";
 "fwd.title" = "Reenviar a otro chat";
 "fwd.whatsapp" = "Por WhatsApp";
+"gg.consentAllow" = "Autorizar gg";
+"gg.consentText" = "gg usa IA (DeepSeek) para leer lo que le pides y los chats que le indiques. ¿Lo autorizas? Sirve para este chat y para @gg en tus grupos.";
+"gg.forOther" = "Para {name}";
+"gg.rowHint" = "tu asistente";
+"gg.thinking" = "gg está pensando…";
 "group.addPhoto" = "Poner foto del grupo";
 "group.changePhoto" = "Cambiar foto del grupo";
 "group.photo" = "Foto del grupo";
@@ -1785,11 +1791,18 @@
 "search.groups" = "Grupos";
 "search.inChat" = "Buscar en el chat";
 "search.inChatPh" = "Buscar en este chat";
+"search.messages" = "Mensajes";
+"search.moreMessages" = "Ver más mensajes";
 "search.newer" = "Siguiente";
+"search.noMessages" = "Ningún mensaje con eso.";
 "search.none" = "Nada coincide con «{q}».";
 "search.older" = "Anterior";
 "search.opensChat" = "Abre el chat";
 "search.people" = "Personas";
+"self.rowHint" = "notas para ti";
+"self.saveHere" = "Guardar en Tú";
+"self.saved" = "Guardado en Tú";
+"self.title" = "Tú";
 "settings.alerts" = "Avisos";
 "settings.closeSession" = "Cerrar";
 "settings.devices" = "Dispositivos con sesión abierta";
@@ -2074,6 +2087,7 @@
 "sys.event.created" = "Agendó «{title}» para el {when}.";
 "sys.event.moved" = "Movió «{title}» al {when}.";
 "sys.event.today" = "Hoy: {title} a las {time}.";
+"sys.gg.actions" = "✦ gg dejó algo listo para confirmar";
 "sys.group.created" = "Grupo «{name}» creado.";
 "sys.group.photo_changed" = "Cambió la foto del grupo.";
 "sys.group.photo_removed" = "Quitó la foto del grupo.";

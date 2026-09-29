@@ -107,6 +107,10 @@ class AppSettings(context: Context) {
     var issueGroupBy: String
         get() = prefs.getString("issueGroupBy", "group")?.takeIf { it == "group" || it == "person" } ?: "group"
         set(v) { prefs.edit().putString("issueGroupBy", v).apply() }
+    /** Hoy › «Comenta tus correos con el equipo»: cerrada con ✕ no vuelve (docs/CORREO.md). */
+    var mailNudgeOff: Boolean
+        get() = prefs.getBoolean("mailNudgeOff", false)
+        set(v) { prefs.edit().putBoolean("mailNudgeOff", v).apply() }
     /** Calendario (1.6.6): «day» | «week» (por defecto) | «month», recordado por dispositivo. */
     var calendarView: String
         get() = com.tiecoms.app.core.CalendarGrid.View.of(prefs.getString("calendarView", null)).id

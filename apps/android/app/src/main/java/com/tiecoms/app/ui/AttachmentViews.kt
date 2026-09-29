@@ -266,7 +266,9 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
                  /** Sidechat que salió de un asunto: «Tarea del asunto». */
                  onTask: (() -> Unit)? = null,
                  /** 1.6.6: «📹 Reunión ahora» y «📅 Agendar reunión con enlace» (Meet, Teams o Zoom). */
-                 onMeetNow: (() -> Unit)? = null, onMeetSchedule: (() -> Unit)? = null) {
+                 onMeetNow: (() -> Unit)? = null, onMeetSchedule: (() -> Unit)? = null,
+                 /** Correo en el chat (docs/CORREO.md): «Correo» y «Mensaje de WhatsApp». */
+                 onMail: (() -> Unit)? = null, onWhatsApp: (() -> Unit)? = null) {
     val ctx = LocalContext.current
     // Saveable: si el sistema recrea la actividad mientras la cámara está abierta, la foto no se pierde.
     var cameraUri by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<android.net.Uri?>(null) }
@@ -298,6 +300,9 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
     ) + (if (onMeetNow != null || onMeetSchedule != null) listOf(null) else emptyList()) + listOfNotNull(
         onMeetNow?.let { SheetItem(ctx.getString(R.string.meet_now), "", tag = "plusMeetNow", onClick = it) },
         onMeetSchedule?.let { SheetItem(ctx.getString(R.string.meet_schedule), "", tag = "plusMeetSchedule", onClick = it) },
+    ) + (if (onMail != null || onWhatsApp != null) listOf(null) else emptyList()) + listOfNotNull(
+        onMail?.let { SheetItem(ctx.getString(R.string.web_mail_fromChat), "✉", tag = "plusMail", onClick = it) },
+        onWhatsApp?.let { SheetItem(ctx.getString(R.string.web_wa_fromChat), "✆", tag = "plusWhatsApp", onClick = it) },
     ) + (if (onEvent != null || onIssue != null || onTask != null) listOf(null) else emptyList()) + listOfNotNull(
         onTask?.let { SheetItem(ctx.getString(R.string.task_add_here), "☑", tag = "plusTask", onClick = it) },
         onEvent?.let { SheetItem(ctx.getString(R.string.bar_new_event), "📅", tag = "plusEvent", onClick = it) },

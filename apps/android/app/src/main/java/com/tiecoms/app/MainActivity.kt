@@ -15,8 +15,10 @@ import com.tiecoms.app.ui.theme.TieComsTheme
 
 class MainActivity : ComponentActivity() {
     private var pausedForMeeting = false
+    private var pausedForMail = false
     override fun onPause() {
         if (container.meetingConnecting != null) pausedForMeeting = true
+        if (container.mailConnecting != null) pausedForMail = true
         super.onPause()
     }
     override fun onResume() {
@@ -24,6 +26,9 @@ class MainActivity : ComponentActivity() {
         // A callback is handled by onNewIntent/onCreate before this. A plain Back from Custom Tabs cancels.
         if (pausedForMeeting && container.meetingConnecting != null) container.cancelMeetingConnect()
         pausedForMeeting = false
+        // Igual con el correo: volver con Atrás sin terminar descarta la prueba.
+        if (pausedForMail && container.mailConnecting != null) { container.client.value.cancelMailConnect(); container.mailConnecting = null }
+        pausedForMail = false
     }
     override fun attachBaseContext(newBase: android.content.Context) { super.attachBaseContext(com.tiecoms.app.platform.AppLocale.wrap(newBase)) }
 
@@ -86,6 +91,11 @@ class MainActivity : ComponentActivity() {
             com.tiecoms.app.core.Meetings.parseReturn(data)?.let {
                 intent.data = null // Do not retain the short-lived receipt in the activity Intent.
                 container.handleMeetingReturn(it); return
+            }
+            // chaggu://mail/connected: vuelta de «Conectar» Gmail u Outlook (docs/CORREO.md).
+            com.tiecoms.app.core.Mail.parseReturn(data)?.let {
+                intent.data = null
+                container.handleMailReturn(it); return
             }
             DeepLinks.parse(data)?.let { container.pendingLink.value = it }
         }

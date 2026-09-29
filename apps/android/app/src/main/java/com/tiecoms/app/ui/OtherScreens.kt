@@ -405,6 +405,11 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
                     tag = "rowCompany") { onNavigate("domains/${org.id}") }
                 HorizontalDivider()
             }
+            // Correo en el chat (docs/CORREO.md): solo con el correo prendido en el servidor.
+            if (data?.mailEnabled == true) {
+                NavRow("✉ " + stringResource(R.string.web_mail_title) + " · " + stringResource(R.string.web_mail_settingsRow), stringResource(R.string.web_mail_settingsHint), tag = "rowMail") { onNavigate("mailbox?conv=") }
+                HorizontalDivider()
+            }
             NavRow("🟢 " + stringResource(R.string.nav_whatsapp), stringResource(R.string.settings_whatsapp_hint), tag = "rowWhatsApp") { onNavigate("whatsapp") }
             HorizontalDivider()
             NavRow("⏰ " + stringResource(R.string.rem_title), null, tag = "rowReminders") { onNavigate("reminders") }

@@ -116,6 +116,11 @@ class AppContainer(private val app: Application) {
 
     /** Conversación visible en pantalla (para decidir entre sonido de recepción o de aviso). */
     @Volatile var openConversationId: String? = null
+    /**
+     * Saltar a un mensaje del chat que ya está abierto (enlace, notificación): lo hace ese mismo chat, sin abrirlo de nuevo,
+     * así el filtro de temas «Todo» se conserva (docs/TEMAS.md).
+     */
+    val chatJump = kotlinx.coroutines.flow.MutableStateFlow<Pair<String, Long>?>(null)
 
     val foreground: Boolean get() = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 
@@ -388,6 +393,51 @@ class AppContainer(private val app: Application) {
             is com.tiecoms.app.core.Meetings.Return.Failed -> {
                 c.cancelMeetingConnect()
                 toast(if (r.cancelled) app.getString(R.string.meet_connect_cancelled) else app.getString(R.string.meet_connect_failed, r.error))
+            }
+        }
+    }
+
+    // ---------- Correo: conectar Gmail u Outlook (docs/CORREO.md) ----------
+    /** Proveedor de correo cuya conexión está abierta en el navegador. */
+    @Volatile var mailConnecting: String? = null
+
+    /** «Conectar» Gmail u Outlook en Custom Tabs; vuelve por chaggu://mail/connected ([handleMailReturn]). */
+    fun startMailConnect(activity: Context, provider: String) {
+        val c = client.value
+        val generation = c.sessionGeneration
+        scope.launch {
+            try {
+                val url = c.startMailConnect(provider)
+                if (client.value !== c || c.sessionGeneration != generation) return@launch
+                mailConnecting = provider
+                val tabs = CustomTabsIntent.Builder().setShowTitle(true)
+                    .setDefaultColorSchemeParams(CustomTabColorSchemeParams.Builder().setToolbarColor(0xFFFDFAF7.toInt()).build()).build()
+                try { tabs.launchUrl(activity, Uri.parse(url)) } catch (e: ActivityNotFoundException) { c.cancelMailConnect(); mailConnecting = null; toast(app.getString(R.string.sso_no_browser)) }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException && client.value === c && c.sessionGeneration == generation) toast(errorText(app, e))
+            }
+        }
+    }
+
+    fun handleMailReturn(r: com.tiecoms.app.core.Meetings.Return) {
+        val c = client.value
+        val generation = c.sessionGeneration
+        val provider = r.provider ?: mailConnecting
+        mailConnecting = null
+        val label = provider?.let { com.tiecoms.app.core.Mail.label(it) } ?: ""
+        when (r) {
+            is com.tiecoms.app.core.Meetings.Return.Pending -> scope.launch {
+                try {
+                    c.confirmMailConnect(r.provider, r.receipt)
+                    c.loadMailConnections()
+                    if (client.value === c && c.sessionGeneration == generation) toast(app.getString(R.string.web_mail_connectedToast, label))
+                } catch (e: Exception) {
+                    if (e !is kotlinx.coroutines.CancellationException && client.value === c && c.sessionGeneration == generation) toast(errorText(app, e))
+                }
+            }
+            is com.tiecoms.app.core.Meetings.Return.Failed -> {
+                c.cancelMailConnect()
+                toast(if (r.cancelled) app.getString(R.string.web_mail_cancelledToast) else app.getString(R.string.web_mail_failedToast, r.error))
             }
         }
     }

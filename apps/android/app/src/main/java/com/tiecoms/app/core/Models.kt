@@ -346,6 +346,8 @@ data class BootstrapDTO(
     val myActiveCall: CallDTO? = null,
 ) {
     val callsEnabled: Boolean get() = features.calls
+    /** Correo en el chat prendido (`MAIL_ENABLED` en el servidor). */
+    val mailEnabled: Boolean get() = features.mail
 }
 
 @Serializable

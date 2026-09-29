@@ -281,6 +281,7 @@ fun ConversationScreen(
     /** «＋ Nuevo tema» desde el menú de un mensaje: al crearlo, el mensaje queda con ese tema. */
     var topicNewFor by remember { mutableStateOf<MessageDTO?>(null) }
     val snackbar = LocalSnackbar.current
+    val mailNav = LocalMailNav.current
 
     val listState = rememberLazyListState()
     val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex <= 1 } }
@@ -441,6 +442,15 @@ fun ConversationScreen(
             if (e is kotlinx.coroutines.CancellationException) throw e
             readLoadFailed = true
         }
+    }
+
+    // Salto pedido para este chat ya abierto (enlace o notificación): sin reabrirlo, así «Todo» no se pierde.
+    val chatJump by container.chatJump.collectAsStateWithLifecycle()
+    LaunchedEffect(chatJump, conv?.loaded == true) {
+        val (cid, seq) = chatJump ?: return@LaunchedEffect
+        if (cid != id || embedded || conv?.loaded != true) return@LaunchedEffect
+        container.chatJump.value = null
+        jumpTo(seq)
     }
 
     // Tras agotar los reintentos, el socket de vuelta en línea reintenta la carga (el borrador sigue en el compositor).
@@ -881,6 +891,8 @@ fun ConversationScreen(
                 placeholderOverride = if (meta.isSide) sidePlaceholder else activeTopic?.let { stringResource(R.string.topic_placeholder, it.name) },
                 onNewEvent = { meeting = true to null }, onNewIssue = if (myWsRole != "guest") ({ newIssue = true to null }) else null,
                 onMeeting = if (canWork) ({ now -> meetingLink = now }) else null,
+                onMail = if (data.mailEnabled && canWork) ({ mailNav.openList(id) }) else null,
+                onWhatsApp = if (data.mailEnabled && canWork) mailNav.openWhatsApp else null,
                 autoFocus = embedded,
                 canSchedule = privateHere == null, onScheduled = { replyTo = null },
             ) } else ReadOnlyNotice()
@@ -1037,6 +1049,8 @@ private fun Composer(
     onNewEvent: (() -> Unit)? = null, onNewIssue: (() -> Unit)? = null,
     /** «📹 Reunión ahora» (true) y «📅 Agendar reunión con enlace» (false). */
     onMeeting: ((Boolean) -> Unit)? = null,
+    /** Correo en el chat (docs/CORREO.md): «Correo» abre la lista con este chat como destino; «Mensaje de WhatsApp», la pantalla de WhatsApp. */
+    onMail: (() -> Unit)? = null, onWhatsApp: (() -> Unit)? = null,
     autoFocus: Boolean = false,
     /** Mensajes programados (1.6.4 / 23): 🕒 junto a enviar y pulsación larga en ➤. false en respuestas privadas. */
     canSchedule: Boolean = false, onScheduled: () -> Unit = {},
@@ -1141,7 +1155,8 @@ private fun Composer(
     val sideIssue = client.meta(id)?.sideIssueId
     AttachPicker(picker, onDismiss = { picker = false }, onPicked = { add(it) }, onEvent = onNewEvent, onIssue = onNewIssue,
         onTask = sideIssue?.let { sid -> { picker = false; taskDialogs.openTasks(sid, id) } },
-        onMeetNow = onMeeting?.let { f -> { picker = false; f(true) } }, onMeetSchedule = onMeeting?.let { f -> { picker = false; f(false) } })
+        onMeetNow = onMeeting?.let { f -> { picker = false; f(true) } }, onMeetSchedule = onMeeting?.let { f -> { picker = false; f(false) } },
+        onMail = onMail?.let { f -> { picker = false; f() } }, onWhatsApp = onWhatsApp?.let { f -> { picker = false; f() } })
     // Un hilo o sidechat abierto al lado recibe el cursor.
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(id, autoFocus) { if (autoFocus) { delay(300); runCatching { focus.requestFocus() } } }
@@ -1342,9 +1357,14 @@ internal fun SystemRow(
     val ctx = LocalContext.current
     val chat = LocalChatColors.current
     // Correo y WhatsApp traídos al chat (docs/CORREO.md): nunca como JSON crudo.
-    com.tiecoms.app.core.MailSystem.parse(m)?.let { b -> MailSystemText(m, b, data); return }
+    com.tiecoms.app.core.MailSystem.parse(m)?.let { b -> MailSystemRow(m, b, data, canPost, onOpenIssue); return }
     // Tanda 1.7: es hoy, tarea hecha/vencida y comentarios agrupados se ven como la tarjeta del evento o de la tarea.
     com.tiecoms.app.core.System17.parse(m)?.let { b ->
+        // Comentarios agrupados: una línea corta que abre la tarea o el evento, sin repetir la tarjeta (como la web).
+        if (b.key == "issue.comments" && b.issueId != null) { CommentsNoticeLine(b.count, b.title, b.lastByName, b.lastExcerpt, icon = { Text("☑", style = MaterialTheme.typography.bodySmall) },
+            tag = "issueCommentsLine") { onOpenIssue(b.issueId) }; return }
+        if (b.key == "event.comments" && b.eventId != null) { CommentsNoticeLine(b.count, b.title, b.lastByName, b.lastExcerpt, icon = { Text("📅", style = MaterialTheme.typography.bodySmall) },
+            tag = "eventCommentsLine") { onOpenEvent(b.eventId) }; return }
         val fb = systemText(ctx, m.body, Names.person(data, m.authorId)?.name)
         if (b.eventId != null) { EventChatCard(b.eventId, m.authorId, data, onOpenEvent, sys = b, canPost = canPost, fallback = fb); return }
         if (b.issueId != null) { IssueChatCard(b.issueId, m.authorId, data, canPost, onOpenIssue, sys = b, animate = animate, fallback = fb); return }

@@ -5,6 +5,7 @@ import android.util.Base64
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -322,6 +323,8 @@ private fun ChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPatch:
     val data = client.state.collectAsStateWithLifecycle().value.data ?: return
     var messages by remember { mutableStateOf<List<WaMessageDTO>?>(null) }
     LaunchedEffect(c.accountId, c.jid, revision) { messages = runCatching { client.waMessages(c) }.getOrDefault(emptyList()) }
+    var waMenu by remember { mutableStateOf<WaMessageDTO?>(null) }
+    var waShare by remember { mutableStateOf<WaMessageDTO?>(null) }
     val targets = data.conversations.filter { it.kind != "direct" && it.canPost }
     val linked = c.linkedConversationId?.let { id -> data.conversations.firstOrNull { it.id == id } }
     FormSheet(c.name, onClose, tag = "waChatSheet") {
@@ -335,7 +338,9 @@ private fun ChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPatch:
             messages!!.isEmpty() -> Text(stringResource(R.string.wa_no_messages), style = MaterialTheme.typography.bodySmall)
             else -> messages!!.takeLast(40).forEach { m ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.fromMe) Arrangement.End else Arrangement.Start) {
-                    Surface(shape = RoundedCornerShape(12.dp), color = if (m.fromMe) Color(0xFFDCF8C6) else MaterialTheme.colorScheme.surfaceContainerHigh) {
+                    // Correo en el chat (docs/CORREO.md): pulsación larga › «Comentar en chaggu…» (solo con el correo prendido).
+                    Surface(shape = RoundedCornerShape(12.dp), color = if (m.fromMe) Color(0xFFDCF8C6) else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = if (data.mailEnabled) Modifier.combinedClickable(onClick = {}, onLongClick = { waMenu = m }).testTag("waMsg-${m.id}") else Modifier) {
                         Column(Modifier.padding(8.dp)) {
                             if (!m.fromMe && c.isGroup && m.author != null) Text(m.author, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = if (m.fromMe) Color(0xFF1F1F1F) else MaterialTheme.colorScheme.onSurface)
                             Text(m.body, color = if (m.fromMe) Color(0xFF1F1F1F) else MaterialTheme.colorScheme.onSurface)
@@ -355,5 +360,7 @@ private fun ChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPatch:
         if (linked != null) TextButton(onClick = { onClose(); onOpenConversation(linked.id) }) { Text(stringResource(R.string.wa_linked_hint, titleOf(ctx, linked, data))) }
         else Text(stringResource(R.string.wa_link_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+    waMenu?.let { m -> ActionSheet(null, listOf(SheetItem(ctx.getString(R.string.web_wa_bring), "⤴", tag = "waCommentIn") { waMenu = null; waShare = m }), onDismiss = { waMenu = null }) }
+    waShare?.let { m -> WaShareSheet(c, m, onClose = { waShare = null }, onDone = { cid -> waShare = null; onClose(); onOpenConversation(cid) }) }
 }
 

@@ -13,6 +13,8 @@ struct ApiRequestError: Error, Equatable, LocalizedError {
     /// Errores que no se arreglan reintentando (permiso, validación, conflicto).
     var permanent: Bool { status >= 400 && status < 500 && status != 408 && status != 429 && status != 401 }
     var isNetwork: Bool { status == 0 }
+    /// Pasajero: red o tiempo agotado (status 0), 408 o 5xx (p. ej. el 502 del proxy mientras se reemplaza el API).
+    var isTransient: Bool { status == 0 || status == 408 || (500..<600).contains(status) }
     var errorDescription: String? { message }
 
     static func network(_ e: Error) -> ApiRequestError {
@@ -196,6 +198,11 @@ final class APIClient {
         if let body = try? JSONDecoder().decode(ApiErrorBody.self, from: data) {
             return ApiRequestError(status: status, code: body.code.isEmpty ? "http_\(status)" : body.code, message: body.message,
                                    paths: body.details.compactMap(\.path), userIds: body.userIds, meetingId: body.meetingId)
+        }
+        // 502/503/504 sin JSON: lo responde el proxy mientras el API se reinicia (despliegue). En vez del «bad gateway»
+        // del sistema, un texto propio en el idioma de la app.
+        if [502, 503, 504].contains(status) {
+            return ApiRequestError(status: status, code: "server_updating", message: L("err.server_updating"))
         }
         return ApiRequestError(status: status, code: "http_\(status)", message: HTTPURLResponse.localizedString(forStatusCode: status))
     }

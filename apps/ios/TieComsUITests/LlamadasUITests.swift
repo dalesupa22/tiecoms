@@ -117,8 +117,9 @@ final class LlamadasUITests: XCTestCase {
         XCTAssertTrue(app.buttons["call.consent.start"].waitForExistence(timeout: 5))
         shot("09-consentimiento")
         app.buttons["call.consent.start"].tap()
-        XCTAssertTrue(app.staticTexts["Se está transcribiendo: todos en la llamada lo ven"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.otherElements["call.captions"].waitForExistence(timeout: 5) || app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Frase de prueba")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Se está transcribiendo: todos en la llamada lo ven")).firstMatch.waitForExistence(timeout: 10))
+        // Pedazo falso («texto:…») → call.processing y call.transcript con la frase.
+        XCTAssertTrue(app.descendants(matching: .any).containing(NSPredicate(format: "label CONTAINS %@", "Frase de prueba")).firstMatch.waitForExistence(timeout: 15))
         shot("10-transcribiendo")
         app.buttons["call.minimize"].tap()
         XCTAssertTrue(app.buttons["call.pill"].waitForExistence(timeout: 5))

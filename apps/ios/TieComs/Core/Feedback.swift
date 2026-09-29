@@ -10,9 +10,11 @@ protocol FeedbackSink: AnyObject {
     func playReceive()
     /// Mensaje de otra persona en una conversación que no está abierta (app en primer plano).
     func notifyIncoming(conversationId: String, title: String, author: String, body: String)
-    /// Con el sonido del chat (docs/SONIDOS.md). Por defecto, las de arriba.
+    /// Con el sonido del chat (docs/SONIDOS.md). Por defecto, el de siempre.
     func playReceive(sound: String, mention: Bool)
-    func notifyIncoming(conversationId: String, title: String, author: String, body: String, sound: String?)
+    /// Encolar no significa admitir: el id y dueño viajan hasta willPresent.
+    func notifyMessage(_ message: ForegroundMessage, title: String, author: String, body: String)
+    func cancelPendingMessages()
     /// Aviso de reunión 10 min antes (evento de cuenta `event.soon`).
     func notifyEventSoon(conversationId: String, eventId: String, title: String, subtitle: String?, body: String)
 }
@@ -20,9 +22,11 @@ protocol FeedbackSink: AnyObject {
 extension FeedbackSink {
     /// Sonido del chat (docs/SONIDOS.md): por defecto, el de siempre.
     func playReceive(sound: String, mention: Bool) { playReceive() }
-    func notifyIncoming(conversationId: String, title: String, author: String, body: String, sound: String?) {
-        notifyIncoming(conversationId: conversationId, title: title, author: author, body: body)
+    func cancelPendingMessages() {}
+    func notifyMessage(_ message: ForegroundMessage, title: String, author: String, body: String) {
+        notifyIncoming(conversationId: message.conversationId, title: title, author: author, body: body)
     }
+
     func notifyEventSoon(conversationId: String, eventId: String, title: String, subtitle: String?, body: String) {
         notifyIncoming(conversationId: conversationId, title: title, author: subtitle ?? "", body: body)
     }
@@ -66,13 +70,41 @@ final class SoundPlayer {
     }
 }
 
+/// Adaptador injectable: las pruebas controlan permiso, rechazo y orden del callback de presentación.
+@MainActor
+protocol LocalNotificationCenter: AnyObject {
+    func isAuthorized() async -> Bool
+    func add(_ request: UNNotificationRequest, completion: @escaping @MainActor (Bool) -> Void)
+    func removePending(_ identifiers: [String])
+}
+
+@MainActor
+private final class SystemLocalNotificationCenter: LocalNotificationCenter {
+    func isAuthorized() async -> Bool {
+        let s = await UNUserNotificationCenter.current().notificationSettings()
+        return s.authorizationStatus == .authorized || s.authorizationStatus == .provisional || s.authorizationStatus == .ephemeral
+    }
+    func add(_ request: UNNotificationRequest, completion: @escaping @MainActor (Bool) -> Void) {
+        // Ni el éxito de add ni su fallo consumen el aviso: sólo willPresent lo admite.
+        UNUserNotificationCenter.current().add(request) { error in
+            let accepted = error == nil
+            Task { @MainActor in completion(accepted) }
+        }
+    }
+    func removePending(_ identifiers: [String]) {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: identifiers)
+    }
+}
+
 /// Sonidos y presentación de notificaciones locales y remotas.
 @MainActor
 final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegate {
     static let shared = AppFeedback()
     let sounds = SoundPlayer()
-    /// Conversación visible ahora mismo (para decidir si se presenta el banner).
+    /// Conversación visible ahora mismo (en pantalla, app activa y cargada) para decidir si se presenta el banner.
     var openConversationId: (() -> String?)?
+    /// Push remoto de un mensaje en primer plano: el store decide con el registro de ids ya anunciados.
+    var presentsMessage: ((PushPayload, String?, Bool) -> Bool)?
     /// Toque en una notificación.
     var onOpenConversation: ((String) -> Void)?
     /// Toque en un push de sidechat: (origen, sidechat).
@@ -87,11 +119,24 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     var onAnswerCall: ((String) -> Void)?
     /// Acción «Marcar como leído».
     var onMarkRead: ((String) async -> Void)?
-    /// El socket está en línea: los push en primer plano sobran (el aviso local ya salió).
+    /// El socket está en línea: los push en primer plano que no son de mensajes (recordatorio, reacción, tarea,
+    /// aviso de reunión) sobran porque el socket ya los avisó. Los de mensajes usan `presentsMessage`.
     var socketOnline: (() -> Bool)?
     /// «No molestar» activo: en primer plano no se presenta ningún aviso (ni local ni push).
     var dndActive: (() -> Bool)?
     private(set) var authorized = false
+    private let localCenter: LocalNotificationCenter
+    var foregroundSession: (() -> String?)?
+    private var pendingMessages: Set<String> = []
+    private var queueGeneration = UUID()
+    private var fallbackSounds = AnnouncedLedger(capacity: 300)
+    private let playNotificationSound: (() -> Void)?
+
+    init(localCenter: LocalNotificationCenter? = nil, playNotificationSound: (() -> Void)? = nil) {
+        self.localCenter = localCenter ?? SystemLocalNotificationCenter()
+        self.playNotificationSound = playNotificationSound
+        super.init()
+    }
 
     func install() {
         UNUserNotificationCenter.current().delegate = self
@@ -100,8 +145,7 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     }
 
     func refreshAuthorization() async {
-        let s = await UNUserNotificationCenter.current().notificationSettings()
-        authorized = s.authorizationStatus == .authorized || s.authorizationStatus == .provisional || s.authorizationStatus == .ephemeral
+        authorized = await localCenter.isAuthorized()
     }
 
     /// Se pide permiso tras entrar por primera vez (no en la pantalla de login).
@@ -144,6 +188,41 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
         UNUserNotificationCenter.current().add(req)
     }
 
+    func notifyMessage(_ message: ForegroundMessage, title: String, author: String, body: String) {
+        guard foregroundSession?() == message.owner else { return }
+        guard Prefs.notificationsEnabled, authorized else {
+            let key = "\(message.owner)|\(message.messageId)"
+            if Prefs.soundsEnabled, message.soundFile != nil, fallbackSounds.record(key, .sound) {
+                if let playNotificationSound { playNotificationSound() } else { ChoiceSoundPlayer.shared.play(message.soundFile) }
+            }
+            return
+        }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.subtitle = author
+        content.body = String(body.prefix(240))
+        content.threadIdentifier = message.conversationId
+        content.userInfo = message.userInfo
+        content.categoryIdentifier = PushPayload.messageCategory
+        if Prefs.soundsEnabled, let file = message.soundFile { content.sound = UNNotificationSound(named: UNNotificationSoundName("\(file).caf")) }
+        let id = "msg-\(message.owner)-\(message.messageId)", generation = queueGeneration
+        pendingMessages.insert(id)
+        localCenter.add(UNNotificationRequest(identifier: id, content: content, trigger: nil)) { [weak self] accepted in
+            guard let self else { return }
+            if !accepted { self.pendingMessages.remove(id); return }
+            if generation != self.queueGeneration || self.foregroundSession?() != message.owner {
+                self.localCenter.removePending([id])
+                self.pendingMessages.remove(id)
+            }
+        }
+    }
+
+    func cancelPendingMessages() {
+        queueGeneration = UUID()
+        localCenter.removePending(Array(pendingMessages))
+        pendingMessages.removeAll()
+    }
+
     func notifyEventSoon(conversationId: String, eventId: String, title: String, subtitle: String?, body: String) {
         guard Prefs.notificationsEnabled, authorized else {
             if UIApplication.shared.applicationState == .active { sounds.play(.notify) }
@@ -173,24 +252,39 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     // MARK: UNUserNotificationCenterDelegate
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        let conv = notification.request.content.userInfo["conversationId"] as? String
-        let isRemote = notification.request.trigger is UNPushNotificationTrigger
-        let (enabled, open, online, dnd) = await MainActor.run {
-            (Prefs.notificationsEnabled, AppFeedback.shared.openConversationId?(), AppFeedback.shared.socketOnline?() ?? false,
-             AppFeedback.shared.dndActive?() ?? false)
-        }
-        guard enabled, NotifyRule.presentsInForeground(dnd: dnd) else { return [] }
         let info = notification.request.content.userInfo
-        let isEventSoon = (info["type"] as? String) == "event" && info["minutes"] != nil
-        // El aviso de reunión se muestra siempre (aunque sea el chat abierto), salvo el push duplicado del aviso local.
-        if isEventSoon { return isRemote && online ? [] : [.banner, .list, .sound] }
+        let remote = notification.request.trigger is UNPushNotificationTrigger
+        if !remote { _ = await MainActor.run { pendingMessages.remove(notification.request.identifier) } }
+        return await presentationOptions(userInfo: info, isRemote: remote)
+    }
+
+    /// Único punto de admisión para mensajes locales y remotos. Se ejecuta en MainActor sin awaits entre
+    /// consultar y registrar la decisión, aunque add o el socket terminen en el orden contrario.
+    func presentationOptions(userInfo: [AnyHashable: Any], isRemote: Bool) -> UNNotificationPresentationOptions {
+        guard Prefs.notificationsEnabled else { return [] }
+        let open = openConversationId?()
+        let online = socketOnline?() ?? false
+        let options: UNNotificationPresentationOptions = Prefs.soundsEnabled ? [.banner, .list, .sound] : [.banner, .list]
+        if let payload = PushPayload(userInfo: userInfo), payload.messageId != nil, ForegroundPush.isMessage(payload.kind) {
+            // Los avisos locales nuevos siempre tienen dueño. Un callback local sin dueño no puede consumir un id.
+            let owner = isRemote ? nil : userInfo[ForegroundMessage.ownerKey] as? String
+            guard isRemote || (owner != nil && foregroundSession?() == owner) else { return [] }
+            let currentOwner = foregroundSession?()
+            let played = currentOwner.map { fallbackSounds.contains("\($0)|\(payload.messageId ?? "")") } ?? false
+            let present = presentsMessage?(payload, owner, played) ?? false
+            guard present else { return [] }
+            var messageOptions = options
+            if played { messageOptions.remove(.sound) }
+            return messageOptions
+        }
+        guard NotifyRule.presentsInForeground(dnd: dndActive?() ?? false) else { return [] }
+        let isEventSoon = (userInfo["type"] as? String) == "event" && userInfo["minutes"] != nil
+        if isEventSoon { return isRemote && online ? [] : options }
         // Llamada: con la app abierta y en línea ya suena el aviso propio (call.ringing).
-        if (info["type"] as? String) == "call" { return online ? [] : [.banner, .list, .sound] }
-        // En primer plano: nada si es la conversación abierta (ya sonó tc_receive).
-        if let conv, conv == open { return [] }
-        // Con el socket en línea el aviso local ya salió: el push remoto sería un duplicado.
+        if (userInfo["type"] as? String) == "call" { return online ? [] : options }
+        if let conv = userInfo["conversationId"] as? String, conv == open { return [] }
         if isRemote && online { return [] }
-        return [.banner, .list, .sound]
+        return options
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {

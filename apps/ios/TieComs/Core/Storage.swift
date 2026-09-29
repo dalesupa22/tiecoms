@@ -66,6 +66,10 @@ final class KeychainSecretStore: SecretStore {
     func set(_ value: String?) {
         if let group { SecItemDelete(query(group: group) as CFDictionary) }
         SecItemDelete(query(group: nil) as CFDictionary)
+        #if DEBUG
+        // El borrado debe alcanzar también el fallback unsigned, incluso cuando value es nil.
+        debugFallback(nil)
+        #endif
         guard let value, let data = value.data(using: .utf8) else { return }
         func add(_ group: String?) -> OSStatus {
             var q = query(group: group)
@@ -86,7 +90,9 @@ final class KeychainSecretStore: SecretStore {
     #if DEBUG
     private var fallbackURL: URL? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("debug-session-\(account).txt")
+            .appendingPathComponent("debug-sessions", isDirectory: true)
+            .appendingPathComponent(service.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? service, isDirectory: true)
+            .appendingPathComponent((account.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? account) + ".txt")
     }
     private func debugFallback(_ value: String?) {
         guard let url = fallbackURL else { return }

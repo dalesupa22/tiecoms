@@ -47,10 +47,14 @@ await call(`/conversations/${dm.id}/read`, { token: a.accessToken, body: { seq: 
 const c1 = await call(`/conversations/${dm.id}/call`, { token: b.accessToken, body: { kind: 'audio' } });
 await call(`/calls/${c1.call.id}/join`, { token: a.accessToken, body: {} });
 await call(`/calls/${c1.call.id}/transcription`, { token: b.accessToken, body: { on: true, aiSummary: false } });
-await call(`/calls/${c1.call.id}/transcript`, { token: b.accessToken, body: { segments: [
-  { resultId: `r1-${tag}`, externalUserId: b.user.id, language: 'es-US', text: 'Revisemos el presupuesto de octubre.', startMs: 1200, endMs: 3600 },
-  { resultId: `r2-${tag}`, externalUserId: a.user.id, language: 'es-US', text: 'De acuerdo, lo mando hoy por el chat.', startMs: 4100, endMs: 6400 },
-] } });
+// Transcripción con Groq (CALLS_STT_PROVIDER=fake: el «audio» trae el texto como «texto:…»).
+const audio = async (token, text, segId, offsetMs) => {
+  const res = await fetch(`${API}/api/v1/calls/${c1.call.id}/audio`, { method: 'POST', body: `texto:${text}`,
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'x-file-type': 'audio/mp4', 'x-seg-id': segId, 'x-offset-ms': String(offsetMs), 'x-duration-ms': '12000' } });
+  if (!res.ok) throw new Error(`audio → ${res.status} ${await res.text()}`);
+};
+await audio(b.accessToken, 'Revisemos el presupuesto de octubre.', `segb${tag}`, 1200);
+await audio(a.accessToken, 'De acuerdo, lo mando hoy por el chat.', `sega${tag}`, 14000);
 await call(`/calls/${c1.call.id}/leave`, { token: a.accessToken, body: {} });
 await call(`/calls/${c1.call.id}/leave`, { token: b.accessToken, body: {} });
 // Lo no leído, todo en «Finanzas» (al abrir, el chat queda filtrado ahí).

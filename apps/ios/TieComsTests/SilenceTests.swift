@@ -160,6 +160,8 @@ final class SilenceTests: XCTestCase {
     func testDndEventSilencesEverythingAndTurnsBackOn() throws {
         let spy = FeedbackSpy()
         let s = store(try boot(), spy: spy)
+        // El chat abierto suena (en vez de avisar) solo si sus mensajes están cargados (incidencia 502, 28-sep-2026).
+        s.seedForTesting(try boot(), conversations: ["c1": ConversationState(loaded: true)])
         s.onConversationEvent(message("c1", seq: 1), live: true)
         XCTAssertEqual(spy.notifications.count, 1, "sin «No molestar» avisa")
 

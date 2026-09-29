@@ -71,13 +71,20 @@ final class MailUITests: XCTestCase {
 
     func el(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
 
+    /// Toque por coordenada: en la lista de Grupos la ventana de avisos a veces tapa los botones para XCTest.
+    func tapC(_ e: XCUIElement) { e.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
+
     func openChat(_ app: XCUIApplication, _ f: Fixture) {
         let row = app.buttons["conv.row.\(f.chatId)"]
         XCTAssertTrue(waitFor(row, 25, app), "fila del grupo")
-        let until = Date().addingTimeInterval(6)
-        while Date() < until && !row.isHittable { dismissSystemPrompts(app); usleep(300_000) }
-        if !row.isHittable { shot("correo-00-fila-tapada") }
-        row.tap()
+        // Otra ventana (avisos) a veces tapa la fila para XCTest: se toca por coordenada y se reintenta.
+        let field = app.descendants(matching: .any)["composer.field"]
+        for _ in 0..<3 where !field.exists {
+            sleep(1)
+            if row.exists { tapC(row) }
+            _ = field.waitForExistence(timeout: 6)
+        }
+        XCTAssertTrue(field.exists, "se abrió el chat")
     }
 
     /// Busca hacia arriba en el chat (la tarjeta más vieja queda arriba).
@@ -153,5 +160,94 @@ final class MailUITests: XCTestCase {
         shot("correo-05-hilo-cancelar-programado")
         cancel.tap()
         XCTAssertTrue(app.staticTexts["Por responder"].waitForExistence(timeout: 8) || el(app, "mail.status").label == "Por responder")
+    }
+    // MARK: 2. ＋ › Correo: la lista con pestañas y filtros, vista previa y «Comentar aquí»
+
+    func test2ShareFromList() throws {
+        let f = try fixture()
+        let app = login(f, as: f.a)
+        openChat(app, f)
+        let plus = app.buttons["composer.attach"]
+        XCTAssertTrue(plus.waitForExistence(timeout: 10))
+        plus.tap()
+        let mail = app.buttons["composer.plus.mail"]
+        XCTAssertTrue(mail.waitForExistence(timeout: 5), "＋ › Correo")
+        XCTAssertTrue(app.buttons["composer.plus.whatsapp"].exists, "＋ › Mensaje de WhatsApp")
+        mail.tap()
+
+        // Dos cuentas: selector Gmail/Outlook; Recibidos › Principal por defecto (sin la promoción ni el pago).
+        XCTAssertTrue(el(app, "mail.provider").waitForExistence(timeout: 15), "selector Gmail/Outlook")
+        XCTAssertTrue(app.buttons["mail.row.g1"].waitForExistence(timeout: 15), "el comité está en Principal")
+        XCTAssertFalse(app.buttons["mail.row.g3"].exists, "sin promociones")
+        XCTAssertFalse(app.buttons["mail.row.g2"].exists, "el pago va en Notificaciones")
+        XCTAssertTrue(el(app, "mail.header").label.contains("Principal"), el(app, "mail.header").label)
+        shot("correo-06-lista-principal")
+
+        // Buscar sin elegir pestaña: todas (category=any, se marca «Todo»), también lo de 2025; filtro Con adjuntos.
+        let search = app.textFields["mail.search"]
+        search.tap(); search.typeText("presentación")
+        XCTAssertTrue(app.buttons["mail.row.g5"].waitForExistence(timeout: 10), "la búsqueda llega a lo de 2025")
+        XCTAssertTrue(app.buttons["mail.cat.any"].isSelected, "al buscar, la pestaña pasa a Todo")
+        app.buttons["mail.f.attachments"].tap()
+        let until = Date().addingTimeInterval(8)
+        while Date() < until && app.buttons["mail.row.g5"].exists { usleep(300_000) }
+        XCTAssertFalse(app.buttons["mail.row.g5"].exists, "con adjuntos: solo el comité")
+        XCTAssertTrue(app.buttons["mail.row.g1"].exists)
+        XCTAssertTrue(el(app, "mail.header").label.contains("resultados"), el(app, "mail.header").label)
+        shot("correo-07-lista-busqueda-filtros")
+        app.buttons["mail.clear"].tap()
+        app.buttons["mail.cat.updates"].tap()
+        XCTAssertTrue(app.buttons["mail.row.g2"].waitForExistence(timeout: 10), "Notificaciones")
+
+        // Enviados: ↗ en las filas.
+        el(app, "mail.box").buttons["Enviados"].tap()
+        XCTAssertTrue(app.buttons["mail.row.g4"].waitForExistence(timeout: 10))
+        el(app, "mail.box").buttons["Recibidos"].tap()
+
+        // Vista previa (GET /mail/messages/…) y «Comentar aquí» en este chat.
+        let pago = app.buttons["mail.row.g2"]
+        XCTAssertTrue(pago.waitForExistence(timeout: 10))
+        pago.tap()
+        XCTAssertTrue(el(app, "mail.previewBody").waitForExistence(timeout: 10))
+        let pick = app.buttons["mail.pick"]
+        XCTAssertTrue(pick.waitForExistence(timeout: 5))
+        XCTAssertEqual(pick.label, "Comentar aquí")
+        pick.tap()
+        let comment = app.textFields["mail.shareComment"].exists ? app.textFields["mail.shareComment"] : app.textViews["mail.shareComment"]
+        XCTAssertTrue(comment.waitForExistence(timeout: 5))
+        comment.tap(); comment.typeText("Ya llegó el pago de Uniandes")
+        XCTAssertTrue(el(app, "mail.whoSees").exists, "aviso de quiénes lo verán")
+        shot("correo-08-compartir")
+        app.buttons["mail.shareSend"].tap()
+        // Vuelve al chat con la tarjeta nueva.
+        XCTAssertTrue(app.staticTexts["Ya llegó el pago de Uniandes"].waitForExistence(timeout: 15), "el comentario de quien lo trajo")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Recibiste un pago")).firstMatch.waitForExistence(timeout: 10))
+        shot("correo-09-tarjeta-nueva")
+    }
+
+    // MARK: 3. Hoy (Grupos): «Comenta tus correos con el equipo · Conectar» y Tú › Correo
+
+    func test3TodayNudgeAndSettings() throws {
+        let f = try fixture()
+        let app = login(f, as: f.b)
+        let nudge = el(app, "mail.nudge")
+        XCTAssertTrue(waitFor(nudge, 20, app), "sin correo conectado: la invitación")
+        shot("correo-10-hoy-invitacion")
+        tapC(app.buttons["mail.nudge.connect"])
+        XCTAssertTrue(app.buttons["mail.connect.google"].waitForExistence(timeout: 10), "tarjetas para conectar")
+        XCTAssertTrue(app.buttons["mail.connect.microsoft"].exists)
+        shot("correo-11-conectar")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["mail.nudge.close"].waitForExistence(timeout: 5))
+        tapC(app.buttons["mail.nudge.close"])
+        let until = Date().addingTimeInterval(5)
+        while Date() < until && nudge.exists { usleep(300_000) }
+        XCTAssertFalse(nudge.exists, "✕ la cierra y no vuelve")
+        // Tú › Correo · Gmail y Outlook.
+        let you = app.tabBars.buttons.element(boundBy: app.tabBars.buttons.count - 1)
+        tapC(you)
+        let row = app.buttons["settings.mail"]
+        for _ in 0..<4 where !row.exists { app.swipeUp() }
+        XCTAssertTrue(row.exists, "Tú › Correo")
     }
 }

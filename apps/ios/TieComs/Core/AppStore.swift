@@ -44,6 +44,8 @@ enum Route: Hashable {
     case callDetail(String)
     /// Correo compartido en un chat, en pantalla completa (docs/CORREO.md). `mode`: read | comments | reply.
     case mail(String, mode: String)
+    /// La lista de Gmail/Outlook. Con `conversationId` (desde el ＋ del chat) el destino ya viene elegido.
+    case mailBox(conversationId: String?)
 }
 
 /// Barra inferior (docs/GRUPOS.md): Grupos (`home`) · DMs · Asuntos · Calendario · Llamadas (solo con `features.calls`) · Tú (`settings`).
@@ -107,6 +109,8 @@ final class AppStore {
     var mailsMissing: Set<String> = []
     /// Sube al conectar o desconectar Gmail/Outlook: la lista y Hoy vuelven a pedir las conexiones.
     var mailRevision = 0
+    /// Últimas conexiones de correo conocidas (para la invitación de Hoy); nil = aún no se pidieron.
+    var mailConnectionsKnown: [MailConnectionDTO]?
     /// Aviso breve (toast).
     var toast: String?
     /// «Deshacer» del aviso actual (completar o descartar un asunto); se borra al cambiar el aviso.
@@ -576,7 +580,7 @@ final class AppStore {
         pending = []
         typing = [:]
         issues = [:]; pins = [:]; topics = [:]; taskCardComments = [:]; reminders = []; events = [:]; scheduled = []
-        mails = [:]; mailsMissing = []; mailWanted = []
+        mails = [:]; mailsMissing = []; mailWanted = []; mailConnectionsKnown = nil
         blockedUserIds = []
         localDndUntil = nil; dndLocalOnly = false; dndExpiryTask?.cancel(); dndExpiryTask = nil
         homePath = []; dmsPath = []; issuesPath = []; agendaPath = []; settingsPath = []; callsPath = []

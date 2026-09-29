@@ -1359,7 +1359,10 @@ struct ConversationView: View {
                 if editing == nil && !commenting {
                     AttachButton(staged: $staged, onEvent: embedded ? nil : { sheet = .newEvent(nil) },
                                  onIssue: embedded || !canOpenIssues ? nil : { sheet = .newIssue(nil) },
-                                 onMeeting: embedded ? nil : { now in sheet = .meeting(now: now) }) { store.show($0) }
+                                 onMeeting: embedded ? nil : { now in sheet = .meeting(now: now) },
+                                 // Correo en el chat (docs/CORREO.md): ＋ › Correo con este chat como destino; WhatsApp va a su pantalla.
+                                 onMail: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.mailBox(conversationId: conversationId)) },
+                                 onWhatsApp: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.whatsapp) }) { store.show($0) }
                 }
                 if editing == nil && !commenting && !embedded { ViewOnceToggle(on: $viewOnceNext) }
                 // UITextView: tokens resaltados, cursor real y retroceso que borra el token entero.

@@ -128,6 +128,7 @@
 		7E32BF546BC3912953CC54A3 /* V10IssueTasksTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0F74399F62C210F5D5E5480 /* V10IssueTasksTests.swift */; };
 		7E55D7C316E16C7E29BDD886 /* Assistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DF211F0D4E2862568A60C6A /* Assistant.swift */; };
 		7E582CB54B8079427412F167 /* UpdateViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BB86FFB2306485743B9C208 /* UpdateViews.swift */; };
+		7EE192FA2EEDC808E2E5C69B /* MailListViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5965A8040A3C3E78E4674E6 /* MailListViews.swift */; };
 		7EE20389123C10350C4E0955 /* AmazonChimeSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 1E52DDBBDC5068138A8B09A6 /* AmazonChimeSDK */; };
 		82DE85395C5D1215D2EA8616 /* SidechatUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A1E930E8CE6C195EE296120 /* SidechatUITests.swift */; };
 		8518E5818D6724FB859348D9 /* MailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C11902EC3AA1AB2318F9838 /* MailViews.swift */; };
@@ -490,6 +491,7 @@
 		E350A8EAD5807021812F01A5 /* AddInvite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddInvite.swift; sourceTree = "<group>"; };
 		E4842EF37BA97EFDD7E0A622 /* TieComs.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TieComs.entitlements; sourceTree = "<group>"; };
 		E4E9802F016F0B0A5FD993D1 /* Attachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Attachments.swift; sourceTree = "<group>"; };
+		E5965A8040A3C3E78E4674E6 /* MailListViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailListViews.swift; sourceTree = "<group>"; };
 		E62F7C36416F5CCC95C04ED6 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		E6E05B9B11BCDD8884DC3611 /* ProfileFilesViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileFilesViews.swift; sourceTree = "<group>"; };
 		E7B7D04AEB3A584685873097 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
@@ -705,6 +707,7 @@
 				D5512C5E20A20FE9F456CC2F /* HomeView.swift */,
 				2A28865A1C3A3819B28889DF /* IssueChatCard.swift */,
 				923D2E3C2F53E9B60B7EAF56 /* IssuesViews.swift */,
+				E5965A8040A3C3E78E4674E6 /* MailListViews.swift */,
 				3C11902EC3AA1AB2318F9838 /* MailViews.swift */,
 				4C77507D571D2D4FDFC4CF35 /* MeetingViews.swift */,
 				F07DB698B001880B34E1D442 /* MentionViews.swift */,
@@ -1103,6 +1106,7 @@
 				425047FC706FE4791A019506 /* Keyboard.swift in Sources */,
 				1395F25E40795DF8EAFACC33 /* L10n.swift in Sources */,
 				AADDAFCF408CEE6ABF20DEFC /* Mail.swift in Sources */,
+				7EE192FA2EEDC808E2E5C69B /* MailListViews.swift in Sources */,
 				A1BCFFFB81514877A26508B9 /* MailModels.swift in Sources */,
 				8518E5818D6724FB859348D9 /* MailViews.swift in Sources */,
 				B5F2BA16023265B88621B1CC /* MeetingViews.swift in Sources */,

@@ -291,6 +291,7 @@ extension View {
             case .scheduled: ScheduledScreen()
             case .callDetail(let id): CallDetailView(callId: id)
             case .mail(let id, let mode): MailDetailView(emailId: id, mode: mode)
+            case .mailBox(let cid): MailBoxScreen(conversationId: cid)
             }
         }
     }

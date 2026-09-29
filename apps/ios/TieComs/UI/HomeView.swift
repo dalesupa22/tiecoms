@@ -65,6 +65,13 @@ struct HomeView: View {
                     HomeTabs(d: d, selected: $tab, cases: HomeFilter.groupCases, groupsOnly: true)
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                    // Correo en el chat: «Comenta tus correos con el equipo · Conectar» (como Hoy en la web).
+                    if MailConnectNudge.visible(store) {
+                        MailConnectNudge()
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                    }
                     if store.connection != .online {
                         ConnectionBanner(connection: store.connection)
                             .listRowBackground(Color.clear)
@@ -127,6 +134,7 @@ struct HomeView: View {
                     }
                 }
                 .refreshable { await store.refreshAll() }
+                .task(id: "\(store.mailEnabled)|\(store.mailRevision)|\(store.me?.id ?? "")") { await MailConnectNudge.refresh(store) }
             } else {
                 ProgressView()
             }

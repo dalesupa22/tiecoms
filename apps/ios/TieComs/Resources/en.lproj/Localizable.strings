@@ -2178,6 +2178,7 @@
 "topic.a11yCount" = "{name}, {n} messages";
 "topic.a11yHint" = "Long-press to rename, recolor, archive or remove";
 "topic.all" = "All";
+"topic.allHint" = "Every message, with or without a topic";
 "topic.archive" = "Archive";
 "topic.archiveHint" = "Leaves the row. Its messages keep a gray tag.";
 "topic.archived" = "Archived {name}";
@@ -2201,6 +2202,8 @@
 "topic.empty" = "No messages in {name} yet. What you write now goes to this topic.";
 "topic.full" = "There are already {max} topics";
 "topic.fullHint" = "Archive the ones you no longer use: long-press its flag (or right-click).";
+"topic.general" = "General";
+"topic.generalHint" = "Only messages without a topic";
 "topic.icon" = "Icon";
 "topic.left" = "{n} of {max} left.";
 "topic.name" = "Name";

@@ -24,7 +24,7 @@ enum TopicRules {
         return n
     }
 
-    /// El filtro solo vale para un tema activo que exista (si lo archivan o quitan, el chat vuelve a «Todo»).
+    /// El filtro solo vale para un tema activo que exista (si lo archivan o quitan, el chat vuelve a «General»).
     static func effectiveFilter(_ filter: String?, in list: [TopicDTO]) -> String? {
         guard let filter, list.contains(where: { $0.id == filter && !$0.isArchived }) else { return nil }
         return filter
@@ -33,15 +33,29 @@ enum TopicRules {
     /// ¿Se ve este mensaje con el filtro? Sin filtro, todos.
     static func matches(_ m: MessageDTO, filter: String?) -> Bool { filter == nil || m.topicId == filter }
 
-    // «Todo» con temas activos (docs/TEMAS.md › «Todo», 29-sep-2026; web Conversation.tsx hideTopicsInAll/topicUnread).
+    // Tres vistas (docs/TEMAS.md, 29-sep-2026; web Topics.tsx TOPIC_ALL y Conversation.tsx generalOnly):
+    // «General» (nil, así abre el chat) solo lo sin tema; «Todo» (`all`) todo con su etiqueta; un tema, solo lo suyo.
+
+    /// Filtro «Todo»: todos los mensajes, con y sin tema.
+    static let all = "__all"
 
     /// Ids de los temas activos (los archivados cuentan como sin tema).
     static func activeIds(_ list: [TopicDTO]) -> Set<String> { Set(list.filter { !$0.isArchived }.map(\.id)) }
 
-    /// En «Todo» se esconde lo ya leído (al abrir) que tiene un tema activo, salvo los mensajes a los que se saltó.
-    static func hiddenInAll(_ m: MessageDTO, filter: String?, active: Set<String>, baseRead: Int, revealed: Set<Int>) -> Bool {
-        guard filter == nil, !active.isEmpty, let t = m.topicId, active.contains(t) else { return false }
-        return m.seq <= baseRead && !revealed.contains(m.seq)
+    /// En «General» (sin filtro y con temas activos) se esconde lo que tiene un tema activo, también las tarjetas de las
+    /// tareas de un tema (`issueTopic`), salvo el mensaje al que se saltó. «Todo» y un tema no esconden nada aquí.
+    static func hiddenInGeneral(_ m: MessageDTO, filter: String?, showAll: Bool, active: Set<String>, revealed: Set<Int>, issueTopic: String? = nil) -> Bool {
+        guard filter == nil, !showAll, !active.isEmpty, !revealed.contains(m.seq) else { return false }
+        if let t = m.topicId, active.contains(t) { return true }
+        if m.isSystem, let t = issueTopic, active.contains(t) { return true }
+        return false
+    }
+
+    /// Al saltar a un mensaje (búsqueda, mención, enlace o notificación): el filtro pasa a su tema, o a General si no
+    /// tiene (o su tema está archivado). En «Todo» no cambia: devuelve el filtro actual.
+    static func filterForJump(_ m: MessageDTO, current: String?, active: Set<String>) -> String? {
+        if current == all { return all }
+        return m.topicId.flatMap { active.contains($0) ? $0 : nil }
     }
 
     /// ¿Cuenta como no leído para las banderitas? Texto de otra persona, no eliminado, después de lo leído.
@@ -49,7 +63,7 @@ enum TopicRules {
         m.seq > read && m.deletedAt == nil && m.kind == "text" && m.authorId != me
     }
 
-    /// Sin leer por tema activo; la clave "" es lo sin tema (el número de «Todo»). Sin pendientes, no hay clave.
+    /// Sin leer por tema activo; la clave "" es lo sin tema (el número de «General»). Sin pendientes, no hay clave.
     static func unreadCounts(_ messages: [MessageDTO], read: Int, me: String, active: Set<String>) -> [String: Int] {
         var n: [String: Int] = [:]
         for m in messages where countsAsUnread(m, after: read, me: me) {
@@ -58,7 +72,7 @@ enum TopicRules {
         return n
     }
 
-    /// Al abrir con no leídos: si todos están en un solo tema activo, ese tema (el chat abre filtrado); si no, nil («Todo»).
+    /// Al abrir con no leídos: si todos están en un solo tema activo, ese tema (el chat abre filtrado); si no, nil («General»).
     static func autoTopic(_ messages: [MessageDTO], after read: Int, me: String, active: Set<String>) -> String? {
         let keys = Set(unreadCounts(messages, read: read, me: me, active: active).keys)
         guard keys.count == 1, let only = keys.first, !only.isEmpty else { return nil }

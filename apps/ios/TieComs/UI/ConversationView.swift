@@ -317,7 +317,17 @@ struct ConversationView: View {
         }
     }
 
-    /// Tema elegido si sigue activo (si lo archivan o quitan en otro dispositivo, el chat vuelve a «Todo»).
+    /// «Todo» (con temas activos): todos los mensajes con su etiqueta; lo que se escribe va sin tema.
+    private var showAll: Bool { !embedded && topicFilter == TopicRules.all && !activeTopicIds.isEmpty }
+
+    /// Saltar a un mensaje (búsqueda, mención, enlace o notificación): el filtro pasa a su tema, o a General. En Todo no cambia.
+    private func followTopic(_ m: MessageDTO?) {
+        guard !embedded, let m else { return }
+        let want = TopicRules.filterForJump(m, current: showAll ? TopicRules.all : activeTopic?.id, active: activeTopicIds)
+        if want != (showAll ? TopicRules.all : activeTopic?.id) { autoFiltered = true; topicFilter = want }
+    }
+
+    /// Tema elegido si sigue activo (si lo archivan o quitan en otro dispositivo, el chat vuelve a «General»).
     private var activeTopic: TopicDTO? {
         guard !embedded, let id = TopicRules.effectiveFilter(topicFilter, in: store.topics[conversationId] ?? []) else { return nil }
         return store.topics[conversationId]?.first { $0.id == id }
@@ -389,7 +399,7 @@ struct ConversationView: View {
                         onThreads: { sheet = .threads }, onAgenda: { sheet = .agenda })
                 // Lo que falta por leer en sus hilos y ramas (aunque este chat ya esté leído).
                 // Temas: banderitas con scroll horizontal justo debajo de la barra de accesos.
-                TopicDock(conv: c, filter: activeTopic?.id, counts: topicCounts, unread: topicUnread,
+                TopicDock(conv: c, filter: showAll ? TopicRules.all : activeTopic?.id, counts: topicCounts, unread: topicUnread,
                           onFilter: { topicFilter = $0; autoFiltered = false; Haptics.tap() }, onNew: { sheet = .newTopic(nil) },
                           onRename: { sheet = .renameTopic($0) }, onRemove: { confirmRemoveTopic = $0 },
                           onArchived: { sheet = .archivedTopics })
@@ -488,11 +498,13 @@ struct ConversationView: View {
         var prevDate: Date?
         let cal = Calendar.current
         let filter = activeTopic?.id
-        let active = activeTopicIds, read = baseRead
-        // Con una banderita elegida solo van los mensajes de ese tema y las tarjetas de sus tareas. En «Todo» con temas activos:
-        // lo sin tema, lo no leído de los temas y los mensajes a los que se saltó (docs/TEMAS.md › «Todo»).
+        let active = activeTopicIds
+        // Tres vistas (docs/TEMAS.md): un tema, solo lo suyo y las tarjetas de sus tareas; «General», solo lo sin tema
+        // (y el mensaje al que se saltó); «Todo», todo con su etiqueta.
+        let all = showAll
         for m in state.messages where !store.blockedUserIds.contains(m.authorId) && (filter == nil || TaskCard.matches(m, filter: filter, issues: store.issues))
-            && !TopicRules.hiddenInAll(m, filter: filter, active: active, baseRead: read, revealed: revealed) {
+            && !TopicRules.hiddenInGeneral(m, filter: filter, showAll: all, active: active, revealed: revealed,
+                                           issueTopic: m.isSystem && filter == nil && !all ? ChatCards.kind(m)?.issueId.flatMap { store.issues[$0]?.topicId } : nil) {
             let date = ISODate.parse(m.createdAt) ?? Date()
             let day = cal.dateComponents([.year, .month, .day], from: date)
             if day != lastDay {
@@ -650,6 +662,7 @@ struct ConversationView: View {
                 readPauseID = pause
                 defer { if readPauseID == pause { readPauseID = nil } }
                 if let id = await store.ensureMessage(conversationId, seq: seq) {
+                    followTopic(store.conversations[conversationId]?.messages.first { $0.seq == seq })
                     revealed.insert(seq)
                     do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
                     guard store.jumpTo[conversationId] == seq else { return }
@@ -800,7 +813,7 @@ struct ConversationView: View {
     /// Salta al resultado (con filtro de tema se quita para que se vea) y lo resalta.
     private func goSearch(_ i: Int) {
         guard let m = search.current else { return }
-        if topicFilter != nil, m.topicId != topicFilter { topicFilter = nil }
+        followTopic(m)
         revealed.insert(m.seq)
         store.jumpTo[conversationId] = m.seq
     }
@@ -922,7 +935,7 @@ struct ConversationView: View {
             if let next = mentionQueue.first {
                 Button {
                     mentionQueue.removeFirst()
-                    if let seq = store.conversations[conversationId]?.messages.first(where: { $0.id == next })?.seq { revealed.insert(seq) }
+                    if let m = store.conversations[conversationId]?.messages.first(where: { $0.id == next }) { followTopic(m); revealed.insert(m.seq) }
                     jump(proxy, to: next, anchor: .center)
                     highlighted = next
                     Task {

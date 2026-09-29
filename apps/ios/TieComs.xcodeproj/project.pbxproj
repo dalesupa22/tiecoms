@@ -54,6 +54,7 @@
 		325C868CDC680D4831F0323A /* ViewOnceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8730A5DEF766A88B5840D261 /* ViewOnceViews.swift */; };
 		3309B10A7D72102369213B8B /* AssistantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A49B7BC21933C038BE7A3E19 /* AssistantTests.swift */; };
 		3398EFD5E838BD6D49484EC1 /* Storage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3068A6F5B7DE8788B944476 /* Storage.swift */; };
+		34EEB687ED84A989B170F073 /* TemasGeneralUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79254570B0A6BC716D24099D /* TemasGeneralUITests.swift */; };
 		364D144461099A53D0778965 /* IntegrationV3Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F11C1668BB980DEBC703A6 /* IntegrationV3Tests.swift */; };
 		38FEE993B071D9258A6BDD5C /* PersonColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5FDE484919C99579D339A66 /* PersonColor.swift */; };
 		39170673C86561E1D51BEB5E /* AssistantVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B56935C512DB24578AC9B0 /* AssistantVoice.swift */; };
@@ -391,6 +392,7 @@
 		787E89B5DD3CCB47B23CF7B9 /* AttachmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentViews.swift; sourceTree = "<group>"; };
 		78BB31C4BDBEEC56C23E7663 /* VoiceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceViews.swift; sourceTree = "<group>"; };
 		78C29252B3353B9E5D864D69 /* PersonalIssueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalIssueTests.swift; sourceTree = "<group>"; };
+		79254570B0A6BC716D24099D /* TemasGeneralUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemasGeneralUITests.swift; sourceTree = "<group>"; };
 		79A9581A136556B589C7E824 /* SSOTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSOTests.swift; sourceTree = "<group>"; };
 		79F11C1668BB980DEBC703A6 /* IntegrationV3Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationV3Tests.swift; sourceTree = "<group>"; };
 		7ABD55CF24BEE201F8E3E781 /* Calls171Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Calls171Tests.swift; sourceTree = "<group>"; };
@@ -541,6 +543,7 @@
 				893473FDBFD159D372AAD1A7 /* SilenceUITests.swift */,
 				B52B41CC252A748322D44E63 /* Tanda17UITests.swift */,
 				01034B2C6362F6FC798890A9 /* Tanda166UITests.swift */,
+				79254570B0A6BC716D24099D /* TemasGeneralUITests.swift */,
 				431C989FD7FCE8D7FD9B5552 /* TemasUITests.swift */,
 				637AC517AB3F0783C71B2F77 /* UpdateUITests.swift */,
 			);
@@ -1205,6 +1208,7 @@
 				BCEBBE1E4545F6632C9F1E56 /* SilenceUITests.swift in Sources */,
 				6A26054A810E081F3EE3BF9A /* Tanda166UITests.swift in Sources */,
 				FE518EF7362F4F6508990C48 /* Tanda17UITests.swift in Sources */,
+				34EEB687ED84A989B170F073 /* TemasGeneralUITests.swift in Sources */,
 				FB95FE369FBEBE7B1ECC86B0 /* TemasUITests.swift in Sources */,
 				94314AB98FC3D69091F7856E /* UpdateUITests.swift in Sources */,
 			);

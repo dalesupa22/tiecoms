@@ -96,8 +96,8 @@ final class LlamadasUITests: XCTestCase {
         expectation(for: selected, evaluatedWith: fin); waitForExpectations(timeout: 5)
         XCTAssertTrue(app.buttons["call.start.audio"].exists, "📞 en el encabezado")
         shot("02-chat-auto-tema")
-        // «Todo»: lo leído de los temas no se ve; lo sin tema y los avisos de la llamada sí.
-        app.buttons["topic.all"].tap()
+        // «General»: lo de los temas no se ve; lo sin tema y los avisos de la llamada sí.
+        app.buttons["topic.general"].tap()
         XCTAssertTrue(app.staticTexts["Hola Ana, ¿cómo vas?"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Ya pagué la factura de agosto"].exists, "leído con tema: solo en su banderita")
         XCTAssertTrue(app.staticTexts["Quedó guardada la transcripción de la llamada."].exists)

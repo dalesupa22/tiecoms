@@ -75,7 +75,7 @@ final class TemasUITests: XCTestCase {
         let app = XCUIApplication()
         openChat(app, f)
         XCTAssertTrue(app.buttons["chat.bar.issues"].label.contains("Tareas"), "el chip dice Tareas")
-        XCTAssertTrue(app.buttons["topic.all"].exists)
+        XCTAssertTrue(app.buttons["topic.general"].exists)
         XCTAssertTrue(app.buttons["topic.new"].exists)
         let flag = app.buttons["topic.flag.\(f.topicName)"]
         XCTAssertTrue(flag.waitForExistence(timeout: 10), "banderita \(f.topicName)")
@@ -107,10 +107,10 @@ final class TemasUITests: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
         sleep(1)
 
-        // «Todo» quita el filtro (la fila se desplazó hacia la banderita elegida).
+        // «General» quita el filtro (la fila se desplazó hacia la banderita elegida).
         app.descendants(matching: .any)["topic.dock"].swipeRight()
-        app.buttons["topic.all"].tap()
-        XCTAssertTrue(app.buttons["topic.all"].isSelected)
+        app.buttons["topic.general"].tap()
+        XCTAssertTrue(app.buttons["topic.general"].isSelected)
     }
 
     /// Tarjeta de tarea en el chat: reemplaza «Creó la tarea…», se ve al filtrar por su tema y se comenta ahí mismo.

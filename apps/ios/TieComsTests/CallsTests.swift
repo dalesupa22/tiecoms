@@ -192,15 +192,26 @@ final class CallsTests: XCTestCase {
 
     // MARK: Temas: «Todo», contadores y auto-selección
 
-    func testAllHidesReadTopicMessagesButShowsUnreadAndRevealed() {
+    func testGeneralShowsOnlyUntopicedAllShowsEverything() {
         let active: Set<String> = ["fin"]
-        XCTAssertTrue(TopicRules.hiddenInAll(msg(3, topic: "fin"), filter: nil, active: active, baseRead: 5, revealed: []), "leído con tema: solo en su banderita")
-        XCTAssertFalse(TopicRules.hiddenInAll(msg(6, topic: "fin"), filter: nil, active: active, baseRead: 5, revealed: []), "no leído: se ve en «Todo»")
-        XCTAssertFalse(TopicRules.hiddenInAll(msg(3), filter: nil, active: active, baseRead: 5, revealed: []), "sin tema: siempre")
-        XCTAssertFalse(TopicRules.hiddenInAll(msg(3, topic: "old"), filter: nil, active: active, baseRead: 5, revealed: []), "tema archivado cuenta como sin tema")
-        XCTAssertFalse(TopicRules.hiddenInAll(msg(3, topic: "fin"), filter: nil, active: active, baseRead: 5, revealed: [3]), "mensaje al que se saltó")
-        XCTAssertFalse(TopicRules.hiddenInAll(msg(3, topic: "fin"), filter: "fin", active: active, baseRead: 5, revealed: []), "con filtro no aplica")
-        XCTAssertFalse(TopicRules.hiddenInAll(msg(3, topic: "fin"), filter: nil, active: [], baseRead: 5, revealed: []), "sin temas activos, todo")
+        // «General» (sin filtro): solo lo sin tema, leído o no.
+        XCTAssertTrue(TopicRules.hiddenInGeneral(msg(3, topic: "fin"), filter: nil, showAll: false, active: active, revealed: []), "con tema: solo en su banderita")
+        XCTAssertTrue(TopicRules.hiddenInGeneral(msg(6, topic: "fin"), filter: nil, showAll: false, active: active, revealed: []), "aunque no esté leído")
+        XCTAssertFalse(TopicRules.hiddenInGeneral(msg(3), filter: nil, showAll: false, active: active, revealed: []), "sin tema: siempre")
+        XCTAssertFalse(TopicRules.hiddenInGeneral(msg(3, topic: "old"), filter: nil, showAll: false, active: active, revealed: []), "tema archivado cuenta como sin tema")
+        XCTAssertTrue(TopicRules.hiddenInGeneral(msg(4, kind: "system"), filter: nil, showAll: false, active: active, revealed: [], issueTopic: "fin"), "tarjeta de una tarea del tema")
+        XCTAssertFalse(TopicRules.hiddenInGeneral(msg(4, kind: "system"), filter: nil, showAll: false, active: active, revealed: [], issueTopic: nil), "tarjeta de tarea sin tema")
+        XCTAssertFalse(TopicRules.hiddenInGeneral(msg(3, topic: "fin"), filter: nil, showAll: false, active: active, revealed: [3]), "mensaje al que se saltó")
+        // «Todo» y un tema: nada se esconde aquí.
+        XCTAssertFalse(TopicRules.hiddenInGeneral(msg(3, topic: "fin"), filter: nil, showAll: true, active: active, revealed: []), "Todo: todo")
+        XCTAssertFalse(TopicRules.hiddenInGeneral(msg(3, topic: "fin"), filter: "fin", showAll: false, active: active, revealed: []), "con filtro no aplica")
+        XCTAssertFalse(TopicRules.hiddenInGeneral(msg(3, topic: "fin"), filter: nil, showAll: false, active: [], revealed: []), "sin temas activos, todo")
+        // Saltar a un mensaje: su tema, o General; en Todo no cambia.
+        XCTAssertEqual(TopicRules.filterForJump(msg(3, topic: "fin"), current: nil, active: active), "fin")
+        XCTAssertNil(TopicRules.filterForJump(msg(3), current: "fin", active: active), "sin tema: a General")
+        XCTAssertNil(TopicRules.filterForJump(msg(3, topic: "old"), current: "fin", active: active), "tema archivado: a General")
+        XCTAssertEqual(TopicRules.filterForJump(msg(3, topic: "fin"), current: TopicRules.all, active: active), TopicRules.all, "en Todo no cambia")
+        XCTAssertNil(TopicRules.effectiveFilter(TopicRules.all, in: [TopicDTO(id: "fin", conversationId: "c1", name: "Finanzas")]), "Todo no es un tema: lo escrito va sin tema")
         let list = [TopicDTO(id: "fin", conversationId: "c1", name: "Finanzas"), TopicDTO(id: "old", conversationId: "c1", name: "Viejo", archivedAt: "2026-09-01")]
         XCTAssertEqual(TopicRules.activeIds(list), ["fin"])
     }

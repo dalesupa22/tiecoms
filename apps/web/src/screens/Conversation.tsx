@@ -34,6 +34,7 @@ import { IntegrationsPanel } from './Integrations.tsx';
 import { TopicDock, TopicTag, openTopicMenu, topicMenu, useTopics } from './Topics.tsx';
 import { ChatSearchBar, Notice17Row, ViewOnceBubble, parseNotice, useRefPicker } from './Chat17.tsx';
 import { backspaceRef, refsFor, viewOnceAllowed, type RefToken } from '../chat17.ts';
+import { markAgain } from '../perf.ts';
 
 type Row =
   | { kind: 'day'; key: string; label: string }
@@ -222,6 +223,10 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   useEffect(() => { try { if (text) localStorage.setItem(draftKey(id), text); else localStorage.removeItem(draftKey(id)); } catch {} }, [id, text]);
 
   useEffect(() => { if (local?.loaded && liveFrom.current == null) liveFrom.current = conv?.lastMessageSeq ?? 0; }, [local?.loaded]);
+  // Medición: desde que se monta el chat hasta que sus mensajes están a la vista (perf.ts).
+  useEffect(() => { markAgain(`chaggu:chat-open:${id}`); }, [id]);
+  useEffect(() => { if (local?.loaded) markAgain(`chaggu:chat-shown:${id}`); }, [id, local?.loaded]);
+  useEffect(() => { if (local?.cached) markAgain(`chaggu:chat-painted:${id}`); }, [id, local?.cached]);
   const pending = useMemo(() => pendingAll.filter((p) => p.conversationId === id), [pendingAll, id]);
   const byId = useMemo(() => new Map((local?.messages ?? []).map((m) => [m.id, m])), [local?.messages]);
   const issueTopicOf = (m: MessageDTO) => {

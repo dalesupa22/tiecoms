@@ -109,3 +109,20 @@ Contratos en `packages/contracts` (commits `ea9536e` «contratos 1.7» y `4a46c1
   - Retención: cada 10 min el worker borra el texto y marca los adjuntos como borrados cuando todos los destinatarios lo abrieron (hace más de 2 min) o a los 14 días.
   - `lastMessagePreview` llega como `'①'` para clientes viejos.
 - **Web:** el confeti es propio (canvas, sin librería) y la carita triste es CSS; ninguno se anima con «reducir movimiento». El resaltado de la búsqueda usa CSS Custom Highlight (sin tocar el DOM de React). Los botones de «No cumplimos» desaparecen cuando la tarea ya no está vencida.
+
+## Velocidad (fase 2, misma rama)
+
+La lentitud era de red (Colombia → us-east-1 ≈ 100 ms por viaje) y de que el cliente no guardaba nada entre visitas.
+
+- **Caché local** (`packages/client-core/src/local-cache.ts`, IndexedDB en la web): el último bootstrap y los últimos 50 mensajes de las 30 conversaciones más recientes, por cuenta (`u:<id>:cache:v1:…`, `CACHE_VERSION`). Al abrir la app se pinta de inmediato desde la caché y se revalida con el bootstrap real. Al abrir un chat guardado se pinta al instante y se pone al día con `/events?after=` (sin pedir la página de mensajes); si el servidor pide empezar de cero (`resetRequired`) se pide la página normal. Se borra al cerrar sesión o si la sesión se rechaza (junto con `cache:lastUser`); sin red se queda con la caché y completa el inicio al volver la conexión.
+- **Precarga:** tras el bootstrap, en tiempo libre, los mensajes de las conversaciones con no leídos y las fijadas (máx. 8, de 2 en 2).
+- **Arranque:** recordatorios, programados y tareas abiertas se piden después de la primera pintura. El segundo bootstrap del arranque (el «ready» del socket) ya no sale si hubo uno hace menos de 5 s. GET compartidos (misma ruta en vuelo o respondida hace < 10 s): `/issues`, `/events`, `/events/:id` (las tarjetas del mismo evento piden una vez), `/pins` y `/blocks` (1 min).
+- **API:** LRU en memoria (200 entradas / 20 MB, TTL 1 h) para `/avatars/:id` y `/previews/:id`.
+- **Medición** (local, API por un proxy con +200 ms por viaje, marcas `chaggu:*` de `apps/web/src/perf.ts`):
+
+| | Antes | Después |
+|---|---|---|
+| Primera pintura de la lista (`chaggu:ready`) | 2 520–3 390 ms | 67 ms (desde caché) |
+| Peticiones al arrancar | 2 bootstrap, 3 issues, reminders, scheduled | 1 bootstrap; el resto en tiempo libre |
+| Abrir un chat con no leídos (precargado) | 3 060–3 340 ms | 0 ms |
+| Abrir un chat solo en caché | 3 060–3 340 ms | pintado en 17 ms, al día en 2,2 s |

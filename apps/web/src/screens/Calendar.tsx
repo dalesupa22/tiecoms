@@ -172,7 +172,7 @@ export function EventDrawer({ id, onClose }: { id: string; onClose: () => void }
   const d = useClient((s) => s.data)!;
   const ev = useClient((s) => s.events[id]);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { if (!ev) client.request<CalendarEventDTO>(`/events/${id}`).then((e) => client.loadEvents(new Date(Date.parse(e.startsAt) - 1), new Date(Date.parse(e.endsAt) + 1))).catch((e) => setError(errorText(e))); }, [id]);
+  useEffect(() => { if (!ev) client.loadEvent(id).catch((e) => setError(errorText(e))); }, [id]);
   if (!ev) return <Modal title={t('nav.agenda')} onClose={onClose}><div className="muted">{error ?? t('common.loading')}</div></Modal>;
   const conv = d.conversations.find((c) => c.id === ev.conversationId);
   const mine = ev.invitees.find((i) => i.userId === d.me.id);
@@ -434,7 +434,8 @@ export function EventChatCard({ eventId, creatorId, banner, tone, footer }: {
   const [missing, setMissing] = useState(false);
   useEffect(() => {
     if (ev) return;
-    client.request<CalendarEventDTO>(`/events/${eventId}`).then((e) => client.loadEvents(new Date(Date.parse(e.startsAt) - 1), new Date(Date.parse(e.endsAt) + 1), e.conversationId)).catch(() => setMissing(true));
+    // Compartido: las tarjetas del mismo evento (creado, es hoy, comentarios) piden una sola vez.
+    client.loadEvent(eventId).catch(() => setMissing(true));
   }, [eventId, !!ev]);
   if (!ev) return missing ? null : <div className="card event-card is-loading" aria-busy>…</div>;
   const c = eventColors(d, ev);

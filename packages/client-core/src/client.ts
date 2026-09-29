@@ -11,6 +11,18 @@ import {
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
+import {
+  CACHE_VERSION, LAST_USER_KEY, PREFETCH_CONCURRENCY, bootKey, convIndexKey, convKey, conversationsToCache, prefetchCandidates, runLimited,
+  snapshotConversation, usableBoot, usableConversation, type CachedBoot, type CachedConversation,
+} from './local-cache.ts';
+
+/** Después de la primera pintura, cuando el navegador está libre (o a los 1,2 s). */
+const whenIdle = (fn: () => void) => {
+  const ric = (globalThis as any).requestIdleCallback as ((cb: () => void, o?: { timeout: number }) => void) | undefined;
+  if (ric) ric(fn, { timeout: 2000 }); else setTimeout(fn, 1200);
+};
+/** GET repetidos (misma ruta) dentro de esta ventana devuelven la misma respuesta. */
+const SHARED_TTL_MS = 10_000;
 
 export interface PendingMessage {
   clientMessageId: string;
@@ -37,6 +49,8 @@ export interface PendingMessage {
 
 export interface ConversationState {
   messages: MessageDTO[];
+  /** Pintado desde la caché local mientras se pone al día (loaded aún false). */
+  cached?: boolean;
   /** Cursor continuo: nunca avanza sobre un hueco. */
   lastEventSeq: number;
   hasMore: boolean;
@@ -144,6 +158,15 @@ export class TieComsClient {
   private bootstrapTimer: ReturnType<typeof setTimeout> | null = null;
   private catchingUp = new Set<string>();
   private opening = new Map<string, { generation: number; signal?: AbortSignal; promise: Promise<void> }>();
+  // ---------- Velocidad: caché local, precarga y GET compartidos ----------
+  private refreshNetworkError = false;
+  /** Arrancó desde la caché sin red: al volver la conexión se completa el inicio de sesión. */
+  private needsLogin = false;
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private bootDirty = false;
+  private dirtyConvs = new Set<string>();
+  private lastBootstrapAt = 0;
+  private sharedGets = new Map<string, { generation: number; at: number; promise: Promise<unknown> }>();
 
   constructor(private opts: ClientOptions) {}
 
@@ -157,12 +180,87 @@ export class TieComsClient {
   }
   private setConv(id: string, patch: Partial<ConversationState>) {
     const prev = this.state.conversations[id] ?? { messages: [], lastEventSeq: 0, hasMore: true, loaded: false, loading: false };
-    this.set({ conversations: { ...this.state.conversations, [id]: { ...prev, ...patch } } });
+    const next = { ...prev, ...patch };
+    this.set({ conversations: { ...this.state.conversations, [id]: next } });
+    if (next.loaded && (patch.messages || patch.lastEventSeq !== undefined)) { this.dirtyConvs.add(id); this.schedulePersist(); }
   }
   private patchConversationMeta(id: string, patch: Partial<ConversationDTO>) {
     const d = this.state.data;
     if (!d) return;
     this.set({ data: { ...d, conversations: d.conversations.map((c) => (c.id === id ? { ...c, ...patch } : c)) } });
+    this.bootDirty = true; this.schedulePersist();
+  }
+
+  // ---------- Caché local (stale-while-revalidate) ----------
+  private schedulePersist() {
+    if (this.persistTimer || !this.state.data) return;
+    this.persistTimer = setTimeout(() => { this.persistTimer = null; void this.persist().catch(() => {}); }, 1500);
+  }
+  /** Guarda el bootstrap y las conversaciones abiertas que cambiaron (solo las ~30 más recientes). */
+  private async persist() {
+    const generation = this.sessionGeneration;
+    const data = this.state.data;
+    const userId = data?.me.id;
+    if (!data || !userId || this.state.status !== 'ready') return;
+    const store = this.opts.storage;
+    if (this.bootDirty) {
+      this.bootDirty = false;
+      const boot: CachedBoot = { v: CACHE_VERSION, userId, savedAt: new Date().toISOString(), data };
+      await store.set(bootKey(userId), boot);
+      await store.set(LAST_USER_KEY, userId);
+    }
+    if (generation !== this.sessionGeneration) return;
+    const keep = conversationsToCache(data);
+    const keepSet = new Set(keep);
+    const dirty = [...this.dirtyConvs];
+    this.dirtyConvs.clear();
+    for (const id of dirty) {
+      const c = this.state.conversations[id];
+      if (!keepSet.has(id) || !c?.loaded) continue;
+      await store.set(convKey(userId, id), snapshotConversation(c));
+      if (generation !== this.sessionGeneration) return;
+    }
+    const prev = (await store.get<string[]>(convIndexKey(userId))) ?? [];
+    const cached = new Set([...prev.filter((id) => keepSet.has(id)), ...dirty.filter((id) => keepSet.has(id) && this.state.conversations[id]?.loaded)]);
+    for (const id of prev) if (!keepSet.has(id)) await store.del(convKey(userId, id));
+    if (generation !== this.sessionGeneration) return;
+    await store.set(convIndexKey(userId), [...cached]);
+  }
+  private async readBootCache(): Promise<CachedBoot | null> {
+    try {
+      const userId = await this.opts.storage.get<string>(LAST_USER_KEY);
+      return usableBoot(userId ? await this.opts.storage.get<CachedBoot>(bootKey(userId)) : null, userId);
+    } catch { return null; }
+  }
+  private async readConvCache(id: string): Promise<CachedConversation | null> {
+    const userId = this.state.data?.me.id;
+    if (!userId) return null;
+    try { return usableConversation(await this.opts.storage.get<CachedConversation>(convKey(userId, id)), this.state.data?.conversations.find((c) => c.id === id)); } catch { return null; }
+  }
+
+  /** GET compartido: la misma ruta en vuelo (o respondida hace menos de 10 s) no sale otra vez. */
+  private sharedGet<T>(path: string, ttl = SHARED_TTL_MS): Promise<T> {
+    const generation = this.sessionGeneration;
+    const hit = this.sharedGets.get(path);
+    if (hit && hit.generation === generation && Date.now() - hit.at < ttl) return hit.promise as Promise<T>;
+    const promise = this.request<T>(path);
+    this.sharedGets.set(path, { generation, at: Date.now(), promise });
+    promise.catch(() => { if (this.sharedGets.get(path)?.promise === promise) this.sharedGets.delete(path); });
+    return promise;
+  }
+
+  /** Precarga en segundo plano: mensajes de las conversaciones con no leídos y las fijadas (máx. 8, de 2 en 2). */
+  private prefetch() {
+    const generation = this.sessionGeneration;
+    whenIdle(() => {
+      const data = this.state.data;
+      if (!data || generation !== this.sessionGeneration) return;
+      const ids = prefetchCandidates(data, (id) => !!this.state.conversations[id]?.loaded || !!this.state.conversations[id]?.loading);
+      void runLimited(ids, PREFETCH_CONCURRENCY, async (id) => {
+        if (generation !== this.sessionGeneration) return;
+        await this.openConversation(id);
+      });
+    });
   }
 
   // ---------- HTTP ----------
@@ -220,8 +318,23 @@ export class TieComsClient {
   /** Arranque: intenta reanudar la sesión guardada. */
   async start(): Promise<void> {
     this.set({ status: 'loading' });
-    if (await this.refresh()) await this.afterLogin();
-    else this.set({ status: 'anonymous' });
+    // Pinta de inmediato con lo último que se vio en este dispositivo; el bootstrap real lo reemplaza enseguida.
+    const cached = await this.readBootCache();
+    const generation = this.sessionGeneration;
+    if (cached && generation === this.sessionGeneration) this.set({ status: 'ready', data: cached.data });
+    if (await this.refresh()) {
+      try { await this.afterLogin(); } catch (e) {
+        // Sin red a mitad del arranque: se sigue con la caché y se completa al volver la conexión.
+        if (!(cached && generation === this.sessionGeneration && e instanceof TypeError)) throw e;
+        this.needsLogin = true;
+      }
+    } else if (cached && this.refreshNetworkError && generation === this.sessionGeneration) {
+      this.needsLogin = true;
+      this.set({ connection: 'offline' });
+    } else {
+      if (cached) await this.handleSignedOut();
+      this.set({ status: 'anonymous' });
+    }
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => this.resync());
       document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.resync(); });
@@ -293,6 +406,7 @@ export class TieComsClient {
       if (this.opts.secrets && !stored) return false;
       const res = await this.raw('/auth/refresh', { method: 'POST', json: stored ? { refreshToken: stored } : {} }, false).catch(() => null);
       if (generation !== this.sessionGeneration) return false;
+      this.refreshNetworkError = !res;
       if (!res) return !!this.accessToken; // sin red: conserva la sesión local
       if (!res.ok) { this.accessToken = null; return false; }
       const auth = await res.json();
@@ -326,10 +440,15 @@ export class TieComsClient {
     this.bootstrapTimer = null; this.flushTimer = null;
     for (const timer of this.readTimers.values()) clearTimeout(timer);
     this.readTimers.clear();
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = null; this.bootDirty = false; this.dirtyConvs.clear(); this.sharedGets.clear(); this.needsLogin = false; this.lastBootstrapAt = 0;
     this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0, calls: {} };
     this.listeners.forEach((l) => l());
     await this.opts.secrets?.set(null);
-    if (userId) await this.opts.storage.clearPrefix(`u:${userId}:`);
+    if (userId) {
+      await this.opts.storage.clearPrefix(`u:${userId}:`);
+      if ((await this.opts.storage.get<string>(LAST_USER_KEY).catch(() => undefined)) === userId) await this.opts.storage.del(LAST_USER_KEY);
+    }
   }
 
   private async afterLogin() {
@@ -340,12 +459,17 @@ export class TieComsClient {
     const pending = (await this.opts.storage.get<PendingMessage[]>(`u:${me}:outbox`)) ?? [];
     this.assertSession(generation);
     this.set({ status: 'ready', pending: pending.map((p) => ({ ...p, status: p.status === 'sending' ? 'pending' : p.status })) });
+    this.needsLogin = false;
     this.connect();
     this.scheduleFlush(0);
-    void this.loadReminders().catch(() => {});
-    void this.loadScheduled().catch(() => {});
-    // Grupos muestra los asuntos abiertos bajo cada grupo.
-    void this.loadIssues({ open: true }).catch(() => {});
+    // Lo no crítico, después de la primera pintura. Grupos muestra los asuntos abiertos bajo cada grupo.
+    whenIdle(() => {
+      if (generation !== this.sessionGeneration) return;
+      void this.loadReminders().catch(() => {});
+      void this.loadScheduled().catch(() => {});
+      void this.loadIssues({ open: true }).catch(() => {});
+    });
+    this.prefetch();
   }
 
   // ---------- Snapshot ----------
@@ -359,7 +483,9 @@ export class TieComsClient {
       data.me.dndUntil = isActiveUntil(local) ? local : null;
     }
     this.assertSession(generation);
+    this.lastBootstrapAt = Date.now();
     this.set({ data, dndLocalOnly });
+    this.bootDirty = true; this.schedulePersist();
     // Conversaciones que ya no están en mi alcance: se purgan de la caché local.
     const allowed = new Set(data.conversations.map((c) => c.id));
     const kept: Record<string, ConversationState> = {};
@@ -413,8 +539,16 @@ export class TieComsClient {
   /** Tras reconectar o volver del segundo plano: snapshot + recuperación de huecos + cola. */
   async resync() {
     if (this.state.status !== 'ready') return;
+    if (this.needsLogin) {
+      // Se abrió sin red desde la caché: ahora sí se inicia la sesión.
+      if (await this.refresh()) await this.afterLogin().catch(() => {});
+      else if (!this.refreshNetworkError) await this.handleSignedOut();
+      return;
+    }
+    // Lo que se pidió hace nada (p. ej. el bootstrap de afterLogin y el «ready» del socket) no se repite.
+    this.sharedGets.clear();
     try {
-      await this.loadBootstrap();
+      if (Date.now() - this.lastBootstrapAt > 5000) await this.loadBootstrap();
       for (const c of this.state.data?.conversations ?? []) {
         const local = this.state.conversations[c.id];
         if (local?.loaded && c.lastEventSeq > local.lastEventSeq) void this.catchUp(c.id);
@@ -510,6 +644,21 @@ export class TieComsClient {
     if (e.type === 'message.updated') this.patchPreviewIfLast(e.message);
     this.setConv(e.conversationId, { messages, lastEventSeq: e.eventSeq });
     if (e.type === 'message.created') this.dropPending(e.message);
+  }
+
+  /** Pone al día una conversación pintada desde la caché. false = hay que pedir la página (cursor viejo o error). */
+  private async catchUpFromCache(conversationId: string, generation: number, signal?: AbortSignal): Promise<boolean> {
+    try {
+      for (let guard = 0; guard < 25; guard++) {
+        const local = this.state.conversations[conversationId];
+        if (!local || generation !== this.sessionGeneration) return false;
+        const page = await this.request<EventsPage>(`/conversations/${conversationId}/events?after=${local.lastEventSeq}&limit=200`, { signal });
+        if (generation !== this.sessionGeneration || page.resetRequired) return false;
+        for (const e of page.events) this.applyEvent(e);
+        if (page.events.length < 200) return true;
+      }
+      return false;
+    } catch (e: any) { if (e?.name === 'AbortError') throw e; return false; }
   }
 
   private async catchUp(conversationId: string) {
@@ -611,11 +760,25 @@ export class TieComsClient {
       try {
         this.assertSession(generation);
         signal?.throwIfAborted();
+        // Caché local: se pinta enseguida (loaded sigue en false) y se pone al día con los eventos. Solo si el
+        // servidor no pide empezar de cero, queda cargada sin pedir la página de mensajes.
+        const cached = !force && !local?.messages.length ? await this.readConvCache(id) : null;
+        this.assertSession(generation);
+        if (cached) {
+          this.setConv(id, { messages: cached.messages, hasMore: cached.hasMore, lastEventSeq: cached.lastEventSeq, loaded: false, loading: true, cached: true });
+          if (await this.catchUpFromCache(id, generation, signal)) {
+            this.setConv(id, { loaded: true, loading: false, cached: false });
+            void this.catchUp(id);
+            return;
+          }
+          this.assertSession(generation);
+          signal?.throwIfAborted();
+        }
         this.setConv(id, { loading: true });
         const page = await this.request<{ messages: MessageDTO[]; hasMore: boolean; lastEventSeq: number }>(`/conversations/${id}/messages?limit=50`, { signal });
         this.assertSession(generation);
         signal?.throwIfAborted();
-        this.setConv(id, { messages: page.messages, hasMore: page.hasMore, lastEventSeq: page.lastEventSeq, loaded: true, loading: false });
+        this.setConv(id, { messages: page.messages, hasMore: page.hasMore, lastEventSeq: page.lastEventSeq, loaded: true, loading: false, cached: false });
         void this.catchUp(id);
       } catch (e) {
         // An old/aborted request must not clear a newer load or another account's state.
@@ -801,7 +964,7 @@ export class TieComsClient {
     if (filter.conversationId) q.set('conversationId', filter.conversationId);
     if (filter.mine) q.set('mine', '1');
     if (filter.open) q.set('open', '1');
-    const r = await this.request<{ issues: IssueDTO[] }>(`/issues?${q}`);
+    const r = await this.sharedGet<{ issues: IssueDTO[] }>(`/issues?${q}`);
     this.putIssues(r.issues);
     return r.issues;
   }
@@ -969,7 +1132,7 @@ export class TieComsClient {
     return out;
   }
   async loadPins(conversationId: string) {
-    const r = await this.request<{ messages: MessageDTO[] }>(`/conversations/${conversationId}/pins`);
+    const r = await this.sharedGet<{ messages: MessageDTO[] }>(`/conversations/${conversationId}/pins`, 3000);
     this.set({ pins: { ...this.state.pins, [conversationId]: r.messages.map((m) => m.id) } });
     return r.messages;
   }
@@ -1105,6 +1268,8 @@ export class TieComsClient {
   async cancelScheduled(id: string) { this.putScheduled(await this.request<ScheduledMessageDTO>(`/scheduled/${id}`, { method: 'DELETE' })); }
   async sendScheduledNow(id: string) { this.putScheduled(await this.request<ScheduledMessageDTO>(`/scheduled/${id}/send`, { method: 'POST', json: {} })); }
 
+  /** Personas que bloqueé (compartido por un minuto). */
+  async loadBlocks() { return (await this.sharedGet<{ userIds: string[] }>('/blocks', 60_000)).userIds; }
   async loadReminders() { const r = await this.request<{ reminders: ReminderDTO[] }>('/reminders'); this.set({ reminders: r.reminders }); return r.reminders; }
   async createReminder(input: { conversationId: string; messageId?: string | null; note?: string | null; remindAt: string }) {
     const r = await this.request<ReminderDTO>('/reminders', { method: 'POST', json: input });
@@ -1124,9 +1289,15 @@ export class TieComsClient {
   private putEvents(list: CalendarEventDTO[]) { const n = { ...this.state.events }; for (const e of list) n[e.id] = e; this.set({ events: n }); }
   async loadEvents(from: Date, to: Date, conversationId?: string) {
     const q = new URLSearchParams({ from: from.toISOString(), to: to.toISOString(), ...(conversationId ? { conversationId } : {}) });
-    const r = await this.request<{ events: CalendarEventDTO[] }>(`/events?${q}`);
+    const r = await this.sharedGet<{ events: CalendarEventDTO[] }>(`/events?${q}`);
     this.putEvents(r.events);
     return r.events;
+  }
+  /** Un evento por id (compartido: varias tarjetas del mismo evento piden una sola vez). */
+  async loadEvent(id: string) {
+    const e = await this.sharedGet<CalendarEventDTO>(`/events/${id}`);
+    this.putEvents([e]);
+    return e;
   }
   async createEvent(conversationId: string, input: { title: string; description?: string | null; location?: string | null; startsAt: string; endsAt: string; timezone: string; inviteeIds?: string[]; originMessageId?: string | null }) {
     const e = await this.request<CalendarEventDTO>(`/conversations/${conversationId}/events`, { method: 'POST', json: input });

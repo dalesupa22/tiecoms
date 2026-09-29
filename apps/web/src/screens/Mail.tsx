@@ -33,7 +33,8 @@ export function ProviderIcon({ provider, size = 18 }: { provider: MailProvider; 
     </svg>
   );
 }
-const LABEL: Record<MailProvider, string> = { google: 'Gmail', microsoft: 'Outlook' };
+const LABEL: Record<MailProvider | 'whatsapp', string> = { google: 'Gmail', microsoft: 'Outlook', whatsapp: 'WhatsApp' };
+const SrcIcon = ({ provider, size = 22 }: { provider: MailProvider | 'whatsapp'; size?: number }) => (provider === 'whatsapp' ? <WaIcon size={size} /> : <ProviderIcon provider={provider} size={size} />);
 /** Recibido ↙ o enviado ↗: se distingue de un vistazo en la lista y en la tarjeta. */
 export const DirBadge = ({ out }: { out: boolean }) => <span className={`mail-dir ${out ? 'out' : 'in'}`} title={t(out ? 'mail.dir.out' : 'mail.dir.in')} aria-label={t(out ? 'mail.dir.out' : 'mail.dir.in')}>{out ? '↗' : '↙'}</span>;
 export const WaIcon = ({ size = 18 }: { size?: number }) => (
@@ -296,32 +297,67 @@ function MailPreview({ provider, item, pickLabel, onPick, onClose }: { provider:
   );
 }
 
-function MailMeta({ from, to, cc, date, provider }: { from: SharedMailDTO['from']; to: SharedMailDTO['to']; cc: SharedMailDTO['cc']; date: string | null; provider: MailProvider }) {
+function MailMeta({ from, to, cc, date, provider }: { from: SharedMailDTO['from']; to: SharedMailDTO['to']; cc: SharedMailDTO['cc']; date: string | null; provider: MailProvider | 'whatsapp' }) {
   const list = (l: SharedMailDTO['to']) => l.map((a) => (a.name ? `${a.name} <${a.email}>` : a.email)).join(', ');
   return (
     <dl className="mail-meta">
       <dt>{t('mail.meta.from')}</dt><dd>{from ? (from.name ? `${from.name} <${from.email}>` : from.email) : '—'}</dd>
       {!!to.length && <><dt>{t('mail.meta.to')}</dt><dd>{list(to)}</dd></>}
       {!!cc.length && <><dt>CC</dt><dd>{list(cc)}</dd></>}
-      {date && <><dt>{t('mail.meta.date')}</dt><dd>{new Date(date).toLocaleString(locale(), { dateStyle: 'medium', timeStyle: 'short' })} · <ProviderIcon provider={provider} size={12} /> {LABEL[provider]}</dd></>}
+      {date && <><dt>{t('mail.meta.date')}</dt><dd>{new Date(date).toLocaleString(locale(), { dateStyle: 'medium', timeStyle: 'short' })} · <SrcIcon provider={provider} size={12} /> {LABEL[provider]}</dd></>}
     </dl>
   );
 }
 
 // ---------- Llevar a un chat ----------
-function ShareStep({ provider, item, conversationId, onDone, onBack }: { provider: MailProvider; item: MailListItemDTO; conversationId?: string; onDone: (convId: string) => void; onBack: () => void }) {
+/** Elegir uno o varios chats (hasta 10) para llevar un correo o un WhatsApp. */
+function ChatPicker({ picked, setPicked }: { picked: string[]; setPicked: (v: string[]) => void }) {
   const d = useClient((s) => s.data)!;
   const [q, setQ] = useState('');
-  const [target, setTarget] = useState<string | null>(conversationId ?? null);
+  const list = useMemo(() => d.conversations.filter((c) => c.canPost && (!q || conversationTitle(d, c).toLowerCase().includes(q.toLowerCase()))).slice(0, 80), [d, q]);
+  const toggle = (id: string) => setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : picked.length >= 10 ? picked : [...picked, id]);
+  return (
+    <>
+      <input className="input" placeholder={t('mail.pickChat')} value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+      {picked.length > 0 && (
+        <div className="chips">{picked.map((id) => { const c = d.conversations.find((x) => x.id === id); return c ? <button key={id} className="chip on" onClick={() => toggle(id)}>{conversationTitle(d, c)} ✕</button> : null; })}</div>
+      )}
+      <div className="list" style={{ maxHeight: 220, overflow: 'auto' }}>
+        {list.map((c) => (
+          <label key={c.id} className={`check ${picked.includes(c.id) ? 'derive-opt is-on' : ''}`}>
+            <input type="checkbox" checked={picked.includes(c.id)} onChange={() => toggle(c.id)} />
+            <span className="grow"><b>{conversationTitle(d, c)}</b><span className="small muted" style={{ display: 'block' }}>{d.workspaces.find((w) => w.id === c.workspaceId)?.name ?? t('kind.direct')}</span></span>
+          </label>
+        ))}
+      </div>
+    </>
+  );
+}
+function WhoSees({ picked }: { picked: string[] }) {
+  const d = useClient((s) => s.data)!;
+  const convs = picked.map((id) => d.conversations.find((c) => c.id === id)).filter(Boolean) as typeof d.conversations;
+  if (!convs.length) return null;
+  const people = new Set(convs.flatMap((c) => c.memberIds));
+  return <div className="warn-box">{convs.length === 1 ? t('mail.whoSees', { n: convs[0]!.memberIds.length, name: conversationTitle(d, convs[0]!) }) : t('mail.whoSeesMany', { n: people.size, chats: convs.length })}</div>;
+}
+const shareLabel = (d: NonNullable<ReturnType<typeof client.getState>['data']>, picked: string[]) => {
+  if (picked.length === 1) { const c = d.conversations.find((x) => x.id === picked[0]); return c ? t('mail.shareIn', { name: conversationTitle(d, c) }) : t('mail.share'); }
+  return picked.length > 1 ? t('mail.shareInMany', { n: picked.length }) : t('mail.share');
+};
+
+function ShareStep({ provider, item, conversationId, onDone, onBack }: { provider: MailProvider; item: MailListItemDTO; conversationId?: string; onDone: (convId: string) => void; onBack: () => void }) {
+  const d = useClient((s) => s.data)!;
+  const [picked, setPicked] = useState<string[]>(conversationId ? [conversationId] : []);
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
-  const list = useMemo(() => d.conversations.filter((c) => c.canPost && (!q || conversationTitle(d, c).toLowerCase().includes(q.toLowerCase()))).slice(0, 80), [d, q]);
-  const conv = target ? d.conversations.find((c) => c.id === target) : null;
   const share = async () => {
-    if (!target || busy) return;
+    if (!picked.length || busy) return;
     setBusy(true);
-    try { await client.shareMail({ provider, messageId: item.id, conversationId: target, comment: comment.trim() || undefined }); toast(t('mail.shared')); onDone(target); }
-    catch (e) { toast(errorText(e)); } finally { setBusy(false); }
+    try {
+      await client.shareMail({ provider, messageId: item.id, conversationIds: picked, comment: comment.trim() || undefined });
+      toast(picked.length > 1 ? t('mail.sharedMany', { n: picked.length }) : t('mail.shared'));
+      onDone(conversationId && picked.includes(conversationId) ? conversationId : picked[0]!);
+    } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
   };
   return (
     <>
@@ -329,24 +365,12 @@ function ShareStep({ provider, item, conversationId, onDone, onBack }: { provide
         <div className="xcard-top"><span className="src-ico"><ProviderIcon provider={provider} size={20} /></span>
           <div style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}><DirBadge out={item.box === 'sent'} /> {item.subject || t('mail.noSubject')}</b><span className="small muted">{who(item.box === 'sent' ? item.to[0] : item.from)} · {fmtDate(item.date)}{item.hasAttachments ? ' · 📎' : ''}</span></div></div>
       </div>
-      {!conversationId && (
-        <>
-          <input className="input" placeholder={t('mail.pickChat')} value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
-          <div className="list" style={{ maxHeight: 220, overflow: 'auto' }}>
-            {list.map((c) => (
-              <label key={c.id} className={`check ${target === c.id ? 'derive-opt is-on' : ''}`}>
-                <input type="radio" name="mail-target" checked={target === c.id} onChange={() => setTarget(c.id)} />
-                <span className="grow"><b>{conversationTitle(d, c)}</b><span className="small muted" style={{ display: 'block' }}>{d.workspaces.find((w) => w.id === c.workspaceId)?.name ?? t('kind.direct')}</span></span>
-              </label>
-            ))}
-          </div>
-        </>
-      )}
-      <textarea className="input" rows={3} maxLength={4000} autoFocus={!!conversationId} placeholder={t('mail.commentPh')} value={comment} onChange={(e) => setComment(e.target.value)} />
-      {conv && <div className="warn-box">{t('mail.whoSees', { n: conv.memberIds.length, name: conversationTitle(d, conv) })}</div>}
+      <ChatPicker picked={picked} setPicked={setPicked} />
+      <textarea className="input" rows={3} maxLength={4000} placeholder={t('mail.commentPh')} value={comment} onChange={(e) => setComment(e.target.value)} />
+      <WhoSees picked={picked} />
       <div className="modal-actions">
         <button className="btn ghost" onClick={onBack}>{t('common.back')}</button>
-        <button className="btn primary" disabled={!target || busy} onClick={() => void share()}>{busy ? t('mail.sharing') : conv ? t('mail.shareIn', { name: conversationTitle(d, conv) }) : t('mail.share')}</button>
+        <button className="btn primary" disabled={!picked.length || busy} onClick={() => void share()}>{busy ? t('mail.sharing') : shareLabel(d, picked)}</button>
       </div>
     </>
   );
@@ -412,19 +436,76 @@ export function MailStatus({ email }: { email: SharedMailDTO }) {
   return <span className="pill-state wait">{t('mail.pending')}</span>;
 }
 
+/** Comentarios en la tarjeta, como en la tarjeta de tarea: los 2 últimos, «Ver los N comentarios» y comentar ahí mismo. */
+function CardComments({ email, canPost }: { email: SharedMailDTO; canPost: boolean }) {
+  const d = useClient((s) => s.data)!;
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const send = async () => {
+    const body = text.trim(); if (!body || busy) return;
+    setBusy(true);
+    try { await client.commentMail(email.id, body); setText(''); } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
+  };
+  const last = email.lastComments.slice(-2);
+  return (
+    <>
+      {last.length > 0 && (
+        <div className="task-card-comments">
+          {last.map((c) => <div key={c.id} className="task-card-comment"><b>{c.authorId === d.me.id ? t('common.youShort') : personById(d, c.authorId)?.name.split(' ')[0]}</b> {c.body}</div>)}
+          {email.commentCount > last.length && <button className="link-btn small" onClick={() => openMailDrawer(email.id, 'comments')}>{t('task.cardAll', { n: email.commentCount })}</button>}
+        </div>
+      )}
+      {canPost && (
+        <div className="task-card-reply">
+          <input className="input" value={text} placeholder={email.provider === 'whatsapp' ? t('mail.commentWaPh') : t('mail.commentCardPh')} onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} />
+          <button className="btn small" disabled={!text.trim() || busy} onClick={() => void send()}>{t('comments.send')}</button>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function MailCard({ emailId, banner, onIssue }: { emailId: string; banner?: React.ReactNode; onIssue?: (id: string) => void }) {
   const d = useClient((s) => s.data)!;
   const { email, missing } = useSharedMail(emailId);
   if (!email) return missing ? <div className="card mail-card is-missing small muted">{t('mail.unavailable')}</div> : <div className="card mail-card is-loading" aria-busy>…</div>;
   const mine = email.sharedBy === d.me.id;
   const conv = d.conversations.find((c) => c.id === email.conversationId);
+  const isWa = email.provider === 'whatsapp';
   const other = email.direction === 'out' ? email.to[0] : email.from;
   const open = (mode: DrawerMode) => openMailDrawer(email.id, mode);
+  const taskBtn = email.issueId
+    ? <button className="btn small" onClick={() => onIssue?.(email.issueId!)}>◆ {t('mail.seeTask')}</button>
+    : conv?.canPost ? <button className="btn small" onClick={() => openDialog((close) => <MailTaskDialog email={email} onClose={close} />)}>◆ {t('mail.task')}</button> : null;
+  if (isWa) {
+    const wa = email.wa;
+    const author = email.direction === 'out' ? (mine ? t('common.youShort') : personById(d, email.sharedBy)?.name.split(' ')[0]) : email.from?.name ?? t('wa.someone');
+    return (
+      <div className="card mail-card wa-card">
+        {banner}
+        <div className="mail-card-top">
+          <span className="src-ico wa"><WaIcon size={22} /></span>
+          <div style={{ minWidth: 0 }}>
+            <div className="mail-card-kind">WhatsApp{wa?.accountKind === 'business' ? ' Business' : ''} · {wa?.isGroup ? `👥 ${t('wa.groupShort')}` : ''}{wa?.chatName ?? email.subject}</div>
+            <div className="small muted ellipsis"><b>{author}</b> · {fmtDate(email.sentAt)}</div>
+          </div>
+        </div>
+        <button className="wa-quote link-quote" onClick={() => open('read')}>{email.snippet}</button>
+        <CardComments email={email} canPost={!!conv?.canPost} />
+        <div className="mail-card-foot">
+          <span className="grow" />
+          {taskBtn}
+          {mine && wa && <button className="btn small" onClick={() => navigate('/whatsapp')}>{t('wa.seeIn')}</button>}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={`card mail-card ${email.direction === 'out' ? 'is-out' : 'is-in'}`}>
       {banner}
       <div className="mail-card-top">
-        <span className="src-ico"><ProviderIcon provider={email.provider} size={22} /></span>
+        <span className="src-ico"><SrcIcon provider={email.provider} size={22} /></span>
         <div style={{ minWidth: 0 }}>
           <div className="mail-card-kind"><DirBadge out={email.direction === 'out'} /> {t(email.direction === 'out' ? 'mail.kind.out' : 'mail.kind.in', { name: LABEL[email.provider] })}</div>
           <button className="mail-card-title" onClick={() => open('read')}>{email.subject || t('mail.noSubject')}</button>
@@ -438,16 +519,24 @@ export function MailCard({ emailId, banner, onIssue }: { emailId: string; banner
           {email.attachments.length > 4 && <button className="file-chip" onClick={() => open('read')}>+{email.attachments.length - 4}</button>}
         </div>
       )}
+      <CardComments email={email} canPost={!!conv?.canPost} />
       <div className="mail-card-foot">
         <MailStatus email={email} />
         <span className="grow" />
-        <button className="btn small" onClick={() => open('comments')} title={t('mail.comments')}>💬 {email.commentCount || ''}</button>
-        {email.issueId
-          ? <button className="btn small" onClick={() => onIssue?.(email.issueId!)}>◆ {t('mail.seeTask')}</button>
-          : conv?.canPost && <button className="btn small" onClick={() => openDialog((close) => <MailTaskDialog email={email} onClose={close} />)}>◆ {t('mail.task')}</button>}
+        {taskBtn}
         {mine && email.status !== 'replied' && email.status !== 'scheduled' && <button className="btn small primary" onClick={() => open('reply')}>{t('mail.reply')}</button>}
       </div>
     </div>
+  );
+}
+
+/** Aviso agrupado de comentarios: una línea corta que lleva a la tarjeta, sin repetirla. */
+export function CommentsNoticeLine({ count, title, lastByName, lastExcerpt, icon, onOpen }: { count: number; title: string; lastByName: string; lastExcerpt: string; icon?: React.ReactNode; onOpen: () => void }) {
+  return (
+    <button className="comments-line" onClick={onOpen}>
+      {icon}<span className="comments-line-n">{count > 1 ? t('comments.many', { n: count }) : t('comments.one')}</span>
+      <span className="comments-line-t ellipsis">«{title}» · <b>{String(lastByName ?? '').split(' ')[0]}</b> {lastExcerpt}</span>
+    </button>
   );
 }
 
@@ -495,7 +584,7 @@ function MailDrawer({ id, mode, onClose }: { id: string; mode: DrawerMode; onClo
     <div className="drawer-shade" onClick={onClose}>
       <aside className="mail-drawer" role="dialog" aria-label={email?.subject ?? t('mail.title')} onClick={(e) => e.stopPropagation()}>
         <header className="mail-drawer-h">
-          {email && <span className="src-ico"><ProviderIcon provider={email.provider} size={20} /></span>}
+          {email && <span className={`src-ico ${email.provider === 'whatsapp' ? 'wa' : ''}`}><SrcIcon provider={email.provider} size={20} /></span>}
           <b className="grow ellipsis">{email ? email.subject || t('mail.noSubject') : t('mail.title')}</b>
           {gmailLink && <a className="btn small ghost" href={gmailLink} target="_blank" rel="noopener noreferrer">{t('mail.openIn', { name: LABEL[email!.provider] })} ↗</a>}
           <button className="icon-btn" onClick={onClose} aria-label={t('common.close')}>×</button>
@@ -694,7 +783,7 @@ function MailTaskDialog({ email, onClose }: { email: SharedMailDTO; onClose: () 
 
 // ---------- WhatsApp ----------
 export type WaShared = { accountId: string; jid: string; waMessageId: string; accountKind: 'personal' | 'business'; chatName: string | null; isGroup: boolean; author: string | null; fromMe: boolean; text: string; sentAt: string | null; comment?: string };
-export function WaSharedRow({ m, p }: { m: MessageDTO; p: WaShared }) {
+export function WaSharedRow({ m, p, onIssue }: { m: MessageDTO; p: WaShared & { emailId?: string }; onIssue?: (id: string) => void }) {
   const d = useClient((s) => s.data)!;
   const author = personById(d, m.authorId);
   return (
@@ -703,52 +792,48 @@ export function WaSharedRow({ m, p }: { m: MessageDTO; p: WaShared }) {
       <div style={{ minWidth: 0 }}>
         <div className="msg-meta"><span className="msg-author">{author?.name ?? t('common.participant')}</span><span className="msg-time">{new Date(m.createdAt).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })}</span></div>
         {p.comment && <div className="msg-body">{p.comment}</div>}
-        <div className="card mail-card wa-card">
-          <div className="mail-card-top">
-            <span className="src-ico wa"><WaIcon size={22} /></span>
-            <div style={{ minWidth: 0 }}>
-              <div className="mail-card-kind">WhatsApp{p.accountKind === 'business' ? ' Business' : ''}{p.chatName ? ` · ${p.isGroup ? t('wa.groupShort') : ''}${p.chatName}` : ''}</div>
-              <div className="small muted">{p.fromMe ? t('common.youShort') : p.author ?? t('wa.someone')}{p.sentAt ? ` · ${fmtDate(p.sentAt)}` : ''}</div>
+        {/* Desde la 040 el mensaje compartido tiene registro propio (hilo y tarea); los viejos se pintan del payload. */}
+        {p.emailId ? <MailCard emailId={p.emailId} onIssue={onIssue} /> : (
+          <div className="card mail-card wa-card">
+            <div className="mail-card-top">
+              <span className="src-ico wa"><WaIcon size={22} /></span>
+              <div style={{ minWidth: 0 }}>
+                <div className="mail-card-kind">WhatsApp{p.accountKind === 'business' ? ' Business' : ''}{p.chatName ? ` · ${p.isGroup ? `👥 ${t('wa.groupShort')}` : ''}${p.chatName}` : ''}</div>
+                <div className="small muted">{p.fromMe ? t('common.youShort') : p.author ?? t('wa.someone')}{p.sentAt ? ` · ${fmtDate(p.sentAt)}` : ''}</div>
+              </div>
             </div>
+            <blockquote className="wa-quote">{p.text}</blockquote>
           </div>
-          <blockquote className="wa-quote">{p.text}</blockquote>
-          {m.authorId === d.me.id && <div className="mail-card-foot"><span className="grow" /><button className="btn small" onClick={() => navigate(`/whatsapp?account=${p.accountId}&chat=${encodeURIComponent(p.jid)}`)}>{t('wa.seeIn')}</button></div>}
-        </div>
+        )}
       </div>
     </div>
   );
 }
 
-export function WaShareDialog({ accountId, jid, message, chatName, onClose }: { accountId: string; jid: string; message: { id: string; body: string; author: string | null; fromMe: boolean }; chatName: string; onClose: () => void }) {
+/** Llevar un mensaje de WhatsApp a uno o varios chats, igual que un correo. */
+export function WaShareDialog({ accountId, jid, message, chatName, isGroup, onClose }: { accountId: string; jid: string; message: { id: string; body: string; author: string | null; fromMe: boolean; sentAt?: string }; chatName: string; isGroup?: boolean; onClose: () => void }) {
   const d = useClient((s) => s.data)!;
-  const [q, setQ] = useState('');
-  const [target, setTarget] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
-  const list = d.conversations.filter((c) => c.canPost && (!q || conversationTitle(d, c).toLowerCase().includes(q.toLowerCase()))).slice(0, 80);
-  const conv = target ? d.conversations.find((c) => c.id === target) : null;
   const share = async () => {
-    if (!target) return;
+    if (!picked.length || busy) return;
     setBusy(true);
-    try { await client.shareWhatsApp({ accountId, jid, messageId: message.id, conversationId: target, comment: comment.trim() || undefined }); toast(t('mail.shared'), { label: t('lin.open'), run: () => navigate(`/c/${target}`) }); onClose(); }
-    catch (e) { toast(errorText(e)); } finally { setBusy(false); }
+    try {
+      await client.shareWhatsApp({ accountId, jid, messageId: message.id, conversationIds: picked, comment: comment.trim() || undefined });
+      const first = picked[0]!;
+      toast(picked.length > 1 ? t('mail.sharedMany', { n: picked.length }) : t('mail.shared'), { label: t('lin.open'), run: () => navigate(`/c/${first}`) });
+      onClose();
+    } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
   };
   return (
-    <Modal title={t('wa.commentIn')} onClose={onClose}>
-      <div className="xcard mini"><div className="xcard-top"><span className="src-ico wa"><WaIcon size={20} /></span><div style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{chatName}</b><span className="small muted">{message.fromMe ? t('common.youShort') : message.author ?? t('wa.someone')}</span></div></div>
+    <Modal title={t('wa.bringTitle')} onClose={onClose}>
+      <div className="xcard mini"><div className="xcard-top"><span className="src-ico wa"><WaIcon size={20} /></span><div style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{isGroup ? '👥 ' : ''}{chatName}</b><span className="small muted">{message.fromMe ? t('common.youShort') : message.author ?? t('wa.someone')}{message.sentAt ? ` · ${fmtDate(message.sentAt)}` : ''}</span></div></div>
         <blockquote className="wa-quote">{message.body.slice(0, 400)}</blockquote></div>
-      <input className="input" placeholder={t('mail.pickChat')} value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
-      <div className="list" style={{ maxHeight: 220, overflow: 'auto' }}>
-        {list.map((c) => (
-          <label key={c.id} className={`check ${target === c.id ? 'derive-opt is-on' : ''}`}>
-            <input type="radio" name="wa-target" checked={target === c.id} onChange={() => setTarget(c.id)} />
-            <span className="grow"><b>{conversationTitle(d, c)}</b><span className="small muted" style={{ display: 'block' }}>{d.workspaces.find((w) => w.id === c.workspaceId)?.name ?? t('kind.direct')}</span></span>
-          </label>
-        ))}
-      </div>
+      <ChatPicker picked={picked} setPicked={setPicked} />
       <textarea className="input" rows={2} maxLength={4000} placeholder={t('wa.commentPh')} value={comment} onChange={(e) => setComment(e.target.value)} />
-      {conv && <div className="warn-box">{t('mail.whoSees', { n: conv.memberIds.length, name: conversationTitle(d, conv) })}</div>}
-      <div className="modal-actions"><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" disabled={!target || busy} onClick={() => void share()}>{t('mail.share')}</button></div>
+      <WhoSees picked={picked} />
+      <div className="modal-actions"><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" disabled={!picked.length || busy} onClick={() => void share()}>{busy ? t('mail.sharing') : shareLabel(d, picked)}</button></div>
     </Modal>
   );
 }

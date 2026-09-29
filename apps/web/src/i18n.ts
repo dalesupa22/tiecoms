@@ -62,7 +62,7 @@ const es = {
   'calls.callBack': 'Volver a llamar', 'calls.pick': '¿A quién llamas?', 'calls.search': 'Buscar persona o grupo',
   'calls.share': 'Compartir', 'calls.shareChat': 'Enviar a un chat', 'calls.shareSystem': 'Compartir con otra app', 'calls.shareWhat': '¿Qué compartes?',
   'calls.shareSummary': 'Resumen', 'calls.shareTranscript': 'Transcripción', 'calls.shareBoth': 'Resumen y transcripción', 'calls.shared': 'Enviado a {name}',
-  'calls.pickChat': 'Enviar a…', 'calls.noSummary': 'Sin resumen. Se genera al colgar si quien prendió la transcripción lo autorizó.', 'err.calls_disabled': 'Las llamadas todavía no están activas.', 'err.mic_denied': 'El navegador no dio permiso al micrófono. Actívalo en el candado de la barra de direcciones.', 'err.call_connect_failed': 'No se pudo conectar la llamada. Intenta de nuevo.', 'err.call_busy': 'Otra empresa del chat tiene una llamada en curso. Intenta cuando termine.', 'calls.noContent': 'Esta llamada no tiene resumen ni transcripción.',
+  'calls.pickChat': 'Enviar a…', 'calls.noSummary': 'Sin resumen. Se genera al colgar si quien prendió la transcripción lo autorizó.', 'err.calls_disabled': 'Las llamadas todavía no están activas.', 'err.mic_denied': 'El navegador no dio permiso al micrófono. Actívalo en el candado de la barra de direcciones.', 'side.searchChats': 'Buscar chat, grupo o persona…', 'err.mic_blocked_os': 'Tu computador no deja que el navegador use el micrófono. En Mac: Configuración del Sistema › Privacidad y seguridad › Micrófono, activa tu navegador y ciérralo y ábrelo de nuevo. En Windows: Configuración › Privacidad y seguridad › Micrófono, activa «Acceso al micrófono» y «Permitir que las aplicaciones de escritorio accedan al micrófono».', 'err.mic_busy': 'Otra aplicación está usando el micrófono o la cámara (Teams, Zoom, Meet…). Ciérrala e intenta de nuevo.', 'err.mic_missing': 'No encontré un micrófono. Conecta uno (o unos audífonos con micrófono) e intenta de nuevo.', 'err.call_connect_failed': 'No se pudo conectar la llamada. Intenta de nuevo.', 'err.call_busy': 'Otra empresa del chat tiene una llamada en curso. Intenta cuando termine.', 'calls.noContent': 'Esta llamada no tiene resumen ni transcripción.',
   'call.audio': 'Llamada de voz', 'call.video': 'Videollamada', 'call.title': 'Llamada', 'call.inProgress': 'Llamada en curso', 'call.join': 'Unirse',
   'call.incoming': 'Te están llamando', 'call.incomingIn': 'Te llama en {title}', 'call.incomingFrom': '{name} te está llamando', 'call.decline': 'Ahora no', 'call.answer': 'Contestar',
   'call.answerAudio': 'Contestar sin cámara', 'call.answerVideo': 'Contestar con cámara', 'call.connecting': 'Conectando…', 'call.waiting': 'Esperando a que alguien entre…',
@@ -844,6 +844,14 @@ const es = {
   'mail.refresh': 'Actualizar',
   'mail.showHistory': 'Ver el historial citado y la firma',
   'mail.hideHistory': 'Ocultar el historial',
+  'mail.whoSeesMany': 'Lo verán {n} personas en {chats} chats: remitente, asunto y texto. Cada chat tiene su propia tarjeta e hilo.',
+  'mail.shareInMany': 'Compartir en {n} chats',
+  'mail.sharedMany': 'Compartido en {n} chats',
+  'mail.commentCardPh': 'Comenta este correo…',
+  'mail.commentWaPh': 'Comenta este mensaje…',
+  'wa.bring': 'Llevar a un chat…',
+  'wa.bringShort': 'Llevar a un chat',
+  'wa.bringTitle': 'Llevar un WhatsApp a un chat',
 };
 type Key = keyof typeof es;
 
@@ -899,7 +907,7 @@ const en: Record<Key, string> = {
   'calls.callBack': 'Call again', 'calls.pick': 'Who are you calling?', 'calls.search': 'Search person or group',
   'calls.share': 'Share', 'calls.shareChat': 'Send to a chat', 'calls.shareSystem': 'Share with another app', 'calls.shareWhat': 'What do you share?',
   'calls.shareSummary': 'Summary', 'calls.shareTranscript': 'Transcript', 'calls.shareBoth': 'Summary and transcript', 'calls.shared': 'Sent to {name}',
-  'calls.pickChat': 'Send to…', 'calls.noSummary': 'No summary. It is created when the call ends if whoever turned on transcription allowed it.', 'err.calls_disabled': 'Calls are not enabled yet.', 'err.mic_denied': 'The browser blocked the microphone. Allow it from the lock icon in the address bar.', 'err.call_connect_failed': 'The call could not connect. Try again.', 'err.call_busy': 'Another company in this chat is on a call. Try again when it ends.', 'calls.noContent': 'This call has no summary or transcript.',
+  'calls.pickChat': 'Send to…', 'calls.noSummary': 'No summary. It is created when the call ends if whoever turned on transcription allowed it.', 'err.calls_disabled': 'Calls are not enabled yet.', 'err.mic_denied': 'The browser blocked the microphone. Allow it from the lock icon in the address bar.', 'side.searchChats': 'Search chat, group or person…', 'err.mic_blocked_os': 'Your computer is not letting the browser use the microphone. On Mac: System Settings › Privacy & Security › Microphone, turn on your browser, then quit and reopen it. On Windows: Settings › Privacy & security › Microphone, turn on «Microphone access» and «Let desktop apps access your microphone».', 'err.mic_busy': 'Another app is using the microphone or camera (Teams, Zoom, Meet…). Close it and try again.', 'err.mic_missing': 'No microphone found. Plug one in (or headphones with a mic) and try again.', 'err.call_connect_failed': 'The call could not connect. Try again.', 'err.call_busy': 'Another company in this chat is on a call. Try again when it ends.', 'calls.noContent': 'This call has no summary or transcript.',
   'call.audio': 'Voice call', 'call.video': 'Video call', 'call.title': 'Call', 'call.inProgress': 'Call in progress', 'call.join': 'Join',
   'call.incoming': 'Incoming call', 'call.incomingIn': 'Calling you in {title}', 'call.incomingFrom': '{name} is calling you', 'call.decline': 'Not now', 'call.answer': 'Answer',
   'call.answerAudio': 'Answer without camera', 'call.answerVideo': 'Answer with camera', 'call.connecting': 'Connecting…', 'call.waiting': 'Waiting for someone to join…',
@@ -1657,6 +1665,14 @@ const en: Record<Key, string> = {
   'mail.refresh': 'Refresh',
   'mail.showHistory': 'Show quoted history and signature',
   'mail.hideHistory': 'Hide history',
+  'mail.whoSeesMany': '{n} people in {chats} chats will see the sender, subject and text. Each chat gets its own card and thread.',
+  'mail.shareInMany': 'Share in {n} chats',
+  'mail.sharedMany': 'Shared in {n} chats',
+  'mail.commentCardPh': 'Comment on this email…',
+  'mail.commentWaPh': 'Comment on this message…',
+  'wa.bring': 'Bring to a chat…',
+  'wa.bringShort': 'Bring to a chat',
+  'wa.bringTitle': 'Bring a WhatsApp message to a chat',
 };
 const dicts: Record<Lang, Record<Key, string>> = { es, en };
 const STORE_KEY = 'tiecoms:lang';

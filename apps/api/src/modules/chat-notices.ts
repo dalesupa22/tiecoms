@@ -19,6 +19,7 @@ const excerptOf = (s: string) => { const t = s.replace(/\s+/g, ' ').trim(); retu
  */
 export async function bumpCommentNotice(c: Tx, p: {
   kind: 'issue' | 'event' | 'mail'; conversationId: string; itemId: string; title: string; actorId: string; actorName: string; body: string;
+  /** Datos extra del aviso (p. ej. provider del correo o WhatsApp). */ extra?: Record<string, unknown>;
 }) {
   const key = p.kind === 'issue' ? 'issue.comments' : p.kind === 'mail' ? 'mail.comments' : 'event.comments';
   const idField = p.kind === 'issue' ? 'issueId' : p.kind === 'mail' ? 'emailId' : 'eventId';
@@ -35,13 +36,13 @@ export async function bumpCommentNotice(c: Tx, p: {
     try { b = JSON.parse(r.body); } catch { continue; }
     if (b[idField] !== p.itemId) continue;
     const { k: _k, ...prev } = b;
-    const body = sys(key, { ...prev, title: p.title, count: Number(b.count ?? 1) + 1, ...last });
+    const body = sys(key, { ...prev, ...p.extra, title: p.title, count: Number(b.count ?? 1) + 1, ...last });
     const up = await c.query('UPDATE messages SET body = $2 WHERE id = $1 RETURNING *', [r.id, body]);
     const message = toMessageDTO(up.rows[0]);
     await appendEvent(c, p.conversationId, { type: 'message.updated', conversationId: p.conversationId, message }, r.id);
     return message;
   }
-  return appendMessage(c, { conversationId: p.conversationId, authorId: p.actorId, kind: 'system', body: sys(key, { [idField]: p.itemId, title: p.title, count: 1, ...last }) });
+  return appendMessage(c, { conversationId: p.conversationId, authorId: p.actorId, kind: 'system', body: sys(key, { [idField]: p.itemId, ...p.extra, title: p.title, count: 1, ...last }) });
 }
 
 /** Lo llama el worker cada 15 s: el aviso «es hoy» de cada evento, una sola vez. */

@@ -1,3 +1,4 @@
+import type { Ref } from 'react';
 import { MailPickDialog } from './Mail.tsx';
 import type { BootstrapDTO, ConversationDTO, PersonDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
@@ -126,18 +127,19 @@ export function QuickSearchSections({ query, order }: { query: string; order: Pa
 }
 
 /** Buscador de Grupos y DMs: Enter abre el primer resultado; Esc borra. */
-export function QuickSearchField({ value, onChange, placeholder, order }: { value: string; onChange: (v: string) => void; placeholder: string; order: Part[] }) {
+export function QuickSearchField({ value, onChange, placeholder, order, inputRef, hint }: { value: string; onChange: (v: string) => void; placeholder: string; order: Part[]; inputRef?: Ref<HTMLInputElement>; hint?: string }) {
   const r = useQuickResults(value);
   return (
     <div className="search-field">
       <span aria-hidden className="muted">⌕</span>
-      <input className="grow" type="search" value={value} placeholder={placeholder} aria-label={placeholder} autoComplete="off" spellCheck={false}
+      <input ref={inputRef} className="grow" type="search" value={value} placeholder={placeholder} aria-label={placeholder} autoComplete="off" spellCheck={false}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') { const go = firstResult(r, order); if (go) { e.preventDefault(); go(); } }
           else if (e.key === 'Escape' && value) { e.preventDefault(); onChange(''); }
         }} />
-      {value && <button type="button" className="search-clear" onClick={() => onChange('')} aria-label={t('common.clear')}>×</button>}
+      {value ? <button type="button" className="search-clear" onClick={() => onChange('')} aria-label={t('common.clear')}>×</button>
+        : hint ? <kbd className="search-kbd" aria-hidden>{hint}</kbd> : null}
     </div>
   );
 }

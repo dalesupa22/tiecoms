@@ -843,6 +843,10 @@ select.link-act { appearance: none; padding-right: 10px; }
 .side-tab { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; border-radius: 8px; padding: 6px 4px; font-weight: 700; font-size: 12.5px; white-space: nowrap; color: var(--ink-2); display: inline-flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; }
 .side-tab.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
 .side-tab-n { font-size: 10.5px; font-weight: 700; background: #B45309; color: #fff; border-radius: 99px; padding: 0 6px; min-width: 18px; text-align: center; }
+.side-search { padding: 0 10px 4px; }
+.side-search .search-field { margin-top: 4px; min-height: 36px; }
+.side-search .search-field input { min-height: 34px; }
+.search-kbd { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
 .side-tools { gap: 6px 4px; padding: 4px 10px 2px; flex-wrap: wrap; }
 .side-filters { display: flex; gap: 4px; flex: 1 0 auto; }
 .side-tools .seg { margin-right: auto; }
@@ -1529,3 +1533,19 @@ mark { background: #f5e3b3; color: inherit; border-radius: 3px; padding: 0 1px; 
 @media (prefers-reduced-motion: reduce) { .call-ringing-text { animation: none; } }
 .calls-live { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
 .call-row.is-live { border-color: #2f9e5a; }
+/* Aviso agrupado de comentarios: una línea, sin repetir la tarjeta (correo, WhatsApp, tareas y eventos). */
+.comments-line { display: flex; align-items: center; gap: 8px; max-width: 520px; width: 100%; min-width: 0; border: 0; background: none; padding: 4px 2px; font: inherit; font-size: 13px; color: var(--ink-2); text-align: left; cursor: pointer; }
+.comments-line-n { flex: none; font-weight: 700; color: #2f6fdb; }
+.comments-line-t { min-width: 0; }
+.comments-line:hover .comments-line-n { text-decoration: underline; }
+.mail-card .task-card-comments { border-top: 1px solid var(--line); }
+.mail-card .link-btn.small { color: #2f6fdb; align-self: flex-start; }
+.link-quote { border: 0; background: none; font: inherit; text-align: left; cursor: pointer; color: inherit; width: 100%; padding: 0 0 0 10px; border-left: 3px solid #25d366; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.wa-msg { position: relative; }
+.wa-bring { display: none; margin-top: 4px; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 2px 8px; font: inherit; font-size: 11.5px; font-weight: 600; color: var(--ink-2); cursor: pointer; }
+.wa-msg:hover .wa-bring, .wa-msg:focus-within .wa-bring { display: inline-block; }
+@media (hover: none) { .wa-bring { display: inline-block; } }
+/* Dentro de un chat, gg flota por encima del campo de escribir (no tapa enviar ni el micrófono). */
+.ai-bubble.in-conv { bottom: calc(104px + var(--safe-b)); width: 48px; height: 48px; }
+.ai-bubble.in-conv img { width: 34px; height: 34px; }
+@media (max-width: 860px) { .ai-bubble.in-conv { bottom: calc(86px + var(--safe-b)); right: 12px; width: 44px; height: 44px; } }

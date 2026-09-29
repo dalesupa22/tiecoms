@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { BootstrapDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { asset, navigate, type Route } from '../router.ts';
@@ -8,7 +8,7 @@ import type { ConversationDTO } from '@tiecoms/contracts';
 import { t } from '../i18n.ts';
 import { openAccountMenu } from './Profile.tsx';
 import { AllList, DmsList, GroupsBody, GroupsViewButton, GroupsViewToggle, dmConversations, useGroupsView } from './Groups.tsx';
-import { isMac, openCreateMenu, openNewMessage, quickKey } from './Quick.tsx';
+import { QuickSearchField, QuickSearchSections, isMac, openCreateMenu, openNewMessage, quickKey } from './Quick.tsx';
 import { activityOf, isMuted, pendingOf } from '../home-order.ts';
 import { DndStrip, MeAvatar } from './Silence.tsx';
 import { AssistantBubble } from './Assistant.tsx';
@@ -150,6 +150,26 @@ function Sidebar({ route }: { route: Route }) {
   const [filter, setFilterState] = useState<HomeTab>(storedFilter);
   const [sideTab, setSideTabState] = useState<SideTab>(storedSideTab);
   const view = useGroupsView();
+  // Buscar un chat desde la barra (pedido de Danny, 29-sep-2026): chats, grupos y personas; se limpia al abrir uno.
+  const [sq, setSq] = useState('');
+  const sideSearching = !!sq.trim();
+  const routeKey = route.name === 'conversation' ? route.id : route.name;
+  useEffect(() => { setSq(''); }, [routeKey]);
+  const sideInput = useRef<HTMLInputElement>(null);
+  // ⌘F / Ctrl+F: en un chat busca texto en la conversación; si ya estás ahí (o fuera de un chat), chats, grupos y personas.
+  // ⌘⇧F / Ctrl+Shift+F: siempre chats, grupos y personas.
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== 'f') return;
+      if (document.querySelector('.modal')) return;
+      e.preventDefault();
+      const inChatSearch = !!(document.activeElement as HTMLElement | null)?.closest('.chat-search');
+      if (!e.shiftKey && route.name === 'conversation' && !inChatSearch) { dispatchEvent(new Event('chaggu:chat-search')); return; }
+      sideInput.current?.focus(); sideInput.current?.select();
+    };
+    addEventListener('keydown', k);
+    return () => removeEventListener('keydown', k);
+  }, [route.name]);
   // Las secciones menos usadas van bajo «Más» para que los grupos y las relaciones quepan sin scroll.
   const [navMore, setNavMore] = useState(() => { try { return localStorage.getItem(NAV_MORE_KEY) === '1'; } catch { return false; } });
   const toggleNavMore = () => { const v = !navMore; setNavMore(v); try { localStorage.setItem(NAV_MORE_KEY, v ? '1' : '0'); } catch {} };
@@ -181,15 +201,17 @@ function Sidebar({ route }: { route: Route }) {
         </button>
       </nav>
       <DndStrip />
-      <SideTabs d={d} tab={sideTab} onTab={setSideTab} />
-      <div className="home-tabs-row side-tools">
+      <div className="side-search"><QuickSearchField inputRef={sideInput} value={sq} onChange={setSq} placeholder={t('side.searchChats')} order={['chats', 'groups', 'people']} hint={isMac ? '⌘F' : 'Ctrl+F'} /></div>
+      {!sideSearching && <SideTabs d={d} tab={sideTab} onTab={setSideTab} />}
+      {!sideSearching && <div className="home-tabs-row side-tools">
         <SideFilters d={d} filter={filter} onFilter={setFilter} />
         {/* Lista | Árbol vive junto a ☰; ☰ (plegar) solo aplica en Árbol. */}
         {sideTab === 'groups' && filter !== 'mentions' && <GroupsViewToggle />}
         {sideTab === 'groups' && view === 'tree' && filter !== 'mentions' && <GroupsViewButton tab={filter} />}
-      </div>
+      </div>}
       <div className="side-scroll">
-        {filter === 'mentions' ? <MentionsInbox />
+        {sideSearching ? <QuickSearchSections query={sq} order={['chats', 'groups', 'people']} />
+          : filter === 'mentions' ? <MentionsInbox />
           : sideTab === 'all' ? <AllList tab={filter} activeConv={activeConv} />
           : sideTab === 'groups' ? <GroupsBody tab={filter} activeConv={activeConv} />
           : <>
@@ -261,8 +283,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {children}
       </main>
       <MobileTabs route={route} />
-      {/* Como en WhatsApp: en las listas sí, dentro de un chat no. */}
-      <AssistantBubble hidden={inConv} />
+      {/* gg siempre a mano (Danny, 29-sep-2026): también dentro de un chat, por encima del campo de escribir. */}
+      <AssistantBubble hidden={false} inConv={inConv} />
     </div>
   );
 }

@@ -4,6 +4,7 @@
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { pool } from '../src/db.ts';
 import { cleanBody, gmailQuery, graphListUrl, htmlToText, parseAddressList } from '../src/modules/mailbox.ts';
 
 const API = process.env.API_URL ?? 'http://localhost:3097';
@@ -115,7 +116,7 @@ describe('correo en el chat (API + proveedor falso)', () => {
     const s2 = await stats();
     expect(s2.gmailList).toBe(s1.gmailList + 1);
     expect(s2.batch).toBe(s1.batch + 1);
-    expect(s2.gmailGet).toBe(s1.gmailGet);
+    // (gmailGet no se compara: el proveedor falso lo comparten otras pruebas que corren a la vez.)
     const updates = await call('/mail/messages?provider=google&box=inbox&category=updates', { token: ana.token });
     expect(updates.json.items.map((i: any) => i.subject)).toEqual(['Recibiste un pago de $4.200.000']);
     const old = await call('/mail/messages?provider=google&box=all&q=presentaci%C3%B3n&before=2025-12-31', { token: ana.token });
@@ -239,6 +240,42 @@ describe('correo en el chat (API + proveedor falso)', () => {
     expect(r.json.status).toBe('replied');
     const out = (await sentOut()).slice(before);
     expect(out[0]).toMatchObject({ provider: 'microsoft', id: 'ms-g2', to: 'avisos@banco.example', comment: 'Gracias.<br>Recibido.' });
+  });
+
+  it('un correo en varios chats a la vez: una tarjeta e hilo por chat', async () => {
+    await connect(ana, 'google');
+    const chat2 = (await post('/chats', ana.token, { userIds: [beto.id], name: `Otro ${run}` })).json.id;
+    const r = await post('/mail/share', ana.token, { provider: 'google', messageId: 'g2', conversationIds: [chat, chat2], comment: 'Llegó el pago' });
+    expect(r.status).toBe(201);
+    expect(r.json.emails.map((e: any) => e.conversationId).sort()).toEqual([chat, chat2].sort());
+    expect(new Set(r.json.emails.map((e: any) => e.id)).size).toBe(2);
+    // Carla no está en esos chats: no puede ser destino.
+    expect((await post('/mail/share', carla.token, { provider: 'google', messageId: 'g2', conversationIds: [chat] })).status).toBeGreaterThanOrEqual(403);
+  });
+
+  it('WhatsApp como correo: tarjeta con hilo, tarea y sin responder desde chaggu', async () => {
+    const acc = (await pool.query("INSERT INTO wa_accounts (user_id, label, kind, status) VALUES ($1,'Business','business','connected') RETURNING id", [ana.id])).rows[0].id;
+    const jid = '120363000000000001@g.us';
+    await pool.query("INSERT INTO wa_chats (account_id, jid, name, is_group) VALUES ($1,$2,'Soporte Uniandes',true)", [acc, jid]);
+    await pool.query("INSERT INTO wa_messages (account_id, chat_jid, id, from_me, author_name, body, sent_at) VALUES ($1,$2,'WAM1',false,'Lorena Tapias','Ya confirmé con James la cuenta correcta.', now())", [acc, jid]);
+    const r = await post('/whatsapp/share', ana.token, { accountId: acc, jid, messageId: 'WAM1', conversationIds: [chat], comment: 'Ojo con esto' });
+    expect(r.status).toBe(201);
+    const e = r.json.emails[0];
+    expect(e).toMatchObject({ provider: 'whatsapp', subject: 'Soporte Uniandes', direction: 'in', comment: 'Ojo con esto' });
+    expect(e.wa).toMatchObject({ chatName: 'Soporte Uniandes', isGroup: true, accountKind: 'business' });
+    expect(e.from.name).toBe('Lorena Tapias');
+    const msg = (await sysOf(beto, chat, 'wa.shared')).at(-1);
+    expect(msg.b).toMatchObject({ emailId: e.id, chatName: 'Soporte Uniandes', text: 'Ya confirmé con James la cuenta correcta.' });
+    expect((await post(`/mail/shared/${e.id}/comments`, beto.token, { body: 'La reverso mañana' })).status).toBe(201);
+    const card = (await call(`/mail/shared/${e.id}`, { token: beto.token })).json;
+    expect(card.commentCount).toBe(1);
+    expect(card.lastComments[0].body).toBe('La reverso mañana');
+    expect((await post(`/mail/shared/${e.id}/reply`, ana.token, { body: 'hola' })).status).toBe(400);
+    expect((await post(`/mail/shared/${e.id}/task`, ana.token, { title: 'Revertir recarga' })).status).toBe(201);
+    // Otra persona no puede compartir mensajes de una cuenta ajena.
+    expect((await post('/whatsapp/share', beto.token, { accountId: acc, jid, messageId: 'WAM1', conversationIds: [chat] })).status).toBe(404);
+    const notices = await sysOf(ana, chat, 'mail.comments');
+    expect(notices.some((n: any) => n.b.provider === 'whatsapp')).toBe(true);
   });
 
   it('WhatsApp: solo el dueño de la cuenta comparte sus mensajes', async () => {

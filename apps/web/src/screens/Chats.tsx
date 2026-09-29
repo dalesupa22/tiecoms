@@ -28,45 +28,51 @@ export function Linkify({ text }: { text: string }) {
 const roleLine = (p: PersonDTO) => [p.title, p.area].filter(Boolean).join(' · ');
 
 /**
- * Mensaje nuevo (✎ y ⌘K): buscador fijo arriba; un clic en una persona abre su directo (el que existe o uno nuevo).
- * «Recientes» son las personas de mis directos; «Chat con varias personas» pasa a selección múltiple (chat grupal,
- * pueden ser de empresas distintas). Al buscar también salen grupos. Flechas mueven, Enter abre (o marca).
- * «Grupo en un espacio» sigue disponible abajo (docs/GRUPOS.md › Barra de arriba y búsqueda rápida).
+ * Mensaje nuevo (✎ y ⌘K), como WhatsApp o Slack: tocar una persona la marca (una o varias, de cualquier empresa)
+ * y queda arriba como chip; abajo «Abrir chat» con una o «Crear chat (n)» con varias (nombre opcional).
+ * El 💬 de la fila, doble clic o Enter con un solo resultado abren el directo al instante. Al buscar también salen
+ * grupos (se abren). «Grupo en un espacio» sigue abajo (docs/GRUPOS.md › Barra de arriba y búsqueda rápida).
  */
 export function NewChatDialog({ onClose }: { onClose: () => void }) {
   const d = useClient((s) => s.data)!;
   const [mode, setMode] = useState<'compose' | 'space'>('compose');
   const [q, setQ] = useState('');
-  const [multi, setMulti] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const list = useRef<HTMLDivElement>(null);
+  const search = useRef<HTMLInputElement>(null);
   const searching = !!q.trim();
   const orgs = useMemo(() => peopleByOrg(d, q), [d, q]);
-  const groups = useMemo(() => (multi || !searching ? [] : searchGroups(d, q, { title: (c) => conversationTitle(d, c) }).slice(0, 6)), [d, q, multi, searching]);
+  const groups = useMemo(() => (picked.length || !searching ? [] : searchGroups(d, q, { title: (c) => conversationTitle(d, c) }).slice(0, 6)), [d, q, picked.length, searching]);
   const recents = useMemo(() => recentPeopleIds(d).slice(0, 8).map((id) => personById(d, id)).filter((p): p is PersonDTO => !!p), [d]);
   // Lo que se recorre con el teclado: grupos encontrados y luego personas, en el orden en que se ven.
   const items: ({ kind: 'group'; c: ConversationDTO } | { kind: 'person'; p: PersonDTO })[] = [
     ...groups.map((c) => ({ kind: 'group' as const, c })),
     ...orgs.flatMap((g) => g.people.map((p) => ({ kind: 'person' as const, p }))),
   ];
+  const people = items.filter((x) => x.kind === 'person');
   const at = Math.min(active, Math.max(0, items.length - 1));
-  useEffect(() => { setActive(0); }, [q, multi]);
+  useEffect(() => { setActive(0); }, [q]);
   useEffect(() => { list.current?.querySelector('[data-active]')?.scrollIntoView({ block: 'nearest' }); }, [at]);
-  const toggle = (id: string) => setPicked((x) => (x.includes(id) ? x.filter((y) => y !== id) : [...x, id]));
+  /** Marca o desmarca; al buscar, limpia la búsqueda para seguir eligiendo (como el «Para:» de Slack). */
+  const toggle = (id: string) => {
+    setPicked((x) => (x.includes(id) ? x.filter((y) => y !== id) : [...x, id]));
+    if (searching) setQ('');
+    search.current?.focus();
+  };
   const pickedOrgs = [...new Set([d.me.primaryOrgId, ...picked.map((id) => personById(d, id)?.orgId)].filter(Boolean) as string[])];
 
   async function run(fn: () => Promise<void>) {
     setBusy(true); setError(null);
     try { await fn(); onClose(); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
-  /** Un clic: el directo con esa persona. */
+  /** Directo inmediato con esa persona (💬, doble clic o Enter con un solo resultado). */
   const open = (p: PersonDTO) => run(() => openDirect(p.id));
   const openGroup = (c: ConversationDTO) => { onClose(); navigate(`/c/${c.id}`); };
-  const createMulti = () => run(async () => {
+  const create = () => run(async () => {
     if (picked.length === 1) { await openDirect(picked[0]!); return; }
     const r = await client.request<{ id: string; kind: string }>('/chats', { method: 'POST', json: { userIds: picked, ...(name.trim() ? { name: name.trim() } : {}) } });
     await client.loadBootstrap();
@@ -75,20 +81,23 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
   const choose = (it: (typeof items)[number] | undefined) => {
     if (!it || busy) return;
     if (it.kind === 'group') openGroup(it.c);
-    else if (multi) toggle(it.p.id);
-    else void open(it.p);
+    else toggle(it.p.id);
   };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(at + 1, items.length - 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(at - 1, 0)); }
+    else if (e.key === 'Backspace' && !q && picked.length) setPicked((x) => x.slice(0, -1));
     else if (e.key === 'Enter') {
       e.preventDefault();
-      // En selección múltiple, ⌘/Ctrl+Enter crea el chat.
-      if (multi && (e.metaKey || e.ctrlKey)) { if (picked.length) void createMulti(); return; }
-      if (searching || multi) choose(items[at]);
+      // ⌘/Ctrl+Enter, o Enter sin búsqueda con gente marcada: abre o crea el chat.
+      if ((e.metaKey || e.ctrlKey || !searching) && picked.length) { void create(); return; }
+      // Nadie marcado y un solo resultado: su directo, sin más pasos.
+      if (!picked.length && items.length === 1 && people.length === 1) { void open((people[0] as { p: PersonDTO }).p); return; }
+      if (searching) choose(items[at]);
     }
   };
-  const isActive = (it: (typeof items)[number]) => (searching || multi) && items[at] === it;
+  const isActive = (it: (typeof items)[number]) => searching && items[at] === it;
+  const first = picked.length === 1 ? personById(d, picked[0])?.name.split(' ')[0] ?? '' : '';
 
   if (mode === 'space') {
     return (
@@ -99,55 +108,48 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
     );
   }
   return (
-    <Modal title={multi ? t('compose.multi') : t('dms.new')} onClose={onClose}>
-      <div className="search-field compose-search">
+    <Modal title={t('dms.new')} onClose={onClose}>
+      <div className={`search-field compose-search ${picked.length ? 'has-chips' : ''}`} onClick={() => search.current?.focus()}>
         <span aria-hidden className="muted">⌕</span>
-        <input className="grow" autoFocus type="search" value={q} placeholder={t('compose.search')} aria-label={t('compose.search')} autoComplete="off" spellCheck={false}
+        {picked.map((id) => {
+          const p = personById(d, id);
+          return (
+            <button key={id} type="button" className="chip compose-chip" onClick={(e) => { e.stopPropagation(); toggle(id); }} title={t('common.remove')}>
+              <Avatar person={p} org={orgById(d, p?.orgId)} size={20} />{p?.name.split(' ')[0]} <span aria-hidden>×</span>
+            </button>
+          );
+        })}
+        <input ref={search} className="grow" autoFocus type="search" value={q} placeholder={picked.length ? t('compose.addMore') : t('compose.search')} aria-label={t('compose.search')} autoComplete="off" spellCheck={false}
           role="combobox" aria-expanded aria-controls="compose-list" onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} disabled={busy} />
         {q && <button type="button" className="search-clear" onClick={() => setQ('')} aria-label={t('common.clear')}>×</button>}
       </div>
-      {multi && (
+      {picked.length > 1 && (
         <div className="compose-multi">
-          <span className="hint">{t('compose.multiHint')}</span>
-          {picked.length > 0 && (
-            <div className="picker-chips">
-              {picked.map((id) => {
-                const p = personById(d, id);
-                return <button key={id} type="button" className="chip" onClick={() => toggle(id)} title={t('common.remove')}><Avatar person={p} org={orgById(d, p?.orgId)} size={20} />{p?.name.split(' ')[0]} ×</button>;
-              })}
-            </div>
-          )}
-          {picked.length > 1 && (
-            <>
-              <div className="row small muted" style={{ gap: 6, flexWrap: 'wrap' }}>
-                {pickedOrgs.map((o) => <OrgMark key={o} org={orgById(d, o)} size={18} />)}
-                <span>{pickedOrgs.length > 1 ? t('chat.crossCompany', { n: pickedOrgs.length }) : t('chat.sameCompany')}</span>
-              </div>
-              <input className="input" maxLength={120} placeholder={t('chat.groupNamePh')} value={name} onChange={(e) => setName(e.target.value)} />
-            </>
-          )}
+          <div className="row small muted" style={{ gap: 6, flexWrap: 'wrap' }}>
+            {pickedOrgs.map((o) => <OrgMark key={o} org={orgById(d, o)} size={18} />)}
+            <span>{pickedOrgs.length > 1 ? t('chat.crossCompany', { n: pickedOrgs.length }) : t('chat.sameCompany')}</span>
+          </div>
+          <input className="input" maxLength={120} placeholder={t('chat.groupNamePh')} value={name} onChange={(e) => setName(e.target.value)} />
         </div>
       )}
-      <div className="compose-list" id="compose-list" ref={list} role="listbox" aria-busy={busy}>
-        {!multi && !searching && (
-          <>
-            <button type="button" className="person-row compose-multi-btn" onClick={() => setMulti(true)}>
-              <span className="compose-multi-ico" aria-hidden>👥</span><b className="grow">{t('compose.multi')}</b><span className="muted" aria-hidden>›</span>
-            </button>
-            {recents.length > 0 && (
-              <section>
-                <div className="picker-org">{t('compose.recent')}</div>
-                <div className="compose-recents">
-                  {recents.map((p) => (
-                    <button key={p.id} type="button" className="compose-recent" onClick={() => void open(p)} title={`${p.name} · ${t('search.opensChat')}`} aria-label={p.name}>
-                      <Avatar person={p} org={orgById(d, p.orgId)} size={44} />
-                      <span className="ellipsis">{p.name.split(' ')[0]}</span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            )}
-          </>
+      {!picked.length && !searching && <div className="small muted compose-tip">{t('compose.tip')}</div>}
+      <div className="compose-list" id="compose-list" ref={list} role="listbox" aria-multiselectable aria-busy={busy}>
+        {!searching && recents.length > 0 && (
+          <section>
+            <div className="picker-org">{t('compose.recent')}</div>
+            <div className="compose-recents">
+              {recents.map((p) => {
+                const on = picked.includes(p.id);
+                return (
+                  <button key={p.id} type="button" className={`compose-recent ${on ? 'on' : ''}`} onClick={() => toggle(p.id)} onDoubleClick={() => void open(p)}
+                    aria-pressed={on} aria-label={p.name} title={p.name}>
+                    <span className="compose-recent-av"><Avatar person={p} org={orgById(d, p.orgId)} size={44} />{on && <span className="compose-recent-check" aria-hidden>✓</span>}</span>
+                    <span className="ellipsis">{p.name.split(' ')[0]}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
         )}
         {groups.length > 0 && (
           <section>
@@ -173,17 +175,17 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
               const on = picked.includes(p.id);
               const line = roleLine(p) || (p.guest ? t('common.guest') : g.org?.name ?? '');
               return (
-                <button key={p.id} type="button" role="option" aria-selected={multi ? on : isActive(it)} data-active={isActive(it) || undefined}
-                  className={`person-row ${isActive(it) ? 'is-active' : ''} ${on ? 'on' : ''}`} onClick={() => (multi ? toggle(p.id) : void open(p))}
-                  title={multi ? undefined : t('search.opensChat')}>
-                  {multi && <span className={`compose-check ${on ? 'on' : ''}`} aria-hidden>{on ? '✓' : ''}</span>}
+                <div key={p.id} role="option" aria-selected={on} data-active={isActive(it) || undefined} tabIndex={-1}
+                  className={`person-row ${isActive(it) ? 'is-active' : ''} ${on ? 'on' : ''}`} onClick={() => toggle(p.id)} onDoubleClick={() => void open(p)}>
+                  <span className={`compose-check ${on ? 'on' : ''}`} aria-hidden>{on ? '✓' : ''}</span>
                   <Avatar person={p} org={g.org} size={32} />
                   <span className="grow" style={{ minWidth: 0 }}>
                     <b className="ellipsis" style={{ display: 'block' }}>{p.name}</b>
                     {line && <span className="small muted ellipsis" style={{ display: 'block' }}>{line}</span>}
                   </span>
-                  {!multi && <span className="person-row-go" aria-hidden>💬</span>}
-                </button>
+                  <button type="button" className="person-row-go" title={t('search.opensChat')} aria-label={`${t('search.opensChat')}: ${p.name}`}
+                    onClick={(e) => { e.stopPropagation(); void open(p); }}>💬</button>
+                </div>
               );
             })}
           </section>
@@ -191,18 +193,13 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
       </div>
       {error && <div className="error">{error}</div>}
       <div className="modal-actions">
-        {multi ? (
-          <>
-            <button className="btn ghost" onClick={() => { setMulti(false); setPicked([]); setName(''); }}>‹ {t('common.back')}</button>
-            <button className="btn primary" disabled={!picked.length || busy} onClick={() => void createMulti()}>
-              {picked.length > 1 ? t('chat.createGroup', { n: picked.length + 1 }) : t('chat.openDirect')}
-            </button>
-          </>
+        <button className="btn ghost small" style={{ marginRight: 'auto' }} onClick={() => setMode('space')}>{t('chat.mode.space')}</button>
+        {picked.length ? (
+          <button className="btn primary" disabled={busy} onClick={() => void create()}>
+            {picked.length > 1 ? t('chat.createGroup', { n: picked.length + 1 }) : t('compose.openWith', { name: first })}
+          </button>
         ) : (
-          <>
-            <button className="btn ghost small" style={{ marginRight: 'auto' }} onClick={() => setMode('space')}>{t('chat.mode.space')}</button>
-            <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
-          </>
+          <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
         )}
       </div>
     </Modal>

@@ -585,7 +585,7 @@ const es = {
   'mention.dropped': 'No se pudo mencionar a: {names}', 'mention.picker': 'Mencionar a alguien', 'mention.noMatch': 'Nadie coincide en este chat.',
   'home.tab.mentions': 'Menciones', 'mention.loadMore': 'Ver más', 'mention.inConv': 'en {name}', 'mention.allLabel': '@todos',
   // Barra de arriba: ✎ Mensaje nuevo · ＋ Crear, y búsqueda de personas, grupos y chats (docs/GRUPOS.md)
-  'quick.create': 'Crear', 'issue.where': 'Grupo o chat', 'compose.multi': 'Chat con varias personas',
+  'quick.create': 'Crear', 'issue.where': 'Grupo o chat', 'compose.multi': 'Chat con varias personas', 'compose.tip': 'Toca una o varias personas. El 💬 abre su chat directo.', 'compose.addMore': 'Agregar a alguien más…', 'compose.openWith': 'Abrir chat con {name}',
   'compose.multiHint': 'Elige a 2 o más personas. Pueden ser de tu equipo o de otras empresas.', 'compose.recent': 'Recientes',
   'compose.search': 'Buscar persona, empresa o grupo', 'search.people': 'Personas', 'search.groups': 'Grupos', 'search.chats': 'Chats',
   'search.opensChat': 'Abre el chat', 'search.none': 'Nada coincide con «{q}».', 'common.clear': 'Borrar', 'grp.foldMenu': 'Plegar y desplegar',
@@ -1217,7 +1217,7 @@ const en: Record<Key, string> = {
   'mention.dropped': 'Could not mention: {names}', 'mention.picker': 'Mention someone', 'mention.noMatch': 'Nobody in this chat matches.',
   'home.tab.mentions': 'Mentions', 'mention.loadMore': 'Load more', 'mention.inConv': 'in {name}', 'mention.allLabel': '@all',
   // Top bar: ✎ New message · ＋ Create, and search for people, groups and chats (docs/GRUPOS.md)
-  'quick.create': 'Create', 'issue.where': 'Group or chat', 'compose.multi': 'Chat with several people',
+  'quick.create': 'Create', 'issue.where': 'Group or chat', 'compose.multi': 'Chat with several people', 'compose.tip': 'Tap one or more people. 💬 opens their direct chat.', 'compose.addMore': 'Add someone else…', 'compose.openWith': 'Open chat with {name}',
   'compose.multiHint': 'Pick 2 or more people. They can be on your team or at other companies.', 'compose.recent': 'Recent',
   'compose.search': 'Search a person, company or group', 'search.people': 'People', 'search.groups': 'Groups', 'search.chats': 'Chats',
   'search.opensChat': 'Opens the chat', 'search.none': 'Nothing matches “{q}”.', 'common.clear': 'Clear', 'grp.foldMenu': 'Collapse and expand',

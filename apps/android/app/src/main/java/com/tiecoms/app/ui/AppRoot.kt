@@ -69,6 +69,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.ui.platform.testTag
 import com.tiecoms.app.core.DeepLinks
 import com.tiecoms.app.R
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.statusBars
 import com.tiecoms.app.container
 import com.tiecoms.app.core.DeepLink
 import com.tiecoms.app.core.SessionStatus
@@ -91,18 +93,29 @@ fun AppRoot() {
         // En debug las etiquetas de prueba se exponen como resource-id (UiAutomator del test del splash).
         val rootMod = if (com.tiecoms.app.BuildConfig.DEBUG) Modifier.semantics { testTagsAsResourceId = true } else Modifier
         Surface(Modifier.fillMaxSize().then(rootMod).dismissKeyboardOnOutsideInteraction(), color = MaterialTheme.colorScheme.background) {
+            // Actualización disponible (GET /app-version): franja fija arriba que empuja la app, o pantalla que bloquea.
+            val latest by container.appVersion.collectAsStateWithLifecycle()
+            val update = com.tiecoms.app.core.AppUpdate.evaluate(com.tiecoms.app.BuildConfig.VERSION_CODE, latest)
             Box(Modifier.fillMaxSize()) {
-                when (state.status) {
-                    SessionStatus.LOADING -> Splash()
-                    SessionStatus.UNREACHABLE -> Unreachable()
-                    SessionStatus.ANONYMOUS -> AuthNav()
-                    SessionStatus.READY -> TaskDialogsHost { MainNav() }
+                Column(Modifier.fillMaxSize()) {
+                    if (update is com.tiecoms.app.core.AppUpdate.Status.Available) UpdateBanner(update)
+                    // Con la franja, la barra de estado ya está ocupada: las pantallas no vuelven a sumarla.
+                    Box(Modifier.weight(1f).fillMaxWidth().then(if (update is com.tiecoms.app.core.AppUpdate.Status.Available)
+                        Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier)) {
+                        when (state.status) {
+                            SessionStatus.LOADING -> Splash()
+                            SessionStatus.UNREACHABLE -> Unreachable()
+                            SessionStatus.ANONYMOUS -> AuthNav()
+                            SessionStatus.READY -> TaskDialogsHost { MainNav() }
+                        }
+                    }
                 }
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 72.dp))
                 // Splash animado sobre la app: la app carga debajo y aparece cuando el splash se aleja.
                 splash?.let { mode ->
                     SplashOverlay(mode, ready = state.status != SessionStatus.LOADING) { container.splashMode.value = null }
                 }
+                if (update is com.tiecoms.app.core.AppUpdate.Status.Required) UpdateRequiredScreen(update)
             }
         }
     }

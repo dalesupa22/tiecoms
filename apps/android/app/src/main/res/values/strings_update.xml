@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.7 (26): pinned "Update available" notice (GET /app-version). -->
+<resources>
+    <string name="update_available">Update available</string>
+    <string name="update_action">Update</string>
+    <string name="update_required">This version no longer works. Update chaggu to continue</string>
+</resources>

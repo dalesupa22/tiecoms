@@ -127,6 +127,28 @@ class AppContainer(private val app: Application) {
     /** Imágenes remotas (fotos y miniaturas públicas) con caché en memoria y en disco. */
     val images by lazy { com.tiecoms.app.platform.ImageLoader(app, okHttp) }
 
+    /** Última versión publicada (GET /app-version). null = aún no se sabe o falló la red: no se avisa nada. */
+    val appVersion = MutableStateFlow<com.tiecoms.app.core.AppVersionDTO?>(null)
+    private var appVersionJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Pregunta si hay una versión nueva: al abrir la app y cada vez que vuelve al frente, una sola petición a la vez
+     * (fuera del hilo principal). Si falla, se conserva lo que se sabía y se reintenta en la siguiente vuelta al frente.
+     */
+    fun checkAppVersion() {
+        if (appVersionJob?.isActive == true) return
+        appVersionJob = scope.launch {
+            val v = withContextIO {
+                runCatching {
+                    val r = client.value.http.exec("GET", com.tiecoms.app.core.AppUpdate.path(java.util.Locale.getDefault().language))
+                    if (r.ok) com.tiecoms.app.core.TcJson.decodeFromString(com.tiecoms.app.core.AppVersionDTO.serializer(), r.body) else null
+                }.getOrNull()
+            }
+            if (v != null) appVersion.value = v
+        }
+    }
+    private suspend fun <T> withContextIO(block: suspend () -> T): T = kotlinx.coroutines.withContext(Dispatchers.IO) { block() }
+
     fun init() {
         // Títulos de chats grupales sin nombre, en el idioma del teléfono (código puro de core/Names).
         Names.labels = Names.Labels(app.getString(R.string.chat_group_chat), app.getString(R.string.chat_and_more), app.getString(R.string.side_default_name))
@@ -162,6 +184,8 @@ class AppContainer(private val app: Application) {
         }
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
+                // Al abrir y al volver al frente, también sin sesión (login): ¿hay una versión nueva?
+                checkAppVersion()
                 client.value.wake()
                 retryPushRegistration()
             }

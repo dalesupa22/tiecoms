@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.6.7 (26): aviso fijo de «Actualización disponible» (GET /app-version). -->
+<resources>
+    <string name="update_available">Actualización disponible</string>
+    <string name="update_action">Actualizar</string>
+    <string name="update_required">Esta versión ya no funciona. Actualiza chaggu para seguir</string>
+</resources>

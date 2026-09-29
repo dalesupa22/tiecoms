@@ -671,7 +671,8 @@ export async function getSharedMany(userId: string, ids: string[]) {
        JOIN conversation_memberships cm ON cm.conversation_id = e.conversation_id AND cm.user_id = $2 AND cm.removed_at IS NULL
        LEFT JOIN messages m ON m.id = e.message_id
       WHERE e.id = ANY($1::uuid[]) AND (m.seq IS NULL OR m.seq > cm.history_from_seq)`, [ids, userId]);
-  return { emails: await loadMany(pool, rows.map((r) => r.id), userId) };
+  const ok = new Set(rows.map((r) => r.id as string));
+  return { emails: await loadMany(pool, ids.filter((id) => ok.has(id)), userId) };
 }
 /** El correo tal como está en el buzón (con historial citado y firma), en vivo y sin guardarlo. */
 export async function original(userId: string, id: string) {

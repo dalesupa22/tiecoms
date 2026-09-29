@@ -157,6 +157,8 @@ fun CallBanner(conversationId: String, data: BootstrapDTO) {
     val mine by container.calls.view.collectAsStateWithLifecycle()
     val call = st.calls[conversationId]
     if (!data.callsEnabled || call == null || mine?.call?.id == call.id) return
+    // Acabo de colgar y el servidor todavía no confirmó: solo quedaba yo dentro, no hay a qué unirse.
+    if (call.activeUserIds.all { it == data.me.id }) return
     val launcher = rememberCallLauncher()
     val names = call.activeUserIds.map { firstName(data, it) }.filter { it.isNotEmpty() }.joinToString(", ")
     Surface(color = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.fillMaxWidth().testTag("callBanner")) {

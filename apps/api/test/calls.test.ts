@@ -155,4 +155,21 @@ describe('llamadas', () => {
     const solo = (await post('/chats', ana.token, { userIds: [extra.id], name: 'Sin Beto' })).json.id;
     if (solo) expect((await post(`/calls/${callId}/share`, beto.token, { conversationId: solo })).status).toBe(404);
   });
+
+  it('sonidos: el de un chat y los predeterminados llegan en el bootstrap', async () => {
+    expect((await call(`/conversations/${chatId}/prefs`, { method: 'PUT', token: ana.token, body: { sound: 'marimba' } })).status).toBe(200);
+    expect((await call(`/conversations/${chatId}/prefs`, { method: 'PUT', token: ana.token, body: { sound: 'trompeta' } })).status).toBe(400);
+    expect((await call('/me/sounds', { method: 'PUT', token: ana.token, body: { messageSound: 'gota', ringtone: 'suave' } })).json).toEqual({ messageSound: 'gota', ringtone: 'suave' });
+    const b = (await call('/bootstrap', { token: ana.token })).json;
+    expect(b.conversations.find((c: any) => c.id === chatId).sound).toBe('marimba');
+    expect([b.me.messageSound, b.me.ringtone]).toEqual(['gota', 'suave']);
+    // Volver al predeterminado.
+    await call(`/conversations/${chatId}/prefs`, { method: 'PUT', token: ana.token, body: { sound: null } });
+    const b2 = (await call('/bootstrap', { token: ana.token })).json;
+    expect(b2.conversations.find((c: any) => c.id === chatId).sound).toBeUndefined();
+    // Silenciar no borra el sonido elegido (y al revés).
+    await call(`/conversations/${chatId}/prefs`, { method: 'PUT', token: beto.token, body: { sound: 'tambor' } });
+    await call(`/conversations/${chatId}/prefs`, { method: 'PUT', token: beto.token, body: { pinned: true } });
+    expect((await call('/bootstrap', { token: beto.token })).json.conversations.find((c: any) => c.id === chatId).sound).toBe('tambor');
+  });
 });

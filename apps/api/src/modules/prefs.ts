@@ -5,20 +5,34 @@ import { enqueueOutbox, pool, tx } from '../db.ts';
 import { badRequest } from '../errors.ts';
 
 /** Fijar y silenciar son preferencias personales: solo cambian la vista de quien las pone. */
-export async function setConversationPrefs(userId: string, conversationId: string, input: { pinned?: boolean; mutedUntil?: string | null; linkPreviews?: 'large' | 'compact' | 'none' }) {
+export async function setConversationPrefs(userId: string, conversationId: string, input: { pinned?: boolean; mutedUntil?: string | null; linkPreviews?: 'large' | 'compact' | 'none'; sound?: string | null }) {
   return tx(async (c) => {
     await conversationAccess(c, userId, conversationId, 'read');
     await c.query(
-      `INSERT INTO conversation_prefs (user_id, conversation_id, pinned_at, muted_until, link_previews) VALUES ($1,$2,$3,$4,$7)
+      `INSERT INTO conversation_prefs (user_id, conversation_id, pinned_at, muted_until, link_previews, sound) VALUES ($1,$2,$3,$4,$7,$8)
        ON CONFLICT (user_id, conversation_id) DO UPDATE SET
          pinned_at = CASE WHEN $5 THEN EXCLUDED.pinned_at ELSE conversation_prefs.pinned_at END,
          muted_until = CASE WHEN $6 THEN EXCLUDED.muted_until ELSE conversation_prefs.muted_until END,
          link_previews = COALESCE(EXCLUDED.link_previews, conversation_prefs.link_previews),
+         sound = CASE WHEN $9 THEN EXCLUDED.sound ELSE conversation_prefs.sound END,
          updated_at = now()`,
-      [userId, conversationId, input.pinned ? new Date() : null, input.mutedUntil ?? null, input.pinned !== undefined, input.mutedUntil !== undefined, input.linkPreviews ?? null],
+      [userId, conversationId, input.pinned ? new Date() : null, input.mutedUntil ?? null, input.pinned !== undefined, input.mutedUntil !== undefined, input.linkPreviews ?? null, input.sound ?? null, input.sound !== undefined],
     );
     await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'prefs.updated', conversationId } });
     return { ok: true };
+  });
+}
+
+/** Sonido predeterminado de los chats y tono de llamada de la persona (en todos sus dispositivos). */
+export async function setSounds(userId: string, input: { messageSound?: string | null; ringtone?: string | null }) {
+  return tx(async (c) => {
+    const { rows } = await c.query(
+      `UPDATE users SET message_sound = CASE WHEN $2 THEN $3 ELSE message_sound END, ringtone = CASE WHEN $4 THEN $5 ELSE ringtone END
+        WHERE id = $1 RETURNING message_sound, ringtone`,
+      [userId, input.messageSound !== undefined, input.messageSound ?? null, input.ringtone !== undefined, input.ringtone ?? null],
+    );
+    await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'prefs.updated' } });
+    return { messageSound: rows[0].message_sound, ringtone: rows[0].ringtone };
   });
 }
 

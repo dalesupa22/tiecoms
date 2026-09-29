@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
-import type { BootstrapDTO, ConversationDTO, MessageDTO, PersonDTO, WorkspaceDTO } from '@tiecoms/contracts';
+import { MESSAGE_SOUNDS, type BootstrapDTO, type ConversationDTO, type MessageDTO, type PersonDTO, type SoundChoice, type WorkspaceDTO } from '@tiecoms/contracts';
 import { client } from './app-client.ts';
 import { errorText, locale, t } from './i18n.ts';
 import { copyText, toast, type MenuItem } from './menu.tsx';
@@ -8,6 +8,7 @@ import { Modal, conversationTitle, personById } from './ui.tsx';
 import { previewModeMenu } from './screens/Links.tsx';
 import { SleepDialog, sleepSummary } from './screens/Sleep.tsx';
 import { MUTE_FOREVER, activeUntil, isForever, tomorrowAt8, untilText } from './silence.ts';
+import { DEFAULT_SOUND, playMessageSound } from './sound.ts';
 
 // ---------- Diálogos globales (se pueden abrir desde cualquier menú) ----------
 let dialog: ((close: () => void) => ReactNode) | null = null;
@@ -157,6 +158,30 @@ export function muteOptions(conv: ConversationDTO): MenuItem[] {
 }
 export const unmute = (conv: ConversationDTO) => client.setConversationPrefs(conv.id, { mutedUntil: null }).then(() => toast(t('toast.unmuted'))).catch((e) => toast(errorText(e)));
 
+/** Submenú «Sonido» de un chat: Predeterminado, los 10 sonidos (suenan al elegirlos) y Sin sonido. */
+export function soundMenu(conv: ConversationDTO): MenuItem {
+  const cur = conv.sound ?? null;
+  const pick = (v: SoundChoice | null) => {
+    if (v && v !== 'none') playMessageSound(v, false, true);
+    void client.setConversationPrefs(conv.id, { sound: v }).then(() => toast(t('sound.set', { name: soundName(v) }))).catch((e) => toast(errorText(e)));
+  };
+  return {
+    label: t('sound.chat'), icon: '🎵', hint: soundName(cur),
+    items: [
+      { label: `${cur === null ? '✓ ' : ''}${t('sound.default')}`, onSelect: () => pick(null) },
+      { divider: true },
+      ...MESSAGE_SOUNDS.map((x) => ({ label: `${cur === x ? '✓ ' : ''}${soundName(x)}`, onSelect: () => pick(x) })),
+      { divider: true },
+      { label: `${cur === 'none' ? '✓ ' : ''}${t('sound.none')}`, onSelect: () => pick('none') },
+    ],
+  };
+}
+/** «Pop», «Campana», «Predeterminado (Pop)», «Sin sonido»… */
+export function soundName(v: SoundChoice | null | undefined): string {
+  if (v == null) { const def = client.getState().data?.me.messageSound ?? DEFAULT_SOUND; return `${t('sound.default')} (${soundName(def)})`; }
+  return v === 'none' ? t('sound.none') : t(`sound.n.${v}` as any);
+}
+
 export function muteMenu(conv: ConversationDTO): MenuItem {
   if (activeUntil(conv.mutedUntil)) return { label: t('menu.unmute'), icon: '🔔', hint: mutedText(conv) ?? undefined, onSelect: () => void unmute(conv) };
   return { label: t('menu.mute'), icon: '🔕', items: muteOptions(conv) };
@@ -228,6 +253,7 @@ export function conversationMenu(conv: ConversationDTO, extra: { onNewMeeting?: 
       ? { label: t('menu.markRead'), icon: '✓', onSelect: () => void client.markTreeRead(conv.id).then(() => toast(t('toast.markedRead'))).catch((e) => toast(errorText(e))) }
       : { label: t('menu.markUnreadConv'), icon: '●', disabled: conv.lastMessageSeq <= conv.historyFromSeq, onSelect: () => void client.markUnread(conv.id, conv.lastMessageSeq).then(() => toast(t('toast.markedUnread'))).catch((e) => toast(errorText(e))) },
     muteMenu(conv),
+    soundMenu(conv),
     previewModeMenu(conv),
     remindMenu(conv),
     ...(extra.onNewMeeting && conv.canPost ? [{ label: t('menu.meeting'), icon: '📅', onSelect: extra.onNewMeeting }] : []),

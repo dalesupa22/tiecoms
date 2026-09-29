@@ -17,7 +17,8 @@ import { TEXT_SIZES, setTextSize, useTextSize } from '../text-size.ts';
 import { askNotifications, conversationMenu, dndMenu, dndText, mutedText, openDialog, personMenu } from '../actions.tsx';
 import { menuProps, openMenuAt, toast } from '../menu.tsx';
 import { isMuted } from '../home-order.ts';
-import { setSoundEnabled, soundEnabled, subscribeSound } from '../sound.ts';
+import { DEFAULT_RINGTONE, DEFAULT_SOUND, playMessageSound, previewRingtone, setSoundEnabled, soundEnabled, subscribeSound } from '../sound.ts';
+import { MESSAGE_SOUNDS, RINGTONES } from '@tiecoms/contracts';
 import { SignOutButton, groupWorkspaces } from './Shell.tsx';
 import { JoinWithCodeDialog, openCreateGroup } from './Groups.tsx';
 
@@ -435,8 +436,38 @@ function SilenceSettings() {
         <input type="checkbox" checked={sound} onChange={(e) => setSoundEnabled(e.target.checked)} />
         <span className="grow"><b>{t('sound.title')}</b><span className="small muted" style={{ display: 'block' }}>{t('sound.hint')}</span></span>
       </label>
+      <SoundDefaults />
     </>
   );
+}
+
+/** Sonido predeterminado de los chats y tono de llamada (docs/SONIDOS.md); cada chat puede tener el suyo. */
+function SoundDefaults() {
+  const me = useClient((s) => s.data?.me);
+  const msg = me?.messageSound ?? null;
+  const ring = me?.ringtone ?? null;
+  const save = (p: Parameters<typeof client.setSounds>[0]) => void client.setSounds(p).catch((e) => toast(errorText(e)));
+  const at = (el: HTMLElement) => { const r = el.getBoundingClientRect(); return [r.left, r.bottom + 4] as const; };
+  const msgMenu = (el: HTMLElement) => openMenuAt(...at(el), [
+    ...MESSAGE_SOUNDS.map((x) => ({ label: `${(msg ?? DEFAULT_SOUND) === x ? '✓ ' : ''}${t(`sound.n.${x}` as any)}`, onSelect: () => { playMessageSound(x, false, true); save({ messageSound: x }); } })),
+    { divider: true },
+    { label: `${msg === 'none' ? '✓ ' : ''}${t('sound.none')}`, onSelect: () => save({ messageSound: 'none' }) },
+  ]);
+  const ringMenu = (el: HTMLElement) => openMenuAt(...at(el), RINGTONES.map((x) => ({
+    label: `${(ring ?? DEFAULT_RINGTONE) === x ? '✓ ' : ''}${t(`ring.n.${x}` as any)}`, onSelect: () => { previewRingtone(x); save({ ringtone: x }); },
+  })));
+  return <>
+    <button className="card conv-card" style={{ marginBottom: 12 }} onClick={(e) => msgMenu(e.currentTarget)}>
+      <span style={{ fontSize: 22 }} aria-hidden>🎵</span>
+      <span className="grow"><b>{t('sound.defaultTitle')}</b><span className="small muted" style={{ display: 'block' }}>{msg === 'none' ? t('sound.none') : t(`sound.n.${msg ?? DEFAULT_SOUND}` as any)} · {t('sound.defaultHint')}</span></span>
+      <span className="muted">›</span>
+    </button>
+    <button className="card conv-card" style={{ marginBottom: 12 }} onClick={(e) => ringMenu(e.currentTarget)}>
+      <span style={{ fontSize: 22 }} aria-hidden>📞</span>
+      <span className="grow"><b>{t('ring.title')}</b><span className="small muted" style={{ display: 'block' }}>{t(`ring.n.${ring ?? DEFAULT_RINGTONE}` as any)}</span></span>
+      <span className="muted">›</span>
+    </button>
+  </>;
 }
 
 function NotificationToggle() {

@@ -6,7 +6,7 @@ import { ForwardToChatsDialog, Linkify, StackedAvatars } from './Chats.tsx';
 import { QUICK_REACTIONS } from '@tiecoms/contracts';
 import { ReactionBar, isJumbo, openEmojiPicker, toggleReaction, useEmojiAutocomplete } from './Reactions.tsx';
 import { LinkGroup, LinksPane, MessageLinks, isLinkOnly } from './Links.tsx';
-import { conversationMenu, forwardMenu, messageLink, muteMenu, muteOptions, mutedText, openDialog, remindMenu, unmute, useExpiry } from '../actions.tsx';
+import { conversationMenu, forwardMenu, messageLink, muteMenu, muteOptions, mutedText, openDialog, remindMenu, soundMenu, soundName, unmute, useExpiry } from '../actions.tsx';
 import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate, queryParam } from '../router.ts';
@@ -753,6 +753,15 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
             <button className="switch" role="switch" aria-checked={muted} aria-label={t('mute.switch')}
               onClick={(e) => { if (muted) void unmute(conv); else openMuteMenu(e.currentTarget); }} />
           </div>
+          {/* Sonido de este chat (docs/SONIDOS.md): el menú lo cambia y lo hace sonar. */}
+          <button className="card mute-row" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, soundMenu(conv).items!); }}>
+            <span aria-hidden style={{ fontSize: 18 }}>🎵</span>
+            <span className="grow" style={{ textAlign: 'left' }}>
+              <b style={{ display: 'block' }}>{t('sound.chat')}</b>
+              <span className="small muted" style={{ display: 'block' }}>{soundName(conv.sound)}</span>
+            </span>
+            <span className="muted">›</span>
+          </button>
           {canWork && <ConversationAgenda conv={conv} />}
           {canWork && (
             <div>

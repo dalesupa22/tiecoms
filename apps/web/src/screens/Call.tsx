@@ -10,6 +10,7 @@ import { errorText, locale, t } from '../i18n.ts';
 import { openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate } from '../router.ts';
 import { openDialog } from '../actions.tsx';
+import { startRingtone, stopRingtone } from '../sound.ts';
 import { Avatar, ConvAvatar, Modal, conversationTitle, personById } from '../ui.tsx';
 
 const useCallView = () => useSyncExternalStore((l) => subscribeCall(() => l()), currentCall);
@@ -51,11 +52,12 @@ export function showIncomingCall(call: CallDTO, callerName: string, title: strin
   if (currentCall()?.call.id === call.id) return;
   ringing = { call, callerName, title };
   ringListeners.forEach((l) => l());
+  startRingtone(client.getState().data?.me.ringtone);
   if (ringTimer) clearTimeout(ringTimer);
   // Deja de sonar a los 45 s si nadie contesta.
   ringTimer = setTimeout(dismissRing, 45_000);
 }
-function dismissRing() { ringing = null; ringListeners.forEach((l) => l()); }
+function dismissRing() { stopRingtone(); ringing = null; ringListeners.forEach((l) => l()); }
 
 export function IncomingCallHost() {
   const r = useSyncExternalStore((l) => { ringListeners.add(l); return () => ringListeners.delete(l); }, () => ringing);

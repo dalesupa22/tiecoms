@@ -7,7 +7,7 @@ import { conversationTitle, personById } from './ui.tsx';
 import { placeWorkspace } from './screens/Groups.tsx';
 import type { BootstrapDTO, ConversationDTO } from '@tiecoms/contracts';
 import { activeUntil, mayAlert, shouldSound } from './silence.ts';
-import { playPop, soundEnabled } from './sound.ts';
+import { playMessageSound, soundEnabled } from './sound.ts';
 import { showIncomingCall } from './screens/Call.tsx';
 
 /** En el chat abierto, ¿la vista está arriba, lejos del final (más de una pantalla)? */
@@ -44,7 +44,7 @@ export function handleNotice(n: ClientNotice) {
       dndUntil: d.me.dndUntil, soundOn: soundEnabled(), hidden, current, farFromEnd: current && !hidden && farFromEnd(n.conversationId),
     };
     if (!mayAlert(check)) return;
-    if (shouldSound(check)) playPop(!!n.mentioned);
+    if (shouldSound(check)) playMessageSound(conv?.sound ?? d.me.messageSound, !!n.mentioned);
     const who = personById(d, n.message.authorId)?.name ?? '';
     if (hidden && canNotify) {
       const group = conv ? groupNoticeTitle(d, conv) : null;
@@ -81,8 +81,8 @@ export function handleNotice(n: ClientNotice) {
   }
   if (n.kind === 'callRinging') {
     // El aviso en pantalla siempre (el cliente ya filtra «No molestar»); notificación del sistema si la pestaña está oculta.
+    // Suena el tono de llamada (distinto de los mensajes) hasta contestar, rechazar o que termine.
     showIncomingCall(n.call, n.callerName, n.conversationTitle);
-    playPop(true);
     if (document.visibilityState !== 'visible' && canNotify) {
       const note = new Notification(`${n.call.kind === 'video' ? '🎥' : '📞'} ${t('call.incomingFrom', { name: n.callerName })}`, { body: n.conversationTitle ?? '', tag: `call-${n.call.id}`, requireInteraction: true, icon: `${BASE}/icon-192.png` });
       note.onclick = () => { window.focus(); navigate(`/c/${n.call.conversationId}`); note.close(); };

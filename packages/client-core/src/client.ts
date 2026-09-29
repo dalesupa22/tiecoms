@@ -5,7 +5,7 @@ import {
   type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type TopicColor, type TopicDTO, type UserDTO, normalizeEmoji,
-  type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentInput,
+  type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentInput,
   type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO, type IntegrationDTO, type IntegrationSecretDTO,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
@@ -545,6 +545,11 @@ export class TieComsClient {
     return this.request<{ saved: number }>(`/calls/${callId}/transcript`, { method: 'POST', json: { segments } });
   }
   callTranscript(callId: string) { return this.request<CallTranscriptDTO>(`/calls/${callId}/transcript`); }
+  /** Sonido predeterminado y tono de llamada (optimista). */
+  async setSounds(p: { messageSound?: SoundChoice | null; ringtone?: Ringtone | null }) {
+    this.patchMe(p);
+    await this.request('/me/sounds', { method: 'PUT', json: p });
+  }
   callHistory(before?: string) { return this.request<{ calls: CallHistoryItemDTO[]; hasMore: boolean }>(`/calls?limit=30${before ? `&before=${encodeURIComponent(before)}` : ''}`); }
   shareCall(callId: string, conversationId: string, what: 'summary' | 'transcript' | 'both') {
     return this.request<{ message: MessageDTO }>(`/calls/${callId}/share`, { method: 'POST', json: { conversationId, what } });
@@ -792,10 +797,11 @@ export class TieComsClient {
   }
 
   // ---------- Preferencias, fijados, no leído, edición ----------
-  async setConversationPrefs(id: string, prefs: { pinned?: boolean; mutedUntil?: string | null }) {
+  async setConversationPrefs(id: string, prefs: { pinned?: boolean; mutedUntil?: string | null; sound?: SoundChoice | null }) {
     const patch: Partial<ConversationDTO> = {};
     if (prefs.pinned !== undefined) patch.pinnedAt = prefs.pinned ? new Date().toISOString() : null;
     if (prefs.mutedUntil !== undefined) patch.mutedUntil = prefs.mutedUntil;
+    if (prefs.sound !== undefined) patch.sound = prefs.sound;
     this.patchConversationMeta(id, patch); // optimista; el servidor confirma
     await this.request(`/conversations/${id}/prefs`, { method: 'PUT', json: prefs });
   }

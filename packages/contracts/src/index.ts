@@ -220,6 +220,9 @@ export interface UserDTO {
    * Ausente = servidor anterior a «No molestar».
    */
   dndUntil?: string | null;
+  /** Sonido predeterminado de los chats y tono de llamada (null = los de fábrica: pop y clasico). */
+  messageSound?: SoundChoice | null;
+  ringtone?: Ringtone | null;
   /** Solo en bootstrap.me: mi modo sueño (horario de descanso diario). Ausente = servidor anterior. */
   sleep?: SleepDTO;
 }
@@ -347,6 +350,8 @@ export interface ConversationDTO {
   unreadMentions?: number;
   /** Preferencia personal de vista previa de enlaces en esta conversación (ausente = 'large'). */
   linkPreviews?: LinkPreviewMode;
+  /** Sonido de este chat para mí (ausente o null = mi predeterminado). */
+  sound?: SoundChoice | null;
   /** Enlaces compartidos en la conversación (visibles para mí). Clientes viejos: ausente. */
   linkCount?: number;
 }
@@ -1154,7 +1159,19 @@ export const SendMessageInput = z.object({
 }).refine((v) => v.body.length > 0 || !!v.attachmentIds?.length || !!v.forwardAttachmentIds?.length, { message: 'body_or_attachments', path: ['body'] })
   .refine((v) => (v.attachmentIds?.length ?? 0) + (v.forwardAttachmentIds?.length ?? 0) <= 10, { message: 'max_10_attachments', path: ['attachmentIds'] });
 export const EditMessageInput = z.object({ body: z.string().trim().min(1).max(8000), mentions: z.array(MentionInput).max(50).optional() });
-export const ConversationPrefsInput = z.object({ pinned: z.boolean().optional(), mutedUntil: z.iso.datetime().nullable().optional(), linkPreviews: z.enum(['large', 'compact', 'none']).optional() });
+// ---------- Sonidos (docs/SONIDOS.md) ----------
+/** Sonidos de mensaje: se generan en cada cliente (web con WebAudio; móvil con archivos del mismo nombre). */
+export const MESSAGE_SOUNDS = ['pop', 'gota', 'campana', 'marimba', 'burbuja', 'cristal', 'acorde', 'silbido', 'tambor', 'brisa'] as const;
+export type MessageSound = (typeof MESSAGE_SOUNDS)[number];
+/** 'none' = sin sonido. */
+export const SoundChoice = z.enum([...MESSAGE_SOUNDS, 'none']);
+export type SoundChoice = z.infer<typeof SoundChoice>;
+export const RINGTONES = ['clasico', 'suave', 'marimba'] as const;
+export type Ringtone = (typeof RINGTONES)[number];
+/** PUT /me/sounds: el sonido predeterminado de los chats y el tono de llamada (null = el de fábrica). */
+export const SoundsInput = z.object({ messageSound: SoundChoice.nullable().optional(), ringtone: z.enum(RINGTONES).nullable().optional() });
+/** sound: el de este chat (null = el predeterminado de la persona). */
+export const ConversationPrefsInput = z.object({ pinned: z.boolean().optional(), mutedUntil: z.iso.datetime().nullable().optional(), linkPreviews: z.enum(['large', 'compact', 'none']).optional(), sound: SoundChoice.nullable().optional() });
 export const WorkspacePrefsInput = z.object({ pinned: z.boolean() });
 /** Constante para «Hasta que lo reactive» (chat silenciado o «No molestar»). */
 export const MUTE_FOREVER = '9999-12-31T00:00:00Z';

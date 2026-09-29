@@ -468,10 +468,13 @@ export function GgActionsRow({ messageId, conversationId, p }: { messageId: stri
   );
 }
 
+/** Arreglo vacío fijo: un `?? []` dentro del selector de useClient es nuevo en cada render y React entra en bucle (pantalla en blanco). */
+const NO_MESSAGES: readonly never[] = [];
+
 /** «gg está pensando…»: después de escribirle, mientras no conteste (máx. 90 s). */
 export function GgThinking({ conversationId, inDm }: { conversationId: string; inDm: boolean }) {
   const d = useClient((s) => s.data)!;
-  const msgs = useClient((s) => s.conversations[conversationId]?.messages ?? []);
+  const msgs = useClient((s) => s.conversations[conversationId]?.messages ?? NO_MESSAGES);
   const [, tick] = useState(0);
   useEffect(() => { const h = setInterval(() => tick((x) => x + 1), 5000); return () => clearInterval(h); }, []);
   let lastAsk = -1, lastGg = -1;

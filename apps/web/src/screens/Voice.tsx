@@ -210,7 +210,15 @@ export function VoiceNote({ a, onCreateIssue }: { a: AttachmentDTO; onCreateIssu
       }
       document.querySelectorAll<HTMLElement>('.voice-note.is-playing').forEach((n) => { if (n !== root.current) n.dispatchEvent(new Event('voice:pause')); });
       audio.current.playbackRate = speed;
-      await audio.current.play();
+      // WebKit (Safari y la app de escritorio en Mac) a veces no reproduce audio desde blob: («The element has no
+      // supported sources»). Si pasa, se reintenta una vez con el mismo audio como data: URL.
+      try { await audio.current.play(); }
+      catch (e: any) {
+        if (e?.name !== 'NotSupportedError' || !audio.current.src.startsWith('blob:')) throw e;
+        audio.current.src = await asDataUrl(audio.current.src);
+        audio.current.playbackRate = speed;
+        await audio.current.play();
+      }
       if (!wasHeard) { markHeard(a.id); setWasHeard(true); }
     } catch (e) { toast(errorText(e) || t('att.unavailable')); }
   }
@@ -263,4 +271,11 @@ export function VoiceNote({ a, onCreateIssue }: { a: AttachmentDTO; onCreateIssu
       )}
     </div>
   );
+}
+
+/** El mismo audio como data: URL (respaldo para WebKit, que a veces no reproduce blob:). */
+async function asDataUrl(objectUrl: string): Promise<string> {
+  const blob = await (await fetch(objectUrl)).blob();
+  const typed = blob.type ? blob : new Blob([blob], { type: 'audio/mp4' });
+  return new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(String(r.result)); r.onerror = () => fail(r.error); r.readAsDataURL(typed); });
 }

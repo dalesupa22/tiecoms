@@ -1345,8 +1345,15 @@ export interface ChatSearchResultDTO {
   /** Coincidencias dentro de snippet: [inicio, largo] en unidades UTF-16. */
   matches: [number, number][];
   /** Dónde coincidió. */
-  field?: 'body' | 'attachment' | 'transcript';
+  field?: 'body' | 'attachment' | 'transcript' | 'mail';
 }
+/** GET /search/messages: buscar en todos mis chats (más recientes primero). before = createdAt ISO del último recibido. */
+export const GlobalSearchQuery = z.object({
+  q: z.string().trim().min(2).max(120),
+  before: z.iso.datetime({ offset: true }).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+export interface GlobalSearchPageDTO { results: ChatSearchResultDTO[]; hasMore: boolean }
 export interface ChatSearchPageDTO { results: ChatSearchResultDTO[]; hasMore: boolean }
 
 // ---------- Mensajes de sistema nuevos (tanda 1.7): body = JSON.stringify({ k, ... }) ----------

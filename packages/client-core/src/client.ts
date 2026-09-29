@@ -1103,6 +1103,10 @@ export class TieComsClient {
 
   // ---------- Tanda 1.7: buscar en el chat, una sola vista, comentarios de eventos ----------
   /** Busca dentro de una conversación (q ≥ 2 caracteres; admite from:Nombre). before = seq del último resultado. */
+  /** Buscar en todos mis chats (mensajes, adjuntos, notas de voz, correos y WhatsApps compartidos). */
+  searchAll(q: string, before?: string, limit = 20, signal?: AbortSignal) {
+    return this.request<import('@tiecoms/contracts').GlobalSearchPageDTO>(`/search/messages?q=${encodeURIComponent(q)}&limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`, { signal });
+  }
   searchChat(conversationId: string, q: string, before?: number, limit = 30, signal?: AbortSignal) {
     return this.request<ChatSearchPageDTO>(`/conversations/${conversationId}/search?q=${encodeURIComponent(q)}&limit=${limit}${before ? `&before=${before}` : ''}`, { signal });
   }

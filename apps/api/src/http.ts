@@ -11,7 +11,7 @@ import {
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
-  ChatSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput,
+  ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput,
   SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
@@ -52,7 +52,7 @@ import * as links from './modules/links.ts';
 import * as topics from './modules/topics.ts';
 import * as integrations from './modules/integrations.ts';
 import { openViewOnce, fetchOnce } from './modules/view-once.ts';
-import { searchConversation } from './modules/chat-search.ts';
+import { searchAll, searchConversation } from './modules/chat-search.ts';
 import { getObject } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
 import { z } from 'zod';
@@ -424,6 +424,8 @@ export async function buildHttp() {
     // Tanda 1.7: buscar dentro del chat y abrir un mensaje de una sola vista (una vez por persona).
     priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/search', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) =>
       searchConversation(req.userId, z.uuid().parse(req.params.id), ChatSearchQuery.parse(req.query)));
+    // Buscar en todos mis chats (mensajes, adjuntos, notas de voz y correos o WhatsApps compartidos).
+    priv.get('/api/v1/search/messages', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => searchAll(req.userId, GlobalSearchQuery.parse(req.query)));
     priv.post<{ Params: { id: string } }>('/api/v1/messages/:id/open', async (req) => openViewOnce(req.userId, z.uuid().parse(req.params.id)));
     // Bandeja «Menciones»: before = createdAt del último que ya tienes.
     priv.get<{ Querystring: { before?: string; limit?: string } }>('/api/v1/mentions', async (req) => {

@@ -1559,3 +1559,9 @@ mark { background: #f5e3b3; color: inherit; border-radius: 3px; padding: 0 1px; 
 .gg-actions .ai-card { max-width: 520px; }
 .gg-suggest { padding-left: 2px; }
 .gg-thinking { display: flex; align-items: center; gap: 8px; padding: 6px 16px 6px 60px; color: var(--muted); font-size: 13px; }
+/* Buscar en todos los chats: sección «Mensajes» del buscador de la barra. */
+.msg-search { display: flex; flex-direction: column; gap: 2px; padding-bottom: 10px; }
+.msg-search-row { display: flex; flex-direction: column; gap: 2px; text-align: left; border: 0; background: none; padding: 7px 10px; border-radius: 8px; font: inherit; color: inherit; cursor: pointer; min-width: 0; }
+.msg-search-row:hover { background: var(--paper-2); }
+.msg-search-snip { color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.msg-search .link-btn { align-self: flex-start; margin-left: 10px; }

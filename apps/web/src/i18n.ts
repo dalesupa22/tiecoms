@@ -862,6 +862,9 @@ const es = {
   'gg.forOther': 'Para {name}',
   'gg.thinking': 'gg está pensando…',
   'ai.discarded': 'Descartado',
+  'search.messages': 'Mensajes',
+  'search.noMessages': 'Ningún mensaje con eso.',
+  'search.moreMessages': 'Ver más mensajes',
 };
 type Key = keyof typeof es;
 
@@ -1693,6 +1696,9 @@ const en: Record<Key, string> = {
   'gg.forOther': 'For {name}',
   'gg.thinking': 'gg is thinking…',
   'ai.discarded': 'Discarded',
+  'search.messages': 'Messages',
+  'search.noMessages': 'No messages match.',
+  'search.moreMessages': 'More messages',
 };
 const dicts: Record<Lang, Record<Key, string>> = { es, en };
 const STORE_KEY = 'tiecoms:lang';

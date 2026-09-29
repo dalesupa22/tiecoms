@@ -69,6 +69,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   // ?issue=<id>: se abre directo el asunto (desde el árbol de Grupos).
   const [openIssue, setOpenIssue] = useState<string | null>(() => queryParam('issue'));
   const [highlight, setHighlight] = useState<number | null>(null);
+  // Mensajes con tema a los que se saltó desde «Todo» (quedan a la vista aunque «Todo» esconda los temas).
+  const [revealed, setRevealed] = useState<Set<number>>(() => new Set());
   const [replyTo, setReplyTo] = useState<MessageDTO | null>(null);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [showPins, setShowPins] = useState(false);
@@ -79,6 +81,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const [topicFilter, setTopicFilter] = useState<string | null>(null);
   const topicById = useMemo(() => new Map(topics.map((x) => [x.id, x])), [topics]);
   const activeFilter = topicFilter && topicById.get(topicFilter) && !topicById.get(topicFilter)!.archivedAt ? topicFilter : null;
+  const activeTopicIds = useMemo(() => new Set(topics.filter((x) => !x.archivedAt).map((x) => x.id)), [topics]);
+  const hideTopicsInAll = !activeFilter && activeTopicIds.size > 0;
   const [text, setText] = useState(() => { try { return localStorage.getItem(draftKey(id)) ?? ''; } catch { return ''; } });
   const scroller = useRef<HTMLDivElement>(null);
   const [host, setHost] = useState<HTMLDivElement | null>(null);
@@ -151,6 +155,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     void client.ensureMessage(id, seq).then((found) => {
       if (!found) return;
       setHighlight(seq);
+      setRevealed((x) => (x.has(seq) ? x : new Set(x).add(seq)));
       requestAnimationFrame(() => document.getElementById(`msg-${id}-${seq}`)?.scrollIntoView({ block: 'center', behavior: 'instant' }));
       setTimeout(() => setHighlight(null), 2800);
     });
@@ -182,6 +187,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     for (const m of local?.messages ?? []) {
       // Con un tema elegido se ven sus mensajes y las tarjetas de sus tareas.
       if (activeFilter && m.topicId !== activeFilter && !(m.kind === 'system' && issueTopicOf(m) === activeFilter)) continue;
+      // «Todo» con temas activos: lo que no tiene tema, más lo no leído de los temas (docs/TEMAS.md › «Todo»).
+      if (hideTopicsInAll && m.topicId && activeTopicIds.has(m.topicId) && m.seq <= baseRead && !revealed.has(m.seq)) continue;
       const day = new Date(m.createdAt).toDateString();
       if (day !== lastDay) { out.push({ kind: 'day', key: `d${day}`, label: dayLabel(m.createdAt) }); lastDay = day; prev = null; }
       // Bajo la línea «N mensajes nuevos» el primer mensaje vuelve a llevar autor y hora.
@@ -198,12 +205,23 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
       if (at >= 0) out.splice(at, 0, { kind: 'new', key: 'new-line' });
     }
     return groupLinkRuns(out, expandedGroups, highlight, baseRead);
-  }, [local?.messages, pending, expandedGroups, highlight, newLine, activeFilter, activeFilter ? allIssues : null]);
+  }, [local?.messages, pending, expandedGroups, highlight, newLine, activeFilter, activeFilter ? allIssues : null, hideTopicsInAll, activeTopicIds, revealed]);
   const topicCounts = useMemo(() => {
     const n: Record<string, number> = {};
     for (const m of local?.messages ?? []) if (m.topicId && !m.deletedAt) n[m.topicId] = (n[m.topicId] ?? 0) + 1;
     return n;
   }, [local?.messages]);
+  // Sin leer por tema (y sin tema, clave ''), con lo leído en vivo: el número junto a cada banderita.
+  const readNow = Math.max(conv?.lastReadSeq ?? 0, conv?.historyFromSeq ?? 0);
+  const topicUnread = useMemo(() => {
+    const n: Record<string, number> = {};
+    for (const m of local?.messages ?? []) {
+      if (m.seq <= readNow || m.deletedAt || m.kind !== 'text' || m.authorId === d?.me.id) continue;
+      const k = m.topicId && activeTopicIds.has(m.topicId) ? m.topicId : '';
+      n[k] = (n[k] ?? 0) + 1;
+    }
+    return n;
+  }, [local?.messages, readNow, activeTopicIds]);
 
   // Mantiene la vista abajo al llegar mensajes, y la posición al cargar historial antiguo.
   useLayoutEffect(() => {
@@ -233,7 +251,14 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     }
     if (!r && entry.unread > 0) { setPlacementFailed(true); return; }
     placing.current = false;
-    if (r) { justPlaced.current = true; setNewLine(r.seq); return; }
+    if (r) {
+      // Todo lo no leído está en un solo tema: el chat abre en esa banderita.
+      const unreadTopics = new Set(local.messages.filter((m) => m.seq > entry.readFrom && m.kind === 'text' && !m.deletedAt && m.authorId !== d?.me.id)
+        .map((m) => (m.topicId && activeTopicIds.has(m.topicId) ? m.topicId : '')));
+      const only = unreadTopics.size === 1 ? [...unreadTopics][0] : '';
+      if (only) setTopicFilter(only);
+      justPlaced.current = true; setNewLine(r.seq); return;
+    }
     atBottom.current = true;
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -533,7 +558,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)} onLinks={() => setShowLinks(true)}
             onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
         )}
-        {!embedded && <TopicDock conv={conv} list={topics} filter={activeFilter} onFilter={(x) => { setTopicFilter(x); atBottom.current = true; requestAnimationFrame(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }); }} counts={topicCounts} />}
+        {!embedded && <TopicDock conv={conv} list={topics} filter={activeFilter} onFilter={(x) => { setTopicFilter(x); atBottom.current = true; requestAnimationFrame(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }); }} counts={topicCounts} unread={topicUnread} />}
         {!embedded && <DerivedPendingStrip conv={conv} />}
 
         {placementFailed && <div className="error" role="alert">{t('chat.unreadLoadFailed')} <button className="link-btn" disabled={local?.loading} onClick={() => void retryUnreadHistory()}>{t('chat.retryUnread')}</button></div>}

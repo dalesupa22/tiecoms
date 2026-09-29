@@ -8,7 +8,8 @@ import { Modal, personById } from '../ui.tsx';
 
 /**
  * Temas del chat (docs/TEMAS.md): banderitas arriba del chat, con scroll horizontal.
- * Tocar una filtra el chat y lo que escribas sale con ese tema; «Todo» quita el filtro.
+ * Tocar una filtra el chat y lo que escribas sale con ese tema; «Todo» quita el filtro y muestra lo que no tiene tema
+ * más lo no leído de los temas. El número de cada banderita es lo que tiene sin leer.
  * Mantener presionada (o clic derecho) abre renombrar, color, archivar y quitar. Sin límite práctico (TOPIC_LIMIT es un tope técnico).
  */
 const ICONS = ['🌐', '🌱', '💰', '📣', '📈', '🤝', '🎯', '🧾', '⚙️', '📦', '🎓', '⚖️'];
@@ -165,8 +166,10 @@ function ArchivedDialog({ list, onClose }: { list: TopicDTO[]; onClose: () => vo
   );
 }
 
-export function TopicDock({ conv, list, filter, onFilter, counts }: {
+export function TopicDock({ conv, list, filter, onFilter, counts, unread = {} }: {
   conv: ConversationDTO; list: TopicDTO[]; filter: string | null; onFilter: (id: string | null) => void; counts: Record<string, number>;
+  /** Sin leer por tema; '' = sin tema (va en «Todo»). */
+  unread?: Record<string, number>;
 }) {
   const d = useClient((s) => s.data)!;
   const act = activeTopics(list);
@@ -194,12 +197,12 @@ export function TopicDock({ conv, list, filter, onFilter, counts }: {
   if (!act.length && !archived.length && !canEdit) return null;
   return (
     <div ref={dock} className="topic-dock" role="tablist" aria-label={t('topic.bar')}>
-      <button role="tab" aria-selected={!filter} className={`topic-flag c-plain ${!filter ? 'is-on' : ''}`} onClick={() => onFilter(null)}>💬 {t('topic.all')}</button>
+      <button role="tab" aria-selected={!filter} className={`topic-flag c-plain ${!filter ? 'is-on' : ''}`} onClick={() => onFilter(null)}>💬 {t('topic.all')}{unread[''] && act.length > 0 ? <span className="topic-unread" aria-label={t('topic.unreadN', { n: unread['']! })}>{unread['']}</span> : null}</button>
       {act.map((x) => (
         <button key={x.id} role="tab" aria-selected={filter === x.id} className={`topic-flag c-${x.color} ${filter === x.id ? 'is-on' : ''}`}
           title={personById(d, x.createdBy)?.name}
           onClick={() => onFilter(filter === x.id ? null : x.id)} {...(canEdit ? menuProps(() => flagMenu(x)) : {})}>
-          {x.icon} {x.name}{counts[x.id] ? <span className="topic-count">{counts[x.id]}</span> : null}
+          {x.icon} {x.name}{unread[x.id] ? <span className="topic-unread" aria-label={t('topic.unreadN', { n: unread[x.id]! })}>{unread[x.id]}</span> : null}
         </button>
       ))}
       {canEdit && (

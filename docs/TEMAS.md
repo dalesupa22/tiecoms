@@ -16,6 +16,9 @@ Los temas no son hilos ni tareas:
   - Después van los temas activos y «＋ Nuevo».
   - Al final va «Archivados N», si hay alguno.
 - **Tocar una banderita** filtra el chat a ese tema. Lo que se escribe mientras tanto sale con ese tema, y el campo lo indica con «Mensaje en X». Tocar «Todo» o la misma banderita otra vez quita el filtro.
+- **«Todo» con temas activos** (pedido de Danny, 29-sep-2026): se ven los mensajes **sin tema**, más los **no leídos** de cualquier tema, que llegan con su etiqueta. Lo ya leído que tiene tema solo se ve en su banderita, así «Todo» no se llena de ruido. Los mensajes de temas archivados cuentan como sin tema. Si se salta a un mensaje con tema (una mención, un enlace o `?m=`), ese mensaje queda a la vista en «Todo».
+- **El número de cada banderita** es lo que tiene **sin leer**. En «Todo» es lo sin leer que no tiene tema. Sin pendientes, no sale número. Los mensajes propios y los de sistema no cuentan.
+- **Al abrir un chat con no leídos**: si todo lo no leído está en un solo tema, el chat abre filtrado en esa banderita, en el primer no leído y con la línea «N mensajes nuevos». Si está repartido o hay no leídos sin tema, abre en «Todo».
 - **Mantener presionada una banderita** (o clic derecho) abre: Renombrar, Cambiar color, Archivar y Quitar tema.
   - **Archivar** saca la banderita de la fila. Los mensajes conservan la etiqueta en gris y el tema se puede restaurar si hay espacio.
   - **Quitar** borra el tema y deja sus mensajes sin tema. Pide confirmación y no borra ningún mensaje.

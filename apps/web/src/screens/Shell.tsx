@@ -208,7 +208,7 @@ function Sidebar({ route }: { route: Route }) {
   );
 }
 
-/** Barra inferior móvil: 5 pestañas fijas (docs/GRUPOS.md), 6 con las llamadas prendidas. */
+/** Barra inferior móvil: 5 pestañas fijas (docs/GRUPOS.md), 6 con las llamadas prendidas. Solo íconos, salvo «DMs». */
 function MobileTabs({ route }: { route: Route }) {
   const d = useClient((s) => s.data);
   const unreadOf = (f: (c: ConversationDTO) => boolean) => d?.conversations.filter(f).reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0) ?? 0;
@@ -224,8 +224,11 @@ function MobileTabs({ route }: { route: Route }) {
   return (
     <nav className={`tabs ${tabs.length === 6 ? 'n6' : ''}`} aria-label={t('nav.mainNav')}>
       {tabs.map((x) => (
-        <button key={x.name} className={route.name === x.name || (x.name === 'groups' && route.name === 'today') ? 'on' : ''} onClick={() => navigate(x.to)}>
-          {x.ico ? <span className="ico">{x.ico}</span> : <span className="ico">{d ? <MeAvatar size={22} /> : <Avatar person={me} org={null} size={22} />}</span>}{x.label}
+        <button key={x.name} className={route.name === x.name || (x.name === 'groups' && route.name === 'today') ? 'on' : ''} onClick={() => navigate(x.to)}
+          aria-label={x.label} title={x.label}>
+          {x.ico ? <span className="ico">{x.ico}</span> : <span className="ico">{d ? <MeAvatar size={24} /> : <Avatar person={me} org={null} size={24} />}</span>}
+          {/* Solo íconos (pedido de Danny, 29-sep-2026); «DMs» es el único que lleva texto. */}
+          {x.name === 'dms' && <span className="tab-label">{x.label}</span>}
           {x.badge > 0 && <span className="pill">{x.badge}</span>}
         </button>
       ))}

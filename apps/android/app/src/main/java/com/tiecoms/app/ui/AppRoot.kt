@@ -91,6 +91,7 @@ import com.tiecoms.app.core.DeepLinks
 import com.tiecoms.app.R
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import com.tiecoms.app.container
 import com.tiecoms.app.core.DeepLink
 import com.tiecoms.app.core.SessionStatus
@@ -119,8 +120,11 @@ fun AppRoot() {
             Box(Modifier.fillMaxSize()) {
                 Column(Modifier.fillMaxSize()) {
                     if (update is com.tiecoms.app.core.AppUpdate.Status.Available) UpdateBanner(update)
+                    // 1.7.1: «📞 En llamada en tu …» (estoy en la llamada desde otro dispositivo), fija arriba.
+                    val elsewhere = if (state.status == SessionStatus.READY) rememberElsewhereCall() else null
+                    if (elsewhere != null) ElsewhereBanner(elsewhere, if (update is com.tiecoms.app.core.AppUpdate.Status.Available) Modifier else Modifier.windowInsetsPadding(WindowInsets.statusBars))
                     // Con la franja, la barra de estado ya está ocupada: las pantallas no vuelven a sumarla.
-                    Box(Modifier.weight(1f).fillMaxWidth().then(if (update is com.tiecoms.app.core.AppUpdate.Status.Available)
+                    Box(Modifier.weight(1f).fillMaxWidth().then(if (update is com.tiecoms.app.core.AppUpdate.Status.Available || elsewhere != null)
                         Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier)) {
                         when (state.status) {
                             SessionStatus.LOADING -> Splash()

@@ -5,7 +5,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
 /** Versión del contrato que habla esta app (packages/contracts CONTRACT_VERSION). */
-const val CONTRACT_VERSION = "2026-09-29"
+const val CONTRACT_VERSION = "2026-09-29.1"
 const val PLATFORM = "android"
 
 @Serializable
@@ -342,6 +342,8 @@ data class BootstrapDTO(
     val people: List<PersonDTO> = emptyList(),
     /** Funciones prendidas en el servidor (aditivo): `features.calls` muestra 📞/🎥, la franja y la pestaña «Llamadas». */
     val features: FeaturesDTO = FeaturesDTO(),
+    /** 1.7.1: la llamada en la que estoy ahora desde algún dispositivo (franja «En llamada en tu …»). */
+    val myActiveCall: CallDTO? = null,
 ) {
     val callsEnabled: Boolean get() = features.calls
 }

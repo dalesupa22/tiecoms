@@ -106,6 +106,8 @@ sealed interface ClientSignal {
     data class CallCaption(val event: CallCaptionEvent) : ClientSignal
     /** Me están llamando (`call.ringing`), salvo con «No molestar» o modo sueño. */
     data class CallRinging(val call: CallDTO, val callerName: String, val conversationTitle: String?) : ClientSignal
+    /** 1.7.1: contesté o rechacé en otro dispositivo: dejar de sonar y quitar el aviso de esa llamada. */
+    data class CallElsewhere(val info: com.tiecoms.app.core.CallElsewhere) : ClientSignal
 }
 
 private enum class RefreshOutcome { OK, UNAUTHORIZED, NETWORK }
@@ -527,6 +529,13 @@ class TieComsClient(
         if (serverKnowsDnd) { storage.set(DND_KEY, dnd); storage.set(DND_LOCAL_KEY, null) }
         val localOnly = !serverKnowsDnd && storage.get(DND_LOCAL_KEY) == "1"
         setState { copy(data = sorted, conversations = conversations.filterKeys { it in allowed }, dndUntil = dnd, dndLocalOnly = localOnly) }
+        // 1.7.1: la llamada en la que estoy desde otro dispositivo (con myDevices) entra al estado de llamadas.
+        sorted.myActiveCall?.takeIf { !it.ended }?.let { c -> setState { copy(calls = Calls.put(calls, c)) } }
+        // Si el servidor conoce el campo, manda él: una llamada que ya no es «la mía en otro dispositivo» pierde sus myDevices.
+        if (((raw as? JsonObject)?.containsKey("myActiveCall")) == true) {
+            val keep = sorted.myActiveCall?.takeIf { !it.ended }?.id
+            setState { copy(calls = calls.mapValues { (_, c) -> if (c != null && c.id != keep && !c.myDevices.isNullOrEmpty()) c.copy(myDevices = emptyList()) else c }) }
+        }
         restoreMeetingAttempts(sorted.me.id)
         sorted.me.sleep?.let { rememberSleep(it); syncSleepTz(it) }
         return sorted
@@ -657,6 +666,10 @@ class TieComsClient(
             is AccountEvent.CallRinging -> {
                 putCall(e.call)
                 if (e.call.startedBy != myId && !dndActive()) _signals.tryEmit(ClientSignal.CallRinging(e.call, e.callerName, e.conversationTitle))
+            }
+            is AccountEvent.CallElsewhere -> {
+                // Si no es este dispositivo el que contestó (el servidor manda a mis OTRAS sesiones), deja de sonar.
+                if (e.info.deviceKey == null || e.info.deviceKey !in myDeviceKeys()) _signals.tryEmit(ClientSignal.CallElsewhere(e.info))
             }
             is AccountEvent.Unknown -> Unit
         }
@@ -1332,10 +1345,19 @@ class TieComsClient(
     }
     /** Empieza la llamada o entra a la que está en curso (dos que llaman a la vez caen en la misma). */
     suspend fun startCall(conversationId: String, kind: String): CallJoinDTO = withContext(dispatcher) {
-        req("POST", "/conversations/${enc(conversationId)}/call", buildJsonObject { put("kind", JsonPrimitive(kind)) }, CallJoinDTO.serializer()).also { putCall(it.call) }
+        req("POST", "/conversations/${enc(conversationId)}/call", buildJsonObject { put("kind", JsonPrimitive(kind)); put("deviceKey", JsonPrimitive(myDeviceKey())) }, CallJoinDTO.serializer()).also { putCall(it.call) }
     }
     suspend fun joinCall(callId: String): CallJoinDTO = withContext(dispatcher) {
-        req("POST", callsPath(callId, "join"), buildJsonObject {}, CallJoinDTO.serializer()).also { putCall(it.call) }
+        try {
+            req("POST", callsPath(callId, "join"), buildJsonObject { put("deviceKey", JsonPrimitive(myDeviceKey())) }, CallJoinDTO.serializer()).also { putCall(it.call) }
+        } catch (e: ApiException) {
+            // Ya terminó (se perdió el aviso en vivo): fuera la franja y «En curso ahora».
+            if (e.code == "call_ended") setState {
+                val conv = calls.entries.firstOrNull { it.value?.id == callId }?.key
+                copy(calls = if (conv != null) calls + (conv to null) else calls, callsRevision = callsRevision + 1)
+            }
+            throw e
+        }
     }
     /** Sumar personas a la llamada en curso (les suena aunque no estén en el chat). */
     suspend fun inviteToCall(callId: String, userIds: List<String>): CallDTO? = withContext(dispatcher) {
@@ -1346,10 +1368,25 @@ class TieComsClient(
         request("POST", callsPath(callId, "audio"), null, CallAudioResult.serializer(), HttpApi.RawBody(bytes, "application/octet-stream", mapOf(
             "x-file-type" to fileType, "x-seg-id" to segId, "x-offset-ms" to maxOf(0L, offsetMs).toString(), "x-duration-ms" to maxOf(0L, durationMs).toString())))
     }
-    suspend fun callHeartbeat(callId: String) = withContext(dispatcher) { req("POST", callsPath(callId, "heartbeat"), buildJsonObject {}, JsonElement.serializer()); Unit }
+    /** 1.7.1: «Ahora no» — mis otros dispositivos también dejan de sonar (`call.declined`). Para los demás no cambia nada. */
+    suspend fun declineCall(callId: String) = withContext(dispatcher) { req("POST", callsPath(callId, "decline"), buildJsonObject {}, JsonElement.serializer()); Unit }
+    /** 1.7.1: «Pasar aquí» — saca solo a ese otro dispositivo mío de la llamada. */
+    suspend fun leaveCallDevice(callId: String, deviceKey: String): CallDTO? = withContext(dispatcher) {
+        req("POST", callsPath(callId, "leave"), buildJsonObject { put("deviceKey", JsonPrimitive(deviceKey)) }, CallEnvelope.serializer()).call?.also { putCall(it) }
+    }
+    /** 1.7.1: llamadas sin terminar de mis conversaciones (y a las que me invitaron). */
+    suspend fun activeCalls(): List<CallDTO> = withContext(dispatcher) {
+        // Sin subir callsRevision: la pestaña recarga con cada cambio y esto la haría recargar en bucle.
+        Calls171.decodeActive(req("GET", "/calls/active", null, JsonElement.serializer())).also { list -> setState { copy(calls = list.fold(calls) { m, c -> Calls.put(m, c) }) } }
+    }
+    /** Claves con las que el servidor puede nombrar a este dispositivo (8 primeros caracteres de la sesión o del dispositivo). */
+    fun myDeviceKeys(): Set<String> = setOfNotNull(myDeviceKey())
+    /** 1.7.1: la clave de este dispositivo que mando al entrar, latir y salir (8 primeros caracteres del id del dispositivo). */
+    fun myDeviceKey(): String = Calls171.keyOf(deviceId())!!
+    suspend fun callHeartbeat(callId: String) = withContext(dispatcher) { req("POST", callsPath(callId, "heartbeat"), buildJsonObject { put("deviceKey", JsonPrimitive(myDeviceKey())) }, JsonElement.serializer()); Unit }
     /** Colgar (o terminarla para todos con [forAll]). */
     suspend fun leaveCall(callId: String, forAll: Boolean = false): CallDTO? = withContext(dispatcher) {
-        req("POST", callsPath(callId, if (forAll) "end" else "leave"), buildJsonObject {}, CallEnvelope.serializer()).call?.also { putCall(it) }
+        req("POST", callsPath(callId, if (forAll) "end" else "leave"), buildJsonObject { if (!forAll) put("deviceKey", JsonPrimitive(myDeviceKey())) }, CallEnvelope.serializer()).call?.also { putCall(it) }
     }
     /** Prender o apagar la transcripción; [aiSummary]: quien la prende autoriza el resumen con IA al colgar. */
     suspend fun setCallTranscription(callId: String, on: Boolean, aiSummary: Boolean = false): CallDTO? = withContext(dispatcher) {

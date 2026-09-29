@@ -53,7 +53,8 @@ class CallService : Service() {
             .setStyle(NotificationCompat.CallStyle.forOngoingCall(person, hangUp))
             .build()
         var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        // 1.7.1: tipo cámara solo mientras mi cámara está prendida (se vuelve a llamar al prenderla o apagarla).
+        if (view.camera && ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
         val ok = runCatching {
             ServiceCompat.startForeground(this, NOTIF_ID, n, if (Build.VERSION.SDK_INT >= 30) types else 0)
         }
@@ -149,8 +150,7 @@ class CallService : Service() {
 class CallDeclineReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = intent.getStringExtra(CallService.EXTRA_CALL) ?: return
-        CallService.cancelIncoming(context, id)
-        val calls = context.container.calls
-        if (calls.ringing.value?.call?.id == id) calls.dismissRing()
+        // 1.7.1: POST /calls/:id/decline — mis otros dispositivos también dejan de sonar.
+        context.container.calls.decline(id)
     }
 }

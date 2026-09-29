@@ -71,16 +71,23 @@ class Barra169UiTest {
         compose.onNodeWithTag("composer").assertIsDisplayed()
         compose.onNodeWithTag("send").assertIsDisplayed()
         // Por encima del teclado: el borde inferior de ➤ no pasa del alto de la ventana menos el teclado.
-        var imeBottom = 0; var rootH = 0
-        ins.runOnMainSync {
-            val root = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
-                .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).first().window.decorView
-            val insets = androidx.core.view.ViewCompat.getRootWindowInsets(root)
-            imeBottom = insets?.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())?.bottom ?: 0
-            rootH = root.height
+        // Se espera hasta 5 s a que termine la animación del teclado (el inset llega antes que el nuevo tamaño).
+        fun measure(): Triple<Float, Int, Int> {
+            var imeBottom = 0; var rootH = 0
+            ins.runOnMainSync {
+                val root = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).first().window.decorView
+                val insets = androidx.core.view.ViewCompat.getRootWindowInsets(root)
+                imeBottom = insets?.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())?.bottom ?: 0
+                rootH = root.height
+            }
+            val density = ins.targetContext.resources.displayMetrics.density
+            return Triple(compose.onNodeWithTag("send").getBoundsInRoot().bottom.value * density, rootH, imeBottom)
         }
-        val density = ins.targetContext.resources.displayMetrics.density
-        val sendBottomPx = compose.onNodeWithTag("send").getBoundsInRoot().bottom.value * density
+        var m = measure()
+        val until = System.currentTimeMillis() + 5_000
+        while (m.first > m.second - m.third + 2 && System.currentTimeMillis() < until) { Thread.sleep(200); compose.waitForIdle(); m = measure() }
+        val (sendBottomPx, rootH, imeBottom) = m
         assertTrue("➤ por encima del teclado (send=$sendBottomPx, alto=$rootH, teclado=$imeBottom)", sendBottomPx <= rootH - imeBottom + 2)
         shot("$label-teclado")
         compose.onNodeWithTag("send").performClick()

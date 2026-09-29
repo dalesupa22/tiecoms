@@ -38,6 +38,8 @@ import com.tiecoms.app.R
 import com.tiecoms.app.core.CallDTO
 import com.tiecoms.app.core.CallJoinDTO
 import com.tiecoms.app.core.Calls
+import com.tiecoms.app.core.Calls171
+import com.tiecoms.app.core.Calls171Invites
 import com.tiecoms.app.core.Caption
 import com.tiecoms.app.core.ChimeJoin
 import com.tiecoms.app.core.TranscriptOutbox
@@ -84,6 +86,13 @@ class CallManager(private val app: Application, private val container: AppContai
         val fake: Boolean = false,
         val expanded: Boolean = true,
         val error: Int? = null,
+        /** 1.7.1: salida de audio elegida y las disponibles (auricular, altavoz, Bluetooth, cable). */
+        val route: Calls171.Route = Calls171.Route.EARPIECE,
+        val routes: List<Calls171.Route> = emptyList(),
+        /** Personas con el micrófono silenciado (onAttendeesMuted de Chime). */
+        val mutedIds: Set<String> = emptySet(),
+        /** Invitados: cuándo los vi por primera vez sin entrar (para «Llamando…» → «No contestó» a los 45 s). */
+        val invitedAt: Map<String, Long> = emptyMap(),
     )
     data class Ring(val call: CallDTO, val callerName: String, val title: String?)
 
@@ -128,7 +137,7 @@ class CallManager(private val app: Application, private val container: AppContai
                 if (v != null && calls.containsKey(v.call.conversationId)) {
                     val c = calls[v.call.conversationId]
                     if (c == null) { if (!leaving) teardown() }
-                    else if (c.id == v.call.id && c != v.call) patch { copy(call = c, captions = if (c.transcribing) captions else emptyList()) }
+                    else if (c.id == v.call.id && c != v.call) patch { copy(call = c, captions = if (c.transcribing) captions else emptyList(), invitedAt = Calls171Invites.track(invitedAt, c, System.currentTimeMillis())) }
                 }
                 val r = _ringing.value
                 if (r != null && calls.containsKey(r.call.conversationId) && calls[r.call.conversationId]?.id != r.call.id) dismissRing()
@@ -154,6 +163,40 @@ class CallManager(private val app: Application, private val container: AppContai
         connect(client.joinCall(callId), camera)
     }
 
+    /** «Pasar aquí»: entra desde este dispositivo y, ya conectado, saca a mis otros dispositivos de la llamada. */
+    suspend fun takeOver(call: CallDTO, myKeys: Set<String>) {
+        val others = call.myDevices.orEmpty().map { it.deviceKey }.filter { it !in myKeys }
+        join(call.id, camera = false)
+        if (_view.value?.call?.id != call.id) return
+        scope.launch {
+            // Espera a que el audio conecte (o el proveedor falso), como mucho 15 s, y luego suelta los otros.
+            val until = System.currentTimeMillis() + 15_000
+            while (_view.value?.call?.id == call.id && _view.value?.phase != Phase.LIVE && System.currentTimeMillis() < until) delay(200)
+            if (_view.value?.call?.id != call.id) return@launch
+            for (k in others) runCatching { client.leaveCallDevice(call.id, k) }
+        }
+    }
+
+    /** «Ahora no»: deja de sonar aquí y en mis otros dispositivos (POST /calls/:id/decline). */
+    fun decline(callId: String? = _ringing.value?.call?.id) {
+        callId ?: return
+        if (_ringing.value?.call?.id == callId) dismissRing() else CallService.cancelIncoming(app, callId)
+        scope.launch { runCatching { client.declineCall(callId) } }
+    }
+
+    /** `call.answered` / `call.declined` en otro dispositivo mío: aquí deja de sonar y se quita el aviso. */
+    fun onElsewhere(callId: String) {
+        if (_ringing.value?.call?.id == callId) dismissRing()
+        CallService.cancelIncoming(app, callId)
+    }
+
+    /** Invitar de nuevo a quien no contestó (vuelve a sonarle). */
+    suspend fun reinvite(userId: String) {
+        val v = _view.value ?: return
+        patch { copy(invitedAt = invitedAt + (userId to System.currentTimeMillis())) }
+        client.inviteToCall(v.call.id, listOf(userId))?.let { c -> patch { copy(call = c) } }
+    }
+
     private fun hasPermission(p: String) = ContextCompat.checkSelfPermission(app, p) == PackageManager.PERMISSION_GRANTED
 
     private fun connect(j: CallJoinDTO, camera: Boolean) {
@@ -162,8 +205,11 @@ class CallManager(private val app: Application, private val container: AppContai
         val info = ChimeJoin.parse(j.meeting, j.attendee)
         val fake = info == null || info.isFake
         val cam = camera && hasPermission(Manifest.permission.CAMERA)
-        _view.value = View(j.call, phase = if (fake) Phase.LIVE else Phase.CONNECTING, camera = cam && !fake, speaker = camera, fake = fake,
-            error = if (camera && !cam) R.string.call_perm_camera_denied else null)
+        val route0 = Calls171.defaultRoute(listOf(Calls171.Route.EARPIECE, Calls171.Route.SPEAKER), video = camera)
+        _view.value = View(j.call, phase = if (fake) Phase.LIVE else Phase.CONNECTING, camera = cam && !fake, speaker = route0 == Calls171.Route.SPEAKER, fake = fake,
+            error = if (camera && !cam) R.string.call_perm_camera_denied else null, route = route0,
+            routes = if (fake) listOf(Calls171.Route.EARPIECE, Calls171.Route.SPEAKER) else emptyList(),
+            invitedAt = Calls171Invites.track(emptyMap(), j.call, System.currentTimeMillis()))
         CallService.start(app)
         beat = scope.launch {
             while (true) {
@@ -181,7 +227,7 @@ class CallManager(private val app: Application, private val container: AppContai
                 CreateMeetingResponse(Meeting(info.externalMeetingId, placement, info.mediaRegion, info.meetingId)),
                 CreateAttendeeResponse(Attendee(info.attendeeId, info.externalUserId, info.joinToken)),
             )
-            attendees[info.attendeeId] = info.externalUserId
+            attendees[info.attendeeId] = Calls171.personOf(info.externalUserId) ?: info.externalUserId
             val s = DefaultMeetingSession(cfg, ConsoleLogger(LogLevel.WARN), app, egl)
             session = s
             val av = s.audioVideo
@@ -189,6 +235,7 @@ class CallManager(private val app: Application, private val container: AppContai
             av.addRealtimeObserver(rtObserver)
             av.addVideoTileObserver(tileObserver)
             av.addActiveSpeakerObserver(DefaultActiveSpeakerPolicy(), speakerObserver)
+            av.addDeviceChangeObserver(deviceObserver)
             av.start()
             av.startRemoteVideo()
             if (cam) av.startLocalVideo()
@@ -212,25 +259,45 @@ class CallManager(private val app: Application, private val container: AppContai
     fun toggleCamera() {
         val v = _view.value ?: return
         val av = session?.audioVideo
-        if (v.camera) { av?.stopLocalVideo(); patch { copy(camera = false, tiles = tiles.filter { !it.local }) }; return }
+        if (v.camera) { av?.stopLocalVideo(); patch { copy(camera = false, tiles = tiles.filter { !it.local }) }; CallService.start(app); return }
         if (!hasPermission(Manifest.permission.CAMERA)) { patch { copy(error = R.string.call_perm_camera_denied) }; return }
         if (av == null) { patch { copy(error = if (v.fake) R.string.call_fake else R.string.call_no_camera) }; return }
-        runCatching { av.startLocalVideo() }.onSuccess { patch { copy(camera = true, error = null) } }.onFailure { patch { copy(error = R.string.call_no_camera) } }
+        // En plena llamada de voz: el video sale sin reconectar; el servicio pasa a tipo cámara solo mientras está prendida.
+        runCatching { av.startLocalVideo() }.onSuccess { patch { copy(camera = true, error = null) }; CallService.start(app) }.onFailure { patch { copy(error = R.string.call_no_camera) } }
     }
 
     fun switchCamera() { runCatching { session?.audioVideo?.switchCamera() } }
 
-    /** Altavoz ↔ auricular (o audífonos / Bluetooth si hay). */
+    /** Altavoz ↔ auricular (con Bluetooth o cable la pantalla abre la lista y llama a [setRoute]). */
     fun toggleSpeaker() {
         val v = _view.value ?: return
+        setRoute(Calls171.toggle(v.route, v.routes.ifEmpty { listOf(Calls171.Route.EARPIECE, Calls171.Route.SPEAKER) }))
+    }
+
+    /** Elegir la salida de audio con Chime (listAudioDevices / chooseAudioDevice). */
+    fun setRoute(r: Calls171.Route) {
         val av = session?.audioVideo
         if (av != null) runCatching {
-            val devices = av.listAudioDevices()
-            val target = if (v.speaker) devices.firstOrNull { it.type != MediaDeviceType.AUDIO_BUILTIN_SPEAKER }
-                else devices.firstOrNull { it.type == MediaDeviceType.AUDIO_BUILTIN_SPEAKER }
-            target?.let { av.chooseAudioDevice(it) }
+            av.listAudioDevices().firstOrNull { routeOf(it.type) == r }?.let { av.chooseAudioDevice(it) }
         }
-        patch { copy(speaker = !speaker) }
+        patch { copy(route = r, speaker = r == Calls171.Route.SPEAKER) }
+    }
+
+    private fun routeOf(t: MediaDeviceType): Calls171.Route? = when (t) {
+        MediaDeviceType.AUDIO_HANDSET -> Calls171.Route.EARPIECE
+        MediaDeviceType.AUDIO_BUILTIN_SPEAKER -> Calls171.Route.SPEAKER
+        MediaDeviceType.AUDIO_BLUETOOTH -> Calls171.Route.BLUETOOTH
+        MediaDeviceType.AUDIO_WIRED_HEADSET, MediaDeviceType.AUDIO_USB_HEADSET -> Calls171.Route.WIRED
+        else -> null
+    }
+
+    private fun refreshRoutes(pickDefault: Boolean) {
+        val av = session?.audioVideo ?: return
+        val list = runCatching { av.listAudioDevices().mapNotNull { routeOf(it.type) }.distinct() }.getOrDefault(emptyList())
+        val v = _view.value ?: return
+        patch { copy(routes = Calls171.choices(list)) }
+        // Al conectar o al enchufar/soltar audífonos o Bluetooth: la salida por defecto (Bluetooth/cable; si no, auricular en voz y altavoz en video).
+        if (pickDefault || v.route !in list) setRoute(Calls171.defaultRoute(list, video = v.call.isVideo || v.camera))
     }
 
     fun setExpanded(on: Boolean) = patch { copy(expanded = on) }
@@ -310,7 +377,7 @@ class CallManager(private val app: Application, private val container: AppContai
         if (s != null) runCatching {
             val av = s.audioVideo
             av.removeAudioVideoObserver(avObserver); av.removeRealtimeObserver(rtObserver); av.removeVideoTileObserver(tileObserver)
-            av.removeActiveSpeakerObserver(speakerObserver)
+            av.removeActiveSpeakerObserver(speakerObserver); av.removeDeviceChangeObserver(deviceObserver)
             av.stopLocalVideo(); av.stopRemoteVideo(); av.stop()
         }
         _view.value = null
@@ -357,11 +424,8 @@ class CallManager(private val app: Application, private val container: AppContai
         override fun onAudioSessionStartedConnecting(reconnecting: Boolean) {}
         override fun onAudioSessionStarted(reconnecting: Boolean) {
             patch { copy(phase = Phase.LIVE) }
-            // Videollamada: arranca en altavoz, como en cualquier teléfono.
-            if (!reconnecting && _view.value?.speaker == true) runCatching {
-                val av = session?.audioVideo ?: return@runCatching
-                av.listAudioDevices().firstOrNull { it.type == MediaDeviceType.AUDIO_BUILTIN_SPEAKER }?.let { av.chooseAudioDevice(it) }
-            }
+            // Por defecto: auricular en voz, altavoz en video (Bluetooth o audífonos si están conectados).
+            if (!reconnecting) refreshRoutes(pickDefault = true)
         }
         override fun onAudioSessionDropped() {}
         override fun onAudioSessionStopped(sessionStatus: MeetingSessionStatus) {
@@ -385,19 +449,29 @@ class CallManager(private val app: Application, private val container: AppContai
     private val rtObserver = object : RealtimeObserver {
         override fun onVolumeChanged(volumeUpdates: Array<VolumeUpdate>) {}
         override fun onSignalStrengthChanged(signalUpdates: Array<SignalUpdate>) {}
-        override fun onAttendeesJoined(attendeeInfo: Array<AttendeeInfo>) { attendeeInfo.forEach { attendees[it.attendeeId] = it.externalUserId } }
+        override fun onAttendeesJoined(attendeeInfo: Array<AttendeeInfo>) { attendeeInfo.forEach { attendees[it.attendeeId] = Calls171.personOf(it.externalUserId) ?: it.externalUserId } }
         override fun onAttendeesLeft(attendeeInfo: Array<AttendeeInfo>) {}
         override fun onAttendeesDropped(attendeeInfo: Array<AttendeeInfo>) {}
-        override fun onAttendeesMuted(attendeeInfo: Array<AttendeeInfo>) {}
-        override fun onAttendeesUnmuted(attendeeInfo: Array<AttendeeInfo>) {}
+        override fun onAttendeesMuted(attendeeInfo: Array<AttendeeInfo>) {
+            val ids = attendeeInfo.mapNotNull { Calls171.personOf(it.externalUserId) }
+            patch { copy(mutedIds = mutedIds + ids) }
+        }
+        override fun onAttendeesUnmuted(attendeeInfo: Array<AttendeeInfo>) {
+            val ids = attendeeInfo.mapNotNull { Calls171.personOf(it.externalUserId) }.toSet()
+            patch { copy(mutedIds = mutedIds - ids) }
+        }
     }
 
     private val speakerObserver = object : ActiveSpeakerObserver {
         override val scoreCallbackIntervalMs: Int? get() = null
         override fun onActiveSpeakerDetected(attendeeInfo: Array<AttendeeInfo>) {
-            patch { copy(speaking = attendeeInfo.map { it.externalUserId }) }
+            patch { copy(speaking = attendeeInfo.mapNotNull { Calls171.personOf(it.externalUserId) }.distinct()) }
         }
         override fun onActiveSpeakerScoreChanged(scores: Map<AttendeeInfo, Double>) {}
+    }
+
+    private val deviceObserver = object : com.amazonaws.services.chime.sdk.meetings.device.DeviceChangeObserver {
+        override fun onAudioDeviceChanged(freshAudioDeviceList: List<com.amazonaws.services.chime.sdk.meetings.device.MediaDevice>) { refreshRoutes(pickDefault = false) }
     }
 
     private val tileObserver = object : VideoTileObserver {

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cc_mute">Silenciar</string>
+    <string name="cc_unmute">Activar</string>
+    <string name="cc_camera">Cámara</string>
+    <string name="cc_flip">Girar</string>
+    <string name="cc_add">Agregar</string>
+    <string name="cc_transcribe">Transcribir</string>
+    <string name="cc_hang_up">Colgar</string>
+    <string name="route_earpiece">Teléfono</string>
+    <string name="route_speaker">Altavoz</string>
+    <string name="route_bluetooth">Bluetooth</string>
+    <string name="route_wired">Audífonos</string>
+    <string name="route_title">Salida de audio</string>
+    <string name="inv_calling">Llamando…</string>
+    <string name="inv_no_answer">No contestó</string>
+    <string name="inv_ring_again">Volver a llamar</string>
+    <string name="p_cam_off">Cámara apagada</string>
+    <string name="p_muted">Micrófono silenciado</string>
+    <string name="elsewhere_text">En llamada en tu %1$s</string>
+    <string name="elsewhere_move">Pasar aquí</string>
+    <string name="elsewhere_join">Unirme también</string>
+    <string name="dev_iphone">iPhone</string>
+    <string name="dev_android">Android</string>
+    <string name="dev_web">navegador</string>
+    <string name="dev_desktop">computador</string>
+    <string name="dev_other">otro dispositivo</string>
+    <string name="calls_active">En curso ahora</string>
+    <string name="calls_active_in">%1$d en la llamada</string>
+</resources>

@@ -58,6 +58,8 @@ sealed interface AccountEvent {
     data class CallCaption(val event: CallCaptionEvent) : AccountEvent
     /** `call.ringing`: me están llamando (el servidor no lo manda a quien tiene No molestar). */
     data class CallRinging(val call: CallDTO, val conversationTitle: String?, val callerName: String) : AccountEvent
+    /** 1.7.1: `call.answered` / `call.declined` en otro de mis dispositivos: aquí deja de sonar. */
+    data class CallElsewhere(val info: com.tiecoms.app.core.CallElsewhere) : AccountEvent
     data class Unknown(val type: String) : AccountEvent
 }
 
@@ -127,6 +129,9 @@ fun decodeAccountEvent(el: JsonElement): AccountEvent {
         }
         "call.ringing" -> Calls.decode(o["call"])?.takeIf { it.conversationId.isNotEmpty() }
             ?.let { AccountEvent.CallRinging(it, o.str("conversationTitle"), o.str("callerName") ?: "") } ?: AccountEvent.Unknown(type)
+        "call.answered", "call.declined" -> o.str("callId")?.let {
+            AccountEvent.CallElsewhere(CallElsewhere(it, type == "call.answered", o.str("deviceKey"), o.str("platform"), o.str("label")))
+        } ?: AccountEvent.Unknown(type)
         "me.dnd" -> if (o.containsKey("dndUntil")) AccountEvent.DndUpdated(o.str("dndUntil")) else AccountEvent.Unknown(type)
         else -> AccountEvent.Unknown(type)
     }

@@ -513,6 +513,8 @@ class AppContainer(private val app: Application) {
             }
             // Te están llamando (docs/LLAMADAS.md): aviso con Contestar / Ahora no; deja de sonar a los 45 s.
             is ClientSignal.CallCaption -> calls.onCaption(sig.event)
+            // 1.7.1: contesté o rechacé en otro dispositivo: deja de sonar y se quita el aviso de esa llamada.
+            is ClientSignal.CallElsewhere -> calls.onElsewhere(sig.info.callId)
             is ClientSignal.CallRinging -> calls.ring(sig.call, sig.callerName.ifBlank { Names.person(client.value.state.value.data, sig.call.startedBy)?.name ?: "" }, sig.conversationTitle)
             // Sin sesión: fuera sugerencias de Direct Share, burbujas y notificaciones de la cuenta anterior.
             is ClientSignal.SignedOut -> {

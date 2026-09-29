@@ -24,6 +24,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
@@ -189,6 +193,57 @@ fun CallOverlayHost(onOpenConversation: (String) -> Unit) {
     }
 }
 
+/** 1.7.1: la llamada en la que estoy desde OTRO dispositivo (y no desde este), para la franja de arriba. */
+@Composable
+fun rememberElsewhereCall(): com.tiecoms.app.core.CallDTO? {
+    val client = LocalClient.current
+    val container = LocalContainer.current
+    val st by client.state.collectAsStateWithLifecycle()
+    val view by container.calls.view.collectAsStateWithLifecycle()
+    val ring by container.calls.ringing.collectAsStateWithLifecycle()
+    val data = st.data ?: return null
+    if (!data.callsEnabled) return null
+    val keys = remember(client, data.me.id) { client.myDeviceKeys() }
+    return com.tiecoms.app.core.Calls171.elsewhere(data.myActiveCall, st.calls, view?.call?.id, keys)?.takeIf { it.id != ring?.call?.id }
+}
+
+/**
+ * Franja fija arriba (empuja la app, como la de actualización): «📞 En llamada en tu {dispositivo} · {chat}»
+ * con Pasar aquí, Unirme también y Agregar.
+ */
+@Composable
+fun ElsewhereBanner(call: com.tiecoms.app.core.CallDTO, modifier: Modifier = Modifier) {
+    val ctx = LocalContext.current
+    val client = LocalClient.current
+    val container = LocalContainer.current
+    val st by client.state.collectAsStateWithLifecycle()
+    val data = st.data ?: return
+    val keys = remember(client, data.me.id) { client.myDeviceKeys() }
+    val launcher = rememberCallLauncher()
+    var adding by remember { mutableStateOf(false) }
+    val dev = com.tiecoms.app.core.Calls171.otherDevice(call, keys)
+    val devName = com.tiecoms.app.core.Calls171.deviceName(dev, stringResource(R.string.dev_iphone), stringResource(R.string.dev_android),
+        stringResource(R.string.dev_web), stringResource(R.string.dev_desktop), stringResource(R.string.dev_other))
+    val chat = data.conversations.firstOrNull { it.id == call.conversationId }?.let { titleOf(ctx, it, data) } ?: call.title
+    Surface(color = Color(0xFF1F7A4D), contentColor = Color.White, modifier = Modifier.fillMaxWidth().testTag("callElsewhere")) {
+        Column(modifier.padding(horizontal = 12.dp, vertical = 8.dp).semantics(mergeDescendants = false) { liveRegion = LiveRegionMode.Polite }) {
+            Text("📞 " + stringResource(R.string.elsewhere_text, devName) + (chat?.let { " · $it" } ?: ""), style = MaterialTheme.typography.labelLarge,
+                maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("callElsewhereText"))
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(onClick = { launcher.launch(false) { container.calls.takeOver(call, keys) } }, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF1F7A4D)),
+                    contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.heightIn(min = 40.dp).testTag("callMoveHere")) { Text(stringResource(R.string.elsewhere_move), maxLines = 1) }
+                OutlinedButton(onClick = { launcher.launch(false) { container.calls.join(call.id, false) } }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.heightIn(min = 40.dp).testTag("callJoinToo")) { Text(stringResource(R.string.elsewhere_join), maxLines = 1) }
+                OutlinedButton(onClick = { adding = true }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    contentPadding = PaddingValues(horizontal = 10.dp), modifier = Modifier.heightIn(min = 40.dp).testTag("callElsewhereAdd")) {
+                    Icon(Icons.Filled.PersonAdd, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.cc_add), maxLines = 1)
+                }
+            }
+        }
+    }
+    if (adding) AddToCallSheet(call, data, onDismiss = { adding = false })
+}
+
 @Composable
 private fun rememberClock(startedAt: String): String {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -216,7 +271,7 @@ private fun IncomingCallCard(r: CallManager.Ring, modifier: Modifier) {
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = { container.calls.dismissRing() }, modifier = Modifier.weight(1f).heightIn(min = 44.dp).testTag("callDecline")) {
+                OutlinedButton(onClick = { container.calls.decline(r.call.id) }, modifier = Modifier.weight(1f).heightIn(min = 44.dp).testTag("callDecline")) {
                     Text(stringResource(R.string.call_decline), maxLines = 1)
                 }
                 Button(onClick = { launcher.launch(false) { container.calls.join(r.call.id, false) } }, modifier = Modifier.weight(1f).heightIn(min = 44.dp).testTag("callAnswer")) {
@@ -260,6 +315,7 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
     val clock = rememberClock(v.call.startedAt)
     var consent by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
+    var routes by remember { mutableStateOf(false) }
     val cameraPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) container.calls.toggleCamera() else container.toast(ctx.getString(R.string.call_perm_camera_denied))
     }
@@ -291,25 +347,55 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
                 }
             }
             Box(Modifier.weight(1f).fillMaxWidth().padding(8.dp)) {
-                val video = v.tiles.filter { !it.paused || it.local }
-                if (video.isNotEmpty()) {
-                    val cols = if (video.size <= 1) 1 else 2
-                    LazyVerticalGrid(GridCells.Fixed(cols), Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(video, key = { it.tileId }) { t -> VideoTile(t, if (t.local) stringResource(R.string.call_you) else firstName(data, t.userId, v.call), rows = (video.size + cols - 1) / cols) }
+                // 1.7.1: con al menos una persona en video, cuadrícula; quien no tiene cámara sale como avatar en su celda.
+                val people = (listOf(me) + v.call.activeUserIds.filter { it != me }).distinct()
+                val live = v.tiles.filter { !it.paused || it.local }
+                val tileOf: (String) -> CallManager.Tile? = { id -> if (id == me) live.firstOrNull { it.local } else live.firstOrNull { !it.local && it.userId == id } }
+                val now by rememberNow()
+                if (live.isNotEmpty()) {
+                    val cols = if (people.size <= 1) 1 else 2
+                    val rows = (people.size + cols - 1) / cols
+                    LazyVerticalGrid(GridCells.Fixed(cols), Modifier.fillMaxSize().testTag("callGrid"), verticalArrangement = Arrangement.spacedBy(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(people, key = { it }) { id ->
+                            val t = tileOf(id)
+                            val name = if (id == me) stringResource(R.string.call_you) else firstName(data, id, v.call)
+                            val muted = if (id == me) v.muted else id in v.mutedIds
+                            if (t != null) VideoTile(t, name, rows = rows, muted = muted)
+                            else AvatarCell(id, data, name, rows = rows, muted = muted, speaking = id in v.speaking)
+                        }
                     }
                 } else Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        v.call.activeUserIds.forEach { id ->
+                        people.forEach { id ->
                             val speaking = id in v.speaking
+                            val muted = if (id == me) v.muted else id in v.mutedIds
                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(92.dp).testTag("callPerson-$id")) {
                                 Box(Modifier.size(84.dp).border(if (speaking) 3.dp else 0.dp, if (speaking) Color(0xFF3CCB7F) else Color.Transparent, CircleShape).padding(4.dp)) {
                                     PersonAvatar(Names.person(data, id), data, size = 76.dp)
+                                    if (muted) MutedBadge(Modifier.align(Alignment.BottomEnd))
                                 }
                                 Text(if (id == me) stringResource(R.string.call_you) else firstName(data, id, v.call), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
+                        // Invitados que aún no entran: «Llamando…» y, a los 45 s, «No contestó» con «Volver a llamar».
+                        v.invitedAt.forEach { (id, at) ->
+                            val st2 = com.tiecoms.app.core.Calls171Invites.state(at, now)
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(104.dp).testTag("callInvited-$id")) {
+                                Box(Modifier.size(84.dp).padding(4.dp).then(Modifier.graphicsLayer(alpha = 0.55f))) { PersonAvatar(Names.person(data, id), data, size = 76.dp) }
+                                Text(firstName(data, id, v.call), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (st2 == com.tiecoms.app.core.Calls171Invites.State.CALLING)
+                                    Text(stringResource(R.string.inv_calling), style = MaterialTheme.typography.labelSmall, color = CallInk.copy(alpha = 0.7f), modifier = Modifier.testTag("invCalling-$id"))
+                                else {
+                                    Text(stringResource(R.string.inv_no_answer), style = MaterialTheme.typography.labelSmall, color = Color(0xFFFFB4A8), modifier = Modifier.testTag("invNoAnswer-$id"))
+                                    TextButton(onClick = { container.scope.launch { runCatching { container.calls.reinvite(id) }.onFailure { container.toast(errorText(ctx, it)) } } },
+                                        contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.heightIn(min = 36.dp).testTag("invRingAgain-$id")) {
+                                        Text(stringResource(R.string.inv_ring_again), color = CallInk, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            }
+                        }
                     }
-                    if (others.isEmpty()) Text(stringResource(R.string.call_waiting), color = CallInk.copy(alpha = 0.7f), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("callWaiting"))
+                    if (others.isEmpty() && v.invitedAt.isEmpty()) Text(stringResource(R.string.call_waiting), color = CallInk.copy(alpha = 0.7f), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("callWaiting"))
                 }
             }
             if (v.call.transcribing && v.captions.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp).background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
@@ -320,25 +406,35 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
                         color = if (c.partial) CallInk.copy(alpha = 0.65f) else CallInk, modifier = if (c.processing) Modifier.testTag("callProcessing") else Modifier)
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                CallControl(if (v.muted) Icons.Filled.MicOff else Icons.Filled.Mic, stringResource(if (v.muted) R.string.call_unmute else R.string.call_mute), off = v.muted, tag = "callMute") { container.calls.toggleMute() }
-                CallControl(if (v.camera) Icons.Filled.Videocam else Icons.Filled.VideocamOff, stringResource(if (v.camera) R.string.call_camera_off else R.string.call_camera_on), off = !v.camera, tag = "callCamera") {
+            // 1.7.1: controles con texto (se nota «Agregar»), en dos filas si no caben; Colgar abajo al centro.
+            androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp).testTag("callControls"),
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                CallControl(if (v.muted) Icons.Filled.MicOff else Icons.Filled.Mic, stringResource(if (v.muted) R.string.cc_unmute else R.string.cc_mute),
+                    stringResource(if (v.muted) R.string.call_unmute else R.string.call_mute), off = v.muted, tag = "callMute") { container.calls.toggleMute() }
+                CallControl(if (v.camera) Icons.Filled.Videocam else Icons.Filled.VideocamOff, stringResource(R.string.cc_camera),
+                    stringResource(if (v.camera) R.string.call_camera_off else R.string.call_camera_on), off = !v.camera, tag = "callCamera") {
+                    // En una llamada de voz: la primera vez pide el permiso de cámara; luego el video sale sin reconectar.
                     if (!v.camera && ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) cameraPerm.launch(Manifest.permission.CAMERA)
                     else container.calls.toggleCamera()
                 }
-                if (v.camera) CallControl(Icons.Filled.Cameraswitch, stringResource(R.string.call_switch_camera), off = false, tag = "callSwitch") { container.calls.switchCamera() }
-                CallControl(Icons.AutoMirrored.Filled.VolumeUp, stringResource(R.string.call_speaker), off = !v.speaker, tag = "callSpeaker") { container.calls.toggleSpeaker() }
-                CallControl(Icons.Filled.PersonAdd, stringResource(R.string.call_add), off = false, tag = "callAdd") { adding = true }
-                CallControl(Icons.Filled.ClosedCaption, stringResource(if (v.call.transcribing) R.string.call_transcript_off else R.string.call_transcript_on), off = false, rec = v.call.transcribing, tag = "callTranscript") {
+                if (v.camera) CallControl(Icons.Filled.Cameraswitch, stringResource(R.string.cc_flip), stringResource(R.string.call_switch_camera), off = false, tag = "callSwitch") { container.calls.switchCamera() }
+                CallControl(routeIcon(v.route), routeLabel(v.route), stringResource(R.string.route_title) + ": " + routeLabel(v.route), off = v.route == com.tiecoms.app.core.Calls171.Route.EARPIECE, tag = "callSpeaker") {
+                    if (com.tiecoms.app.core.Calls171.needsPicker(v.routes)) routes = true else container.calls.toggleSpeaker()
+                }
+                CallControl(Icons.Filled.PersonAdd, stringResource(R.string.cc_add), stringResource(R.string.call_add), off = false, tag = "callAdd") { adding = true }
+                CallControl(Icons.Filled.ClosedCaption, stringResource(R.string.cc_transcribe), stringResource(if (v.call.transcribing) R.string.call_transcript_off else R.string.call_transcript_on), off = false, rec = v.call.transcribing, tag = "callTranscript") {
                     if (v.call.transcribing) container.scope.launch { runCatching { container.calls.setTranscription(false) }.onFailure { container.toast(errorText(ctx, it)) } }
                     else consent = true
                 }
-                IconButton(onClick = { container.scope.launch { container.calls.hangUp() } }, modifier = Modifier.size(58.dp).background(HangRed, CircleShape).testTag("callHangUp")) {
+            }
+            Box(Modifier.fillMaxWidth().padding(bottom = 14.dp, top = 4.dp), contentAlignment = Alignment.Center) {
+                IconButton(onClick = { container.scope.launch { container.calls.hangUp() } }, modifier = Modifier.size(62.dp).background(HangRed, CircleShape).testTag("callHangUp")) {
                     Icon(Icons.Filled.CallEnd, stringResource(R.string.call_hang_up), tint = Color.White)
                 }
             }
         }
     }
+    if (routes) AudioRouteSheet(v, onDismiss = { routes = false })
     if (adding) AddToCallSheet(v.call, data, onDismiss = { adding = false })
     if (consent) TranscriptConsentDialog(onDismiss = { consent = false }) { ai ->
         consent = false
@@ -347,13 +443,84 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
 }
 
 @Composable
-private fun CallControl(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, off: Boolean, tag: String, rec: Boolean = false, onClick: () -> Unit) {
+private fun CallControl(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, description: String, off: Boolean, tag: String, rec: Boolean = false, onClick: () -> Unit) {
     val bg = when { rec -> HangRed.copy(alpha = 0.9f); off -> Color.White.copy(alpha = 0.12f); else -> Color.White.copy(alpha = 0.26f) }
-    IconButton(onClick = onClick, modifier = Modifier.size(50.dp).background(bg, CircleShape).testTag(tag)) { Icon(icon, label, tint = CallInk) }
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(64.dp).clickable(onClick = onClick, role = androidx.compose.ui.semantics.Role.Button)
+        .semantics(mergeDescendants = true) { contentDescription = description }.testTag(tag)) {
+        Box(Modifier.size(50.dp).background(bg, CircleShape), contentAlignment = Alignment.Center) { Icon(icon, null, tint = CallInk) }
+        Text(label, style = MaterialTheme.typography.labelSmall, color = CallInk, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+    }
 }
 
 @Composable
-private fun VideoTile(t: CallManager.Tile, label: String, rows: Int) {
+private fun routeLabel(r: com.tiecoms.app.core.Calls171.Route): String = stringResource(when (r) {
+    com.tiecoms.app.core.Calls171.Route.EARPIECE -> R.string.route_earpiece
+    com.tiecoms.app.core.Calls171.Route.SPEAKER -> R.string.route_speaker
+    com.tiecoms.app.core.Calls171.Route.BLUETOOTH -> R.string.route_bluetooth
+    com.tiecoms.app.core.Calls171.Route.WIRED -> R.string.route_wired
+})
+
+private fun routeIcon(r: com.tiecoms.app.core.Calls171.Route) = when (r) {
+    com.tiecoms.app.core.Calls171.Route.EARPIECE -> Icons.Filled.PhoneInTalk
+    com.tiecoms.app.core.Calls171.Route.SPEAKER -> Icons.AutoMirrored.Filled.VolumeUp
+    com.tiecoms.app.core.Calls171.Route.BLUETOOTH -> Icons.Filled.Bluetooth
+    com.tiecoms.app.core.Calls171.Route.WIRED -> Icons.Filled.Headphones
+}
+
+/** Salida de audio con Bluetooth o cable conectados: auricular, altavoz, Bluetooth, audífonos. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AudioRouteSheet(v: CallManager.View, onDismiss: () -> Unit) {
+    val container = LocalContainer.current
+    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("callRoutes")) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
+            Text(stringResource(R.string.route_title), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).semantics { heading() })
+            v.routes.forEach { r ->
+                Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable { container.calls.setRoute(r); onDismiss() }.padding(horizontal = 16.dp).testTag("callRoute-${r.name}"),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Icon(routeIcon(r), null); Spacer(Modifier.width(14.dp))
+                    Text(routeLabel(r), Modifier.weight(1f), fontWeight = if (r == v.route) FontWeight.SemiBold else FontWeight.Normal)
+                    if (r == v.route) Text("✓", color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun rememberNow(): androidx.compose.runtime.State<Long> {
+    val now = remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { delay(1000); now.longValue = System.currentTimeMillis() } }
+    return now
+}
+
+@Composable
+private fun MutedBadge(modifier: Modifier) {
+    val cd = stringResource(R.string.p_muted)
+    Box(modifier.size(24.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape).semantics { contentDescription = cd }, contentAlignment = Alignment.Center) {
+        Icon(Icons.Filled.MicOff, null, tint = Color.White, modifier = Modifier.size(14.dp))
+    }
+}
+
+/** Celda de la cuadrícula para quien no tiene la cámara prendida: su avatar, con «Cámara apagada» y el micrófono. */
+@Composable
+private fun AvatarCell(id: String, data: BootstrapDTO, label: String, rows: Int, muted: Boolean, speaking: Boolean) {
+    val h = (LocalConfigurationHeight() / maxOf(1, rows)).coerceIn(140, 520)
+    val cd = stringResource(R.string.p_cam_off)
+    Box(Modifier.fillMaxWidth().height(h.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.08f))
+        .border(if (speaking) 3.dp else 0.dp, if (speaking) Color(0xFF3CCB7F) else Color.Transparent, RoundedCornerShape(12.dp)).testTag("callAvatarCell-$id")) {
+        Box(Modifier.align(Alignment.Center)) { PersonAvatar(Names.person(data, id), data, size = 72.dp) }
+        Row(Modifier.align(Alignment.BottomStart).padding(6.dp).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.VideocamOff, cd, tint = Color.White, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp))
+            if (muted) { Icon(Icons.Filled.MicOff, stringResource(R.string.p_muted), tint = Color.White, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)) }
+            Text(label, color = Color.White, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+@Composable
+private fun VideoTile(t: CallManager.Tile, label: String, rows: Int, muted: Boolean = false) {
     val container = LocalContainer.current
     val h = (LocalConfigurationHeight() / maxOf(1, rows)).coerceIn(140, 520)
     Box(Modifier.fillMaxWidth().height(h.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black).testTag("callTile-${t.tileId}")) {
@@ -362,8 +529,11 @@ private fun VideoTile(t: CallManager.Tile, label: String, rows: Int) {
             onRelease = { view -> container.calls.unbind(t.tileId); view.release() },
             modifier = Modifier.fillMaxSize(),
         )
-        Text(label, Modifier.align(Alignment.BottomStart).padding(6.dp).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
-            color = Color.White, style = MaterialTheme.typography.labelMedium)
+        Row(Modifier.align(Alignment.BottomStart).padding(6.dp).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            if (muted) { Icon(Icons.Filled.MicOff, stringResource(R.string.p_muted), tint = Color.White, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)) }
+            Text(label, color = Color.White, style = MaterialTheme.typography.labelMedium)
+        }
     }
 }
 
@@ -425,7 +595,8 @@ private fun AddToCallSheet(call: com.tiecoms.app.core.CallDTO, data: BootstrapDT
                     busy = true
                     val ids = picked.toList()
                     container.scope.launch {
-                        runCatching { container.calls.invite(ids) }
+                        // Desde la pantalla de la llamada, la franja «En llamada en tu …» o «En curso ahora».
+                        runCatching { if (container.calls.view.value?.call?.id == call.id) container.calls.invite(ids) else container.client.value.inviteToCall(call.id, ids) }
                             .onSuccess { container.toast(ctx.getString(R.string.call_added, ids.size)); onDismiss() }
                             .onFailure { busy = false; container.toast(errorText(ctx, it)) }
                     }
@@ -499,9 +670,20 @@ fun CallsScreen(onOpenDetail: (String) -> Unit, onOpenConversation: (String) -> 
     // Recarga al cambiar alguna llamada en vivo (empezó, terminó, hay transcripción).
     LaunchedEffect(data.callsEnabled, st.callsRevision) {
         if (!data.callsEnabled) return@LaunchedEffect
-        runCatching { client.callHistory() }.onSuccess { items = it.calls; more = it.hasMore; error = null }.onFailure { error = errorText(ctx, it) }
+        // Una recarga que se cancela porque llegó otra (callsRevision) no es un error.
+        try { val it = client.callHistory(); items = it.calls; more = it.hasMore; error = null }
+        catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = errorText(ctx, e) }
     }
     fun call(convId: String, kind: String) = launcher.launch(kind == "video") { cam -> container.calls.start(convId, if (cam) "video" else "audio") }
+    // 1.7.1: «En curso ahora» (GET /calls/active) arriba del historial.
+    var active by remember { mutableStateOf<List<com.tiecoms.app.core.CallDTO>>(emptyList()) }
+    var addingTo by remember { mutableStateOf<com.tiecoms.app.core.CallDTO?>(null) }
+    val mine by container.calls.view.collectAsStateWithLifecycle()
+    LaunchedEffect(data.callsEnabled, st.callsRevision) {
+        if (data.callsEnabled) runCatching { client.activeCalls() }.onSuccess { active = it }
+    }
+    // Lo que llega en vivo manda: una que terminó sale; los datos nuevos (quién está) reemplazan.
+    val liveNow = active.mapNotNull { c -> if (st.calls.containsKey(c.conversationId)) st.calls[c.conversationId]?.takeIf { it.id == c.id }?.let { it.copy(title = it.title ?: c.title) } else c }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -521,6 +703,15 @@ fun CallsScreen(onOpenDetail: (String) -> Unit, onOpenConversation: (String) -> 
     ) { pad ->
         LazyColumn(Modifier.padding(pad).fillMaxSize().testTag("callsList"), contentPadding = PaddingValues(bottom = 88.dp)) {
             if (!data.callsEnabled) item { EmptyNote(stringResource(R.string.err_calls_disabled)) }
+            if (liveNow.isNotEmpty()) {
+                item { SectionHeader(stringResource(R.string.calls_active), Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp).testTag("callsActiveHeader")) }
+                items(liveNow, key = { "a:" + it.id }) { c ->
+                    ActiveCallRow(c, data, inside = mine?.call?.id == c.id,
+                        onJoin = { launcher.launch(false) { container.calls.join(c.id, false) } },
+                        onAdd = { addingTo = c })
+                }
+                item { HorizontalDivider(Modifier.padding(top = 6.dp)) }
+            }
             error?.let { e -> item { ErrorText(e) } }
             val list = items
             if (data.callsEnabled && list == null && error == null) item { Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
@@ -540,6 +731,7 @@ fun CallsScreen(onOpenDetail: (String) -> Unit, onOpenConversation: (String) -> 
             }
         }
     }
+    addingTo?.let { c -> AddToCallSheet(c, data, onDismiss = { addingTo = null }) }
     picking?.let { kind -> PickConversationSheet(stringResource(R.string.calls_pick), onDismiss = { picking = null }) { c -> picking = null; call(c.id, kind) } }
 }
 
@@ -576,6 +768,31 @@ private fun CallRow(item: CallHistoryItemDTO, data: BootstrapDTO, onOpen: () -> 
         else IconButton(onClick = onCallBack, modifier = Modifier.testTag("callRowBack")) {
             Icon(if (c.isVideo) Icons.Filled.Videocam else Icons.Filled.Call, stringResource(R.string.calls_call_back), tint = MaterialTheme.colorScheme.primary)
         }
+    }
+}
+
+@Composable
+private fun ActiveCallRow(c: com.tiecoms.app.core.CallDTO, data: BootstrapDTO, inside: Boolean, onJoin: () -> Unit, onAdd: () -> Unit) {
+    val ctx = LocalContext.current
+    val conv = data.conversations.firstOrNull { it.id == c.conversationId }
+    val name = conv?.let { titleOf(ctx, it, data) } ?: c.title ?: c.activeUserIds.map { firstName(data, it, c) }.filter { it.isNotEmpty() }.joinToString(", ")
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("callActive-${c.id}"), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(Modifier.size(8.dp).background(Color(0xFF3CCB7F), CircleShape))
+                Text((if (c.isVideo) "🎥 " else "📞 ") + name.ifEmpty { stringResource(R.string.call_title) }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                c.activeUserIds.take(5).forEach { id -> Box(Modifier.padding(end = 2.dp)) { PersonAvatar(Names.person(data, id), data, size = 24.dp) } }
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(R.string.calls_active_in, c.activeUserIds.size), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        // Agregar exige estar dentro (desde cualquiera de mis dispositivos); si no, primero Unirse.
+        if (data.me.id in c.activeUserIds) OutlinedButton(onClick = onAdd, contentPadding = PaddingValues(horizontal = 10.dp), modifier = Modifier.padding(end = 6.dp).testTag("callActiveAdd")) {
+            Icon(Icons.Filled.PersonAdd, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.cc_add))
+        }
+        if (!inside) Button(onClick = onJoin, contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.testTag("callActiveJoin")) { Text(stringResource(R.string.call_join)) }
     }
 }
 

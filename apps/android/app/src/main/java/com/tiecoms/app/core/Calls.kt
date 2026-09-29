@@ -31,6 +31,12 @@ data class CallDTO(
     val invitedUserIds: List<String> = emptyList(),
     /** Nombres de quienes están o fueron agregados, para quien no los tiene en su lista de personas. */
     val names: Map<String, String> = emptyMap(),
+    /** 1.7.1: mis dispositivos dentro de esta llamada (solo los míos; ausente en servidores viejos). */
+    val myDevices: List<CallDeviceDTO>? = null,
+    /** 1.7.1 (GET /calls/active): título de la conversación. */
+    val title: String? = null,
+    /** 1.7.1 (5dd0443): a quién se llamó con «＋ Agregar» y si ya entró. null = servidor anterior (se sigue en el cliente). */
+    val invited: List<CallInviteDTO>? = null,
 ) {
     val isVideo: Boolean get() = kind == "video"
     val ended: Boolean get() = endedAt != null
@@ -236,7 +242,7 @@ object Calls {
     fun mergeCaption(list: List<Caption>, p: TranscriptPiece): List<Caption> {
         val text = p.text.trim()
         if (text.isEmpty()) return list
-        return (list.filter { it.resultId != p.resultId } + Caption(p.resultId, p.externalUserId, text, p.partial)).takeLast(MAX_CAPTIONS)
+        return (list.filter { it.resultId != p.resultId } + Caption(p.resultId, Calls171.personOf(p.externalUserId) ?: p.externalUserId, text, p.partial)).takeLast(MAX_CAPTIONS)
     }
 
     /** Frase final → segmento para el API (texto recortado a 4000, tiempos no negativos). null si es parcial o vacía. */
@@ -277,7 +283,9 @@ object Calls {
     fun put(calls: Map<String, CallDTO?>, call: CallDTO): Map<String, CallDTO?> {
         val cur = calls[call.conversationId]
         if (call.ended && cur != null && cur.id != call.id) return calls
-        return calls + (call.conversationId to if (call.ended) null else call)
+        // 1.7.1: el call.updated de la conversación no trae myDevices: se conserva el último de mi cuenta para esa llamada.
+        val merged = if (call.myDevices == null && cur != null && cur.id == call.id && cur.myDevices != null) call.copy(myDevices = cur.myDevices) else call
+        return calls + (call.conversationId to if (call.ended) null else merged)
     }
 
     fun decode(el: JsonElement?): CallDTO? = el?.let { runCatching { TcJson.decodeFromJsonElement(CallDTO.serializer(), it) }.getOrNull() }?.takeIf { it.id.isNotEmpty() }

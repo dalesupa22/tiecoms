@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 1.7.1: varios dispositivos, altavoz, llamadas en curso, agregar y cámara en plena llamada -->
+    <string name="cc_mute">Mute</string>
+    <string name="cc_unmute">Unmute</string>
+    <string name="cc_camera">Camera</string>
+    <string name="cc_flip">Flip</string>
+    <string name="cc_add">Add</string>
+    <string name="cc_transcribe">Transcribe</string>
+    <string name="cc_hang_up">Hang up</string>
+    <string name="route_earpiece">Phone</string>
+    <string name="route_speaker">Speaker</string>
+    <string name="route_bluetooth">Bluetooth</string>
+    <string name="route_wired">Headphones</string>
+    <string name="route_title">Audio output</string>
+    <string name="inv_calling">Calling…</string>
+    <string name="inv_no_answer">No answer</string>
+    <string name="inv_ring_again">Call again</string>
+    <string name="p_cam_off">Camera off</string>
+    <string name="p_muted">Muted</string>
+    <string name="elsewhere_text">On a call on your %1$s</string>
+    <string name="elsewhere_move">Move here</string>
+    <string name="elsewhere_join">Join too</string>
+    <string name="dev_iphone">iPhone</string>
+    <string name="dev_android">Android phone</string>
+    <string name="dev_web">browser</string>
+    <string name="dev_desktop">computer</string>
+    <string name="dev_other">other device</string>
+    <string name="calls_active">Happening now</string>
+    <string name="calls_active_in">%1$d in the call</string>
+</resources>

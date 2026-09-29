@@ -143,6 +143,11 @@ export interface CallDTO {
    * conserva el último que recibió para esa llamada).
    */
   myDevices?: CallDeviceDTO[];
+  /**
+   * 1.7.1: a quién se llamó con «＋ Agregar» (POST /calls/:id/invite), del chat o de fuera, y si ya entró después de
+   * esa llamada. Los clientes muestran «Llamando…» y, pasados 45 s sin entrar, «No contestó» con «Volver a llamar».
+   */
+  invited?: { userId: string; at: string; joined: boolean }[];
 }
 /** POST /calls/:id/invite: suma personas a la llamada en curso (les suena aunque no estén en el chat). */
 export const CallInviteInput = z.object({ userIds: z.array(z.uuid()).min(1).max(20) });

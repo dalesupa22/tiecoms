@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BootstrapDTO, ConversationDTO } from '@tiecoms/contracts';
-import { destinationLabel, directWith, issueDestinations, peopleByOrg, quickSearch, recentPeopleIds, searchChats, searchGroups, searchPeople, type Namer } from '../src/quick-search.ts';
+import { companyLine, companyOf, destinationLabel, directWith, issueDestinations, peopleByOrg, quickSearch, recentPeopleIds, searchChats, searchGroups, searchPeople, type Namer } from '../src/quick-search.ts';
 
 // Búsqueda rápida (personas, grupos y chats), «Recientes» de Mensaje nuevo y destinos de «＋ Nuevo asunto».
 // Mismo escenario que apps/ios/TieComsTests/QuickSearchTests.swift.
@@ -91,5 +91,27 @@ describe('búsqueda rápida', () => {
     expect(list[0]).toBe('d2');
     expect(destinationLabel(d, d.conversations.find((c) => c.id === 'r1')!, 'Mentoría 1')).toBe('Mentoría 1 · Ongoing');
     expect(destinationLabel(d, d.conversations.find((c) => c.id === 'd2')!, 'Carla Pérez')).toBe('Carla Pérez');
+  });
+});
+
+describe('empresa bajo el nombre', () => {
+  const c = (id: string) => d.conversations.find((x) => x.id === id)!;
+  it('grupos: la otra parte, la anfitriona si soy invitado o la mía', () => {
+    expect(companyOf(d, c('r1'))).toBe('Ongoing');
+    expect(companyOf(d, c('x1'))).toBe('Acme');
+    expect(companyOf(d, c('g1'))).toBe('Xertify');
+  });
+  it('directo 1:1: la empresa de la otra persona; varias personas: sus empresas; sidechats: ninguna', () => {
+    expect(companyOf(d, c('d1'))).toBe('Ongoing');
+    // Varias personas: las empresas de los participantes, primero las de los demás (pedido de Danny, 29-sep-2026).
+    expect(companyOf(d, c('m1'))).toBe('Ongoing · Xertify');
+    expect(companyOf(d, conv({ id: 's', kind: 'multi', deriveKind: 'side', parentId: 'r1', memberIds: ['me', 'bob'] }))).toBeNull();
+  });
+  it('no duplica si el nombre ya empieza por la empresa', () => {
+    expect(companyLine(d, c('g1'), 'Xertify - Xertiflow')).toBeNull();
+    expect(companyLine(d, c('r1'), 'Mentoría 1')).toBe('Ongoing');
+  });
+  it('la búsqueda por empresa sigue encontrando los grupos', () => {
+    expect(ids(searchGroups(d, 'ongoing', names))).toEqual(['r1']);
   });
 });

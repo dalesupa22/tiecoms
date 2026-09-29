@@ -3,6 +3,7 @@ import { useEffect, type ReactNode } from 'react';
 import type { BootstrapDTO, ConversationDTO, OrganizationDTO, PersonDTO } from '@tiecoms/contracts';
 import { attachmentSummaryText, locale, systemText, t } from './i18n.ts';
 import { apiUrl } from './app-client.ts';
+import { companyLine, companyOf } from './quick-search.ts';
 
 export function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -70,7 +71,20 @@ export function ConvAvatar({ c, size = 22, fallback }: { c: ConversationDTO; siz
       style={{ width: size, height: size, borderRadius: c.kind === 'multi' ? 99 : Math.round(size * 0.28), objectFit: 'cover', flex: 'none' }} />;
   }
   if (fallback) return <>{fallback}</>;
-  return <span className="hash">{c.deriveKind === 'side' ? '💬' : c.parentId ? '⑂' : c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>;
+  if (c.deriveKind === 'side') return <SideIcon size={size} />;
+  return <span className="hash">{c.parentId ? '⑂' : c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>;
+}
+
+/** Ícono de sidechat: globo de diálogo en el verde azulado de sidechats (tokens --side-ink / --side-bg, igual en iOS y Android). */
+export function SideIcon({ size = 22 }: { size?: number }) {
+  const g = Math.round(size * 0.6);
+  return (
+    <span className="side-ico" aria-hidden style={{ width: size, height: size, borderRadius: Math.round(size * 0.28) }}>
+      <svg width={g} height={g} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4 19.5l1.4-4.4A7.5 7.5 0 1 1 20 11.5z" />
+      </svg>
+    </span>
+  );
 }
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
@@ -119,8 +133,14 @@ export function conversationSubtitle(d: BootstrapDTO, c: ConversationDTO) {
     const orgs = [...new Set(c.memberIds.map((m) => orgById(d, personById(d, m)?.orgId)?.name).filter(Boolean))];
     return [c.deriveKind === 'side' ? `💬 ${t('side.kind')}` : t('chat.groupChat'), orgs.slice(0, 3).join(', ')].filter(Boolean).join(' · ');
   }
+  // Grupos: la empresa primero (bajo el nombre, en gris), luego el espacio si no es el mismo nombre.
   const ws = d.workspaces.find((w) => w.id === c.workspaceId);
-  return [ws?.name, c.kind === 'internal' ? t('kind.internalShort') : c.level === 'directivo' ? t('kind.directivo') : null].filter(Boolean).join(' · ');
+  const company = companyLine(d, c, conversationTitle(d, c));
+  const fold = (x: string) => x.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
+  const co = fold(companyOf(d, c) ?? '');
+  // El espacio solo si aporta: no el de la casa de la empresa ni uno cuyo nombre ya trae la empresa.
+  const wsName = ws && !ws.isOrgHome && !(co && fold(ws.name).includes(co)) ? ws.name : null;
+  return [company, wsName, c.kind === 'internal' ? t('kind.internalShort') : c.level === 'directivo' ? t('kind.directivo') : null].filter(Boolean).join(' · ');
 }
 
 /** Empresa "contraparte" de un espacio desde mi punto de vista (para agrupar la barra lateral). */

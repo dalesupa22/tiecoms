@@ -77,7 +77,8 @@ const data: BootstrapDTO = {
   contract: 'dev', serverTime: new Date().toISOString(),
   me: { id: 'danny', name: 'Danny Suárez', kind: 'human', title: 'Líder técnico', area: null, primaryOrgId: 'xertify', email: 'danny@demo.tiecoms.com' },
   organizations: [org('xertify', 'Xertify', 'X', '#dcd0f2', '#3b2a5a', true), org('norte', 'Estudio Norte', 'EN', '#e8d5a8', '#4a3a14')],
-  workspaces: [{ id: 'ws1', name: 'Lanzamiento · Estudio Norte', department: 'Portal de certificados', glyph: null, owningOrgId: 'xertify', organizationIds: ['xertify', 'norte'], memberIds: ['danny', 'laura', 'mateo', 'ana'], myRole: 'lead', createdAt: iso(4 * D), pinnedAt: null }],
+  workspaces: [{ id: 'ws1', name: 'Lanzamiento · Estudio Norte', department: 'Portal de certificados', glyph: null, owningOrgId: 'xertify', organizationIds: ['xertify', 'norte'], memberIds: ['danny', 'laura', 'mateo', 'ana'], myRole: 'lead', createdAt: iso(4 * D), pinnedAt: null },
+    { id: 'wsx', name: 'Xertify', department: null, glyph: null, owningOrgId: 'xertify', organizationIds: ['xertify'], memberIds: ['danny', 'laura'], myRole: 'lead', createdAt: iso(9 * D), pinnedAt: null, isOrgHome: true }],
   conversations: [
     conv({ id: 'general', name: 'General', pinnedAt: iso(D), memberIds: ['danny', 'laura', 'mateo', 'ana'], lastMessageSeq: g.length, lastEventSeq: g.length, lastReadSeq: g.length - 1, unread: 1, unreadMentions: 1, lastMessagePreview: g[g.length - 1]!.body, openIssues: 2, linkCount: 6 }),
     conv({ id: 'diag', name: 'Diagnóstico · notificaciones duplicadas', kind: 'internal', level: null, internalOrgId: 'xertify', memberIds: ['danny', 'laura'], parentId: 'general', parentMessageId: 'general-m4', parentMessageSeq: 4, deriveKind: 'internal', deriveReason: 'Ana necesita saber si es el job o un reenvío', returnedAt: iso(5 * H), lastMessageSeq: dg.length, lastEventSeq: dg.length, lastReadSeq: dg.length }),
@@ -85,6 +86,10 @@ const data: BootstrapDTO = {
     conv({ id: 'multi1', kind: 'multi', workspaceId: null, level: null, name: 'Equipo mixto', avatarUrl: '/chaggu-logo.svg', memberIds: ['danny', 'mateo', 'ana', 'laura'], unread: 2, lastMessagePreview: '¿Nos vemos el jueves?' }),
     conv({ id: 'side1', kind: 'multi', workspaceId: null, level: null, name: 'Sidechat · Veo notificaciones duplicadas en las…', memberIds: ['danny', 'laura'], parentId: 'general', parentMessageId: 'general-m4', parentMessageSeq: 4, deriveKind: 'side', lastMessageSeq: sd.length, lastEventSeq: sd.length, lastReadSeq: sd.length - 1, unread: 1, lastMessagePreview: sd[2]!.body }),
     conv({ id: 'dm-ana', kind: 'direct', workspaceId: null, level: null, memberIds: ['danny', 'ana'], lastMessageSeq: dm.length, lastEventSeq: dm.length, lastReadSeq: dm.length, lastMessagePreview: dm[1]!.body }),
+    // Empresa bajo el nombre (1.7.1): uno ya empieza por la empresa y no la repite; directo con alguien de otra empresa.
+    conv({ id: 'xflow', workspaceId: 'wsx', name: 'Xertify - Xertiflow', memberIds: ['danny', 'laura'], lastMessageAt: iso(3 * H), lastMessagePreview: 'Subí la versión 2 del flujo.' }),
+    conv({ id: 'pagos', workspaceId: 'wsx', name: 'Pagos', memberIds: ['danny', 'laura'], lastMessageAt: iso(26 * H), lastMessagePreview: 'Factura de septiembre lista.' }),
+    conv({ id: 'dm-mateo', kind: 'direct', workspaceId: null, level: null, memberIds: ['danny', 'mateo'], lastMessageAt: iso(4 * H), lastMessagePreview: 'Nos vemos el viernes.' }),
     conv({ id: 'internal', name: 'Equipo interno', kind: 'internal', level: null, internalOrgId: 'xertify', memberIds: ['danny', 'laura'] }),
   ],
   people: [person('danny', 'Danny Suárez', 'xertify', 'Líder técnico'), person('laura', 'Laura Gómez', 'xertify', 'Soporte'), person('mateo', 'Mateo Rivas', 'norte', 'Director de proyectos'), { ...person('ana', 'Ana Torres', 'norte', 'Coordinadora'), sleep: { start: `${String((new Date().getHours() + 23) % 24).padStart(2, '0')}:00`, end: `${String((new Date().getHours() + 7) % 24).padStart(2, '0')}:00`, tz: Intl.DateTimeFormat().resolvedOptions().timeZone } }],

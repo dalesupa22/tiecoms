@@ -104,3 +104,30 @@ Pedido de Danny: la opción más barata. Groq cobra ≈ US$0.04 por hora de audi
 - Job `push.call`: `category` es `TC_CALL` y `data` es `{type: 'call', callId, conversationId, kind}`. Sale con el título de quien llama y el texto «📞 Te está llamando».
 - No sale con «No molestar» ni en modo sueño.
 - Las apps muestran Contestar / Ahora no y entran con `/calls/:id/join`.
+
+## Varios dispositivos, altavoz y llamadas en curso (1.7.1, 29-sep-2026)
+
+Pedido de Danny. César lo llamó, contestó en el iPhone y el PC siguió sonando.
+
+- **Un attendee por dispositivo.**
+  - `CreateAttendee` usa `ExternalUserId = "{userId}#{deviceKey}"`, donde `deviceKey` son los primeros 8 caracteres del id de sesión o de dispositivo; en total son como mucho 45 caracteres.
+  - Así la misma persona puede estar en la llamada desde dos dispositivos sin que Chime saque al primero (antes, reusar el attendee daba `AudioJoinedFromAnotherDevice`).
+  - Los clientes toman el id de la persona con `externalUserId.split('#')[0]`, tanto para los nombres y quién habla como para la transcripción; el API también acepta el id sin `#`.
+  - Migración 038: `call_participants` pasa a tener la clave `(call_id, user_id, device_key)`, con el latido por dispositivo.
+  - `CallDTO.activeUserIds` sigue con las **personas** (sin repetir). Se agrega `CallDTO.myDevices?: { deviceKey, platform, label }[]`, solo con los míos.
+- **Contestar o rechazar se coordina entre mis dispositivos.**
+  - Al entrar (`join`/`startOrJoin`), el servidor manda a **mis otras sesiones** por la cuenta `call.answered { callId, deviceKey, platform, label }`. Esos dispositivos dejan de sonar y cierran el aviso y la notificación.
+  - `POST /calls/:id/decline` (nuevo) manda `call.declined { callId }` a mis sesiones. Todas dejan de sonar. Para los demás no cambia nada: si nadie contesta, la llamada termina sola.
+  - En iOS y Android, al recibir `call.answered` o `call.declined`, también se quita la notificación push de esa llamada (collapseId `call-{id}`). El push de llamada lleva `callId` para identificarla.
+- **«Llamada en curso en otro dispositivo».** Si estoy en una llamada en un dispositivo, los demás muestran una franja fija arriba: «📞 En llamada en tu iPhone · {chat}», con dos botones:
+  - **Pasar aquí:** entra desde este dispositivo y, cuando conecta, llama a `POST /calls/:id/leave {deviceKey: el otro}`, que saca solo a ese dispositivo.
+  - **Unirme también.**
+  - El estado sale de `CallDTO.myDevices` en `call.updated` y del bootstrap (`BootstrapDTO.myActiveCall?: CallDTO`).
+- **Llamadas en curso.**
+  - `GET /calls/active` devuelve las llamadas sin terminar de mis conversaciones (y a las que me invitaron): `CallDTO` con `activeUserIds` y el título.
+  - **Web:** en la pestaña Llamadas, una sección «En curso ahora» arriba del historial, con avatares de quién está y el botón Unirse. Además, un punto verde 📞 junto a la conversación en la lista lateral, sacado de `calls[convId]` o de `call.updated`.
+  - **Móvil:** la misma sección en la pestaña Llamadas.
+- **Altavoz.**
+  - **iOS:** botón 🔊 en la pantalla de llamada. Por defecto va el auricular en voz y el altavoz en video. Alterna con `overrideOutputAudioPort(.speaker/.none)` o con la lista de dispositivos de audio de Chime (`listAudioDevices`/`chooseAudioDevice`), mostrando Bluetooth y audífonos si hay.
+  - **Android:** lo mismo con `audioVideo.listAudioDevices()` y `chooseAudioDevice(...)` de Chime (auricular, altavoz, Bluetooth, cable).
+  - **Web:** menú «Salida de audio» con `chooseAudioOutput` del SDK (`setSinkId`) donde el navegador lo permita, y micrófono con `listAudioInputDevices`.

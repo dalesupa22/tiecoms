@@ -18,6 +18,7 @@ import { FilesScreen } from './screens/Files.tsx';
 import { DmsScreen, GroupsScreen, OversightScreen, ReadOnlyConversationScreen } from './screens/Groups.tsx';
 import { DialogHost } from './actions.tsx';
 import { MenuHost, ToastHost } from './menu.tsx';
+import { BubbleHost, useTabBadge } from './bubbles.tsx';
 import { UpdateBanner } from './update.tsx';
 import { EmojiPickerHost } from './screens/Reactions.tsx';
 import { SavedLinksScreen } from './screens/Links.tsx';
@@ -44,6 +45,7 @@ export function App() {
   const lang = useLang();
   const route = parse(path);
   const prevStatus = useRef(status);
+  useTabBadge();
 
   useEffect(() => {
     if (status === 'anonymous' && !['login', 'signup', 'invite', 'sso'].includes(route.name)) navigate(`/login${path !== '/' ? `?next=${encodeURIComponent(path)}` : ''}`, true);
@@ -92,6 +94,7 @@ export function App() {
     <MenuHost />
     <DialogHost />
     <ToastHost />
+    <BubbleHost />
     <EmojiPickerHost />
     <CallDock />
     <IncomingCallHost />

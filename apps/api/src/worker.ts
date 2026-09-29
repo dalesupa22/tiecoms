@@ -19,6 +19,7 @@ import { digestFor, markDigestSent } from './modules/links.ts';
 import { linkDigestMail, trySendMail } from './mail.ts';
 import { config } from './config.ts';
 import { fireSoonEvents, soonMinutes } from './modules/calendar.ts';
+import { fireDueMailReplies } from './modules/mailbox.ts';
 import { cleanupPending as cleanupAttachments } from './modules/attachments.ts';
 import { transcribeAttachment } from './modules/voice.ts';
 import { deliverIntegrationEvent } from './modules/integration-events.ts';
@@ -172,6 +173,7 @@ async function loop() {
         const s = await fireSoonEvents(); if (s) console.log(`[worker] avisos de reunión: ${s}`);
         // «Es hoy» (tanda 1.7), en el mismo ciclo que «empieza pronto».
         const td = await fireTodayEvents(); if (td) console.log(`[worker] avisos «es hoy»: ${td}`);
+        const mr = await fireDueMailReplies(); if (mr) console.log(`[worker] respuestas de correo programadas: ${mr}`);
         // Mensajes programados, en el mismo ciclo de 15 s (índice parcial: sin pendientes no cuesta nada).
         const p = await sendDueScheduled(); if (p) console.log(`[worker] programados enviados: ${p}`);
         // Llamadas: quien dejó de latir sale; la llamada vacía se cierra (y se borra la reunión en Chime).

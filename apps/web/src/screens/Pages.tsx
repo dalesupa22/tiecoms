@@ -1,3 +1,4 @@
+import { ProviderIcon } from './Mail.tsx';
 import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from 'react';
 import type { ConversationDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
@@ -300,6 +301,7 @@ function InviteColleague({ orgId, orgName }: { orgId: string; orgName: string })
 
 export function SettingsScreen() {
   const d = useClient((s) => s.data)!;
+  const mailOn = d?.features?.mail === true;
   useLang();
   const [sessions, setSessions] = useState<Awaited<ReturnType<typeof client.sessions>> | null>(null);
   const load = () => client.sessions().then(setSessions).catch(() => {});
@@ -356,6 +358,17 @@ export function SettingsScreen() {
         <span className="muted">›</span>
       </button>
 
+      {mailOn && (
+        <>
+          {/* En el celular no hay «Más»: Tú › Correo es la entrada a la lista, además del ＋ del chat (docs/CORREO.md). */}
+          <div className="eyebrow" style={{ marginBottom: 10 }}>{t('mail.title')}</div>
+          <button className="card conv-card" style={{ marginBottom: 24 }} onClick={() => navigate('/correo')}>
+            <span className="row" style={{ gap: 4 }} aria-hidden><ProviderIcon provider="google" size={20} /><ProviderIcon provider="microsoft" size={20} /></span>
+            <span className="grow"><b>{t('mail.settingsRow')}</b><span className="small muted" style={{ display: 'block' }}>{t('mail.settingsHint')}</span></span>
+            <span className="muted">›</span>
+          </button>
+        </>
+      )}
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('settings.whatsapp')}</div>
       <button className="card conv-card" style={{ marginBottom: 24 }} onClick={() => navigate('/whatsapp')}>
         <span style={{ fontSize: 22 }} aria-hidden>✆</span>

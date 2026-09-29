@@ -14,6 +14,7 @@ import { TrazoScreen } from './screens/Lineage.tsx';
 import { AgendaScreen } from './screens/Calendar.tsx';
 import { ShareScreen } from './screens/Bring.tsx';
 import { WhatsAppScreen } from './screens/WhatsApp.tsx';
+import { MailScreen } from './screens/Mail.tsx';
 import { FilesScreen } from './screens/Files.tsx';
 import { DmsScreen, GroupsScreen, OversightScreen, ReadOnlyConversationScreen } from './screens/Groups.tsx';
 import { DialogHost } from './actions.tsx';
@@ -79,6 +80,7 @@ export function App() {
       {route.name === 'saved' && <SavedLinksScreen />}
       {route.name === 'scheduled' && <ScheduledScreen />}
       {route.name === 'calls' && <CallsScreen />}
+      {route.name === 'mail' && <MailScreen />}
       {route.name === 'signed' && <Suspense fallback={<div className="page"><div className="hint">{t('common.loading')}</div></div>}><SignedScreen /></Suspense>}
       {route.name === 'groups' && <GroupsScreen />}
       {route.name === 'dms' && <DmsScreen />}

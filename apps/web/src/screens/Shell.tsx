@@ -25,6 +25,7 @@ const NAV = [
   { name: 'files', label: 'nav.files', ico: '▣', to: '/archivos' },
   { name: 'saved', label: 'nav.saved', ico: '🔖', to: '/ver-despues' },
   { name: 'scheduled', label: 'nav.scheduled', ico: '🕒', to: '/programados' },
+  { name: 'mail', label: 'nav.mail', ico: '✉', to: '/correo' },
   { name: 'whatsapp', label: 'nav.whatsapp', ico: '✆', to: '/whatsapp' },
 ] as const;
 /** Today, Conversaciones, Calendario, Asuntos (y Llamadas si están prendidas) siempre; el resto bajo «Más». */
@@ -160,6 +161,7 @@ function Sidebar({ route }: { route: Route }) {
   const activeConv = route.name === 'conversation' ? route.id : null;
 
   const callsOn = useClient((s) => s.data?.features?.calls === true);
+  const mailOn = useClient((s) => s.data?.features?.mail === true);
   return (
     <aside className="side">
       <div className="side-brand">
@@ -168,7 +170,7 @@ function Sidebar({ route }: { route: Route }) {
       </div>
       <QuickChat />
       <nav className="nav">
-        {NAV.filter((n) => n.name !== 'calls' || callsOn).filter((n, i) => i < NAV_MAIN + (callsOn ? 1 : 0) || navMore || route.name === n.name).map((n) => (
+        {NAV.filter((n) => (n.name !== 'calls' || callsOn) && (n.name !== 'mail' || mailOn)).filter((n, i) => i < NAV_MAIN + (callsOn ? 1 : 0) || navMore || route.name === n.name).map((n) => (
           <button key={n.name} className={`nav-item ${route.name === n.name ? 'active' : ''}`} onClick={() => navigate(n.to)}>
             <span className="ico">{n.ico}</span><span className="grow">{t(n.label)}</span>
             {n.name === 'today' && unreadTotal > 0 && <span className="pill">{unreadTotal}</span>}

@@ -20,7 +20,7 @@ export function usePath() {
 }
 
 export type Route =
-  | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' } | { name: 'agenda' } | { name: 'share' } | { name: 'whatsapp' } | { name: 'files' } | { name: 'groups' } | { name: 'dms' } | { name: 'saved' } | { name: 'scheduled' } | { name: 'signed' } | { name: 'calls' }
+  | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' } | { name: 'agenda' } | { name: 'share' } | { name: 'whatsapp' } | { name: 'files' } | { name: 'groups' } | { name: 'dms' } | { name: 'saved' } | { name: 'scheduled' } | { name: 'signed' } | { name: 'calls' } | { name: 'mail' }
   | { name: 'oversight'; id: string } | { name: 'readonly'; id: string }
   | { name: 'conversation'; id: string } | { name: 'workspace'; id: string }
   | { name: 'login' } | { name: 'signup' } | { name: 'sso' } | { name: 'invite'; token: string };
@@ -51,6 +51,7 @@ export function parse(path: string): Route {
   if (a === 'programados') return { name: 'scheduled' };
   if (a === 'firmas') return { name: 'signed' };
   if (a === 'llamadas') return { name: 'calls' };
+  if (a === 'correo') return { name: 'mail' };
   return { name: 'today' };
 }
 

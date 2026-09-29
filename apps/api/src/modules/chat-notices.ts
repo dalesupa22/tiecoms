@@ -18,10 +18,10 @@ const excerptOf = (s: string) => { const t = s.replace(/\s+/g, ' ').trim(); retu
  * elemento si sigue entre los últimos 15 mensajes (message.updated, sin subir no leídos) o publica uno nuevo.
  */
 export async function bumpCommentNotice(c: Tx, p: {
-  kind: 'issue' | 'event'; conversationId: string; itemId: string; title: string; actorId: string; actorName: string; body: string;
+  kind: 'issue' | 'event' | 'mail'; conversationId: string; itemId: string; title: string; actorId: string; actorName: string; body: string;
 }) {
-  const key = p.kind === 'issue' ? 'issue.comments' : 'event.comments';
-  const idField = p.kind === 'issue' ? 'issueId' : 'eventId';
+  const key = p.kind === 'issue' ? 'issue.comments' : p.kind === 'mail' ? 'mail.comments' : 'event.comments';
+  const idField = p.kind === 'issue' ? 'issueId' : p.kind === 'mail' ? 'emailId' : 'eventId';
   // Bloquea la conversación: dos comentarios simultáneos no crean dos avisos.
   const conv = (await c.query('SELECT last_message_seq FROM conversations WHERE id = $1 FOR UPDATE', [p.conversationId])).rows[0];
   if (!conv) return null;

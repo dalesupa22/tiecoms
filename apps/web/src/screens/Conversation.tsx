@@ -22,6 +22,7 @@ import { SleepNotice } from './Sleep.tsx';
 import { createChatRecovery } from '../chat-recovery.ts';
 import { DerivedPendingStrip } from './Pending.tsx';
 import { MeetingDialog } from './Meetings.tsx';
+import { MailCard, MailPickDialog, MailSharedRow, WaSharedRow, openMailDrawer, type WaShared } from './Mail.tsx';
 import { CallBanner, CallButtons, openTranscript } from './Call.tsx';
 import { ScheduledStrip, openScheduleMenu, scheduleMenu, whenLabel } from './Scheduled.tsx';
 import { SideIssueStrip, TasksDialog } from './Issues.tsx';
@@ -766,6 +767,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
                   { label: t('meet.nowTitle'), icon: '📹', onSelect: () => openDialog((close) => <MeetingDialog conversationId={id} onClose={close} />) },
                   { label: t('meet.laterTitle'), icon: '🔗', onSelect: () => openDialog((close) => <MeetingDialog conversationId={id} scheduled onClose={close} />) },
                   { label: t('bar.newEvent'), icon: '📅', onSelect: () => newEvent({ conversationId: id }) },
+                  ...(d.features?.mail ? [{ divider: true as const }, { label: t('mail.fromChat'), icon: '✉', onSelect: () => openDialog((close) => <MailPickDialog conversationId={id} onClose={close} />) }, { label: t('wa.fromChat'), icon: '✆', onSelect: () => navigate('/whatsapp') }] : []),
                   ...(canOpenIssues ? [{ label: t('bar.newIssue'), icon: '◆', onSelect: () => setNewIssue({}) }] : []),
                   ...(conv.sideIssueId ? [{ label: t('task.addHere'), icon: '☑', onSelect: () => openDialog((close) => <TasksDialog parentId={conv.sideIssueId!} conversationId={id} onClose={close} />) }] : []),
                 ]);
@@ -957,6 +959,26 @@ function PinsDialog({ conv, onJump, onClose }: { conv: ConversationDTO; onJump: 
 /** Mensajes de sistema: algunos enlazan a un asunto, una reunión o la conversación derivada (si la puedes ver). */
 function SystemRow({ m, onIssue, canPost, live }: { m: MessageDTO; onIssue: (id: string) => void; canPost: boolean; live: boolean }) {
   const d = useClient((s) => s.data)!;
+  // Correo y WhatsApp traídos al chat (docs/CORREO.md): mensaje de quien lo trajo + tarjeta.
+  let px: any = null;
+  try { px = m.body.startsWith('{"k":"mail.') || m.body.startsWith('{"k":"wa.') ? JSON.parse(m.body) : null; } catch {}
+  if (px?.k === 'mail.shared' && px.emailId) return <MailSharedRow m={m} p={px} onIssue={onIssue} />;
+  if (px?.k === 'wa.shared' && px.text != null) return <WaSharedRow m={m} p={px as WaShared} />;
+  if (px?.k === 'mail.comments' && px.emailId) return (
+    <div id={`msg-${m.conversationId}-${m.seq}`} className="msg-card-row">
+      <MailCard emailId={px.emailId} onIssue={onIssue} banner={
+        <div className="comments-strip">
+          <span className="grow" style={{ minWidth: 0 }}>
+            <b>{px.count > 1 ? t('comments.many', { n: px.count }) : t('comments.one')}</b>
+            <span className="small ellipsis" style={{ display: 'block' }}><b>{String(px.lastByName ?? '').split(' ')[0]}</b> {px.lastExcerpt}</span>
+          </span>
+          {canPost && <button className="btn small" onClick={() => openMailDrawer(px.emailId, 'comments')}>{t('comments.reply')}</button>}
+        </div>} />
+    </div>
+  );
+  if ((px?.k === 'mail.replied' || px?.k === 'mail.reply_failed') && px.emailId) return (
+    <div id={`msg-${m.conversationId}-${m.seq}`} className="msg-sys">{systemText(m.body)} · <button className="link-btn" onClick={() => openMailDrawer(px.emailId)}>{t('lin.open')}</button></div>
+  );
   // Tanda 1.7: es hoy, tarea hecha, tarea vencida y comentarios agrupados, como tarjetas.
   const notice = parseNotice(m.body);
   if (notice) return <Notice17Row m={m} p={notice} canPost={canPost} live={live} onIssue={onIssue} />;

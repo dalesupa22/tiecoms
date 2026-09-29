@@ -696,6 +696,84 @@ export interface EventCommentDTO {
 }
 export const EventCommentInput = z.object({ body: z.string().trim().min(1).max(4000) });
 
+// ---------- Correo en el chat (docs/CORREO.md) ----------
+/** Proveedor de correo: Gmail (google) u Outlook (microsoft). */
+export const MailProvider = z.enum(['google', 'microsoft']);
+export type MailProvider = z.infer<typeof MailProvider>;
+export interface MailConnectionDTO {
+  provider: MailProvider; label: 'Gmail' | 'Outlook'; available: boolean; unavailableReason: string | null;
+  status: 'none' | 'active' | 'reconnect'; accountEmail: string | null;
+}
+export interface MailAddressDTO { name: string | null; email: string }
+export interface MailAttachmentInfoDTO { id: string; name: string; size: number; contentType: string }
+/** Fila de la lista (en vivo, no se guarda). */
+export interface MailListItemDTO {
+  provider: MailProvider; id: string; threadId: string | null; from: MailAddressDTO | null; to: MailAddressDTO[];
+  subject: string; snippet: string; date: string | null; unread: boolean; hasAttachments: boolean; box: 'inbox' | 'sent';
+}
+export interface MailListDTO { items: MailListItemDTO[]; nextPage: string | null; accountEmail: string | null }
+/** Correo completo leído en vivo (vista previa antes de compartir). */
+export interface MailMessageDTO extends MailListItemDTO { cc: MailAddressDTO[]; body: string; attachments: MailAttachmentInfoDTO[] }
+export const MailListQuery = z.object({
+  provider: MailProvider,
+  box: z.enum(['inbox', 'sent', 'all']).default('inbox'),
+  /** Pestaña de Recibidos: Gmail primary/promotions/updates/social/forums; Outlook focused/other. any = todas. */
+  category: z.enum(['primary', 'promotions', 'updates', 'social', 'forums', 'focused', 'other', 'any']).optional(),
+  q: z.string().trim().max(200).optional(),
+  from: z.string().trim().max(200).optional(),
+  to: z.string().trim().max(200).optional(),
+  after: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  before: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  attachments: z.enum(['1', 'true']).optional(),
+  unread: z.enum(['1', 'true']).optional(),
+  label: z.string().trim().max(100).optional(),
+  page: z.string().max(2000).optional(),
+});
+export const ShareMailInput = z.object({
+  provider: MailProvider,
+  messageId: z.string().min(1).max(500),
+  conversationId: z.uuid(),
+  comment: z.string().trim().max(4000).optional(),
+  topicId: z.uuid().nullable().optional(),
+});
+export type SharedMailStatus = 'pending' | 'scheduled' | 'replied';
+export interface SharedMailCommentDTO { id: string; emailId: string; authorId: string; body: string; createdAt: string }
+export interface SharedMailDTO {
+  id: string; conversationId: string; sharedBy: string; provider: MailProvider; accountEmail: string | null;
+  direction: 'in' | 'out'; from: MailAddressDTO | null; to: MailAddressDTO[]; cc: MailAddressDTO[];
+  /** body solo llega con full=true (GET /mail/shared/:id?full=1); en tarjetas y en vivo va ''. */
+  subject: string; snippet: string; body: string; full?: boolean;
+  /** Se guardó solo lo nuevo: el historial citado y la firma se ven con GET /mail/shared/:id/original (en vivo). */
+  trimmed?: boolean;
+  sentAt: string | null; attachments: MailAttachmentInfoDTO[];
+  messageId: string | null; comment: string | null; status: SharedMailStatus; repliedAt: string | null; repliedBy: string | null;
+  /** Respuesta programada pendiente (solo la ve quien la programó). */
+  scheduledReply: { id: string; sendAt: string } | null;
+  issueId: string | null; commentCount: number; lastComments: SharedMailCommentDTO[]; createdAt: string;
+  /** Abrir en Gmail/Outlook (solo para quien lo compartió; null para los demás y en vivo). */
+  webLink?: string | null;
+}
+export const MailReplyInput = z.object({
+  body: z.string().trim().min(1).max(20000),
+  cc: z.array(z.email()).max(20).optional(),
+  /** Adjuntos que ya están en el chat (se envían con la respuesta). */
+  attachmentIds: z.array(z.uuid()).max(10).optional(),
+  /** Programar: si no llega, sale ya. */
+  sendAt: z.iso.datetime({ offset: true }).optional(),
+  notifyChat: z.boolean().default(true),
+});
+export const MailTaskInput = z.object({
+  title: z.string().trim().min(2).max(200),
+  ownerId: z.uuid().nullable().optional(),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  closeOnReply: z.boolean().default(true),
+});
+/** «Comentar en chaggu» desde un mensaje de WhatsApp. */
+export const ShareWaInput = z.object({
+  accountId: z.uuid(), jid: z.string().min(3).max(200), messageId: z.string().min(1).max(200),
+  conversationId: z.uuid(), comment: z.string().trim().max(4000).optional(),
+});
+
 /** side = conversación lateral: consulta privada desde un mensaje (chat multi que cuelga de su origen). */
 export type DeriveKind = 'same' | 'internal' | 'directive' | 'side';
 export type IssueStatus = 'open' | 'in_progress' | 'waiting' | 'done' | 'cancelled';
@@ -833,7 +911,7 @@ export interface BootstrapDTO {
   conversations: ConversationDTO[];
   people: PersonDTO[];
   /** Funciones que el servidor tiene prendidas (aditivo: clientes viejos lo ignoran). */
-  features?: { calls: boolean };
+  features?: { calls: boolean; mail?: boolean };
 }
 
 // ---------- Espacios y conversaciones ----------
@@ -1439,6 +1517,7 @@ export type ConversationEvent =
   /** Lista completa de temas (activos y archivados) tras crear, editar, archivar o quitar uno. */
   | { type: 'topics.changed'; conversationId: string; eventSeq: number; topics: TopicDTO[] }
   | { type: 'calendar.updated'; conversationId: string; eventSeq: number; event: CalendarEventDTO }
+  | { type: 'mail.updated'; conversationId: string; eventSeq: number; email: SharedMailDTO }
   /** Empezó, cambió quién está dentro o terminó una llamada de la conversación. */
   | { type: 'call.updated'; conversationId: string; eventSeq: number; call: CallDTO }
   /** Evento fuera de tu historial visible: solo avanza el cursor. */

@@ -11,7 +11,7 @@ import {
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
-  ChatSearchQuery, EventCommentInput,
+  ChatSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput,
   SetAdminInput, UpdateIntegrationInput, StartCallInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
@@ -31,6 +31,7 @@ import * as cal from './modules/calendar.ts';
 import * as prefs from './modules/prefs.ts';
 import * as reminders from './modules/reminders.ts';
 import * as meetings from './modules/meetings.ts';
+import * as mailbox from './modules/mailbox.ts';
 import * as scheduled from './modules/scheduled.ts';
 import * as wa from './modules/whatsapp.ts';
 import * as profile from './modules/profile.ts';
@@ -176,6 +177,11 @@ export async function buildHttp() {
   });
   app.get<{ Params: { provider: string }; Querystring: Record<string, string | undefined> }>('/api/v1/auth/:provider/callback', authLimit, async (req, reply) => {
     // Conectar Meet/Teams vuelve por esta misma redirect URI registrada: el state lo distingue del login.
+    // Conectar el correo usa la misma redirect URI: state `mail_`.
+    if (mailbox.isMailState(req.query.state)) {
+      reply.header('cache-control', 'no-store'); reply.header('referrer-policy', 'no-referrer');
+      return reply.redirect(await mailbox.finishConnect(req.query, MailProvider.parse(req.params.provider)), 302);
+    }
     if (meetings.isMeetingState(req.query.state)) {
       reply.header('cache-control', 'no-store'); reply.header('referrer-policy', 'no-referrer');
       return reply.redirect(await meetings.finishConnect(req.query, MeetingProvider.parse(req.params.provider)), 302);
@@ -479,6 +485,42 @@ export async function buildHttp() {
     priv.delete<{ Params: { provider: string } }>('/api/v1/meetings/connections/:provider', async (req) => meetings.disconnect(req.userId, MeetingProvider.parse(req.params.provider)));
     priv.post('/api/v1/meetings', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => meetings.createMeeting(req.userId, CreateMeetingInput.parse(req.body)));
     priv.get<{ Params: { id: string } }>('/api/v1/meetings/:id', async (req) => meetings.getMeeting(req.userId, req.params.id));
+    // Correo en el chat (docs/CORREO.md): la bandeja se lee en vivo; solo se guarda lo que se comparte.
+    const mailLimit = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
+    priv.get('/api/v1/mail/connections', async (req) => ({ connections: await mailbox.listConnections(req.userId) }));
+    priv.post('/api/v1/mail/connect/confirm', async (req, reply) => { reply.header('cache-control', 'no-store'); return mailbox.confirmConnect(req.userId, MeetingConfirmInput.parse(req.body)); });
+    priv.post<{ Params: { provider: string } }>('/api/v1/mail/connect/:provider', async (req) => {
+      const b = MeetingConnectInput.parse(req.body ?? {});
+      return mailbox.startConnect(req.userId, MailProvider.parse(req.params.provider), { platform: b.platform, redirectScheme: b.redirectScheme, proofChallenge: b.proofChallenge });
+    });
+    priv.delete<{ Params: { provider: string } }>('/api/v1/mail/connections/:provider', async (req) => mailbox.disconnect(req.userId, MailProvider.parse(req.params.provider)));
+    priv.get('/api/v1/mail/messages', mailLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return mailbox.listMail(req.userId, MailListQuery.parse(req.query), (req.query as any)?.fresh === '1'); });
+    priv.get<{ Params: { provider: string; id: string } }>('/api/v1/mail/messages/:provider/:id', mailLimit, async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      return mailbox.getMail(req.userId, MailProvider.parse(req.params.provider), z.string().min(1).max(500).parse(req.params.id));
+    });
+    priv.post('/api/v1/mail/share', mailLimit, async (req, reply) => reply.status(201).send(await mailbox.shareMail(req.userId, ShareMailInput.parse(req.body))));
+    priv.get<{ Querystring: { ids?: string } }>('/api/v1/mail/shared', async (req) => mailbox.getSharedMany(req.userId, z.array(z.uuid()).min(1).max(50).parse(String(req.query.ids ?? '').split(',').filter(Boolean))));
+    priv.get<{ Params: { id: string }; Querystring: { full?: string } }>('/api/v1/mail/shared/:id', async (req) => mailbox.getShared(req.userId, z.uuid().parse(req.params.id), req.query.full === '1'));
+    priv.get<{ Params: { id: string } }>('/api/v1/mail/shared/:id/original', mailLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return mailbox.original(req.userId, z.uuid().parse(req.params.id)); });
+    priv.get<{ Params: { id: string } }>('/api/v1/mail/shared/:id/comments', async (req) => mailbox.listComments(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/comments', async (req, reply) =>
+      reply.status(201).send(await mailbox.comment(req.userId, z.uuid().parse(req.params.id), EventCommentInput.parse(req.body).body)));
+    priv.get<{ Params: { id: string; att: string } }>('/api/v1/mail/shared/:id/attachments/:att', mailLimit, async (req, reply) => {
+      const f = await mailbox.fetchAttachment(req.userId, z.uuid().parse(req.params.id), z.string().min(1).max(2000).parse(req.params.att));
+      const ascii = f.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
+      const disp = /^(image\/(png|jpeg|gif|webp)|application\/pdf)$/.test(f.contentType) && (req.query as any)?.download !== '1' ? 'inline' : 'attachment';
+      return reply.header('content-type', f.contentType).header('cache-control', 'no-store').header('x-content-type-options', 'nosniff')
+        .header('content-security-policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox")
+        .header('content-disposition', `${disp}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(f.name)}`).send(f.bytes);
+    });
+    priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/draft', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) =>
+      mailbox.draftReply(req.userId, z.uuid().parse(req.params.id), (req.body as any)?.lang === 'en' ? 'en' : 'es'));
+    priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/reply', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) =>
+      mailbox.reply(req.userId, z.uuid().parse(req.params.id), MailReplyInput.parse(req.body)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/mail/shared/:id/reply', async (req) => mailbox.cancelReply(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/task', async (req, reply) => reply.status(201).send(await mailbox.createTask(req.userId, z.uuid().parse(req.params.id), MailTaskInput.parse(req.body))));
+    priv.post('/api/v1/whatsapp/share', mailLimit, async (req, reply) => reply.status(201).send(await mailbox.shareWhatsApp(req.userId, ShareWaInput.parse(req.body))));
     priv.get('/api/v1/reminders', async (req) => ({ reminders: await reminders.listReminders(req.userId) }));
     priv.post('/api/v1/reminders', async (req) => reminders.createReminder(req.userId, CreateReminderInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/reminders/:id/done', async (req) => reminders.completeReminder(req.userId, req.params.id));

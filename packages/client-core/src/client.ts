@@ -77,6 +77,8 @@ export interface ClientState {
   /** Mis mensajes programados por salir (y los fallidos), ordenados por hora de envío. */
   scheduled: ScheduledMessageDTO[];
   events: Record<string, CalendarEventDTO>;
+  /** Correos llevados a un chat (docs/CORREO.md), por id. */
+  mails: Record<string, import('@tiecoms/contracts').SharedMailDTO>;
   /** Sube cuando el puente de WhatsApp trae chats o mensajes nuevos: la pantalla vuelve a pedir la lista. */
   waRevision: number;
   /** Sube cuando cambia algún árbol de archivos visible para la persona. */
@@ -146,7 +148,7 @@ const base64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+
  * escritorio y móvil se comporten igual.
  */
 export class TieComsClient {
-  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0, calls: {} };
+  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, mails: {}, waRevision: 0, driveRevision: 0, calls: {} };
   private listeners = new Set<() => void>();
   private accessToken: string | null = null;
   private accessExp = 0;
@@ -442,7 +444,7 @@ export class TieComsClient {
     this.readTimers.clear();
     if (this.persistTimer) clearTimeout(this.persistTimer);
     this.persistTimer = null; this.bootDirty = false; this.dirtyConvs.clear(); this.sharedGets.clear(); this.needsLogin = false; this.lastBootstrapAt = 0;
-    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0, calls: {} };
+    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, mails: {}, waRevision: 0, driveRevision: 0, calls: {} };
     this.listeners.forEach((l) => l());
     await this.opts.secrets?.set(null);
     if (userId) {
@@ -602,6 +604,8 @@ export class TieComsClient {
     if (e.type === 'pins.changed') this.set({ pins: { ...this.state.pins, [e.conversationId]: e.messageIds } });
     if (e.type === 'topics.changed') this.set({ topics: { ...this.state.topics, [e.conversationId]: e.topics } });
     if (e.type === 'calendar.updated') this.set({ events: { ...this.state.events, [e.event.id]: e.event } });
+    // En vivo llega igual para todos: conservo mi respuesta programada (solo la ve quien la programó).
+    if (e.type === 'mail.updated') this.putMail({ ...e.email, scheduledReply: e.email.status === 'scheduled' ? this.state.mails[e.email.id]?.scheduledReply ?? null : null, webLink: this.state.mails[e.email.id]?.webLink ?? null });
     if (e.type === 'call.updated') this.putCall(e.call);
     if (e.type === 'message.created' && e.message.authorId !== this.state.data?.me.id && e.message.kind === 'text' && !dndActive(this.state)) {
       const muted = isActiveUntil(meta.mutedUntil);
@@ -1093,6 +1097,80 @@ export class TieComsClient {
     const r = await this.request<{ comment: EventCommentDTO; event: CalendarEventDTO }>(`/events/${eventId}/comments`, { method: 'POST', json: { body } });
     this.set({ events: { ...this.state.events, [r.event.id]: r.event } });
     return r;
+  }
+  // ---------- Correo en el chat (docs/CORREO.md) ----------
+  /** Una tarjeta sin cuerpo no borra el cuerpo que ya se había cargado al abrir el correo. */
+  private putMail(m: import('@tiecoms/contracts').SharedMailDTO) {
+    const prev = this.state.mails[m.id];
+    const merged = !m.full && prev?.full ? { ...m, body: prev.body, full: true } : m;
+    this.set({ mails: { ...this.state.mails, [m.id]: merged } });
+    return merged;
+  }
+  // Tarjetas del chat: se piden juntas (hasta 50 por petición) en vez de una por tarjeta.
+  private mailWanted = new Map<string, { resolve: (m: import('@tiecoms/contracts').SharedMailDTO) => void; reject: (e: unknown) => void }[]>();
+  private mailTimer: ReturnType<typeof setTimeout> | null = null;
+  private flushMailBatch = async () => {
+    this.mailTimer = null;
+    const batch = [...this.mailWanted.entries()].slice(0, 50);
+    for (const [id] of batch) this.mailWanted.delete(id);
+    if (this.mailWanted.size) this.mailTimer = setTimeout(this.flushMailBatch, 0);
+    try {
+      const r = await this.request<{ emails: import('@tiecoms/contracts').SharedMailDTO[] }>(`/mail/shared?ids=${batch.map(([id]) => id).join(',')}`);
+      const got = new Map(r.emails.map((e) => [e.id, this.putMail(e)]));
+      for (const [id, waiters] of batch) for (const w of waiters) { const e = got.get(id); if (e) w.resolve(e); else w.reject(new ApiRequestError(404, 'not_found', 'Correo no disponible')); }
+    } catch (e) { for (const [, waiters] of batch) for (const w of waiters) w.reject(e); }
+  };
+  async mailConnections() { return (await this.request<{ connections: import('@tiecoms/contracts').MailConnectionDTO[] }>('/mail/connections')).connections; }
+  connectMailProvider(provider: import('@tiecoms/contracts').MailProvider, proofChallenge: string, platform: 'web' | 'ios' | 'android' | 'desktop' = 'web') {
+    return this.request<{ url: string }>(`/mail/connect/${provider}`, { method: 'POST', json: { platform, proofChallenge } });
+  }
+  confirmMailProvider(receipt: string, proofVerifier: string) {
+    return this.request<{ ok: true; provider: import('@tiecoms/contracts').MailProvider }>('/mail/connect/confirm', { method: 'POST', json: { receipt, proofVerifier } });
+  }
+  async disconnectMailProvider(provider: import('@tiecoms/contracts').MailProvider) { await this.request(`/mail/connections/${provider}`, { method: 'DELETE' }); }
+  /** Lista en vivo (Gmail/Outlook). Los filtros van tal cual al proveedor; nada se guarda. */
+  listMail(q: { provider: import('@tiecoms/contracts').MailProvider; box?: 'inbox' | 'sent' | 'all'; category?: string; q?: string; from?: string; to?: string; after?: string; before?: string; attachments?: boolean; unread?: boolean; label?: string; page?: string; fresh?: boolean }) {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== '' && v !== false) p.set(k, v === true ? '1' : String(v));
+    return this.request<import('@tiecoms/contracts').MailListDTO>(`/mail/messages?${p}`);
+  }
+  getMail(provider: import('@tiecoms/contracts').MailProvider, id: string) {
+    return this.request<import('@tiecoms/contracts').MailMessageDTO>(`/mail/messages/${provider}/${encodeURIComponent(id)}`);
+  }
+  async shareMail(input: { provider: import('@tiecoms/contracts').MailProvider; messageId: string; conversationId: string; comment?: string; topicId?: string | null }) {
+    return this.putMail(await this.request<import('@tiecoms/contracts').SharedMailDTO>('/mail/share', { method: 'POST', json: input }));
+  }
+  loadSharedMail(id: string): Promise<import('@tiecoms/contracts').SharedMailDTO> {
+    return new Promise((resolve, reject) => {
+      const list = this.mailWanted.get(id) ?? [];
+      list.push({ resolve, reject });
+      this.mailWanted.set(id, list);
+      this.mailTimer ??= setTimeout(this.flushMailBatch, 16);
+    });
+  }
+  /** El correo con su cuerpo (al abrir el panel). */
+  async loadSharedMailFull(id: string) { return this.putMail(await this.sharedGet<import('@tiecoms/contracts').SharedMailDTO>(`/mail/shared/${id}?full=1`)); }
+  /** El correo tal como está en el buzón (con historial citado y firma), en vivo y sin guardar. */
+  mailOriginal(id: string) { return this.request<{ body: string }>(`/mail/shared/${id}/original`); }
+  async mailComments(id: string) { return (await this.request<{ comments: import('@tiecoms/contracts').SharedMailCommentDTO[] }>(`/mail/shared/${id}/comments`)).comments; }
+  async commentMail(id: string, body: string) {
+    const r = await this.request<{ comment: import('@tiecoms/contracts').SharedMailCommentDTO; email: import('@tiecoms/contracts').SharedMailDTO }>(`/mail/shared/${id}/comments`, { method: 'POST', json: { body } });
+    this.putMail({ ...r.email, scheduledReply: this.state.mails[id]?.scheduledReply ?? r.email.scheduledReply });
+    return r;
+  }
+  mailAttachmentPath(id: string, attachmentId: string) { return `/mail/shared/${id}/attachments/${encodeURIComponent(attachmentId)}`; }
+  draftMailReply(id: string, lang: 'es' | 'en' = 'es') { return this.request<{ body: string }>(`/mail/shared/${id}/draft`, { method: 'POST', json: { lang } }); }
+  async replyMail(id: string, input: { body: string; cc?: string[]; attachmentIds?: string[]; sendAt?: string; notifyChat?: boolean }) {
+    return this.putMail(await this.request<import('@tiecoms/contracts').SharedMailDTO>(`/mail/shared/${id}/reply`, { method: 'POST', json: input }));
+  }
+  async cancelMailReply(id: string) { return this.putMail(await this.request<import('@tiecoms/contracts').SharedMailDTO>(`/mail/shared/${id}/reply`, { method: 'DELETE' })); }
+  async mailTask(id: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; closeOnReply?: boolean }) {
+    const r = await this.request<{ issue: IssueDTO; email: import('@tiecoms/contracts').SharedMailDTO }>(`/mail/shared/${id}/task`, { method: 'POST', json: input });
+    this.putMail(r.email);
+    return r;
+  }
+  shareWhatsApp(input: { accountId: string; jid: string; messageId: string; conversationId: string; comment?: string }) {
+    return this.request<{ message: MessageDTO }>('/whatsapp/share', { method: 'POST', json: input });
   }
   /** Bandeja «Menciones»: más recientes primero; before = createdAt del último que ya tienes. */
   listMentions(before?: string, limit = 50) {

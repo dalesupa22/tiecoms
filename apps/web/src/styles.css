@@ -846,6 +846,7 @@ select.link-act { appearance: none; padding-right: 10px; }
 .side-search { padding: 0 10px 4px; }
 .side-search .search-field { margin-top: 4px; min-height: 36px; }
 .side-search .search-field input { min-height: 34px; }
+.search-kbd { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
 .side-tools { gap: 6px 4px; padding: 4px 10px 2px; flex-wrap: wrap; }
 .side-filters { display: flex; gap: 4px; flex: 1 0 auto; }
 .side-tools .seg { margin-right: auto; }

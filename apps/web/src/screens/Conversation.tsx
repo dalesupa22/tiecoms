@@ -129,6 +129,15 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const [refTokens, setRefTokens] = useState<RefToken[]>([]);
   const [viewOnce, setViewOnce] = useState(false);
   const [searching, setSearching] = useState(false);
+  // ⌘F / Ctrl+F (lo despacha Shell): abre la búsqueda dentro del chat o vuelve a enfocarla.
+  useEffect(() => {
+    const on = () => {
+      setSearching(true);
+      requestAnimationFrame(() => { const el = document.querySelector<HTMLInputElement>('.chat-search input'); el?.focus(); el?.select(); });
+    };
+    addEventListener('chaggu:chat-search', on);
+    return () => removeEventListener('chaggu:chat-search', on);
+  }, []);
   const refPicker = useRefPicker({
     text, caret, exclude: id,
     onPick: (range, token) => {

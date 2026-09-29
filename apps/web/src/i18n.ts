@@ -844,6 +844,14 @@ const es = {
   'mail.refresh': 'Actualizar',
   'mail.showHistory': 'Ver el historial citado y la firma',
   'mail.hideHistory': 'Ocultar el historial',
+  'mail.whoSeesMany': 'Lo verán {n} personas en {chats} chats: remitente, asunto y texto. Cada chat tiene su propia tarjeta e hilo.',
+  'mail.shareInMany': 'Compartir en {n} chats',
+  'mail.sharedMany': 'Compartido en {n} chats',
+  'mail.commentCardPh': 'Comenta este correo…',
+  'mail.commentWaPh': 'Comenta este mensaje…',
+  'wa.bring': 'Llevar a un chat…',
+  'wa.bringShort': 'Llevar a un chat',
+  'wa.bringTitle': 'Llevar un WhatsApp a un chat',
 };
 type Key = keyof typeof es;
 
@@ -1657,6 +1665,14 @@ const en: Record<Key, string> = {
   'mail.refresh': 'Refresh',
   'mail.showHistory': 'Show quoted history and signature',
   'mail.hideHistory': 'Hide history',
+  'mail.whoSeesMany': '{n} people in {chats} chats will see the sender, subject and text. Each chat gets its own card and thread.',
+  'mail.shareInMany': 'Share in {n} chats',
+  'mail.sharedMany': 'Shared in {n} chats',
+  'mail.commentCardPh': 'Comment on this email…',
+  'mail.commentWaPh': 'Comment on this message…',
+  'wa.bring': 'Bring to a chat…',
+  'wa.bringShort': 'Bring to a chat',
+  'wa.bringTitle': 'Bring a WhatsApp message to a chat',
 };
 const dicts: Record<Lang, Record<Key, string>> = { es, en };
 const STORE_KEY = 'tiecoms:lang';

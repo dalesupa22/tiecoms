@@ -10,8 +10,9 @@ class ChatGesturesTest {
         assertFalse(LongText.collapsible("Hola"))
         assertFalse(LongText.collapsible("a".repeat(500)))
         assertTrue(LongText.collapsible("a".repeat(4000)))
-        assertTrue(LongText.collapsible((1..60).joinToString("\n") { "línea $it con texto" }))
-        // 25 líneas cortas: cabe sin plegar.
+        assertTrue(LongText.collapsible("a".repeat(3001)))                                   // > 3 000 caracteres
+        assertTrue(LongText.collapsible((1..41).joinToString("\n") { "línea $it" }))         // > 40 líneas cortas
+        assertFalse(LongText.collapsible((1..40).joinToString("\n") { "línea $it" }))        // 40 líneas: cabe
         assertFalse(LongText.collapsible((1..25).joinToString("\n") { "línea $it con un poco más de texto" }))
         assertEquals(3, LongText.estimatedLines("a\n\nb"))
     }
@@ -19,11 +20,13 @@ class ChatGesturesTest {
     @Test fun `solo lo claramente horizontal hacia la derecha es responder`() {
         val slop = 20f
         assertEquals(SwipeReply.Decision.UNDECIDED, SwipeReply.decide(5f, 5f, slop))
-        assertEquals(SwipeReply.Decision.CLAIM, SwipeReply.decide(30f, 4f, slop))
+        assertEquals(SwipeReply.Decision.CLAIM, SwipeReply.decide(45f, 4f, slop))
+        assertEquals(SwipeReply.Decision.UNDECIDED, SwipeReply.decide(30f, 4f, slop))   // deriva corta: todavía no
         assertEquals(SwipeReply.Decision.REJECT, SwipeReply.decide(3f, 25f, slop))      // vertical: es de la lista
         assertEquals(SwipeReply.Decision.REJECT, SwipeReply.decide(15f, -30f, slop))    // diagonal con más vertical
         assertEquals(SwipeReply.Decision.REJECT, SwipeReply.decide(-30f, 0f, slop))     // hacia la izquierda
-        assertEquals(SwipeReply.Decision.UNDECIDED, SwipeReply.decide(30f, 18f, slop))  // diagonal: todavía no
+        assertEquals(SwipeReply.Decision.UNDECIDED, SwipeReply.decide(45f, 18f, slop))  // diagonal: todavía no
+        assertEquals(SwipeReply.Decision.REJECT, SwipeReply.decide(60f, 22f, slop))     // el pulgar ya bajó: es scroll
     }
 
     @Test fun `la burbuja sigue al dedo y luego con resistencia`() {

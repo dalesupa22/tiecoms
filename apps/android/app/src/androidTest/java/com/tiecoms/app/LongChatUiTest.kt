@@ -146,6 +146,37 @@ class LongChatUiTest {
         }
     }
 
+    /**
+     * Un pulgar real arranca con deriva horizontal (hacia la izquierda o la derecha) antes de subir o bajar.
+     * En 1.7.0 el deslizar de la burbuja (detectHorizontalDragGestures) se quedaba con ese gesto en cuanto la deriva
+     * pasaba el umbral y la lista no se movía: con una burbuja más alta que la pantalla no había dónde más apoyar el dedo.
+     */
+    @Test fun thumbDriftOverLongBubbleStillScrolls() {
+        open()
+        compose.onNodeWithTag("messages").performScrollToKey("m:long-20")
+        compose.waitForIdle()
+        compose.onNodeWithTag("expand-20").performClick()
+        compose.waitForIdle()
+        for (drift in listOf(-1f, 1f)) {
+            val list = compose.onNodeWithTag("messages").fetchSemanticsNode().boundsInRoot
+            assertTrue("La burbuja larga ocupa el centro de la lista", fullBounds("msg-20").contains(list.center))
+            val before = top("msg-20")
+            compose.onNodeWithTag("messages").performTouchInput {
+                val start = center
+                val slop = viewConfiguration.touchSlop
+                down(start)
+                // Primero la deriva horizontal (pasa el umbral), luego el recorrido vertical.
+                moveTo(start + Offset(drift * (slop + 12f), slop * 0.6f), delayMillis = 16)
+                for (i in 1..12) moveTo(start + Offset(drift * (slop + 12f + 2f * i), slop * 0.6f + 40f * i), delayMillis = 16)
+                up()
+            }
+            compose.waitForIdle()
+            val after = top("msg-20")
+            assertTrue("Con deriva ${if (drift < 0) "izquierda" else "derecha"} el chat se desplaza ($before → $after)", after > before + 150f)
+            assertFalse("No abrió la cita", exists("replyBar"))
+        }
+    }
+
     @Test fun swipeRightQuotesReplyInsteadOfSidechat() {
         open()
         compose.onNodeWithTag("msg-38").performTouchInput {

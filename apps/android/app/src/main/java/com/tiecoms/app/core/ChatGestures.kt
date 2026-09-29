@@ -10,6 +10,10 @@ import kotlin.math.ceil
 object LongText {
     /** Plegado, el mensaje enseña estas líneas y «Ver más». */
     const val COLLAPSED_LINES = 30
+    /** Se pliega un mensaje de más de estas líneas… */
+    const val MAX_LINES = 40
+    /** …o de más de estos caracteres (igual en iOS). */
+    const val MAX_CHARS = 3000
     /** Caracteres por línea con que se estima un teléfono angosto (burbuja al 80 %). */
     private const val CHARS_PER_LINE = 38
 
@@ -17,8 +21,8 @@ object LongText {
     fun estimatedLines(body: String): Int =
         body.split('\n').sumOf { p -> maxOf(1, ceil(p.length / CHARS_PER_LINE.toDouble()).toInt()) }
 
-    /** Candidato a «Ver más»: la medición real (hasVisualOverflow) decide si de verdad se corta. */
-    fun collapsible(body: String): Boolean = body.length > 600 && estimatedLines(body) > COLLAPSED_LINES
+    /** «Ver más» (1.7.1, igual en iOS): más de 40 líneas o más de 3 000 caracteres; plegado a [COLLAPSED_LINES]. */
+    fun collapsible(body: String): Boolean = body.length > MAX_CHARS || estimatedLines(body) > MAX_LINES
 }
 
 object SwipeReply {
@@ -29,13 +33,14 @@ object SwipeReply {
     const val MAX_DP = 96f
 
     /**
-     * Solo un movimiento claramente horizontal y hacia la derecha se lleva el gesto; lo vertical es de la lista
-     * (se rechaza en cuanto supera el umbral de arrastre), y hacia la izquierda no hace nada.
+     * Solo un movimiento claramente horizontal y hacia la derecha se lleva el gesto: al menos dos umbrales de arrastre
+     * a la derecha y tres veces más horizontal que vertical. Lo vertical es de la lista (se rechaza en cuanto pasa el
+     * umbral), y hacia la izquierda no hace nada. Así la deriva de un pulgar que sube o baja no frena el chat.
      */
     fun decide(dx: Float, dy: Float, slop: Float): Decision = when {
-        abs(dy) > slop && abs(dy) * 2f >= abs(dx) -> Decision.REJECT
+        abs(dy) > slop -> Decision.REJECT
         dx < -slop -> Decision.REJECT
-        dx > slop && dx > abs(dy) * 2f -> Decision.CLAIM
+        dx > slop * 2f && dx > abs(dy) * 3f -> Decision.CLAIM
         else -> Decision.UNDECIDED
     }
 

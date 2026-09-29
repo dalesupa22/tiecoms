@@ -51,7 +51,7 @@ class PasteImageUiTest {
                 val path = r.requestUrl!!.encodedPath
                 val body = when {
                     path == "$AUTH_BASE_PATH/login" -> """{"accessToken":"local","accessExpiresAt":"2099-01-01T00:00:00Z","refreshToken":"local","sessionId":"local","user":{"id":"me","name":"QA"}}"""
-                    path == "/api/v1/bootstrap" -> """{"me":{"id":"me","name":"QA"},"people":[{"id":"me","name":"QA"},{"id":"other","name":"Ana Pega"}],"conversations":[{"id":"paste-qa","kind":"group","name":"Pegar","memberIds":["me","other"],"lastMessageSeq":1,"lastReadSeq":1,"unread":0,"canPost":true}]}"""
+                    path == "/api/v1/bootstrap" -> """{"me":{"id":"me","name":"QA"},"people":[{"id":"me","name":"QA"},{"id":"other","name":"Ana Pega"}],"conversations":[{"id":"paste-qa","kind":"group","name":"Capturas QA","memberIds":["me","other"],"lastMessageSeq":1,"lastReadSeq":1,"unread":0,"canPost":true}]}"""
                     path == "/api/v1/conversations/paste-qa/messages" -> TcJson.encodeToString(MessagesPage.serializer(), MessagesPage(listOf(
                         MessageDTO(id = "p-1", conversationId = "paste-qa", seq = 1, authorId = "other", body = "Pega una captura", createdAt = "2026-09-28T10:00:00Z")), false, 0))
                     path == "/api/v1/blocks" -> """{"userIds":[]}"""

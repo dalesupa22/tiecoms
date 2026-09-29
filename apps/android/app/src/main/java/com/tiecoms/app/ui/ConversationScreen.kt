@@ -701,7 +701,9 @@ fun ConversationScreen(
                                 meta.kind == "direct" -> Names.directCompany(meta, data) ?: orgs.ifEmpty { null }
                                 else -> orgs.ifEmpty { null }
                             }
-                            if (!head.isNullOrEmpty()) Text(head, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            if (!head.isNullOrEmpty()) Text(head, style = MaterialTheme.typography.labelSmall,
+                                color = if (meta.isSide) com.tiecoms.app.ui.theme.LocalSideColors.current.fg else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = if (meta.isSide) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.testTag("chatPath"))
                         }
                     }

@@ -208,17 +208,29 @@ function Sidebar({ route }: { route: Route }) {
   );
 }
 
-/** Barra inferior móvil: 5 pestañas fijas (docs/GRUPOS.md), 6 con las llamadas prendidas. Solo íconos, salvo «DMs». */
+/** Íconos de línea de la barra inferior (mismos dibujos que iOS y Android). */
+const TAB_ICONS: Record<string, ReactNode> = {
+  groups: <><circle cx="8" cy="8" r="3" /><circle cx="16" cy="8" r="3" /><path d="M2.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5M12.5 15.2c.9-.8 2.1-1.2 3.5-1.2 2.7 0 4.9 1.8 5.5 5" /></>,
+  dms: <><path d="M3.5 6.5A2.5 2.5 0 0 1 6 4h8a2.5 2.5 0 0 1 2.5 2.5v5A2.5 2.5 0 0 1 14 14H8.5L5 17v-3.1A2.5 2.5 0 0 1 3.5 11.5z" /><path d="M16.5 8.5H18a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-1.5 2.3V21l-3.2-2.5H12a2.5 2.5 0 0 1-2.3-1.5" /></>,
+  tasks: <><path d="M4 6.5l1.8 1.8L9 5M4 16.5l1.8 1.8L9 15" /><path d="M12 7h8M12 17h8" /></>,
+  agenda: <><rect x="3.5" y="5" width="17" height="15" rx="2.5" /><path d="M3.5 10h17M8 3v4M16 3v4" /><circle cx="8.5" cy="14.5" r=".6" /><circle cx="12" cy="14.5" r=".6" /><circle cx="15.5" cy="14.5" r=".6" /></>,
+  calls: <path d="M6.6 3.5h2.3l1.4 4-2 1.3a11 11 0 0 0 6.9 6.9l1.3-2 4 1.4v2.3a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2z" />,
+};
+function TabIcon({ name }: { name: string }) {
+  return <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{TAB_ICONS[name]}</svg>;
+}
+
+/** Barra inferior móvil: 5 pestañas fijas (docs/GRUPOS.md), 6 con las llamadas prendidas. Solo íconos, sin texto. */
 function MobileTabs({ route }: { route: Route }) {
   const d = useClient((s) => s.data);
   const unreadOf = (f: (c: ConversationDTO) => boolean) => d?.conversations.filter(f).reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0) ?? 0;
   const me = d ? personById(d, d.me.id) : null;
   const tabs = [
-    { name: 'groups', label: t('nav.groups'), ico: '▦', to: '/grupos', badge: unreadOf((c) => !!c.workspaceId) },
-    { name: 'dms', label: t('nav.dms'), ico: '◍', to: '/dms', badge: unreadOf((c) => c.kind === 'direct' || c.kind === 'multi') },
-    { name: 'issues', label: t('nav.issues'), ico: '◆', to: '/asuntos', badge: 0 },
-    { name: 'agenda', label: t('nav.calendar'), ico: '▤', to: '/agenda', badge: 0 },
-    ...(d?.features?.calls ? [{ name: 'calls', label: t('nav.calls'), ico: '☏', to: '/llamadas', badge: 0 }] : []),
+    { name: 'groups', label: t('nav.groups'), ico: 'groups', to: '/grupos', badge: unreadOf((c) => !!c.workspaceId) },
+    { name: 'dms', label: t('nav.dms'), ico: 'dms', to: '/dms', badge: unreadOf((c) => c.kind === 'direct' || c.kind === 'multi') },
+    { name: 'issues', label: t('nav.issues'), ico: 'tasks', to: '/asuntos', badge: 0 },
+    { name: 'agenda', label: t('nav.calendar'), ico: 'agenda', to: '/agenda', badge: 0 },
+    ...(d?.features?.calls ? [{ name: 'calls', label: t('nav.calls'), ico: 'calls', to: '/llamadas', badge: 0 }] : []),
     { name: 'settings', label: t('nav.you'), ico: null, to: '/ajustes', badge: 0 },
   ];
   return (
@@ -226,9 +238,8 @@ function MobileTabs({ route }: { route: Route }) {
       {tabs.map((x) => (
         <button key={x.name} className={route.name === x.name || (x.name === 'groups' && route.name === 'today') ? 'on' : ''} onClick={() => navigate(x.to)}
           aria-label={x.label} title={x.label}>
-          {x.ico ? <span className="ico">{x.ico}</span> : <span className="ico">{d ? <MeAvatar size={24} /> : <Avatar person={me} org={null} size={24} />}</span>}
-          {/* Solo íconos (pedido de Danny, 29-sep-2026); «DMs» es el único que lleva texto. */}
-          {x.name === 'dms' && <span className="tab-label">{x.label}</span>}
+          {x.ico ? <span className="ico"><TabIcon name={x.ico} /></span> : <span className="ico">{d ? <MeAvatar size={24} /> : <Avatar person={me} org={null} size={24} />}</span>}
+          {/* Solo íconos, sin texto (pedido de Danny, 29-sep-2026); el nombre va en aria-label y title. */}
           {x.badge > 0 && <span className="pill">{x.badge}</span>}
         </button>
       ))}

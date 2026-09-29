@@ -7,6 +7,7 @@
 import type { PushData } from '@tiecoms/contracts';
 import { pool, tx } from '../db.ts';
 import { sendApns, sendFcm, type PushResult } from '../push-transport.ts';
+import { safePushReason } from '../push-reason.ts';
 import { summarize, summaryText } from './attachments.ts';
 
 type Lang = 'es' | 'en';
@@ -107,6 +108,21 @@ export function fcmData(n: Note, badge: number): Record<string, string> {
 
 export const pushStats = { sent: 0, failed: 0, removed: 0 };
 
+/**
+ * Recibo de cada envío en el log del worker: qué pasó con cada aviso (aceptado por APNs/FCM, token inválido
+ * borrado, falla o sin configurar). Sin token, sin cuerpo ni título: ids internos y el código del proveedor.
+ * «Aceptado» = el proveedor devolvió 200; NO prueba que el teléfono lo haya mostrado.
+ */
+function logDelivery(t: Target, n: Note, r: PushResult, cleanup?: 'removed' | 'not_present' | 'failed') {
+  const reason = r.ok ? undefined : safePushReason(r.error);
+  const result = r.ok ? 'accepted' : r.invalidToken ? cleanup === 'removed' ? 'invalid_token_removed' : 'invalid_token'
+    : reason === 'apns_not_configured' || reason === 'fcm_not_configured' ? 'not_configured' : 'failed';
+  console.log(JSON.stringify({
+    evt: 'push.delivery', result, type: n.data.type, messageId: n.data.messageId ?? null, conversationId: n.data.conversationId ?? null,
+    user: t.user_id, sub: t.sub_id, provider: t.provider, env: t.environment, ...(reason ? { reason } : {}), ...(cleanup ? { cleanup } : {}),
+  }));
+}
+
 async function deliver(targets: Target[], note: (t: Target) => Note) {
   if (!targets.length) return;
   const counts = await badges([...new Set(targets.map((t) => t.user_id))]);
@@ -119,16 +135,24 @@ async function deliver(targets: Target[], note: (t: Target) => Note) {
         ? await sendApns(t.token, t.environment, apnsPayload(n, badge), { collapseId: n.collapseId })
         : await sendFcm(t.token, fcmData(n, badge), { collapseKey: n.threadId });
     } catch (e: any) { r = { ok: false, invalidToken: false, error: String(e?.message ?? e) }; }
+    if (!r.ok && r.invalidToken) {
+      // Provider rejection is known; removal is not known until the DB confirms it.
+      try {
+        const removed = await pool.query('DELETE FROM push_subscriptions WHERE id = $1', [t.sub_id]);
+        if (removed.rowCount) pushStats.removed++;
+        logDelivery(t, n, r, removed.rowCount ? 'removed' : 'not_present');
+      } catch (error) { logDelivery(t, n, r, 'failed'); throw error; }
+      return;
+    }
+    logDelivery(t, n, r);
     if (r.ok) {
       pushStats.sent++;
       await pool.query('UPDATE push_subscriptions SET failures = 0, last_error = NULL WHERE id = $1 AND failures > 0', [t.sub_id]);
-    } else if (r.invalidToken) {
-      pushStats.removed++;
-      await pool.query('DELETE FROM push_subscriptions WHERE id = $1', [t.sub_id]);
-    } else if (!r.error.endsWith('not_configured')) {
+    } else if (r.error !== 'apns_not_configured' && r.error !== 'fcm_not_configured') {
       pushStats.failed++;
-      await pool.query('UPDATE push_subscriptions SET failures = failures + 1, last_error = $2 WHERE id = $1', [t.sub_id, r.error.slice(0, 500)]);
-      console.error(`[push] ${t.provider} falló: ${r.error}`);
+      const reason = safePushReason(r.error);
+      await pool.query('UPDATE push_subscriptions SET failures = failures + 1, last_error = $2 WHERE id = $1', [t.sub_id, reason]);
+      console.error(`[push] ${t.provider} falló: ${reason}`);
     }
   }));
 }
@@ -197,6 +221,8 @@ export async function pushMessage(messageId: string) {
         AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = u.id AND b.blocked_id = $2) OR (b.blocker_id = $2 AND b.blocked_id = u.id))`,
     [m.conversation_id, m.author_id, m.seq, m.id],
   );
+  // Sin destinatarios: dejarlo dicho (sesión cerrada, sin token, silencio, DND o descanso), para no confundirlo con un envío.
+  if (!targets.length) console.log(JSON.stringify({ evt: 'push.delivery', result: 'no_eligible_targets', type: 'message', messageId: m.id, conversationId: m.conversation_id }));
   const direct = m.conv_kind === 'direct';
   const avatar = m.avatar_file_id ? `/api/v1/avatars/${m.avatar_file_id}` : '';
   const labels = await groupLabels(m.conversation_id, targets.map((t) => t.user_id));

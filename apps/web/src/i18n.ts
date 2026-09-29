@@ -90,6 +90,7 @@ const es = {
   'meet.connectedToast': '{name} conectado', 'meet.cancelledToast': 'Cancelaste la conexión', 'meet.failedToast': 'No se pudo conectar ({code})',
   'cal.allDay': 'Todo el día', 'cal.groups': 'Grupos en la agenda', 'cal.showAll': 'Mostrar todos', 'cal.showGroup': 'Mostrar este grupo', 'cal.hideGroup': 'Ocultar este grupo',
   'cal.view': 'Vista', 'cal.v.day': 'Día', 'cal.v.week': 'Semana', 'cal.v.month': 'Mes', 'cal.prevDay': 'Día anterior', 'cal.nextDay': 'Día siguiente', 'cal.prevMonth': 'Mes anterior', 'cal.nextMonth': 'Mes siguiente', 'cal.more': '+{n} más',
+  'err.updating': 'chaggu se está actualizando. Vuelve a intentar en unos segundos.', 'chat.reconnecting': 'Reconectando… (chaggu se está actualizando)',
   'nav.scheduled': 'Programados', 'sched.menuTitle': 'Programar envío', 'sched.inHour': 'En 1 hora', 'sched.thisAfternoon': 'Esta tarde', 'sched.tomorrowMorning': 'Mañana temprano', 'sched.monday': 'El lunes temprano',
   'sched.pick': 'Elegir fecha y hora…', 'sched.pickTitle': '¿Cuándo lo envío?', 'sched.date': 'Día', 'sched.time': 'Hora', 'sched.willSend': 'Se enviará {when}.', 'sched.future': 'Elige una hora en el futuro.', 'sched.confirm': 'Programar',
   'sched.todayAt': 'hoy a las {time}', 'sched.tomorrowAt': 'mañana a las {time}', 'sched.dayAt': 'el {day} a las {time}',
@@ -744,6 +745,7 @@ const en: Record<Key, string> = {
   'meet.connectedToast': '{name} connected', 'meet.cancelledToast': 'You cancelled the connection', 'meet.failedToast': 'Could not connect ({code})',
   'cal.allDay': 'All day', 'cal.groups': 'Groups in the calendar', 'cal.showAll': 'Show all', 'cal.showGroup': 'Show this group', 'cal.hideGroup': 'Hide this group',
   'cal.view': 'View', 'cal.v.day': 'Day', 'cal.v.week': 'Week', 'cal.v.month': 'Month', 'cal.prevDay': 'Previous day', 'cal.nextDay': 'Next day', 'cal.prevMonth': 'Previous month', 'cal.nextMonth': 'Next month', 'cal.more': '+{n} more',
+  'err.updating': 'chaggu is updating. Try again in a few seconds.', 'chat.reconnecting': 'Reconnecting… (chaggu is updating)',
   'nav.scheduled': 'Scheduled', 'sched.menuTitle': 'Schedule send', 'sched.inHour': 'In 1 hour', 'sched.thisAfternoon': 'This afternoon', 'sched.tomorrowMorning': 'Tomorrow morning', 'sched.monday': 'Monday morning',
   'sched.pick': 'Pick date and time…', 'sched.pickTitle': 'When should it go out?', 'sched.date': 'Day', 'sched.time': 'Time', 'sched.willSend': 'It will be sent {when}.', 'sched.future': 'Pick a time in the future.', 'sched.confirm': 'Schedule',
   'sched.todayAt': 'today at {time}', 'sched.tomorrowAt': 'tomorrow at {time}', 'sched.dayAt': 'on {day} at {time}',
@@ -1339,6 +1341,8 @@ export function tn(n: number, one: Key, many: Key) {
 
 /** Mensaje de error legible a partir del código del API (el texto del servidor está en español). */
 export function errorText(e: any): string {
+  // Un 502/503/504 sin cuerpo JSON (API reiniciándose): nunca «Bad Gateway» crudo.
+  if (/^http_50[234]$/.test(e?.code ?? '')) return t('err.updating');
   if (e?.code === 'bad_request' && Array.isArray(e?.details) && e.details.length) {
     const paths = e.details.map((d: any) => d.path).filter(Boolean);
     return `${t('err.bad_request')}${paths.length ? `: ${[...new Set(paths)].join(', ')}` : ''}`;

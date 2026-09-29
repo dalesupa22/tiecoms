@@ -19,6 +19,7 @@ import { QuickReplies, SideChip, SideConnector, SideDialog, replyPrivately, side
 import { BringDialog } from './Bring.tsx';
 import { ConversationAgenda, EventChatCard, newEvent, openEvent } from './Calendar.tsx';
 import { SleepNotice } from './Sleep.tsx';
+import { createChatRecovery } from '../chat-recovery.ts';
 import { DerivedPendingStrip } from './Pending.tsx';
 import { MeetingDialog } from './Meetings.tsx';
 import { CallBanner, CallButtons, openTranscript } from './Call.tsx';
@@ -161,10 +162,36 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     });
   };
 
+  /**
+   * Abrir con reintento: un 502/503/504 o un corte de red (p. ej. mientras se despliega el API) no deja el
+   * chat roto con «Bad Gateway». Reintenta con espera creciente (≈30 s en total) y otra vez cuando vuelve la
+   * conexión; el borrador sigue en el compositor. Un error permanente (403, 404…) se muestra tal cual.
+   */
+  const [retrying, setRetrying] = useState(false);
+  const recovery = useRef<ReturnType<typeof createChatRecovery> | null>(null);
+  const openWithRetry = () => recovery.current?.start();
+  const sessionIdentity = useClient(() => client.getSessionIdentity());
+  const connection = useClient((s) => s.connection);
+
+  useEffect(() => {
+    const owner = createChatRecovery({
+      identity: client.getSessionIdentity,
+      loaded: () => !!client.getState().conversations[id]?.loaded,
+      subscribe: client.subscribe,
+      open: (signal) => client.openConversation(id, false, signal),
+      change: (state) => {
+        setRetrying(state.status === 'retrying');
+        setError(state.status === 'failed' ? state.error ? errorText(state.error) : t('err.updating') : null);
+      },
+    });
+    recovery.current = owner;
+    void owner.start();
+    return () => { owner.dispose(); if (recovery.current === owner) recovery.current = null; };
+  }, [id, sessionIdentity]);
+  useEffect(() => { if (connection === 'online' && (retrying || error) && !client.getState().conversations[id]?.loaded) void openWithRetry(); }, [connection]);
+
   useEffect(() => {
     // La pantalla se monta de nuevo por conversación (key={id}), así el borrador no se cruza.
-    setError(null);
-    client.openConversation(id).then(() => setError(null)).catch((e) => setError(errorText(e)));
     client.loadIssues({ conversationId: id }).catch(() => {});
     client.loadPins(id).catch(() => {});
     // ?m=seq: salta a un mensaje (origen de un asunto, derivada, resultado devuelto, recordatorio o enlace copiado).
@@ -570,7 +597,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           {local?.loading && !local.loaded && <div className="msg-sys">{t('common.loading')}</div>}
           {local?.loaded && !local.hasMore && conv.historyFromSeq > 0 && <div className="msg-sys">{t('chat.lateJoin')}</div>}
           {local?.loaded && local.hasMore && <div className="msg-sys">{local.loading ? t('chat.loadingOlder') : '·'}</div>}
-          {error && <div className="error" style={{ textAlign: 'center' }}>{error}</div>}
+          {retrying && <div className="hint" role="status" style={{ textAlign: 'center' }}>⟳ {t('chat.reconnecting')}</div>}
+          {error && <div className="error" style={{ textAlign: 'center' }}>{error} <button className="link-btn" onClick={() => void openWithRetry()}>{t('chat.retry')}</button></div>}
           {activeFilter && local?.loaded && !rows.some((r) => r.kind === 'msg' || r.kind === 'links') && <div className="topic-empty">{t('topic.empty', { name: topicById.get(activeFilter)!.name })}</div>}
           {rows.map((r) => {
             if (r.kind === 'day') return <div key={r.key} className="day">{r.label}</div>;

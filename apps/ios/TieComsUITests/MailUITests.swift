@@ -75,15 +75,17 @@ final class MailUITests: XCTestCase {
     func tapC(_ e: XCUIElement) { if e.isHittable { e.tap() } else { e.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() } }
 
     func openChat(_ app: XCUIApplication, _ f: Fixture) {
+        let field = app.descendants(matching: .any)["composer.field"]
+        if field.waitForExistence(timeout: 12) { return } // -TCOpenConversation ya lo abrió
         let row = app.buttons["conv.row.\(f.chatId)"]
         XCTAssertTrue(waitFor(row, 25, app), "fila del grupo")
         // Otra ventana (avisos) a veces tapa la fila para XCTest: se toca por coordenada y se reintenta.
-        let field = app.descendants(matching: .any)["composer.field"]
         for _ in 0..<3 where !field.exists {
             sleep(1)
             if row.exists { tapC(row) }
             _ = field.waitForExistence(timeout: 6)
         }
+        if !field.exists { shot("correo-00-no-abrio") }
         XCTAssertTrue(field.exists, "se abrió el chat")
     }
 
@@ -100,17 +102,28 @@ final class MailUITests: XCTestCase {
 
     func test1CardOpenAndComment() throws {
         let f = try fixture()
-        let app = login(f, as: f.a)
+        let app = login(f, as: f.a, extra: ["-TCOpenConversation", f.chatId])
         openChat(app, f)
         // mail.shared: mensaje de quien lo trajo, con su comentario, y la tarjeta (Gmail, ↙, Por responder, adjuntos).
         let card = el(app, "mailCard.\(f.g1)")
-        XCTAssertTrue(waitFor(card, 15, app), "tarjeta del comité")
+        if !waitFor(card, 15, app) { shot("correo-00-sin-tarjeta") }
+        XCTAssertTrue(card.exists, "tarjeta del comité")
         XCTAssertTrue(app.staticTexts["¿Cómo le respondemos a Jorge?"].exists, "el comentario de quien lo trajo")
         XCTAssertTrue(app.staticTexts["Solicitud de presentación para el comité del jueves"].exists || app.buttons["mailCard.subject"].exists)
         shot("correo-01a-tarjeta")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "📎 Requisitos_comite.pdf")).firstMatch.exists, "chips de adjuntos")
-        // mail.comments: la franja con «2 comentarios nuevos».
-        XCTAssertTrue(waitFor(el(app, "card.commentsStrip"), 8, app), "franja de comentarios")
+        // Comentarios en la tarjeta (los 2 últimos) y el aviso mail.comments como una línea corta, sin repetir la tarjeta.
+        XCTAssertTrue(waitFor(el(app, "commentsLine"), 8, app), "línea «💬 2 comentarios nuevos · …»")
+        XCTAssertTrue(el(app, "commentsLine").label.contains("2 comentarios nuevos"), el(app, "commentsLine").label)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Precios por volumen en la diapositiva 3")).firstMatch.exists, "último comentario en la tarjeta")
+        XCTAssertFalse(app.buttons["mailCard.comments"].exists, "sin el botón 💬")
+        // Comentar en la tarjeta, ahí mismo.
+        let inline = card.textFields["mailCard.commentField"]
+        XCTAssertTrue(inline.waitForExistence(timeout: 5), "«Comenta este correo…»")
+        tapC(inline); sleep(1); app.typeText("Lo reviso hoy\n")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Lo reviso hoy")).firstMatch.waitForExistence(timeout: 10), "el comentario queda en la tarjeta")
+        XCTAssertTrue(card.buttons["mailCard.allComments"].waitForExistence(timeout: 8), "«Ver los 3 comentarios»")
+        if app.keyboards.firstMatch.exists { app.swipeDown() }
         shot("correo-01-tarjeta-chat")
 
         // Abrir: cuerpo completo (?full=1), metadatos y adjuntos bajo demanda.
@@ -165,7 +178,7 @@ final class MailUITests: XCTestCase {
 
     func test2ShareFromList() throws {
         let f = try fixture()
-        let app = login(f, as: f.a)
+        let app = login(f, as: f.a, extra: ["-TCOpenConversation", f.chatId])
         openChat(app, f)
         let plus = app.buttons["composer.attach"]
         XCTAssertTrue(plus.waitForExistence(timeout: 10))
@@ -236,9 +249,11 @@ final class MailUITests: XCTestCase {
         // ✕ la cierra y no vuelve.
         let close = app.buttons["mail.nudge.close"]
         shot("correo-10b-antes-de-cerrar")
-        tapC(close)
-        let until = Date().addingTimeInterval(5)
-        while Date() < until && nudge.exists { usleep(300_000) }
+        for _ in 0..<3 where nudge.exists {
+            tapC(close)
+            let until = Date().addingTimeInterval(4)
+            while Date() < until && nudge.exists { usleep(300_000) }
+        }
         XCTAssertFalse(nudge.exists, "✕ la cierra")
 
         // Tú › Correo · Gmail y Outlook: tarjetas para conectar.

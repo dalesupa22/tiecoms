@@ -529,7 +529,72 @@ struct MailPreviewSheet: View {
     }
 }
 
-/// Elegir el chat (si no viene dado), el comentario y el aviso de quiénes lo verán. POST /mail/share.
+/// Elegir uno o varios chats (hasta 10), como ChatPicker de la web. El de origen viene marcado.
+struct MailChatPicker: View {
+    @Environment(AppStore.self) private var store
+    @Binding var picked: [String]
+    @State private var q = ""
+    var body: some View {
+        if let d = store.data {
+            TextField(L("mail.pickChat"), text: $q).accessibilityIdentifier("mail.pickChat")
+            if !picked.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(picked, id: \.self) { id in
+                            if let c = store.meta(id) {
+                                Button { toggle(id) } label: {
+                                    Text(Naming.title(d, c) + " ✕").font(.caption.weight(.semibold)).foregroundStyle(Theme.accentText)
+                                        .padding(.horizontal, 10).padding(.vertical, 6).background(Capsule().fill(Theme.orange.opacity(0.16)))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            ForEach(chats(d)) { c in
+                Button { toggle(c.id) } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(Naming.title(d, c)).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textPrimary)
+                            Text(d.workspaces.first { $0.id == c.workspaceId }?.name ?? L("kind.direct")).font(.caption).foregroundStyle(Theme.textSecondary)
+                        }
+                        Spacer()
+                        Image(systemName: picked.contains(c.id) ? "checkmark.circle.fill" : "circle").foregroundStyle(Theme.accentText)
+                    }
+                }
+                .accessibilityAddTraits(picked.contains(c.id) ? .isSelected : [])
+                .accessibilityIdentifier("mail.target.\(c.id)")
+            }
+        }
+    }
+    private func toggle(_ id: String) {
+        if let i = picked.firstIndex(of: id) { picked.remove(at: i) } else if picked.count < 10 { picked.append(id) }
+    }
+    private func chats(_ d: BootstrapDTO) -> [ConversationDTO] {
+        let t = q.trimmingCharacters(in: .whitespaces).lowercased()
+        return Array(d.conversations.filter { $0.canPost && (t.isEmpty || Naming.title(d, $0).lowercased().contains(t)) }.prefix(80))
+    }
+}
+
+@MainActor
+enum MailShareText {
+    /// «Lo verán las N personas de X…» o, con varios chats, «Lo verán N personas en M chats…».
+    static func whoSees(_ store: AppStore, _ picked: [String]) -> String? {
+        guard let d = store.data else { return nil }
+        let convs = picked.compactMap { store.meta($0) }
+        if convs.count == 1, let c = convs.first { return L("mail.whoSees", ["n": c.memberIds.count, "name": Naming.title(d, c)]) }
+        guard convs.count > 1 else { return nil }
+        return L("mail.whoSeesMany", ["n": Set(convs.flatMap(\.memberIds)).count, "chats": convs.count])
+    }
+    static func button(_ store: AppStore, _ picked: [String]) -> String {
+        if picked.count == 1, let d = store.data, let c = store.meta(picked[0]) { return L("mail.shareIn", ["name": Naming.title(d, c)]) }
+        return picked.count > 1 ? L("mail.shareInMany", ["n": picked.count]) : L("mail.share")
+    }
+    static func done(_ n: Int) -> String { n > 1 ? L("mail.sharedMany", ["n": n]) : L("mail.shared") }
+}
+
+/// Elegir los chats (el de origen ya viene marcado), el comentario y el aviso de quiénes lo verán. POST /mail/share.
 struct MailShareStep: View {
     @Environment(AppStore.self) private var store
     let provider: MailProvider
@@ -537,14 +602,11 @@ struct MailShareStep: View {
     var conversationId: String?
     var onBack: () -> Void
     var onDone: (String) -> Void
-    @State private var q = ""
-    @State private var target: String?
+    @State private var picked: [String] = []
     @State private var comment = ""
     @State private var busy = false
 
     var body: some View {
-        let d = store.data
-        let conv = (target ?? conversationId).flatMap { store.meta($0) }
         List {
             Section {
                 HStack(alignment: .top, spacing: 10) {
@@ -555,43 +617,23 @@ struct MailShareStep: View {
                     }
                 }
             }
-            if conversationId == nil, let d {
-                Section {
-                    TextField(L("mail.pickChat"), text: $q).accessibilityIdentifier("mail.pickChat")
-                    ForEach(chats(d)) { c in
-                        Button { target = c.id } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(Naming.title(d, c)).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textPrimary)
-                                    Text(d.workspaces.first { $0.id == c.workspaceId }?.name ?? L("kind.direct")).font(.caption).foregroundStyle(Theme.textSecondary)
-                                }
-                                Spacer()
-                                Image(systemName: target == c.id ? "checkmark.circle.fill" : "circle").foregroundStyle(Theme.accentText)
-                            }
-                        }
-                        .accessibilityAddTraits(target == c.id ? .isSelected : [])
-                        .accessibilityIdentifier("mail.target.\(c.id)")
-                    }
-                }
-            }
+            Section { MailChatPicker(picked: $picked) }
             Section {
                 TextField(L("mail.commentPh"), text: $comment, axis: .vertical).lineLimit(2...6)
                     .accessibilityIdentifier("mail.shareComment")
             } footer: {
-                if let conv, let d { Text(L("mail.whoSees", ["n": conv.memberIds.count, "name": Naming.title(d, conv)])).accessibilityIdentifier("mail.whoSees") }
+                if let t = MailShareText.whoSees(store, picked) { Text(t).accessibilityIdentifier("mail.whoSees") }
             }
         }
+        .onAppear { if picked.isEmpty, let conversationId { picked = [conversationId] } }
         .safeAreaInset(edge: .bottom) {
             HStack {
                 Button(L("common.back"), action: onBack).buttonStyle(.bordered)
-                Button {
-                    share()
-                } label: {
-                    Text(busy ? L("mail.sharing") : conv.flatMap { c in d.map { L("mail.shareIn", ["name": Naming.title($0, c)]) } } ?? L("mail.share"))
-                        .lineLimit(1).frame(maxWidth: .infinity)
+                Button { share() } label: {
+                    Text(busy ? L("mail.sharing") : MailShareText.button(store, picked)).lineLimit(1).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(PrimaryButtonStyle())
-                .disabled(conv == nil || busy)
+                .disabled(picked.isEmpty || busy)
                 .accessibilityIdentifier("mail.shareSend")
             }
             .padding(12)
@@ -599,20 +641,16 @@ struct MailShareStep: View {
         }
     }
 
-    private func chats(_ d: BootstrapDTO) -> [ConversationDTO] {
-        let t = q.trimmingCharacters(in: .whitespaces).lowercased()
-        return Array(d.conversations.filter { $0.canPost && (t.isEmpty || Naming.title(d, $0).lowercased().contains(t)) }.prefix(80))
-    }
-
     private func share() {
-        guard let id = target ?? conversationId, !busy else { return }
+        guard !picked.isEmpty, !busy else { return }
         busy = true
+        let ids = picked
         Task {
             defer { busy = false }
             do {
-                try await store.shareMail(provider, messageId: item.id, conversationId: id, comment: comment)
-                store.show(L("mail.shared"))
-                onDone(id)
+                try await store.shareMail(provider, messageId: item.id, conversationIds: ids, comment: comment)
+                store.show(MailShareText.done(ids.count))
+                onDone(conversationId.flatMap { ids.contains($0) ? $0 : nil } ?? ids[0])
             } catch { store.show(L10n.errorText(error)) }
         }
     }
@@ -670,8 +708,7 @@ struct WaShareSheet: View {
     @Environment(\.dismiss) private var dismiss
     let chat: WaChatDTO
     let message: WaMessageDTO
-    @State private var q = ""
-    @State private var target: String?
+    @State private var picked: [String] = []
     @State private var comment = ""
     @State private var busy = false
 
@@ -682,8 +719,9 @@ struct WaShareSheet: View {
                     HStack(alignment: .top, spacing: 10) {
                         WaIcon(size: 22)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(chat.name).font(.subheadline.weight(.bold))
-                            Text(message.fromMe ? L("common.youShort") : message.author ?? L("wa.someone")).font(.caption).foregroundStyle(Theme.textSecondary)
+                            Text((chat.isGroup ? "👥 " : "") + chat.name).font(.subheadline.weight(.bold))
+                            Text((message.fromMe ? L("common.youShort") : message.author ?? L("wa.someone")) + " · " + MailUI.date(message.sentAt))
+                                .font(.caption).foregroundStyle(Theme.textSecondary)
                             HStack(spacing: 8) {
                                 Rectangle().fill(MailUI.waColor).frame(width: 3)
                                 Text(String(message.body.prefix(400))).font(.subheadline)
@@ -691,49 +729,33 @@ struct WaShareSheet: View {
                         }
                     }
                 }
-                if let d = store.data {
-                    Section {
-                        TextField(L("mail.pickChat"), text: $q)
-                        ForEach(Array(d.conversations.filter { $0.canPost && (q.isEmpty || Naming.title(d, $0).lowercased().contains(q.lowercased())) }.prefix(80))) { c in
-                            Button { target = c.id } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(Naming.title(d, c)).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.textPrimary)
-                                        Text(d.workspaces.first { $0.id == c.workspaceId }?.name ?? L("kind.direct")).font(.caption).foregroundStyle(Theme.textSecondary)
-                                    }
-                                    Spacer()
-                                    Image(systemName: target == c.id ? "checkmark.circle.fill" : "circle").foregroundStyle(Theme.accentText)
-                                }
-                            }
-                            .accessibilityIdentifier("wa.target.\(c.id)")
-                        }
-                    }
-                    Section {
-                        TextField(L("wa.commentPh"), text: $comment, axis: .vertical).lineLimit(2...5)
-                    } footer: {
-                        if let c = target.flatMap({ store.meta($0) }) { Text(L("mail.whoSees", ["n": c.memberIds.count, "name": Naming.title(d, c)])) }
-                    }
+                Section { MailChatPicker(picked: $picked) }
+                Section {
+                    TextField(L("wa.commentPh"), text: $comment, axis: .vertical).lineLimit(2...5)
+                } footer: {
+                    if let t = MailShareText.whoSees(store, picked) { Text(t) }
                 }
             }
-            .navigationTitle(L("wa.commentIn"))
+            .navigationTitle(L("wa.bringTitle"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(L("mail.share")) { share() }.disabled(target == nil || busy).accessibilityIdentifier("wa.shareSend")
+                    Button(busy ? L("mail.sharing") : L("mail.share")) { share() }.disabled(picked.isEmpty || busy).accessibilityIdentifier("wa.shareSend")
                 }
             }
         }
     }
 
     private func share() {
-        guard let target else { return }
+        guard !picked.isEmpty else { return }
         busy = true
+        let ids = picked
         Task {
             defer { busy = false }
             do {
-                try await store.shareWhatsApp(accountId: chat.accountId, jid: chat.jid, messageId: message.id, conversationId: target, comment: comment)
-                store.show(L("mail.shared"))
+                try await store.shareWhatsApp(accountId: chat.accountId, jid: chat.jid, messageId: message.id, conversationIds: ids, comment: comment)
+                store.show(MailShareText.done(ids.count))
                 dismiss()
             } catch { store.show(L10n.errorText(error)) }
         }

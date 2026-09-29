@@ -1019,6 +1019,17 @@ struct ConversationView: View {
             if let mk = MailChatKind.parse(m.systemPayload) {
                 // Correo y WhatsApp traídos al chat (docs/CORREO.md): mensaje de quien lo trajo + tarjeta, o la línea con «Abrir».
                 MailChatRow(message: m, kind: mk, canPost: c.canPost)
+            } else if let k = ChatCards.kind(m), k.isComments {
+                // Comentarios agrupados: una línea que lleva a la tarea o al evento, sin repetir la tarjeta (como la web).
+                switch k {
+                case .issueComments(let id, let info):
+                    CommentsNoticeLine(count: info.count, title: ChatCards.title(m), lastByName: info.lastByName, lastExcerpt: info.lastExcerpt,
+                                       icon: AnyView(Text("☑").font(.footnote))) { store.push(.issue(id)) }
+                case .eventComments(let id, let info):
+                    CommentsNoticeLine(count: info.count, title: ChatCards.title(m), lastByName: info.lastByName, lastExcerpt: info.lastExcerpt,
+                                       icon: AnyView(Text("📅").font(.footnote))) { store.push(.event(id)) }
+                default: EmptyView()
+                }
             } else if let k = ChatCards.kind(m), let eventId = k.eventId {
                 EventChatCard(eventId: eventId, creatorId: m.authorId, kind: k, onComment: c.canPost ? { ev in
                     commentingEvent = ev; commentingIssue = nil; replyTo = nil; editing = nil; composerFocused = true

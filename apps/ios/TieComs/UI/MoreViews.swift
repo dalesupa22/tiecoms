@@ -422,8 +422,16 @@ struct WaChatSheet: View {
                         // Correo y WhatsApp en el chat (docs/CORREO.md): pulsación larga › «Comentar en chaggu…».
                         .contextMenu {
                             if store.mailEnabled && !m.body.isEmpty {
-                                Button { sharing = m } label: { Label(L("wa.commentIn"), systemImage: "bubble.left.and.text.bubble.right") }
-                                    .accessibilityIdentifier("wa.commentIn")
+                                Button { sharing = m } label: { Label(L("wa.bring"), systemImage: "arrowshape.turn.up.right") }
+                                    .accessibilityIdentifier("wa.bring")
+                            }
+                        }
+                        // Botón a la vista, como «⤴ Llevar a un chat» de la web.
+                        .overlay(alignment: m.fromMe ? .bottomLeading : .bottomTrailing) {
+                            if store.mailEnabled && !m.body.isEmpty {
+                                Button { sharing = m } label: { Text("⤴ " + L("wa.bringShort")).font(.caption2.weight(.semibold)) }
+                                    .buttonStyle(.borderless)
+                                    .accessibilityIdentifier("wa.bringShort")
                             }
                         }
                     }

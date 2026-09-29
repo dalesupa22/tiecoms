@@ -696,7 +696,10 @@
 "err.has_digital_signature" = "This PDF already has a digital signature";
 "err.internal" = "Internal error. Please try again.";
 "err.invalid_pdf" = "Could not read this PDF";
+"err.mic_blocked_os" = "Your computer is not letting the browser use the microphone. On Mac: System Settings › Privacy & Security › Microphone, turn on your browser, then quit and reopen it. On Windows: Settings › Privacy & security › Microphone, turn on «Microphone access» and «Let desktop apps access your microphone».";
+"err.mic_busy" = "Another app is using the microphone or camera (Teams, Zoom, Meet…). Close it and try again.";
 "err.mic_denied" = "The browser blocked the microphone. Allow it from the lock icon in the address bar.";
+"err.mic_missing" = "No microphone found. Plug one in (or headphones with a mic) and try again.";
 "err.network" = "Cannot reach the server";
 "err.not_found" = "Not found or outside your scope";
 "err.not_pdf" = "This file is not a PDF";
@@ -1247,8 +1250,10 @@
 "mail.cat.updates" = "Updates";
 "mail.ccPh" = "name@company.com, other@company.com";
 "mail.clear" = "Clear search";
+"mail.commentCardPh" = "Comment on this email…";
 "mail.commentPh" = "Your comment: “Look at this email, how do we answer?”";
 "mail.commentTeamPh" = "Write to the team…";
+"mail.commentWaPh" = "Comment on this message…";
 "mail.comments" = "Comments";
 "mail.connect" = "Connect";
 "mail.connectHint" = "Read, search, reply and schedule replies.";
@@ -1342,8 +1347,10 @@
 "mail.settingsRow" = "Gmail and Outlook";
 "mail.share" = "Share";
 "mail.shareIn" = "Share in {name}";
+"mail.shareInMany" = "Share in {n} chats";
 "mail.shareTitle" = "Bring to a chat";
 "mail.shared" = "Shared in the chat";
+"mail.sharedMany" = "Shared in {n} chats";
 "mail.sharing" = "Sharing…";
 "mail.showHistory" = "Show quoted history and signature";
 "mail.task" = "Task";
@@ -1364,6 +1371,7 @@
 "mail.toTeam" = "Comment to the team";
 "mail.unavailable" = "This email is no longer available.";
 "mail.whoSees" = "All {n} people in {name} will see the sender, subject and text. Attachments open from your mailbox only when someone asks.";
+"mail.whoSeesMany" = "{n} people in {chats} chats will see the sender, subject and text. Each chat gets its own card and thread.";
 "meet.at" = "Date and time";
 "meet.cancelledToast" = "You cancelled the connection";
 "meet.connect" = "Connect";
@@ -1896,6 +1904,7 @@
 "side.returned" = "The answer is already in the thread";
 "side.returnedChip" = "✓ Brought to the thread";
 "side.search" = "Search this chat or your company";
+"side.searchChats" = "Search chat, group or person…";
 "side.seeInChat" = "View in chat";
 "side.selected" = "{n} selected";
 "side.selectedOne" = "1 selected";
@@ -2307,6 +2316,9 @@
 "wa.account" = "Account";
 "wa.allAccounts" = "All accounts";
 "wa.allChats" = "All chats";
+"wa.bring" = "Bring to a chat…";
+"wa.bringShort" = "Bring to a chat";
+"wa.bringTitle" = "Bring a WhatsApp message to a chat";
 "wa.cat.all" = "All";
 "wa.cat.amigos" = "Friends";
 "wa.cat.clientes" = "Customers";

@@ -50,7 +50,7 @@ final class V9LanguageSubjectsTests: XCTestCase {
     /// Ningún texto visible dice «asunto» ni «subject»; solo el asunto de un correo: el importado («Asunto: {s}») y
     /// el de Gmail/Outlook en «Correo en el chat» (docs/CORREO.md: «(sin asunto)», buscar por asunto, quién ve el asunto).
     func testNoTextSaysAsuntoOrSubject() throws {
-        let emailSubject: Set<String> = ["imp.subject", "mail.noSubject", "mail.searchPh", "mail.whoSees"]
+        let emailSubject: Set<String> = ["imp.subject", "mail.noSubject", "mail.searchPh", "mail.whoSees", "mail.whoSeesMany"]
         for (lang, word) in [("es", "asunto"), ("en", "subject")] {
             let left = try strings(lang).filter { !emailSubject.contains($0.key) && Self.visible($0.value).range(of: word, options: .caseInsensitive) != nil }
             XCTAssertTrue(left.isEmpty, "\(lang): \(left.keys.sorted())")

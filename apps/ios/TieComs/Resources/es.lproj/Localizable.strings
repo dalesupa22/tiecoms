@@ -696,7 +696,10 @@
 "err.has_digital_signature" = "Este PDF ya tiene una firma digital";
 "err.internal" = "Error interno. Intenta de nuevo.";
 "err.invalid_pdf" = "No pude leer este PDF";
+"err.mic_blocked_os" = "Tu computador no deja que el navegador use el micrófono. En Mac: Configuración del Sistema › Privacidad y seguridad › Micrófono, activa tu navegador y ciérralo y ábrelo de nuevo. En Windows: Configuración › Privacidad y seguridad › Micrófono, activa «Acceso al micrófono» y «Permitir que las aplicaciones de escritorio accedan al micrófono».";
+"err.mic_busy" = "Otra aplicación está usando el micrófono o la cámara (Teams, Zoom, Meet…). Ciérrala e intenta de nuevo.";
 "err.mic_denied" = "El navegador no dio permiso al micrófono. Actívalo en el candado de la barra de direcciones.";
+"err.mic_missing" = "No encontré un micrófono. Conecta uno (o unos audífonos con micrófono) e intenta de nuevo.";
 "err.network" = "Sin conexión con el servidor";
 "err.not_found" = "No encontrado o fuera de tu alcance";
 "err.not_pdf" = "Este archivo no es un PDF";
@@ -1247,8 +1250,10 @@
 "mail.cat.updates" = "Notificaciones";
 "mail.ccPh" = "correo@empresa.com, otro@empresa.com";
 "mail.clear" = "Limpiar búsqueda";
+"mail.commentCardPh" = "Comenta este correo…";
 "mail.commentPh" = "Tu comentario: «Miren este correo, ¿cómo le respondemos?»";
 "mail.commentTeamPh" = "Escribe al equipo…";
+"mail.commentWaPh" = "Comenta este mensaje…";
 "mail.comments" = "Comentarios";
 "mail.connect" = "Conectar";
 "mail.connectHint" = "Leer, buscar, responder y programar respuestas.";
@@ -1342,8 +1347,10 @@
 "mail.settingsRow" = "Gmail y Outlook";
 "mail.share" = "Compartir";
 "mail.shareIn" = "Compartir en {name}";
+"mail.shareInMany" = "Compartir en {n} chats";
 "mail.shareTitle" = "Llevar a un chat";
 "mail.shared" = "Compartido en el chat";
+"mail.sharedMany" = "Compartido en {n} chats";
 "mail.sharing" = "Compartiendo…";
 "mail.showHistory" = "Ver el historial citado y la firma";
 "mail.task" = "Tarea";
@@ -1364,6 +1371,7 @@
 "mail.toTeam" = "Comentar al equipo";
 "mail.unavailable" = "Este correo ya no está disponible.";
 "mail.whoSees" = "Lo verán las {n} personas de {name}: remitente, asunto y texto. Los adjuntos se abren desde tu correo solo cuando alguien los pide.";
+"mail.whoSeesMany" = "Lo verán {n} personas en {chats} chats: remitente, asunto y texto. Cada chat tiene su propia tarjeta e hilo.";
 "meet.at" = "Fecha y hora";
 "meet.cancelledToast" = "Cancelaste la conexión";
 "meet.connect" = "Conectar";
@@ -1896,6 +1904,7 @@
 "side.returned" = "La respuesta ya está en el hilo";
 "side.returnedChip" = "✓ Llevado al hilo";
 "side.search" = "Buscar en este chat o en tu empresa";
+"side.searchChats" = "Buscar chat, grupo o persona…";
 "side.seeInChat" = "Ver en el chat";
 "side.selected" = "{n} seleccionadas";
 "side.selectedOne" = "1 seleccionada";
@@ -2307,6 +2316,9 @@
 "wa.account" = "Cuenta";
 "wa.allAccounts" = "Todas las cuentas";
 "wa.allChats" = "Todos los chats";
+"wa.bring" = "Llevar a un chat…";
+"wa.bringShort" = "Llevar a un chat";
+"wa.bringTitle" = "Llevar un WhatsApp a un chat";
 "wa.cat.all" = "Todos";
 "wa.cat.amigos" = "Amigos";
 "wa.cat.clientes" = "Clientes";

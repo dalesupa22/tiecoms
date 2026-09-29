@@ -205,20 +205,22 @@ extension AppStore {
         try await api.request("/mail/messages/\(p.rawValue)/\(id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? id)")
     }
 
+    /// Llevar a uno o varios chats (hasta 10; POST /mail/share con conversationIds → {emails}). Cada chat tiene su tarjeta.
     @discardableResult
-    func shareMail(_ p: MailProvider, messageId: String, conversationId: String, comment: String) async throws -> SharedMailDTO {
-        var json: [String: Any] = ["provider": p.rawValue, "messageId": messageId, "conversationId": conversationId]
+    func shareMail(_ p: MailProvider, messageId: String, conversationIds: [String], comment: String) async throws -> [SharedMailDTO] {
+        var json: [String: Any] = ["provider": p.rawValue, "messageId": messageId, "conversationIds": Array(conversationIds.prefix(10))]
         let c = comment.trimmingCharacters(in: .whitespacesAndNewlines)
         if !c.isEmpty { json["comment"] = String(c.prefix(4000)) }
-        let m: SharedMailDTO = try await api.request("/mail/share", method: "POST", json: json)
-        return putMail(m)
+        let data = try await api.requestData("/mail/share", method: "POST", json: json)
+        return MailShareResult.decode(data).map { putMail($0) }
     }
 
-    func shareWhatsApp(accountId: String, jid: String, messageId: String, conversationId: String, comment: String) async throws {
-        var json: [String: Any] = ["accountId": accountId, "jid": jid, "messageId": messageId, "conversationId": conversationId]
+    func shareWhatsApp(accountId: String, jid: String, messageId: String, conversationIds: [String], comment: String) async throws {
+        var json: [String: Any] = ["accountId": accountId, "jid": jid, "messageId": messageId, "conversationIds": Array(conversationIds.prefix(10))]
         let c = comment.trimmingCharacters(in: .whitespacesAndNewlines)
         if !c.isEmpty { json["comment"] = String(c.prefix(4000)) }
-        try await api.requestData("/whatsapp/share", method: "POST", json: json)
+        let data = try await api.requestData("/whatsapp/share", method: "POST", json: json)
+        for e in MailShareResult.decode(data) { putMail(e) }
     }
 
     // MARK: Conectar

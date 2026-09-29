@@ -38,12 +38,16 @@ final class MailTests: XCTestCase {
     func testChatKindParse() {
         XCTAssertEqual(MailChatKind.parse(sys(#"{"k":"mail.shared","emailId":"e1","comment":"Miren"}"#).systemPayload), .shared(emailId: "e1", comment: "Miren"))
         XCTAssertEqual(MailChatKind.parse(sys(#"{"k":"mail.shared","emailId":"e1"}"#).systemPayload), .shared(emailId: "e1", comment: nil))
-        guard case .comments(let id, let info)? = MailChatKind.parse(sys(#"{"k":"mail.comments","emailId":"e2","title":"T","count":3,"lastById":"b","lastByName":"Bruno Díaz","lastExcerpt":"ok"}"#).systemPayload) else { return XCTFail() }
+        guard case .comments(let id, let info, let prov)? = MailChatKind.parse(sys(#"{"k":"mail.comments","emailId":"e2","title":"T","count":3,"lastById":"b","lastByName":"Bruno Díaz","lastExcerpt":"ok","provider":"whatsapp"}"#).systemPayload) else { return XCTFail() }
         XCTAssertEqual(id, "e2"); XCTAssertEqual(info.count, 3); XCTAssertEqual(info.lastByName, "Bruno Díaz"); XCTAssertEqual(info.lastExcerpt, "ok")
+        XCTAssertEqual(info.title, "T"); XCTAssertEqual(prov, "whatsapp", "el aviso trae el proveedor para el icono")
         XCTAssertEqual(MailChatKind.parse(sys(#"{"k":"mail.replied","emailId":"e3"}"#).systemPayload), .replied(emailId: "e3"))
         XCTAssertEqual(MailChatKind.parse(sys(#"{"k":"mail.reply_failed","emailId":"e3","error":"x"}"#).systemPayload), .replyFailed(emailId: "e3"))
         guard case .waShared(let w)? = MailChatKind.parse(sys(#"{"k":"wa.shared","accountId":"a1","jid":"j","waMessageId":"w","accountKind":"business","chatName":"Obra","isGroup":true,"author":"Luis","fromMe":false,"text":"Llegó","sentAt":"2026-09-29T10:00:00Z","comment":"Ojo"}"#).systemPayload) else { return XCTFail() }
         XCTAssertEqual(w.chatName, "Obra"); XCTAssertTrue(w.isGroup); XCTAssertEqual(w.accountKind, "business"); XCTAssertEqual(w.comment, "Ojo"); XCTAssertEqual(w.text, "Llegó")
+        XCTAssertNil(w.emailId, "los viejos no traen registro propio")
+        guard case .waShared(let w2)? = MailChatKind.parse(sys(#"{"k":"wa.shared","emailId":"e9","text":"Hola"}"#).systemPayload) else { return XCTFail() }
+        XCTAssertEqual(w2.emailId, "e9", "desde la 040: tarjeta con hilo y tarea")
         // Sin id o de otro tipo: no es tarjeta de correo.
         XCTAssertNil(MailChatKind.parse(sys(#"{"k":"mail.shared"}"#).systemPayload))
         XCTAssertNil(MailChatKind.parse(sys(#"{"k":"issue.created","issueId":"i"}"#).systemPayload))
@@ -82,6 +86,16 @@ final class MailTests: XCTestCase {
         // Una tarjeta pedida por mí (no en vivo) sí trae su scheduledReply real.
         var mine = live; mine.scheduledReply = nil
         XCTAssertNil(SharedMailDTO.merge(mine, into: full).scheduledReply)
+    }
+
+    func testWhatsAppSharedAndShareResult() throws {
+        let e = try dec(SharedMailDTO.self, #"{"id":"w1","conversationId":"c1","sharedBy":"u1","provider":"whatsapp","direction":"in","from":{"name":"Luis","email":""},"subject":"Obra","snippet":"Llegó el cemento","attachments":[],"wa":{"chatName":"Obra","isGroup":true,"accountKind":"business","accountId":"a1","jid":"x@g.us"}}"#)
+        XCTAssertEqual(e.provider, .whatsapp); XCTAssertTrue(e.provider.isWhatsApp); XCTAssertEqual(e.provider.label, "WhatsApp")
+        XCTAssertEqual(e.wa?.chatName, "Obra"); XCTAssertTrue(e.wa?.isGroup == true); XCTAssertEqual(e.wa?.jid, "x@g.us"); XCTAssertEqual(e.from?.name, "Luis")
+        // Varios chats: {emails:[…]}; servidores anteriores: un SharedMailDTO; WhatsApp viejo: {message} sin tarjetas.
+        XCTAssertEqual(MailShareResult.decode(Data(#"{"emails":[{"id":"a"},{"id":"b"}]}"#.utf8)).map(\.id), ["a", "b"])
+        XCTAssertEqual(MailShareResult.decode(Data(#"{"id":"a","conversationId":"c1"}"#.utf8)).map(\.id), ["a"])
+        XCTAssertTrue(MailShareResult.decode(Data(#"{"message":{"id":"m"}}"#.utf8)).isEmpty)
     }
 
     func testLiveEventDecodes() throws {

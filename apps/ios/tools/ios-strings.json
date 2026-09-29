@@ -3590,17 +3590,5 @@
  "sys.unknown": [
   "Actualización en el chat",
   "Chat update"
- ],
- "topic.general": [
-  "General",
-  "General"
- ],
- "topic.generalHint": [
-  "Solo los mensajes sin tema",
-  "Only messages without a topic"
- ],
- "topic.allHint": [
-  "Todos los mensajes, con y sin tema",
-  "Every message, with or without a topic"
  ]
 }

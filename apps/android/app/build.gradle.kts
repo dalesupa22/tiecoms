@@ -151,6 +151,9 @@ dependencies {
     implementation(libs.androidx.browser)
     implementation(libs.androidx.splashscreen)
     implementation(libs.firebase.messaging)
+    // Llamadas de voz y video (docs/LLAMADAS.md): Amazon Chime SDK con su librería de medios nativa.
+    implementation(libs.chime.sdk)
+    implementation(libs.chime.sdk.media)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
 

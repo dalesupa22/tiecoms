@@ -73,6 +73,13 @@ data class ClientState(
     val scheduled: List<ScheduledMessageDTO> = emptyList(),
     /** Mis conexiones con Meet, Teams y Zoom (null = aún no se pidieron). */
     val meetingConnections: List<MeetingConnectionDTO>? = null,
+    /**
+     * Llamada en curso por conversación (docs/LLAMADAS.md): ausente = no se sabe todavía, null = ninguna.
+     * Llega de GET /conversations/:id/call, de `call.updated` y de `call.ringing`.
+     */
+    val calls: Map<String, CallDTO?> = emptyMap(),
+    /** Sube cuando alguna llamada cambia (empezó, terminó, hay transcripción): la pestaña «Llamadas» recarga. */
+    val callsRevision: Int = 0,
 )
 
 /** Avisos puntuales para sonidos y notificaciones. */
@@ -90,6 +97,8 @@ sealed interface ClientSignal {
     data class MentionsDropped(val conversationId: String, val userIds: List<String>) : ClientSignal
     /** La reunión empieza pronto (evento de cuenta `event.soon`). */
     data class EventSoon(val event: CalendarEventDTO, val minutes: Int) : ClientSignal
+    /** Me están llamando (`call.ringing`), salvo con «No molestar» o modo sueño. */
+    data class CallRinging(val call: CallDTO, val callerName: String, val conversationTitle: String?) : ClientSignal
 }
 
 private enum class RefreshOutcome { OK, UNAUTHORIZED, NETWORK }
@@ -510,6 +519,10 @@ class TieComsClient(
             is AccountEvent.IssuePersonal -> putIssues(listOf(e.issue))
             is AccountEvent.IssueHidden -> { setState { copy(issues = issues - e.issueId) }; if (e.conversationId.isNotEmpty()) recountIssues(e.conversationId) }
             is AccountEvent.ScheduledUpdated -> setState { copy(scheduled = Scheduling.apply(scheduled, e.scheduled)) }
+            is AccountEvent.CallRinging -> {
+                putCall(e.call)
+                if (e.call.startedBy != myId && !dndActive()) _signals.tryEmit(ClientSignal.CallRinging(e.call, e.callerName, e.conversationTitle))
+            }
             is AccountEvent.Unknown -> Unit
         }
     }
@@ -523,6 +536,7 @@ class TieComsClient(
             is ConversationEvent.IssueUpdated -> { putIssues(listOf(e.issue)); recountIssues(e.conversationId) }
             is ConversationEvent.PinsChanged -> setState { copy(pins = pins + (e.conversationId to e.messageIds)) }
             is ConversationEvent.TopicsChanged -> putTopics(e.conversationId, e.topics)
+            is ConversationEvent.CallUpdated -> putCall(e.call)
             is ConversationEvent.CalendarUpdated -> {
                 val prev = s.events[e.event.id]
                 putEvents(listOf(e.event))
@@ -591,6 +605,7 @@ class TieComsClient(
             is ConversationEvent.PinsChanged -> setState { copy(pins = pins + (e.conversationId to e.messageIds)) }
             is ConversationEvent.CalendarUpdated -> putEvents(listOf(e.event))
             is ConversationEvent.TopicsChanged -> putTopics(e.conversationId, e.topics)
+            is ConversationEvent.CallUpdated -> Unit // ya se aplicó en onConversationEvent (también con el chat cerrado)
             is ConversationEvent.CursorOnly -> Unit
         }
         setConv(e.conversationId) { copy(messages = messages, lastEventSeq = maxOf(lastEventSeq, e.eventSeq)) }
@@ -1110,6 +1125,44 @@ class TieComsClient(
     }
 
     // ---------- Temas (docs/TEMAS.md) ----------
+    // ---------- Llamadas (docs/LLAMADAS.md) ----------
+    private fun putCall(call: CallDTO) = setState { copy(calls = Calls.put(calls, call), callsRevision = callsRevision + 1) }
+    private fun callsPath(id: String, tail: String) = "/calls/${enc(id)}/$tail"
+
+    /** GET /conversations/:id/call: la llamada en curso (o null). */
+    suspend fun loadCall(conversationId: String): CallDTO? = withContext(dispatcher) {
+        val r = req("GET", "/conversations/${enc(conversationId)}/call", null, CallEnvelope.serializer())
+        setState { copy(calls = calls + (conversationId to r.call?.takeIf { !it.ended })) }
+        r.call
+    }
+    /** Empieza la llamada o entra a la que está en curso (dos que llaman a la vez caen en la misma). */
+    suspend fun startCall(conversationId: String, kind: String): CallJoinDTO = withContext(dispatcher) {
+        req("POST", "/conversations/${enc(conversationId)}/call", buildJsonObject { put("kind", JsonPrimitive(kind)) }, CallJoinDTO.serializer()).also { putCall(it.call) }
+    }
+    suspend fun joinCall(callId: String): CallJoinDTO = withContext(dispatcher) {
+        req("POST", callsPath(callId, "join"), buildJsonObject {}, CallJoinDTO.serializer()).also { putCall(it.call) }
+    }
+    suspend fun callHeartbeat(callId: String) = withContext(dispatcher) { req("POST", callsPath(callId, "heartbeat"), buildJsonObject {}, JsonElement.serializer()); Unit }
+    /** Colgar (o terminarla para todos con [forAll]). */
+    suspend fun leaveCall(callId: String, forAll: Boolean = false): CallDTO? = withContext(dispatcher) {
+        req("POST", callsPath(callId, if (forAll) "end" else "leave"), buildJsonObject {}, CallEnvelope.serializer()).call?.also { putCall(it) }
+    }
+    /** Prender o apagar la transcripción; [aiSummary]: quien la prende autoriza el resumen con IA al colgar. */
+    suspend fun setCallTranscription(callId: String, on: Boolean, aiSummary: Boolean = false): CallDTO? = withContext(dispatcher) {
+        req("POST", callsPath(callId, "transcription"), buildJsonObject { put("on", JsonPrimitive(on)); put("aiSummary", JsonPrimitive(aiSummary)) }, CallEnvelope.serializer()).call?.also { putCall(it) }
+    }
+    suspend fun sendCallTranscript(callId: String, segments: List<CallTranscriptSegmentInput>): Int = withContext(dispatcher) {
+        req("POST", callsPath(callId, "transcript"), TcJson.encodeToJsonElement(CallTranscriptBody.serializer(), CallTranscriptBody(segments)), CallTranscriptSaved.serializer()).saved
+    }
+    suspend fun callTranscript(callId: String): CallTranscriptDTO = withContext(dispatcher) { req("GET", callsPath(callId, "transcript"), null, CallTranscriptDTO.serializer()) }
+    suspend fun callHistory(before: String? = null, limit: Int = 30): CallHistoryPage = withContext(dispatcher) {
+        req("GET", "/calls" + q("limit" to limit.toString(), "before" to before), null, CallHistoryPage.serializer())
+    }
+    /** Compartir en otro chat (sale como mensaje mío). what: summary | transcript | both. */
+    suspend fun shareCall(callId: String, conversationId: String, what: String): MessageDTO? = withContext(dispatcher) {
+        req("POST", callsPath(callId, "share"), buildJsonObject { put("conversationId", JsonPrimitive(conversationId)); put("what", JsonPrimitive(what)) }, CallShareResult.serializer()).message
+    }
+
     private fun putTopics(conversationId: String, topics: List<TopicDTO>) = setState { copy(topics = this.topics + (conversationId to topics)) }
 
     suspend fun loadTopics(conversationId: String): List<TopicDTO> = withContext(dispatcher) {

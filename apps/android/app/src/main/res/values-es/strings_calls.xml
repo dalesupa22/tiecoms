@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Llamadas de voz y video con Amazon Chime SDK (docs/LLAMADAS.md). Mismos textos que la web (apps/web/src/i18n.ts). -->
+<resources>
+    <!-- Mensajes de sistema en el chat (sys.call.*) -->
+    <string name="sys_call_started">Empezó una llamada.</string>
+    <string name="sys_call_ended">Terminó la llamada · %1$s.</string>
+    <string name="sys_call_ended_plain">Terminó la llamada.</string>
+    <string name="sys_call_transcription_on">%1$s prendió la transcripción de la llamada.</string>
+    <string name="sys_call_transcription_off">%1$s apagó la transcripción de la llamada.</string>
+    <string name="sys_call_transcript">Quedó guardada la transcripción de la llamada.</string>
+    <string name="call_transcript_open">Ver transcripción</string>
+
+    <!-- Encabezado, franja y llamada entrante -->
+    <string name="call_audio">Llamada de voz</string>
+    <string name="call_video">Videollamada</string>
+    <string name="call_title">Llamada</string>
+    <string name="call_in_progress">Llamada en curso</string>
+    <string name="call_join">Unirse</string>
+    <string name="call_incoming">Te están llamando</string>
+    <string name="call_incoming_in">Te llama en %1$s</string>
+    <string name="call_decline">Ahora no</string>
+    <string name="call_answer">Contestar</string>
+    <string name="call_answer_audio">Contestar sin cámara</string>
+    <string name="call_answer_video">Contestar con cámara</string>
+
+    <!-- Pantalla de la llamada -->
+    <string name="call_connecting">Conectando…</string>
+    <string name="call_waiting">Esperando a que alguien entre…</string>
+    <string name="call_you">Tú</string>
+    <string name="call_mute">Silenciar micrófono</string>
+    <string name="call_unmute">Activar micrófono</string>
+    <string name="call_camera_on">Encender cámara</string>
+    <string name="call_camera_off">Apagar cámara</string>
+    <string name="call_switch_camera">Cambiar de cámara</string>
+    <string name="call_speaker">Altavoz</string>
+    <string name="call_no_camera">No encontramos una cámara</string>
+    <string name="call_hang_up">Colgar</string>
+    <string name="call_minimize">Minimizar</string>
+    <string name="call_expand">Ampliar</string>
+    <string name="call_audio_failed">No se pudo conectar el audio de la llamada.</string>
+    <string name="call_fake">Llamada de prueba: sin audio (proveedor falso).</string>
+    <string name="call_transcript_on">Transcribir la llamada</string>
+    <string name="call_transcript_off">Detener la transcripción</string>
+    <string name="call_transcript_start">Empezar a transcribir</string>
+    <string name="call_transcribing_short">transcribiendo</string>
+    <string name="call_transcribing_all">Se está transcribiendo: todos en la llamada lo ven</string>
+    <string name="call_consent_body">Todo lo que se diga desde ahora quedará escrito y guardado en esta conversación. Todos en la llamada verán el aviso y quedará en el chat quién la prendió. Puedes apagarla cuando quieras.</string>
+    <string name="call_consent_ai">Al colgar, resumir la transcripción con IA (DeepSeek)</string>
+    <string name="call_transcript_title">Transcripción de la llamada</string>
+    <string name="call_transcript_empty">Todavía no hay frases guardadas.</string>
+    <string name="call_summary">Resumen</string>
+    <string name="call_copy">Copiar</string>
+    <string name="call_copied">Transcripción copiada</string>
+
+    <!-- Permisos -->
+    <string name="call_perm_title">Micrófono y cámara</string>
+    <string name="call_perm_body">Para llamar, chaggu necesita el micrófono (y la cámara en las videollamadas). La llamada sigue aunque salgas de la app.</string>
+    <string name="call_perm_continue">Continuar</string>
+    <string name="call_perm_denied">Sin permiso del micrófono no se puede llamar. Actívalo en Ajustes.</string>
+    <string name="call_perm_camera_denied">Sin permiso de la cámara la llamada sigue solo con voz.</string>
+    <string name="camera_perm_denied">Para tomar la foto, permite la cámara en Ajustes.</string>
+
+    <!-- Servicio en primer plano y aviso de llamada entrante -->
+    <string name="call_notif_channel">Llamadas</string>
+    <string name="call_notif_channel_desc">Llamadas en curso y llamadas entrantes</string>
+    <string name="call_notif_ongoing">Llamada en curso</string>
+    <string name="call_notif_tap">Toca para volver a la llamada</string>
+    <string name="call_notif_incoming">%1$s te está llamando</string>
+
+    <!-- Pestaña «Llamadas» -->
+    <string name="nav_calls">Llamadas</string>
+    <string name="calls_title">Llamadas</string>
+    <string name="calls_new">Llamar</string>
+    <string name="calls_empty">Todavía no hay llamadas. Llama a una persona o a un grupo desde aquí o desde el chat.</string>
+    <string name="calls_group">Grupal</string>
+    <string name="calls_direct">Individual</string>
+    <string name="calls_missed">Sin respuesta</string>
+    <string name="calls_live">En curso</string>
+    <string name="calls_more">Ver más</string>
+    <string name="calls_call_back">Volver a llamar</string>
+    <string name="calls_pick">¿A quién llamas?</string>
+    <string name="calls_search">Buscar persona o grupo</string>
+    <string name="calls_share">Compartir</string>
+    <string name="calls_share_chat">Enviar a un chat</string>
+    <string name="calls_share_system">Compartir con otra app</string>
+    <string name="calls_share_what">¿Qué compartes?</string>
+    <string name="calls_share_summary">Resumen</string>
+    <string name="calls_share_transcript">Transcripción</string>
+    <string name="calls_share_both">Resumen y transcripción</string>
+    <string name="calls_shared">Enviado a %1$s</string>
+    <string name="calls_pick_chat">Enviar a…</string>
+    <string name="calls_no_summary">Sin resumen. Se genera al colgar si quien prendió la transcripción lo autorizó.</string>
+    <string name="calls_no_content">Esta llamada no tiene resumen ni transcripción.</string>
+    <string name="err_calls_disabled">Las llamadas todavía no están activas.</string>
+    <string name="err_not_in_call">Ya no estás en esa llamada.</string>
+
+    <!-- Temas: número de no leídos de cada banderita (docs/TEMAS.md › «Todo») -->
+    <string name="topic_unread_n">%1$d sin leer</string>
+</resources>

@@ -121,6 +121,9 @@ class AppContainer(private val app: Application) {
 
     private fun newClient(url: String) = TieComsClient(url, deviceName, storage, secrets, okHttp, meetingStore = meetingStore)
 
+    /** Llamadas de voz y video (docs/LLAMADAS.md): una a la vez, con Amazon Chime SDK. */
+    val calls by lazy { com.tiecoms.app.platform.CallManager(app, this) }
+
     /** Notas de voz: un solo reproductor para toda la app (reproducción continua). */
     val voice by lazy { com.tiecoms.app.platform.VoicePlayer(app, okHttp, settings) }
 
@@ -467,8 +470,13 @@ class AppContainer(private val app: Application) {
                 notifier.showMessage(ev.conversationId, "📅 " + app.getString(R.string.cal_soon, sig.minutes, ev.title), listOf(where, whenText).filter { it.isNotBlank() }.joinToString(" · "),
                     silent = !settings.soundsEnabled, tag = "event:soon:" + ev.id)
             }
+            // Te están llamando (docs/LLAMADAS.md): aviso con Contestar / Ahora no; deja de sonar a los 45 s.
+            is ClientSignal.CallRinging -> calls.ring(sig.call, sig.callerName.ifBlank { Names.person(client.value.state.value.data, sig.call.startedBy)?.name ?: "" }, sig.conversationTitle)
             // Sin sesión: fuera sugerencias de Direct Share, burbujas y notificaciones de la cuenta anterior.
-            ClientSignal.SignedOut -> { com.tiecoms.app.platform.ConversationShortcuts.clear(app); notifier.cancelAll() }
+            ClientSignal.SignedOut -> {
+                com.tiecoms.app.platform.ConversationShortcuts.clear(app); notifier.cancelAll()
+                calls.dismissRing(); scope.launch { runCatching { calls.hangUp() } }
+            }
         }
     }
 }

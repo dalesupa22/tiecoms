@@ -82,6 +82,8 @@ fun errorText(ctx: Context, e: Throwable): String = when (e) {
             "storage_unavailable" -> R.string.err_storage_unavailable
             "side_outsider" -> R.string.err_side_outsider
             "blocked_user" -> R.string.err_blocked_user
+            "calls_disabled" -> R.string.err_calls_disabled
+            "not_in_call" -> R.string.err_not_in_call
             else -> null
         }
         when {
@@ -112,6 +114,8 @@ fun systemText(ctx: Context, body: String, author: String? = null): String {
         is JsonArray -> v.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.joinToString(", ")
         else -> ""
     }
+    // Llamadas (docs/LLAMADAS.md): call.started, call.ended · m:ss, transcripción prendida/apagada y guardada.
+    com.tiecoms.app.core.Calls.systemCall(o)?.let { c -> return callSystemText(ctx, c) }
     return when (str("k")) {
         "workspace.created" -> ctx.getString(R.string.sys_workspace_created, str("name"))
         "group.created" -> ctx.getString(R.string.sys_group_created, str("name"))
@@ -140,6 +144,14 @@ fun systemText(ctx: Context, body: String, author: String? = null): String {
             else ctx.getString(R.string.sys_side_started, str("authorName"), str("excerpt"))
         else -> body
     }
+}
+
+fun callSystemText(ctx: Context, c: com.tiecoms.app.core.Calls.SystemCall): String = when (c.key) {
+    "call.started" -> ctx.getString(R.string.sys_call_started)
+    "call.ended" -> c.durationSec?.let { ctx.getString(R.string.sys_call_ended, com.tiecoms.app.core.Calls.clock(it)) } ?: ctx.getString(R.string.sys_call_ended_plain)
+    "call.transcription.on" -> ctx.getString(R.string.sys_call_transcription_on, c.name)
+    "call.transcription.off" -> ctx.getString(R.string.sys_call_transcription_off, c.name)
+    else -> ctx.getString(R.string.sys_call_transcript)
 }
 
 fun roleText(ctx: Context, role: String) = ctx.getString(

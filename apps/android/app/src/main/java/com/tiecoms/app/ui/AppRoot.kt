@@ -55,6 +55,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Forum
@@ -191,8 +192,11 @@ private fun AuthNav() {
     }
 }
 
-/** Barra inferior (docs/GRUPOS.md): Grupos · DMs · Asuntos · Calendario · Tú, siempre en este orden. */
-private val TABS = listOf("home?ws={ws}", "dms", "issues", "agenda", "settings")
+/**
+ * Barra inferior (docs/GRUPOS.md): Grupos · DMs · Asuntos · Calendario · Tú, siempre en este orden.
+ * Con `features.calls` va «Llamadas» entre Calendario y Tú (docs/LLAMADAS.md).
+ */
+private val TABS = listOf("home?ws={ws}", "dms", "issues", "agenda", "calls", "settings")
 
 @Composable
 private fun MainNav() {
@@ -270,6 +274,7 @@ private fun MainNav() {
                 DeepLinks.SCREEN_SCHEDULED -> nav.navigate("scheduled") { launchSingleTop = true }
             }
             is DeepLink.Share -> { container.shareDraft = p; nav.navigate("share") { launchSingleTop = true } }
+            is DeepLink.CallDetail -> nav.navigate("call/${p.id}") { launchSingleTop = true }
             is DeepLink.Signup -> Unit
         }
     }
@@ -290,6 +295,8 @@ private fun MainNav() {
                     Tab("dms", R.string.nav_dms, dmsBadge) { Icon(Icons.Filled.Forum, null) },
                     Tab("issues", R.string.nav_issues, 0) { Icon(Icons.Filled.CheckCircle, null) },
                     Tab("agenda", R.string.nav_calendar, 0) { Icon(Icons.Filled.DateRange, null) },
+                    // Llamadas (docs/LLAMADAS.md): sexto ícono, solo si el servidor las tiene prendidas.
+                    Tab("calls", R.string.nav_calls, 0) { Icon(Icons.Filled.Call, null) }.takeIf { data?.callsEnabled == true },
                     // «Tú»: la foto de la persona como ícono (como el perfil de Instagram).
                     Tab("settings", R.string.nav_you, 0) {
                         val me = data?.me
@@ -303,7 +310,7 @@ private fun MainNav() {
                         }
                     },
                 )
-                items.forEach { t ->
+                items.filterNotNull().forEach { t ->
                     NavigationBarItem(
                         selected = route == t.route, onClick = { tab(if (t.route.startsWith("home")) "home" else t.route) },
                         icon = {
@@ -355,6 +362,10 @@ private fun MainNav() {
                 IssuesScreen(onOpen = { i -> nav.navigate("issue/$i") }, conversationFilter = it.arguments?.getString("conv"), onBack = { nav.popBackStack() })
             }
             composable("agenda") { AgendaScreen(onOpenEvent = { nav.navigate("event/$it") }, quick = quick) }
+            composable("calls") { CallsScreen(onOpenDetail = { c -> nav.navigate("call/$c") { launchSingleTop = true } }, onOpenConversation = { c -> openConv(c) }) }
+            composable("call/{id}") {
+                CallDetailScreen(it.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() }, onOpenConversation = { c -> openConv(c) })
+            }
             composable("settings") { SettingsScreen(onNavigate = { r -> nav.navigate(r) { launchSingleTop = true } }) }
             composable("oversight/{org}") {
                 OversightScreen(it.arguments?.getString("org") ?: "", onBack = { nav.popBackStack() }, onOpen = { c -> openConv(c) },
@@ -449,6 +460,8 @@ private fun MainNav() {
         AssistantBubble(gg, visible = route in TABS && !gg.open, modifier = Modifier.align(Alignment.BottomEnd))
         }
     }
+    // Llamada en curso y llamada entrante (docs/LLAMADAS.md): encima de todo, también de la barra de pestañas.
+    CallOverlayHost(onOpenConversation = { c -> openConv(c) })
     AssistantPanel(gg, myName = state.data?.me?.name ?: "") { target ->
         gg.close()
         when (target) {

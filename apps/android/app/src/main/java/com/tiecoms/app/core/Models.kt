@@ -325,7 +325,11 @@ data class BootstrapDTO(
     val workspaces: List<WorkspaceDTO> = emptyList(),
     val conversations: List<ConversationDTO> = emptyList(),
     val people: List<PersonDTO> = emptyList(),
-)
+    /** Funciones prendidas en el servidor (aditivo): `features.calls` muestra 📞/🎥, la franja y la pestaña «Llamadas». */
+    val features: FeaturesDTO = FeaturesDTO(),
+) {
+    val callsEnabled: Boolean get() = features.calls
+}
 
 @Serializable
 data class MessagesPage(

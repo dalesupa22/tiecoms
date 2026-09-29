@@ -21,6 +21,9 @@ sealed interface ConversationEvent {
     /** `topics.changed` (docs/TEMAS.md): trae la lista completa de temas (activos y archivados); reemplaza la local. */
     data class TopicsChanged(override val conversationId: String, override val eventSeq: Long, val topics: List<TopicDTO>) : ConversationEvent
 
+    /** `call.updated` (docs/LLAMADAS.md): quién está en la llamada y si se transcribe; terminada = endedAt. */
+    data class CallUpdated(override val conversationId: String, override val eventSeq: Long, val call: CallDTO) : ConversationEvent
+
     /** `redacted` o cualquier tipo nuevo: solo avanza el cursor. */
     data class CursorOnly(override val conversationId: String, override val eventSeq: Long, val type: String) : ConversationEvent
 }
@@ -49,6 +52,8 @@ sealed interface AccountEvent {
     data class IssuePersonal(val issue: IssueDTO) : AccountEvent
     /** Perdí acceso a un asunto: sacarlo de la lista. */
     data class IssueHidden(val issueId: String, val conversationId: String) : AccountEvent
+    /** `call.ringing`: me están llamando (el servidor no lo manda a quien tiene No molestar). */
+    data class CallRinging(val call: CallDTO, val conversationTitle: String?, val callerName: String) : AccountEvent
     data class Unknown(val type: String) : AccountEvent
 }
 
@@ -77,6 +82,7 @@ fun decodeConversationEvent(el: JsonElement): ConversationEvent? {
         "calendar.updated" -> obj(o, "event", CalendarEventDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { ConversationEvent.CalendarUpdated(conv, seq, it) }
         "topics.changed" -> obj(o, "topics", kotlinx.serialization.builtins.ListSerializer(TopicDTO.serializer()))
             ?.filter { it.id.isNotEmpty() }?.map { it.copy(conversationId = it.conversationId.ifEmpty { conv }) }?.let { ConversationEvent.TopicsChanged(conv, seq, it) }
+        "call.updated" -> Calls.decode(o["call"])?.let { ConversationEvent.CallUpdated(conv, seq, it.copy(conversationId = it.conversationId.ifEmpty { conv })) }
         else -> null
     } ?: ConversationEvent.CursorOnly(conv, seq, type)
 }
@@ -107,6 +113,8 @@ fun decodeAccountEvent(el: JsonElement): AccountEvent {
         "issue.personal" -> obj(o, "issue", IssueDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { AccountEvent.IssuePersonal(it.copy(conversationId = null)) } ?: AccountEvent.Unknown(type)
         "issue.hidden" -> o.str("issueId")?.let { AccountEvent.IssueHidden(it, o.str("conversationId") ?: "") } ?: AccountEvent.Unknown(type)
         "me.sleep" -> obj(o, "sleep", SleepDTO.serializer())?.let { AccountEvent.SleepUpdated(it) } ?: AccountEvent.Unknown(type)
+        "call.ringing" -> Calls.decode(o["call"])?.takeIf { it.conversationId.isNotEmpty() }
+            ?.let { AccountEvent.CallRinging(it, o.str("conversationTitle"), o.str("callerName") ?: "") } ?: AccountEvent.Unknown(type)
         "me.dnd" -> if (o.containsKey("dndUntil")) AccountEvent.DndUpdated(o.str("dndUntil")) else AccountEvent.Unknown(type)
         else -> AccountEvent.Unknown(type)
     }

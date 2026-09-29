@@ -18,6 +18,8 @@ sealed interface DeepLink {
     data class Screen(val name: String) : DeepLink
     /** Texto que llega desde «Compartir» del sistema (o /share?text=). source: whatsapp|slack|email|teams|other */
     data class Share(val text: String, val source: String = "other") : DeepLink
+    /** Detalle de una llamada (resumen y transcripción): «Ver transcripción» del chat e historial (docs/LLAMADAS.md). */
+    data class CallDetail(val id: String) : DeepLink
 }
 
 object DeepLinks {

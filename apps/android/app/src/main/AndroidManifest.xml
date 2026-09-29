@@ -12,6 +12,13 @@
     <!-- Subidas grandes desde «Compartir» (WorkManager en primer plano). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Llamadas de voz y video (docs/LLAMADAS.md): cámara y audio, pedidos al llamar; servicio en primer plano durante la llamada. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
 
     <!-- Custom Tabs para el SSO (Android 11+ exige declarar la consulta al navegador). -->
     <queries>
@@ -30,7 +37,8 @@
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="https" />
         </intent>
-        <!-- Tomar la foto de perfil o del grupo con la cámara del sistema (sin permiso CAMERA propio). -->
+        <!-- Tomar la foto de perfil o del grupo con la cámara del sistema. Con CAMERA declarado (llamadas),
+             la app pide ese permiso antes de abrir la cámara del sistema (rememberCameraGate). -->
         <intent>
             <action android:name="android.media.action.IMAGE_CAPTURE" />
         </intent>
@@ -172,6 +180,12 @@
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
+
+        <!-- Llamada en curso (docs/LLAMADAS.md): sigue con la app en segundo plano, con su notificación y Colgar. -->
+        <service
+            android:name=".platform.CallService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|camera" />
 
         <!-- Burbuja de conversación (SPEC-v3 §6) -->
         <activity

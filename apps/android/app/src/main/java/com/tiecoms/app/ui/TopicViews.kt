@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -100,6 +101,8 @@ fun topicError(ctx: Context, e: Throwable): String =
 private fun TopicFlag(
     text: String, bg: Color, ink: Color, selected: Boolean, tag: String,
     onClick: () -> Unit, onLongClick: (() -> Unit)? = null, stripe: Color = ink.copy(alpha = 0.22f), bold: Boolean = true,
+    /** Sin leer en esta banderita (pastilla de acento); 0 = sin número. */
+    unread: Int = 0,
 ) {
     val density = androidx.compose.ui.platform.LocalDensity.current
     val tailPx = with(density) { 9.dp.toPx() }
@@ -120,16 +123,27 @@ private fun TopicFlag(
             .testTag(tag),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, color = ink, fontSize = 12.5.sp, fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+        androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(text, color = ink, fontSize = 12.5.sp, fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+            if (unread > 0) {
+                val cd = stringResource(R.string.topic_unread_n, unread)
+                Box(Modifier.padding(start = 6.dp).height(18.dp).widthIn(min = 18.dp)
+                    .background(Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE), androidx.compose.foundation.shape.RoundedCornerShape(50))
+                    .padding(horizontal = 5.dp).semantics { contentDescription = cd }.testTag("$tag-unread"), contentAlignment = Alignment.Center) {
+                    Text(if (unread > 99) "99+" else unread.toString(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
+            }
+        }
     }
 }
 
 /**
- * Fila de banderitas: «💬 Todo», los temas activos (ícono, nombre y conteo), «＋ Nuevo» y, al final, «🗄 Archivados N».
- * [filter] es la banderita elegida (null = Todo); [counts], cuántos mensajes cargados tiene cada tema.
+ * Fila de banderitas: «💬 Todo», los temas activos (ícono, nombre y sin leer), «＋ Nuevo» y, al final, «🗄 Archivados N».
+ * [filter] es la banderita elegida (null = Todo); [counts], cuántos mensajes cargados tiene cada tema (para «Quitar»); [unread], lo sin leer de cada tema (clave "" = sin tema, va en «Todo»).
+ * Sin pendientes, no sale número (docs/TEMAS.md › «Todo»).
  */
 @Composable
-fun TopicDock(conv: ConversationDTO, topics: List<TopicDTO>, filter: String?, counts: Map<String, Int>, onFilter: (String?) -> Unit) {
+fun TopicDock(conv: ConversationDTO, topics: List<TopicDTO>, filter: String?, counts: Map<String, Int>, unread: Map<String, Int>, onFilter: (String?) -> Unit) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val container = LocalContainer.current
@@ -174,14 +188,13 @@ fun TopicDock(conv: ConversationDTO, topics: List<TopicDTO>, filter: String?, co
         ) {
             item(key = "all") {
                 TopicFlag("💬 " + stringResource(R.string.topic_all), MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurfaceVariant,
-                    selected = filter == null, tag = "topicAll", onClick = { onFilter(null) }, stripe = MaterialTheme.colorScheme.outlineVariant)
+                    selected = filter == null, tag = "topicAll", onClick = { onFilter(null) }, stripe = MaterialTheme.colorScheme.outlineVariant, unread = unread[""] ?: 0)
             }
             items(active, key = { it.id }) { t ->
                 val (bg, ink) = topicColors(t.color)
-                val n = counts[t.id] ?: 0
                 Box {
-                    TopicFlag("${t.icon} ${t.name}" + (if (n > 0) "  $n" else ""), bg, ink, selected = filter == t.id, tag = "topic-${t.name}",
-                        onClick = { onFilter(if (filter == t.id) null else t.id) }, onLongClick = if (canEdit) ({ menuFor = t.id }) else null)
+                    TopicFlag("${t.icon} ${t.name}", bg, ink, selected = filter == t.id, tag = "topic-${t.name}",
+                        onClick = { onFilter(if (filter == t.id) null else t.id) }, onLongClick = if (canEdit) ({ menuFor = t.id }) else null, unread = unread[t.id] ?: 0)
                     AnchoredMenu(menuFor == t.id, if (menuFor == t.id) menu(t) else emptyList(), onDismiss = { menuFor = null })
                 }
             }

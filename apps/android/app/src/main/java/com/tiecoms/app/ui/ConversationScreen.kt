@@ -284,14 +284,23 @@ fun ConversationScreen(
     var dividerSeq by remember(id) { mutableStateOf<Long?>(null) }
     /** Ya se colocó la vista al abrir (en el primer no leído o al final); hasta entonces no se marca leído. */
     var positioned by remember(id) { mutableStateOf(entry.second <= 0 || (jumpSeq ?: 0) > 0 || jumpMessageId != null) }
-    val items = remember(conv?.messages, pending, conv?.hasMore, conv?.loading, state.blockedUserIds, dividerSeq, activeTopic?.id, if (activeTopic != null) state.issues else null) {
+    /** Hasta dónde había leído al abrir: «Todo» esconde lo ya leído que tiene tema (docs/TEMAS.md › «Todo»). */
+    val readFrom = maxOf(entry.first, meta.historyFromSeq)
+    /** Mensajes con tema a los que se saltó desde «Todo» (mención, enlace, ?m=): quedan a la vista. */
+    val revealed = remember(id) { androidx.compose.runtime.mutableStateListOf<Long>() }
+    val activeTopicIds = remember(topics) { com.tiecoms.app.core.Topics.activeIds(topics) }
+    val items = remember(conv?.messages, pending, conv?.hasMore, conv?.loading, state.blockedUserIds, dividerSeq, activeTopic?.id, if (activeTopic != null) state.issues else null,
+        activeTopicIds, revealed.toList()) {
         val tid = activeTopic?.id
-        // Con un tema elegido se ven sus mensajes y las tarjetas de sus tareas.
-        buildItems(com.tiecoms.app.core.Topics.filter((conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }, tid) { iid -> state.issues[iid]?.topicId },
+        // Con un tema elegido se ven sus mensajes y las tarjetas de sus tareas; en «Todo», lo sin tema y lo no leído de los temas.
+        buildItems(com.tiecoms.app.core.Topics.view((conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }, topics, tid, readFrom, revealed.toSet()) { iid -> state.issues[iid]?.topicId },
             if (tid == null) pending else pending.filter { it.topicId == tid }, me, conv?.hasMore ?: false, conv?.loading ?: false, meta.historyFromSeq > 0,
             dividerSeq, entry.second)
     }
     val topicCounts = remember(conv?.messages) { com.tiecoms.app.core.Topics.counts(conv?.messages.orEmpty()) }
+    // Sin leer por banderita (clave "" = sin tema, el número de «Todo»), con lo leído en vivo.
+    val readNow = maxOf(meta.lastReadSeq, meta.historyFromSeq)
+    val topicUnread = remember(conv?.messages, readNow, activeTopicIds, me) { com.tiecoms.app.core.Topics.unread(conv?.messages.orEmpty(), activeTopicIds, readNow, me) }
     val itemsNow by androidx.compose.runtime.rememberUpdatedState(items)
     // «Seguir el final»: solo cambia con la lista quieta. Si llega un mensaje durante la animación de otro
     // (mi envío y la respuesta inmediata), atBottom daría falso a mitad de camino y dejaría de seguir.
@@ -304,13 +313,17 @@ fun ConversationScreen(
     val byId = remember(conv?.messages, state.blockedUserIds) { (conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }.associateBy { it.id } }
 
     fun jumpTo(seq: Long) {
-        // El salto busca en el chat completo: se quita el filtro de tema.
+        // El salto busca en el chat completo: se quita el filtro de tema, y el mensaje queda a la vista en «Todo» aunque tenga tema.
         topicFilter = null
         scope.launch {
             if (!client.ensureMessage(id, seq)) { readLoadFailed = true; return@launch }
-            delay(80)
-            val idx = buildItems((client.state.value.conversations[id]?.messages ?: emptyList()).filter { it.authorId !in client.state.value.blockedUserIds }, client.state.value.pending.filter { it.conversationId == id }, me, false, false, false)
-                .indexOfFirst { (it as? ChatItem.Msg)?.m?.seq == seq }
+            if (seq !in revealed) revealed.add(seq)
+            var idx = -1
+            for (i in 0 until 10) {
+                delay(40)
+                idx = itemsNow.indexOfFirst { (it as? ChatItem.Msg)?.m?.seq == seq }
+                if (idx >= 0) break
+            }
             if (idx >= 0) listState.animateScrollToItem(idx)
             mentionQueue.remove(seq)
             highlight = seq
@@ -344,8 +357,16 @@ fun ConversationScreen(
             val c = loaded()
             val position = com.tiecoms.app.core.ChatNav.position(c?.messages.orEmpty(), floor, entry.second, me, meta.lastMessageSeq, client.state.value.blockedUserIds)
             if (position !is com.tiecoms.app.core.ChatNav.Position.Ready) throw IllegalStateException("Unread history has a gap")
-            val seq = position.seq
+            var seq = position.seq
             if (seq != null) {
+                // Todo lo no leído está en un solo tema: el chat abre filtrado en esa banderita, en su primer no leído.
+                val topicsNow = client.state.value.topics[id] ?: runCatching { client.loadTopics(id) }.getOrDefault(emptyList())
+                val auto = com.tiecoms.app.core.Topics.autoTopic(c?.messages.orEmpty().filter { it.authorId !in client.state.value.blockedUserIds },
+                    com.tiecoms.app.core.Topics.activeIds(topicsNow), floor, me)
+                if (auto != null) {
+                    topicFilter = auto
+                    seq = com.tiecoms.app.core.Topics.firstUnreadIn(c?.messages.orEmpty(), auto, floor, me) ?: seq
+                }
                 dividerSeq = seq
                 withFrameNanos { }; delay(30)
                 val idx = itemsNow.indexOfFirst { it is ChatItem.NewDivider }
@@ -591,6 +612,8 @@ fun ConversationScreen(
                     }
                 },
                 actions = {
+                    // 📞 y 🎥 (docs/LLAMADAS.md): solo con features.calls y si puedo escribir.
+                    if (!meta.isSide && !blockedDirect) CallHeaderButtons(meta, data)
                     IconButton(onClick = { convMenu = true }, modifier = Modifier.testTag("convMenu")) { Icon(Icons.Filled.MoreVert, stringResource(R.string.menu_more)) }
                     IconButton(onClick = onDetails, modifier = Modifier.testTag("details")) { Icon(Icons.Filled.Info, stringResource(R.string.details)) }
                 },
@@ -601,6 +624,8 @@ fun ConversationScreen(
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize().navigationBarsPadding().imePadding()) {
             ConnectionBanner(state.connection)
+            // «Llamada en curso · Unirse» (GET /conversations/:id/call y el evento call.updated).
+            if (!embedded) CallBanner(id, data)
             // Dentro del panel del sidechat, «Llevar al hilo» ya está en ⋯ y la tarjeta del ancla hace de linaje.
             if (!(embedded && meta.isSide)) LineageBar(meta, data, onOpenConversation, onReturn = { returning = true }, onTrazo = onTrazo)
             // Barra de accesos (docs/GRUPOS.md): Fijados · Asuntos · Hilos · Agenda. Dentro de un hilo al lado no se muestra.
@@ -608,7 +633,7 @@ fun ConversationScreen(
                 onPins = { showPins = true }, onOpenIssue = onOpenIssue, onNewIssue = { newIssue = true to null }, onNewEvent = { meeting = true to null },
                 onOpenEvent = onOpenEvent, onOpenThread = { t -> sideOpen = t })
             // Temas (docs/TEMAS.md): banderitas bajo la barra de accesos, con scroll horizontal.
-            if (!embedded) TopicDock(meta, topics, activeTopic?.id, topicCounts, onFilter = { f ->
+            if (!embedded) TopicDock(meta, topics, activeTopic?.id, topicCounts, topicUnread, onFilter = { f ->
                 topicFilter = f
                 scope.launch { runCatching { listState.scrollToItem(0) }; follow = true }
             })
@@ -1205,6 +1230,11 @@ internal fun SystemRow(
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             if (child != null) TextButton(onClick = { onOpenConversation(child.id, null) }) { Text("⑂ " + titleOf(ctx, child, data)) }
             if (issueId != null) TextButton(onClick = { onOpenIssue(issueId) }) { Text(stringResource(R.string.lin_open)) }
+            // «Quedó guardada la transcripción de la llamada» · Ver transcripción (abre el detalle con resumen y transcripción).
+            com.tiecoms.app.core.Calls.transcriptCallId(m)?.let { callId ->
+                val container = LocalContainer.current
+                TextButton(onClick = { openCallDetail(container, callId) }, modifier = Modifier.testTag("callTranscriptOpen")) { Text("📝 " + stringResource(R.string.call_transcript_open)) }
+            }
         }
         if (eventId != null) {
             val ev = events[eventId]

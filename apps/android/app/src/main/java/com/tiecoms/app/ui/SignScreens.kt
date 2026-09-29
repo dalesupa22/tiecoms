@@ -930,6 +930,7 @@ private fun PhotoPad(
     fun load(uri: Uri?) { if (uri == null) return; scope.launch { loading = true; onPhoto(SignatureArt.loadPhoto(ctx, uri)); loading = false } }
     val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { load(it) }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> if (ok) load(cameraUri?.let(Uri::parse)) }
+    val cameraGate = rememberCameraGate()
     // Se recalcula al mover el control o cambiar la tinta (con una pausa corta para no hacerlo en cada cuadro).
     LaunchedEffect(photo, threshold, keepColor, ink) {
         val p = photo ?: return@LaunchedEffect
@@ -945,12 +946,12 @@ private fun PhotoPad(
         }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-        OutlinedButton(onClick = {
+        OutlinedButton(onClick = { cameraGate {
             val f = File(ctx.cacheDir, "photos/sig-${System.currentTimeMillis()}.jpg").apply { parentFile?.mkdirs() }
             val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
             cameraUri = uri.toString()
             runCatching { camera.launch(uri) }.onFailure { Toast.makeText(ctx, R.string.att_camera_unavailable, Toast.LENGTH_SHORT).show() }
-        }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("sigCamera")) { Text("📷 " + stringResource(R.string.sig_take_photo), maxLines = 1) }
+        } }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("sigCamera")) { Text("📷 " + stringResource(R.string.sig_take_photo), maxLines = 1) }
         OutlinedButton(onClick = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
             modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("sigGallery")) { Text("🖼 " + stringResource(R.string.sig_pick_image), maxLines = 1) }
     }

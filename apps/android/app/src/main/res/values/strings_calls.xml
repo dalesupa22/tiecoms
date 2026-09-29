@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Voice and video calls with Amazon Chime SDK (docs/LLAMADAS.md). Same texts as the web (apps/web/src/i18n.ts). -->
+<resources>
+    <!-- System messages in the chat (sys.call.*) -->
+    <string name="sys_call_started">A call started.</string>
+    <string name="sys_call_ended">The call ended · %1$s.</string>
+    <string name="sys_call_ended_plain">The call ended.</string>
+    <string name="sys_call_transcription_on">%1$s turned on call transcription.</string>
+    <string name="sys_call_transcription_off">%1$s turned off call transcription.</string>
+    <string name="sys_call_transcript">The call transcript was saved.</string>
+    <string name="call_transcript_open">View transcript</string>
+
+    <!-- Header, banner and incoming call -->
+    <string name="call_audio">Voice call</string>
+    <string name="call_video">Video call</string>
+    <string name="call_title">Call</string>
+    <string name="call_in_progress">Call in progress</string>
+    <string name="call_join">Join</string>
+    <string name="call_incoming">Incoming call</string>
+    <string name="call_incoming_in">Calling you in %1$s</string>
+    <string name="call_decline">Not now</string>
+    <string name="call_answer">Answer</string>
+    <string name="call_answer_audio">Answer without camera</string>
+    <string name="call_answer_video">Answer with camera</string>
+
+    <!-- Call screen -->
+    <string name="call_connecting">Connecting…</string>
+    <string name="call_waiting">Waiting for someone to join…</string>
+    <string name="call_you">You</string>
+    <string name="call_mute">Mute microphone</string>
+    <string name="call_unmute">Unmute microphone</string>
+    <string name="call_camera_on">Turn camera on</string>
+    <string name="call_camera_off">Turn camera off</string>
+    <string name="call_switch_camera">Switch camera</string>
+    <string name="call_speaker">Speaker</string>
+    <string name="call_no_camera">No camera found</string>
+    <string name="call_hang_up">Hang up</string>
+    <string name="call_minimize">Minimize</string>
+    <string name="call_expand">Expand</string>
+    <string name="call_audio_failed">The call audio could not connect.</string>
+    <string name="call_fake">Test call: no audio (fake provider).</string>
+    <string name="call_transcript_on">Transcribe the call</string>
+    <string name="call_transcript_off">Stop transcription</string>
+    <string name="call_transcript_start">Start transcribing</string>
+    <string name="call_transcribing_short">transcribing</string>
+    <string name="call_transcribing_all">Transcription is on: everyone in the call can see it</string>
+    <string name="call_consent_body">Everything said from now on will be written down and saved in this conversation. Everyone in the call will see the notice, and the chat will show who turned it on. You can turn it off at any time.</string>
+    <string name="call_consent_ai">When the call ends, summarize the transcript with AI (DeepSeek)</string>
+    <string name="call_transcript_title">Call transcript</string>
+    <string name="call_transcript_empty">No lines saved yet.</string>
+    <string name="call_summary">Summary</string>
+    <string name="call_copy">Copy</string>
+    <string name="call_copied">Transcript copied</string>
+
+    <!-- Permissions -->
+    <string name="call_perm_title">Microphone and camera</string>
+    <string name="call_perm_body">To call, chaggu needs the microphone (and the camera for video calls). The call keeps going if you leave the app.</string>
+    <string name="call_perm_continue">Continue</string>
+    <string name="call_perm_denied">Without microphone access you cannot call. Turn it on in Settings.</string>
+    <string name="call_perm_camera_denied">Without camera access the call continues with voice only.</string>
+    <string name="camera_perm_denied">To take the photo, allow the camera in Settings.</string>
+
+    <!-- Foreground service and incoming notification -->
+    <string name="call_notif_channel">Calls</string>
+    <string name="call_notif_channel_desc">Ongoing calls and incoming calls</string>
+    <string name="call_notif_ongoing">Call in progress</string>
+    <string name="call_notif_tap">Tap to go back to the call</string>
+    <string name="call_notif_incoming">%1$s is calling you</string>
+
+    <!-- «Calls» tab -->
+    <string name="nav_calls">Calls</string>
+    <string name="calls_title">Calls</string>
+    <string name="calls_new">Call</string>
+    <string name="calls_empty">No calls yet. Call a person or a group from here or from the chat.</string>
+    <string name="calls_group">Group</string>
+    <string name="calls_direct">One-to-one</string>
+    <string name="calls_missed">No answer</string>
+    <string name="calls_live">Live</string>
+    <string name="calls_more">Show more</string>
+    <string name="calls_call_back">Call again</string>
+    <string name="calls_pick">Who are you calling?</string>
+    <string name="calls_search">Search person or group</string>
+    <string name="calls_share">Share</string>
+    <string name="calls_share_chat">Send to a chat</string>
+    <string name="calls_share_system">Share with another app</string>
+    <string name="calls_share_what">What do you share?</string>
+    <string name="calls_share_summary">Summary</string>
+    <string name="calls_share_transcript">Transcript</string>
+    <string name="calls_share_both">Summary and transcript</string>
+    <string name="calls_shared">Sent to %1$s</string>
+    <string name="calls_pick_chat">Send to…</string>
+    <string name="calls_no_summary">No summary. It is created when the call ends if whoever turned on transcription allowed it.</string>
+    <string name="calls_no_content">This call has no summary or transcript.</string>
+    <string name="err_calls_disabled">Calls are not enabled yet.</string>
+    <string name="err_not_in_call">You are no longer in that call.</string>
+
+    <!-- Topics: unread count on each flag (docs/TEMAS.md › «Todo») -->
+    <string name="topic_unread_n">%1$d unread</string>
+</resources>

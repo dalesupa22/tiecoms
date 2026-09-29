@@ -281,18 +281,19 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
         if (!ok && !wrote) cameraFile?.let { File(it).delete() }
         cameraUri = null; cameraFile = null
     }
+    val cameraGate = rememberCameraGate()
     val docs = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { onPicked(it.take(Attachments.MAX_PER_MESSAGE)) }
     // El «＋» del compositor (docs/GRUPOS.md): fotos, cámara y archivos; luego Evento y Asunto, creados a mano.
     if (open) ActionSheet(stringResource(R.string.bar_plus), listOf<SheetItem?>(
         SheetItem(ctx.getString(R.string.att_photos_pick), "🖼", tag = "attPhotos") {
             media.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo))
         },
-        SheetItem(ctx.getString(R.string.att_camera), "📷", tag = "attCamera") {
+        SheetItem(ctx.getString(R.string.att_camera), "📷", tag = "attCamera") { cameraGate {
             val f = File(ctx.cacheDir, "photos/att-" + java.util.UUID.randomUUID().toString().take(8) + ".jpg").apply { parentFile?.mkdirs() }
             val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
             cameraUri = uri; cameraFile = f.absolutePath
             runCatching { camera.launch(uri) }.onFailure { container.toast(ctx.getString(R.string.att_camera_unavailable)) }
-        },
+        } },
         SheetItem(ctx.getString(R.string.att_files_pick), "📎", tag = "attFiles") { docs.launch(arrayOf("*/*")) },
     ) + (if (onMeetNow != null || onMeetSchedule != null) listOf(null) else emptyList()) + listOfNotNull(
         onMeetNow?.let { SheetItem(ctx.getString(R.string.meet_now), "", tag = "plusMeetNow", onClick = it) },

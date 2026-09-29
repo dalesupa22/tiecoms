@@ -77,14 +77,15 @@ fun PhotoFlow(open: Boolean, onDismiss: () -> Unit, upload: suspend (ByteArray) 
     val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> onDismiss(); picked = uri }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> onDismiss(); picked = uri }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> onDismiss(); if (ok) picked = cameraUri?.let { Uri.parse(it) } }
+    val cameraGate = rememberCameraGate()
     if (open) ActionSheet(stringResource(R.string.photo_choose), listOf(
         SheetItem(ctx.getString(R.string.photo_gallery), "🖼", tag = "photoGallery") { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-        SheetItem(ctx.getString(R.string.photo_camera), "📷", tag = "photoCamera") {
+        SheetItem(ctx.getString(R.string.photo_camera), "📷", tag = "photoCamera") { cameraGate {
             val dir = File(ctx.cacheDir, "photos").apply { mkdirs() }
             val f = File(dir, "camera-${System.currentTimeMillis()}.jpg")
             val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
             cameraUri = uri.toString(); camera.launch(uri)
-        },
+        } },
         SheetItem(ctx.getString(R.string.photo_files), "📁", tag = "photoFiles") { files.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) },
     ), onDismiss)
     picked?.let { uri -> CropEditor(uri, onCancel = { picked = null }, upload = upload, onSaved = { picked = null; onSaved() }, group = group) }

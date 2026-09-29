@@ -100,6 +100,64 @@ export const CreateMeetingInput = z.object({
 });
 export type SsoProvider = z.infer<typeof SsoProvider>;
 
+// ---------- Llamadas (Amazon Chime SDK) ----------
+export const CallKind = z.enum(['audio', 'video']);
+export type CallKind = z.infer<typeof CallKind>;
+/** POST /conversations/:id/call: empieza la llamada o entra a la que ya está en curso. */
+export const StartCallInput = z.object({ kind: CallKind.default('audio') });
+export interface CallDTO {
+  id: string;
+  conversationId: string;
+  kind: CallKind;
+  startedBy: string;
+  startedAt: string;
+  endedAt: string | null;
+  /** Quienes están dentro ahora mismo. */
+  activeUserIds: string[];
+  /** La transcripción está prendida (todos lo ven en la llamada). */
+  transcribing: boolean;
+  /** Hay transcripción guardada para leer. */
+  hasTranscript: boolean;
+}
+/** aiSummary: quien la prende autoriza que DeepSeek resuma la transcripción al colgar. */
+export const CallTranscriptionInput = z.object({ on: z.boolean(), aiSummary: z.boolean().default(false) });
+/** Frases finales que el cliente recibió del SDK (TranscriptEvent con isPartial=false). */
+export const CallTranscriptInput = z.object({
+  segments: z.array(z.object({
+    resultId: z.string().min(1).max(128),
+    attendeeId: z.string().max(128).nullable().optional(),
+    externalUserId: z.string().max(128).nullable().optional(),
+    language: z.string().max(16).nullable().optional(),
+    text: z.string().trim().min(1).max(4000),
+    startMs: z.number().int().min(0),
+    endMs: z.number().int().min(0),
+  })).min(1).max(50),
+});
+export type CallTranscriptSegmentInput = z.input<typeof CallTranscriptInput>['segments'][number];
+export interface CallTranscriptSegmentDTO { resultId: string; speakerUserId: string | null; speakerName: string | null; language: string | null; text: string; startMs: number; endMs: number }
+/** Una fila del historial de llamadas (pestaña «Llamadas»). */
+export interface CallHistoryItemDTO {
+  call: CallDTO;
+  /** Todos los que entraron alguna vez, en orden de llegada. */
+  participantIds: string[];
+  durationSec: number | null;
+  hasSummary: boolean;
+}
+export const CallHistoryQuery = z.object({ before: z.iso.datetime({ offset: true }).optional(), limit: z.coerce.number().int().min(1).max(100).default(30) });
+/** Compartir el resumen o la transcripción en otra conversación (como mensaje mío). */
+export const CallShareInput = z.object({ conversationId: z.uuid(), what: z.enum(['summary', 'transcript', 'both']).default('both') });
+export interface CallTranscriptDTO { call: CallDTO; summary: string | null; segments: CallTranscriptSegmentDTO[] }
+/**
+ * Lo que el cliente pasa tal cual al SDK de Chime (MeetingSessionConfiguration(meeting, attendee)).
+ * `meeting` es la respuesta de CreateMeeting y `attendee` la de CreateAttendee (con JoinToken): no se guardan
+ * en el cliente ni se reenvían.
+ */
+export interface CallJoinDTO {
+  call: CallDTO;
+  meeting: { Meeting: Record<string, unknown> };
+  attendee: { Attendee: { AttendeeId: string; ExternalUserId: string; JoinToken: string } };
+}
+
 /**
  * Flujo para todas las plataformas (web, iOS, Android, escritorio):
  * 1. El cliente abre en el navegador del sistema
@@ -733,6 +791,8 @@ export interface BootstrapDTO {
   workspaces: WorkspaceDTO[];
   conversations: ConversationDTO[];
   people: PersonDTO[];
+  /** Funciones que el servidor tiene prendidas (aditivo: clientes viejos lo ignoran). */
+  features?: { calls: boolean };
 }
 
 // ---------- Espacios y conversaciones ----------
@@ -1274,6 +1334,8 @@ export type ConversationEvent =
   /** Lista completa de temas (activos y archivados) tras crear, editar, archivar o quitar uno. */
   | { type: 'topics.changed'; conversationId: string; eventSeq: number; topics: TopicDTO[] }
   | { type: 'calendar.updated'; conversationId: string; eventSeq: number; event: CalendarEventDTO }
+  /** Empezó, cambió quién está dentro o terminó una llamada de la conversación. */
+  | { type: 'call.updated'; conversationId: string; eventSeq: number; call: CallDTO }
   /** Evento fuera de tu historial visible: solo avanza el cursor. */
   | { type: 'redacted'; conversationId: string; eventSeq: number };
 
@@ -1291,6 +1353,8 @@ export type AccountEvent =
   | { type: 'prefs.updated'; conversationId?: string; workspaceId?: string }
   /** Cambió mi «No molestar» (desde este u otro dispositivo). */
   | { type: 'me.dnd'; dndUntil: string | null }
+  /** Me están llamando en una conversación (no llega a quien la empezó ni a quien tiene No molestar). */
+  | { type: 'call.ringing'; call: CallDTO; conversationTitle: string | null; callerName: string }
   /** Un asunto restringido (visibilidad 'org' o 'private') que puedo ver cambió: no viaja por la conversación. */
   | { type: 'issue.updated'; issue: IssueDTO }
   /** Mi asunto personal cambió (no tiene conversación). */

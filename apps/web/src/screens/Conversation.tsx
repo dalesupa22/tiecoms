@@ -21,6 +21,7 @@ import { ConversationAgenda, EventChatCard, newEvent, openEvent } from './Calend
 import { SleepNotice } from './Sleep.tsx';
 import { DerivedPendingStrip } from './Pending.tsx';
 import { MeetingDialog } from './Meetings.tsx';
+import { CallBanner, CallButtons, openTranscript } from './Call.tsx';
 import { ScheduledStrip, openScheduleMenu, scheduleMenu, whenLabel } from './Scheduled.tsx';
 import { SideIssueStrip, TasksDialog } from './Issues.tsx';
 import { ConversationIssues, IssueChatCard, IssueDrawer, NewIssueDialog, isClosed } from './Issues.tsx';
@@ -504,12 +505,14 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           {embedded && pinned.size > 0 && <button className="btn ghost small" onClick={() => setShowPins(true)} title={t('pins.title')}>📌 {pinned.size}</button>}
           {embedded && conv.canManage && conv.kind !== 'direct' && <button className="btn ghost small" onClick={() => openDialog((close) => <AddMembersDialog conversationId={id} onClose={close} />)} title={t('bar.addPeople')}>＋ {t('bar.people')}</button>}
           {ws && !embedded && <button className="btn ghost small only-desktop" onClick={() => navigate(`/w/${ws.id}`)}>{t('chat.space')}</button>}
+          {!isSide && <CallButtons conv={conv} />}
           <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) })); }}>⋯</button>
           {embedded ? <>
             <button className="icon-btn" aria-label={t('side.openFull')} title={t('side.openFull')} onClick={() => navigate(`/c/${id}`)}>⤢</button>
             <button className="icon-btn" aria-label={t('side.close')} title={t('side.close')} onClick={embedded.onClose}>×</button>
           </> : <button className="icon-btn" aria-label={t('chat.details')} onClick={() => setPanel(!panelPref)}>ⓘ</button>}
         </header>
+        {!isSide && <CallBanner conversationId={id} />}
         {isSide && (embedded?.anchor || anchorExcerpt) && (
           <div className="side-anchor" style={{ borderLeftColor: personColor(embedded?.anchor?.authorId ?? null) }}>
             <div className="row" style={{ gap: 6 }}>
@@ -860,6 +863,7 @@ function SystemRow({ m, onIssue, canPost }: { m: MessageDTO; onIssue: (id: strin
       {child && <> · <button className="link-btn" onClick={() => navigate(`/c/${child.id}`)}>⑂ {conversationTitle(d, child)}</button></>}
       {p?.issueId && <> · <button className="link-btn" onClick={() => onIssue(p.issueId)}>{t('lin.open')}</button></>}
       {p?.eventId && <> · <button className="link-btn" onClick={() => openEvent(p.eventId)}>{t('lin.open')}</button></>}
+      {p?.k === 'call.transcript' && p.callId && <> · <button className="link-btn" onClick={() => openTranscript(p.callId)}>{t('call.transcriptOpen')}</button></>}
     </div>
   );
 }

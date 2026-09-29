@@ -19,6 +19,7 @@ const NAV = [
   { name: 'inbox', label: 'nav.inbox', ico: '◍', to: '/conversaciones' },
   { name: 'agenda', label: 'nav.agenda', ico: '▤', to: '/agenda' },
   { name: 'issues', label: 'nav.issues', ico: '◆', to: '/asuntos' },
+  { name: 'calls', label: 'nav.calls', ico: '☏', to: '/llamadas' },
   { name: 'trazo', label: 'nav.trazo', ico: '⑂', to: '/trazo' },
   { name: 'people', label: 'nav.people', ico: '◎', to: '/participantes' },
   { name: 'files', label: 'nav.files', ico: '▣', to: '/archivos' },
@@ -26,7 +27,7 @@ const NAV = [
   { name: 'scheduled', label: 'nav.scheduled', ico: '🕒', to: '/programados' },
   { name: 'whatsapp', label: 'nav.whatsapp', ico: '✆', to: '/whatsapp' },
 ] as const;
-/** Today, Conversaciones, Calendario y Asuntos siempre; el resto bajo «Más». */
+/** Today, Conversaciones, Calendario, Asuntos (y Llamadas si están prendidas) siempre; el resto bajo «Más». */
 const NAV_MAIN = 4;
 const NAV_MORE_KEY = 'tiecoms:navMore';
 
@@ -158,6 +159,7 @@ function Sidebar({ route }: { route: Route }) {
   const myOrg = orgById(d, d.me.primaryOrgId);
   const activeConv = route.name === 'conversation' ? route.id : null;
 
+  const callsOn = useClient((s) => s.data?.features?.calls === true);
   return (
     <aside className="side">
       <div className="side-brand">
@@ -166,7 +168,7 @@ function Sidebar({ route }: { route: Route }) {
       </div>
       <QuickChat />
       <nav className="nav">
-        {NAV.filter((n, i) => i < NAV_MAIN || navMore || route.name === n.name).map((n) => (
+        {NAV.filter((n) => n.name !== 'calls' || callsOn).filter((n, i) => i < NAV_MAIN + (callsOn ? 1 : 0) || navMore || route.name === n.name).map((n) => (
           <button key={n.name} className={`nav-item ${route.name === n.name ? 'active' : ''}`} onClick={() => navigate(n.to)}>
             <span className="ico">{n.ico}</span><span className="grow">{t(n.label)}</span>
             {n.name === 'today' && unreadTotal > 0 && <span className="pill">{unreadTotal}</span>}
@@ -206,7 +208,7 @@ function Sidebar({ route }: { route: Route }) {
   );
 }
 
-/** Barra inferior móvil: 5 pestañas fijas (docs/GRUPOS.md). */
+/** Barra inferior móvil: 5 pestañas fijas (docs/GRUPOS.md), 6 con las llamadas prendidas. */
 function MobileTabs({ route }: { route: Route }) {
   const d = useClient((s) => s.data);
   const unreadOf = (f: (c: ConversationDTO) => boolean) => d?.conversations.filter(f).reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0) ?? 0;
@@ -216,10 +218,11 @@ function MobileTabs({ route }: { route: Route }) {
     { name: 'dms', label: t('nav.dms'), ico: '◍', to: '/dms', badge: unreadOf((c) => c.kind === 'direct' || c.kind === 'multi') },
     { name: 'issues', label: t('nav.issues'), ico: '◆', to: '/asuntos', badge: 0 },
     { name: 'agenda', label: t('nav.calendar'), ico: '▤', to: '/agenda', badge: 0 },
+    ...(d?.features?.calls ? [{ name: 'calls', label: t('nav.calls'), ico: '☏', to: '/llamadas', badge: 0 }] : []),
     { name: 'settings', label: t('nav.you'), ico: null, to: '/ajustes', badge: 0 },
   ];
   return (
-    <nav className="tabs" aria-label={t('nav.mainNav')}>
+    <nav className={`tabs ${tabs.length === 6 ? 'n6' : ''}`} aria-label={t('nav.mainNav')}>
       {tabs.map((x) => (
         <button key={x.name} className={route.name === x.name || (x.name === 'groups' && route.name === 'today') ? 'on' : ''} onClick={() => navigate(x.to)}>
           {x.ico ? <span className="ico">{x.ico}</span> : <span className="ico">{d ? <MeAvatar size={22} /> : <Avatar person={me} org={null} size={22} />}</span>}{x.label}

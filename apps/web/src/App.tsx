@@ -22,6 +22,7 @@ import { UpdateBanner } from './update.tsx';
 import { EmojiPickerHost } from './screens/Reactions.tsx';
 import { SavedLinksScreen } from './screens/Links.tsx';
 import { ScheduledScreen } from './screens/Scheduled.tsx';
+import { CallDock, CallsScreen, IncomingCallHost } from './screens/Call.tsx';
 /** «Documentos que firmé»: se carga aparte junto con el visor de PDF. */
 const SignedScreen = lazy(() => import('./screens/Signed.tsx'));
 
@@ -74,6 +75,7 @@ export function App() {
       {route.name === 'files' && <FilesScreen />}
       {route.name === 'saved' && <SavedLinksScreen />}
       {route.name === 'scheduled' && <ScheduledScreen />}
+      {route.name === 'calls' && <CallsScreen />}
       {route.name === 'signed' && <Suspense fallback={<div className="page"><div className="hint">{t('common.loading')}</div></div>}><SignedScreen /></Suspense>}
       {route.name === 'groups' && <GroupsScreen />}
       {route.name === 'dms' && <DmsScreen />}
@@ -88,6 +90,8 @@ export function App() {
     <DialogHost />
     <ToastHost />
     <EmojiPickerHost />
+    <CallDock />
+    <IncomingCallHost />
     </>
   );
 }

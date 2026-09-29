@@ -5,6 +5,7 @@ import {
   type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type TopicColor, type TopicDTO, type UserDTO, normalizeEmoji,
+  type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentInput,
   type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO, type IntegrationDTO, type IntegrationSecretDTO,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
@@ -63,6 +64,8 @@ export interface ClientState {
   driveRevision: number;
   /** «No molestar» guardado solo en este dispositivo porque el servidor no conoce /me/dnd (servidor viejo). */
   dndLocalOnly?: boolean;
+  /** Llamada activa por conversación (null = ninguna; ausente = no se ha preguntado). */
+  calls: Record<string, CallDTO | null>;
 }
 
 /** Silencio «hasta que lo reactive»: más de un año (igual que el servidor, que ahí no deja pasar menciones). */
@@ -87,7 +90,9 @@ export type ClientNotice =
   /** El servidor descartó menciones de un mensaje propio (ids o 'all'). */
   | { kind: 'mentionsDropped'; conversationId: string; userIds: string[] }
   /** Alguien reaccionó a un mensaje mío (conversación abierta en este dispositivo). */
-  | { kind: 'reaction'; conversationId: string; message: MessageDTO; userId: string; emoji: string };
+  | { kind: 'reaction'; conversationId: string; message: MessageDTO; userId: string; emoji: string }
+  /** Me están llamando en una conversación. */
+  | { kind: 'callRinging'; call: CallDTO; callerName: string; conversationTitle: string | null };
 
 export interface ClientOptions {
   /** Origen del API, p. ej. https://app.chaggu.com. Vacío = mismo origen (web). */
@@ -110,7 +115,7 @@ const base64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+
  * escritorio y móvil se comporten igual.
  */
 export class TieComsClient {
-  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0 };
+  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0, calls: {} };
   private listeners = new Set<() => void>();
   private accessToken: string | null = null;
   private accessExp = 0;
@@ -303,7 +308,7 @@ export class TieComsClient {
     this.bootstrapTimer = null; this.flushTimer = null;
     for (const timer of this.readTimers.values()) clearTimeout(timer);
     this.readTimers.clear();
-    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0 };
+    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, waRevision: 0, driveRevision: 0, calls: {} };
     this.listeners.forEach((l) => l());
     await this.opts.secrets?.set(null);
     if (userId) await this.opts.storage.clearPrefix(`u:${userId}:`);
@@ -412,6 +417,10 @@ export class TieComsClient {
       this.set({ issues: next }); this.recountIssues(e.conversationId);
     }
     if (e.type === 'me.sleep') this.patchMe({ sleep: e.sleep });
+    if (e.type === 'call.ringing') {
+      this.putCall(e.call);
+      if (!dndActive(this.state)) this.opts.onNotice?.({ kind: 'callRinging', call: e.call, callerName: e.callerName, conversationTitle: e.conversationTitle });
+    }
     if (e.type === 'reminders.changed') void this.loadReminders().catch(() => {});
     if (e.type === 'scheduled.updated') this.putScheduled(e.scheduled);
     if (e.type === 'whatsapp.updated') this.set({ waRevision: this.state.waRevision + 1 });
@@ -439,6 +448,7 @@ export class TieComsClient {
     if (e.type === 'pins.changed') this.set({ pins: { ...this.state.pins, [e.conversationId]: e.messageIds } });
     if (e.type === 'topics.changed') this.set({ topics: { ...this.state.topics, [e.conversationId]: e.topics } });
     if (e.type === 'calendar.updated') this.set({ events: { ...this.state.events, [e.event.id]: e.event } });
+    if (e.type === 'call.updated') this.putCall(e.call);
     if (e.type === 'message.created' && e.message.authorId !== this.state.data?.me.id && e.message.kind === 'text' && !dndActive(this.state)) {
       const muted = isActiveUntil(meta.mutedUntil);
       const mentioned = mentionsUser(e.message, this.state.data?.me.id);
@@ -495,6 +505,49 @@ export class TieComsClient {
         if (!page.events.length || page.events.length < 200) return;
       }
     } catch {} finally { this.catchingUp.delete(conversationId); }
+  }
+
+  // ---------- Llamadas (Chime SDK) ----------
+  private putCall(call: CallDTO) {
+    const cur = this.state.calls[call.conversationId];
+    // Una llamada terminada no pisa a otra más nueva que ya esté en curso.
+    if (call.endedAt && cur && cur.id !== call.id) return;
+    this.set({ calls: { ...this.state.calls, [call.conversationId]: call.endedAt ? null : call } });
+  }
+  async loadCall(conversationId: string) {
+    const r = await this.request<{ call: CallDTO | null }>(`/conversations/${conversationId}/call`);
+    this.set({ calls: { ...this.state.calls, [conversationId]: r.call } });
+    return r.call;
+  }
+  /** Empieza o entra a la llamada de la conversación: devuelve lo que necesita el SDK. */
+  async startCall(conversationId: string, kind: CallKind) {
+    const r = await this.request<CallJoinDTO>(`/conversations/${conversationId}/call`, { method: 'POST', json: { kind } });
+    this.putCall(r.call);
+    return r;
+  }
+  async joinCall(callId: string) {
+    const r = await this.request<CallJoinDTO>(`/calls/${callId}/join`, { method: 'POST', json: {} });
+    this.putCall(r.call);
+    return r;
+  }
+  callHeartbeat(callId: string) { return this.request<{ ok: true }>(`/calls/${callId}/heartbeat`, { method: 'POST', json: {} }); }
+  async leaveCall(callId: string, forAll = false) {
+    const r = await this.request<{ call: CallDTO }>(`/calls/${callId}/${forAll ? 'end' : 'leave'}`, { method: 'POST', json: {} });
+    this.putCall(r.call);
+    return r.call;
+  }
+  async setCallTranscription(callId: string, on: boolean, aiSummary = false) {
+    const r = await this.request<{ call: CallDTO }>(`/calls/${callId}/transcription`, { method: 'POST', json: { on, aiSummary } });
+    this.putCall(r.call);
+    return r.call;
+  }
+  sendCallTranscript(callId: string, segments: CallTranscriptSegmentInput[]) {
+    return this.request<{ saved: number }>(`/calls/${callId}/transcript`, { method: 'POST', json: { segments } });
+  }
+  callTranscript(callId: string) { return this.request<CallTranscriptDTO>(`/calls/${callId}/transcript`); }
+  callHistory(before?: string) { return this.request<{ calls: CallHistoryItemDTO[]; hasMore: boolean }>(`/calls?limit=30${before ? `&before=${encodeURIComponent(before)}` : ''}`); }
+  shareCall(callId: string, conversationId: string, what: 'summary' | 'transcript' | 'both') {
+    return this.request<{ message: MessageDTO }>(`/calls/${callId}/share`, { method: 'POST', json: { conversationId, what } });
   }
 
   // ---------- Conversaciones ----------

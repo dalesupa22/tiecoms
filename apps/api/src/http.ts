@@ -11,7 +11,7 @@ import {
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
-  SetAdminInput, UpdateIntegrationInput,
+  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -38,6 +38,7 @@ import * as safety from './modules/safety.ts';
 import * as push from './modules/push.ts';
 import * as attachments from './modules/attachments.ts';
 import * as voice from './modules/voice.ts';
+import * as calls from './modules/calls.ts';
 import * as assistant from './modules/assistant.ts';
 import * as signatures from './modules/signatures.ts';
 import * as mentions from './modules/mentions.ts';
@@ -422,6 +423,26 @@ export async function buildHttp() {
     priv.patch<{ Params: { id: string } }>('/api/v1/scheduled/:id', async (req) => scheduled.updateScheduled(req.userId, req.params.id, UpdateScheduledInput.parse(req.body)));
     priv.delete<{ Params: { id: string } }>('/api/v1/scheduled/:id', async (req) => scheduled.cancelScheduled(req.userId, req.params.id));
     priv.post<{ Params: { id: string } }>('/api/v1/scheduled/:id/send', async (req) => scheduled.sendScheduledNow(req.userId, req.params.id));
+    // Llamadas de voz y video (Amazon Chime SDK) con transcripción que se prende y apaga.
+    const callLimit = { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } };
+    priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/call', async (req) => ({ call: await calls.activeCall(req.userId, z.uuid().parse(req.params.id)) }));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/call', callLimit, async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      return calls.startOrJoin(req.userId, z.uuid().parse(req.params.id), StartCallInput.parse(req.body ?? {}).kind);
+    });
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/join', callLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.join(req.userId, z.uuid().parse(req.params.id)); });
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/heartbeat', async (req) => calls.heartbeat(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/leave', async (req) => calls.leave(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/end', async (req) => calls.endForAll(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/transcription', callLimit, async (req) => {
+      const b = CallTranscriptionInput.parse(req.body);
+      return calls.setTranscription(req.userId, z.uuid().parse(req.params.id), b.on, b.aiSummary);
+    });
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/transcript', { config: { rateLimit: { max: 240, timeWindow: '1 minute' } } }, async (req) =>
+      calls.addSegments(req.userId, z.uuid().parse(req.params.id), CallTranscriptInput.parse(req.body)));
+    priv.get<{ Params: { id: string } }>('/api/v1/calls/:id/transcript', async (req) => calls.transcript(req.userId, z.uuid().parse(req.params.id)));
+    priv.get('/api/v1/calls', async (req) => calls.history(req.userId, CallHistoryQuery.parse(req.query)));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/share', callLimit, async (req) => calls.share(req.userId, z.uuid().parse(req.params.id), CallShareInput.parse(req.body)));
     // Reuniones con Meet, Teams o Zoom (cuenta de cada persona).
     priv.get('/api/v1/meetings/connections', async (req) => ({ connections: await meetings.listConnections(req.userId) }));
     priv.post('/api/v1/meetings/connect/confirm', async (req, reply) => { reply.header('cache-control', 'no-store'); return meetings.confirmConnect(req.userId, MeetingConfirmInput.parse(req.body)); });

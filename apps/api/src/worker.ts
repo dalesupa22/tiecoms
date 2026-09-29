@@ -20,6 +20,7 @@ import { fireSoonEvents, soonMinutes } from './modules/calendar.ts';
 import { cleanupPending as cleanupAttachments } from './modules/attachments.ts';
 import { transcribeAttachment } from './modules/voice.ts';
 import { deliverIntegrationEvent } from './modules/integration-events.ts';
+import { reapCalls, summarizeCall } from './modules/calls.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
 const LEASE_SECONDS = 120;
@@ -44,6 +45,8 @@ const handlers: Record<string, Handler> = {
   async 'push.event_soon'(p) { await pushEventSoon(p.eventId, p.userIds, soonMinutes()); },
   /** Webhook de salida de una integración (firmado; reintenta con backoff hasta max_attempts). */
   async 'integration.deliver'(p) { await deliverIntegrationEvent(p.deliveryId); },
+  /** Resumen de la transcripción de una llamada (DeepSeek, si quien la prendió lo autorizó). */
+  async 'call.summary'(p) { await summarizeCall(p.callId); },
   /** Vistas previas de los primeros 3 enlaces de un mensaje. */
   async 'link.preview'(p) { await previewMessage(p.messageId); },
   /** Aviso agrupado al autor: reaccionaron a su mensaje. */
@@ -156,7 +159,9 @@ async function loop() {
       if (Date.now() - lastReminders > 15_000) { lastReminders = Date.now(); const n = await fireDueReminders(); if (n) console.log(`[worker] recordatorios disparados: ${n}`);
         const s = await fireSoonEvents(); if (s) console.log(`[worker] avisos de reunión: ${s}`);
         // Mensajes programados, en el mismo ciclo de 15 s (índice parcial: sin pendientes no cuesta nada).
-        const p = await sendDueScheduled(); if (p) console.log(`[worker] programados enviados: ${p}`); }
+        const p = await sendDueScheduled(); if (p) console.log(`[worker] programados enviados: ${p}`);
+        // Llamadas: quien dejó de latir sale; la llamada vacía se cierra (y se borra la reunión en Chime).
+        const k = await reapCalls(); if (k) console.log(`[worker] llamadas actualizadas: ${k}`); }
       if (Date.now() - lastSchedule > 30_000) { await schedule(); lastSchedule = Date.now(); }
       const worked = await runOne();
       if (!worked) await new Promise((r) => setTimeout(r, 1000));

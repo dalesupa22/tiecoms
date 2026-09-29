@@ -752,3 +752,22 @@ export function WaShareDialog({ accountId, jid, message, chatName, onClose }: { 
     </Modal>
   );
 }
+
+/** Hoy: invitación a conectar el correo. Solo si nadie está conectado; se cierra con ✕ y no vuelve. */
+const NUDGE_KEY = 'chaggu:mail-nudge-off';
+export function MailConnectNudge() {
+  const on = useClient((s) => s.data?.features?.mail === true);
+  const [off, setOff] = useState(() => { try { return localStorage.getItem(NUDGE_KEY) === '1'; } catch { return false; } });
+  const [list, setList] = useState<MailConnectionDTO[] | null>(null);
+  useEffect(() => { if (on && !off) client.mailConnections().then(setList).catch(() => {}); }, [on, off]);
+  if (!on || off || !list || list.some((c) => c.status === 'active') || !list.some((c) => c.available)) return null;
+  const close = () => { setOff(true); try { localStorage.setItem(NUDGE_KEY, '1'); } catch {} };
+  return (
+    <div className="card mail-nudge">
+      <span className="row" style={{ gap: 4 }} aria-hidden><ProviderIcon provider="google" size={22} /><ProviderIcon provider="microsoft" size={22} /></span>
+      <span className="grow" style={{ minWidth: 0 }}><b style={{ display: 'block' }}>{t('mail.nudgeTitle')}</b><span className="small muted">{t('mail.nudgeBody')}</span></span>
+      <button className="btn small primary" onClick={() => navigate('/correo')}>{t('mail.connect')}</button>
+      <button className="icon-btn" aria-label={t('common.close')} onClick={close}>×</button>
+    </div>
+  );
+}

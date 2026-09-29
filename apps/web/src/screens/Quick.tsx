@@ -1,3 +1,4 @@
+import { MailPickDialog } from './Mail.tsx';
 import type { BootstrapDTO, ConversationDTO, PersonDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { openDialog } from '../actions.tsx';
@@ -25,6 +26,7 @@ export function createMenuItems(): MenuItem[] {
     { label: t('issue.newTitle'), icon: '◆', disabled: !canIssue,
       onSelect: () => openDialog((close) => <NewIssueDialog onClose={close} onCreated={(i) => navigate(`/c/${i.conversationId}?issue=${i.id}`)} />) },
     { label: t('cal.newTitle'), icon: '📅', onSelect: () => newEvent() },
+    ...(d?.features?.mail ? [{ label: t('mail.bringOne'), icon: '✉', onSelect: () => openDialog((close) => <MailPickDialog onClose={close} />) }] : []),
     { divider: true },
     { label: t('join.title'), icon: '⌗', onSelect: () => openDialog((close) => <JoinWithCodeDialog onClose={close} />) },
   ];

@@ -1508,3 +1508,4 @@ mark { background: #f5e3b3; color: inherit; border-radius: 3px; padding: 0 1px; 
 .mail-browser > :not(.mail-list) { flex-shrink: 0; }
 .mail-browser.is-compact { max-height: none; }
 .mail-browser.is-compact .mail-list { max-height: min(46vh, 420px); }
+.mail-nudge { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin: 14px 0 4px; flex-wrap: wrap; }

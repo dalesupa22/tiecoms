@@ -1,4 +1,4 @@
-import { ProviderIcon } from './Mail.tsx';
+import { MailConnectNudge, ProviderIcon } from './Mail.tsx';
 import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from 'react';
 import type { ConversationDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
@@ -73,6 +73,7 @@ export function TodayScreen() {
         {unread ? t('today.summary', { messages: tn(unread, 'n.newMessage', 'n.newMessages'), conversations: tn(unreadConvs.length, 'n.conversation', 'n.conversations') }) : t('today.upToDate')}
         {' · '}{t('today.spacesWith', { spaces: tn(d.workspaces.length, 'n.space', 'n.spaces'), companies: tn(Math.max(0, orgsCount - 1), 'n.company', 'n.companies') })}
       </div>
+      <MailConnectNudge />
       <div className="stats">
         <div className="stat dark"><div className="eyebrow">{t('today.unread')}</div><div className="num">{unread}</div></div>
         <div className="stat dark"><div className="eyebrow">{t('today.waiting')}</div><div className="num">{unreadConvs.length}</div></div>

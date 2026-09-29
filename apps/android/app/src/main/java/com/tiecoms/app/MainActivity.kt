@@ -68,6 +68,15 @@ class MainActivity : ComponentActivity() {
         }
         // Solo debug: `adb shell am start -n com.chaggu.app/com.tiecoms.app.MainActivity -e apiUrl http://10.0.2.2:3021`
         if (BuildConfig.DEBUG) intent.getStringExtra("apiUrl")?.let { container.setDebugApiUrl(it) }
+        // Solo debug: simula el push TC_CALL a los 4 s (para ver el aviso con la app en segundo plano):
+        // `am start -n com.chaggu.app/com.tiecoms.app.MainActivity --es debugPushCall <callId> --es debugConv <conversationId>`
+        if (BuildConfig.DEBUG) intent.getStringExtra("debugPushCall")?.let { callId ->
+            val conv = intent.getStringExtra("debugConv") ?: return@let
+            android.os.Handler(mainLooper).postDelayed({
+                com.tiecoms.app.platform.TcMessagingService.handle(applicationContext, mapOf("type" to "call", "callId" to callId, "conversationId" to conv,
+                    "kind" to "audio", "title" to "Beto Prueba", "subtitle" to "Equipo comercial", "category" to "TC_CALL"))
+            }, 4_000)
+        }
         // «Compartir» desde otras apps llega a ShareActivity (SPEC-v4 §B), no aquí.
         if (intent.action == Intent.ACTION_VIEW) {
             val data = intent.dataString

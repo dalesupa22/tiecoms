@@ -198,7 +198,7 @@ extension MainView {
         case .dms:
             NavigationStack(path: $store.dmsPath) { DMsView().assistantListMargin().routes() }.issueSheets(host: "tab.dms").appTextSize()
         case .issues:
-            NavigationStack(path: $store.issuesPath) { IssuesScreen().assistantListMargin().routes() }.issueSheets(host: "tab.issues").appTextSize()
+            NavigationStack(path: $store.issuesPath) { IssuesScreen(hub: true).assistantListMargin().routes() }.issueSheets(host: "tab.issues").appTextSize()
         case .agenda:
             NavigationStack(path: $store.agendaPath) { AgendaScreen().assistantListMargin().routes() }.issueSheets(host: "tab.agenda").appTextSize()
         case .calls:
@@ -373,7 +373,7 @@ enum TabInfo {
         switch t {
         case .home: return L("tab.groups")
         case .dms: return L("tab.dms")
-        case .issues: return L("tab.issues")
+        case .issues: return L("tab.hub")
         case .agenda: return L("bar.agenda")
         case .calls: return L("tab.calls")
         case .settings: return L("tab.you")
@@ -383,7 +383,7 @@ enum TabInfo {
         switch t {
         case .home: return "person.2"
         case .dms: return "bubble.left.and.bubble.right"
-        case .issues: return "checkmark.circle"
+        case .issues: return "square.grid.2x2"
         case .agenda: return "calendar"
         case .calls: return "phone"
         case .settings: return "person.crop.circle"
@@ -466,6 +466,12 @@ struct AppTabBar: View {
             .clipShape(Circle())
             .padding(2)
             .overlay(Circle().stroke(on ? Theme.accentText : .clear, lineWidth: 2))
+        } else if it.tab == .issues {
+            // «Todo» (1.7.3): cuadrícula con un chulito, para que se siga leyendo como tareas.
+            HubGlyph(filled: on)
+                .foregroundStyle(on ? Theme.accentText : Theme.textSecondary)
+                .frame(width: 24, height: 24)
+                .frame(height: 26)
         } else {
             Image(systemName: it.symbol)
                 .symbolVariant(on ? .fill : .none)
@@ -489,6 +495,31 @@ struct AppTabBar: View {
                 .offset(x: 2, y: -3)
                 .accessibilityHidden(true)
         }
+    }
+}
+
+/// Ícono de «Todo»: tres cuadros y un chulito en el cuarto lugar (el del mockup aprobado). Elegido: cuadros llenos.
+struct HubGlyph: View {
+    var filled: Bool
+    var body: some View {
+        GeometryReader { g in
+            let u = min(g.size.width, g.size.height) / 24
+            let line = 1.8 * u
+            ZStack {
+                ForEach(0..<3, id: \.self) { i in
+                    let r = CGRect(x: (i == 1 ? 13.5 : 4) * u, y: (i == 2 ? 13.5 : 4) * u, width: 6.5 * u, height: 6.5 * u)
+                    let shape = RoundedRectangle(cornerRadius: 1.8 * u).path(in: r)
+                    if filled { shape.fill() } else { shape.stroke(style: StrokeStyle(lineWidth: line, lineJoin: .round)) }
+                }
+                Path { p in
+                    p.move(to: CGPoint(x: 14.2 * u, y: 16.8 * u))
+                    p.addLine(to: CGPoint(x: 16.1 * u, y: 18.7 * u))
+                    p.addLine(to: CGPoint(x: 19.6 * u, y: 15 * u))
+                }
+                .stroke(style: StrokeStyle(lineWidth: filled ? line * 1.25 : line, lineCap: .round, lineJoin: .round))
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 

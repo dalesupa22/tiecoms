@@ -1748,13 +1748,13 @@ struct MessageBubble: View {
                     if !attachments.isEmpty { AttachmentsBlock(attachments: attachments, mine: mine, messageId: messageId, conversationId: conversationId) }
                     if !text.isEmpty || attachments.isEmpty {
                     Group {
-                        if !mentions.isEmpty || highlight != nil || !GGMention.typedRanges(in: text).isEmpty {
+                        if !mentions.isEmpty || highlight != nil || !GGMention.typedRanges(in: text).isEmpty || (!italic && MessageFormat.hasFormat(text)) {
                             // Cada mención con el color de SU persona (y tocable); los enlaces http con el color de enlace.
                             RichMessageText(text: text, mentions: mentions, mine: mine, linkify: linkify, highlight: highlight,
                                             maxLines: collapsed ? collapsedLines : 0) { id in
                                 if let u = URL(string: "chaggu-mention://\(id)") { openURL(u) }
                             }
-                        } else if linkify { Text(Linkify.cachedAttributed(text)) } else { Text(text) }
+                        } else if linkify { Text(Linkify.cachedAttributed(MessageFormat.bullets(text))) } else { Text(MessageFormat.bullets(text)) }
                     }
                     .lineLimit(collapsed ? collapsedLines : nil)
                     // Solo emojis (1 a 3): grandes, como en la web (isJumbo).

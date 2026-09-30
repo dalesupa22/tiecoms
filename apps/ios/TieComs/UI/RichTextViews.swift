@@ -17,7 +17,9 @@ enum RichText {
     }
 
     /// Texto de la burbuja: http subrayado con el color de enlace; menciones en negrita y color de su persona (link chaggu-mention://).
-    static func bubble(_ text: String, mentions: [Mention], mine: Bool, linkify: Bool, highlight: String? = nil) -> NSAttributedString {
+    static func bubble(_ raw: String, mentions: [Mention], mine: Bool, linkify: Bool, highlight: String? = nil) -> NSAttributedString {
+        // Viñetas «- » → «• » (misma longitud: las menciones no se corren).
+        let text = MessageFormat.bullets(raw)
         let out = NSMutableAttributedString(string: text, attributes: [.font: baseFont(), .foregroundColor: mine ? UIColor.white : UIColor(Theme.textPrimary)])
         if linkify {
             for (r, url) in Linkify.links(in: text) {
@@ -39,6 +41,9 @@ enum RichText {
         }
         // @gg multicolor (web 63e6b0f): la mención a gg o «@gg» escrito a mano.
         GGMention.apply(to: out, text: text, mentions: mentions, mine: mine, font: boldFont())
+        // Formato (*negrilla*, _cursiva_, ~tachado~, `código`) solo en el texto suelto, como la web.
+        let spans = formatSpans(text, mentions: mentions)
+        for sp in spans where NSMaxRange(sp.range) <= out.length { applyFormat(sp, to: out, mine: mine) }
         // Búsqueda en el chat (tanda 1.7 §6): lo que coincide, resaltado (sin mayúsculas ni tildes).
         if let highlight, highlight.count >= 2 {
             for r in ChatSearch.ranges(of: highlight, in: text) {
@@ -46,7 +51,49 @@ enum RichText {
                 if !mine { out.addAttribute(.foregroundColor, value: UIColor.label, range: r) }
             }
         }
+        // Las marcas se ocultan al final: los atributos de arriba usan las posiciones del texto original.
+        for o in MessageFormat.hiddenOffsets(spans).reversed() where o < out.length {
+            out.deleteCharacters(in: NSRange(location: o, length: 1))
+        }
         return out
+    }
+
+    /// Lo que no lleva formato: menciones, #grupos, @gg y enlaces (en la web van en tramos aparte).
+    static func formatSpans(_ text: String, mentions: [Mention]) -> [MessageFormat.Span] {
+        guard MessageFormat.mightHaveFormat(text) else { return [] }
+        var blocked = MentionText.valid(mentions, in: text).map { NSRange(location: $0.start, length: $0.length) }
+        blocked += GGMention.ranges(in: text, mentions: mentions)
+        blocked += Linkify.links(in: text).map { NSRange($0.range, in: text) }
+        return MessageFormat.spans(in: text, excluding: blocked)
+    }
+
+    /// Rangos del texto original (p. ej. el brillo de @gg) en el texto ya sin marcas.
+    static func displayRanges(_ ranges: [NSRange], text: String, mentions: [Mention]) -> [NSRange] {
+        let hidden = MessageFormat.hiddenOffsets(formatSpans(MessageFormat.bullets(text), mentions: mentions))
+        guard !hidden.isEmpty else { return ranges }
+        return ranges.map { MessageFormat.map($0, hidden: hidden) }
+    }
+
+    static func italicFont() -> UIFont {
+        let d = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .body)
+        return UIFont(descriptor: d.withSymbolicTraits(.traitItalic) ?? d, size: 0)
+    }
+
+    static func codeFont() -> UIFont {
+        UIFont.monospacedSystemFont(ofSize: baseFont().pointSize * 0.92, weight: .regular)
+    }
+
+    private static func applyFormat(_ sp: MessageFormat.Span, to out: NSMutableAttributedString, mine: Bool) {
+        let r = sp.inner
+        switch sp.kind {
+        case .bold: out.addAttribute(.font, value: boldFont(), range: r)
+        case .italic: out.addAttribute(.font, value: italicFont(), range: r)
+        case .strike: out.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: r)
+        case .code:
+            // Monoespaciado con fondo suave (en la burbuja propia, blanco translúcido).
+            out.addAttributes([.font: codeFont(),
+                               .backgroundColor: mine ? UIColor.white.withAlphaComponent(0.22) : UIColor(Theme.textPrimary).withAlphaComponent(0.08)], range: r)
+        }
     }
 
     /// Clave de la caché de burbujas (1.7.1): mismo texto, menciones, lado, enlaces, resaltado y tamaño de letra.
@@ -133,7 +180,7 @@ struct RichMessageText: UIViewRepresentable {
         if context.coordinator.key != key {
             context.coordinator.key = key
             v.attributedText = RichText.cachedBubble(key)
-            context.coordinator.ggRanges = GGMention.ranges(in: text, mentions: mentions)
+            context.coordinator.ggRanges = RichText.displayRanges(GGMention.ranges(in: text, mentions: mentions), text: text, mentions: mentions)
         }
         // Brillo de @gg: después de maquetar (las posiciones dependen del ancho).
         let gg = context.coordinator.ggRanges
@@ -191,6 +238,10 @@ struct ComposerTextView: UIViewRepresentable {
     func makeUIView(context: Context) -> UITextView {
         let v = PastingTextView()
         v.onPasteAttachments = onPasteAttachments
+        v.onWrap = { [weak coord = context.coordinator, weak v] mark in
+            guard let coord, let v else { return }
+            coord.wrap(v, mark: mark)
+        }
         v.font = RichText.baseFont()
         v.adjustsFontForContentSizeCategory = true
         v.backgroundColor = .clear
@@ -320,6 +371,18 @@ struct ComposerTextView: UIViewRepresentable {
             if parent.focused { DispatchQueue.main.async { self.parent.focused = false } }
         }
 
+        /// ⌘B / ⌘I / ⌘⇧X (o Formato en el menú): envuelve la selección en *, _ o ~ sin partir menciones.
+        func wrap(_ textView: UITextView, mark: String) {
+            guard textView.markedTextRange == nil,
+                  let r = MessageFormat.wrap(textView.text ?? "", selection: textView.selectedRange, mark: mark, mentions: parent.mentions) else { return }
+            applying = true
+            textView.text = r.text
+            RichText.applyComposerStyle(textView.textStorage, mentions: r.mentions)
+            textView.selectedRange = r.selection
+            applying = false
+            publish(textView, text: r.text, mentions: r.mentions)
+        }
+
         private func publish(_ textView: UITextView, text: String, mentions: [Mention]) {
             styledMentions = mentions
             textView.typingAttributes = [.font: RichText.baseFont(), .foregroundColor: UIColor(Theme.textPrimary)]
@@ -337,12 +400,29 @@ struct ComposerTextView: UIViewRepresentable {
 /// de la imagen), el texto también se pega.
 final class PastingTextView: UITextView {
     var onPasteAttachments: (([LocalAttachment]) -> Void)?
+    /// Formato con teclado o con Formato ▸ Negrita / Cursiva del menú: envuelve la selección en la marca («*», «_», «~»).
+    var onWrap: ((String) -> Void)?
     /// Portapapeles a usar (las pruebas pasan uno propio).
     var pasteboard: UIPasteboard = .general
 
+    private var canWrap: Bool { onWrap != nil && selectedRange.length > 0 && markedTextRange == nil }
+
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)), onPasteAttachments != nil, PasteImages.hasImages(pasteboard) { return true }
+        if action == #selector(toggleBoldface(_:)) || action == #selector(toggleItalics(_:)) || action == #selector(strikeSelection(_:)) { return canWrap }
+        if action == #selector(toggleUnderline(_:)) { return false }
         return super.canPerformAction(action, withSender: sender)
+    }
+
+    // El texto es plano (allowsEditingTextAttributes = false): ⌘B / ⌘I ponen las marcas de la web.
+    override func toggleBoldface(_ sender: Any?) { if canWrap { onWrap?("*") } }
+    override func toggleItalics(_ sender: Any?) { if canWrap { onWrap?("_") } }
+    @objc func strikeSelection(_ sender: Any?) { if canWrap { onWrap?("~") } }
+
+    override var keyCommands: [UIKeyCommand]? {
+        let strike = UIKeyCommand(input: "x", modifierFlags: [.command, .shift], action: #selector(strikeSelection(_:)))
+        strike.discoverabilityTitle = L("composer.strike")
+        return (super.keyCommands ?? []) + [strike]
     }
 
     override func paste(_ sender: Any?) {

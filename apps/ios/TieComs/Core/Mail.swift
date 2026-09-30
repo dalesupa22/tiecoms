@@ -124,11 +124,26 @@ extension AppStore {
         }
     }
 
+    /// Correos sin leer de Recibidos › Principal/Prioritarios (tope 100), para la pastilla de «Todo».
+    func mailUnread() async throws -> Int {
+        struct R: Decodable { var unread: Int }
+        let r: R = try await api.request("/mail/unread")
+        return r.unread
+    }
+
     /// El correo tal cual está en el buzón (historial citado y firma), en vivo y sin guardar.
     func mailOriginal(_ id: String) async throws -> String {
         struct R: Decodable { var body: String }
         let r: R = try await api.request("/mail/shared/\(id)/original")
         return r.body
+    }
+
+    /// El HTML del correo (ya limpio por el servidor) para verlo con su diseño; nil si solo tiene texto.
+    /// Las imágenes vienen como rutas relativas /api/v1/mail/img/… (proxy firmado): se resuelven contra el origen del API.
+    func mailHtml(_ id: String) async throws -> String? {
+        struct R: Decodable { var html: String? }
+        let r: R = try await api.request("/mail/shared/\(id)/html")
+        return r.html.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
     }
 
     func mailComments(_ id: String) async throws -> [SharedMailCommentDTO] {

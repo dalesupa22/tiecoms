@@ -917,6 +917,7 @@
 "home.tab.sides" = "Sidechats";
 "home.tab.unread" = "Unread";
 "home.unreadIn" = "{n} unread";
+"hub.shortcuts" = "Shortcuts";
 "imp.action" = "Bring in from WhatsApp, Slack or email";
 "imp.asMany" = "Bring them as {n} separate messages";
 "imp.asOne" = "Bring it as a single message";
@@ -2130,6 +2131,7 @@
 "tab.calls" = "Calls";
 "tab.dms" = "DMs";
 "tab.groups" = "Groups";
+"tab.hub" = "Hub";
 "tab.home" = "Home";
 "tab.issues" = "Tasks";
 "tab.you" = "You";
@@ -2462,3 +2464,6 @@
 "err.call_not_live" = "Nobody is in the call right now.";
 "err.call_full" = "The call already has the maximum number of guests.";
 "err.call_ended" = "The call already ended.";
+"composer.strike" = "Strikethrough";
+"mail.asText" = "Show plain text";
+"mail.asDesign" = "Show with its design";

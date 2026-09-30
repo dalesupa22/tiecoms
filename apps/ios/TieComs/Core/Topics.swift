@@ -17,6 +17,30 @@ enum TopicRules {
     }
     static func archived(_ list: [TopicDTO]) -> [TopicDTO] { list.filter(\.isArchived) }
 
+    /// Arrastrar la banderita `from` sobre `target` (dropOn de la web): hacia adelante queda después del destino, hacia
+    /// atrás queda antes. Devuelve los ids activos en el orden nuevo, o nil si no cambia nada.
+    static func reorder(_ ids: [String], moving from: String, onto target: String) -> [String]? {
+        guard from != target, let fi = ids.firstIndex(of: from), let ti = ids.firstIndex(of: target) else { return nil }
+        var out = ids.filter { $0 != from }
+        guard let t = out.firstIndex(of: target) else { return nil }
+        out.insert(from, at: t + (fi < ti ? 1 : 0))
+        return out == ids ? nil : out
+    }
+
+    /// Un paso a la izquierda (-1) o a la derecha (+1) (menú y VoiceOver).
+    static func step(_ ids: [String], _ id: String, by delta: Int) -> [String]? {
+        guard let i = ids.firstIndex(of: id) else { return nil }
+        let j = i + delta
+        guard ids.indices.contains(j) else { return nil }
+        return reorder(ids, moving: id, onto: ids[j])
+    }
+
+    /// La lista con las posiciones del orden nuevo (lo optimista, antes de que responda el API).
+    static func applyOrder(_ list: [TopicDTO], _ ids: [String]) -> [TopicDTO] {
+        let pos = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($1, $0) })
+        return list.map { t in var x = t; if let p = pos[t.id] { x.position = p }; return x }.sorted { $0.position < $1.position }
+    }
+
     /// Mensajes (no eliminados) por tema, para el conteo de cada banderita.
     static func counts(_ messages: [MessageDTO]) -> [String: Int] {
         var n: [String: Int] = [:]
@@ -139,6 +163,20 @@ extension AppStore {
     func updateTopic(_ t: TopicDTO, _ patch: [String: Any]) async throws {
         let r: TopicsResult = try await api.request("/topics/\(t.id)", method: "PATCH", json: patch)
         topics[t.conversationId] = r.topics
+    }
+
+    /// Nuevo orden de los temas activos (PUT /conversations/:id/topics/order { ids }): lo ven todos los del chat.
+    /// Optimista; si el API falla vuelve al orden anterior y se lanza el error (la vista muestra el aviso).
+    func reorderTopics(_ conversationId: String, ids: [String]) async throws {
+        let before = topics[conversationId] ?? []
+        topics[conversationId] = TopicRules.applyOrder(before, ids)
+        do {
+            let r: TopicsResult = try await api.request("/conversations/\(conversationId)/topics/order", method: "PUT", json: ["ids": ids])
+            topics[conversationId] = r.topics
+        } catch {
+            topics[conversationId] = before
+            throw error
+        }
     }
 
     /// Quitar: se borra la banderita y sus mensajes quedan sin tema (no se borra ningún mensaje).

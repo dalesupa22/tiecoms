@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // Temas del chat (docs/TEMAS.md): fila de banderitas bajo la barra de accesos, etiqueta en cada mensaje,
 // hoja «Nuevo tema» / «Renombrar tema» y lista de archivados. Paridad con apps/web/src/screens/Topics.tsx.
@@ -68,6 +69,9 @@ struct TopicDock: View {
     var onRename: (TopicDTO) -> Void
     var onRemove: (TopicDTO) -> Void
     var onArchived: () -> Void
+    /// Arrastrar para reordenar (solo si puedo escribir): la banderita que se mueve y sobre cuál va.
+    @State private var dragging: String?
+    @State private var over: String?
 
     var body: some View {
         let list = store.topics[conv.id] ?? []
@@ -78,9 +82,11 @@ struct TopicDock: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 4) {
                         // Sin temas activos, «General» y «Todo» son lo mismo: una sola banderita «Todo».
+                        // Las fijas son compactas: solo el ícono, y el nombre únicamente cuando están seleccionadas.
                         let general = active.isEmpty ? L("topic.all") : L("topic.general")
+                        let generalIcon = active.isEmpty ? "☰" : "💬"
                         Button { onFilter(nil) } label: {
-                            TopicFlag(text: "💬 \(general)", unread: active.isEmpty ? nil : unread[""], bg: Theme.background, ink: Theme.textSecondary, on: filter == nil)
+                            TopicFlag(text: filter == nil ? "\(generalIcon) \(general)" : generalIcon, unread: active.isEmpty ? nil : unread[""], bg: Theme.background, ink: Theme.textSecondary, on: filter == nil)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel([general, !active.isEmpty && (unread[""] ?? 0) > 0 ? L("topic.unreadN", ["n": unread[""] ?? 0]) : nil].compactMap { $0 }.joined(separator: ", "))
@@ -89,7 +95,7 @@ struct TopicDock: View {
                         .accessibilityIdentifier("topic.general")
                         if !active.isEmpty {
                             Button { onFilter(filter == TopicRules.all ? nil : TopicRules.all) } label: {
-                                TopicFlag(text: "☰ \(L("topic.all"))", bg: Theme.background, ink: Theme.textSecondary, on: filter == TopicRules.all)
+                                TopicFlag(text: filter == TopicRules.all ? "☰ \(L("topic.all"))" : "☰", bg: Theme.background, ink: Theme.textSecondary, on: filter == TopicRules.all)
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(L("topic.all"))
@@ -103,8 +109,22 @@ struct TopicDock: View {
                             }
                             .buttonStyle(.plain)
                             .id(t.id)
-                            // Mantener presionada: Renombrar, Cambiar color, Archivar y Quitar tema.
-                            .contextMenu { if conv.canPost { flagMenu(t) } }
+                            .overlay {
+                                if over == t.id && dragging != nil && dragging != t.id {
+                                    TopicFlagShape().stroke(Theme.accentText, lineWidth: 2)
+                                }
+                            }
+                            // Mantener presionada: Renombrar, Cambiar color, mover, Archivar y Quitar tema; y arrastrar para reordenar.
+                            .contextMenu { if conv.canPost { flagMenu(t, ids: active.map(\.id)) } }
+                            .modifier(TopicDragModifier(enabled: conv.canPost, id: t.id, name: t.name, dragging: $dragging, over: $over) { from, to in
+                                move(TopicRules.reorder(active.map(\.id), moving: from, onto: to))
+                            })
+                            .accessibilityActions {
+                                if conv.canPost {
+                                    Button(L("topic.moveLeft")) { move(TopicRules.step(active.map(\.id), t.id, by: -1)) }
+                                    Button(L("topic.moveRight")) { move(TopicRules.step(active.map(\.id), t.id, by: 1)) }
+                                }
+                            }
                             .accessibilityLabel([t.name, (unread[t.id] ?? 0) > 0 ? L("topic.unreadN", ["n": unread[t.id] ?? 0]) : nil].compactMap { $0 }.joined(separator: ", "))
                             .accessibilityHint(conv.canPost ? L("topic.a11yHint") : "")
                             .accessibilityAddTraits(filter == t.id ? .isSelected : [])
@@ -139,8 +159,22 @@ struct TopicDock: View {
         }
     }
 
-    @ViewBuilder private func flagMenu(_ t: TopicDTO) -> some View {
+    /// Guarda el orden nuevo (optimista; si falla vuelve el anterior y sale el aviso con el error).
+    private func move(_ ids: [String]?) {
+        guard let ids else { return }
+        Haptics.tap()
+        let cid = conv.id
+        Task { do { try await store.reorderTopics(cid, ids: ids) } catch { store.show(L10n.errorText(error)) } }
+    }
+
+    @ViewBuilder private func flagMenu(_ t: TopicDTO, ids: [String]) -> some View {
         Button { onRename(t) } label: { Label(L("topic.rename"), systemImage: "pencil") }
+        if ids.first != t.id {
+            Button { move(TopicRules.step(ids, t.id, by: -1)) } label: { Label(L("topic.moveLeft"), systemImage: "arrow.left") }
+        }
+        if ids.last != t.id {
+            Button { move(TopicRules.step(ids, t.id, by: 1)) } label: { Label(L("topic.moveRight"), systemImage: "arrow.right") }
+        }
         Menu {
             ForEach(TopicRules.colors, id: \.self) { c in
                 Button { update(t, ["color": c]) } label: {
@@ -167,6 +201,50 @@ struct TopicDock: View {
                     Task { do { try await store.updateTopic(t, ["archived": false]) } catch { store.show(L10n.errorText(error)) } }
                 }
             } catch { store.show(L10n.errorText(error)) }
+        }
+    }
+}
+
+/// Arrastrar una banderita sobre otra para reordenar (el orden es del chat: lo ven todos).
+private struct TopicDragModifier: ViewModifier {
+    var enabled: Bool
+    var id: String
+    var name: String
+    @Binding var dragging: String?
+    @Binding var over: String?
+    var onDrop: (String, String) -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .onDrag {
+                    dragging = id
+                    return NSItemProvider(object: id as NSString)
+                } preview: {
+                    Text(name).font(.footnote.weight(.semibold)).padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(Capsule().fill(Theme.surface))
+                }
+                .onDrop(of: [UTType.plainText], delegate: Delegate(id: id, dragging: $dragging, over: $over, onDrop: onDrop))
+        } else {
+            content
+        }
+    }
+
+    struct Delegate: DropDelegate {
+        var id: String
+        @Binding var dragging: String?
+        @Binding var over: String?
+        var onDrop: (String, String) -> Void
+        func validateDrop(info: DropInfo) -> Bool { dragging != nil }
+        func dropEntered(info: DropInfo) { over = id }
+        func dropExited(info: DropInfo) { if over == id { over = nil } }
+        func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+        func performDrop(info: DropInfo) -> Bool {
+            let from = dragging
+            dragging = nil; over = nil
+            guard let from, from != id else { return false }
+            onDrop(from, id)
+            return true
         }
     }
 }

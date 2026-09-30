@@ -2467,3 +2467,7 @@
 "composer.strike" = "Strikethrough";
 "mail.asText" = "Show plain text";
 "mail.asDesign" = "Show with its design";
+
+/* Topics: reorder (drag the flag or from the menu) */
+"topic.moveLeft" = "Move left";
+"topic.moveRight" = "Move right";

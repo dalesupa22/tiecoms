@@ -2467,3 +2467,7 @@
 "composer.strike" = "Tachado";
 "mail.asText" = "Ver solo el texto";
 "mail.asDesign" = "Ver con su diseño";
+
+/* Temas: reordenar (arrastrar la banderita o desde el menú) */
+"topic.moveLeft" = "Mover a la izquierda";
+"topic.moveRight" = "Mover a la derecha";

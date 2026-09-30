@@ -57,9 +57,11 @@ final class ChatPerfUITests: XCTestCase {
             usleep(300_000)
         }
         let dms = app.buttons["tab.dms"].firstMatch
-        XCTAssertTrue(dms.waitForExistence(timeout: 20)); dms.tap()
+        XCTAssertTrue(dms.waitForExistence(timeout: 20))
         let row = app.buttons["conv.row.\(f.dmId)"].firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        // Recién entrado, el primer toque a la pestaña a veces se pierde: se reintenta.
+        for _ in 0..<4 where !row.exists { dms.tap(); _ = row.waitForExistence(timeout: 5) }
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
         sleep(2)
         // Tramo 1: la lista de DMs, arriba y abajo.
         var t0 = counters(perf)

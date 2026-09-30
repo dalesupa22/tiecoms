@@ -365,12 +365,16 @@ enum PasteImages {
     static func raw(_ pb: UIPasteboard) -> [Raw] {
         var out: [Raw] = []
         let preferred: [UTType] = [.png, .jpeg, .heic, .heif, .gif, .webP, .tiff, .image]
-        for item in pb.items {
+        // Los bytes tal cual (`data(forPasteboardType:inItemSet:)`): `items` convierte PNG/GIF en UIImage y se perdía el
+        // formato (un GIF animado quedaba como JPEG fijo).
+        for i in 0..<pb.numberOfItems {
+            let set = IndexSet(integer: i)
+            let keys = pb.types(forItemSet: set)?.first ?? []
             var found: Raw?
             for t in preferred {
-                guard let key = item.keys.first(where: { UTType($0)?.conforms(to: t) == true }) else { continue }
-                if let d = item[key] as? Data { found = .data(d, UTType(key) ?? t) }
-                else if let img = item[key] as? UIImage { found = .image(img) }
+                guard let key = keys.first(where: { UTType($0)?.conforms(to: t) == true }) else { continue }
+                if let d = pb.data(forPasteboardType: key, inItemSet: set)?.first, !d.isEmpty { found = .data(d, UTType(key) ?? t) }
+                else if let img = pb.value(forPasteboardType: key) as? UIImage { found = .image(img) }
                 if found != nil { break }
             }
             if let found { out.append(found) }

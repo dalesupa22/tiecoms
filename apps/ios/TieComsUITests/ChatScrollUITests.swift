@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// 1.7.1: un mensaje más alto que la pantalla no bloquea el scroll (ni se pierden mensajes) y deslizar un mensaje a la
 /// derecha abre la respuesta citada (no un sidechat). Contra el API local con `TEST_RUNNER_TC_FIXTURE_LONG`: el fixture de
@@ -50,6 +51,12 @@ final class ChatScrollUITests: XCTestCase {
             XCTAssertTrue(row.waitForExistence(timeout: 15)); row.tap()
         }
         XCTAssertTrue(app.textViews["composer.field"].waitForExistence(timeout: 15))
+        // «Save Password?» del sistema puede salir unos segundos después del login y tapa el chat: se cierra.
+        for _ in 0..<20 {
+            let b = [app.buttons["Not Now"], spring.buttons["Not Now"], app.buttons["Ahora no"], spring.buttons["Ahora no"]].first { $0.exists }
+            if let b { b.tap(); break }
+            usleep(300_000)
+        }
         return (app, f)
     }
 
@@ -78,6 +85,22 @@ final class ChatScrollUITests: XCTestCase {
         shot(tag + "171-01-abierto")
         let screen = app.windows.firstMatch.frame
         func covers() -> Bool { long.frame.minY < screen.midY - 100 && long.frame.maxY > screen.midY + 100 }
+        // Más de 40 líneas: llega plegado a 30 con «Ver más». Se despliega (120 líneas, mucho más alto que la pantalla).
+        let more = app.buttons["msg.readMore.\(f.longMessageId)"].firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 5), "el mensaje muy largo trae «Ver más»")
+        XCTAssertEqual(more.label, "Ver más")
+        for _ in 0..<12 where !(more.isHittable && more.frame.minY > screen.height * 0.25 && more.frame.maxY < screen.height * 0.8) {
+            if more.frame.midY < screen.height * 0.5 { drag(app, from: 0.38, to: 0.62) } else { drag(app, from: 0.62, to: 0.38) }
+        }
+        let collapsedH = long.frame.height
+        more.tap()
+        let expanded = app.buttons["msg.readMore.\(f.longMessageId)"].firstMatch
+        XCTAssertTrue(NSPredicate(format: "label == 'Ver menos'").evaluate(with: expanded) || { sleep(1); return expanded.label == "Ver menos" }(),
+                      "«Ver más» cambia a «Ver menos»")
+        XCTAssertGreaterThan(long.frame.height, collapsedH * 2.5, "desplegado muestra las 120 líneas (\(collapsedH) → \(long.frame.height))")
+        XCTAssertGreaterThan(long.frame.height, screen.height * 1.5, "más alto que la pantalla")
+        // Llevar su final a la parte baja de la pantalla, para cruzarlo entero hacia arriba.
+        for _ in 0..<16 where long.frame.maxY > screen.height * 0.8 { drag(app, from: 0.72, to: 0.38) }
         // Llevar el mensaje largo a cubrir el centro, venga de arriba o de abajo.
         for _ in 0..<16 where !covers() {
             if long.frame.maxY < screen.midY { drag(app, from: 0.38, to: 0.72) } else { drag(app, from: 0.72, to: 0.38) }
@@ -147,5 +170,36 @@ final class ChatScrollUITests: XCTestCase {
             XCTAssertFalse(bar.exists, "menos de 60 pt no responde")
         }
         shot("171-06-enviada")
+    }
+
+    /// Pegar una imagen copiada (menú «Pegar» del compositor): queda en la bandeja de adjuntos y se envía.
+    func testPasteImageFromClipboardStagesAndSends() throws {
+        let (app, _) = try openChat()
+        let f = UIGraphicsImageRendererFormat(); f.scale = 1
+        let img = UIGraphicsImageRenderer(size: CGSize(width: 120, height: 80), format: f).image { ctx in
+            UIColor.systemTeal.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 120, height: 80))
+        }
+        UIPasteboard.general.image = img
+        let field = app.textViews["composer.field"]
+        field.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        // Menú de edición: una pulsación sobre el campo con el cursor muestra «Pegar».
+        field.press(forDuration: 1.0)
+        let paste = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@ AND (elementType == %d OR elementType == %d)",
+                                                                         ["Pegar", "Paste"], XCUIElement.ElementType.menuItem.rawValue,
+                                                                         XCUIElement.ElementType.button.rawValue)).firstMatch
+        if !paste.waitForExistence(timeout: 3) { field.tap(); _ = paste.waitForExistence(timeout: 3) }
+        XCTAssertTrue(paste.exists, "«Pegar» aparece con una imagen en el portapapeles")
+        shot("171-07-menu-pegar")
+        paste.tap()
+        let staged = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'staged.pegada-'")).firstMatch
+        XCTAssertTrue(staged.waitForExistence(timeout: 8), "la imagen pegada queda en la bandeja de adjuntos")
+        XCTAssertEqual((field.value as? String).map { $0.contains("http") } ?? false, false, "no se pega como texto")
+        shot("171-08-pegada")
+        app.buttons["composer.send"].tap()
+        let gone = NSPredicate(format: "exists == false")
+        expectation(for: gone, evaluatedWith: staged)
+        waitForExpectations(timeout: 20)
+        shot("171-09-enviada")
     }
 }

@@ -6,7 +6,7 @@
     "dev": "tauri dev",
     "build": "tauri build",
     "build:mac": "CI=true tauri build --target universal-apple-darwin --bundles app,dmg",
-    "build:win": "tauri build --target x86_64-pc-windows-msvc"
+    "build:win": "tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi"
   },
   "devDependencies": { "@tauri-apps/cli": "2.11.5" }
 }

@@ -69,13 +69,19 @@
         "languages": [
           "Spanish",
           "English"
-        ]
+        ],
+        "installerIcon": "icons/icon.ico",
+        "startMenuFolder": "Chaggu"
       },
       "wix": {
         "language": [
           "es-ES",
           "en-US"
         ]
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
       }
     }
   }

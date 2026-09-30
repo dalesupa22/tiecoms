@@ -9,7 +9,7 @@
 import { z } from 'zod';
 
 export const API_VERSION = 1;
-export const CONTRACT_VERSION = '2026-09-29.1';
+export const CONTRACT_VERSION = '2026-09-29.2';
 /** Clientes con un contrato anterior a este deben actualizarse. */
 export const MIN_CLIENT_CONTRACT = '2026-09-23';
 
@@ -441,6 +441,31 @@ export interface AttachmentDTO {
   transcript?: VoiceTranscriptDTO | null;
   /** Solo en PDFs firmados con Chaggu (POST /attachments/:id/sign): quién firmó, cuándo y la huella del resultado. */
   signing?: AttachmentSigningDTO | null;
+  /**
+   * Solo en videos (contentType video/*, kind sigue siendo 'file' para no romper apps viejas): ruta del API que,
+   * con Bearer, responde { url, expiresIn } con una URL prefirmada de S3 para reproducir en streaming (Range directo
+   * a S3). En videos, durationMs, width y height vienen del cliente que lo subió (docs/VIDEO.md).
+   */
+  playUrl?: string | null;
+}
+
+/** GET /attachments/:id/play: URL prefirmada de S3 (inline, o attachment con ?download=1) válida expiresIn segundos. */
+export interface VideoPlayDTO { url: string; expiresIn: number; contentType: string }
+
+/** Bytes por categoría. Cada objeto de S3 cuenta una sola vez (los reenvíos comparten el objeto). */
+export interface StorageBreakdownDTO { videos: number; photos: number; files: number; voice: number }
+/** GET /me/storage y GET /organizations/:id/storage: solo medición, todavía no hay cupo ni cobro. */
+export interface StorageUsageDTO {
+  scope: 'user' | 'organization';
+  id: string;
+  totalBytes: number;
+  objects: number;
+  breakdown: StorageBreakdownDTO;
+  /** De dónde viene: adjuntos del chat o archivos del árbol (Drive). */
+  bySource: { chat: number; drive: number };
+  /** Solo en organization: cuántas personas con esa empresa principal suman algo. */
+  people?: number;
+  measuredAt: string;
 }
 
 /** Referencia corta de una firma (8 caracteres): va impresa en el sello del PDF y sirve para buscarla en el historial. */
@@ -563,6 +588,8 @@ export interface VoiceTranscriptDTO {
 }
 export const MAX_VOICE_MS = 15 * 60_000;
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+/** Videos (POST /conversations/:id/videos, subida por stream): la web y las apps los comprimen antes a H.264 720p. */
+export const MAX_VIDEO_BYTES = 150 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
 
 export type ForwardSource = 'whatsapp' | 'slack' | 'email' | 'teams' | 'tiecoms' | 'other';

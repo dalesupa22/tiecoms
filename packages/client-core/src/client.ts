@@ -8,6 +8,7 @@ import {
   type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentDTO, type CallTranscriptSegmentInput,
   type ActiveCallDTO, type MessageRefDTO, type ChatSearchPageDTO, type ViewOnceOpenDTO, type EventCommentDTO, type ViewOnceState,
   type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO, type IntegrationDTO, type IntegrationSecretDTO,
+  type StorageUsageDTO, type VideoPlayDTO,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -1478,6 +1479,50 @@ export class TieComsClient {
   retryTranscription(attachmentId: string, aiConsent = false) {
     return this.request<AttachmentDTO>(`/attachments/${attachmentId}/transcribe`, { method: 'POST', json: { aiConsent } });
   }
+  /**
+   * Video ya comprimido (≤ 150 MB) por la ruta de stream (docs/VIDEO.md). Con XMLHttpRequest para informar el
+   * progreso de subida (0–1) y cancelar con signal. Sin XHR (entornos raros) cae a fetch sin progreso.
+   */
+  async uploadVideo(conversationId: string, file: Blob, meta: { name: string; durationMs?: number; width?: number; height?: number },
+    opts: { onProgress?: (p: number) => void; signal?: AbortSignal } = {}): Promise<AttachmentDTO> {
+    const headers: Record<string, string> = {
+      'content-type': file.type && file.type.startsWith('video/') ? file.type : 'video/mp4', 'x-file-name': encodeURIComponent(meta.name),
+      ...(meta.durationMs ? { 'x-duration-ms': String(Math.round(meta.durationMs)) } : {}),
+      ...(meta.width ? { 'x-width': String(Math.round(meta.width)) } : {}), ...(meta.height ? { 'x-height': String(Math.round(meta.height)) } : {}),
+    };
+    const path = `/conversations/${conversationId}/videos`;
+    if (typeof XMLHttpRequest === 'undefined') return this.request<AttachmentDTO>(path, { method: 'POST', body: file, headers, signal: opts.signal });
+    const generation = this.sessionGeneration;
+    const once = () => new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', this.url(path));
+      xhr.withCredentials = true;
+      xhr.setRequestHeader('x-tiecoms-client', this.opts.platform);
+      xhr.setRequestHeader('x-tiecoms-contract', CONTRACT_VERSION);
+      if (this.accessToken) xhr.setRequestHeader('authorization', `Bearer ${this.accessToken}`);
+      for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable && e.total) opts.onProgress?.(e.loaded / e.total); };
+      xhr.onload = () => resolve({ status: xhr.status, body: xhr.responseText });
+      xhr.onerror = () => reject(new ApiRequestError(0, 'network', 'No hay conexión'));
+      xhr.onabort = () => reject(new ApiRequestError(0, 'canceled', 'Cancelado'));
+      if (opts.signal) { if (opts.signal.aborted) { reject(new ApiRequestError(0, 'canceled', 'Cancelado')); return; } opts.signal.addEventListener('abort', () => xhr.abort(), { once: true }); }
+      xhr.send(file);
+    });
+    if (this.accessToken && Date.now() > this.accessExp - 60_000) await this.refresh();
+    this.assertSession(generation);
+    let r = await once();
+    if (r.status === 401 && (await this.refresh())) { this.assertSession(generation); r = await once(); }
+    this.assertSession(generation);
+    if (r.status < 200 || r.status >= 300) throw await parseError(new Response(r.body || null, { status: r.status }));
+    return JSON.parse(r.body) as AttachmentDTO;
+  }
+  /** URL prefirmada de S3 para reproducir un video en streaming (o descargarlo con download). */
+  videoPlayUrl(attachmentId: string, download = false) {
+    return this.request<VideoPlayDTO>(`/attachments/${attachmentId}/play${download ? '?download=1' : ''}`);
+  }
+  /** Almacenamiento usado (solo medición). */
+  myStorage() { return this.request<StorageUsageDTO>('/me/storage'); }
+  orgStorage(orgId: string) { return this.request<StorageUsageDTO>(`/organizations/${orgId}/storage`); }
   /** Miniatura opcional (JPEG/PNG/WebP ≤ 512 KB) de un adjunto aún pendiente. */
   uploadAttachmentThumb(id: string, thumb: Blob) {
     return this.request<AttachmentDTO>(`/attachments/${id}/thumb`, { method: 'POST', body: thumb, headers: { 'content-type': 'application/octet-stream' } });

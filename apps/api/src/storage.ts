@@ -4,7 +4,9 @@
  * otros usos del bucket. Sin configuración, las subidas responden 503.
  */
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import type { Readable } from 'node:stream';
 import { ApiError } from './errors.ts';
 
 const bucket = process.env.S3_BUCKET ?? '';
@@ -35,13 +37,37 @@ export async function getObject(key: string) {
   return { body: Buffer.from(await r.Body!.transformToByteArray()), contentType: r.ContentType ?? 'application/octet-stream' };
 }
 
-/** Enlace temporal de descarga directo a S3 (el navegador baja el archivo sin pasar por el API). */
-export async function presignDownload(key: string, fileName: string, contentType: string, seconds = 300) {
+/**
+ * Enlace temporal directo a S3 (el navegador baja el archivo sin pasar por el API).
+ * inline: para reproducir un video en <video> (el navegador pide rangos directo a S3).
+ */
+export async function presignDownload(key: string, fileName: string, contentType: string, seconds = 300, inline = false) {
   const ascii = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
   return getSignedUrl(client(), new GetObjectCommand({
     Bucket: bucket, Key: key, ResponseContentType: contentType,
-    ResponseContentDisposition: `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    ResponseContentDisposition: `${inline ? 'inline' : 'attachment'}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
   }), { expiresIn: seconds });
+}
+
+/**
+ * Sube un stream sin tenerlo entero en memoria: multipart de 5 MB con 2 partes en vuelo (≈ 10 MB por subida).
+ * Si el stream falla (cliente que corta, límite superado), lib-storage aborta el multipart.
+ */
+export async function putObjectStream(key: string, body: Readable, contentType: string) {
+  const up = new Upload({
+    client: client(), queueSize: 2, partSize: 5 * 1024 * 1024, leavePartsOnError: false,
+    params: { Bucket: bucket, Key: key, Body: body, ContentType: contentType, CacheControl: 'private, max-age=31536000, immutable', ServerSideEncryption: 'AES256' },
+  });
+  await up.done();
+}
+
+/** Lectura por stream (con Range opcional) para servir videos grandes sin cargarlos en memoria. */
+export async function getObjectStream(key: string, range?: string) {
+  const r = await client().send(new GetObjectCommand({ Bucket: bucket, Key: key, ...(range ? { Range: range } : {}) }));
+  return {
+    body: r.Body as Readable, contentLength: r.ContentLength ?? null, contentRange: r.ContentRange ?? null,
+    partial: !!range && !!r.ContentRange,
+  };
 }
 
 /**

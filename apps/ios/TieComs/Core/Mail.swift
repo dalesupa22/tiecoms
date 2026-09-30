@@ -124,6 +124,13 @@ extension AppStore {
         }
     }
 
+    /// Correos sin leer de Recibidos › Principal/Prioritarios (tope 100), para la pastilla de «Todo».
+    func mailUnread() async throws -> Int {
+        struct R: Decodable { var unread: Int }
+        let r: R = try await api.request("/mail/unread")
+        return r.unread
+    }
+
     /// El correo tal cual está en el buzón (historial citado y firma), en vivo y sin guardar.
     func mailOriginal(_ id: String) async throws -> String {
         struct R: Decodable { var body: String }

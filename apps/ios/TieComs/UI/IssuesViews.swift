@@ -1073,6 +1073,8 @@ struct HubShortcuts: View {
     @Environment(AppStore.self) private var store
     /// Chats de WhatsApp con mensajes sin leer (la misma cuenta que el organizador de la pantalla de WhatsApp).
     @State private var waUnread = 0
+    /// Correos sin leer (0 si el correo no está activo o la consulta falla: la pastilla va sin número).
+    @State private var mailUnread = 0
 
     static let mailColor = Color(red: 0.23, green: 0.45, blue: 0.85)
     static let waColor = Color(red: 0.15, green: 0.64, blue: 0.35)
@@ -1083,7 +1085,7 @@ struct HubShortcuts: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 if store.mailEnabled {
-                    pill(L("mail.title"), "envelope", Self.mailColor, 0, id: "mail") { store.push(.mailBox(conversationId: nil)) }
+                    pill(L("mail.title"), "envelope", Self.mailColor, mailUnread, id: "mail") { store.push(.mailBox(conversationId: nil)) }
                 }
                 pill(L("settings.whatsapp"), "message", Self.waColor, waUnread, id: "whatsapp") { store.push(.whatsapp) }
                 pill(L("nav.files"), "folder", Self.filesColor, 0, id: "files") { store.push(.files) }
@@ -1099,6 +1101,11 @@ struct HubShortcuts: View {
         .task(id: store.waRevision) {
             guard let r = try? await store.waChats(accountId: nil, category: nil, onlyGroups: false, showHidden: false, query: "") else { return }
             waUnread = r.categories.values.reduce(0) { $0 + $1.unread }
+        }
+        // Cada vez que se abre «Todo» (las pestañas se conservan montadas: se mira la pestaña elegida).
+        .task(id: "\(store.mailEnabled)|\(store.tab == .issues)") {
+            guard store.mailEnabled, store.tab == .issues else { if !store.mailEnabled { mailUnread = 0 }; return }
+            mailUnread = (try? await store.mailUnread()) ?? 0
         }
     }
 

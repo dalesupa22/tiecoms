@@ -97,7 +97,7 @@ struct QuickSearchSections: View {
     }
 
     private func convRow(_ c: ConversationDTO) -> some View {
-        NavigationLink(value: Route.conversation(c.id)) { HierarchyConvRow(d: d, c: c, showWs: true, showIssueChip: false) {} }
+        NavigationLink(value: Route.conversation(c.id)) { HierarchyConvRow(d: d, c: c, showIssueChip: false, company: Naming.companyLine(d, c)) {} }
             .accessibilityIdentifier("search.conv.\(c.id)")
     }
 

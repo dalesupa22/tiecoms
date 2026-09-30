@@ -664,7 +664,7 @@ struct DMsView: View {
 
     private func dmRow(_ d: BootstrapDTO, _ c: ConversationDTO, threadUnread: Int) -> some View {
         NavigationLink(value: Route.conversation(c.id)) {
-            HierarchyConvRow(d: d, c: c, threadUnread: threadUnread) { issuesFor = c.id }
+            HierarchyConvRow(d: d, c: c, threadUnread: threadUnread, company: Naming.companyLine(d, c)) { issuesFor = c.id }
         }
         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
         .accessibilityIdentifier("conv.row.\(c.id)")

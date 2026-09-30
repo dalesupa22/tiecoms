@@ -4,12 +4,12 @@ import Foundation
 enum Naming {
     static func org(_ d: BootstrapDTO, _ id: String?) -> OrganizationDTO? {
         guard let id else { return nil }
-        return d.organizations.first { $0.id == id }
+        return PerfCounters.measure("naming.org") { d.organization(id: id) }
     }
 
     static func person(_ d: BootstrapDTO, _ id: String?) -> PersonDTO? {
         guard let id else { return nil }
-        if let p = d.people.first(where: { $0.id == id }) { return p }
+        if let p = PerfCounters.measure("naming.person", { d.person(id: id) }) { return p }
         // gg (docs/GG-CHAT.md): si el servidor aún no lo manda en people, igual se ve como «gg».
         if id == GG.id { return PersonDTO(id: GG.id, name: "gg", kind: "agent") }
         return nil

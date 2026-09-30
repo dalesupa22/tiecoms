@@ -58,12 +58,14 @@ final class BandejaTests: XCTestCase {
     func testListIsFlatOrderedAndLabeledCompanyGroup() throws {
         let list = Naming.groupsList(try boot())
         XCTAssertEqual(list.map(\.id), ["g2", "r1", "g1", "x1", "p1"], "sin hilos ni DMs; fijado, mención, no leído y luego actividad")
-        let labels = Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0.label ?? "") })
-        XCTAssertEqual(labels["g1"], "Xertify · Pagos", "Tu organización → mi empresa")
-        XCTAssertEqual(labels["g2"], "Xertify interno", "si el nombre ya empieza por la empresa no se repite")
-        XCTAssertEqual(labels["r1"], "Ongoing · Mentoría", "Relaciones → la contraparte")
-        XCTAssertEqual(labels["p1"], "Nestlé · Proveedores", "relación pendiente → counterpartName")
-        XCTAssertEqual(labels["x1"], "Acme · Cohorte", "Invitado en → la anfitriona")
+        // 1.7.1: arriba solo el grupo (sin «Empresa · »); la empresa va aparte, debajo en gris.
+        XCTAssertTrue(list.allSatisfy { $0.label == nil }, "sin nombres repetidos no hay etiqueta propia")
+        let companies = Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0.company ?? "") })
+        XCTAssertEqual(companies["g1"], "Xertify", "Tu organización → mi empresa")
+        XCTAssertEqual(companies["g2"], "", "si el nombre ya empieza por la empresa no se repite")
+        XCTAssertEqual(companies["r1"], "Ongoing", "Relaciones → la contraparte")
+        XCTAssertEqual(companies["p1"], "Nestlé", "relación pendiente → counterpartName")
+        XCTAssertEqual(companies["x1"], "Acme", "Invitado en → la anfitriona")
         XCTAssertEqual(list.first { $0.id == "r1" }?.threadUnread, 5, "«💬 N» de sus hilos")
     }
 
@@ -72,6 +74,20 @@ final class BandejaTests: XCTestCase {
         XCTAssertEqual(Naming.listLabel(company: "Nestlé", group: "Nestle compras"), "Nestle compras", "sin tildes ni mayúsculas")
         XCTAssertEqual(Naming.listLabel(company: nil, group: "Pagos"), "Pagos")
         XCTAssertEqual(Naming.listLabel(company: "Ongoing", group: "Pagos"), "Ongoing · Pagos")
+    }
+
+    func testCompanyBelowNameNotRepeatedAndOnlyWhereItApplies() throws {
+        XCTAssertNil(Naming.companyBelow(company: "Xertify", title: "Xertify - Xertiflow"), "el nombre ya trae la empresa")
+        XCTAssertNil(Naming.companyBelow(company: "Nestlé", title: "nestle compras"), "sin tildes ni mayúsculas")
+        XCTAssertNil(Naming.companyBelow(company: "  ", title: "Pagos"))
+        XCTAssertEqual(Naming.companyBelow(company: "Ongoing", title: "Pagos"), "Ongoing")
+        let d = try boot()
+        let conv = { (id: String) in d.conversations.first { $0.id == id }! }
+        XCTAssertEqual(Naming.companyLine(d, conv("g1")), "Xertify")
+        XCTAssertEqual(Naming.companyLine(d, conv("r1")), "Ongoing")
+        XCTAssertEqual(Naming.companyLine(d, conv("d1")), "Ongoing", "directo 1:1 → la empresa de la otra persona")
+        XCTAssertEqual(Naming.title(d, conv("g1")), "Pagos", "el título no cambia: la búsqueda por empresa sigue en el árbol")
+        XCTAssertEqual(Naming.groupsList(d, query: "ongoing").map(\.id), ["r1"], "buscar por la empresa sigue encontrando el grupo")
     }
 
     func testBucketsPinnedUnreadRecentAndEmptyOnesHidden() throws {

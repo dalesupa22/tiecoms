@@ -183,9 +183,11 @@ final class MailUITests: XCTestCase {
         openChat(app, f)
         let plus = app.buttons["composer.attach"]
         XCTAssertTrue(plus.waitForExistence(timeout: 10))
-        plus.tap()
         let mail = app.buttons["composer.plus.mail"]
-        XCTAssertTrue(mail.waitForExistence(timeout: 5), "＋ › Correo")
+        // A veces el primer toque no abre el menú (otra ventana tapa el botón para XCTest): se reintenta.
+        for _ in 0..<3 where !mail.exists { tapC(plus); _ = mail.waitForExistence(timeout: 4) }
+        if !mail.exists { shot("correo-00-menu-mas") }
+        XCTAssertTrue(mail.exists, "＋ › Correo")
         XCTAssertTrue(app.buttons["composer.plus.whatsapp"].exists, "＋ › Mensaje de WhatsApp")
         mail.tap()
 

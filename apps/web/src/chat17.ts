@@ -148,3 +148,10 @@ export function claimEffect(store: Pick<Storage, 'getItem' | 'setItem'> | null, 
   } catch { /* sin almacenamiento: basta con la memoria de esta pestaña */ }
   return true;
 }
+
+/** Posiciones de «@gg» como palabra (no dentro de un correo ni de «@ggg»). */
+export function ggRanges(text: string): { start: number; length: number }[] {
+  const out: { start: number; length: number }[] = [];
+  for (const m of text.matchAll(/(^|[^\w@.])(@gg)(?![\w])/gi)) out.push({ start: m.index! + m[1]!.length, length: 3 });
+  return out;
+}

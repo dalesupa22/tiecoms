@@ -1629,3 +1629,17 @@ mark { background: #f5e3b3; color: inherit; border-radius: 3px; padding: 0 1px; 
 .pill.is-missed { background: #d93025; color: #fff; }
 .call-tag.is-missed { background: rgba(217, 48, 37, 0.12); color: #d93025; border-color: rgba(217, 48, 37, 0.35); }
 .rail-count.tone-missed { background: #d93025; color: #fff; }
+
+/* @gg con el degradado multicolor de la marca (web; iOS y Android lo igualan). */
+.mention.is-gg {
+  font-weight: 800; cursor: default; letter-spacing: .01em;
+  padding: 0 5px; border-radius: 7px;
+  background-image: linear-gradient(90deg, #FF5A36, #FFB23F, #FF4FA3, #7B61FF, #2F8CFF, #FF5A36),
+    linear-gradient(90deg, rgba(255, 90, 54, .12), rgba(255, 79, 163, .12), rgba(123, 97, 255, .14), rgba(47, 140, 255, .12));
+  background-size: 200% 100%, 100% 100%;
+  -webkit-background-clip: text, padding-box; background-clip: text, padding-box; color: transparent;
+  animation: gg-shimmer 6s linear infinite;
+}
+@keyframes gg-shimmer { to { background-position: -200% 0, 0 0; } }
+@media (prefers-reduced-motion: reduce) { .mention.is-gg { animation: none; } }
+.mention-mirror mark.is-gg { background: linear-gradient(90deg, rgba(255, 90, 54, .22), rgba(255, 79, 163, .2), rgba(123, 97, 255, .22), rgba(47, 140, 255, .2)); }

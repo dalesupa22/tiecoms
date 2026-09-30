@@ -120,7 +120,8 @@ final class MailUITests: XCTestCase {
         // Comentar en la tarjeta, ahí mismo.
         let inline = card.textFields["mailCard.commentField"]
         XCTAssertTrue(inline.waitForExistence(timeout: 5), "«Comenta este correo…»")
-        tapC(inline); sleep(1); app.typeText("Lo reviso hoy\n")
+        for _ in 0..<3 where !app.keyboards.firstMatch.exists { tapC(inline); _ = app.keyboards.firstMatch.waitForExistence(timeout: 3) }
+        app.typeText("Lo reviso hoy\n")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Lo reviso hoy")).firstMatch.waitForExistence(timeout: 10), "el comentario queda en la tarjeta")
         XCTAssertTrue(card.buttons["mailCard.allComments"].waitForExistence(timeout: 8), "«Ver los 3 comentarios»")
         if app.keyboards.firstMatch.exists { app.swipeDown() }
@@ -254,6 +255,7 @@ final class MailUITests: XCTestCase {
             let until = Date().addingTimeInterval(4)
             while Date() < until && nudge.exists { usleep(300_000) }
         }
+        if nudge.exists { shot("correo-10c-no-cerro") }
         XCTAssertFalse(nudge.exists, "✕ la cierra")
 
         // Tú › Correo · Gmail y Outlook: tarjetas para conectar.

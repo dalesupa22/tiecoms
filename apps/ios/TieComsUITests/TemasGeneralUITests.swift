@@ -39,7 +39,7 @@ final class TemasGeneralUITests: XCTestCase {
         let f = try fixture()
         let app = XCUIApplication()
         app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES",
-                               "-AppleLanguages", "(es)", "-AppleLocale", "es_CO", "-TCResetLanguage", "YES"]
+                               "-AppleLanguages", "(es)", "-AppleLocale", "es_CO", "-TCResetLanguage", "YES", "-TCOpenConversation", f.conversationId]
         app.launch()
         let email = app.textFields["login.email"]
         XCTAssertTrue(email.waitForExistence(timeout: 20))
@@ -49,11 +49,21 @@ final class TemasGeneralUITests: XCTestCase {
         app.buttons["login.submit"].tap()
         let notNow = app.buttons.matching(NSPredicate(format: "label IN %@", ["Not Now", "Ahora no"])).firstMatch
         if notNow.waitForExistence(timeout: 5) { notNow.tap() }
-        let row = app.buttons["conv.row.\(f.conversationId)"]
-        XCTAssertTrue(row.waitForExistence(timeout: 25))
-        let until = Date().addingTimeInterval(6)
-        while Date() < until && !row.isHittable { usleep(300_000) }
-        row.tap()
+        // -TCOpenConversation abre el chat; si no, se toca la fila (por coordenada: a veces otra ventana la tapa para XCTest).
+        let general0 = app.buttons["topic.general"]
+        let composer = app.descendants(matching: .any)["composer.field"]
+        let opened = Date().addingTimeInterval(20)
+        while Date() < opened && !general0.exists && !composer.exists { usleep(300_000) }
+        if composer.exists { _ = general0.waitForExistence(timeout: 20) }
+        if !general0.exists {
+            if app.navigationBars.buttons.count > 0 && composer.exists { app.navigationBars.buttons.element(boundBy: 0).tap() }
+            let row = app.buttons["conv.row.\(f.conversationId)"]
+            XCTAssertTrue(row.waitForExistence(timeout: 25))
+            for _ in 0..<3 where !general0.exists {
+                row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                _ = general0.waitForExistence(timeout: 6)
+            }
+        }
 
         // 1. Abre en «General» (los no leídos están repartidos): solo lo sin tema, con su número de sin leer.
         let general = app.buttons["topic.general"]

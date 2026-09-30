@@ -117,7 +117,8 @@ struct Avatar: View {
     var size: CGFloat = 40
     /// Ruta relativa de la foto (/api/v1/avatars/…); sin foto o mientras carga, iniciales.
     var photo: String? = nil
-    /// Marca de la empresa en la esquina (como la web con tamaño ≥ 30).
+    /// Se ignora: ya no se pinta la marca de la empresa en la esquina (el nombre de la empresa va escrito
+    /// junto a la persona y la letra suelta confundía). Se conserva para no tocar a quien la pasa.
     var badge = false
     /// Color propio (PersonColor) en vez del de la empresa: iniciales en blanco.
     var fill: Color? = nil
@@ -132,7 +133,7 @@ struct Avatar: View {
         self.size = size
         self.photo = person?.avatarUrl
         self.badge = badge
-        // Como la web: iniciales blancas sobre el color estable de la persona; la empresa va en la insignia.
+        // Como la web: iniciales blancas sobre el color estable de la persona.
         self.fill = person.map { PersonColor.fill($0.id) }
         self.isGG = person?.id == GG.id
     }
@@ -168,13 +169,6 @@ struct Avatar: View {
             }
         }
         .frame(width: size, height: size)
-        .overlay(alignment: .bottomTrailing) {
-            if badge, let org {
-                OrgMark(org: org, size: max(12, size * 0.42))
-                    .overlay(RoundedRectangle(cornerRadius: size * 0.42 * 0.28).stroke(Theme.surface, lineWidth: 1.5))
-                    .offset(x: size * 0.08, y: size * 0.08)
-            }
-        }
         .accessibilityHidden(true)
     }
 }

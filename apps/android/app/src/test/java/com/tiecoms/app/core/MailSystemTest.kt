@@ -71,4 +71,20 @@ class MailSystemTest {
         assertFalse(Regex("\n\\s*else -> body\n").containsMatchIn(common))
         MailSystem.KEYS.forEach { k -> assertTrue(k, common.contains("\"$k\" ->") || k == "wa.shared") }
     }
+
+    /** Responder una tarjeta: la cita nunca es JSON, ni con el cuerpo cortado a 140 de las vistas previas. */
+    @Test fun cardQuoteAndForwarded() {
+        val mail = """{"k":"mail.shared","emailId":"e1","provider":"google","subject":"Comité","from":"Jorge","forwardedFrom":"c9"}"""
+        assertEquals("✉ Comité · Jorge", MailSystem.cardQuote("system", mail))
+        assertEquals("c9", MailSystem.parse(mail)!!.forwardedFrom)
+        assertEquals("✉ (sin asunto)", MailSystem.cardQuote("system", """{"k":"mail.shared","emailId":"e1","subject":""}"""))
+        assertEquals("WhatsApp · Pedidos: Llegó el pedido", MailSystem.cardQuote("system", """{"k":"wa.shared","emailId":"w1","chatName":"Pedidos","text":"Llegó el pedido","isGroup":true}"""))
+        val cut = """{"k":"mail.shared","emailId":"e1","provider":"google","subject":"Solicitud de presentación para el comité","from":"Jorge Ramírez","comment":"Mir"""
+        assertEquals("✉ Solicitud de presentación para el comité · Jorge Ramírez", MailSystem.cardQuote("system", cut))
+        assertNull(MailSystem.cardQuote("text", mail)); assertNull(MailSystem.cardQuote("system", """{"k":"issue.created","issueId":"i"}"""))
+        assertTrue(MailSystem.isCard(MailSystem.parse(mail))); assertFalse(MailSystem.isCard(MailSystem.parse("""{"k":"mail.replied","emailId":"e1"}""")))
+        // Las citas de la app pasan por quoteText.
+        val conv = File("src/main/java/com/tiecoms/app/ui/ConversationScreen.kt").readText()
+        assertFalse(conv.contains("excerpt(quoted.body")); assertFalse(conv.contains("excerpt(replyTo.body")); assertFalse(conv.contains("excerpt(privateHere.source.body"))
+    }
 }

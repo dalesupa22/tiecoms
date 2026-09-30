@@ -1,5 +1,5 @@
 import type { BootstrapDTO, ConversationDTO, OrganizationDTO, PersonDTO, WorkspaceDTO } from '@tiecoms/contracts';
-import { activityOf, compareConversations, companyUnder } from './home-order.ts';
+import { activityOf, compareConversations, companyUnder, listedChat } from './home-order.ts';
 
 /**
  * Búsqueda rápida de Grupos, DMs y «Mensaje nuevo»: personas, grupos y chats a la vez, para escribirle a alguien
@@ -18,7 +18,7 @@ const wsOf = (d: BootstrapDTO, c: ConversationDTO) => d.workspaces.find((w) => w
 
 /** Hilo de un chat (derivada que no es sidechat): vive en la barra de su chat, no en las listas. */
 export const isThread = (c: ConversationDTO) => !!c.parentId && c.deriveKind !== 'side';
-const isChat = (c: ConversationDTO) => c.kind === 'direct' || c.kind === 'multi';
+const isChat = (c: ConversationDTO) => (c.kind === 'direct' || c.kind === 'multi') && listedChat(c);
 /** Grupo de un espacio (group o internal); los sidechats van en DMs. */
 const isGroupRow = (c: ConversationDTO) => !!c.workspaceId && (c.kind === 'group' || c.kind === 'internal') && c.deriveKind !== 'side';
 /** En espacios donde soy tercero no creo asuntos. */

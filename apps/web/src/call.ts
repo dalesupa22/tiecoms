@@ -5,7 +5,7 @@
  * - Transcripción: el SDK entrega frases parciales (subtítulos en vivo) y finales; las finales se mandan
  *   al API en lotes para guardarlas (el API deduplica, todos los participantes las reportan).
  */
-import type { AccountEvent, CallDTO, CallJoinDTO, CallKind, CallTranscriptSegmentInput, GuestCallStateDTO, GuestJoinDTO } from '@tiecoms/contracts';
+import type { AccountEvent, CallDTO, CallJoinDTO, CallKind, CallLinkDTO, CallTranscriptSegmentInput, GuestCallStateDTO, GuestJoinDTO, InstantCallDTO } from '@tiecoms/contracts';
 import { callUserId } from '@tiecoms/contracts';
 import { apiUrl, client } from './app-client.ts';
 
@@ -114,6 +114,26 @@ export async function startCall(conversationId: string, kind: CallKind) {
   await connect(await client.startCall(conversationId, kind), kind === 'video');
 }
 
+// ---------- «Nueva llamada» con enlace (docs/LLAMADAS.md › Nueva llamada) ----------
+/** Enlace para invitados de cada llamada que creé o compartí desde este navegador (el 🔗 lo reusa). */
+const links = new Map<string, CallLinkDTO>();
+export const callLinkOf = (callId: string) => links.get(callId) ?? null;
+export const rememberCallLink = (callId: string, link: CallLinkDTO) => { links.set(callId, link); };
+export const forgetCallLink = (callId: string) => { links.delete(callId); };
+
+/**
+ * Crea la llamada sin elegir chat (POST /calls/instant: conversación de reunión + llamada + enlace) y entra con el
+ * flujo normal. Primero pide micrófono y cámara: si no hay permiso, no se crea nada.
+ */
+export async function startInstantCall(input: { title?: string; video: boolean }): Promise<InstantCallDTO> {
+  await askDevices(input.video);
+  const r = await client.instantCall({ ...(input.title?.trim() ? { title: input.title.trim() } : {}), video: input.video });
+  links.set(r.call.id, r.link);
+  if (view) await hangUp();
+  await connect(await client.startCall(r.conversationId, r.call.kind), input.video);
+  return r;
+}
+
 /** Entrar desde el aviso «te están llamando». */
 export async function joinCall(callId: string, camera: boolean) {
   if (view?.call.id === callId && view.phase !== 'ended') return;
@@ -140,10 +160,10 @@ function guestCall(g: GuestCallStateDTO, prev?: CallDTO): CallDTO {
 }
 
 /** Entrar como invitado con el enlace (/llamada/:token), sin cuenta. */
-export async function joinAsGuest(token: string, name: string, camera: boolean) {
+export async function joinAsGuest(token: string, name: string, email: string, camera: boolean) {
   if (view && view.phase !== 'ended') return;
   await askDevices(camera);
-  const j = await publicPost<GuestJoinDTO>(`/call-links/${encodeURIComponent(token)}/join`, { name });
+  const j = await publicPost<GuestJoinDTO>(`/call-links/${encodeURIComponent(token)}/join`, { name, email });
   guest = { id: j.guestId, secret: j.secret };
   await connect({ call: guestCall(j.call), meeting: j.meeting, attendee: j.attendee } as CallJoinDTO, camera);
 }

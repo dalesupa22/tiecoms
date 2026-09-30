@@ -5,7 +5,7 @@ import {
   type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type TopicColor, type TopicDTO, type UserDTO, normalizeEmoji,
-  type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallLinkDTO, type SignupConfirmPreviewDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentDTO, type CallTranscriptSegmentInput,
+  type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallLinkDTO, type InstantCallDTO, type SignupConfirmPreviewDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentDTO, type CallTranscriptSegmentInput,
   type ActiveCallDTO, type MessageRefDTO, type ChatSearchPageDTO, type ViewOnceOpenDTO, type EventCommentDTO, type ViewOnceState,
   type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO, type IntegrationDTO, type IntegrationSecretDTO,
   type StorageUsageDTO, type VideoPlayDTO,
@@ -774,6 +774,15 @@ export class TieComsClient {
     const r = await this.request<{ call: CallDTO }>(`/calls/${callId}/invite`, { method: 'POST', json: { userIds } });
     this.putCall(r.call);
     return r.call;
+  }
+  /**
+   * «Nueva llamada» (POST /calls/instant): conversación de reunión, llamada ya iniciada y enlace para invitados.
+   * Después se entra con startCall(conversationId) como a cualquier llamada.
+   */
+  async instantCall(input: { title?: string; video?: boolean }) {
+    const r = await this.request<InstantCallDTO>('/calls/instant', { method: 'POST', json: input });
+    this.putCall(r.call);
+    return r;
   }
   /** Enlace para que terceros entren sin cuenta (vale mientras la llamada siga abierta). */
   async createCallLink(callId: string) { return this.request<CallLinkDTO>(`/calls/${callId}/link`, { method: 'POST', json: {} }); }

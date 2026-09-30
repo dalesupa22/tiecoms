@@ -37,7 +37,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
       [userId],
     ),
     pool.query(
-      `SELECT c.id, c.workspace_id, c.kind, c.level, c.name, c.internal_org_id, c.last_message_seq, c.last_event_seq, c.last_message_at,
+      `SELECT c.id, c.workspace_id, c.kind, c.level, c.name, c.internal_org_id, c.is_meeting, c.last_message_seq, c.last_event_seq, c.last_message_at,
               c.parent_conversation_id, c.parent_message_id, c.side_issue_id, (SELECT pm.seq FROM messages pm WHERE pm.id = c.parent_message_id) AS parent_message_seq, c.derive_kind, c.derive_reason, c.returned_at, c.avatar_file_id,
               (SELECT count(*) FROM issues i WHERE i.conversation_id = c.id AND i.visibility = 'all' AND i.status NOT IN ('done','cancelled'))::int AS open_issues,
               (SELECT count(*) FROM message_mentions mm WHERE mm.user_id = m.user_id AND mm.conversation_id = c.id
@@ -63,6 +63,11 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
          LEFT JOIN conversation_prefs cp ON cp.conversation_id = c.id AND cp.user_id = m.user_id
         WHERE m.user_id = $1 AND m.removed_at IS NULL
           AND (c.workspace_id IS NULL OR (wm.user_id IS NOT NULL AND ${ACTIVE_WM}))
+          -- «Nueva llamada» (docs/LLAMADAS.md › Nueva llamada): su conversación no ensucia la bandeja. Sale solo con
+          -- la llamada en curso o si alguien escribió en ella.
+          AND (NOT c.is_meeting
+               OR EXISTS (SELECT 1 FROM calls k WHERE k.conversation_id = c.id AND k.ended_at IS NULL)
+               OR EXISTS (SELECT 1 FROM messages hm WHERE hm.conversation_id = c.id AND hm.kind = 'text' AND hm.deleted_at IS NULL))
         ORDER BY c.last_message_at DESC NULLS LAST`,
       [userId],
     ),
@@ -124,6 +129,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
       ...(r.link_previews ? { linkPreviews: r.link_previews } : {}),
       ...(r.sound ? { sound: r.sound } : {}),
       linkCount: r.link_count ?? 0,
+      ...(r.is_meeting ? { meeting: true } : {}),
       lastHumanPreview: r.human ? {
         messageId: r.human.id, seq: Number(r.human.seq), authorId: r.human.authorId, body: r.human.body ?? '',
         attachments: summarize(r.human.attachments), createdAt: new Date(r.human.createdAt).toISOString(),

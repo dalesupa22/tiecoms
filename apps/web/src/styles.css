@@ -1923,3 +1923,30 @@ body.is-resizing-row, body.is-resizing-row * { cursor: row-resize !important; us
 :root[data-theme="dark"] .stat.dark .eyebrow { color: var(--accent-ink); }
 /* Diálogos y paneles flotantes en oscuro: un escalón más claro que el fondo, con borde, para que se separen. */
 :root[data-theme="dark"] .modal, :root[data-theme="dark"] .mail-drawer { background: var(--card); border: 1px solid var(--line); }
+
+/* ---------- «Nueva llamada» y «Comparte el enlace» (docs/LLAMADAS.md › Nueva llamada) ---------- */
+.calls-new-cta { display: flex; align-items: center; gap: 14px; width: 100%; margin: 4px 0 18px; padding: 16px 18px; border-radius: 16px; border: 1px solid var(--accent-fill); background: var(--accent-fill); color: var(--on-accent); text-align: left; cursor: pointer; }
+.calls-new-cta:hover { filter: brightness(1.06); }
+.calls-new-cta .calls-new-ico { width: 44px; height: 44px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 22px; background: rgba(255, 255, 255, 0.18); }
+.calls-new-cta b { display: block; font-size: 17px; }
+.calls-new-cta small { display: block; opacity: 0.9; font-size: 13px; margin-top: 2px; }
+.newcall-kind { width: 100%; }
+.newcall-kind button { padding: 10px 8px; font-size: 14px; white-space: nowrap; }
+.share-link-url { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.share-link-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-top: 10px; }
+.share-link-actions .btn { justify-content: center; text-decoration: none; }
+.share-link-actions .btn.is-disabled { opacity: 0.5; pointer-events: none; }
+.share-link-text { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--paper-3); border: 1px solid var(--line); }
+.call-guests { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 12px; border: 1px solid rgba(127, 127, 127, 0.3); }
+.call-guests .eyebrow { color: inherit; opacity: 0.7; }
+.call-guest-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13px; }
+.call-guest-row .call-guest-mail { opacity: 0.75; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guest-form-help { font-size: 12px; color: var(--muted); margin-top: -2px; }
+.guest-form-bad { font-size: 12px; color: var(--danger); margin-top: -2px; }
+.input.is-bad { border-color: var(--danger); }
+.guest-ended { display: flex; flex-direction: column; gap: 10px; }
+.guest-signup { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 14px; background: var(--paper-3); border: 1px solid var(--line); }
+.guest-like { position: fixed; right: 16px; bottom: calc(84px + var(--safe-b)); display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 12px; border-radius: 99px; font-size: 13px; background: rgba(255, 255, 255, 0.1); color: var(--call-fg); border: 1px solid rgba(255, 255, 255, 0.16); }
+.guest-like a { color: inherit; font-weight: 600; text-decoration: none; }
+.guest-like button { border: 0; background: transparent; color: inherit; opacity: 0.7; cursor: pointer; padding: 2px 6px; }
+@media (max-width: 560px) { .guest-like { left: 16px; right: 16px; justify-content: space-between; } }

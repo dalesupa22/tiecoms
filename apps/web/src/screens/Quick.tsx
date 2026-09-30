@@ -12,6 +12,7 @@ import { NewChatDialog } from './Chats.tsx';
 import { ConvItem, JoinWithCodeDialog, openCreateGroup } from './Groups.tsx';
 import { NewIssueDialog } from './Issues.tsx';
 import { newEvent } from './Calendar.tsx';
+import { openNewCall } from './NewCall.tsx';
 
 // ---------- Barra de arriba: ✎ Mensaje nuevo · ＋ Crear (docs/GRUPOS.md › Barra de arriba y búsqueda rápida) ----------
 export const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -27,6 +28,7 @@ export function createMenuItems(): MenuItem[] {
     { label: t('issue.newTitle'), icon: '◆', disabled: !canIssue,
       onSelect: () => openDialog((close) => <NewIssueDialog onClose={close} onCreated={(i) => navigate(`/c/${i.conversationId}?issue=${i.id}`)} />) },
     { label: t('cal.newTitle'), icon: '📅', onSelect: () => newEvent() },
+    ...(d?.features?.calls ? [{ label: t('newcall.cta'), icon: '🔗', onSelect: () => openNewCall() }] : []),
     ...(d?.features?.mail ? [{ label: t('mail.bringOne'), icon: '✉', onSelect: () => openDialog((close) => <MailPickDialog onClose={close} />) }] : []),
     { divider: true },
     { label: t('join.title'), icon: '⌗', onSelect: () => openDialog((close) => <JoinWithCodeDialog onClose={close} />) },

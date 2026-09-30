@@ -8,6 +8,11 @@ export const activityOf = (c: ConversationDTO) => c.lastHumanPreview?.createdAt 
 /** Con no leídos (no silenciada) cuenta como pendiente; silenciada con no leídos cuenta como leída. */
 export const pendingOf = (c: ConversationDTO) => (c.unread > 0 && (!isMuted(c) || (c.unreadMentions ?? 0) > 0) ? c.unread : 0);
 const hasMention = (c: ConversationDTO) => (c.unreadMentions ?? 0) > 0;
+/**
+ * «Nueva llamada» (docs/LLAMADAS.md › Nueva llamada): su conversación de reunión no sale en las listas hasta que
+ * alguien escribe en ella (solo trae avisos de la llamada). La llamada en curso se ve en el panel y en Llamadas.
+ */
+export const listedChat = (c: ConversationDTO) => !(c.meeting && !c.lastHumanPreview);
 
 /**
  * Pendientes del árbol (docs/TANDA-LECTURA-REUNIONES.md): el grupo más sus derivadas (hilos, ramas,

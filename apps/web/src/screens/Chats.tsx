@@ -10,6 +10,7 @@ import { navigate } from '../router.ts';
 import { directOtherId, Avatar, ConvAvatar, Modal, OrgMark, conversationTitle, orgById, personById } from '../ui.tsx';
 import { companyLine, destinationLabel, peopleByOrg, recentPeopleIds, searchGroups } from '../quick-search.ts';
 import { openDirect } from './Quick.tsx';
+import { openNewCall } from './NewCall.tsx';
 import { Formatted } from '../fmt.tsx';
 
 // ---------- Enlaces clicables en el texto ----------
@@ -195,6 +196,7 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
       </div>
       {error && <div className="error">{error}</div>}
       <div className="modal-actions">
+        {d.features?.calls && !picked.length && <button className="btn ghost small" onClick={() => { onClose(); openNewCall(); }} title={t('newcall.railHint')}>🔗 {t('newcall.cta')}</button>}
         <button className="btn ghost small" style={{ marginRight: 'auto' }} onClick={() => setMode('space')}>{t('chat.mode.space')}</button>
         {picked.length ? (
           <button className="btn primary" disabled={busy} onClick={() => void create()}>

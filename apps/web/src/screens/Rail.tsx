@@ -4,9 +4,10 @@ import { client, useClient } from '../app-client.ts';
 import { t } from '../i18n.ts';
 import { openMenuAt, type MenuItem } from '../menu.tsx';
 import { asset, navigate, type Route } from '../router.ts';
-import { pendingOf } from '../home-order.ts';
+import { listedChat, pendingOf } from '../home-order.ts';
 import { openAccountMenu } from './Profile.tsx';
 import { MeAvatar } from './Silence.tsx';
+import { openNewCall } from './NewCall.tsx';
 
 /**
  * Riel de la web de escritorio (opción A, Danny 29-sep-2026): la barra lateral queda para los chats y las
@@ -29,7 +30,7 @@ const modeStore = (() => {
 export const useSideMode = () => useSyncExternalStore(modeStore.subscribe, modeStore.get);
 export const setSideMode = modeStore.set;
 
-export const isDmRow = (c: ConversationDTO) => (c.kind === 'direct' || c.kind === 'multi') && !(c.parentId && c.deriveKind !== 'side');
+export const isDmRow = (c: ConversationDTO) => (c.kind === 'direct' || c.kind === 'multi') && !(c.parentId && c.deriveKind !== 'side') && listedChat(c);
 const isGroupRow = (c: ConversationDTO) => !!c.workspaceId && c.deriveKind !== 'side';
 const sum = (d: BootstrapDTO, f: (c: ConversationDTO) => boolean) => d.conversations.filter(f).reduce((n, c) => n + pendingOf(c), 0);
 
@@ -71,6 +72,7 @@ const ICONS: Record<string, ReactNode> = {
   tasks: <><path d="M4 6.5l1.8 1.8L9 5M4 16.5l1.8 1.8L9 15" /><path d="M12 7h8M12 17h8" /></>,
   trazo: <><circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" /><path d="M6 7v10M18 9c0 5-12 3-12 8" /></>,
   calls: <path d="M6.6 3.5h2.3l1.4 4-2 1.3a11 11 0 0 0 6.9 6.9l1.3-2 4 1.4v2.3a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2z" />,
+  newcall: <><path d="M5.6 4.5h2.1l1.3 3.6-1.8 1.2a10 10 0 0 0 6.2 6.2l1.2-1.8 3.6 1.3v2.1a1.8 1.8 0 0 1-2 1.8A15 15 0 0 1 3.8 6.5a1.8 1.8 0 0 1 1.8-2z" /><path d="M18 3v6M15 6h6" /></>,
   more: <><circle cx="5.5" cy="12" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="18.5" cy="12" r="1.2" /></>,
 };
 const Icon = ({ name }: { name: string }) => (
@@ -154,6 +156,7 @@ export function Rail({ route }: { route: Route }) {
       <RailItem icon="tasks" label={t('nav.issues')} on={route.name === 'issues'} dot={due} onClick={() => navigate('/asuntos')} />
       <RailItem icon="trazo" label={t('nav.trazo')} on={route.name === 'trazo'} onClick={() => navigate('/trazo')} />
       {callsOn && <RailItem icon="calls" label={missed > 0 ? t('calls.missedN', { n: missed }) : t('nav.calls')} on={route.name === 'calls'} count={missed} tone={missed > 0 ? 'missed' : 'call'} dot={anyCall || inCall} onClick={() => navigate('/llamadas')} />}
+      {callsOn && <RailItem icon="newcall" label={t('newcall.cta')} on={false} onClick={openNewCall} />}
       <span className="grow" />
       <RailItem icon="more" label={t('nav.more')} on={moreOn} onClick={more} />
       <button className="rail-me" aria-haspopup="menu" title={t('profile.menu')} aria-label={t('profile.menu')} onClick={(e) => openAccountMenu(e.currentTarget)}>

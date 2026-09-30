@@ -19,7 +19,7 @@ import { StackedAvatars } from './Chats.tsx';
 import { companyLine } from '../quick-search.ts';
 import { QuickActions, QuickSearchField, QuickSearchSections, openNewMessage } from './Quick.tsx';
 import { matchesTab, type HomeTab } from './Shell.tsx';
-import { activityOf, compareConversations, pendingOf, treeOnlyPending, withSeparators, withTree } from '../home-order.ts';
+import { activityOf, compareConversations, listedChat, pendingOf, treeOnlyPending, withSeparators, withTree } from '../home-order.ts';
 
 // ---------- Árbol de Grupos (mismas reglas en web, iOS y Android: docs/GRUPOS.md) ----------
 /** label: el nombre a mostrar; si dos grupos de la misma empresa se llaman igual, lleva delante el espacio de donde viene. */
@@ -115,7 +115,7 @@ export function buildGroupTree(d: BootstrapDTO, issues: Record<string, IssueDTO>
 
 /** DMs: directos y chats grupales, incluidos los sidechats (con su burbuja). Los hilos de un chat viven en su barra. */
 export function dmConversations(d: BootstrapDTO, tab: HomeTab = 'all') {
-  return d.conversations.filter((c) => (c.kind === 'direct' || c.kind === 'multi') && !(c.parentId && c.deriveKind !== 'side') && matchesTab(c, tab)).sort(compareConversations);
+  return d.conversations.filter((c) => (c.kind === 'direct' || c.kind === 'multi') && !(c.parentId && c.deriveKind !== 'side') && listedChat(c) && matchesTab(c, tab)).sort(compareConversations);
 }
 
 // ---------- Plegado (por dispositivo) ----------

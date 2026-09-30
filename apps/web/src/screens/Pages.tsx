@@ -19,7 +19,7 @@ import { THEME_PREFS, setThemePreference, useThemePreference } from '../theme.ts
 import { formatBytes } from '../video.ts';
 import { askNotifications, conversationMenu, dndMenu, dndText, mutedText, openDialog, personMenu } from '../actions.tsx';
 import { menuProps, openMenuAt, toast } from '../menu.tsx';
-import { isMuted } from '../home-order.ts';
+import { isMuted, listedChat } from '../home-order.ts';
 import { DEFAULT_RINGTONE, DEFAULT_SOUND, playMessageSound, previewRingtone, setSoundEnabled, soundEnabled, subscribeSound } from '../sound.ts';
 import { MESSAGE_SOUNDS, RINGTONES } from '@tiecoms/contracts';
 import { SignOutButton, groupWorkspaces } from './Shell.tsx';
@@ -59,9 +59,9 @@ export function TodayScreen() {
   const visible = new Set(d.conversations.map((c) => c.id));
   const mine = Object.values(issues).filter((i) => i.ownerId === d.me.id && !isClosed(i) && (!i.conversationId || visible.has(i.conversationId)))
     .sort((a, b) => (a.dueDate ?? '9').localeCompare(b.dueDate ?? '9'));
-  const unreadConvs = d.conversations.filter((c) => c.unread > 0);
+  const unreadConvs = d.conversations.filter((c) => c.unread > 0 && listedChat(c));
   const unread = unreadConvs.reduce((n, c) => n + c.unread, 0);
-  const recent = d.conversations.filter((c) => c.lastMessageAt).slice(0, 6);
+  const recent = d.conversations.filter((c) => c.lastMessageAt && listedChat(c)).slice(0, 6);
   const orgsCount = new Set(d.workspaces.flatMap((w) => w.organizationIds)).size;
   const firstName = d.me.name.split(' ')[0];
   const rawDate = new Date().toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long' });
@@ -119,7 +119,7 @@ export function InboxScreen() {
   const d = useClient((s) => s.data)!;
   const [filter, setFilter] = useState<'all' | 'unread' | 'direct'>('all');
   const [q, setQ] = useState('');
-  const list = d.conversations.filter((c) => (filter === 'unread' ? c.unread > 0 : filter === 'direct' ? c.kind === 'direct' || c.kind === 'multi' : true))
+  const list = d.conversations.filter(listedChat).filter((c) => (filter === 'unread' ? c.unread > 0 : filter === 'direct' ? c.kind === 'direct' || c.kind === 'multi' : true))
     .filter((c) => !q || conversationTitle(d, c).toLowerCase().includes(q.toLowerCase()));
   const label = { all: t('inbox.all'), unread: t('inbox.unread'), direct: t('inbox.directs') };
   return (

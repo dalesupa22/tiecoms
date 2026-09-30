@@ -155,7 +155,11 @@ export interface CallDTO {
   /** Invitados por enlace que están dentro ahora (sin cuenta). En Chime su externalUserId es "guest:{id}". */
   guests?: CallGuestDTO[];
 }
-export interface CallGuestDTO { id: string; name: string }
+/**
+ * Invitado por enlace dentro de la llamada. email (desde el 30-sep-2026, migración 047): solo llega a los de chaggu
+ * (CallDTO); en el API público (GuestCallStateDTO) nunca va. Invitados de antes del correo: sin email.
+ */
+export interface CallGuestDTO { id: string; name: string; email?: string }
 /** externalUserId de Chime de un invitado por enlace. */
 export const guestExternalId = (guestId: string) => `guest:${guestId}`;
 export const isGuestExternalId = (id: string | null | undefined) => !!id && id.startsWith('guest:');
@@ -163,7 +167,21 @@ export const isGuestExternalId = (id: string | null | undefined) => !!id && id.s
 export interface CallLinkDTO { url: string; token: string }
 /** GET /api/v1/call-links/:token (público): qué llamada es, antes de pedir el nombre. */
 export interface GuestCallPreviewDTO { title: string | null; hostName: string; orgName: string | null; kind: CallKind; active: boolean }
-export const GuestJoinInput = z.object({ name: z.string().trim().min(1).max(60) });
+/**
+ * POST /call-links/:token/join. Desde el 30-sep-2026 el correo es obligatorio (400 email_required si falta,
+ * 400 invalid_email si no tiene forma de correo); se guarda en minúsculas. La validación con esos códigos la hace
+ * el servidor (guestJoinInput en calls.ts); este esquema es la forma para los clientes.
+ */
+export const GuestJoinInput = z.object({ name: z.string().trim().min(1).max(60), email: z.string().trim().max(254) });
+/** Forma de un correo (la misma en el servidor y en la validación en vivo de la web). */
+export const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+/**
+ * POST /calls/instant: «Nueva llamada» sin elegir chat. Crea una conversación de reunión (ConversationDTO.meeting),
+ * la llamada ya iniciada con quien la pide dentro y el enlace para invitados. title ≤ 80; sin título, «Llamada de <nombre>».
+ * Después el cliente entra con el flujo normal: POST /conversations/:conversationId/call.
+ */
+export const InstantCallInput = z.object({ title: z.string().trim().max(80).optional(), video: z.boolean().optional() });
+export interface InstantCallDTO { call: CallDTO; conversationId: string; link: CallLinkDTO }
 /** Lo que ve el invitado de la llamada (sin ids de la conversación ni del resto de chaggu). */
 export interface GuestCallStateDTO {
   callId: string; kind: CallKind; active: boolean; transcribing: boolean;
@@ -201,6 +219,10 @@ export interface CallHistoryItemDTO {
   hasSummary: boolean;
   /** Me sonó, no la rechacé y no entré (llamada perdida). */
   missed?: boolean;
+  /** Nombre de la conversación (p. ej. de una «Nueva llamada», que no sale en la bandeja). Clientes viejos: ausente. */
+  title?: string | null;
+  /** La llamada fue una «Nueva llamada» con enlace (conversación de reunión). */
+  meeting?: boolean;
 }
 export const CallHistoryQuery = z.object({ before: z.iso.datetime({ offset: true }).optional(), limit: z.coerce.number().int().min(1).max(100).default(30) });
 /** Compartir el resumen o la transcripción en otra conversación (como mensaje mío). */
@@ -415,6 +437,11 @@ export interface ConversationDTO {
   sound?: SoundChoice | null;
   /** Enlaces compartidos en la conversación (visibles para mí). Clientes viejos: ausente. */
   linkCount?: number;
+  /**
+   * Conversación propia de una «Nueva llamada» (POST /calls/instant). Solo llega en el bootstrap mientras tenga la
+   * llamada en curso o algún mensaje de una persona; los clientes no la muestran en Recientes sin mensajes.
+   */
+  meeting?: boolean;
 }
 
 /** Una entrada de la bandeja «Menciones» (GET /mentions). */

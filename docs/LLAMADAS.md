@@ -172,7 +172,7 @@ Pedido de Danny. César lo llamó, contestó en el iPhone y el PC siguió sonand
 - El invitado abre `/llamada/<token>` sin cuenta, escribe su nombre y entra con voz o video; puede silenciarse, prender la cámara y compartir pantalla.
 - API público (sin sesión, con límite de peticiones):
   - `GET /call-links/:token`: título (no en chats directos), quién invita y su empresa, y si hay alguien dentro. No devuelve ids de la conversación.
-  - `POST /call-links/:token/join {name}`: crea el attendee `guest:{id}` y devuelve la reunión, el `guestId` y un `secret`.
+  - `POST /call-links/:token/join {name, email}`: crea el attendee `guest:{id}` y devuelve la reunión, el `guestId` y un `secret`. Desde la migración 047 el correo es obligatorio (ver «Nueva llamada»).
   - `POST /call-guests/:id/heartbeat {secret}` cada 15 s (también trae quién está: el invitado no tiene socket) y `/leave`.
 - Reglas:
   - Del token y del secreto solo se guarda el hash (`call_links`, `call_guests`).
@@ -180,5 +180,45 @@ Pedido de Danny. César lo llamó, contestó en el iPhone y el PC siguió sonand
   - Los invitados no sostienen la llamada: cuando sale el último de chaggu, termina y se les corta.
   - A los 45 s sin latir, el worker los saca.
   - No transcriben su audio (la transcripción con Groq pide sesión).
-- `CallDTO.guests` lleva los invitados que están dentro, para que todos vean su nombre.
+- `CallDTO.guests` lleva los invitados que están dentro, para que todos vean su nombre (y, desde la 047, su correo).
 - Pruebas: `test/calls-guests.test.ts`.
+
+## Nueva llamada con enlace (desde el 30-sep-2026, migración 047)
+
+Pedido de Danny: en Llamadas, un botón «Nueva llamada» que de una vez crea el enlace para compartirlo con quien sea, aunque no tenga cuenta ni app (adopción). El invitado solo pone nombre y correo. El enlace dura lo que dure la llamada.
+
+### Contrato (web, iOS y Android)
+
+- `POST /api/v1/calls/instant` con `{ "title"?: string (≤ 80), "video"?: boolean }` → **201**
+  `{ "call": CallDTO, "conversationId": string, "link": { "url": string, "token": string } }`.
+  - `call` viene ya iniciada (`endedAt: null`, `kind` `video` si `video: true`, si no `audio`) y con quien la pide en `activeUserIds`; `myDevices` viene vacío.
+  - El cliente entra después con el flujo normal: `POST /conversations/:conversationId/call {kind, deviceKey}` (encuentra la misma llamada, no crea otra).
+  - Título de más de 80 caracteres: 400 (`bad_request`). Llamadas apagadas: 503 `calls_disabled`.
+- `POST /api/v1/call-links/:token/join` con `{ "name": string, "email": string }`:
+  - sin correo (o vacío): **400 `email_required`**; con forma inválida: **400 `invalid_email`**; sin nombre: 400 `name_required`;
+  - el correo se guarda en minúsculas en `call_guests.email`; mismo límite de peticiones (6 por minuto por IP);
+  - llamada terminada: **410 `call_ended`**; enlace quitado con la llamada abierta: 410 `link_revoked` (como antes);
+  - forma del correo: `EMAIL_SHAPE` de `@tiecoms/contracts` (`algo@dominio.tld`, TLD de 2+ letras, sin espacios, ≤ 254).
+- `CallDTO.guests[]` = `{ id, name, email? }`. El correo solo va en el `CallDTO` (lo reciben los de chaggu que ven la llamada: los de la conversación y los agregados). **Nunca** en el API público: `GuestJoinDTO.call.guests` y el latido del invitado llevan solo `{ id, name }`.
+- `GET /api/v1/call-links/:token`: igual que antes; si la llamada ya terminó, **410 `call_ended`** (antes respondía 200 con `active: false`). Un enlace quitado con la llamada abierta sigue respondiendo 200 con `active: false`.
+- `CallHistoryItemDTO` suma `title` (nombre de la conversación) y `meeting: true` en las «Nueva llamada»: la conversación de reunión no está en la bandeja, así el historial puede nombrarla. Un cliente que no los conozca ve «Llamada».
+- `ConversationDTO.meeting: true` marca la conversación de reunión cuando sí llega en el bootstrap.
+
+### La conversación de la reunión (decisión)
+
+- Una llamada necesita una conversación. `/calls/instant` crea una propia: kind `multi`, fuera de los espacios, con quien la pide como único miembro y admin, nombre = título o «Llamada de <nombre>», y `conversations.is_meeting = true` (migración 047).
+- **No ensucia la bandeja:**
+  - el bootstrap solo la manda mientras tenga la llamada en curso o si alguien escribió un mensaje de texto en ella; así los clientes viejos (1.7.x en tiendas) tampoco la ven después de colgar;
+  - la web la oculta de todas las listas (DMs, Todo, Recientes, búsqueda de chats, contadores del riel) mientras no tenga un mensaje de una persona (`listedChat` en `home-order.ts`), también durante la llamada: la llamada se ve en el panel y en «En curso ahora». Los móviles deben filtrar igual: `meeting && !lastHumanPreview` → no se lista.
+- No le suena a nadie (no hay más miembros). Se puede sumar gente de chaggu con «＋ Agregar» (les suena; entran a la llamada sin entrar al chat).
+- Si alguien escribe en ella, aparece como un chat más (con `meeting: true`).
+- Quien la pide queda dentro con una fila provisional (`device_key = 'instant'`, sin attendee) hasta que su cliente entra; al entrar desde un dispositivo la fila se borra (no aparece en `myDevices`). Si nunca entra, el worker la saca a los 75 s, la llamada se cierra y el enlace muere.
+
+### Web y escritorio
+
+- Llamadas: tarjeta grande «Nueva llamada» arriba; «Llamar a un chat» (📞/🎥) queda como antes. También en el riel (ícono de teléfono con ＋), en «＋ Crear» y en el diálogo ⌘K («🔗 Nueva llamada»).
+- Diálogo: título opcional y Voz/Video (recuerda la última elección; por defecto Video). Enter o «Empezar llamada» = un clic. Pide micrófono/cámara antes de crear nada.
+- Al crearla entra y abre «Comparte el enlace»: enlace, Copiar enlace, WhatsApp (`https://wa.me/?text=`), Correo (`mailto:`), «Más…» (`navigator.share`, si existe) y el texto sugerido «Únete a mi llamada en chaggu: <url>. Solo necesitas tu nombre y correo.» con Copiar texto. 🔗 en la barra de la llamada vuelve a abrir la hoja con el mismo enlace (o crea uno si esta llamada no tiene uno de este navegador).
+- En el panel, «Invitados por enlace» con nombre y correo de cada invitado.
+- `/llamada/<token>`: nombre y correo con validación en vivo, «Lo usamos solo para identificarte en esta llamada», aviso de privacidad breve; si la llamada terminó (410), «Esta llamada ya terminó» con «Crea tu cuenta gratis en chaggu» (→ `/signup`). Dentro de la llamada, «¿Te gustó? Crea tu cuenta ›» discreto y se puede cerrar.
+- Pruebas: `apps/api/test/calls-guests.test.ts` (API) y `apps/web/test/call-link.test.ts` (texto, WhatsApp/correo, correo del invitado, bandeja limpia).

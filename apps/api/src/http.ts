@@ -12,7 +12,7 @@ import {
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
   ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput, ForwardSharedInput,
-  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, GuestJoinInput, GuestSecretInput, SignupConfirmInput, ReorderTopicsInput,
+  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, InstantCallInput, GuestSecretInput, SignupConfirmInput, ReorderTopicsInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -524,6 +524,11 @@ export async function buildHttp() {
       const b = StartCallInput.parse(req.body ?? {});
       return calls.startOrJoin(req.userId, z.uuid().parse(req.params.id), b.kind, calls.deviceOf(req.sessionId, b.deviceKey));
     });
+    // «Nueva llamada»: conversación de reunión + llamada ya iniciada + enlace para invitados (docs/LLAMADAS.md › Nueva llamada).
+    priv.post('/api/v1/calls/instant', callLimit, async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      return reply.status(201).send(await calls.instantCall(req.userId, InstantCallInput.parse(req.body ?? {})));
+    });
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/join', callLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.join(req.userId, z.uuid().parse(req.params.id), calls.deviceOf(req.sessionId, CallDeviceInput.parse(req.body ?? {}).deviceKey)); });
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/link', callLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.createLink(req.userId, z.uuid().parse(req.params.id)); });
     priv.delete<{ Params: { id: string } }>('/api/v1/calls/:id/link', callLimit, async (req) => calls.revokeLinks(req.userId, z.uuid().parse(req.params.id)));
@@ -725,7 +730,7 @@ export async function buildHttp() {
   app.get<{ Params: { token: string } }>('/api/v1/call-links/:token', guestLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.previewLink(req.params.token); });
   app.post<{ Params: { token: string } }>('/api/v1/call-links/:token/join', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req, reply) => {
     reply.header('cache-control', 'no-store');
-    return calls.guestJoin(req.params.token, GuestJoinInput.parse(req.body).name);
+    return calls.guestJoin(req.params.token, calls.guestJoinInput(req.body));
   });
   app.post<{ Params: { id: string } }>('/api/v1/call-guests/:id/heartbeat', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) =>
     calls.guestHeartbeat(z.uuid().parse(req.params.id), GuestSecretInput.parse(req.body).secret));

@@ -14,8 +14,8 @@ import {
   ChimeSDKMeetingsClient, CreateAttendeeCommand, CreateMeetingCommand, DeleteMeetingCommand, GetMeetingCommand,
   StartMeetingTranscriptionCommand, StopMeetingTranscriptionCommand,
 } from '@aws-sdk/client-chime-sdk-meetings';
-import type { ActiveCallDTO, CallDTO, CallHistoryItemDTO, CallJoinDTO, CallKind, CallLinkDTO, CallTranscriptDTO, CallTranscriptSegmentDTO, GuestCallPreviewDTO, GuestCallStateDTO, GuestJoinDTO } from '@tiecoms/contracts';
-import { LEGACY_DEVICE_KEY, callUserId, guestExternalId } from '@tiecoms/contracts';
+import type { ActiveCallDTO, CallDTO, CallHistoryItemDTO, CallJoinDTO, CallKind, CallLinkDTO, CallTranscriptDTO, CallTranscriptSegmentDTO, GuestCallPreviewDTO, GuestCallStateDTO, GuestJoinDTO, InstantCallDTO } from '@tiecoms/contracts';
+import { EMAIL_SHAPE, LEGACY_DEVICE_KEY, callUserId, guestExternalId } from '@tiecoms/contracts';
 import type { z } from 'zod';
 import type { CallTranscriptInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
@@ -25,7 +25,7 @@ import { pool, tx, type Db, type Tx, enqueueOutbox } from '../db.ts';
 import { ApiError, badRequest, notFound } from '../errors.ts';
 import { appendEvent, appendMessage, sendMessage } from './messages.ts';
 import { getSummarizer } from './voice-providers.ts';
-import { reachable } from './workspaces.ts';
+import { reachable, scopeChanged } from './workspaces.ts';
 import { sttConfigured, transcribeChunk } from './call-stt.ts';
 
 /** CALLS_STT=chime vuelve a Amazon Transcribe dentro de Chime; por defecto, Groq Whisper por pedazos. */
@@ -137,6 +137,12 @@ const getProvider = () => (provider ??= process.env.CALLS_PROVIDER === 'fake' ? 
 export interface CallDevice { key: string; sessionId: string }
 export const deviceOf = (sessionId: string, key?: string | null): CallDevice => ({ key: key || LEGACY_DEVICE_KEY, sessionId });
 const externalUserIdOf = (userId: string, key: string) => (key === LEGACY_DEVICE_KEY ? userId : `${userId}#${key}`);
+/**
+ * «Nueva llamada» (POST /calls/instant): quien la pide queda dentro con esta fila provisional, sin
+ * attendee, hasta que su cliente entra con el flujo normal (y la fila se borra). Si no entra, el worker la saca a
+ * los 75 s y la llamada se cierra (el enlace muere con ella). No aparece en myDevices.
+ */
+const INSTANT_DEVICE_KEY = 'instant';
 
 // ---------- Quién ve la llamada (huddle) ----------
 /**
@@ -182,7 +188,7 @@ async function callDTO(db: Db, id: string, viewerId?: string): Promise<CallDTO> 
             COALESCE((SELECT array_agg(x.user_id ORDER BY x.first) FROM (SELECT p.user_id, min(p.first_joined_at) AS first FROM call_participants p
                        WHERE p.call_id = c.id AND p.left_at IS NULL GROUP BY p.user_id) x), '{}') AS active,
             CASE WHEN $2::uuid IS NULL THEN NULL ELSE COALESCE((SELECT jsonb_agg(jsonb_build_object('deviceKey', p.device_key, 'platform', COALESCE(p.platform, 'web'), 'label', COALESCE(p.label, ''))
-                       ORDER BY p.joined_at) FROM call_participants p WHERE p.call_id = c.id AND p.user_id = $2 AND p.left_at IS NULL), '[]'::jsonb) END AS my_devices,
+                       ORDER BY p.joined_at) FROM call_participants p WHERE p.call_id = c.id AND p.user_id = $2 AND p.left_at IS NULL AND p.device_key <> '${INSTANT_DEVICE_KEY}'), '[]'::jsonb) END AS my_devices,
             EXISTS (SELECT 1 FROM call_transcript_segments s WHERE s.call_id = c.id) AS has_transcript,
             ARRAY(SELECT i.user_id FROM call_invites i WHERE i.call_id = c.id ORDER BY i.created_at) AS invited,
             (SELECT jsonb_agg(jsonb_build_object('userId', g.user_id, 'at', to_char(g.rung_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
@@ -191,7 +197,7 @@ async function callDTO(db: Db, id: string, viewerId?: string): Promise<CallDTO> 
             (SELECT jsonb_object_agg(u.id, u.name) FROM users u
               WHERE u.id IN (SELECT p.user_id FROM call_participants p WHERE p.call_id = c.id UNION SELECT i.user_id FROM call_invites i WHERE i.call_id = c.id
                              UNION SELECT g.user_id FROM call_rings g WHERE g.call_id = c.id)) AS names,
-            (SELECT jsonb_agg(jsonb_build_object('id', q.id, 'name', q.name) ORDER BY q.joined_at) FROM call_guests q
+            (SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object('id', q.id, 'name', q.name, 'email', q.email)) ORDER BY q.joined_at) FROM call_guests q
               WHERE q.call_id = c.id AND q.left_at IS NULL) AS guests
        FROM calls c WHERE c.id = $1`,
     [id, viewerId ?? null],
@@ -296,7 +302,7 @@ export async function history(userId: string, q: { before?: string; limit: numbe
     `SELECT c.id, c.started_at,
             ARRAY(SELECT p.user_id FROM call_participants p WHERE p.call_id = c.id ORDER BY p.first_joined_at) AS participant_ids,
             CASE WHEN c.ended_at IS NOT NULL THEN extract(epoch FROM c.ended_at - c.started_at)::int END AS secs,
-            c.summary IS NOT NULL AS has_summary,
+            c.summary IS NOT NULL AS has_summary, cv.name AS title, cv.is_meeting,
             EXISTS (SELECT 1 FROM call_ringees r WHERE r.call_id = c.id AND r.user_id = $1 AND ${MISSED_SQL}) AS missed
        FROM calls c
        LEFT JOIN conversation_memberships cm ON cm.conversation_id = c.conversation_id AND cm.user_id = $1 AND cm.removed_at IS NULL
@@ -312,7 +318,7 @@ export async function history(userId: string, q: { before?: string; limit: numbe
   const page = rows.slice(0, q.limit);
   const calls = await Promise.all(page.map(async (r) => ({
     call: await callDTO(pool, r.id), participantIds: r.participant_ids, durationSec: r.secs, hasSummary: r.has_summary,
-    ...(r.missed ? { missed: true } : {}),
+    ...(r.missed ? { missed: true } : {}), title: r.title ?? null, ...(r.is_meeting ? { meeting: true } : {}),
   })));
   return { calls, hasMore: rows.length > q.limit };
 }
@@ -370,6 +376,7 @@ async function joinCall(userId: string, callId: string, created: boolean, device
   const call = await tx(async (c) => {
     const ses = device.sessionId ? (await c.query('SELECT platform, device_name FROM sessions WHERE id = $1', [device.sessionId])).rows[0] : null;
     const platform = ses?.platform ?? 'web', label = ses?.device_name ?? '';
+    if (device.key !== INSTANT_DEVICE_KEY) await c.query('DELETE FROM call_participants WHERE call_id = $1 AND user_id = $2 AND device_key = $3', [callId, userId, INSTANT_DEVICE_KEY]);
     await c.query(
       `INSERT INTO call_participants (call_id, user_id, attendee_id, device_key, platform, label) VALUES ($1,$2,$3,$4,$5,$6)
        ON CONFLICT (call_id, user_id, device_key) DO UPDATE SET attendee_id = $3, platform = $5, label = $6, joined_at = now(), last_seen_at = now(), left_at = NULL`,
@@ -623,9 +630,54 @@ export async function createLink(userId: string, callId: string): Promise<CallLi
   if (call.ended_at) throw new ApiError(409, 'call_ended', 'La llamada ya terminó');
   const inside = await pool.query('SELECT 1 FROM call_participants WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL LIMIT 1', [callId, userId]);
   if (!inside.rowCount) throw new ApiError(409, 'not_in_call', 'Entra a la llamada para compartir el enlace');
+  return insertLink(pool, userId, callId);
+}
+
+async function insertLink(db: Db, userId: string, callId: string): Promise<CallLinkDTO> {
   const token = randomToken(18);
-  await pool.query('INSERT INTO call_links (call_id, token_hash, created_by) VALUES ($1,$2,$3)', [callId, sha256(token), userId]);
+  await db.query('INSERT INTO call_links (call_id, token_hash, created_by) VALUES ($1,$2,$3)', [callId, sha256(token), userId]);
   return { token, url: `${config.publicOrigin}/llamada/${token}` };
+}
+
+/**
+ * POST /calls/instant: «Nueva llamada» (docs/LLAMADAS.md › Nueva llamada). Sin elegir chat:
+ * - crea una conversación de reunión (kind 'multi', fuera de los espacios, solo con quien la pide, is_meeting) con
+ *   nombre = title o «Llamada de <nombre>»;
+ * - abre la llamada ya iniciada (reunión en Chime) con quien la pide dentro (fila provisional 'instant') hasta que
+ *   su cliente entra con el flujo normal, POST /conversations/:id/call, desde su dispositivo;
+ * - y crea de una vez el enlace para invitados.
+ * No le suena a nadie. La conversación no sale en la bandeja mientras no tenga mensajes de personas (bootstrap).
+ */
+export async function instantCall(userId: string, input: { title?: string; video?: boolean }): Promise<InstantCallDTO> {
+  requireEnabled();
+  const kind: CallKind = input.video ? 'video' : 'audio';
+  const { conversationId, callId } = await tx(async (c) => {
+    const me = (await c.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0];
+    const name = input.title?.replace(/[\u0000-\u001f\u007f]/g, '').trim() || `Llamada de ${me?.name ?? 'chaggu'}`.slice(0, 80);
+    const conv = await c.query("INSERT INTO conversations (kind, name, created_by, is_meeting) VALUES ('multi', $1, $2, true) RETURNING id", [name, userId]);
+    const conversationId: string = conv.rows[0].id;
+    await c.query('INSERT INTO conversation_memberships (conversation_id, user_id, can_manage, added_by) VALUES ($1,$2,true,$2)', [conversationId, userId]);
+    const call = await c.query('INSERT INTO calls (conversation_id, started_by, kind) VALUES ($1,$2,$3) RETURNING id', [conversationId, userId, kind]);
+    await scopeChanged(c, [userId], 'chat.created', { conversationId });
+    return { conversationId, callId: call.rows[0].id as string };
+  });
+  try {
+    const m = await getProvider().create(callId);
+    return await tx(async (c) => {
+      await c.query('UPDATE calls SET external_id = $2, media_region = $3, meeting = $4 WHERE id = $1', [callId, m.externalId, m.mediaRegion, JSON.stringify(m.meeting)]);
+      await c.query("INSERT INTO call_participants (call_id, user_id, device_key, platform, label) VALUES ($1,$2,$3,'web','')", [callId, userId, INSTANT_DEVICE_KEY]);
+      const msg = await callNote(c, callId, { conversationId, authorId: userId, kind: 'system', body: sys('call.started', { kind, callId }) });
+      await c.query('UPDATE calls SET message_id = $2 WHERE id = $1', [callId, msg?.id ?? null]);
+      await publish(c, conversationId, callId);
+      const link = await insertLink(c, userId, callId);
+      return { call: await callDTO(c, callId, userId), conversationId, link };
+    });
+  } catch (e) {
+    // Sin reunión no hay llamada: se cierra para no dejarla colgada.
+    await finish(callId).catch(() => {});
+    if (e instanceof MeetingGone) throw new ApiError(503, 'call_unavailable', 'No se pudo abrir la llamada, intenta de nuevo');
+    throw e;
+  }
 }
 
 /** DELETE /calls/:id/link: los enlaces dejan de servir. Quien ya entró sigue dentro (se le puede sacar colgando para todos). */
@@ -654,6 +706,8 @@ async function linkRow(token: string) {
 export async function previewLink(token: string): Promise<GuestCallPreviewDTO> {
   requireEnabled();
   const r = await linkRow(token);
+  // El enlace solo vive durante la llamada.
+  if (r.ended_at) throw new ApiError(410, 'call_ended', 'Esta llamada ya terminó');
   return {
     title: r.conv_kind === 'direct' ? null : r.conv_name ?? null, hostName: r.host_name, orgName: r.org_name ?? null,
     kind: r.kind, active: !r.revoked_at && !r.ended_at && r.live && !!r.external_id,
@@ -666,21 +720,38 @@ async function guestState(db: Db, callId: string): Promise<GuestCallStateDTO> {
   const names: Record<string, string> = {};
   for (const id of call.activeUserIds) if (call.names?.[id]) names[id] = call.names[id]!;
   for (const g of guests) names[guestExternalId(g.id)] = g.name;
-  return { callId, kind: call.kind, active: !call.endedAt, transcribing: call.transcribing, activeUserIds: call.activeUserIds, guests, names };
+  // API público: el correo de los invitados nunca sale de aquí.
+  return { callId, kind: call.kind, active: !call.endedAt, transcribing: call.transcribing, activeUserIds: call.activeUserIds, guests: guests.map((g) => ({ id: g.id, name: g.name })), names };
 }
 
-/** POST /call-links/:token/join (público): entra un invitado con su nombre. */
-export async function guestJoin(token: string, name: string): Promise<GuestJoinDTO> {
+/**
+ * Cuerpo de POST /call-links/:token/join: nombre y correo (desde el 30-sep-2026). Sin correo, 400 email_required;
+ * con forma inválida, 400 invalid_email. El correo se guarda en minúsculas.
+ */
+export function guestJoinInput(body: unknown): { name: string; email: string } {
+  const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+  const name = typeof b.name === 'string' ? b.name.trim() : '';
+  if (!name) throw new ApiError(400, 'name_required', 'Escribe tu nombre');
+  const email = typeof b.email === 'string' ? b.email.trim().toLowerCase() : '';
+  if (!email) throw new ApiError(400, 'email_required', 'Escribe tu correo');
+  if (email.length > 254 || !EMAIL_SHAPE.test(email)) throw new ApiError(400, 'invalid_email', 'Ese correo no parece válido');
+  return { name: name.slice(0, 60), email };
+}
+
+/** POST /call-links/:token/join (público): entra un invitado con su nombre y su correo. */
+export async function guestJoin(token: string, input: { name: string; email: string }): Promise<GuestJoinDTO> {
   requireEnabled();
+  const { name, email } = input;
   const r = await linkRow(token);
+  // Terminada: 410 (el enlace solo vive durante la llamada). Quitado con la llamada abierta: 410 link_revoked.
+  if (r.ended_at) throw new ApiError(410, 'call_ended', 'Esta llamada ya terminó');
   if (r.revoked_at) throw new ApiError(410, 'link_revoked', 'Este enlace ya no sirve. Pide uno nuevo.');
-  if (r.ended_at) throw new ApiError(409, 'call_ended', 'La llamada ya terminó');
   if (!r.live || !r.external_id) throw new ApiError(409, 'call_not_live', 'No hay nadie en la llamada ahora');
   const n = await pool.query('SELECT count(*)::int AS n FROM call_guests WHERE call_id = $1 AND left_at IS NULL', [r.call_id]);
   if (n.rows[0].n >= MAX_GUESTS) throw new ApiError(409, 'call_full', 'La llamada ya tiene el máximo de invitados');
   const secret = randomToken(24);
   const clean = name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 60) || 'Invitado';
-  const ins = await pool.query('INSERT INTO call_guests (call_id, link_id, name, secret_hash) VALUES ($1,$2,$3,$4) RETURNING id', [r.call_id, r.link_id, clean, sha256(secret)]);
+  const ins = await pool.query('INSERT INTO call_guests (call_id, link_id, name, secret_hash, email) VALUES ($1,$2,$3,$4,$5) RETURNING id', [r.call_id, r.link_id, clean, sha256(secret), email]);
   const guestId = ins.rows[0].id as string;
   let attendee: Attendee;
   try { attendee = await getProvider().attendee(r.external_id, guestExternalId(guestId)); }

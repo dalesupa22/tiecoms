@@ -14,6 +14,7 @@ import { navigate } from '../router.ts';
 import { openDialog } from '../actions.tsx';
 import { startRingtone, stopRingtone } from '../sound.ts';
 import { directOtherId, Avatar, ConvAvatar, Modal, conversationTitle, personById } from '../ui.tsx';
+import { openNewCall, openShareLink } from './NewCall.tsx';
 
 export const useCallView = () => useSyncExternalStore((l) => subscribeCall(() => l()), currentCall);
 /** Quienes están dentro: personas de chaggu y, al final, los invitados por enlace ("guest:{id}", como en Chime). */
@@ -124,33 +125,6 @@ export function ScreenButton({ v }: { v: CallView }) {
   if (!canShareScreen()) return null;
   return <button className={`call-ctl ${v.sharing ? 'is-rec' : ''}`} onClick={() => (v.sharing ? stopScreenShare() : void startScreenShare().catch(fail))}
     aria-pressed={v.sharing} title={v.sharing ? t('call.shareStop') : t('call.shareScreen')} aria-label={v.sharing ? t('call.shareStop') : t('call.shareScreen')}>🖥️</button>;
-}
-
-/** «Enlace para invitados»: crea el enlace, lo copia y deja compartirlo o quitarlo. */
-function GuestLinkDialog({ call, onClose }: { call: CallDTO; onClose: () => void }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    client.createCallLink(call.id).then((l) => { setUrl(l.url); void navigator.clipboard?.writeText(l.url).then(() => toast(t('call.linkCopied'))).catch(() => {}); })
-      .catch((e) => setError(errorText(e)));
-  }, [call.id]);
-  const share = () => { if (url) void (navigator as any).share?.({ title: t('call.linkShareTitle'), url }).catch(() => {}); };
-  return (
-    <Modal title={t('call.guestLink')} onClose={onClose}>
-      <p className="small muted" style={{ marginTop: 0 }}>{t('call.guestLinkHelp')}</p>
-      {error ? <div className="error">{error}</div> : (
-        <div className="row" style={{ gap: 8 }}>
-          <input className="input grow" readOnly value={url ?? t('call.connecting')} onFocus={(e) => e.currentTarget.select()} />
-          <button className="btn primary small" disabled={!url} onClick={() => url && void navigator.clipboard?.writeText(url).then(() => toast(t('call.linkCopied')))}>{t('call.copy')}</button>
-        </div>
-      )}
-      <div className="row" style={{ gap: 8, marginTop: 12 }}>
-        {'share' in navigator && <button className="btn small" disabled={!url} onClick={share}>{t('call.linkShare')}</button>}
-        <span className="grow" />
-        <button className="btn small" onClick={() => void client.revokeCallLinks(call.id).then(() => { toast(t('call.linkRevoked')); onClose(); }).catch(fail)}>{t('call.linkRevoke')}</button>
-      </div>
-    </Modal>
-  );
 }
 
 type ClientData = NonNullable<ReturnType<typeof client.getState>['data']>;
@@ -309,6 +283,14 @@ function CallPanel({ v, d, compact, nameOf, pip }: { v: CallView; d: ClientData;
             {others.length === 0 && <div className="small muted">{t('call.waiting')}</div>}
           </div>}
       {!pip && pending.length > 0 && <InvitedList call={v.call} pending={pending} />}
+      {!pip && !!v.call.guests?.length && (
+        <div className="call-guests" aria-label={t('call.guestsTitle')}>
+          <span className="eyebrow">🔗 {t('call.guestsTitle')} · {v.call.guests.length}</span>
+          {v.call.guests.map((g) => (
+            <div key={g.id} className="call-guest-row"><b className="ellipsis">{g.name}</b>{g.email && <span className="call-guest-mail" title={g.email}>{g.email}</span>}</div>
+          ))}
+        </div>
+      )}
       {v.call.transcribing && v.captions.length > 0 && (
         <div className="call-captions" aria-live="polite">
           {v.captions.slice(-4).map((c) => <div key={c.resultId} className={c.partial ? 'is-partial' : ''}><b>{c.userId === d.me.id ? t('call.you') : firstName(d, c.userId, v.call.names) || '·'}:</b> {c.processing ? <span className="call-processing">⏳ {t('call.processing')}</span> : c.text}</div>)}
@@ -321,7 +303,7 @@ function CallPanel({ v, d, compact, nameOf, pip }: { v: CallView; d: ClientData;
       {!pip && <button className={`call-ctl ${v.call.transcribing ? 'is-rec' : ''}`} onClick={toggleTranscript} aria-pressed={v.call.transcribing} title={v.call.transcribing ? t('call.transcriptOff') : t('call.transcriptOn')}>📝</button>}
       <ScreenButton v={v} />
       {!pip && <button className="call-ctl" onClick={(e) => void openAudioMenu(e.currentTarget, v)} title={t('call.audioMenu')} aria-label={t('call.audioMenu')}>🔊</button>}
-      {!pip && <button className="call-ctl" onClick={() => openDialog((close) => <GuestLinkDialog call={v.call} onClose={close} />)} title={t('call.guestLink')} aria-label={t('call.guestLink')}>🔗</button>}
+      {!pip && <button className="call-ctl" onClick={() => openShareLink(v.call)} title={t('call.linkButton')} aria-label={t('call.linkButton')}>🔗</button>}
       {!pip && <button className="btn small call-add" onClick={() => openAddToCall(v.call)} title={t('call.add')}>{t('call.addShort')}</button>}
       <span className="grow" />
       <button className="btn small call-hang" onClick={() => void hangUp()}>{t('call.hangUp')}</button>
@@ -772,10 +754,17 @@ export function CallsScreen() {
       <div className="row page-head">
         <h1 className="grow">{t('calls.title')}</h1>
         {on && <>
-          <button className="btn small" onClick={() => newCall('video')}>🎥</button>
-          <button className="btn accent small" onClick={() => newCall('audio')}>📞 {t('calls.new')}</button>
+          <button className="btn small" onClick={() => newCall('video')} title={t('newcall.orChat')} aria-label={`🎥 ${t('newcall.orChat')}`}>🎥</button>
+          <button className="btn small" onClick={() => newCall('audio')}>📞 {t('newcall.orChat')}</button>
         </>}
       </div>
+      {on && (
+        <button className="calls-new-cta" onClick={openNewCall}>
+          <span className="calls-new-ico" aria-hidden>🔗</span>
+          <span className="grow"><b>{t('newcall.cta')}</b><small>{t('newcall.hint')}</small></span>
+          <span aria-hidden style={{ fontSize: 22 }}>›</span>
+        </button>
+      )}
       {!on && <div className="hint">{t('err.calls_disabled')}</div>}
       {err && <div className="hint">{err}</div>}
       {on && <LiveNow />}
@@ -794,10 +783,11 @@ function CallRow({ item }: { item: CallHistoryItemDTO }) {
   const conv = d.conversations.find((x) => x.id === c.conversationId);
   const others = item.participantIds.filter((id) => id !== d.me.id);
   const group = conv ? conv.kind !== 'direct' : others.length > 1;
-  const name = conv ? conversationTitle(d, conv) : others.map((id) => personById(d, id)?.name ?? '').join(', ');
+  const name = conv ? conversationTitle(d, conv) : item.title || others.map((id) => personById(d, id)?.name ?? '').join(', ');
   // Perdida para mí (me sonó y no entré) en rojo; «Sin respuesta» si nadie más entró.
   const mine = !!item.missed;
-  const missed = mine || (!!c.endedAt && item.participantIds.length < 2);
+  // Una «Nueva llamada» con enlace no es «Sin respuesta» aunque solo entraran invitados (no cuentan en participantIds).
+  const missed = mine || (!!c.endedAt && item.participantIds.length < 2 && !item.meeting);
   const live = !c.endedAt;
   const dur = item.durationSec != null ? `${Math.floor(item.durationSec / 60)}:${String(item.durationSec % 60).padStart(2, '0')}` : null;
   const who = group ? others.slice(0, 3).map((id) => personById(d, id)?.name.split(' ')[0]).filter(Boolean).join(', ') : '';
@@ -808,7 +798,7 @@ function CallRow({ item }: { item: CallHistoryItemDTO }) {
       <button className="grow call-row-main" onClick={() => (c.hasTranscript || item.hasSummary ? openTranscript(c.id) : navigate(`/c/${c.conversationId}`))}>
         <div className="row" style={{ gap: 6 }}>
           <strong className="ellipsis">{name || t('call.title')}</strong>
-          <span className="call-tag">{group ? t('calls.group') : t('calls.direct')}</span>
+          <span className="call-tag">{item.meeting ? `🔗 ${t('newcall.cta')}` : group ? t('calls.group') : t('calls.direct')}</span>
           {live && <span className="call-tag is-live">{t('calls.live')}</span>}
           {mine && <span className="call-tag is-missed">{t('calls.missedMine')}</span>}
         </div>
@@ -823,7 +813,9 @@ function CallRow({ item }: { item: CallHistoryItemDTO }) {
       </button>
       {live
         ? <button className="btn accent small" onClick={() => void joinCall(c.id, false).catch(fail)}>{t('call.join')}</button>
-        : <button className="icon-btn" title={t('calls.callBack')} aria-label={t('calls.callBack')} onClick={() => void startCall(c.conversationId, c.kind).catch(fail)}>{c.kind === 'video' ? '🎥' : '📞'}</button>}
+        : item.meeting
+          ? <button className="icon-btn" title={t('newcall.cta')} aria-label={t('newcall.cta')} onClick={openNewCall}>🔗</button>
+          : <button className="icon-btn" title={t('calls.callBack')} aria-label={t('calls.callBack')} onClick={() => void startCall(c.conversationId, c.kind).catch(fail)}>{c.kind === 'video' ? '🎥' : '📞'}</button>}
     </div>
   );
 }

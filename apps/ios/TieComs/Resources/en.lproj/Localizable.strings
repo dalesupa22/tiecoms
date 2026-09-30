@@ -2434,3 +2434,31 @@
 "ws.onlyYours" = "You only see the groups you are in; the others do not reveal their name.";
 "ws.participants" = "Participants";
 "ws.yourGroups" = "Your groups in this space";
+
+/* Calls: shared screens and link guests (/llamada/<token>) */
+"call.screen" = "Shared screen";
+"call.screenOf" = "{name}'s screen";
+"call.enlarge" = "Enlarge the screen";
+"call.shrink" = "Shrink the screen";
+"call.guestBadge" = "guest";
+"guest.title" = "Join the call";
+"guest.by" = "{host} invites you";
+"guest.byOrg" = "{host} · {org} invites you";
+"guest.name" = "Your name";
+"guest.namePh" = "How others will see you";
+"guest.joinAudio" = "Join with audio";
+"guest.joinVideo" = "Join with video";
+"guest.notLive" = "Nobody is in the call yet. Try again in a moment.";
+"guest.invalid" = "This link no longer works. Ask whoever invited you for a new one.";
+"guest.left" = "You left the call.";
+"guest.ended" = "The call ended.";
+"guest.rejoin" = "Try again";
+"guest.powered" = "Call on chaggu, the work network across companies";
+"guest.privacy" = "When you join, people in the call will see your name and, if you turn it on, your camera.";
+"guest.switchTitle" = "You're already on another call";
+"guest.switchBody" = "To join this one, the call you're on will end for you.";
+"guest.switchConfirm" = "Hang up and join";
+"err.link_revoked" = "This link no longer works. Ask for a new one.";
+"err.call_not_live" = "Nobody is in the call right now.";
+"err.call_full" = "The call already has the maximum number of guests.";
+"err.call_ended" = "The call already ended.";

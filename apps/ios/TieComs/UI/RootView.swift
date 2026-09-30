@@ -29,6 +29,14 @@ struct RootView: View {
                 .transition(.opacity)
                 .zIndex(1)
             }
+            // /llamada/<token>: encima de todo (con o sin sesión, también en el arranque en frío). Es una capa y no una
+            // hoja: así no choca con otra pantalla presentada (la llamada en curso se minimiza al abrir el enlace).
+            if let token = store.guestLinkToken {
+                GuestCallLinkView(token: token)
+                    .environment(\.locale, L10n.locale)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(1.5)
+            }
             if case .blocked(let info) = update {
                 UpdateBlockedView(info: info) { updates.openUpdate() }.zIndex(2)
             }
@@ -169,7 +177,8 @@ struct MainView: View {
             .animation(.spring(duration: 0.3), value: store.callCenter.ringing?.id)
             .animation(.spring(duration: 0.3), value: store.callCenter.expanded)
         }
-        .fullScreenCover(isPresented: Binding(get: { store.callCenter.expanded && store.callCenter.view != nil },
+        // La llamada como invitado se muestra en la pantalla del enlace (GuestCallLinkView), no aquí.
+        .fullScreenCover(isPresented: Binding(get: { store.callCenter.expanded && store.callCenter.view != nil && store.callCenter.view?.isGuest != true },
                                               set: { if !$0 { store.callCenter.expanded = false } })) { CallScreen() }
         .sheet(isPresented: $store.showPushPrompt) { PushPromptView() }
         .sheet(isPresented: $store.showSleepSettings) { SleepSheet() }

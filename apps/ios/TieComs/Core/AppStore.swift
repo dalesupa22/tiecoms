@@ -179,6 +179,8 @@ final class AppStore {
     var alert: AppAlert?
     /// Invitación a un espacio abierta por enlace (hoja modal).
     var inviteToken: String?
+    /// /llamada/<token>: pantalla «Entrar a la llamada» encima de todo, con o sin sesión (docs/LLAMADAS.md › Invitados por enlace).
+    var guestLinkToken: String?
     /// Registro con invitación de empresa (?org=token).
     var signupOrgToken: String?
     var showSignup = false
@@ -1475,6 +1477,8 @@ final class AppStore {
         case .share(let text):
             shareText = text ?? ""
             if status != .ready { pendingLink = link }
+        case .guestCall(let token):
+            openGuestLink(token)
         default:
             if status == .ready { navigate(to: link) } else { pendingLink = link }
         }
@@ -1546,7 +1550,15 @@ final class AppStore {
         case .trazo: tab = .home; homePath = [.trazo]
         case .whatsapp: tab = .settings; settingsPath = [.whatsapp]
         case .share(let text): shareText = text ?? ""
+        case .guestCall(let token): openGuestLink(token)
         }
+    }
+
+    /// Enlace de llamada para invitados: la pantalla va encima (también sin sesión). Si estoy en otra llamada a pantalla
+    /// completa, esa se minimiza; la pantalla del enlace pregunta antes de colgarla.
+    func openGuestLink(_ token: String) {
+        if callCenter.expanded, callCenter.view?.isGuest != true { callCenter.expanded = false }
+        guestLinkToken = token
     }
 
     // MARK: - Ciclo de vida

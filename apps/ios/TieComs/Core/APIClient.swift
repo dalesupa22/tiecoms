@@ -296,8 +296,8 @@ final class APIClient {
     }
 
     /// Petición pública (sin token).
-    func publicRequest<T: Decodable>(_ path: String) async throws -> T {
-        let (data, res) = try await raw(path, auth: false)
+    func publicRequest<T: Decodable>(_ path: String, method: String = "GET", json: [String: Any]? = nil) async throws -> T {
+        let (data, res) = try await raw(path, method: method, json: json, auth: false)
         guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(data, status: res.statusCode) }
         return try decode(data)
     }

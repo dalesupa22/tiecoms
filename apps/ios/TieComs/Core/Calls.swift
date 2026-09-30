@@ -70,12 +70,89 @@ struct CallJoinDTO: Decodable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         call = try c.decode(CallDTO.self, forKey: AnyKey("call"))
+        (meeting, attendee) = try Self.media(c)
+    }
+
+    init(call: CallDTO, meeting: Meeting, attendee: Attendee) { self.call = call; self.meeting = meeting; self.attendee = attendee }
+
+    /// `meeting.Meeting` y `attendee.Attendee` (iguales en la llamada normal y en la de invitado).
+    static func media(_ c: KeyedDecodingContainer<AnyKey>) throws -> (Meeting, Attendee) {
         let m = try c.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey("meeting"))
-        meeting = try m.decode(Meeting.self, forKey: AnyKey("Meeting"))
         let a = try c.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey("attendee"))
-        attendee = try a.decode(Attendee.self, forKey: AnyKey("Attendee"))
+        return (try m.decode(Meeting.self, forKey: AnyKey("Meeting")), try a.decode(Attendee.self, forKey: AnyKey("Attendee")))
     }
 }
+
+// MARK: - Invitados por enlace (docs/LLAMADAS.md › Invitados por enlace)
+
+/// GET /call-links/:token (público): lo mínimo para la pantalla «Entrar a la llamada».
+struct GuestCallPreviewDTO: Decodable, Equatable, Sendable {
+    /// Nombre del grupo o chat (null en un chat directo).
+    var title: String?
+    var hostName: String
+    var orgName: String?
+    var kind: String
+    /// Hay alguien de chaggu dentro: se puede entrar.
+    var active: Bool
+    var isVideo: Bool { kind == "video" }
+    init(title: String?, hostName: String, orgName: String?, kind: String, active: Bool) {
+        self.title = title; self.hostName = hostName; self.orgName = orgName; self.kind = kind; self.active = active
+    }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        title = c.o("title"); hostName = c.v("hostName", ""); orgName = c.o("orgName")
+        kind = c.v("kind", "audio"); active = c.v("active", false)
+    }
+}
+
+/// Lo que ve el invitado de la llamada (join y cada latido): sin ids de la conversación.
+struct GuestCallStateDTO: Decodable, Equatable, Sendable {
+    var callId: String
+    var kind: String
+    var active: Bool
+    var transcribing: Bool
+    var activeUserIds: [String]
+    var guests: [CallGuestDTO]
+    /// Nombres de las personas y de los invitados («guest:{id}» → nombre).
+    var names: [String: String]
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        callId = try c.decode(String.self, forKey: AnyKey("callId"))
+        kind = c.v("kind", "audio"); active = c.v("active", false); transcribing = c.v("transcribing", false)
+        activeUserIds = c.v("activeUserIds", []); guests = c.lossyArray("guests"); names = c.v("names", [:])
+    }
+}
+
+/// POST /call-links/:token/join → { guestId, secret, call, meeting, attendee }.
+struct GuestJoinDTO: Decodable, Sendable {
+    var guestId: String
+    var secret: String
+    var state: GuestCallStateDTO
+    /// Lista para conectar con el SDK (la llamada con la forma de CallDTO).
+    var join: CallJoinDTO
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        guestId = try c.decode(String.self, forKey: AnyKey("guestId"))
+        secret = try c.decode(String.self, forKey: AnyKey("secret"))
+        state = try c.decode(GuestCallStateDTO.self, forKey: AnyKey("call"))
+        let (m, a) = try CallJoinDTO.media(c)
+        join = CallJoinDTO(call: CallRules.guestCall(state, prev: nil), meeting: m, attendee: a)
+    }
+}
+
+/// Mi entrada como invitado: el secreto solo vive en memoria (latido y salida).
+struct GuestSession: Equatable, Sendable {
+    var id: String
+    var secret: String
+    var token: String
+    /// Título para la pantalla de la llamada (grupo o quien invita).
+    var title: String
+    /// Como me ven los demás («guest:{id}»).
+    var userId: String { CallRules.guestUserId(id) }
+}
+
+/// Cómo terminó mi llamada de invitado (texto de la pantalla del enlace).
+enum GuestOutcome: Equatable, Sendable { case left, ended }
 
 /// GET /calls/active → { calls }.
 struct ActiveCallDTO: Decodable, Identifiable, Sendable {
@@ -203,6 +280,8 @@ struct CallTile: Equatable, Identifiable, Sendable {
     var local: Bool
     var userId: String?
     var active: Bool
+    /// Pantalla compartida (attendee «{id}#content»), no la cámara.
+    var content = false
     var id: Int { tileId }
 }
 
@@ -218,6 +297,9 @@ enum CallShareWhat: String, CaseIterable, Identifiable, Sendable {
 
 enum CallRules {
     static let heartbeatSeconds: UInt64 = 30
+    /// Los invitados laten más seguido: así también se enteran de quién entra y sale (no tienen socket).
+    static let guestHeartbeatSeconds: UInt64 = 15
+    static let guestNameMax = 60
     static let ringSeconds: UInt64 = 45
     static let flushSeconds: Double = 3
     static let maxBatch = 50
@@ -230,6 +312,48 @@ enum CallRules {
     static func personId(_ externalUserId: String) -> String {
         String(externalUserId.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first ?? Substring(externalUserId))
     }
+
+    /// Id de un invitado dentro de la llamada (su ExternalUserId en Chime).
+    static func guestUserId(_ guestId: String) -> String { "guest:\(guestId)" }
+    static func isGuest(_ id: String) -> Bool { id.hasPrefix("guest:") }
+
+    /// Quienes están dentro: personas de chaggu y luego los invitados por enlace (callPeople de la web).
+    static func people(_ c: CallDTO) -> [String] {
+        var seen = Set<String>()
+        return (c.activeUserIds + c.guests.map { guestUserId($0.id) }).filter { seen.insert($0).inserted }
+    }
+
+    /// Nombre de un invitado (de `guests`, o de `names` en la vista del invitado).
+    static func guestName(_ c: CallDTO, _ id: String) -> String? {
+        guard isGuest(id) else { return nil }
+        let n = c.guests.first { guestUserId($0.id) == id }?.name ?? c.names[id]
+        return n?.isEmpty == false ? n : nil
+    }
+
+    /// La llamada que ve un invitado, con la forma de CallDTO para reusar la pantalla (guestCall de la web).
+    static func guestCall(_ g: GuestCallStateDTO, prev: CallDTO?) -> CallDTO {
+        var c = CallDTO(id: g.callId, conversationId: "", kind: g.kind, startedBy: "",
+                        startedAt: prev?.startedAt ?? ISODate.string(Date()), endedAt: g.active ? nil : ISODate.string(Date()),
+                        activeUserIds: g.activeUserIds, transcribing: g.transcribing, hasTranscript: false)
+        c.names = g.names
+        c.guests = g.guests
+        return c
+    }
+
+    /// El latido del invitado dice que ya no está: 409 not_in_call o 404 (la llamada terminó o lo sacaron).
+    static func guestGone(_ error: Error) -> Bool {
+        guard let e = error as? ApiRequestError else { return false }
+        return e.code == "not_in_call" || e.status == 404 || e.status == 410
+    }
+
+    /// Nombre para entrar: 1–60 caracteres sin espacios sobrantes.
+    static func cleanGuestName(_ raw: String) -> String? {
+        let n = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? nil : String(n.prefix(guestNameMax))
+    }
+
+    /// Attendee de una pantalla compartida: «{attendeeId}#content»; la persona es la del attendee base.
+    static func baseAttendee(_ attendeeId: String) -> String { personId(attendeeId) }
 
     /// Sin respuesta: terminó y nunca entraron dos personas.
     static func isMissed(_ item: CallHistoryItemDTO) -> Bool { item.call.endedAt != nil && item.participantIds.count < 2 }
@@ -343,8 +467,8 @@ protocol CallMedia: AnyObject {
     func switchCamera()
     func bind(_ view: UIView, tileId: Int)
     func unbind(tileId: Int)
-    /// Vista para pintar un video (DefaultVideoRenderView con el SDK).
-    func makeVideoView() -> UIView
+    /// Vista para pintar un video (DefaultVideoRenderView con el SDK). `fit`: sin recortar (pantallas compartidas).
+    func makeVideoView(fit: Bool) -> UIView
     /// Salidas de audio disponibles y la activa (1.7.1).
     func audioDevices() -> [CallAudioDevice]
     func activeAudioDevice() -> String?
@@ -393,7 +517,7 @@ final class NullCallMedia: CallMedia {
     func switchCamera() {}
     func bind(_ view: UIView, tileId: Int) {}
     func unbind(tileId: Int) {}
-    func makeVideoView() -> UIView { UIView() }
+    func makeVideoView(fit: Bool) -> UIView { UIView() }
     private(set) var active = "receiver"
     func audioDevices() -> [CallAudioDevice] {
         [CallAudioDevice(id: "receiver", label: L("call.out.receiver"), kind: .receiver), CallAudioDevice(id: "speaker", label: L("call.out.speaker"), kind: .speaker)]
@@ -431,6 +555,10 @@ struct CallView: Equatable {
     var mutedUsers: Set<String> = []
     /// Agregados que aún no entran: cuándo se les llamó («Llamando…»; a los 45 s, «No contestó»).
     var invites: [String: Date] = [:]
+    /// Pantallas compartidas por otros (recuadros de contenido de Chime).
+    var screens: [CallTile] = []
+    /// Entré con un enlace de invitado (sin transcripción, sin agregar personas).
+    var isGuest = false
 }
 
 @MainActor
@@ -440,6 +568,10 @@ final class CallCenter: CallMediaDelegate {
     private(set) var ringing: IncomingCall?
     /// Pantalla completa de la llamada (si no, la píldora de arriba).
     var expanded = false
+    /// Estoy en la llamada como invitado por enlace (id y secreto para latir y salir).
+    private(set) var guest: GuestSession?
+    /// Cómo terminó la última llamada de invitado («Saliste» / «La llamada terminó»).
+    var guestOutcome: GuestOutcome?
 
     @ObservationIgnored weak var store: AppStore?
     /// Fábrica de la sesión de medios (las pruebas ponen NullCallMedia).
@@ -468,6 +600,8 @@ final class CallCenter: CallMediaDelegate {
     /// «Pasar aquí»: dispositivo mío que sale cuando este conecta.
     @ObservationIgnored var handOffFrom: String?
     @ObservationIgnored private var attendeeUsers: [String: String] = [:]
+    /// Vista pegada a cada recuadro: solo quien la pegó la suelta (al ampliar una pantalla hay dos vistas por un momento).
+    @ObservationIgnored private var bound: [Int: ObjectIdentifier] = [:]
     /// Lotes enviados (pruebas y diagnóstico).
     @ObservationIgnored private(set) var sentBatches = 0
 
@@ -491,11 +625,25 @@ final class CallCenter: CallMediaDelegate {
         await connect(j, camera: camera)
     }
 
+    /// Entrar con el enlace /llamada/<token> (con o sin sesión). La vista ya preguntó si había otra llamada.
+    func joinAsGuest(token: String, name: String, camera: Bool, title: String) async throws {
+        if let g = guest, g.token == token, inCall { return }
+        if view != nil { await hangUp() }
+        guard let store else { return }
+        let j = try await store.joinCallLink(token, name: name)
+        guest = GuestSession(id: j.guestId, secret: j.secret, token: token, title: title)
+        guestOutcome = nil
+        await connect(j.join, camera: camera)
+    }
+
     private func connect(_ j: CallJoinDTO, camera: Bool) async {
         leaving = false
         outbox = []
+        bound = [:]
         attendeeUsers = [j.attendee.attendeeId: CallRules.personId(j.attendee.externalUserId)]
-        view = CallView(call: j.call, camera: false)
+        var v = CallView(call: j.call, camera: false)
+        v.isGuest = guest != nil
+        view = v
         expanded = true
         let m = makeMedia(j)
         media = m
@@ -507,13 +655,19 @@ final class CallCenter: CallMediaDelegate {
             }
             try m.start()
             if camera { await startCamera() }
-            startHeartbeat(j.call.id)
+            if guest != nil { startGuestHeartbeat(j.call.id) } else { startHeartbeat(j.call.id) }
         } catch {
             view?.error = (error as? CallMediaError)?.text ?? error.localizedDescription
-            let id = j.call.id
+            let id = j.call.id, g = guest
             await teardown(keepError: true)
-            _ = try? await store?.leaveCallRequest(id)
+            await leaveRemote(id, guest: g)
         }
+    }
+
+    /// Salir en el servidor: el invitado con su secreto; la persona de chaggu con su dispositivo.
+    private func leaveRemote(_ callId: String, guest g: GuestSession?, forAll: Bool = false) async {
+        if let g { try? await store?.guestLeave(g.id, secret: g.secret) }
+        else { _ = try? await store?.leaveCallRequest(callId, forAll: forAll) }
     }
 
     // MARK: Controles
@@ -539,13 +693,23 @@ final class CallCenter: CallMediaDelegate {
         do { try media.startCamera(); view?.camera = true } catch { view?.error = L("call.noCamera") }
     }
 
-    func bind(_ v: UIView, tileId: Int) { media?.bind(v, tileId: tileId) }
-    func unbind(tileId: Int) { media?.unbind(tileId: tileId) }
-    func makeVideoView() -> UIView { media?.makeVideoView() ?? UIView() }
+    func bind(_ v: UIView, tileId: Int) {
+        bound[tileId] = ObjectIdentifier(v)
+        media?.bind(v, tileId: tileId)
+    }
+    /// Suelta el recuadro solo si esta vista es la que lo tiene (la otra ya lo tomó al ampliar o volver).
+    func unbind(_ v: UIView, tileId: Int) {
+        guard bound[tileId] == ObjectIdentifier(v) else { return }
+        bound[tileId] = nil
+        media?.unbind(tileId: tileId)
+    }
+    func isBound(_ v: UIView, tileId: Int) -> Bool { bound[tileId] == ObjectIdentifier(v) }
+    /// `fit`: sin recortar (pantallas compartidas); si no, llena el recuadro (cámaras).
+    func makeVideoView(fit: Bool = false) -> UIView { media?.makeVideoView(fit: fit) ?? UIView() }
 
     /// Prender (tras la confirmación) o apagar la transcripción.
     func setTranscription(_ on: Bool, aiSummary: Bool = false) async throws {
-        guard let v = view, let store else { return }
+        guard let v = view, !v.isGuest, let store else { return }
         if !on { await flush() }
         let call = try await store.setCallTranscriptionRequest(v.call.id, on: on, aiSummary: aiSummary)
         if let call { view?.call = call }
@@ -554,7 +718,8 @@ final class CallCenter: CallMediaDelegate {
 
     /// Graba el micrófono propio mientras la llamada está en vivo y se transcribe (como syncRecorder de la web).
     private func syncRecorder() {
-        let want = view.map { $0.phase == .live && $0.call.transcribing } ?? false
+        // Los invitados no transcriben su audio (la transcripción con Groq pide sesión).
+        let want = view.map { $0.phase == .live && $0.call.transcribing && !$0.isGuest } ?? false
         if want, recorder == nil, let call = view?.call {
             let r = makeRecorder(self, call)
             recorder = r
@@ -584,7 +749,7 @@ final class CallCenter: CallMediaDelegate {
 
     /// Sumar personas a la llamada en curso (o a la de mi otro dispositivo, `callId`).
     func invite(_ userIds: [String], callId: String? = nil) async throws {
-        guard let id = callId ?? view?.call.id, let store, !userIds.isEmpty else { return }
+        guard let id = callId ?? view?.call.id, let store, !userIds.isEmpty, callId != nil || guest == nil else { return }
         try await store.inviteToCall(id, userIds: userIds)
         if view?.call.id == id { let now = Date(); for u in userIds { view?.invites[u] = now } }
     }
@@ -600,14 +765,17 @@ final class CallCenter: CallMediaDelegate {
 
     func hangUp(forAll: Bool = false) async {
         guard let v = view else { return }
-        let id = v.call.id
-        await flush()
-        await teardown()
-        _ = try? await store?.leaveCallRequest(id, forAll: forAll)
+        let id = v.call.id, g = guest
+        if g == nil { await flush() }
+        await teardown(outcome: .left)
+        await leaveRemote(id, guest: g, forAll: forAll && g == nil)
     }
 
-    private func teardown(keepError: Bool = false) async {
+    /// `outcome`: solo en la llamada de invitado, qué dice después la pantalla del enlace.
+    private func teardown(keepError: Bool = false, outcome: GuestOutcome? = nil) async {
         leaving = true
+        if guest != nil { guestOutcome = outcome; guest = nil }
+        bound = [:]
         beat?.cancel(); beat = nil
         flushTask?.cancel(); flushTask = nil
         let m = media
@@ -623,6 +791,12 @@ final class CallCenter: CallMediaDelegate {
 
     /// Cerrar sesión o cambiar de cuenta: se cuelga sin esperar.
     func reset() {
+        // La llamada como invitado no depende de la cuenta: cerrar sesión no la corta.
+        if guest != nil {
+            ringTask?.cancel(); ringTask = nil
+            ringing = nil
+            return
+        }
         if let id = view?.call.id, let store { Task { _ = try? await store.leaveCallRequest(id) } }
         leaving = true
         beat?.cancel(); beat = nil
@@ -647,6 +821,33 @@ final class CallCenter: CallMediaDelegate {
         }
     }
 
+    /// Invitado: latido cada 15 s con el secreto; trae quién está. Si ya no estoy o terminó, se cierra.
+    private func startGuestHeartbeat(_ callId: String) {
+        beat?.cancel()
+        beat = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: CallRules.guestHeartbeatSeconds * 1_000_000_000)
+                guard !Task.isCancelled, let self, self.view?.call.id == callId else { return }
+                await self.guestBeat()
+            }
+        }
+    }
+
+    /// Un latido del invitado (también lo llaman las pruebas).
+    func guestBeat() async {
+        guard let g = guest, let store, view != nil else { return }
+        do {
+            let s = try await store.guestHeartbeat(g.id, secret: g.secret)
+            guard guest == g, var v = view else { return }
+            if !s.active { await teardown(outcome: .ended); return }
+            v.call = CallRules.guestCall(s, prev: v.call)
+            if v != view { view = v }
+        } catch {
+            guard guest == g else { return }
+            if CallRules.guestGone(error) { await teardown(outcome: .ended) }
+        }
+    }
+
     // MARK: Estado desde el socket
 
     /// `call.updated` / respuestas del API: quién está, si transcribe, si terminó.
@@ -660,7 +861,7 @@ final class CallCenter: CallMediaDelegate {
                 if i.joined { v.invites[i.userId] = nil } else if let at = ISODate.parse(i.at), !c.activeUserIds.contains(i.userId) { v.invites[i.userId] = at }
             }
             for u in c.activeUserIds { v.invites[u] = nil }
-            if c.endedAt != nil, v.phase != .ended { Task { await teardown() }; return }
+            if c.endedAt != nil, v.phase != .ended { Task { await teardown(outcome: .ended) }; return }
             v.call = c
             if v != view { view = v }
         }
@@ -738,7 +939,7 @@ final class CallCenter: CallMediaDelegate {
     /// Manda las frases finales pendientes (lotes de hasta 50). Sin red se reintenta; fuera de la llamada se descartan.
     func flush() async {
         flushTask?.cancel(); flushTask = nil
-        guard let id = view?.call.id, let store, !outbox.isEmpty else { return }
+        guard let id = view?.call.id, let store, !outbox.isEmpty, guest == nil else { return }
         let batch = Array(outbox.prefix(CallRules.maxBatch))
         outbox.removeFirst(batch.count)
         do {
@@ -789,17 +990,27 @@ final class CallCenter: CallMediaDelegate {
     func mediaDidStop(error: String?) {
         guard !leaving, let v = view else { return }
         if let error { view?.error = error }
-        let id = v.call.id
-        Task { await teardown(keepError: error != nil); _ = try? await store?.leaveCallRequest(id) }
+        let id = v.call.id, g = guest
+        Task { await teardown(keepError: error != nil, outcome: .ended); await leaveRemote(id, guest: g) }
     }
     func mediaMuteChanged(_ muted: Bool) { view?.muted = muted }
     func mediaTileAdded(_ tile: CallTile) {
         guard var v = view else { return }
-        v.tiles.removeAll { $0.tileId == tile.tileId }
-        v.tiles.append(tile)
-        view = v
+        if tile.content {
+            v.screens.removeAll { $0.tileId == tile.tileId }
+            v.screens.append(tile)
+        } else {
+            v.tiles.removeAll { $0.tileId == tile.tileId }
+            v.tiles.append(tile)
+        }
+        if v != view { view = v }
     }
-    func mediaTileRemoved(_ tileId: Int) { view?.tiles.removeAll { $0.tileId == tileId } }
+    func mediaTileRemoved(_ tileId: Int) {
+        guard var v = view else { return }
+        v.tiles.removeAll { $0.tileId == tileId }
+        v.screens.removeAll { $0.tileId == tileId }
+        if v != view { view = v }
+    }
     func mediaSpeaking(_ userIds: [String]) { if view?.speaking != userIds { view?.speaking = userIds } }
     func mediaRemoteMute(_ userIds: [String], muted: Bool) {
         guard var v = view else { return }
@@ -891,6 +1102,25 @@ extension AppStore {
         return j
     }
 
+    // Invitados por enlace: API público, sin sesión (el token del enlace o el secreto del invitado).
+    private func linkPath(_ token: String) -> String { token.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? token }
+
+    func previewCallLink(_ token: String) async throws -> GuestCallPreviewDTO {
+        try await api.publicRequest("/call-links/\(linkPath(token))")
+    }
+
+    func joinCallLink(_ token: String, name: String) async throws -> GuestJoinDTO {
+        try await api.publicRequest("/call-links/\(linkPath(token))/join", method: "POST", json: ["name": name])
+    }
+
+    func guestHeartbeat(_ guestId: String, secret: String) async throws -> GuestCallStateDTO {
+        try await api.publicRequest("/call-guests/\(linkPath(guestId))/heartbeat", method: "POST", json: ["secret": secret])
+    }
+
+    func guestLeave(_ guestId: String, secret: String) async throws {
+        let _: GuestOk = try await api.publicRequest("/call-guests/\(linkPath(guestId))/leave", method: "POST", json: ["secret": secret])
+    }
+
     func callHeartbeatRequest(_ callId: String) async throws {
         try await api.requestData("/calls/\(callId)/heartbeat", method: "POST", json: ["deviceKey": CallRules.deviceKey])
     }
@@ -956,3 +1186,6 @@ extension AppStore {
         try await api.requestData("/calls/\(callId)/share", method: "POST", json: ["conversationId": conversationId, "what": what.rawValue])
     }
 }
+
+/// `{ ok: true }` de /call-guests/:id/leave.
+private struct GuestOk: Decodable {}

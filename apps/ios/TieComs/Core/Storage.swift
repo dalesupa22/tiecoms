@@ -197,6 +197,12 @@ enum Prefs {
         set { defaults.set(newValue, forKey: "tc.lastUserId") }
     }
 
+    /// Nombre con el que entré la última vez a una llamada por enlace (se prellena la próxima).
+    static var guestCallName: String? {
+        get { defaults.string(forKey: "tc.guestCallName") }
+        set { defaults.set(newValue, forKey: "tc.guestCallName") }
+    }
+
     static var soundsEnabled: Bool {
         get { defaults.object(forKey: soundsKey) as? Bool ?? true }
         set { defaults.set(newValue, forKey: soundsKey) }

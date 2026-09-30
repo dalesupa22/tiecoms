@@ -68,9 +68,10 @@ final class ChimeCallMedia: NSObject, CallMedia {
         av.bindVideoView(videoView: v, tileId: tileId)
     }
     func unbind(tileId: Int) { av.unbindVideoView(tileId: tileId) }
-    func makeVideoView() -> UIView {
+    func makeVideoView(fit: Bool) -> UIView {
         let v = DefaultVideoRenderView()
-        v.contentMode = .scaleAspectFill
+        // Pantallas compartidas completas (sin recortar); cámaras llenando el recuadro.
+        v.contentMode = fit ? .scaleAspectFit : .scaleAspectFill
         v.clipsToBounds = true
         return v
     }
@@ -121,23 +122,32 @@ extension ChimeCallMedia: RealtimeObserver {
 }
 
 extension ChimeCallMedia: VideoTileObserver {
+    /// Persona del recuadro. Una pantalla compartida es el attendee «{attendeeId}#content» (externalUserId «{ext}#content»).
+    private func tileUser(_ attendee: String) -> String? {
+        attendeeUsers[attendee] ?? attendeeUsers[CallRules.baseAttendee(attendee)]
+    }
+    /// Se copian los datos del estado (el observador llega fuera del hilo principal).
+    nonisolated private func report(_ t: VideoTileState, active: Bool) {
+        let id = t.tileId, local = t.isLocalTile, attendee = t.attendeeId, content = t.isContent
+        main { self.delegate?.mediaTileAdded(CallTile(tileId: id, local: local, userId: self.tileUser(attendee), active: active, content: content)) }
+    }
     nonisolated func videoTileDidAdd(tileState: VideoTileState) {
-        guard !tileState.isContent else { return }
-        let id = tileState.tileId, local = tileState.isLocalTile, attendee = tileState.attendeeId
+        // Solo pantallas de otros (iOS no comparte la suya).
+        if tileState.isContent && tileState.isLocalTile { return }
         let active = tileState.pauseState == .unpaused
-        main { self.delegate?.mediaTileAdded(CallTile(tileId: id, local: local, userId: self.attendeeUsers[attendee], active: active)) }
+        report(tileState, active: active)
     }
     nonisolated func videoTileDidRemove(tileState: VideoTileState) {
         let id = tileState.tileId
         main { self.av.unbindVideoView(tileId: id); self.delegate?.mediaTileRemoved(id) }
     }
     nonisolated func videoTileDidPause(tileState: VideoTileState) {
-        let id = tileState.tileId, local = tileState.isLocalTile, attendee = tileState.attendeeId
-        main { self.delegate?.mediaTileAdded(CallTile(tileId: id, local: local, userId: self.attendeeUsers[attendee], active: false)) }
+        if tileState.isContent && tileState.isLocalTile { return }
+        report(tileState, active: false)
     }
     nonisolated func videoTileDidResume(tileState: VideoTileState) {
-        let id = tileState.tileId, local = tileState.isLocalTile, attendee = tileState.attendeeId
-        main { self.delegate?.mediaTileAdded(CallTile(tileId: id, local: local, userId: self.attendeeUsers[attendee], active: true)) }
+        if tileState.isContent && tileState.isLocalTile { return }
+        report(tileState, active: true)
     }
     nonisolated func videoTileSizeDidChange(tileState: VideoTileState) {}
 }

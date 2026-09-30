@@ -586,6 +586,8 @@ struct CallDTO: Codable, Equatable, Identifiable, Sendable {
         }
     }
     var invited: [Invited] = []
+    /// Invitados por enlace que están dentro (sin cuenta; en Chime son «guest:{id}»).
+    var guests: [CallGuestDTO] = []
     /// Título de la conversación (GET /calls/active).
     var title: String?
 
@@ -607,6 +609,7 @@ struct CallDTO: Codable, Equatable, Identifiable, Sendable {
         names = c.v("names", [:])
         myDevices = c.lossyArray("myDevices")
         invited = c.lossyArray("invited")
+        guests = c.lossyArray("guests")
         title = c.o("title")
     }
 
@@ -614,6 +617,18 @@ struct CallDTO: Codable, Equatable, Identifiable, Sendable {
          activeUserIds: [String] = [], transcribing: Bool = false, hasTranscript: Bool = false) {
         self.id = id; self.conversationId = conversationId; self.kind = kind; self.startedBy = startedBy; self.startedAt = startedAt
         self.endedAt = endedAt; self.activeUserIds = activeUserIds; self.transcribing = transcribing; self.hasTranscript = hasTranscript
+    }
+}
+
+/// Invitado por enlace dentro de una llamada: `{ id, name }`.
+struct CallGuestDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var name: String
+    init(id: String, name: String) { self.id = id; self.name = name }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        name = c.v("name", "")
     }
 }
 

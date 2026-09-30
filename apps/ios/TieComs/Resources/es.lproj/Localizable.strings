@@ -2434,3 +2434,31 @@
 "ws.onlyYours" = "Solo ves los grupos en los que participas; los demás no revelan su nombre.";
 "ws.participants" = "Participantes";
 "ws.yourGroups" = "Tus grupos en este espacio";
+
+/* Llamadas: pantallas compartidas e invitados por enlace (/llamada/<token>) */
+"call.screen" = "Pantalla compartida";
+"call.screenOf" = "Pantalla de {name}";
+"call.enlarge" = "Ampliar la pantalla";
+"call.shrink" = "Reducir la pantalla";
+"call.guestBadge" = "invitado";
+"guest.title" = "Entrar a la llamada";
+"guest.by" = "{host} te invita";
+"guest.byOrg" = "{host} · {org} te invita";
+"guest.name" = "Tu nombre";
+"guest.namePh" = "Cómo te verán en la llamada";
+"guest.joinAudio" = "Entrar con voz";
+"guest.joinVideo" = "Entrar con video";
+"guest.notLive" = "Todavía no hay nadie en la llamada. Vuelve a intentar en un momento.";
+"guest.invalid" = "Este enlace ya no sirve. Pide uno nuevo a quien te invitó.";
+"guest.left" = "Saliste de la llamada.";
+"guest.ended" = "La llamada terminó.";
+"guest.rejoin" = "Volver a intentar";
+"guest.powered" = "Llamada en chaggu, la red de trabajo entre empresas";
+"guest.privacy" = "Al entrar, quienes están en la llamada verán tu nombre y, si la prendes, tu cámara.";
+"guest.switchTitle" = "Ya estás en otra llamada";
+"guest.switchBody" = "Para entrar a esta, se cuelga la llamada en la que estás.";
+"guest.switchConfirm" = "Colgar y entrar";
+"err.link_revoked" = "Este enlace ya no sirve. Pide uno nuevo.";
+"err.call_not_live" = "No hay nadie en la llamada ahora.";
+"err.call_full" = "La llamada ya tiene el máximo de invitados.";
+"err.call_ended" = "La llamada ya terminó.";

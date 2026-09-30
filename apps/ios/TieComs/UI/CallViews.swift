@@ -48,7 +48,8 @@ struct CallBanner: View {
     var body: some View {
         Group {
             if let d = store.data, d.callsEnabled, let call = store.liveCalls[conversationId], store.callCenter.view?.call.id != call.id {
-                let names = call.activeUserIds.map { firstName(d, $0) }.filter { !$0.isEmpty }.joined(separator: ", ")
+                let names = (call.activeUserIds.map { firstName(d, $0) } + call.guests.map { "\($0.name) (\(L("call.guestBadge")))" })
+                    .filter { !$0.isEmpty }.joined(separator: ", ")
                 HStack(spacing: 10) {
                     Image(systemName: call.isVideo ? "video.fill" : "phone.fill").foregroundStyle(Theme.accentText)
                     Text([L("call.inProgress"), names.isEmpty ? nil : names, call.transcribing ? L("call.transcribingShort") : nil]
@@ -120,7 +121,7 @@ struct ActiveCallPill: View {
     @Environment(AppStore.self) private var store
     var body: some View {
         let center = store.callCenter
-        if let v = center.view, !center.expanded, let d = store.data {
+        if let v = center.view, !v.isGuest, !center.expanded, let d = store.data {
             HStack(spacing: 10) {
                 Button { center.expanded = true } label: {
                     HStack(spacing: 8) {
@@ -246,19 +247,61 @@ struct ActiveCallsSection: View {
 
 // MARK: - Pantalla de la llamada
 
-private struct CallVideoTile: UIViewRepresentable {
+struct CallVideoTile: UIViewRepresentable {
     let tileId: Int
     let center: CallCenter
+    /// Sin recortar (pantallas compartidas).
+    var fit = false
     final class Coordinator { var tileId = 0; weak var center: CallCenter? }
     func makeCoordinator() -> Coordinator { let c = Coordinator(); c.tileId = tileId; c.center = center; return c }
     func makeUIView(context: Context) -> UIView {
-        let v = center.makeVideoView()
+        let v = center.makeVideoView(fit: fit)
         center.bind(v, tileId: tileId)
         return v
     }
-    func updateUIView(_ uiView: UIView, context: Context) {}
+    func updateUIView(_ uiView: UIView, context: Context) {
+        // Otro recuadro en la misma celda: se suelta el anterior y se pega el nuevo.
+        guard context.coordinator.tileId != tileId else { return }
+        center.unbind(uiView, tileId: context.coordinator.tileId)
+        context.coordinator.tileId = tileId
+        center.bind(uiView, tileId: tileId)
+    }
     static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
-        MainActor.assumeIsolated { coordinator.center?.unbind(tileId: coordinator.tileId) }
+        MainActor.assumeIsolated { coordinator.center?.unbind(uiView, tileId: coordinator.tileId) }
+    }
+}
+
+/// Quién es quién en la pantalla de la llamada, con sesión (snapshot) o como invitado (solo `call.names`).
+struct CallPeopleContext {
+    var d: BootstrapDTO?
+    /// Mi id dentro de la llamada (el de mi cuenta o «guest:{id}»).
+    var me: String
+    var call: CallDTO
+
+    /// Quienes están (yo primero si no aparezco): personas de chaggu e invitados por enlace.
+    var inside: [String] {
+        let all = CallRules.people(call)
+        return all.contains(me) ? all : [me] + all
+    }
+    func fullName(_ id: String) -> String {
+        if let g = CallRules.guestName(call, id) { return g }
+        return d.flatMap { Naming.person($0, id)?.name } ?? call.names[id] ?? ""
+    }
+    func name(_ id: String) -> String {
+        if id == me { return L("call.you") }
+        if CallRules.isGuest(id) { return fullName(id) }
+        let n = fullName(id)
+        return n.split(separator: " ").first.map(String.init) ?? n
+    }
+    /// «invitado» junto al nombre de quien entró con el enlace (no en mí).
+    func isGuest(_ id: String) -> Bool { id != me && CallRules.isGuest(id) }
+
+    @ViewBuilder func avatar(_ id: String, size: CGFloat) -> some View {
+        if let p = d.flatMap({ Naming.person($0, id) }) { Avatar(person: p, org: nil, size: size) }
+        else {
+            let n = fullName(id)
+            Avatar(name: n.isEmpty ? "?" : n, org: nil, size: size, fill: PersonColor.fill(id))
+        }
     }
 }
 
@@ -266,14 +309,17 @@ struct CallScreen: View {
     @Environment(AppStore.self) private var store
     @State private var consent = false
     @State private var adding = false
+    /// Pantalla compartida ampliada (tileId).
+    @State private var enlarged: Int?
 
     var body: some View {
         let center = store.callCenter
         ZStack {
             Color(hex: 0x17161F).ignoresSafeArea()
-            if let v = center.view, let d = store.data {
+            if let v = center.view {
+                let ctx = CallPeopleContext(d: store.data, me: v.isGuest ? (center.guest?.userId ?? "") : (store.data?.me.id ?? ""), call: v.call)
                 VStack(spacing: 14) {
-                    header(d, v)
+                    header(ctx, v)
                     if v.call.transcribing {
                         Label(L("call.transcribingAll"), systemImage: "record.circle")
                             .font(.footnote.weight(.semibold)).foregroundStyle(.white)
@@ -281,8 +327,8 @@ struct CallScreen: View {
                             .background(Capsule().fill(Color.red.opacity(0.85)))
                             .accessibilityIdentifier("call.recording")
                     }
-                    stage(d, v, center)
-                    if v.call.transcribing && !v.captions.isEmpty { captions(d, v) }
+                    stage(ctx, v, center)
+                    if v.call.transcribing && !v.captions.isEmpty { captions(ctx, v) }
                     if let e = v.error { Text(e).font(.footnote).foregroundStyle(.orange) }
                     secondary(v, center)
                     controls(v, center)
@@ -299,57 +345,113 @@ struct CallScreen: View {
             .presentationDetents([.medium])
         }
         .sheet(isPresented: $adding) { AddToCallSheet() }
+        .fullScreenCover(isPresented: Binding(get: { enlarged != nil }, set: { if !$0 { enlarged = nil } })) {
+            if let id = enlarged, let v = center.view {
+                let ctx = CallPeopleContext(d: store.data, me: v.isGuest ? (center.guest?.userId ?? "") : (store.data?.me.id ?? ""), call: v.call)
+                let owner = v.screens.first { $0.tileId == id }?.userId
+                ScreenShareZoomView(tileId: id, label: screenLabel(ctx, owner), center: center) { enlarged = nil }
+            }
+        }
+        .onChange(of: center.view?.screens.map(\.tileId) ?? []) { _, ids in
+            // Dejó de compartir: se cierra la vista ampliada.
+            if let e = enlarged, !ids.contains(e) { enlarged = nil }
+        }
         .overlay(alignment: .bottom) { ToastView(inSheet: true) }
     }
 
-    private func header(_ d: BootstrapDTO, _ v: CallView) -> some View {
-        HStack(spacing: 10) {
-            Button { store.callCenter.expanded = false } label: {
-                Image(systemName: "chevron.down").font(.headline).foregroundStyle(.white).frame(width: 44, height: 44)
+    private func header(_ ctx: CallPeopleContext, _ v: CallView) -> some View {
+        let center = store.callCenter
+        return HStack(spacing: 10) {
+            if v.isGuest {
+                // Como invitado la llamada va siempre a pantalla completa (no hay lista de chats debajo).
+                Color.clear.frame(width: 44, height: 44)
+            } else {
+                Button { center.expanded = false } label: {
+                    Image(systemName: "chevron.down").font(.headline).foregroundStyle(.white).frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(L("call.minimize")).accessibilityIdentifier("call.minimize")
             }
-            .accessibilityLabel(L("call.minimize")).accessibilityIdentifier("call.minimize")
             VStack(spacing: 2) {
-                Text(CallTitle.text(d, v.call)).font(.headline).foregroundStyle(.white).lineLimit(1)
-                TimelineView(.periodic(from: .now, by: 1)) { ctx in
-                    Text(v.phase == .connecting ? L("call.connecting") : CallRules.clock(elapsed(since: v.call.startedAt, now: ctx.date)))
+                Text(v.isGuest ? (center.guest?.title ?? L("call.title")) : (ctx.d.map { CallTitle.text($0, v.call) } ?? L("call.title")))
+                    .font(.headline).foregroundStyle(.white).lineLimit(1)
+                TimelineView(.periodic(from: .now, by: 1)) { t in
+                    Text(v.phase == .connecting ? L("call.connecting") : CallRules.clock(elapsed(since: v.call.startedAt, now: t.date)))
                         .font(.subheadline).monospacedDigit().foregroundStyle(.white.opacity(0.7))
                 }
                 .accessibilityIdentifier("call.clock")
             }
             .frame(maxWidth: .infinity)
-            Button { adding = true } label: {
-                Image(systemName: "person.badge.plus").font(.headline).foregroundStyle(.white).frame(width: 44, height: 44)
+            if v.isGuest {
+                Color.clear.frame(width: 44, height: 44)
+            } else {
+                Button { adding = true } label: {
+                    Image(systemName: "person.badge.plus").font(.headline).foregroundStyle(.white).frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(L("call.add")).accessibilityIdentifier("call.add")
             }
-            .accessibilityLabel(L("call.add")).accessibilityIdentifier("call.add")
         }
     }
 
+    private func screenLabel(_ ctx: CallPeopleContext, _ owner: String?) -> String {
+        let n = owner.map(ctx.fullName) ?? ""
+        return n.isEmpty ? L("call.screen") : L("call.screenOf", ["name": n])
+    }
+
     @ViewBuilder
-    private func stage(_ d: BootstrapDTO, _ v: CallView, _ center: CallCenter) -> some View {
+    private func stage(_ ctx: CallPeopleContext, _ v: CallView, _ center: CallCenter) -> some View {
         let video = v.tiles.filter { $0.active || $0.local }
-        // Quienes están (yo siempre) y los agregados que aún no entran.
-        let inside = v.call.activeUserIds.contains(d.me.id) ? v.call.activeUserIds : [d.me.id] + v.call.activeUserIds
+        // Quienes están (yo siempre), los invitados por enlace y los agregados que aún no entran.
+        let inside = ctx.inside
         let invited = v.invites.keys.filter { !inside.contains($0) }.sorted()
-        if !video.isEmpty {
+        if let screen = v.screens.first(where: \.active) ?? v.screens.first {
+            // Alguien comparte pantalla: grande y sin recortar; las personas en una fila abajo.
+            VStack(spacing: 10) {
+                screenTile(ctx, v, center, screen)
+                    .frame(maxHeight: .infinity)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(inside + invited, id: \.self) { id in
+                            let tile = id == ctx.me ? video.first(where: \.local) : video.first { !$0.local && $0.userId == id }
+                            ZStack {
+                                if let tile { CallVideoTile(tileId: tile.tileId, center: center) }
+                                else { Color.white.opacity(0.08); personAvatar(ctx, v, center, id, size: 40) }
+                            }
+                            .frame(width: 84, height: 84)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.green, lineWidth: v.speaking.contains(id) ? 3 : 0))
+                            .overlay(alignment: .bottom) {
+                                Text(ctx.name(id)).font(.caption2.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
+                                    .padding(.horizontal, 4).background(Capsule().fill(.black.opacity(0.5))).padding(3)
+                            }
+                            .overlay(alignment: .topLeading) { if ctx.isGuest(id) { guestBadge.padding(3) } }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier(tile != nil ? "call.video.\(id)" : "call.person.\(id)")
+                        }
+                    }
+                }
+                .frame(height: 84)
+            }
+            .frame(maxHeight: .infinity)
+        } else if !video.isEmpty {
             // Con al menos un video: cuadrícula; quien no tiene cámara va como avatar en su recuadro.
             let cells = inside + invited
             let cols = cells.count > 1 ? [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)] : [GridItem(.flexible())]
             ScrollView {
                 LazyVGrid(columns: cols, spacing: 8) {
                     ForEach(cells, id: \.self) { id in
-                        let tile = id == d.me.id ? video.first(where: \.local) : video.first { !$0.local && $0.userId == id }
+                        let tile = id == ctx.me ? video.first(where: \.local) : video.first { !$0.local && $0.userId == id }
                         ZStack {
                             if let tile {
                                 CallVideoTile(tileId: tile.tileId, center: center)
                             } else {
                                 Color.white.opacity(0.08)
-                                personAvatar(d, v, center, id, size: 64)
+                                personAvatar(ctx, v, center, id, size: 64)
                             }
                         }
                         .aspectRatio(3 / 4, contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.green, lineWidth: v.speaking.contains(id) ? 3 : 0))
-                        .overlay(alignment: .bottomLeading) { nameTag(d, v, id, hasVideo: tile != nil) }
+                        .overlay(alignment: .bottomLeading) { nameTag(ctx, v, id, hasVideo: tile != nil) }
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier(tile != nil ? "call.video.\(id)" : "call.person.\(id)")
                     }
@@ -363,14 +465,15 @@ struct CallScreen: View {
                 LazyVGrid(columns: cols, spacing: 18) {
                     ForEach(inside + invited, id: \.self) { id in
                         VStack(spacing: 6) {
-                            personAvatar(d, v, center, id, size: 76)
-                            Text(id == d.me.id ? L("call.you") : firstName(d, id, v.call.names)).font(.footnote).foregroundStyle(.white).lineLimit(1)
+                            personAvatar(ctx, v, center, id, size: 76)
+                            Text(ctx.name(id)).font(.footnote).foregroundStyle(.white).lineLimit(1)
+                            if ctx.isGuest(id) { guestBadge }
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("call.person.\(id)")
                     }
                 }
-                if v.call.activeUserIds.filter({ $0 != d.me.id }).isEmpty && invited.isEmpty {
+                if inside.filter({ $0 != ctx.me }).isEmpty && invited.isEmpty {
                     Text(L("call.waiting")).font(.subheadline).foregroundStyle(.white.opacity(0.7))
                 }
                 Spacer()
@@ -379,13 +482,47 @@ struct CallScreen: View {
         }
     }
 
+    /// Pantalla compartida: completa (aspect fit) sobre negro; tocarla o ⤢ la amplía.
+    private func screenTile(_ ctx: CallPeopleContext, _ v: CallView, _ center: CallCenter, _ screen: CallTile) -> some View {
+        ZStack {
+            Color.black
+            // Mientras está ampliada, la vista grande tiene el recuadro.
+            if enlarged != screen.tileId { CallVideoTile(tileId: screen.tileId, center: center, fit: true) }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .contentShape(Rectangle())
+        .onTapGesture { enlarged = screen.tileId }
+        .overlay(alignment: .bottomLeading) {
+            Label(screenLabel(ctx, screen.userId), systemImage: "rectangle.on.rectangle")
+                .font(.caption.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
+                .padding(.horizontal, 8).padding(.vertical, 3).background(Capsule().fill(.black.opacity(0.55))).padding(6)
+        }
+        .overlay(alignment: .topTrailing) {
+            Button { enlarged = screen.tileId } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                    .frame(width: 36, height: 36).background(Circle().fill(.black.opacity(0.55)))
+            }
+            .padding(6)
+            .accessibilityLabel(L("call.enlarge"))
+            .accessibilityIdentifier("call.screen.enlarge")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("call.screen")
+    }
+
+    private var guestBadge: some View {
+        Text(L("call.guestBadge")).font(.caption2.weight(.semibold)).foregroundStyle(.white)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(Capsule().fill(Theme.orange.opacity(0.85)))
+    }
+
     /// Avatar con quién habla, micrófono silenciado y, si es un agregado que no entra, «Llamando…» / «No contestó».
     @ViewBuilder
-    private func personAvatar(_ d: BootstrapDTO, _ v: CallView, _ center: CallCenter, _ id: String, size: CGFloat) -> some View {
+    private func personAvatar(_ ctx: CallPeopleContext, _ v: CallView, _ center: CallCenter, _ id: String, size: CGFloat) -> some View {
         let speaking = v.speaking.contains(id)
-        let muted = id == d.me.id ? v.muted : v.mutedUsers.contains(id)
+        let muted = id == ctx.me ? v.muted : v.mutedUsers.contains(id)
         VStack(spacing: 6) {
-            Avatar(person: Naming.person(d, id), org: nil, size: size)
+            ctx.avatar(id, size: size)
                 .overlay(Circle().stroke(Color.green, lineWidth: speaking ? 4 : 0).padding(-4))
                 .overlay(alignment: .bottomTrailing) {
                     if muted {
@@ -396,8 +533,8 @@ struct CallScreen: View {
                 .opacity(center.inviteState(id) != nil ? 0.55 : 1)
                 .animation(.easeOut(duration: 0.15), value: speaking)
             if let st = center.inviteState(id) {
-                TimelineView(.periodic(from: .now, by: 5)) { ctx in
-                    let state = center.inviteState(id, now: ctx.date) ?? st
+                TimelineView(.periodic(from: .now, by: 5)) { t in
+                    let state = center.inviteState(id, now: t.date) ?? st
                     if state == .ringing {
                         Text(L("call.inviteRinging")).font(.caption2).foregroundStyle(.white.opacity(0.8))
                             .accessibilityIdentifier("call.invite.ringing.\(id)")
@@ -416,21 +553,22 @@ struct CallScreen: View {
         }
     }
 
-    private func nameTag(_ d: BootstrapDTO, _ v: CallView, _ id: String, hasVideo: Bool) -> some View {
-        let muted = id == d.me.id ? v.muted : v.mutedUsers.contains(id)
+    private func nameTag(_ ctx: CallPeopleContext, _ v: CallView, _ id: String, hasVideo: Bool) -> some View {
+        let muted = id == ctx.me ? v.muted : v.mutedUsers.contains(id)
         return HStack(spacing: 4) {
             if muted { Image(systemName: "mic.slash.fill").foregroundStyle(.red) }
             if !hasVideo { Image(systemName: "video.slash.fill").accessibilityLabel(L("call.cameraOffPerson")) }
-            Text(id == d.me.id ? L("call.you") : firstName(d, id, v.call.names))
+            Text(ctx.name(id))
+            if ctx.isGuest(id) { Text("· " + L("call.guestBadge")).foregroundStyle(.white.opacity(0.75)) }
         }
         .font(.caption.weight(.semibold)).foregroundStyle(.white)
         .padding(.horizontal, 8).padding(.vertical, 3).background(Capsule().fill(.black.opacity(0.5))).padding(6)
     }
 
-    private func captions(_ d: BootstrapDTO, _ v: CallView) -> some View {
+    private func captions(_ ctx: CallPeopleContext, _ v: CallView) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(v.captions.suffix(4)) { c in
-                let who = c.userId == d.me.id ? L("call.you") : firstName(d, c.userId, v.call.names)
+                let who = c.userId.map(ctx.name) ?? ""
                 (Text("\(who.isEmpty ? "·" : who): ").bold() + Text(c.processing ? "⏳ \(L("call.processing"))" : c.text))
                     .font(.subheadline).foregroundStyle(.white.opacity(c.partial ? 0.65 : 1))
             }
@@ -464,10 +602,12 @@ struct CallScreen: View {
                     .accessibilityAddTraits(onSpeaker ? .isSelected : [])
                     .accessibilityIdentifier("call.speaker")
             }
-            Button { adding = true } label: { chip("person.badge.plus", L("call.addShort"), on: false) }
-                .buttonStyle(.plain)
-                .accessibilityLabel(L("call.add"))
-                .accessibilityIdentifier("call.addButton")
+            if !v.isGuest {
+                Button { adding = true } label: { chip("person.badge.plus", L("call.addShort"), on: false) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L("call.add"))
+                    .accessibilityIdentifier("call.addButton")
+            }
         }
     }
 
@@ -487,10 +627,13 @@ struct CallScreen: View {
             if v.camera {
                 ctl("arrow.triangle.2.circlepath.camera", on: false, label: L("call.switchCamera"), id: "call.switchCamera") { center.switchCamera() }
             }
-            ctl("text.quote", on: v.call.transcribing, label: v.call.transcribing ? L("call.transcriptOff") : L("call.transcriptOn"), id: "call.transcript", tint: .red) {
-                if v.call.transcribing {
-                    Task { do { try await center.setTranscription(false) } catch { store.show(L10n.errorText(error)) } }
-                } else { consent = true }
+            // Los invitados no prenden ni apagan la transcripción (pide sesión).
+            if !v.isGuest {
+                ctl("text.quote", on: v.call.transcribing, label: v.call.transcribing ? L("call.transcriptOff") : L("call.transcriptOn"), id: "call.transcript", tint: .red) {
+                    if v.call.transcribing {
+                        Task { do { try await center.setTranscription(false) } catch { store.show(L10n.errorText(error)) } }
+                    } else { consent = true }
+                }
             }
             Button { Task { await center.hangUp() } } label: {
                 Image(systemName: "phone.down.fill").font(.title2).foregroundStyle(.white).frame(width: 64, height: 64).background(Circle().fill(Color.red))
@@ -510,6 +653,61 @@ struct CallScreen: View {
         .accessibilityLabel(label)
         .accessibilityAddTraits(on ? .isSelected : [])
         .accessibilityIdentifier(id)
+    }
+}
+
+/// Pantalla compartida ampliada: negro, sin recortar, con pellizco para acercar (y girar el teléfono).
+struct ScreenShareZoomView: View {
+    let tileId: Int
+    let label: String
+    let center: CallCenter
+    var close: () -> Void
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            CallVideoTile(tileId: tileId, center: center, fit: true)
+                .scaleEffect(scale)
+                .offset(offset)
+                .gesture(
+                    MagnifyGesture()
+                        .onChanged { scale = min(5, max(1, lastScale * $0.magnification)) }
+                        .onEnded { _ in lastScale = scale; if scale == 1 { offset = .zero; lastOffset = .zero } }
+                        .simultaneously(with: DragGesture()
+                            .onChanged { g in
+                                guard scale > 1 else { return }
+                                offset = CGSize(width: lastOffset.width + g.translation.width, height: lastOffset.height + g.translation.height)
+                            }
+                            .onEnded { _ in lastOffset = offset })
+                )
+                .onTapGesture(count: 2) {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        if scale > 1 { scale = 1; offset = .zero } else { scale = 2.5 }
+                        lastScale = scale; lastOffset = offset
+                    }
+                }
+                .ignoresSafeArea()
+                .accessibilityIdentifier("call.screen.zoomed")
+        }
+        .overlay(alignment: .topLeading) {
+            Text(label).font(.footnote.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
+                .padding(.horizontal, 10).padding(.vertical, 5).background(Capsule().fill(.black.opacity(0.55))).padding(12)
+        }
+        .overlay(alignment: .topTrailing) {
+            Button(action: close) {
+                Image(systemName: "arrow.down.right.and.arrow.up.left").font(.headline).foregroundStyle(.white)
+                    .frame(width: 44, height: 44).background(Circle().fill(.black.opacity(0.55)))
+            }
+            .padding(12)
+            .accessibilityLabel(L("call.shrink"))
+            .accessibilityIdentifier("call.screen.shrink")
+        }
+        .preferredColorScheme(.dark)
+        .statusBarHidden()
     }
 }
 

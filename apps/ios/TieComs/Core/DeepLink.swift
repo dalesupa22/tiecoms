@@ -12,6 +12,8 @@ enum DeepLink: Equatable, Hashable {
     case trazo
     case whatsapp
     case share(text: String?)
+    /// /llamada/<token>: entrar a una llamada como invitado, con o sin sesión (docs/LLAMADAS.md › Invitados por enlace).
+    case guestCall(String)
 
     static let hosts: Set<String> = ["app.chaggu.com", "chaggu.com", "www.chaggu.com",
                                      // Dominio anterior de la marca: los enlaces ya compartidos siguen abriendo la app.
@@ -48,6 +50,7 @@ enum DeepLink: Equatable, Hashable {
         case "agenda": return .agenda
         case "trazo": return .trazo
         case "whatsapp": return .whatsapp
+        case "llamada": return arg.flatMap { validCallToken($0) ? .guestCall($0) : nil }
         case "share":
             let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
             let text = ["title", "text", "url"].compactMap { k in items.first(where: { $0.name == k })?.value }.filter { !$0.isEmpty }.joined(separator: "\n")
@@ -57,6 +60,11 @@ enum DeepLink: Equatable, Hashable {
             return .signup(orgToken: org?.isEmpty == false ? org : nil)
         default: return nil
         }
+    }
+
+    /// Token del enlace de llamada (base64url en el servidor). Uno que no exista lo rechaza el API con 404.
+    static func validCallToken(_ t: String) -> Bool {
+        (1...128).contains(t.count) && t.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
     }
 
     private static func valid(_ id: String) -> Bool {

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.7.4: invitados por enlace y pantallas compartidas (docs/LLAMADAS.md). Mismos textos que la web (guest.*, call.screenOf). -->
+<resources>
+    <string name="guest_title">Entrar a la llamada</string>
+    <string name="guest_by">%1$s te invita</string>
+    <string name="guest_by_org">%1$s · %2$s te invita</string>
+    <string name="guest_name">Tu nombre</string>
+    <string name="guest_name_ph">Cómo te verán en la llamada</string>
+    <string name="guest_join_audio">Entrar con voz</string>
+    <string name="guest_join_video">Entrar con video</string>
+    <string name="guest_not_live">Todavía no hay nadie en la llamada. Vuelve a intentar en un momento.</string>
+    <string name="guest_invalid">Este enlace ya no sirve. Pide uno nuevo a quien te invitó.</string>
+    <string name="guest_left">Saliste de la llamada.</string>
+    <string name="guest_ended">La llamada terminó.</string>
+    <string name="guest_retry">Volver a intentar</string>
+    <string name="guest_powered">Llamada en chaggu, la red de trabajo entre empresas</string>
+    <string name="guest_privacy">Al entrar, quienes están en la llamada verán tu nombre y, si la prendes, tu cámara.</string>
+    <string name="guest_full">La llamada está llena. Vuelve a intentar en un momento.</string>
+    <string name="guest_close">Cerrar</string>
+    <string name="guest_in_call">En la llamada · %1$d</string>
+    <string name="guest_switch_title">Estás en otra llamada</string>
+    <string name="guest_switch_body">Si entras a esta, sales de la llamada en la que estás ahora.</string>
+    <string name="guest_switch_yes">Salir y entrar</string>
+    <string name="call_guest_badge">invitado</string>
+    <string name="call_screen_of">Pantalla de %1$s</string>
+    <string name="call_screen_full">Ampliar pantalla</string>
+    <string name="call_screen_exit">Salir de pantalla completa</string>
+</resources>

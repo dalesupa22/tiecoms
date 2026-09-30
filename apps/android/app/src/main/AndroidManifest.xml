@@ -100,6 +100,8 @@
                 <data android:pathPrefix="/share" />
                 <data android:pathPrefix="/ajustes" />
                 <data android:pathPrefix="/programados" />
+                <!-- 1.7.4: enlace de invitado a una llamada (https://app.chaggu.com/llamada/<token>), con o sin sesión. -->
+                <data android:pathPrefix="/llamada/" />
             </intent-filter>
 
             <!-- App Links de la marca anterior (TieComs): se mantienen mientras tiecoms.com siga activo. -->
@@ -148,7 +150,7 @@
                 <data android:scheme="chaggu" android:host="mail" android:pathPrefix="/connected" />
             </intent-filter>
 
-            <!-- Esquema propio de respaldo (chaggu, para no chocar con la app TieComs instalada): chaggu://c/<id>, chaggu://w/<id>, chaggu://invite/<token>, chaggu://signup?org=<token> -->
+            <!-- Esquema propio de respaldo (chaggu, para no chocar con la app TieComs instalada): chaggu://c/<id>, chaggu://w/<id>, chaggu://invite/<token>, chaggu://signup?org=<token>, chaggu://llamada/<token> -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

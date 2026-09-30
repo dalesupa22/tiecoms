@@ -42,6 +42,7 @@ import com.tiecoms.app.core.Calls171
 import com.tiecoms.app.core.Calls171Invites
 import com.tiecoms.app.core.Caption
 import com.tiecoms.app.core.ChimeJoin
+import com.tiecoms.app.core.GuestCalls
 import com.tiecoms.app.core.TranscriptOutbox
 import com.tiecoms.app.core.TranscriptPiece
 import kotlinx.coroutines.CoroutineScope
@@ -70,8 +71,16 @@ import kotlinx.coroutines.sync.withLock
  */
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class CallManager(private val app: Application, private val container: AppContainer) {
-    data class Tile(val tileId: Int, val local: Boolean, val userId: String?, val paused: Boolean)
+    /** [attendeeId]: el de Chime (para ponerle nombre si el recuadro llega antes que el attendee). */
+    data class Tile(val tileId: Int, val local: Boolean, val userId: String?, val paused: Boolean, val attendeeId: String? = null)
     enum class Phase { CONNECTING, LIVE }
+    /** 1.7.4: entré como invitado con un enlace (sin cuenta): latido y salida por el API público. */
+    data class Guest(val id: String, val secret: String, val token: String, val name: String) {
+        val externalId: String get() = GuestCalls.externalId(id)
+    }
+    /** Cómo terminó mi última llamada como invitado (para «Saliste» / «La llamada terminó» en su pantalla). */
+    enum class GuestEnd { LEFT, ENDED }
+    data class GuestOutcome(val token: String, val end: GuestEnd)
     data class View(
         val call: CallDTO,
         val phase: Phase = Phase.CONNECTING,
@@ -93,13 +102,25 @@ class CallManager(private val app: Application, private val container: AppContai
         val mutedIds: Set<String> = emptySet(),
         /** Invitados: cuándo los vi por primera vez sin entrar (para «Llamando…» → «No contestó» a los 45 s). */
         val invitedAt: Map<String, Long> = emptyMap(),
-    )
+        /** 1.7.4: pantallas compartidas por otros (recuadros de contenido de Chime), grandes y sin recortar. */
+        val screens: List<Tile> = emptyList(),
+        /** 1.7.4: estoy como invitado por enlace (null = llamada normal con mi cuenta). */
+        val guest: Guest? = null,
+    ) {
+        /** Mi id dentro de la llamada: `guest:<id>` como invitado o el de mi cuenta. */
+        fun meId(accountId: String?): String? = guest?.externalId ?: accountId
+    }
     data class Ring(val call: CallDTO, val callerName: String, val title: String?)
 
     private val _view = MutableStateFlow<View?>(null)
     val view: StateFlow<View?> = _view.asStateFlow()
     private val _ringing = MutableStateFlow<Ring?>(null)
     val ringing: StateFlow<Ring?> = _ringing.asStateFlow()
+    private val _guestOutcome = MutableStateFlow<GuestOutcome?>(null)
+    val guestOutcome: StateFlow<GuestOutcome?> = _guestOutcome.asStateFlow()
+    /** Colgué yo (no la cerró el servidor): el invitado ve «Saliste» en lugar de «La llamada terminó». */
+    @Volatile private var userLeft = false
+    @Volatile private var myAttendeeId: String? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val lock = Mutex()
@@ -122,7 +143,7 @@ class CallManager(private val app: Application, private val container: AppContai
 
     init {
         scope.launch {
-            _view.map { v -> v?.takeIf { it.phase == Phase.LIVE && it.call.transcribing }?.call?.id }.distinctUntilChanged().collect { callId ->
+            _view.map { v -> v?.takeIf { it.guest == null && it.phase == Phase.LIVE && it.call.transcribing }?.call?.id }.distinctUntilChanged().collect { callId ->
                 recorder?.stop(); recorder = null
                 if (callId != null && hasPermission(Manifest.permission.RECORD_AUDIO)) {
                     val startedAt = _view.value?.call?.startedAt?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() } ?: System.currentTimeMillis()
@@ -134,7 +155,8 @@ class CallManager(private val app: Application, private val container: AppContai
         scope.launch {
             container.client.flatMapLatest { it.state }.map { it.calls }.distinctUntilChanged().collect { calls ->
                 val v = _view.value
-                if (v != null && calls.containsKey(v.call.conversationId)) {
+                // El invitado no tiene socket: su estado llega con el latido.
+                if (v != null && v.guest == null && calls.containsKey(v.call.conversationId)) {
                     val c = calls[v.call.conversationId]
                     if (c == null) { if (!leaving) teardown() }
                     else if (c.id == v.call.id && c != v.call) patch { copy(call = c, captions = if (c.transcribing) captions else emptyList(), invitedAt = Calls171Invites.track(invitedAt, c, System.currentTimeMillis())) }
@@ -197,25 +219,55 @@ class CallManager(private val app: Application, private val container: AppContai
         client.inviteToCall(v.call.id, listOf(userId))?.let { c -> patch { copy(call = c) } }
     }
 
+    /**
+     * Entrar como invitado con el enlace (/llamada/<token>), con o sin sesión (joinAsGuest de la web).
+     * Si estoy en otra llamada, la pantalla ya lo preguntó: aquí se cuelga esa antes de entrar.
+     */
+    suspend fun joinAsGuest(token: String, name: String, camera: Boolean) = lock.withLock {
+        dismissRing()
+        val v = _view.value
+        if (v?.guest?.token == token) { patch { copy(expanded = true) }; return@withLock }
+        if (v != null) hangUpLocked()
+        _guestOutcome.value = null
+        val j = client.guestCallJoin(token, name)
+        val g = Guest(j.guestId, j.secret, token, name)
+        connect(CallJoinDTO(GuestCalls.toCall(j.call), j.meeting, j.attendee), camera, g)
+    }
+
+    /** «Salir» de la pantalla de invitado sin haber entrado: olvida el «Saliste / terminó» de ese enlace. */
+    fun clearGuestOutcome() { _guestOutcome.value = null }
+
     private fun hasPermission(p: String) = ContextCompat.checkSelfPermission(app, p) == PackageManager.PERMISSION_GRANTED
 
-    private fun connect(j: CallJoinDTO, camera: Boolean) {
-        leaving = false
+    private fun connect(j: CallJoinDTO, camera: Boolean, guest: Guest? = null) {
+        leaving = false; userLeft = false
         outbox.clear(); attendees.clear()
         val info = ChimeJoin.parse(j.meeting, j.attendee)
+        myAttendeeId = info?.attendeeId
         val fake = info == null || info.isFake
         val cam = camera && hasPermission(Manifest.permission.CAMERA)
         val route0 = Calls171.defaultRoute(listOf(Calls171.Route.EARPIECE, Calls171.Route.SPEAKER), video = camera)
         _view.value = View(j.call, phase = if (fake) Phase.LIVE else Phase.CONNECTING, camera = cam && !fake, speaker = route0 == Calls171.Route.SPEAKER, fake = fake,
             error = if (camera && !cam) R.string.call_perm_camera_denied else null, route = route0,
             routes = if (fake) listOf(Calls171.Route.EARPIECE, Calls171.Route.SPEAKER) else emptyList(),
-            invitedAt = Calls171Invites.track(emptyMap(), j.call, System.currentTimeMillis()))
+            invitedAt = if (guest != null) emptyMap() else Calls171Invites.track(emptyMap(), j.call, System.currentTimeMillis()), guest = guest)
         CallService.start(app)
         beat = scope.launch {
             while (true) {
-                delay(Calls.HEARTBEAT_MS)
-                val id = _view.value?.call?.id ?: break
-                try { client.callHeartbeat(id) } catch (e: Exception) { if (Calls.heartbeatEnds(e)) { teardown(); break } }
+                // Los invitados laten cada 15 s (así se enteran de quién entra y sale: no tienen socket).
+                delay(if (guest != null) GuestCalls.HEARTBEAT_MS else Calls.HEARTBEAT_MS)
+                val cur = _view.value ?: break
+                if (guest != null) {
+                    if (cur.guest?.id != guest.id) break
+                    try {
+                        val st = client.guestCallHeartbeat(guest.id, guest.secret)
+                        if (_view.value?.guest?.id != guest.id) break
+                        if (!st.active) { teardown(); break }
+                        patch { copy(call = GuestCalls.toCall(st, call), captions = if (st.transcribing) captions else emptyList()) }
+                    } catch (e: Exception) { if (GuestCalls.heartbeatEnds(e)) { teardown(); break } }
+                    continue
+                }
+                try { client.callHeartbeat(cur.call.id) } catch (e: Exception) { if (Calls.heartbeatEnds(e)) { teardown(); break } }
             }
         }
         if (fake || info == null) return
@@ -358,10 +410,19 @@ class CallManager(private val app: Application, private val container: AppContai
     }
 
     // ---------- Colgar ----------
-    suspend fun hangUp(forAll: Boolean = false) = lock.withLock { hangUpLocked(forAll) }
+    /** [byUser] = false: la cerró Chime o el servidor (el invitado ve «La llamada terminó», no «Saliste»). */
+    suspend fun hangUp(forAll: Boolean = false, byUser: Boolean = true) = lock.withLock { hangUpLocked(forAll, byUser) }
 
-    private suspend fun hangUpLocked(forAll: Boolean = false) {
-        val id = _view.value?.call?.id ?: return
+    private suspend fun hangUpLocked(forAll: Boolean = false, byUser: Boolean = true) {
+        val v = _view.value ?: return
+        val id = v.call.id
+        v.guest?.let { g ->
+            // Invitado: salir por el API público (sin sesión) y «Saliste de la llamada».
+            userLeft = byUser
+            teardown()
+            runCatching { client.guestCallLeave(g.id, g.secret) }
+            return
+        }
         runCatching { flush() }
         teardown()
         runCatching { client.leaveCall(id, forAll) }
@@ -369,6 +430,9 @@ class CallManager(private val app: Application, private val container: AppContai
 
     private fun teardown() {
         leaving = true
+        _view.value?.guest?.let { g -> _guestOutcome.value = GuestOutcome(g.token, if (userLeft) GuestEnd.LEFT else GuestEnd.ENDED) }
+        userLeft = false
+        myAttendeeId = null
         recorder?.stop(); recorder = null
         beat?.cancel(); beat = null
         flushJob?.cancel(); flushJob = null
@@ -433,7 +497,7 @@ class CallManager(private val app: Application, private val container: AppContai
             if (sessionStatus.statusCode != MeetingSessionStatusCode.OK && sessionStatus.statusCode != MeetingSessionStatusCode.Left) {
                 container.toast(app.getString(R.string.call_audio_failed))
             }
-            scope.launch { hangUp() }
+            scope.launch { hangUp(byUser = false) }
         }
         override fun onAudioSessionCancelledReconnect() {}
         override fun onConnectionRecovered() {}
@@ -449,7 +513,12 @@ class CallManager(private val app: Application, private val container: AppContai
     private val rtObserver = object : RealtimeObserver {
         override fun onVolumeChanged(volumeUpdates: Array<VolumeUpdate>) {}
         override fun onSignalStrengthChanged(signalUpdates: Array<SignalUpdate>) {}
-        override fun onAttendeesJoined(attendeeInfo: Array<AttendeeInfo>) { attendeeInfo.forEach { attendees[it.attendeeId] = Calls171.personOf(it.externalUserId) ?: it.externalUserId } }
+        override fun onAttendeesJoined(attendeeInfo: Array<AttendeeInfo>) {
+            attendeeInfo.forEach { attendees[it.attendeeId] = Calls171.personOf(it.externalUserId) ?: it.externalUserId }
+            // Un recuadro (video o pantalla) que llegó antes que su attendee queda sin nombre: se completa aquí.
+            fun named(t: Tile) = if (t.userId == null && !t.local && t.attendeeId != null) t.copy(userId = userOf(t.attendeeId)) else t
+            patch { if (tiles.none { it.userId == null } && screens.none { it.userId == null }) this else copy(tiles = tiles.map(::named), screens = screens.map(::named)) }
+        }
         override fun onAttendeesLeft(attendeeInfo: Array<AttendeeInfo>) {}
         override fun onAttendeesDropped(attendeeInfo: Array<AttendeeInfo>) {}
         override fun onAttendeesMuted(attendeeInfo: Array<AttendeeInfo>) {
@@ -474,20 +543,33 @@ class CallManager(private val app: Application, private val container: AppContai
         override fun onAudioDeviceChanged(freshAudioDeviceList: List<com.amazonaws.services.chime.sdk.meetings.device.MediaDevice>) { refreshRoutes(pickDefault = false) }
     }
 
+    /** Persona de un attendee (el de una pantalla es `<attendeeId>#content`: se busca también sin el sufijo). */
+    private fun userOf(attendeeId: String): String? = attendees[attendeeId] ?: attendees[attendeeId.substringBefore('#')]
+
     private val tileObserver = object : VideoTileObserver {
-        private fun tile(s: VideoTileState) = Tile(s.tileId, s.isLocalTile, if (s.isLocalTile) client.myId else attendees[s.attendeeId],
-            s.pauseState != VideoPauseState.Unpaused)
+        private fun tile(s: VideoTileState) = Tile(s.tileId, s.isLocalTile,
+            if (s.isLocalTile) _view.value?.meId(client.myId) else userOf(s.attendeeId),
+            s.pauseState != VideoPauseState.Unpaused, s.attendeeId)
+        private fun setPaused(id: Int, paused: Boolean) = patch {
+            copy(tiles = tiles.map { if (it.tileId == id) it.copy(paused = paused) else it }, screens = screens.map { if (it.tileId == id) it.copy(paused = paused) else it })
+        }
         override fun onVideoTileAdded(tileState: VideoTileState) {
-            if (tileState.isContent) return
+            if (tileState.isContent || GuestCalls.isContentAttendee(tileState.attendeeId)) {
+                // Pantalla compartida por otra persona (la mía no se mostraría: Android no comparte, pero por si acaso).
+                if (GuestCalls.isMyContent(tileState.attendeeId, myAttendeeId)) return
+                val t = tile(tileState).copy(local = false)
+                patch { copy(screens = screens.filter { it.tileId != t.tileId } + t) }
+                return
+            }
             val t = tile(tileState)
             patch { copy(tiles = tiles.filter { it.tileId != t.tileId } + t) }
         }
         override fun onVideoTileRemoved(tileState: VideoTileState) {
             unbind(tileState.tileId)
-            patch { copy(tiles = tiles.filter { it.tileId != tileState.tileId }) }
+            patch { copy(tiles = tiles.filter { it.tileId != tileState.tileId }, screens = screens.filter { it.tileId != tileState.tileId }) }
         }
-        override fun onVideoTilePaused(tileState: VideoTileState) { patch { copy(tiles = tiles.map { if (it.tileId == tileState.tileId) it.copy(paused = true) else it }) } }
-        override fun onVideoTileResumed(tileState: VideoTileState) { patch { copy(tiles = tiles.map { if (it.tileId == tileState.tileId) it.copy(paused = false) else it }) } }
+        override fun onVideoTilePaused(tileState: VideoTileState) { setPaused(tileState.tileId, true) }
+        override fun onVideoTileResumed(tileState: VideoTileState) { setPaused(tileState.tileId, false) }
         override fun onVideoTileSizeChanged(tileState: VideoTileState) {}
     }
 }

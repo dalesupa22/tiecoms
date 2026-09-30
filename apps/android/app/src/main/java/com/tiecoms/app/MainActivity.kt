@@ -97,7 +97,12 @@ class MainActivity : ComponentActivity() {
                 intent.data = null
                 container.handleMailReturn(it); return
             }
-            DeepLinks.parse(data)?.let { container.pendingLink.value = it }
+            when (val link = DeepLinks.parse(data)) {
+                null -> Unit
+                // 1.7.4: enlace de invitado a una llamada: se abre encima de todo, con o sin sesión (en frío y en caliente).
+                is DeepLink.GuestCall -> container.openGuestCall(link.token)
+                else -> container.pendingLink.value = link
+            }
         }
     }
 }

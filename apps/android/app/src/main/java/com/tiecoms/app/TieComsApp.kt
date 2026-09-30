@@ -91,6 +91,13 @@ class AppContainer(private val app: Application) {
 
     /** Enlace pendiente de abrir (llega sin sesión o antes de cargar el snapshot). */
     val pendingLink = MutableStateFlow<DeepLink?>(null)
+    /** 1.7.4: enlace de invitado a una llamada abierto (token): «Entrar a la llamada» sobre todo, con o sin sesión. */
+    val guestLink = MutableStateFlow<String?>(null)
+    fun openGuestCall(token: String) {
+        // Con la llamada de ese enlace en curso (tocar la notificación): se vuelve a mostrar grande.
+        if (calls.view.value?.guest?.token == token) calls.setExpanded(true)
+        guestLink.value = token
+    }
 
     /** Splash animado: solo en el arranque en frío (primera actividad del proceso). */
     @Volatile var splashPending = true

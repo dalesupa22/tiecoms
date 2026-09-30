@@ -40,8 +40,10 @@ class CallService : Service() {
         if (view == null) { stopSelf(); return START_NOT_STICKY }
         ensureChannel(this)
         val title = applicationContext.container.conversationName(view.call.conversationId).ifBlank { getString(R.string.call_title) }
+        // 1.7.4: como invitado no hay chat: tocar la notificación vuelve a la pantalla de la llamada por enlace.
+        val openUri = view.guest?.let { "chaggu://llamada/${Uri.encode(it.token)}" } ?: "chaggu://c/${view.call.conversationId}"
         val hangUp = PendingIntent.getService(this, 1, Intent(this, CallService::class.java).setAction(ACTION_HANG_UP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val open = PendingIntent.getActivity(this, 2, Intent(Intent.ACTION_VIEW, Uri.parse("chaggu://c/${view.call.conversationId}"), this, MainActivity::class.java)
+        val open = PendingIntent.getActivity(this, 2, Intent(Intent.ACTION_VIEW, Uri.parse(openUri), this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val person = Person.Builder().setName(title).setImportant(true).build()
         val n = NotificationCompat.Builder(this, CHANNEL)

@@ -2076,6 +2076,28 @@ class TieComsClient(
         Unit
     }
 
+    // ---------- Invitados por enlace a una llamada (públicos, sin sesión; docs/LLAMADAS.md) ----------
+    private suspend fun <T> publicCall(method: String, path: String, body: JsonElement?, ser: KSerializer<T>): T {
+        val r = http.exec(method, path, body?.toString())
+        if (!r.ok) throw HttpApi.parseError(r)
+        return TcJson.decodeFromString(ser, r.body.ifBlank { "{}" })
+    }
+    /** GET /call-links/:token: título, quién invita y si hay alguien dentro. 404 si el enlace no existe. */
+    suspend fun guestCallPreview(token: String): GuestCallPreviewDTO = withContext(dispatcher) {
+        publicCall("GET", "/call-links/${enc(token)}", null, GuestCallPreviewDTO.serializer())
+    }
+    /** POST /call-links/:token/join {name}: crea el attendee `guest:<id>` y devuelve la reunión y el secreto. */
+    suspend fun guestCallJoin(token: String, name: String): GuestJoinDTO = withContext(dispatcher) {
+        publicCall("POST", "/call-links/${enc(token)}/join", buildJsonObject { put("name", JsonPrimitive(name)) }, GuestJoinDTO.serializer())
+    }
+    /** POST /call-guests/:id/heartbeat {secret} cada 15 s: quién está (409 not_in_call / 404 = terminó). */
+    suspend fun guestCallHeartbeat(guestId: String, secret: String): GuestCallStateDTO = withContext(dispatcher) {
+        publicCall("POST", "/call-guests/${enc(guestId)}/heartbeat", buildJsonObject { put("secret", JsonPrimitive(secret)) }, GuestCallStateDTO.serializer())
+    }
+    suspend fun guestCallLeave(guestId: String, secret: String) = withContext(dispatcher) {
+        publicCall("POST", "/call-guests/${enc(guestId)}/leave", buildJsonObject { put("secret", JsonPrimitive(secret)) }, JsonElement.serializer()); Unit
+    }
+
     // ---------- Invitaciones ----------
     suspend fun previewInvitation(token: String): InvitationPreviewDTO = withContext(dispatcher) {
         val r = http.exec("GET", "/invitations/${enc(token)}")

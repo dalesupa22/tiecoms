@@ -22,6 +22,8 @@ sealed interface DeepLink {
     data class CallDetail(val id: String) : DeepLink
     /** Contestar una llamada desde su notificación (chaggu://call/<id>?camera=1): entra con /calls/:id/join. */
     data class CallJoin(val id: String, val camera: Boolean = false) : DeepLink
+    /** Enlace de invitado a una llamada (https://app.chaggu.com/llamada/<token>, chaggu://llamada/<token>): con o sin sesión. */
+    data class GuestCall(val token: String) : DeepLink
 }
 
 object DeepLinks {
@@ -86,6 +88,7 @@ object DeepLinks {
             "ajustes" -> DeepLink.Screen(SCREEN_SETTINGS)
             "programados" -> DeepLink.Screen(SCREEN_SCHEDULED)
             "call" -> arg?.let { DeepLink.CallJoin(it, query["camera"] == "1") }
+            "llamada" -> arg?.let { DeepLink.GuestCall(it) }
             "share" -> DeepLink.Share(listOfNotNull(query["title"], query["text"], query["url"]).joinToString("\n").trim())
             else -> null
         }

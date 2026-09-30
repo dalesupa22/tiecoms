@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.7.4: invitados por enlace y pantallas compartidas (docs/LLAMADAS.md). Mismos textos que la web (guest.*, call.screenOf). -->
+<resources>
+    <string name="guest_title">Join the call</string>
+    <string name="guest_by">%1$s invites you</string>
+    <string name="guest_by_org">%1$s · %2$s invites you</string>
+    <string name="guest_name">Your name</string>
+    <string name="guest_name_ph">How others will see you</string>
+    <string name="guest_join_audio">Join with audio</string>
+    <string name="guest_join_video">Join with video</string>
+    <string name="guest_not_live">Nobody is in the call yet. Try again in a moment.</string>
+    <string name="guest_invalid">This link no longer works. Ask whoever invited you for a new one.</string>
+    <string name="guest_left">You left the call.</string>
+    <string name="guest_ended">The call ended.</string>
+    <string name="guest_retry">Try again</string>
+    <string name="guest_powered">Call on chaggu, the work network across companies</string>
+    <string name="guest_privacy">When you join, people in the call will see your name and, if you turn it on, your camera.</string>
+    <string name="guest_full">The call is full. Try again in a moment.</string>
+    <string name="guest_close">Close</string>
+    <string name="guest_in_call">In the call · %1$d</string>
+    <string name="guest_switch_title">You are in another call</string>
+    <string name="guest_switch_body">If you join this one, you will leave the call you are in now.</string>
+    <string name="guest_switch_yes">Leave and join</string>
+    <string name="call_guest_badge">guest</string>
+    <string name="call_screen_of">%1$s\'s screen</string>
+    <string name="call_screen_full">Expand screen</string>
+    <string name="call_screen_exit">Exit full screen</string>
+</resources>

@@ -72,6 +72,11 @@ import com.tiecoms.app.core.CallTranscriptDTO
 import com.tiecoms.app.core.Calls
 import com.tiecoms.app.core.ConversationDTO
 import com.tiecoms.app.core.DeepLink
+import com.tiecoms.app.core.GuestCalls
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import com.tiecoms.app.core.Names
 import com.tiecoms.app.platform.CallManager
 import kotlinx.coroutines.delay
@@ -86,9 +91,9 @@ import java.time.format.FormatStyle
  * Todo sale solo con features.calls del bootstrap.
  */
 
-private val CallInk = Color(0xFFF7F3EE)
-private val CallBg = Color(0xFF161412)
-private val HangRed = Color(0xFFD93B2B)
+internal val CallInk = Color(0xFFF7F3EE)
+internal val CallBg = Color(0xFF161412)
+internal val HangRed = Color(0xFFD93B2B)
 /** Rojo de las llamadas perdidas (igual que la web): pastilla de «Llamadas» y etiqueta «Perdida». */
 internal val MissedRed = Color(0xFFD93025)
 
@@ -187,7 +192,8 @@ fun CallOverlayHost(onOpenConversation: (String) -> Unit) {
     val view by container.calls.view.collectAsStateWithLifecycle()
     val ring by container.calls.ringing.collectAsStateWithLifecycle()
     Box(Modifier.fillMaxSize()) {
-        view?.let { v ->
+        // La llamada como invitado por enlace la dibuja GuestCallHost (AppRoot), también sin sesión.
+        view?.takeIf { it.guest == null }?.let { v ->
             if (v.expanded) CallScreen(v, onOpenConversation)
             else CallPill(v, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 6.dp))
         }
@@ -247,7 +253,7 @@ fun ElsewhereBanner(call: com.tiecoms.app.core.CallDTO, modifier: Modifier = Mod
 }
 
 @Composable
-private fun rememberClock(startedAt: String): String {
+internal fun rememberClock(startedAt: String): String {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(startedAt) { while (true) { now = System.currentTimeMillis(); delay(1000) } }
     val start = parseInstant(startedAt)?.toEpochMilli() ?: now
@@ -287,7 +293,7 @@ private fun IncomingCallCard(r: CallManager.Ring, modifier: Modifier) {
 }
 
 @Composable
-private fun CallPill(v: CallManager.View, modifier: Modifier) {
+internal fun CallPill(v: CallManager.View, modifier: Modifier) {
     val container = LocalContainer.current
     val clock = rememberClock(v.call.startedAt)
     val cd = stringResource(R.string.call_expand)
@@ -313,126 +319,74 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
     val data = st.data ?: return
     val conv = data.conversations.firstOrNull { it.id == v.call.conversationId }
     val me = data.me.id
-    val others = v.call.activeUserIds.filter { it != me }
+    // 1.7.4: personas de chaggu y, al final, los invitados por enlace (`guest:<id>`).
+    val people = (listOf(me) + GuestCalls.people(v.call).filter { it != me }).distinct()
+    val others = people.filter { it != me }
+    val you = stringResource(R.string.call_you)
+    val nameOf: (String?) -> String = { id -> if (id == me) you else GuestCalls.guestName(v.call, id) ?: firstName(data, id, v.call) }
     val clock = rememberClock(v.call.startedAt)
     var consent by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     var routes by remember { mutableStateOf(false) }
+    var screenFull by remember { mutableStateOf<Int?>(null) }
+    val full = screenFull?.takeIf { id -> v.screens.any { it.tileId == id } }
     val cameraPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) container.calls.toggleCamera() else container.toast(ctx.getString(R.string.call_perm_camera_denied))
     }
-    androidx.activity.compose.BackHandler { container.calls.setExpanded(false) }
+    androidx.activity.compose.BackHandler { if (full != null) screenFull = null else container.calls.setExpanded(false) }
     Surface(color = CallBg, contentColor = CallInk, modifier = Modifier.fillMaxSize().testTag("callScreen")) {
-        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { container.calls.setExpanded(false) }, modifier = Modifier.testTag("callMinimize")) {
-                    Icon(Icons.Filled.KeyboardArrowDown, stringResource(R.string.call_minimize), tint = CallInk)
+        Column(Modifier.fillMaxSize().then(if (full != null) Modifier else Modifier.safeDrawingPadding())) {
+            if (full == null) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { container.calls.setExpanded(false) }, modifier = Modifier.testTag("callMinimize")) {
+                        Icon(Icons.Filled.KeyboardArrowDown, stringResource(R.string.call_minimize), tint = CallInk)
+                    }
+                    Column(Modifier.weight(1f).clickable(enabled = conv != null) { container.calls.setExpanded(false); onOpenConversation(v.call.conversationId) }) {
+                        // Si me agregaron a una llamada de un chat en el que no estoy: los nombres de quienes están (call.names).
+                        Text(conv?.let { titleOf(ctx, it, data) } ?: others.map { nameOf(it) }.filter { it.isNotEmpty() }.joinToString(", ").ifEmpty { stringResource(R.string.call_title) }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.semantics { heading() })
+                        Text(if (v.phase == CallManager.Phase.CONNECTING) stringResource(R.string.call_connecting) else clock, style = MaterialTheme.typography.bodySmall,
+                            color = CallInk.copy(alpha = 0.7f), modifier = Modifier.testTag("callClock"))
+                    }
+                    Box(Modifier.padding(end = 12.dp).size(10.dp).background(if (v.phase == CallManager.Phase.LIVE) Color(0xFF3CCB7F) else Color(0xFFBDB5AE), CircleShape))
                 }
-                Column(Modifier.weight(1f).clickable(enabled = conv != null) { container.calls.setExpanded(false); onOpenConversation(v.call.conversationId) }) {
-                    // Si me agregaron a una llamada de un chat en el que no estoy: los nombres de quienes están (call.names).
-                    Text(conv?.let { titleOf(ctx, it, data) } ?: others.map { firstName(data, it, v.call) }.filter { it.isNotEmpty() }.joinToString(", ").ifEmpty { stringResource(R.string.call_title) }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.semantics { heading() })
-                    Text(if (v.phase == CallManager.Phase.CONNECTING) stringResource(R.string.call_connecting) else clock, style = MaterialTheme.typography.bodySmall,
-                        color = CallInk.copy(alpha = 0.7f), modifier = Modifier.testTag("callClock"))
-                }
-                Box(Modifier.padding(end = 12.dp).size(10.dp).background(if (v.phase == CallManager.Phase.LIVE) Color(0xFF3CCB7F) else Color(0xFFBDB5AE), CircleShape))
+                CallNotices(v)
             }
-            if (v.call.transcribing) Text("⏺ " + stringResource(R.string.call_transcribing_all), Modifier.fillMaxWidth().background(HangRed.copy(alpha = 0.85f))
-                .padding(horizontal = 14.dp, vertical = 6.dp).semantics { liveRegion = LiveRegionMode.Polite }.testTag("callTranscribing"),
-                color = Color.White, style = MaterialTheme.typography.labelLarge)
-            if (v.fake) Text(stringResource(R.string.call_fake), Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp).testTag("callFake"),
-                style = MaterialTheme.typography.labelMedium, color = CallInk.copy(alpha = 0.7f))
-            v.error?.let { e ->
-                Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(e), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = Color(0xFFFFB4A8))
-                    TextButton(onClick = { container.calls.clearError() }) { Text("✕", color = CallInk) }
-                }
-            }
-            Box(Modifier.weight(1f).fillMaxWidth().padding(8.dp)) {
-                // 1.7.1: con al menos una persona en video, cuadrícula; quien no tiene cámara sale como avatar en su celda.
-                val people = (listOf(me) + v.call.activeUserIds.filter { it != me }).distinct()
-                val live = v.tiles.filter { !it.paused || it.local }
-                val tileOf: (String) -> CallManager.Tile? = { id -> if (id == me) live.firstOrNull { it.local } else live.firstOrNull { !it.local && it.userId == id } }
+            Box(Modifier.weight(1f).fillMaxWidth().padding(if (full != null) 0.dp else 8.dp)) {
                 val now by rememberNow()
-                if (live.isNotEmpty()) {
-                    val cols = if (people.size <= 1) 1 else 2
-                    val rows = (people.size + cols - 1) / cols
-                    LazyVerticalGrid(GridCells.Fixed(cols), Modifier.fillMaxSize().testTag("callGrid"), verticalArrangement = Arrangement.spacedBy(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(people, key = { it }) { id ->
-                            val t = tileOf(id)
-                            val name = if (id == me) stringResource(R.string.call_you) else firstName(data, id, v.call)
-                            val muted = if (id == me) v.muted else id in v.mutedIds
-                            if (t != null) VideoTile(t, name, rows = rows, muted = muted)
-                            else AvatarCell(id, data, name, rows = rows, muted = muted, speaking = id in v.speaking)
-                        }
-                    }
-                } else Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        people.forEach { id ->
-                            val speaking = id in v.speaking
-                            val muted = if (id == me) v.muted else id in v.mutedIds
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(92.dp).testTag("callPerson-$id")) {
-                                Box(Modifier.size(84.dp).border(if (speaking) 3.dp else 0.dp, if (speaking) Color(0xFF3CCB7F) else Color.Transparent, CircleShape).padding(4.dp)) {
-                                    PersonAvatar(Names.person(data, id), data, size = 76.dp)
-                                    if (muted) MutedBadge(Modifier.align(Alignment.BottomEnd))
-                                }
-                                Text(if (id == me) stringResource(R.string.call_you) else firstName(data, id, v.call), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
-                        // Invitados que aún no entran: «Llamando…» y, a los 45 s, «No contestó» con «Volver a llamar».
-                        v.invitedAt.forEach { (id, at) ->
-                            val st2 = com.tiecoms.app.core.Calls171Invites.state(at, now)
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(104.dp).testTag("callInvited-$id")) {
-                                Box(Modifier.size(84.dp).padding(4.dp).then(Modifier.graphicsLayer(alpha = 0.55f))) { PersonAvatar(Names.person(data, id), data, size = 76.dp) }
-                                Text(firstName(data, id, v.call), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (st2 == com.tiecoms.app.core.Calls171Invites.State.CALLING)
-                                    Text(stringResource(R.string.inv_calling), style = MaterialTheme.typography.labelSmall, color = CallInk.copy(alpha = 0.7f), modifier = Modifier.testTag("invCalling-$id"))
-                                else {
-                                    Text(stringResource(R.string.inv_no_answer), style = MaterialTheme.typography.labelSmall, color = Color(0xFFFFB4A8), modifier = Modifier.testTag("invNoAnswer-$id"))
-                                    TextButton(onClick = { container.scope.launch { runCatching { container.calls.reinvite(id) }.onFailure { container.toast(errorText(ctx, it)) } } },
-                                        contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.heightIn(min = 36.dp).testTag("invRingAgain-$id")) {
-                                        Text(stringResource(R.string.inv_ring_again), color = CallInk, style = MaterialTheme.typography.labelMedium)
-                                    }
+                CallStage(v, people, me, data, nameOf, full, onFull = { screenFull = it }, waiting = others.isEmpty() && v.invitedAt.isEmpty()) {
+                    // Invitados que aún no entran: «Llamando…» y, a los 45 s, «No contestó» con «Volver a llamar».
+                    v.invitedAt.forEach { (id, at) ->
+                        val st2 = com.tiecoms.app.core.Calls171Invites.state(at, now)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(104.dp).testTag("callInvited-$id")) {
+                            Box(Modifier.size(84.dp).padding(4.dp).then(Modifier.graphicsLayer(alpha = 0.55f))) { PersonAvatar(Names.person(data, id), data, size = 76.dp) }
+                            Text(firstName(data, id, v.call), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (st2 == com.tiecoms.app.core.Calls171Invites.State.CALLING)
+                                Text(stringResource(R.string.inv_calling), style = MaterialTheme.typography.labelSmall, color = CallInk.copy(alpha = 0.7f), modifier = Modifier.testTag("invCalling-$id"))
+                            else {
+                                Text(stringResource(R.string.inv_no_answer), style = MaterialTheme.typography.labelSmall, color = Color(0xFFFFB4A8), modifier = Modifier.testTag("invNoAnswer-$id"))
+                                TextButton(onClick = { container.scope.launch { runCatching { container.calls.reinvite(id) }.onFailure { container.toast(errorText(ctx, it)) } } },
+                                    contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.heightIn(min = 36.dp).testTag("invRingAgain-$id")) {
+                                    Text(stringResource(R.string.inv_ring_again), color = CallInk, style = MaterialTheme.typography.labelMedium)
                                 }
                             }
                         }
                     }
-                    if (others.isEmpty() && v.invitedAt.isEmpty()) Text(stringResource(R.string.call_waiting), color = CallInk.copy(alpha = 0.7f), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("callWaiting"))
                 }
             }
-            if (v.call.transcribing && v.captions.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp).background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
-                .padding(10.dp).semantics { liveRegion = LiveRegionMode.Polite }.testTag("callCaptions")) {
-                v.captions.takeLast(4).forEach { c ->
-                    val who = if (c.userId == me) stringResource(R.string.call_you) else firstName(data, c.userId, v.call).ifEmpty { "·" }
-                    Text("$who: " + (if (c.processing) "⏳ " + stringResource(R.string.call_processing) else c.text), style = MaterialTheme.typography.bodyMedium,
-                        color = if (c.partial) CallInk.copy(alpha = 0.65f) else CallInk, modifier = if (c.processing) Modifier.testTag("callProcessing") else Modifier)
+            if (full == null) {
+                CallCaptions(v, me, nameOf)
+                // 1.7.1: controles con texto (se nota «Agregar»), en dos filas si no caben; Colgar abajo al centro.
+                androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp).testTag("callControls"),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MediaControls(v, onRoutes = { routes = true }, onCameraPermission = { cameraPerm.launch(Manifest.permission.CAMERA) })
+                    CallControl(Icons.Filled.PersonAdd, stringResource(R.string.cc_add), stringResource(R.string.call_add), off = false, tag = "callAdd") { adding = true }
+                    CallControl(Icons.Filled.ClosedCaption, stringResource(R.string.cc_transcribe), stringResource(if (v.call.transcribing) R.string.call_transcript_off else R.string.call_transcript_on), off = false, rec = v.call.transcribing, tag = "callTranscript") {
+                        if (v.call.transcribing) container.scope.launch { runCatching { container.calls.setTranscription(false) }.onFailure { container.toast(errorText(ctx, it)) } }
+                        else consent = true
+                    }
                 }
-            }
-            // 1.7.1: controles con texto (se nota «Agregar»), en dos filas si no caben; Colgar abajo al centro.
-            androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp).testTag("callControls"),
-                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                CallControl(if (v.muted) Icons.Filled.MicOff else Icons.Filled.Mic, stringResource(if (v.muted) R.string.cc_unmute else R.string.cc_mute),
-                    stringResource(if (v.muted) R.string.call_unmute else R.string.call_mute), off = v.muted, tag = "callMute") { container.calls.toggleMute() }
-                CallControl(if (v.camera) Icons.Filled.Videocam else Icons.Filled.VideocamOff, stringResource(R.string.cc_camera),
-                    stringResource(if (v.camera) R.string.call_camera_off else R.string.call_camera_on), off = !v.camera, tag = "callCamera") {
-                    // En una llamada de voz: la primera vez pide el permiso de cámara; luego el video sale sin reconectar.
-                    if (!v.camera && ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) cameraPerm.launch(Manifest.permission.CAMERA)
-                    else container.calls.toggleCamera()
-                }
-                if (v.camera) CallControl(Icons.Filled.Cameraswitch, stringResource(R.string.cc_flip), stringResource(R.string.call_switch_camera), off = false, tag = "callSwitch") { container.calls.switchCamera() }
-                CallControl(routeIcon(v.route), routeLabel(v.route), stringResource(R.string.route_title) + ": " + routeLabel(v.route), off = v.route == com.tiecoms.app.core.Calls171.Route.EARPIECE, tag = "callSpeaker") {
-                    if (com.tiecoms.app.core.Calls171.needsPicker(v.routes)) routes = true else container.calls.toggleSpeaker()
-                }
-                CallControl(Icons.Filled.PersonAdd, stringResource(R.string.cc_add), stringResource(R.string.call_add), off = false, tag = "callAdd") { adding = true }
-                CallControl(Icons.Filled.ClosedCaption, stringResource(R.string.cc_transcribe), stringResource(if (v.call.transcribing) R.string.call_transcript_off else R.string.call_transcript_on), off = false, rec = v.call.transcribing, tag = "callTranscript") {
-                    if (v.call.transcribing) container.scope.launch { runCatching { container.calls.setTranscription(false) }.onFailure { container.toast(errorText(ctx, it)) } }
-                    else consent = true
-                }
-            }
-            Box(Modifier.fillMaxWidth().padding(bottom = 14.dp, top = 4.dp), contentAlignment = Alignment.Center) {
-                IconButton(onClick = { container.scope.launch { container.calls.hangUp() } }, modifier = Modifier.size(62.dp).background(HangRed, CircleShape).testTag("callHangUp")) {
-                    Icon(Icons.Filled.CallEnd, stringResource(R.string.call_hang_up), tint = Color.White)
-                }
+                HangUpButton { container.scope.launch { container.calls.hangUp() } }
             }
         }
     }
@@ -444,8 +398,171 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
     }
 }
 
+/** Franjas de la llamada: «Se está transcribiendo», proveedor falso y el error del momento. */
 @Composable
-private fun CallControl(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, description: String, off: Boolean, tag: String, rec: Boolean = false, onClick: () -> Unit) {
+internal fun CallNotices(v: CallManager.View) {
+    val container = LocalContainer.current
+    if (v.call.transcribing) Text("⏺ " + stringResource(R.string.call_transcribing_all), Modifier.fillMaxWidth().background(HangRed.copy(alpha = 0.85f))
+        .padding(horizontal = 14.dp, vertical = 6.dp).semantics { liveRegion = LiveRegionMode.Polite }.testTag("callTranscribing"),
+        color = Color.White, style = MaterialTheme.typography.labelLarge)
+    if (v.fake) Text(stringResource(R.string.call_fake), Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp).testTag("callFake"),
+        style = MaterialTheme.typography.labelMedium, color = CallInk.copy(alpha = 0.7f))
+    v.error?.let { e ->
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(e), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = Color(0xFFFFB4A8))
+            TextButton(onClick = { container.calls.clearError() }) { Text("✕", color = CallInk) }
+        }
+    }
+}
+
+@Composable
+internal fun CallCaptions(v: CallManager.View, me: String, nameOf: (String?) -> String) {
+    if (v.call.transcribing && v.captions.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp).background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+        .padding(10.dp).semantics { liveRegion = LiveRegionMode.Polite }.testTag("callCaptions")) {
+        v.captions.takeLast(4).forEach { c ->
+            val who = if (c.userId == me) stringResource(R.string.call_you) else nameOf(c.userId).ifEmpty { "·" }
+            Text("$who: " + (if (c.processing) "⏳ " + stringResource(R.string.call_processing) else c.text), style = MaterialTheme.typography.bodyMedium,
+                color = if (c.partial) CallInk.copy(alpha = 0.65f) else CallInk, modifier = if (c.processing) Modifier.testTag("callProcessing") else Modifier)
+        }
+    }
+}
+
+/** Silenciar, cámara, girar cámara y salida de audio (igual para la llamada normal y la de invitado). */
+@Composable
+internal fun MediaControls(v: CallManager.View, onRoutes: () -> Unit, onCameraPermission: () -> Unit) {
+    val ctx = LocalContext.current
+    val container = LocalContainer.current
+    CallControl(if (v.muted) Icons.Filled.MicOff else Icons.Filled.Mic, stringResource(if (v.muted) R.string.cc_unmute else R.string.cc_mute),
+        stringResource(if (v.muted) R.string.call_unmute else R.string.call_mute), off = v.muted, tag = "callMute") { container.calls.toggleMute() }
+    CallControl(if (v.camera) Icons.Filled.Videocam else Icons.Filled.VideocamOff, stringResource(R.string.cc_camera),
+        stringResource(if (v.camera) R.string.call_camera_off else R.string.call_camera_on), off = !v.camera, tag = "callCamera") {
+        // En una llamada de voz: la primera vez pide el permiso de cámara; luego el video sale sin reconectar.
+        if (!v.camera && ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) onCameraPermission()
+        else container.calls.toggleCamera()
+    }
+    if (v.camera) CallControl(Icons.Filled.Cameraswitch, stringResource(R.string.cc_flip), stringResource(R.string.call_switch_camera), off = false, tag = "callSwitch") { container.calls.switchCamera() }
+    CallControl(routeIcon(v.route), routeLabel(v.route), stringResource(R.string.route_title) + ": " + routeLabel(v.route), off = v.route == com.tiecoms.app.core.Calls171.Route.EARPIECE, tag = "callSpeaker") {
+        if (com.tiecoms.app.core.Calls171.needsPicker(v.routes)) onRoutes() else container.calls.toggleSpeaker()
+    }
+}
+
+@Composable
+internal fun HangUpButton(onClick: () -> Unit) {
+    Box(Modifier.fillMaxWidth().padding(bottom = 14.dp, top = 4.dp), contentAlignment = Alignment.Center) {
+        IconButton(onClick = onClick, modifier = Modifier.size(62.dp).background(HangRed, CircleShape).testTag("callHangUp")) {
+            Icon(Icons.Filled.CallEnd, stringResource(R.string.call_hang_up), tint = Color.White)
+        }
+    }
+}
+
+/**
+ * Lo del medio de la llamada (normal o como invitado):
+ * - Con una pantalla compartida: la pantalla grande, entera (sin recortar), y abajo una tira con las personas. [full]: solo la pantalla.
+ * - Con alguien en video: cuadrícula; quien no tiene cámara sale como avatar en su celda.
+ * - Si no: avatares (con [extra] al final: los invitados que aún no entran) y «Esperando…».
+ */
+@Composable
+internal fun CallStage(
+    v: CallManager.View, people: List<String>, me: String, data: BootstrapDTO?, nameOf: (String?) -> String,
+    full: Int?, onFull: (Int?) -> Unit, waiting: Boolean, extra: @Composable () -> Unit = {},
+) {
+    val live = v.tiles.filter { !it.paused || it.local }
+    val tileOf: (String) -> CallManager.Tile? = { id -> if (id == me) live.firstOrNull { it.local } else live.firstOrNull { !it.local && it.userId == id } }
+    val muted: (String) -> Boolean = { id -> if (id == me) v.muted else id in v.mutedIds }
+    val isG: (String) -> Boolean = { id -> id != me && GuestCalls.isGuest(id) }
+    if (v.screens.isNotEmpty()) {
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val shown = if (full != null) v.screens.filter { it.tileId == full } else v.screens
+            shown.forEach { t ->
+                androidx.compose.runtime.key(t.tileId) {
+                    ScreenTile(t, stringResource(R.string.call_screen_of, nameOf(t.userId)), full = full != null,
+                        onToggle = { onFull(if (full == null) t.tileId else null) }, modifier = Modifier.fillMaxWidth().weight(1f))
+                }
+            }
+            if (full == null) androidx.compose.foundation.lazy.LazyRow(Modifier.fillMaxWidth().height(104.dp).testTag("callStrip"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(people, key = { it }) { id ->
+                    val t = tileOf(id)
+                    Box(Modifier.width(120.dp).fillMaxHeight()) {
+                        if (t != null) VideoTile(t, nameOf(id), rows = 1, muted = muted(id), height = 104, guest = isG(id))
+                        else AvatarCell(id, data, nameOf(id), rows = 1, muted = muted(id), speaking = id in v.speaking, height = 104, avatar = 48.dp, guest = isG(id))
+                    }
+                }
+            }
+        }
+        return
+    }
+    if (live.isNotEmpty()) {
+        val cols = if (people.size <= 1) 1 else 2
+        val rows = (people.size + cols - 1) / cols
+        LazyVerticalGrid(GridCells.Fixed(cols), Modifier.fillMaxSize().testTag("callGrid"), verticalArrangement = Arrangement.spacedBy(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(people, key = { it }) { id ->
+                val t = tileOf(id)
+                if (t != null) VideoTile(t, nameOf(id), rows = rows, muted = muted(id), guest = isG(id))
+                else AvatarCell(id, data, nameOf(id), rows = rows, muted = muted(id), speaking = id in v.speaking, guest = isG(id))
+            }
+        }
+        return
+    }
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.align(Alignment.Center).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                people.forEach { id ->
+                    val speaking = id in v.speaking
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(92.dp).testTag("callPerson-$id")) {
+                        Box(Modifier.size(84.dp).border(if (speaking) 3.dp else 0.dp, if (speaking) Color(0xFF3CCB7F) else Color.Transparent, CircleShape).padding(4.dp)) {
+                            CallAvatar(id, data, nameOf(id), size = 76.dp)
+                            if (muted(id)) MutedBadge(Modifier.align(Alignment.BottomEnd))
+                        }
+                        Text(nameOf(id), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (isG(id)) GuestTag()
+                    }
+                }
+                extra()
+            }
+            if (waiting) Text(stringResource(R.string.call_waiting), color = CallInk.copy(alpha = 0.7f), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("callWaiting"))
+        }
+    }
+}
+
+/** Etiqueta «invitado» de quien entró con el enlace (sin cuenta en chaggu). */
+@Composable
+internal fun GuestTag(modifier: Modifier = Modifier) {
+    Text(stringResource(R.string.call_guest_badge), modifier.background(Color.White.copy(alpha = 0.16f), RoundedCornerShape(50)).padding(horizontal = 7.dp, vertical = 1.dp).testTag("callGuestTag"),
+        style = MaterialTheme.typography.labelSmall, color = CallInk, maxLines = 1)
+}
+
+/** Avatar dentro de la llamada: el de la persona si la conozco; si no (invitado, o me agregaron), iniciales sobre su color. */
+@Composable
+internal fun CallAvatar(id: String, data: BootstrapDTO?, name: String, size: androidx.compose.ui.unit.Dp) {
+    val p = Names.person(data, id)
+    if (p != null) PersonAvatar(p, data, size = size)
+    else Avatar(name.ifBlank { "?" }, personColor(id), Color.White, size = size)
+}
+
+/** Pantalla compartida por otra persona: entera (AspectFit, sin recortar), con «Ampliar» (o doble toque) y su nombre. */
+@Composable
+internal fun ScreenTile(t: CallManager.Tile, label: String, full: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    val container = LocalContainer.current
+    Box(modifier.clip(RoundedCornerShape(if (full) 0.dp else 12.dp)).background(Color.Black).testTag("callScreenTile-${t.tileId}")) {
+        AndroidView(
+            factory = { c -> DefaultVideoRenderView(c).apply { init(container.calls.egl); scalingType = VideoScalingType.AspectFit; mirror = false; container.calls.bind(t.tileId, this) } },
+            onRelease = { view -> container.calls.unbind(t.tileId); view.release() },
+            modifier = Modifier.fillMaxSize(),
+        )
+        Box(Modifier.matchParentSize().pointerInput(full) { detectTapGestures(onDoubleTap = { onToggle() }) })
+        if (t.paused) Text("⏸", Modifier.align(Alignment.Center), color = Color.White, style = MaterialTheme.typography.headlineMedium)
+        Text("🖥️ $label", Modifier.align(Alignment.BottomStart).then(if (full) Modifier.navigationBarsPadding() else Modifier).padding(8.dp)
+            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
+            color = Color.White, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        IconButton(onClick = onToggle, modifier = Modifier.align(Alignment.TopEnd).then(if (full) Modifier.statusBarsPadding() else Modifier).padding(6.dp)
+            .background(Color.Black.copy(alpha = 0.55f), CircleShape).testTag(if (full) "callScreenExit" else "callScreenFull")) {
+            Icon(if (full) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen, stringResource(if (full) R.string.call_screen_exit else R.string.call_screen_full), tint = Color.White)
+        }
+    }
+}
+
+@Composable
+internal fun CallControl(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, description: String, off: Boolean, tag: String, rec: Boolean = false, onClick: () -> Unit) {
     val bg = when { rec -> HangRed.copy(alpha = 0.9f); off -> Color.White.copy(alpha = 0.12f); else -> Color.White.copy(alpha = 0.26f) }
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(64.dp).clickable(onClick = onClick, role = androidx.compose.ui.semantics.Role.Button)
         .semantics(mergeDescendants = true) { contentDescription = description }.testTag(tag)) {
@@ -455,14 +572,14 @@ private fun CallControl(icon: androidx.compose.ui.graphics.vector.ImageVector, l
 }
 
 @Composable
-private fun routeLabel(r: com.tiecoms.app.core.Calls171.Route): String = stringResource(when (r) {
+internal fun routeLabel(r: com.tiecoms.app.core.Calls171.Route): String = stringResource(when (r) {
     com.tiecoms.app.core.Calls171.Route.EARPIECE -> R.string.route_earpiece
     com.tiecoms.app.core.Calls171.Route.SPEAKER -> R.string.route_speaker
     com.tiecoms.app.core.Calls171.Route.BLUETOOTH -> R.string.route_bluetooth
     com.tiecoms.app.core.Calls171.Route.WIRED -> R.string.route_wired
 })
 
-private fun routeIcon(r: com.tiecoms.app.core.Calls171.Route) = when (r) {
+internal fun routeIcon(r: com.tiecoms.app.core.Calls171.Route) = when (r) {
     com.tiecoms.app.core.Calls171.Route.EARPIECE -> Icons.Filled.PhoneInTalk
     com.tiecoms.app.core.Calls171.Route.SPEAKER -> Icons.AutoMirrored.Filled.VolumeUp
     com.tiecoms.app.core.Calls171.Route.BLUETOOTH -> Icons.Filled.Bluetooth
@@ -472,7 +589,7 @@ private fun routeIcon(r: com.tiecoms.app.core.Calls171.Route) = when (r) {
 /** Salida de audio con Bluetooth o cable conectados: auricular, altavoz, Bluetooth, audífonos. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AudioRouteSheet(v: CallManager.View, onDismiss: () -> Unit) {
+internal fun AudioRouteSheet(v: CallManager.View, onDismiss: () -> Unit) {
     val container = LocalContainer.current
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("callRoutes")) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
@@ -490,14 +607,14 @@ private fun AudioRouteSheet(v: CallManager.View, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun rememberNow(): androidx.compose.runtime.State<Long> {
+internal fun rememberNow(): androidx.compose.runtime.State<Long> {
     val now = remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(1000); now.longValue = System.currentTimeMillis() } }
     return now
 }
 
 @Composable
-private fun MutedBadge(modifier: Modifier) {
+internal fun MutedBadge(modifier: Modifier) {
     val cd = stringResource(R.string.p_muted)
     Box(modifier.size(24.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape).semantics { contentDescription = cd }, contentAlignment = Alignment.Center) {
         Icon(Icons.Filled.MicOff, null, tint = Color.White, modifier = Modifier.size(14.dp))
@@ -506,25 +623,26 @@ private fun MutedBadge(modifier: Modifier) {
 
 /** Celda de la cuadrícula para quien no tiene la cámara prendida: su avatar, con «Cámara apagada» y el micrófono. */
 @Composable
-private fun AvatarCell(id: String, data: BootstrapDTO, label: String, rows: Int, muted: Boolean, speaking: Boolean) {
-    val h = (LocalConfigurationHeight() / maxOf(1, rows)).coerceIn(140, 520)
+internal fun AvatarCell(id: String, data: BootstrapDTO?, label: String, rows: Int, muted: Boolean, speaking: Boolean, height: Int? = null, avatar: androidx.compose.ui.unit.Dp = 72.dp, guest: Boolean = false) {
+    val h = height ?: (LocalConfigurationHeight() / maxOf(1, rows)).coerceIn(140, 520)
     val cd = stringResource(R.string.p_cam_off)
     Box(Modifier.fillMaxWidth().height(h.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.08f))
         .border(if (speaking) 3.dp else 0.dp, if (speaking) Color(0xFF3CCB7F) else Color.Transparent, RoundedCornerShape(12.dp)).testTag("callAvatarCell-$id")) {
-        Box(Modifier.align(Alignment.Center)) { PersonAvatar(Names.person(data, id), data, size = 72.dp) }
+        Box(Modifier.align(Alignment.Center)) { CallAvatar(id, data, label, size = avatar) }
         Row(Modifier.align(Alignment.BottomStart).padding(6.dp).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.VideocamOff, cd, tint = Color.White, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp))
             if (muted) { Icon(Icons.Filled.MicOff, stringResource(R.string.p_muted), tint = Color.White, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)) }
-            Text(label, color = Color.White, style = MaterialTheme.typography.labelMedium)
+            Text(label, color = Color.White, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        if (guest) GuestTag(Modifier.align(Alignment.TopStart).padding(6.dp))
     }
 }
 
 @Composable
-private fun VideoTile(t: CallManager.Tile, label: String, rows: Int, muted: Boolean = false) {
+internal fun VideoTile(t: CallManager.Tile, label: String, rows: Int, muted: Boolean = false, height: Int? = null, guest: Boolean = false) {
     val container = LocalContainer.current
-    val h = (LocalConfigurationHeight() / maxOf(1, rows)).coerceIn(140, 520)
+    val h = height ?: (LocalConfigurationHeight() / maxOf(1, rows)).coerceIn(140, 520)
     Box(Modifier.fillMaxWidth().height(h.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black).testTag("callTile-${t.tileId}")) {
         AndroidView(
             factory = { c -> DefaultVideoRenderView(c).apply { init(container.calls.egl); scalingType = VideoScalingType.AspectFill; mirror = t.local; container.calls.bind(t.tileId, this) } },
@@ -534,8 +652,9 @@ private fun VideoTile(t: CallManager.Tile, label: String, rows: Int, muted: Bool
         Row(Modifier.align(Alignment.BottomStart).padding(6.dp).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically) {
             if (muted) { Icon(Icons.Filled.MicOff, stringResource(R.string.p_muted), tint = Color.White, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)) }
-            Text(label, color = Color.White, style = MaterialTheme.typography.labelMedium)
+            Text(label, color = Color.White, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        if (guest) GuestTag(Modifier.align(Alignment.TopStart).padding(6.dp))
     }
 }
 

@@ -40,4 +40,17 @@ class DeepLinkTest {
         assertNull(DeepLinks.parse("javascript:alert(1)"))
         assertNull(DeepLinks.parse(null))
     }
+
+    @Test fun `enlace de invitado a una llamada (https y chaggu)`() {
+        assertEquals(DeepLink.GuestCall("tok_AbC-123"), DeepLinks.parse("https://app.chaggu.com/llamada/tok_AbC-123"))
+        assertEquals(DeepLink.GuestCall("t1"), DeepLinks.parse("https://chaggu.com/llamada/t1/"))
+        assertEquals(DeepLink.GuestCall("t1"), DeepLinks.parse("https://www.chaggu.com/llamada/t1?utm=x"))
+        assertEquals(DeepLink.GuestCall("t2"), DeepLinks.parse("chaggu://llamada/t2"))
+        assertEquals(DeepLink.GuestCall("t2"), DeepLinks.parse("chaggu:///llamada/t2"))
+        assertEquals(DeepLink.GuestCall("tokenInvalidoDePrueba123"), DeepLinks.parse("https://app.chaggu.com/llamada/tokenInvalidoDePrueba123"))
+        // Sin token, con caracteres raros o en otro host: nada.
+        assertNull(DeepLinks.parse("https://app.chaggu.com/llamada/"))
+        assertNull(DeepLinks.parse("https://app.chaggu.com/llamada/a%20b"))
+        assertNull(DeepLinks.parse("https://evil.example.com/llamada/t1"))
+    }
 }

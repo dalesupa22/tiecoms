@@ -139,6 +139,8 @@ fun AppRoot() {
                         }
                     }
                 }
+                // 1.7.4: llamada por enlace de invitado (con o sin sesión), encima de la app y debajo de los avisos y del splash.
+                GuestCallHost()
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 72.dp))
                 // Splash animado sobre la app: la app carga debajo y aparece cuando el splash se aleja.
                 splash?.let { mode ->
@@ -197,6 +199,7 @@ private fun AuthNav() {
         when (val p = pending) {
             is DeepLink.Signup -> { container.pendingLink.value = null; nav.navigate("signup?org=${p.orgToken ?: ""}") { launchSingleTop = true } }
             is DeepLink.Invite -> nav.navigate("invite/${p.token}") { launchSingleTop = true }
+            is DeepLink.GuestCall -> { container.pendingLink.value = null; container.openGuestCall(p.token) }
             else -> Unit // conversación / espacio: se abre después de entrar
         }
     }
@@ -399,6 +402,7 @@ private fun MainNav() {
             }
             is DeepLink.Share -> { container.shareDraft = p; nav.navigate("share") { launchSingleTop = true } }
             is DeepLink.CallDetail -> nav.navigate("call/${p.id}") { launchSingleTop = true }
+            is DeepLink.GuestCall -> container.openGuestCall(p.token)
             // «Contestar» del aviso de llamada (push TC_CALL): pide el micrófono y entra con /calls/:id/join.
             is DeepLink.CallJoin -> {
                 com.tiecoms.app.platform.CallService.cancelIncoming(ctx, p.id)

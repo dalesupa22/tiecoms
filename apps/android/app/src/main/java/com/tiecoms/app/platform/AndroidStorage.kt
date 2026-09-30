@@ -108,6 +108,10 @@ class AppSettings(context: Context) {
         get() = prefs.getString("issueGroupBy", "group")?.takeIf { it == "group" || it == "person" } ?: "group"
         set(v) { prefs.edit().putString("issueGroupBy", v).apply() }
     /** Hoy › «Comenta tus correos con el equipo»: cerrada con ✕ no vuelve (docs/CORREO.md). */
+    /** 1.7.4: el nombre con el que entré la última vez a una llamada por enlace (invitado). */
+    var guestName: String?
+        get() = prefs.getString("guestName", null)
+        set(v) { prefs.edit().apply { if (v.isNullOrBlank()) remove("guestName") else putString("guestName", v) }.apply() }
     var mailNudgeOff: Boolean
         get() = prefs.getBoolean("mailNudgeOff", false)
         set(v) { prefs.edit().putBoolean("mailNudgeOff", v).apply() }

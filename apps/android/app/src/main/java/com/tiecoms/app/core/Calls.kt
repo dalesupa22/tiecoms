@@ -37,6 +37,8 @@ data class CallDTO(
     val title: String? = null,
     /** 1.7.1 (5dd0443): a quién se llamó con «＋ Agregar» y si ya entró. null = servidor anterior (se sigue en el cliente). */
     val invited: List<CallInviteDTO>? = null,
+    /** 1.7.4: invitados por enlace que están dentro ahora (sin cuenta; en Chime `guest:<id>`). */
+    val guests: List<CallGuestDTO>? = null,
 ) {
     val isVideo: Boolean get() = kind == "video"
     val ended: Boolean get() = endedAt != null

@@ -532,6 +532,11 @@ const es = {
   // ---------- SPEC v4: adjuntos, compartir y pestañas de Inicio ----------
   'att.photo': '📷 Foto', 'att.photos': '📷 {n} fotos', 'att.video': '🎬 Video', 'att.videos': '🎬 {n} videos', 'att.media': '🖼 {n} fotos y videos',
   'att.file': '📎 {name}', 'att.files': '📎 {n} archivos', 'att.add': 'Adjuntar', 'att.fromPhotos': 'Fotos y videos', 'att.fromCamera': 'Cámara', 'att.fromFiles': 'Archivos',
+  'att.compressing': 'Comprimiendo… {p} %', 'att.uploadingPct': 'Subiendo… {p} %', 'att.cancel': 'Cancelar', 'att.play': 'Reproducir video',
+  'att.videoTooBig': '«{name}» pesa más de 150 MB incluso comprimido',
+  'storage.title': 'Almacenamiento', 'storage.used': 'Almacenamiento usado: {total}', 'storage.videos': 'videos {n}', 'storage.photos': 'fotos {n}',
+  'storage.files': 'archivos {n}', 'storage.voice': 'notas de voz {n}', 'storage.hint': 'Cuenta lo que subiste al chat y a Archivos. Lo reenviado no ocupa espacio de nuevo.',
+  'storage.org': '{org}: {total} entre {n} personas', 'storage.orgOne': '{org}: {total} (1 persona)',
   'att.drop': 'Suelta aquí para adjuntar', 'att.uploading': 'Subiendo…', 'att.uploadingN': 'Subiendo {i} de {n}…', 'att.failed': 'No se pudo subir «{name}»',
   'att.tooBig': '«{name}» pesa más de 25 MB', 'att.max': 'Máximo 10 adjuntos por mensaje', 'att.remove': 'Quitar adjunto', 'att.retry': 'Reintentar',
   'att.download': 'Descargar', 'att.open': 'Abrir', 'att.more': '+{n}', 'att.viewer': 'Foto', 'att.prev': 'Anterior', 'att.next': 'Siguiente',
@@ -1370,6 +1375,11 @@ const en: Record<Key, string> = {
   // ---------- SPEC v4: attachments, sharing and Home tabs ----------
   'att.photo': '📷 Photo', 'att.photos': '📷 {n} photos', 'att.video': '🎬 Video', 'att.videos': '🎬 {n} videos', 'att.media': '🖼 {n} photos and videos',
   'att.file': '📎 {name}', 'att.files': '📎 {n} files', 'att.add': 'Attach', 'att.fromPhotos': 'Photos and videos', 'att.fromCamera': 'Camera', 'att.fromFiles': 'Files',
+  'att.compressing': 'Compressing… {p}%', 'att.uploadingPct': 'Uploading… {p}%', 'att.cancel': 'Cancel', 'att.play': 'Play video',
+  'att.videoTooBig': '“{name}” is over 150 MB even compressed',
+  'storage.title': 'Storage', 'storage.used': 'Storage used: {total}', 'storage.videos': 'videos {n}', 'storage.photos': 'photos {n}',
+  'storage.files': 'files {n}', 'storage.voice': 'voice notes {n}', 'storage.hint': 'Counts what you uploaded to chats and Files. Forwarded items don’t take space again.',
+  'storage.org': '{org}: {total} across {n} people', 'storage.orgOne': '{org}: {total} (1 person)',
   'att.drop': 'Drop here to attach', 'att.uploading': 'Uploading…', 'att.uploadingN': 'Uploading {i} of {n}…', 'att.failed': 'Could not upload “{name}”',
   'att.tooBig': '“{name}” is larger than 25 MB', 'att.max': 'Up to 10 attachments per message', 'att.remove': 'Remove attachment', 'att.retry': 'Retry',
   'att.download': 'Download', 'att.open': 'Open', 'att.more': '+{n}', 'att.viewer': 'Photo', 'att.prev': 'Previous', 'att.next': 'Next',

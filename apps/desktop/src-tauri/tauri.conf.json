@@ -12,7 +12,7 @@
   "app": {
     "windows": [{ "title": "Chaggu", "width": 1280, "height": 820, "minWidth": 380, "minHeight": 560 }],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' https://app.chaggu.com wss://app.chaggu.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:"
+      "csp": "default-src 'self'; connect-src 'self' https://app.chaggu.com wss://app.chaggu.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob: data: https://*.amazonaws.com; worker-src 'self' blob:"
     }
   },
   "bundle": {

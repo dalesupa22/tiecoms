@@ -39,6 +39,7 @@ import * as drive from './modules/drive.ts';
 import * as safety from './modules/safety.ts';
 import * as push from './modules/push.ts';
 import * as attachments from './modules/attachments.ts';
+import * as storageUsage from './modules/storage-usage.ts';
 import * as voice from './modules/voice.ts';
 import * as calls from './modules/calls.ts';
 import * as assistant from './modules/assistant.ts';
@@ -53,7 +54,7 @@ import * as topics from './modules/topics.ts';
 import * as integrations from './modules/integrations.ts';
 import { openViewOnce, fetchOnce } from './modules/view-once.ts';
 import { searchAll, searchConversation } from './modules/chat-search.ts';
-import { getObject } from './storage.ts';
+import { getObject, getObjectStream } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
 import { z } from 'zod';
 import { verifyAccess } from './security.ts';
@@ -88,7 +89,7 @@ export async function buildHttp() {
   await app.register(cors, {
     origin: [config.publicOrigin, ...config.extraOrigins],
     credentials: true,
-    allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract', 'x-file-type', 'x-file-name', 'x-voice-note', 'x-duration-ms', 'x-waveform', 'x-ai-consent'],
+    allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract', 'x-file-type', 'x-file-name', 'x-voice-note', 'x-duration-ms', 'x-waveform', 'x-ai-consent', 'x-width', 'x-height'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     maxAge: 600,
   });
@@ -298,19 +299,58 @@ export async function buildHttp() {
     });
     priv.post<{ Params: { id: string } }>('/api/v1/attachments/:id/transcribe', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
       async (req) => voice.retryTranscription(req.userId, z.uuid().parse(req.params.id), z.object({ aiConsent: z.boolean().optional() }).parse(req.body ?? {}).aiConsent === true));
+    // Videos (docs/VIDEO.md): subida por stream a S3 en partes, sin buffer. Contexto propio sin los parsers que
+    // cargan el cuerpo en memoria: el handler recibe el stream crudo y lo pasa a S3.
+    priv.register(async (vid) => {
+      vid.removeAllContentTypeParsers();
+      vid.addContentTypeParser('*', (_req, payload, done) => done(null, payload));
+      vid.post<{ Params: { id: string } }>('/api/v1/conversations/:id/videos', { bodyLimit: attachments.MAX_VIDEO_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+        const len = req.headers['content-length'] !== undefined ? Number(req.headers['content-length']) : null;
+        try {
+          return await attachments.uploadVideo(req.userId, z.uuid().parse(req.params.id), {
+            stream: req.raw, length: Number.isFinite(len) ? len : null, name: String(req.headers['x-file-name'] ?? ''),
+            durationMs: req.headers['x-duration-ms'] as string | undefined, width: req.headers['x-width'] as string | undefined, height: req.headers['x-height'] as string | undefined,
+          });
+        } catch (e) {
+          // El cuerpo pudo quedar a medias: esta conexión no se reutiliza.
+          if (!req.raw.readableEnded) reply.header('connection', 'close');
+          throw e;
+        }
+      });
+    });
+    // URL prefirmada de S3 (1 h) para reproducir un video en streaming (?download=1: como descarga).
+    priv.get<{ Params: { id: string }; Querystring: { download?: string } }>('/api/v1/attachments/:id/play', async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      return attachments.playLink(req.userId, z.uuid().parse(req.params.id), req.query.download === '1');
+    });
     for (const thumb of [false, true]) {
       priv.get<{ Params: { id: string }; Querystring: { download?: string; original?: string } }>(`/api/v1/attachments/:id${thumb ? '/thumb' : ''}`, async (req, reply) => {
-        const f = await attachments.fetchFile(req.userId, z.uuid().parse(req.params.id), thumb, req.query.original === '1');
-        const ascii = f.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
-        const disp = f.inline && req.query.download !== '1' ? 'inline' : 'attachment';
-        reply.header('content-type', f.contentType)
-          .header('content-disposition', `${disp}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(f.name)}`)
+        const info = await attachments.fileInfo(req.userId, z.uuid().parse(req.params.id), thumb, req.query.original === '1');
+        const ascii = info.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
+        const disp = info.inline && req.query.download !== '1' ? 'inline' : 'attachment';
+        reply.header('content-type', info.contentType)
+          .header('content-disposition', `${disp}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(info.name)}`)
           .header('cache-control', 'private, max-age=31536000, immutable')
           .header('x-content-type-options', 'nosniff')
           .header('content-security-policy', "default-src 'none'; sandbox")
           .header('accept-ranges', 'bytes');
+        const rawRange = String(req.headers.range ?? '');
+        // Videos y archivos grandes: por stream desde S3 (el rango se reenvía tal cual), memoria constante.
+        if (info.stream) {
+          const range = /^bytes=\d*-\d*$/.test(rawRange) && rawRange !== 'bytes=-' ? rawRange : undefined;
+          try {
+            const o = await getObjectStream(info.key, range);
+            if (o.contentLength != null) reply.header('content-length', String(o.contentLength));
+            if (o.partial) reply.status(206).header('content-range', o.contentRange!);
+            return reply.send(o.body);
+          } catch (e: any) {
+            if (e?.name === 'InvalidRange' || e?.$metadata?.httpStatusCode === 416) return reply.status(416).send();
+            throw e;
+          }
+        }
+        const f = { ...info, body: (await getObject(info.key)).body };
         // Rango simple (bytes=a-b): los reproductores de video lo piden.
-        const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+        const range = /^bytes=(\d*)-(\d*)$/.exec(rawRange);
         if (range && (range[1] || range[2])) {
           const total = f.body.length;
           let start = range[1] ? Number(range[1]) : Math.max(0, total - Number(range[2]));
@@ -321,6 +361,10 @@ export async function buildHttp() {
         return reply.send(f.body);
       });
     }
+    // Almacenamiento usado (solo medición, para cobrarlo más adelante): mío y de la empresa (owner/admin).
+    priv.get('/api/v1/me/storage', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => storageUsage.myStorage(req.userId));
+    priv.get<{ Params: { id: string } }>('/api/v1/organizations/:id/storage', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
+      async (req) => storageUsage.orgStorage(req.userId, z.uuid().parse(req.params.id)));
     // Firmar PDFs: firmas guardadas (PNG crudo, solo su dueño) y estampado en el servidor.
     priv.get('/api/v1/me/signatures', async (req) => ({ signatures: await signatures.listSignatures(req.userId) }));
     priv.post('/api/v1/me/signatures', { bodyLimit: MAX_SIGNATURE_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => {

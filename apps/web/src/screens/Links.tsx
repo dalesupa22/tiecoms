@@ -2,7 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { BootstrapDTO, ConversationDTO, LinkItemDTO, LinkKind, LinkPreviewDTO, LinkPreviewMode, LinkProvider, MessageDTO } from '@tiecoms/contracts';
 import { apiUrl, client, useClient } from '../app-client.ts';
 import { errorText, getLang, locale, t } from '../i18n.ts';
-import { toast, type MenuItem } from '../menu.tsx';
+import { menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate } from '../router.ts';
 import { Avatar, Modal, conversationTitle, orgById, personById, timeLabel } from '../ui.tsx';
 
@@ -152,16 +152,19 @@ export function isLinkOnly(m: MessageDTO) {
   return !!urls?.length && m.body.replace(URL_RE, '').replace(/\s+/g, ' ').trim().length <= 24;
 }
 
-export function LinkGroup({ d, msgs, onExpand }: { d: BootstrapDTO; msgs: MessageDTO[]; onExpand: () => void }) {
+/** Varios enlaces seguidos de la misma persona en una sola tarjeta. `menuFor` da el menú de cada mensaje
+ * (Reenviar, Responder, Tarea…): clic derecho en una tarjeta abre el de su mensaje; en el resto, uno por enlace. */
+export function LinkGroup({ d, msgs, onExpand, menuFor }: { d: BootstrapDTO; msgs: MessageDTO[]; onExpand: () => void; menuFor?: (m: MessageDTO) => MenuItem[] }) {
   const author = personById(d, msgs[0]!.authorId);
   const org = orgById(d, author?.orgId);
   const previews = msgs.flatMap((m) => {
     const ps = m.linkPreviews?.length ? m.linkPreviews : m.linkPreview ? [m.linkPreview] : [];
     const urls = m.body.match(URL_RE) ?? [];
-    return ps.length ? ps : urls.map((u) => ({ url: u, title: null, description: null, siteName: null, imageUrl: null } as LinkPreviewDTO));
+    return (ps.length ? ps : urls.map((u) => ({ url: u, title: null, description: null, siteName: null, imageUrl: null } as LinkPreviewDTO))).map((p) => ({ p, m }));
   });
+  const groupMenu = () => (msgs.length === 1 ? menuFor!(msgs[0]!) : previews.map(({ p, m }) => ({ label: (p.title ?? p.url).slice(0, 48), icon: '🔗', items: menuFor!(m) })));
   return (
-    <div className="msg link-group" data-mid={msgs[0]!.id}>
+    <div className="msg link-group" data-mid={msgs[0]!.id} {...(menuFor ? menuProps(groupMenu) : {})}>
       <div><Avatar person={author} org={org} size={34} /></div>
       <div style={{ minWidth: 0 }}>
         <div className="msg-meta">
@@ -172,8 +175,11 @@ export function LinkGroup({ d, msgs, onExpand }: { d: BootstrapDTO; msgs: Messag
         <div className="link-group-head">
           <span>🔗 {t('link.groupShared', { name: author?.name.split(' ')[0] ?? '', n: previews.length })}</span>
           <button className="link-btn small" onClick={onExpand}>{t('link.groupExpand')}</button>
+          {menuFor && <button className="icon-btn small link-group-more" aria-label={t('menu.open')} title={t('menu.open')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, groupMenu()); }}>⋯</button>}
         </div>
-        <div className="link-list">{previews.map((p, i) => <LinkCard key={`${p.linkId ?? p.url}-${i}`} p={p} mode="compact" />)}</div>
+        <div className="link-list">{previews.map(({ p, m }, i) => (
+          <div key={`${p.linkId ?? p.url}-${i}`} {...(menuFor ? menuProps(() => menuFor(m)) : {})}><LinkCard p={p} mode="compact" /></div>
+        ))}</div>
       </div>
     </div>
   );

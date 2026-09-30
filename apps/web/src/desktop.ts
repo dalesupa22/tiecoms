@@ -37,6 +37,15 @@ export async function initDesktop() {
   client.subscribe(update);
   update();
 
+  // Sin el menú nativo del WebView («Atrás / Recargar»): donde la app no pone el suyo, no sale nada. Se deja en
+  // campos de texto y con texto seleccionado (copiar, pegar, revisar ortografía).
+  document.addEventListener('contextmenu', (e) => {
+    if (e.defaultPrevented) return;
+    const el = e.target as HTMLElement | null;
+    if (el?.closest('input, textarea, [contenteditable="true"], [contenteditable=""]') || (getSelection()?.toString() ?? '') !== '') return;
+    e.preventDefault();
+  });
+
   // Cerrar la ventana durante una llamada no la esconde: pasa al modo mini, siempre encima.
   await listen('chaggu:closed', () => {
     void import('./call.ts').then((m) => {
@@ -81,3 +90,6 @@ export async function setCallMini(on: boolean) {
   }
 }
 export const isCallMini = () => !!saved;
+
+// Solo en compilaciones de prueba (VITE_CHAGGU_PROBE=1): deja probar el modo mini desde afuera.
+if (import.meta.env.VITE_CHAGGU_PROBE) (window as any).__chagguMini = setCallMini;

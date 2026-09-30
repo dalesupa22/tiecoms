@@ -302,6 +302,21 @@ export async function createChat(userId: string, input: { userIds: string[]; nam
   return tx(async (c) => {
     const ok = await reachable(c, userId, others);
     if (ok.length !== others.length) throw forbidden('Solo puedes sumar personas con las que compartes un espacio o tu empresa');
+    // Sin nombre, un chat con exactamente las mismas personas es el mismo chat (como WhatsApp o Slack): se
+    // retoma el que ya existe en vez de crear otro (Danny, 30-sep-2026: «Josué, Harold» salía repetido).
+    // Con nombre es un grupo nuevo a propósito. Los chats derivados (hilos, sidechats) no cuentan.
+    if (!input.name) {
+      const members = [userId, ...others].sort();
+      const same = await c.query(
+        `SELECT c.id FROM conversations c
+          WHERE c.kind = 'multi' AND c.workspace_id IS NULL AND c.name IS NULL AND c.archived_at IS NULL AND c.parent_conversation_id IS NULL
+            AND (SELECT array_agg(m.user_id::text ORDER BY m.user_id::text COLLATE "C") FROM conversation_memberships m
+                  WHERE m.conversation_id = c.id AND m.removed_at IS NULL) = $1::text[]
+          ORDER BY c.last_message_at DESC NULLS LAST LIMIT 1`,
+        [members],
+      );
+      if (same.rows[0]) return { id: same.rows[0].id as string, created: false, kind: 'multi' as const };
+    }
     const { rows } = await c.query("INSERT INTO conversations (kind, name, created_by) VALUES ('multi', $1, $2) RETURNING id", [input.name ?? null, userId]);
     const id: string = rows[0].id;
     // Quien crea administra; el resto participa y puede sumar a más gente.

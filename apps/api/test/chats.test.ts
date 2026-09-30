@@ -95,9 +95,11 @@ describe('chats grupales', () => {
     expect((await call('/chats', { token: ana.token, body: { userIds: [laura.id, extraño.id] } })).status).toBe(403);
     const r = await call('/chats', { token: ana.token, body: { userIds: [laura.id, mateo.id] } });
     expect((await call(`/conversations/${r.json.id}/members`, { token: ana.token, body: { userIds: [extraño.id], history: 'now' } })).status).toBe(403);
-    // Un chat grupal nuevo nunca reutiliza otro, aunque tenga las mismas personas.
-    const again = await call('/chats', { token: ana.token, body: { userIds: [laura.id, mateo.id] } });
-    expect(again.json.id).not.toBe(r.json.id);
+    // Sin nombre y con las mismas personas es el mismo chat (Danny, 30-sep-2026); con nombre, uno nuevo.
+    const again = await call('/chats', { token: ana.token, body: { userIds: [mateo.id, laura.id] } });
+    expect(again.json.id).toBe(r.json.id);
+    const named = await call('/chats', { token: ana.token, body: { userIds: [laura.id, mateo.id], name: 'Con nombre' } });
+    expect(named.json.id).not.toBe(r.json.id);
     // Se puede salir de un chat grupal.
     expect((await call(`/conversations/${r.json.id}/members/${laura.id}`, { token: laura.token, method: 'DELETE' })).status).toBe(200);
   });

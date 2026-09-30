@@ -6,7 +6,7 @@
 import { useEffect, useState, type DragEvent } from 'react';
 import { useClient } from '../app-client.ts';
 import { t } from '../i18n.ts';
-import { DRAG_TYPE, MAX_PANES, SPLIT_MEDIA, closePane, focusPane, onlyPane, openBeside, syncActive, usePanes } from '../split.ts';
+import { DRAG_TYPE, MAX_PANES, SPLIT_MEDIA, closePane, focusPane, onlyPane, openBeside, setSplitSize, syncActive, usePanes, useSplitSizes } from '../split.ts';
 import { ConversationScreen } from './Conversation.tsx';
 
 /** En pantallas angostas (celular, ventana chica) no hay paneles: solo el activo. */
@@ -34,6 +34,7 @@ export function ConversationArea({ id, search }: { id: string; search: string })
   if (!list.includes(id)) list[0] = id;
   const [drop, setDrop] = useState<{ over: string | null } | null>(null);
   const full = list.length >= MAX_PANES;
+  const sizes = useSplitSizes();
 
   const onDragOver = (e: DragEvent) => {
     if (!wide || !isConvDrag(e)) return;
@@ -66,7 +67,8 @@ export function ConversationArea({ id, search }: { id: string; search: string })
     );
   }
   return (
-    <div className={`split n${list.length} ${drop ? 'is-dropping' : ''}`} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+    <div className={`split n${list.length} ${drop ? 'is-dropping' : ''}`} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
+      style={{ gridTemplateColumns: `${sizes.col}fr ${1 - sizes.col}fr`, ...(list.length > 2 ? { gridTemplateRows: `${sizes.row}fr ${1 - sizes.row}fr` } : {}) }}>
       {list.map((x) => (
         <div key={x} data-pane={x} className={`split-cell ${x === id ? 'is-active' : ''} ${drop && full && drop.over === x ? 'is-target' : ''}`}
           // Tocar un panel lo vuelve el activo (antes del clic, para que el clic siga funcionando adentro).
@@ -74,7 +76,30 @@ export function ConversationArea({ id, search }: { id: string; search: string })
           <ConversationScreen key={x} id={x} pane={{ active: x === id, count: list.length, onClose: () => closePane(x, id), onOnly: () => onlyPane(x) }} />
         </div>
       ))}
+      {/* Divisiones que se arrastran para cambiar el tamaño (doble clic: mitad y mitad). */}
+      <SplitHandle dir="col" at={sizes.col} />
+      {list.length > 2 && <SplitHandle dir="row" at={sizes.row} />}
       {dropHint && <div className="split-drop" aria-hidden><span>⊞ {dropHint}</span></div>}
     </div>
   );
+}
+
+function SplitHandle({ dir, at }: { dir: 'col' | 'row'; at: number }) {
+  const start = (e: React.PointerEvent<HTMLDivElement>) => {
+    const box = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    document.body.classList.add(dir === 'col' ? 'is-resizing-col' : 'is-resizing-row');
+    const move = (ev: PointerEvent) => setSplitSize(dir === 'col' ? { col: (ev.clientX - box.left) / box.width } : { row: (ev.clientY - box.top) / box.height });
+    const up = () => {
+      el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up);
+      document.body.classList.remove('is-resizing-col', 'is-resizing-row');
+      setSplitSize({}, true);
+    };
+    el.addEventListener('pointermove', move); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+    e.preventDefault();
+  };
+  return <div className={`split-handle is-${dir}`} role="separator" aria-orientation={dir === 'col' ? 'vertical' : 'horizontal'} title={t('split.resize')}
+    style={dir === 'col' ? { left: `calc(${at * 100}% - 5px)` } : { top: `calc(${at * 100}% - 5px)` }}
+    onPointerDown={start} onDoubleClick={() => setSplitSize(dir === 'col' ? { col: 0.5 } : { row: 0.5 }, true)} />;
 }

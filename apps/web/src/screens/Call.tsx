@@ -32,7 +32,7 @@ export function CallButtons({ conv }: { conv: ConversationDTO }) {
   if (!on || !conv.canPost) return null;
   return <>
     <button className="icon-btn" aria-label={t('call.audio')} title={t('call.audio')} onClick={() => void startCall(conv.id, 'audio').catch(fail)}>📞</button>
-    <button className="icon-btn" aria-label={t('call.video')} title={t('call.video')} onClick={() => void startCall(conv.id, 'video').catch(fail)}>🎥</button>
+    <button className="icon-btn head-call-video" aria-label={t('call.video')} title={t('call.video')} onClick={() => void startCall(conv.id, 'video').catch(fail)}>🎥</button>
   </>;
 }
 

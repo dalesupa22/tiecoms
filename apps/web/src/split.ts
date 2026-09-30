@@ -78,3 +78,35 @@ export function focusPane(id: string) { lastActive = id; navigate(`/c/${id}`, tr
 
 /** ¿La conversación está a la vista en algún panel? (para no avisar de lo que ya se está leyendo). */
 export const isOpenInPanes = (id: string) => panes.includes(id);
+
+// ---------- Tamaño de los paneles (se arrastran las divisiones) ----------
+/** Fracción del ancho para la columna izquierda y del alto para la fila de arriba (0,2–0,8). */
+const SIZE_KEY = 'chaggu:split-size';
+let sizes: { col: number; row: number } = (() => {
+  try { const v = JSON.parse(localStorage.getItem(SIZE_KEY) ?? 'null'); if (v && v.col > 0 && v.row > 0) return v; } catch { /* */ }
+  return { col: 0.5, row: 0.5 };
+})();
+const sizeListeners = new Set<() => void>();
+export const useSplitSizes = () => useSyncExternalStore((l) => { sizeListeners.add(l); return () => { sizeListeners.delete(l); }; }, () => sizes);
+export function setSplitSize(p: Partial<{ col: number; row: number }>, persist = false) {
+  const clamp = (x: number) => Math.min(0.8, Math.max(0.2, x));
+  sizes = { col: clamp(p.col ?? sizes.col), row: clamp(p.row ?? sizes.row) };
+  sizeListeners.forEach((l) => l());
+  if (persist) { try { localStorage.setItem(SIZE_KEY, JSON.stringify(sizes)); } catch { /* */ } }
+}
+
+// ---------- Zoom por conversación (A− / A+ o ⌘/Ctrl + rueda) ----------
+const ZOOM_KEY = 'chaggu:conv-zoom';
+export const ZOOM_MIN = 0.7, ZOOM_MAX = 1.6;
+let zooms: Record<string, number> = (() => { try { return JSON.parse(localStorage.getItem(ZOOM_KEY) ?? '{}') ?? {}; } catch { return {}; } })();
+const zoomListeners = new Set<() => void>();
+export const useConvZoom = (id: string) => useSyncExternalStore((l) => { zoomListeners.add(l); return () => { zoomListeners.delete(l); }; }, () => zooms[id] ?? 1);
+/** Zoom actual sin suscribirse (para los manejadores de eventos). */
+export const convZoomNow = (id: string) => zooms[id] ?? 1;
+export function setConvZoom(id: string, z: number) {
+  const v = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) * 10) / 10;
+  zooms = { ...zooms };
+  if (v === 1) delete zooms[id]; else zooms[id] = v;
+  zoomListeners.forEach((l) => l());
+  try { localStorage.setItem(ZOOM_KEY, JSON.stringify(zooms)); } catch { /* */ }
+}

@@ -1,0 +1,66 @@
+diff --git a/node_modules/baileys/lib/Socket/messages-recv.js b/node_modules/baileys/lib/Socket/messages-recv.js
+index f2003ac..3151f4e 100644
+--- a/node_modules/baileys/lib/Socket/messages-recv.js
++++ b/node_modules/baileys/lib/Socket/messages-recv.js
+@@ -359,7 +359,7 @@ export const makeMessagesRecvSocket = (config) => {
+         }
+     };
+     const sendMessageAck = async (node, errorCode) => {
+-        const stanza = buildAckStanza(node, errorCode, authState.creds.me.id);
++        const stanza = buildAckStanza(node, errorCode, authState.creds.me?.id); // Parche Chaggu (Baileys #2738)
+         logger.debug({ recv: { tag: node.tag, attrs: node.attrs }, sent: stanza.attrs }, 'sent ack');
+         await sendNode(stanza);
+     };
+diff --git a/node_modules/baileys/lib/Socket/socket.js b/node_modules/baileys/lib/Socket/socket.js
+index ae34a8f..ed8d327 100644
+--- a/node_modules/baileys/lib/Socket/socket.js
++++ b/node_modules/baileys/lib/Socket/socket.js
+@@ -690,6 +690,23 @@ export const makeSocket = (config) => {
+     ws.on('close', () => void end(new Boom('Connection Terminated', { statusCode: DisconnectReason.connectionClosed })));
+     // the server terminated the connection
+     ws.on('CB:xmlstreamend', () => void end(new Boom('Connection Terminated by Server', { statusCode: DisconnectReason.connectionClosed })));
++    // Parche Chaggu (Baileys PR #2765): desde fin de julio de 2026 WhatsApp manda
++    // companion_reg_refresh al escanear para retirar el secreto adv del QR. Hay que
++    // generar uno nuevo y volver a mostrar el mismo ref; si no, el teléfono falla.
++    let refreshPairingQR;
++    ws.on('CB:notification,type:companion_reg_refresh', (node) => {
++        if (!getBinaryNodeChild(node, 'companion_reg_refresh') && !getBinaryNodeChild(node, 'pair-device-rotate-qr')) {
++            logger.warn({ node }, 'companion_reg_refresh without expected child; ignoring');
++            return;
++        }
++        if (creds.me) {
++            return;
++        }
++        creds.advSecretKey = randomBytes(32).toString('base64');
++        ev.emit('creds.update', { advSecretKey: creds.advSecretKey });
++        logger.info({ id: node.attrs.id }, 'rotated adv secret on companion_reg_refresh; re-rendering QR');
++        refreshPairingQR?.();
++    });
+     // QR gen
+     ws.on('CB:iq,type:set,pair-device', async (stanza) => {
+         const iq = {
+@@ -705,7 +722,11 @@ export const makeSocket = (config) => {
+         const refNodes = getBinaryNodeChildren(pairDeviceNode, 'ref');
+         const noiseKeyB64 = Buffer.from(creds.noiseKey.public).toString('base64');
+         const identityKeyB64 = Buffer.from(creds.signedIdentityKey.public).toString('base64');
+-        const advB64 = creds.advSecretKey;
++        // Parche Chaggu (Baileys PR #2765): el secreto adv se lee en cada render porque
++        // companion_reg_refresh lo rota a mitad del flujo.
++        let currentRef;
++        const renderQR = (ref) => ev.emit('connection.update', { qr: buildPairingQRData(ref, noiseKeyB64, identityKeyB64, creds.advSecretKey, browser) });
++        refreshPairingQR = () => { if (currentRef !== undefined && ws.isOpen) renderQR(currentRef); };
+         let qrMs = qrTimeout || 60000; // time to let a QR live
+         const genPairQR = () => {
+             if (!ws.isOpen) {
+@@ -716,9 +737,8 @@ export const makeSocket = (config) => {
+                 void end(new Boom('QR refs attempts ended', { statusCode: DisconnectReason.timedOut }));
+                 return;
+             }
+-            const ref = refNode.content.toString('utf-8');
+-            const qr = buildPairingQRData(ref, noiseKeyB64, identityKeyB64, advB64, browser);
+-            ev.emit('connection.update', { qr });
++            currentRef = refNode.content.toString('utf-8');
++            renderQR(currentRef);
+             qrTimer = setTimeout(genPairQR, qrMs);
+             qrMs = qrTimeout || 20000; // shorter subsequent qrs
+         };

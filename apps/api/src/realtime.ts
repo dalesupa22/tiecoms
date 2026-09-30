@@ -26,6 +26,7 @@ export function createRealtime(httpServer: HttpServer) {
   // Pool propio y pequeño: el LISTEN del adaptador nunca compite con las peticiones.
   const adapterPool = new pg.Pool({ connectionString: config.databaseUrl, ssl: pgSsl(), max: 2, application_name: 'tiecoms-sio-adapter' });
   adapterPool.on('error', (e) => console.error('[sio-adapter] pool', e.message));
+  adapterPool.on('connect', (c) => c.on('error', (e) => console.error('[sio-adapter] cliente', e.message)));
   io.adapter(createAdapter(adapterPool, { tableName: 'socket_io_attachments', channelPrefix: 'tiecoms_sio', errorHandler: (e) => console.error('[sio-adapter]', e.message) }));
 
   io.use(async (socket, next) => {

@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { WaAccountDTO, WaCategory, WaChatDTO, WaKind, WaMessageDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
-import { toast } from '../menu.tsx';
+import { copyText, menuProps, toast } from '../menu.tsx';
+import { openDialog } from '../actions.tsx';
+import { WaShareDialog } from './Mail.tsx';
 import { navigate } from '../router.ts';
 import { Modal, conversationTitle } from '../ui.tsx';
 
@@ -268,7 +270,7 @@ function ChatRow({ c, active, multi, onOpen, onPatch }: { c: WaChatDTO; active: 
           <span className="row" style={{ gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
             {multi && <span className="tag">{c.accountLabel}</span>}
             {c.isGroup && c.participants ? <span className="tag">{t('wa.members', { n: c.participants })}</span> : null}
-            {c.linkedConversationId && <span className="tag wa-linked">⇄ Chaggu</span>}
+            {c.linkedConversationId && <span className="tag wa-linked">⇄ chaggu</span>}
           </span>
         </span>
         {c.unread > 0 && <span className="pill">{c.unread}</span>}
@@ -285,6 +287,7 @@ function ChatPanel({ c, revision, onClose, onPatch }: { c: WaChatDTO; revision: 
   const d = useClient((s) => s.data)!;
   const [messages, setMessages] = useState<WaMessageDTO[] | null>(null);
   const box = useRef<HTMLDivElement>(null);
+  const mailOn = d.features?.mail === true;
   useEffect(() => { api.messages(c).then((r) => setMessages(r.messages)).catch(() => setMessages([])); }, [c.accountId, c.jid, revision]);
   useEffect(() => { box.current?.scrollTo({ top: box.current.scrollHeight }); }, [messages]);
   const targets = useMemo(() => d.conversations.filter((x) => x.kind !== 'direct' && x.canPost !== false), [d]);
@@ -306,13 +309,20 @@ function ChatPanel({ c, revision, onClose, onPatch }: { c: WaChatDTO; revision: 
       <div className="wa-msgs" ref={box}>
         {messages === null && <div className="hint">{t('common.loading')}</div>}
         {messages?.length === 0 && <div className="hint">{t('wa.noMessages')}</div>}
-        {messages?.map((m) => (
-          <div key={m.id} className={`wa-msg ${m.fromMe ? 'me' : ''}`}>
-            {!m.fromMe && c.isGroup && m.author && <div className="wa-author">{m.author}</div>}
+        {messages?.map((m) => {
+          const bring = () => openDialog((close) => <WaShareDialog accountId={c.accountId} jid={c.jid} chatName={c.name} isGroup={c.isGroup} message={m} onClose={close} />);
+          return (
+          <div key={m.id} className={`wa-msg ${m.fromMe ? 'me' : ''}`} {...(mailOn ? menuProps(() => [
+            { label: t('wa.bring'), icon: '⤴', onSelect: bring },
+            { label: t('common.copy'), icon: '⧉', onSelect: () => void copyText(m.body).then(() => toast(t('common.copied'))) },
+          ]) : {})}>
+            {!m.fromMe && c.isGroup && <div className={m.author ? 'wa-author' : 'wa-author unknown'}>{m.author ?? t('wa.someone')}</div>}
             <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{m.body}</div>
             <div className="wa-time">{new Date(m.sentAt).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+            {mailOn && <button className="wa-bring" onClick={bring} title={t('wa.bring')}>⤴ {t('wa.bringShort')}</button>}
           </div>
-        ))}
+          );
+        })}
       </div>
       <div className="wa-panel-foot">
         <div className="row" style={{ flexWrap: 'wrap' }}>

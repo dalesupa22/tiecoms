@@ -1,6 +1,6 @@
 /**
  * Guardado de lo que llega de WhatsApp (credenciales cifradas, contactos, chats,
- * mensajes) y reenvío a Chaggu de los chats vinculados. Lo usa src/wa-bridge.ts.
+ * mensajes) y reenvío a chaggu de los chats vinculados. Lo usa src/wa-bridge.ts.
  */
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import {
@@ -147,11 +147,64 @@ export async function upsertContacts(s: Session, contacts: Partial<Contact>[]) {
     // El mismo contacto puede llegar como número (@s.whatsapp.net) o como LID: se guarda con ambos.
     for (const jid of new Set([ct.id, ct.phoneNumber, ct.lid].filter(Boolean) as string[])) rows.push([jidNormalizedUser(jid), name]);
   }
+  await storeAliases(s, contacts.map(aliasOf));
   for (let i = 0; i < rows.length; i += 500) {
     const part = rows.slice(i, i + 500);
     await pool.query(
       `INSERT INTO wa_contacts (account_id, jid, name) SELECT $1, j, n FROM unnest($2::text[], $3::text[]) AS t(j, n)
        ON CONFLICT (account_id, jid) DO UPDATE SET name = EXCLUDED.name`,
+      [s.id, part.map((r) => r[0]), part.map((r) => r[1])],
+    );
+  }
+}
+
+/** Equivalencias LID ↔ número (@s.whatsapp.net) de una cuenta; con ellas se resuelven los nombres. */
+export async function storeAliases(s: Session, pairs: { lid?: string | null; pn?: string | null }[]) {
+  const seen = new Map<string, string>();
+  for (const p of pairs) {
+    if (!p.lid || !p.pn) continue;
+    const lid = jidNormalizedUser(p.lid), pn = jidNormalizedUser(p.pn);
+    if (lid.endsWith('@lid') && pn.endsWith('@s.whatsapp.net')) seen.set(lid, pn);
+  }
+  const rows = [...seen];
+  for (let i = 0; i < rows.length; i += 500) {
+    const part = rows.slice(i, i + 500);
+    await pool.query(
+      `INSERT INTO wa_jid_alias (account_id, lid, pn) SELECT $1, l, p FROM unnest($2::text[], $3::text[]) AS t(l, p)
+       ON CONFLICT (account_id, lid) DO UPDATE SET pn = EXCLUDED.pn WHERE wa_jid_alias.pn IS DISTINCT FROM EXCLUDED.pn`,
+      [s.id, part.map((r) => r[0]), part.map((r) => r[1])],
+    );
+  }
+}
+
+/** Pares LID ↔ número que trae un contacto o participante de grupo. */
+export function aliasOf(ct: { id?: string | null; lid?: string | null; phoneNumber?: string | null }) {
+  const lid = ct.lid ?? (ct.id?.endsWith('@lid') ? ct.id : null);
+  const pn = ct.phoneNumber ?? (ct.id?.endsWith('@s.whatsapp.net') ? ct.id : null);
+  return { lid, pn };
+}
+
+/**
+ * Lo que cada mensaje dice de quien lo escribe: el nombre que esa persona se puso (pushName) y,
+ * en grupos, su número junto al LID. El pushName va en su propia columna: no pisa la libreta.
+ */
+export async function rememberSenders(s: Session, messages: WAMessage[]) {
+  const names: [string, string][] = [];
+  const pairs: { lid?: string | null; pn?: string | null }[] = [];
+  for (const m of messages) {
+    if (m.key.fromMe || !m.key.remoteJid) continue;
+    const group = isJidGroup(m.key.remoteJid);
+    const a = group ? m.key.participant : m.key.remoteJid;
+    const b = group ? (m.key as any).participantAlt : (m.key as any).remoteJidAlt;
+    if (a && b) pairs.push(aliasOf({ id: a, ...(b.endsWith('@lid') ? { lid: b } : { phoneNumber: b }) }));
+    if (m.pushName) for (const j of [a, b]) if (j) names.push([jidNormalizedUser(j), m.pushName]);
+  }
+  await storeAliases(s, pairs);
+  for (let i = 0; i < names.length; i += 500) {
+    const part = names.slice(i, i + 500);
+    await pool.query(
+      `INSERT INTO wa_contacts (account_id, jid, push_name) SELECT DISTINCT ON (j) $1, j, n FROM unnest($2::text[], $3::text[]) AS t(j, n)
+       ON CONFLICT (account_id, jid) DO UPDATE SET push_name = EXCLUDED.push_name WHERE wa_contacts.push_name IS DISTINCT FROM EXCLUDED.push_name`,
       [s.id, part.map((r) => r[0]), part.map((r) => r[1])],
     );
   }
@@ -271,7 +324,7 @@ export async function storeMessages(s: Session, rows: MsgRow[], live: boolean) {
   return inserted;
 }
 
-/** Chats vinculados a una conversación de Chaggu: los mensajes nuevos llegan allí como reenviados de WhatsApp. */
+/** Chats vinculados a una conversación de chaggu: los mensajes nuevos llegan allí como reenviados de WhatsApp. */
 export async function bridgeToTieComs(s: Session, rows: MsgRow[]) {
   if (!rows.length) return;
   const { rows: links } = await pool.query(
@@ -296,7 +349,7 @@ export async function bridgeToTieComs(s: Session, rows: MsgRow[]) {
       if (e?.status === 403 || e?.status === 404) {
         await pool.query('UPDATE wa_chats SET linked_conversation_id = NULL, linked_since = NULL WHERE account_id = $1 AND jid = $2', [s.id, m.chat]);
         byJid.delete(m.chat);
-      } else console.error(`[wa] no pude reenviar ${m.id} a Chaggu`, e?.message);
+      } else console.error(`[wa] no pude reenviar ${m.id} a chaggu`, e?.message);
     }
   }
 }
@@ -315,12 +368,12 @@ export async function organizeAccount(s: Session) {
   }
 }
 
-/** id de Chaggu del mensaje reenviado desde WhatsApp (mismo clientMessageId que bridgeToTieComs). */
+/** id de chaggu del mensaje reenviado desde WhatsApp (mismo clientMessageId que bridgeToTieComs). */
 const bridgedClientId = (accountId: string, chat: string, id: string) => `wa-${createHash('sha256').update(`${accountId}|${chat}|${id}`).digest('hex').slice(0, 40)}`;
 
 /**
  * Reacción de WhatsApp (reactionMessage): se guarda en el mensaje de WhatsApp y, si el chat está vinculado,
- * en el mensaje reenviado a Chaggu como reacción externa («Laura · WhatsApp»). Texto vacío = la quitó.
+ * en el mensaje reenviado a chaggu como reacción externa («Laura · WhatsApp»). Texto vacío = la quitó.
  */
 export async function storeReaction(s: Session, m: WAMessage) {
   const r = m.message?.reactionMessage;

@@ -46,7 +46,7 @@ export function SideDialog({ conv, message, initialUserIds = [], onClose, onOpen
   const [question, setQuestion] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { client.request<{ userIds: string[] }>('/blocks').then((r) => setBlocked(new Set(r.userIds))).catch(() => {}); }, []);
+  useEffect(() => { client.loadBlocks().then((ids) => setBlocked(new Set(ids))).catch(() => {}); }, []);
   const all = useMemo(() => sideCandidates(d, conv, blocked), [d, conv, blocked]);
   const needle = q.trim().toLowerCase();
   const match = (c: Candidate) => !needle || [c.p.name, c.p.title, c.p.area, orgById(d, c.p.orgId)?.name].some((v) => v?.toLowerCase().includes(needle));

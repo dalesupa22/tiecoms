@@ -1,10 +1,12 @@
-import { Fragment, useEffect, useMemo, useState, type KeyboardEvent, type RefObject } from 'react';
-import type { BootstrapDTO, ConversationDTO, MentionDTO, MentionItemDTO, MessageDTO, PersonDTO } from '@tiecoms/contracts';
+import { useEffect, useMemo, useState, type KeyboardEvent, type RefObject } from 'react';
+import type { BootstrapDTO, ConversationDTO, MentionDTO, MentionItemDTO, MessageDTO, MessageRefDTO, PersonDTO } from '@tiecoms/contracts';
+import { ggRanges, segmentBody } from '../chat17.ts';
+import { openRef } from './Chat17.tsx';
 import { client, useClient } from '../app-client.ts';
 import { attachmentSummaryText, errorText, t } from '../i18n.ts';
 import { openMenuAt, toast } from '../menu.tsx';
 import { navigate } from '../router.ts';
-import { Avatar, conversationTitle, orgById, personById, personColor, timeLabel } from '../ui.tsx';
+import { Avatar, GG_ID, conversationTitle, orgById, personById, personColor, timeLabel } from '../ui.tsx';
 import { personMenu } from '../actions.tsx';
 import { Linkify } from './Chats.tsx';
 
@@ -135,8 +137,11 @@ export function backspaceToken(text: string, caret: number, tokens: MentionToken
 }
 
 /** Espejo detrás del textarea que resalta los tokens (el textarea va con fondo transparente). */
-export function MentionMirror({ text, tokens, taRef }: { text: string; tokens: MentionToken[]; taRef: RefObject<HTMLTextAreaElement | null> }) {
-  const ranges = mentionsFor(text, tokens);
+export function MentionMirror({ text, tokens, taRef, refRanges = [] }: { text: string; tokens: MentionToken[]; taRef: RefObject<HTMLTextAreaElement | null>; refRanges?: { start: number; length: number }[] }) {
+  const mentioned = mentionsFor(text, tokens).map((m) => ({ ...m, ref: false, gg: m.userId === GG_ID }));
+  // «@gg» escrito a mano también se resalta con el degradado de gg.
+  const typedGg = ggRanges(text).filter((g) => !mentioned.some((m) => m.start === g.start)).map((g) => ({ ...g, ref: false, gg: true }));
+  const ranges = [...mentioned, ...typedGg, ...refRanges.map((r) => ({ ...r, ref: true, gg: false }))].sort((a, b) => a.start - b.start);
   const [scroll, setScroll] = useState(0);
   const [style, setStyle] = useState<React.CSSProperties>({});
   // Mismas medidas que el textarea para que el resaltado quede exactamente debajo del texto.
@@ -157,8 +162,9 @@ export function MentionMirror({ text, tokens, taRef }: { text: string; tokens: M
   const parts: React.ReactNode[] = [];
   let at = 0;
   for (const r of ranges) {
+    if (r.start < at) continue;
     parts.push(text.slice(at, r.start));
-    parts.push(<mark key={r.start}>{text.slice(r.start, r.start + r.length)}</mark>);
+    parts.push(<mark key={r.start} className={r.ref ? 'is-ref' : r.gg ? 'is-gg' : undefined}>{text.slice(r.start, r.start + r.length)}</mark>);
     at = r.start + r.length;
   }
   parts.push(text.slice(at), '​');
@@ -166,28 +172,43 @@ export function MentionMirror({ text, tokens, taRef }: { text: string; tokens: M
 }
 
 // ---------- En las burbujas ----------
-/** Texto con enlaces y menciones (negrita del color de la persona; si soy yo, fondo suave). */
-export function MessageText({ d, body, mentions }: { d: BootstrapDTO; body: string; mentions?: MentionDTO[] }) {
-  const list = (mentions ?? []).filter((m) => m.start >= 0 && m.start + m.length <= body.length).sort((a, b) => a.start - b.start);
-  if (!list.length) return <Linkify text={body} />;
+/**
+ * Texto con enlaces, menciones (negrita del color de la persona; si soy yo, fondo suave) y #grupos (pastilla del
+ * color del acento: abre la conversación o avisa «No tienes acceso a #Nombre»).
+ */
+/** @gg con el degradado de la marca (pedido de Danny, 29-sep-2026). */
+const GgMention = ({ text }: { text: string }) => <span className="mention is-gg" title="gg">{text}</span>;
+/** Texto sin menciones estructuradas: «@gg» escrito a mano también lleva el degradado. */
+function TextWithGg({ text }: { text: string }) {
+  const rs = ggRanges(text);
+  if (!rs.length) return <Linkify text={text} />;
   const out: React.ReactNode[] = [];
   let at = 0;
-  for (const m of list) {
-    if (m.start < at) continue;
-    out.push(<Linkify key={`t${at}`} text={body.slice(at, m.start)} />);
-    const label = body.slice(m.start, m.start + m.length);
+  rs.forEach((r, i) => { out.push(<Linkify key={`t${i}`} text={text.slice(at, r.start)} />, <GgMention key={`g${i}`} text={text.slice(r.start, r.start + r.length)} />); at = r.start + r.length; });
+  out.push(<Linkify key="end" text={text.slice(at)} />);
+  return <>{out}</>;
+}
+
+export function MessageText({ d, body, mentions, refs }: { d: BootstrapDTO; body: string; mentions?: MentionDTO[]; refs?: MessageRefDTO[] }) {
+  if (!mentions?.length && !refs?.length) return <TextWithGg text={body} />;
+  const segs = segmentBody(body, mentions, refs);
+  return <>{segs.map((sg, i) => {
+    if (sg.kind === 'text') return <TextWithGg key={i} text={sg.text} />;
+    if (sg.kind === 'ref') {
+      const ref = sg.ref;
+      return <button key={i} type="button" className="ref-pill" title={ref.name} onClick={() => openRef(d, ref)}>{sg.text}</button>;
+    }
+    const m = sg.mention;
+    if (m.userId === GG_ID) return <GgMention key={i} text={sg.text} />;
     const p = m.userId === 'all' ? null : personById(d, m.userId);
     const me = m.userId === 'all' || m.userId === d.me.id;
-    out.push(
-      <button key={`m${m.start}`} type="button" className={`mention ${me ? 'is-me' : ''}`} style={p ? { color: personColor(p.id) } : undefined}
+    return (
+      <button key={i} type="button" className={`mention ${me ? 'is-me' : ''}`} style={p ? { color: personColor(p.id) } : undefined}
         onClick={(e) => { if (!p) return; const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, personMenu(p)); }}>
-        {label}
-      </button>,
+        {sg.text}
+      </button>
     );
-    at = m.start + m.length;
-  }
-  out.push(<Linkify key={`t${at}`} text={body.slice(at)} />);
-  return <>{out.map((x, i) => <Fragment key={i}>{x}</Fragment>)}</>;
+  })}</>;
 }
 
 export const mentionsMe = (d: BootstrapDTO, m: MessageDTO) => m.authorId !== d.me.id && (m.mentions ?? []).some((x) => x.userId === d.me.id || x.userId === 'all');

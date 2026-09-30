@@ -101,13 +101,34 @@ export async function removeAccount(userId: string, id: string) {
   return { ok: true };
 }
 
+/**
+ * Nombre y número de un jid de WhatsApp. Muchos llegan como LID (@lid): el nombre se busca por el LID
+ * y por el número equivalente (wa_jid_alias). Primero la libreta, luego el pushName (wa_contacts.push_name).
+ */
+const whoSql = (acc: string, jid: string) => `(SELECT
+    COALESCE((SELECT name FROM wa_contacts WHERE account_id = ${acc} AND jid = ${jid}),
+             (SELECT k.name FROM wa_jid_alias al JOIN wa_contacts k ON k.account_id = al.account_id AND k.jid = al.pn
+               WHERE al.account_id = ${acc} AND al.lid = ${jid}),
+             (SELECT push_name FROM wa_contacts WHERE account_id = ${acc} AND jid = ${jid}),
+             (SELECT k.push_name FROM wa_jid_alias al JOIN wa_contacts k ON k.account_id = al.account_id AND k.jid = al.pn
+               WHERE al.account_id = ${acc} AND al.lid = ${jid})) AS name,
+    COALESCE((SELECT pn FROM wa_jid_alias WHERE account_id = ${acc} AND lid = ${jid}),
+             CASE WHEN ${jid} LIKE '%@s.whatsapp.net' THEN ${jid} END) AS pn)`;
+
+/** «+57 300 5750500» a partir de un jid de número; null si solo hay LID. */
+export function phoneLabel(pn: string | null | undefined) {
+  const d = pn?.split('@')[0];
+  if (!d || !/^\d{6,15}$/.test(d)) return null;
+  return d.startsWith('57') && d.length === 12 ? `+57 ${d.slice(2, 5)} ${d.slice(5)}` : `+${d}`;
+}
+
 function toChatDTO(r: any): WaChatDTO {
   return {
     accountId: r.account_id,
     accountLabel: r.account_label,
     accountKind: r.account_kind,
     jid: r.jid,
-    name: r.name ?? r.jid.split('@')[0],
+    name: r.name ?? phoneLabel(r.pn) ?? r.jid.split('@')[0],
     isGroup: r.is_group,
     participants: r.participants,
     description: r.description,
@@ -125,9 +146,9 @@ function toChatDTO(r: any): WaChatDTO {
 
 export async function listChats(userId: string, q: { accountId?: string; category?: WaCategory; groups?: boolean; search?: string; hidden?: boolean; limit: number }) {
   const { rows } = await pool.query(
-    `SELECT c.*, COALESCE(c.name, ct.name) AS name, a.label AS account_label, a.kind AS account_kind
+    `SELECT c.*, COALESCE(c.name, ct.name) AS name, ct.pn, a.label AS account_label, a.kind AS account_kind
        FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
-       LEFT JOIN wa_contacts ct ON ct.account_id = c.account_id AND ct.jid = c.jid
+       LEFT JOIN LATERAL ${whoSql('c.account_id', 'c.jid')} ct ON true
       WHERE a.user_id = $1 AND a.removed_at IS NULL
         AND ($2::uuid IS NULL OR c.account_id = $2)
         AND ($3::text IS NULL OR c.category = $3)
@@ -153,8 +174,8 @@ export async function listChats(userId: string, q: { accountId?: string; categor
 
 async function ownChat(userId: string, accountId: string, jid: string) {
   const { rows } = await pool.query(
-    `SELECT c.*, COALESCE(c.name, ct.name) AS name, a.label AS account_label, a.kind AS account_kind FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
-       LEFT JOIN wa_contacts ct ON ct.account_id = c.account_id AND ct.jid = c.jid
+    `SELECT c.*, COALESCE(c.name, ct.name) AS name, ct.pn, a.label AS account_label, a.kind AS account_kind FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
+       LEFT JOIN LATERAL ${whoSql('c.account_id', 'c.jid')} ct ON true
       WHERE c.account_id = $1 AND c.jid = $2 AND a.user_id = $3 AND a.removed_at IS NULL`,
     [accountId, jid, userId],
   );
@@ -189,7 +210,7 @@ export async function updateChat(userId: string, accountId: string, jid: string,
 export async function reorganize(userId: string) {
   const { rows } = await pool.query(
     `SELECT c.account_id, c.jid, COALESCE(c.name, ct.name) AS name, c.is_group, c.category, a.kind FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
-       LEFT JOIN wa_contacts ct ON ct.account_id = c.account_id AND ct.jid = c.jid
+       LEFT JOIN LATERAL ${whoSql('c.account_id', 'c.jid')} ct ON true
       WHERE a.user_id = $1 AND a.removed_at IS NULL AND NOT c.category_manual`,
     [userId],
   );
@@ -206,12 +227,14 @@ export async function reorganize(userId: string) {
 export async function listChatMessages(userId: string, accountId: string, jid: string, before: string | undefined, limit: number) {
   await ownChat(userId, accountId, jid);
   const { rows } = await pool.query(
-    `SELECT * FROM wa_messages WHERE account_id = $1 AND chat_jid = $2 AND ($3::timestamptz IS NULL OR sent_at < $3)
-      ORDER BY sent_at DESC LIMIT $4`,
+    `SELECT m.*, w.name AS who_name, w.pn AS who_pn FROM wa_messages m
+       LEFT JOIN LATERAL ${whoSql('m.account_id', 'm.author_jid')} w ON NOT m.from_me
+      WHERE m.account_id = $1 AND m.chat_jid = $2 AND ($3::timestamptz IS NULL OR m.sent_at < $3)
+      ORDER BY m.sent_at DESC LIMIT $4`,
     [accountId, jid, before ?? null, limit],
   );
   const messages: WaMessageDTO[] = rows.reverse().map((r) => ({
-    id: r.id, fromMe: r.from_me, author: r.from_me ? null : (r.author_name ?? r.author_jid?.split('@')[0] ?? null),
+    id: r.id, fromMe: r.from_me, author: r.from_me ? null : (r.author_name ?? r.who_name ?? phoneLabel(r.who_pn)),
     kind: r.kind, body: r.body, sentAt: new Date(r.sent_at).toISOString(),
     ...(r.reactions ? { reactions: Object.values(r.reactions as Record<string, { emoji: string; name: string }>) } : {}),
   }));

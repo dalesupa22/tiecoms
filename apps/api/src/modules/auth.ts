@@ -1,11 +1,12 @@
-import type { AuthResult, DeviceInfo, LoginInput, OrgRole, SignupInput, UserDTO } from '@tiecoms/contracts';
+import type { z } from 'zod';
+import type { AuthResult, CreateOrgInvitationInput, DeviceInfo, LoginInput, OrgRole, SignupInput, UserDTO } from '@tiecoms/contracts';
 import { config } from '../config.ts';
 import { audit, enqueueOutbox, pool, tx, type Db, type Tx } from '../db.ts';
 import { ApiError, badRequest, conflict, forbidden, notFound, unauthorized } from '../errors.ts';
-import type { MailLang } from '../mail.ts';
-import { hashPassword, orgLook, randomToken, sha256, signAccess, verifyPassword } from '../security.ts';
+import { hashPassword, inviteCodeHash, normalizeInviteCode, orgLook, randomInviteCode, randomToken, sha256, signAccess, verifyPassword } from '../security.ts';
 import { claimedBy, emailDomain, isPublicDomain } from './domains.ts';
-import { deliverInvitation, prepareInvitationFor } from './invitations.ts';
+import { deliverInvitation, invitationUrl, prepareInvitationFor } from './invitations.ts';
+import { checkOrgInviteGroups, consumeOrgInvite, joinOrgInviteGroups, orgInviteGroupNames } from './workspaces.ts';
 
 /** Ventana en la que el refresh anterior sigue sirviendo (dos pestañas refrescando a la vez). */
 const ROTATION_GRACE_MS = 30_000;
@@ -47,21 +48,23 @@ export interface DomainProof { provider: 'google' | 'microsoft'; tenant: string 
  */
 export async function placeNewUser(c: Tx, email: string, opts: { orgInviteToken?: string; orgName?: string; fallbackOrgName: string; proof?: DomainProof | null }) {
   if (opts.orgInviteToken) {
-    // Se une a una empresa existente: la invitación es de un solo uso y puede exigir un correo.
-    const { rows } = await c.query('SELECT * FROM org_invitations WHERE token_hash = $1 FOR UPDATE', [sha256(opts.orgInviteToken)]);
+    // Se une a una empresa existente: por enlace (token) o código; de un solo uso salvo `multi_use`, y puede exigir un correo.
+    const code = normalizeInviteCode(opts.orgInviteToken);
+    const { rows } = await c.query('SELECT * FROM org_invitations WHERE token_hash = $1 OR code_hash = $2 FOR UPDATE',
+      [sha256(opts.orgInviteToken), code ? inviteCodeHash(code) : null]);
     const inv = rows[0];
     if (!inv) throw notFound('Invitación');
-    if (inv.accepted_at || inv.revoked_at || new Date(inv.expires_at) < new Date()) throw conflict('La invitación ya no es válida');
+    if ((!inv.multi_use && inv.accepted_at) || inv.revoked_at || new Date(inv.expires_at) < new Date()) throw conflict('La invitación ya no es válida');
     if (inv.email && String(inv.email).toLowerCase() !== email) throw forbidden('Esta invitación es para otro correo');
-    return { orgId: inv.org_id as string, role: inv.role as OrgRole, inviteId: inv.id as string, via: 'invite' as const };
+    return { orgId: inv.org_id as string, role: inv.role as OrgRole, inviteId: inv.id as string, invite: inv, via: 'invite' as const };
   }
   const domain = emailDomain(email);
   const corporate = !isPublicDomain(domain);
   if (corporate) {
     const owner = await claimedBy(c, domain);
     if (owner) {
-      if (owner.joinPolicy === 'auto' && opts.proof) return { orgId: owner.orgId, role: 'member' as OrgRole, inviteId: null, via: 'domain' as const };
-      throw new ApiError(409, 'domain_claimed', `${owner.orgName} ya está en Chaggu con el dominio ${domain}. Pide a su administrador que te invite.`, { orgName: owner.orgName, domain });
+      if (owner.joinPolicy === 'auto' && opts.proof) return { orgId: owner.orgId, role: 'member' as OrgRole, inviteId: null, invite: null, via: 'domain' as const };
+      throw new ApiError(409, 'domain_claimed', `${owner.orgName} ya está en chaggu con el dominio ${domain}. Pide a su administrador que te invite.`, { orgName: owner.orgName, domain });
     }
   }
   const name = (opts.orgName ?? opts.fallbackOrgName).trim().slice(0, 120);
@@ -88,7 +91,7 @@ export async function placeNewUser(c: Tx, email: string, opts: { orgInviteToken?
       throw new ApiError(409, 'domain_claimed', `Otra empresa acaba de registrar el dominio ${domain}. Pide a su administrador que te invite.`, { domain });
     }
   }
-  return { orgId, role: 'owner' as OrgRole, inviteId: null, via: 'created' as const };
+  return { orgId, role: 'owner' as OrgRole, inviteId: null, invite: null, via: 'created' as const };
 }
 
 /** Crea la persona dentro de la empresa elegida y avisa a los colegas si se unió a una existente. */
@@ -100,7 +103,11 @@ export async function insertUser(c: Tx, u: { email: string; name: string; passwo
   );
   const userId: string = r.rows[0].id;
   await c.query('INSERT INTO organization_memberships (org_id, user_id, role, title) VALUES ($1,$2,$3,$4)', [place.orgId, userId, place.role, u.title ?? null]);
-  if (place.inviteId) await c.query('UPDATE org_invitations SET accepted_by = $2, accepted_at = now() WHERE id = $1', [place.inviteId, userId]);
+  if (place.invite) {
+    await consumeOrgInvite(c, place.invite, userId);
+    // Invitada desde un grupo: además de la empresa, entra al espacio y a esos grupos.
+    await joinOrgInviteGroups(c, userId, place.invite);
+  }
   if (place.via !== 'created') {
     // Los colegas ven a la persona nueva en su directorio.
     const mates = await c.query('SELECT user_id FROM organization_memberships WHERE org_id = $1', [place.orgId]);
@@ -125,37 +132,52 @@ export async function signup(input: SignupInput): Promise<AuthResult> {
   }
 }
 
-/** Invitar a un colega a mi empresa. Solo dueños y administradores. */
-export async function createOrgInvitation(userId: string, orgId: string, input: { email?: string; role: 'member' | 'admin'; expiresInDays: number; lang?: MailLang }) {
+/**
+ * Invitar a un colega a mi empresa. Dueños y administradores, como siempre; con `conversationIds`
+ * (grupos donde participo) cualquier miembro puede invitar colegas como `member`: al aceptar entran a la
+ * empresa y a esos grupos. `multiUse` = enlace y código para varias personas (sin correo).
+ */
+export async function createOrgInvitation(userId: string, orgId: string, input: z.infer<typeof CreateOrgInvitationInput>) {
+  const conversationIds = [...new Set(input.conversationIds ?? [])];
   const inv = await tx(async (c) => {
     const { rows } = await c.query('SELECT role FROM organization_memberships WHERE org_id = $1 AND user_id = $2', [orgId, userId]);
     if (!rows[0]) throw notFound('Empresa');
-    if (!['owner', 'admin'].includes(rows[0].role)) throw forbidden('Solo quien administra la empresa puede invitar colegas');
+    const admin = ['owner', 'admin'].includes(rows[0].role);
+    if (!admin && (!conversationIds.length || input.role !== 'member')) throw forbidden('Solo quien administra la empresa puede invitar colegas');
+    const workspaceId = conversationIds.length ? await checkOrgInviteGroups(c, userId, orgId, conversationIds, input.workspaceId) : null;
+    if (input.workspaceId && !conversationIds.length) throw badRequest('Indica los grupos de ese espacio');
+    if (input.multiUse && input.email) throw badRequest('Un enlace para varias personas no lleva correo');
     if (input.email) await prepareInvitationFor(c, 'org', orgId, input.email);
     const token = randomToken(24);
+    // Sin correo es un enlace para compartir: también lleva un código corto para escribirlo en la app.
+    const code = input.email ? null : randomInviteCode();
     const r = await c.query(
-      `INSERT INTO org_invitations (token_hash, org_id, invited_by, email, role, expires_at, lang)
-       VALUES ($1,$2,$3,$4,$5, now() + make_interval(days => $6), $7) RETURNING id, expires_at`,
-      [sha256(token), orgId, userId, input.email ?? null, input.role, input.expiresInDays, input.lang ?? 'es'],
+      `INSERT INTO org_invitations (token_hash, org_id, invited_by, email, role, expires_at, lang, workspace_id, conversation_ids, history, code_hash, multi_use)
+       VALUES ($1,$2,$3,$4,$5, now() + make_interval(days => $6), $7, $8, $9, $10, $11, $12) RETURNING id, expires_at`,
+      [sha256(token), orgId, userId, input.email ?? null, input.role, input.expiresInDays, input.lang ?? 'es', workspaceId, conversationIds, input.history ?? 'now',
+        code ? inviteCodeHash(normalizeInviteCode(code)!) : null, Boolean(input.multiUse && !input.email)],
     );
-    await audit(c, userId, 'org_invitation.created', { type: 'organization', id: orgId }, { email: input.email ?? null, role: input.role });
-    return { id: r.rows[0].id as string, token, expiresAt: r.rows[0].expires_at as Date };
+    await audit(c, userId, 'org_invitation.created', { type: 'organization', id: orgId },
+      { email: input.email ?? null, role: input.role, workspaceId, groups: conversationIds.length, multiUse: Boolean(input.multiUse) });
+    return { id: r.rows[0].id as string, token, code, expiresAt: r.rows[0].expires_at as Date };
   });
   const mail = input.email ? await deliverInvitation('org', inv.id, inv.token) : null;
-  return { ...inv, emailSent: mail?.status === 'sent', emailStatus: mail?.status ?? null };
+  return { ...inv, url: invitationUrl('org', inv.token), emailSent: mail?.status === 'sent', emailStatus: mail?.status ?? null };
 }
 
 export async function previewOrgInvitation(token: string) {
+  const code = normalizeInviteCode(token);
   const { rows } = await pool.query(
-    `SELECT i.email, i.expires_at, i.accepted_at, i.revoked_at, o.name AS org_name, u.name AS inviter
-       FROM org_invitations i JOIN organizations o ON o.id = i.org_id JOIN users u ON u.id = i.invited_by WHERE i.token_hash = $1`,
-    [sha256(token)],
+    `SELECT i.email, i.expires_at, i.accepted_at, i.revoked_at, i.multi_use, i.conversation_ids, o.name AS org_name, u.name AS inviter
+       FROM org_invitations i JOIN organizations o ON o.id = i.org_id JOIN users u ON u.id = i.invited_by WHERE i.token_hash = $1 OR i.code_hash = $2`,
+    [sha256(token), code ? inviteCodeHash(code) : null],
   );
   const r = rows[0];
   if (!r) throw notFound('Invitación');
   return {
     orgName: r.org_name, invitedByName: r.inviter, email: r.email, expiresAt: new Date(r.expires_at).toISOString(),
-    valid: !r.accepted_at && !r.revoked_at && new Date(r.expires_at) > new Date(),
+    valid: (r.multi_use || !r.accepted_at) && !r.revoked_at && new Date(r.expires_at) > new Date(),
+    groupNames: await orgInviteGroupNames(r.conversation_ids), multiUse: r.multi_use,
   };
 }
 

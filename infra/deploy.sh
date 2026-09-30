@@ -87,5 +87,8 @@ fi
 # Conserva las últimas 5 versiones.
 ls -1dt $BASE/releases/*/ | tail -n +6 | xargs -r rm -rf
 docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^tiecoms-api:' | grep -v ":$REL$" | grep -v ":${PREV:-none}$" | xargs -r docker image rm >/dev/null 2>&1 || true
+# El disco de la EC2 es de 20 GB y compartido: la caché de compilación de Docker llegó a 6,8 GB (30-sep-2026).
+# Se deja 1 GB para que el siguiente despliegue siga rápido.
+docker builder prune -f --keep-storage 1GB >/dev/null 2>&1 || true
 echo "✓ Chaggu $REL en línea"
 REMOTE

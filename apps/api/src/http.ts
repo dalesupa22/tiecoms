@@ -5,20 +5,24 @@ import rateLimit from '@fastify/rate-limit';
 import { ZodError } from 'zod';
 import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput, CreateGroupInput, JoinPolicyInput,
-  CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MIN_CLIENT_CONTRACT, PageQuery,
-  RefreshInput, SendMessageInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
-  UpdateProfileInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
+  CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateChildIssueInput, CreatePersonalIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateScheduledInput, UpdateScheduledInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MarkTreeReadInput, MIN_CLIENT_CONTRACT, PageQuery,
+  RefreshInput, SendMessageInput, CreateTopicInput, UpdateTopicInput, SetMessageTopicInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
+  UpdateProfileInput, DndInput, MeetingProvider, MeetingConnectInput, MeetingConfirmInput, CreateMeetingInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
+  SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
+  CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
+  ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput, ForwardSharedInput,
+  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, GuestJoinInput, GuestSecretInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
-import { ApiError, unauthorized } from './errors.ts';
+import { ApiError, notFound, unauthorized } from './errors.ts';
 import * as auth from './modules/auth.ts';
 import * as sso from './modules/sso.ts';
 import * as domains from './modules/domains.ts';
 import { deleteAccount } from './modules/account.ts';
 import { bootstrap } from './modules/bootstrap.ts';
-import { listEvents, listMessages, markRead, sendMessage } from './modules/messages.ts';
+import { listEvents, listMessages, markRead, markTreeRead, sendMessage } from './modules/messages.ts';
 import * as ws from './modules/workspaces.ts';
 import * as groups from './modules/groups.ts';
 import * as invitations from './modules/invitations.ts';
@@ -26,24 +30,42 @@ import * as issues from './modules/issues.ts';
 import * as cal from './modules/calendar.ts';
 import * as prefs from './modules/prefs.ts';
 import * as reminders from './modules/reminders.ts';
+import * as meetings from './modules/meetings.ts';
+import * as mailbox from './modules/mailbox.ts';
+import * as scheduled from './modules/scheduled.ts';
 import * as wa from './modules/whatsapp.ts';
 import * as profile from './modules/profile.ts';
 import * as drive from './modules/drive.ts';
 import * as safety from './modules/safety.ts';
 import * as push from './modules/push.ts';
 import * as attachments from './modules/attachments.ts';
+import * as storageUsage from './modules/storage-usage.ts';
 import * as voice from './modules/voice.ts';
+import * as calls from './modules/calls.ts';
+import * as assistant from './modules/assistant.ts';
+import * as gg from './modules/gg.ts';
+import { getOrCreateDirect } from './modules/workspaces.ts';
+import * as signatures from './modules/signatures.ts';
 import * as mentions from './modules/mentions.ts';
 import { readPreviewImage } from './modules/link-preview.ts';
 import * as reactions from './modules/reactions.ts';
 import * as links from './modules/links.ts';
-import { getObject } from './storage.ts';
+import * as topics from './modules/topics.ts';
+import * as integrations from './modules/integrations.ts';
+import { openViewOnce, fetchOnce } from './modules/view-once.ts';
+import { searchAll, searchConversation } from './modules/chat-search.ts';
+import { getObject, getObjectStream } from './storage.ts';
 import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modules/messages.ts';
 import { z } from 'zod';
 import { verifyAccess } from './security.ts';
+import { ByteLru } from './lru.ts';
 
 const REFRESH_COOKIE = 'tc_rt';
+/** Fotos de perfil y miniaturas de enlaces en memoria (inmutables por id). */
+export const imageCache = new ByteLru<{ body: Buffer; contentType: string }>(200, 20 * 1024 * 1024);
 const COOKIE_PATH = '/api/v1/auth';
+import { safeRequestPath } from './log-safety.ts';
+
 const SSO_COOKIE = 'tc_sso';
 
 declare module 'fastify' {
@@ -54,7 +76,11 @@ export async function buildHttp() {
   const app = Fastify({
     trustProxy: config.trustProxy,
     bodyLimit: 64 * 1024,
-    logger: { level: config.env === 'production' ? 'info' : 'debug', redact: ['req.headers.authorization', 'req.headers.cookie'] },
+    logger: {
+      level: config.env === 'production' ? 'info' : 'debug', redact: ['req.headers.authorization', 'req.headers.cookie'],
+      // OAuth codes/state/receipts and other URL credentials must never enter access logs.
+      serializers: { req: (req) => ({ method: req.method, url: safeRequestPath(req.url), hostname: req.hostname, remoteAddress: req.ip }) },
+    },
     genReqId: () => crypto.randomUUID(),
   });
 
@@ -63,7 +89,7 @@ export async function buildHttp() {
   await app.register(cors, {
     origin: [config.publicOrigin, ...config.extraOrigins],
     credentials: true,
-    allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract', 'x-file-type', 'x-file-name', 'x-voice-note', 'x-duration-ms', 'x-waveform', 'x-ai-consent'],
+    allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract', 'x-file-type', 'x-file-name', 'x-voice-note', 'x-duration-ms', 'x-waveform', 'x-ai-consent', 'x-width', 'x-height'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     maxAge: 600,
   });
@@ -85,6 +111,9 @@ export async function buildHttp() {
     return reply.status(500).send({ error: { code: 'internal', message: 'Error interno' } });
   });
 
+  // Avoid Fastify's default not-found log message, which embeds a raw credential-bearing URL.
+  app.setNotFoundHandler((_req, reply) => reply.status(404).send({ error: { code: 'not_found', message: 'Ruta no encontrada' } }));
+
   // ---------- Salud ----------
   app.get('/api/health/live', async () => ({ ok: true }));
   app.get('/api/health/ready', async (_req, reply) => {
@@ -95,7 +124,25 @@ export async function buildHttp() {
       return reply.status(503).send({ ok: false });
     }
   });
+  // Adjunto de una sola vista: URL firmada de 60 s (sin Bearer) que solo entrega POST /messages/:id/open.
+  app.get<{ Querystring: { t?: string } }>('/api/v1/once', async (req, reply) => {
+    const f = await fetchOnce(String(req.query.t ?? ''));
+    return reply.header('content-type', f.contentType).header('content-disposition', 'inline').header('cache-control', 'no-store')
+      .header('x-content-type-options', 'nosniff').header('content-security-policy', "default-src 'none'; sandbox").send(f.body);
+  });
   app.get('/api/v1/meta', async () => ({ apiVersion: API_VERSION, contract: CONTRACT_VERSION, minClientContract: MIN_CLIENT_CONTRACT }));
+  // «Actualización disponible» (docs/ACTUALIZAR.md): público, las apps lo piden al abrir y al volver al frente.
+  app.get<{ Querystring: { platform?: string; lang?: string } }>('/api/v1/app-version', async (req, reply) => {
+    const q = z.object({ platform: z.enum(['ios', 'android']), lang: z.string().max(10).optional() }).parse(req.query);
+    const { rows } = await pool.query('SELECT * FROM app_releases WHERE platform = $1', [q.platform]);
+    const r = rows[0];
+    if (!r) throw notFound('Versión');
+    reply.header('cache-control', 'no-store');
+    return {
+      platform: r.platform, latestVersion: r.latest_version, latestBuild: r.latest_build, minBuild: r.min_build, url: r.url,
+      notes: (q.lang?.startsWith('en') ? r.notes_en : r.notes_es) ?? null,
+    };
+  });
 
   // ---------- Auth ----------
   const authLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
@@ -132,13 +179,57 @@ export async function buildHttp() {
     return reply.redirect(url, 302);
   });
   app.get<{ Params: { provider: string }; Querystring: Record<string, string | undefined> }>('/api/v1/auth/:provider/callback', authLimit, async (req, reply) => {
+    // Conectar Meet/Teams vuelve por esta misma redirect URI registrada: el state lo distingue del login.
+    // Conectar el correo usa la misma redirect URI: state `mail_`.
+    if (mailbox.isMailState(req.query.state)) {
+      reply.header('cache-control', 'no-store'); reply.header('referrer-policy', 'no-referrer');
+      return reply.redirect(await mailbox.finishConnect(req.query, MailProvider.parse(req.params.provider)), 302);
+    }
+    if (meetings.isMeetingState(req.query.state)) {
+      reply.header('cache-control', 'no-store'); reply.header('referrer-policy', 'no-referrer');
+      return reply.redirect(await meetings.finishConnect(req.query, MeetingProvider.parse(req.params.provider)), 302);
+    }
     const target = await sso.callback(sso.parseProvider(req.params.provider), req.query, req.cookies[SSO_COOKIE]);
     reply.clearCookie(SSO_COOKIE, { path: COOKIE_PATH });
     reply.header('cache-control', 'no-store');
     reply.header('referrer-policy', 'no-referrer');
     return reply.redirect(target, 302);
   });
+  app.get<{ Querystring: Record<string, string | undefined> }>('/api/v1/meetings/zoom/callback', authLimit, async (req, reply) => {
+    reply.header('cache-control', 'no-store'); reply.header('referrer-policy', 'no-referrer');
+    return reply.redirect(await meetings.finishConnect(req.query, 'zoom'), 302);
+  });
   app.post('/api/v1/auth/sso/exchange', authLimit, async (req, reply) => sendAuth(req, reply, await sso.exchange(SsoExchangeInput.parse(req.body))));
+
+  // ---------- Integraciones (token del grupo, sin sesión) ----------
+  // Webhook entrante con el formato de Slack: el token en Authorization o, para quien solo acepta una URL, en la ruta.
+  const hookLimit = { config: { rateLimit: { max: 120, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => `hook:${(r.params as any)?.id ?? r.ip}` } } };
+  const bearer = (req: FastifyRequest) => { const h = req.headers.authorization; return h?.startsWith('Bearer ') ? h.slice(7).trim() : undefined; };
+  const idemKey = (req: FastifyRequest) => { const k = req.headers['idempotency-key']; return typeof k === 'string' && k ? k : undefined; };
+  const hook = async (req: FastifyRequest<{ Params: { id: string; token?: string } }>) => {
+    const id = z.uuid().safeParse(req.params.id);
+    if (!id.success) throw unauthorized('Token de integración inválido');
+    const integ = await integrations.authenticate(req.params.token ?? bearer(req), id.data);
+    return integrations.postMessage(integ, IncomingWebhookInput.parse(req.body ?? {}), idemKey(req));
+  };
+  app.post<{ Params: { id: string } }>('/api/hooks/:id', hookLimit, hook);
+  app.post<{ Params: { id: string; token: string } }>('/api/hooks/:id/:token', hookLimit, hook);
+
+  app.register(async (api) => {
+    api.addHook('onRequest', async (req) => { (req as any).integration = await integrations.authenticate(bearer(req)); });
+    const integ = (req: FastifyRequest) => (req as any).integration as integrations.IntegrationAuth;
+    const limit = { config: { rateLimit: { max: 300, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => `integ:${bearer(r)?.slice(-12) ?? r.ip}` } } };
+    api.get('/api/integration/v1/me', limit, async (req) => integrations.describe(integ(req)));
+    api.post('/api/integration/v1/messages', limit, async (req) => integrations.postMessage(integ(req), IncomingWebhookInput.parse(req.body ?? {}), idemKey(req)));
+    api.post('/api/integration/v1/issues', limit, async (req) => integrations.createIssue(integ(req), IntegrationCreateIssueInput.parse(req.body)));
+    api.get<{ Querystring: { externalId?: string } }>('/api/integration/v1/issues', limit, async (req) =>
+      integrations.findIssue(integ(req), z.string().min(1).max(120).parse(req.query.externalId)));
+    api.get<{ Params: { id: string } }>('/api/integration/v1/issues/:id', limit, async (req) => integrations.getIssue(integ(req), z.uuid().parse(req.params.id)));
+    api.patch<{ Params: { id: string } }>('/api/integration/v1/issues/:id', limit, async (req) =>
+      integrations.updateIssue(integ(req), z.uuid().parse(req.params.id), IntegrationUpdateIssueInput.parse(req.body)));
+    api.post<{ Params: { id: string } }>('/api/integration/v1/issues/:id/comments', limit, async (req) =>
+      integrations.commentIssue(integ(req), z.uuid().parse(req.params.id), IntegrationCommentInput.parse(req.body), idemKey(req)));
+  });
 
   // ---------- Rutas autenticadas ----------
   app.register(async (priv) => {
@@ -180,6 +271,11 @@ export async function buildHttp() {
       safety.report(req.userId, z.object({ userId: z.uuid().optional(), messageId: z.uuid().optional(), reason: z.string().trim().min(5).max(2000) }).parse(req.body)));
     // Perfil propio
     priv.patch('/api/v1/me', async (req) => profile.updateProfile(req.userId, UpdateProfileInput.parse(req.body)));
+    // «No molestar» general: { until: ISO | null } → { dndUntil }.
+    priv.put('/api/v1/me/sounds', async (req) => prefs.setSounds(req.userId, SoundsInput.parse(req.body ?? {})));
+    priv.put('/api/v1/me/dnd', async (req) => prefs.setDnd(req.userId, DndInput.parse(req.body ?? {}).until));
+    // Modo sueño: horario diario sin sonidos { on?, start?, end?, tz?, tzAuto? } → { sleep }.
+    priv.put('/api/v1/me/sleep', async (req) => prefs.setSleep(req.userId, SleepInput.parse(req.body ?? {})));
     priv.post('/api/v1/me/avatar', { bodyLimit: profile.MAX_AVATAR_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
       async (req) => profile.setAvatar(req.userId, req.body as Buffer));
     priv.delete('/api/v1/me/avatar', async (req) => profile.removeAvatar(req.userId));
@@ -203,19 +299,58 @@ export async function buildHttp() {
     });
     priv.post<{ Params: { id: string } }>('/api/v1/attachments/:id/transcribe', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
       async (req) => voice.retryTranscription(req.userId, z.uuid().parse(req.params.id), z.object({ aiConsent: z.boolean().optional() }).parse(req.body ?? {}).aiConsent === true));
+    // Videos (docs/VIDEO.md): subida por stream a S3 en partes, sin buffer. Contexto propio sin los parsers que
+    // cargan el cuerpo en memoria: el handler recibe el stream crudo y lo pasa a S3.
+    priv.register(async (vid) => {
+      vid.removeAllContentTypeParsers();
+      vid.addContentTypeParser('*', (_req, payload, done) => done(null, payload));
+      vid.post<{ Params: { id: string } }>('/api/v1/conversations/:id/videos', { bodyLimit: attachments.MAX_VIDEO_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+        const len = req.headers['content-length'] !== undefined ? Number(req.headers['content-length']) : null;
+        try {
+          return await attachments.uploadVideo(req.userId, z.uuid().parse(req.params.id), {
+            stream: req.raw, length: Number.isFinite(len) ? len : null, name: String(req.headers['x-file-name'] ?? ''),
+            durationMs: req.headers['x-duration-ms'] as string | undefined, width: req.headers['x-width'] as string | undefined, height: req.headers['x-height'] as string | undefined,
+          });
+        } catch (e) {
+          // El cuerpo pudo quedar a medias: esta conexión no se reutiliza.
+          if (!req.raw.readableEnded) reply.header('connection', 'close');
+          throw e;
+        }
+      });
+    });
+    // URL prefirmada de S3 (1 h) para reproducir un video en streaming (?download=1: como descarga).
+    priv.get<{ Params: { id: string }; Querystring: { download?: string } }>('/api/v1/attachments/:id/play', async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      return attachments.playLink(req.userId, z.uuid().parse(req.params.id), req.query.download === '1');
+    });
     for (const thumb of [false, true]) {
       priv.get<{ Params: { id: string }; Querystring: { download?: string; original?: string } }>(`/api/v1/attachments/:id${thumb ? '/thumb' : ''}`, async (req, reply) => {
-        const f = await attachments.fetchFile(req.userId, z.uuid().parse(req.params.id), thumb, req.query.original === '1');
-        const ascii = f.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
-        const disp = f.inline && req.query.download !== '1' ? 'inline' : 'attachment';
-        reply.header('content-type', f.contentType)
-          .header('content-disposition', `${disp}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(f.name)}`)
+        const info = await attachments.fileInfo(req.userId, z.uuid().parse(req.params.id), thumb, req.query.original === '1');
+        const ascii = info.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
+        const disp = info.inline && req.query.download !== '1' ? 'inline' : 'attachment';
+        reply.header('content-type', info.contentType)
+          .header('content-disposition', `${disp}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(info.name)}`)
           .header('cache-control', 'private, max-age=31536000, immutable')
           .header('x-content-type-options', 'nosniff')
           .header('content-security-policy', "default-src 'none'; sandbox")
           .header('accept-ranges', 'bytes');
+        const rawRange = String(req.headers.range ?? '');
+        // Videos y archivos grandes: por stream desde S3 (el rango se reenvía tal cual), memoria constante.
+        if (info.stream) {
+          const range = /^bytes=\d*-\d*$/.test(rawRange) && rawRange !== 'bytes=-' ? rawRange : undefined;
+          try {
+            const o = await getObjectStream(info.key, range);
+            if (o.contentLength != null) reply.header('content-length', String(o.contentLength));
+            if (o.partial) reply.status(206).header('content-range', o.contentRange!);
+            return reply.send(o.body);
+          } catch (e: any) {
+            if (e?.name === 'InvalidRange' || e?.$metadata?.httpStatusCode === 416) return reply.status(416).send();
+            throw e;
+          }
+        }
+        const f = { ...info, body: (await getObject(info.key)).body };
         // Rango simple (bytes=a-b): los reproductores de video lo piden.
-        const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+        const range = /^bytes=(\d*)-(\d*)$/.exec(rawRange);
         if (range && (range[1] || range[2])) {
           const total = f.body.length;
           let start = range[1] ? Number(range[1]) : Math.max(0, total - Number(range[2]));
@@ -226,6 +361,32 @@ export async function buildHttp() {
         return reply.send(f.body);
       });
     }
+    // Almacenamiento usado (solo medición, para cobrarlo más adelante): mío y de la empresa (owner/admin).
+    priv.get('/api/v1/me/storage', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => storageUsage.myStorage(req.userId));
+    priv.get<{ Params: { id: string } }>('/api/v1/organizations/:id/storage', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
+      async (req) => storageUsage.orgStorage(req.userId, z.uuid().parse(req.params.id)));
+    // Firmar PDFs: firmas guardadas (PNG crudo, solo su dueño) y estampado en el servidor.
+    priv.get('/api/v1/me/signatures', async (req) => ({ signatures: await signatures.listSignatures(req.userId) }));
+    priv.post('/api/v1/me/signatures', { bodyLimit: MAX_SIGNATURE_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => {
+      if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube la firma como image/png');
+      return signatures.createSignature(req.userId, req.body, String(req.headers['x-signature-kind'] ?? ''), String(req.headers['x-signature-source'] ?? ''));
+    });
+    priv.get<{ Params: { id: string } }>('/api/v1/me/signatures/:id/image', async (req, reply) => {
+      const png = await signatures.signatureImage(req.userId, z.uuid().parse(req.params.id));
+      return reply.header('content-type', 'image/png').header('cache-control', 'private, max-age=31536000, immutable')
+        .header('x-content-type-options', 'nosniff').header('content-security-policy', "default-src 'none'; sandbox").send(png);
+    });
+    priv.delete<{ Params: { id: string } }>('/api/v1/me/signatures/:id', async (req) => signatures.deleteSignature(req.userId, z.uuid().parse(req.params.id)));
+    priv.get('/api/v1/me/signings', async (req) => signatures.listSignings(req.userId, SigningHistoryQuery.parse(req.query)));
+    priv.get<{ Params: { id: string } }>('/api/v1/attachments/:id/sign-info', async (req) => signatures.signInfo(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/attachments/:id/sign', { bodyLimit: 256 * 1024, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+      const input = SignPdfInput.parse(req.body);
+      const out = await signatures.signPdf(req.userId, z.uuid().parse(req.params.id), input, {
+        ip: req.ip ?? null, userAgent: String(req.headers['user-agent'] ?? '') || null,
+        lang: /^\s*en\b/i.test(String(req.headers['accept-language'] ?? '')) ? 'en' : 'es',
+      });
+      return reply.status(out.duplicate ? 200 : 201).send(out);
+    });
     // Notificaciones push: un token por sesión.
     priv.put('/api/v1/push/token', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) =>
       push.registerToken(req.sessionId, PushTokenInput.parse(req.body), String(req.headers['accept-language'] ?? '')));
@@ -261,6 +422,26 @@ export async function buildHttp() {
     priv.post<{ Params: { token: string } }>('/api/v1/invitations/:token/accept', async (req) =>
       ws.acceptInvitation(req.userId, req.params.token, AcceptInvitationInput.parse(req.body ?? {})));
 
+    // Asistente: todo corre con req.userId (ver modules/assistant.ts, «Aislamiento»).
+    priv.post('/api/v1/assistant/turn', { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } }, async (req) => assistant.turn(req.userId, req.body));
+    priv.post<{ Querystring: { lang?: string } }>('/api/v1/assistant/transcribe', { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } },
+      async (req) => assistant.transcribe(req.userId, req.body, req.headers['x-file-type'] as string | undefined, req.query.lang, req.headers['x-ai-consent'] === '1'));
+    priv.post('/api/v1/assistant/run', { config: { rateLimit: { max: 60, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } }, async (req) => {
+      // Desde la tarjeta del chat con gg: además de hacerlo, queda guardado el estado en el mensaje.
+      const { messageId, actionId, ...body } = (req.body ?? {}) as any;
+      const extra = z.object({ messageId: z.uuid().optional(), actionId: z.string().max(80).optional() }).parse({ messageId, actionId });
+      const out = await assistant.run(req.userId, body);
+      if (extra.messageId && extra.actionId) await gg.markAction(req.userId, extra.messageId, extra.actionId, { ...out, id: extra.actionId });
+      return out;
+    });
+    priv.post('/api/v1/assistant/actions/discard', async (req) => {
+      const b = z.object({ messageId: z.uuid(), actionId: z.string().max(80) }).parse(req.body);
+      return gg.markAction(req.userId, b.messageId, b.actionId, { status: 'failed', error: 'Descartado' });
+    });
+    priv.post('/api/v1/assistant/consent', async (req) => gg.setConsent(req.userId, z.object({ on: z.boolean() }).parse(req.body).on));
+    // Tu chat con gg y «Tú» (notas para ti): se crean al abrirlos.
+    priv.post('/api/v1/assistant/chat', async (req) => getOrCreateDirect(req.userId, gg.GG_ID));
+    priv.post('/api/v1/me/notes', async (req) => getOrCreateDirect(req.userId, req.userId));
     priv.post('/api/v1/directs', async (req) => ws.getOrCreateDirect(req.userId, CreateDirectInput.parse(req.body).userId));
     priv.post('/api/v1/chats', async (req) => ws.createChat(req.userId, CreateChatInput.parse(req.body)));
 
@@ -277,12 +458,19 @@ export async function buildHttp() {
       return reply.status(out.duplicate ? 200 : 201).send(out);
     });
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/read', async (req) => markRead(req.userId, req.params.id, MarkReadInput.parse(req.body).seq));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/read-tree', async (req) => markTreeRead(req.userId, req.params.id, MarkTreeReadInput.parse(req.body).items));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/members', async (req) => ws.addMembers(req.userId, req.params.id, AddMembersInput.parse(req.body)));
     // Preferencias personales, no leído, mensajes
     priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/prefs', async (req) => prefs.setConversationPrefs(req.userId, req.params.id, ConversationPrefsInput.parse(req.body)));
     priv.put<{ Params: { id: string } }>('/api/v1/workspaces/:id/prefs', async (req) => prefs.setWorkspacePrefs(req.userId, req.params.id, WorkspacePrefsInput.parse(req.body).pinned));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/unread', async (req) => markUnread(req.userId, req.params.id, MarkUnreadInput.parse(req.body).seq));
-    priv.patch<{ Params: { id: string } }>('/api/v1/messages/:id', async (req) => { const e = EditMessageInput.parse(req.body); return editMessage(req.userId, req.params.id, e.body, e.mentions); });
+    priv.patch<{ Params: { id: string } }>('/api/v1/messages/:id', async (req) => { const e = EditMessageInput.parse(req.body); return editMessage(req.userId, req.params.id, e.body, e.mentions, e.refs); });
+    // Tanda 1.7: buscar dentro del chat y abrir un mensaje de una sola vista (una vez por persona).
+    priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/search', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) =>
+      searchConversation(req.userId, z.uuid().parse(req.params.id), ChatSearchQuery.parse(req.query)));
+    // Buscar en todos mis chats (mensajes, adjuntos, notas de voz y correos o WhatsApps compartidos).
+    priv.get('/api/v1/search/messages', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => searchAll(req.userId, GlobalSearchQuery.parse(req.query)));
+    priv.post<{ Params: { id: string } }>('/api/v1/messages/:id/open', async (req) => openViewOnce(req.userId, z.uuid().parse(req.params.id)));
     // Bandeja «Menciones»: before = createdAt del último que ya tienes.
     priv.get<{ Querystring: { before?: string; limit?: string } }>('/api/v1/mentions', async (req) => {
       const q = z.object({ before: z.iso.datetime().optional(), limit: z.coerce.number().int().min(1).max(100).default(50) }).parse(req.query);
@@ -292,6 +480,12 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/messages/:id/pin', async (req) => setPin(req.userId, req.params.id, true));
     priv.delete<{ Params: { id: string } }>('/api/v1/messages/:id/pin', async (req) => setPin(req.userId, req.params.id, false));
     priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/pins', async (req) => ({ messages: await listPins(req.userId, req.params.id) }));
+    // Temas (docs/TEMAS.md): banderitas del chat y etiqueta de cada mensaje.
+    priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/topics', async (req) => ({ topics: await topics.listTopics(req.userId, req.params.id) }));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/topics', async (req) => topics.createTopic(req.userId, req.params.id, CreateTopicInput.parse(req.body)));
+    priv.patch<{ Params: { id: string } }>('/api/v1/topics/:id', async (req) => topics.updateTopic(req.userId, z.uuid().parse(req.params.id), UpdateTopicInput.parse(req.body)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/topics/:id', async (req) => topics.deleteTopic(req.userId, z.uuid().parse(req.params.id)));
+    priv.put<{ Params: { id: string } }>('/api/v1/messages/:id/topic', async (req) => topics.setMessageTopic(req.userId, z.uuid().parse(req.params.id), SetMessageTopicInput.parse(req.body).topicId));
     // Reacciones: el emoji va en la ruta (URL-encoded). No suben no leídos; llegan a todos con message.updated.
     priv.put<{ Params: { id: string; emoji: string } }>('/api/v1/messages/:id/reactions/:emoji', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) =>
       reactions.react(req.userId, z.uuid().parse(req.params.id), req.params.emoji, true, ReactInput.parse(req.body ?? {})));
@@ -309,6 +503,95 @@ export async function buildHttp() {
       return links.summarizeLink(req.userId, z.uuid().parse(req.params.id), lang);
     });
     // Recordatorios
+    // Mensajes programados: solo los ve quien los escribió.
+    priv.get<{ Querystring: { conversationId?: string } }>('/api/v1/scheduled', async (req) => ({ scheduled: await scheduled.listScheduled(req.userId, req.query.conversationId) }));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/scheduled', async (req) => scheduled.createScheduled(req.userId, req.params.id, CreateScheduledInput.parse(req.body)));
+    priv.patch<{ Params: { id: string } }>('/api/v1/scheduled/:id', async (req) => scheduled.updateScheduled(req.userId, req.params.id, UpdateScheduledInput.parse(req.body)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/scheduled/:id', async (req) => scheduled.cancelScheduled(req.userId, req.params.id));
+    priv.post<{ Params: { id: string } }>('/api/v1/scheduled/:id/send', async (req) => scheduled.sendScheduledNow(req.userId, req.params.id));
+    // Llamadas de voz y video (Amazon Chime SDK) con transcripción que se prende y apaga.
+    const callLimit = { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } };
+    priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/call', async (req) => ({ call: await calls.activeCall(req.userId, z.uuid().parse(req.params.id)) }));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/call', callLimit, async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      const b = StartCallInput.parse(req.body ?? {});
+      return calls.startOrJoin(req.userId, z.uuid().parse(req.params.id), b.kind, calls.deviceOf(req.sessionId, b.deviceKey));
+    });
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/join', callLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.join(req.userId, z.uuid().parse(req.params.id), calls.deviceOf(req.sessionId, CallDeviceInput.parse(req.body ?? {}).deviceKey)); });
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/link', callLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.createLink(req.userId, z.uuid().parse(req.params.id)); });
+    priv.delete<{ Params: { id: string } }>('/api/v1/calls/:id/link', callLimit, async (req) => calls.revokeLinks(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/invite', callLimit, async (req) => calls.invite(req.userId, z.uuid().parse(req.params.id), CallInviteInput.parse(req.body).userIds));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/heartbeat', async (req) => calls.heartbeat(req.userId, z.uuid().parse(req.params.id), CallDeviceInput.parse(req.body ?? {}).deviceKey));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/leave', async (req) => calls.leave(req.userId, z.uuid().parse(req.params.id), CallDeviceInput.parse(req.body ?? {}).deviceKey));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/decline', callLimit, async (req) => calls.decline(req.userId, z.uuid().parse(req.params.id)));
+    priv.get('/api/v1/calls/active', async (req) => calls.activeCalls(req.userId));
+    priv.post('/api/v1/calls/seen', async (req) => calls.markCallsSeen(req.userId));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/end', async (req) => calls.endForAll(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/transcription', callLimit, async (req) => {
+      const b = CallTranscriptionInput.parse(req.body);
+      return calls.setTranscription(req.userId, z.uuid().parse(req.params.id), b.on, b.aiSummary);
+    });
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/transcript', { config: { rateLimit: { max: 240, timeWindow: '1 minute' } } }, async (req) =>
+      calls.addSegments(req.userId, z.uuid().parse(req.params.id), CallTranscriptInput.parse(req.body)));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/audio', { bodyLimit: calls.MAX_CALL_AUDIO_BYTES, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => {
+      if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube el audio como application/octet-stream');
+      return calls.addAudio(req.userId, z.uuid().parse(req.params.id), {
+        body: req.body, type: String(req.headers['x-file-type'] ?? ''), segId: String(req.headers['x-seg-id'] ?? ''),
+        offsetMs: Math.max(0, Number(req.headers['x-offset-ms']) || 0), durationMs: Math.max(0, Number(req.headers['x-duration-ms']) || 0),
+      });
+    });
+    priv.get<{ Params: { id: string } }>('/api/v1/calls/:id/transcript', async (req) => calls.transcript(req.userId, z.uuid().parse(req.params.id)));
+    priv.get('/api/v1/calls', async (req) => calls.history(req.userId, CallHistoryQuery.parse(req.query)));
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/share', callLimit, async (req) => calls.share(req.userId, z.uuid().parse(req.params.id), CallShareInput.parse(req.body)));
+    // Reuniones con Meet, Teams o Zoom (cuenta de cada persona).
+    priv.get('/api/v1/meetings/connections', async (req) => ({ connections: await meetings.listConnections(req.userId) }));
+    priv.post('/api/v1/meetings/connect/confirm', async (req, reply) => { reply.header('cache-control', 'no-store'); return meetings.confirmConnect(req.userId, MeetingConfirmInput.parse(req.body)); });
+    priv.post<{ Params: { provider: string } }>('/api/v1/meetings/connect/:provider', async (req) => {
+      const p = MeetingProvider.parse(req.params.provider);
+      const b = MeetingConnectInput.parse(req.body ?? {});
+      return meetings.startConnect(req.userId, p, { platform: b.platform, redirectScheme: b.redirectScheme, proofChallenge: b.proofChallenge });
+    });
+    priv.delete<{ Params: { provider: string } }>('/api/v1/meetings/connections/:provider', async (req) => meetings.disconnect(req.userId, MeetingProvider.parse(req.params.provider)));
+    priv.post('/api/v1/meetings', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => meetings.createMeeting(req.userId, CreateMeetingInput.parse(req.body)));
+    priv.get<{ Params: { id: string } }>('/api/v1/meetings/:id', async (req) => meetings.getMeeting(req.userId, req.params.id));
+    // Correo en el chat (docs/CORREO.md): la bandeja se lee en vivo; solo se guarda lo que se comparte.
+    const mailLimit = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
+    priv.get('/api/v1/mail/connections', async (req) => ({ connections: await mailbox.listConnections(req.userId) }));
+    priv.post('/api/v1/mail/connect/confirm', async (req, reply) => { reply.header('cache-control', 'no-store'); return mailbox.confirmConnect(req.userId, MeetingConfirmInput.parse(req.body)); });
+    priv.post<{ Params: { provider: string } }>('/api/v1/mail/connect/:provider', async (req) => {
+      const b = MeetingConnectInput.parse(req.body ?? {});
+      return mailbox.startConnect(req.userId, MailProvider.parse(req.params.provider), { platform: b.platform, redirectScheme: b.redirectScheme, proofChallenge: b.proofChallenge });
+    });
+    priv.delete<{ Params: { provider: string } }>('/api/v1/mail/connections/:provider', async (req) => mailbox.disconnect(req.userId, MailProvider.parse(req.params.provider)));
+    priv.get('/api/v1/mail/unread', mailLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return mailbox.unreadCount(req.userId); });
+    priv.get('/api/v1/mail/messages', mailLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return mailbox.listMail(req.userId, MailListQuery.parse(req.query), (req.query as any)?.fresh === '1'); });
+    priv.get<{ Params: { provider: string; id: string } }>('/api/v1/mail/messages/:provider/:id', mailLimit, async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      return mailbox.getMail(req.userId, MailProvider.parse(req.params.provider), z.string().min(1).max(500).parse(req.params.id));
+    });
+    priv.post('/api/v1/mail/share', mailLimit, async (req, reply) => reply.status(201).send(await mailbox.shareMail(req.userId, ShareMailInput.parse(req.body))));
+    priv.get<{ Querystring: { ids?: string } }>('/api/v1/mail/shared', async (req) => mailbox.getSharedMany(req.userId, z.array(z.uuid()).min(1).max(50).parse(String(req.query.ids ?? '').split(',').filter(Boolean))));
+    priv.get<{ Params: { id: string }; Querystring: { full?: string } }>('/api/v1/mail/shared/:id', async (req) => mailbox.getShared(req.userId, z.uuid().parse(req.params.id), req.query.full === '1'));
+    priv.get<{ Params: { id: string } }>('/api/v1/mail/shared/:id/original', mailLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return mailbox.original(req.userId, z.uuid().parse(req.params.id)); });
+    priv.get<{ Params: { id: string } }>('/api/v1/mail/shared/:id/comments', async (req) => mailbox.listComments(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/comments', async (req, reply) =>
+      reply.status(201).send(await mailbox.comment(req.userId, z.uuid().parse(req.params.id), EventCommentInput.parse(req.body).body)));
+    priv.get<{ Params: { id: string; att: string } }>('/api/v1/mail/shared/:id/attachments/:att', mailLimit, async (req, reply) => {
+      const f = await mailbox.fetchAttachment(req.userId, z.uuid().parse(req.params.id), z.string().min(1).max(2000).parse(req.params.att));
+      const ascii = f.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
+      const disp = /^(image\/(png|jpeg|gif|webp)|application\/pdf)$/.test(f.contentType) && (req.query as any)?.download !== '1' ? 'inline' : 'attachment';
+      return reply.header('content-type', f.contentType).header('cache-control', 'no-store').header('x-content-type-options', 'nosniff')
+        .header('content-security-policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox")
+        .header('content-disposition', `${disp}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(f.name)}`).send(f.bytes);
+    });
+    priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/draft', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) =>
+      mailbox.draftReply(req.userId, z.uuid().parse(req.params.id), (req.body as any)?.lang === 'en' ? 'en' : 'es'));
+    priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/reply', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) =>
+      mailbox.reply(req.userId, z.uuid().parse(req.params.id), MailReplyInput.parse(req.body)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/mail/shared/:id/reply', async (req) => mailbox.cancelReply(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/task', async (req, reply) => reply.status(201).send(await mailbox.createTask(req.userId, z.uuid().parse(req.params.id), MailTaskInput.parse(req.body))));
+    priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/forward', mailLimit, async (req, reply) => reply.status(201).send(await mailbox.forwardShared(req.userId, z.uuid().parse(req.params.id), ForwardSharedInput.parse(req.body))));
+    priv.post('/api/v1/whatsapp/share', mailLimit, async (req, reply) => reply.status(201).send(await mailbox.shareWhatsApp(req.userId, ShareWaInput.parse(req.body))));
     priv.get('/api/v1/reminders', async (req) => ({ reminders: await reminders.listReminders(req.userId) }));
     priv.post('/api/v1/reminders', async (req) => reminders.createReminder(req.userId, CreateReminderInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/reminders/:id/done', async (req) => reminders.completeReminder(req.userId, req.params.id));
@@ -322,6 +605,9 @@ export async function buildHttp() {
     priv.get<{ Params: { id: string } }>('/api/v1/events/:id', async (req) => cal.getEvent(req.userId, req.params.id));
     priv.patch<{ Params: { id: string } }>('/api/v1/events/:id', async (req) => cal.updateEvent(req.userId, req.params.id, UpdateEventInput.parse(req.body)));
     priv.delete<{ Params: { id: string } }>('/api/v1/events/:id', async (req) => cal.cancelEvent(req.userId, req.params.id));
+    priv.get<{ Params: { id: string } }>('/api/v1/events/:id/comments', async (req) => cal.listEventComments(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/events/:id/comments', async (req, reply) =>
+      reply.status(201).send(await cal.commentEvent(req.userId, z.uuid().parse(req.params.id), EventCommentInput.parse(req.body).body)));
     priv.post<{ Params: { id: string } }>('/api/v1/events/:id/rsvp', async (req) => cal.rsvp(req.userId, req.params.id, RsvpInput.parse(req.body).rsvp));
 
     // Bifurcaciones
@@ -333,11 +619,15 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/return', async (req) => ws.returnResult(req.userId, req.params.id, ReturnResultInput.parse(req.body).summary));
     // Asuntos
     priv.get<{ Querystring: { workspaceId?: string; conversationId?: string; mine?: string; open?: string } }>('/api/v1/issues', async (req) => ({
-      issues: await issues.listIssues(req.userId, { workspaceId: req.query.workspaceId, conversationId: req.query.conversationId, mine: req.query.mine === '1', open: req.query.open === '1' }),
+      // Los asuntos personales (conversationId null) solo van a clientes que los entienden.
+      issues: await issues.listIssues(req.userId, { workspaceId: req.query.workspaceId, conversationId: req.query.conversationId, mine: req.query.mine === '1', open: req.query.open === '1',
+        personal: String(req.headers['x-tiecoms-contract'] ?? '') >= '2026-09-28' }),
     }));
+    priv.post('/api/v1/issues', async (req) => issues.createPersonalIssue(req.userId, CreatePersonalIssueInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/issues', async (req) => issues.createIssue(req.userId, req.params.id, CreateIssueInput.parse(req.body)));
     priv.get<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.getIssue(req.userId, req.params.id));
     priv.patch<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.updateIssue(req.userId, req.params.id, UpdateIssueInput.parse(req.body)));
+    priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/children', async (req) => issues.createChildIssue(req.userId, req.params.id, CreateChildIssueInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/comments', async (req) => issues.commentIssue(req.userId, req.params.id, IssueCommentInput.parse(req.body).body));
 
     // Archivos en árbol de carpetas («Mis archivos» o un espacio)
@@ -377,6 +667,18 @@ export async function buildHttp() {
       return wa.listChatMessages(req.userId, z.uuid().parse(req.params.accountId), req.params.jid, q.before, q.limit);
     });
 
+    // Admins de grupo (como WhatsApp).
+    priv.put<{ Params: { id: string; userId: string } }>('/api/v1/conversations/:id/members/:userId/admin', async (req) =>
+      ws.setMemberAdmin(req.userId, z.uuid().parse(req.params.id), z.uuid().parse(req.params.userId), SetAdminInput.parse(req.body).admin));
+    // Integraciones del grupo (las configura quien administra el espacio o la empresa).
+    priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/integrations', async (req) => integrations.listIntegrations(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/integrations', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) =>
+      integrations.createIntegration(req.userId, z.uuid().parse(req.params.id), CreateIntegrationInput.parse(req.body)));
+    priv.patch<{ Params: { id: string } }>('/api/v1/integrations/:id', async (req) => integrations.updateIntegration(req.userId, z.uuid().parse(req.params.id), UpdateIntegrationInput.parse(req.body)));
+    priv.post<{ Params: { id: string } }>('/api/v1/integrations/:id/rotate', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) =>
+      integrations.rotateToken(req.userId, z.uuid().parse(req.params.id)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/integrations/:id', async (req) => integrations.revokeIntegration(req.userId, z.uuid().parse(req.params.id)));
+
     priv.delete<{ Params: { id: string; userId: string } }>('/api/v1/conversations/:id/members/:userId', async (req) => {
       await ws.removeMember(req.userId, req.params.id, req.params.userId);
       return { ok: true };
@@ -384,19 +686,35 @@ export async function buildHttp() {
   });
 
   // Foto de perfil: el id cambia en cada subida, así que se puede cachear para siempre.
+  // En memoria (LRU 200 / 20 MB): cada foto iba a S3 en cada petición (p50 ≈ 96 ms).
   app.get<{ Params: { id: string } }>('/api/v1/avatars/:id', async (req, reply) => {
-    const f = await profile.readAvatar(z.uuid().parse(req.params.id));
+    const id = z.uuid().parse(req.params.id);
+    const f = await imageCache.through(`a:${id}`, () => profile.readAvatar(id));
     return reply.header('content-type', f.contentType).header('cache-control', 'public, max-age=31536000, immutable').send(f.body);
   });
 
   // Miniatura de una vista previa de enlace (guardada en S3 por el worker).
   app.get<{ Params: { id: string } }>('/api/v1/previews/:id', async (req, reply) => {
-    const key = await readPreviewImage(z.uuid().parse(req.params.id));
-    if (!key) return reply.status(404).send({ error: { code: 'not_found', message: 'No encontrada' } });
-    const f = await getObject(key);
+    const id = z.uuid().parse(req.params.id);
+    const f = await imageCache.through(`p:${id}`, async () => {
+      const key = await readPreviewImage(id);
+      return key ? getObject(key) : { body: Buffer.alloc(0), contentType: '' };
+    });
+    if (!f.body.length) return reply.status(404).send({ error: { code: 'not_found', message: 'No encontrada' } });
     return reply.header('content-type', f.contentType).header('cache-control', 'public, max-age=31536000, immutable').send(f.body);
   });
 
+  // Invitados por enlace a una llamada (sin cuenta): ver, entrar con su nombre, latir y salir.
+  const guestLimit = { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } };
+  app.get<{ Params: { token: string } }>('/api/v1/call-links/:token', guestLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.previewLink(req.params.token); });
+  app.post<{ Params: { token: string } }>('/api/v1/call-links/:token/join', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req, reply) => {
+    reply.header('cache-control', 'no-store');
+    return calls.guestJoin(req.params.token, GuestJoinInput.parse(req.body).name);
+  });
+  app.post<{ Params: { id: string } }>('/api/v1/call-guests/:id/heartbeat', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) =>
+    calls.guestHeartbeat(z.uuid().parse(req.params.id), GuestSecretInput.parse(req.body).secret));
+  app.post<{ Params: { id: string } }>('/api/v1/call-guests/:id/leave', guestLimit, async (req) =>
+    calls.guestLeave(z.uuid().parse(req.params.id), GuestSecretInput.parse(req.body).secret));
   app.get<{ Params: { token: string } }>('/api/v1/org-invitations/:token', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => auth.previewOrgInvitation(req.params.token));
 
   // Vista previa pública de invitación (requiere el token; no expone datos del espacio más allá del nombre).

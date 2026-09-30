@@ -339,9 +339,11 @@ function CallPanel({ v, d, compact, nameOf, pip }: { v: CallView; d: ClientData;
  *   quien habla o, sin cámaras, un lienzo con los participantes y quién habla.
  */
 function usePip(v: CallView | null, d: ClientData | null) {
-  const docPip = typeof window !== 'undefined' && 'documentPictureInPicture' in window;
-  // App de escritorio sin Document PiP (el WebView de Mac): modo mini nativo, siempre encima (desktop.ts).
-  const miniPip = isDesktop && !docPip;
+  // App de escritorio (Mac y Windows por igual): modo mini nativo, la ventana de chaggu chiquita y siempre
+  // encima, como la de Zoom (desktop.ts). No se usa Document PiP ahí: el WebView de Mac no lo tiene y en
+  // WebView2 (Windows) no es confiable.
+  const miniPip = isDesktop;
+  const docPip = !miniPip && typeof window !== 'undefined' && 'documentPictureInPicture' in window;
   const videoPip = !miniPip && typeof document !== 'undefined' && !!document.pictureInPictureEnabled;
   const [win, setWin] = useState<Window | null>(null);
   const [videoOpen, setVideoOpen] = useState(false);

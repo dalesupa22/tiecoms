@@ -1,5 +1,9 @@
 [
   [
+    "<span data-download-label>Descargar</span>",
+    "<span data-download-label>Download</span>"
+  ],
+  [
     "      <a href=\"#descargar\">Descargar</a>\n",
     "      <a href=\"#descargar\">Download</a>\n"
   ],

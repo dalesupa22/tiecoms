@@ -66,18 +66,25 @@
 // Descargas: resalta el sistema de quien visita (y lo pone primero) y muestra versión y peso reales.
 (() => {
   const grid = document.querySelector('[data-downloads]');
-  if (!grid) return;
+  if (!grid && !document.querySelector('[data-download-top]')) return;
   const ua = navigator.userAgent;
   const os = /Windows/.test(ua) ? 'windows' : /Macintosh|Mac OS X/.test(ua) && !/iPhone|iPad/.test(ua) && navigator.maxTouchPoints < 2 ? 'mac' : null;
-  const mine = os && grid.querySelector(`[data-os="${os}"]`);
-  if (mine) { mine.classList.add('is-mine'); grid.prepend(mine); }
+  const mine = os && grid?.querySelector(`[data-os="${os}"]`);
+  if (mine && grid) { mine.classList.add('is-mine'); grid.prepend(mine); }
   const mb = (n) => `${(n / 1048576).toFixed(1).replace('.', document.documentElement.lang === 'es' ? ',' : '.')} MB`;
+  // Botón de arriba: descarga directa de la última versión para este sistema (o lleva a la sección).
+  const top = document.querySelector('[data-download-top]');
+  const topLabel = top?.querySelector('[data-download-label]');
+  const esTop = document.documentElement.lang === 'es';
+  if (top && os) top.setAttribute('href', os === 'mac' ? '/descargas/chaggu-mac.dmg' : '/descargas/chaggu-windows.exe');
+  if (topLabel && os) topLabel.textContent = esTop ? `Descargar para ${os === 'mac' ? 'Mac' : 'Windows'}` : `Download for ${os === 'mac' ? 'Mac' : 'Windows'}`;
   fetch('/descargas/latest.json', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : null)).then((v) => {
     if (!v) return;
     const es = document.documentElement.lang === 'es';
-    const mac = grid.querySelector('[data-meta="mac"]');
+    if (topLabel && v.version) { const sm = document.createElement('small'); sm.textContent = ` v${v.version}`; topLabel.after(sm); }
+    const mac = grid?.querySelector('[data-meta="mac"]');
     if (mac && v.mac) mac.textContent = `${es ? 'Versión' : 'Version'} ${v.version} · .dmg · ${mb(v.mac.size)}`;
-    const win = grid.querySelector('[data-meta="windows"]');
+    const win = grid?.querySelector('[data-meta="windows"]');
     if (win && v.windows) win.firstChild.textContent = `${es ? 'Versión' : 'Version'} ${v.version} · .exe · ${mb(v.windows.size)} · `;
   }).catch(() => {});
 })();

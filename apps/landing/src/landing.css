@@ -60,3 +60,7 @@
 @media (max-width:900px){.download-grid{grid-template-columns:1fr}.download-intro{grid-template-columns:1fr}.download-section{padding:90px 22px}.download-card p{min-height:0}}
 .download-intro .eyebrow{grid-column:1/-1}.download-intro .section-lede{margin:0 0 6px;justify-self:end}
 @media (max-width:900px){.download-intro .section-lede{justify-self:start;margin-top:14px}}
+/* Botón fijo de descarga arriba: la última versión para el sistema de quien visita (landing.js). */
+.header-download{min-height:40px;padding:0 16px;font-size:13.5px;font-weight:600;white-space:nowrap;margin-top:0}
+.header-download small{font-family:var(--mono);font-size:11px;opacity:.8;font-weight:500}
+@media (max-width:900px){.header-download{display:none}}

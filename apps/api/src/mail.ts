@@ -171,3 +171,65 @@ export function linkDigestMail(p: {
   ].join('\n');
   return { to: [{ email: p.to, name: p.name }], subject, text, html: layout(p.lang, title, paragraphs, { label, url }, footer), tags: ['link-digest'] };
 }
+
+/** Citas por enlace (docs/CITAS.md): confirmación, cambio y cancelación para quien reservó. Diseño propio, con tarjeta de fecha. */
+export function bookingMail(p: {
+  kind: 'confirmed' | 'rescheduled' | 'cancelled'; lang: MailLang; to: string; guestName: string; title: string; hosts: string[];
+  startsAt: Date; endsAt: Date; timezone: string; joinUrl: string | null; manageUrl: string; pageUrl: string;
+}): Mail {
+  const en = p.lang === 'en';
+  const first = esc(p.guestName.split(' ')[0] ?? p.guestName);
+  const loc = en ? 'en-US' : 'es-CO';
+  const part = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(loc, { timeZone: p.timezone, ...o }).format(p.startsAt);
+  const when = new Intl.DateTimeFormat(loc, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: p.timezone, timeZoneName: 'short' }).format(p.startsAt);
+  const dayBig = part({ day: 'numeric' }), monthSmall = part({ month: 'short' }).replace('.', '').toUpperCase();
+  const weekday = part({ weekday: 'long' });
+  const range = `${part({ hour: 'numeric', minute: '2-digit' })} – ${new Intl.DateTimeFormat(loc, { hour: 'numeric', minute: '2-digit', timeZone: p.timezone, timeZoneName: 'short' }).format(p.endsAt)}`;
+  const mins = Math.round((p.endsAt.getTime() - p.startsAt.getTime()) / 60_000);
+  const who = p.hosts.join(', ');
+  const cancelled = p.kind === 'cancelled';
+  const subject = {
+    confirmed: en ? `✓ Confirmed: ${p.title} · ${when}` : `✓ Confirmada: ${p.title} · ${when}`,
+    rescheduled: en ? `🔁 New time: ${p.title} · ${when}` : `🔁 Nuevo horario: ${p.title} · ${when}`,
+    cancelled: en ? `Cancelled: ${p.title}` : `Cancelada: ${p.title}`,
+  }[p.kind];
+  const headline = {
+    confirmed: en ? `You're in, ${first}! 🎉` : `¡Quedó agendada, ${first}! 🎉`,
+    rescheduled: en ? `New time, ${first} 🔁` : `Nuevo horario, ${first} 🔁`,
+    cancelled: en ? `Your booking was cancelled, ${first}` : `Tu cita fue cancelada, ${first}`,
+  }[p.kind];
+  const sub = {
+    confirmed: en ? `We saved your spot with ${esc(who)}. A calendar invite is on its way too.` : `Te guardamos el cupo con ${esc(who)}. También te llega la invitación a tu calendario.`,
+    rescheduled: en ? `Your meeting with ${esc(who)} moved. Here's the updated time.` : `Tu reunión con ${esc(who)} cambió de horario. Aquí está el nuevo.`,
+    cancelled: en ? 'No worries — you can pick another time whenever you want.' : 'Sin problema: puedes elegir otro horario cuando quieras.',
+  }[p.kind];
+  const fmtZ = (d: Date) => d.toISOString().replace(/[-:]|\.\d{3}/g, '');
+  const gcal = `https://calendar.google.com/calendar/render?${new URLSearchParams({ action: 'TEMPLATE', text: `${p.title} · ${who}`, dates: `${fmtZ(p.startsAt)}/${fmtZ(p.endsAt)}`, details: p.joinUrl ?? p.pageUrl, location: p.joinUrl ?? '' })}`;
+  const btn = (label: string, url: string, primary = true) =>
+    `<a href="${esc(url)}" style="display:inline-block;margin:0 8px 10px 0;padding:14px 26px;border-radius:12px;font-weight:700;font-size:15px;text-decoration:none;${primary ? 'background:#FF5A36;color:#17161F' : 'background:#ffffff;color:#17161F;border:2px solid #17161F;padding:12px 24px'}">${label}</a>`;
+  const card = cancelled ? '' : `
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:22px 0;background:#faf7f2;border-radius:16px"><tr>
+<td width="92" align="center" style="padding:18px 0 18px 18px"><div style="background:#17161F;border-radius:14px;width:76px;padding:8px 0;text-align:center"><div style="font-size:12px;letter-spacing:1.5px;color:#FF5A36;font-weight:700">${esc(monthSmall)}</div><div style="font-size:34px;line-height:38px;color:#ffffff;font-weight:800">${esc(dayBig)}</div></div></td>
+<td style="padding:18px 20px"><div style="font-size:17px;font-weight:800;color:#17161F">${esc(p.title)}</div>
+<div style="font-size:14px;color:#4b4a55;margin-top:4px;text-transform:capitalize">${esc(weekday)} · ${esc(range)}</div>
+<div style="font-size:13px;color:#6b6a75;margin-top:2px">${en ? `${mins} min · with` : `${mins} min · con`} ${esc(who)}</div></td></tr></table>`;
+  const buttons = cancelled
+    ? btn(en ? 'Book another time' : 'Reservar otro horario', p.pageUrl)
+    : [p.joinUrl ? btn(en ? '🎥 Join the video call' : '🎥 Entrar a la videollamada', p.joinUrl) : '', btn(en ? 'Add to calendar' : 'Agregar al calendario', gcal, !p.joinUrl)].join('');
+  const manage = cancelled ? '' : `<p style="margin:6px 0 0;font-size:14px;color:#4b4a55">${en ? 'Plans changed?' : '¿Cambió el plan?'} <a href="${esc(p.manageUrl)}" style="color:#C73A1A;font-weight:700">${en ? 'Reschedule or cancel' : 'Cambiar horario o cancelar'}</a></p>`;
+  const html = `<!doctype html><html lang="${p.lang}"><body style="margin:0;background:#efece6;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0">${esc(when)} · ${esc(who)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#efece6;padding:28px 12px"><tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:20px;overflow:hidden">
+<tr><td style="background:#17161F;padding:22px 32px"><span style="font-size:24px;font-weight:800;color:#ffffff;letter-spacing:-0.5px">chaggu</span><span style="font-size:24px;font-weight:800;color:#FF5A36">.</span></td></tr>
+<tr><td style="padding:32px 32px 28px">
+<h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;color:#17161F;letter-spacing:-0.5px">${headline}</h1>
+<p style="margin:0;font-size:16px;line-height:1.55;color:#4b4a55">${sub}</p>${card}
+<div>${buttons}</div>${manage}
+</td></tr>
+<tr><td style="padding:18px 32px 26px;border-top:1px solid #efece6;font-size:12px;line-height:1.6;color:#8a8994">${en ? 'Booked through' : 'Reservada con'} <a href="https://www.chaggu.com" style="color:#8a8994"><b>chaggu</b></a> — ${en ? 'where teams from different companies get things done together.' : 'donde equipos de distintas empresas trabajan juntos.'}<br>${en ? 'You got this because someone used your email to book a time.' : 'Te llega porque alguien usó tu correo para reservar este horario.'}</td></tr>
+</table></td></tr></table></body></html>`;
+  const text = [headline.replace(/<[^>]+>/g, ''), '', p.title, `${en ? 'With' : 'Con'} ${who}`, when, ...(p.joinUrl && !cancelled ? ['', `${en ? 'Video call' : 'Videollamada'}: ${p.joinUrl}`] : []), '',
+    cancelled ? `${en ? 'Book another time' : 'Reservar otro horario'}: ${p.pageUrl}` : `${en ? 'Reschedule or cancel' : 'Cambiar o cancelar'}: ${p.manageUrl}`].join('\n');
+  return { to: [{ email: p.to, name: p.guestName }], subject, text, html, tags: [`booking-${p.kind}`] };
+}

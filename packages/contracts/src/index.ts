@@ -1719,3 +1719,64 @@ export interface AssistantActionDTO {
   error?: string | null;
 }
 export interface AssistantTurnDTO { reply: string; actions: AssistantActionDTO[]; /** 2-3 respuestas rápidas que el usuario probablemente dirá después (chips). */ suggestions?: string[] }
+
+
+// ---------- Citas por enlace, tipo Calendly (docs/CITAS.md) ----------
+export const BookingMode = z.enum(['collective', 'round_robin']);
+export type BookingMode = z.infer<typeof BookingMode>;
+/** Horario de atención: día de la semana (0 = domingo … 6) → tramos «HH:MM». */
+const HhMm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+export const BookingHours = z.record(z.string().regex(/^[0-6]$/), z.array(z.tuple([HhMm, HhMm])).max(6));
+export type BookingHours = z.infer<typeof BookingHours>;
+export const BookingSlug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/);
+
+export interface BookingHostDTO { id: string; name: string; avatarUrl: string | null }
+/** Lo que ve cualquier persona en la página pública. */
+export interface BookingPagePublicDTO {
+  slug: string; title: string; description: string; durationMin: number; timezone: string; orgName: string | null;
+  hosts: BookingHostDTO[]; mode: BookingMode; minNoticeMin: number; horizonDays: number;
+  /** false: nadie tiene un calendario conectado todavía; no hay horarios que ofrecer. */
+  ready: boolean;
+}
+export interface BookingSlotsDTO { slots: string[]; timezone: string }
+export const BookingCreateInput = z.object({
+  startsAt: z.iso.datetime({ offset: true }),
+  name: z.string().trim().min(1).max(120),
+  email: z.string().trim().toLowerCase().email().max(254),
+  note: z.string().trim().max(2000).optional(),
+  timezone: z.string().min(1).max(64).default('UTC'),
+  lang: z.enum(['es', 'en']).default('es'),
+  /** Campo trampa: las personas no lo ven ni lo llenan. */
+  website: z.string().max(200).optional(),
+});
+export const BookingRescheduleInput = z.object({ startsAt: z.iso.datetime({ offset: true }) });
+export interface BookingDTO {
+  status: 'confirmed' | 'cancelled'; startsAt: string; endsAt: string; guestName: string; guestEmail: string; note: string;
+  joinUrl: string | null; hosts: BookingHostDTO[]; page: BookingPagePublicDTO;
+  /** Solo al crear: el enlace para cambiar o cancelar (no se puede recuperar después). */
+  manageToken?: string;
+}
+
+/** Administración (autenticado). */
+export interface BookingHostStatusDTO extends BookingHostDTO { email: string; calendar: 'google' | 'microsoft' | 'none' | 'reconnect' }
+export interface BookingPageDTO extends BookingPagePublicDTO {
+  id: string; ownerId: string; titleEn: string | null; descriptionEn: string | null; bufferMin: number; stepMin: number; hours: BookingHours; active: boolean;
+  hostsStatus: BookingHostStatusDTO[]; url: string; upcoming: number;
+}
+export const BookingPageInput = z.object({
+  slug: BookingSlug,
+  title: z.string().trim().min(2).max(120), titleEn: z.string().trim().max(120).nullable().optional(),
+  description: z.string().trim().max(1000).default(''), descriptionEn: z.string().trim().max(1000).nullable().optional(),
+  mode: BookingMode,
+  durationMin: z.number().int().min(10).max(240),
+  bufferMin: z.number().int().min(0).max(120).default(0),
+  stepMin: z.number().int().min(5).max(240).default(30),
+  minNoticeMin: z.number().int().min(0).max(43200).default(240),
+  horizonDays: z.number().int().min(1).max(180).default(30),
+  timezone: z.string().min(1).max(64).default('America/Bogota'),
+  hours: BookingHours,
+  hostIds: z.array(z.uuid()).min(1).max(12),
+  active: z.boolean().default(true),
+});
+export const BookingPagePatch = BookingPageInput.partial();
+export interface BookingHostBookingDTO { id: string; pageId: string; pageTitle: string; startsAt: string; endsAt: string; guestName: string; guestEmail: string; note: string; joinUrl: string | null; status: 'confirmed' | 'cancelled'; hostIds: string[] }

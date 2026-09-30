@@ -8,18 +8,21 @@
  *   node ops.js create-integration <correo> <conversationId> "<nombre>" [urlDeSalida]
  *   node ops.js import-events <correo> <conversationId> < eventos.json   agenda sin convocatorias ni avisos (idempotente)
  *   node ops.js purge-integration-issues <integrationId> <externalId,...>  borra esos asuntos y sus avisos del chat
+ *   node ops.js booking-page <correo dueño> <slug> "<título>" <collective|round_robin> <minutos> <correos,de,anfitriones> ["<descripción>"]   página de citas (docs/CITAS.md; idempotente por slug)
+ *   node ops.js booking-status                              páginas de citas y si cada anfitrión tiene calendario conectado (solo lectura)
  *   node ops.js app-version <ios|android> <versión> <build> [minBuild] ["notas es"] ["notas en"]   última versión publicada (docs/ACTUALIZAR.md)
  *   node ops.js app-version <mac|windows> <versión> [url de descarga]     escritorio: el build sale de la versión (0.3.0 → 300)
  *   node ops.js app-version <ios|android>                  muestra la registrada
  *       imprime el JSON con el token (y el secreto de salida) UNA vez: redirígelo a un archivo protegido.
  */
-import { CreateGroupInput, CreateIntegrationInput } from '@tiecoms/contracts';
+import { BookingPageInput, CreateGroupInput, CreateIntegrationInput } from '@tiecoms/contracts';
 import { createGroup } from './modules/groups.ts';
 import { createIntegration } from './modules/integrations.ts';
 import { importEvents } from './modules/calendar.ts';
 import { appendEvent, toMessageDTO } from './modules/messages.ts';
 import { CreateEventInput } from '@tiecoms/contracts';
 import { enqueueOutbox, pool, tx } from './db.ts';
+import { createPage, myPages, updatePage } from './modules/booking.ts';
 
 async function userId(email: string): Promise<string> {
   const { rows } = await pool.query('SELECT id FROM users WHERE email = $1 AND disabled_at IS NULL', [email]);
@@ -86,6 +89,21 @@ try {
       return { issues: ids.length, messages: msgs.length };
     });
     console.log(JSON.stringify(r));
+  } else if (command === 'booking-page' && a && b && c) {
+    // Horario de atención por defecto: lunes a viernes, 9:00-12:00 y 14:00-17:00 (hora de Bogotá). Se cambia después en la app.
+    const [, , , , mode, minutes, hostList, description] = process.argv.slice(2);
+    const hours: Record<string, [string, string][]> = Object.fromEntries([1, 2, 3, 4, 5].map((d) => [String(d), [['09:00', '12:00'], ['14:00', '17:00']] as [string, string][]]));
+    const owner = await userId(a);
+    const hostIds = await Promise.all((hostList ?? a).split(',').filter(Boolean).map((e) => userId(e.trim())));
+    const existing = (await myPages(owner)).find((p) => p.slug === b);
+    const input = { slug: b, title: c, description: description ?? '', mode: mode as 'collective' | 'round_robin', durationMin: Number(minutes ?? 30), hours, hostIds };
+    const r = existing ? await updatePage(owner, existing.id, input) : await createPage(owner, BookingPageInput.parse(input));
+    console.log(JSON.stringify({ id: r.id, url: r.url, mode: r.mode, hosts: r.hostsStatus.map((h) => ({ email: h.email, calendar: h.calendar })), ready: r.ready }, null, 1));
+  } else if (command === 'booking-status') {
+    const { rows } = await pool.query('SELECT DISTINCT owner_id FROM booking_pages');
+    const out = [];
+    for (const r of rows) for (const p of await myPages(r.owner_id)) out.push({ slug: p.slug, url: p.url, mode: p.mode, ready: p.ready, upcoming: p.upcoming, hosts: p.hostsStatus.map((h) => `${h.email}: ${h.calendar}`) });
+    console.log(JSON.stringify(out, null, 1));
   } else if (command === 'app-version' && (a === 'mac' || a === 'windows')) {
     if (b) {
       const m = b.match(/^(\d+)\.(\d+)\.(\d+)$/);

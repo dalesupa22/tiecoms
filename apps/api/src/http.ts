@@ -12,7 +12,7 @@ import {
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
   ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput, ForwardSharedInput,
-  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, GuestJoinInput, GuestSecretInput, SignupConfirmInput, ReorderTopicsInput,
+  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, GuestJoinInput, GuestSecretInput, BookingCreateInput, BookingRescheduleInput, BookingPageInput, BookingPagePatch, SignupConfirmInput, ReorderTopicsInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -31,6 +31,7 @@ import * as cal from './modules/calendar.ts';
 import * as prefs from './modules/prefs.ts';
 import * as reminders from './modules/reminders.ts';
 import * as meetings from './modules/meetings.ts';
+import * as booking from './modules/booking.ts';
 import * as mailbox from './modules/mailbox.ts';
 import * as scheduled from './modules/scheduled.ts';
 import * as wa from './modules/whatsapp.ts';
@@ -561,6 +562,12 @@ export async function buildHttp() {
     priv.delete<{ Params: { provider: string } }>('/api/v1/meetings/connections/:provider', async (req) => meetings.disconnect(req.userId, MeetingProvider.parse(req.params.provider)));
     priv.post('/api/v1/meetings', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => meetings.createMeeting(req.userId, CreateMeetingInput.parse(req.body)));
     priv.get<{ Params: { id: string } }>('/api/v1/meetings/:id', async (req) => meetings.getMeeting(req.userId, req.params.id));
+    // Citas por enlace, tipo Calendly (docs/CITAS.md): administración de mis páginas y citas.
+    priv.get('/api/v1/booking/pages', async (req) => ({ pages: await booking.myPages(req.userId) }));
+    priv.post('/api/v1/booking/pages', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => booking.createPage(req.userId, BookingPageInput.parse(req.body)));
+    priv.patch<{ Params: { id: string } }>('/api/v1/booking/pages/:id', async (req) => booking.updatePage(req.userId, z.uuid().parse(req.params.id), BookingPagePatch.parse(req.body)));
+    priv.get('/api/v1/booking/bookings', async (req) => ({ bookings: await booking.hostBookings(req.userId) }));
+    priv.post<{ Params: { id: string } }>('/api/v1/booking/bookings/:id/cancel', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => booking.cancelAsHost(req.userId, z.uuid().parse(req.params.id)));
     // Correo en el chat (docs/CORREO.md): la bandeja se lee en vivo; solo se guarda lo que se comparte.
     const mailLimit = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
     priv.get('/api/v1/mail/connections', async (req) => ({ connections: await mailbox.listConnections(req.userId) }));
@@ -731,6 +738,27 @@ export async function buildHttp() {
     calls.guestHeartbeat(z.uuid().parse(req.params.id), GuestSecretInput.parse(req.body).secret));
   app.post<{ Params: { id: string } }>('/api/v1/call-guests/:id/leave', guestLimit, async (req) =>
     calls.guestLeave(z.uuid().parse(req.params.id), GuestSecretInput.parse(req.body).secret));
+  // Citas por enlace (docs/CITAS.md): públicas, sin cuenta. Reservar y cambiar llevan límite propio.
+  const lang = (q: { lang?: string }) => (q.lang === 'en' ? 'en' : 'es') as 'es' | 'en';
+  const bookRead = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
+  app.get<{ Params: { slug: string }; Querystring: { lang?: string } }>('/api/v1/book/:slug', bookRead, async (req, reply) => { reply.header('cache-control', 'no-store'); return booking.publicPage(req.params.slug, lang(req.query)); });
+  app.get<{ Params: { slug: string }; Querystring: { from?: string; to?: string } }>('/api/v1/book/:slug/slots', bookRead, async (req, reply) => {
+    reply.header('cache-control', 'no-store');
+    return booking.slots(req.params.slug, String(req.query.from ?? ''), String(req.query.to ?? ''));
+  });
+  app.post<{ Params: { slug: string } }>('/api/v1/book/:slug', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req, reply) => {
+    reply.header('cache-control', 'no-store');
+    return booking.book(req.params.slug, BookingCreateInput.parse(req.body));
+  });
+  app.get<{ Params: { token: string }; Querystring: { lang?: string } }>('/api/v1/booking/:token', bookRead, async (req, reply) => { reply.header('cache-control', 'no-store'); return booking.viewBooking(req.params.token, lang(req.query)); });
+  app.post<{ Params: { token: string }; Querystring: { lang?: string } }>('/api/v1/booking/:token/cancel', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req, reply) => {
+    reply.header('cache-control', 'no-store');
+    return booking.cancelByToken(req.params.token, lang(req.query));
+  });
+  app.post<{ Params: { token: string }; Querystring: { lang?: string } }>('/api/v1/booking/:token/reschedule', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req, reply) => {
+    reply.header('cache-control', 'no-store');
+    return booking.rescheduleByToken(req.params.token, BookingRescheduleInput.parse(req.body).startsAt, lang(req.query));
+  });
   app.get<{ Params: { token: string } }>('/api/v1/org-invitations/:token', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => auth.previewOrgInvitation(req.params.token));
 
   // Vista previa pública de invitación (requiere el token; no expone datos del espacio más allá del nombre).

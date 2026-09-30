@@ -13,7 +13,7 @@ import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 
 const port = Number(process.argv[2] ?? 59300);
-const state = { msNoTeams: false, revokeAll: false, failNext: null, dropAfterCreate: null, googlePending: false, googleFailed: false, delayRefresh: false, refreshFailure: false, created: { google: 0, microsoft: 0, zoom: 0 }, byKey: new Map(), events: new Map() };
+const state = { msNoTeams: false, revokeAll: false, failNext: null, dropAfterCreate: null, googlePending: false, googleFailed: false, busy: [], delayRefresh: false, refreshFailure: false, created: { google: 0, microsoft: 0, zoom: 0 }, byKey: new Map(), events: new Map() };
 const heldRefresh = [];
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const idToken = (email) => `${b64({ alg: 'none' })}.${b64({ email, preferred_username: email })}.`;
@@ -29,7 +29,8 @@ const tokens = (p) => ({ access_token: `at-${p}-${randomUUID()}`, refresh_token:
 http.createServer(async (req, res) => {
   const u = new URL(req.url, `http://localhost:${port}`);
   const [, prov, kind, ...rest] = u.pathname.split('/');
-  if (u.pathname === '/stats') return send(res, 200, { ...state.created, refreshWaiting: heldRefresh.length });
+  if (u.pathname === '/stats') return send(res, 200, { ...state.created, patched: state.patched ?? 0, deleted: state.deleted ?? 0, refreshWaiting: heldRefresh.length });
+  if (u.pathname === '/events') return send(res, 200, [...state.events.values()]);
   if (u.pathname === '/control') { Object.assign(state, await body(req)); if (!state.delayRefresh) while (heldRefresh.length) heldRefresh.shift()(); return send(res, 200, { ok: true }); }
   if (kind === 'auth') {
     const to = new URL(u.searchParams.get('redirect_uri'));
@@ -51,13 +52,21 @@ http.createServer(async (req, res) => {
     const auth = req.headers.authorization ?? '';
     if (!auth.startsWith('Bearer at-') || state.revokeAll) return send(res, 401, { error: { code: 'unauthorized', message: 'Token inválido (mock)' } });
     if (state.failNext === prov) { state.failNext = null; return send(res, 503, { error: { message: 'Caído (mock)' } }); }
-    const b = req.method === 'POST' ? await body(req) : {};
+    const b = req.method === 'POST' || req.method === 'PATCH' ? await body(req) : {};
     if (prov === 'google') {
+      // Citas por enlace: listar la agenda (events.list), mover (PATCH) y cancelar (DELETE).
+      if (req.method === 'GET' && rest.at(-1) === 'events') {
+        const min = Date.parse(u.searchParams.get('timeMin')), max = Date.parse(u.searchParams.get('timeMax'));
+        const items = [...state.events.values(), ...state.busy].filter((ev) => ev.status !== 'cancelled' && Date.parse(ev.start.dateTime) < max && Date.parse(ev.end.dateTime) > min);
+        return send(res, 200, { items });
+      }
+      if (req.method === 'PATCH') { const ev = state.events.get(rest.at(-1)); if (!ev) return send(res, 404, {}); Object.assign(ev, { start: b.start ?? ev.start, end: b.end ?? ev.end }); state.patched = (state.patched ?? 0) + 1; return send(res, 200, ev); }
+      if (req.method === 'DELETE') { const ev = state.events.get(rest.at(-1)); if (!ev) return send(res, 404, {}); ev.status = 'cancelled'; state.deleted = (state.deleted ?? 0) + 1; res.writeHead(204); return res.end(); }
       if (req.method === 'GET') { const ev = state.events.get(rest.at(-1)); return ev ? send(res, 200, state.googlePending || state.googleFailed ? { ...ev, hangoutLink: undefined, conferenceData: { createRequest: { status: { statusCode: state.googleFailed ? 'failure' : 'pending' } } } } : ev) : send(res, 404, {}); }
       const id = b.id ?? randomUUID();
       const key = `g:${id}`;
       if (state.events.has(id)) return send(res, 409, { error: { status: 'conflict' } });
-      const ev = { id, summary: b.summary, start: b.start, end: b.end, hangoutLink: `https://meet.google.com/mock-${id.slice(0, 4)}-${id.slice(4, 8)}`, conferenceData: { entryPoints: [{ entryPointType: 'video', uri: `https://meet.google.com/mock-${id.slice(0, 4)}-${id.slice(4, 8)}` }] } };
+      const ev = { id, summary: b.summary, start: b.start, end: b.end, attendees: b.attendees, hangoutLink: `https://meet.google.com/mock-${id.slice(0, 4)}-${id.slice(4, 8)}`, conferenceData: { entryPoints: [{ entryPointType: 'video', uri: `https://meet.google.com/mock-${id.slice(0, 4)}-${id.slice(4, 8)}` }] } };
       state.byKey.set(key, ev); state.events.set(id, ev); state.created.google++;
       if (state.dropAfterCreate === 'google') { state.dropAfterCreate = null; return res.destroy(); }
       return send(res, 200, state.googlePending || state.googleFailed ? { ...ev, hangoutLink: undefined, conferenceData: { createRequest: { status: { statusCode: state.googleFailed ? 'failure' : 'pending' } } } } : ev);

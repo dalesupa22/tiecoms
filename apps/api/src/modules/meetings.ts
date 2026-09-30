@@ -58,8 +58,8 @@ interface Provider {
 }
 
 const env = (k: string, d = '') => process.env[k] ?? d;
-const request = (url: string, init: RequestInit = {}) => fetch(url, { ...init, signal: AbortSignal.timeout(15_000) });
-const apiBase = (k: string, d: string) => env(k, d).replace(/\/$/, '');
+export const request = (url: string, init: RequestInit = {}) => fetch(url, { ...init, signal: AbortSignal.timeout(15_000) });
+export const apiBase = (k: string, d: string) => env(k, d).replace(/\/$/, '');
 const ssoRedirect = (p: 'google' | 'microsoft') => `${config.apiPublicOrigin}/api/v1/auth/${p}/callback`;
 const zoomRedirect = () => `${config.apiPublicOrigin}/api/v1/meetings/zoom/callback`;
 
@@ -69,7 +69,7 @@ async function form(url: string, body: Record<string, string>, headers: Record<s
   if (!res.ok) throw new ProviderError(res.status, json?.error ?? 'token_failed', json?.error_description ?? json?.error ?? `HTTP ${res.status}`);
   return json;
 }
-class ProviderError extends Error {
+export class ProviderError extends Error {
   constructor(public status: number, public code: string, message: string, public externalId: string | null = null) { super(message); }
 }
 class ProviderPending extends Error {
@@ -198,7 +198,7 @@ const PROVIDERS: Record<MeetingProvider, Provider> = {
     },
   },
 };
-function meetUrl(ev: any): string | null {
+export function meetUrl(ev: any): string | null {
   if (typeof ev?.hangoutLink === 'string') return ev.hangoutLink;
   const ep = (ev?.conferenceData?.entryPoints ?? []).find((e: any) => e.entryPointType === 'video' && typeof e.uri === 'string');
   return ep?.uri ?? null;
@@ -314,7 +314,7 @@ export async function disconnect(userId: string, provider: MeetingProvider) {
 }
 
 /** Token vigente; si venció se renueva. Si el proveedor lo rechaza, la conexión queda «reconectar». */
-async function accessToken(userId: string, provider: MeetingProvider, expectedGeneration?: string): Promise<{ access: string; generation: string; accessCipher: Buffer }> {
+export async function accessToken(userId: string, provider: MeetingProvider, expectedGeneration?: string): Promise<{ access: string; generation: string; accessCipher: Buffer }> {
   const { rows } = await pool.query('SELECT * FROM meeting_connections WHERE user_id = $1 AND provider = $2', [userId, provider]);
   const r = rows[0];
   if (!r) throw new ApiError(409, 'not_connected', `Conecta tu cuenta de ${PROVIDERS[provider].label} para crear la reunión`);

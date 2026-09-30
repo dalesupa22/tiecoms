@@ -51,8 +51,17 @@
         "windowSize": {
           "width": 560,
           "height": 360
+        },
+        "appPosition": {
+          "x": 150,
+          "y": 180
+        },
+        "applicationFolderPosition": {
+          "x": 410,
+          "y": 180
         }
-      }
+      },
+      "hardenedRuntime": true
     },
     "windows": {
       "nsis": {

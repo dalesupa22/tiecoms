@@ -50,6 +50,7 @@
 		2D6C298E45855A3A5510F347 /* IntegrationV4Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9761D73C8074AD793EEE221 /* IntegrationV4Tests.swift */; };
 		2F9BEEE1A93572D3DC4F9C45 /* SocketIOProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF6A5A1072D180B50ABD7291 /* SocketIOProtocol.swift */; };
 		304A7ED6BCE177CE9A54BD8D /* SocketIOProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58CF969C93A44DD76EE4EE0B /* SocketIOProtocolTests.swift */; };
+		3066437BF4DA86CC471C5E87 /* RecentsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BFAFF4FCE46F77A338D9DBA /* RecentsTests.swift */; };
 		31DD07B095571C91D0FB232C /* StoreSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB118B40A5F8B04415623994 /* StoreSyncTests.swift */; };
 		325C868CDC680D4831F0323A /* ViewOnceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8730A5DEF766A88B5840D261 /* ViewOnceViews.swift */; };
 		3309B10A7D72102369213B8B /* AssistantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A49B7BC21933C038BE7A3E19 /* AssistantTests.swift */; };
@@ -367,6 +368,7 @@
 		58CF969C93A44DD76EE4EE0B /* SocketIOProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketIOProtocolTests.swift; sourceTree = "<group>"; };
 		59F3964718A8AF1F2FEFCB66 /* TopicsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopicsTests.swift; sourceTree = "<group>"; };
 		5B97CA8A60F4AA2EDD7059F7 /* GroupsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupsUITests.swift; sourceTree = "<group>"; };
+		5BFAFF4FCE46F77A338D9DBA /* RecentsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsTests.swift; sourceTree = "<group>"; };
 		5CDA44DC6302797DC800B44D /* TieComsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TieComsApp.swift; sourceTree = "<group>"; };
 		5CF65CD0606CB7EB53F0E78F /* snd_cristal.caf */ = {isa = PBXFileReference; path = snd_cristal.caf; sourceTree = "<group>"; };
 		5EE2B1313EBAD028D7C39324 /* GatewayRecoveryUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayRecoveryUITests.swift; sourceTree = "<group>"; };
@@ -829,6 +831,7 @@
 				065ECF12C5C02AC734D2F725 /* MentionSafetyTests.swift */,
 				78C29252B3353B9E5D864D69 /* PersonalIssueTests.swift */,
 				9F54037674E327B223BFB8EA /* QuickSearchTests.swift */,
+				5BFAFF4FCE46F77A338D9DBA /* RecentsTests.swift */,
 				6BBA4C886B6327B84516EA02 /* SafetyTests.swift */,
 				B5E87C423391FC6DFBA28D1B /* SignIntegrationTests.swift */,
 				807D4F6583A0E19D1793BBE2 /* SignTests.swift */,
@@ -1263,6 +1266,7 @@
 				26A9E63652B219D905A66975 /* MentionSafetyTests.swift in Sources */,
 				76C0EB1883DD2DC672C94583 /* PersonalIssueTests.swift in Sources */,
 				DA996AB6EFAF6FFBDAC0D53C /* QuickSearchTests.swift in Sources */,
+				3066437BF4DA86CC471C5E87 /* RecentsTests.swift in Sources */,
 				59508C7C91EA2B02ACAD615B /* SSOTests.swift in Sources */,
 				76C5C689B36884A3C54C59B3 /* SafetyTests.swift in Sources */,
 				72907156BE604A6883B0AB58 /* SignIntegrationTests.swift in Sources */,

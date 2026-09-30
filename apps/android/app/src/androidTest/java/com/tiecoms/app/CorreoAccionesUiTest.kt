@@ -80,13 +80,23 @@ class CorreoAccionesUiTest {
         compose.onNodeWithTag("email").performTextInput(arg("email"))
         compose.onNodeWithTag("password").performTextInput(arg("password"))
         compose.onNodeWithTag("login").performScrollTo().performClick()
-        compose.waitUntil(20_000) { exists("quick.create") }
+        // El API de pruebas limita los ingresos por IP (10 por minuto, compartidos con otras sesiones): si responde 429,
+        // se vuelve a intentar en lugar de fallar la prueba por el entorno.
+        for (attempt in 1..4) {
+            if (runCatching { compose.waitUntil(20_000) { exists("quick.create") } }.isSuccess) break
+            if (attempt == 4) throw AssertionError("No se pudo iniciar sesión en el API de pruebas")
+            Log.i("TieComsUiTest", "reintento de ingreso $attempt")
+            compose.onNodeWithTag("login").performScrollTo().performClick()
+        }
         compose.waitUntil(10_000) { app.container.client.value.state.value.data?.mailEnabled == true }
         return scenario
     }
     private fun openChat(id: String) {
         ins.runOnMainSync { app.container.pendingLink.value = DeepLink.Conversation(id) }
         compose.waitUntilAtLeastOneExists(hasTestTag("composer"), 20_000)
+        // La carrera al abrir («Algunos no leídos no se pudieron cargar») ya no aparece.
+        Thread.sleep(1500); compose.waitForIdle()
+        assertFalse("Aviso «no se pudieron cargar» al abrir", exists("readRetry"))
     }
 
     private fun msgSeqOf(conv: String, emailId: String): Long {
@@ -117,7 +127,7 @@ class CorreoAccionesUiTest {
             val text = "Sí, preparo la presentación ${System.currentTimeMillis() % 10000}"
             compose.onNodeWithTag("composer").performTextInput(text)
             compose.onNodeWithTag("send").performClick()
-            compose.waitUntil(15_000) { client.state.value.conversations[chat]?.messages?.any { it.body == text } == true }
+            compose.waitUntil(30_000) { client.state.value.conversations[chat]?.messages?.any { it.body == text } == true }
             assertEquals(cardMsg.id, client.state.value.conversations[chat]!!.messages.first { it.body == text }.replyTo)
             compose.waitUntil(10_000) { shows(text) }
             assertFalse("La cita no muestra JSON", shows("{\"k\""))
@@ -136,7 +146,8 @@ class CorreoAccionesUiTest {
             compose.onNodeWithTag("forwardComment").performTextReplacement("Reenviado desde Android")
             shot("23-reenviar")
             compose.onNodeWithTag("forwardConfirm").performScrollTo().performClick()
-            compose.waitUntil(15_000) { client.state.value.mails.values.count { it.conversationId == other && it.subject.startsWith("Solicitud de presentación") } >= 2 }
+            // La copia nueva (la de la respuesta del POST), distinta de la que ya había reenviado Laura.
+            compose.waitUntil(15_000) { client.state.value.mails.values.any { it.conversationId == other && it.id != fwdId && it.subject.startsWith("Solicitud de presentación") } }
 
             // En «Temas Xertify»: la copia que reenvió Laura; «Responder en privado» a Laura, con la cita de la tarjeta.
             compose.waitUntilAtLeastOneExists(hasTestTag("composer"), 15_000)
@@ -153,12 +164,23 @@ class CorreoAccionesUiTest {
             compose.onNodeWithTag("composer").performTextInput(priv)
             shot("25-privado")
             compose.onNodeWithTag("send").performClick()
-            compose.waitUntil(15_000) { client.state.value.conversations.values.any { c -> c.messages.any { it.body == priv && it.forwarded?.messageId != null } } }
+            runCatching { compose.waitUntil(30_000) { client.state.value.conversations.values.any { c -> c.messages.any { it.body == priv && it.forwarded?.messageId != null } } } }
+                .onFailure {
+                    shot("xx-privado-enviado")
+                    Log.e("TieComsUiTest", "privado sin llegar; pendientes=" + client.state.value.pending.joinToString { p -> "${p.body}|${p}" } +
+                        "; en chats=" + client.state.value.conversations.values.flatMap { c -> c.messages }.filter { m -> m.body == priv }.joinToString { m -> "${m.conversationId}/${m.forwarded}" })
+                    throw it
+                }
             val sent = client.state.value.conversations.values.flatMap { it.messages }.first { it.body == priv }
             assertEquals(client.state.value.conversations[other]!!.messages.first { it.seq == lseq }.id, sent.forwarded?.messageId)
             compose.waitUntil(10_000) { shows(priv) }
             assertFalse(shows("{\"k\""))
             shot("26-privado-enviado")
+        } catch (t: Throwable) {
+            // Diagnóstico: captura del momento y el estado del chat abierto.
+            shot("xx-fallo")
+            Log.e("TieComsUiTest", "fallo en CorreoAccionesUiTest", t)
+            throw t
         } finally { scenario.close() }
     }
 }

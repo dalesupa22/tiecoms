@@ -286,7 +286,15 @@ internal fun MailCard(emailId: String, data: BootstrapDTO, canPost: Boolean, onO
     var task by remember(emailId) { mutableStateOf(false) }
     LaunchedEffect(emailId, e == null) {
         if (e != null) return@LaunchedEffect
-        runCatching { client.loadSharedMail(emailId) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; missing = true }
+        // Un error pasajero (sin red, 429, 5xx) se reintenta con espera 1, 2, 4, 8 y 15 s; solo un 403/404 dice
+        // «Este correo ya no está disponible».
+        for (wait in com.tiecoms.app.core.ChatRecovery.BACKOFF_MS.toList() + null) {
+            val r = runCatching { client.loadSharedMail(emailId) }
+            val err = r.exceptionOrNull() ?: return@LaunchedEffect
+            if (err is kotlinx.coroutines.CancellationException) throw err
+            if (wait == null || !com.tiecoms.app.core.ChatRecovery.transient(err)) { missing = true; return@LaunchedEffect }
+            kotlinx.coroutines.delay(wait)
+        }
     }
     val maxW = (LocalConfiguration.current.screenWidthDp * 0.9f).coerceAtMost(520f).dp
     if (e == null) {

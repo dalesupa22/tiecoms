@@ -79,13 +79,23 @@ class CorreoUiTest {
         compose.onNodeWithTag("email").performTextInput(arg("email"))
         compose.onNodeWithTag("password").performTextInput(arg("password"))
         compose.onNodeWithTag("login").performScrollTo().performClick()
-        compose.waitUntil(20_000) { exists("quick.create") }
+        // El API de pruebas limita los ingresos por IP (10 por minuto, compartidos con otras sesiones): si responde 429,
+        // se vuelve a intentar en lugar de fallar la prueba por el entorno.
+        for (attempt in 1..4) {
+            if (runCatching { compose.waitUntil(20_000) { exists("quick.create") } }.isSuccess) break
+            if (attempt == 4) throw AssertionError("No se pudo iniciar sesión en el API de pruebas")
+            Log.i("TieComsUiTest", "reintento de ingreso $attempt")
+            compose.onNodeWithTag("login").performScrollTo().performClick()
+        }
         compose.waitUntil(10_000) { app.container.client.value.state.value.data?.mailEnabled == true }
         return scenario
     }
     private fun openChat(id: String) {
         ins.runOnMainSync { app.container.pendingLink.value = DeepLink.Conversation(id) }
         compose.waitUntilAtLeastOneExists(hasTestTag("composer"), 20_000)
+        // La carrera al abrir («Algunos no leídos no se pudieron cargar») ya no aparece.
+        Thread.sleep(1500); compose.waitForIdle()
+        assertFalse("Aviso «no se pudieron cargar» al abrir", exists("readRetry"))
     }
 
     /** La tarjeta en el chat: icono, dirección, asunto, estado, botones; el aviso de comentarios con su franja. */

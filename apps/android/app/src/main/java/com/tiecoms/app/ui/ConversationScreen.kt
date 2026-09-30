@@ -128,6 +128,7 @@ import com.tiecoms.app.ui.theme.Brand
 import com.tiecoms.app.ui.theme.LocalChatColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
@@ -411,10 +412,20 @@ fun ConversationScreen(
             fun loaded() = client.state.value.conversations[id]
             readLoadFailed = false
             val floor = maxOf(entry.first, meta.historyFromSeq)
+            // Otra carga del mismo chat puede estar en curso (openConversation vuelve sin esperar si ya está cargando):
+            // se espera a que termine antes de pedir páginas viejas; si no, loadOlder daba falso y salía «no se pudieron cargar».
+            suspend fun settled() = kotlinx.coroutines.withTimeoutOrNull(20_000) {
+                client.state.first { st -> st.conversations[id]?.let { it.loaded && !it.loading } ?: true }
+            }
+            settled()
             while (true) {
                 val c = loaded() ?: break
                 if (!com.tiecoms.app.core.ChatNav.needsOlder(c.messages, floor, entry.second, me, c.hasMore)) break
-                if (!client.loadOlder(id)) throw IllegalStateException("Unread page unavailable")
+                if (!client.loadOlder(id)) {
+                    // Falso porque otra carga seguía en curso: esperar y volver a mirar; si no, falló de verdad.
+                    if (loaded()?.loading == true) { settled(); continue }
+                    throw IllegalStateException("Unread page unavailable")
+                }
             }
             val c = loaded()
             val position = com.tiecoms.app.core.ChatNav.position(c?.messages.orEmpty(), floor, entry.second, me, meta.lastMessageSeq, client.state.value.blockedUserIds)

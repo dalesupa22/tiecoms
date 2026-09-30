@@ -1,12 +1,13 @@
 /**
  * Notificaciones push: registro del token por sesión y envío desde el worker.
  * Reciben: participantes activos que no son el autor, sin la conversación silenciada,
- * sin bloqueo con el autor, en todas sus sesiones activas con token.
+ * sin «No molestar» activo, sin bloqueo con el autor, en todas sus sesiones activas con token.
  * Payload (APNs y FCM) en docs/PUSH.md.
  */
 import type { PushData } from '@tiecoms/contracts';
 import { pool, tx } from '../db.ts';
 import { sendApns, sendFcm, type PushResult } from '../push-transport.ts';
+import { safePushReason } from '../push-reason.ts';
 import { summarize, summaryText } from './attachments.ts';
 
 type Lang = 'es' | 'en';
@@ -34,7 +35,14 @@ export async function removeToken(sessionId: string) {
 
 interface Target { user_id: string; sub_id: string; provider: 'apns' | 'fcm'; token: string; environment: 'sandbox' | 'production'; lang: Lang; mentioned?: boolean }
 
+/**
+ * Sesiones con token de quien no tiene «No molestar» activo ni está en su modo sueño (horario de descanso): con dnd_until > now() no sale ningún push
+ * (mensajes, menciones, reacciones, reuniones, avisos de reunión ni recordatorios). Todas las consultas
+ * de destinatarios pasan por aquí.
+ */
 const ACTIVE_SESSION = `JOIN sessions s ON s.user_id = u.id AND s.revoked_at IS NULL AND s.expires_at > now()
+    AND (u.dnd_until IS NULL OR u.dnd_until <= now())
+    AND NOT tiecoms_sleeping(u.sleep_on, u.sleep_start, u.sleep_end, u.sleep_tz)
   JOIN push_subscriptions ps ON ps.session_id = s.id AND ps.provider IN ('apns', 'fcm')`;
 
 /** No leídos de cada persona (conversaciones que puede leer y no tiene silenciadas): el globo del ícono. */
@@ -57,8 +65,15 @@ async function badges(userIds: string[]): Promise<Map<string, number>> {
 }
 
 /** «📷 2 fotos · texto» o solo el texto (≤ 180). */
-function messageText(body: string, atts: any, lang: Lang) {
+function messageText(body: string, atts: any, lang: Lang, viewOnce = false) {
   const sum = summarize(atts);
+  // Una sola vista: nunca el contenido (docs/TANDA-1.7.md §7).
+  if (viewOnce) {
+    const en = lang === 'en';
+    if (sum?.voices) return en ? '① Voice note' : '① Nota de voz';
+    if (sum?.images) return en ? '① Photo' : '① Foto';
+    return en ? '① Message' : '① Mensaje';
+  }
   const text = [sum ? summaryText(sum, lang) : '', body.replace(/\s+/g, ' ').trim()].filter(Boolean).join(' · ');
   return clip(text, 180) || (lang === 'en' ? 'New message' : 'Mensaje nuevo');
 }
@@ -100,6 +115,21 @@ export function fcmData(n: Note, badge: number): Record<string, string> {
 
 export const pushStats = { sent: 0, failed: 0, removed: 0 };
 
+/**
+ * Recibo de cada envío en el log del worker: qué pasó con cada aviso (aceptado por APNs/FCM, token inválido
+ * borrado, falla o sin configurar). Sin token, sin cuerpo ni título: ids internos y el código del proveedor.
+ * «Aceptado» = el proveedor devolvió 200; NO prueba que el teléfono lo haya mostrado.
+ */
+function logDelivery(t: Target, n: Note, r: PushResult, cleanup?: 'removed' | 'not_present' | 'failed') {
+  const reason = r.ok ? undefined : safePushReason(r.error);
+  const result = r.ok ? 'accepted' : r.invalidToken ? cleanup === 'removed' ? 'invalid_token_removed' : 'invalid_token'
+    : reason === 'apns_not_configured' || reason === 'fcm_not_configured' ? 'not_configured' : 'failed';
+  console.log(JSON.stringify({
+    evt: 'push.delivery', result, type: n.data.type, messageId: n.data.messageId ?? null, conversationId: n.data.conversationId ?? null,
+    user: t.user_id, sub: t.sub_id, provider: t.provider, env: t.environment, ...(reason ? { reason } : {}), ...(cleanup ? { cleanup } : {}),
+  }));
+}
+
 async function deliver(targets: Target[], note: (t: Target) => Note) {
   if (!targets.length) return;
   const counts = await badges([...new Set(targets.map((t) => t.user_id))]);
@@ -112,16 +142,24 @@ async function deliver(targets: Target[], note: (t: Target) => Note) {
         ? await sendApns(t.token, t.environment, apnsPayload(n, badge), { collapseId: n.collapseId })
         : await sendFcm(t.token, fcmData(n, badge), { collapseKey: n.threadId });
     } catch (e: any) { r = { ok: false, invalidToken: false, error: String(e?.message ?? e) }; }
+    if (!r.ok && r.invalidToken) {
+      // Provider rejection is known; removal is not known until the DB confirms it.
+      try {
+        const removed = await pool.query('DELETE FROM push_subscriptions WHERE id = $1', [t.sub_id]);
+        if (removed.rowCount) pushStats.removed++;
+        logDelivery(t, n, r, removed.rowCount ? 'removed' : 'not_present');
+      } catch (error) { logDelivery(t, n, r, 'failed'); throw error; }
+      return;
+    }
+    logDelivery(t, n, r);
     if (r.ok) {
       pushStats.sent++;
       await pool.query('UPDATE push_subscriptions SET failures = 0, last_error = NULL WHERE id = $1 AND failures > 0', [t.sub_id]);
-    } else if (r.invalidToken) {
-      pushStats.removed++;
-      await pool.query('DELETE FROM push_subscriptions WHERE id = $1', [t.sub_id]);
-    } else if (!r.error.endsWith('not_configured')) {
+    } else if (r.error !== 'apns_not_configured' && r.error !== 'fcm_not_configured') {
       pushStats.failed++;
-      await pool.query('UPDATE push_subscriptions SET failures = failures + 1, last_error = $2 WHERE id = $1', [t.sub_id, r.error.slice(0, 500)]);
-      console.error(`[push] ${t.provider} falló: ${r.error}`);
+      const reason = safePushReason(r.error);
+      await pool.query('UPDATE push_subscriptions SET failures = failures + 1, last_error = $2 WHERE id = $1', [t.sub_id, reason]);
+      console.error(`[push] ${t.provider} falló: ${reason}`);
     }
   }));
 }
@@ -165,7 +203,7 @@ export async function groupLabels(conversationId: string, userIds: string[]): Pr
 /** Mensaje de texto nuevo. */
 export async function pushMessage(messageId: string) {
   const { rows } = await pool.query(
-    `SELECT m.id, m.conversation_id, m.seq, m.author_id, m.body, m.attachments, m.deleted_at, m.kind, c.kind AS conv_kind, c.name AS conv_name,
+    `SELECT m.id, m.conversation_id, m.seq, m.author_id, m.body, m.attachments, m.deleted_at, m.kind, m.view_once, c.kind AS conv_kind, c.name AS conv_name,
             c.derive_kind, c.parent_conversation_id, c.parent_message_id,
             u.name AS author_name, u.avatar_file_id, o.name AS org_name
        FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN users u ON u.id = m.author_id
@@ -190,6 +228,8 @@ export async function pushMessage(messageId: string) {
         AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = u.id AND b.blocked_id = $2) OR (b.blocker_id = $2 AND b.blocked_id = u.id))`,
     [m.conversation_id, m.author_id, m.seq, m.id],
   );
+  // Sin destinatarios: dejarlo dicho (sesión cerrada, sin token, silencio, DND o descanso), para no confundirlo con un envío.
+  if (!targets.length) console.log(JSON.stringify({ evt: 'push.delivery', result: 'no_eligible_targets', type: 'message', messageId: m.id, conversationId: m.conversation_id }));
   const direct = m.conv_kind === 'direct';
   const avatar = m.avatar_file_id ? `/api/v1/avatars/${m.avatar_file_id}` : '';
   const labels = await groupLabels(m.conversation_id, targets.map((t) => t.user_id));
@@ -198,7 +238,7 @@ export async function pushMessage(messageId: string) {
   const mentionNote = (t: Target): Note => ({
     title: t.lang === 'en' ? `${m.author_name} mentioned you` : `${m.author_name} te mencionó`,
     subtitle: direct ? null : convTitle(t) || null,
-    body: messageText(m.body, m.attachments, t.lang),
+    body: messageText(m.body, m.attachments, t.lang, m.view_once),
     threadId: m.conversation_id, category: 'TC_MESSAGE', collapseId: m.id,
     data: { type: 'mention', conversationId: m.conversation_id, messageId: m.id, authorId: m.author_id, authorName: m.author_name, authorAvatarUrl: avatar },
   });
@@ -213,7 +253,7 @@ export async function pushMessage(messageId: string) {
     await deliver(targets, (t) => ({
       title: t.lang === 'en' ? `💬 Sidechat from ${m.author_name}` : `💬 Sidechat de ${m.author_name}`,
       subtitle: excerpt ? `${t.lang === 'en' ? 'About' : 'Sobre'}: «${excerpt}»` : null,
-      body: messageText(m.body, m.attachments, t.lang),
+      body: messageText(m.body, m.attachments, t.lang, m.view_once),
       threadId: m.conversation_id, category: 'TC_SIDE', collapseId: m.id,
       data: { type: 'side', conversationId: m.conversation_id, messageId: m.id, authorId: m.author_id, authorName: m.author_name, authorAvatarUrl: avatar, sideOf },
     }));
@@ -222,7 +262,7 @@ export async function pushMessage(messageId: string) {
   await deliver(targets, (t) => ({
     title: direct ? m.author_name : convTitle(t) || m.author_name,
     subtitle: direct ? null : [m.author_name, m.org_name].filter(Boolean).join(' · '),
-    body: messageText(m.body, m.attachments, t.lang),
+    body: messageText(m.body, m.attachments, t.lang, m.view_once),
     threadId: m.conversation_id, category: 'TC_MESSAGE', collapseId: m.id,
     data: { type: 'message', conversationId: m.conversation_id, messageId: m.id, authorId: m.author_id, authorName: m.author_name, authorAvatarUrl: avatar },
   }));
@@ -358,5 +398,110 @@ export async function pushReaction(messageId: string) {
       data: { type: 'reaction', conversationId: m.conversation_id, messageId: m.id },
     };
   });
+  return targets.length;
+}
+
+/** «Te asignaron una tarea»: al responsable nuevo (no a quien asignó), respetando No molestar y las noches. */
+export async function pushIssueAssigned(issueId: string, ownerId: string, actorId: string) {
+  const { rows } = await pool.query(
+    `SELECT i.id, i.title, i.conversation_id, i.owner_id, i.status, u.name AS actor_name,
+            EXISTS (SELECT 1 FROM conversation_memberships cm WHERE cm.conversation_id = i.conversation_id AND cm.user_id = $2 AND cm.removed_at IS NULL) AS in_chat
+       FROM issues i JOIN users u ON u.id = $3 WHERE i.id = $1`,
+    [issueId, ownerId, actorId],
+  );
+  const r = rows[0];
+  if (!r || r.owner_id !== ownerId || r.status === 'done' || r.status === 'cancelled') return 0;
+  const { rows: targets } = await pool.query<Target>(
+    `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
+       FROM users u ${ACTIVE_SESSION} WHERE u.id = $1 AND u.disabled_at IS NULL`,
+    [ownerId],
+  );
+  // El nombre del grupo solo si la persona está en él (un tercero asignado no lo ve).
+  const labels = r.in_chat ? await groupLabels(r.conversation_id, [ownerId]) : new Map<string, string>();
+  await deliver(targets, (t) => ({
+    title: t.lang === 'en' ? `${r.actor_name} assigned you a task` : `${r.actor_name} te asignó una tarea`,
+    subtitle: labels.get(t.user_id) ?? null,
+    body: clip(r.title, 180),
+    threadId: r.in_chat ? r.conversation_id : `issue-${r.id}`, category: 'TC_ISSUE', collapseId: `issue-${r.id}`,
+    data: { type: 'issue', issueId: r.id, conversationId: r.conversation_id, inChat: !!r.in_chat },
+  }));
+  return targets.length;
+}
+
+/** «No cumplimos» (tanda 1.7): la tarea venció. Al responsable, con la categoría de tarea. */
+export async function pushIssueOverdue(issueId: string, ownerId: string, dueDate: string) {
+  const { rows } = await pool.query(
+    `SELECT i.id, i.title, i.conversation_id, i.owner_id, i.status, to_char(i.due_date, 'YYYY-MM-DD') AS due,
+            EXISTS (SELECT 1 FROM conversation_memberships cm WHERE cm.conversation_id = i.conversation_id AND cm.user_id = $2 AND cm.removed_at IS NULL) AS in_chat
+       FROM issues i WHERE i.id = $1`,
+    [issueId, ownerId],
+  );
+  const r = rows[0];
+  if (!r || r.owner_id !== ownerId || r.status === 'done' || r.status === 'cancelled' || r.due !== dueDate) return 0;
+  const { rows: targets } = await pool.query<Target>(
+    `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
+       FROM users u ${ACTIVE_SESSION} WHERE u.id = $1 AND u.disabled_at IS NULL`,
+    [ownerId],
+  );
+  const labels = r.in_chat && r.conversation_id ? await groupLabels(r.conversation_id, [ownerId]) : new Map<string, string>();
+  await deliver(targets, (t) => ({
+    title: t.lang === 'en' ? '😢 We missed it' : '😢 No cumplimos',
+    subtitle: labels.get(t.user_id) ?? null,
+    body: clip(t.lang === 'en' ? `${r.title} was due on ${r.due}` : `${r.title} venció el ${r.due}`, 180),
+    threadId: r.in_chat ? r.conversation_id : `issue-${r.id}`, category: 'TC_ISSUE', collapseId: `issue-overdue-${r.id}`,
+    data: { type: 'issue', issueId: r.id, conversationId: r.conversation_id ?? '', inChat: !!r.in_chat },
+  }));
+  return targets.length;
+}
+
+/**
+ * Llamada entrante (docs/LLAMADAS.md): push para quien tiene la app cerrada. category TC_CALL y data.type 'call'
+ * para que las apps muestren Contestar / Ahora no. No sale con «No molestar» ni en modo sueño (ACTIVE_SESSION).
+ */
+/**
+ * «Llamada perdida»: mismo collapseId que el aviso entrante, así lo reemplaza. Va como tipo message (abre el chat)
+ * para que las apps publicadas lo muestren. Sin push con No molestar ni en modo sueño (ACTIVE_SESSION).
+ */
+export async function pushCallMissed(p: { callId: string; userIds: string[] }) {
+  if (!p.userIds?.length) return 0;
+  const { rows } = await pool.query(
+    `SELECT c.id, c.conversation_id, c.kind, u.name AS caller, cv.name AS title, cv.kind AS conv_kind
+       FROM calls c JOIN users u ON u.id = c.started_by JOIN conversations cv ON cv.id = c.conversation_id WHERE c.id = $1`,
+    [p.callId],
+  );
+  const call = rows[0];
+  if (!call) return 0;
+  const { rows: targets } = await pool.query<Target>(
+    `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
+       FROM users u ${ACTIVE_SESSION} WHERE u.id = ANY($1) AND u.disabled_at IS NULL`,
+    [p.userIds],
+  );
+  await deliver(targets, (t) => ({
+    title: clip(call.caller ?? 'chaggu', 80),
+    subtitle: call.conv_kind !== 'direct' && call.title ? clip(call.title, 80) : null,
+    body: t.lang === 'en' ? (call.kind === 'video' ? '🎥 Missed video call' : '📞 Missed call') : (call.kind === 'video' ? '🎥 Videollamada perdida' : '📞 Llamada perdida'),
+    threadId: call.conversation_id, category: 'TC_MESSAGE', collapseId: `call-${call.id}`,
+    data: { type: 'message', callMissed: call.id, conversationId: call.conversation_id },
+  }));
+  return targets.length;
+}
+
+export async function pushCall(p: { callId: string; userIds: string[]; callerName: string; title: string | null }) {
+  if (!p.userIds?.length) return 0;
+  const { rows } = await pool.query('SELECT id, conversation_id, kind, ended_at FROM calls WHERE id = $1', [p.callId]);
+  const call = rows[0];
+  if (!call || call.ended_at) return 0;
+  const { rows: targets } = await pool.query<Target>(
+    `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
+       FROM users u ${ACTIVE_SESSION} WHERE u.id = ANY($1) AND u.disabled_at IS NULL`,
+    [p.userIds],
+  );
+  await deliver(targets, (t) => ({
+    title: clip(p.callerName, 80),
+    subtitle: p.title ? clip(p.title, 80) : null,
+    body: t.lang === 'en' ? (call.kind === 'video' ? '🎥 Video call' : '📞 Calling you') : (call.kind === 'video' ? '🎥 Videollamada' : '📞 Te está llamando'),
+    threadId: call.conversation_id, category: 'TC_CALL', collapseId: `call-${call.id}`,
+    data: { type: 'call', callId: call.id, conversationId: call.conversation_id, kind: call.kind },
+  }));
   return targets.length;
 }

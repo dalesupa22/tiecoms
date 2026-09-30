@@ -68,7 +68,7 @@ export async function addDomain(userId: string, orgId: string, input: string): P
   return tx(async (c) => {
     await requireOrgAdmin(c, userId, orgId);
     const owner = await claimedBy(c, domain);
-    if (owner && owner.orgId !== orgId) throw conflict(`El dominio ${domain} ya pertenece a otra empresa en Chaggu`);
+    if (owner && owner.orgId !== orgId) throw conflict(`El dominio ${domain} ya pertenece a otra empresa en chaggu`);
     const { rows } = await c.query(
       `INSERT INTO org_domains (org_id, domain, token, created_by) VALUES ($1,$2,$3,$4)
        ON CONFLICT (org_id, domain) DO UPDATE SET domain = EXCLUDED.domain RETURNING *`,

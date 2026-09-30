@@ -39,17 +39,17 @@ print('landing: dist listo (es + en)')
 # de Google y Microsoft: /privacidad/, /terminos/, /en/privacy/, /en/terms/.
 template = (src / 'legal' / 'template.html').read_text()
 UPDATED = {'es': 'Última actualización: 26 de septiembre de 2026', 'en': 'Last updated: September 26, 2026'}
-PRIVACY_UPDATED = {'es': 'Última actualización: 26 de septiembre de 2026', 'en': 'Last updated: September 26, 2026'}
+PRIVACY_UPDATED = {'es': 'Última actualización: 28 de septiembre de 2026', 'en': 'Last updated: September 28, 2026'}
 PAGES = [
     # (idioma, ruta, fuente, título, ruta en el otro idioma, descripción)
-    ('es', '/privacidad/', 'privacidad.es.html', 'Política de privacidad', '/en/privacy/', 'Cómo Chaggu trata los datos personales.'),
-    ('es', '/terminos/', 'terminos.es.html', 'Términos del servicio', '/en/terms/', 'Condiciones de uso de Chaggu.'),
-    ('en', '/en/privacy/', 'privacy.en.html', 'Privacy policy', '/privacidad/', 'How Chaggu handles personal data.'),
-    ('en', '/en/terms/', 'terms.en.html', 'Terms of service', '/terminos/', 'Chaggu terms of service.'),
-    ('es', '/soporte/', 'soporte.es.html', 'Soporte', '/en/support/', 'Ayuda con tu cuenta, conversaciones y archivos de Chaggu.'),
-    ('en', '/en/support/', 'support.en.html', 'Support', '/soporte/', 'Help with your Chaggu account, conversations and files.'),
-    ('es', '/eliminar-cuenta/', 'eliminar-cuenta.es.html', 'Eliminar tu cuenta', '/en/delete-account/', 'Cómo solicitar la eliminación de tu cuenta de Chaggu y qué datos se conservan.'),
-    ('en', '/en/delete-account/', 'delete-account.en.html', 'Delete your account', '/eliminar-cuenta/', 'How to request deletion of your Chaggu account and which data is retained.'),
+    ('es', '/privacidad/', 'privacidad.es.html', 'Política de privacidad', '/en/privacy/', 'Cómo chaggu trata los datos personales.'),
+    ('es', '/terminos/', 'terminos.es.html', 'Términos del servicio', '/en/terms/', 'Condiciones de uso de chaggu.'),
+    ('en', '/en/privacy/', 'privacy.en.html', 'Privacy policy', '/privacidad/', 'How chaggu handles personal data.'),
+    ('en', '/en/terms/', 'terms.en.html', 'Terms of service', '/terminos/', 'chaggu terms of service.'),
+    ('es', '/soporte/', 'soporte.es.html', 'Soporte', '/en/support/', 'Ayuda con tu cuenta, conversaciones y archivos de chaggu.'),
+    ('en', '/en/support/', 'support.en.html', 'Support', '/soporte/', 'Help with your chaggu account, conversations and files.'),
+    ('es', '/eliminar-cuenta/', 'eliminar-cuenta.es.html', 'Eliminar tu cuenta', '/en/delete-account/', 'Cómo solicitar la eliminación de tu cuenta de chaggu y qué datos se conservan.'),
+    ('en', '/en/delete-account/', 'delete-account.en.html', 'Delete your account', '/eliminar-cuenta/', 'How to request deletion of your chaggu account and which data is retained.'),
 ]
 for lang, path, source, title, alt, desc in PAGES:
     es = lang == 'es'

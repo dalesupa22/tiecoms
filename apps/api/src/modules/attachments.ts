@@ -5,16 +5,22 @@
  * y un objeto solo se borra cuando ninguna fila lo usa (S3_ALLOW_DELETE).
  */
 import { randomUUID } from 'node:crypto';
-import type { AttachmentDTO, AttachmentSummaryDTO } from '@tiecoms/contracts';
-import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_VOICE_MS, type VoiceTranscriptDTO } from '@tiecoms/contracts';
+import { Readable } from 'node:stream';
+import type { AttachmentDTO, AttachmentSummaryDTO, VideoPlayDTO } from '@tiecoms/contracts';
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_VIDEO_BYTES, MAX_VOICE_MS, type VoiceTranscriptDTO } from '@tiecoms/contracts';
 import { transcriptionEnabled } from './voice-providers.ts';
 import { conversationAccess } from '../access.ts';
 import { pool, type Tx } from '../db.ts';
-import { ApiError, badRequest, forbidden, notFound } from '../errors.ts';
-import { deleteObject, getObject, objectKey, putObject } from '../storage.ts';
+import { ApiError, badRequest, forbidden, notFound, viewOnceConflict } from '../errors.ts';
+import { deleteObject, getObject, objectKey, presignDownload, putObject, putObjectStream } from '../storage.ts';
 
 export const MAX_THUMB_BYTES = 512 * 1024;
 export const MAX_UPLOAD_BYTES = MAX_ATTACHMENT_BYTES;
+export { MAX_VIDEO_BYTES };
+/** Validez de la URL prefirmada para reproducir o descargar un video (el reproductor la pide de nuevo si vence). */
+export const PLAY_URL_SECONDS = 3600;
+/** Por encima de esto, GET /attachments/:id sirve por stream desde S3 en vez de cargar el archivo en memoria. */
+export const STREAM_OVER_BYTES = 8 * 1024 * 1024;
 const PENDING_HOURS = 24;
 
 /** Tipos que se sirven con su propio Content-Type (y en línea); todo lo demás va como descarga octet-stream. */
@@ -28,6 +34,9 @@ export const toDTO = (r: any): AttachmentDTO => ({
   // Si hay variante reproducible (AAC), url la sirve y contentType la describe; ?original=1 da el archivo subido.
   contentType: r.play_type ?? r.content_type, sizeBytes: Number(r.size_bytes), width: r.width ?? null, height: r.height ?? null,
   url: `/api/v1/attachments/${r.id}`, thumbUrl: r.thumb_key ? `/api/v1/attachments/${r.id}/thumb` : null,
+  ...(r.signing ? { signing: r.signing } : {}),
+  // Videos: kind queda 'file' (las apps viejas solo conocen 'file' | 'voice'); durationMs y playUrl son aditivos.
+  ...(r.kind !== 'voice' && String(r.content_type).startsWith('video/') ? { durationMs: r.duration_ms ?? null, playUrl: `/api/v1/attachments/${r.id}/play` } : {}),
   ...(r.kind === 'voice' ? {
     kind: 'voice' as const, durationMs: r.duration_ms ?? null, waveform: r.waveform ?? null,
     transcript: r.transcript && r.transcript.status !== 'new' ? publicTranscript(r.transcript) : null,
@@ -120,7 +129,7 @@ function exifRotated(b: Buffer): boolean {
   return false;
 }
 
-function cleanName(raw: string | undefined): string {
+export function cleanName(raw: string | undefined): string {
   let name = '';
   try { name = decodeURIComponent(String(raw ?? '')); } catch { name = String(raw ?? ''); }
   name = name.replace(/[\u0000-\u001f\u007f/\\]/g, '_').replace(/^\.+/, '').trim().slice(0, 200);
@@ -149,6 +158,109 @@ export async function upload(userId: string, conversationId: string, input: {
     [id, conversationId, userId, cleanName(input.name), contentType, input.body.length, size?.width ?? null, size?.height ?? null, key],
   );
   return toDTO(rows[0]);
+}
+
+// ---------- Videos ----------
+const IMAGE_BRANDS = /^(heic|heix|hevc|hevx|heim|heis|mif1|msf1|avif|avis)$/;
+const AUDIO_BRANDS = /^(M4A |M4B |M4P )$/;
+/** Video por los primeros bytes: MP4/MOV (caja ftyp) o WebM (EBML con DocType webm). null si no lo es. */
+export function sniffVideo(b: Buffer): 'video/mp4' | 'video/quicktime' | 'video/webm' | null {
+  if (b.length >= 12 && b.toString('ascii', 4, 8) === 'ftyp') {
+    const brand = b.toString('ascii', 8, 12);
+    if (IMAGE_BRANDS.test(brand) || AUDIO_BRANDS.test(brand)) return null;
+    return brand === 'qt  ' ? 'video/quicktime' : 'video/mp4';
+  }
+  if (b.length >= 4 && b.readUInt32BE(0) === 0x1a45dfa3) {
+    const head = b.subarray(0, Math.min(b.length, 64));
+    return head.includes(Buffer.from('webm', 'ascii')) ? 'video/webm' : null;
+  }
+  return null;
+}
+
+function intHeader(raw: string | undefined, name: string, max: number): number | null {
+  if (raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > max) throw badRequest(`${name} inválido`);
+  return n;
+}
+
+/**
+ * Video por stream (docs/VIDEO.md): el cuerpo pasa a S3 en partes de 5 MB sin quedar entero en memoria ni en disco.
+ * Límite MAX_VIDEO_BYTES; el tipo se decide por los primeros bytes. Duración, ancho y alto los manda el cliente
+ * (x-duration-ms, x-width, x-height), que ya leyó el archivo al comprimirlo. Queda pendiente como cualquier adjunto.
+ */
+export async function uploadVideo(userId: string, conversationId: string, input: {
+  stream: Readable; length?: number | null; name?: string; durationMs?: string; width?: string; height?: string;
+}) {
+  if (input.length != null && input.length > MAX_VIDEO_BYTES) throw tooBigVideo();
+  const durationMs = intHeader(input.durationMs, 'x-duration-ms', 6 * 3600_000);
+  const width = intHeader(input.width, 'x-width', 16384), height = intHeader(input.height, 'x-height', 16384);
+  try { await conversationAccess(pool, userId, conversationId, 'post'); } catch (e) { await discard(input.stream); throw e; }
+  const it = input.stream[Symbol.asyncIterator]() as AsyncIterator<Buffer>;
+  // Primeros bytes para reconocer el formato antes de abrir el multipart.
+  const head: Buffer[] = [];
+  let got = 0;
+  while (got < 64) {
+    const n = await it.next();
+    if (n.done) break;
+    head.push(n.value); got += n.value.length;
+  }
+  const first = Buffer.concat(head);
+  if (!first.length) throw badRequest('Falta el video');
+  const contentType = sniffVideo(first);
+  if (!contentType) { await discard(input.stream, it); throw new ApiError(415, 'not_video', 'El archivo no es un video MP4, MOV o WebM'); }
+  let total = 0, overflow = false;
+  async function* body() {
+    for (const c of head) { total += c.length; yield c; }
+    for (;;) {
+      const n = await it.next();
+      if (n.done) return;
+      total += n.value.length;
+      if (total > MAX_VIDEO_BYTES) { overflow = true; throw tooBigVideo(); }
+      yield n.value;
+    }
+  }
+  if (total > MAX_VIDEO_BYTES) throw tooBigVideo();
+  const id = randomUUID();
+  const key = objectKey(`attachments/${conversationId}/${id}`);
+  try {
+    await putObjectStream(key, Readable.from(body(), { objectMode: false }), contentType);
+  } catch (e) {
+    // Sin destruir el stream: Fastify responde 413 (con Connection: close) y Node cierra al terminar.
+    if (overflow) throw tooBigVideo();
+    throw e;
+  }
+  const { rows } = await pool.query(
+    `INSERT INTO attachments (id, conversation_id, owner_id, name, content_type, size_bytes, width, height, s3_key, duration_ms)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [id, conversationId, userId, cleanName(input.name || 'video.mp4'), contentType, total, width, height, key, durationMs],
+  );
+  return toDTO(rows[0]);
+}
+/**
+ * Antes de responder un error, lee y descarta hasta 2 MB del cuerpo para que el cliente reciba la respuesta
+ * (si el servidor cierra con el cuerpo a medio enviar, el navegador ve un error de red en vez del 4xx). Más, se corta.
+ */
+async function discard(stream: Readable, it?: AsyncIterator<Buffer>, max = 2 * 1024 * 1024) {
+  const iter = it ?? (stream[Symbol.asyncIterator]() as AsyncIterator<Buffer>);
+  let n = 0;
+  try {
+    for (;;) {
+      const r = await iter.next();
+      if (r.done) return;
+      n += r.value.length;
+      if (n > max) { stream.destroy(); return; }
+    }
+  } catch { /* el cliente cortó */ }
+}
+const tooBigVideo = () => new ApiError(413, 'too_large', 'El video pesa más de 150 MB');
+
+/** URL prefirmada (1 h) para reproducir en streaming o descargar un video. Mismo acceso que GET /attachments/:id. */
+export async function playLink(userId: string, attachmentId: string, download: boolean): Promise<VideoPlayDTO> {
+  const a = await readable(userId, attachmentId);
+  if (!String(a.content_type).startsWith('video/')) throw badRequest('Este adjunto no es un video');
+  const url = await presignDownload(a.s3_key, a.name, a.content_type, PLAY_URL_SECONDS, !download);
+  return { url, expiresIn: PLAY_URL_SECONDS, contentType: a.content_type };
 }
 
 /** Nota de voz: audio (m4a/AAC, webm/opus, ogg, mp3, wav, flac) de hasta 15 min. La transcripción empieza al enviarla. */
@@ -218,7 +330,7 @@ export async function claimForMessage(c: Tx, userId: string, conversationId: str
   }
   if (fwd.length) {
     const { rows } = await c.query(
-      `SELECT a.*, m.seq AS message_seq FROM attachments a JOIN messages m ON m.id = a.message_id
+      `SELECT a.*, m.seq AS message_seq, m.view_once FROM attachments a JOIN messages m ON m.id = a.message_id
         WHERE a.id = ANY($1) AND a.deleted_at IS NULL AND m.deleted_at IS NULL`,
       [fwd],
     );
@@ -226,14 +338,16 @@ export async function claimForMessage(c: Tx, userId: string, conversationId: str
     for (const id of fwd) {
       const r = byId.get(id);
       if (!r) throw badRequest('Algún adjunto reenviado no existe');
+      if (r.view_once) throw viewOnceConflict();
       const acc = await conversationAccess(c, userId, r.conversation_id, 'read');
       if (r.message_seq <= acc.historyFromSeq) throw badRequest('Algún adjunto reenviado no existe');
       const copy = await c.query(
         `INSERT INTO attachments (conversation_id, owner_id, name, content_type, size_bytes, width, height, s3_key, thumb_key, thumb_type,
-                                  kind, duration_ms, waveform, transcript, play_key, play_type)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+                                  kind, duration_ms, waveform, transcript, play_key, play_type, signing)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
         [conversationId, userId, r.name, r.content_type, r.size_bytes, r.width, r.height, r.s3_key, r.thumb_key, r.thumb_type,
-          r.kind, r.duration_ms, JSON.stringify(r.waveform), JSON.stringify(r.transcript ? { ...r.transcript, status: r.transcript.status === 'done' ? 'done' : 'disabled', aiConsent: false, aiConsentAt: null } : null), r.play_key, r.play_type],
+          r.kind, r.duration_ms, JSON.stringify(r.waveform), JSON.stringify(r.transcript ? { ...r.transcript, status: r.transcript.status === 'done' ? 'done' : 'disabled', aiConsent: false, aiConsentAt: null } : null), r.play_key, r.play_type,
+          r.signing ? JSON.stringify(r.signing) : null],
       );
       out.push({ id: copy.rows[0].id, dto: toDTO(copy.rows[0]) });
     }
@@ -253,7 +367,7 @@ export async function hideForMessage(c: Tx, messageId: string) {
 /** Solo quien puede leer el mensaje (respeta historyFromSeq). Los pendientes, solo su dueño. */
 export async function readable(userId: string, attachmentId: string) {
   const { rows } = await pool.query(
-    'SELECT a.*, m.seq AS message_seq, m.deleted_at AS message_deleted_at FROM attachments a LEFT JOIN messages m ON m.id = a.message_id WHERE a.id = $1',
+    'SELECT a.*, m.seq AS message_seq, m.deleted_at AS message_deleted_at, m.view_once FROM attachments a LEFT JOIN messages m ON m.id = a.message_id WHERE a.id = $1',
     [attachmentId],
   );
   const a = rows[0];
@@ -261,16 +375,26 @@ export async function readable(userId: string, attachmentId: string) {
   if (!a.message_id) { if (a.owner_id !== userId) throw notFound('Adjunto'); return a; }
   const acc = await conversationAccess(pool, userId, a.conversation_id, 'read').catch(() => { throw notFound('Adjunto'); });
   if (a.message_seq <= acc.historyFromSeq) throw forbidden('Este adjunto está fuera de tu historial');
+  // Una sola vista: solo por la URL firmada que entrega POST /messages/:id/open.
+  if (a.view_once) throw forbidden('Este adjunto es de una sola vista');
   return a;
 }
 
-export async function fetchFile(userId: string, attachmentId: string, thumb: boolean, original = false) {
+/** Qué objeto servir. stream: videos y archivos grandes van por stream desde S3 (nunca enteros en la memoria del API). */
+export async function fileInfo(userId: string, attachmentId: string, thumb: boolean, original = false) {
   const a = await readable(userId, attachmentId);
   const useThumb = thumb && !!a.thumb_key;
   const usePlay = !thumb && !original && !!a.play_key;
-  const obj = await getObject(useThumb ? a.thumb_key : usePlay ? a.play_key : a.s3_key);
-  const type = useThumb ? a.thumb_type : usePlay ? a.play_type : a.content_type;
-  return { body: obj.body, name: a.name as string, contentType: INLINE_TYPES.has(type) ? type : 'application/octet-stream', inline: INLINE_TYPES.has(type) };
+  const key: string = useThumb ? a.thumb_key : usePlay ? a.play_key : a.s3_key;
+  const type: string = useThumb ? a.thumb_type : usePlay ? a.play_type : a.content_type;
+  const stream = !useThumb && !usePlay && (type.startsWith('video/') || Number(a.size_bytes) > STREAM_OVER_BYTES);
+  return { key, name: a.name as string, contentType: INLINE_TYPES.has(type) ? type : 'application/octet-stream', inline: INLINE_TYPES.has(type), stream };
+}
+
+export async function fetchFile(userId: string, attachmentId: string, thumb: boolean, original = false) {
+  const f = await fileInfo(userId, attachmentId, thumb, original);
+  const obj = await getObject(f.key);
+  return { ...f, body: obj.body };
 }
 
 // ---------- Resúmenes ----------

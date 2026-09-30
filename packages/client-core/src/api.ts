@@ -9,5 +9,7 @@ export class ApiRequestError extends Error {
 export async function parseError(res: Response): Promise<ApiRequestError> {
   let body: ApiErrorBody | undefined;
   try { body = await res.json(); } catch {}
-  return new ApiRequestError(res.status, body?.error?.code ?? 'http_' + res.status, body?.error?.message ?? res.statusText, body?.error?.details);
+  // Sin cuerpo JSON (429 de nginx, 502/524 de Cloudflare) y con HTTP/2 statusText viene vacío: se traduce por estado.
+  const fallback = res.status === 429 ? 'rate_limited' : res.status >= 500 ? 'internal' : 'http_' + res.status;
+  return new ApiRequestError(res.status, body?.error?.code ?? fallback, body?.error?.message ?? res.statusText, body?.error?.details);
 }

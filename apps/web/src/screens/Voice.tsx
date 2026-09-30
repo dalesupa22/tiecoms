@@ -31,7 +31,7 @@ interface Rec { recorder: MediaRecorder; stream: MediaStream; ctx: AudioContext;
  * Micrófono del compositor: mantener pulsado graba, soltar envía, deslizar a la izquierda cancela y
  * deslizar arriba bloquea (manos libres con Enviar / Descartar). Onda en vivo y contador; máximo 15 min.
  */
-export function VoiceRecorder({ conversationId, onSent }: { conversationId: string; onSent?: () => void }) {
+export function VoiceRecorder({ conversationId, onSent, viewOnce }: { conversationId: string; onSent?: () => void; /** Una sola vista (tanda 1.7). */ viewOnce?: boolean }) {
   const rec = useRef<Rec | null>(null);
   const origin = useRef({ x: 0, y: 0 });
   const [state, setState] = useState<'idle' | 'holding' | 'locked' | 'sending'>('idle');
@@ -107,7 +107,7 @@ export function VoiceRecorder({ conversationId, onSent }: { conversationId: stri
     try {
       const ext = out.blob.type.includes('mp4') ? 'm4a' : out.blob.type.includes('ogg') ? 'ogg' : 'webm';
       const att = await client.uploadAttachment(conversationId, out.blob, `nota-de-voz.${ext}`, { durationMs: out.durationMs, waveform: out.waveform, aiConsent });
-      await client.send(conversationId, '', null, null, { attachments: [att] });
+      await client.send(conversationId, '', null, null, { attachments: [att], ...(viewOnce ? { viewOnce: true } : {}) });
       onSent?.();
     } catch (e) { toast(errorText(e)); } finally { setState('idle'); }
   }
@@ -210,7 +210,15 @@ export function VoiceNote({ a, onCreateIssue }: { a: AttachmentDTO; onCreateIssu
       }
       document.querySelectorAll<HTMLElement>('.voice-note.is-playing').forEach((n) => { if (n !== root.current) n.dispatchEvent(new Event('voice:pause')); });
       audio.current.playbackRate = speed;
-      await audio.current.play();
+      // WebKit (Safari y la app de escritorio en Mac) a veces no reproduce audio desde blob: («The element has no
+      // supported sources»). Si pasa, se reintenta una vez con el mismo audio como data: URL.
+      try { await audio.current.play(); }
+      catch (e: any) {
+        if (e?.name !== 'NotSupportedError' || !audio.current.src.startsWith('blob:')) throw e;
+        audio.current.src = await asDataUrl(audio.current.src);
+        audio.current.playbackRate = speed;
+        await audio.current.play();
+      }
       if (!wasHeard) { markHeard(a.id); setWasHeard(true); }
     } catch (e) { toast(errorText(e) || t('att.unavailable')); }
   }
@@ -263,4 +271,11 @@ export function VoiceNote({ a, onCreateIssue }: { a: AttachmentDTO; onCreateIssu
       )}
     </div>
   );
+}
+
+/** El mismo audio como data: URL (respaldo para WebKit, que a veces no reproduce blob:). */
+async function asDataUrl(objectUrl: string): Promise<string> {
+  const blob = await (await fetch(objectUrl)).blob();
+  const typed = blob.type ? blob : new Blob([blob], { type: 'audio/mp4' });
+  return new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(String(r.result)); r.onerror = () => fail(r.error); r.readAsDataURL(typed); });
 }

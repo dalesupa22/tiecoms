@@ -1,11 +1,14 @@
+import { asset } from './router.ts';
 import { useEffect, type ReactNode } from 'react';
 import type { BootstrapDTO, ConversationDTO, OrganizationDTO, PersonDTO } from '@tiecoms/contracts';
 import { attachmentSummaryText, locale, systemText, t } from './i18n.ts';
 import { apiUrl } from './app-client.ts';
+import { companyLine, companyOf } from './quick-search.ts';
 
 export function initials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1]![0] : '')).toUpperCase();
+  // Solo palabras que empiezan con letra o número: «Laura (cliente)» → LC, no «L(».
+  const parts = name.trim().split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}]+/u, '')).filter(Boolean);
+  return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1]![0] : '')).toUpperCase() || '?';
 }
 
 export function OrgMark({ org, size = 26 }: { org?: OrganizationDTO | null; size?: number }) {
@@ -40,7 +43,15 @@ export function personColor(id: string | null | undefined): string {
   return PERSON_COLORS[h % PERSON_COLORS.length]!;
 }
 
+/** gg, el asistente: participante bot con id fijo (docs/GG-CHAT.md). */
+export const GG_ID = '0a9a9a9a-0000-4000-8000-000000000066';
+/** En un directo, la otra persona; en «Tú» (directo contigo mismo), tú. */
+export const directOtherId = (d: BootstrapDTO, c: ConversationDTO) => c.memberIds.find((m) => m !== d.me.id) ?? d.me.id;
+export const isSelfChat = (d: BootstrapDTO, c: ConversationDTO) => c.kind === 'direct' && c.memberIds.every((m) => m === d.me.id);
+export const isGgChat = (c: ConversationDTO) => c.kind === 'direct' && c.memberIds.includes(GG_ID);
+
 export function Avatar({ person, org, size = 34 }: { person?: PersonDTO | null; org?: OrganizationDTO | null; size?: number }) {
+  if (person?.id === GG_ID) return <span className="avatar gg-avatar" style={{ width: size, height: size }}><img src={asset('/gg-mark.svg')} alt="gg" draggable={false} /></span>;
   // Sin foto: iniciales sobre el color estable de la persona; la empresa va en la insignia.
   const bg = person?.kind === 'agent' ? '#1b1917' : person ? personColor(person.id) : '#e0dace';
   const fg = person?.kind === 'agent' ? '#f4f1ea' : person ? '#ffffff' : '#5c554c';
@@ -61,7 +72,20 @@ export function ConvAvatar({ c, size = 22, fallback }: { c: ConversationDTO; siz
       style={{ width: size, height: size, borderRadius: c.kind === 'multi' ? 99 : Math.round(size * 0.28), objectFit: 'cover', flex: 'none' }} />;
   }
   if (fallback) return <>{fallback}</>;
-  return <span className="hash">{c.deriveKind === 'side' ? '💬' : c.parentId ? '⑂' : c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>;
+  if (c.deriveKind === 'side') return <SideIcon size={size} />;
+  return <span className="hash">{c.parentId ? '⑂' : c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>;
+}
+
+/** Ícono de sidechat: globo de diálogo en el verde azulado de sidechats (tokens --side-ink / --side-bg, igual en iOS y Android). */
+export function SideIcon({ size = 22 }: { size?: number }) {
+  const g = Math.round(size * 0.6);
+  return (
+    <span className="side-ico" aria-hidden style={{ width: size, height: size, borderRadius: Math.round(size * 0.28) }}>
+      <svg width={g} height={g} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4 19.5l1.4-4.4A7.5 7.5 0 1 1 20 11.5z" />
+      </svg>
+    </span>
+  );
 }
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
@@ -86,6 +110,7 @@ export const personById = (d: BootstrapDTO, id: string | null | undefined) => d.
 
 export function conversationTitle(d: BootstrapDTO, c: ConversationDTO) {
   if (c.kind === 'direct') {
+    if (isSelfChat(d, c)) return t('self.title');
     const other = c.memberIds.find((m) => m !== d.me.id);
     return personById(d, other)?.name ?? t('chat.aDirect');
   }
@@ -102,15 +127,21 @@ export function conversationTitle(d: BootstrapDTO, c: ConversationDTO) {
 
 export function conversationSubtitle(d: BootstrapDTO, c: ConversationDTO) {
   if (c.kind === 'direct') {
-    const other = personById(d, c.memberIds.find((m) => m !== d.me.id));
+    const other = personById(d, directOtherId(d, c));
     return other ? [other.title, orgById(d, other.orgId)?.name ?? (other.guest ? t('common.guest') : null)].filter(Boolean).join(' · ') : '';
   }
   if (c.kind === 'multi') {
     const orgs = [...new Set(c.memberIds.map((m) => orgById(d, personById(d, m)?.orgId)?.name).filter(Boolean))];
     return [c.deriveKind === 'side' ? `💬 ${t('side.kind')}` : t('chat.groupChat'), orgs.slice(0, 3).join(', ')].filter(Boolean).join(' · ');
   }
+  // Grupos: la empresa primero (bajo el nombre, en gris), luego el espacio si no es el mismo nombre.
   const ws = d.workspaces.find((w) => w.id === c.workspaceId);
-  return [ws?.name, c.kind === 'internal' ? t('kind.internalShort') : c.level === 'directivo' ? t('kind.directivo') : null].filter(Boolean).join(' · ');
+  const company = companyLine(d, c, conversationTitle(d, c));
+  const fold = (x: string) => x.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
+  const co = fold(companyOf(d, c) ?? '');
+  // El espacio solo si aporta: no el de la casa de la empresa ni uno cuyo nombre ya trae la empresa.
+  const wsName = ws && !ws.isOrgHome && !(co && fold(ws.name).includes(co)) ? ws.name : null;
+  return [company, wsName, c.kind === 'internal' ? t('kind.internalShort') : c.level === 'directivo' ? t('kind.directivo') : null].filter(Boolean).join(' · ');
 }
 
 /** Empresa "contraparte" de un espacio desde mi punto de vista (para agrupar la barra lateral). */
@@ -140,14 +171,16 @@ export function dayLabel(iso: string) {
 }
 
 /** Vista previa de la barra lateral: los mensajes de sistema se traducen. */
-export const previewText = (body: string | null) => (body ? systemText(body) : null);
+export const previewText = (body: string | null) => (body === '①' ? t('once.message') : body ? systemText(body) : null);
 
 /** Vista previa de una conversación: prefiere el último mensaje de una persona (con sus adjuntos) sobre los avisos de sistema. */
 export function conversationPreview(d: BootstrapDTO, c: ConversationDTO): string | null {
   const h = c.lastHumanPreview;
   if (h) {
     const who = h.authorId === d.me.id ? t('common.youShort') : c.kind !== 'direct' ? personById(d, h.authorId)?.name.split(' ')[0] : null;
-    const text = [h.attachments ? attachmentSummaryText(h.attachments) : '', h.body.replace(/\s+/g, ' ').trim()].filter(Boolean).join(' · ');
+    // Una sola vista: «① Foto», «① Mensaje» o «① Nota de voz», nunca el contenido.
+    const text = h.viewOnce ? (h.attachments?.voices ? t('once.voice') : h.attachments?.images ? t('once.photo') : t('once.message'))
+      : [h.attachments ? attachmentSummaryText(h.attachments) : '', h.body.replace(/\s+/g, ' ').trim()].filter(Boolean).join(' · ');
     if (text) return who ? `${who}: ${text}` : text;
   }
   return previewText(c.lastMessagePreview);

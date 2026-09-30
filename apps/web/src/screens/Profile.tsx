@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { UserDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
-import { openDialog } from '../actions.tsx';
+import { dndMenu, openDialog } from '../actions.tsx';
+import { setSoundEnabled, soundEnabled } from '../sound.ts';
 import { errorText, getLang, langPreference, setLang, t, type Lang } from '../i18n.ts';
 import { openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate } from '../router.ts';
@@ -74,6 +75,7 @@ export function ProfileDialog({ onClose }: { onClose: () => void }) {
       <label className="field"><span>{t('profile.jobTitle')}</span><input className="input" maxLength={120} value={title} placeholder={t('profile.jobTitlePh')} onChange={(e) => setTitle(e.target.value)} /></label>
       <label className="field"><span>{t('profile.area')}</span><input className="input" maxLength={120} value={area} placeholder={t('profile.areaPh')} onChange={(e) => setArea(e.target.value)} /></label>
       <div className="hint">{d.me.email}{org ? ` · ${org.name}` : ''}</div>
+      <button type="button" className="btn profile-signed" onClick={() => { onClose(); navigate('/firmas'); }}>✍️ {t('profile.signed')} <span className="muted">›</span></button>
       {error && <div className="error">{error}</div>}
       {cropFile && <PhotoCropDialog file={cropFile} title={t('photo.cropTitle')} onSave={upload} onClose={() => setCropFile(null)} />}
       <div className="modal-actions">
@@ -95,7 +97,13 @@ export function openAccountMenu(anchor: HTMLElement) {
     { label: t('profile.edit'), icon: '✎', onSelect: openProfile },
     { label: t('profile.changePhoto'), icon: '📷', onSelect: openProfile },
     { divider: true },
+    // «No molestar» (silenciar todo) y el sonido de mensajes (docs/GRUPOS.md, 28-sep-2026).
+    dndMenu(client.getState().data?.me.dndUntil),
+    { label: t('sound.title'), icon: soundEnabled() ? '🔊' : '🔈', hint: soundEnabled() ? '✓' : '—', onSelect: () => setSoundEnabled(!soundEnabled()) },
+    { divider: true },
+    { label: t('nav.signed'), icon: '✍️', onSelect: () => navigate('/firmas') },
     { label: t('nav.files'), icon: '▣', onSelect: () => navigate('/archivos') },
+    ...(client.getState().data?.features?.mail ? [{ label: t('nav.mail'), icon: '✉', onSelect: () => navigate('/correo') }] : []),
     { label: t('nav.whatsapp'), icon: '✆', onSelect: () => navigate('/whatsapp') },
     { label: t('settings.language'), icon: '🌐', hint: pref ? (pref === 'es' ? 'ES' : 'EN') : getLang().toUpperCase(),
       items: langs.map(([v, label]) => ({ label, icon: pref === v ? '✓' : '', onSelect: () => setLang(v) })) },

@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Platform } from '@tiecoms/contracts';
+import { clearForeignMeetingAttempts } from './meeting-attempt.ts';
+import { clearForeignMeetingProof } from './meeting-oauth.ts';
 import { browserLang } from './i18n.ts';
 import { IndexedDbStorage, MemoryStorage, TieComsClient, type ClientNotice, type ClientState, type SecretStore } from '@tiecoms/client-core';
 
@@ -40,8 +42,8 @@ const en = browserLang() === 'en';
 const mobile = navigator.userAgent.includes('Mobile');
 const DEVICE_NAMES: Record<Platform, string> = {
   web: en ? (mobile ? 'Mobile browser' : 'Browser') : (mobile ? 'Navegador móvil' : 'Navegador'),
-  macos: en ? 'Chaggu for Mac' : 'Chaggu para Mac', windows: en ? 'Chaggu for Windows' : 'Chaggu para Windows',
-  android: 'Chaggu Android', ios: 'Chaggu iPhone', agent: en ? 'Agent' : 'Agente',
+  macos: en ? 'chaggu for Mac' : 'chaggu para Mac', windows: en ? 'chaggu for Windows' : 'chaggu para Windows',
+  android: 'chaggu Android', ios: 'chaggu iPhone', agent: en ? 'Agent' : 'Agente',
 };
 
 // En web, API en el mismo origen. En apps, la variable de build apunta a https://app.chaggu.com.
@@ -59,6 +61,15 @@ export const client = new TieComsClient({
   deviceName: DEVICE_NAMES[platform],
   storage: makeStorage(),
   secrets: platform === 'web' ? undefined : nativeSecrets,
+});
+
+// Keep a proof only while the same signed-in identity owns this tab. Initial loading on
+// the provider return must preserve it until bootstrap identifies the account.
+client.subscribe(() => {
+  const state = client.getState();
+  if (state.status === 'anonymous' || state.data?.me.id) {
+    try { clearForeignMeetingProof(sessionStorage, state.data?.me.id ?? null); clearForeignMeetingAttempts(localStorage, state.data?.me.id ?? null); } catch {}
+  }
 });
 
 export function useClient<T>(select: (s: ClientState) => T): T {

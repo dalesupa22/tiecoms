@@ -74,6 +74,13 @@ export async function deleteAccount(userId: string, input: { confirmEmail: strin
         [JSON.stringify({ fileId: file.id, key: file.s3_key }), `delete-file:${file.id}`],
       );
     }
+    const sigs = await c.query('UPDATE user_signatures SET deleted_at = COALESCE(deleted_at, now()) WHERE user_id = $1 RETURNING id, s3_key', [userId]);
+    for (const sig of sigs.rows) {
+      await c.query(
+        `INSERT INTO jobs (kind, payload, dedupe_key) VALUES ('signature.delete', $1, $2) ON CONFLICT (dedupe_key) DO NOTHING`,
+        [JSON.stringify({ key: sig.s3_key }), `delete-signature:${sig.id}`],
+      );
+    }
     await c.query('DELETE FROM folders WHERE owner_id = $1 AND workspace_id IS NULL', [userId]);
     const wa = await c.query('UPDATE wa_accounts SET removed_at = now(), updated_at = now() WHERE user_id = $1 AND removed_at IS NULL RETURNING id', [userId]);
 

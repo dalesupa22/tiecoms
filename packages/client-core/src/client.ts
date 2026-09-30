@@ -5,7 +5,7 @@ import {
   type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type TopicColor, type TopicDTO, type UserDTO, normalizeEmoji,
-  type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallLinkDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentDTO, type CallTranscriptSegmentInput,
+  type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallLinkDTO, type SignupConfirmPreviewDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentDTO, type CallTranscriptSegmentInput,
   type ActiveCallDTO, type MessageRefDTO, type ChatSearchPageDTO, type ViewOnceOpenDTO, type EventCommentDTO, type ViewOnceState,
   type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO, type IntegrationDTO, type IntegrationSecretDTO,
   type StorageUsageDTO, type VideoPlayDTO,
@@ -376,6 +376,26 @@ export class TieComsClient {
     const generation = ++this.sessionGeneration;
     this.refreshing = null;
     const res = await this.raw('/auth/signup', { method: 'POST', json: { ...input, device: await this.device() } }, false);
+    if (!res.ok) throw await parseError(res);
+    const auth = await res.json();
+    this.assertSession(generation);
+    await this.applyAuth(auth);
+    this.assertSession(generation);
+    await this.afterLogin();
+  }
+
+  /** Registro con correo corporativo: a qué empresa entra quien abre el enlace del correo (docs/REGISTRO.md). */
+  async previewSignupConfirmation(token: string) {
+    const res = await this.raw(`/auth/signup/confirm/${encodeURIComponent(token)}`, {}, false);
+    if (!res.ok) throw await parseError(res);
+    return (await res.json()) as SignupConfirmPreviewDTO;
+  }
+
+  /** Confirma el correo: crea la cuenta (o la suma a la empresa del dominio) y deja la sesión iniciada. */
+  async confirmSignup(token: string) {
+    const generation = ++this.sessionGeneration;
+    this.refreshing = null;
+    const res = await this.raw('/auth/signup/confirm', { method: 'POST', json: { token, device: await this.device() } }, false);
     if (!res.ok) throw await parseError(res);
     const auth = await res.json();
     this.assertSession(generation);

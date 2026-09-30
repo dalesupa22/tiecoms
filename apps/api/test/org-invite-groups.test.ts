@@ -9,7 +9,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 const API = process.env.API_URL ?? 'http://localhost:3020';
 const BREVO = process.env.BREVO_URL ?? 'http://localhost:59100';
 const run = randomUUID().slice(0, 8);
-const mailOf = (who: string) => `${who}.${run}@acme-pruebas.co`;
+// Cada empresa con su dominio: quien comparte el dominio de Xertify entra a Xertify (docs/REGISTRO.md).
+const OWN_COMPANY = new Set(['gabi', 'hugo', 'intruso', 'otro', 'ajeno', 'uniandes1', 'mentor']);
+const mailOf = (who: string) => (OWN_COMPANY.has(who) ? `${who}.${run}@${who}-${run}-pruebas.co` : `${who}.${run}@acme-${run}-pruebas.co`);
 
 // Cada llamada desde una IP distinta (x-forwarded-for) para no chocar con el límite de altas por minuto.
 let n = 0;
@@ -24,7 +26,12 @@ async function call(path: string, opts: { method?: string; token?: string; body?
 }
 const device = () => ({ deviceId: randomUUID(), name: 'vitest', platform: 'web' });
 async function signup(who: string, extra: Record<string, unknown>) {
-  const r = await call('/auth/signup', { body: { name: who, email: mailOf(who), password: 'clave-segura-123', device: device(), ...extra } });
+  let r = await call('/auth/signup', { body: { name: who, email: mailOf(who), password: 'clave-segura-123', device: device(), ...extra } });
+  // Correo corporativo sin invitación: la cuenta nace al confirmar el correo (docs/REGISTRO.md).
+  if (r.json?.error?.code === 'email_confirm_sent') {
+    const m = (await sentTo(mailOf(who))).filter((x) => x.tags?.includes('signup-confirm')).at(-1);
+    r = await call('/auth/signup/confirm', { body: { token: /\/confirmar\/([A-Za-z0-9_-]+)/.exec(m.textContent)![1], device: device() } });
+  }
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   return { token: r.json.accessToken as string, id: r.json.user.id as string, orgId: r.json.user.primaryOrgId as string };
 }

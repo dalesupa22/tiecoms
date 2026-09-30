@@ -51,10 +51,14 @@ export const SignupInput = z.object({
   orgInviteToken: z.string().min(8).max(200).optional(),
   title: z.string().trim().max(120).optional(),
   device: DeviceInfo,
-}).refine((v) => !!v.orgName || !!v.orgInviteToken, { message: 'org_required', path: ['orgName'] });
+});
+/** Sin empresa ni invitación solo con correo corporativo: se suma a la del dominio o la crea con su nombre (el API lo valida). */
 export type SignupInput = z.infer<typeof SignupInput>;
 
 export const LoginInput = z.object({ email, password: z.string().min(1).max(200), device: DeviceInfo });
+/** POST /auth/signup/confirm: el enlace del correo de confirmación (registro con correo corporativo). */
+export const SignupConfirmInput = z.object({ token: z.string().min(20).max(100), device: DeviceInfo });
+export interface SignupConfirmPreviewDTO { email: string; name: string; orgName: string | null; joining: boolean }
 export type LoginInput = z.infer<typeof LoginInput>;
 
 export const RefreshInput = z.object({ refreshToken: z.string().optional() });

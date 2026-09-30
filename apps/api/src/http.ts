@@ -517,6 +517,7 @@ export async function buildHttp() {
       return mailbox.startConnect(req.userId, MailProvider.parse(req.params.provider), { platform: b.platform, redirectScheme: b.redirectScheme, proofChallenge: b.proofChallenge });
     });
     priv.delete<{ Params: { provider: string } }>('/api/v1/mail/connections/:provider', async (req) => mailbox.disconnect(req.userId, MailProvider.parse(req.params.provider)));
+    priv.get('/api/v1/mail/unread', mailLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return mailbox.unreadCount(req.userId); });
     priv.get('/api/v1/mail/messages', mailLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return mailbox.listMail(req.userId, MailListQuery.parse(req.query), (req.query as any)?.fresh === '1'); });
     priv.get<{ Params: { provider: string; id: string } }>('/api/v1/mail/messages/:provider/:id', mailLimit, async (req, reply) => {
       reply.header('cache-control', 'no-store');

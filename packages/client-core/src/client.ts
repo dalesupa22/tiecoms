@@ -149,6 +149,20 @@ const base64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+
  * reintentos, orden, recuperación y no leídos vive aquí para que web,
  * escritorio y móvil se comporten igual.
  */
+/** Vista previa «último mensaje de una persona» (ConversationDTO.lastHumanPreview) a partir de un mensaje de texto. */
+export function humanPreviewOf(m: MessageDTO): NonNullable<ConversationDTO['lastHumanPreview']> {
+  const list = m.attachments ?? [];
+  const voice = list.filter((a) => a.kind === 'voice');
+  const rest = list.filter((a) => a.kind !== 'voice');
+  const images = rest.filter((a) => a.contentType.startsWith('image/')).length;
+  const videos = rest.filter((a) => a.contentType.startsWith('video/')).length;
+  return {
+    messageId: m.id, seq: m.seq, authorId: m.authorId, body: m.viewOnce ? '' : m.body, createdAt: m.createdAt,
+    attachments: list.length ? { count: list.length, images, videos, files: rest.length - images - videos, firstName: list[0]?.name ?? null, voices: voice.length, voiceDurationMs: voice[0]?.durationMs ?? null } : null,
+    ...(m.viewOnce ? { viewOnce: true } : {}),
+  };
+}
+
 export class TieComsClient {
   private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, mails: {}, waRevision: 0, driveRevision: 0, calls: {} };
   private listeners = new Set<() => void>();
@@ -639,6 +653,9 @@ export class TieComsClient {
     const lastReadSeq = mine && m.seq === c.lastMessageSeq + 1 && Math.max(c.lastReadSeq, c.historyFromSeq) >= c.lastMessageSeq ? m.seq : c.lastReadSeq;
     this.patchConversationMeta(c.id, {
       lastMessageSeq: m.seq, lastMessageAt: m.createdAt, lastMessagePreview: m.viewOnce ? '①' : m.body.slice(0, 140), lastReadSeq,
+      // La lista ordena y previsualiza por el último mensaje de una persona (activityOf): se actualiza aquí, no solo en
+      // el bootstrap. Sin esto, escribirle a alguien no lo subía en «Recientes» hasta recargar (igual que Android).
+      ...(m.kind === 'text' ? { lastHumanPreview: humanPreviewOf(m) } : {}),
       // La pestaña «Enlaces» suma los enlaces nuevos sin esperar otro bootstrap.
       ...(m.kind === 'text' && c.linkCount !== undefined ? { linkCount: c.linkCount + new Set(m.body.match(/\bhttps?:\/\/[^\s<>"'`]+/gi) ?? []).size } : {}),
       unread: Math.max(0, m.seq - Math.max(lastReadSeq, c.historyFromSeq)),
@@ -1157,6 +1174,8 @@ export class TieComsClient {
       for (const [id, waiters] of batch) for (const w of waiters) { const e = got.get(id); if (e) w.resolve(e); else w.reject(new ApiRequestError(404, 'not_found', 'Correo no disponible')); }
     } catch (e) { for (const [, waiters] of batch) for (const w of waiters) w.reject(e); }
   };
+  /** Sin leer en Principal/Prioritarios de los correos conectados (para el riel de la web). */
+  async mailUnread() { return (await this.request<{ unread: number }>('/mail/unread')).unread; }
   async mailConnections() { return (await this.request<{ connections: import('@tiecoms/contracts').MailConnectionDTO[] }>('/mail/connections')).connections; }
   connectMailProvider(provider: import('@tiecoms/contracts').MailProvider, proofChallenge: string, platform: 'web' | 'ios' | 'android' | 'desktop' = 'web') {
     return this.request<{ url: string }>(`/mail/connect/${provider}`, { method: 'POST', json: { platform, proofChallenge } });

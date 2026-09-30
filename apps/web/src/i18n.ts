@@ -692,6 +692,7 @@ const es = {
   'err.already_opened': 'Ya abriste este mensaje', 'err.expired': 'Este mensaje ya no está disponible',
   // Correo en el chat (docs/CORREO.md)
   'nav.mail': 'Correo',
+  'side.allTitle': 'Todo', 'side.dmsTitle': 'Mensajes directos', 'notif.ask': 'Activa los avisos para enterarte de mensajes y llamadas aunque estés en otra pestaña.', 'notif.askBtn': 'Activar', 'notif.later': 'Ahora no',
   'mail.title': 'Correo',
   'mail.accounts': 'Cuentas',
   'mail.apply': 'Aplicar',
@@ -1528,6 +1529,7 @@ const en: Record<Key, string> = {
   'err.already_opened': 'You already opened this message', 'err.expired': 'This message is no longer available',
   // Email in the chat (docs/CORREO.md)
   'nav.mail': 'Email',
+  'side.allTitle': 'All', 'side.dmsTitle': 'Direct messages', 'notif.ask': 'Turn on alerts to hear about messages and calls even in another tab.', 'notif.askBtn': 'Turn on', 'notif.later': 'Not now',
   'mail.title': 'Email',
   'mail.accounts': 'Accounts',
   'mail.apply': 'Apply',

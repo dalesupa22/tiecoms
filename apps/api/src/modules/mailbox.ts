@@ -149,7 +149,10 @@ interface Provider {
   get(at: string, id: string): Promise<Full>;
   attachment(at: string, messageId: string, attachmentId: string): Promise<{ bytes: Buffer }>;
   reply(at: string, original: { externalId: string; threadId: string | null; internetId: string | null; references: string | null }, out: ReplyOut): Promise<void>;
+  /** Sin leer en Recibidos › Principal (Gmail) o Prioritarios (Outlook), hasta UNREAD_CAP. Una sola petición barata. */
+  unread(at: string): Promise<number>;
 }
+const UNREAD_CAP = 100;
 class ProviderError extends Error { constructor(public status: number, public code: string, message: string) { super(message); } }
 
 async function form(url: string, body: Record<string, string>) {
@@ -353,6 +356,10 @@ const PROVIDERS: Record<MailProvider, Provider> = {
       const j = await api(at, `${gApi()}/users/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`);
       return { bytes: b64u(j.data ?? '') };
     },
+    async unread(at) {
+      const p = new URLSearchParams({ maxResults: String(UNREAD_CAP), q: 'in:inbox category:primary is:unread', fields: 'messages(id)' });
+      return ((await api(at, `${gApi()}/users/me/messages?${p}`)).messages ?? []).length;
+    },
     async reply(at, o, out) {
       const raw = mime(out, { 'In-Reply-To': o.internetId, References: [o.references, o.internetId].filter(Boolean).join(' ') || null });
       await api(at, `${gApi()}/users/me/messages/send`, {
@@ -392,6 +399,11 @@ const PROVIDERS: Record<MailProvider, Provider> = {
         items = items.filter((i: MailListItemDTO) => cls.get(i.id) === ic);
       }
       return { items, nextPage: j['@odata.nextLink'] ?? null };
+    },
+    async unread(at) {
+      const p = new URLSearchParams({ $filter: "isRead eq false and inferenceClassification eq 'focused'", $top: '1', $count: 'true', $select: 'id' });
+      const j = await api(at, `${msApi()}/me/mailFolders/inbox/messages?${p}`, { headers: { ConsistencyLevel: 'eventual' } });
+      return Math.min(UNREAD_CAP, Number(j['@odata.count'] ?? 0));
     },
     async get(at, id) {
       const sel = 'id,conversationId,subject,bodyPreview,body,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isRead,hasAttachments,internetMessageId';
@@ -571,6 +583,22 @@ export async function listMail(userId: string, q: z.infer<typeof MailListQuery>,
   const load = () => withProvider(userId, q.provider, async (at, email) => ({ ...(await PROVIDERS[q.provider].list(at, q)), accountEmail: email }));
   if (fresh || !mailEnabled()) { const r = await load(); listCache.set(key, { body: Buffer.from(JSON.stringify(r)) }); return r; }
   return cached(listCache, key, load);
+}
+/**
+ * Sin leer para el riel de la web: suma de Gmail y Outlook conectados (cada uno hasta UNREAD_CAP).
+ * Un proveedor caído o por reconectar cuenta 0 y no rompe al otro. Se guarda 60 s en memoria.
+ */
+const unreadCache = new Map<string, { at: number; n: number }>();
+export async function unreadCount(userId: string): Promise<{ unread: number }> {
+  if (!mailEnabled()) return { unread: 0 };
+  const hit = unreadCache.get(userId);
+  if (hit && Date.now() - hit.at < 60_000) return { unread: hit.n };
+  const { rows } = await pool.query("SELECT provider FROM mail_connections WHERE user_id = $1 AND status = 'active'", [userId]);
+  const each = await Promise.all(rows.map((r) => withProvider(userId, r.provider as MailProvider, (at) => PROVIDERS[r.provider as MailProvider].unread(at)).catch(() => 0)));
+  const n = each.reduce((a, b) => a + b, 0);
+  if (unreadCache.size > 5000) unreadCache.clear();
+  unreadCache.set(userId, { at: Date.now(), n });
+  return { unread: n };
 }
 /** El correo completo, en vivo; se guarda unos minutos en memoria (vista previa → compartir no pide dos veces). */
 async function fullMail(userId: string, provider: MailProvider, id: string): Promise<Full> {

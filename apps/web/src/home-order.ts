@@ -62,12 +62,15 @@ export function withSeparators<T>(items: T[], convOf: (x: T) => ConversationDTO)
   return out;
 }
 
-// ---------- Etiqueta «Empresa · Grupo» de la vista Lista ----------
+// ---------- Empresa bajo el nombre (1.7.1: web, iOS y Android) ----------
 const fold = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
-/** «{Empresa} · {Grupo}»; si el nombre del grupo ya empieza por la empresa, no se repite. */
-export function companyGroupLabel(company: string | null | undefined, group: string) {
+/**
+ * La línea pequeña y gris bajo el nombre del grupo o la persona: la empresa. Si el nombre ya empieza por la
+ * empresa («Xertify - Xertiflow») no se repite y devuelve null; sin empresa también null.
+ */
+export function companyUnder(company: string | null | undefined, title: string): string | null {
   const c = (company ?? '').trim();
-  if (!c) return group;
-  if (fold(group).startsWith(fold(c))) return group;
-  return `${c} · ${group}`;
+  if (!c) return null;
+  if (fold(title).startsWith(fold(c))) return null;
+  return c;
 }

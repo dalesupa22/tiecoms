@@ -1,36 +1,19 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { BootstrapDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
-import { asset, navigate, type Route } from '../router.ts';
+import { navigate, type Route } from '../router.ts';
 import { Avatar, counterpartOrg, orgById, personById } from '../ui.tsx';
 import { MentionsInbox } from './Mentions.tsx';
 import type { ConversationDTO } from '@tiecoms/contracts';
 import { t } from '../i18n.ts';
-import { openAccountMenu } from './Profile.tsx';
-import { AllList, DmsList, GroupsBody, GroupsViewButton, GroupsViewToggle, dmConversations, useGroupsView } from './Groups.tsx';
+import { AllList, DmsList, GroupsBody, GroupsViewButton, dmConversations } from './Groups.tsx';
 import { QuickSearchField, QuickSearchSections, isMac, openCreateMenu, openNewMessage, quickKey, MessageSearchSection, useQuickResults } from './Quick.tsx';
 import { activityOf, isMuted, pendingOf } from '../home-order.ts';
 import { DndStrip, MeAvatar } from './Silence.tsx';
 import { AssistantBubble } from './Assistant.tsx';
+import { Rail, useSideMode } from './Rail.tsx';
+import { NotifyAsk } from '../bubbles.tsx';
 import { useSleepTzSync } from './Sleep.tsx';
-
-const NAV = [
-  { name: 'today', label: 'nav.today', ico: '◑', to: '/' },
-  { name: 'inbox', label: 'nav.inbox', ico: '◍', to: '/conversaciones' },
-  { name: 'agenda', label: 'nav.agenda', ico: '▤', to: '/agenda' },
-  { name: 'issues', label: 'nav.issues', ico: '◆', to: '/asuntos' },
-  { name: 'calls', label: 'nav.calls', ico: '☏', to: '/llamadas' },
-  { name: 'trazo', label: 'nav.trazo', ico: '⑂', to: '/trazo' },
-  { name: 'people', label: 'nav.people', ico: '◎', to: '/participantes' },
-  { name: 'files', label: 'nav.files', ico: '▣', to: '/archivos' },
-  { name: 'saved', label: 'nav.saved', ico: '🔖', to: '/ver-despues' },
-  { name: 'scheduled', label: 'nav.scheduled', ico: '🕒', to: '/programados' },
-  { name: 'mail', label: 'nav.mail', ico: '✉', to: '/correo' },
-  { name: 'whatsapp', label: 'nav.whatsapp', ico: '✆', to: '/whatsapp' },
-] as const;
-/** Today, Conversaciones, Calendario, Asuntos (y Llamadas si están prendidas) siempre; el resto bajo «Más». */
-const NAV_MAIN = 4;
-const NAV_MORE_KEY = 'tiecoms:navMore';
 
 export function groupWorkspaces(d: BootstrapDTO) {
   const groups = new Map<string, { org: ReturnType<typeof orgById>; workspaces: BootstrapDTO['workspaces'] }>();
@@ -82,29 +65,6 @@ export function matchesTab(c: ConversationDTO, tab: HomeTab) {
 }
 function storedFilter(): HomeTab { try { const v = localStorage.getItem(TAB_KEY); return v === 'unread' || v === 'mentions' ? v : 'all'; } catch { return 'all'; } }
 
-// ---------- Pestañas «Todo · Grupos · DMs» de la barra lateral (solo web de escritorio) ----------
-type SideTab = 'all' | 'groups' | 'dms';
-const SIDE_TAB_KEY = 'chaggu:sidebarTab';
-function storedSideTab(): SideTab { try { const v = localStorage.getItem(SIDE_TAB_KEY); return v === 'groups' || v === 'dms' ? v : 'all'; } catch { return 'all'; } }
-const isDmRow = (c: ConversationDTO) => (c.kind === 'direct' || c.kind === 'multi') && !(c.parentId && c.deriveKind !== 'side');
-
-function SideTabs({ d, tab, onTab }: { d: BootstrapDTO; tab: SideTab; onTab: (t: SideTab) => void }) {
-  // Globo: no leídos pendientes (no silenciados, o con mención). «Grupos» incluye las respuestas de sus hilos.
-  const sum = (f: (c: ConversationDTO) => boolean) => d.conversations.filter(f).reduce((n, c) => n + pendingOf(c), 0);
-  const groups = sum((c) => !!c.workspaceId && c.deriveKind !== 'side');
-  const dms = sum(isDmRow);
-  const n: Record<SideTab, number> = { all: groups + dms, groups, dms };
-  return (
-    <div className="side-tabs" role="tablist" aria-label={t('inbox.tabs')}>
-      {(['all', 'groups', 'dms'] as const).map((k) => (
-        <button key={k} role="tab" aria-selected={tab === k} className={`side-tab ${tab === k ? 'on' : ''}`} onClick={() => onTab(k)}>
-          {t(`inbox.tab.${k}`)}{n[k] > 0 && <span className="side-tab-n">{n[k]}</span>}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function SideFilters({ d, filter, onFilter }: { d: BootstrapDTO; filter: HomeTab; onFilter: (f: HomeTab) => void }) {
   return (
     <div className="side-filters" role="group" aria-label={t('inbox.filters')}>
@@ -148,8 +108,8 @@ function QuickChat() {
 function Sidebar({ route }: { route: Route }) {
   const d = useClient((s) => s.data)!;
   const [filter, setFilterState] = useState<HomeTab>(storedFilter);
-  const [sideTab, setSideTabState] = useState<SideTab>(storedSideTab);
-  const view = useGroupsView();
+  // Todo, Grupos o DMs lo elige el riel (Rail.tsx).
+  const sideTab = useSideMode();
   // Buscar un chat desde la barra (pedido de Danny, 29-sep-2026): chats, grupos y personas; se limpia al abrir uno.
   const [sq, setSq] = useState('');
   const sideSearching = !!sq.trim();
@@ -172,46 +132,22 @@ function Sidebar({ route }: { route: Route }) {
     addEventListener('keydown', k);
     return () => removeEventListener('keydown', k);
   }, [route.name]);
-  // Las secciones menos usadas van bajo «Más» para que los grupos y las relaciones quepan sin scroll.
-  const [navMore, setNavMore] = useState(() => { try { return localStorage.getItem(NAV_MORE_KEY) === '1'; } catch { return false; } });
-  const toggleNavMore = () => { const v = !navMore; setNavMore(v); try { localStorage.setItem(NAV_MORE_KEY, v ? '1' : '0'); } catch {} };
   const setFilter = (v: HomeTab) => { setFilterState(v); try { localStorage.setItem(TAB_KEY, v); } catch {} };
-  const setSideTab = (v: SideTab) => { setSideTabState(v); try { localStorage.setItem(SIDE_TAB_KEY, v); } catch {} };
-  const unreadTotal = d.conversations.reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0);
   const dms = dmConversations(d, filter);
-  const myOrg = orgById(d, d.me.primaryOrgId);
   const activeConv = route.name === 'conversation' ? route.id : null;
-
-  const callsOn = useClient((s) => s.data?.features?.calls === true);
-  const missedCalls = useClient((s) => s.data?.missedCalls ?? 0);
-  const mailOn = useClient((s) => s.data?.features?.mail === true);
   return (
     <aside className="side">
-      <div className="side-brand">
-        <img src={asset("/chaggu-logo.svg")} alt="chaggu" width={78} height={34} />
-        <span className="eyebrow" style={{ fontSize: 10 }}>{t('brand.network')}</span>
-      </div>
       <QuickChat />
-      <nav className="nav">
-        {NAV.filter((n) => (n.name !== 'calls' || callsOn) && (n.name !== 'mail' || mailOn)).filter((n, i) => i < NAV_MAIN + (callsOn ? 1 : 0) || navMore || route.name === n.name).map((n) => (
-          <button key={n.name} className={`nav-item ${route.name === n.name ? 'active' : ''}`} onClick={() => navigate(n.to)}>
-            <span className="ico">{n.ico}</span><span className="grow">{t(n.label)}</span>
-            {n.name === 'today' && unreadTotal > 0 && <span className="pill">{unreadTotal}</span>}
-            {n.name === 'calls' && missedCalls > 0 && <span className="pill is-missed" title={t('calls.missedN', { n: missedCalls })}>{missedCalls}</span>}
-          </button>
-        ))}
-        <button className="nav-item nav-more" aria-expanded={navMore} onClick={toggleNavMore}>
-          <span className="ico">{navMore ? '⌃' : '⋯'}</span><span className="grow">{navMore ? t('nav.less') : t('nav.more')}</span>
-        </button>
-      </nav>
       <DndStrip />
       <div className="side-search"><QuickSearchField inputRef={sideInput} value={sq} onChange={setSq} placeholder={t('side.searchChats')} order={['chats', 'groups', 'people']} hint={isMac ? '⌘F' : 'Ctrl+F'} /></div>
-      {!sideSearching && <SideTabs d={d} tab={sideTab} onTab={setSideTab} />}
+      <NotifyAsk />
+      {!sideSearching && <div className="side-title">
+        <span className="grow">{t(sideTab === 'groups' ? 'nav.groups' : sideTab === 'dms' ? 'side.dmsTitle' : 'side.allTitle')}</span>
+        {/* Lista | Árbol y plegar van en un solo botón de vista (solo en Grupos). */}
+        {sideTab === 'groups' && filter !== 'mentions' && <GroupsViewButton tab={filter} withView />}
+      </div>}
       {!sideSearching && <div className="home-tabs-row side-tools">
         <SideFilters d={d} filter={filter} onFilter={setFilter} />
-        {/* Lista | Árbol vive junto a ☰; ☰ (plegar) solo aplica en Árbol. */}
-        {sideTab === 'groups' && filter !== 'mentions' && <GroupsViewToggle />}
-        {sideTab === 'groups' && view === 'tree' && filter !== 'mentions' && <GroupsViewButton tab={filter} />}
       </div>}
       <div className="side-scroll">
         {sideSearching ? <><QuickSearchSections query={sq} order={['chats', 'groups', 'people']} withMessages /><MessageSearchSection query={sq} hasQuick={quickHas} /></>
@@ -223,15 +159,6 @@ function Sidebar({ route }: { route: Route }) {
             {dms.length === 0 && <button className="side-conv" onClick={openNewMessage}><span className="hash">✎</span><span className="grow muted">{t('dms.new')}</span></button>}
           </>}
       </div>
-      <button className="side-foot" style={{ border: 0, borderTop: '1px solid var(--line)', background: 'transparent', textAlign: 'left' }}
-        aria-haspopup="menu" title={t('profile.menu')} onClick={(e) => openAccountMenu(e.currentTarget)}>
-        <MeAvatar size={34} />
-        <span className="grow" style={{ minWidth: 0 }}>
-          <span className="ellipsis" style={{ display: 'block', fontWeight: 700 }}>{d.me.name}</span>
-          <span className="ellipsis small muted" style={{ display: 'block' }}>{myOrg?.name}</span>
-        </span>
-        <span className="muted" aria-hidden>⋯</span>
-      </button>
     </aside>
   );
 }
@@ -281,6 +208,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   const inConv = route.name === 'conversation';
   return (
     <div className={`shell ${inConv ? 'in-conv' : ''}`}>
+      <Rail route={route} />
       <Sidebar route={route} />
       <main className="main">
         {connection !== 'online' && <div className="conn" role="status">{connection === 'connecting' ? t('conn.connecting') : t('conn.offline')}</div>}

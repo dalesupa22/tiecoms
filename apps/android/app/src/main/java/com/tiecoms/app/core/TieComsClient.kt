@@ -1470,6 +1470,18 @@ class TieComsClient(
         req("PATCH", "/topics/${t.id}", body, TopicsPage.serializer()).topics.also { putTopics(t.conversationId, it) }
     }
 
+    /**
+     * 1.7.4: reordenar los temas activos del chat (PUT /conversations/:id/topics/order {ids}). Optimista: la fila cambia ya
+     * y, si el API falla (403 sin permiso de escribir, sin red…), vuelve al orden anterior y se lanza el error.
+     */
+    suspend fun reorderTopics(conversationId: String, list: List<TopicDTO>, ids: List<String>): List<TopicDTO> = withContext(dispatcher) {
+        putTopics(conversationId, Topics.applyOrder(list, ids))
+        try {
+            val body = buildJsonObject { put("ids", kotlinx.serialization.json.JsonArray(ids.map { JsonPrimitive(it) })) }
+            req("PUT", "/conversations/${enc(conversationId)}/topics/order", body, TopicsPage.serializer()).topics.also { putTopics(conversationId, it) }
+        } catch (e: Exception) { putTopics(conversationId, list); throw e }
+    }
+
     /** Quitar un tema: sus mensajes quedan sin tema (no se borra ninguno). Devuelve cuántos quedaron sin tema. */
     suspend fun deleteTopic(t: TopicDTO): Int = withContext(dispatcher) {
         val r = req("DELETE", "/topics/${t.id}", null, TopicsPage.serializer())

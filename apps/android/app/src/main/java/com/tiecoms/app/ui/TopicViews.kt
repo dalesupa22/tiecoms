@@ -55,6 +55,19 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.composed
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.gestures.drag
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -109,6 +122,8 @@ private fun TopicFlag(
     hint: String? = null,
     /** 1.7.4: banderita compacta (solo el ícono): TalkBack lee este nombre completo, con el sin leer y la pista. */
     a11y: String? = null,
+    /** 1.7.4: se puede arrastrar para reordenar (mantener presionado y mover; sin mover, abre el menú). */
+    drag: TopicDrag? = null,
 ) {
     val density = androidx.compose.ui.platform.LocalDensity.current
     val tailPx = with(density) { 9.dp.toPx() }
@@ -123,7 +138,12 @@ private fun TopicFlag(
     Box(
         Modifier.height(h).background(bg, shape)
             .drawBehind { drawRect(stripe, size = androidx.compose.ui.geometry.Size(with(density) { 5.dp.toPx() }, size.height)) }
-            .combinedClickable(role = Role.Tab, onClick = onClick, onLongClick = onLongClick, onLongClickLabel = if (onLongClick != null) menuLabel else null)
+            .then(if (drag == null) Modifier.combinedClickable(role = Role.Tab, onClick = onClick, onLongClick = onLongClick, onLongClickLabel = if (onLongClick != null) menuLabel else null)
+                else Modifier.topicDragGestures(drag, onClick, onLongClick).semantics {
+                    role = Role.Tab
+                    this.onClick { onClick(); true }
+                    if (onLongClick != null) this.onLongClick(menuLabel) { onLongClick(); true }
+                })
             .testTag(tag)
             .then(if (a11y != null) Modifier.clearAndSetSemantics { this.selected = selected; role = Role.Tab; contentDescription = a11y }
                 else Modifier.semantics { this.selected = selected; if (hint != null) contentDescription = hint })
@@ -144,6 +164,40 @@ private fun TopicFlag(
     }
 }
 
+/** Arrastre de una banderita: empieza al mantener presionado; [onDrag] recibe el movimiento horizontal en píxeles. */
+internal class TopicDrag(val onStart: () -> Unit, val onDrag: (Float) -> Unit, val onEnd: () -> Unit, val onCancel: () -> Unit)
+
+/**
+ * Toque = [onClick]. Mantener presionado: vibra y, si se mueve, arrastra ([TopicDrag]); si se suelta sin mover, [onLongClick] (el menú).
+ * Si antes del mantener la fila se desliza, no pasa nada (la fila se desplaza).
+ */
+private fun Modifier.topicDragGestures(drag: TopicDrag, onClick: () -> Unit, onLongClick: (() -> Unit)?): Modifier = composed {
+    val view = androidx.compose.ui.platform.LocalView.current
+    pointerInput(drag) {
+        awaitEachGesture {
+            val down = awaitFirstDown()
+            var cancelled = false
+            val up = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                waitForUpOrCancellation().also { if (it == null) cancelled = true }
+            }
+            if (up != null) { up.consume(); onClick(); return@awaitEachGesture }
+            if (cancelled) return@awaitEachGesture
+            // Mantener presionado.
+            view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            drag.onStart()
+            var moved = 0f
+            val ok = drag(down.id) { change ->
+                val dx = change.positionChange().x
+                moved += dx
+                drag.onDrag(dx)
+                change.consume()
+            }
+            if (kotlin.math.abs(moved) < viewConfiguration.touchSlop) { drag.onCancel(); onLongClick?.invoke() }
+            else if (ok) drag.onEnd() else drag.onCancel()
+        }
+    }
+}
+
 /**
  * Fila de banderitas: «💬 Todo», los temas activos (ícono, nombre y sin leer), «＋ Nuevo» y, al final, «🗄 Archivados N».
  * [filter] es la banderita elegida (null = Todo); [counts], cuántos mensajes cargados tiene cada tema (para «Quitar»); [unread], lo sin leer de cada tema (clave "" = sin tema, va en «Todo»).
@@ -156,7 +210,26 @@ fun TopicDock(conv: ConversationDTO, topics: List<TopicDTO>, filter: String?, co
     val container = LocalContainer.current
     val snackbar = LocalSnackbar.current
     // Orden de llegada: el más antiguo primero (position sigue el orden de creación; estable si empatan).
-    val active = remember(topics) { Topics.active(topics).sortedBy { it.position } }
+    val active = remember(topics) { Topics.ordered(topics) }
+    // Arrastrar para reordenar (mantener presionado y mover; solo quien puede escribir): el tema arrastrado y cuánto se movió.
+    val rowState = androidx.compose.foundation.lazy.rememberLazyListState()
+    var dragging by remember { mutableStateOf<String?>(null) }
+    var dragDx by remember { mutableStateOf(0f) }
+    fun dropTarget(): String? {
+        val from = dragging ?: return null
+        val items = rowState.layoutInfo.visibleItemsInfo
+        val me = items.firstOrNull { it.key == from } ?: return null
+        val center = me.offset + me.size / 2f + dragDx
+        val ids = active.map { it.id }.toSet()
+        return items.firstOrNull { it.key in ids && center >= it.offset && center < it.offset + it.size }?.key as? String
+    }
+    fun drop() {
+        val from = dragging; val target = dropTarget()
+        dragging = null; dragDx = 0f
+        if (from == null || target == null) return
+        val ids = Topics.moveTo(active.map { it.id }, from, target) ?: return
+        container.scope.launch { runCatching { client.reorderTopics(conv.id, topics, ids) }.onFailure { snackbar.showSnackbar(topicError(ctx, it)) } }
+    }
     val archived = Topics.archived(topics)
     val canEdit = conv.canPost
     var menuFor by remember { mutableStateOf<String?>(null) }
@@ -191,7 +264,7 @@ fun TopicDock(conv: ConversationDTO, topics: List<TopicDTO>, filter: String?, co
     val cd = stringResource(R.string.topic_bar)
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth().testTag("topicDock")) {
         LazyRow(
-            Modifier.fillMaxWidth().height(40.dp).semantics { contentDescription = cd },
+            Modifier.fillMaxWidth().height(40.dp).semantics { contentDescription = cd }, state = rowState,
             contentPadding = PaddingValues(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Top,
         ) {
             // «💬 General» (solo lo sin tema; así abre el chat) y «☰ Todo» (todo, con su etiqueta). Sin temas activos son lo
@@ -215,9 +288,19 @@ fun TopicDock(conv: ConversationDTO, topics: List<TopicDTO>, filter: String?, co
             }
             items(active, key = { it.id }) { t ->
                 val (bg, ink) = topicColors(t.color)
-                Box {
+                val isDragged = dragging == t.id
+                val over = dragging != null && !isDragged && dropTarget() == t.id
+                Box(Modifier.zIndex(if (isDragged) 1f else 0f).graphicsLayer {
+                    translationX = if (isDragged) dragDx else 0f; if (isDragged) { scaleX = 1.06f; scaleY = 1.06f; shadowElevation = 8f }
+                }.then(if (over) Modifier.border(2.dp, ink.copy(alpha = 0.6f), RoundedCornerShape(4.dp)) else Modifier)) {
                     TopicFlag("${t.icon} ${t.name}", bg, ink, selected = filter == t.id, tag = "topic-${t.name}",
-                        onClick = { onFilter(if (filter == t.id) null else t.id) }, onLongClick = if (canEdit) ({ menuFor = t.id }) else null, unread = unread[t.id] ?: 0)
+                        onClick = { onFilter(if (filter == t.id) null else t.id) }, onLongClick = if (canEdit) ({ menuFor = t.id }) else null, unread = unread[t.id] ?: 0,
+                        drag = if (canEdit) TopicDrag(
+                            onStart = { dragging = t.id; dragDx = 0f },
+                            onDrag = { dx -> dragDx += dx },
+                            onEnd = { drop() },
+                            onCancel = { dragging = null; dragDx = 0f },
+                        ) else null)
                     AnchoredMenu(menuFor == t.id, if (menuFor == t.id) menu(t) else emptyList(), onDismiss = { menuFor = null })
                 }
             }

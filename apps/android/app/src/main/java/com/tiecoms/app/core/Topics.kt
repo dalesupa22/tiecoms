@@ -42,6 +42,27 @@ object Topics {
     fun active(list: List<TopicDTO>): List<TopicDTO> = list.filter { !it.archived }
     fun archived(list: List<TopicDTO>): List<TopicDTO> = list.filter { it.archived }
 
+    /** 1.7.4: la fila en orden de llegada (position; estable si empatan). El orden lo cambia quien arrastra y es del chat. */
+    fun ordered(list: List<TopicDTO>): List<TopicDTO> = active(list).sortedBy { it.position }
+
+    /**
+     * Soltar [from] sobre [target] (dropOn de la web): el orden nuevo de los ids activos, o null si no cambia nada.
+     * Hacia adelante queda después del destino; hacia atrás, antes.
+     */
+    fun moveTo(ids: List<String>, from: String, target: String): List<String>? {
+        val fi = ids.indexOf(from); val ti = ids.indexOf(target)
+        if (fi < 0 || ti < 0 || fi == ti) return null
+        val rest = ids.filter { it != from }.toMutableList()
+        rest.add(rest.indexOf(target) + (if (fi < ti) 1 else 0), from)
+        return rest.takeIf { it != ids }
+    }
+
+    /** Aplica el orden nuevo a la lista (actualización optimista, como reorderTopics de la web). */
+    fun applyOrder(list: List<TopicDTO>, ids: List<String>): List<TopicDTO> {
+        val pos = ids.withIndex().associate { it.value to it.index }
+        return list.map { t -> pos[t.id]?.let { t.copy(position = it) } ?: t }.sortedBy { it.position }
+    }
+
     /** Mensajes con tema por banderita (solo los cargados y no eliminados). */
     fun counts(messages: List<MessageDTO>): Map<String, Int> =
         messages.filter { it.topicId != null && it.deletedAt == null }.groupingBy { it.topicId!! }.eachCount()

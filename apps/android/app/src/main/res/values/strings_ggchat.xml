@@ -4,4 +4,7 @@
     <string name="gg_for_other">For %1$s</string>
     <string name="ai_discarded">Discarded</string>
     <string name="gg_actions_preview">gg has %1$d things ready</string>
+    <string name="card_forward">Forward</string>
+    <string name="card_forward_title">Forward to other chats</string>
+    <string name="card_forwarded">Forwarded</string>
 </resources>

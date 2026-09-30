@@ -247,6 +247,8 @@ fun ConversationScreen(
     var newIssue by remember { mutableStateOf<Pair<Boolean, MessageDTO?>?>(null) }
     var meeting by remember { mutableStateOf<Pair<Boolean, MessageDTO?>?>(null) }
     var forwarding by remember { mutableStateOf<MessageDTO?>(null) }
+    /** Reenviar la tarjeta de un correo o WhatsApp a otros chats (su emailId). */
+    var forwardCard by remember { mutableStateOf<String?>(null) }
     var reminderCustom by remember { mutableStateOf<Pair<Boolean, MessageDTO?>?>(null) }
     var bringing by rememberSaveable { mutableStateOf(false) }
     /** «Crear asunto: …» sugerido por la transcripción de una nota de voz. */
@@ -782,7 +784,17 @@ fun ConversationScreen(
                             when (item) {
                                 is ChatItem.Day -> DaySeparator(dayText(ctx, item.date))
                                 is ChatItem.Msg -> if (item.m.kind == "system") SystemRow(item.m, data, state.events, onOpenConversation, onOpenIssue, onOpenEvent, canPost = meta.canPost && !blockedDirect,
-                                    animate = item.m.id in liveFx)
+                                    animate = item.m.id in liveFx,
+                                    // Tarjetas de correo o WhatsApp: responder aquí, en privado y reenviar, como un mensaje normal.
+                                    cardActions = if (embedded) null else { cm, emailId ->
+                                        val author = Names.person(data, cm.authorId)
+                                        CardActions(
+                                            reply = if (meta.canPost && !blockedDirect) ({ replyTo = cm; editing = null }) else null,
+                                            replyPrivately = if (cm.authorId != me && meta.kind != "direct" && author?.kind == "human") ({ onPrivateReply(cm) }) else null,
+                                            forward = emailId?.let { e -> { forwardCard = e } },
+                                            copyLink = { copyToClipboard(ctx, messageLink(id, cm.seq)); container.toast(ctx.getString(R.string.toast_link_copied)) },
+                                        )
+                                    })
                                 else MessageBubble(
                                     item, data, quoted = item.m.replyTo?.let { byId[it] }, pinnedHere = item.m.id in pinned, highlighted = highlight == item.m.seq,
                                     issue = openHere.firstOrNull { it.originMessageId == item.m.id },
@@ -860,7 +872,7 @@ fun ConversationScreen(
                 val pr by container.privateReply.collectAsStateWithLifecycle()
                 val privateHere = pr?.takeIf { it.targetConversationId == id }
                 if (privateHere != null) Banner(
-                    stringResource(R.string.reply_private_to, privateHere.authorName ?: "") + " · «" + excerpt(privateHere.source.body, 100) + "»",
+                    stringResource(R.string.reply_private_to, privateHere.authorName ?: "") + " · «" + excerpt(quoteText(ctx, privateHere.source), 100) + "»",
                     stringResource(R.string.reply_cancel), { container.privateReply.value = null }, "privateReplyBar",
                 )
                 // Sidechat: respuestas rápidas del lado de quien recibe (la última palabra no es mía).
@@ -941,6 +953,7 @@ fun ConversationScreen(
     sideStart?.let { m -> SideStartSheet(meta, m, onClose = { sideStart = null; sidePreselect = emptyList() }, onStarted = { sid -> sideOpen = sid }, preselect = sidePreselect) }
 
     topicNewFor?.let { m -> TopicSheet(id, topics, edit = null, onClose = { topicNewFor = null }, onSaved = { t -> tagWithNewTopic(ctx, container, snackbar, m, t) }) }
+    forwardCard?.let { e -> ForwardCardSheet(e, onClose = { forwardCard = null }, onDone = { cid -> forwardCard = null; onOpenConversation(cid, null) }) }
     reportMessage?.let { ReportDialog(it.authorId, it.id, onClose = { reportMessage = null }) }
     pickerFor?.let { pm ->
         val live = byId[pm.id] ?: pm
@@ -954,8 +967,8 @@ fun ConversationScreen(
     voiceIssue?.let { (t, m) -> NewIssueDialog(id, m.id, t, onClose = { voiceIssue = null }, onCreated = onOpenIssue) }
     // El hilo nuevo se abre al lado, sin salir del chat (como un hilo de Slack).
     deriving?.let { m -> DeriveDialog(meta, m, onClose = { deriving = null }, onCreated = { cid -> sideOpen = cid }) }
-    newIssue?.let { (_, m) -> NewIssueDialog(id, m?.id, m?.let { excerpt(it.body) } ?: "", onClose = { newIssue = null }, onCreated = onOpenIssue) }
-    meeting?.let { (_, m) -> EventDialog(id, originMessageId = m?.id, defaultTitle = m?.let { excerpt(it.body, 80) } ?: "", onClose = { meeting = null }) }
+    newIssue?.let { (_, m) -> NewIssueDialog(id, m?.id, m?.let { excerpt(quoteText(ctx, it)) } ?: "", onClose = { newIssue = null }, onCreated = onOpenIssue) }
+    meeting?.let { (_, m) -> EventDialog(id, originMessageId = m?.id, defaultTitle = m?.let { excerpt(quoteText(ctx, it), 80) } ?: "", onClose = { meeting = null }) }
     forwarding?.let { m -> ForwardDialog(m, onClose = { forwarding = null }, onSent = {}) }
     meetingLink?.let { now -> MeetingDialog(id, now, onClose = { meetingLink = null }) }
     reminderCustom?.let { (_, m) -> ReminderDialog(meta, m, onClose = { reminderCustom = null }) }
@@ -1215,7 +1228,7 @@ private fun Composer(
                     onScheduled()
                 }) else null)
             }
-            if (replyTo != null) Banner(stringResource(R.string.reply_to, Names.person(data, replyTo.authorId)?.name ?: "") + " · " + excerpt(replyTo.body, 100), stringResource(R.string.reply_cancel), onCancelReply, "replyBar")
+            if (replyTo != null) Banner(stringResource(R.string.reply_to, Names.person(data, replyTo.authorId)?.name ?: "") + " · " + excerpt(quoteText(LocalContext.current, replyTo), 100), stringResource(R.string.reply_cancel), onCancelReply, "replyBar")
             if (editing != null) Banner(stringResource(R.string.edit_title), stringResource(R.string.cancel), onCancelEdit, "editBar")
             // Buscador de menciones sobre el compositor.
             run {
@@ -1355,13 +1368,15 @@ internal fun SystemRow(
     canPost: Boolean = false,
     /** Llegó en vivo con el chat a la vista (tanda 1.7): la carita triste de la tarea vencida se anima una vez. */
     animate: Boolean = false,
+    /** Acciones de las tarjetas de correo y WhatsApp (menú y deslizar); null las oculta. */
+    cardActions: ((MessageDTO, String?) -> CardActions)? = null,
 ) {
     val ctx = LocalContext.current
     val chat = LocalChatColors.current
     // gg: lo que dejó listo (tarjetas para confirmar) y respuestas rápidas (docs/GG-CHAT.md).
     com.tiecoms.app.core.Gg.parseActions(m)?.let { g -> GgActionsRow(m, g, data); return }
     // Correo y WhatsApp traídos al chat (docs/CORREO.md): nunca como JSON crudo.
-    com.tiecoms.app.core.MailSystem.parse(m)?.let { b -> MailSystemRow(m, b, data, canPost, onOpenIssue); return }
+    com.tiecoms.app.core.MailSystem.parse(m)?.let { b -> MailSystemRow(m, b, data, canPost, onOpenIssue, cardActions); return }
     // Tanda 1.7: es hoy, tarea hecha/vencida y comentarios agrupados se ven como la tarjeta del evento o de la tarea.
     com.tiecoms.app.core.System17.parse(m)?.let { b ->
         // Comentarios agrupados: una línea corta que abre la tarea o el evento, sin repetir la tarjeta (como la web).
@@ -1510,7 +1525,7 @@ internal fun MessageBubble(
             if (m.replyTo != null) {
                 Surface(color = fg.copy(alpha = 0.12f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(bottom = 4.dp).clickable(enabled = quoted != null) { quoted?.let(onQuote) }) {
                     Text(
-                        if (quoted != null) "${Names.person(data, quoted.authorId)?.name ?: ""}: " + (if (quoted.deletedAt != null) stringResource(R.string.deleted) else excerpt(quoted.body, 120))
+                        if (quoted != null) "${Names.person(data, quoted.authorId)?.name ?: ""}: " + (if (quoted.deletedAt != null) stringResource(R.string.deleted) else excerpt(quoteText(ctx, quoted), 120))
                         else stringResource(R.string.reply_quote_missing),
                         Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall, color = fg, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     )

@@ -36,6 +36,8 @@ object MailSystem {
         val lastExcerpt: String?,
         /** wa.shared: el mensaje de WhatsApp citado. */
         val wa: Wa?,
+        /** La tarjeta se reenvió desde este chat (POST /mail/shared/:id/forward). */
+        val forwardedFrom: String? = null,
     )
 
     data class Wa(
@@ -44,6 +46,27 @@ object MailSystem {
     )
 
     fun parse(m: MessageDTO): Body? = if (m.kind != "system") null else parse(m.body)
+
+    /** Una tarjeta de correo o WhatsApp llevada al chat (mail.shared / wa.shared): se puede responder y reenviar. */
+    fun isCard(b: Body?): Boolean = b != null && (b.key == "mail.shared" || b.key == "wa.shared")
+
+    /**
+     * Cómo se cita la tarjeta al responderla (cardQuote de la web): «✉ asunto · remitente» o «WhatsApp · chat: texto».
+     * null si no es una tarjeta. Tolera el cuerpo cortado de las vistas previas.
+     */
+    fun cardQuote(kind: String, body: String, noSubject: String = "(sin asunto)"): String? {
+        if (kind != "system") return null
+        val b = parse(body) ?: run {
+            if (!body.startsWith("{\"k\":\"mail.shared\"") && !body.startsWith("{\"k\":\"wa.shared\"")) return null
+            val pairs = Regex("\"(\\w+)\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").findAll(body).associate { it.groupValues[1] to JsonPrimitive(it.groupValues[2]) }
+            parse(kotlinx.serialization.json.JsonObject(pairs))
+        } ?: return null
+        return when (b.key) {
+            "mail.shared" -> "✉ " + b.subject.ifEmpty { noSubject } + (b.from?.let { " · $it" } ?: "")
+            "wa.shared" -> "WhatsApp" + (b.wa?.chatName?.let { " · $it" } ?: "") + ": " + (b.wa?.text ?: "")
+            else -> null
+        }
+    }
 
     fun parse(body: String): Body? {
         if (!body.startsWith("{\"k\":\"mail.") && !body.startsWith("{\"k\":\"wa.")) return null
@@ -61,7 +84,7 @@ object MailSystem {
         return Body(
             key = k, emailId = s("emailId"), provider = s("provider"), subject = s("subject") ?: s("title") ?: "", from = s("from"),
             comment = s("comment"), byName = s("byName"), error = s("error"), count = (o["count"] as? JsonPrimitive)?.intOrNull ?: 1,
-            lastById = s("lastById"), lastByName = s("lastByName"), lastExcerpt = s("lastExcerpt"), wa = wa,
+            lastById = s("lastById"), lastByName = s("lastByName"), lastExcerpt = s("lastExcerpt"), wa = wa, forwardedFrom = s("forwardedFrom"),
         )
     }
 }

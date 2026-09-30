@@ -16,6 +16,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ActivityScenario
@@ -93,6 +95,11 @@ class CorreoUiTest {
             val chat = arg("chat"); val id = arg("sharedId"); val quoted = arg("quotedId")
             val client = app.container.client.value
             openChat(chat)
+            compose.waitUntil(20_000) { client.state.value.conversations[chat]?.messages?.any { it.body.contains(id) } == true }
+            compose.waitUntil(20_000) { client.state.value.mails[id] != null }
+            // La fila entera abre el menú de la tarjeta (sus hijos se fusionan): se busca por la fila.
+            val cardSeq = client.state.value.conversations[chat]!!.messages.first { it.kind == "system" && it.body.startsWith("{\"k\":\"mail.shared\"") && it.body.contains(id) }.seq
+            compose.onNodeWithTag("messages").performScrollToNode(hasTestTag("mailShared-$cardSeq"))
             compose.waitUntilAtLeastOneExists(hasTestTag("mailCard-$id"), 20_000)
             // Se ve como mensaje de quien lo trajo, con su comentario, y la tarjeta (cargada en lote, sin cuerpo).
             compose.waitUntil(10_000) { shows("Miren este correo, ¿cómo le respondemos?") }
@@ -163,7 +170,10 @@ class CorreoUiTest {
             // Cancelar lo programado desde el correo (se espera a que se vaya el aviso de abajo).
             compose.waitUntil(8_000) { !shows(str(R.string.web_mail_scheduledToast, "").trim().substringBefore(" ")) || true }
             Thread.sleep(4500)
-            compose.onAllNodesWithTag("mailCardTitle-$id", useUnmergedTree = true).onFirst().performScrollTo().performClick()
+            compose.onNodeWithTag("messages").performScrollToNode(hasTestTag("mailShared-$cardSeq"))
+            compose.onNodeWithTag("messages").performTouchInput { swipeUp(startY = bottom * 0.7f, endY = bottom * 0.4f) }
+            compose.waitForIdle()
+            compose.onAllNodesWithTag("mailCardTitle-$id", useUnmergedTree = true).onFirst().performClick()
             runCatching { compose.waitUntilAtLeastOneExists(hasTestTag("mailCancelSchedule"), 10_000) }.onFailure { shot("xx-sin-cancelar"); throw it }
             compose.onNodeWithTag("mailCancelSchedule").performClick()
             compose.waitUntil(15_000) { client.state.value.mails[id]?.status == "pending" }

@@ -779,11 +779,11 @@ private fun MailPreviewSheet(provider: String, item: MailListItemDTO, pickLabel:
 /** Elegir uno o varios chats (hasta 10) para llevar un correo o un WhatsApp; los elegidos van como chips arriba. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MultiChatPicker(data: BootstrapDTO, picked: List<String>, onChange: (List<String>) -> Unit) {
+private fun MultiChatPicker(data: BootstrapDTO, picked: List<String>, exclude: String? = null, onChange: (List<String>) -> Unit) {
     val ctx = LocalContext.current
     var q by rememberSaveable { mutableStateOf("") }
     val direct = stringResource(R.string.kind_direct)
-    val list = data.conversations.filter { it.canPost && (q.isBlank() || titleOf(ctx, it, data).contains(q, ignoreCase = true)) }.take(80)
+    val list = data.conversations.filter { it.canPost && it.id != exclude && (q.isBlank() || titleOf(ctx, it, data).contains(q, ignoreCase = true)) }.take(80)
     OutlinedTextField(q, { q = it }, placeholder = { Text(stringResource(R.string.web_mail_pickChat)) }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("pickerSearch"))
     if (picked.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         picked.forEach { id -> data.conversations.firstOrNull { it.id == id }?.let { c ->
@@ -865,6 +865,48 @@ private fun MailShareSheet(provider: String, item: MailListItemDTO, conversation
                         val go = conversationId?.takeIf { it in targets } ?: targets.first()
                         onDone(go, list.firstOrNull { it.conversationId == go }?.messageId)
                     }
+                    .onFailure { container.toast(errorText(ctx, it)) }
+                busy = false
+            }
+        }
+    }
+}
+
+// ---------- Reenviar una tarjeta ----------
+/** Reenviar un correo o WhatsApp ya compartido a otros chats: cada uno recibe su copia con hilo propio (POST …/forward). */
+@Composable
+fun ForwardCardSheet(emailId: String, onClose: () -> Unit, onDone: (String) -> Unit) {
+    val ctx = LocalContext.current
+    val client = LocalClient.current
+    val container = LocalContainer.current
+    val st by client.state.collectAsStateWithLifecycle()
+    val data = st.data ?: return
+    val e = st.mails[emailId]
+    var picked by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var comment by rememberSaveable { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    FormSheet(stringResource(R.string.card_forward_title), onClose, tag = "forwardCard") {
+        if (e != null) Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                SrcIcon(e.provider, 20.dp); Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(if (e.isWhatsApp) e.wa?.chatName ?: e.subject else e.subject.ifBlank { stringResource(R.string.web_mail_noSubject) }, fontWeight = FontWeight.Bold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(e.snippet, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        // El chat donde ya está no se ofrece.
+        MultiChatPicker(data, picked, exclude = e?.conversationId) { picked = it }
+        OutlinedTextField(comment, { comment = it.take(4000) }, placeholder = { Text(stringResource(R.string.web_mail_commentPh)) }, minLines = 2, maxLines = 4,
+            modifier = Modifier.fillMaxWidth().testTag("forwardComment"))
+        WhoSees(data, picked)
+        DialogButtons(onClose, if (busy) stringResource(R.string.web_mail_sharing) else shareLabel(data, picked), enabled = picked.isNotEmpty() && !busy, confirmTag = "forwardConfirm") {
+            val targets = picked
+            busy = true
+            container.scope.launch {
+                runCatching { client.forwardShared(emailId, targets, comment) }
+                    .onSuccess { container.toast(if (targets.size > 1) ctx.getString(R.string.web_mail_sharedMany, targets.size.toString()) else ctx.getString(R.string.web_mail_shared)); onDone(targets.first()) }
                     .onFailure { container.toast(errorText(ctx, it)) }
                 busy = false
             }

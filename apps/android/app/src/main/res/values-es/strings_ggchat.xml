@@ -4,4 +4,7 @@
     <string name="gg_for_other">Para %1$s</string>
     <string name="ai_discarded">Descartado</string>
     <string name="gg_actions_preview">gg dejó %1$d cosas listas</string>
+    <string name="card_forward">Reenviar</string>
+    <string name="card_forward_title">Reenviar a otros chats</string>
+    <string name="card_forwarded">Reenviado</string>
 </resources>

@@ -56,6 +56,12 @@ import com.tiecoms.app.core.Names
 import com.tiecoms.app.core.SharedMailDTO
 import com.tiecoms.app.ui.theme.LocalChatColors
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -128,16 +134,17 @@ fun DirBadge(out: Boolean) {
  * (features.mail = false) se ve el texto de sys.* — nunca el JSON.
  */
 @Composable
-internal fun MailSystemRow(m: MessageDTO, b: MailSystem.Body, data: BootstrapDTO, canPost: Boolean, onOpenIssue: (String) -> Unit) {
+internal fun MailSystemRow(m: MessageDTO, b: MailSystem.Body, data: BootstrapDTO, canPost: Boolean, onOpenIssue: (String) -> Unit,
+                            cardActions: ((MessageDTO, String?) -> CardActions)? = null) {
     val nav = LocalMailNav.current
     val on = data.mailEnabled
     val id = b.emailId
     when {
         // Desde la 040 el WhatsApp compartido tiene registro propio (hilo y tarea): su tarjeta; los viejos, del payload.
-        b.key == "wa.shared" && on && id != null -> MailSharedRow(m, b, data, canPost, onOpenIssue)
-        b.key == "wa.shared" -> WaSharedRow(m, b, data)
+        b.key == "wa.shared" && on && id != null -> MailSharedRow(m, b, data, canPost, onOpenIssue, cardActions?.invoke(m, id))
+        b.key == "wa.shared" -> WaSharedRow(m, b, data, cardActions?.invoke(m, null))
         !on || id == null -> MailSystemText(m, b, data)
-        b.key == "mail.shared" -> MailSharedRow(m, b, data, canPost, onOpenIssue)
+        b.key == "mail.shared" -> MailSharedRow(m, b, data, canPost, onOpenIssue, cardActions?.invoke(m, id))
         b.key == "mail.comments" -> CommentsNoticeLine(b.count, b.subject, b.lastByName, b.lastExcerpt, icon = {
             if (b.provider == "whatsapp") WaIcon(14.dp) else Text("✉", style = MaterialTheme.typography.bodySmall)
         }, tag = "mailCommentsLine") { nav.openMail(id, "comments") }
@@ -173,10 +180,33 @@ internal fun MailSystemText(m: MessageDTO, b: MailSystem.Body, data: BootstrapDT
 }
 
 /** Cabecera de un aviso que se ve como mensaje de quien lo trajo: avatar, nombre y hora; luego su comentario. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun BroughtBy(m: MessageDTO, data: BootstrapDTO, comment: String?, tag: String, content: @Composable () -> Unit) {
+private fun BroughtBy(m: MessageDTO, data: BootstrapDTO, comment: String?, tag: String, actions: CardActions? = null, forwardedFrom: String? = null, content: @Composable () -> Unit) {
+    val ctx = LocalContext.current
     val author = Names.person(data, m.authorId)
-    Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp).testTag(tag), verticalAlignment = Alignment.Top) {
+    var menu by remember(m.id) { mutableStateOf(false) }
+    // Deslizar a la derecha: responder, igual que en un mensaje normal.
+    var swipe by remember(m.id) { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val swipeMax = with(androidx.compose.ui.platform.LocalDensity.current) { 96.dp.toPx() }
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val menuLabel = stringResource(R.string.menu_more)
+    Row(Modifier.fillMaxWidth()
+        .then(if (actions != null) Modifier
+            .pointerInput(m.id) {
+                detectHorizontalDragGestures(
+                    onDragEnd = { if (swipe >= swipeMax * 0.8f) actions.reply?.invoke(); swipe = 0f },
+                    onDragCancel = { swipe = 0f },
+                ) { _, dx -> swipe = (swipe + dx).coerceIn(0f, swipeMax) }
+            }
+            .graphicsLayer { translationX = swipe }
+            // Pulsación larga sin fusionar la semántica de la tarjeta (sus botones y el campo siguen accesibles por separado);
+            // con TalkBack, la acción «Más opciones».
+            .pointerInput(m.id) {
+                detectTapGestures(onLongPress = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); menu = true })
+            }
+            .semantics { customActions = listOf(androidx.compose.ui.semantics.CustomAccessibilityAction(menuLabel) { menu = true; true }) } else Modifier)
+        .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp).testTag(tag), verticalAlignment = Alignment.Top) {
         AuthorAvatar(author, m.authorId, 34.dp)
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -185,17 +215,33 @@ private fun BroughtBy(m: MessageDTO, data: BootstrapDTO, comment: String?, tag: 
                     color = personColor(m.authorId), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 Text("  " + timeText(m.createdAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            // Copia reenviada desde otro chat: «↪ Reenviado desde «X»» (o «↪ Reenviado» si ese chat no lo veo).
+            forwardedFrom?.let { from ->
+                val c = data.conversations.firstOrNull { it.id == from }
+                Text("↪ " + (c?.let { stringResource(R.string.fwd_from_conv, titleOf(ctx, it, data)) } ?: stringResource(R.string.card_forwarded)),
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("cardForwarded"))
+            }
             comment?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("$tag-comment")) }
             content()
         }
     }
+    if (menu && actions != null) ActionSheet(null, listOfNotNull(
+        actions.reply?.let { SheetItem(ctx.getString(R.string.menu_reply), "↩", tag = "cardReply") { menu = false; it() } },
+        actions.replyPrivately?.let { SheetItem(ctx.getString(R.string.menu_reply_private), "✉", tag = "cardReplyPrivate",
+            subtitle = ctx.getString(R.string.menu_reply_private_sub, author?.name?.substringBefore(' ') ?: "")) { menu = false; it() } },
+        actions.forward?.let { SheetItem(ctx.getString(R.string.card_forward), "↪", tag = "cardForward") { menu = false; it() } },
+        SheetItem(ctx.getString(R.string.menu_copy_link), "⛓", tag = "cardCopyLink") { menu = false; actions.copyLink() },
+    ), onDismiss = { menu = false })
 }
+
+/** Responder aquí, en privado y reenviar la tarjeta, como un mensaje normal (pulsación larga o deslizar). */
+class CardActions(val reply: (() -> Unit)?, val replyPrivately: (() -> Unit)?, val forward: (() -> Unit)?, val copyLink: () -> Unit)
 
 /** mail.shared: el mensaje de quien trajo el correo, con su comentario y la tarjeta. */
 @Composable
-internal fun MailSharedRow(m: MessageDTO, b: MailSystem.Body, data: BootstrapDTO, canPost: Boolean, onOpenIssue: (String) -> Unit) {
+internal fun MailSharedRow(m: MessageDTO, b: MailSystem.Body, data: BootstrapDTO, canPost: Boolean, onOpenIssue: (String) -> Unit, actions: CardActions? = null) {
     val ctx = LocalContext.current
-    BroughtBy(m, data, b.comment, "mailShared-${m.seq}") {
+    BroughtBy(m, data, b.comment, "mailShared-${m.seq}", actions, b.forwardedFrom) {
         MailCard(b.emailId ?: return@BroughtBy, data, canPost, onOpenIssue, fallback = mailSystemText(ctx, b))
     }
 }
@@ -394,11 +440,11 @@ internal fun FileChip(text: String, tag: String, onClick: () -> Unit) {
 
 /** wa.shared: el mensaje de quien lo trajo con su comentario y la tarjeta verde con el mensaje citado. */
 @Composable
-internal fun WaSharedRow(m: MessageDTO, b: MailSystem.Body, data: BootstrapDTO) {
+internal fun WaSharedRow(m: MessageDTO, b: MailSystem.Body, data: BootstrapDTO, actions: CardActions? = null) {
     val w = b.wa ?: return
     val nav = LocalMailNav.current
     val maxW = (LocalConfiguration.current.screenWidthDp * 0.9f).coerceAtMost(520f).dp
-    BroughtBy(m, data, b.comment, "waShared-${m.seq}") {
+    BroughtBy(m, data, b.comment, "waShared-${m.seq}", actions, b.forwardedFrom) {
         Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, shadowElevation = 1.dp,
             modifier = Modifier.widthIn(max = maxW).fillMaxWidth().testTag("waCard")) {
             Column(Modifier.drawBehind { drawRect(WaGreen, size = androidx.compose.ui.geometry.Size(4.dp.toPx(), size.height)) }

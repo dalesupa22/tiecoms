@@ -378,6 +378,8 @@
 "calls.live" = "En curso";
 "calls.liveNow" = "En curso ahora";
 "calls.missed" = "Sin respuesta";
+"calls.missedMine" = "Perdida";
+"calls.missedN" = "{n} llamadas perdidas";
 "calls.more" = "Ver más";
 "calls.new" = "Llamar";
 "calls.noContent" = "Esta llamada no tiene resumen ni transcripción.";
@@ -397,6 +399,8 @@
 "card.commentAdded" = "Comentario añadido";
 "card.commentsNew" = "{n} comentarios nuevos";
 "card.doneBy" = "{name} completó la tarea";
+"card.forward" = "Reenviar";
+"card.forwardTitle" = "Reenviar a otros chats";
 "card.markDone" = "Marcar hecha";
 "card.newDate" = "Nueva fecha";
 "card.overdue" = "No cumplimos · venció el {date}";
@@ -1545,8 +1549,11 @@
 "nav.trazo" = "Trazo";
 "nav.whatsapp" = "WhatsApp";
 "nav.you" = "Tú";
+"notif.ask" = "Activa los avisos para enterarte de mensajes y llamadas aunque estés en otra pestaña.";
+"notif.askBtn" = "Activar";
 "notif.blocked" = "El navegador bloqueó las notificaciones";
 "notif.enable" = "Activar notificaciones del navegador";
+"notif.later" = "Ahora no";
 "notif.on" = "Notificaciones activadas en este navegador";
 "notif.title" = "Notificaciones";
 "once.already" = "Ya abriste este mensaje";
@@ -1865,6 +1872,7 @@
 "shareX.suggested" = "Sugerida";
 "side.addPerson" = "Añadir persona";
 "side.aiSoon" = "Pronto podrás sumar agentes de IA a los sidechats.";
+"side.allTitle" = "Todo";
 "side.anchor" = "Sobre este mensaje";
 "side.ask" = "Sidechat privado";
 "side.body" = "Pregunta en privado sobre este mensaje. En este chat no se publica nada y nadie más sabrá que existe.";
@@ -1876,6 +1884,7 @@
 "side.create" = "Enviar";
 "side.defaultName" = "Sidechat · {excerpt}";
 "side.directs" = "Chats";
+"side.dmsTitle" = "Mensajes directos";
 "side.drop" = "Soltar";
 "side.empty" = "Crea tu primer espacio de trabajo con otra empresa.";
 "side.emptyChat" = "Pregunta sin que el grupo lo vea";

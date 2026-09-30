@@ -808,6 +808,8 @@ struct CallsScreen: View {
         }
         .refreshable { await load() }
         .task(id: store.callsRevision) { await load() }
+        // Abrir la pestaña quita el número rojo (aquí y en mis otros dispositivos). La pantalla queda montada al cambiar de pestaña.
+        .onChange(of: store.tab == .calls, initial: true) { _, on in if on { store.markCallsSeen() } }
         .sheet(item: Binding(get: { picking.map(IdBox.init) }, set: { picking = $0?.id })) { box in
             PickConversationSheet(title: L("calls.pick")) { c in
                 picking = nil
@@ -848,12 +850,14 @@ struct CallRow: View {
             let others = item.participantIds.filter { $0 != d.me.id }
             let group = CallRules.isGroup(item, conv: conv, me: d.me.id)
             let name = conv.map { Naming.title(d, $0) } ?? others.compactMap { Naming.person(d, $0)?.name }.joined(separator: ", ")
-            let missed = CallRules.isMissed(item)
+            // Perdida para mí (me sonó y no entré): etiqueta roja «Perdida»; «Sin respuesta» si nadie más entró.
+            let mine = item.missed
+            let missed = mine || CallRules.isMissed(item)
             let live = c.endedAt == nil
             let who = group ? others.prefix(3).map { firstName(d, $0) }.filter { !$0.isEmpty }.joined(separator: ", ") : ""
             let meta = [ISODate.parse(c.startedAt).map { L10n.dateTime($0) },
                         !missed ? item.durationSec.map(CallRules.clock) : nil,
-                        missed ? L("calls.missed") : nil, who.isEmpty ? nil : who].compactMap { $0 }.joined(separator: " · ")
+                        missed && !mine ? L("calls.missed") : nil, who.isEmpty ? nil : who].compactMap { $0 }.joined(separator: " · ")
             HStack(spacing: 12) {
                 Group {
                     if !group, let o = others.first, let p = Naming.person(d, o) { Avatar(person: p, org: Naming.org(d, p.orgId), size: 40) }
@@ -867,6 +871,7 @@ struct CallRow: View {
                             Text(name.isEmpty ? L("call.title") : name).font(.subheadline.weight(.semibold)).foregroundStyle(missed ? Color.red : Theme.textPrimary).lineLimit(1)
                             tag(group ? L("calls.group") : L("calls.direct"), live: false)
                             if live { tag(L("calls.live"), live: true) }
+                            if mine { missedTag }
                         }
                         HStack(spacing: 4) {
                             Image(systemName: c.isVideo ? "video" : "phone").font(.caption2)
@@ -916,6 +921,15 @@ struct CallRow: View {
             .foregroundStyle(live ? .white : Theme.textSecondary)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(Capsule().fill(live ? Color.green : Theme.textSecondary.opacity(0.12)))
+    }
+
+    /// «Perdida» en rojo (#D93025, el mismo de la pastilla de la pestaña).
+    private var missedTag: some View {
+        Text(L("calls.missedMine")).font(.caption2.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Capsule().fill(Theme.missed))
+            .accessibilityIdentifier("calls.missedTag.\(item.call.id)")
     }
 
     private func chip(_ text: String) -> some View {

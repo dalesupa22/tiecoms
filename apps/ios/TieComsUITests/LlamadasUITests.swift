@@ -265,6 +265,51 @@ final class LlamadasUITests: XCTestCase {
         shot("34-directo")
     }
 
+    /// POST a la API de pruebas como Bruno (fixture); devuelve el JSON de la respuesta.
+    @discardableResult
+    private func asBruno(_ f: Fixture, _ path: String, _ body: String) -> [String: Any]? {
+        guard let tok = f.bToken, let url = URL(string: f.apiUrl + "/api/v1" + path) else { return nil }
+        var req = URLRequest(url: url); req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "content-type"); req.setValue("Bearer \(tok)", forHTTPHeaderField: "authorization")
+        req.httpBody = Data(body.utf8)
+        var out: [String: Any]?
+        let done = expectation(description: path)
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            out = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        return out
+    }
+
+    /// 30-sep-2026: Bruno me llama y cuelga sin que conteste → la pestaña Llamadas queda en rojo con el número (llega por
+    /// el evento calls.missed con la app abierta); al abrirla se quita y el historial muestra «Perdida».
+    func testMissedCallRedBadgeClearsOnOpen() throws {
+        let f = try fixture()
+        guard f.bToken != nil else { throw XCTSkip("Fixture sin bToken") }
+        let app = login(f)
+        goTab(app, "dms")
+        let call = asBruno(f, "/conversations/\(f.dmId)/call", #"{"kind":"audio","deviceKey":"fixture2"}"#)?["call"] as? [String: Any]
+        let callId = try XCTUnwrap(call?["id"] as? String, "llamada de Bruno")
+        sleep(2)
+        asBruno(f, "/calls/\(callId)/end", #"{"deviceKey":"fixture2"}"#)
+        let tab = app.buttons["tab.calls"].firstMatch
+        let red = NSPredicate(format: "value CONTAINS %@", "perdida")
+        expectation(for: red, evaluatedWith: tab); waitForExpectations(timeout: 15)
+        sleep(1); shot("60-llamadas-rojo")
+        tab.tap()
+        // La etiqueta va dentro del botón de la fila (VoiceOver lee la fila entera).
+        let row = app.buttons["calls.row.\(callId)"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "fila de la llamada")
+        XCTAssertTrue(row.label.contains("Perdida"), "«Perdida» en el historial: \(row.label)")
+        XCTAssertFalse(row.label.contains("Sin respuesta"), "en lugar de «Sin respuesta»")
+        expectation(for: NSPredicate(format: "value == %@", ""), evaluatedWith: tab); waitForExpectations(timeout: 5)
+        shot("61-historial-perdida")
+        // Vuelve a Grupos: ya no hay número.
+        goTab(app, "home")
+        XCTAssertEqual(tab.value as? String ?? "", "", "se quitó al abrirla")
+    }
+
     /// 1.7.1: «En curso ahora», altavoz, «Agregar» con texto, cámara en plena llamada (cuadrícula) y cambiar cámara.
     func testLiveNowSpeakerAddAndCamera() throws {
         let f = try fixture()

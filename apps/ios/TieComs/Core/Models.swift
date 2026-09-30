@@ -471,6 +471,8 @@ struct BootstrapDTO: Codable, Equatable, Sendable {
 
     /// 1.7.1: mi llamada en curso (en cualquiera de mis dispositivos).
     var myActiveCall: CallDTO?
+    /// Llamadas perdidas que no he visto (se quita al abrir Llamadas). Ausente = servidor anterior (0).
+    var missedCalls: Int?
 
     /// Llamadas de voz y video (docs/LLAMADAS.md): sin esto no hay botones, franja ni pestaña.
     var callsEnabled: Bool { features?.calls == true }
@@ -481,6 +483,7 @@ struct BootstrapDTO: Codable, Equatable, Sendable {
         let c = try container(decoder)
         features = c.o("features")
         myActiveCall = c.o("myActiveCall")
+        missedCalls = c.intOpt("missedCalls")
         contract = c.v("contract", "")
         serverTime = c.v("serverTime", "")
         me = try c.decode(UserDTO.self, forKey: AnyKey("me"))
@@ -798,6 +801,9 @@ enum AccountEvent: Decodable, Equatable, Sendable {
     /// Transcripción por pedazos (Groq): uno se está procesando o ya trae sus frases.
     case callProcessing(callId: String, userId: String, segId: String)
     case callTranscript(callId: String, userId: String, segId: String, segments: [CallTranscriptSegmentDTO], failed: Bool)
+    /// Cambió mi número de llamadas perdidas sin ver: al colgar una que me perdí (con callId) o 0 al abrir Llamadas
+    /// en otro dispositivo (callId null). Siempre reemplaza el número, no lo suma.
+    case callsMissed(callId: String?, missedCalls: Int)
     case other(type: String)
 
     init(from decoder: Decoder) throws {
@@ -835,6 +841,8 @@ enum AccountEvent: Decodable, Equatable, Sendable {
         case "call.transcript":
             self = .callTranscript(callId: c.v("callId", ""), userId: c.v("userId", ""), segId: c.v("segId", ""),
                                    segments: c.lossyArray("segments"), failed: c.v("failed", false))
+        case "calls.missed":
+            self = .callsMissed(callId: c.o("callId"), missedCalls: max(0, c.int("missedCalls")))
         case "call.ringing":
             if let x: CallDTO = c.o("call") { self = .callRinging(call: x, conversationTitle: c.o("conversationTitle"), callerName: c.v("callerName", "")) }
             else { self = .other(type: type) }

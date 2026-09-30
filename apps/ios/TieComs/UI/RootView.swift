@@ -210,6 +210,7 @@ extension MainView {
         case .home: return d.map(Naming.groupsUnread) ?? 0
         case .dms: return d.map(Naming.dmsUnread) ?? 0
         case .issues: return store.myOpenIssues
+        case .calls: return store.missedCalls
         default: return 0
         }
     }
@@ -232,7 +233,8 @@ extension MainView {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if TabBarRule.visible(path: store.currentPath, keyboard: keyboardVisible) {
                 AppTabBar(items: tabs.map { t in
-                    AppTabBar.Item(tab: t, label: TabInfo.title(t), symbol: TabInfo.symbol(t), badge: badge(t, d), identifier: "tab.\(TabInfo.id(t))")
+                    AppTabBar.Item(tab: t, label: TabInfo.title(t), symbol: TabInfo.symbol(t), badge: badge(t, d), identifier: "tab.\(TabInfo.id(t))",
+                                   missed: t == .calls && store.missedCalls > 0)
                 }, selected: store.tab, avatar: youIcon(d)) { t in
                     if store.tab == t { store.popToRoot(t) } else { store.tab = t }
                 }
@@ -402,6 +404,8 @@ struct AppTabBar: View {
         var symbol: String
         var badge: Int
         var identifier: String
+        /// Llamadas con perdidas sin ver: ícono y pastilla en rojo (#D93025).
+        var missed = false
     }
     var items: [Item]
     var selected: AppTab
@@ -429,13 +433,13 @@ struct AppTabBar: View {
                     icon(it, on: on)
                         .frame(width: 48, height: 36)
                         .background(Capsule().fill(on && it.tab != .settings ? Theme.accentText.opacity(0.12) : .clear))
-                        .overlay(alignment: .topTrailing) { badge(it.badge) }
+                        .overlay(alignment: .topTrailing) { badge(it.badge, missed: it.missed) }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(it.label)
-                .accessibilityValue(it.badge > 0 ? L("a11y.unread", ["n": it.badge]) : "")
+                .accessibilityValue(it.badge > 0 ? L(it.missed ? "calls.missedN" : "a11y.unread", ["n": it.badge]) : "")
                 .accessibilityAddTraits(on ? [.isSelected] : [])
                 .accessibilityIdentifier(it.identifier)
             }
@@ -457,19 +461,19 @@ struct AppTabBar: View {
             Image(systemName: it.symbol)
                 .symbolVariant(on ? .fill : .none)
                 .font(.system(size: 22, weight: .regular))
-                .foregroundStyle(on ? Theme.accentText : Theme.textSecondary)
+                .foregroundStyle(it.missed ? Theme.missed : on ? Theme.accentText : Theme.textSecondary)
                 .frame(height: 26)
         }
     }
 
-    @ViewBuilder private func badge(_ n: Int) -> some View {
+    @ViewBuilder private func badge(_ n: Int, missed: Bool) -> some View {
         if n > 0 {
             Text(n > 99 ? "99+" : "\(n)")
                 .font(.system(size: 10, weight: .semibold)).monospacedDigit()
-                .foregroundStyle(Theme.onPrimary)
+                .foregroundStyle(missed ? .white : Theme.onPrimary)
                 .padding(.horizontal, 4)
                 .frame(minWidth: 16, minHeight: 16)
-                .background(Capsule().fill(Theme.primaryFill))
+                .background(Capsule().fill(missed ? Theme.missed : Theme.primaryFill))
                 .overlay(Capsule().stroke(Theme.background, lineWidth: 1.5))
                 .fixedSize()
                 // Pegado arriba a la derecha del ícono (dentro de la celda de 48 pt: no tapa al vecino).

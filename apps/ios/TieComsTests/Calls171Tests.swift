@@ -111,3 +111,69 @@ final class Calls171Tests: XCTestCase {
         s.callCenter.reset()
     }
 }
+
+/// Llamadas perdidas (30-sep-2026, migración 042): número rojo en Llamadas que se quita al abrirla y «Perdida» en el historial.
+@MainActor
+final class MissedCallsTests: XCTestCase {
+    private func store() throws -> AppStore {
+        let s = try ControlledURLProtocol.store()
+        s.seedForTesting(try dec(BootstrapDTO.self, #"{"me":{"id":"a","name":"Ana"},"features":{"calls":true},"conversations":[{"id":"c1","kind":"direct","memberIds":["a","b"],"canPost":true}]}"#))
+        return s
+    }
+
+    func testDecodeBootstrapEventAndHistory() throws {
+        XCTAssertEqual(try dec(BootstrapDTO.self, #"{"me":{"id":"a","name":"A"},"missedCalls":3}"#).missedCalls, 3)
+        XCTAssertNil(try dec(BootstrapDTO.self, #"{"me":{"id":"a","name":"A"}}"#).missedCalls, "servidor anterior: sin número")
+        guard case .callsMissed(let id, let n) = try dec(AccountEvent.self, #"{"type":"calls.missed","callId":"call1","missedCalls":2}"#) else { return XCTFail() }
+        XCTAssertEqual(id, "call1"); XCTAssertEqual(n, 2)
+        guard case .callsMissed(let none, let zero) = try dec(AccountEvent.self, #"{"type":"calls.missed","callId":null,"missedCalls":0}"#) else { return XCTFail() }
+        XCTAssertNil(none, "abrí Llamadas en otro dispositivo: callId null"); XCTAssertEqual(zero, 0)
+        let item = try dec(CallHistoryItemDTO.self, #"{"call":\#(callJSON),"participantIds":["b"],"missed":true}"#)
+        XCTAssertTrue(item.missed)
+        XCTAssertFalse(try dec(CallHistoryItemDTO.self, #"{"call":\#(callJSON),"participantIds":["b"]}"#).missed, "ausente = no perdida")
+    }
+
+    func testCountReplacesNeverAdds() throws {
+        XCTAssertEqual(CallRules.missedCount(current: 2, incoming: 3), 3)
+        XCTAssertEqual(CallRules.missedCount(current: 5, incoming: 1), 1)
+        XCTAssertEqual(CallRules.missedCount(current: 4, incoming: 0), 0)
+        XCTAssertEqual(CallRules.missedCount(current: 0, incoming: -1), 0)
+        let s = try store()
+        ControlledURLProtocol.handler = { req in Task { @MainActor in req.respond(#"{"missedCalls":0}"#) } }
+        s.socketEventForTesting("account.event", #"{"type":"calls.missed","callId":"call1","missedCalls":2}"#)
+        XCTAssertEqual(s.missedCalls, 2)
+        s.socketEventForTesting("account.event", #"{"type":"calls.missed","callId":"call2","missedCalls":3}"#)
+        XCTAssertEqual(s.missedCalls, 3, "reemplaza, no suma")
+        s.socketEventForTesting("account.event", #"{"type":"calls.missed","callId":null,"missedCalls":0}"#)
+        XCTAssertEqual(s.missedCalls, 0, "vista en otro dispositivo")
+    }
+
+    func testOpeningCallsTabMarksSeen() async throws {
+        let s = try store()
+        var seen: [[String: Any]] = []
+        ControlledURLProtocol.handler = { req in Task { @MainActor in
+            if req.request.url!.path == "/api/v1/calls/seen", req.request.httpMethod == "POST" { seen.append(req.json) }
+            req.respond(#"{"missedCalls":0}"#)
+        } }
+        s.socketEventForTesting("account.event", #"{"type":"calls.missed","callId":"call1","missedCalls":2}"#)
+        XCTAssertEqual(s.missedCalls, 2)
+        XCTAssertTrue(seen.isEmpty, "con otra pestaña no se marca vista")
+        // Lo que hace la pestaña al abrirse.
+        s.tab = .calls
+        s.markCallsSeen()
+        XCTAssertEqual(s.missedCalls, 0, "se quita al instante")
+        try await waitUntil(3, "POST /calls/seen") { seen.count == 1 }
+        XCTAssertEqual(seen.first?.count, 0, "cuerpo {}")
+        // Con Llamadas abierta, una perdida nueva se vuelve a marcar vista.
+        let rev = s.callsRevision
+        s.socketEventForTesting("account.event", #"{"type":"calls.missed","callId":"call2","missedCalls":1}"#)
+        XCTAssertEqual(s.missedCalls, 0)
+        XCTAssertGreaterThan(s.callsRevision, rev, "el historial se vuelve a pedir")
+        try await waitUntil(3, "segundo /calls/seen") { seen.count == 2 }
+        // Un error del servidor no devuelve el número.
+        ControlledURLProtocol.handler = { req in Task { @MainActor in req.respond(500, #"{"code":"boom","message":"x"}"#) } }
+        s.markCallsSeen()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(s.missedCalls, 0)
+    }
+}

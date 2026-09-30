@@ -40,6 +40,8 @@ extension Theme {
     /// Naranja sobrio de los badges (#B45309, AA con texto blanco en letra chica) y gris del silenciado; igual que la web.
     static let badgeFallback = Color(hex: 0xB45309)
     static let badgeMuted = Color(hex: 0x7A7368)
+    /// Llamadas perdidas: pastilla e ícono de la pestaña Llamadas y la etiqueta «Perdida» (el mismo rojo de la web).
+    static let missed = Color(hex: 0xD93025)
 
     /// Badge de no leídos: el color de la empresa solo si cumple AA (4,5:1) con texto blanco; si no, el naranja sobrio.
     static func badgeColor(_ css: String) -> Color? {

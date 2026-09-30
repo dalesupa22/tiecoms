@@ -256,6 +256,8 @@ final class AppStore {
     @ObservationIgnored var callsChecked: Set<String> = []
     /// Sube con cada cambio de una llamada (el historial se vuelve a pedir).
     var callsRevision = 0
+    /// Llamadas perdidas sin ver: pastilla roja en la pestaña Llamadas (bootstrap.missedCalls y el evento calls.missed).
+    var missedCalls = 0
     /// La llamada de este dispositivo y el aviso de llamada entrante.
     let callCenter = CallCenter()
     /// «Contestar» desde el push con la app cerrada: se entra al tener sesión.
@@ -584,7 +586,7 @@ final class AppStore {
         blockedUserIds = []
         localDndUntil = nil; dndLocalOnly = false; dndExpiryTask?.cancel(); dndExpiryTask = nil
         homePath = []; dmsPath = []; issuesPath = []; agendaPath = []; settingsPath = []; callsPath = []
-        callCenter.reset(); liveCalls = [:]; callsChecked = []
+        callCenter.reset(); liveCalls = [:]; callsChecked = []; missedCalls = 0
         tab = .home
         workspaceFilter = nil
         openConversationId = nil
@@ -628,6 +630,7 @@ final class AppStore {
         scheduleSnapshot()
         ChatSounds.shareRingtone(d.me.ringtone)
         if let c = d.myActiveCall { putCall(c) }
+        applyMissedCalls(d.callsEnabled ? (d.missedCalls ?? 0) : 0)
     }
 
     func scheduleBootstrap(signal: String? = nil) {
@@ -776,6 +779,11 @@ final class AppStore {
             callCenter.onTranscriptEvent(callId: callId, userId: userId, segId: segId, segments: nil)
         case .callTranscript(let callId, let userId, let segId, let segments, _):
             callCenter.onTranscriptEvent(callId: callId, userId: userId, segId: segId, segments: segments)
+        case .callsMissed(_, let n):
+            guard data?.callsEnabled == true else { return }
+            // Una perdida nueva también entra al historial (la pestaña lo vuelve a pedir).
+            if n > 0 { callsRevision += 1 }
+            applyMissedCalls(n)
         case .other: break
         }
     }

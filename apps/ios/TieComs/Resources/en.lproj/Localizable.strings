@@ -378,6 +378,8 @@
 "calls.live" = "Live";
 "calls.liveNow" = "Happening now";
 "calls.missed" = "No answer";
+"calls.missedMine" = "Missed";
+"calls.missedN" = "{n} missed calls";
 "calls.more" = "Show more";
 "calls.new" = "Call";
 "calls.noContent" = "This call has no summary or transcript.";
@@ -397,6 +399,8 @@
 "card.commentAdded" = "Comment added";
 "card.commentsNew" = "{n} new comments";
 "card.doneBy" = "{name} completed the task";
+"card.forward" = "Forward";
+"card.forwardTitle" = "Forward to other chats";
 "card.markDone" = "Mark done";
 "card.newDate" = "New date";
 "card.overdue" = "We missed it · due {date}";
@@ -1545,8 +1549,11 @@
 "nav.trazo" = "Trace";
 "nav.whatsapp" = "WhatsApp";
 "nav.you" = "You";
+"notif.ask" = "Turn on alerts to hear about messages and calls even in another tab.";
+"notif.askBtn" = "Turn on";
 "notif.blocked" = "The browser blocked notifications";
 "notif.enable" = "Turn on browser notifications";
+"notif.later" = "Not now";
 "notif.on" = "Notifications are on in this browser";
 "notif.title" = "Notifications";
 "once.already" = "You already opened this message";
@@ -1865,6 +1872,7 @@
 "shareX.suggested" = "Suggested";
 "side.addPerson" = "Add person";
 "side.aiSoon" = "Soon you will be able to add AI agents to sidechats.";
+"side.allTitle" = "All";
 "side.anchor" = "About this message";
 "side.ask" = "Private sidechat";
 "side.body" = "Ask privately about this message. Nothing is posted in this chat and nobody else will know it exists.";
@@ -1876,6 +1884,7 @@
 "side.create" = "Send";
 "side.defaultName" = "Sidechat · {excerpt}";
 "side.directs" = "Chats";
+"side.dmsTitle" = "Direct messages";
 "side.drop" = "Dismiss";
 "side.empty" = "Create your first workspace with another company.";
 "side.emptyChat" = "Ask without the group seeing it";

@@ -119,6 +119,8 @@ struct CallHistoryItemDTO: Decodable, Equatable, Identifiable, Sendable {
     var participantIds: [String]
     var durationSec: Int?
     var hasSummary: Bool
+    /// Perdida para mí: me sonó, no rechacé y no entré (etiqueta roja «Perdida»).
+    var missed: Bool = false
     var id: String { call.id }
 
     init(from decoder: Decoder) throws {
@@ -127,9 +129,10 @@ struct CallHistoryItemDTO: Decodable, Equatable, Identifiable, Sendable {
         participantIds = c.v("participantIds", [])
         durationSec = c.intOpt("durationSec")
         hasSummary = c.v("hasSummary", false)
+        missed = c.v("missed", false)
     }
-    init(call: CallDTO, participantIds: [String], durationSec: Int?, hasSummary: Bool) {
-        self.call = call; self.participantIds = participantIds; self.durationSec = durationSec; self.hasSummary = hasSummary
+    init(call: CallDTO, participantIds: [String], durationSec: Int?, hasSummary: Bool, missed: Bool = false) {
+        self.call = call; self.participantIds = participantIds; self.durationSec = durationSec; self.hasSummary = hasSummary; self.missed = missed
     }
 }
 
@@ -230,6 +233,9 @@ enum CallRules {
 
     /// Sin respuesta: terminó y nunca entraron dos personas.
     static func isMissed(_ item: CallHistoryItemDTO) -> Bool { item.call.endedAt != nil && item.participantIds.count < 2 }
+
+    /// Número de llamadas perdidas sin ver: el que llega (bootstrap o calls.missed) reemplaza al anterior, nunca se suma.
+    static func missedCount(current: Int, incoming: Int) -> Int { max(0, incoming) }
 
     /// Grupal: la conversación no es un directo (o, si no la conozco, hubo más de otro participante).
     static func isGroup(_ item: CallHistoryItemDTO, conv: ConversationDTO?, me: String) -> Bool {
@@ -892,6 +898,21 @@ extension AppStore {
     /// «Ahora no»: deja de sonar en todos mis dispositivos (los demás no se enteran).
     func declineCallRequest(_ callId: String) async throws {
         try await api.requestData("/calls/\(callId)/decline", method: "POST", json: [:])
+    }
+
+    /// Llegó el número de perdidas sin ver (bootstrap o calls.missed). Con la pestaña Llamadas abierta se marca vista otra vez.
+    func applyMissedCalls(_ n: Int) {
+        let next = CallRules.missedCount(current: missedCalls, incoming: n)
+        if next != missedCalls { missedCalls = next }
+        if next > 0, tab == .calls { markCallsSeen() }
+    }
+
+    /// Abrí Llamadas: el número rojo se quita aquí y en mis otros dispositivos (POST /calls/seen; los errores se ignoran).
+    func markCallsSeen() {
+        if missedCalls != 0 { missedCalls = 0 }
+        guard data?.callsEnabled == true else { return }
+        let api = api
+        Task { _ = try? await api.requestData("/calls/seen", method: "POST", json: [:]) }
     }
 
     /// Llamadas sin terminar de mis conversaciones (y a las que me invitaron): «En curso ahora».

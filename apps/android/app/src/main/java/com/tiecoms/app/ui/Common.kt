@@ -267,14 +267,14 @@ fun AuthorAvatar(p: PersonDTO?, id: String, size: Dp = 28.dp, modifier: Modifier
     Avatar(p?.name ?: "?", Color(com.tiecoms.app.core.PersonColors.light(id)), Color.White, size = size, photo = p?.avatarUrl, modifier = modifier)
 }
 
-/** Avatar de una persona: su foto o sus iniciales sobre el color de su empresa; opcionalmente con el logo de la empresa en la esquina. */
+/** Avatar de una persona: su foto o sus iniciales sobre el color de su empresa. Ya no lleva el logo de la empresa en la
+ * esquina (`orgBadge` se ignora): el nombre de la empresa va escrito junto a la persona y la letra suelta confundía. */
 @Composable
 fun PersonAvatar(p: PersonDTO?, data: BootstrapDTO?, size: Dp = 40.dp, orgBadge: Boolean = false, modifier: Modifier = Modifier) {
     if (com.tiecoms.app.core.Gg.isGg(p?.id, data)) { Box(modifier.size(size), contentAlignment = Alignment.Center) { GgMark(size * 0.9f) }; return }
     val org = Names.org(data, p?.orgId)
     Box(modifier.size(size)) {
         Avatar(p?.name ?: "?", parseColor(org?.colorBg, Brand.Black), parseColor(org?.colorFg, Color.White), size = size, photo = p?.avatarUrl)
-        if (orgBadge && org != null) OrgMark(org, size = size * 0.42f, modifier = Modifier.align(Alignment.BottomEnd))
     }
 }
 

@@ -43,6 +43,8 @@ import com.tiecoms.app.core.Calls171Invites
 import com.tiecoms.app.core.Caption
 import com.tiecoms.app.core.ChimeJoin
 import com.tiecoms.app.core.GuestCalls
+import com.tiecoms.app.core.InstantCallDTO
+import com.tiecoms.app.core.InstantCalls
 import com.tiecoms.app.core.TranscriptOutbox
 import com.tiecoms.app.core.TranscriptPiece
 import kotlinx.coroutines.CoroutineScope
@@ -106,6 +108,10 @@ class CallManager(private val app: Application, private val container: AppContai
         val screens: List<Tile> = emptyList(),
         /** 1.7.4: estoy como invitado por enlace (null = llamada normal con mi cuenta). */
         val guest: Guest? = null,
+        /** 1.7.6: enlace para invitados de una «Nueva llamada» (el 🔗 lo vuelve a compartir). */
+        val shareLink: String? = null,
+        /** 1.7.6: mostrar «Comparte el enlace» (al entrar a una llamada rápida y con el 🔗). */
+        val sharing: Boolean = false,
     ) {
         /** Mi id dentro de la llamada: `guest:<id>` como invitado o el de mi cuenta. */
         fun meId(accountId: String?): String? = guest?.externalId ?: accountId
@@ -176,6 +182,22 @@ class CallManager(private val app: Application, private val container: AppContai
         connect(client.startCall(conversationId, kind), camera = kind == "video")
     }
 
+    /**
+     * 1.7.6: «Nueva llamada» rápida: POST /calls/instant, entra a la llamada de la conversación que devuelve y deja listo
+     * «Comparte el enlace». Devuelve la respuesta del servidor (404 si aún no tiene llamadas rápidas).
+     */
+    suspend fun startInstant(title: String?, video: Boolean): InstantCallDTO {
+        val r = client.startInstantCall(title, video)
+        val conv = InstantCalls.conversationOf(r)
+        val url = InstantCalls.linkUrl(r)
+        start(conv, if (video) "video" else "audio")
+        if (_view.value?.call?.conversationId == conv) patch { copy(shareLink = url ?: shareLink, sharing = url != null, expanded = true) }
+        return r
+    }
+
+    /** Abrir o cerrar «Comparte el enlace». */
+    fun setSharing(on: Boolean) = patch { copy(sharing = on && shareLink != null) }
+
     /** Entrar desde el aviso «te están llamando», la franja «Unirse» o el historial. */
     suspend fun join(callId: String, camera: Boolean) = lock.withLock {
         dismissRing()
@@ -223,13 +245,13 @@ class CallManager(private val app: Application, private val container: AppContai
      * Entrar como invitado con el enlace (/llamada/<token>), con o sin sesión (joinAsGuest de la web).
      * Si estoy en otra llamada, la pantalla ya lo preguntó: aquí se cuelga esa antes de entrar.
      */
-    suspend fun joinAsGuest(token: String, name: String, camera: Boolean) = lock.withLock {
+    suspend fun joinAsGuest(token: String, name: String, camera: Boolean, email: String? = null) = lock.withLock {
         dismissRing()
         val v = _view.value
         if (v?.guest?.token == token) { patch { copy(expanded = true) }; return@withLock }
         if (v != null) hangUpLocked()
         _guestOutcome.value = null
-        val j = client.guestCallJoin(token, name)
+        val j = client.guestCallJoin(token, name, email)
         val g = Guest(j.guestId, j.secret, token, name)
         connect(CallJoinDTO(GuestCalls.toCall(j.call), j.meeting, j.attendee), camera, g)
     }

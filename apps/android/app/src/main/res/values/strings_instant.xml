@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.7.6: quick «New call» with a guest link (POST /calls/instant). -->
+<resources>
+    <string name="calls_instant">New call</string>
+    <string name="calls_instant_hint">Start the call and share the link with anyone, even if they do not have chaggu.</string>
+    <string name="calls_instant_title_label">Title (optional)</string>
+    <string name="calls_instant_title_ph">Leave it empty for an automatic title</string>
+    <string name="calls_instant_voice">Voice</string>
+    <string name="calls_instant_video">Video</string>
+    <string name="calls_instant_start">Start</string>
+    <string name="calls_instant_unsupported">Update soon: your server does not have quick calls yet</string>
+    <string name="call_share_title">Share the link</string>
+    <string name="call_share_body">Anyone with the link joins with just their name and email, no account or app. It stops working when the call ends.</string>
+    <string name="call_share_copy">Copy</string>
+    <string name="call_share_copied">Link copied</string>
+    <string name="call_share_send">Share…</string>
+    <string name="call_share_chooser">Share the call link</string>
+    <string name="call_instant_share_text">Join my call on chaggu: %1$s. You only need your name and email</string>
+    <string name="call_instant_share_subject">Join my call on chaggu</string>
+    <string name="call_share_guests">Guests in the call</string>
+    <string name="call_share_no_guests">Nobody has joined with the link yet.</string>
+    <string name="call_share_done">Done</string>
+    <string name="cc_link">Link</string>
+    <string name="call_share_again">Share the guest link</string>
+    <string name="guest_email">Your email</string>
+    <string name="guest_email_ph">name@company.com</string>
+    <string name="guest_email_bad">Check the email</string>
+</resources>

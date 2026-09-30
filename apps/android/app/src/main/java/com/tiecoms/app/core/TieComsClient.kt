@@ -1436,6 +1436,17 @@ class TieComsClient(
     suspend fun callHistory(before: String? = null, limit: Int = 30): CallHistoryPage = withContext(dispatcher) {
         req("GET", "/calls" + q("limit" to limit.toString(), "before" to before), null, CallHistoryPage.serializer())
     }
+    /**
+     * 1.7.6: «Nueva llamada» con enlace para invitados (POST /calls/instant). La llamada queda iniciada conmigo; luego se
+     * entra con [startCall] en la conversación que devuelve. 404 = el servidor aún no tiene llamadas rápidas.
+     */
+    suspend fun startInstantCall(title: String?, video: Boolean): InstantCallDTO = withContext(dispatcher) {
+        val body = buildJsonObject { InstantCalls.cleanTitle(title)?.let { put("title", JsonPrimitive(it)) }; put("video", JsonPrimitive(video)) }
+        req("POST", "/calls/instant", body, InstantCallDTO.serializer()).also { r ->
+            val conv = InstantCalls.conversationOf(r)
+            if (conv.isNotEmpty() && r.call.id.isNotEmpty()) putCall(r.call.copy(conversationId = conv))
+        }
+    }
     /** Compartir en otro chat (sale como mensaje mío). what: summary | transcript | both. */
     suspend fun shareCall(callId: String, conversationId: String, what: String): MessageDTO? = withContext(dispatcher) {
         req("POST", callsPath(callId, "share"), buildJsonObject { put("conversationId", JsonPrimitive(conversationId)); put("what", JsonPrimitive(what)) }, CallShareResult.serializer()).message
@@ -2104,9 +2115,9 @@ class TieComsClient(
     suspend fun guestCallPreview(token: String): GuestCallPreviewDTO = withContext(dispatcher) {
         publicCall("GET", "/call-links/${enc(token)}", null, GuestCallPreviewDTO.serializer())
     }
-    /** POST /call-links/:token/join {name}: crea el attendee `guest:<id>` y devuelve la reunión y el secreto. */
-    suspend fun guestCallJoin(token: String, name: String): GuestJoinDTO = withContext(dispatcher) {
-        publicCall("POST", "/call-links/${enc(token)}/join", buildJsonObject { put("name", JsonPrimitive(name)) }, GuestJoinDTO.serializer())
+    /** POST /call-links/:token/join {name, email?}: crea el attendee `guest:<id>` y devuelve la reunión y el secreto. */
+    suspend fun guestCallJoin(token: String, name: String, email: String? = null): GuestJoinDTO = withContext(dispatcher) {
+        publicCall("POST", "/call-links/${enc(token)}/join", buildJsonObject { put("name", JsonPrimitive(name)); if (!email.isNullOrBlank()) put("email", JsonPrimitive(email)) }, GuestJoinDTO.serializer())
     }
     /** POST /call-guests/:id/heartbeat {secret} cada 15 s: quién está (409 not_in_call / 404 = terminó). */
     suspend fun guestCallHeartbeat(guestId: String, secret: String): GuestCallStateDTO = withContext(dispatcher) {

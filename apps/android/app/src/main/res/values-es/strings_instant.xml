@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.7.6: «Nueva llamada» rápida con enlace para invitados (POST /calls/instant). -->
+<resources>
+    <string name="calls_instant">Nueva llamada</string>
+    <string name="calls_instant_hint">Crea la llamada y comparte el enlace con quien quieras, aunque no tenga chaggu.</string>
+    <string name="calls_instant_title_label">Título (opcional)</string>
+    <string name="calls_instant_title_ph">Si lo dejas vacío, se pone solo</string>
+    <string name="calls_instant_voice">Voz</string>
+    <string name="calls_instant_video">Video</string>
+    <string name="calls_instant_start">Empezar</string>
+    <string name="calls_instant_unsupported">Actualiza pronto: tu servidor aún no tiene llamadas rápidas</string>
+    <string name="call_share_title">Comparte el enlace</string>
+    <string name="call_share_body">Quien tenga el enlace entra solo con su nombre y correo, sin cuenta ni app. Deja de servir cuando termina la llamada.</string>
+    <string name="call_share_copy">Copiar</string>
+    <string name="call_share_copied">Enlace copiado</string>
+    <string name="call_share_send">Compartir…</string>
+    <string name="call_share_chooser">Compartir el enlace de la llamada</string>
+    <string name="call_instant_share_text">Únete a mi llamada en chaggu: %1$s. Solo necesitas tu nombre y correo</string>
+    <string name="call_instant_share_subject">Únete a mi llamada en chaggu</string>
+    <string name="call_share_guests">Invitados en la llamada</string>
+    <string name="call_share_no_guests">Todavía no ha entrado nadie con el enlace.</string>
+    <string name="call_share_done">Listo</string>
+    <string name="cc_link">Enlace</string>
+    <string name="call_share_again">Compartir el enlace para invitados</string>
+    <string name="guest_email">Tu correo</string>
+    <string name="guest_email_ph">nombre@empresa.com</string>
+    <string name="guest_email_bad">Revisa el correo</string>
+</resources>

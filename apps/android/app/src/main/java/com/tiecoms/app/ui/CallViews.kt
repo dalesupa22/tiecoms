@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.MicOff
@@ -343,7 +344,7 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
                     }
                     Column(Modifier.weight(1f).clickable(enabled = conv != null) { container.calls.setExpanded(false); onOpenConversation(v.call.conversationId) }) {
                         // Si me agregaron a una llamada de un chat en el que no estoy: los nombres de quienes están (call.names).
-                        Text(conv?.let { titleOf(ctx, it, data) } ?: others.map { nameOf(it) }.filter { it.isNotEmpty() }.joinToString(", ").ifEmpty { stringResource(R.string.call_title) }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        Text(conv?.let { titleOf(ctx, it, data) } ?: v.call.title?.takeIf { it.isNotBlank() } ?: others.map { nameOf(it) }.filter { it.isNotEmpty() }.joinToString(", ").ifEmpty { stringResource(R.string.call_title) }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.semantics { heading() })
                         Text(if (v.phase == CallManager.Phase.CONNECTING) stringResource(R.string.call_connecting) else clock, style = MaterialTheme.typography.bodySmall,
                             color = CallInk.copy(alpha = 0.7f), modifier = Modifier.testTag("callClock"))
@@ -381,6 +382,8 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
                     horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     MediaControls(v, onRoutes = { routes = true }, onCameraPermission = { cameraPerm.launch(Manifest.permission.CAMERA) })
                     CallControl(Icons.Filled.PersonAdd, stringResource(R.string.cc_add), stringResource(R.string.call_add), off = false, tag = "callAdd") { adding = true }
+                    // 1.7.6: 🔗 vuelve a abrir «Comparte el enlace» (solo en las llamadas rápidas, que traen enlace).
+                    if (v.shareLink != null) CallControl(Icons.Filled.Link, stringResource(R.string.cc_link), stringResource(R.string.call_share_again), off = false, tag = "callShareLink") { container.calls.setSharing(true) }
                     CallControl(Icons.Filled.ClosedCaption, stringResource(R.string.cc_transcribe), stringResource(if (v.call.transcribing) R.string.call_transcript_off else R.string.call_transcript_on), off = false, rec = v.call.transcribing, tag = "callTranscript") {
                         if (v.call.transcribing) container.scope.launch { runCatching { container.calls.setTranscription(false) }.onFailure { container.toast(errorText(ctx, it)) } }
                         else consent = true
@@ -391,6 +394,7 @@ private fun CallScreen(v: CallManager.View, onOpenConversation: (String) -> Unit
         }
     }
     if (routes) AudioRouteSheet(v, onDismiss = { routes = false })
+    if (v.sharing) v.shareLink?.let { url -> ShareCallLinkSheet(url, v.call, onDismiss = { container.calls.setSharing(false) }) }
     if (adding) AddToCallSheet(v.call, data, onDismiss = { adding = false })
     if (consent) TranscriptConsentDialog(onDismiss = { consent = false }) { ai ->
         consent = false
@@ -514,6 +518,8 @@ internal fun CallStage(
                             if (muted(id)) MutedBadge(Modifier.align(Alignment.BottomEnd))
                         }
                         Text(nameOf(id), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // 1.7.6: el correo que dejó el invitado (llamadas rápidas).
+                        if (isG(id)) GuestCalls.guestEmail(v.call, id)?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = CallInk.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("callGuestEmail-$id")) }
                         if (isG(id)) GuestTag()
                     }
                 }
@@ -787,6 +793,7 @@ fun CallsScreen(onOpenDetail: (String) -> Unit, onOpenConversation: (String) -> 
     var more by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var picking by rememberSaveable { mutableStateOf<String?>(null) }
+    var instant by rememberSaveable { mutableStateOf(false) }
     val launcher = rememberCallLauncher()
     // Recarga al cambiar alguna llamada en vivo (empezó, terminó, hay transcripción).
     LaunchedEffect(data.callsEnabled, st.callsRevision) {
@@ -826,6 +833,11 @@ fun CallsScreen(onOpenDetail: (String) -> Unit, onOpenConversation: (String) -> 
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
+        // 1.7.6: «Nueva llamada» con enlace para invitados, a un toque.
+        floatingActionButton = {
+            if (data.callsEnabled) ExtendedFloatingActionButton(onClick = { instant = true }, icon = { Icon(Icons.Filled.Link, null) },
+                text = { Text(stringResource(R.string.calls_instant), fontWeight = FontWeight.SemiBold) }, modifier = Modifier.testTag("callsInstant"))
+        },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { pad ->
         LazyColumn(Modifier.padding(pad).fillMaxSize().testTag("callsList"), contentPadding = PaddingValues(bottom = 88.dp)) {
@@ -859,6 +871,7 @@ fun CallsScreen(onOpenDetail: (String) -> Unit, onOpenConversation: (String) -> 
         }
     }
     addingTo?.let { c -> AddToCallSheet(c, data, onDismiss = { addingTo = null }) }
+    if (instant) InstantCallSheet(onDismiss = { instant = false })
     picking?.let { kind -> PickConversationSheet(stringResource(R.string.calls_pick), onDismiss = { picking = null }) { c -> picking = null; call(c.id, kind) } }
 }
 

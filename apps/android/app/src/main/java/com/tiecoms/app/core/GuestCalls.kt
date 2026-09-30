@@ -14,7 +14,12 @@ import kotlinx.serialization.json.JsonObject
  */
 
 /** Invitado por enlace que está dentro de la llamada (CallDTO.guests y GuestCallState.guests). */
-@Serializable data class CallGuestDTO(val id: String = "", val name: String = "")
+@Serializable data class CallGuestDTO(
+    val id: String = "",
+    val name: String = "",
+    /** 1.7.6: correo que dejó al entrar (llamadas rápidas). null en servidores anteriores. */
+    val email: String? = null,
+)
 
 /** GET /call-links/:token: lo que ve el invitado antes de entrar (sin ids de la conversación). */
 @Serializable
@@ -84,6 +89,22 @@ object GuestCalls {
         if (!isGuest(id)) return null
         val gid = id!!.removePrefix(PREFIX)
         return c?.guests?.firstOrNull { it.id == gid }?.name?.takeIf { it.isNotBlank() } ?: c?.names?.get(id) ?: ""
+    }
+
+    /** 1.7.6: correo de un invitado (`guest:<id>`), si lo dejó; null si no es invitado o no hay. */
+    fun guestEmail(c: CallDTO?, id: String?): String? {
+        if (!isGuest(id)) return null
+        val gid = id!!.removePrefix(PREFIX)
+        return c?.guests?.firstOrNull { it.id == gid }?.email?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    const val EMAIL_MAX = 254
+    private val EMAIL = Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")
+
+    /** Correo para entrar: sin espacios y en minúsculas; null si no parece un correo. */
+    fun cleanEmail(raw: String?): String? {
+        val e = raw?.trim()?.lowercase() ?: return null
+        return e.takeIf { it.length <= EMAIL_MAX && EMAIL.matches(it) }
     }
 
     /** Estado de la pantalla «Entrar a la llamada» según el error del API. */

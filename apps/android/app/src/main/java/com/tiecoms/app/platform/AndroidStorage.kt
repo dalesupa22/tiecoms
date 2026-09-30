@@ -112,6 +112,10 @@ class AppSettings(context: Context) {
     var guestName: String?
         get() = prefs.getString("guestName", null)
         set(v) { prefs.edit().apply { if (v.isNullOrBlank()) remove("guestName") else putString("guestName", v) }.apply() }
+    /** 1.7.6: correo con el que entré como invitado la última vez. */
+    var guestEmail: String?
+        get() = prefs.getString("guestEmail", null)
+        set(v) { prefs.edit().apply { if (v.isNullOrBlank()) remove("guestEmail") else putString("guestEmail", v) }.apply() }
     var mailNudgeOff: Boolean
         get() = prefs.getBoolean("mailNudgeOff", false)
         set(v) { prefs.edit().putBoolean("mailNudgeOff", v).apply() }

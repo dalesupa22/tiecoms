@@ -6,11 +6,17 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 |---|---|
 | applicationId | `com.chaggu.app` (app nueva en Play desde 1.6.0 / 14; la anterior era `com.tiecoms.app`). El `namespace` y los paquetes Kotlin siguen siendo `com.tiecoms.app`. |
 | minSdk / target / compile | 26 / 36 / 36 |
-| Versión | `versionName 1.6.7`, `versionCode 26`. Sube el `versionCode` en cada envío a Play. |
+| Versión | `versionName 1.7.6`, `versionCode 45`. Sube el `versionCode` en cada envío a Play. |
 | Contrato | `2026-09-28` (`CONTRACT_VERSION` en core/Models.kt y `BuildConfig.CONTRACT_VERSION`). Se envía en `x-tiecoms-contract` y en `device.contract`. |
 | API por defecto | `https://app.chaggu.com` (web pública: `https://www.chaggu.com`) |
 | Marca | **Chaggu** desde 1.6.0 (antes TieComs). Cambia solo lo visible: nombre, textos, dominios, ícono, splash y colores (tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`). Se publica como app nueva: `applicationId` `com.chaggu.app` y esquema propio `chaggu://` (el SSO pide `redirect_scheme=chaggu`), para convivir con la app TieComs instalada. Lo demás interno se mantiene: `namespace`/paquetes Kotlin `com.tiecoms.app`, clave de subida `tiecoms-upload`, proyecto Firebase `tiecoms`, headers `x-tiecoms-*`, claves de SharedPreferences, IDs de canales y nombres de sonidos. |
 | Toolchain | Gradle 8.14.3 (wrapper), AGP 8.13.2, Kotlin 2.3.21 y JDK 17 |
+
+## Entrega 1.7.6 (45): «Nueva llamada» con enlace para invitados
+
+- **Pestaña Llamadas** (`ui/InstantCallViews.kt`, `core/InstantCalls.kt`): botón flotante «Nueva llamada». La hoja trae título opcional (vacío = automático del servidor) y Voz/Video (voz por defecto); «Empezar» llama a `POST /calls/instant {title?, video}` → `{call, conversationId, link:{url, token}}`, entra con el flujo normal (`POST /conversations/:id/call`) y abre «Comparte el enlace»: el enlace, Copiar, Compartir… (`ACTION_SEND` con selector) y el texto «Únete a mi llamada en chaggu: <url>. Solo necesitas tu nombre y correo». Dentro de la llamada, «🔗 Enlace» lo vuelve a abrir. Un 404 muestra «Actualiza pronto: tu servidor aún no tiene llamadas rápidas».
+- **Invitados con correo**: `CallDTO.guests[].email` (opcional); se ve bajo el nombre en la llamada y en la lista de invitados de «Comparte el enlace». La pantalla «Entrar a la llamada» de Android pide nombre y correo (`POST /call-links/:token/join {name, email}`).
+- `InstantCallsTest`.
 
 ## Entrega 1.7.5 (44): orden de los temas y abrir en el tema del mensaje
 

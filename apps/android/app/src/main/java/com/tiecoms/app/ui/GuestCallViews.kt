@@ -88,6 +88,8 @@ private fun GuestLobby(token: String, onClose: () -> Unit) {
     var confirmSwitch by remember { mutableStateOf<Boolean?>(null) }
     // Nombre: el que usé la última vez o, con sesión, el de mi perfil.
     var name by rememberSaveable(token) { mutableStateOf(container.settings.guestName ?: st.data?.me?.name ?: "") }
+    // 1.7.6: el correo (la web pide nombre y correo); se recuerda como el nombre.
+    var email by rememberSaveable(token) { mutableStateOf(container.settings.guestEmail ?: st.data?.me?.email ?: "") }
     val profileName = st.data?.me?.name
     LaunchedEffect(profileName) { if (name.isBlank() && !profileName.isNullOrBlank()) name = profileName }
 
@@ -109,10 +111,12 @@ private fun GuestLobby(token: String, onClose: () -> Unit) {
 
     fun doJoin(video: Boolean) {
         val n = GuestCalls.cleanName(name) ?: return
+        val mail = GuestCalls.cleanEmail(email) ?: return
         container.settings.guestName = n
+        container.settings.guestEmail = mail
         launcher.launch(video) { cam ->
             busy = true
-            try { container.calls.joinAsGuest(token, n, cam) }
+            try { container.calls.joinAsGuest(token, n, cam, mail) }
             catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 when (GuestCalls.problemOf(e)) {
@@ -126,7 +130,7 @@ private fun GuestLobby(token: String, onClose: () -> Unit) {
         }
     }
     fun join(video: Boolean) {
-        if (GuestCalls.cleanName(name) == null || busy) return
+        if (GuestCalls.cleanName(name) == null || GuestCalls.cleanEmail(email) == null || busy) return
         // Ya estoy en otra llamada: se pregunta antes de salir de ella.
         val cur = view
         if (cur != null && cur.guest?.token != token) confirmSwitch = video else doJoin(video)
@@ -165,10 +169,16 @@ private fun GuestLobby(token: String, onClose: () -> Unit) {
                         } else {
                             OutlinedTextField(name, { name = it.take(GuestCalls.NAME_MAX) }, singleLine = true, label = { Text(stringResource(R.string.guest_name)) },
                                 placeholder = { Text(stringResource(R.string.guest_name_ph)) },
-                                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { join(i.kind == "video") }),
+                                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
                                 modifier = Modifier.fillMaxWidth().testTag("guestName"))
-                            val ok = GuestCalls.cleanName(name) != null && !busy
+                            val badEmail = email.isNotBlank() && GuestCalls.cleanEmail(email) == null
+                            OutlinedTextField(email, { email = it.take(GuestCalls.EMAIL_MAX) }, singleLine = true, label = { Text(stringResource(R.string.guest_email)) },
+                                placeholder = { Text(stringResource(R.string.guest_email_ph)) }, isError = badEmail,
+                                supportingText = if (badEmail) { { Text(stringResource(R.string.guest_email_bad)) } } else null,
+                                keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Email, imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { join(i.kind == "video") }),
+                                modifier = Modifier.fillMaxWidth().testTag("guestEmail"))
+                            val ok = GuestCalls.cleanName(name) != null && GuestCalls.cleanEmail(email) != null && !busy
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedButton(onClick = { join(false) }, enabled = ok, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("guestJoinAudio")) {
                                     Text("📞 " + stringResource(R.string.guest_join_audio), maxLines = 1, overflow = TextOverflow.Ellipsis)

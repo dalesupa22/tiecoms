@@ -9,6 +9,9 @@ on:
     tags: ['desktop-v*']
     paths: ['apps/desktop/**', 'apps/web/**', 'packages/**', '.github/workflows/desktop-windows.yml']
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -36,3 +39,22 @@ jobs:
             apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
             apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
           if-no-files-found: error
+      # Release público con los instaladores (el repo es público): www.chaggu.com/descargas/ los sirve desde el
+      # servidor (docs/ESCRITORIO.md). Un release por versión de tauri.conf.json; volver a correrlo reemplaza los archivos.
+      - name: Versión
+        id: ver
+        shell: bash
+        run: echo "v=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Publicar release
+        if: github.ref == 'refs/heads/desktop-windows' || startsWith(github.ref, 'refs/tags/desktop-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-v${{ steps.ver.outputs.v }}
+          name: chaggu escritorio ${{ steps.ver.outputs.v }}
+          target_commitish: ${{ github.sha }}
+          body: Instaladores de chaggu para Windows. Descárgalos en https://www.chaggu.com/#descargar
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          files: |
+            apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi

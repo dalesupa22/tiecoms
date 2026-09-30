@@ -3,6 +3,7 @@ import { client } from './app-client.ts';
 import { t } from './i18n.ts';
 import { toast } from './menu.tsx';
 import { BASE, navigate } from './router.ts';
+import { isOpenInPanes } from './split.ts';
 import { conversationTitle, personById } from './ui.tsx';
 import { placeWorkspace } from './screens/Groups.tsx';
 import type { BootstrapDTO, ConversationDTO } from '@tiecoms/contracts';
@@ -43,7 +44,7 @@ export function handleNotice(n: ClientNotice) {
   if (n.kind === 'message') {
     const conv = d.conversations.find((c) => c.id === n.conversationId);
     const hidden = document.visibilityState !== 'visible';
-    const current = location.pathname === `${BASE}/c/${n.conversationId}`;
+    const current = location.pathname === `${BASE}/c/${n.conversationId}` || isOpenInPanes(n.conversationId);
     const check = {
       fromOther: n.message.authorId !== d.me.id && n.message.kind === 'text', mutedUntil: conv?.mutedUntil, mentioned: !!n.mentioned,
       dndUntil: d.me.dndUntil, soundOn: soundEnabled(), hidden, current, farFromEnd: current && !hidden && farFromEnd(n.conversationId),
@@ -76,7 +77,7 @@ export function handleNotice(n: ClientNotice) {
   }
   if (n.kind === 'reaction') {
     // Reacción a un mensaje mío: toast si estoy en otra pantalla; notificación del sistema si la pestaña no está a la vista.
-    const current = location.pathname === `${BASE}/c/${n.conversationId}`;
+    const current = location.pathname === `${BASE}/c/${n.conversationId}` || isOpenInPanes(n.conversationId);
     if (document.visibilityState === 'visible' && current) return;
     // Igual que el push de reacciones: nada con «No molestar» ni en un chat silenciado.
     if (dnd || activeUntil(d.conversations.find((c) => c.id === n.conversationId)?.mutedUntil)) return;

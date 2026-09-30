@@ -23,7 +23,7 @@ export type Route =
   | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' } | { name: 'agenda' } | { name: 'share' } | { name: 'whatsapp' } | { name: 'files' } | { name: 'groups' } | { name: 'dms' } | { name: 'saved' } | { name: 'scheduled' } | { name: 'signed' } | { name: 'calls' } | { name: 'mail' }
   | { name: 'oversight'; id: string } | { name: 'readonly'; id: string }
   | { name: 'conversation'; id: string } | { name: 'workspace'; id: string }
-  | { name: 'login' } | { name: 'signup' } | { name: 'sso' } | { name: 'invite'; token: string } | { name: 'guestCall'; token: string };
+  | { name: 'login' } | { name: 'signup' } | { name: 'sso' } | { name: 'invite'; token: string } | { name: 'guestCall'; token: string } | { name: 'confirmSignup'; token: string };
 
 export function parse(path: string): Route {
   const [, a, b] = path.split('/');
@@ -31,6 +31,7 @@ export function parse(path: string): Route {
   if (a === 'w' && b) return { name: 'workspace', id: b };
   if (a === 'invite' && b) return { name: 'invite', token: decodeURIComponent(b) };
   if (a === 'llamada' && b) return { name: 'guestCall', token: decodeURIComponent(b) };
+  if (a === 'confirmar' && b) return { name: 'confirmSignup', token: decodeURIComponent(b) };
   if (a === 'auth' && b === 'sso') return { name: 'sso' };
   if (a === 'login') return { name: 'login' };
   if (a === 'signup') return { name: 'signup' };

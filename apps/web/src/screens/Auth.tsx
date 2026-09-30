@@ -10,6 +10,8 @@ export function AuthScreen({ mode, after }: { mode: 'login' | 'signup'; after?: 
   const [f, setF] = useState({ name: '', email: '', password: '', orgName: '', title: '' });
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  /** Correo corporativo: la cuenta nace al confirmar el correo (docs/REGISTRO.md). */
+  const [confirmSent, setConfirmSent] = useState<{ email: string; orgName?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const joining = mode === 'signup' && !!orgToken;
@@ -34,11 +36,12 @@ export function AuthScreen({ mode, after }: { mode: 'login' | 'signup'; after?: 
       if (mode === 'login') await client.login(f.email, f.password);
       else await client.signup({
         name: f.name, email: f.email, password: f.password, title: f.title || undefined,
-        ...(joining ? { orgInviteToken: orgToken } : { orgName: f.orgName }),
+        ...(joining ? { orgInviteToken: orgToken } : f.orgName.trim() ? { orgName: f.orgName.trim() } : {}),
       });
       navigate(after ?? '/', true);
     } catch (err: any) {
-      setError(errorText(err));
+      if (err?.code === 'email_confirm_sent') setConfirmSent({ email: err.details?.email ?? f.email, orgName: err.details?.orgName });
+      else setError(errorText(err));
     } finally {
       setBusy(false);
     }
@@ -64,6 +67,17 @@ export function AuthScreen({ mode, after }: { mode: 'login' | 'signup'; after?: 
       setBusy(false);
     }
   }
+  if (confirmSent) return (
+    <div className="auth">
+      <div className="auth-card">
+        <img src={asset('/chaggu-logo.svg')} alt="chaggu" width={180} height={78} />
+        <h2 style={{ margin: 0 }}>📬 {t('confirm.checkTitle')}</h2>
+        <p style={{ margin: 0 }}>{confirmSent.orgName ? t('confirm.checkJoin', { email: confirmSent.email, org: confirmSent.orgName }) : t('confirm.checkCreate', { email: confirmSent.email })}</p>
+        <p className="small muted" style={{ margin: 0 }}>{t('confirm.checkSpam')}</p>
+        <button className="btn" onClick={() => setConfirmSent(null)}>{t('confirm.changeEmail')}</button>
+      </div>
+    </div>
+  );
   return (
     <div className="auth">
       <div className="auth-card">
@@ -79,7 +93,7 @@ export function AuthScreen({ mode, after }: { mode: 'login' | 'signup'; after?: 
         {/* En móvil el SSO lo hacen las apps nativas; aquí la web y el escritorio (este por el navegador del sistema). */}
         {(platform === 'web' || isDesktop) && (
           <div className="sso">
-            {mode === 'signup' && !joining && <label className="field"><span>{t('auth.company')}</span><input className="input" autoComplete="organization" value={f.orgName} onChange={set('orgName')} placeholder={t('auth.companyPh')} /></label>}
+            {mode === 'signup' && !joining && <label className="field"><span>{t('auth.company')}</span><input className="input" autoComplete="organization" value={f.orgName} onChange={set('orgName')} placeholder={t('auth.companyPh')} /><small className="hint">{t('auth.companyHint')}</small></label>}
             <button type="button" className="btn sso-btn" disabled={busy} onClick={() => sso('google')}><GoogleMark /> {t('auth.withGoogle')}</button>
             <button type="button" className="btn sso-btn" disabled={busy} onClick={() => sso('microsoft')}><MicrosoftMark /> {t('auth.withMicrosoft')}</button>
             <div className="sso-or"><span>{t('auth.orEmail')}</span></div>
@@ -154,6 +168,37 @@ export function SsoReturnScreen() {
               <button className="btn primary" onClick={() => navigate('/login', true)}>{t('auth.backToLogin')}</button>
             </>
           : <p className="muted">{t('common.wait')}</p>}
+      </div>
+    </div>
+  );
+}
+
+/** /confirmar/:token — el enlace del correo: muestra a qué empresa entra y crea la cuenta al tocar «Confirmar». */
+export function ConfirmSignupScreen({ token }: { token: string }) {
+  const [p, setP] = useState<{ email: string; name: string; orgName: string | null; joining: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { client.previewSignupConfirmation(token).then(setP).catch((e) => setError(errorText(e))); }, [token]);
+  // Se confirma con un toque (no al abrir): los antivirus del correo abren los enlaces solos.
+  const confirm = () => {
+    setBusy(true);
+    client.confirmSignup(token).then(() => navigate('/', true)).catch((e) => { setError(errorText(e)); setBusy(false); });
+  };
+  return (
+    <div className="auth">
+      <div className="auth-card">
+        <img src={asset('/chaggu-logo.svg')} alt="chaggu" width={180} height={78} />
+        {error ? <>
+            <div className="error" role="alert">{error}</div>
+            <button className="btn primary" onClick={() => navigate('/login', true)}>{t('auth.backToLogin')}</button>
+          </>
+          : !p ? <p className="muted">{t('common.wait')}</p>
+          : <>
+              <h2 style={{ margin: 0 }}>{t('confirm.hi', { name: p.name.split(' ')[0] ?? p.name })}</h2>
+              <p style={{ margin: 0 }}>{p.joining && p.orgName ? t('confirm.join', { org: p.orgName }) : t('confirm.create', { org: p.orgName ?? '' })}</p>
+              <div className="small muted">{p.email}</div>
+              <button className="btn primary" disabled={busy} onClick={confirm}>{t('confirm.button')}</button>
+            </>}
       </div>
     </div>
   );

@@ -93,6 +93,26 @@ final class ChatScrollUITests: XCTestCase {
             if more.frame.midY < screen.height * 0.5 { drag(app, from: 0.38, to: 0.62) } else { drag(app, from: 0.62, to: 0.38) }
         }
         let collapsedH = long.frame.height
+        if lazy {
+            // Pila perezosa: «Ver más» abre el texto completo en una hoja (la fila no se despliega: la LazyVStack entraba en
+            // un bucle re-estimando una fila más alta que la pantalla). Luego el chat se recorre hasta el primero y el último.
+            more.tap()
+            let body = app.descendants(matching: .any)["longText.body"].firstMatch
+            XCTAssertTrue(body.waitForExistence(timeout: 5), "la hoja con el texto completo")
+            XCTAssertTrue(body.label.contains("Línea 120"), "trae las 120 líneas")
+            shot("lazy-171-02-hoja")
+            app.buttons["longText.close"].tap()
+            XCTAssertTrue(more.waitForExistence(timeout: 5))
+            XCTAssertEqual(long.frame.height, collapsedH, accuracy: 4, "la fila sigue plegada")
+            let first = text(app, "corto antes 1")
+            for _ in 0..<25 where !(first.exists && first.isHittable) { drag(app, from: 0.35, to: 0.70) }
+            XCTAssertTrue(first.exists && first.isHittable, "llega al primero de antes del largo")
+            let last = text(app, "ÚLTIMO MENSAJE CORTO")
+            for _ in 0..<25 where !(last.exists && last.isHittable) { drag(app, from: 0.70, to: 0.30) }
+            XCTAssertTrue(last.exists && last.isHittable, "llega al último mensaje")
+            shot("lazy-171-04-final")
+            return
+        }
         more.tap()
         let expanded = app.buttons["msg.readMore.\(f.longMessageId)"].firstMatch
         XCTAssertTrue(NSPredicate(format: "label == 'Ver menos'").evaluate(with: expanded) || { sleep(1); return expanded.label == "Ver menos" }(),

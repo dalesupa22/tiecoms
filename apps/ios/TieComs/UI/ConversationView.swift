@@ -1681,6 +1681,8 @@ struct MessageBubble: View {
     @Environment(\.openURL) private var openURL
     /// Mensaje muy largo (1.7.1): plegado a `LongText.collapsedLines` con «Ver más».
     @State private var expanded = false
+    @State private var reading = false
+    @Environment(\.chatLazyStack) private var inLazyStack
 
     var body: some View {
         let _ = PerfCounters.bump("chat.bubble.body")
@@ -1727,12 +1729,12 @@ struct MessageBubble: View {
                         if !mentions.isEmpty || highlight != nil {
                             // Cada mención con el color de SU persona (y tocable); los enlaces http con el color de enlace.
                             RichMessageText(text: text, mentions: mentions, mine: mine, linkify: linkify, highlight: highlight,
-                                            maxLines: collapsed ? LongText.collapsedLines : 0) { id in
+                                            maxLines: collapsed ? collapsedLines : 0) { id in
                                 if let u = URL(string: "chaggu-mention://\(id)") { openURL(u) }
                             }
                         } else if linkify { Text(Linkify.cachedAttributed(text)) } else { Text(text) }
                     }
-                    .lineLimit(collapsed ? LongText.collapsedLines : nil)
+                    .lineLimit(collapsed ? collapsedLines : nil)
                     // Solo emojis (1 a 3): grandes, como en la web (isJumbo).
                     .font(jumbo ? .system(size: jumboSize) : .body)
                     .italic(italic)
@@ -1742,13 +1744,14 @@ struct MessageBubble: View {
                     // Con fotos la burbuja se ciñe a ellas; el texto conserva su margen.
                     .padding(.horizontal, attachments.isEmpty ? 0 : 9).padding(.bottom, attachments.isEmpty ? 0 : 4)
                     if long {
-                        Button { withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() } } label: {
+                        Button { if inLazyStack { reading = true } else { withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() } } } label: {
                             Text(expanded ? L("chat.readLess") : L("chat.readMore")).font(.subheadline.weight(.semibold))
                                 .foregroundStyle(mine ? Color.white : Theme.accentText)
                                 .padding(.vertical, 2).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("msg.readMore.\(messageId ?? "")")
+                        .sheet(isPresented: $reading) { LongTextSheet(text: text, author: author?.name) }
                     }
                     }
                     if let linkPreview { LinkPreviewCard(preview: linkPreview, mine: mine) }
@@ -1806,7 +1809,10 @@ struct MessageBubble: View {
 
     /// Muy largo y sin búsqueda activa (con búsqueda se ve entero para que se vea lo resaltado).
     private var long: Bool { highlight == nil && !italic && LongText.isLong(text) }
-    private var collapsed: Bool { long && !expanded }
+    private var collapsed: Bool { long && (!expanded || inLazyStack) }
+    /// En la pila perezosa, plegado más corto: una fila más alta que la pantalla (30 líneas que se parten en 60) también
+    /// dejaba la LazyVStack re-estimando sin fin; con 12 queda siempre por debajo del alto de la pantalla.
+    private var collapsedLines: Int { inLazyStack ? LongText.lazyCollapsedLines : LongText.collapsedLines }
 
     private var jumbo: Bool { !italic && attachments.isEmpty && mentions.isEmpty && Reactions.isJumbo(text) }
 
@@ -1881,6 +1887,8 @@ struct LineageBar: View {
 /// Mensajes muy largos: más de 40 líneas o 3000 caracteres se muestran plegados a 30 líneas con «Ver más».
 enum LongText {
     static let collapsedLines = 30
+    /// En la pila perezosa (chats de más de 200 filas).
+    static let lazyCollapsedLines = 12
     static func isLong(_ s: String) -> Bool {
         if s.utf16.count > 3000 { return true }
         var lines = 1
@@ -1898,6 +1906,37 @@ struct ChatStack<Content: View>: View {
     let lazy: Bool
     @ViewBuilder var content: () -> Content
     var body: some View {
-        if lazy { LazyVStack(spacing: 4, content: content) } else { VStack(spacing: 4, content: content) }
+        if lazy { LazyVStack(spacing: 4, content: content).environment(\.chatLazyStack, true) } else { VStack(spacing: 4, content: content) }
+    }
+}
+
+/// En la pila perezosa un mensaje muy largo no se despliega en el chat: la LazyVStack re-estimaba sin fin el alto de una
+/// fila más alta que la pantalla (LazyStack.measureEstimates / placeSubviews en bucle, app congelada). Ahí «Ver más» abre
+/// el texto completo en una hoja. Prueba: ChatScrollUITests.testLongMessageScrollsInLazyStack.
+private struct ChatLazyStackKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var chatLazyStack: Bool {
+        get { self[ChatLazyStackKey.self] }
+        set { self[ChatLazyStackKey.self] = newValue }
+    }
+}
+
+/// El texto completo de un mensaje muy largo (desde la pila perezosa).
+struct LongTextSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let text: String
+    let author: String?
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(text).font(.body).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .accessibilityIdentifier("longText.body")
+            }
+            .navigationTitle(author ?? L("chat.readMore"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L("common.close")) { dismiss() }.accessibilityIdentifier("longText.close") } }
+        }
     }
 }

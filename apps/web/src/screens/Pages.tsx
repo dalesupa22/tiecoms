@@ -15,6 +15,7 @@ import { RemindersSection } from './Bring.tsx';
 import { SleepDialog, sleepSummary } from './Sleep.tsx';
 import { MeetingsSettings } from './Meetings.tsx';
 import { TEXT_SIZES, setTextSize, useTextSize } from '../text-size.ts';
+import { THEME_PREFS, setThemePreference, useThemePreference } from '../theme.ts';
 import { formatBytes } from '../video.ts';
 import { askNotifications, conversationMenu, dndMenu, dndText, mutedText, openDialog, personMenu } from '../actions.tsx';
 import { menuProps, openMenuAt, toast } from '../menu.tsx';
@@ -195,7 +196,7 @@ export function WorkspaceScreen({ id }: { id: string }) {
           <div className="list">
             {convs.map((c) => (
               <button key={c.id} className="card conv-card" onClick={() => navigate(`/c/${c.id}`)} {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
-                {c.avatarUrl ? <ConvAvatar c={c} size={34} /> : <span className="mark" style={{ width: 34, height: 34, background: c.kind === 'internal' ? '#fff' : 'var(--paper-3)', border: '1px solid var(--line)', fontSize: 14 }}>{c.parentId ? '⑂' : c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>}
+                {c.avatarUrl ? <ConvAvatar c={c} size={34} /> : <span className="mark" style={{ width: 34, height: 34, background: c.kind === 'internal' ? 'var(--surface)' : 'var(--paper-3)', border: '1px solid var(--line)', fontSize: 14 }}>{c.parentId ? '⑂' : c.kind === 'internal' ? '◌' : c.level === 'directivo' ? '◆' : '#'}</span>}
                 <span className="grow" style={{ minWidth: 0 }}>
                   <span className="row"><b className="grow ellipsis">{conversationTitle(d, c)}</b><span className="small muted">{timeLabel(c.lastMessageAt)}</span></span>
                   <span className="small muted ellipsis" style={{ display: 'block' }}>{t(c.kind === 'internal' ? 'kind.internal' : c.level === 'directivo' ? 'kind.directivo' : 'kind.operativo')} · {tn(c.memberIds.length, 'n.participant', 'n.participants')}</span>
@@ -390,6 +391,8 @@ export function SettingsScreen() {
           <button key={label} className={pref === v ? 'on' : ''} onClick={() => setLang(v)} lang={v ?? getLang()}>{label}</button>
         ))}
       </div>
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{t('theme.title')}</div>
+      <ThemeSetting />
 
       {canInvite && myOrg && (
         <>
@@ -449,6 +452,21 @@ function StorageUsage({ adminOrgs }: { adminOrgs: { id: string; name: string }[]
           {orgs.map((o) => <div key={o.id} className="small" style={{ marginTop: 8 }}>{t(o.people === 1 ? 'storage.orgOne' : 'storage.org', { org: o.name, total: fmt(o.totalBytes), n: o.people ?? 0 })}</div>)}
         </>
       )}
+    </div>
+  );
+}
+
+/** Apariencia: Automático (sistema) · Claro · Oscuro. Se guarda en este dispositivo (theme.ts). */
+function ThemeSetting() {
+  const pref = useThemePreference();
+  return (
+    <div style={{ marginBottom: 24, maxWidth: 480 }} data-testid="theme-setting">
+      <div className="seg" role="radiogroup" aria-label={t('theme.title')}>
+        {THEME_PREFS.map((v) => (
+          <button key={v} role="radio" aria-checked={pref === v} className={pref === v ? 'on' : ''} onClick={() => setThemePreference(v)}>{t(`theme.${v}`)}</button>
+        ))}
+      </div>
+      <div className="hint" style={{ marginTop: 6 }}>{t('theme.hint')}</div>
     </div>
   );
 }

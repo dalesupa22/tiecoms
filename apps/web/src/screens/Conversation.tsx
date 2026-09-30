@@ -13,7 +13,7 @@ import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem }
 import { navigate, queryParam } from '../router.ts';
 import { MAX_PANES, ZOOM_MAX, ZOOM_MIN, convZoomNow, setConvZoom, splitAvailable, useConvZoom } from '../split.ts';
 import { SplitPicker } from './SplitPicker.tsx';
-import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, isGgChat, isSelfChat, orgById, personById, personColor } from '../ui.tsx';
+import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, isGgChat, isSelfChat, orgById, personById, personColor, personInk } from '../ui.tsx';
 import { PhotoCropDialog, pickImage } from './PhotoCrop.tsx';
 import { AttachmentsView, DraftTray, pickFiles, useDrafts } from './Attachments.tsx';
 import { VoiceRecorder } from './Voice.tsx';
@@ -746,7 +746,7 @@ export function ConversationScreen({ id, embedded, pane }: { id: string; embedde
                 <div style={{ minWidth: 0 }}>
                   {!r.cont && (
                     <div className="msg-meta">
-                      <span className="msg-author" style={conv.kind !== 'direct' && author ? { color: personColor(author.id) } : undefined}>{author?.name ?? t('chat.formerParticipant')}</span>
+                      <span className="msg-author" style={conv.kind !== 'direct' && author ? { color: personInk(author.id) } : undefined}>{author?.name ?? t('chat.formerParticipant')}</span>
                       <span className="msg-org">{org?.name ?? (author?.guest ? t('common.guest') : '')}</span>
                       <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span>
                       {pinned.has(m.id) && <span className="msg-time">📌</span>}

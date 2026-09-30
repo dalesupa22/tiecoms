@@ -62,8 +62,8 @@ export function handleNotice(n: ClientNotice) {
         ? new Notification(group, { body: `${who}: ${body}`, tag: n.conversationId, icon: `${BASE}/icon-192.png` })
         : new Notification(`${who} · ${conv ? conversationTitle(d, conv) : 'chaggu'}`, { body, tag: n.conversationId, icon: `${BASE}/icon-192.png` });
       note.onclick = () => { window.focus(); navigate(`/c/${n.conversationId}?m=${n.message.seq}`); note.close(); };
-    } else if (!hidden && !current) {
-      // Pestaña a la vista pero en otra pantalla: burbuja con quién, dónde y el mensaje; un clic abre el chat.
+    } else if (!current) {
+      // En otra pantalla (o con la pestaña oculta y sin permiso de avisos): burbuja con quién, dónde y el mensaje; un clic abre el chat.
       const group = conv ? groupNoticeTitle(d, conv) : null;
       const person = personById(d, n.message.authorId) ?? null;
       showMessageBubble({

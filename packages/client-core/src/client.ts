@@ -1150,6 +1150,8 @@ export class TieComsClient {
       for (const [id, waiters] of batch) for (const w of waiters) { const e = got.get(id); if (e) w.resolve(e); else w.reject(new ApiRequestError(404, 'not_found', 'Correo no disponible')); }
     } catch (e) { for (const [, waiters] of batch) for (const w of waiters) w.reject(e); }
   };
+  /** Sin leer en Principal/Prioritarios de los correos conectados (para el riel de la web). */
+  async mailUnread() { return (await this.request<{ unread: number }>('/mail/unread')).unread; }
   async mailConnections() { return (await this.request<{ connections: import('@tiecoms/contracts').MailConnectionDTO[] }>('/mail/connections')).connections; }
   connectMailProvider(provider: import('@tiecoms/contracts').MailProvider, proofChallenge: string, platform: 'web' | 'ios' | 'android' | 'desktop' = 'web') {
     return this.request<{ url: string }>(`/mail/connect/${provider}`, { method: 'POST', json: { platform, proofChallenge } });

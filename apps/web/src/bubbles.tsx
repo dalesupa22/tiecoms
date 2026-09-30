@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useClient } from './app-client.ts';
 import { pendingOf } from './home-order.ts';
 import { t } from './i18n.ts';
@@ -44,12 +44,48 @@ export function BubbleHost() {
 }
 
 // ---------- Número de conversaciones sin leer en la pestaña (y en el ícono de la app instalada) ----------
+// Llamada entrante: el título de la pestaña titila «📞 Fulano te está llamando» hasta contestar o colgar.
+let titleFlash: string | null = null;
+let flashOn = false;
+let flashTimer: ReturnType<typeof setInterval> | null = null;
+const titleListeners = new Set<() => void>();
+const emitTitle = () => titleListeners.forEach((l) => l());
+export function flashTitle(text: string | null) {
+  if (flashTimer) clearInterval(flashTimer);
+  flashTimer = null;
+  titleFlash = text; flashOn = !!text;
+  if (text) flashTimer = setInterval(() => { flashOn = !flashOn; emitTitle(); }, 1000);
+  emitTitle();
+}
+const titleNow = () => (titleFlash && flashOn ? titleFlash : null);
+
 export function useTabBadge() {
   const n = useClient((s) => (s.data?.conversations ?? []).reduce((k, c) => k + (pendingOf(c) > 0 || (c.unreadMentions ?? 0) > 0 ? 1 : 0), 0));
+  const flash = useSyncExternalStore((l) => { titleListeners.add(l); return () => titleListeners.delete(l); }, titleNow);
   useEffect(() => {
-    document.title = n > 0 ? `(${n > 99 ? '99+' : n}) chaggu` : 'chaggu';
+    document.title = flash ?? (n > 0 ? `(${n > 99 ? '99+' : n}) chaggu` : 'chaggu');
+  }, [n, flash]);
+  useEffect(() => {
     const nav = navigator as Navigator & { setAppBadge?: (n?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
     try { void (n > 0 ? nav.setAppBadge?.(n) : nav.clearAppBadge?.())?.catch(() => {}); } catch {}
   }, [n]);
   useEffect(() => () => { document.title = 'chaggu'; }, []);
+}
+
+// ---------- Pedir permiso de avisos del sistema (una franja en la barra, se puede posponer) ----------
+const ASK_KEY = 'chaggu:notifyAskLater';
+export function NotifyAsk() {
+  const supported = typeof Notification !== 'undefined';
+  const [perm, setPerm] = useState(() => (supported ? Notification.permission : 'denied'));
+  const [later, setLater] = useState(() => { try { return Number(localStorage.getItem(ASK_KEY) ?? 0) > Date.now(); } catch { return false; } });
+  if (!supported || perm !== 'default' || later) return null;
+  return (
+    <div className="notify-ask" role="note">
+      <span className="grow">🔔 {t('notif.ask')}</span>
+      <span className="notify-ask-btns">
+        <button className="btn small accent" onClick={() => { void Notification.requestPermission().then(setPerm).catch(() => {}); }}>{t('notif.askBtn')}</button>
+        <button className="btn small" onClick={() => { setLater(true); try { localStorage.setItem(ASK_KEY, String(Date.now() + 7 * 86400_000)); } catch {} }}>{t('notif.later')}</button>
+      </span>
+    </div>
+  );
 }

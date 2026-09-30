@@ -159,14 +159,20 @@ function treeControls(sections: GroupSection[]): TreeMenu {
 }
 
 /** Botón de vista (plegar y desplegar), aparte de ✎ y «＋», que son para escribir y crear. */
-export function GroupsViewButton({ tab = 'all' }: { tab?: HomeTab }) {
-  const label = t('grp.foldMenu');
+export function GroupsViewButton({ tab = 'all', withView = false }: { tab?: HomeTab; withView?: boolean }) {
+  const label = withView ? t('inbox.view') : t('grp.foldMenu');
   return (
     <button className="icon-btn view-btn" title={label} aria-label={label} aria-haspopup="menu"
       onClick={(e) => {
         const s = client.getState();
         const r = e.currentTarget.getBoundingClientRect();
-        openMenuAt(r.left, r.bottom + 4, treeMenuItems(treeControls(buildGroupTree(s.data!, s.issues, tab))));
+        const tree = viewStore.get() === 'tree';
+        // En la barra de la web: Lista | Árbol arriba y, en Árbol, plegar y desplegar debajo.
+        const view: MenuItem[] = withView ? [
+          ...(['list', 'tree'] as const).map((v) => ({ label: t(v === 'list' ? 'inbox.list' : 'inbox.tree'), icon: viewStore.get() === v ? '✓' : '', onSelect: () => viewStore.set(v) })),
+          ...(tree ? [{ divider: true } as MenuItem] : []),
+        ] : [];
+        openMenuAt(r.left, r.bottom + 4, [...view, ...(tree || !withView ? treeMenuItems(treeControls(buildGroupTree(s.data!, s.issues, tab))) : [])]);
       }}>☰</button>
   );
 }

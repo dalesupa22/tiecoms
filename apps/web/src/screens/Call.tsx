@@ -3,6 +3,7 @@
  * panel flotante de la llamada (con subtítulos y el interruptor de transcripción) y la transcripción guardada.
  */
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import { flashTitle } from '../bubbles.tsx';
 import type { ActiveCallDTO, CallDTO, CallDeviceDTO, CallHistoryItemDTO, CallTranscriptDTO, ConversationDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { bindTile, chooseAudioInput, chooseAudioOutput, currentCall, hangUp, joinCall, listAudioInputs, listAudioOutputs, passHere, setTranscription, startCall, subscribeCall, toggleCamera, toggleMute, type CallView } from '../call.ts';
@@ -55,11 +56,12 @@ export function showIncomingCall(call: CallDTO, callerName: string, title: strin
   ringing = { call, callerName, title };
   ringListeners.forEach((l) => l());
   startRingtone(client.getState().data?.me.ringtone);
+  flashTitle(`${call.kind === 'video' ? '🎥' : '📞'} ${t('call.incomingFrom', { name: callerName })}`);
   if (ringTimer) clearTimeout(ringTimer);
   // Deja de sonar a los 45 s si nadie contesta.
   ringTimer = setTimeout(dismissRing, 45_000);
 }
-function dismissRing() { stopRingtone(); ringing = null; ringListeners.forEach((l) => l()); }
+function dismissRing() { stopRingtone(); flashTitle(null); ringing = null; ringListeners.forEach((l) => l()); }
 /** Contesté o rechacé en otro de mis dispositivos (call.answered / call.declined): aquí deja de sonar. */
 export function dismissIncomingCall(callId: string) { if (ringing?.call.id === callId) dismissRing(); }
 

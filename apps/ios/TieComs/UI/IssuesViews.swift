@@ -557,6 +557,9 @@ enum IssueTree {
 
 struct IssuesScreen: View {
     @Environment(AppStore.self) private var store
+    /// Pestaña «Todo» (1.7.3, variante 2 del mockup): arriba los atajos pequeños a Correo, WhatsApp, Archivos y Trazo;
+    /// debajo, Tareas igual que siempre.
+    var hub = false
     @State private var filter = IssueTree.Filter.mine
     @AppStorage(IssueTree.groupByKey) private var groupByRaw = IssueTree.GroupBy.group.rawValue
     @State private var error: String?
@@ -575,6 +578,13 @@ struct IssuesScreen: View {
                 let shown = groupBy == .group ? IssueTasks.tops(list, store.issues) : list
                 let sections = IssueTree.sections(shown, by: groupBy, me: d.me.id, groupKey: { IssueTasks.groupConversation($0, store.issues) }) { sectionTitle(d, $0, groupBy) }
                 List {
+                    if hub {
+                        Section {
+                            HubShortcuts()
+                                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                                .listRowBackground(Color.clear)
+                        }
+                    }
                     // 1.6.6: sin el párrafo explicativo (issue.pageSub); los filtros quedan pegados al título.
                     Section {
                         Picker(L("nav.issues"), selection: $filter) {
@@ -591,6 +601,11 @@ struct IssuesScreen: View {
                         .pickerStyle(.segmented)
                         .accessibilityIdentifier("issues.groupBy")
                         if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+                    } header: {
+                        if hub {
+                            Text(L("nav.issues")).font(.title3.weight(.bold)).foregroundStyle(Theme.textPrimary).textCase(nil)
+                                .accessibilityAddTraits(.isHeader)
+                        }
                     }
                     if filter != .closed {
                         Section { QuickAddIssue(conversationId: nil) }
@@ -619,7 +634,7 @@ struct IssuesScreen: View {
             }
         }
         .background(Theme.background.ignoresSafeArea())
-        .navigationTitle(L("nav.issues"))
+        .navigationTitle(L(hub ? "tab.hub" : "nav.issues"))
         .quickActions()
         .task { await load() }
     }
@@ -1049,5 +1064,66 @@ struct IssueDetailView: View {
         case "visibility": return "\(L("task.evVis")) → " + (to == "all" ? L("task.visAll") : to == "org" ? L("task.visOrgShort") : L("task.visPrivate"))
         default: return ""
         }
+    }
+}
+
+/// Atajos de la pestaña «Todo»: una fila pequeña y deslizable (ícono de color + nombre + no leídos si hay) que abre las
+/// mismas pantallas que Tú › Archivos / WhatsApp / Correo / Trazo. Discreta: Tareas sigue siendo lo principal.
+struct HubShortcuts: View {
+    @Environment(AppStore.self) private var store
+    /// Chats de WhatsApp con mensajes sin leer (la misma cuenta que el organizador de la pantalla de WhatsApp).
+    @State private var waUnread = 0
+
+    static let mailColor = Color(red: 0.23, green: 0.45, blue: 0.85)
+    static let waColor = Color(red: 0.15, green: 0.64, blue: 0.35)
+    static let filesColor = Color(red: 0.70, green: 0.48, blue: 0.07)
+    static let traceColor = Color(red: 0.49, green: 0.29, blue: 0.76)
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                if store.mailEnabled {
+                    pill(L("mail.title"), "envelope", Self.mailColor, 0, id: "mail") { store.push(.mailBox(conversationId: nil)) }
+                }
+                pill(L("settings.whatsapp"), "message", Self.waColor, waUnread, id: "whatsapp") { store.push(.whatsapp) }
+                pill(L("nav.files"), "folder", Self.filesColor, 0, id: "files") { store.push(.files) }
+                pill(L("nav.trazo"), "arrow.triangle.branch", Self.traceColor, 0, id: "trazo") { store.push(.trazo) }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 2)
+        }
+        .scrollClipDisabled()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(L("hub.shortcuts"))
+        .accessibilityIdentifier("hub.shortcuts")
+        .task(id: store.waRevision) {
+            guard let r = try? await store.waChats(accountId: nil, category: nil, onlyGroups: false, showHidden: false, query: "") else { return }
+            waUnread = r.categories.values.reduce(0) { $0 + $1.unread }
+        }
+    }
+
+    private func pill(_ title: String, _ symbol: String, _ color: Color, _ n: Int, id: String, _ action: @escaping () -> Void) -> some View {
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(color)
+                Text(title).font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                if n > 0 {
+                    Text(n > 99 ? "99+" : "\(n)").font(.caption2.weight(.bold)).monospacedDigit().foregroundStyle(Theme.accentText)
+                }
+            }
+            .lineLimit(1)
+            .padding(.leading, 8).padding(.trailing, 10).padding(.vertical, 6)
+            .background(Capsule().fill(Theme.surface))
+            .overlay(Capsule().stroke(Theme.textSecondary.opacity(0.18), lineWidth: 0.5))
+            .frame(minHeight: 44)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(n > 0 ? L("a11y.unread", ["n": n]) : "")
+        .accessibilityIdentifier("hub.\(id)")
     }
 }

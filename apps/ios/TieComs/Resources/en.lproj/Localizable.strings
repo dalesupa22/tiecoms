@@ -917,6 +917,7 @@
 "home.tab.sides" = "Sidechats";
 "home.tab.unread" = "Unread";
 "home.unreadIn" = "{n} unread";
+"hub.shortcuts" = "Shortcuts";
 "imp.action" = "Bring in from WhatsApp, Slack or email";
 "imp.asMany" = "Bring them as {n} separate messages";
 "imp.asOne" = "Bring it as a single message";
@@ -2130,6 +2131,7 @@
 "tab.calls" = "Calls";
 "tab.dms" = "DMs";
 "tab.groups" = "Groups";
+"tab.hub" = "Hub";
 "tab.home" = "Home";
 "tab.issues" = "Tasks";
 "tab.you" = "You";

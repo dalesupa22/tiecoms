@@ -401,6 +401,22 @@ struct SettingsView: View {
                     }
                 } footer: { Text(L("join.youHint")) }
             }
+            // Archivos, WhatsApp, Correo y Trazo arriba de los avisos (1.7.3): también están en la pestaña «Todo».
+            Section {
+                NavigationLink(value: Route.files) { Label(L("nav.files"), systemImage: "folder") }
+                    .accessibilityIdentifier("settings.files")
+                NavigationLink(value: Route.whatsapp) { Label(L("settings.whatsapp"), systemImage: "message") }
+                if store.mailEnabled {
+                    NavigationLink(value: Route.mailBox(conversationId: nil)) { Label(L("mail.title") + " · " + L("mail.settingsRow"), systemImage: "envelope") }
+                        .accessibilityIdentifier("settings.mail")
+                }
+                NavigationLink(value: Route.reminders) { Label(L("rem.title"), systemImage: "alarm") }
+                NavigationLink(value: Route.scheduled) {
+                    Label(L("nav.scheduled") + (store.scheduled.isEmpty ? "" : " · \(store.scheduled.count)"), systemImage: "clock")
+                }
+                .accessibilityIdentifier("settings.scheduled")
+                NavigationLink(value: Route.trazo) { Label(L("nav.trazo"), systemImage: "arrow.triangle.branch") }
+            } footer: { Text(L("settings.whatsappHint")) }
             // Conexiones para crear reuniones reales de Meet, Teams o Zoom (1.6.6).
             if store.data != nil { MeetingsSettingsSection() }
             Section {
@@ -440,21 +456,6 @@ struct SettingsView: View {
                     }
                 }
             }
-            Section {
-                NavigationLink(value: Route.files) { Label(L("nav.files"), systemImage: "folder") }
-                    .accessibilityIdentifier("settings.files")
-                NavigationLink(value: Route.whatsapp) { Label(L("settings.whatsapp"), systemImage: "message") }
-                if store.mailEnabled {
-                    NavigationLink(value: Route.mailBox(conversationId: nil)) { Label(L("mail.title") + " · " + L("mail.settingsRow"), systemImage: "envelope") }
-                        .accessibilityIdentifier("settings.mail")
-                }
-                NavigationLink(value: Route.reminders) { Label(L("rem.title"), systemImage: "alarm") }
-                NavigationLink(value: Route.scheduled) {
-                    Label(L("nav.scheduled") + (store.scheduled.isEmpty ? "" : " · \(store.scheduled.count)"), systemImage: "clock")
-                }
-                .accessibilityIdentifier("settings.scheduled")
-                NavigationLink(value: Route.trazo) { Label(L("nav.trazo"), systemImage: "arrow.triangle.branch") }
-            } footer: { Text(L("settings.whatsappHint")) }
             Section(L("safety.title")) {
                 NavigationLink { BlockedUsersView() } label: { Label(L("safety.blockedUsers"), systemImage: "person.slash") }
                     .accessibilityIdentifier("settings.blockedUsers")

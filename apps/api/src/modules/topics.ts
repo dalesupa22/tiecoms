@@ -83,6 +83,24 @@ export async function updateTopic(userId: string, topicId: string, input: { name
   });
 }
 
+/**
+ * Orden de las banderitas (Danny, 30-sep-2026): por defecto el de llegada (position sigue la creación) y cada
+ * quien lo cambia arrastrando. `ids` es el orden nuevo de los temas activos; los que no vengan quedan después,
+ * en su orden de antes. Es el orden del chat (lo ven todos, como el nombre y el color del tema).
+ */
+export async function reorderTopics(userId: string, conversationId: string, ids: string[]) {
+  return tx(async (c) => {
+    await conversationAccess(c, userId, conversationId, 'post', true);
+    const { rows } = await c.query('SELECT id FROM conversation_topics WHERE conversation_id = $1 ORDER BY archived_at NULLS FIRST, position, created_at FOR UPDATE', [conversationId]);
+    const known = new Set(rows.map((r) => r.id as string));
+    const wanted = [...new Set(ids)].filter((id) => known.has(id));
+    if (wanted.length !== new Set(ids).size) throw badRequest('Hay temas que no son de este chat');
+    const order = [...wanted, ...rows.map((r) => r.id as string).filter((id) => !wanted.includes(id))];
+    for (let i = 0; i < order.length; i++) await c.query('UPDATE conversation_topics SET position = $2 WHERE id = $1', [order[i], i]);
+    return { topics: await changed(c, conversationId) };
+  });
+}
+
 /** Quitar un tema: se borra la banderita y sus mensajes y tareas quedan sin tema (ON DELETE SET NULL). */
 export async function deleteTopic(userId: string, topicId: string) {
   return tx(async (c) => {

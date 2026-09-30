@@ -175,9 +175,18 @@ export function TopicDock({ conv, list, filter, onFilter, counts, unread = {} }:
   unread?: Record<string, number>;
 }) {
   const d = useClient((s) => s.data)!;
-  // Primero (de izquierda a derecha) los temas con mensajes sin leer y luego el resto por orden alfabético
-  // (Danny, 30-sep-2026; igual en iOS y Android).
-  const act = [...activeTopics(list)].sort((a, b) => (unread[b.id] ? 1 : 0) - (unread[a.id] ? 1 : 0) || a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
+  // Orden de llegada por defecto; quien puede escribir lo cambia arrastrando las banderitas (Danny, 30-sep-2026).
+  const act = activeTopics(list);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const dropOn = (targetId: string) => {
+    const from = dragging;
+    setDragging(null); setOver(null);
+    if (!from || from === targetId) return;
+    const ids = act.map((x) => x.id).filter((id) => id !== from);
+    ids.splice(ids.indexOf(targetId) + (act.findIndex((x) => x.id === from) < act.findIndex((x) => x.id === targetId) ? 1 : 0), 0, from);
+    void client.reorderTopics(conv.id, list, ids).catch((e) => toast(errorText(e)));
+  };
   const archived = list.filter((x) => x.archivedAt);
   const canEdit = conv.canPost;
   const flagMenu = (x: TopicDTO): MenuItem[] => [
@@ -211,8 +220,11 @@ export function TopicDock({ conv, list, filter, onFilter, counts, unread = {} }:
           title={`${t('topic.all')} · ${t('topic.allHint')}`}>☰{filter === TOPIC_ALL ? <span className="topic-flag-text"> {t('topic.all')}</span> : null}</button>
       )}
       {act.map((x) => (
-        <button key={x.id} role="tab" aria-selected={filter === x.id} className={`topic-flag c-${x.color} ${filter === x.id ? 'is-on' : ''}`}
-          title={personById(d, x.createdBy)?.name}
+        <button key={x.id} role="tab" aria-selected={filter === x.id} className={`topic-flag c-${x.color} ${filter === x.id ? 'is-on' : ''} ${dragging === x.id ? 'is-dragging' : ''} ${over === x.id && dragging !== x.id ? 'is-drop' : ''}`}
+          draggable={canEdit} onDragStart={(e) => { setDragging(x.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', x.name); }}
+          onDragOver={(e) => { if (!dragging) return; e.preventDefault(); if (over !== x.id) setOver(x.id); }} onDragLeave={() => setOver((o) => (o === x.id ? null : o))}
+          onDrop={(e) => { e.preventDefault(); dropOn(x.id); }} onDragEnd={() => { setDragging(null); setOver(null); }}
+          title={[personById(d, x.createdBy)?.name, canEdit ? t('topic.dragHint') : null].filter(Boolean).join(' · ')}
           onClick={() => onFilter(filter === x.id ? null : x.id)} {...(canEdit ? menuProps(() => flagMenu(x)) : {})}>
           {x.icon} {x.name}{unread[x.id] ? <span className="topic-unread" aria-label={t('topic.unreadN', { n: unread[x.id]! })}>{unread[x.id]}</span> : null}
         </button>

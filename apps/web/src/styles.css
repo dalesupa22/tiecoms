@@ -1807,3 +1807,7 @@ body.is-resizing-row, body.is-resizing-row * { cursor: row-resize !important; us
 /* «General» y «Todo» compactas (solo ícono si no están elegidas). */
 .topic-flag.is-compact { padding-inline: 10px; }
 .topic-flag.is-compact:not(.is-on) { min-width: 0; }
+/* Reordenar temas arrastrando. */
+.topic-flag[draggable="true"] { cursor: grab; }
+.topic-flag.is-dragging { opacity: 0.45; }
+.topic-flag.is-drop { box-shadow: -3px 0 0 var(--accent); }

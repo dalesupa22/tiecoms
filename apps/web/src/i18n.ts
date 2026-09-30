@@ -83,6 +83,7 @@ const es = {
   'err.screen_share_failed': 'No se pudo compartir la pantalla. Revisa el permiso de grabación de pantalla del sistema.',
   'err.link_revoked': 'Este enlace ya no sirve. Pide uno nuevo.', 'err.call_not_live': 'No hay nadie en la llamada ahora.', 'err.call_full': 'La llamada ya tiene el máximo de invitados.',
   // Conversaciones en paralelo (30-sep-2026)
+  'topic.dragHint': 'Arrastra para cambiar el orden',
   'split.resize': 'Arrastra para cambiar el tamaño · doble clic: mitad y mitad', 'zoom.label': 'Tamaño del texto de este chat', 'zoom.in': 'Agrandar (⌘/Ctrl + rueda)', 'zoom.out': 'Achicar (⌘/Ctrl + rueda)', 'zoom.reset': 'Volver al 100 %',
   'split.add': 'Abrir otro chat al lado (hasta 4)', 'split.pickTitle': 'Abrir otro chat al lado', 'split.pickHelp': 'Tendrás los chats en paralelo en esta ventana. También puedes arrastrar un chat de la lista hasta aquí.', 'split.pickFull': 'Ya tienes 4 abiertos: el que elijas reemplaza al último.', 'split.pickSearch': 'Buscar chat, grupo o persona',
   'split.open': 'Abrir en paralelo', 'split.openReplace': 'Abrir en paralelo (reemplaza la última)', 'split.close': 'Cerrar este panel', 'split.only': 'Dejar solo este chat',
@@ -982,6 +983,7 @@ const en: Record<Key, string> = {
   'err.screen_share_failed': 'Could not share the screen. Check the system screen recording permission.',
   'err.link_revoked': 'This link no longer works. Ask for a new one.', 'err.call_not_live': 'Nobody is in the call right now.', 'err.call_full': 'The call already has the maximum number of guests.',
   // Conversations side by side (30-sep-2026)
+  'topic.dragHint': 'Drag to change the order',
   'split.resize': 'Drag to resize · double-click: half and half', 'zoom.label': 'Text size of this chat', 'zoom.in': 'Zoom in (⌘/Ctrl + wheel)', 'zoom.out': 'Zoom out (⌘/Ctrl + wheel)', 'zoom.reset': 'Back to 100%',
   'split.add': 'Open another chat beside (up to 4)', 'split.pickTitle': 'Open another chat beside', 'split.pickHelp': 'You will have the chats side by side in this window. You can also drag a chat from the list here.', 'split.pickFull': 'You already have 4 open: the one you pick replaces the last one.', 'split.pickSearch': 'Search chat, group or person',
   'split.open': 'Open side by side', 'split.openReplace': 'Open side by side (replaces the last one)', 'split.close': 'Close this pane', 'split.only': 'Keep only this chat',

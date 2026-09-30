@@ -1290,6 +1290,15 @@ export class TieComsClient {
     const r = await this.request<{ topics: TopicDTO[] }>(`/topics/${t.id}`, { method: 'PATCH', json: patch });
     this.putTopics(t.conversationId, r.topics);
   }
+  /** Orden nuevo de las banderitas (arrastrar); se ve al instante y se corrige con lo que responda el API. */
+  async reorderTopics(conversationId: string, list: TopicDTO[], ids: string[]) {
+    const pos = new Map(ids.map((id, i) => [id, i]));
+    this.putTopics(conversationId, list.map((t) => (pos.has(t.id) ? { ...t, position: pos.get(t.id)! } : t)).sort((a, b) => a.position - b.position));
+    try {
+      const r = await this.request<{ topics: TopicDTO[] }>(`/conversations/${conversationId}/topics/order`, { method: 'PUT', json: { ids } });
+      this.putTopics(conversationId, r.topics);
+    } catch (e) { this.putTopics(conversationId, list); throw e; }
+  }
   async deleteTopic(t: TopicDTO) {
     const r = await this.request<{ topics: TopicDTO[]; cleared: number }>(`/topics/${t.id}`, { method: 'DELETE' });
     this.putTopics(t.conversationId, r.topics);

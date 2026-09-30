@@ -73,7 +73,7 @@ export function ConversationArea({ id, search }: { id: string; search: string })
         <div key={x} data-pane={x} className={`split-cell ${x === id ? 'is-active' : ''} ${drop && full && drop.over === x ? 'is-target' : ''}`}
           // Tocar un panel lo vuelve el activo (antes del clic, para que el clic siga funcionando adentro).
           onPointerDownCapture={() => { if (x !== id) focusPane(x); }}>
-          <ConversationScreen key={x} id={x} pane={{ active: x === id, count: list.length, onClose: () => closePane(x, id), onOnly: () => onlyPane(x) }} />
+          <ConversationScreen key={x} id={x} search={x === id ? search : ''} pane={{ active: x === id, count: list.length, onClose: () => closePane(x, id), onOnly: () => onlyPane(x) }} />
         </div>
       ))}
       {/* Divisiones que se arrastran para cambiar el tamaño (doble clic: mitad y mitad). */}

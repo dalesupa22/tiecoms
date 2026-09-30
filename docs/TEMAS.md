@@ -13,16 +13,16 @@ Los temas no son hilos ni tareas:
 - Cualquiera también puede etiquetar **cualquier mensaje**, sea suyo o de otra persona. Queda registrado quién le puso el tema (`topicBy`), y la interfaz muestra «tema puesto por X» cuando no fue el autor del mensaje.
 - **Fila de banderitas**: va debajo de los chips (Fijados, Tareas, Hilos, Agenda, Enlaces) y tiene scroll horizontal.
   - La primera es «💬 General» y la segunda «☰ Todo» (sin temas activos, una sola banderita «Todo»).
-  - Después van los temas activos y «＋ Nuevo».
+  - Después van los temas activos y «＋ Nuevo». Orden (Danny, 30-sep-2026): primero los temas con algo **sin leer para mí**, y luego el resto; los dos grupos en el **orden guardado del chat** (por defecto el de llegada; se cambia arrastrando, `PUT /conversations/:id/topics/order`). Entre los no leídos no se ordena por hora. Un tema nunca sale dos veces, y al leerse vuelve a su lugar. El bloque de no leídos es solo presentación: arrastrar mueve el tema dentro del orden guardado. En web el cálculo vive en `apps/web/src/topic-order.ts` (`orderTopicsForDock`), con los mensajes que tiene el cliente (seq > lo leído y `topicId`); no hace falta nada del API.
   - Al final va «Archivados N», si hay alguno.
 - **Tres vistas** (pedido de Danny, 29-sep-2026, reemplaza la regla anterior de «Todo» con los no leídos):
   - **General** (así abre el chat): solo los mensajes **sin tema**, sin las tarjetas de tareas de un tema. Los mensajes de temas archivados cuentan como sin tema.
   - **Todo**: todos los mensajes, cada uno con su etiqueta.
   - **Un tema**: solo sus mensajes y las tarjetas de sus tareas. Tocar la misma banderita otra vez vuelve a General.
 - **Lo que se escribe** en General o en Todo sale sin tema. Dentro de un tema sale con ese tema, y el campo lo indica con «Mensaje en X».
-- **Saltar a un mensaje** (búsqueda, mención, enlace o `?m=`) cambia el filtro a su tema, o a General si no tiene. En Todo no cambia nada.
+- **Abrir o saltar a un mensaje concreto** (burbuja de mensaje nuevo, notificación del navegador o del escritorio, mención, búsqueda, enlace o `?m=`) deja el chat filtrado en el tema de ese mensaje, con scroll y resaltado en él. Si el mensaje no tiene tema (o su tema está archivado), queda en **Todo**, no en General (Danny, 30-sep-2026). Si ya estaba en Todo, no cambia nada. Los temas se esperan antes de decidir: antes, si no habían llegado todavía, el chat siempre quedaba en General.
 - **El número de cada banderita** es lo que tiene **sin leer**. En General es lo sin leer que no tiene tema. Así no se pierde lo que llega a un tema mientras estás en General. Sin pendientes, no sale número. Los mensajes propios y los de sistema no cuentan.
-- **Al abrir un chat con no leídos**: si todo lo no leído está en un solo tema, el chat abre filtrado en esa banderita, en el primer no leído y con la línea «N mensajes nuevos». Si no, abre en General.
+- **Al abrir un chat desde la lista con no leídos** (sin un mensaje concreto): abre en el tema del **primer no leído**, en ese mensaje y con la línea «N mensajes nuevos». Si ese primer no leído no tiene tema, abre en General. Sin no leídos, abre en General como siempre.
 - **Mantener presionada una banderita** (o clic derecho) abre: Renombrar, Cambiar color, Archivar y Quitar tema.
   - **Archivar** saca la banderita de la fila. Los mensajes conservan la etiqueta en gris y el tema se puede restaurar si hay espacio.
   - **Quitar** borra el tema y deja sus mensajes sin tema. Pide confirmación y no borra ningún mensaje.

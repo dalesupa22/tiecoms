@@ -399,6 +399,7 @@
 "card.doneBy" = "{name} completó la tarea";
 "card.forward" = "Reenviar";
 "card.forwardTitle" = "Reenviar a otros chats";
+"card.forwarded" = "Reenviado";
 "card.markDone" = "Marcar hecha";
 "card.newDate" = "Nueva fecha";
 "card.overdue" = "No cumplimos · venció el {date}";

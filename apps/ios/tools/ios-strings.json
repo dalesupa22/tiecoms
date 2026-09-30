@@ -3602,5 +3602,9 @@
  "chat.readLess": [
   "Ver menos",
   "Show less"
+ ],
+ "card.forwarded": [
+  "Reenviado",
+  "Forwarded"
  ]
 }

@@ -31,6 +31,9 @@ final class TemasGeneralUITests: XCTestCase {
         }
     }
 
+    /// Toque que no falla si otra ventana tapa el botón para XCTest (se toca por coordenada).
+    func tapC(_ e: XCUIElement) { if e.isHittable { e.tap() } else { e.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() } }
+
     func text(_ app: XCUIApplication, _ s: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", s)).firstMatch
     }
@@ -65,6 +68,12 @@ final class TemasGeneralUITests: XCTestCase {
             }
         }
 
+        // El aviso del sistema «¿Guardar contraseña?» llega unos segundos después de entrar y tapa el chat: se cierra.
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for _ in 0..<8 {
+            for surface in [app, springboard] { for label in ["Not Now", "Ahora no"] where surface.buttons[label].exists { surface.buttons[label].tap() } }
+            sleep(1)
+        }
         // 1. Abre en «General» (los no leídos están repartidos): solo lo sin tema, con su número de sin leer.
         let general = app.buttons["topic.general"]
         XCTAssertTrue(general.waitForExistence(timeout: 10))
@@ -82,7 +91,7 @@ final class TemasGeneralUITests: XCTestCase {
         // 2. «☰ Todo»: todo, con su etiqueta.
         let all = app.buttons["topic.all"]
         XCTAssertTrue(all.exists, "«Todo» aparece porque hay temas activos")
-        all.tap()
+        tapC(all)
         XCTAssertTrue(text(app, "Falta el extracto de septiembre").waitForExistence(timeout: 5))
         XCTAssertTrue(text(app, "El camión llega el lunes").exists)
         XCTAssertTrue(text(app, "Nos vemos mañana en la oficina").exists)
@@ -90,12 +99,12 @@ final class TemasGeneralUITests: XCTestCase {
 
         // 3. Un tema: solo lo suyo; tocarlo otra vez vuelve a General.
         let fin = app.buttons["topic.flag.Finanzas"]
-        fin.tap()
+        tapC(fin)
         XCTAssertTrue(text(app, "Falta el extracto de septiembre").waitForExistence(timeout: 5))
         XCTAssertFalse(text(app, "Nos vemos mañana en la oficina").exists)
         XCTAssertFalse(text(app, "El camión llega el lunes").exists)
         shot("temas-03-finanzas")
-        fin.tap()
+        tapC(fin)
         expectation(for: selected, evaluatedWith: general); waitForExpectations(timeout: 5)
         XCTAssertFalse(text(app, "Falta el extracto de septiembre").exists)
 

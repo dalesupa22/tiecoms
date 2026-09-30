@@ -1063,7 +1063,9 @@ struct ConversationView: View {
                 GgActionsRow(message: m, payload: gp)
             } else if let mk = MailChatKind.parse(m.systemPayload) {
                 // Correo y WhatsApp traídos al chat (docs/CORREO.md): mensaje de quien lo trajo + tarjeta, o la línea con «Abrir».
-                MailChatRow(message: m, kind: mk, canPost: c.canPost)
+                MailChatRow(message: m, kind: mk, canPost: c.canPost,
+                            onReply: c.canPost ? { startReply(m) } : nil,
+                            onPrivateReply: m.authorId != d.me.id && c.kind != .direct ? { act { try await store.startPrivateReply(to: m) } } : nil)
             } else if let k = ChatCards.kind(m), k.isComments {
                 // Comentarios agrupados: una línea que lleva a la tarea o al evento, sin repetir la tarjeta (como la web).
                 switch k {
@@ -1099,7 +1101,7 @@ struct ConversationView: View {
                 mine: mine,
                 author: mine || !showAuthor ? nil : Naming.authorLine(d, m.authorId),
                 status: nil, italic: m.deletedAt != nil,
-                quote: m.replyTo == nil ? nil : (quoted.map { q in (Naming.person(d, q.authorId)?.name ?? "", q.deletedAt != nil ? L("chat.deleted") : excerpt(q.body)) } ?? ("", L("reply.quoteMissing"))),
+                quote: m.replyTo == nil ? nil : (quoted.map { q in (Naming.person(d, q.authorId)?.name ?? "", q.deletedAt != nil ? L("chat.deleted") : excerpt(MailText.quoteText(kind: q.kind, body: q.body))) } ?? ("", L("reply.quoteMissing"))),
                 forwardedLabel: m.forwarded.map { forwardedLabel(d, $0, mine: mine, authorName: author?.name) },
                 merged: m.mergedKind == "side" ? L("side.fromSidechat")
                     : m.mergedFrom.map { id in store.meta(id).map { L("lin.resultOf", ["name": Naming.title(d, $0)]) } ?? L("lin.resultHidden") },
@@ -1339,7 +1341,7 @@ struct ConversationView: View {
             }
             if let r = replyTo {
                 ContextBar(icon: "arrowshape.turn.up.left", title: L("reply.to", ["name": Naming.person(d, r.authorId)?.name ?? ""]),
-                           detail: excerpt(r.body, 100), cancelLabel: L("reply.cancel")) { replyTo = nil }
+                           detail: excerpt(MailText.quoteText(kind: r.kind, body: r.body), 100), cancelLabel: L("reply.cancel")) { replyTo = nil }
                     .accessibilityIdentifier("composer.replyBar")
             }
             if let ce = commentingEvent {

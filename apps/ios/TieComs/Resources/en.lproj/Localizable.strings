@@ -399,6 +399,7 @@
 "card.doneBy" = "{name} completed the task";
 "card.forward" = "Forward";
 "card.forwardTitle" = "Forward to other chats";
+"card.forwarded" = "Forwarded";
 "card.markDone" = "Mark done";
 "card.newDate" = "New date";
 "card.overdue" = "We missed it · due {date}";

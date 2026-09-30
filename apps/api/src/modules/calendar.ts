@@ -1,16 +1,20 @@
 import type { z } from 'zod';
-import type { CalendarEventDTO, CreateEventInput, UpdateEventInput } from '@tiecoms/contracts';
+import type { CalendarEventDTO, CreateEventInput, EventCommentDTO, UpdateEventInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Db, type Tx } from '../db.ts';
 import { badRequest, forbidden, notFound } from '../errors.ts';
 import { appendEvent, appendMessage } from './messages.ts';
+import { bumpCommentNotice, localDate } from './chat-notices.ts';
 
 const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, ...p });
 const iso = (d: any) => (d ? new Date(d).toISOString() : null);
 
 async function load(db: Db, id: string): Promise<CalendarEventDTO> {
   const { rows } = await db.query(
-    `SELECT e.*, COALESCE(json_agg(json_build_object('userId', i.user_id, 'rsvp', i.rsvp)) FILTER (WHERE i.user_id IS NOT NULL), '[]') AS invitees
+    `SELECT e.*, COALESCE(json_agg(json_build_object('userId', i.user_id, 'rsvp', i.rsvp)) FILTER (WHERE i.user_id IS NOT NULL), '[]') AS invitees,
+            (SELECT count(*) FROM calendar_event_comments cc WHERE cc.event_id = e.id)::int AS comment_count,
+            (SELECT json_agg(x ORDER BY x.created_at) FROM (SELECT id, event_id, author_id, body, created_at FROM calendar_event_comments cc
+                WHERE cc.event_id = e.id ORDER BY cc.created_at DESC LIMIT 2) x) AS last_comments
        FROM calendar_events e LEFT JOIN calendar_event_invitees i ON i.event_id = e.id WHERE e.id = $1 GROUP BY e.id`,
     [id],
   );
@@ -20,8 +24,11 @@ async function load(db: Db, id: string): Promise<CalendarEventDTO> {
     id: r.id, workspaceId: r.workspace_id, conversationId: r.conversation_id, originMessageId: r.origin_message_id, title: r.title,
     description: r.description, location: r.location, startsAt: iso(r.starts_at)!, endsAt: iso(r.ends_at)!, timezone: r.timezone,
     organizerId: r.organizer_id, invitees: r.invitees, cancelledAt: iso(r.cancelled_at), updatedAt: iso(r.updated_at)!,
+    commentCount: r.comment_count ?? 0, lastComments: (r.last_comments ?? []).map(commentDTO),
   };
 }
+
+const commentDTO = (r: any): EventCommentDTO => ({ id: r.id, eventId: r.event_id, authorId: r.author_id, body: r.body, createdAt: iso(r.created_at)! });
 
 const publish = (c: Tx, ev: CalendarEventDTO) => appendEvent(c, ev.conversationId, { type: 'calendar.updated', conversationId: ev.conversationId, event: ev });
 
@@ -38,17 +45,23 @@ async function inviteeIds(c: Tx, conversationId: string, wanted: string[] | unde
   return ids;
 }
 
-export async function createEvent(userId: string, conversationId: string, input: z.infer<typeof CreateEventInput>) {
+export async function createEvent(userId: string, conversationId: string, input: z.infer<typeof CreateEventInput>, meetingId?: string) {
   if (Date.parse(input.endsAt) <= Date.parse(input.startsAt)) throw badRequest('La reunión debe terminar después de empezar');
   if (!validTz(input.timezone)) throw badRequest('Zona horaria inválida');
   return tx(async (c) => {
     const a = await conversationAccess(c, userId, conversationId, 'post', true);
+    if (meetingId) {
+      const meeting = (await c.query('SELECT calendar_event_id FROM meetings WHERE id = $1 AND user_id = $2 AND conversation_id = $3 FOR UPDATE', [meetingId, userId, conversationId])).rows[0];
+      if (!meeting) throw notFound('Reunión');
+      if (meeting.calendar_event_id) return load(c, meeting.calendar_event_id);
+    }
     const { rows } = await c.query(
       `INSERT INTO calendar_events (workspace_id, conversation_id, origin_message_id, title, description, location, starts_at, ends_at, timezone, organizer_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
       [a.workspaceId, conversationId, input.originMessageId ?? null, input.title, input.description ?? null, input.location ?? null, input.startsAt, input.endsAt, input.timezone, userId],
     );
     const id: string = rows[0].id;
+    if (meetingId) await c.query('UPDATE meetings SET calendar_event_id = $2 WHERE id = $1', [meetingId, id]);
     for (const uid of await inviteeIds(c, conversationId, input.inviteeIds, userId)) {
       await c.query('INSERT INTO calendar_event_invitees (event_id, user_id, rsvp, responded_at) VALUES ($1,$2,$3,$4)', [id, uid, uid === userId ? 'yes' : 'pending', uid === userId ? new Date() : null]);
     }
@@ -59,6 +72,35 @@ export async function createEvent(userId: string, conversationId: string, input:
     await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('push.event', $1, 2)", [JSON.stringify({ eventId: id })]);
     await audit(c, userId, 'event.created', { type: 'event', id, workspaceId: a.workspaceId });
     return ev;
+  });
+}
+
+/**
+ * Importación silenciosa (solo ops.js por SSH): eventos de un sistema externo (p. ej. los eventos comerciales de
+ * Semillero) que entran a la agenda del grupo sin convocatoria, sin push y sin aviso en el chat. Quien organiza es
+ * la única invitada; el grupo los ve igual (la agenda muestra todo lo de las conversaciones que puedo leer).
+ */
+export async function importEvents(userId: string, conversationId: string, items: z.infer<typeof CreateEventInput>[]) {
+  return tx(async (c) => {
+    const a = await conversationAccess(c, userId, conversationId, 'post', true);
+    const out: CalendarEventDTO[] = [];
+    for (const input of items) {
+      if (Date.parse(input.endsAt) <= Date.parse(input.startsAt)) throw badRequest(`«${input.title}» termina antes de empezar`);
+      if (!validTz(input.timezone)) throw badRequest(`Zona horaria inválida en «${input.title}»`);
+      const dup = await c.query('SELECT id FROM calendar_events WHERE conversation_id = $1 AND title = $2 AND starts_at = $3 AND cancelled_at IS NULL', [conversationId, input.title, input.startsAt]);
+      if (dup.rows[0]) { out.push(await load(c, dup.rows[0].id)); continue; }
+      const { rows } = await c.query(
+        `INSERT INTO calendar_events (workspace_id, conversation_id, title, description, location, starts_at, ends_at, timezone, organizer_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+        [a.workspaceId, conversationId, input.title, input.description ?? null, input.location ?? null, input.startsAt, input.endsAt, input.timezone, userId],
+      );
+      await c.query("INSERT INTO calendar_event_invitees (event_id, user_id, rsvp, responded_at) VALUES ($1,$2,'yes',now())", [rows[0].id, userId]);
+      const ev = await load(c, rows[0].id);
+      await publish(c, ev);
+      out.push(ev);
+    }
+    await audit(c, userId, 'event.imported', { type: 'conversation', id: conversationId, workspaceId: a.workspaceId }, { count: out.length });
+    return out;
   });
 }
 
@@ -80,9 +122,12 @@ export async function updateEvent(userId: string, id: string, input: z.infer<typ
     await c.query(
       `UPDATE calendar_events SET title = COALESCE($2, title), description = CASE WHEN $3 THEN $4 ELSE description END,
          location = CASE WHEN $5 THEN $6 ELSE location END, starts_at = $7, ends_at = $8, timezone = COALESCE($9, timezone), updated_at = now(),
-         soon_notified_at = CASE WHEN starts_at <> $7::timestamptz THEN NULL ELSE soon_notified_at END
+         soon_notified_at = CASE WHEN starts_at <> $7::timestamptz THEN NULL ELSE soon_notified_at END,
+         today_posted_at = CASE WHEN $10 THEN NULL ELSE today_posted_at END
        WHERE id = $1`,
-      [id, input.title ?? null, input.description !== undefined, input.description ?? null, input.location !== undefined, input.location ?? null, starts, ends, input.timezone ?? null],
+      [id, input.title ?? null, input.description !== undefined, input.description ?? null, input.location !== undefined, input.location ?? null, starts, ends, input.timezone ?? null,
+        // Otro día (en su zona): vuelve a avisar «es hoy» ese día.
+        localDate(new Date(starts), input.timezone ?? e.timezone) !== localDate(new Date(e.starts_at), e.timezone)],
     );
     if (input.inviteeIds) {
       const ids = await inviteeIds(c, e.conversation_id, input.inviteeIds, e.organizer_id);
@@ -176,5 +221,30 @@ export async function fireSoonEvents(): Promise<number> {
       await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('push.event_soon', $1, 2)", [JSON.stringify({ eventId: r.id, userIds })]);
     }
     return rows.length;
+  });
+}
+
+// ---------- Comentarios (tanda 1.7) ----------
+export async function listEventComments(userId: string, id: string): Promise<{ comments: EventCommentDTO[] }> {
+  const ev = await load(pool, id);
+  await conversationAccess(pool, userId, ev.conversationId, 'read');
+  const { rows } = await pool.query('SELECT * FROM calendar_event_comments WHERE event_id = $1 ORDER BY created_at LIMIT 500', [id]);
+  return { comments: rows.map(commentDTO) };
+}
+
+/** Comentar un evento: quien puede escribir en su conversación. Publica el aviso agrupado en el chat. */
+export async function commentEvent(userId: string, id: string, body: string): Promise<{ comment: EventCommentDTO; event: CalendarEventDTO }> {
+  return tx(async (c) => {
+    const { rows } = await c.query('SELECT id, conversation_id, title FROM calendar_events WHERE id = $1 FOR UPDATE', [id]);
+    const e = rows[0];
+    if (!e) throw notFound('Reunión');
+    await conversationAccess(c, userId, e.conversation_id, 'post', true);
+    const ins = await c.query('INSERT INTO calendar_event_comments (event_id, author_id, body) VALUES ($1,$2,$3) RETURNING *', [id, userId, body]);
+    await c.query('UPDATE calendar_events SET updated_at = now() WHERE id = $1', [id]);
+    const actorName = (await c.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name ?? '';
+    await bumpCommentNotice(c, { kind: 'event', conversationId: e.conversation_id, itemId: id, title: e.title, actorId: userId, actorName, body });
+    const ev = await load(c, id);
+    await publish(c, ev);
+    return { comment: commentDTO(ins.rows[0]), event: ev };
   });
 }

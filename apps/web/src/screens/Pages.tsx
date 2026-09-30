@@ -1,18 +1,26 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import type { ConversationDTO } from '@tiecoms/contracts';
+import { MailConnectNudge, ProviderIcon } from './Mail.tsx';
+import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from 'react';
+import type { ConversationDTO, StorageUsageDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, getLang, langPreference, locale, setLang, t, tn, useLang, type Lang } from '../i18n.ts';
 import { navigate } from '../router.ts';
 import { openProfile } from './Profile.tsx';
 import { NewChatDialog, StackedAvatars } from './Chats.tsx';
-import { Avatar, ConvAvatar, OrgMark, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, conversationPreview, timeLabel } from '../ui.tsx';
+import { directOtherId, Avatar, ConvAvatar, OrgMark, SideIcon, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, conversationPreview, timeLabel } from '../ui.tsx';
 import { InviteDialog, NewGroupDialog } from './Dialogs.tsx';
 import { InviteResult, PendingInvitations } from './Invitations.tsx';
 import { IssueDrawer, IssueRow, isClosed } from './Issues.tsx';
 import { TodayAgenda, newEvent } from './Calendar.tsx';
 import { RemindersSection } from './Bring.tsx';
-import { askNotifications, conversationMenu, openDialog, personMenu } from '../actions.tsx';
-import { menuProps, toast } from '../menu.tsx';
+import { SleepDialog, sleepSummary } from './Sleep.tsx';
+import { MeetingsSettings } from './Meetings.tsx';
+import { TEXT_SIZES, setTextSize, useTextSize } from '../text-size.ts';
+import { formatBytes } from '../video.ts';
+import { askNotifications, conversationMenu, dndMenu, dndText, mutedText, openDialog, personMenu } from '../actions.tsx';
+import { menuProps, openMenuAt, toast } from '../menu.tsx';
+import { isMuted } from '../home-order.ts';
+import { DEFAULT_RINGTONE, DEFAULT_SOUND, playMessageSound, previewRingtone, setSoundEnabled, soundEnabled, subscribeSound } from '../sound.ts';
+import { MESSAGE_SOUNDS, RINGTONES } from '@tiecoms/contracts';
 import { SignOutButton, groupWorkspaces } from './Shell.tsx';
 import { JoinWithCodeDialog, openCreateGroup } from './Groups.tsx';
 
@@ -23,17 +31,20 @@ function greeting() {
 
 function ConvCard({ c }: { c: ConversationDTO }) {
   const d = useClient((s) => s.data)!;
-  const other = c.kind === 'direct' ? personById(d, c.memberIds.find((m) => m !== d.me.id)) : null;
+  const other = c.kind === 'direct' ? personById(d, directOtherId(d, c)) : null;
   const org = other ? orgById(d, other.orgId) : c.workspaceId ? counterpartOrg(d, c.workspaceId) : null;
+  const muted = isMuted(c);
   return (
-    <button className="card conv-card" onClick={() => navigate(`/c/${c.id}`)} {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
-      {other ? <Avatar person={other} org={org} size={38} /> : c.avatarUrl ? <ConvAvatar c={c} size={38} /> : c.deriveKind === 'side' ? <span className="mark" style={{ width: 38, height: 38, background: 'var(--paper-3)', fontSize: 18 }}>💬</span> : c.kind === 'multi' ? <StackedAvatars c={c} size={30} /> : <OrgMark org={org} size={38} />}
+    <button className={`card conv-card ${muted ? 'is-muted' : ''}`} onClick={() => navigate(`/c/${c.id}`)} {...menuProps(() => conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }))}>
+      {other ? <Avatar person={other} org={org} size={38} /> : c.avatarUrl ? <ConvAvatar c={c} size={38} /> : c.deriveKind === 'side' ? <SideIcon size={38} /> : c.kind === 'multi' ? <StackedAvatars c={c} size={30} /> : <OrgMark org={org} size={38} />}
       <span className="grow" style={{ minWidth: 0 }}>
-        <span className="row"><b className="ellipsis grow">{conversationTitle(d, c)}</b><span className="small muted">{timeLabel(c.lastMessageAt)}</span></span>
+        <span className="row">{c.deriveKind === 'side' && <span className="chip-side is-sidechat">{t('groups.sidechat')}</span>}<b className="ellipsis grow">{c.deriveKind === 'side' ? conversationTitle(d, c).replace(/^(Sidechat|Consulta)\s*·\s*/i, '') : conversationTitle(d, c)}</b><span className="small muted">{timeLabel(c.lastMessageAt)}</span></span>
         <span className="small muted ellipsis" style={{ display: 'block' }}>{conversationSubtitle(d, c)}</span>
         <span className="small ellipsis" style={{ display: 'block', color: c.unread ? 'var(--ink)' : 'var(--muted)' }}>{conversationPreview(d, c) ?? t('conv.noMessages')}</span>
       </span>
-      {c.unread > 0 && <span className="pill">{c.unread}</span>}
+      {muted && <span className="mute-ico" title={mutedText(c) ?? t('side.muted')} aria-label={t('side.muted')}>🔕</span>}
+      {(c.unreadMentions ?? 0) > 0 && <span className="pill mention-pill" title={t('mention.youMentioned')}>@</span>}
+      {c.unread > 0 && <span className={`pill ${muted ? 'is-muted' : ''}`}>{c.unread}</span>}
     </button>
   );
 }
@@ -45,7 +56,7 @@ export function TodayScreen() {
   const [openIssue, setOpenIssue] = useState<string | null>(null);
   useEffect(() => { client.loadIssues({ mine: true, open: true }).catch(() => {}); }, []);
   const visible = new Set(d.conversations.map((c) => c.id));
-  const mine = Object.values(issues).filter((i) => i.ownerId === d.me.id && !isClosed(i) && visible.has(i.conversationId))
+  const mine = Object.values(issues).filter((i) => i.ownerId === d.me.id && !isClosed(i) && (!i.conversationId || visible.has(i.conversationId)))
     .sort((a, b) => (a.dueDate ?? '9').localeCompare(b.dueDate ?? '9'));
   const unreadConvs = d.conversations.filter((c) => c.unread > 0);
   const unread = unreadConvs.reduce((n, c) => n + c.unread, 0);
@@ -63,6 +74,7 @@ export function TodayScreen() {
         {unread ? t('today.summary', { messages: tn(unread, 'n.newMessage', 'n.newMessages'), conversations: tn(unreadConvs.length, 'n.conversation', 'n.conversations') }) : t('today.upToDate')}
         {' · '}{t('today.spacesWith', { spaces: tn(d.workspaces.length, 'n.space', 'n.spaces'), companies: tn(Math.max(0, orgsCount - 1), 'n.company', 'n.companies') })}
       </div>
+      <MailConnectNudge />
       <div className="stats">
         <div className="stat dark"><div className="eyebrow">{t('today.unread')}</div><div className="num">{unread}</div></div>
         <div className="stat dark"><div className="eyebrow">{t('today.waiting')}</div><div className="num">{unreadConvs.length}</div></div>
@@ -188,7 +200,9 @@ export function WorkspaceScreen({ id }: { id: string }) {
                   <span className="row"><b className="grow ellipsis">{conversationTitle(d, c)}</b><span className="small muted">{timeLabel(c.lastMessageAt)}</span></span>
                   <span className="small muted ellipsis" style={{ display: 'block' }}>{t(c.kind === 'internal' ? 'kind.internal' : c.level === 'directivo' ? 'kind.directivo' : 'kind.operativo')} · {tn(c.memberIds.length, 'n.participant', 'n.participants')}</span>
                 </span>
-                {c.unread > 0 && <span className="pill">{c.unread}</span>}
+                {isMuted(c) && <span className="mute-ico" title={mutedText(c) ?? t('side.muted')} aria-label={t('side.muted')}>🔕</span>}
+                {(c.unreadMentions ?? 0) > 0 && <span className="pill mention-pill" title={t('mention.youMentioned')}>@</span>}
+                {c.unread > 0 && <span className={`pill ${isMuted(c) ? 'is-muted' : ''}`}>{c.unread}</span>}
               </button>
             ))}
           </div>
@@ -197,7 +211,7 @@ export function WorkspaceScreen({ id }: { id: string }) {
           <div className="list">
             {(() => {
               const visible = new Set(convs.map((c) => c.id));
-              const list = Object.values(issues).filter((i) => i.workspaceId === id && !isClosed(i) && visible.has(i.conversationId));
+              const list = Object.values(issues).filter((i) => i.workspaceId === id && !isClosed(i) && !!i.conversationId && visible.has(i.conversationId));
               return list.length ? list.map((i) => <IssueRow key={i.id} i={i} onOpen={setOpenIssue} />) : <div className="empty">{t('issue.noIssues')}</div>;
             })()}
           </div>
@@ -289,6 +303,7 @@ function InviteColleague({ orgId, orgName }: { orgId: string; orgName: string })
 
 export function SettingsScreen() {
   const d = useClient((s) => s.data)!;
+  const mailOn = d?.features?.mail === true;
   useLang();
   const [sessions, setSessions] = useState<Awaited<ReturnType<typeof client.sessions>> | null>(null);
   const load = () => client.sessions().then(setSessions).catch(() => {});
@@ -345,14 +360,30 @@ export function SettingsScreen() {
         <span className="muted">›</span>
       </button>
 
+      {mailOn && (
+        <>
+          {/* En el celular no hay «Más»: Tú › Correo es la entrada a la lista, además del ＋ del chat (docs/CORREO.md). */}
+          <div className="eyebrow" style={{ marginBottom: 10 }}>{t('mail.title')}</div>
+          <button className="card conv-card" style={{ marginBottom: 24 }} onClick={() => navigate('/correo')}>
+            <span className="row" style={{ gap: 4 }} aria-hidden><ProviderIcon provider="google" size={20} /><ProviderIcon provider="microsoft" size={20} /></span>
+            <span className="grow"><b>{t('mail.settingsRow')}</b><span className="small muted" style={{ display: 'block' }}>{t('mail.settingsHint')}</span></span>
+            <span className="muted">›</span>
+          </button>
+        </>
+      )}
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('settings.whatsapp')}</div>
       <button className="card conv-card" style={{ marginBottom: 24 }} onClick={() => navigate('/whatsapp')}>
         <span style={{ fontSize: 22 }} aria-hidden>✆</span>
         <span className="grow"><b>{t('wa.connect').replace('＋ ', '')}</b><span className="small muted" style={{ display: 'block' }}>{t('settings.whatsappHint')}</span></span>
         <span className="muted">›</span>
       </button>
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{t('meet.settingsTitle')}</div>
+      <div style={{ marginBottom: 24 }}><MeetingsSettings /></div>
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('notif.title')}</div>
+      <SilenceSettings />
       <NotificationToggle />
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{t('text.title')}</div>
+      <TextSizeSetting />
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('settings.language')}</div>
       <div className="seg" style={{ marginBottom: 24, maxWidth: 480 }}>
         {langOptions.map(([v, label]) => (
@@ -367,6 +398,9 @@ export function SettingsScreen() {
         </>
       )}
 
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{t('storage.title')}</div>
+      <StorageUsage adminOrgs={d.organizations.filter((o) => o.myRole === 'owner' || o.myRole === 'admin').map((o) => ({ id: o.id, name: o.name }))} />
+
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('settings.devices')}</div>
       <div className="list">
         {sessions?.sessions.map((s) => (
@@ -379,6 +413,117 @@ export function SettingsScreen() {
       <div className="hint" style={{ marginTop: 18 }}>{t('settings.platforms')}</div>
     </div></div>
   );
+}
+
+/** «Almacenamiento usado: 1,2 GB · videos 800 MB · fotos … · archivos …» (solo medición, docs/VIDEO.md). */
+function StorageUsage({ adminOrgs }: { adminOrgs: { id: string; name: string }[] }) {
+  const [mine, setMine] = useState<StorageUsageDTO | null>(null);
+  const [orgs, setOrgs] = useState<(StorageUsageDTO & { name: string })[]>([]);
+  const orgKey = adminOrgs.map((o) => o.id).join(',');
+  useEffect(() => {
+    let alive = true;
+    client.myStorage().then((r) => alive && setMine(r)).catch(() => {});
+    Promise.all(adminOrgs.map((o) => client.orgStorage(o.id).then((r) => ({ ...r, name: o.name })).catch(() => null)))
+      .then((list) => alive && setOrgs(list.filter((x): x is StorageUsageDTO & { name: string } => !!x)));
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgKey]);
+  const lang = getLang();
+  const fmt = (n: number) => formatBytes(n, lang);
+  const parts = mine ? ([
+    ['videos', mine.breakdown.videos, 'storage.videos', '#3d5a80'], ['photos', mine.breakdown.photos, 'storage.photos', '#2a9d8f'],
+    ['files', mine.breakdown.files, 'storage.files', '#e9c46a'], ['voice', mine.breakdown.voice, 'storage.voice', '#e76f51'],
+  ] as const) : [];
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 24 }} data-testid="storage-usage">
+      {!mine ? <span className="small muted">{t('common.loading')}</span> : (
+        <>
+          <b>{t('storage.used', { total: fmt(mine.totalBytes) })}</b>
+          <span className="small muted">{parts.filter(([, n]) => n > 0).map(([, n, k]) => ` · ${t(k, { n: fmt(n) })}`).join('')}</span>
+          {mine.totalBytes > 0 && (
+            <div className="storage-bar" aria-hidden>
+              {parts.filter(([, n]) => n > 0).map(([id, n, , color]) => <span key={id} style={{ width: `${(n / mine.totalBytes) * 100}%`, background: color }} />)}
+            </div>
+          )}
+          <div className="hint" style={{ marginTop: 6 }}>{t('storage.hint')}</div>
+          {orgs.map((o) => <div key={o.id} className="small" style={{ marginTop: 8 }}>{t(o.people === 1 ? 'storage.orgOne' : 'storage.org', { org: o.name, total: fmt(o.totalBytes), n: o.people ?? 0 })}</div>)}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Tamaño del texto: 5 pasos con vista previa inmediata (toda la app cambia al mover el control). */
+function TextSizeSetting() {
+  const v = useTextSize();
+  const i = TEXT_SIZES.indexOf(v as (typeof TEXT_SIZES)[number]);
+  const names = [t('text.small'), t('text.default'), t('text.large'), t('text.larger'), t('text.largest')];
+  return (
+    <div className="card text-size">
+      <span className="a-small" aria-hidden>A</span>
+      <input type="range" min={0} max={TEXT_SIZES.length - 1} step={1} value={i < 0 ? 1 : i} aria-label={t('text.title')} aria-valuetext={names[i] ?? names[1]}
+        onChange={(e) => setTextSize(TEXT_SIZES[Number(e.target.value)]!)} />
+      <span className="a-big" aria-hidden>A</span>
+      <span className="small muted" style={{ minWidth: 84, textAlign: 'right' }}>{names[i] ?? names[1]}</span>
+    </div>
+  );
+}
+
+/** «No molestar» y «Sonido de mensajes» (también en el menú de la cuenta). */
+function SilenceSettings() {
+  const until = useClient((s) => s.data?.me.dndUntil);
+  const sleep = useClient((s) => s.data?.me.sleep);
+  const sound = useSyncExternalStore(subscribeSound, soundEnabled);
+  const status = dndText(until);
+  return (
+    <>
+      <button className="card conv-card" style={{ marginBottom: 12 }} aria-haspopup="menu"
+        onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left + 16, r.bottom - 6, dndMenu(until).items!); }}>
+        <span style={{ fontSize: 22 }} aria-hidden>🌙</span>
+        <span className="grow"><b>{t('dnd.title')}</b><span className="small muted" style={{ display: 'block' }}>{status ?? t('dnd.hint')}</span></span>
+        <span className="muted">›</span>
+      </button>
+      <button className="card conv-card" style={{ marginBottom: 12 }} onClick={() => openDialog((close) => <SleepDialog onClose={close} />)}>
+        <span style={{ fontSize: 22 }} aria-hidden>🛌</span>
+        <span className="grow"><b>{t('sleep.title')}</b><span className="small muted" style={{ display: 'block' }}>{sleepSummary(sleep) ?? t('sleep.explain')}</span></span>
+        <span className="muted">›</span>
+      </button>
+      <label className="card conv-card check" style={{ marginBottom: 12 }}>
+        <input type="checkbox" checked={sound} onChange={(e) => setSoundEnabled(e.target.checked)} />
+        <span className="grow"><b>{t('sound.title')}</b><span className="small muted" style={{ display: 'block' }}>{t('sound.hint')}</span></span>
+      </label>
+      <SoundDefaults />
+    </>
+  );
+}
+
+/** Sonido predeterminado de los chats y tono de llamada (docs/SONIDOS.md); cada chat puede tener el suyo. */
+function SoundDefaults() {
+  const me = useClient((s) => s.data?.me);
+  const msg = me?.messageSound ?? null;
+  const ring = me?.ringtone ?? null;
+  const save = (p: Parameters<typeof client.setSounds>[0]) => void client.setSounds(p).catch((e) => toast(errorText(e)));
+  const at = (el: HTMLElement) => { const r = el.getBoundingClientRect(); return [r.left, r.bottom + 4] as const; };
+  const msgMenu = (el: HTMLElement) => openMenuAt(...at(el), [
+    ...MESSAGE_SOUNDS.map((x) => ({ label: `${(msg ?? DEFAULT_SOUND) === x ? '✓ ' : ''}${t(`sound.n.${x}` as any)}`, onSelect: () => { playMessageSound(x, false, true); save({ messageSound: x }); } })),
+    { divider: true },
+    { label: `${msg === 'none' ? '✓ ' : ''}${t('sound.none')}`, onSelect: () => save({ messageSound: 'none' }) },
+  ]);
+  const ringMenu = (el: HTMLElement) => openMenuAt(...at(el), RINGTONES.map((x) => ({
+    label: `${(ring ?? DEFAULT_RINGTONE) === x ? '✓ ' : ''}${t(`ring.n.${x}` as any)}`, onSelect: () => { previewRingtone(x); save({ ringtone: x }); },
+  })));
+  return <>
+    <button className="card conv-card" style={{ marginBottom: 12 }} onClick={(e) => msgMenu(e.currentTarget)}>
+      <span style={{ fontSize: 22 }} aria-hidden>🎵</span>
+      <span className="grow"><b>{t('sound.defaultTitle')}</b><span className="small muted" style={{ display: 'block' }}>{msg === 'none' ? t('sound.none') : t(`sound.n.${msg ?? DEFAULT_SOUND}` as any)} · {t('sound.defaultHint')}</span></span>
+      <span className="muted">›</span>
+    </button>
+    <button className="card conv-card" style={{ marginBottom: 12 }} onClick={(e) => ringMenu(e.currentTarget)}>
+      <span style={{ fontSize: 22 }} aria-hidden>📞</span>
+      <span className="grow"><b>{t('ring.title')}</b><span className="small muted" style={{ display: 'block' }}>{t(`ring.n.${ring ?? DEFAULT_RINGTONE}` as any)}</span></span>
+      <span className="muted">›</span>
+    </button>
+  </>;
 }
 
 function NotificationToggle() {

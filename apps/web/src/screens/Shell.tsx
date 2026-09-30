@@ -1,30 +1,19 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { BootstrapDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
-import { asset, navigate, type Route } from '../router.ts';
+import { navigate, type Route } from '../router.ts';
 import { Avatar, counterpartOrg, orgById, personById } from '../ui.tsx';
 import { MentionsInbox } from './Mentions.tsx';
-import { openDialog } from '../actions.tsx';
 import type { ConversationDTO } from '@tiecoms/contracts';
 import { t } from '../i18n.ts';
-import { openAccountMenu } from './Profile.tsx';
-import { NewChatDialog } from './Chats.tsx';
-import { ConvItem, GroupsTree, dmConversations } from './Groups.tsx';
-
-const NAV = [
-  { name: 'today', label: 'nav.today', ico: '◑', to: '/' },
-  { name: 'inbox', label: 'nav.inbox', ico: '◍', to: '/conversaciones' },
-  { name: 'agenda', label: 'nav.agenda', ico: '▤', to: '/agenda' },
-  { name: 'issues', label: 'nav.issues', ico: '◆', to: '/asuntos' },
-  { name: 'trazo', label: 'nav.trazo', ico: '⑂', to: '/trazo' },
-  { name: 'people', label: 'nav.people', ico: '◎', to: '/participantes' },
-  { name: 'files', label: 'nav.files', ico: '▣', to: '/archivos' },
-  { name: 'saved', label: 'nav.saved', ico: '🔖', to: '/ver-despues' },
-  { name: 'whatsapp', label: 'nav.whatsapp', ico: '✆', to: '/whatsapp' },
-] as const;
-/** Today, Conversaciones, Calendario y Asuntos siempre; el resto bajo «Más». */
-const NAV_MAIN = 4;
-const NAV_MORE_KEY = 'tiecoms:navMore';
+import { AllList, DmsList, GroupsBody, GroupsViewButton, dmConversations } from './Groups.tsx';
+import { QuickSearchField, QuickSearchSections, isMac, openCreateMenu, openNewMessage, quickKey, MessageSearchSection, useQuickResults } from './Quick.tsx';
+import { activityOf, isMuted, pendingOf } from '../home-order.ts';
+import { DndStrip, MeAvatar } from './Silence.tsx';
+import { AssistantBubble } from './Assistant.tsx';
+import { Rail, useSideMode } from './Rail.tsx';
+import { NotifyAsk } from '../bubbles.tsx';
+import { useSleepTzSync } from './Sleep.tsx';
 
 export function groupWorkspaces(d: BootstrapDTO) {
   const groups = new Map<string, { org: ReturnType<typeof orgById>; workspaces: BootstrapDTO['workspaces'] }>();
@@ -37,25 +26,9 @@ export function groupWorkspaces(d: BootstrapDTO) {
   return [...groups.values()];
 }
 
-// ---------- Orden de Inicio (mismas reglas en web, iOS y Android) ----------
-/** Actividad: el último mensaje de una persona si lo hay; si no, el último mensaje. */
-export const activityOf = (c: ConversationDTO) => c.lastHumanPreview?.createdAt ?? c.lastMessageAt ?? '';
-/** Con no leídos (no silenciada) cuenta como pendiente; silenciada con no leídos cuenta como leída. */
-export const pendingOf = (c: ConversationDTO) => (c.unread > 0 && (!isMuted(c) || (c.unreadMentions ?? 0) > 0) ? c.unread : 0);
-/**
- * Primero las que tienen no leídos, luego el resto; en cada bloque las fijadas arriba y después por
- * actividad descendente. Desempate por id para que el orden sea estable.
- */
-export function compareConversations(a: ConversationDTO, b: ConversationDTO) {
-  // Una mención sin leer sube arriba del todo (aunque la conversación esté silenciada).
-  const ma = (a.unreadMentions ?? 0) > 0 ? 1 : 0, mb = (b.unreadMentions ?? 0) > 0 ? 1 : 0;
-  if (ma !== mb) return mb - ma;
-  const ua = pendingOf(a) > 0 ? 1 : 0, ub = pendingOf(b) > 0 ? 1 : 0;
-  if (ua !== ub) return ub - ua;
-  const pa = a.pinnedAt ? 1 : 0, pb = b.pinnedAt ? 1 : 0;
-  if (pa !== pb) return pb - pa;
-  return activityOf(b).localeCompare(activityOf(a)) || a.id.localeCompare(b.id);
-}
+// Orden de Inicio: home-order.ts (puro, con pruebas); se reexporta aquí por compatibilidad.
+export { activityOf, pendingOf, compareConversations } from '../home-order.ts';
+
 /** Espacios y empresas: por no leído agregado y luego por la actividad más reciente de sus conversaciones. */
 function groupRank(convs: ConversationDTO[]) {
   return { unread: convs.reduce((n, c) => n + pendingOf(c), 0), activity: convs.reduce((m, c) => (activityOf(c) > m ? activityOf(c) : m), '') };
@@ -74,10 +47,10 @@ export function sortHome(d: BootstrapDTO, groups: ReturnType<typeof groupWorkspa
     .sort((a, b) => compareRank(a.rank, b.rank) || (a.org?.id ?? '').localeCompare(b.org?.id ?? ''));
 }
 
-// ---------- Pestañas de Inicio (mismas reglas en web, iOS y Android) ----------
+// ---------- Filtros de la bandeja (mismas reglas en web, iOS y Android) ----------
 export type HomeTab = 'all' | 'unread' | 'mentions' | 'issues' | 'chats' | 'sides';
-/** Chats y sidechats tienen su propia sección (DMs): los filtros de Grupos no los repiten. */
-export const HOME_TABS: HomeTab[] = ['all', 'unread', 'mentions', 'issues'];
+/** En la barra lateral, «Sin leer» y «Menciones» son filtros pequeños junto al botón de vista. */
+const SIDE_FILTERS = ['unread', 'mentions'] as const;
 const TAB_KEY = 'tiecoms:homeTab';
 /** No leídos = unread > 0 y no silenciada; Asuntos = openIssues > 0; Chats = direct + multi; Laterales = deriveKind 'side'. */
 export function matchesTab(c: ConversationDTO, tab: HomeTab) {
@@ -90,16 +63,16 @@ export function matchesTab(c: ConversationDTO, tab: HomeTab) {
     default: return true;
   }
 }
-function storedTab(): HomeTab { try { const v = localStorage.getItem(TAB_KEY) as HomeTab | null; return v && HOME_TABS.includes(v) ? v : 'all'; } catch { return 'all'; } }
+function storedFilter(): HomeTab { try { const v = localStorage.getItem(TAB_KEY); return v === 'unread' || v === 'mentions' ? v : 'all'; } catch { return 'all'; } }
 
-function HomeTabs({ d, tab, onTab }: { d: BootstrapDTO; tab: HomeTab; onTab: (t: HomeTab) => void }) {
+function SideFilters({ d, filter, onFilter }: { d: BootstrapDTO; filter: HomeTab; onFilter: (f: HomeTab) => void }) {
   return (
-    <div className="home-tabs" role="tablist" aria-label={t('home.filters')}>
-      {HOME_TABS.map((k) => {
-        const n = k === 'all' ? d.conversations.length : k === 'mentions' ? d.conversations.reduce((s, c) => s + (c.unreadMentions ?? 0), 0) : d.conversations.filter((c) => matchesTab(c, k)).length;
+    <div className="side-filters" role="group" aria-label={t('inbox.filters')}>
+      {SIDE_FILTERS.map((k) => {
+        const n = k === 'mentions' ? d.conversations.reduce((s, c) => s + (c.unreadMentions ?? 0), 0) : d.conversations.filter((c) => matchesTab(c, k)).length;
         return (
-          <button key={k} role="tab" aria-selected={tab === k} className={`home-tab ${tab === k ? 'on' : ''}`} onClick={() => onTab(k)}>
-            {t(`home.tab.${k}`)}{k !== 'all' && n > 0 ? <span className="home-tab-n">{n}</span> : null}
+          <button key={k} aria-pressed={filter === k} className={`side-filter ${filter === k ? 'on' : ''}`} onClick={() => onFilter(filter === k ? 'all' : k)}>
+            {k === 'mentions' ? '@' : '●'} {t(k === 'mentions' ? 'inbox.fMentions' : 'inbox.fUnread')}{n > 0 && <span className="home-tab-n">{n}</span>}
           </button>
         );
       })}
@@ -107,113 +80,122 @@ function HomeTabs({ d, tab, onTab }: { d: BootstrapDTO; tab: HomeTab; onTab: (t:
   );
 }
 
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
-const openNewChat = () => openDialog((close) => <NewChatDialog onClose={close} />);
-
-/** Acceso rápido para iniciar un chat: botón arriba de la barra y ⌘K / Ctrl+K desde cualquier pantalla. */
+/**
+ * Arriba de la barra: ✎ Mensaje nuevo (también ⌘K / Ctrl+K desde cualquier pantalla) y «＋ Crear»
+ * (grupo, asunto, reunión o unirme con código). Los mismos dos botones que en Grupos, DMs, Asuntos y Calendario.
+ */
 function QuickChat() {
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
         if (document.querySelector('.modal')) return;
-        e.preventDefault(); openNewChat();
+        e.preventDefault(); openNewMessage();
       }
     };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, []);
-  const key = isMac ? '⌘K' : 'Ctrl+K';
   return (
-    <button className="quick-chat" onClick={openNewChat} title={t('chat.quickHint', { key })} aria-keyshortcuts={isMac ? 'Meta+K' : 'Control+K'}>
-      <span aria-hidden>✎</span><span className="grow">{t('chat.quick')}</span><kbd>{key}</kbd>
-    </button>
+    <div className="quick-bar">
+      <button className="quick-chat" onClick={openNewMessage} title={t('chat.quickHint', { key: quickKey })} aria-keyshortcuts={isMac ? 'Meta+K' : 'Control+K'}>
+        <span aria-hidden>✎</span><span className="grow">{t('chat.quick')}</span><kbd>{quickKey}</kbd>
+      </button>
+      <button className="quick-create-side" aria-haspopup="menu" title={t('quick.create')} aria-label={t('quick.create')} onClick={(e) => openCreateMenu(e.currentTarget)}>＋</button>
+    </div>
   );
 }
 
 function Sidebar({ route }: { route: Route }) {
   const d = useClient((s) => s.data)!;
-  const [tab, setTabState] = useState<HomeTab>(storedTab);
-  // Las secciones menos usadas van bajo «Más» para que los grupos y las relaciones quepan sin scroll.
-  const [navMore, setNavMore] = useState(() => { try { return localStorage.getItem(NAV_MORE_KEY) === '1'; } catch { return false; } });
-  const toggleNavMore = () => { const v = !navMore; setNavMore(v); try { localStorage.setItem(NAV_MORE_KEY, v ? '1' : '0'); } catch {} };
-  const setTab = (v: HomeTab) => { setTabState(v); try { localStorage.setItem(TAB_KEY, v); } catch {} };
-  const unreadTotal = d.conversations.reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0);
-  const pinnedConvs = d.conversations.filter((c) => c.pinnedAt && matchesTab(c, tab)).sort((a, b) => (a.pinnedAt ?? '').localeCompare(b.pinnedAt ?? ''));
-  const dms = dmConversations(d, tab);
-  const me = personById(d, d.me.id);
-  const myOrg = orgById(d, d.me.primaryOrgId);
+  const [filter, setFilterState] = useState<HomeTab>(storedFilter);
+  // Todo, Grupos o DMs lo elige el riel (Rail.tsx).
+  const sideTab = useSideMode();
+  // Buscar un chat desde la barra (pedido de Danny, 29-sep-2026): chats, grupos y personas; se limpia al abrir uno.
+  const [sq, setSq] = useState('');
+  const sideSearching = !!sq.trim();
+  const quickR = useQuickResults(sq);
+  const quickHas = !!(quickR.people.length || quickR.groups.length || quickR.chats.length);
+  const routeKey = route.name === 'conversation' ? route.id : route.name;
+  useEffect(() => { setSq(''); }, [routeKey]);
+  const sideInput = useRef<HTMLInputElement>(null);
+  // ⌘F / Ctrl+F: en un chat busca texto en la conversación; si ya estás ahí (o fuera de un chat), chats, grupos y personas.
+  // ⌘⇧F / Ctrl+Shift+F: siempre chats, grupos y personas.
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== 'f') return;
+      if (document.querySelector('.modal')) return;
+      e.preventDefault();
+      const inChatSearch = !!(document.activeElement as HTMLElement | null)?.closest('.chat-search');
+      if (!e.shiftKey && route.name === 'conversation' && !inChatSearch) { dispatchEvent(new Event('chaggu:chat-search')); return; }
+      sideInput.current?.focus(); sideInput.current?.select();
+    };
+    addEventListener('keydown', k);
+    return () => removeEventListener('keydown', k);
+  }, [route.name]);
+  const setFilter = (v: HomeTab) => { setFilterState(v); try { localStorage.setItem(TAB_KEY, v); } catch {} };
+  const dms = dmConversations(d, filter);
   const activeConv = route.name === 'conversation' ? route.id : null;
-  const activeWs = route.name === 'workspace' ? route.id : null;
-
   return (
     <aside className="side">
-      <div className="side-brand">
-        <img src={asset("/chaggu-logo.svg")} alt="Chaggu" width={78} height={34} />
-        <span className="eyebrow" style={{ fontSize: 10 }}>{t('brand.network')}</span>
-      </div>
       <QuickChat />
-      <nav className="nav">
-        {NAV.filter((n, i) => i < NAV_MAIN || navMore || route.name === n.name).map((n) => (
-          <button key={n.name} className={`nav-item ${route.name === n.name ? 'active' : ''}`} onClick={() => navigate(n.to)}>
-            <span className="ico">{n.ico}</span><span className="grow">{t(n.label)}</span>
-            {n.name === 'today' && unreadTotal > 0 && <span className="pill">{unreadTotal}</span>}
-          </button>
-        ))}
-        <button className="nav-item nav-more" aria-expanded={navMore} onClick={toggleNavMore}>
-          <span className="ico">{navMore ? '⌃' : '⋯'}</span><span className="grow">{navMore ? t('nav.less') : t('nav.more')}</span>
-        </button>
-      </nav>
+      <DndStrip />
+      <div className="side-search"><QuickSearchField inputRef={sideInput} value={sq} onChange={setSq} placeholder={t('side.searchChats')} order={['chats', 'groups', 'people']} hint={isMac ? '⌘F' : 'Ctrl+F'} /></div>
+      <NotifyAsk />
+      {!sideSearching && <div className="side-title">
+        <span className="grow">{t(sideTab === 'groups' ? 'nav.groups' : sideTab === 'dms' ? 'side.dmsTitle' : 'side.allTitle')}</span>
+        {/* Lista | Árbol y plegar van en un solo botón de vista (solo en Grupos). */}
+        {sideTab === 'groups' && filter !== 'mentions' && <GroupsViewButton tab={filter} withView />}
+      </div>}
+      {!sideSearching && <div className="home-tabs-row side-tools">
+        <SideFilters d={d} filter={filter} onFilter={setFilter} />
+      </div>}
       <div className="side-scroll">
-        <HomeTabs d={d} tab={tab} onTab={setTab} />
-        {tab === 'mentions' ? <MentionsInbox /> : <>
-        {pinnedConvs.length > 0 && (
-          <div className="side-pinned">
-            <div className="eyebrow" style={{ padding: '4px 10px' }}>📌 {t('side.pinned')}</div>
-            {pinnedConvs.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} showWs />)}
-          </div>
-        )}
-        <GroupsTree tab={tab} activeConv={activeConv} activeWs={activeWs} />
-        <div className="row" style={{ padding: '14px 10px 2px' }}>
-          <span className="eyebrow grow">{t('nav.dms')}</span>
-          <button className="btn ghost small" onClick={openNewChat} title={t('dms.new')} aria-label={t('dms.new')}>＋</button>
-        </div>
-        {dms.map((c) => <ConvItem key={c.id} c={c} active={activeConv === c.id} />)}
-        {dms.length === 0 && tab === 'all' && <button className="side-conv" onClick={() => openDialog((close) => <NewChatDialog onClose={close} />)}><span className="hash">＋</span><span className="grow muted">{t('dms.new')}</span></button>}
-        </>}
+        {sideSearching ? <><QuickSearchSections query={sq} order={['chats', 'groups', 'people']} withMessages /><MessageSearchSection query={sq} hasQuick={quickHas} /></>
+          : filter === 'mentions' ? <MentionsInbox />
+          : sideTab === 'all' ? <AllList tab={filter} activeConv={activeConv} />
+          : sideTab === 'groups' ? <GroupsBody tab={filter} activeConv={activeConv} />
+          : <>
+            <DmsList tab={filter} activeConv={activeConv} />
+            {dms.length === 0 && <button className="side-conv" onClick={openNewMessage}><span className="hash">✎</span><span className="grow muted">{t('dms.new')}</span></button>}
+          </>}
       </div>
-      <button className="side-foot" style={{ border: 0, borderTop: '1px solid var(--line)', background: 'transparent', textAlign: 'left' }}
-        aria-haspopup="menu" title={t('profile.menu')} onClick={(e) => openAccountMenu(e.currentTarget)}>
-        <Avatar person={me} org={myOrg} size={34} />
-        <span className="grow" style={{ minWidth: 0 }}>
-          <span className="ellipsis" style={{ display: 'block', fontWeight: 700 }}>{d.me.name}</span>
-          <span className="ellipsis small muted" style={{ display: 'block' }}>{myOrg?.name}</span>
-        </span>
-        <span className="muted" aria-hidden>⋯</span>
-      </button>
     </aside>
   );
 }
 
-const isMuted = (c: ConversationDTO) => !!c.mutedUntil && Date.parse(c.mutedUntil) > Date.now();
+/** Íconos de línea de la barra inferior (mismos dibujos que iOS y Android). */
+const TAB_ICONS: Record<string, ReactNode> = {
+  groups: <><circle cx="8" cy="8" r="3" /><circle cx="16" cy="8" r="3" /><path d="M2.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5M12.5 15.2c.9-.8 2.1-1.2 3.5-1.2 2.7 0 4.9 1.8 5.5 5" /></>,
+  dms: <><path d="M3.5 6.5A2.5 2.5 0 0 1 6 4h8a2.5 2.5 0 0 1 2.5 2.5v5A2.5 2.5 0 0 1 14 14H8.5L5 17v-3.1A2.5 2.5 0 0 1 3.5 11.5z" /><path d="M16.5 8.5H18a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-1.5 2.3V21l-3.2-2.5H12a2.5 2.5 0 0 1-2.3-1.5" /></>,
+  tasks: <><path d="M4 6.5l1.8 1.8L9 5M4 16.5l1.8 1.8L9 15" /><path d="M12 7h8M12 17h8" /></>,
+  agenda: <><rect x="3.5" y="5" width="17" height="15" rx="2.5" /><path d="M3.5 10h17M8 3v4M16 3v4" /><circle cx="8.5" cy="14.5" r=".6" /><circle cx="12" cy="14.5" r=".6" /><circle cx="15.5" cy="14.5" r=".6" /></>,
+  calls: <path d="M6.6 3.5h2.3l1.4 4-2 1.3a11 11 0 0 0 6.9 6.9l1.3-2 4 1.4v2.3a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2z" />,
+};
+function TabIcon({ name }: { name: string }) {
+  return <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{TAB_ICONS[name]}</svg>;
+}
 
-/** Barra inferior móvil: 5 pestañas fijas (docs/GRUPOS.md). */
+/** Barra inferior móvil: 5 pestañas fijas (docs/GRUPOS.md), 6 con las llamadas prendidas. Solo íconos, sin texto. */
 function MobileTabs({ route }: { route: Route }) {
   const d = useClient((s) => s.data);
   const unreadOf = (f: (c: ConversationDTO) => boolean) => d?.conversations.filter(f).reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0) ?? 0;
   const me = d ? personById(d, d.me.id) : null;
   const tabs = [
-    { name: 'groups', label: t('nav.groups'), ico: '▦', to: '/grupos', badge: unreadOf((c) => !!c.workspaceId) },
-    { name: 'dms', label: t('nav.dms'), ico: '◍', to: '/dms', badge: unreadOf((c) => c.kind === 'direct' || c.kind === 'multi') },
-    { name: 'issues', label: t('nav.issues'), ico: '◆', to: '/asuntos', badge: 0 },
-    { name: 'agenda', label: t('nav.calendar'), ico: '▤', to: '/agenda', badge: 0 },
+    { name: 'groups', label: t('nav.groups'), ico: 'groups', to: '/grupos', badge: unreadOf((c) => !!c.workspaceId) },
+    { name: 'dms', label: t('nav.dms'), ico: 'dms', to: '/dms', badge: unreadOf((c) => c.kind === 'direct' || c.kind === 'multi') },
+    { name: 'issues', label: t('nav.issues'), ico: 'tasks', to: '/asuntos', badge: 0 },
+    { name: 'agenda', label: t('nav.calendar'), ico: 'agenda', to: '/agenda', badge: 0 },
+    ...(d?.features?.calls ? [{ name: 'calls', label: t('nav.calls'), ico: 'calls', to: '/llamadas', badge: d.missedCalls ?? 0 }] : []),
     { name: 'settings', label: t('nav.you'), ico: null, to: '/ajustes', badge: 0 },
   ];
   return (
-    <nav className="tabs" aria-label={t('nav.mainNav')}>
+    <nav className={`tabs ${tabs.length === 6 ? 'n6' : ''}`} aria-label={t('nav.mainNav')}>
       {tabs.map((x) => (
-        <button key={x.name} className={route.name === x.name || (x.name === 'groups' && route.name === 'today') ? 'on' : ''} onClick={() => navigate(x.to)}>
-          {x.ico ? <span className="ico">{x.ico}</span> : <span className="ico"><Avatar person={me} org={d ? orgById(d, d.me.primaryOrgId) : null} size={22} /></span>}{x.label}
-          {x.badge > 0 && <span className="pill">{x.badge}</span>}
+        <button key={x.name} className={route.name === x.name || (x.name === 'groups' && route.name === 'today') ? 'on' : ''} onClick={() => navigate(x.to)}
+          aria-label={x.label} title={x.label}>
+          {x.ico ? <span className="ico"><TabIcon name={x.ico} /></span> : <span className="ico">{d ? <MeAvatar size={24} /> : <Avatar person={me} org={null} size={24} />}</span>}
+          {/* Solo íconos, sin texto (pedido de Danny, 29-sep-2026); el nombre va en aria-label y title. */}
+          {x.badge > 0 && <span className={`pill ${x.name === 'calls' ? 'is-missed' : ''}`}>{x.badge}</span>}
         </button>
       ))}
     </nav>
@@ -221,16 +203,20 @@ function MobileTabs({ route }: { route: Route }) {
 }
 
 export function Shell({ route, children }: { route: Route; children: ReactNode }) {
+  useSleepTzSync();
   const connection = useClient((s) => s.connection);
   const inConv = route.name === 'conversation';
   return (
     <div className={`shell ${inConv ? 'in-conv' : ''}`}>
+      <Rail route={route} />
       <Sidebar route={route} />
       <main className="main">
         {connection !== 'online' && <div className="conn" role="status">{connection === 'connecting' ? t('conn.connecting') : t('conn.offline')}</div>}
         {children}
       </main>
       <MobileTabs route={route} />
+      {/* gg siempre a mano (Danny, 29-sep-2026): también dentro de un chat, por encima del campo de escribir. */}
+      <AssistantBubble hidden={false} inConv={inConv} />
     </div>
   );
 }

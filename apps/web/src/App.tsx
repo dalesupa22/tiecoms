@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { Suspense, lazy, useEffect, useRef } from 'react';
 import { notices, useClient } from './app-client.ts';
 import { handleNotice } from './notices.ts';
-import { useLang } from './i18n.ts';
+import { installSoundUnlock } from './sound.ts';
+import { t, useLang } from './i18n.ts';
 import { asset, navigate, parse, usePath } from './router.ts';
 import { AuthScreen, SsoReturnScreen } from './screens/Auth.tsx';
 import { ConversationScreen } from './screens/Conversation.tsx';
@@ -13,12 +14,19 @@ import { TrazoScreen } from './screens/Lineage.tsx';
 import { AgendaScreen } from './screens/Calendar.tsx';
 import { ShareScreen } from './screens/Bring.tsx';
 import { WhatsAppScreen } from './screens/WhatsApp.tsx';
+import { MailScreen } from './screens/Mail.tsx';
 import { FilesScreen } from './screens/Files.tsx';
 import { DmsScreen, GroupsScreen, OversightScreen, ReadOnlyConversationScreen } from './screens/Groups.tsx';
 import { DialogHost } from './actions.tsx';
 import { MenuHost, ToastHost } from './menu.tsx';
+import { BubbleHost, useTabBadge } from './bubbles.tsx';
+import { UpdateBanner } from './update.tsx';
 import { EmojiPickerHost } from './screens/Reactions.tsx';
 import { SavedLinksScreen } from './screens/Links.tsx';
+import { ScheduledScreen } from './screens/Scheduled.tsx';
+import { CallDock, CallsScreen, IncomingCallHost, OtherDeviceCallBar } from './screens/Call.tsx';
+/** «Documentos que firmé»: se carga aparte junto con el visor de PDF. */
+const SignedScreen = lazy(() => import('./screens/Signed.tsx'));
 
 function nextParam() {
   const n = new URLSearchParams(location.search).get('next');
@@ -26,6 +34,10 @@ function nextParam() {
 }
 
 notices.handler = handleNotice;
+// El audio del sonido de mensajes se desbloquea con el primer clic o tecla (sound.ts).
+installSoundUnlock();
+
+import { markOnce } from './perf.ts';
 
 export function App() {
   const path = usePath();
@@ -33,13 +45,22 @@ export function App() {
   // Cambiar de idioma vuelve a pintar toda la app (key={lang}).
   const lang = useLang();
   const route = parse(path);
+  const prevStatus = useRef(status);
+  useTabBadge();
 
   useEffect(() => {
     if (status === 'anonymous' && !['login', 'signup', 'invite', 'sso'].includes(route.name)) navigate(`/login${path !== '/' ? `?next=${encodeURIComponent(path)}` : ''}`, true);
-    if (status === 'ready' && (route.name === 'login' || route.name === 'signup')) navigate(nextParam() ?? '/', true);
+    // Con sesión desde antes, el enlace de una invitación a la empresa (/signup?org=…) se acepta en /invite/… (también
+    // entra a sus grupos). Si la sesión acaba de nacer aquí mismo (se registró con el enlace), ya entró: sigue normal.
+    const org = route.name === 'signup' ? new URLSearchParams(location.search).get('org') : null;
+    const fresh = prevStatus.current === 'anonymous';
+    prevStatus.current = status;
+    if (status === 'ready' && org && !fresh) navigate(`/invite/${encodeURIComponent(org)}`, true);
+    else if (status === 'ready' && (route.name === 'login' || route.name === 'signup')) navigate(nextParam() ?? '/', true);
   }, [status, route.name, path]);
 
-  if (status === 'loading') return <div className="auth"><img src={asset("/chaggu-logo.svg")} alt="Chaggu" width={128} height={56} style={{ opacity: 0.6 }} /></div>;
+  if (status === 'ready') markOnce('chaggu:ready');
+  if (status === 'loading') return <div className="auth"><img src={asset("/chaggu-logo.svg")} alt="chaggu" width={128} height={56} style={{ opacity: 0.6 }} /></div>;
   if (route.name === 'sso') return <SsoReturnScreen key={lang} />;
   if (route.name === 'invite') return <InviteScreen key={lang} token={route.token} />;
   if (status === 'anonymous') return <AuthScreen key={lang} mode={route.name === 'signup' ? 'signup' : 'login'} after={nextParam()} />;
@@ -59,6 +80,10 @@ export function App() {
       {route.name === 'whatsapp' && <WhatsAppScreen />}
       {route.name === 'files' && <FilesScreen />}
       {route.name === 'saved' && <SavedLinksScreen />}
+      {route.name === 'scheduled' && <ScheduledScreen />}
+      {route.name === 'calls' && <CallsScreen />}
+      {route.name === 'mail' && <MailScreen />}
+      {route.name === 'signed' && <Suspense fallback={<div className="page"><div className="hint">{t('common.loading')}</div></div>}><SignedScreen /></Suspense>}
       {route.name === 'groups' && <GroupsScreen />}
       {route.name === 'dms' && <DmsScreen />}
       {route.name === 'oversight' && <OversightScreen key={route.id} orgId={route.id} />}
@@ -67,10 +92,15 @@ export function App() {
       {route.name === 'workspace' && <WorkspaceScreen key={route.id} id={route.id} />}
       {route.name === 'conversation' && <ConversationScreen key={route.id + location.search} id={route.id} />}
     </Shell>
+    <UpdateBanner />
     <MenuHost />
     <DialogHost />
     <ToastHost />
+    <BubbleHost />
     <EmojiPickerHost />
+    <CallDock />
+    <IncomingCallHost />
+    <OtherDeviceCallBar />
     </>
   );
 }

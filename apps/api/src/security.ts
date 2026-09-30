@@ -1,4 +1,4 @@
-import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import { SignJWT, jwtVerify } from 'jose';
 import { config } from './config.ts';
 import { unauthorized } from './errors.ts';
@@ -67,6 +67,28 @@ export async function verifyAccess(token: string): Promise<AccessClaims> {
   } catch {
     throw unauthorized();
   }
+}
+
+/**
+ * URL firmada de corta vida para un adjunto de una sola vista (POST /messages/:id/open): no exige Bearer,
+ * sirve solo a esa persona y vence a los `ttl` segundos.
+ */
+export function signOnce(attachmentId: string, userId: string, ttl = 60) {
+  const payload = Buffer.from(JSON.stringify({ a: attachmentId, u: userId, e: Math.floor(Date.now() / 1000) + ttl })).toString('base64url');
+  const mac = createHmac('sha256', `once:${config.jwtSecret}`).update(payload).digest('base64url');
+  return `${payload}.${mac}`;
+}
+export function verifyOnce(token: string): { attachmentId: string; userId: string } | null {
+  const [payload, mac] = String(token).split('.');
+  if (!payload || !mac) return null;
+  const want = createHmac('sha256', `once:${config.jwtSecret}`).update(payload).digest();
+  const got = Buffer.from(mac, 'base64url');
+  if (got.length !== want.length || !timingSafeEqual(got, want)) return null;
+  try {
+    const p = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (typeof p.a !== 'string' || typeof p.u !== 'string' || typeof p.e !== 'number' || p.e < Date.now() / 1000) return null;
+    return { attachmentId: p.a, userId: p.u };
+  } catch { return null; }
 }
 
 const PALETTE: Array<[string, string]> = [

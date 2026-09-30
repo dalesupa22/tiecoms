@@ -1,11 +1,14 @@
-import { useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
-import type { BootstrapDTO, ConversationDTO, MessageDTO, PersonDTO, WorkspaceDTO } from '@tiecoms/contracts';
+import { useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
+import { MESSAGE_SOUNDS, type BootstrapDTO, type ConversationDTO, type MessageDTO, type PersonDTO, type SoundChoice, type WorkspaceDTO } from '@tiecoms/contracts';
 import { client } from './app-client.ts';
 import { errorText, locale, t } from './i18n.ts';
 import { copyText, toast, type MenuItem } from './menu.tsx';
 import { BASE, navigate } from './router.ts';
 import { Modal, conversationTitle, personById } from './ui.tsx';
 import { previewModeMenu } from './screens/Links.tsx';
+import { SleepDialog, sleepSummary } from './screens/Sleep.tsx';
+import { MUTE_FOREVER, activeUntil, isForever, tomorrowAt8, untilText } from './silence.ts';
+import { DEFAULT_SOUND, playMessageSound } from './sound.ts';
 
 // ---------- Diálogos globales (se pueden abrir desde cualquier menú) ----------
 let dialog: ((close: () => void) => ReactNode) | null = null;
@@ -86,21 +89,21 @@ function forwardText(d: BootstrapDTO, conv: ConversationDTO, m: MessageDTO) {
 
 export function forwardMenu(d: BootstrapDTO, conv: ConversationDTO, m: MessageDTO, openInternal: () => void): MenuItem {
   const f = forwardText(d, conv, m);
-  const plain = `${f.author}: ${f.body}\n\n— ${f.title} · Chaggu\n${f.link}`;
+  const plain = `${f.author}: ${f.body}\n\n— ${f.title} · chaggu\n${f.link}`;
   return {
     label: t('menu.forward'), icon: '↪',
     items: [
       { label: t('fwd.tiecoms'), icon: '◍', onSelect: openInternal },
       { divider: true },
       { label: t('fwd.whatsapp'), icon: '🟢', onSelect: () => window.open(`https://wa.me/?text=${encodeURIComponent(plain)}`, '_blank', 'noopener') },
-      { label: t('fwd.slack'), icon: '#', onSelect: async () => { await copyText(`>${f.body.split('\n').join('\n>')}\n— *${f.author}* · ${f.title} · <${f.link}|Chaggu>`); toast(t('toast.slackCopied')); } },
+      { label: t('fwd.slack'), icon: '#', onSelect: async () => { await copyText(`>${f.body.split('\n').join('\n>')}\n— *${f.author}* · ${f.title} · <${f.link}|chaggu>`); toast(t('toast.slackCopied')); } },
       { label: t('fwd.teams'), icon: 'T', onSelect: async () => { await copyText(plain); toast(t('toast.teamsCopied')); } },
-      { label: t('fwd.email'), icon: '✉', onSelect: () => { location.href = `mailto:?subject=${encodeURIComponent(`${f.title} · Chaggu`)}&body=${encodeURIComponent(plain)}`; } },
+      { label: t('fwd.email'), icon: '✉', onSelect: () => { location.href = `mailto:?subject=${encodeURIComponent(`${f.title} · chaggu`)}&body=${encodeURIComponent(plain)}`; } },
     ],
   };
 }
 
-/** Reenviar un mensaje a otra conversación de Chaggu, conservando autor y origen. */
+/** Reenviar un mensaje a otra conversación de chaggu, conservando autor y origen. */
 export function ForwardDialog({ source, onClose }: { source: MessageDTO; onClose: () => void }) {
   const d = client.getState().data!;
   const [q, setQ] = useState('');
@@ -133,21 +136,109 @@ export function ForwardDialog({ source, onClose }: { source: MessageDTO; onClose
   );
 }
 
-// ---------- Menús de conversación, espacio y persona ----------
-export function muteMenu(conv: ConversationDTO): MenuItem {
-  const muted = !!conv.mutedUntil && Date.parse(conv.mutedUntil) > Date.now();
-  if (muted) return { label: t('menu.unmute'), icon: '🔔', onSelect: () => client.setConversationPrefs(conv.id, { mutedUntil: null }).then(() => toast(t('toast.unmuted'))).catch((e) => toast(errorText(e))) };
+// ---------- Silenciar un chat y «No molestar» ----------
+/** «Silenciado hasta las 18:00», «Silenciado hasta el mar 29, 8:00» o «Silenciado» (hasta que lo reactive). */
+export function mutedText(conv: ConversationDTO): string | null {
+  if (!activeUntil(conv.mutedUntil)) return null;
+  const when = untilText(conv.mutedUntil!, locale());
+  if (!when) return t('mute.on');
+  return new Date(conv.mutedUntil!).toDateString() === new Date().toDateString() ? t('mute.until', { time: when }) : t('mute.untilDay', { time: when });
+}
+
+/** Opciones para silenciar un chat: 1 hora · 8 horas · 1 semana · Hasta que lo reactive. */
+export function muteOptions(conv: ConversationDTO): MenuItem[] {
   const until = (ms: number) => new Date(Date.now() + ms).toISOString();
   const set = (iso: string) => client.setConversationPrefs(conv.id, { mutedUntil: iso }).then(() => toast(t('toast.muted'))).catch((e) => toast(errorText(e)));
+  return [
+    { label: t('mute.1h'), onSelect: () => set(until(3600_000)) },
+    { label: t('mute.8h'), onSelect: () => set(until(8 * 3600_000)) },
+    { label: t('mute.week'), onSelect: () => set(until(7 * 86400_000)) },
+    { label: t('mute.forever'), onSelect: () => set(MUTE_FOREVER) },
+  ];
+}
+export const unmute = (conv: ConversationDTO) => client.setConversationPrefs(conv.id, { mutedUntil: null }).then(() => toast(t('toast.unmuted'))).catch((e) => toast(errorText(e)));
+
+/** Submenú «Sonido» de un chat: Predeterminado, los 10 sonidos (suenan al elegirlos) y Sin sonido. */
+export function soundMenu(conv: ConversationDTO): MenuItem {
+  const cur = conv.sound ?? null;
+  const pick = (v: SoundChoice | null) => {
+    if (v && v !== 'none') playMessageSound(v, false, true);
+    void client.setConversationPrefs(conv.id, { sound: v }).then(() => toast(t('sound.set', { name: soundName(v) }))).catch((e) => toast(errorText(e)));
+  };
   return {
-    label: t('menu.mute'), icon: '🔕',
+    label: t('sound.chat'), icon: '🎵', hint: soundName(cur),
     items: [
-      { label: t('mute.1h'), onSelect: () => set(until(3600_000)) },
-      { label: t('mute.8h'), onSelect: () => set(until(8 * 3600_000)) },
-      { label: t('mute.week'), onSelect: () => set(until(7 * 86400_000)) },
-      { label: t('mute.forever'), onSelect: () => set(new Date('2099-12-31T00:00:00Z').toISOString()) },
+      { label: `${cur === null ? '✓ ' : ''}${t('sound.default')}`, onSelect: () => pick(null) },
+      { divider: true },
+      ...MESSAGE_SOUNDS.map((x) => ({ label: `${cur === x ? '✓ ' : ''}${soundName(x)}`, onSelect: () => pick(x) })),
+      { divider: true },
+      { label: `${cur === 'none' ? '✓ ' : ''}${t('sound.none')}`, onSelect: () => pick('none') },
     ],
   };
+}
+/** «Pop», «Campana», «Predeterminado (Pop)», «Sin sonido»… */
+export function soundName(v: SoundChoice | null | undefined): string {
+  if (v == null) { const def = client.getState().data?.me.messageSound ?? DEFAULT_SOUND; return `${t('sound.default')} (${soundName(def)})`; }
+  return v === 'none' ? t('sound.none') : t(`sound.n.${v}` as any);
+}
+
+export function muteMenu(conv: ConversationDTO): MenuItem {
+  if (activeUntil(conv.mutedUntil)) return { label: t('menu.unmute'), icon: '🔔', hint: mutedText(conv) ?? undefined, onSelect: () => void unmute(conv) };
+  return { label: t('menu.mute'), icon: '🔕', items: muteOptions(conv) };
+}
+
+/** «No molestar hasta las 18:00» (o el día), «No molestar activo» si es hasta que lo reactive; null si está apagado. */
+export function dndText(until: string | null | undefined): string | null {
+  if (!activeUntil(until)) return null;
+  const when = untilText(until!, locale());
+  if (!when) return t('dnd.on');
+  return new Date(until!).toDateString() === new Date().toDateString() ? t('dnd.until', { time: when }) : t('dnd.untilDay', { time: when });
+}
+
+export async function setDnd(until: string | null) {
+  try {
+    const r = await client.setDnd(until);
+    toast(r.local ? t('dnd.localOnly') : until ? t('dnd.toastOn') : t('dnd.toastOff'));
+  } catch (e) { toast(errorText(e)); }
+}
+
+/** «No molestar»: 1 hora · 8 horas · Hasta mañana (8:00) · Hasta que lo reactive; o «Reactivar» si está activo. */
+export function dndMenu(until: string | null | undefined): MenuItem {
+  const on = activeUntil(until);
+  const at = (ms: number) => new Date(Date.now() + ms).toISOString();
+  const tomorrow = tomorrowAt8();
+  return {
+    label: t('dnd.title'), icon: '🌙', hint: on ? untilText(until!, locale()) ?? t('dnd.activeHint') : undefined,
+    items: [
+      ...(on ? [{ label: t('dnd.off'), icon: '🔔', onSelect: () => void setDnd(null) }, { divider: true }] : []),
+      { label: t('dnd.1h'), onSelect: () => void setDnd(at(3600_000)) },
+      { label: t('dnd.8h'), onSelect: () => void setDnd(at(8 * 3600_000)) },
+      { label: t('dnd.tomorrow'), hint: tomorrow.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }), onSelect: () => void setDnd(tomorrow.toISOString()) },
+      { label: t('dnd.forever'), onSelect: () => void setDnd(MUTE_FOREVER) },
+      // Complemento automático: «No molestar» todas las noches en mi horario (modo sueño).
+      { divider: true },
+      { label: t('sleep.title'), icon: '🛌', hint: sleepSummary(client.getState().data?.me.sleep) ?? undefined, onSelect: () => openDialog((close) => <SleepDialog onClose={close} />) },
+    ],
+  };
+}
+
+/** Vuelve a pintar cuando vence `until` (para que la lunita, la franja o el 🔕 desaparezcan solos). */
+export function useExpiry(until: string | null | undefined) {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    if (!activeUntil(until) || isForever(until)) return;
+    const ms = Date.parse(until!) - Date.now() + 250;
+    if (ms > 2 ** 31 - 1) return;
+    const h = setTimeout(() => bump((n) => n + 1), ms);
+    return () => clearTimeout(h);
+  }, [until]);
+}
+
+// ---------- Menús de conversación, espacio y persona ----------
+/** Pendientes del grupo y sus derivadas que ve este cliente (mensajes o menciones). */
+export function treePending(conv: ConversationDTO) {
+  const own = conv.unread + (conv.unreadMentions ?? 0);
+  return own + client.derivedOf(conv.id).reduce((n, x) => n + x.unread + (x.unreadMentions ?? 0), 0);
 }
 
 export function conversationMenu(conv: ConversationDTO, extra: { onNewMeeting?: () => void } = {}): MenuItem[] {
@@ -157,10 +248,12 @@ export function conversationMenu(conv: ConversationDTO, extra: { onNewMeeting?: 
     { label: t('menu.openTab'), icon: '⧉', onSelect: () => window.open(convLink(conv.id), '_blank', 'noopener') },
     { divider: true },
     { label: pinned ? t('menu.unpinTop') : t('menu.pinTop'), icon: '📌', onSelect: () => client.setConversationPrefs(conv.id, { pinned: !pinned }).catch((e) => toast(errorText(e))) },
-    conv.unread > 0
-      ? { label: t('menu.markRead'), icon: '✓', onSelect: () => void client.markConversationRead(conv.id).catch((e) => toast(errorText(e))) }
+    // «Marcar como leído» mira el grupo y sus derivadas (hilos, ramas): así no queda «leído» con pendientes escondidos.
+    treePending(conv) > 0
+      ? { label: t('menu.markRead'), icon: '✓', onSelect: () => void client.markTreeRead(conv.id).then(() => toast(t('toast.markedRead'))).catch((e) => toast(errorText(e))) }
       : { label: t('menu.markUnreadConv'), icon: '●', disabled: conv.lastMessageSeq <= conv.historyFromSeq, onSelect: () => void client.markUnread(conv.id, conv.lastMessageSeq).then(() => toast(t('toast.markedUnread'))).catch((e) => toast(errorText(e))) },
     muteMenu(conv),
+    soundMenu(conv),
     previewModeMenu(conv),
     remindMenu(conv),
     ...(extra.onNewMeeting && conv.canPost ? [{ label: t('menu.meeting'), icon: '📅', onSelect: extra.onNewMeeting }] : []),

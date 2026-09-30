@@ -15,6 +15,9 @@ export const pool = new pg.Pool({
 });
 
 pool.on('error', (err) => console.error('[db] error en cliente inactivo', err.message));
+// El pool solo escucha errores de los clientes inactivos. Si la conexión se cae con un cliente prestado (una
+// transacción, un LISTEN), su 'error' sin oyente tumba el proceso entero; la consulta en curso ya falla sola.
+pool.on('connect', (client) => client.on('error', (err) => console.error('[db] error en cliente prestado', err.message)));
 
 export type Db = pg.PoolClient | pg.Pool;
 export type Tx = pg.PoolClient;

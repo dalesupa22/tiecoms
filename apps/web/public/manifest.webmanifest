@@ -1,6 +1,6 @@
 {
-  "name": "Chaggu",
-  "short_name": "Chaggu",
+  "name": "chaggu",
+  "short_name": "chaggu",
   "description": "La red de trabajo entre empresas",
   "start_url": "./",
   "scope": "./",

@@ -1,4 +1,4 @@
-import { MailConnectNudge, ProviderIcon } from './Mail.tsx';
+import { ProviderIcon } from './Mail.tsx';
 import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from 'react';
 import type { ConversationDTO, StorageUsageDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
@@ -10,8 +10,7 @@ import { directOtherId, Avatar, ConvAvatar, OrgMark, SideIcon, conversationSubti
 import { InviteDialog, NewGroupDialog } from './Dialogs.tsx';
 import { InviteResult, PendingInvitations } from './Invitations.tsx';
 import { IssueDrawer, IssueRow, isClosed } from './Issues.tsx';
-import { TodayAgenda, newEvent } from './Calendar.tsx';
-import { RemindersSection } from './Bring.tsx';
+import { newEvent } from './Calendar.tsx';
 import { SleepDialog, sleepSummary } from './Sleep.tsx';
 import { MeetingsSettings } from './Meetings.tsx';
 import { TEXT_SIZES, setTextSize, useTextSize } from '../text-size.ts';
@@ -25,12 +24,8 @@ import { MESSAGE_SOUNDS, RINGTONES } from '@tiecoms/contracts';
 import { SignOutButton, groupWorkspaces } from './Shell.tsx';
 import { JoinWithCodeDialog, openCreateGroup } from './Groups.tsx';
 
-function greeting() {
-  const h = new Date().getHours();
-  return t(h < 12 ? 'today.morning' : h < 19 ? 'today.afternoon' : 'today.evening');
-}
-
-function ConvCard({ c }: { c: ConversationDTO }) {
+/** Una conversación en tarjeta (Hoy, Conversaciones). La pantalla Hoy vive en Home.tsx (docs/HOY.md). */
+export function ConvCard({ c }: { c: ConversationDTO }) {
   const d = useClient((s) => s.data)!;
   const other = c.kind === 'direct' ? personById(d, directOtherId(d, c)) : null;
   const org = other ? orgById(d, other.orgId) : c.workspaceId ? counterpartOrg(d, c.workspaceId) : null;
@@ -47,71 +42,6 @@ function ConvCard({ c }: { c: ConversationDTO }) {
       {(c.unreadMentions ?? 0) > 0 && <span className="pill mention-pill" title={t('mention.youMentioned')}>@</span>}
       {c.unread > 0 && <span className={`pill ${muted ? 'is-muted' : ''}`}>{c.unread}</span>}
     </button>
-  );
-}
-
-export function TodayScreen() {
-  const d = useClient((s) => s.data)!;
-  const pending = useClient((s) => s.pending);
-  const issues = useClient((s) => s.issues);
-  const [openIssue, setOpenIssue] = useState<string | null>(null);
-  useEffect(() => { client.loadIssues({ mine: true, open: true }).catch(() => {}); }, []);
-  const visible = new Set(d.conversations.map((c) => c.id));
-  const mine = Object.values(issues).filter((i) => i.ownerId === d.me.id && !isClosed(i) && (!i.conversationId || visible.has(i.conversationId)))
-    .sort((a, b) => (a.dueDate ?? '9').localeCompare(b.dueDate ?? '9'));
-  const unreadConvs = d.conversations.filter((c) => c.unread > 0);
-  const unread = unreadConvs.reduce((n, c) => n + c.unread, 0);
-  const recent = d.conversations.filter((c) => c.lastMessageAt).slice(0, 6);
-  const orgsCount = new Set(d.workspaces.flatMap((w) => w.organizationIds)).size;
-  const firstName = d.me.name.split(' ')[0];
-  const rawDate = new Date().toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long' });
-  const date = rawDate.charAt(0).toUpperCase() + rawDate.slice(1);
-
-  return (
-    <div className="page"><div className="page-narrow">
-      <div className="small muted">{date}</div>
-      <h1>{greeting()}, {firstName}.</h1>
-      <div className="muted">
-        {unread ? t('today.summary', { messages: tn(unread, 'n.newMessage', 'n.newMessages'), conversations: tn(unreadConvs.length, 'n.conversation', 'n.conversations') }) : t('today.upToDate')}
-        {' · '}{t('today.spacesWith', { spaces: tn(d.workspaces.length, 'n.space', 'n.spaces'), companies: tn(Math.max(0, orgsCount - 1), 'n.company', 'n.companies') })}
-      </div>
-      <MailConnectNudge />
-      <div className="stats">
-        <div className="stat dark"><div className="eyebrow">{t('today.unread')}</div><div className="num">{unread}</div></div>
-        <div className="stat dark"><div className="eyebrow">{t('today.waiting')}</div><div className="num">{unreadConvs.length}</div></div>
-        <div className="stat"><div className="eyebrow">{t('today.spaces')}</div><div className="num">{d.workspaces.length}</div></div>
-        <div className="stat"><div className="eyebrow">{t('issue.yours')}</div><div className="num">{mine.length}</div></div>
-      </div>
-      {d.workspaces.length === 0 ? (
-        <div className="card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
-          <div className="serif" style={{ fontSize: 30 }}>{t('today.startTitle')}</div>
-          <div className="muted">{t('today.startBody')}</div>
-          <button className="btn primary" onClick={() => openCreateGroup()}>{t('today.newSpace')}</button>
-        </div>
-      ) : (
-        <div className="cols">
-          <section>
-            <div className="row" style={{ marginBottom: 10 }}><span className="eyebrow grow">{t('today.waiting')}</span><span className="small muted">{tn(unreadConvs.length, 'n.conversation', 'n.conversations')}</span></div>
-            <div className="list">
-              {unreadConvs.length ? unreadConvs.map((c) => <ConvCard key={c.id} c={c} />) : <div className="empty">{t('today.nothing')}</div>}
-            </div>
-          </section>
-          <section>
-            <TodayAgenda />
-            <RemindersSection />
-            <div className="row" style={{ marginBottom: 10 }}><span className="eyebrow grow">{t('issue.yours')}</span><button className="btn ghost small" onClick={() => navigate('/asuntos')}>{t('nav.issues')} ›</button></div>
-            <div className="list" style={{ marginBottom: 20 }}>
-              {mine.length ? mine.slice(0, 5).map((i) => <IssueRow key={i.id} i={i} onOpen={setOpenIssue} />) : <div className="empty">{t('issue.yoursEmpty')}</div>}
-            </div>
-            <div className="row" style={{ marginBottom: 10 }}><span className="eyebrow grow">{t('today.recent')}</span></div>
-            <div className="list">{recent.map((c) => <ConvCard key={c.id} c={c} />)}</div>
-            <button className="btn" style={{ marginTop: 12, width: '100%' }} onClick={() => openCreateGroup()}>{t('today.newSpace')}</button>
-          </section>
-        </div>
-      )}
-      {openIssue && <IssueDrawer id={openIssue} onClose={() => setOpenIssue(null)} />}
-      {pending.length > 0 && <div className="hint" style={{ marginTop: 16 }}>{t('today.queued')}: {pending.length}</div>}
-    </div></div>
   );
 }
 
@@ -271,7 +201,7 @@ export function PeopleScreen() {
   );
 }
 
-function InviteColleague({ orgId, orgName }: { orgId: string; orgName: string }) {
+export function InviteColleague({ orgId, orgName }: { orgId: string; orgName: string }) {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState<{ email: string; emailSent: boolean; link: string } | null>(null);
   const [error, setError] = useState<string | null>(null);

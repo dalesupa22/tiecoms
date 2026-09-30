@@ -232,6 +232,14 @@ const waMsgs = [
       : { workspaceId: null, canManageAll: true, folders: [fo('f1', 'Contratos', null), fo('f2', '2026', 'f1'), fo('f3', 'Facturas', null)],
           files: [fi('a1', 'Propuesta Estudio Norte.pdf', null, 'application/pdf', 812_000), fi('a2', 'Contrato marco.docx', 'f2', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 96_000), fi('a3', 'Notas.txt', null, 'text/plain', 1_200)] };
   }
+  // Pantalla Hoy (docs/HOY.md): correo conectado (?correo=no para verlo sin conectar) e historial de llamadas.
+  if (path === '/mail/connections') return { connections: [
+    { provider: 'google', label: 'Gmail', available: true, unavailableReason: null, status: q.get('correo') === 'no' ? 'none' : 'active', accountEmail: 'danny@xertify.co' },
+    { provider: 'microsoft', label: 'Outlook', available: true, unavailableReason: null, status: 'none', accountEmail: null }] };
+  if (path === '/mail/unread') return { unread: 12 };
+  if (path.startsWith('/calls?')) return { hasMore: false, calls: [
+    { call: { id: 'k1', conversationId: 'general', kind: 'video', startedBy: 'mateo', startedAt: iso(3 * H), endedAt: iso(3 * H - 25 * 60_000), activeUserIds: [] }, participantIds: ['mateo', 'danny', 'ana'], durationSec: 1500, hasSummary: true },
+    { call: { id: 'k2', conversationId: 'dm-ana', kind: 'audio', startedBy: 'ana', startedAt: iso(D), endedAt: iso(D - 60_000), activeUserIds: [] }, participantIds: ['ana'], durationSec: null, hasSummary: false, missed: true }] };
   throw new Error('arnés sin backend');
 };
 // Para las pruebas en el navegador: el cliente y la burbuja de mensaje nuevo.

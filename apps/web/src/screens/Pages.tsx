@@ -446,7 +446,7 @@ function StorageUsage({ adminOrgs }: { adminOrgs: { id: string; name: string }[]
             </div>
           )}
           <div className="hint" style={{ marginTop: 6 }}>{t('storage.hint')}</div>
-          {orgs.map((o) => <div key={o.id} className="small" style={{ marginTop: 8 }}>{t('storage.org', { org: o.name, total: fmt(o.totalBytes), n: o.people ?? 0 })}</div>)}
+          {orgs.map((o) => <div key={o.id} className="small" style={{ marginTop: 8 }}>{t(o.people === 1 ? 'storage.orgOne' : 'storage.org', { org: o.name, total: fmt(o.totalBytes), n: o.people ?? 0 })}</div>)}
         </>
       )}
     </div>

@@ -28,4 +28,8 @@
     <string name="dev_other">other device</string>
     <string name="calls_active">Happening now</string>
     <string name="calls_active_in">%1$d in the call</string>
+    <string name="msg_see_more">See more</string>
+    <string name="msg_see_less">See less</string>
+    <string name="swipe_reply_cd">Reply</string>
+    <string name="paste_image_failed">Couldn\'t attach the pasted image</string>
 </resources>

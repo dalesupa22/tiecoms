@@ -79,6 +79,15 @@ private val Dark = darkColorScheme(
     error = Color(0xFFFF8A80),
 )
 
+/**
+ * Lo que identifica un sidechat (píldora «Sidechat» y el ícono de su fila), 1.7.1: verde azulado sobrio,
+ * idéntico en web, iOS y Android. Antes usaba el primaryContainer (terracota).
+ */
+data class SideColors(val fg: Color, val bg: Color)
+val SideLight = SideColors(fg = Color(0xFF1F7A74), bg = Color(0xFFE0F2EF))
+val SideDark = SideColors(fg = Color(0xFF7FD3CA), bg = Color(0xFF16312E))
+val LocalSideColors = androidx.compose.runtime.staticCompositionLocalOf { SideLight }
+
 @Composable
 fun TieComsTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
     val chat = if (dark) {
@@ -91,7 +100,8 @@ fun TieComsTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () 
     val factor = runCatching { app?.container?.settings?.textScale }.getOrNull() ?: 1f
     val base = androidx.compose.ui.platform.LocalDensity.current
     val density = androidx.compose.ui.unit.Density(base.density, com.tiecoms.app.core.TextSize.fontScale(base.fontScale, factor))
-    androidx.compose.runtime.CompositionLocalProvider(LocalChatColors provides chat, androidx.compose.ui.platform.LocalDensity provides density) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalChatColors provides chat, LocalSideColors provides (if (dark) SideDark else SideLight),
+        androidx.compose.ui.platform.LocalDensity provides density) {
         MaterialTheme(colorScheme = if (dark) Dark else Light, content = content)
     }
 }

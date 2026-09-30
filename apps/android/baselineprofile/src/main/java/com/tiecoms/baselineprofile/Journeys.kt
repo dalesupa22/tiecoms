@@ -52,3 +52,31 @@ fun MacrobenchmarkScope.scrollList() {
     list.fling(Direction.DOWN); device.waitForIdle()
     list.fling(Direction.UP); device.waitForIdle()
 }
+
+/** Abre el grupo general del fixture desde Grupos (primera fila de grupo con más mensajes: el argumento conversationId). */
+fun MacrobenchmarkScope.openGroupChat() {
+    device.findObject(By.res("tab-home"))?.click()
+    device.wait(Until.hasObject(By.res("conversationList")), 5_000)
+    val id = arg("conversationId")
+    val row = (if (id.isNotBlank()) device.wait(Until.findObject(By.res("conv-$id")), 10_000) else null)
+        ?: device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile("conv-.*"))), 10_000) ?: error("Sin grupos en la lista")
+    row.click()
+    check(device.wait(Until.hasObject(By.res("messages")), 10_000)) { "No abrió el chat" }
+    device.waitForIdle()
+}
+
+/** Desplaza el chat hacia lo viejo y de vuelta, con gestos de dedo (no saltos). */
+fun MacrobenchmarkScope.scrollChat() {
+    val list = device.findObject(By.res("messages")) ?: return
+    list.setGestureMargin(device.displayWidth / 5)
+    repeat(4) { list.fling(Direction.UP); device.waitForIdle() }
+    repeat(4) { list.fling(Direction.DOWN); device.waitForIdle() }
+}
+
+fun MacrobenchmarkScope.scrollGroups() {
+    device.findObject(By.res("tab-home"))?.click()
+    val list = device.wait(Until.findObject(By.res("conversationList")), 5_000) ?: return
+    list.setGestureMargin(device.displayWidth / 5)
+    repeat(2) { list.fling(Direction.DOWN); device.waitForIdle() }
+    repeat(2) { list.fling(Direction.UP); device.waitForIdle() }
+}

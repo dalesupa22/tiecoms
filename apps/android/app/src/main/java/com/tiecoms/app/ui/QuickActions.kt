@@ -143,7 +143,7 @@ private fun SearchConvRow(c: ConversationDTO, data: BootstrapDTO, internalFallba
     Box(Modifier.testTag("search.conv.${c.id}")) {
         ConversationRow(c, data, internalFallback, convFallback, indent = 16.dp, iconSize = 40.dp,
             menuOpen = false, menuItems = { emptyList() }, onDismissMenu = {}, onLongPress = {}, onIssues = {}, showIssuesChip = false,
-            tagLine = Names.companyOf(c, data), onClick = onClick)
+            companyLine = Names.rowCompany(c, data, internalFallback, convFallback), onClick = onClick)
     }
 }
 

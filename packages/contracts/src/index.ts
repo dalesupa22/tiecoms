@@ -1719,3 +1719,6 @@ export interface AssistantActionDTO {
   error?: string | null;
 }
 export interface AssistantTurnDTO { reply: string; actions: AssistantActionDTO[]; /** 2-3 respuestas rápidas que el usuario probablemente dirá después (chips). */ suggestions?: string[] }
+
+// GIFs y memes (docs/GIFS.md).
+export * from './gifs.ts';

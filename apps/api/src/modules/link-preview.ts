@@ -105,7 +105,7 @@ function getOnce(target: URL, accept: string, max: number, ua = UA): Promise<Got
   });
 }
 
-async function safeGet(url: string, accept: string, max: number, ua = UA): Promise<Got> {
+export async function safeGet(url: string, accept: string, max: number, ua = UA): Promise<Got> {
   let target = new URL(url);
   for (let hop = 0; hop < 4; hop++) {
     const r = await getOnce(target, accept, max, ua);
@@ -210,7 +210,7 @@ function charsetOf(type: string, body: Buffer) {
   try { return new TextDecoder(cs); } catch { return new TextDecoder('utf-8'); }
 }
 
-function sniffImage(b: Buffer): { type: string; ext: string } | null {
+export function sniffImage(b: Buffer): { type: string; ext: string } | null {
   if (b.length > 8 && b[0] === 0x89 && b.toString('ascii', 1, 4) === 'PNG') return { type: 'image/png', ext: 'png' };
   if (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return { type: 'image/jpeg', ext: 'jpg' };
   if (b.length > 12 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP') return { type: 'image/webp', ext: 'webp' };

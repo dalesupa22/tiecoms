@@ -6,12 +6,12 @@
 import { useEffect, useState, type DragEvent } from 'react';
 import { useClient } from '../app-client.ts';
 import { t } from '../i18n.ts';
-import { DRAG_TYPE, MAX_PANES, closePane, focusPane, onlyPane, openBeside, syncActive, usePanes } from '../split.ts';
+import { DRAG_TYPE, MAX_PANES, SPLIT_MEDIA, closePane, focusPane, onlyPane, openBeside, syncActive, usePanes } from '../split.ts';
 import { ConversationScreen } from './Conversation.tsx';
 
 /** En pantallas angostas (celular, ventana chica) no hay paneles: solo el activo. */
 function useWide() {
-  const q = '(min-width: 1100px)';
+  const q = SPLIT_MEDIA;
   const [wide, setWide] = useState(() => typeof matchMedia === 'undefined' || matchMedia(q).matches);
   useEffect(() => {
     const m = matchMedia(q);

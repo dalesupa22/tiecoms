@@ -95,7 +95,7 @@ function GuestInCall({ onLeave }: { onLeave: () => void }) {
   const me = myGuestId();
   const others = people.filter((id) => id !== me);
   const nameOf = (id: string) => v.call.names?.[id] ?? '';
-  const video = v.tiles.filter((x) => (x.local ? v.camera : x.active));
+  const video = v.tiles.filter((x) => (x.local ? v.camera : true));
   const mine = video.find((x) => x.local);
   const videoBy = new Map(video.filter((x) => !x.local).map((x) => [x.userId, x] as const));
   return (

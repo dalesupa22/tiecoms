@@ -10,6 +10,9 @@ import { useSyncExternalStore } from 'react';
 import { navigate } from './router.ts';
 
 export const MAX_PANES = 4;
+/** Desde qué ancho de ventana hay paneles (la app de Mac abre en ~1000 px: con 1100 no aparecían). */
+export const SPLIT_MEDIA = '(min-width: 860px)';
+export const splitAvailable = () => typeof matchMedia !== 'undefined' && matchMedia(SPLIT_MEDIA).matches;
 /** Tipo del arrastre (dataTransfer) de una conversación de la lista. */
 export const DRAG_TYPE = 'application/x-chaggu-conversation';
 const KEY = 'chaggu:split';

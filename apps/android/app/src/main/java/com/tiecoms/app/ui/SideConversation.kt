@@ -261,13 +261,15 @@ fun SideChip(sides: List<ConversationDTO>, onOpen: (String) -> Unit) {
     val ctx = LocalContext.current
     val data = LocalClient.current.state.collectAsStateWithLifecycle().value.data ?: return
     var list by remember { mutableStateOf(false) }
+    // 1.7.1: lo que identifica un sidechat va en verde azulado (LocalSideColors), igual en web e iOS.
+    val sideC = com.tiecoms.app.ui.theme.LocalSideColors.current
     if (sides.size > 1) {
-        Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.secondaryContainer,
+        Surface(shape = RoundedCornerShape(14.dp), color = sideC.bg,
             modifier = Modifier.padding(top = 4.dp).clickable { list = true }.testTag("sideChip")) {
             Row(Modifier.padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                 StackedAvatars(sides.flatMap { it.memberIds }.distinct().filter { it != data.me.id }, data, 20.dp)
                 Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.side_chip, sides.size), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                Text(stringResource(R.string.side_chip, sides.size), style = MaterialTheme.typography.labelMedium, color = sideC.fg)
                 if (sides.any { it.unread > 0 }) Box(Modifier.padding(start = 6.dp).size(8.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
             }
         }
@@ -286,16 +288,16 @@ fun SideChip(sides: List<ConversationDTO>, onOpen: (String) -> Unit) {
     val last = s.lastHumanPreview?.let { h -> if (h.viewOnce) com.tiecoms.app.core.ViewOnce.preview(h.attachments, ctx.getString(R.string.vo_photo), ctx.getString(R.string.vo_voice), ctx.getString(R.string.vo_message))
         else com.tiecoms.app.core.Attachments.preview(h.attachments, h.body, attLabels(ctx)) }
         ?: s.lastMessagePreview?.takeIf { !it.startsWith("{") }
-    Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.secondaryContainer,
+    Surface(shape = RoundedCornerShape(14.dp), color = sideC.bg,
         modifier = Modifier.padding(top = 4.dp).widthIn(max = 300.dp).clickable { onOpen(s.id) }.testTag("sideChip")) {
         Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             StackedAvatars(s.memberIds.filter { it != data.me.id }, data, 22.dp)
             Spacer(Modifier.width(6.dp))
             Column(Modifier.weight(1f, fill = false)) {
                 Text("💬 " + stringResource(R.string.side_title) + " · " + (if (n == 1) stringResource(R.string.side_reply_one) else stringResource(R.string.side_replies, n)),
-                    style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = sideC.fg)
                 if (!last.isNullOrBlank()) Text(last, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f), modifier = Modifier.testTag("sideChipLast"))
+                    color = sideC.fg.copy(alpha = 0.8f), modifier = Modifier.testTag("sideChipLast"))
             }
             if (s.unread > 0 && !s.mutedAt(System.currentTimeMillis())) Box(Modifier.padding(start = 6.dp).size(8.dp).background(Color(0xFFE8502E), CircleShape).testTag("sideChipUnread"))
         }
@@ -325,7 +327,11 @@ fun SidePanelHeader(
             Column(Modifier.weight(1f)) {
                 // Un hilo (derivada) usa el mismo panel: «💬 título» y «Con los del chat · N personas» (docs/GRUPOS.md).
                 if (side.isSide) {
-                    Text(stringResource(R.string.side_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
+                    val sideC = com.tiecoms.app.ui.theme.LocalSideColors.current
+                    Surface(color = sideC.bg, shape = RoundedCornerShape(10.dp)) {
+                        Text(stringResource(R.string.side_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = sideC.fg,
+                            modifier = Modifier.semantics { heading() }.padding(horizontal = 8.dp, vertical = 2.dp).testTag("sideHeaderPill"))
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Lock, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(" " + stringResource(R.string.side_private_n, side.memberIds.size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -392,7 +398,9 @@ fun FloatingSideBubble(side: ConversationDTO, data: BootstrapDTO, onOpen: () -> 
     Surface(onClick = onOpen, shape = RoundedCornerShape(28.dp), shadowElevation = 6.dp, color = MaterialTheme.colorScheme.surface,
         modifier = modifier.semantics { contentDescription = label }.testTag("sideBubble")) {
         Row(Modifier.padding(start = 10.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("💬", style = MaterialTheme.typography.titleMedium)
+            com.tiecoms.app.ui.theme.LocalSideColors.current.let { c ->
+                Box(Modifier.size(28.dp).background(c.bg, CircleShape), contentAlignment = Alignment.Center) { Text("💬", style = MaterialTheme.typography.titleSmall, color = c.fg) }
+            }
             Spacer(Modifier.width(4.dp))
             StackedAvatars(side.memberIds.filter { it != data.me.id }, data, 26.dp)
             if (side.unread > 0) Surface(shape = CircleShape, color = Color(0xFFB45309), modifier = Modifier.padding(start = 2.dp)) {

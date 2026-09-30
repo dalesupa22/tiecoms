@@ -131,6 +131,10 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.material.icons.automirrored.filled.Reply
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -243,6 +247,8 @@ fun ConversationScreen(
     var sideOpen by rememberSaveable(openSide) { mutableStateOf(openSide) }
     var convMenu by rememberSaveable { mutableStateOf(false) }
     var replyTo by remember { mutableStateOf<MessageDTO?>(null) }
+    /** Sube al elegir responder (menú o deslizar): el compositor toma el foco y abre el teclado. */
+    var replyFocus by remember { mutableIntStateOf(0) }
     var editing by remember { mutableStateOf<MessageDTO?>(null) }
     var deriving by remember { mutableStateOf<MessageDTO?>(null) }
     var newIssue by remember { mutableStateOf<Pair<Boolean, MessageDTO?>?>(null) }
@@ -606,13 +612,13 @@ fun ConversationScreen(
         val isPinned = m.id in pinned
         // Una sola vista (tanda 1.7): sin editar, reenviar, copiar, fijar ni convertir en tarea (el servidor responde 409).
         if (com.tiecoms.app.core.ViewOnce.blocksActions(m)) return buildList {
-            if (meta.canPost) add(SheetItem(ctx.getString(R.string.menu_reply), "↩", tag = "menuReply") { replyTo = m; editing = null })
+            if (meta.canPost) add(SheetItem(ctx.getString(R.string.menu_reply), "↩", tag = "menuReply") { replyTo = m; editing = null; replyFocus++ })
             add(SheetItem(ctx.getString(R.string.menu_mark_unread), "●", tag = "menuUnread") { act { client.markUnread(id, m.seq); container.toast(ctx.getString(R.string.toast_marked_unread)) } })
             if (!mine) add(SheetItem(ctx.getString(R.string.safety_report_message), "⚑", danger = true, tag = "menuReport") { reportMessage = m })
             if (mine) add(SheetItem(ctx.getString(R.string.menu_delete), "🗑", danger = true, tag = "menuDelete") { confirmDelete = m })
         }
         return buildList {
-            if (meta.canPost) add(SheetItem(ctx.getString(R.string.menu_reply), "↩", tag = "menuReply") { replyTo = m; editing = null })
+            if (meta.canPost) add(SheetItem(ctx.getString(R.string.menu_reply), "↩", tag = "menuReply") { replyTo = m; editing = null; replyFocus++ })
             // Bloque 1 (docs/GRUPOS.md): responder aquí o en privado por DM al autor (SPEC-v3 §7, en grupos y chats grupales).
             val author = Names.person(data, m.authorId)
             if (!mine && meta.kind != "direct" && m.kind == "text" && author?.kind == "human")
@@ -703,23 +709,26 @@ fun ConversationScreen(
                             if (muted) MutedMark(16.dp, tag = "chatMuted")
                         }
                         }
-                        // Ruta «Empresa · Espacio» (SPEC-v3 §9); en chats y laterales, su subtítulo propio.
+                        // 1.7.1: arriba solo el grupo; debajo, pequeña y gris, la empresa (sin repetirla si el nombre ya la lleva).
                         val ws = data.workspaces.firstOrNull { it.id == meta.workspaceId }
-                        if (ws != null) {
+                        if (ws != null && !meta.isSide) {
                             val org = com.tiecoms.app.core.HomeTree.counterpartOrg(data, ws)
-                            // Relación pendiente: el nombre que se escribió; el espacio casa se llama como la empresa.
+                            // Relación pendiente: el nombre que se escribió.
                             val place = com.tiecoms.app.core.GroupsTree.place(data, ws)
-                            val orgName = place.pendingName ?: org?.name
-                            Text(listOfNotNull(orgName, ws.name).distinct().joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            val orgName = com.tiecoms.app.core.GroupsTree.companyLine(place.pendingName ?: org?.name, title)
+                            if (orgName != null) Text(orgName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Normal,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable { onOpenWorkspace(ws.id) }.testTag("chatPath"))
                         } else {
                             val parent = meta.parentId?.let { pid -> data.conversations.firstOrNull { it.id == pid } }
                             val head = when {
                                 meta.isSide -> listOfNotNull(ctx.getString(R.string.side_title), parent?.let { titleOf(ctx, it, data) }).joinToString(" · ")
                                 meta.kind == "multi" -> Names.multiSubtitle(meta, data)
+                                meta.kind == "direct" -> Names.directCompany(meta, data) ?: orgs.ifEmpty { null }
                                 else -> orgs.ifEmpty { null }
                             }
-                            if (!head.isNullOrEmpty()) Text(head, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            if (!head.isNullOrEmpty()) Text(head, style = MaterialTheme.typography.labelSmall,
+                                color = if (meta.isSide) com.tiecoms.app.ui.theme.LocalSideColors.current.fg else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = if (meta.isSide) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.testTag("chatPath"))
                         }
                     }
@@ -800,7 +809,7 @@ fun ConversationScreen(
                                     cardActions = if (embedded) null else { cm, emailId ->
                                         val author = Names.person(data, cm.authorId)
                                         CardActions(
-                                            reply = if (meta.canPost && !blockedDirect) ({ replyTo = cm; editing = null }) else null,
+                                            reply = if (meta.canPost && !blockedDirect) ({ replyTo = cm; editing = null; replyFocus++ }) else null,
                                             replyPrivately = if (cm.authorId != me && meta.kind != "direct" && author?.kind == "human") ({ onPrivateReply(cm) }) else null,
                                             forward = emailId?.let { e -> { forwardCard = e } },
                                             copyLink = { copyToClipboard(ctx, messageLink(id, cm.seq)); container.toast(ctx.getString(R.string.toast_link_copied)) },
@@ -822,7 +831,8 @@ fun ConversationScreen(
                                     isAnchor = sideMeta?.parentMessageId == item.m.id && !embedded,
                                     onAnchorBounds = { r -> anchorRect = r },
                                     onPerson = { pid -> personCard = pid },
-                                    onSwipeSide = if (!embedded && item.m.kind == "text" && item.m.deletedAt == null && meta.canPost) ({ sideStart = item.m }) else null,
+                                    // 1.7.1: deslizar a la derecha = responder citando (como WhatsApp); el sidechat queda en el menú.
+                                    onSwipeReply = if (item.m.deletedAt == null && meta.canPost && !blockedDirect) ({ replyTo = item.m; editing = null; replyFocus++ }) else null,
                                     onOpenFile = { a -> scope.launch { openAttachment(ctx, client, a) } },
                                     onOpenPdf = { a, sign -> pdfViewer = a to sign; pdfSaved = a.id + "|" + (if (sign) "1" else "0") },
                                     canReact = canReact(item.m), reactionActions = reactionActions,
@@ -918,7 +928,7 @@ fun ConversationScreen(
                 onMeeting = if (canWork) ({ now -> meetingLink = now }) else null,
                 onMail = if (data.mailEnabled && canWork) ({ mailNav.openList(id) }) else null,
                 onWhatsApp = if (data.mailEnabled && canWork) mailNav.openWhatsApp else null,
-                autoFocus = embedded,
+                autoFocus = embedded, focusSignal = replyFocus,
                 canSchedule = privateHere == null, onScheduled = { replyTo = null },
             ) } else ReadOnlyNotice()
         }
@@ -1078,6 +1088,8 @@ private fun Composer(
     /** Correo en el chat (docs/CORREO.md): «Correo» abre la lista con este chat como destino; «Mensaje de WhatsApp», la pantalla de WhatsApp. */
     onMail: (() -> Unit)? = null, onWhatsApp: (() -> Unit)? = null,
     autoFocus: Boolean = false,
+    /** Cambia al responder (deslizar o menú): foco y teclado arriba. */
+    focusSignal: Int = 0,
     /** Mensajes programados (1.6.4 / 23): 🕒 junto a enviar y pulsación larga en ➤. false en respuestas privadas. */
     canSchedule: Boolean = false, onScheduled: () -> Unit = {},
 ) {
@@ -1166,11 +1178,17 @@ private fun Composer(
         confirmButton = { TextButton(onClick = { micWhy = false; micPermission.launch(android.Manifest.permission.RECORD_AUDIO) }, modifier = Modifier.testTag("micAllow")) { Text(stringResource(R.string.voice_mic_allow)) } },
         dismissButton = { TextButton(onClick = { micWhy = false }) { Text(stringResource(R.string.cancel)) } },
     )
-    fun add(uris: List<android.net.Uri>) {
-        if (uris.isEmpty()) return
+    fun add(uris: List<android.net.Uri>, done: () -> Unit = {}) {
+        if (uris.isEmpty()) { done(); return }
         scope.launch {
-            val copied = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.tiecoms.app.platform.ShareIntake.copyToCache(ctx.applicationContext, uris, null) }
-                .map { com.tiecoms.app.platform.ImageTools.prepareForUpload(ctx.applicationContext, it) }
+            val copied = try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.tiecoms.app.platform.ShareIntake.copyToCache(ctx.applicationContext, uris, null) }
+                    .map { com.tiecoms.app.platform.ImageTools.prepareForUpload(ctx.applicationContext, it) }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                attError = ctx.getString(R.string.paste_image_failed); emptyList()
+            } finally { done() }
+            if (copied.isEmpty()) return@launch
             val plan = com.tiecoms.app.core.Attachments.plan(files + copied, null)
             attError = plan.tooLarge.firstOrNull()?.let { ctx.getString(R.string.att_too_large, it.name) }
                 ?: if (plan.dropped > 0) ctx.getString(R.string.att_too_many) else null
@@ -1186,6 +1204,8 @@ private fun Composer(
     // Un hilo o sidechat abierto al lado recibe el cursor.
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(id, autoFocus) { if (autoFocus) { delay(300); runCatching { focus.requestFocus() } } }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    LaunchedEffect(focusSignal) { if (focusSignal > 0) { withFrameNanos { }; runCatching { focus.requestFocus() }; keyboard?.show() } }
     fun sendNow() {
         val body = text
         val bodyMents = ments
@@ -1283,9 +1303,16 @@ private fun Composer(
                     Text("⤓", style = MaterialTheme.typography.titleLarge)
                 }
                 if (rec.recording) RecordingBar(rec, locked, gesture, onDelete = { recorder.cancel(); locked = false; container.toast(ctx.getString(R.string.voice_cancelled)) }, onSend = { sendVoice() }, modifier = Modifier.weight(1f))
-                else OutlinedTextField(
+                else RichPasteScope(enabled = editing == null && uploading == null, onImages = { uris, done -> add(uris, done) }) { OutlinedTextField(
                     value = if (editing != null) androidx.compose.ui.text.input.TextFieldValue(editText, editSel) else androidx.compose.ui.text.input.TextFieldValue(text, sel),
-                    onValueChange = { v ->
+                    onValueChange = { raw ->
+                        // 1.7.1: «Pegar» con una imagen en el portapapeles llega como un marcador: se quita y se adjunta.
+                        val (clean, cur, pasted) = PasteImages.strip(raw.text, raw.selection.start)
+                        val v = if (pasted) androidx.compose.ui.text.input.TextFieldValue(clean, androidx.compose.ui.text.TextRange(cur)) else raw
+                        if (pasted && editing == null) {
+                            val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                            add(PasteImages.imageUris(runCatching { cm?.primaryClip }.getOrNull(), ctx.contentResolver))
+                        }
                         if (editing != null) {
                             val (t, m, c) = com.tiecoms.app.core.Mentions.edit(editText, v.text, editMents, v.selection.start)
                             editText = t; editMents = m; editSel = if (t != v.text) androidx.compose.ui.text.TextRange(c) else v.selection
@@ -1302,7 +1329,7 @@ private fun Composer(
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surface, focusedContainerColor = MaterialTheme.colorScheme.surface),
                     modifier = Modifier.weight(1f).focusRequester(focus).testTag("composer"),
-                )
+                ) }
                 Spacer(Modifier.width(8.dp))
                 if (editing != null) {
                     FilledIconButton(onClick = { onSaveEdit(editing, editText, editMents) }, enabled = editText.isNotBlank(), modifier = Modifier.size(52.dp).testTag("saveEdit"),
@@ -1444,8 +1471,8 @@ internal fun MessageBubble(
     /** Ancla del sidechat abierto: halo y su posición para el conector (SPEC-v4 §G.2). */
     isAnchor: Boolean = false,
     onAnchorBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
-    /** Deslizar la burbuja a la derecha: «Preguntar en un sidechat». */
-    onSwipeSide: (() -> Unit)? = null,
+    /** Deslizar la burbuja a la derecha (1.7.1): responder citando el mensaje. */
+    onSwipeReply: (() -> Unit)? = null,
     onPerson: (String) -> Unit = {},
     /** Reacciones: chips bajo la burbuja y barra rápida encima del menú. */
     canReact: Boolean = false,
@@ -1497,18 +1524,25 @@ internal fun MessageBubble(
             Spacer(Modifier.width(6.dp))
         }
         var swipe by remember(m.id) { androidx.compose.runtime.mutableFloatStateOf(0f) }
-        val swipeMax = with(androidx.compose.ui.platform.LocalDensity.current) { 96.dp.toPx() }
+        val swipeLatest by androidx.compose.runtime.rememberUpdatedState(onSwipeReply)
         if (isAnchor) androidx.compose.runtime.DisposableEffect(m.id) { onDispose { onAnchorBounds(null) } }
         Box {
+        // Ícono ↩ detrás de la burbuja: aparece al deslizar y se llena al pasar el umbral.
+        if (onSwipeReply != null) {
+            val thresholdPx = with(androidx.compose.ui.platform.LocalDensity.current) { com.tiecoms.app.core.SwipeReply.THRESHOLD_DP.dp.toPx() }
+            Box(Modifier.align(Alignment.CenterStart).size(32.dp).graphicsLayer {
+                    val p = (swipe / thresholdPx).coerceIn(0f, 1f)
+                    alpha = p; scaleX = 0.6f + 0.4f * p; scaleY = 0.6f + 0.4f * p
+                    translationX = (swipe - 40.dp.toPx()).coerceAtLeast(0f) * 0.5f
+                }.background(MaterialTheme.colorScheme.surfaceVariant, CircleShape).testTag("swipeReplyIcon-${m.seq}"),
+                contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.swipe_reply_cd), Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         Column(
             Modifier.widthIn(max = maxW)
                 .then(if (isAnchor) Modifier.onGloballyPositioned { onAnchorBounds(it.boundsInRoot()) } else Modifier)
-                .then(if (onSwipeSide != null) Modifier.pointerInput(m.id) {
-                    detectHorizontalDragGestures(
-                        onDragEnd = { if (swipe >= swipeMax * 0.8f) { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onSwipeSide() }; swipe = 0f },
-                        onDragCancel = { swipe = 0f },
-                    ) { _, dx -> swipe = (swipe + dx).coerceIn(0f, swipeMax) }
-                } else Modifier)
+                .then(if (onSwipeReply != null) Modifier.swipeToReply(m.id, haptic, { swipe }, { swipe = it }) { swipeLatest?.invoke() } else Modifier)
                 .graphicsLayer { val s = 1f + 0.03f * lift; scaleX = s; scaleY = s; translationX = swipe; shadowElevation = 12f * lift * density; this.shape = shape; clip = false }
                 .then(if (isAnchor) Modifier.border(2.dp, Brand.Orange.copy(alpha = 0.55f), shape) else Modifier)
                 // Me mencionan: barra lateral de acento naranja.
@@ -1590,8 +1624,23 @@ internal fun MessageBubble(
             else if (m.attachments.isEmpty() && m.mentions.isEmpty() && m.refs.isEmpty() && highlightQuery == null && com.tiecoms.app.core.Reactions.isJumbo(body))
                 Text(body.trim(), color = fg, fontSize = if ((com.tiecoms.app.core.Reactions.clusters(body.filterNot { it.isWhitespace() })?.size ?: 3) == 1) 44.sp else 34.sp,
                     lineHeight = 52.sp, modifier = Modifier.testTag("body-${m.seq}"))
-            else if (body.isNotBlank() || m.attachments.isEmpty()) MessageText(body, m.mentions + com.tiecoms.app.core.Refs.tokens(m), fg, data, onPerson = onPerson,
-                modifier = Modifier.testTag("body-${m.seq}"), highlight = highlightQuery)
+            else if (body.isNotBlank() || m.attachments.isEmpty()) {
+                // 1.7.1: un mensaje enorme se pliega a 30 líneas con «Ver más» (la búsqueda lo muestra entero).
+                val candidate = remember(body) { com.tiecoms.app.core.LongText.collapsible(body) }
+                var expanded by androidx.compose.runtime.saveable.rememberSaveable(m.id) { mutableStateOf(false) }
+                var overflows by remember(m.id) { mutableStateOf(false) }
+                val folded = candidate && !expanded && highlightQuery == null
+                MessageText(body, m.mentions + com.tiecoms.app.core.Refs.tokens(m), fg, data, onPerson = onPerson,
+                    modifier = Modifier.testTag("body-${m.seq}"), highlight = highlightQuery,
+                    maxLines = if (folded) com.tiecoms.app.core.LongText.COLLAPSED_LINES else Int.MAX_VALUE,
+                    onOverflow = if (folded) ({ o -> overflows = o }) else null)
+                if (candidate && highlightQuery == null && (expanded || overflows)) Text(
+                    stringResource(if (expanded) R.string.msg_see_less else R.string.msg_see_more),
+                    color = fg, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(6.dp)).clickable { expanded = !expanded }
+                        .padding(horizontal = 2.dp, vertical = 4.dp).testTag("expand-${m.seq}"),
+                )
+            }
             m.linkPreview?.takeIf { !deleted && it.usable }?.let { LinkPreviewCard(it, fg, Modifier.padding(top = 6.dp)) }
             FlowRow(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End), verticalArrangement = Arrangement.Center) {
                 if (topic != null) TopicTag(topic, topicBy, Modifier.align(Alignment.CenterVertically))
@@ -1680,5 +1729,51 @@ private fun NewMessagesDivider(count: Int) {
         Box(Modifier.weight(1f).height(1.dp).background(color))
         Text(label, color = color, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 10.dp))
         Box(Modifier.weight(1f).height(1.dp).background(color))
+    }
+}
+
+/**
+ * Deslizar a la derecha = responder (1.7.1). La burbuja sigue al dedo con resistencia, vibra suave al pasar
+ * ~60 dp y al soltar pasado el umbral responde. Solo se queda con el gesto si es claramente horizontal: lo
+ * vertical nunca se consume y es de la lista (un mensaje más alto que la pantalla se desplaza igual).
+ */
+private fun Modifier.swipeToReply(
+    key: Any, haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    current: () -> Float, set: (Float) -> Unit, onReply: () -> Unit,
+): Modifier = pointerInput(key) {
+    val slop = viewConfiguration.touchSlop
+    val threshold = com.tiecoms.app.core.SwipeReply.THRESHOLD_DP.dp.toPx()
+    val max = com.tiecoms.app.core.SwipeReply.MAX_DP.dp.toPx()
+    coroutineScope {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            var dx = 0f; var dy = 0f
+            var claimed = false; var armed = false
+            while (true) {
+                val ev = awaitPointerEvent()
+                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                if (!ch.pressed) break
+                val d = ch.position - ch.previousPosition
+                if (!claimed) {
+                    if (ch.isConsumed) break
+                    dx += d.x; dy += d.y
+                    when (com.tiecoms.app.core.SwipeReply.decide(dx, dy, slop)) {
+                        com.tiecoms.app.core.SwipeReply.Decision.REJECT -> break
+                        com.tiecoms.app.core.SwipeReply.Decision.CLAIM -> { claimed = true; ch.consume(); dx -= slop }
+                        com.tiecoms.app.core.SwipeReply.Decision.UNDECIDED -> Unit
+                    }
+                } else {
+                    dx += d.x; ch.consume()
+                    set(com.tiecoms.app.core.SwipeReply.resist(dx, threshold, max))
+                    if (!armed && dx >= threshold) { armed = true; haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove) }
+                    else if (armed && dx < threshold) armed = false
+                }
+            }
+            if (claimed) {
+                if (armed) onReply()
+                val from = current()
+                launch { androidx.compose.animation.core.animate(from, 0f, animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.8f, stiffness = 600f)) { v, _ -> set(v) } }
+            }
+        }
     }
 }

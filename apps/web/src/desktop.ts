@@ -36,4 +36,48 @@ export async function initDesktop() {
   };
   client.subscribe(update);
   update();
+
+  // Cerrar la ventana durante una llamada no la esconde: pasa al modo mini, siempre encima.
+  await listen('chaggu:closed', () => {
+    void import('./call.ts').then((m) => {
+      const v = m.currentCall();
+      if (v && v.phase !== 'ended') window.dispatchEvent(new CustomEvent('chaggu:call-mini'));
+    });
+  });
 }
+
+// ---------- Modo mini de la llamada (como la ventana flotante de Meet) ----------
+/**
+ * El WebView de Mac no tiene Document Picture-in-Picture: la ventana de chaggu se achica a la llamada y queda
+ * siempre encima de las demás apps. Al salir vuelve a su tamaño y lugar. `html.call-mini` hace que se vea solo
+ * la llamada (styles.css).
+ */
+let saved: { w: number; h: number; x: number; y: number; minW: number; minH: number } | null = null;
+export async function setCallMini(on: boolean) {
+  const { LogicalSize, LogicalPosition } = await import('@tauri-apps/api/dpi');
+  const win = getCurrentWindow();
+  const scale = await win.scaleFactor();
+  if (on && !saved) {
+    const size = (await win.innerSize()).toLogical(scale);
+    const pos = (await win.outerPosition()).toLogical(scale);
+    saved = { w: size.width, h: size.height, x: pos.x, y: pos.y, minW: 380, minH: 560 };
+    document.documentElement.classList.add('call-mini');
+    await win.setMinSize(new LogicalSize(300, 220));
+    await win.setSize(new LogicalSize(400, 340));
+    // Abajo a la derecha de la pantalla, como Meet.
+    const sw = screen.availWidth, sh = screen.availHeight;
+    await win.setPosition(new LogicalPosition(Math.max(0, sw - 420), Math.max(0, sh - 380)));
+    await win.setAlwaysOnTop(true);
+    await win.show(); await win.unminimize();
+  } else if (!on && saved) {
+    const s = saved;
+    saved = null;
+    document.documentElement.classList.remove('call-mini');
+    await win.setAlwaysOnTop(false);
+    await win.setMinSize(new LogicalSize(s.minW, s.minH));
+    await win.setSize(new LogicalSize(s.w, s.h));
+    await win.setPosition(new LogicalPosition(s.x, s.y));
+    await win.setFocus();
+  }
+}
+export const isCallMini = () => !!saved;

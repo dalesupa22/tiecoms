@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { z } from 'zod';
 import type {
   MailAddressDTO, MailAttachmentInfoDTO, MailConnectionDTO, MailListDTO, MailListItemDTO, MailListQuery, MailMessageDTO, MailProvider,
@@ -7,6 +7,8 @@ import type {
 import { conversationAccess } from '../access.ts';
 import { config } from '../config.ts';
 import { audit, pool, tx, type Db, type Tx } from '../db.ts';
+import { safeHtml } from './mail-html.ts';
+import { safeGet, sniffImage } from './link-preview.ts';
 import { ApiError, badRequest, forbidden, notFound } from '../errors.ts';
 import { getObject } from '../storage.ts';
 import { ByteLru } from '../lru.ts';
@@ -136,7 +138,7 @@ const reSubject = (s: string) => (/^\s*(re|rv|aw)\s*:/i.test(s) ? s : `Re: ${s}`
 
 // ---------- Proveedores ----------
 interface Tokens { access: string; refresh: string | null; expiresIn: number; email: string | null; scope: string }
-interface Full extends MailMessageDTO { internetId: string | null; references: string | null }
+interface Full extends MailMessageDTO { internetId: string | null; references: string | null; html?: string | null }
 interface ReplyOut { to: MailAddressDTO[]; cc: MailAddressDTO[]; subject: string; body: string; files: { name: string; contentType: string; bytes: Buffer }[] }
 interface Provider {
   label: 'Gmail' | 'Outlook';
@@ -149,6 +151,8 @@ interface Provider {
   get(at: string, id: string): Promise<Full>;
   attachment(at: string, messageId: string, attachmentId: string): Promise<{ bytes: Buffer }>;
   reply(at: string, original: { externalId: string; threadId: string | null; internetId: string | null; references: string | null }, out: ReplyOut): Promise<void>;
+  /** El HTML del correo, si lo tiene (Gmail ya lo trae en get). */
+  html?(at: string, id: string): Promise<string | null>;
   /** Sin leer en Recibidos › Principal (Gmail) o Prioritarios (Outlook), hasta UNREAD_CAP. Una sola petición barata. */
   unread(at: string): Promise<number>;
 }
@@ -348,7 +352,7 @@ const PROVIDERS: Record<MailProvider, Provider> = {
       if (m.payload) gWalk(m.payload, acc);
       const body = acc.plain.length ? acc.plain.join('\n\n').trim() : htmlToText(acc.html.join('\n'));
       return {
-        ...gItem(m), hasAttachments: acc.files.length > 0, cc: parseAddressList(gHeader(m.payload, 'Cc')), body: clip(body, MAX_BODY), attachments: acc.files,
+        ...gItem(m), hasAttachments: acc.files.length > 0, cc: parseAddressList(gHeader(m.payload, 'Cc')), body: clip(body, MAX_BODY), attachments: acc.files, html: acc.html.length ? acc.html.join('\n') : null,
         internetId: gHeader(m.payload, 'Message-ID') ?? gHeader(m.payload, 'Message-Id'), references: gHeader(m.payload, 'References'),
       };
     },
@@ -418,6 +422,10 @@ const PROVIDERS: Record<MailProvider, Provider> = {
       // Aunque se pida texto, algunos buzones devuelven HTML: se limpia igual.
       const body = m.body?.contentType === 'html' || /<(p|div|br|html|body|table|span)\b/i.test(raw) ? htmlToText(raw) : String(raw).trim();
       return { ...msItem(m, 'inbox'), cc: msAddrs(m.ccRecipients), body: clip(body, MAX_BODY), attachments: files, internetId: m.internetMessageId ?? null, references: null };
+    },
+    async html(at, id) {
+      const m = await api(at, `${msApi()}/me/messages/${encodeURIComponent(id)}?$select=body`);
+      return m.body?.contentType === 'html' && m.body.content ? String(m.body.content) : null;
     },
     async attachment(at, messageId, attachmentId) {
       const res = await request(`${msApi()}/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}/$value`, { headers: { authorization: `Bearer ${at}` } }, 60_000);
@@ -606,7 +614,7 @@ async function fullMail(userId: string, provider: MailProvider, id: string): Pro
   return cached(msgCache, `${userId}:${genOf(userId)}:${provider}:${id}`, () => withProvider(userId, provider, (at) => PROVIDERS[provider].get(at, id)));
 }
 export async function getMail(userId: string, provider: MailProvider, id: string): Promise<MailMessageDTO> {
-  const { internetId: _i, references: _r, ...m } = await fullMail(userId, provider, id);
+  const { internetId: _i, references: _r, html: _h, ...m } = await fullMail(userId, provider, id);
   return m;
 }
 
@@ -727,6 +735,42 @@ export async function original(userId: string, id: string) {
     }
     throw err;
   }
+}
+
+/**
+ * El HTML del correo para verlo con su diseño, en vivo como el original. Se quitan scripts, formularios, marcos,
+ * atributos on* y enlaces javascript:; además la web lo pinta en un iframe con sandbox sin scripts.
+ */
+export async function html(userId: string, id: string) {
+  const e = await readable(pool, userId, id);
+  if (e.provider === 'whatsapp') return { html: null };
+  try {
+    const raw = e.provider === 'microsoft'
+      ? await cached(msgCache, `${e.shared_by}:${genOf(e.shared_by)}:html:${e.external_id}`, () => withProvider(e.shared_by, 'microsoft', (at) => PROVIDERS.microsoft.html!(at, e.external_id)))
+      : (await fullMail(e.shared_by, e.provider, e.external_id)).html ?? null;
+    return { html: raw ? safeHtml(raw, imgProxyUrl) : null };
+  } catch (err: any) {
+    if (e.shared_by !== userId && ['not_connected', 'reconnect_required', 'mail_forbidden'].includes(err?.code)) {
+      throw new ApiError(409, 'original_unavailable', 'El correo completo no está disponible: quien lo compartió desconectó su correo.');
+    }
+    throw err;
+  }
+}
+// ---------- Proxy de imágenes del correo ----------
+// URL firmada (sin sesión: un <img> no manda el token): /api/v1/mail/img/<url en base64url>.<firma>.
+const imgSig = (url: string) => createHmac('sha256', config.jwtSecret).update(`mail-img:${url}`).digest('base64url').slice(0, 22);
+export const imgProxyUrl = (url: string) => `/api/v1/mail/img/${Buffer.from(url).toString('base64url')}.${imgSig(url)}`;
+const MAX_IMG = 3 * 1024 * 1024;
+export async function proxyImage(token: string): Promise<{ body: Buffer; contentType: string } | null> {
+  const [b, sig] = token.split('.');
+  if (!b || !sig) return null;
+  const url = Buffer.from(b, 'base64url').toString('utf8');
+  const want = imgSig(url);
+  if (sig.length !== want.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return null;
+  const got = await safeGet(url, 'image/*', MAX_IMG).catch(() => null);
+  if (!got || got.status !== 200 || got.body.length >= MAX_IMG) return null;
+  const kind = sniffImage(got.body);
+  return kind ? { body: got.body, contentType: kind.type } : null;
 }
 
 export async function listComments(userId: string, id: string) {

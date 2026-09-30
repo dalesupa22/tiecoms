@@ -1,5 +1,65 @@
 [
   [
+    "<span data-download-label>Descargar</span>",
+    "<span data-download-label>Download</span>"
+  ],
+  [
+    "      <a href=\"#descargar\">Descargar</a>\n",
+    "      <a href=\"#descargar\">Download</a>\n"
+  ],
+  [
+    "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> Escritorio</p>",
+    "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> Desktop</p>"
+  ],
+  [
+    "<h2 id=\"download-title\">chaggu en tu computador.<br><em>Rápido y liviano.</em></h2>",
+    "<h2 id=\"download-title\">chaggu on your computer.<br><em>Fast and light.</em></h2>"
+  ],
+  [
+    "Avisos del sistema, llamadas con pantalla compartida y hasta cuatro chats abiertos a la vez. Pesa menos de 20 MB y arranca en un segundo.",
+    "System notifications, calls with screen sharing and up to four chats open at once. Under 20 MB and it starts in a second."
+  ],
+  [
+    "<p>macOS 12 o posterior. Apple Silicon e Intel.</p>",
+    "<p>macOS 12 or later. Apple Silicon and Intel.</p>"
+  ],
+  [
+    "Descargar para Mac <span aria-hidden=\"true\">↓</span>",
+    "Download for Mac <span aria-hidden=\"true\">↓</span>"
+  ],
+  [
+    "<small class=\"download-meta\" data-meta=\"mac\">Archivo .dmg</small>",
+    "<small class=\"download-meta\" data-meta=\"mac\">.dmg file</small>"
+  ],
+  [
+    "<span class=\"download-mine\">Tu equipo</span></article>\n        <article class=\"download-card\" data-os=\"windows\">",
+    "<span class=\"download-mine\">Your computer</span></article>\n        <article class=\"download-card\" data-os=\"windows\">"
+  ],
+  [
+    "<p>Windows 10 y 11 de 64 bits.</p>",
+    "<p>64-bit Windows 10 and 11.</p>"
+  ],
+  [
+    "Descargar para Windows <span aria-hidden=\"true\">↓</span>",
+    "Download for Windows <span aria-hidden=\"true\">↓</span>"
+  ],
+  [
+    "Instalador .exe · <a href=\"/descargas/chaggu-windows.msi\" download>.msi para equipos de TI</a></small><span class=\"download-mine\">Tu equipo</span>",
+    ".exe installer · <a href=\"/descargas/chaggu-windows.msi\" download>.msi for IT teams</a></small><span class=\"download-mine\">Your computer</span>"
+  ],
+  [
+    "<h3>Navegador</h3><p>Sin instalar nada, desde cualquier computador.</p>",
+    "<h3>Browser</h3><p>Nothing to install, from any computer.</p>"
+  ],
+  [
+    "Abrir chaggu <span aria-hidden=\"true\">↗</span></a><small class=\"download-meta\">También en iPhone y Android.</small>",
+    "Open chaggu <span aria-hidden=\"true\">↗</span></a><small class=\"download-meta\">Also on iPhone and Android.</small>"
+  ],
+  [
+    "<summary>¿Tu computador muestra un aviso al abrirla?</summary><p><b>Mac:</b> abre el archivo, arrastra chaggu a Aplicaciones y ábrela. Si macOS dice que no puede comprobar al desarrollador, entra a Ajustes del Sistema › Privacidad y seguridad y toca «Abrir de todos modos».</p><p><b>Windows:</b> si aparece «Windows protegió tu PC», toca «Más información» y luego «Ejecutar de todos modos».</p><p>Estamos terminando la firma de Apple y de Microsoft para que estos avisos desaparezcan.</p>",
+    "<summary>Does your computer show a warning when opening it?</summary><p><b>Mac:</b> open the file, drag chaggu to Applications and open it. If macOS says it cannot verify the developer, go to System Settings › Privacy &amp; Security and click «Open Anyway».</p><p><b>Windows:</b> if «Windows protected your PC» appears, click «More info» and then «Run anyway».</p><p>We are finishing the Apple and Microsoft signing so these warnings go away.</p>"
+  ],
+  [
     "<a class=\"text-link lang-link\" href=\"/en/\" hreflang=\"en\" lang=\"en\" aria-label=\"English version\">EN</a>",
     "<a class=\"text-link lang-link\" href=\"/\" hreflang=\"es\" lang=\"es\" aria-label=\"Versión en español\">ES</a>"
   ],
@@ -144,8 +204,8 @@
     "<span>thread for<br>the whole team</span>"
   ],
   [
-    "<p>Conecta humanos, empresas y bots.</p><div class=\"footer-links\"><a href=\"#recorrido\">Cómo funciona</a><a href=\"#espacios\">Producto</a><a href=\"https://app.chaggu.com/\">App</a><a href=\"/privacidad/\">Privacidad</a><a href=\"/terminos/\">Términos</a><a href=\"#inicio\">Volver arriba ↑</a></div>",
-    "<p>Connects people, companies and bots.</p><div class=\"footer-links\"><a href=\"#recorrido\">How it works</a><a href=\"#espacios\">Product</a><a href=\"https://app.chaggu.com/\">App</a><a href=\"/en/privacy/\">Privacy</a><a href=\"/en/terms/\">Terms</a><a href=\"#inicio\">Back to top ↑</a></div>"
+    "<p>Conecta humanos, empresas y bots.</p><div class=\"footer-links\"><a href=\"#recorrido\">Cómo funciona</a><a href=\"#espacios\">Producto</a><a href=\"#descargar\">Descargar</a><a href=\"https://app.chaggu.com/\">App</a><a href=\"/privacidad/\">Privacidad</a><a href=\"/terminos/\">Términos</a><a href=\"#inicio\">Volver arriba ↑</a></div>",
+    "<p>Connects people, companies and bots.</p><div class=\"footer-links\"><a href=\"#recorrido\">How it works</a><a href=\"#espacios\">Product</a><a href=\"#descargar\">Download</a><a href=\"https://app.chaggu.com/\">App</a><a href=\"/en/privacy/\">Privacy</a><a href=\"/en/terms/\">Terms</a><a href=\"#inicio\">Back to top ↑</a></div>"
   ],
   [
     "<a class=\"button button-dark\" href=\"https://app.chaggu.com/signup\">Probar chaggu <span aria-hidden=\"true\">↗</span></a>",

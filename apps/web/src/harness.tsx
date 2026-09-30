@@ -53,7 +53,11 @@ const g = [
   msg('general', 'mateo', 'https://www.instagram.com/reel/C1abc/', 19 * 60_000, { linkPreviews: [{ url: 'https://www.instagram.com/reel/C1abc/', title: 'Reel: detrás de cámaras del lanzamiento', description: null, siteName: 'Instagram', imageUrl: null, kind: 'short', provider: 'instagram', author: 'estudionorte', linkId: 'l3' }] }),
   msg('general', 'mateo', 'y este https://blog.example.com/guia-microcredenciales', 18 * 60_000, { linkPreviews: [{ url: 'https://blog.example.com/guia-microcredenciales', title: 'Guía práctica de microcredenciales', description: 'Cómo diseñar rutas apilables.', siteName: 'Blog Example', imageUrl: null, kind: 'article', provider: null, linkId: 'l4' }] }),
   msg('general', 'laura', '🎉🙌', 10 * 60_000, { reactions: [{ emoji: '❤️', userIds: ['danny', 'ana'] }] }),
+  msg('general', 'danny', 'Pendientes para el *viernes*:\n- Validar la _plantilla_ con Ana\n- Subir el `cronograma.xlsx`\n- ~Llamar a Mateo~ ya quedó\n1. Primero la firma\n2. Luego el envío', 8 * 60_000),
+  msg('general', 'danny', JSON.stringify({ k: 'mail.shared', emailId: 'em1', comment: 'De que es este cobro?' }), 5 * 60_000, { kind: 'system' }),
 ];
+const BANCO = 'header-logo [http://bancolombia-email-wsuite.s3.amazonaws.com/templates/60712c2057ad717760ad6b6c/img/header.png]\n\nHola DANNY SUAREZ,\n\nTe informamos que realizaste una compra por $189.900 en AMAZON WEB SERVICES con tu tarjeta *4521 el 30/09/2026 a las 05:58.\n\nSi no reconoces esta transacción comunícate con nosotros.\nVer detalle [https://www.bancolombia.com/personas/alertas-y-notificaciones?id=98231].\n\nfooter_img [https://bancolombia-email-wsuite.s3.amazonaws.com/templates/x/img/footer.png]\nBancolombia S.A. · Este correo es informativo, por favor no lo respondas.';
+const mails = { em1: { id: 'em1', conversationId: 'general', sharedBy: 'danny', provider: 'gmail', accountEmail: 'danny@xertify.co', direction: 'in', from: { name: 'Alertas y Notificaciones', email: 'alertasynotificaciones@an.notificacionesbancolombia.com' }, to: [], cc: [], subject: 'Alertas y Notificaciones', snippet: BANCO.slice(0, 300), body: BANCO, full: true, sentAt: iso(60 * 60_000), attachments: [], messageId: 'general-m99', comment: 'De que es este cobro?', status: 'pending', repliedAt: null, repliedBy: null, scheduledReply: null, issueId: null, commentCount: 0, lastComments: [], createdAt: iso(5 * 60_000) } };
 seq = 0;
 const dg = [
   msg('diag', 'danny', JSON.stringify({ k: 'derived.here', parent: 'General', excerpt: 'Veo notificaciones duplicadas en las pruebas' }), 2 * D - H, { kind: 'system' }),
@@ -117,7 +121,7 @@ const reminders = [
   { id: 'r2', conversationId: 'diag', messageId: null, messageSeq: null, note: null, remindAt: iso(-5 * H), firedAt: null, doneAt: null },
 ];
 (client as any).set({
-  status: 'ready', connection: 'online', data, issues, events, reminders,
+  status: 'ready', connection: 'online', data, issues, events, reminders, mails,
   scheduled: [
     { id: 's1', conversationId: 'general', body: 'Ana, ¿ya revisaste la cláusula 4 del contrato? Necesito respuesta antes del comité.', mentions: [], replyTo: null, sendAt: new Date(Date.now() + 14 * H).toISOString(), status: 'pending', messageId: null, error: null, createdAt: iso(H), sentAt: null },
     { id: 's2', conversationId: 'general', body: 'Recordatorio: mañana cerramos la plantilla final.', mentions: [], replyTo: null, sendAt: new Date(Date.now() + 38 * H).toISOString(), status: 'pending', messageId: null, error: null, createdAt: iso(H), sentAt: null },

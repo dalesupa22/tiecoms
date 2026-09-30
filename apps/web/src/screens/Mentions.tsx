@@ -189,7 +189,11 @@ function TextWithGg({ text }: { text: string }) {
   return <>{out}</>;
 }
 
-export function MessageText({ d, body, mentions, refs }: { d: BootstrapDTO; body: string; mentions?: MentionDTO[]; refs?: MessageRefDTO[] }) {
+/** «- » o «* » al inicio de línea se ve como viñeta; mide lo mismo, así las posiciones de las menciones no cambian. */
+const bullets = (s: string) => s.replace(/(^|\n)([ \t]*)[-*] (?=\S)/g, '$1$2• ');
+
+export function MessageText({ d, body: raw, mentions, refs }: { d: BootstrapDTO; body: string; mentions?: MentionDTO[]; refs?: MessageRefDTO[] }) {
+  const body = bullets(raw);
   if (!mentions?.length && !refs?.length) return <TextWithGg text={body} />;
   const segs = segmentBody(body, mentions, refs);
   return <>{segs.map((sg, i) => {

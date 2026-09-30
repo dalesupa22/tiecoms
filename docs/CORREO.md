@@ -58,6 +58,14 @@ Programar no necesita un permiso extra: chaggu guarda la respuesta en `mail_repl
 
 Mensajes de sistema nuevos: `mail.shared`, `mail.comments`, `mail.replied`, `mail.reply_failed` y `wa.shared`. Evento en vivo nuevo: `mail.updated`. Las apps que no los conozcan deben mostrar el texto de `sys.*` o ignorarlos.
 
+## Ver el correo con su diseño (30-sep-2026)
+
+- En la tarjeta, «▾ Ver correo» (o tocar el resumen) lo abre ahí mismo; «⤢ Abrir en panel» sigue llevando al panel.
+- `GET /mail/shared/:id/html` trae el HTML en vivo del buzón de quien lo compartió, como `/original`: no se guarda. `safeHtml` (modules/mail-html.ts) quita scripts, marcos, formularios, meta/base/link, atributos on* y enlaces javascript:.
+- La web lo pinta en un iframe `sandbox` sin scripts (solo abrir enlaces en otra pestaña) y encoge los boletines de 600 px al ancho de la tarjeta. «Ver solo el texto» vuelve al texto.
+- Las imágenes pasan por `/api/v1/mail/img/<url>.<firma HMAC>`: la app solo carga imágenes propias (CSP `img-src 'self'`) y así el remitente no ve la IP de quien lee. Máx. 3 MB, solo PNG/JPEG/WebP/GIF, con la misma protección SSRF de las vistas previas.
+- Sin HTML (o en el texto), las direcciones de las imágenes («header-logo [http://…png]») se quitan y los enlaces quedan como «dominio ↗» (web/src/mail-text.ts).
+
 ## Rendimiento y almacenamiento
 
 - **Gmail:** una página cuesta 2 peticiones, la lista y un lote (`POST /batch/gmail/v1`) con la metadata de los 50 correos, con `fields=`. Si el lote falla, se piden de a 10 en paralelo. Antes eran 51.

@@ -45,4 +45,21 @@ class GgChatTest {
         val es = File("src/main/res/values-es/strings_ggchat.xml").readText()
         assertTrue(es.contains("<string name=\"gg_for_other\">Para %1\$s</string>"))
     }
+
+    /** @gg como palabra (ggRanges de la web): no en un correo ni en «@ggg». */
+    @Test fun detectsGgMentions() {
+        assertEquals(listOf(5 to 3), Gg.handRanges("hola @gg ayúdame"))
+        assertEquals(listOf(0 to 3), Gg.handRanges("@GG, ¿qué opinas?"))
+        assertEquals(listOf(1 to 3), Gg.handRanges("(@gg)"))
+        assertEquals(listOf(0 to 3), Gg.handRanges("@gg."))
+        assertTrue(Gg.handRanges("escríbele a ana@gg.com").isEmpty())
+        assertTrue(Gg.handRanges("@ggg y @gg_bot").isEmpty())
+        assertTrue(Gg.handRanges("x.@gg").isEmpty())
+        assertEquals(2, Gg.handRanges("@gg y otra vez @gg").size)
+        // Estructurada: la de gg; una escrita a mano encima de otra mención no se duplica.
+        val text = "@gg mira esto, @Ana"
+        val ms = listOf(MentionDTO(Gg.ID, 0, 3), MentionDTO("u2", 15, 4))
+        assertEquals(listOf(MentionDTO(Gg.ID, 0, 3)), Gg.ggMentions(text, ms))
+        assertEquals(listOf(MentionDTO(Gg.ID, 11, 3)), Gg.ggMentions("hola, mira @gg", emptyList()))
+    }
 }

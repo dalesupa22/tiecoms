@@ -1630,7 +1630,7 @@ internal fun MessageBubble(
                 var expanded by androidx.compose.runtime.saveable.rememberSaveable(m.id) { mutableStateOf(false) }
                 var overflows by remember(m.id) { mutableStateOf(false) }
                 val folded = candidate && !expanded && highlightQuery == null
-                MessageText(body, m.mentions + com.tiecoms.app.core.Refs.tokens(m), fg, data, onPerson = onPerson,
+                MessageText(body, m.mentions + com.tiecoms.app.core.Refs.tokens(m), fg, data, onPerson = onPerson, onColored = item.mine,
                     modifier = Modifier.testTag("body-${m.seq}"), highlight = highlightQuery,
                     maxLines = if (folded) com.tiecoms.app.core.LongText.COLLAPSED_LINES else Int.MAX_VALUE,
                     onOverflow = if (folded) ({ o -> overflows = o }) else null)

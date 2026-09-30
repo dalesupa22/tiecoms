@@ -1,6 +1,8 @@
 package com.tiecoms.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.unit.em
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -58,15 +60,50 @@ import com.tiecoms.app.core.Mentions
 import com.tiecoms.app.core.Names
 import com.tiecoms.app.core.PersonDTO
 import kotlinx.coroutines.launch
+import androidx.compose.animation.core.animateFloat
+
+/** Colores de @gg (Gg.GRADIENT) y el fondo tenue del compositor. */
+private val GgColors = com.tiecoms.app.core.Gg.GRADIENT.map { Color(it) }
+private val GgFaint = Color(0x24FF4FA3)
+private const val GG_PILL = "gg-pill"
+
+/**
+ * Estilo de @gg: texto en degradado, en negrita; [phase] 0..1 desplaza el degradado (el brillo). Con [pill], fondo de
+ * pastilla (blanca en la burbuja propia de color).
+ */
+internal fun ggStyle(phase: Float, pill: Color? = null): SpanStyle {
+    val w = 140f
+    val x = -w * 2 * phase
+    return SpanStyle(
+        brush = androidx.compose.ui.graphics.Brush.linearGradient(GgColors + GgColors.first(), start = androidx.compose.ui.geometry.Offset(x, 0f),
+            end = androidx.compose.ui.geometry.Offset(x + w, 0f), tileMode = androidx.compose.ui.graphics.TileMode.Mirror),
+        fontWeight = FontWeight.ExtraBold, background = pill ?: Color.Unspecified,
+    )
+}
+
+/** Brillo suave de @gg (6 s por vuelta, como la web); quieto si el sistema quitó las animaciones. */
+@Composable
+internal fun rememberGgShimmer(active: Boolean): Float {
+    val ctx = LocalContext.current
+    val still = remember { runCatching { android.provider.Settings.Global.getFloat(ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }.getOrDefault(false) }
+    if (!active || still) return 0f
+    val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "gg")
+    val v by t.animateFloat(0f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(6000, easing = androidx.compose.animation.core.LinearEasing)), label = "ggShimmer")
+    return v
+}
 
 /** Resalta los tokens de mención en el compositor (mismo texto: el mapeo de offsets es la identidad). */
 class MentionHighlight(private val mentions: List<MentionDTO>, private val color: Color) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
-        if (mentions.isEmpty()) return TransformedText(text, OffsetMapping.Identity)
+        val gg = com.tiecoms.app.core.Gg.ggMentions(text.text, mentions)
+        if (mentions.isEmpty() && gg.isEmpty()) return TransformedText(text, OffsetMapping.Identity)
         val b = AnnotatedString.Builder(text)
         mentions.forEach { m ->
+            if (com.tiecoms.app.core.Gg.isGg(m.userId)) return@forEach
             if (m.start >= 0 && m.start + m.length <= text.length) b.addStyle(SpanStyle(color = color, fontWeight = FontWeight.SemiBold, background = color.copy(alpha = 0.10f)), m.start, m.start + m.length)
         }
+        // @gg mientras se escribe: el degradado de gg sobre un fondo tenue (SpanStyle no admite fondo en degradado).
+        gg.forEach { m -> b.addStyle(ggStyle(0f, GgFaint), m.start, m.start + m.length) }
         return TransformedText(b.toAnnotatedString(), OffsetMapping.Identity)
     }
     override fun equals(other: Any?) = other is MentionHighlight && other.mentions == mentions && other.color == color
@@ -122,9 +159,14 @@ fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: Bo
                 /** Mensaje muy largo plegado (1.7.1, «Ver más»). */
                 maxLines: Int = Int.MAX_VALUE,
                 /** Con [maxLines]: avisa si el texto quedó cortado (para mostrar «Ver más»). */
-                onOverflow: ((Boolean) -> Unit)? = null) {
+                onOverflow: ((Boolean) -> Unit)? = null,
+                /** Burbuja propia de color: @gg va como pastilla blanca con el texto en degradado. */
+                onColored: Boolean = false) {
     val hits = remember(text, highlight) { if (highlight.isNullOrBlank()) emptyList() else com.tiecoms.app.core.matchRanges(text, highlight) }
-    if (mentions.isEmpty() && hits.isEmpty()) { LinkifiedText(text, color, modifier, maxLines, onOverflow); return }
+    // @gg (estructurada o escrita a mano como palabra) se pinta con el degradado de gg.
+    val gg = remember(text, mentions) { com.tiecoms.app.core.Gg.ggMentions(text, mentions) }
+    if (mentions.isEmpty() && hits.isEmpty() && gg.isEmpty()) { LinkifiedText(text, color, modifier, maxLines, onOverflow); return }
+    val phase = rememberGgShimmer(gg.isNotEmpty())
     val ctx = LocalContext.current
     val container = LocalContainer.current
     val me = data.me.id
@@ -136,9 +178,9 @@ fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: Bo
         if (com.tiecoms.app.core.Refs.canOpen(container.client.value.state.value.data, convId)) container.pendingLink.value = com.tiecoms.app.core.DeepLink.Conversation(convId)
         else container.toast(ctx.getString(R.string.ref_no_access, label))
     }
-    val annotated = remember(text, mentions, color, interactive, hits) {
+    val annotated = remember(text, mentions, color, interactive, hits, gg, phase, onColored) {
         buildAnnotatedString {
-            val valid = mentions.filter { it.start >= 0 && it.start + it.length <= text.length }.sortedBy { it.start }
+            val valid = (mentions.filter { it.start >= 0 && it.start + it.length <= text.length && !com.tiecoms.app.core.Gg.isGg(it.userId) } + gg).sortedBy { it.start }
             var i = 0
             fun plain(to: Int) {
                 if (to <= i) return
@@ -153,7 +195,12 @@ fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: Bo
                 if (m.start < i) return@forEach
                 plain(m.start)
                 val label = text.substring(m.start, m.start + m.length)
-                if (com.tiecoms.app.core.Refs.isRef(m)) {
+                if (com.tiecoms.app.core.Gg.isGg(m.userId)) {
+                    // En la burbuja propia, pastilla blanca con el texto en degradado. Va como contenido en línea: un fondo en
+                    // el mismo span que el degradado se pinta con el degradado y el texto no se ve.
+                    if (onColored) appendInlineContent(GG_PILL, label)
+                    else withStyle(ggStyle(phase)) { append(label) }
+                } else if (com.tiecoms.app.core.Refs.isRef(m)) {
                     // #grupo: pastilla del color del acento.
                     val style = SpanStyle(fontWeight = FontWeight.SemiBold, color = accent, background = accent.copy(alpha = 0.14f))
                     val convId = m.userId.removePrefix(com.tiecoms.app.core.Refs.TOKEN)
@@ -172,7 +219,13 @@ fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: Bo
             hits.forEach { r -> addStyle(SpanStyle(background = hitBg, fontWeight = FontWeight.SemiBold), r.first, r.last + 1) }
         }
     }
-    Text(annotated, color = color, style = MaterialTheme.typography.bodyLarge, modifier = modifier, maxLines = maxLines,
+    val pill = if (onColored && gg.isNotEmpty()) mapOf(GG_PILL to androidx.compose.foundation.text.InlineTextContent(
+        androidx.compose.ui.text.Placeholder(2.3.em, 1.35.em, androidx.compose.ui.text.PlaceholderVerticalAlign.TextCenter)) { label ->
+        androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().background(Color.White, RoundedCornerShape(7.dp)), contentAlignment = Alignment.Center) {
+            Text(androidx.compose.ui.text.buildAnnotatedString { withStyle(ggStyle(phase)) { append(label) } }, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+        }
+    }) else emptyMap()
+    Text(annotated, color = color, style = MaterialTheme.typography.bodyLarge, modifier = modifier, maxLines = maxLines, inlineContent = pill,
         overflow = if (maxLines == Int.MAX_VALUE) androidx.compose.ui.text.style.TextOverflow.Clip else androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         onTextLayout = onOverflow?.let { f -> { r: androidx.compose.ui.text.TextLayoutResult -> f(r.hasVisualOverflow) } } ?: {})
 }

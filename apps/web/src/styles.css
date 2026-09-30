@@ -1804,3 +1804,6 @@ body.is-resizing-row, body.is-resizing-row * { cursor: row-resize !important; us
 @container (max-width: 380px) { .conv-head .head-call-video { display: none; } }
 @container (max-width: 380px) { .conv-head .zoom-pill { display: none; } }
 @container (max-width: 300px) { .conv-head .head-keep:first-of-type { display: none; } }
+/* «General» y «Todo» compactas (solo ícono si no están elegidas). */
+.topic-flag.is-compact { padding-inline: 10px; }
+.topic-flag.is-compact:not(.is-on) { min-width: 0; }

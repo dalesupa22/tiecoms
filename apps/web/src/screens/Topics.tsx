@@ -175,7 +175,9 @@ export function TopicDock({ conv, list, filter, onFilter, counts, unread = {} }:
   unread?: Record<string, number>;
 }) {
   const d = useClient((s) => s.data)!;
-  const act = activeTopics(list);
+  // Primero (de izquierda a derecha) los temas con mensajes sin leer y luego el resto por orden alfabético
+  // (Danny, 30-sep-2026; igual en iOS y Android).
+  const act = [...activeTopics(list)].sort((a, b) => (unread[b.id] ? 1 : 0) - (unread[a.id] ? 1 : 0) || a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
   const archived = list.filter((x) => x.archivedAt);
   const canEdit = conv.canPost;
   const flagMenu = (x: TopicDTO): MenuItem[] => [
@@ -201,11 +203,12 @@ export function TopicDock({ conv, list, filter, onFilter, counts, unread = {} }:
   return (
     <div ref={dock} className="topic-dock" role="tablist" aria-label={t('topic.bar')}>
       {/* Sin temas activos, «General» y «Todo» son lo mismo: una sola banderita. */}
-      <button role="tab" aria-selected={!filter} className={`topic-flag c-plain ${!filter ? 'is-on' : ''}`} onClick={() => onFilter(null)}
-        title={act.length ? t('topic.generalHint') : undefined}>💬 {act.length ? t('topic.general') : t('topic.all')}{unread[''] && act.length > 0 ? <span className="topic-unread" aria-label={t('topic.unreadN', { n: unread['']! })}>{unread['']}</span> : null}</button>
+      {/* «General» y «Todo» compactas: solo el ícono; el nombre sale cuando están elegidas (o en el título). */}
+      <button role="tab" aria-selected={!filter} aria-label={act.length ? t('topic.general') : t('topic.all')} className={`topic-flag c-plain is-compact ${!filter ? 'is-on' : ''}`} onClick={() => onFilter(null)}
+        title={act.length ? `${t('topic.general')} · ${t('topic.generalHint')}` : undefined}>💬{!filter || !act.length ? <span className="topic-flag-text"> {act.length ? t('topic.general') : t('topic.all')}</span> : null}{unread[''] && act.length > 0 ? <span className="topic-unread" aria-label={t('topic.unreadN', { n: unread['']! })}>{unread['']}</span> : null}</button>
       {act.length > 0 && (
-        <button role="tab" aria-selected={filter === TOPIC_ALL} className={`topic-flag c-plain ${filter === TOPIC_ALL ? 'is-on' : ''}`} onClick={() => onFilter(filter === TOPIC_ALL ? null : TOPIC_ALL)}
-          title={t('topic.allHint')}>☰ {t('topic.all')}</button>
+        <button role="tab" aria-selected={filter === TOPIC_ALL} aria-label={t('topic.all')} className={`topic-flag c-plain is-compact ${filter === TOPIC_ALL ? 'is-on' : ''}`} onClick={() => onFilter(filter === TOPIC_ALL ? null : TOPIC_ALL)}
+          title={`${t('topic.all')} · ${t('topic.allHint')}`}>☰{filter === TOPIC_ALL ? <span className="topic-flag-text"> {t('topic.all')}</span> : null}</button>
       )}
       {act.map((x) => (
         <button key={x.id} role="tab" aria-selected={filter === x.id} className={`topic-flag c-${x.color} ${filter === x.id ? 'is-on' : ''}`}

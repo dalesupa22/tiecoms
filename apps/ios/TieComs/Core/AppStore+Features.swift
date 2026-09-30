@@ -553,7 +553,9 @@ extension AppStore {
         guard let d = data, m.authorId != d.me.id else { throw ApiRequestError(status: 400, code: "bad_request", message: "") }
         let r = try await createChat(userIds: [m.authorId], name: nil)
         privateReplies[r.id] = PrivateReplyDraft(conversationId: r.id, fromConversationId: m.conversationId, messageId: m.id,
-                                                 author: Naming.person(d, m.authorId)?.name, sentAt: m.createdAt, excerpt: String(m.body.prefix(200)))
+                                                 author: Naming.person(d, m.authorId)?.name, sentAt: m.createdAt,
+                                                 // La tarjeta de un correo o WhatsApp se cita con su asunto o texto, nunca como JSON.
+                                                 excerpt: String(MailText.quoteText(kind: m.kind, body: m.body).prefix(200)))
         navigate(to: .conversation(r.id))
         return r.id
     }

@@ -308,6 +308,7 @@ struct WaSharedPayload: Equatable, Sendable {
     var comment: String?
     /// Desde la 040 el mensaje compartido tiene registro propio (SharedMailDTO con hilo y tarea); los viejos no.
     var emailId: String? = nil
+    var forwardedFrom: String? = nil
 }
 
 /// Franja de comentarios agrupados (`mail.comments`).
@@ -315,7 +316,8 @@ struct MailCommentsInfo: Equatable, Sendable { var count: Int; var lastById: Str
 
 /// Qué dibuja un mensaje de sistema de correo o WhatsApp.
 enum MailChatKind: Equatable {
-    case shared(emailId: String, comment: String?)
+    /// `forwardedFrom`: la conversación de donde se reenvió (POST /mail/shared/:id/forward).
+    case shared(emailId: String, comment: String?, forwardedFrom: String? = nil)
     /// Aviso agrupado de comentarios: una línea que abre el hilo. `provider` elige el icono (✉ o WhatsApp).
     case comments(emailId: String, MailCommentsInfo, provider: String?)
     case replied(emailId: String)
@@ -324,7 +326,7 @@ enum MailChatKind: Equatable {
 
     var emailId: String? {
         switch self {
-        case .shared(let id, _), .comments(let id, _, _), .replied(let id), .replyFailed(let id): return id
+        case .shared(let id, _, _), .comments(let id, _, _), .replied(let id), .replyFailed(let id): return id
         case .waShared(let p): return p.emailId
         }
     }
@@ -333,7 +335,7 @@ enum MailChatKind: Equatable {
         guard let p, let k = p["k"] as? String, k.hasPrefix("mail.") || k.hasPrefix("wa.") else { return nil }
         func str(_ key: String) -> String? { (p[key] as? String).flatMap { $0.isEmpty ? nil : $0 } }
         switch k {
-        case "mail.shared": return str("emailId").map { .shared(emailId: $0, comment: str("comment")) }
+        case "mail.shared": return str("emailId").map { .shared(emailId: $0, comment: str("comment"), forwardedFrom: str("forwardedFrom")) }
         case "mail.comments":
             guard let id = str("emailId") else { return nil }
             let n = (p["count"] as? NSNumber)?.intValue ?? Int(str("count") ?? "") ?? 1
@@ -346,7 +348,7 @@ enum MailChatKind: Equatable {
             return .waShared(.init(accountId: str("accountId") ?? "", jid: str("jid") ?? "", waMessageId: str("waMessageId") ?? "",
                                    accountKind: str("accountKind") ?? "personal", chatName: str("chatName"), isGroup: (p["isGroup"] as? Bool) ?? false,
                                    author: str("author"), fromMe: (p["fromMe"] as? Bool) ?? false, text: text, sentAt: str("sentAt"), comment: str("comment"),
-                                   emailId: str("emailId")))
+                                   emailId: str("emailId"), forwardedFrom: str("forwardedFrom")))
         default: return nil
         }
     }
@@ -430,6 +432,24 @@ struct MailFilters: Equatable, Sendable {
 // MARK: - Reglas de texto y tiempo
 
 enum MailText {
+    /// Cómo se cita la tarjeta de un correo o un WhatsApp compartido al responderla (como cardQuote de la web):
+    /// «✉ asunto · remitente» o «WhatsApp · chat: texto». Tolera el cuerpo cortado a 140 caracteres. nil si no es una tarjeta.
+    static func cardQuote(kind: String, body: String) -> String? {
+        guard kind == "system", body.hasPrefix("{\"k\":\"mail.shared\"") || body.hasPrefix("{\"k\":\"wa.shared\"") else { return nil }
+        let p: [String: Any]? = (body.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? L10n.lenientSystemObject(body)
+        guard let p, let k = p["k"] as? String else { return nil }
+        func s(_ key: String) -> String? { (p[key] as? String).flatMap { $0.isEmpty ? nil : $0 } }
+        if k == "mail.shared" { return "✉ " + (s("subject") ?? L("mail.noSubject")) + (s("from").map { " · \($0)" } ?? "") }
+        if k == "wa.shared" { return "WhatsApp" + (s("chatName").map { " · \($0)" } ?? "") + ": " + (s("text") ?? "") }
+        return nil
+    }
+
+    /// Texto para citar cualquier mensaje: la tarjeta como arriba, un aviso de sistema con su texto (nunca JSON) o el cuerpo.
+    static func quoteText(kind: String, body: String) -> String {
+        if let q = cardQuote(kind: kind, body: body) { return q }
+        return kind == "system" ? L10n.systemText(body) : body
+    }
+
     static func ymd(_ d: Date, _ calendar: Calendar = .current) -> String {
         let c = calendar.dateComponents([.year, .month, .day], from: d)
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)

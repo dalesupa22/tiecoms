@@ -100,7 +100,6 @@ struct ConversationView: View {
     @State private var sidePanel: String?
     /// Pide desplazar el chat a un mensaje (ancla de un sidechat) y resaltarlo.
     @State private var reveal: String?
-    @State private var dragging: (id: String, dx: CGFloat)?
     @State private var addingToSide = false
     /// Menciones del borrador (offsets UTF-16) y ficha de una persona mencionada.
     @State private var draftMentions: [Mention] = []
@@ -137,7 +136,14 @@ struct ConversationView: View {
     /// El filtro lo puso la apertura (todo lo no leído en un tema): no se baja al final, se queda en el primer no leído.
     @State private var autoFiltered = false
     /// Borde inferior del contenido en la vista (para detectar el hueco en blanco al final, ver ChatContentBottomKey).
-    @State private var contentBottom: CGFloat = 0
+    /// Medidas del scroll que cambian en cada fotograma (fondo del contenido, filas visibles y vistas). Viven en una
+    /// referencia: escribirlas no vuelve a pintar el chat entero (1.7.1; antes, una pintada por cada arrastre).
+    @State private var track = ScrollTrack()
+    final class ScrollTrack {
+        var contentBottom: CGFloat = 0
+        var visibleSeqs: Set<Int> = []
+        var seenSeqs: Set<Int> = []
+    }
     @State private var gapFix: Task<Void, Never>?
     @State private var blockUserId: String?
     @State private var recorder = VoiceRecorder()
@@ -158,6 +164,8 @@ struct ConversationView: View {
     @State private var dividerId: String?
     /// Ya se colocó el chat al abrir (en el primer no leído o al final).
     @State private var positioned = false
+    /// Hay una página vieja en camino (no se pide otra a la vez).
+    @State private var loadingOlder = false
     /// A más de una pantalla del final: sale el botón ⌄ y los mensajes nuevos no arrastran la vista.
     @State private var farFromBottom = false
     /// Último seq visto estando al final: lo que llegue después cuenta en el globo del ⌄.
@@ -170,13 +178,12 @@ struct ConversationView: View {
     /// Al final del chat (a menos de 40 pt); esto no implica que se hayan visto las filas anteriores.
     @State private var atBottom = false
     /// Filas visibles y visitadas desde la colocación inicial, sin saltar huecos del cursor.
-    @State private var visibleSeqs: Set<Int> = []
-    @State private var seenSeqs: Set<Int> = []
     @State private var readPauseID: UUID?
     @State private var positioning = false
     @State private var positioningFailed = false
 
     var body: some View {
+        let _ = PerfCounters.bump("chat.body")
         Group {
             if let d = store.data, let c = store.meta(conversationId) {
                 content(d, c).modifier(removeTopicDialog)
@@ -455,14 +462,16 @@ struct ConversationView: View {
                             if c.isMuted { Image(systemName: "bell.slash.fill").font(.caption2).foregroundStyle(Theme.textSecondary) }
                         }
                         .foregroundStyle(Theme.textPrimary)
-                        // Grupos de un espacio: la ruta «Empresa · Espacio»; chats: las empresas.
-                        let sub = Naming.route(d, c) ?? Naming.subtitle(d, c)
-                        if !sub.isEmpty { Text(sub).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1).truncationMode(.tail) }
+                        // 1.7.1: arriba solo el grupo o la persona; debajo, pequeño y en gris, la empresa (grupos) o
+                        // «cargo · empresa» (directos); los chats de varias personas, sus empresas.
+                        let sub = headerSubtitle(d, c)
+                        if !sub.isEmpty { Text(sub).font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1).truncationMode(.tail)
+                            .accessibilityIdentifier("chat.header.company") }
                     }
                     // Sin tope, un subtítulo largo (chat grupal con varias empresas) se recorta por ambos lados.
                     .frame(maxWidth: 250)
                 }
-                .accessibilityLabel([Naming.title(d, c), Naming.route(d, c) ?? Naming.subtitle(d, c)].filter { !$0.isEmpty }.joined(separator: ", "))
+                .accessibilityLabel([Naming.title(d, c), headerSubtitle(d, c)].filter { !$0.isEmpty }.joined(separator: ", "))
                 .accessibilityHint(L("chat.details"))
                 .accessibilityIdentifier("chat.header")
             }
@@ -488,6 +497,14 @@ struct ConversationView: View {
                 .accessibilityIdentifier("chat.menu")
             }
             }
+        }
+    }
+
+    /// Línea bajo el título del chat: la empresa en un grupo (sin repetirla si el nombre ya la trae).
+    private func headerSubtitle(_ d: BootstrapDTO, _ c: ConversationDTO) -> String {
+        switch c.kind {
+        case .group, .internal: return Naming.isSide(c) ? Naming.subtitle(d, c) : (Naming.companyLine(d, c) ?? "")
+        case .direct, .multi: return Naming.subtitle(d, c)
         }
     }
 
@@ -530,7 +547,7 @@ struct ConversationView: View {
 
     @ViewBuilder
     private func messages(_ d: BootstrapDTO, _ c: ConversationDTO, _ state: ConversationState) -> some View {
-        let items = buildItems(state, pending: store.pendingFor(conversationId))
+        let items = PerfCounters.measure("chat.buildItems") { buildItems(state, pending: store.pendingFor(conversationId)) }
         let lazyRows = items.count > ChatStackRule.lazyAbove
         let byId = Dictionary(state.messages.filter { !store.blockedUserIds.contains($0.authorId) }.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         ScrollViewReader { proxy in
@@ -540,14 +557,15 @@ struct ConversationView: View {
                         ProgressView()
                             .padding(8)
                             .accessibilityLabel(L("chat.loadingOlder"))
-                            .onAppear {
-                                guard positioned, !positioning else { return }
-                                let anchor = state.messages.first?.id
-                                Task {
-                                    await store.loadOlder(conversationId)
-                                    if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                            .onAppear { loadOlder(proxy, state) }
+                            // En la pila normal (VStack) la rueda existe desde que abre el chat y onAppear no vuelve a
+                            // llegar: las páginas viejas se piden cuando la rueda entra en la pantalla al desplazar.
+                            .background(GeometryReader { g in
+                                Color.clear.onChange(of: positioned && !loadingOlder && g.frame(in: .named("chat.scroll")).minY > -40) { _, visible in
+                                    if visible { loadOlder(proxy, state) }
                                 }
-                            }
+                            })
+
                     } else if c.historyFromSeq > 0 {
                         Text(L("chat.lateJoin")).font(.footnote).foregroundStyle(Theme.textSecondary)
                             .multilineTextAlignment(.center).padding(12)
@@ -562,7 +580,10 @@ struct ConversationView: View {
                         Text(L("conv.noMessages")).font(.subheadline).foregroundStyle(Theme.textSecondary).padding(.top, 40)
                     }
                     ForEach(items) { item in
-                        row(d, c, item, byId: byId).id(item.id)
+                        row(d, c, item, byId: byId)
+                            .modifier(LazyRowCap(cap: lazyRows ? ChatRowCapRule.cap(viewport: viewportHeight) : 0))
+                            .environment(\.chatRowCap, lazyRows ? ChatRowCapRule.cap(viewport: viewportHeight) : 0)
+                            .id(item.id)
                             .background {
                                 if let seq = trackedSeq(item) {
                                     GeometryReader { g in
@@ -587,17 +608,17 @@ struct ConversationView: View {
                     .onChange(of: g.size.height) { _, h in viewportHeight = h }
             })
             .onPreferenceChange(ChatSeenSeqKey.self) { seqs in
-                visibleSeqs = seqs
+                track.visibleSeqs = seqs
                 if positioned { markReadIfVisible() }
             }
             .onPreferenceChange(ChatContentBottomKey.self) { maxY in
-                contentBottom = maxY
+                track.contentBottom = maxY
                 // La LazyVStack re-estima el alto de filas que aún no ha dibujado (tarjetas de tarea): tras ubicar el chat
                 // podía quedar pasada del final, con la pantalla en blanco. Si el hueco sigue un momento después, al final.
                 if positioned, viewportHeight > 0, maxY < viewportHeight - 80, gapFix == nil {
                     gapFix = Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 350_000_000)
-                        if !Task.isCancelled, contentBottom < viewportHeight - 80 { proxy.scrollTo(ChatNavIds.bottom, anchor: .bottom) }
+                        if !Task.isCancelled, track.contentBottom < viewportHeight - 80 { proxy.scrollTo(ChatNavIds.bottom, anchor: .bottom) }
                         gapFix = nil
                     }
                 }
@@ -862,6 +883,14 @@ struct ConversationView: View {
     /// Mensaje ancla del sidechat abierto.
     private var activeAnchor: String? { sidePanel.flatMap { store.meta($0)?.parentMessageId } }
 
+    /// Responder con cita: lo mismo que «Responder» del menú (mensajes vivos en chats donde puedo escribir).
+    private func canReply(_ c: ConversationDTO, _ m: MessageDTO) -> Bool { c.canPost && m.deletedAt == nil && !m.isSystem }
+
+    private func startReply(_ m: MessageDTO) {
+        replyTo = m; editing = nil; commentingIssue = nil; commentingEvent = nil
+        composerFocused = true
+    }
+
     private func canAskSide(_ c: ConversationDTO, _ m: MessageDTO) -> Bool {
         m.kind == "text" && m.deletedAt == nil && !Naming.isSide(c) && !embedded
     }
@@ -871,9 +900,9 @@ struct ConversationView: View {
         guard scenePhase == .active, store.openConversationId == conversationId else { return }
         snapshotUnread()
         guard positioned, readPauseID == nil, readingSession == store.sessionStamp else { return }
-        seenSeqs.formUnion(visibleSeqs)
+        track.seenSeqs.formUnion(track.visibleSeqs)
         guard let c = store.meta(conversationId), let state = store.conversations[conversationId] else { return }
-        let cursor = ChatNav.visibleReadCursor(state.messages, after: max(c.lastReadSeq, c.historyFromSeq), seen: seenSeqs, me: store.me?.id ?? "")
+        let cursor = ChatNav.visibleReadCursor(state.messages, after: max(c.lastReadSeq, c.historyFromSeq), seen: track.seenSeqs, me: store.me?.id ?? "")
         if cursor > c.lastReadSeq { store.markRead(conversationId, upTo: cursor) }
     }
 
@@ -892,12 +921,25 @@ struct ConversationView: View {
         unreadSnap = .init(lastReadSeq: c.lastReadSeq, unread: c.unread)
     }
 
+    /// Pide la página anterior (una a la vez) y deja a la vista el mensaje que estaba arriba.
+    private func loadOlder(_ proxy: ScrollViewProxy, _ state: ConversationState) {
+        guard positioned, !positioning, !loadingOlder, state.hasMore else { return }
+        loadingOlder = true
+        let anchor = state.messages.first?.id
+        Task {
+            await store.loadOlder(conversationId)
+            if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            loadingOlder = false
+        }
+    }
+
     private func positionAtFirstUnread(_ proxy: ScrollViewProxy) async {
         guard !positioning else { return }
         snapshotUnread()
         guard let snap = unreadSnap else { return }
         let retry = positioningFailed
-        positioning = true; positioningFailed = false; positioned = false; seenSeqs = []
+        positioning = true; positioningFailed = false; positioned = false; track.seenSeqs = []
         defer { positioning = false }
         do {
             if retry { try await store.openConversation(conversationId, force: true) }
@@ -1021,7 +1063,9 @@ struct ConversationView: View {
                 GgActionsRow(message: m, payload: gp)
             } else if let mk = MailChatKind.parse(m.systemPayload) {
                 // Correo y WhatsApp traídos al chat (docs/CORREO.md): mensaje de quien lo trajo + tarjeta, o la línea con «Abrir».
-                MailChatRow(message: m, kind: mk, canPost: c.canPost)
+                MailChatRow(message: m, kind: mk, canPost: c.canPost,
+                            onReply: c.canPost ? { startReply(m) } : nil,
+                            onPrivateReply: m.authorId != d.me.id && c.kind != .direct ? { act { try await store.startPrivateReply(to: m) } } : nil)
             } else if let k = ChatCards.kind(m), k.isComments {
                 // Comentarios agrupados: una línea que lleva a la tarea o al evento, sin repetir la tarjeta (como la web).
                 switch k {
@@ -1057,7 +1101,7 @@ struct ConversationView: View {
                 mine: mine,
                 author: mine || !showAuthor ? nil : Naming.authorLine(d, m.authorId),
                 status: nil, italic: m.deletedAt != nil,
-                quote: m.replyTo == nil ? nil : (quoted.map { q in (Naming.person(d, q.authorId)?.name ?? "", q.deletedAt != nil ? L("chat.deleted") : excerpt(q.body)) } ?? ("", L("reply.quoteMissing"))),
+                quote: m.replyTo == nil ? nil : (quoted.map { q in (Naming.person(d, q.authorId)?.name ?? "", q.deletedAt != nil ? L("chat.deleted") : excerpt(MailText.quoteText(kind: q.kind, body: q.body))) } ?? ("", L("reply.quoteMissing"))),
                 forwardedLabel: m.forwarded.map { forwardedLabel(d, $0, mine: mine, authorName: author?.name) },
                 merged: m.mergedKind == "side" ? L("side.fromSidechat")
                     : m.mergedFrom.map { id in store.meta(id).map { L("lin.resultOf", ["name": Naming.title(d, $0)]) } ?? L("lin.resultHidden") },
@@ -1097,24 +1141,8 @@ struct ConversationView: View {
             }
             .padding(.top, showAuthor ? 6 : 0)
             .background(RoundedRectangle(cornerRadius: 12).fill(Theme.orange.opacity(highlighted == m.id ? 0.18 : 0)))
-            // Deslizar la burbuja a la derecha = «Preguntar en un sidechat» (solo en chats que lo permiten).
-            .offset(x: dragging?.id == m.id ? min(90, max(0, dragging!.dx)) : 0)
-            .overlay(alignment: .leading) {
-                if dragging?.id == m.id, (dragging?.dx ?? 0) > 20 {
-                    Image(systemName: "bubble.left.and.text.bubble.right.fill").foregroundStyle(Theme.orange)
-                        .opacity(min(1, Double((dragging?.dx ?? 0) / 70)))
-                        .offset(x: -6)
-                }
-            }
-            .simultaneousGesture(canAskSide(c, m) ? DragGesture(minimumDistance: 24)
-                .onChanged { v in
-                    guard abs(v.translation.width) > abs(v.translation.height) * 2 else { return }
-                    dragging = (m.id, v.translation.width)
-                }
-                .onEnded { v in
-                    if dragging?.id == m.id, v.translation.width > 70 { askSide = m; Haptics.tap() }
-                    withAnimation(.spring(response: 0.3)) { dragging = nil }
-                } : nil)
+            // Deslizar la burbuja a la derecha = responder con cita (1.7.1, como WhatsApp). El sidechat queda en el menú.
+            .modifier(SwipeToReply(enabled: canReply(c, m)) { startReply(m) })
             .accessibilityIdentifier("msg.\(m.id)")
             if m.deletedAt == nil && !m.reactions.isEmpty {
                 ReactionChips(d: d, message: m, mine: mine, canReact: c.canPost, onToggle: { react(m, $0) }, onMore: { sheet = .react(m) })
@@ -1203,7 +1231,7 @@ struct ConversationView: View {
         // Bloque 1: responder aquí o por DM al autor. Bloque 2: responder aparte en un hilo o en un sidechat privado.
         // «Responder en privado» y el sidechat son opciones distintas (docs/GRUPOS.md).
         if c.canPost {
-            Button { replyTo = m; editing = nil; composerFocused = true } label: { Label(L("menu.reply"), systemImage: "arrowshape.turn.up.left") }
+            Button { startReply(m) } label: { Label(L("menu.reply"), systemImage: "arrowshape.turn.up.left") }
         }
         if !mine && c.kind != .direct {
             Button {
@@ -1313,7 +1341,7 @@ struct ConversationView: View {
             }
             if let r = replyTo {
                 ContextBar(icon: "arrowshape.turn.up.left", title: L("reply.to", ["name": Naming.person(d, r.authorId)?.name ?? ""]),
-                           detail: excerpt(r.body, 100), cancelLabel: L("reply.cancel")) { replyTo = nil }
+                           detail: excerpt(MailText.quoteText(kind: r.kind, body: r.body), 100), cancelLabel: L("reply.cancel")) { replyTo = nil }
                     .accessibilityIdentifier("composer.replyBar")
             }
             if let ce = commentingEvent {
@@ -1382,7 +1410,8 @@ struct ConversationView: View {
                 // UITextView: tokens resaltados, cursor real y retroceso que borra el token entero.
                 ComposerTextView(text: $draft, mentions: $draftMentions, cursor: $draftCursor, focused: $composerFocused,
                                  placeholder: composerPlaceholder(d, c), accessibilityLabel: L("chat.composerLabel"),
-                                 onChange: { new in if !new.isEmpty && editing == nil { store.userIsTyping(conversationId) } })
+                                 onChange: { new in if !new.isEmpty && editing == nil { store.userIsTyping(conversationId) } },
+                                 onPasteAttachments: editing == nil && !commenting && !recorder.isActive ? { stagePasted($0) } : nil)
                     .overlay(alignment: .topLeading) {
                         if draft.isEmpty {
                             Text(composerPlaceholder(d, c)).font(.body).foregroundStyle(Theme.textSecondary.opacity(0.8))
@@ -1421,6 +1450,16 @@ struct ConversationView: View {
         .background(Theme.surface.ignoresSafeArea(edges: .bottom))
         .sheet(isPresented: $pickingSchedule) { PickWhenSheet(onPick: scheduleDraft) }
         .sheet(isPresented: $showScheduled) { ScheduledSheet(conversationId: conversationId) }
+    }
+
+    /// Imágenes pegadas: a la misma bandeja de adjuntos que Fotos (con sus límites de cantidad y tamaño).
+    private func stagePasted(_ list: [LocalAttachment]) {
+        for a in list {
+            guard staged.count < AttachmentRules.maxPerMessage else { store.show(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
+            if a.tooBig { store.show(L("att.tooBig", ["name": a.name])); continue }
+            staged.append(a)
+        }
+        Haptics.tap()
     }
 
     /// Solo se programa texto (con menciones y respuesta); adjuntos, notas de voz y respuestas privadas salen al momento.
@@ -1661,8 +1700,14 @@ struct MessageBubble: View {
     var topic: TopicDTO? = nil
     var topicBy: String? = nil
     @Environment(\.openURL) private var openURL
+    /// Mensaje muy largo (1.7.1): plegado a `LongText.collapsedLines` con «Ver más».
+    @State private var expanded = false
+    @State private var reading = false
+    @Environment(\.chatLazyStack) private var inLazyStack
+    @Environment(\.chatRowCap) private var rowCap
 
     var body: some View {
+        let _ = PerfCounters.bump("chat.bubble.body")
         HStack(alignment: .top, spacing: 8) {
             if mine { Spacer(minLength: 48) }
             switch leading {
@@ -1703,13 +1748,15 @@ struct MessageBubble: View {
                     if !attachments.isEmpty { AttachmentsBlock(attachments: attachments, mine: mine, messageId: messageId, conversationId: conversationId) }
                     if !text.isEmpty || attachments.isEmpty {
                     Group {
-                        if !mentions.isEmpty || highlight != nil {
+                        if !mentions.isEmpty || highlight != nil || !GGMention.typedRanges(in: text).isEmpty {
                             // Cada mención con el color de SU persona (y tocable); los enlaces http con el color de enlace.
-                            RichMessageText(text: text, mentions: mentions, mine: mine, linkify: linkify, highlight: highlight) { id in
+                            RichMessageText(text: text, mentions: mentions, mine: mine, linkify: linkify, highlight: highlight,
+                                            maxLines: collapsed ? collapsedLines : 0) { id in
                                 if let u = URL(string: "chaggu-mention://\(id)") { openURL(u) }
                             }
-                        } else if linkify { Text(Linkify.attributed(text)) } else { Text(text) }
+                        } else if linkify { Text(Linkify.cachedAttributed(text)) } else { Text(text) }
                     }
+                    .lineLimit(collapsed ? collapsedLines : nil)
                     // Solo emojis (1 a 3): grandes, como en la web (isJumbo).
                     .font(jumbo ? .system(size: jumboSize) : .body)
                     .italic(italic)
@@ -1718,6 +1765,16 @@ struct MessageBubble: View {
                     .textSelection(.enabled)
                     // Con fotos la burbuja se ciñe a ellas; el texto conserva su margen.
                     .padding(.horizontal, attachments.isEmpty ? 0 : 9).padding(.bottom, attachments.isEmpty ? 0 : 4)
+                    if long {
+                        Button { if inLazyStack { reading = true } else { withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() } } } label: {
+                            Text(expanded ? L("chat.readLess") : L("chat.readMore")).font(.subheadline.weight(.semibold))
+                                .foregroundStyle(mine ? Color.white : Theme.accentText)
+                                .padding(.vertical, 2).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("msg.readMore.\(messageId ?? "")")
+                        .sheet(isPresented: $reading) { LongTextSheet(text: text, author: author?.name) }
+                    }
                     }
                     if let linkPreview { LinkPreviewCard(preview: linkPreview, mine: mine) }
                 }
@@ -1771,6 +1828,13 @@ struct MessageBubble: View {
             }
         }
     }
+
+    /// Muy largo y sin búsqueda activa (con búsqueda se ve entero para que se vea lo resaltado).
+    private var long: Bool { highlight == nil && !italic && LongText.isLong(text) }
+    private var collapsed: Bool { long && (!expanded || inLazyStack) }
+    /// En la pila perezosa, plegado por alto: las líneas que caben en el tope de la fila (≈ 60 % de lo visible) con la
+    /// letra actual; una fila más alta que la pantalla dejaba la LazyVStack re-estimando sin fin.
+    private var collapsedLines: Int { inLazyStack ? ChatRowCapRule.lines(cap: rowCap > 0 ? rowCap : ChatRowCapRule.cap(viewport: 0)) : LongText.collapsedLines }
 
     private var jumbo: Bool { !italic && attachments.isEmpty && mentions.isEmpty && Reactions.isJumbo(text) }
 
@@ -1842,12 +1906,108 @@ struct LineageBar: View {
 /// tarjeta alta en pantalla (tarea, evento) dejaba la lista reubicando filas sin fin y la app congelada (medido en el
 /// simulador: 4 de 4 sin congelarse con VStack; con LazyVStack se congelaba la mayoría de las veces). Con historiales muy
 /// largos (se cargaron muchas páginas) vuelve a la perezosa para no dibujar cientos de filas en cada tecla.
-enum ChatStackRule { static let lazyAbove = 200 }
+/// Mensajes muy largos: más de 40 líneas o 3000 caracteres se muestran plegados a 30 líneas con «Ver más».
+enum LongText {
+    static let collapsedLines = 30
+    static func isLong(_ s: String) -> Bool {
+        if s.utf16.count > 3000 { return true }
+        var lines = 1
+        for c in s.utf16 where c == 10 { lines += 1; if lines > 40 { return true } }
+        return false
+    }
+}
+
+enum ChatStackRule {
+    /// `-TCLazyAbove <n>` (pruebas) fuerza la pila perezosa con menos filas.
+    static let lazyAbove: Int = UserDefaults.standard.object(forKey: "TCLazyAbove") != nil ? UserDefaults.standard.integer(forKey: "TCLazyAbove") : 200
+}
 
 struct ChatStack<Content: View>: View {
     let lazy: Bool
     @ViewBuilder var content: () -> Content
     var body: some View {
-        if lazy { LazyVStack(spacing: 4, content: content) } else { VStack(spacing: 4, content: content) }
+        if lazy { LazyVStack(spacing: 4, content: content).environment(\.chatLazyStack, true) } else { VStack(spacing: 4, content: content) }
+    }
+}
+
+/// En la pila perezosa un mensaje muy largo no se despliega en el chat: la LazyVStack re-estimaba sin fin el alto de una
+/// fila más alta que la pantalla (LazyStack.measureEstimates / placeSubviews en bucle, app congelada). Ahí «Ver más» abre
+/// el texto completo en una hoja. Prueba: ChatScrollUITests.testLongMessageScrollsInLazyStack.
+private struct ChatLazyStackKey: EnvironmentKey { static let defaultValue = false }
+private struct ChatRowCapKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
+extension EnvironmentValues {
+    var chatLazyStack: Bool {
+        get { self[ChatLazyStackKey.self] }
+        set { self[ChatLazyStackKey.self] = newValue }
+    }
+    /// Alto máximo de una fila en la pila perezosa (≈ 60 % de lo visible); 0 = sin tope.
+    var chatRowCap: CGFloat {
+        get { self[ChatRowCapKey.self] }
+        set { self[ChatRowCapKey.self] = newValue }
+    }
+}
+
+/// Tope de alto de las filas en la pila perezosa: ninguna fila pasa de ≈ 60 % de lo visible (iPhone SE, horizontal y
+/// letra grande incluidos). Si la fila entera no cabe, se ve su parte de arriba y «Ver completo», que la abre en una
+/// hoja. Una fila más alta que la pantalla dejaba la LazyVStack re-estimando sin fin (app congelada).
+enum ChatRowCapRule {
+    static let fraction: CGFloat = 0.6
+    static func cap(viewport: CGFloat, screen: CGFloat = UIScreen.main.bounds.height) -> CGFloat {
+        max(140, (viewport > 0 ? viewport : screen * 0.7) * fraction)
+    }
+    /// Líneas de un mensaje muy largo plegado que caben en el tope (con la letra actual).
+    static func lines(cap: CGFloat, lineHeight: CGFloat = UIFont.preferredFont(forTextStyle: .body).lineHeight) -> Int {
+        max(3, min(LongText.collapsedLines, Int((cap * 0.7) / max(1, lineHeight))))
+    }
+}
+
+struct LazyRowCap: ViewModifier {
+    let cap: CGFloat
+    @State private var open = false
+    func body(content: Content) -> some View {
+        if cap > 0 {
+            ViewThatFits(in: .vertical) {
+                content
+                VStack(spacing: 4) {
+                    content.frame(height: max(60, cap - 44), alignment: .top).clipped().allowsHitTesting(false)
+                        .overlay(alignment: .bottom) {
+                            LinearGradient(colors: [Theme.background.opacity(0), Theme.background], startPoint: .top, endPoint: .bottom).frame(height: 36)
+                        }
+                    Button(L("chat.readMore")) { open = true }
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accentText)
+                        .accessibilityIdentifier("row.showAll")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .frame(maxHeight: cap)
+            .sheet(isPresented: $open) {
+                NavigationStack {
+                    ScrollView { content.padding(.vertical, 12).environment(\.chatRowCap, 0).environment(\.chatLazyStack, false) }
+                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L("common.close")) { open = false } } }
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// El texto completo de un mensaje muy largo (desde la pila perezosa).
+struct LongTextSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let text: String
+    let author: String?
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(text).font(.body).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .accessibilityIdentifier("longText.body")
+            }
+            .navigationTitle(author ?? L("chat.readMore"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L("common.close")) { dismiss() }.accessibilityIdentifier("longText.close") } }
+        }
     }
 }

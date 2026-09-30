@@ -533,6 +533,8 @@ struct MailPreviewSheet: View {
 struct MailChatPicker: View {
     @Environment(AppStore.self) private var store
     @Binding var picked: [String]
+    /// El chat donde ya está (al reenviar) no se ofrece.
+    var exclude: String? = nil
     @State private var q = ""
     var body: some View {
         if let d = store.data {
@@ -573,7 +575,7 @@ struct MailChatPicker: View {
     }
     private func chats(_ d: BootstrapDTO) -> [ConversationDTO] {
         let t = q.trimmingCharacters(in: .whitespaces).lowercased()
-        return Array(d.conversations.filter { $0.canPost && (t.isEmpty || Naming.title(d, $0).lowercased().contains(t)) }.prefix(80))
+        return Array(d.conversations.filter { $0.canPost && $0.id != exclude && (t.isEmpty || Naming.title(d, $0).lowercased().contains(t)) }.prefix(80))
     }
 }
 
@@ -736,13 +738,18 @@ struct WaShareSheet: View {
                     if let t = MailShareText.whoSees(store, picked) { Text(t) }
                 }
             }
+            .safeAreaInset(edge: .bottom) {
+                Button { share() } label: { Text(busy ? L("mail.sharing") : MailShareText.button(store, picked)).lineLimit(1).frame(maxWidth: .infinity) }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(picked.isEmpty || busy)
+                    .padding(12)
+                    .background(.bar)
+                    .accessibilityIdentifier("wa.shareSend")
+            }
             .navigationTitle(L("wa.bringTitle"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(busy ? L("mail.sharing") : L("mail.share")) { share() }.disabled(picked.isEmpty || busy).accessibilityIdentifier("wa.shareSend")
-                }
             }
         }
     }

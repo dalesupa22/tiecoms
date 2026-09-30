@@ -654,7 +654,9 @@ struct DMsView: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle(L("tab.dms"))
-        .searchable(text: $query, prompt: L("dm.search"))
+        // Como Grupos (test5BackToHome): título pequeño y buscador siempre visible, sin el bucle de maquetación al volver de un chat.
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: L("dm.search"))
         .quickActions()
         .sheet(isPresented: $newChat) { NewChatSheet() }
         .sheet(item: Binding(get: { issuesFor.map(IdBox.init) }, set: { issuesFor = $0?.id })) { ConversationIssuesSheet(conversationId: $0.id) }
@@ -662,7 +664,7 @@ struct DMsView: View {
 
     private func dmRow(_ d: BootstrapDTO, _ c: ConversationDTO, threadUnread: Int) -> some View {
         NavigationLink(value: Route.conversation(c.id)) {
-            HierarchyConvRow(d: d, c: c, threadUnread: threadUnread) { issuesFor = c.id }
+            HierarchyConvRow(d: d, c: c, threadUnread: threadUnread, company: Naming.companyLine(d, c)) { issuesFor = c.id }
         }
         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
         .accessibilityIdentifier("conv.row.\(c.id)")

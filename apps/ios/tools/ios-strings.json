@@ -3594,5 +3594,17 @@
  "sys.gg.actions": [
   "✦ gg dejó algo listo para confirmar",
   "✦ gg has something ready to confirm"
+ ],
+ "chat.readMore": [
+  "Ver más",
+  "Show more"
+ ],
+ "chat.readLess": [
+  "Ver menos",
+  "Show less"
+ ],
+ "card.forwarded": [
+  "Reenviado",
+  "Forwarded"
  ]
 }

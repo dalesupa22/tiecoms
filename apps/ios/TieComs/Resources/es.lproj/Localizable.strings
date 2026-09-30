@@ -2462,3 +2462,7 @@
 "err.call_not_live" = "No hay nadie en la llamada ahora.";
 "err.call_full" = "La llamada ya tiene el máximo de invitados.";
 "err.call_ended" = "La llamada ya terminó.";
+
+/* Temas: reordenar (arrastrar la banderita o desde el menú) */
+"topic.moveLeft" = "Mover a la izquierda";
+"topic.moveRight" = "Mover a la derecha";

@@ -2462,3 +2462,7 @@
 "err.call_not_live" = "Nobody is in the call right now.";
 "err.call_full" = "The call already has the maximum number of guests.";
 "err.call_ended" = "The call already ended.";
+
+/* Topics: reorder (drag the flag or from the menu) */
+"topic.moveLeft" = "Move left";
+"topic.moveRight" = "Move right";

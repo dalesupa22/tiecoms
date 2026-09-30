@@ -126,4 +126,67 @@ final class TemasGeneralUITests: XCTestCase {
         XCTAssertTrue(text(app, "Falta el extracto de septiembre").exists)
         shot("temas-04-salto-a-tema")
     }
+
+    /// Fijas compactas (solo ícono si no están elegidas) y arrastrar una banderita para reordenar. Con un API sin
+    /// PUT /topics/order (o si falla) vuelve el orden anterior y sale el aviso: así se prueba el gesto y la reversión.
+    func testCompactFixedFlagsAndDragToReorder() throws {
+        let f = try fixture()
+        let app = XCUIApplication()
+        app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES",
+                               "-AppleLanguages", "(es)", "-AppleLocale", "es_CO", "-TCResetLanguage", "YES", "-TCOpenConversation", f.conversationId]
+        app.launch()
+        let email = app.textFields["login.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 20))
+        email.tap(); email.typeText(f.a.email)
+        let pw = app.secureTextFields["login.password"]
+        pw.tap(); pw.typeText(f.password)
+        app.buttons["login.submit"].tap()
+        let general = app.buttons["topic.general"]
+        if !general.waitForExistence(timeout: 25) {
+            let row = app.buttons["conv.row.\(f.conversationId)"]
+            XCTAssertTrue(row.waitForExistence(timeout: 25))
+            row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            XCTAssertTrue(general.waitForExistence(timeout: 10))
+        }
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for _ in 0..<6 {
+            for surface in [app, springboard] { for label in ["Not Now", "Ahora no"] where surface.buttons[label].exists { surface.buttons[label].tap() } }
+            sleep(1)
+        }
+        // «General» elegida muestra su nombre; «Todo» sin elegir es solo ☰ (mismo alto que las demás sin elegir).
+        let all = app.buttons["topic.all"]
+        let fin = app.buttons["topic.flag.Finanzas"], ops = app.buttons["topic.flag.Operaciones"]
+        XCTAssertTrue(fin.waitForExistence(timeout: 10) && ops.exists)
+        XCTAssertEqual(all.label, "Todo", "accesibilidad con el nombre")
+        XCTAssertLessThan(all.frame.width, general.frame.width, "compacta: solo el ícono")
+        XCTAssertEqual(all.frame.height, fin.frame.height, accuracy: 1)
+        XCTAssertLessThan(fin.frame.minX, ops.frame.minX, "orden de llegada: Finanzas primero")
+        shot("temas-10-compactas")
+        tapC(all)
+        XCTAssertTrue(app.buttons["topic.all"].waitForExistence(timeout: 3))
+        sleep(1)
+        XCTAssertGreaterThan(app.buttons["topic.all"].frame.width, app.buttons["topic.general"].frame.width, "elegida: con su nombre")
+        shot("temas-11-todo-elegida")
+        tapC(app.buttons["topic.general"])
+        sleep(1)
+
+        // Mantener presionada Operaciones y soltarla sobre Finanzas.
+        ops.press(forDuration: 1.2, thenDragTo: fin)
+        let toast = app.descendants(matching: .any)["toast"]
+        let moved = Date().addingTimeInterval(8)
+        var sawToast = false
+        while Date() < moved {
+            if toast.exists { sawToast = true; break }
+            if ops.frame.minX < fin.frame.minX { break }
+            usleep(200_000)
+        }
+        shot("temas-12-arrastre")
+        if sawToast {
+            // Este API no tiene el endpoint: vuelve el orden de antes.
+            sleep(1)
+            XCTAssertLessThan(app.buttons["topic.flag.Finanzas"].frame.minX, app.buttons["topic.flag.Operaciones"].frame.minX, "revirtió")
+        } else {
+            XCTAssertLessThan(app.buttons["topic.flag.Operaciones"].frame.minX, app.buttons["topic.flag.Finanzas"].frame.minX, "reordenada")
+        }
+    }
 }

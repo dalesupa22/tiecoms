@@ -1,6 +1,6 @@
 import { MailConnectNudge, ProviderIcon } from './Mail.tsx';
 import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from 'react';
-import type { ConversationDTO } from '@tiecoms/contracts';
+import type { ConversationDTO, StorageUsageDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, getLang, langPreference, locale, setLang, t, tn, useLang, type Lang } from '../i18n.ts';
 import { navigate } from '../router.ts';
@@ -15,6 +15,7 @@ import { RemindersSection } from './Bring.tsx';
 import { SleepDialog, sleepSummary } from './Sleep.tsx';
 import { MeetingsSettings } from './Meetings.tsx';
 import { TEXT_SIZES, setTextSize, useTextSize } from '../text-size.ts';
+import { formatBytes } from '../video.ts';
 import { askNotifications, conversationMenu, dndMenu, dndText, mutedText, openDialog, personMenu } from '../actions.tsx';
 import { menuProps, openMenuAt, toast } from '../menu.tsx';
 import { isMuted } from '../home-order.ts';
@@ -397,6 +398,9 @@ export function SettingsScreen() {
         </>
       )}
 
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{t('storage.title')}</div>
+      <StorageUsage adminOrgs={d.organizations.filter((o) => o.myRole === 'owner' || o.myRole === 'admin').map((o) => ({ id: o.id, name: o.name }))} />
+
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('settings.devices')}</div>
       <div className="list">
         {sessions?.sessions.map((s) => (
@@ -408,6 +412,44 @@ export function SettingsScreen() {
       </div>
       <div className="hint" style={{ marginTop: 18 }}>{t('settings.platforms')}</div>
     </div></div>
+  );
+}
+
+/** «Almacenamiento usado: 1,2 GB · videos 800 MB · fotos … · archivos …» (solo medición, docs/VIDEO.md). */
+function StorageUsage({ adminOrgs }: { adminOrgs: { id: string; name: string }[] }) {
+  const [mine, setMine] = useState<StorageUsageDTO | null>(null);
+  const [orgs, setOrgs] = useState<(StorageUsageDTO & { name: string })[]>([]);
+  const orgKey = adminOrgs.map((o) => o.id).join(',');
+  useEffect(() => {
+    let alive = true;
+    client.myStorage().then((r) => alive && setMine(r)).catch(() => {});
+    Promise.all(adminOrgs.map((o) => client.orgStorage(o.id).then((r) => ({ ...r, name: o.name })).catch(() => null)))
+      .then((list) => alive && setOrgs(list.filter((x): x is StorageUsageDTO & { name: string } => !!x)));
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgKey]);
+  const lang = getLang();
+  const fmt = (n: number) => formatBytes(n, lang);
+  const parts = mine ? ([
+    ['videos', mine.breakdown.videos, 'storage.videos', '#3d5a80'], ['photos', mine.breakdown.photos, 'storage.photos', '#2a9d8f'],
+    ['files', mine.breakdown.files, 'storage.files', '#e9c46a'], ['voice', mine.breakdown.voice, 'storage.voice', '#e76f51'],
+  ] as const) : [];
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 24 }} data-testid="storage-usage">
+      {!mine ? <span className="small muted">{t('common.loading')}</span> : (
+        <>
+          <b>{t('storage.used', { total: fmt(mine.totalBytes) })}</b>
+          <span className="small muted">{parts.filter(([, n]) => n > 0).map(([, n, k]) => ` · ${t(k, { n: fmt(n) })}`).join('')}</span>
+          {mine.totalBytes > 0 && (
+            <div className="storage-bar" aria-hidden>
+              {parts.filter(([, n]) => n > 0).map(([id, n, , color]) => <span key={id} style={{ width: `${(n / mine.totalBytes) * 100}%`, background: color }} />)}
+            </div>
+          )}
+          <div className="hint" style={{ marginTop: 6 }}>{t('storage.hint')}</div>
+          {orgs.map((o) => <div key={o.id} className="small" style={{ marginTop: 8 }}>{t('storage.org', { org: o.name, total: fmt(o.totalBytes), n: o.people ?? 0 })}</div>)}
+        </>
+      )}
+    </div>
   );
 }
 

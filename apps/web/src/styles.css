@@ -715,6 +715,30 @@ select.link-act { appearance: none; padding-right: 10px; }
 .att-retry { position: absolute; left: 4px; right: 4px; bottom: 4px; border: 0; border-radius: 6px; background: var(--danger); color: #fff; font-size: 11px; }
 .att-spin { position: absolute; inset: 0; margin: auto; width: 22px; height: 22px; border-radius: 99px; border: 3px solid rgba(255, 255, 255, .6); border-top-color: var(--ink); animation: att-spin .8s linear infinite; }
 @keyframes att-spin { to { transform: rotate(360deg); } }
+/* Videos (docs/VIDEO.md): tarjeta con póster que se vuelve reproductor en la misma burbuja. */
+.vid-card { position: relative; width: min(100%, 360px); max-height: 420px; border-radius: 12px; overflow: hidden; background: #111; contain: layout paint; }
+.vid-card.portrait { width: min(100%, 236px); }
+.vid-card video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.vid-start { position: absolute; inset: 0; border: 0; padding: 0; background: var(--paper-3); cursor: pointer; }
+.vid-start img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vid-start .att-tile-ph { font-size: 32px; }
+.vid-play { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 99px; display: grid; place-items: center;
+  background: rgba(12, 11, 10, .55); color: #fff; font-size: 20px; padding-left: 3px; box-shadow: 0 2px 12px rgba(0, 0, 0, .3); transition: transform .12s ease; }
+.vid-start:hover .vid-play { transform: scale(1.06); }
+.vid-meta { position: absolute; left: 8px; bottom: 8px; display: flex; gap: 6px; }
+.vid-meta span { background: rgba(12, 11, 10, .62); color: #fff; font-size: 12px; font-weight: 600; padding: 2px 7px; border-radius: 99px; font-variant-numeric: tabular-nums; }
+.vid-dl { position: absolute; right: 8px; bottom: 8px; width: 30px; height: 30px; border-radius: 99px; border: 0; background: rgba(12, 11, 10, .62); color: #fff; font-size: 15px; }
+.vid-failed { position: absolute; left: 8px; right: 8px; top: 8px; text-align: center; background: rgba(12, 11, 10, .7); color: #fff; font-size: 12px; border-radius: 8px; padding: 4px; }
+.att-draft.vid { width: 132px; height: 84px; border-radius: 10px; overflow: hidden; background: #1b1917; }
+.att-draft.vid img { width: 100%; height: 100%; object-fit: cover; opacity: .75; }
+.att-draft.vid.is-done img { opacity: 1; }
+.att-draft.vid .att-tile-ph { color: #bbb; }
+.att-vstate { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 6px 6px; background: linear-gradient(transparent, rgba(0, 0, 0, .7)); color: #fff; }
+.att-vlabel { display: block; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.att-vbar { display: block; height: 3px; margin-top: 3px; border-radius: 99px; background: rgba(255, 255, 255, .3); overflow: hidden; }
+.att-vbar span { display: block; height: 100%; background: #fff; transition: width .2s linear; }
+.storage-bar { display: flex; height: 8px; border-radius: 99px; overflow: hidden; background: var(--paper-3); margin: 10px 0 8px; }
+.storage-bar span { display: block; height: 100%; }
 .conv-main { position: relative; }
 .conv-main.is-dropping .msgs { filter: blur(1px); }
 .drop-hint { position: absolute; inset: 12px; z-index: 30; border: 2px dashed var(--ink-2); border-radius: 16px; background: rgba(251, 249, 244, .85); display: grid; place-items: center; font-weight: 700; font-size: 18px; pointer-events: none; }

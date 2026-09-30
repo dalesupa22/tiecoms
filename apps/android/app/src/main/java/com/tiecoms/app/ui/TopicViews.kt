@@ -53,6 +53,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -105,6 +107,8 @@ private fun TopicFlag(
     unread: Int = 0,
     /** Qué muestra la banderita («Solo los mensajes sin tema»), para TalkBack (en la web es el title). */
     hint: String? = null,
+    /** 1.7.4: banderita compacta (solo el ícono): TalkBack lee este nombre completo, con el sin leer y la pista. */
+    a11y: String? = null,
 ) {
     val density = androidx.compose.ui.platform.LocalDensity.current
     val tailPx = with(density) { 9.dp.toPx() }
@@ -120,9 +124,10 @@ private fun TopicFlag(
         Modifier.height(h).background(bg, shape)
             .drawBehind { drawRect(stripe, size = androidx.compose.ui.geometry.Size(with(density) { 5.dp.toPx() }, size.height)) }
             .combinedClickable(role = Role.Tab, onClick = onClick, onLongClick = onLongClick, onLongClickLabel = if (onLongClick != null) menuLabel else null)
-            .semantics { this.selected = selected; if (hint != null) contentDescription = hint }
-            .padding(start = 11.dp, end = 18.dp)
-            .testTag(tag),
+            .testTag(tag)
+            .then(if (a11y != null) Modifier.clearAndSetSemantics { this.selected = selected; role = Role.Tab; contentDescription = a11y }
+                else Modifier.semantics { this.selected = selected; if (hint != null) contentDescription = hint })
+            .padding(start = 11.dp, end = 18.dp),
         contentAlignment = Alignment.Center,
     ) {
         androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
@@ -150,7 +155,8 @@ fun TopicDock(conv: ConversationDTO, topics: List<TopicDTO>, filter: String?, co
     val client = LocalClient.current
     val container = LocalContainer.current
     val snackbar = LocalSnackbar.current
-    val active = Topics.active(topics)
+    // Orden de llegada: el más antiguo primero (position sigue el orden de creación; estable si empatan).
+    val active = remember(topics) { Topics.active(topics).sortedBy { it.position } }
     val archived = Topics.archived(topics)
     val canEdit = conv.canPost
     var menuFor by remember { mutableStateOf<String?>(null) }
@@ -190,16 +196,22 @@ fun TopicDock(conv: ConversationDTO, topics: List<TopicDTO>, filter: String?, co
         ) {
             // «💬 General» (solo lo sin tema; así abre el chat) y «☰ Todo» (todo, con su etiqueta). Sin temas activos son lo
             // mismo: una sola banderita «Todo» (docs/TEMAS.md).
+            // 1.7.4: compactas, solo el ícono; el nombre sale únicamente en la elegida (TalkBack siempre lo lee).
             item(key = "general") {
-                TopicFlag("💬 " + stringResource(if (active.isNotEmpty()) R.string.topic_general else R.string.topic_all), MaterialTheme.colorScheme.surface,
+                val name = stringResource(if (active.isNotEmpty()) R.string.topic_general else R.string.topic_all)
+                val n = if (active.isNotEmpty()) unread[""] ?: 0 else 0
+                val hint = if (active.isNotEmpty()) stringResource(R.string.topic_general_hint) else null
+                val a11y = listOfNotNull(name, if (n > 0) stringResource(R.string.topic_unread_n, n) else null, hint).joinToString(", ")
+                TopicFlag(if (filter == null) "💬 $name" else "💬", MaterialTheme.colorScheme.surface,
                     MaterialTheme.colorScheme.onSurfaceVariant, selected = filter == null, tag = if (active.isNotEmpty()) "topicGeneral" else "topicAll", onClick = { onFilter(null) },
-                    stripe = MaterialTheme.colorScheme.outlineVariant, unread = if (active.isNotEmpty()) unread[""] ?: 0 else 0,
-                    hint = if (active.isNotEmpty()) stringResource(R.string.topic_general_hint) else null)
+                    stripe = MaterialTheme.colorScheme.outlineVariant, unread = n, hint = hint, a11y = a11y)
             }
             if (active.isNotEmpty()) item(key = "all") {
-                TopicFlag("☰ " + stringResource(R.string.topic_all), MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurfaceVariant,
+                val name = stringResource(R.string.topic_all)
+                val a11y = name + ", " + stringResource(R.string.topic_all_hint)
+                TopicFlag(if (filter == Topics.ALL) "☰ $name" else "☰", MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurfaceVariant,
                     selected = filter == Topics.ALL, tag = "topicAll", onClick = { onFilter(if (filter == Topics.ALL) null else Topics.ALL) },
-                    stripe = MaterialTheme.colorScheme.outlineVariant, hint = stringResource(R.string.topic_all_hint))
+                    stripe = MaterialTheme.colorScheme.outlineVariant, hint = stringResource(R.string.topic_all_hint), a11y = a11y)
             }
             items(active, key = { it.id }) { t ->
                 val (bg, ink) = topicColors(t.color)

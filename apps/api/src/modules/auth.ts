@@ -177,10 +177,11 @@ async function startSignupConfirmation(input: SignupInput, passwordHash: string,
 }
 
 async function confirmationRow(db: Db, token: string) {
-  if (!/^[A-Za-z0-9_-]{20,80}$/.test(token)) throw notFound('Confirmación');
+  const gone = () => new ApiError(404, 'not_found', 'Este enlace de confirmación no existe. Revisa que lo copiaste completo.');
+  if (!/^[A-Za-z0-9_-]{20,80}$/.test(token)) throw gone();
   const { rows } = await db.query('SELECT * FROM signup_confirmations WHERE token_hash = $1', [sha256(token)]);
   const r = rows[0];
-  if (!r) throw notFound('Confirmación');
+  if (!r) throw gone();
   if (r.used_at) throw new ApiError(410, 'confirm_used', 'Este enlace ya se usó. Entra con tu correo y contraseña.');
   if (new Date(r.expires_at) < new Date()) throw new ApiError(410, 'confirm_expired', 'El enlace venció. Vuelve a crear la cuenta para recibir uno nuevo.');
   return r;

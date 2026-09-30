@@ -5,7 +5,7 @@ import { installSoundUnlock } from './sound.ts';
 import { t, useLang } from './i18n.ts';
 import { asset, navigate, parse, usePath } from './router.ts';
 import { AuthScreen, ConfirmSignupScreen, SsoReturnScreen } from './screens/Auth.tsx';
-import { ConversationScreen } from './screens/Conversation.tsx';
+import { ConversationArea } from './screens/Split.tsx';
 import { InviteScreen } from './screens/Invite.tsx';
 import { InboxScreen, PeopleScreen, SettingsScreen, SpacesScreen, TodayScreen, WorkspaceScreen } from './screens/Pages.tsx';
 import { Shell } from './screens/Shell.tsx';
@@ -95,7 +95,7 @@ export function App() {
       {route.name === 'readonly' && <ReadOnlyConversationScreen key={route.id} id={route.id} />}
       {route.name === 'settings' && <SettingsScreen />}
       {route.name === 'workspace' && <WorkspaceScreen key={route.id} id={route.id} />}
-      {route.name === 'conversation' && <ConversationScreen key={route.id + location.search} id={route.id} />}
+      {route.name === 'conversation' && <ConversationArea id={route.id} search={location.search} />}
     </Shell>
     <UpdateBanner />
     <MenuHost />

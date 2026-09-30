@@ -1692,3 +1692,26 @@ mark { background: #f5e3b3; color: inherit; border-radius: 3px; padding: 0 1px; 
 .guest-call-stage.has-screen .call-grid > * { flex: 0 0 180px; min-height: 0; height: 110px; aspect-ratio: auto; }
 .guest-call-stage.has-screen .call-grid .call-tile { height: 110px; }
 .guest-call-stage.has-screen .call-grid .avatar { transform: scale(0.8); }
+
+/* ---------- Conversaciones en paralelo: hasta 4 (split.ts, 30-sep-2026) ---------- */
+.split { position: relative; display: grid; gap: 6px; height: 100%; min-height: 0; background: var(--line); }
+.split.n1 { display: block; background: none; }
+.split.n1 > .split-cell { height: 100%; }
+.split.n2 { grid-template-columns: 1fr 1fr; }
+.split.n3, .split.n4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.split.n3 > .split-cell:nth-child(3) { grid-column: 1 / span 2; }
+.split-cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--paper); }
+.split-cell > .conv { flex: 1; min-height: 0; }
+.split:not(.n1) > .split-cell { border-radius: 8px; box-shadow: inset 0 0 0 1px transparent; transition: box-shadow 0.15s; }
+.split:not(.n1) > .split-cell.is-active::after { content: ""; position: absolute; inset: 0; border: 2px solid var(--accent); border-radius: 8px; pointer-events: none; z-index: 4; }
+.split:not(.n1) > .split-cell:not(.is-active) .conv-head { opacity: 0.8; }
+.split-cell.is-target { box-shadow: inset 0 0 0 3px var(--accent) !important; }
+/* Aviso al arrastrar: tenue sobre todo el área (con 4, se resalta el panel que se reemplaza). */
+.split-drop { position: absolute; inset: 0; pointer-events: none; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 10%, transparent); border: 2px dashed var(--accent); border-radius: 10px; z-index: 5; }
+.split-drop span { background: var(--ink); color: var(--paper); padding: 10px 16px; border-radius: 999px; font-weight: 600; font-size: 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2); }
+.side-conv[draggable="true"] { -webkit-user-drag: element; }
+.side-conv:active { cursor: grabbing; }
+/* Con 3 o 4 paneles: barra de fijados/tareas solo con íconos y números, y encabezado más bajo. */
+.split.n3 .chatbar-label, .split.n4 .chatbar-label { display: none; }
+.split.n3 .chatbar-btn, .split.n4 .chatbar-btn { padding-block: 4px; }
+.split.n3 .conv-head, .split.n4 .conv-head { padding-block: 8px; }

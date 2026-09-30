@@ -383,6 +383,7 @@ struct WaChatSheet: View {
     @State var chat: WaChatDTO
     var onPatched: (WaChatDTO) -> Void
     @State private var messages: [WaMessageDTO]?
+    @State private var sharing: WaMessageDTO?
 
     var body: some View {
         NavigationStack {
@@ -418,6 +419,21 @@ struct WaChatSheet: View {
                         }
                         .frame(maxWidth: .infinity, alignment: m.fromMe ? .trailing : .leading)
                         .accessibilityElement(children: .combine)
+                        // Correo y WhatsApp en el chat (docs/CORREO.md): pulsación larga › «Comentar en chaggu…».
+                        .contextMenu {
+                            if store.mailEnabled && !m.body.isEmpty {
+                                Button { sharing = m } label: { Label(L("wa.bring"), systemImage: "arrowshape.turn.up.right") }
+                                    .accessibilityIdentifier("wa.bring")
+                            }
+                        }
+                        // Botón a la vista, como «⤴ Llevar a un chat» de la web.
+                        .overlay(alignment: m.fromMe ? .bottomLeading : .bottomTrailing) {
+                            if store.mailEnabled && !m.body.isEmpty {
+                                Button { sharing = m } label: { Text("⤴ " + L("wa.bringShort")).font(.caption2.weight(.semibold)) }
+                                    .buttonStyle(.borderless)
+                                    .accessibilityIdentifier("wa.bringShort")
+                            }
+                        }
                     }
                 }
             }
@@ -425,6 +441,7 @@ struct WaChatSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("common.close")) { dismiss() } } }
             .task(id: store.waRevision) { messages = (try? await store.waMessages(chat)) ?? [] }
+            .sheet(item: $sharing) { m in WaShareSheet(chat: chat, message: m) }
         }
     }
 

@@ -9,17 +9,25 @@ enum Naming {
 
     static func person(_ d: BootstrapDTO, _ id: String?) -> PersonDTO? {
         guard let id else { return nil }
-        return d.people.first { $0.id == id }
+        if let p = d.people.first(where: { $0.id == id }) { return p }
+        // gg (docs/GG-CHAT.md): si el servidor aún no lo manda en people, igual se ve como «gg».
+        if id == GG.id { return PersonDTO(id: GG.id, name: "gg", kind: "agent") }
+        return nil
     }
 
+    /// La otra persona del directo; en «Tú» (solo yo), yo.
     static func otherInDirect(_ d: BootstrapDTO, _ c: ConversationDTO) -> PersonDTO? {
-        person(d, c.memberIds.first { $0 != d.me.id })
+        if GG.isSelf(d, c) { return person(d, d.me.id) ?? PersonDTO(id: d.me.id, name: d.me.name, kind: "human", avatarUrl: d.me.avatarUrl) }
+        return person(d, c.memberIds.first { $0 != d.me.id })
     }
 
     /// `group` usa `name`; `internal` igual (con candado en la interfaz); `direct` = la otra persona.
     static func title(_ d: BootstrapDTO, _ c: ConversationDTO) -> String {
         switch c.kind {
-        case .direct: return otherInDirect(d, c)?.name ?? L("chat.aDirect")
+        case .direct:
+            // El directo conmigo mismo se llama «Tú» (docs/GG-CHAT.md).
+            if GG.isSelf(d, c) { return L("self.title") }
+            return otherInDirect(d, c)?.name ?? L("chat.aDirect")
         case .internal:
             // Nombre por defecto del sistema: se muestra en el idioma de quien lee.
             if c.name == "Equipo interno" { return L("conv.defaultInternal") }

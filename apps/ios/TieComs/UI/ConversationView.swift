@@ -1016,9 +1016,23 @@ struct ConversationView: View {
         case .system(let m):
             // Una tarea nueva se ve como tarjeta completa (docs/TEMAS.md), no como la línea «Creó la tarea…».
             // Tanda 1.7: «Es hoy», completada, vencida y comentarios también van como la tarjeta de su evento o tarea.
-            if let mk = MailChatKind.parse(m.systemPayload) {
+            if let gp = GG.actions(m) {
+                // gg como chat (docs/GG-CHAT.md): lo que gg dejó listo; solo quien lo pidió confirma.
+                GgActionsRow(message: m, payload: gp)
+            } else if let mk = MailChatKind.parse(m.systemPayload) {
                 // Correo y WhatsApp traídos al chat (docs/CORREO.md): mensaje de quien lo trajo + tarjeta, o la línea con «Abrir».
                 MailChatRow(message: m, kind: mk, canPost: c.canPost)
+            } else if let k = ChatCards.kind(m), k.isComments {
+                // Comentarios agrupados: una línea que lleva a la tarea o al evento, sin repetir la tarjeta (como la web).
+                switch k {
+                case .issueComments(let id, let info):
+                    CommentsNoticeLine(count: info.count, title: ChatCards.title(m), lastByName: info.lastByName, lastExcerpt: info.lastExcerpt,
+                                       icon: AnyView(Text("☑").font(.footnote))) { store.push(.issue(id)) }
+                case .eventComments(let id, let info):
+                    CommentsNoticeLine(count: info.count, title: ChatCards.title(m), lastByName: info.lastByName, lastExcerpt: info.lastExcerpt,
+                                       icon: AnyView(Text("📅").font(.footnote))) { store.push(.event(id)) }
+                default: EmptyView()
+                }
             } else if let k = ChatCards.kind(m), let eventId = k.eventId {
                 EventChatCard(eventId: eventId, creatorId: m.authorId, kind: k, onComment: c.canPost ? { ev in
                     commentingEvent = ev; commentingIssue = nil; replyTo = nil; editing = nil; composerFocused = true
@@ -1359,7 +1373,10 @@ struct ConversationView: View {
                 if editing == nil && !commenting {
                     AttachButton(staged: $staged, onEvent: embedded ? nil : { sheet = .newEvent(nil) },
                                  onIssue: embedded || !canOpenIssues ? nil : { sheet = .newIssue(nil) },
-                                 onMeeting: embedded ? nil : { now in sheet = .meeting(now: now) }) { store.show($0) }
+                                 onMeeting: embedded ? nil : { now in sheet = .meeting(now: now) },
+                                 // Correo en el chat (docs/CORREO.md): ＋ › Correo con este chat como destino; WhatsApp va a su pantalla.
+                                 onMail: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.mailBox(conversationId: conversationId)) },
+                                 onWhatsApp: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.whatsapp) }) { store.show($0) }
                 }
                 if editing == nil && !commenting && !embedded { ViewOnceToggle(on: $viewOnceNext) }
                 // UITextView: tokens resaltados, cursor real y retroceso que borra el token entero.

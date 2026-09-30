@@ -91,6 +91,7 @@ targets:
       - TieComs/Core/Models.swift
       - TieComs/Core/ModelsV2.swift
       - TieComs/Core/MailModels.swift
+      - TieComs/Core/GG.swift
       - TieComs/Core/APIClient.swift
       - TieComs/Core/Storage.swift
       - TieComs/Core/SharedText.swift

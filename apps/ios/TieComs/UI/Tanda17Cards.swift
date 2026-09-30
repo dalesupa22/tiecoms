@@ -57,6 +57,9 @@ enum ChatCards {
         }
     }
 
+    /// El título que trae el aviso (p. ej. el de la tarea en `issue.comments`).
+    static func title(_ m: MessageDTO) -> String { (m.systemPayload?["title"] as? String) ?? "" }
+
     /// Mensajes que celebran (confeti) o lamentan (carita triste) al llegar en vivo con el chat a la vista.
     enum Burst: Equatable { case confetti, sad }
     static func burst(_ m: MessageDTO) -> Burst? {

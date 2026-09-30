@@ -5,11 +5,13 @@ import Foundation
 // apps/web/src/screens/Mail.tsx y packages/client-core. Este archivo también lo compila la extensión
 // Compartir (el evento en vivo `mail.updated` trae un SharedMailDTO).
 
-/// Proveedor de correo: Gmail (google) u Outlook (microsoft).
+/// Proveedor de correo: Gmail (google) u Outlook (microsoft). `whatsapp` solo aparece en un SharedMailDTO: un mensaje de
+/// WhatsApp llevado al chat (migración 040), con hilo y tarea como un correo, pero sin responder desde chaggu.
 enum MailProvider: String, Codable, CaseIterable, Sendable, Hashable, Identifiable {
-    case google, microsoft
+    case google, microsoft, whatsapp
     var id: String { rawValue }
-    var label: String { self == .google ? "Gmail" : "Outlook" }
+    var label: String { self == .google ? "Gmail" : self == .microsoft ? "Outlook" : "WhatsApp" }
+    var isWhatsApp: Bool { self == .whatsapp }
     /// Pestañas de Recibidos; la primera es la de por defecto.
     var categories: [String] { self == .microsoft ? ["focused", "other", "any"] : ["primary", "updates", "promotions", "social", "forums", "any"] }
 }
@@ -158,6 +160,27 @@ struct ScheduledReplyDTO: Codable, Equatable, Sendable {
     var sendAt: String
 }
 
+/// Datos del WhatsApp compartido (provider `whatsapp`).
+struct SharedWaInfo: Codable, Equatable, Sendable {
+    var chatName: String?
+    var isGroup: Bool
+    /// personal | business
+    var accountKind: String
+    var accountId: String
+    var jid: String
+    init(chatName: String?, isGroup: Bool, accountKind: String, accountId: String, jid: String) {
+        self.chatName = chatName; self.isGroup = isGroup; self.accountKind = accountKind; self.accountId = accountId; self.jid = jid
+    }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        chatName = c.o("chatName")
+        isGroup = c.v("isGroup", false)
+        accountKind = c.v("accountKind", "personal")
+        accountId = c.v("accountId", "")
+        jid = c.v("jid", "")
+    }
+}
+
 /// El correo que alguien llevó a un chat (la tarjeta). `body` solo llega con `?full=1`.
 struct SharedMailDTO: Codable, Equatable, Identifiable, Sendable {
     var id: String
@@ -191,6 +214,8 @@ struct SharedMailDTO: Codable, Equatable, Identifiable, Sendable {
     var lastComments: [SharedMailCommentDTO]
     var createdAt: String
     var webLink: String?
+    /// Solo con provider `whatsapp`.
+    var wa: SharedWaInfo?
 
     var isOut: Bool { direction == "out" }
     /// La otra persona de la tarjeta: el primer destinatario si lo envié, el remitente si lo recibí.
@@ -237,6 +262,7 @@ struct SharedMailDTO: Codable, Equatable, Identifiable, Sendable {
         lastComments = c.lossyArray("lastComments")
         createdAt = c.v("createdAt", "")
         webLink = c.o("webLink")
+        wa = c.o("wa")
     }
 
     /// Une lo que llega (tarjeta, evento en vivo o respuesta de una acción) con lo que ya había:
@@ -251,6 +277,16 @@ struct SharedMailDTO: Codable, Equatable, Identifiable, Sendable {
             m.webLink = prev.webLink
         }
         return m
+    }
+}
+
+/// Respuesta de compartir: {emails:[…]} (varios chats) o, en servidores anteriores, un SharedMailDTO o {message}.
+enum MailShareResult {
+    static func decode(_ data: Data) -> [SharedMailDTO] {
+        struct Many: Decodable { var emails: [SharedMailDTO]? }
+        if let m = try? JSONDecoder().decode(Many.self, from: data), let e = m.emails { return e }
+        if let one = try? JSONDecoder().decode(SharedMailDTO.self, from: data) { return [one] }
+        return []
     }
 }
 
@@ -270,23 +306,26 @@ struct WaSharedPayload: Equatable, Sendable {
     var text: String
     var sentAt: String?
     var comment: String?
+    /// Desde la 040 el mensaje compartido tiene registro propio (SharedMailDTO con hilo y tarea); los viejos no.
+    var emailId: String? = nil
 }
 
 /// Franja de comentarios agrupados (`mail.comments`).
-struct MailCommentsInfo: Equatable, Sendable { var count: Int; var lastById: String?; var lastByName: String; var lastExcerpt: String }
+struct MailCommentsInfo: Equatable, Sendable { var count: Int; var lastById: String?; var lastByName: String; var lastExcerpt: String; var title = "" }
 
 /// Qué dibuja un mensaje de sistema de correo o WhatsApp.
 enum MailChatKind: Equatable {
     case shared(emailId: String, comment: String?)
-    case comments(emailId: String, MailCommentsInfo)
+    /// Aviso agrupado de comentarios: una línea que abre el hilo. `provider` elige el icono (✉ o WhatsApp).
+    case comments(emailId: String, MailCommentsInfo, provider: String?)
     case replied(emailId: String)
     case replyFailed(emailId: String)
     case waShared(WaSharedPayload)
 
     var emailId: String? {
         switch self {
-        case .shared(let id, _), .comments(let id, _), .replied(let id), .replyFailed(let id): return id
-        case .waShared: return nil
+        case .shared(let id, _), .comments(let id, _, _), .replied(let id), .replyFailed(let id): return id
+        case .waShared(let p): return p.emailId
         }
     }
 
@@ -298,14 +337,16 @@ enum MailChatKind: Equatable {
         case "mail.comments":
             guard let id = str("emailId") else { return nil }
             let n = (p["count"] as? NSNumber)?.intValue ?? Int(str("count") ?? "") ?? 1
-            return .comments(emailId: id, .init(count: max(1, n), lastById: str("lastById"), lastByName: str("lastByName") ?? "", lastExcerpt: str("lastExcerpt") ?? ""))
+            return .comments(emailId: id, .init(count: max(1, n), lastById: str("lastById"), lastByName: str("lastByName") ?? "", lastExcerpt: str("lastExcerpt") ?? "",
+                                                title: str("title") ?? ""), provider: str("provider"))
         case "mail.replied": return str("emailId").map { .replied(emailId: $0) }
         case "mail.reply_failed": return str("emailId").map { .replyFailed(emailId: $0) }
         case "wa.shared":
             guard let text = p["text"] as? String else { return nil }
             return .waShared(.init(accountId: str("accountId") ?? "", jid: str("jid") ?? "", waMessageId: str("waMessageId") ?? "",
                                    accountKind: str("accountKind") ?? "personal", chatName: str("chatName"), isGroup: (p["isGroup"] as? Bool) ?? false,
-                                   author: str("author"), fromMe: (p["fromMe"] as? Bool) ?? false, text: text, sentAt: str("sentAt"), comment: str("comment")))
+                                   author: str("author"), fromMe: (p["fromMe"] as? Bool) ?? false, text: text, sentAt: str("sentAt"), comment: str("comment"),
+                                   emailId: str("emailId")))
         default: return nil
         }
     }

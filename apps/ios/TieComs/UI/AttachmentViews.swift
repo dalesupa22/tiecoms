@@ -331,6 +331,9 @@ struct AttachButton: View {
     var onIssue: (() -> Void)? = nil
     /// «📹 Reunión ahora» y «📅 Agendar reunión con enlace» (Meet, Teams o Zoom), 1.6.6.
     var onMeeting: ((Bool) -> Void)? = nil
+    /// «✉ Correo» y «Mensaje de WhatsApp» (docs/CORREO.md), solo con features.mail.
+    var onMail: (() -> Void)? = nil
+    var onWhatsApp: (() -> Void)? = nil
     var onError: (String) -> Void
 
     var body: some View {
@@ -348,6 +351,9 @@ struct AttachButton: View {
                 Button { onMeeting(true) } label: { Text(L("meet.now")) }.accessibilityIdentifier("composer.plus.meetNow")
                 Button { onMeeting(false) } label: { Text(L("meet.schedule")) }.accessibilityIdentifier("composer.plus.meetSchedule")
             }
+            if onMail != nil || onWhatsApp != nil { Divider() }
+            if let onMail { Button(action: onMail) { Label(L("mail.fromChat"), systemImage: "envelope") }.accessibilityIdentifier("composer.plus.mail") }
+            if let onWhatsApp { Button(action: onWhatsApp) { Label(L("wa.fromChat"), systemImage: "phone.bubble") }.accessibilityIdentifier("composer.plus.whatsapp") }
         } label: {
             Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accentText)
                 .frame(width: 36, height: 40)

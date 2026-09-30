@@ -11,6 +11,9 @@ struct MailProviderIcon: View {
     let provider: MailProvider
     var size: CGFloat = 18
     var body: some View {
+        if provider.isWhatsApp { WaIcon(size: size) } else { icon }
+    }
+    private var icon: some View {
         Canvas { g, sz in
             let k = sz.width / 48
             func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * k, y: y * k) }
@@ -124,8 +127,6 @@ struct MailStatusPill: View {
 struct MailCard: View {
     @Environment(AppStore.self) private var store
     let emailId: String
-    /// Franja «N comentarios nuevos» (aviso `mail.comments`).
-    var comments: MailCommentsInfo? = nil
     var canPost = true
     @State private var task = false
     @State private var fileURL: URL?
@@ -134,7 +135,7 @@ struct MailCard: View {
     var body: some View {
         Group {
             if let e = store.mails[emailId], let d = store.data {
-                card(d, e)
+                if e.provider.isWhatsApp { waCard(d, e) } else { card(d, e) }
             } else if store.mailsMissing.contains(emailId) {
                 Text(L("mail.unavailable")).font(.footnote).foregroundStyle(Theme.textSecondary)
                     .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -154,10 +155,6 @@ struct MailCard: View {
         let mine = e.sharedBy == d.me.id
         let other = e.other
         VStack(alignment: .leading, spacing: 8) {
-            if let comments {
-                CommentsStrip(info: .init(count: comments.count, lastById: comments.lastById, lastByName: comments.lastByName, lastExcerpt: comments.lastExcerpt),
-                              onReply: canPost ? { store.push(.mail(e.id, mode: "comments")) } : nil)
-            }
             HStack(alignment: .top, spacing: 10) {
                 MailProviderIcon(provider: e.provider, size: 24)
                 VStack(alignment: .leading, spacing: 2) {
@@ -198,27 +195,50 @@ struct MailCard: View {
                     }
                 }
             }
+            MailCardComments(email: e, canPost: canPost)
             // En pantallas angostas (tarjeta con avatar al lado) el estado va arriba y los botones abajo.
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 6) { MailStatusPill(email: e).fixedSize(); Spacer(minLength: 4); actions(e, mine: mine) }
                 VStack(alignment: .leading, spacing: 6) { MailStatusPill(email: e); HStack(spacing: 6) { actions(e, mine: mine) } }
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surface))
-        .overlay(alignment: .leading) {
-            UnevenRoundedRectangle(topLeadingRadius: 14, bottomLeadingRadius: 14).fill(e.isOut ? MailUI.outColor : MailUI.inColor).frame(width: 4)
-        }
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.textSecondary.opacity(0.15)))
-        .accessibilityElement(children: .contain)
+        .modifier(MailCardFrame(edge: e.isOut ? MailUI.outColor : MailUI.inColor))
         .accessibilityIdentifier("mailCard.\(e.id)")
     }
 
-    @ViewBuilder private func actions(_ e: SharedMailDTO, mine: Bool) -> some View {
-        Button { store.push(.mail(e.id, mode: "comments")) } label: { pill("💬" + (e.commentCount > 0 ? " \(e.commentCount)" : "")) }
+    /// WhatsApp compartido (desde la 040): el mensaje citado en verde, sus comentarios y ◆ Tarea. Sin Responder.
+    @ViewBuilder private func waCard(_ d: BootstrapDTO, _ e: SharedMailDTO) -> some View {
+        let mine = e.sharedBy == d.me.id
+        let author: String = e.isOut ? (mine ? L("common.youShort") : MailUI.firstName(Naming.person(d, e.sharedBy)?.name)) : (e.from?.name ?? L("wa.someone"))
+        let kind = "WhatsApp" + (e.wa?.accountKind == "business" ? " Business" : "") + " · " + (e.wa?.isGroup == true ? "👥 " + L("wa.groupShort") : "") + (e.wa?.chatName ?? e.subject)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                WaIcon(size: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(kind).font(.caption2.weight(.bold)).foregroundStyle(Theme.textSecondary)
+                    (Text(author).bold() + Text(" · " + MailUI.date(e.sentAt))).font(.caption).foregroundStyle(Theme.textSecondary)
+                }
+            }
+            Button { store.push(.mail(e.id, mode: "read")) } label: {
+                HStack(spacing: 8) {
+                    Rectangle().fill(MailUI.waColor).frame(width: 3)
+                    Text(e.snippet).font(.subheadline).foregroundStyle(Theme.textPrimary).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                }
+            }
             .buttonStyle(.plain)
-            .accessibilityLabel(L("mail.comments") + (e.commentCount > 0 ? " \(e.commentCount)" : ""))
-            .accessibilityIdentifier("mailCard.comments")
+            .accessibilityIdentifier("mailCard.subject")
+            MailCardComments(email: e, canPost: canPost)
+            HStack(spacing: 6) {
+                Spacer()
+                taskButton(e)
+                if mine && e.wa != nil { Button { store.push(.whatsapp) } label: { pill(L("wa.seeIn")) }.buttonStyle(.plain) }
+            }
+        }
+        .modifier(MailCardFrame(edge: MailUI.waColor))
+        .accessibilityIdentifier("waCard.\(e.id)")
+    }
+
+    @ViewBuilder private func taskButton(_ e: SharedMailDTO) -> some View {
         if let issueId = e.issueId {
             Button { store.push(.issue(issueId)) } label: { pill("◆ " + L("mail.seeTask")) }.buttonStyle(.plain)
                 .accessibilityIdentifier("mailCard.seeTask")
@@ -226,6 +246,10 @@ struct MailCard: View {
             Button { task = true } label: { pill("◆ " + L("mail.task")) }.buttonStyle(.plain)
                 .accessibilityIdentifier("mailCard.task")
         }
+    }
+
+    @ViewBuilder private func actions(_ e: SharedMailDTO, mine: Bool) -> some View {
+        taskButton(e)
         if mine && e.status != "replied" && e.status != "scheduled" {
             Button { store.push(.mail(e.id, mode: "reply")) } label: {
                 Text(L("mail.reply")).font(.caption.weight(.bold)).foregroundStyle(Theme.onPrimary).lineLimit(1).fixedSize()
@@ -253,6 +277,108 @@ struct MailCard: View {
     }
 }
 
+/// Marco de la tarjeta: fondo, borde de color a la izquierda (azul recibido, verde azulado enviado, verde WhatsApp).
+struct MailCardFrame: ViewModifier {
+    let edge: Color
+    func body(content: Content) -> some View {
+        content
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surface))
+            .overlay(alignment: .leading) { UnevenRoundedRectangle(topLeadingRadius: 14, bottomLeadingRadius: 14).fill(edge).frame(width: 4) }
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.textSecondary.opacity(0.15)))
+            .accessibilityElement(children: .contain)
+    }
+}
+
+/// Comentarios en la tarjeta, como en la tarjeta de tarea: los 2 últimos, «Ver los N comentarios» y comentar ahí mismo.
+struct MailCardComments: View {
+    @Environment(AppStore.self) private var store
+    let email: SharedMailDTO
+    var canPost = true
+    @State private var text = ""
+    @State private var busy = false
+
+    var body: some View {
+        let last = Array(email.lastComments.suffix(2))
+        VStack(alignment: .leading, spacing: 6) {
+            if !last.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(last) { c in
+                        (Text(c.authorId == store.me?.id ? L("common.youShort") : MailUI.firstName(store.data.flatMap { Naming.person($0, c.authorId)?.name })).bold()
+                         + Text(" " + c.body))
+                            .font(.footnote).foregroundStyle(Theme.textPrimary).lineLimit(3)
+                    }
+                    if email.commentCount > last.count {
+                        Button(L("task.cardAll", ["n": email.commentCount])) { store.push(.mail(email.id, mode: "comments")) }
+                            .font(.footnote.weight(.semibold)).buttonStyle(.borderless)
+                            .accessibilityIdentifier("mailCard.allComments")
+                    }
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Theme.textSecondary.opacity(0.06)))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("mailCard.lastComments")
+            }
+            if canPost {
+                HStack(spacing: 6) {
+                    TextField(email.provider.isWhatsApp ? L("mail.commentWaPh") : L("mail.commentCardPh"), text: $text)
+                        .font(.footnote)
+                        .padding(.horizontal, 10).frame(minHeight: 32)
+                        .background(Capsule().fill(Theme.textSecondary.opacity(0.08)))
+                        .submitLabel(.send)
+                        .onSubmit { send() }
+                        .accessibilityIdentifier("mailCard.commentField")
+                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button(L("comments.send")) { send() }
+                            .font(.footnote.weight(.semibold)).buttonStyle(.borderless).disabled(busy)
+                            .accessibilityIdentifier("mailCard.commentSend")
+                    }
+                }
+            }
+        }
+    }
+
+    private func send() {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty, !busy else { return }
+        busy = true
+        Task {
+            defer { busy = false }
+            do { _ = try await store.commentMail(email.id, body: body); text = "" } catch { store.show(L10n.errorText(error)) }
+        }
+    }
+}
+
+/// Aviso agrupado de comentarios (mail.comments, issue.comments, event.comments): una línea corta que abre el hilo,
+/// sin repetir la tarjeta: «💬 N comentarios nuevos · «título» · Nombre: extracto».
+struct CommentsNoticeLine: View {
+    let count: Int
+    let title: String
+    let lastByName: String
+    let lastExcerpt: String
+    var icon: AnyView? = nil
+    var onOpen: () -> Void
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: 6) {
+                if let icon { icon }
+                Text(count > 1 ? L("comments.many", ["n": count]) : L("comments.one")).font(.footnote.weight(.bold)).foregroundStyle(Theme.accentText).fixedSize()
+                (Text("«\(title)» · ") + Text(MailUI.firstName(lastByName)).bold() + Text(" " + lastExcerpt))
+                    .font(.footnote).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Capsule().fill(Theme.orange.opacity(0.07)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("commentsLine")
+    }
+}
+
 /// «mail.shared»: se ve como un mensaje de quien lo trajo (avatar, nombre, hora y su comentario) con la tarjeta.
 struct MailSharedRow: View {
     @Environment(AppStore.self) private var store
@@ -262,7 +388,6 @@ struct MailSharedRow: View {
     var canPost = true
     var body: some View {
         SharedByRow(message: message, comment: comment) { MailCard(emailId: emailId, canPost: canPost) }
-            .accessibilityIdentifier("mail.sharedRow")
     }
 }
 
@@ -293,12 +418,16 @@ struct SharedByRow<Card: View>: View {
     }
 }
 
-/// «wa.shared»: tarjeta verde con el mensaje citado.
+/// «wa.shared»: con `emailId` (desde la 040) la tarjeta con hilo y tarea; los viejos, la tarjeta verde del mensaje citado.
 struct WaSharedRow: View {
+    @Environment(AppStore.self) private var store
     let message: MessageDTO
     let payload: WaSharedPayload
+    var canPost = true
     var body: some View {
-        SharedByRow(message: message, comment: payload.comment) { WaCard(message: message, payload: payload) }
+        SharedByRow(message: message, comment: payload.comment) {
+            if let id = payload.emailId, store.mailEnabled { MailCard(emailId: id, canPost: canPost) } else { WaCard(message: message, payload: payload) }
+        }
     }
 }
 
@@ -310,7 +439,7 @@ struct WaCard: View {
     private var kindLine: String {
         var s = "WhatsApp"
         if payload.accountKind == "business" { s += " Business" }
-        if let name = payload.chatName { s += " · " + (payload.isGroup ? L("wa.groupShort") : "") + name }
+        if let name = payload.chatName { s += " · " + (payload.isGroup ? "👥 " + L("wa.groupShort") : "") + name }
         return s
     }
     private var authorLine: String {
@@ -336,17 +465,13 @@ struct WaCard: View {
                 HStack { Spacer(); Button(L("wa.seeIn")) { store.push(.whatsapp) }.font(.caption.weight(.semibold)) }
             }
         }
-        .padding(12)
         .frame(maxWidth: 520, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surface))
-        .overlay(alignment: .leading) { UnevenRoundedRectangle(topLeadingRadius: 14, bottomLeadingRadius: 14).fill(MailUI.waColor).frame(width: 4) }
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.textSecondary.opacity(0.15)))
-        .accessibilityElement(children: .combine)
+        .modifier(MailCardFrame(edge: MailUI.waColor))
         .accessibilityIdentifier("waCard")
     }
 }
 
-/// Aviso de correo o WhatsApp en el chat: tarjeta, franja de comentarios o línea con «Abrir».
+/// Aviso de correo o WhatsApp en el chat: tarjeta, línea de comentarios o línea con «Abrir».
 struct MailChatRow: View {
     @Environment(AppStore.self) private var store
     let message: MessageDTO
@@ -356,12 +481,16 @@ struct MailChatRow: View {
         switch kind {
         case .shared(let id, let comment):
             if store.mailEnabled { MailSharedRow(message: message, emailId: id, comment: comment, canPost: canPost) } else { MailSysLine(message: message, emailId: id) }
-        case .comments(let id, let info):
-            if store.mailEnabled { MailCard(emailId: id, comments: info, canPost: canPost).padding(.vertical, 4) } else { MailSysLine(message: message, emailId: id) }
+        case .comments(let id, let info, let provider):
+            // Una línea, no otra tarjeta: la tarjeta original ya muestra los comentarios.
+            CommentsNoticeLine(count: info.count, title: info.title, lastByName: info.lastByName, lastExcerpt: info.lastExcerpt,
+                               icon: provider == "whatsapp" ? AnyView(WaIcon(size: 14)) : AnyView(Text("✉").font(.footnote))) {
+                store.push(.mail(id, mode: "comments"))
+            }
         case .replied(let id), .replyFailed(let id):
             MailSysLine(message: message, emailId: id)
         case .waShared(let p):
-            WaSharedRow(message: message, payload: p)
+            WaSharedRow(message: message, payload: p, canPost: canPost)
         }
     }
 }
@@ -440,7 +569,7 @@ struct MailDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 8) {
-                        MailStatusPill(email: e)
+                        if !e.provider.isWhatsApp { MailStatusPill(email: e) }
                         if e.issueId != nil {
                             Button { if let i = e.issueId { store.push(.issue(i)) } } label: { Text("◆ " + L("mail.hasTask")).font(.caption2.weight(.bold)) }
                         }
@@ -471,7 +600,7 @@ struct MailDetailView: View {
         .safeAreaInset(edge: .bottom) {
             if conv?.canPost == true {
                 VStack(spacing: 8) {
-                    if mine {
+                    if mine && !e.provider.isWhatsApp {
                         Picker("", selection: $tab) {
                             Text("💬 " + L("mail.toTeam")).tag(Tab.comment)
                             Text("✉ " + L("mail.replyTo", ["name": MailUI.firstName(e.other?.display).isEmpty ? "…" : MailUI.firstName(e.other?.display)])).tag(Tab.reply)
@@ -479,7 +608,7 @@ struct MailDetailView: View {
                         .pickerStyle(.segmented)
                         .accessibilityIdentifier("mail.composerMode")
                     }
-                    if tab == .reply && mine {
+                    if tab == .reply && mine && !e.provider.isWhatsApp {
                         MailReplyBox(email: e) { dismiss() }
                     } else {
                         MailCommentBox(email: e) { c in comments = (comments ?? []) + [c] }

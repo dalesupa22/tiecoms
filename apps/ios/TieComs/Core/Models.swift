@@ -158,6 +158,10 @@ struct PersonDTO: Codable, Equatable, Identifiable, Sendable {
     /// Su horario de descanso (`people[].sleep`), o nil si lo tiene apagado.
     var sleep: SleepWindow?
 
+    init(id: String, name: String, kind: String = "human", orgId: String? = nil, avatarUrl: String? = nil) {
+        self.id = id; self.name = name; self.kind = kind; self.orgId = orgId; self.avatarUrl = avatarUrl; self.guest = false
+    }
+
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))

@@ -115,6 +115,8 @@ struct Avatar: View {
     var badge = false
     /// Color propio (PersonColor) en vez del de la empresa: iniciales en blanco.
     var fill: Color? = nil
+    /// gg (docs/GG-CHAT.md): su marca en vez de ◇.
+    var isGG = false
 
     /// Avatar de una persona del snapshot (foto, iniciales o ◇ si es agente).
     init(person: PersonDTO?, org: OrganizationDTO?, size: CGFloat = 40, badge: Bool = false) {
@@ -126,6 +128,7 @@ struct Avatar: View {
         self.badge = badge
         // Como la web: iniciales blancas sobre el color estable de la persona; la empresa va en la insignia.
         self.fill = person.map { PersonColor.fill($0.id) }
+        self.isGG = person?.id == GG.id
     }
 
     init(name: String, org: OrganizationDTO?, isAgent: Bool = false, size: CGFloat = 40, photo: String? = nil, badge: Bool = false, fill: Color? = nil) {
@@ -133,8 +136,21 @@ struct Avatar: View {
     }
 
     var body: some View {
+        if isGG { ggFace } else { face }
+    }
+
+    private var ggFace: some View {
+        GGMark(ink: Theme.ink)
+            .frame(width: size * 0.72, height: size * 0.72)
+            .frame(width: size, height: size)
+            .background(Circle().fill(Color.white))
+            .overlay(Circle().strokeBorder(Theme.orange.opacity(0.28), lineWidth: 1))
+            .accessibilityHidden(true)
+    }
+
+    private var face: some View {
         let shape = RoundedRectangle(cornerRadius: isAgent ? 10 : size / 2)
-        ZStack {
+        return ZStack {
             shape.fill(isAgent ? Theme.ink : fill ?? Color(css: org?.colorBg ?? "#E0DACE"))
             Text(isAgent ? "◇" : Naming.initials(name))
                 .font(.system(size: size * 0.36, weight: .semibold))

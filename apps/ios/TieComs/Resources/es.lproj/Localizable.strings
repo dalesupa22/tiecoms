@@ -73,6 +73,7 @@
 "ai.consentTitle" = "¿Permitir que gg use DeepSeek?";
 "ai.create" = "Crear";
 "ai.discard" = "Descartar";
+"ai.discarded" = "Descartado";
 "ai.done" = "Hecho";
 "ai.edit" = "Editar";
 "ai.failed" = "No se pudo";
@@ -696,7 +697,10 @@
 "err.has_digital_signature" = "Este PDF ya tiene una firma digital";
 "err.internal" = "Error interno. Intenta de nuevo.";
 "err.invalid_pdf" = "No pude leer este PDF";
+"err.mic_blocked_os" = "Tu computador no deja que el navegador use el micrófono. En Mac: Configuración del Sistema › Privacidad y seguridad › Micrófono, activa tu navegador y ciérralo y ábrelo de nuevo. En Windows: Configuración › Privacidad y seguridad › Micrófono, activa «Acceso al micrófono» y «Permitir que las aplicaciones de escritorio accedan al micrófono».";
+"err.mic_busy" = "Otra aplicación está usando el micrófono o la cámara (Teams, Zoom, Meet…). Ciérrala e intenta de nuevo.";
 "err.mic_denied" = "El navegador no dio permiso al micrófono. Actívalo en el candado de la barra de direcciones.";
+"err.mic_missing" = "No encontré un micrófono. Conecta uno (o unos audífonos con micrófono) e intenta de nuevo.";
 "err.network" = "Sin conexión con el servidor";
 "err.not_found" = "No encontrado o fuera de tu alcance";
 "err.not_pdf" = "Este archivo no es un PDF";
@@ -764,6 +768,11 @@
 "fwd.tiecoms" = "A otra conversación de chaggu…";
 "fwd.title" = "Reenviar a otro chat";
 "fwd.whatsapp" = "Por WhatsApp";
+"gg.consentAllow" = "Autorizar gg";
+"gg.consentText" = "gg usa IA (DeepSeek) para leer lo que le pides y los chats que le indiques. ¿Lo autorizas? Sirve para este chat y para @gg en tus grupos.";
+"gg.forOther" = "Para {name}";
+"gg.rowHint" = "tu asistente";
+"gg.thinking" = "gg está pensando…";
 "group.addPhoto" = "Poner foto del grupo";
 "group.changePhoto" = "Cambiar foto del grupo";
 "group.photo" = "Foto del grupo";
@@ -1247,8 +1256,10 @@
 "mail.cat.updates" = "Notificaciones";
 "mail.ccPh" = "correo@empresa.com, otro@empresa.com";
 "mail.clear" = "Limpiar búsqueda";
+"mail.commentCardPh" = "Comenta este correo…";
 "mail.commentPh" = "Tu comentario: «Miren este correo, ¿cómo le respondemos?»";
 "mail.commentTeamPh" = "Escribe al equipo…";
+"mail.commentWaPh" = "Comenta este mensaje…";
 "mail.comments" = "Comentarios";
 "mail.connect" = "Conectar";
 "mail.connectHint" = "Leer, buscar, responder y programar respuestas.";
@@ -1342,8 +1353,10 @@
 "mail.settingsRow" = "Gmail y Outlook";
 "mail.share" = "Compartir";
 "mail.shareIn" = "Compartir en {name}";
+"mail.shareInMany" = "Compartir en {n} chats";
 "mail.shareTitle" = "Llevar a un chat";
 "mail.shared" = "Compartido en el chat";
+"mail.sharedMany" = "Compartido en {n} chats";
 "mail.sharing" = "Compartiendo…";
 "mail.showHistory" = "Ver el historial citado y la firma";
 "mail.task" = "Tarea";
@@ -1364,6 +1377,7 @@
 "mail.toTeam" = "Comentar al equipo";
 "mail.unavailable" = "Este correo ya no está disponible.";
 "mail.whoSees" = "Lo verán las {n} personas de {name}: remitente, asunto y texto. Los adjuntos se abren desde tu correo solo cuando alguien los pide.";
+"mail.whoSeesMany" = "Lo verán {n} personas en {chats} chats: remitente, asunto y texto. Cada chat tiene su propia tarjeta e hilo.";
 "meet.at" = "Fecha y hora";
 "meet.cancelledToast" = "Cancelaste la conexión";
 "meet.connect" = "Conectar";
@@ -1777,11 +1791,18 @@
 "search.groups" = "Grupos";
 "search.inChat" = "Buscar en el chat";
 "search.inChatPh" = "Buscar en este chat";
+"search.messages" = "Mensajes";
+"search.moreMessages" = "Ver más mensajes";
 "search.newer" = "Siguiente";
+"search.noMessages" = "Ningún mensaje con eso.";
 "search.none" = "Nada coincide con «{q}».";
 "search.older" = "Anterior";
 "search.opensChat" = "Abre el chat";
 "search.people" = "Personas";
+"self.rowHint" = "notas para ti";
+"self.saveHere" = "Guardar en Tú";
+"self.saved" = "Guardado en Tú";
+"self.title" = "Tú";
 "settings.alerts" = "Avisos";
 "settings.closeSession" = "Cerrar";
 "settings.devices" = "Dispositivos con sesión abierta";
@@ -1896,6 +1917,7 @@
 "side.returned" = "La respuesta ya está en el hilo";
 "side.returnedChip" = "✓ Llevado al hilo";
 "side.search" = "Buscar en este chat o en tu empresa";
+"side.searchChats" = "Buscar chat, grupo o persona…";
 "side.seeInChat" = "Ver en el chat";
 "side.selected" = "{n} seleccionadas";
 "side.selectedOne" = "1 seleccionada";
@@ -2065,6 +2087,7 @@
 "sys.event.created" = "Agendó «{title}» para el {when}.";
 "sys.event.moved" = "Movió «{title}» al {when}.";
 "sys.event.today" = "Hoy: {title} a las {time}.";
+"sys.gg.actions" = "✦ gg dejó algo listo para confirmar";
 "sys.group.created" = "Grupo «{name}» creado.";
 "sys.group.photo_changed" = "Cambió la foto del grupo.";
 "sys.group.photo_removed" = "Quitó la foto del grupo.";
@@ -2307,6 +2330,9 @@
 "wa.account" = "Cuenta";
 "wa.allAccounts" = "Todas las cuentas";
 "wa.allChats" = "Todos los chats";
+"wa.bring" = "Llevar a un chat…";
+"wa.bringShort" = "Llevar a un chat";
+"wa.bringTitle" = "Llevar un WhatsApp a un chat";
 "wa.cat.all" = "Todos";
 "wa.cat.amigos" = "Amigos";
 "wa.cat.clientes" = "Clientes";

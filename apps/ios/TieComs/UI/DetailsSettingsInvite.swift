@@ -444,6 +444,10 @@ struct SettingsView: View {
                 NavigationLink(value: Route.files) { Label(L("nav.files"), systemImage: "folder") }
                     .accessibilityIdentifier("settings.files")
                 NavigationLink(value: Route.whatsapp) { Label(L("settings.whatsapp"), systemImage: "message") }
+                if store.mailEnabled {
+                    NavigationLink(value: Route.mailBox(conversationId: nil)) { Label(L("mail.title") + " · " + L("mail.settingsRow"), systemImage: "envelope") }
+                        .accessibilityIdentifier("settings.mail")
+                }
                 NavigationLink(value: Route.reminders) { Label(L("rem.title"), systemImage: "alarm") }
                 NavigationLink(value: Route.scheduled) {
                     Label(L("nav.scheduled") + (store.scheduled.isEmpty ? "" : " · \(store.scheduled.count)"), systemImage: "clock")

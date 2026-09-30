@@ -2471,3 +2471,31 @@
 /* Topics: reorder (drag the flag or from the menu) */
 "topic.moveLeft" = "Move left";
 "topic.moveRight" = "Move right";
+
+/* Nueva llamada con enlace para invitados (1.7.6) */
+"calls.instant.autoTitle" = "{name}'s call";
+"calls.instant.autoTitleNoName" = "Quick call";
+"calls.instant.copied" = "Copied";
+"calls.instant.copy" = "Copy";
+"calls.instant.expires" = "The link stops working when the call ends.";
+"calls.instant.kind" = "Call type";
+"calls.instant.linkHint" = "You'll get a link as soon as it starts. Whoever opens it only enters their name and email; it works while the call lasts.";
+"calls.instant.linkShort" = "Link";
+"calls.instant.new" = "New call";
+"calls.instant.newSub" = "Get a link and share it with anyone, even without chaggu";
+"calls.instant.oldServer" = "Update soon: your server doesn't have quick calls yet.";
+"calls.instant.people" = "People ({n})";
+"calls.instant.peopleHint" = "Guests join with the link using their name and email.";
+"calls.instant.share" = "Share";
+"calls.instant.shareAgain" = "Share the call link";
+"calls.instant.shareNav" = "Call link";
+"calls.instant.shareSub" = "Send it to anyone: no account or app needed.";
+"calls.instant.shareSubject" = "Join my call on chaggu";
+"calls.instant.shareText" = "Join my call on chaggu: {url}. You only need your name and email.";
+"calls.instant.shareTitle" = "Share the link";
+"calls.instant.start" = "Start";
+"calls.instant.suggested" = "Suggested message";
+"calls.instant.titleHint" = "Leave it empty and we'll name it for you.";
+"calls.instant.titleLabel" = "Title (optional)";
+"calls.instant.video" = "Video";
+"calls.instant.voice" = "Voice";

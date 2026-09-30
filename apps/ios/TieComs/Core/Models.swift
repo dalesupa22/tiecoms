@@ -620,15 +620,19 @@ struct CallDTO: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-/// Invitado por enlace dentro de una llamada: `{ id, name }`.
+/// Invitado por enlace dentro de una llamada: `{ id, name, email? }` (el correo llega desde «Nueva llamada», 1.7.6).
 struct CallGuestDTO: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var name: String
-    init(id: String, name: String) { self.id = id; self.name = name }
+    /// Correo que escribió al entrar (opcional; servidores anteriores no lo mandan).
+    var email: String?
+    init(id: String, name: String, email: String? = nil) { self.id = id; self.name = name; self.email = email }
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))
         name = c.v("name", "")
+        let e = (c.o("email") as String?)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        email = e?.isEmpty == false ? e : nil
     }
 }
 

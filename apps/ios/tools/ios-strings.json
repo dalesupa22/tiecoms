@@ -3606,5 +3606,109 @@
  "card.forwarded": [
   "Reenviado",
   "Forwarded"
+ ],
+ "calls.instant.new": [
+  "Nueva llamada",
+  "New call"
+ ],
+ "calls.instant.newSub": [
+  "Crea un enlace y compártelo con quien quieras, aunque no tenga chaggu",
+  "Get a link and share it with anyone, even without chaggu"
+ ],
+ "calls.instant.titleLabel": [
+  "Título (opcional)",
+  "Title (optional)"
+ ],
+ "calls.instant.titleHint": [
+  "Si lo dejas vacío, le ponemos uno automático.",
+  "Leave it empty and we'll name it for you."
+ ],
+ "calls.instant.kind": [
+  "Tipo de llamada",
+  "Call type"
+ ],
+ "calls.instant.voice": [
+  "Voz",
+  "Voice"
+ ],
+ "calls.instant.video": [
+  "Video",
+  "Video"
+ ],
+ "calls.instant.linkHint": [
+  "Al empezar tendrás un enlace. Quien lo abra solo pone su nombre y correo; sirve mientras dure la llamada.",
+  "You'll get a link as soon as it starts. Whoever opens it only enters their name and email; it works while the call lasts."
+ ],
+ "calls.instant.start": [
+  "Empezar",
+  "Start"
+ ],
+ "calls.instant.autoTitle": [
+  "Llamada de {name}",
+  "{name}'s call"
+ ],
+ "calls.instant.autoTitleNoName": [
+  "Llamada rápida",
+  "Quick call"
+ ],
+ "calls.instant.shareText": [
+  "Únete a mi llamada en chaggu: {url}. Solo necesitas tu nombre y correo.",
+  "Join my call on chaggu: {url}. You only need your name and email."
+ ],
+ "calls.instant.oldServer": [
+  "Actualiza pronto: tu servidor aún no tiene llamadas rápidas.",
+  "Update soon: your server doesn't have quick calls yet."
+ ],
+ "calls.instant.shareTitle": [
+  "Comparte el enlace",
+  "Share the link"
+ ],
+ "calls.instant.shareNav": [
+  "Enlace de la llamada",
+  "Call link"
+ ],
+ "calls.instant.shareSub": [
+  "Envíalo a quien quieras: no necesita cuenta ni la app.",
+  "Send it to anyone: no account or app needed."
+ ],
+ "calls.instant.copy": [
+  "Copiar",
+  "Copy"
+ ],
+ "calls.instant.copied": [
+  "Copiado",
+  "Copied"
+ ],
+ "calls.instant.share": [
+  "Compartir",
+  "Share"
+ ],
+ "calls.instant.shareSubject": [
+  "Únete a mi llamada en chaggu",
+  "Join my call on chaggu"
+ ],
+ "calls.instant.suggested": [
+  "Texto sugerido",
+  "Suggested message"
+ ],
+ "calls.instant.expires": [
+  "El enlace deja de servir cuando termina la llamada.",
+  "The link stops working when the call ends."
+ ],
+ "calls.instant.linkShort": [
+  "Enlace",
+  "Link"
+ ],
+ "calls.instant.shareAgain": [
+  "Compartir el enlace de la llamada",
+  "Share the call link"
+ ],
+ "calls.instant.people": [
+  "Personas ({n})",
+  "People ({n})"
+ ],
+ "calls.instant.peopleHint": [
+  "Los invitados entran con el enlace poniendo su nombre y correo.",
+  "Guests join with the link using their name and email."
  ]
 }

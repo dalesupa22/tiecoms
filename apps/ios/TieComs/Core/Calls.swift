@@ -572,6 +572,10 @@ final class CallCenter: CallMediaDelegate {
     private(set) var guest: GuestSession?
     /// Cómo terminó la última llamada de invitado («Saliste» / «La llamada terminó»).
     var guestOutcome: GuestOutcome?
+    /// «Nueva llamada» (1.7.6): enlace para invitados de la llamada en curso; muere con ella (InstantCall.swift).
+    var shareLink: CallShareLink?
+    /// Hoja «Comparte el enlace» sobre la pantalla de la llamada.
+    var linkSheet = false
 
     @ObservationIgnored weak var store: AppStore?
     /// Fábrica de la sesión de medios (las pruebas ponen NullCallMedia).
@@ -775,6 +779,7 @@ final class CallCenter: CallMediaDelegate {
     private func teardown(keepError: Bool = false, outcome: GuestOutcome? = nil) async {
         leaving = true
         if guest != nil { guestOutcome = outcome; guest = nil }
+        shareLink = nil; linkSheet = false
         bound = [:]
         beat?.cancel(); beat = nil
         flushTask?.cancel(); flushTask = nil
@@ -804,6 +809,7 @@ final class CallCenter: CallMediaDelegate {
         ringTask?.cancel(); ringTask = nil
         media?.stop(); media = nil
         view = nil; ringing = nil; expanded = false; outbox = []
+        shareLink = nil; linkSheet = false
     }
 
     // MARK: Latido

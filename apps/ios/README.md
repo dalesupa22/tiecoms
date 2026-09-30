@@ -10,9 +10,22 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Bundle ID | `com.chaggu.app` (app) · `com.chaggu.app.share` (Compartir) · `com.chaggu.app.notifications` (Notification Service Extension) · pruebas `com.chaggu.app.tests` / `com.chaggu.app.uitests` |
 | Team | `B76US7H3L3` (CERTILABOR SAS), firma automática |
 | App Group | `group.com.chaggu.app`: Keychain compartido (servicio `com.chaggu.app.session`) y lista de conversaciones para la extensión |
-| Versión | 1.6.7 (build 24), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
+| Versión | 1.7.6 (build 45), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.chaggu.com` por defecto (web: `https://www.chaggu.com`); `-TCApiURL <url>` al lanzar (pruebas) |
+
+## 1.7.6 (45): «Nueva llamada» con enlace para invitados
+
+- Pestaña Llamadas: botón grande «Nueva llamada» arriba (`UI/InstantCallViews.swift`). Hoja corta con título opcional (vacío →
+  «Llamada de {nombre}») y Voz/Video (voz por defecto): un toque en «Empezar» llama a `POST /calls/instant { title, video }`
+  → `{ call, conversationId, link: { url, token } }` (`Core/InstantCall.swift`), entra con `POST /calls/:id/join` y abre sola la
+  hoja «Comparte el enlace»: enlace, Copiar, `ShareLink` (WhatsApp, Mensajes, Correo…) y el texto sugerido
+  «Únete a mi llamada en chaggu: <url>. Solo necesitas tu nombre y correo.». En la llamada, 🔗 «Enlace» la vuelve a abrir.
+  El enlace solo vive en memoria y se borra al terminar la llamada (el servidor lo mata también).
+- Invitados: `CallDTO.guests[].email` opcional (tolerante); el correo sale bajo el nombre y en la hoja «Personas (n)».
+- 404 en `/calls/instant` (servidor viejo): «Actualiza pronto: tu servidor aún no tiene llamadas rápidas.».
+- Pruebas: `InstantCallTests`; `NuevaLlamadaUITests` contra el API sintético `tools/fixtures/instant-call-api.mjs`
+  (`TEST_RUNNER_TC_FIXTURE_INSTANT`; `POST /__old {"on":true}` simula el servidor viejo).
 
 ## 1.7.5 (44): temas con no leídos primero y abrir en el tema del mensaje
 

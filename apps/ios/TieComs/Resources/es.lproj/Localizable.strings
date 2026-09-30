@@ -2471,3 +2471,31 @@
 /* Temas: reordenar (arrastrar la banderita o desde el menú) */
 "topic.moveLeft" = "Mover a la izquierda";
 "topic.moveRight" = "Mover a la derecha";
+
+/* Nueva llamada con enlace para invitados (1.7.6) */
+"calls.instant.autoTitle" = "Llamada de {name}";
+"calls.instant.autoTitleNoName" = "Llamada rápida";
+"calls.instant.copied" = "Copiado";
+"calls.instant.copy" = "Copiar";
+"calls.instant.expires" = "El enlace deja de servir cuando termina la llamada.";
+"calls.instant.kind" = "Tipo de llamada";
+"calls.instant.linkHint" = "Al empezar tendrás un enlace. Quien lo abra solo pone su nombre y correo; sirve mientras dure la llamada.";
+"calls.instant.linkShort" = "Enlace";
+"calls.instant.new" = "Nueva llamada";
+"calls.instant.newSub" = "Crea un enlace y compártelo con quien quieras, aunque no tenga chaggu";
+"calls.instant.oldServer" = "Actualiza pronto: tu servidor aún no tiene llamadas rápidas.";
+"calls.instant.people" = "Personas ({n})";
+"calls.instant.peopleHint" = "Los invitados entran con el enlace poniendo su nombre y correo.";
+"calls.instant.share" = "Compartir";
+"calls.instant.shareAgain" = "Compartir el enlace de la llamada";
+"calls.instant.shareNav" = "Enlace de la llamada";
+"calls.instant.shareSub" = "Envíalo a quien quieras: no necesita cuenta ni la app.";
+"calls.instant.shareSubject" = "Únete a mi llamada en chaggu";
+"calls.instant.shareText" = "Únete a mi llamada en chaggu: {url}. Solo necesitas tu nombre y correo.";
+"calls.instant.shareTitle" = "Comparte el enlace";
+"calls.instant.start" = "Empezar";
+"calls.instant.suggested" = "Texto sugerido";
+"calls.instant.titleHint" = "Si lo dejas vacío, le ponemos uno automático.";
+"calls.instant.titleLabel" = "Título (opcional)";
+"calls.instant.video" = "Video";
+"calls.instant.voice" = "Voz";

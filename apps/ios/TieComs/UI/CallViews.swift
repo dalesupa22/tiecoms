@@ -152,8 +152,10 @@ struct ActiveCallPill: View {
 }
 
 enum CallTitle {
-    static func text(_ d: BootstrapDTO, _ call: CallDTO) -> String {
+    /// `fallback`: el título de «Nueva llamada» mientras su conversación aún no llega al bootstrap.
+    static func text(_ d: BootstrapDTO, _ call: CallDTO, fallback: String? = nil) -> String {
         if let c = d.conversations.first(where: { $0.id == call.conversationId }) { return Naming.title(d, c) }
+        if let t = call.title ?? fallback, !t.isEmpty { return t }
         // Me agregaron a una llamada de un chat donde no estoy: los nombres de quienes están.
         let others = (call.activeUserIds + call.invitedUserIds).filter { $0 != d.me.id }.map { firstName(d, $0, call.names) }.filter { !$0.isEmpty }
         var seen = Set<String>()
@@ -309,6 +311,7 @@ struct CallScreen: View {
     @Environment(AppStore.self) private var store
     @State private var consent = false
     @State private var adding = false
+    @State private var people = false
     /// Pantalla compartida ampliada (tileId).
     @State private var enlarged: Int?
 
@@ -345,6 +348,10 @@ struct CallScreen: View {
             .presentationDetents([.medium])
         }
         .sheet(isPresented: $adding) { AddToCallSheet() }
+        .sheet(isPresented: $people) { CallParticipantsSheet().presentationDetents([.medium, .large]) }
+        .sheet(isPresented: Binding(get: { center.linkSheet && center.currentShareLink != nil }, set: { center.linkSheet = $0 })) {
+            if let l = center.currentShareLink { CallLinkShareSheet(link: l).presentationDetents([.medium, .large]) }
+        }
         .fullScreenCover(isPresented: Binding(get: { enlarged != nil }, set: { if !$0 { enlarged = nil } })) {
             if let id = enlarged, let v = center.view {
                 let ctx = CallPeopleContext(d: store.data, me: v.isGuest ? (center.guest?.userId ?? "") : (store.data?.me.id ?? ""), call: v.call)
@@ -372,7 +379,7 @@ struct CallScreen: View {
                 .accessibilityLabel(L("call.minimize")).accessibilityIdentifier("call.minimize")
             }
             VStack(spacing: 2) {
-                Text(v.isGuest ? (center.guest?.title ?? L("call.title")) : (ctx.d.map { CallTitle.text($0, v.call) } ?? L("call.title")))
+                Text(v.isGuest ? (center.guest?.title ?? L("call.title")) : (ctx.d.map { CallTitle.text($0, v.call, fallback: center.currentShareLink?.title) } ?? L("call.title")))
                     .font(.headline).foregroundStyle(.white).lineLimit(1)
                 TimelineView(.periodic(from: .now, by: 1)) { t in
                     Text(v.phase == .connecting ? L("call.connecting") : CallRules.clock(elapsed(since: v.call.startedAt, now: t.date)))
@@ -468,6 +475,9 @@ struct CallScreen: View {
                             personAvatar(ctx, v, center, id, size: 76)
                             Text(ctx.name(id)).font(.footnote).foregroundStyle(.white).lineLimit(1)
                             if ctx.isGuest(id) { guestBadge }
+                            if let e = CallRules.guestEmail(v.call, id) {
+                                Text(e).font(.caption2).foregroundStyle(.white.opacity(0.7)).lineLimit(1).truncationMode(.middle)
+                            }
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("call.person.\(id)")
@@ -581,9 +591,18 @@ struct CallScreen: View {
     }
 
     /// 🔊 Altavoz (con lista si hay Bluetooth o audífonos) y «Agregar», con texto para que se encuentren.
+    /// En pantallas angostas con 🔗 y personas la fila se desliza en vez de cortarse.
     private func secondary(_ v: CallView, _ center: CallCenter) -> some View {
+        ViewThatFits(in: .horizontal) {
+            secondaryRow(v, center)
+            ScrollView(.horizontal, showsIndicators: false) { secondaryRow(v, center).padding(.horizontal, 2) }
+        }
+    }
+
+    private func secondaryRow(_ v: CallView, _ center: CallCenter) -> some View {
         let current = v.audioDevices.first { $0.id == v.audioOut }
         let onSpeaker = current?.kind == .speaker
+        let count = CallPeopleContext(d: store.data, me: v.isGuest ? (center.guest?.userId ?? "") : (store.data?.me.id ?? ""), call: v.call).inside.count
         return HStack(spacing: 10) {
             if v.audioDevices.count > 2 {
                 Menu {
@@ -608,7 +627,25 @@ struct CallScreen: View {
                     .accessibilityLabel(L("call.add"))
                     .accessibilityIdentifier("call.addButton")
             }
+            // 🔗 Volver a compartir el enlace de «Nueva llamada».
+            if center.currentShareLink != nil {
+                Button { center.linkSheet = true } label: { iconChip("link") }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L("calls.instant.shareAgain"))
+                    .accessibilityIdentifier("call.link")
+            }
+            Button { people = true } label: { chip("person.2.fill", "\(count)", on: false) }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L("calls.instant.people", ["n": count]))
+                .accessibilityIdentifier("call.peopleButton")
         }
+    }
+
+    /// Solo el ícono (🔗), para que la fila quepa en pantallas angostas.
+    private func iconChip(_ icon: String) -> some View {
+        Image(systemName: icon).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+            .frame(width: 44, height: 38)
+            .background(Capsule().fill(Color.white.opacity(0.16)))
     }
 
     private func chip(_ icon: String, _ text: String, on: Bool) -> some View {
@@ -977,9 +1014,16 @@ struct CallsScreen: View {
     @State private var error: String?
     @State private var picking: String?
     @State private var active: [ActiveCallDTO] = []
+    /// «Nueva llamada» (1.7.6): la hoja corta y la llamada creada, que se abre cuando la hoja termina de cerrarse.
+    @State private var instant = false
+    @State private var created: (InstantCallDTO, Bool, String)?
 
     var body: some View {
         List {
+            NewInstantCallButton { instant = true }
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 6, trailing: 16))
+                .listRowBackground(Color.clear)
             // Solo las que siguen en curso (call.updated las va quitando).
             ActiveCallsSection(items: active.filter { store.liveCalls[$0.call.conversationId]?.id == $0.call.id })
             if let error { Text(error).foregroundStyle(Theme.textSecondary) }
@@ -1015,7 +1059,19 @@ struct CallsScreen: View {
                 Task { do { try await center.start(c.id, kind: box.id) } catch { store.show(L10n.errorText(error)) } }
             }
         }
+        .sheet(isPresented: $instant, onDismiss: enterCreated) {
+            InstantCallSheet { r, video, title in created = (r, video, title) }
+                .presentationDetents([.medium, .large])
+        }
         .background(Theme.background.ignoresSafeArea())
+    }
+
+    /// La hoja ya se cerró: entrar a la llamada (la pantalla completa y luego «Comparte el enlace»).
+    private func enterCreated() {
+        guard let (r, video, title) = created else { return }
+        created = nil
+        let center = store.callCenter
+        Task { do { try await center.enterInstant(r, video: video, title: title) } catch { store.show(L10n.errorText(error)) } }
     }
 
     private func load() async {

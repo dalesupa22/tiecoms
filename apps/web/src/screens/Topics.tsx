@@ -175,7 +175,18 @@ export function TopicDock({ conv, list, filter, onFilter, counts, unread = {} }:
   unread?: Record<string, number>;
 }) {
   const d = useClient((s) => s.data)!;
+  // Orden de llegada por defecto; quien puede escribir lo cambia arrastrando las banderitas (Danny, 30-sep-2026).
   const act = activeTopics(list);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const dropOn = (targetId: string) => {
+    const from = dragging;
+    setDragging(null); setOver(null);
+    if (!from || from === targetId) return;
+    const ids = act.map((x) => x.id).filter((id) => id !== from);
+    ids.splice(ids.indexOf(targetId) + (act.findIndex((x) => x.id === from) < act.findIndex((x) => x.id === targetId) ? 1 : 0), 0, from);
+    void client.reorderTopics(conv.id, list, ids).catch((e) => toast(errorText(e)));
+  };
   const archived = list.filter((x) => x.archivedAt);
   const canEdit = conv.canPost;
   const flagMenu = (x: TopicDTO): MenuItem[] => [
@@ -201,15 +212,19 @@ export function TopicDock({ conv, list, filter, onFilter, counts, unread = {} }:
   return (
     <div ref={dock} className="topic-dock" role="tablist" aria-label={t('topic.bar')}>
       {/* Sin temas activos, «General» y «Todo» son lo mismo: una sola banderita. */}
-      <button role="tab" aria-selected={!filter} className={`topic-flag c-plain ${!filter ? 'is-on' : ''}`} onClick={() => onFilter(null)}
-        title={act.length ? t('topic.generalHint') : undefined}>💬 {act.length ? t('topic.general') : t('topic.all')}{unread[''] && act.length > 0 ? <span className="topic-unread" aria-label={t('topic.unreadN', { n: unread['']! })}>{unread['']}</span> : null}</button>
+      {/* «General» y «Todo» compactas: solo el ícono; el nombre sale cuando están elegidas (o en el título). */}
+      <button role="tab" aria-selected={!filter} aria-label={act.length ? t('topic.general') : t('topic.all')} className={`topic-flag c-plain is-compact ${!filter ? 'is-on' : ''}`} onClick={() => onFilter(null)}
+        title={act.length ? `${t('topic.general')} · ${t('topic.generalHint')}` : undefined}>💬{!filter || !act.length ? <span className="topic-flag-text"> {act.length ? t('topic.general') : t('topic.all')}</span> : null}{unread[''] && act.length > 0 ? <span className="topic-unread" aria-label={t('topic.unreadN', { n: unread['']! })}>{unread['']}</span> : null}</button>
       {act.length > 0 && (
-        <button role="tab" aria-selected={filter === TOPIC_ALL} className={`topic-flag c-plain ${filter === TOPIC_ALL ? 'is-on' : ''}`} onClick={() => onFilter(filter === TOPIC_ALL ? null : TOPIC_ALL)}
-          title={t('topic.allHint')}>☰ {t('topic.all')}</button>
+        <button role="tab" aria-selected={filter === TOPIC_ALL} aria-label={t('topic.all')} className={`topic-flag c-plain is-compact ${filter === TOPIC_ALL ? 'is-on' : ''}`} onClick={() => onFilter(filter === TOPIC_ALL ? null : TOPIC_ALL)}
+          title={`${t('topic.all')} · ${t('topic.allHint')}`}>☰{filter === TOPIC_ALL ? <span className="topic-flag-text"> {t('topic.all')}</span> : null}</button>
       )}
       {act.map((x) => (
-        <button key={x.id} role="tab" aria-selected={filter === x.id} className={`topic-flag c-${x.color} ${filter === x.id ? 'is-on' : ''}`}
-          title={personById(d, x.createdBy)?.name}
+        <button key={x.id} role="tab" aria-selected={filter === x.id} className={`topic-flag c-${x.color} ${filter === x.id ? 'is-on' : ''} ${dragging === x.id ? 'is-dragging' : ''} ${over === x.id && dragging !== x.id ? 'is-drop' : ''}`}
+          draggable={canEdit} onDragStart={(e) => { setDragging(x.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', x.name); }}
+          onDragOver={(e) => { if (!dragging) return; e.preventDefault(); if (over !== x.id) setOver(x.id); }} onDragLeave={() => setOver((o) => (o === x.id ? null : o))}
+          onDrop={(e) => { e.preventDefault(); dropOn(x.id); }} onDragEnd={() => { setDragging(null); setOver(null); }}
+          title={[personById(d, x.createdBy)?.name, canEdit ? t('topic.dragHint') : null].filter(Boolean).join(' · ')}
           onClick={() => onFilter(filter === x.id ? null : x.id)} {...(canEdit ? menuProps(() => flagMenu(x)) : {})}>
           {x.icon} {x.name}{unread[x.id] ? <span className="topic-unread" aria-label={t('topic.unreadN', { n: unread[x.id]! })}>{unread[x.id]}</span> : null}
         </button>

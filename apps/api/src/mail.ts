@@ -116,6 +116,31 @@ export function invitationMail(p: {
   };
 }
 
+/** Confirmar el correo al crear la cuenta con un correo corporativo (docs/REGISTRO.md). */
+export function signupConfirmMail(p: { lang: MailLang; to: string; name: string; url: string; orgName: string | null; joining: boolean }): Mail {
+  const en = p.lang === 'en';
+  const first = esc(p.name.split(' ')[0] ?? p.name), org = p.orgName ? esc(p.orgName) : null;
+  const subject = en
+    ? (p.joining && p.orgName ? `Confirm your email to join ${p.orgName} on chaggu` : 'Confirm your email to create your chaggu account')
+    : (p.joining && p.orgName ? `Confirma tu correo para unirte a ${p.orgName} en chaggu` : 'Confirma tu correo para crear tu cuenta de chaggu');
+  const title = en ? `Hi ${first}, confirm your email` : `Hola ${first}, confirma tu correo`;
+  const lead = p.joining && org
+    ? (en ? `<b>${org}</b> is already on chaggu. Confirm that this address is yours and you will join your team right away.`
+      : `<b>${org}</b> ya está en chaggu. Confirma que este correo es tuyo y entras de una con tu equipo.`)
+    : (en ? `Confirm that this address is yours to create ${org ? `<b>${org}</b>` : 'your company'} on chaggu. Colleagues with your company email will join it later.`
+      : `Confirma que este correo es tuyo para crear ${org ? `<b>${org}</b>` : 'tu empresa'} en chaggu. Tus colegas con el correo de la empresa se sumarán después.`);
+  const note = en ? 'The link is single-use and expires in 48 hours.' : 'El enlace es de un solo uso y vence en 48 horas.';
+  const footer = en ? `If you didn't try to create an account, ignore this email. If the button doesn't work, copy this link:`
+    : 'Si no intentaste crear una cuenta, ignora este correo. Si el botón no funciona, copia este enlace:';
+  const label = en ? 'Confirm and enter' : 'Confirmar y entrar';
+  return {
+    to: [{ email: p.to, name: p.name }], subject,
+    text: [subject, '', `${label}: ${p.url}`, '', note].join('\n'),
+    html: layout(p.lang, title, [lead, note], { label, url: p.url }, footer),
+    tags: ['signup-confirm'],
+  };
+}
+
 /** Resumen semanal de enlaces (opt-in en el perfil): lo que compartieron otros y mi «Ver después» pendiente. */
 export function linkDigestMail(p: {
   lang: MailLang; to: string; name: string; appUrl: string;

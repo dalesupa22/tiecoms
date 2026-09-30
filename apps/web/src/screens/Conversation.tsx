@@ -51,7 +51,10 @@ type Row =
 const draftKey = (id: string) => `tiecoms:draft:${id}`;
 const excerpt = (s: string, n = 90) => s.replace(/\s+/g, ' ').trim().slice(0, n);
 
-export function ConversationScreen({ id, embedded }: { id: string; embedded?: { onClose: () => void; anchor?: MessageDTO | null; onSeeAnchor?: () => void } }) {
+/** Panel dentro de la vista en paralelo (Split.tsx): activo = el del URL; count = cuántos hay abiertos. */
+export interface PaneProps { active: boolean; count: number; onClose: () => void; onOnly: () => void }
+
+export function ConversationScreen({ id, embedded, pane }: { id: string; embedded?: { onClose: () => void; anchor?: MessageDTO | null; onSeeAnchor?: () => void }; pane?: PaneProps }) {
   const d = useClient((s) => s.data)!;
   const conv = d.conversations.find((c) => c.id === id);
   const local = useClient((s) => s.conversations[id]);
@@ -60,7 +63,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const pinIds = useClient((s) => s.pins[id]);
   const allIssues = useClient((s) => s.issues);
   const [panelPref, setPanel] = useState(() => window.innerWidth > 1180);
-  const panel = panelPref && !embedded;
+  // Con varias conversaciones en paralelo no cabe el panel de detalles.
+  const panel = panelPref && !embedded && !pane;
   // Conversación lateral abierta como panel a la derecha (o hoja en el teléfono).
   const [sideId, setSideId] = useState<string | null>(null);
   const [sideFor, setSideForState] = useState<{ message: MessageDTO; userIds: string[] } | null>(null);
@@ -95,6 +99,8 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const [text, setText] = useState(() => { try { return localStorage.getItem(draftKey(id)) ?? ''; } catch { return ''; } });
   const scroller = useRef<HTMLDivElement>(null);
   const [host, setHost] = useState<HTMLDivElement | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  hostRef.current = host;
   // Chat largo (docs/GRUPOS.md › «Navegar un chat largo»): con no leídos se abre en el primero, con la línea
   // «N mensajes nuevos». Lo leído se toma al montar, antes de marcar nada.
   const [entry] = useState(() => {
@@ -132,13 +138,15 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   const [searching, setSearching] = useState(false);
   // ⌘F / Ctrl+F (lo despacha Shell): abre la búsqueda dentro del chat o vuelve a enfocarla.
   useEffect(() => {
+    // En paralelo solo busca el panel activo, y dentro de su propio chat.
+    if (pane && !pane.active) return;
     const on = () => {
       setSearching(true);
-      requestAnimationFrame(() => { const el = document.querySelector<HTMLInputElement>('.chat-search input'); el?.focus(); el?.select(); });
+      requestAnimationFrame(() => { const el = (hostRef.current ?? document).querySelector<HTMLInputElement>('.chat-search input'); el?.focus(); el?.select(); });
     };
     addEventListener('chaggu:chat-search', on);
     return () => removeEventListener('chaggu:chat-search', on);
-  }, []);
+  }, [pane?.active]);
   const refPicker = useRefPicker({
     text, caret, exclude: id,
     onPick: (range, token) => {
@@ -403,7 +411,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
   };
   // Web: Fin o ⌥↓ / Alt+↓ con el foco fuera del compositor baja al final.
   useEffect(() => {
-    if (embedded) return;
+    if (embedded || (pane && !pane.active)) return;
     const k = (e: globalThis.KeyboardEvent) => {
       if (!(e.key === 'End' || (e.altKey && e.key === 'ArrowDown'))) return;
       const el = e.target as HTMLElement | null;
@@ -413,7 +421,7 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
     };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
-  }, [embedded, id]);
+  }, [embedded, id, pane?.active]);
 
   // El 🔕 y «Silenciado hasta…» se quitan solos cuando vence el silencio.
   useExpiry(conv?.mutedUntil);
@@ -657,6 +665,9 @@ export function ConversationScreen({ id, embedded }: { id: string; embedded?: { 
           {embedded ? <>
             <button className="icon-btn" aria-label={t('side.openFull')} title={t('side.openFull')} onClick={() => navigate(`/c/${id}`)}>⤢</button>
             <button className="icon-btn" aria-label={t('side.close')} title={t('side.close')} onClick={embedded.onClose}>×</button>
+          </> : pane ? <>
+            <button className="icon-btn" aria-label={t('split.only')} title={t('split.only')} onClick={pane.onOnly}>⤢</button>
+            <button className="icon-btn" aria-label={t('split.close')} title={t('split.close')} onClick={pane.onClose}>×</button>
           </> : <button className="icon-btn" aria-label={t('chat.details')} onClick={() => setPanel(!panelPref)}>ⓘ</button>}
         </header>
         {searching && <ChatSearchBar conv={conv} scroller={scroller} onJump={jumpTo} onClose={() => { setSearching(false); input.current?.focus(); }} />}

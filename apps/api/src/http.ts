@@ -12,7 +12,7 @@ import {
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
   ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput, ForwardSharedInput,
-  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, GuestJoinInput, GuestSecretInput,
+  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, GuestJoinInput, GuestSecretInput, SignupConfirmInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -159,7 +159,13 @@ export async function buildHttp() {
     return r;
   }
 
-  app.post('/api/v1/auth/signup', authLimit, async (req, reply) => sendAuth(req, reply, await auth.signup(SignupInput.parse(req.body))));
+  app.post('/api/v1/auth/signup', authLimit, async (req, reply) => sendAuth(req, reply, await auth.signup(SignupInput.parse(req.body), String(req.headers['accept-language'] ?? ''))));
+  // Registro con correo corporativo: la cuenta nace al confirmar el correo (docs/REGISTRO.md).
+  app.get<{ Params: { token: string } }>('/api/v1/auth/signup/confirm/:token', authLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return auth.previewSignupConfirmation(req.params.token); });
+  app.post('/api/v1/auth/signup/confirm', authLimit, async (req, reply) => {
+    const b = SignupConfirmInput.parse(req.body);
+    return sendAuth(req, reply, await auth.confirmSignup(b.token, b.device));
+  });
   app.post('/api/v1/auth/login', authLimit, async (req, reply) => sendAuth(req, reply, await auth.login(LoginInput.parse(req.body))));
   app.post('/api/v1/auth/refresh', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
     const body = RefreshInput.parse(req.body ?? {});

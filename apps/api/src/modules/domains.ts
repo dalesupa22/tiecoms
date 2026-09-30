@@ -34,7 +34,7 @@ export function normalizeDomain(input: string): string {
 export async function claimedBy(db: Db, domain: string): Promise<{ orgId: string; orgName: string; joinPolicy: string; status: string } | null> {
   const { rows } = await db.query(
     `SELECT d.org_id, d.status, o.name, o.join_policy FROM org_domains d JOIN organizations o ON o.id = d.org_id
-      WHERE d.domain = $1 AND d.status IN ('idp','dns')`,
+      WHERE d.domain = $1 AND d.status IN ('email','idp','dns')`,
     [domain],
   );
   const r = rows[0];
@@ -98,7 +98,7 @@ export async function verifyDomain(userId: string, orgId: string, input: string,
       return toDTO(r.rows[0]);
     }
     // El DNS manda: si otra empresa lo tenía solo por proveedor de identidad, lo pierde.
-    await c.query("UPDATE org_domains SET status = 'pending', verified_at = NULL WHERE domain = $1 AND org_id <> $2 AND status IN ('idp','dns')", [domain, orgId]);
+    await c.query("UPDATE org_domains SET status = 'pending', verified_at = NULL WHERE domain = $1 AND org_id <> $2 AND status IN ('email','idp','dns')", [domain, orgId]);
     const r = await c.query(
       "UPDATE org_domains SET status = 'dns', verified_at = now(), last_checked_at = now() WHERE org_id = $1 AND domain = $2 RETURNING *",
       [orgId, domain],

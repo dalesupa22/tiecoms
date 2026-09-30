@@ -126,6 +126,8 @@ export interface EventInput {
   /** Llave estable de la cita (su id): reintentar no duplica el evento. */
   key: string; title: string; description: string; startsAt: string; endsAt: string; timezone: string;
   attendees: { email: string; name: string }[];
+  /** Videollamada de chaggu (sala). Sin ella se pide Meet o Teams al proveedor. */
+  joinUrl?: string | null;
 }
 export interface CreatedEvent { provider: CalendarProvider; externalId: string; joinUrl: string | null }
 
@@ -146,13 +148,13 @@ async function googleCreate(access: string, e: EventInput): Promise<CreatedEvent
   let ev: any = await read();
   if (ev?.status === 'cancelled') throw new ApiError(409, 'slot_failed', 'El evento de esta cita fue cancelado');
   if (!ev) {
-    const res = await request(`${gBase()}/calendars/primary/events?conferenceDataVersion=1&sendUpdates=all`, {
+    const res = await request(`${gBase()}/calendars/primary/events?${e.joinUrl ? '' : 'conferenceDataVersion=1&'}sendUpdates=all`, {
       method: 'POST', headers: { authorization: `Bearer ${access}`, 'content-type': 'application/json' },
       body: JSON.stringify({
         id, summary: e.title, description: e.description,
         start: { dateTime: e.startsAt, timeZone: e.timezone }, end: { dateTime: e.endsAt, timeZone: e.timezone },
         attendees: e.attendees.map((a) => ({ email: a.email, displayName: a.name })),
-        conferenceData: { createRequest: { requestId: e.key, conferenceSolutionKey: { type: 'hangoutsMeet' } } },
+        ...(e.joinUrl ? { location: e.joinUrl } : { conferenceData: { createRequest: { requestId: e.key, conferenceSolutionKey: { type: 'hangoutsMeet' } } } }),
         guestsCanModify: false, guestsCanInviteOthers: false,
       }),
     });
@@ -162,6 +164,7 @@ async function googleCreate(access: string, e: EventInput): Promise<CreatedEvent
       if (!res.ok) throw new ProviderError(res.status, 'google_failed', `Google respondió HTTP ${res.status}`);
     }
   }
+  if (e.joinUrl) return { provider: 'google', externalId: id, joinUrl: e.joinUrl };
   let url = meetUrl(ev);
   // Meet a veces tarda un instante en salir: una relectura corta antes de rendirse.
   for (let i = 0; !url && i < 3; i++) { await new Promise((r) => setTimeout(r, 700)); url = meetUrl(await read()); }
@@ -178,12 +181,12 @@ async function microsoftCreate(access: string, e: EventInput): Promise<CreatedEv
       subject: e.title, body: { contentType: 'text', content: e.description },
       start: { dateTime: localIso(e.startsAt, e.timezone), timeZone: e.timezone }, end: { dateTime: localIso(e.endsAt, e.timezone), timeZone: e.timezone },
       attendees: e.attendees.map((a) => ({ emailAddress: { address: a.email, name: a.name }, type: 'required' })),
-      isOnlineMeeting: true, onlineMeetingProvider: 'teamsForBusiness', transactionId: e.key.slice(0, 64),
+      ...(e.joinUrl ? { location: { displayName: e.joinUrl } } : { isOnlineMeeting: true, onlineMeetingProvider: 'teamsForBusiness' }), transactionId: e.key.slice(0, 64),
     }),
   });
   const ev: any = await res.json().catch(() => ({}));
   if (!res.ok) throw new ProviderError(res.status, ev?.error?.code ?? 'microsoft_failed', `Microsoft respondió HTTP ${res.status}`);
-  return { provider: 'microsoft', externalId: ev.id, joinUrl: ev?.onlineMeeting?.joinUrl ?? null };
+  return { provider: 'microsoft', externalId: ev.id, joinUrl: e.joinUrl ?? ev?.onlineMeeting?.joinUrl ?? null };
 }
 
 /** Mueve el evento (mismo enlace de Meet/Teams) y avisa a los invitados. */

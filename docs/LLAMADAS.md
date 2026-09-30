@@ -182,3 +182,15 @@ Pedido de Danny. César lo llamó, contestó en el iPhone y el PC siguió sonand
   - No transcriben su audio (la transcripción con Groq pide sesión).
 - `CallDTO.guests` lleva los invitados que están dentro, para que todos vean su nombre.
 - Pruebas: `test/calls-guests.test.ts`.
+
+
+## Salas abiertas (desde el 30-sep-2026, migración 049)
+
+Como «Crear una reunión para después» de Google Meet: un enlace **permanente** que su dueño crea una vez y deja abierto para invitar a quien quiera.
+
+- **Crear:** Agenda › Mis enlaces › «＋ Enlace de reunión», o «＋ Crear» › «Crear enlace de reunión». «Iniciar una reunión ahora» crea la sala, copia el enlace y entra. Con «Programar reunión» se sigue agendando en el calendario como siempre.
+- **Enlace:** `https://app.chaggu.com/sala/abc-defg-hij` (10 letras al azar). Cualquiera entra con su nombre, sin cuenta, por voz o video, **aunque el dueño no esté**.
+- **Ciclo:** al entrar el primero a una sala vacía se abre una llamada nueva (en el chat «Tú» del dueño, que solo él ve); cuando sale el último (de chaggu o invitado) se cierra. El enlace sigue sirviendo. A diferencia de las llamadas de chat, **los invitados sostienen una sala**. gg le avisa al dueño cuando alguien entra a su sala vacía.
+- **API:** `POST /rooms {title}`, `GET /rooms`, `DELETE /rooms/:id` (el enlace deja de servir y se cierra la llamada), `POST /rooms/:id/enter` (el dueño entra desde la app); públicos: `GET /rooms/:code`, `POST /rooms/:code/join {name}`. Mismo límite de 10 invitados.
+- **Citas:** cada cita por enlace (`docs/CITAS.md`) crea su propia sala (`source='booking'`), que no aparece en Mis enlaces y se cierra al cancelar la cita.
+- Pruebas: `test/rooms.test.ts`.

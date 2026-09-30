@@ -7,6 +7,7 @@ import type {
 import { config } from '../config.ts';
 import { audit, pool, tx, type Tx } from '../db.ts';
 import { GG_ID } from './gg.ts';
+import { callsEnabled, createRoom } from './calls.ts';
 import { appendMessage } from './messages.ts';
 import { getOrCreateDirect } from './workspaces.ts';
 import { ApiError, badRequest, forbidden, notFound } from '../errors.ts';
@@ -200,9 +201,9 @@ function bookingDTO(b: BookingRow, p: Page, pub: BookingPagePublicDTO, token?: s
     hosts: p.hosts.filter((h) => b.host_ids.includes(h.id)).map(hostDTO), page: pub, ...(token ? { manageToken: token } : {}),
   };
 }
-const eventOf = (p: Page, b: { id: string; guest_name: string; guest_email: string; guest_note: string }, hosts: string[], startsAt: number, organizerId: string) => ({
-  key: b.id, title: `${p.title}: ${b.guest_name}`,
-  description: [b.guest_note ? `Nota de ${b.guest_name}: ${b.guest_note}` : '', `Reservado en ${pageUrl(p.slug)}`].filter(Boolean).join('\n\n'),
+const eventOf = (p: Page, b: { id: string; guest_name: string; guest_email: string; guest_note: string }, hosts: string[], startsAt: number, organizerId: string, joinUrl: string | null) => ({
+  key: b.id, title: `${p.title}: ${b.guest_name}`, joinUrl,
+  description: [joinUrl ? `Videollamada de chaggu: ${joinUrl}` : '', b.guest_note ? `Nota de ${b.guest_name}: ${b.guest_note}` : '', `Reservado en ${pageUrl(p.slug)}`].filter(Boolean).join('\n\n'),
   startsAt: iso(startsAt), endsAt: iso(startsAt + p.durationMin * MIN), timezone: p.timezone,
   attendees: [{ email: b.guest_email, name: b.guest_name }, ...p.hosts.filter((h) => hosts.includes(h.id) && h.id !== organizerId).map((h) => ({ email: h.email, name: h.name }))],
 });
@@ -235,11 +236,18 @@ export async function book(slug: string, input: { startsAt: string; name: string
   });
 
   const row = { id, guest_name: input.name, guest_email: input.email, guest_note: input.note ?? '' };
+  // La videollamada es una sala de chaggu, propia de esta cita; sin llamadas activas, Meet/Teams del proveedor.
+  let roomId: string | null = null, joinUrl: string | null = null;
   try {
-    const ev = await createCalendarEvent(slot.organizerId, eventOf(p, row, slot.hostIds, start, slot.organizerId));
-    await pool.query("UPDATE bookings SET status = 'confirmed', provider = $2, external_id = $3, join_url = $4, confirmed_at = now() WHERE id = $1", [id, ev.provider, ev.externalId, ev.joinUrl]);
+    if (callsEnabled()) {
+      const room = await createRoom(slot.organizerId, p.title, 'booking');
+      roomId = room.id; joinUrl = room.url;
+    }
+    const ev = await createCalendarEvent(slot.organizerId, eventOf(p, row, slot.hostIds, start, slot.organizerId, joinUrl));
+    await pool.query("UPDATE bookings SET status = 'confirmed', provider = $2, external_id = $3, join_url = $4, room_id = $5, confirmed_at = now() WHERE id = $1", [id, ev.provider, ev.externalId, ev.joinUrl, roomId]);
   } catch (e: any) {
     await pool.query("UPDATE bookings SET status = 'failed' WHERE id = $1", [id]);
+    if (roomId) await pool.query('UPDATE call_rooms SET revoked_at = now() WHERE id = $1', [roomId]);
     console.log(`[booking] no se pudo crear el evento de ${id}: ${e?.message ?? e}`);
     throw new ApiError(502, 'calendar_unavailable', 'No pudimos crear la cita en el calendario. Inténtalo de nuevo en un momento.');
   }
@@ -311,6 +319,7 @@ async function cancel(b: BookingRow, p: Page, by: 'guest' | 'host', token: strin
     catch (e: any) { console.log(`[booking] no se pudo cancelar el evento de ${b.id}: ${e?.message ?? e}`); throw new ApiError(502, 'calendar_unavailable', 'No pudimos cancelar en el calendario. Inténtalo de nuevo.'); }
   }
   await pool.query("UPDATE bookings SET status = 'cancelled', cancelled_at = now(), cancelled_by = $2 WHERE id = $1", [b.id, by]);
+  await pool.query('UPDATE call_rooms SET revoked_at = now() WHERE id = (SELECT room_id FROM bookings WHERE id = $1) AND revoked_at IS NULL', [b.id]);
   for (const h of b.host_ids) forgetBusy(h);
   void notifyHosts('cancelled', { ...b, status: 'cancelled' }, p, by);
   if (token) void notifyGuest('cancelled', { ...b, status: 'cancelled' }, p, await publicDTO(p, b.lang), token);
@@ -385,7 +394,7 @@ const checkHours = (hours: BookingHours) => {
   for (const ranges of Object.values(hours)) for (const [a, b] of ranges) if (a >= b) throw badRequest('En el horario, cada tramo debe terminar después de empezar');
 };
 
-export async function createPage(userId: string, input: Input): Promise<BookingPageDTO> {
+export async function createPage(userId: string, input: Input, orgId?: string): Promise<BookingPageDTO> {
   if (RESERVED.has(input.slug)) throw badRequest('Ese nombre está reservado; elige otro');
   if (!validTz(input.timezone)) throw badRequest('Zona horaria inválida');
   checkHours(input.hours);
@@ -393,7 +402,7 @@ export async function createPage(userId: string, input: Input): Promise<BookingP
   if (!(await isMemberWith(userId, hostIds.filter((h) => h !== userId)))) throw forbidden('Solo puedes elegir como anfitriones a personas de tu empresa');
   const id = await tx(async (c) => {
     if ((await c.query('SELECT 1 FROM booking_pages WHERE slug = $1', [input.slug])).rowCount) throw new ApiError(409, 'slug_taken', 'Ese enlace ya está en uso');
-    const org = (await c.query('SELECT primary_org_id FROM users WHERE id = $1', [userId])).rows[0]?.primary_org_id ?? null;
+    const org = orgId ?? (await c.query('SELECT primary_org_id FROM users WHERE id = $1', [userId])).rows[0]?.primary_org_id ?? null;
     const { rows } = await c.query(
       `INSERT INTO booking_pages (slug, owner_id, org_id, title, title_en, description, description_en, mode, duration_min, buffer_min, step_min, min_notice_min, horizon_days, timezone, hours, active)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,

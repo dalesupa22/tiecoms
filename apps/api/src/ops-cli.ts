@@ -8,7 +8,7 @@
  *   node ops.js create-integration <correo> <conversationId> "<nombre>" [urlDeSalida]
  *   node ops.js import-events <correo> <conversationId> < eventos.json   agenda sin convocatorias ni avisos (idempotente)
  *   node ops.js purge-integration-issues <integrationId> <externalId,...>  borra esos asuntos y sus avisos del chat
- *   node ops.js booking-page <correo dueño> <slug> "<título>" <collective|round_robin> <minutos> <correos,de,anfitriones> ["<descripción>"]   página de citas (docs/CITAS.md; idempotente por slug)
+ *   node ops.js booking-page <correo dueño> <slug> "<título>" <collective|round_robin> <minutos> <correos,de,anfitriones> ["<descripción>" ["<empresa>" ["<título en>" ["<descripción en>"]]]]   página de citas (docs/CITAS.md; idempotente por slug)
  *   node ops.js booking-status                              páginas de citas y si cada anfitrión tiene calendario conectado (solo lectura)
  *   node ops.js app-version <ios|android> <versión> <build> [minBuild] ["notas es"] ["notas en"]   última versión publicada (docs/ACTUALIZAR.md)
  *   node ops.js app-version <mac|windows> <versión> [url de descarga]     escritorio: el build sale de la versión (0.3.0 → 300)
@@ -91,13 +91,15 @@ try {
     console.log(JSON.stringify(r));
   } else if (command === 'booking-page' && a && b && c) {
     // Horario de atención por defecto: lunes a viernes, 9:00-12:00 y 14:00-17:00 (hora de Bogotá). Se cambia después en la app.
-    const [, , , , mode, minutes, hostList, description] = process.argv.slice(2);
+    const [, , , , mode, minutes, hostList, description, orgName, titleEn, descriptionEn] = process.argv.slice(2);
     const hours: Record<string, [string, string][]> = Object.fromEntries([1, 2, 3, 4, 5].map((d) => [String(d), [['09:00', '12:00'], ['14:00', '17:00']] as [string, string][]]));
     const owner = await userId(a);
     const hostIds = await Promise.all((hostList ?? a).split(',').filter(Boolean).map((e) => userId(e.trim())));
     const existing = (await myPages(owner)).find((p) => p.slug === b);
-    const input = { slug: b, title: c, description: description ?? '', mode: mode as 'collective' | 'round_robin', durationMin: Number(minutes ?? 30), hours, hostIds };
-    const r = existing ? await updatePage(owner, existing.id, input) : await createPage(owner, BookingPageInput.parse(input));
+    const input = { slug: b, title: c, titleEn: titleEn || null, description: description ?? '', descriptionEn: descriptionEn || null, mode: mode as 'collective' | 'round_robin', durationMin: Number(minutes ?? 30), hours, hostIds };
+    const orgId = orgName ? await orgOf(owner, orgName) : undefined;
+    const r = existing ? await updatePage(owner, existing.id, input) : await createPage(owner, BookingPageInput.parse(input), orgId);
+    if (orgId) await pool.query('UPDATE booking_pages SET org_id = $2 WHERE id = $1', [r.id, orgId]);
     console.log(JSON.stringify({ id: r.id, url: r.url, mode: r.mode, hosts: r.hostsStatus.map((h) => ({ email: h.email, calendar: h.calendar })), ready: r.ready }, null, 1));
   } else if (command === 'booking-status') {
     const { rows } = await pool.query('SELECT DISTINCT owner_id FROM booking_pages');

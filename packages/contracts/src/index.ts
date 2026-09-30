@@ -172,6 +172,9 @@ export interface GuestCallStateDTO {
   guests: CallGuestDTO[];
   names: Record<string, string>;
 }
+/** Sala de reunión abierta: un enlace permanente que cualquiera con el enlace puede usar (docs/LLAMADAS.md › Salas). */
+export interface RoomDTO { id: string; code: string; title: string; url: string; live: boolean; guests: number; createdAt: string }
+export const CreateRoomInput = z.object({ title: z.string().trim().max(120).default('') });
 export interface GuestJoinDTO { guestId: string; secret: string; call: GuestCallStateDTO; meeting: unknown; attendee: unknown }
 export const GuestSecretInput = z.object({ secret: z.string().min(20).max(100) });
 /** POST /calls/:id/invite: suma personas a la llamada en curso (les suena aunque no estén en el chat). */

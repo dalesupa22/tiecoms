@@ -7,6 +7,7 @@ import { contextHandler, copyText, toast, type MenuItem } from '../menu.tsx';
 import { BASE, navigate } from '../router.ts';
 import { Avatar, Modal, conversationTitle, orgById, personById } from '../ui.tsx';
 import { QuickActions } from './Quick.tsx';
+import { MyLinks } from './MyLinks.tsx';
 import { isMeetingUrl } from './Meetings.tsx';
 import { addDays, startOfDay, storedView, viewRange, VIEW_KEY, type CalView } from '../calendar-grid.ts';
 import { groupColor, isAllDayEvent } from '@tiecoms/client-core';
@@ -271,6 +272,7 @@ export function AgendaScreen() {
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 1180 }}>
       <div className="row page-head"><h1 className="grow">{t('nav.agenda')}</h1><QuickActions /></div>
+      <MyLinks />
       <div className="row cal-toolbar">
         <div className="seg" role="radiogroup" aria-label={t('cal.view')}>
           {(['day', 'week', 'month'] as const).map((v) => <button key={v} role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>{t(`cal.v.${v}`)}</button>)}

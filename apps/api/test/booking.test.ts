@@ -145,7 +145,7 @@ describe('reservar', () => {
     const r = await call(`/book/${slugRR}`, { body: guest('1', t, { note: 'Quiero ver una demo' }) });
     expect(r.status).toBe(200);
     expect(r.json).toMatchObject({ status: 'confirmed', startsAt: t, guestName: 'Tercero 1' });
-    expect(r.json.joinUrl).toMatch(/^https:\/\/meet\.google\.com\//);
+    expect(r.json.joinUrl).toMatch(/\/sala\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/); // la videollamada es una sala de chaggu, no Meet
     expect(r.json.manageToken).toHaveLength(43);
     expect(r.json.hosts.map((h: any) => h.name)).toEqual(['Beto']);
     expect((await fakeStats()).google).toBe(before.google + 1);
@@ -156,7 +156,11 @@ describe('reservar', () => {
     expect(mails.length).toBe(1);
     expect(mails[0].subject).toContain('Confirmada');
     expect(mails[0].htmlContent).toContain(`/r/${r.json.manageToken}`);
-    expect(mails[0].htmlContent).toContain('meet.google.com');
+    expect(mails[0].htmlContent).toContain(r.json.joinUrl);
+    expect(ev.location).toBe(r.json.joinUrl);
+    expect(ev.conferenceData?.createRequest).toBeUndefined();
+    const sala = await call(`/rooms/${r.json.joinUrl.split('/sala/')[1]}`);
+    expect(sala.json).toMatchObject({ hostName: 'Beto', title: `Cita ${slugRR}`, live: false });
     // gg le escribe directo a Beto.
     const gg = await eventually(() => pool.query(
       `SELECT m.body FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN conversation_memberships cm ON cm.conversation_id = c.id
@@ -243,5 +247,7 @@ describe('cambiar y cancelar con el enlace', () => {
     const host = mine.hostIds.includes(a.id) ? a : b;
     expect((await call(`/booking/bookings/${mine.id}/cancel`, { token: host.token, body: {} })).json).toEqual({ ok: true });
     expect((await call(`/booking/${r.json.manageToken}`)).json.status).toBe('cancelled');
+    // La sala de la cita cancelada deja de servir.
+    expect((await call(`/rooms/${r.json.joinUrl.split('/sala/')[1]}`)).status).toBe(410);
   });
 });

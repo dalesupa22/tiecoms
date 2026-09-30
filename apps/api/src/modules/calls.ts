@@ -14,7 +14,7 @@ import {
   ChimeSDKMeetingsClient, CreateAttendeeCommand, CreateMeetingCommand, DeleteMeetingCommand, GetMeetingCommand,
   StartMeetingTranscriptionCommand, StopMeetingTranscriptionCommand,
 } from '@aws-sdk/client-chime-sdk-meetings';
-import type { ActiveCallDTO, CallDTO, CallHistoryItemDTO, CallJoinDTO, CallKind, CallLinkDTO, CallTranscriptDTO, CallTranscriptSegmentDTO, GuestCallPreviewDTO, GuestCallStateDTO, GuestJoinDTO } from '@tiecoms/contracts';
+import type { RoomDTO, ActiveCallDTO, CallDTO, CallHistoryItemDTO, CallJoinDTO, CallKind, CallLinkDTO, CallTranscriptDTO, CallTranscriptSegmentDTO, GuestCallPreviewDTO, GuestCallStateDTO, GuestJoinDTO } from '@tiecoms/contracts';
 import { LEGACY_DEVICE_KEY, callUserId, guestExternalId } from '@tiecoms/contracts';
 import type { z } from 'zod';
 import type { CallTranscriptInput } from '@tiecoms/contracts';
@@ -25,7 +25,8 @@ import { pool, tx, type Db, type Tx, enqueueOutbox } from '../db.ts';
 import { ApiError, badRequest, notFound } from '../errors.ts';
 import { appendEvent, appendMessage, sendMessage } from './messages.ts';
 import { getSummarizer } from './voice-providers.ts';
-import { reachable } from './workspaces.ts';
+import { getOrCreateDirect, reachable } from './workspaces.ts';
+import { GG_ID } from './gg.ts';
 import { sttConfigured, transcribeChunk } from './call-stt.ts';
 
 /** CALLS_STT=chime vuelve a Amazon Transcribe dentro de Chime; por defecto, Groq Whisper por pedazos. */
@@ -356,15 +357,20 @@ export async function join(userId: string, callId: string, device: CallDevice = 
   }
 }
 
-async function joinCall(userId: string, callId: string, created: boolean, device: CallDevice): Promise<CallJoinDTO> {
+/** La fila de la llamada con su reunión de Chime creada (idempotente: si dos entran a la vez, ambos reciben la misma). */
+async function ensureMeeting(callId: string) {
   let row = (await pool.query('SELECT * FROM calls WHERE id = $1', [callId])).rows[0];
   if (!row.meeting) {
-    // Idempotente en Chime (ClientRequestToken): si dos entran a la vez, ambos reciben la misma reunión.
     const m = await getProvider().create(callId);
     await pool.query('UPDATE calls SET external_id = $2, media_region = $3, meeting = $4 WHERE id = $1 AND meeting IS NULL',
       [callId, m.externalId, m.mediaRegion, JSON.stringify(m.meeting)]);
     row = (await pool.query('SELECT * FROM calls WHERE id = $1', [callId])).rows[0];
   }
+  return row;
+}
+
+async function joinCall(userId: string, callId: string, created: boolean, device: CallDevice): Promise<CallJoinDTO> {
+  const row = await ensureMeeting(callId);
   // Un attendee por dispositivo: la misma persona puede estar desde dos sin que Chime saque al primero.
   const attendee = await getProvider().attendee(row.external_id, externalUserIdOf(userId, device.key));
   const call = await tx(async (c) => {
@@ -482,7 +488,9 @@ export async function leave(userId: string, callId: string, deviceKey: string = 
     const r = await c.query('UPDATE call_participants SET left_at = now() WHERE call_id = $1 AND user_id = $2 AND device_key = $3 AND left_at IS NULL', [callId, userId, deviceKey]);
     if (!r.rowCount || call.ended_at) return false;
     const left = await c.query('SELECT 1 FROM call_participants WHERE call_id = $1 AND left_at IS NULL LIMIT 1', [callId]);
-    if (left.rowCount) { await publish(c, call.conversation_id, callId); return false; }
+    // Una sala abierta la sostienen también sus invitados: sigue mientras quede alguien, sea de chaggu o no.
+    const guests = call.room_id ? await c.query('SELECT 1 FROM call_guests WHERE call_id = $1 AND left_at IS NULL LIMIT 1', [callId]) : null;
+    if (left.rowCount || guests?.rowCount) { await publish(c, call.conversation_id, callId); return false; }
     return true;
   });
   if (empty) await finish(callId);
@@ -597,7 +605,8 @@ export async function reapCalls(): Promise<number> {
   // Los invitados no sostienen la llamada: sin nadie de chaggu dentro, se cierra (y se les corta).
   const empty = await pool.query(
     `SELECT c.id FROM calls c WHERE c.ended_at IS NULL AND c.started_at < now() - interval '1 minute'
-        AND NOT EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id AND p.left_at IS NULL)`,
+        AND NOT EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id AND p.left_at IS NULL)
+        AND NOT (c.room_id IS NOT NULL AND EXISTS (SELECT 1 FROM call_guests q WHERE q.call_id = c.id AND q.left_at IS NULL))`,
   );
   const ended = new Set(empty.rows.map((r) => r.id));
   for (const id of ended) await finish(id);
@@ -676,6 +685,11 @@ export async function guestJoin(token: string, name: string): Promise<GuestJoinD
   if (r.revoked_at) throw new ApiError(410, 'link_revoked', 'Este enlace ya no sirve. Pide uno nuevo.');
   if (r.ended_at) throw new ApiError(409, 'call_ended', 'La llamada ya terminó');
   if (!r.live || !r.external_id) throw new ApiError(409, 'call_not_live', 'No hay nadie en la llamada ahora');
+  return admitGuest(r, name);
+}
+
+/** Crea al invitado en la reunión de Chime y lo anota. `r` trae la llamada y el enlace por el que entra. */
+async function admitGuest(r: { link_id: string; call_id: string; external_id: string; meeting: unknown; conversation_id: string }, name: string): Promise<GuestJoinDTO> {
   const n = await pool.query('SELECT count(*)::int AS n FROM call_guests WHERE call_id = $1 AND left_at IS NULL', [r.call_id]);
   if (n.rows[0].n >= MAX_GUESTS) throw new ApiError(409, 'call_full', 'La llamada ya tiene el máximo de invitados');
   const secret = randomToken(24);
@@ -926,3 +940,119 @@ export async function summarizeCall(callId: string) {
 
 /** Solo pruebas: reemplaza el proveedor. */
 export function setCallProvider(p: CallProvider | null) { provider = p; }
+
+// ---------- Salas abiertas (docs/LLAMADAS.md › Salas) ----------
+const CODE_LETTERS = 'abcdefghjkmnpqrstuvwxyz';
+const pick = (n: number) => Array.from({ length: n }, () => CODE_LETTERS[Math.floor(Math.random() * CODE_LETTERS.length)]).join('');
+/** «kxq-mwzt-rba»: 10 letras al azar (más de 10^13 combinaciones), fácil de dictar por teléfono. */
+const newRoomCode = () => `${pick(3)}-${pick(4)}-${pick(3)}`;
+const roomUrl = (code: string) => `${config.publicOrigin.replace(/\/$/, '')}/sala/${code}`;
+const CODE_RE = /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/;
+
+const roomDTO = (r: any): RoomDTO => ({ id: r.id, code: r.code, title: r.title, url: roomUrl(r.code), live: !!r.live, guests: r.guests ?? 0, createdAt: new Date(r.created_at).toISOString() });
+const ROOM_SELECT = `SELECT r.*, EXISTS (SELECT 1 FROM calls c WHERE c.room_id = r.id AND c.ended_at IS NULL AND (
+      EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id AND p.left_at IS NULL) OR EXISTS (SELECT 1 FROM call_guests q WHERE q.call_id = c.id AND q.left_at IS NULL))) AS live,
+    (SELECT count(*)::int FROM call_guests q JOIN calls c ON c.id = q.call_id WHERE c.room_id = r.id AND c.ended_at IS NULL AND q.left_at IS NULL) AS guests
+  FROM call_rooms r`;
+
+/** POST /rooms: una sala nueva para compartir («Crear una reunión para después»). También la usan las citas. */
+export async function createRoom(userId: string, title: string, source: 'manual' | 'booking' = 'manual'): Promise<RoomDTO> {
+  requireEnabled();
+  for (let i = 0; i < 5; i++) {
+    const r = await pool.query('INSERT INTO call_rooms (owner_id, code, title, source) VALUES ($1,$2,$3,$4) ON CONFLICT (code) DO NOTHING RETURNING *', [userId, newRoomCode(), title.slice(0, 120), source]);
+    if (r.rows[0]) return roomDTO(r.rows[0]);
+  }
+  throw new ApiError(503, 'room_unavailable', 'No se pudo crear la sala, intenta de nuevo');
+}
+
+export async function myRooms(userId: string): Promise<{ rooms: RoomDTO[] }> {
+  const { rows } = await pool.query(`${ROOM_SELECT} WHERE r.owner_id = $1 AND r.revoked_at IS NULL AND r.source = 'manual' ORDER BY r.created_at DESC LIMIT 50`, [userId]);
+  return { rooms: rows.map(roomDTO) };
+}
+
+/** DELETE /rooms/:id: el enlace deja de servir y, si hay una llamada abierta, se cierra. */
+export async function revokeRoom(userId: string, id: string) {
+  const { rows } = await pool.query('UPDATE call_rooms SET revoked_at = now() WHERE id = $1 AND owner_id = $2 AND revoked_at IS NULL RETURNING id', [id, userId]);
+  if (!rows[0]) throw notFound('Sala');
+  const open = await pool.query('SELECT id FROM calls WHERE room_id = $1 AND ended_at IS NULL', [id]);
+  for (const c of open.rows) await finish(c.id);
+  return { ok: true };
+}
+
+async function roomByCode(code: string) {
+  if (!CODE_RE.test(code)) throw notFound('Sala');
+  const r = (await pool.query(`${ROOM_SELECT} WHERE r.code = $1`, [code])).rows[0];
+  if (!r) throw notFound('Sala');
+  if (r.revoked_at) throw new ApiError(410, 'link_revoked', 'Esta sala ya no existe. Pide un enlace nuevo.');
+  return r;
+}
+
+/** GET /rooms/:code (público): lo mínimo para la pantalla «Entrar a la reunión». */
+export async function roomPreview(code: string): Promise<GuestCallPreviewDTO & { live: boolean }> {
+  requireEnabled();
+  const r = await roomByCode(code);
+  const u = (await pool.query(
+    `SELECT u.name, (SELECT o.name FROM organization_memberships om JOIN organizations o ON o.id = om.org_id WHERE om.user_id = u.id ORDER BY om.joined_at LIMIT 1) AS org_name FROM users u WHERE u.id = $1`, [r.owner_id])).rows[0];
+  // Una sala siempre se puede abrir: «active» es que se puede entrar ahora; «live» que ya hay gente.
+  return { title: r.title || null, hostName: u.name, orgName: u.org_name ?? null, kind: 'video', active: true, live: !!r.live };
+}
+
+/** La llamada abierta de la sala; si no hay, abre una (en el chat «Tú» de su dueño, que solo él ve). */
+async function openRoomCall(room: { id: string; owner_id: string }): Promise<string> {
+  const find = async () => (await pool.query('SELECT id FROM calls WHERE room_id = $1 AND ended_at IS NULL', [room.id])).rows[0]?.id as string | undefined;
+  const cur = await find();
+  if (cur) return cur;
+  const conv = (await getOrCreateDirect(room.owner_id, room.owner_id)).id;
+  try {
+    const ins = await pool.query('INSERT INTO calls (conversation_id, started_by, kind, room_id) VALUES ($1,$2,$3,$4) RETURNING id', [conv, room.owner_id, 'video', room.id]);
+    return ins.rows[0].id;
+  } catch (e: any) {
+    if (e?.code === '23505') { const again = await find(); if (again) return again; }
+    throw e;
+  }
+}
+
+/** POST /rooms/:id/enter: su dueño entra (desde la app) a la llamada de la sala. */
+export async function enterRoom(userId: string, id: string, device: CallDevice = deviceOf('', null)): Promise<CallJoinDTO> {
+  requireEnabled();
+  const room = (await pool.query('SELECT * FROM call_rooms WHERE id = $1 AND owner_id = $2 AND revoked_at IS NULL', [id, userId])).rows[0];
+  if (!room) throw notFound('Sala');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const callId = await openRoomCall(room);
+    try { return await joinCall(userId, callId, false, device); }
+    catch (e) { if (!(e instanceof MeetingGone)) throw e; await finish(callId); }
+  }
+  throw new ApiError(503, 'call_unavailable', 'No se pudo abrir la sala, intenta de nuevo');
+}
+
+/** POST /rooms/:code/join (público): entra con su nombre, sin cuenta; si la sala estaba vacía, la abre. */
+export async function roomGuestJoin(code: string, name: string): Promise<GuestJoinDTO> {
+  requireEnabled();
+  const room = await roomByCode(code);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const callId = await openRoomCall(room);
+    const row = await ensureMeeting(callId);
+    // El enlace interno de la llamada (la sala es el enlace de verdad): uno por llamada.
+    let link = (await pool.query('SELECT id FROM call_links WHERE call_id = $1 AND revoked_at IS NULL LIMIT 1', [callId])).rows[0];
+    if (!link) link = (await pool.query('INSERT INTO call_links (call_id, token_hash, created_by) VALUES ($1,$2,$3) RETURNING id', [callId, sha256(randomToken(18)), room.owner_id])).rows[0];
+    const alone = !(await pool.query(
+      `SELECT 1 WHERE EXISTS (SELECT 1 FROM call_participants WHERE call_id = $1 AND left_at IS NULL) OR EXISTS (SELECT 1 FROM call_guests WHERE call_id = $1 AND left_at IS NULL)`, [callId])).rowCount;
+    try {
+      const out = await admitGuest({ link_id: link.id, call_id: callId, external_id: row.external_id, meeting: row.meeting, conversation_id: row.conversation_id }, name);
+      if (alone) void tellOwner(room, name);
+      return out;
+    } catch (e) {
+      if (!(e instanceof ApiError && e.code === 'call_ended') || attempt) throw e;
+    }
+  }
+  throw new ApiError(503, 'call_unavailable', 'No se pudo abrir la sala, intenta de nuevo');
+}
+
+/** gg le avisa al dueño que alguien entró a su sala vacía. */
+async function tellOwner(room: { owner_id: string; title: string; code: string }, guest: string) {
+  try {
+    const dm = await getOrCreateDirect(room.owner_id, GG_ID);
+    const clean = guest.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 60) || 'Alguien';
+    await tx((c) => appendMessage(c, { conversationId: dm.id, authorId: GG_ID, kind: 'text', body: `🎥 ${clean} entró a tu sala${room.title ? ` «${room.title}»` : ''}.\nEntra tú también: ${roomUrl(room.code)}` }));
+  } catch (e: any) { console.log(`[calls] gg no pudo avisar de la sala: ${e?.message ?? e}`); }
+}

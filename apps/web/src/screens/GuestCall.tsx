@@ -6,7 +6,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import type { GuestCallPreviewDTO } from '@tiecoms/contracts';
 import { apiUrl } from '../app-client.ts';
-import { hangUp, joinAsGuest, myGuestId, toggleCamera, toggleMute } from '../call.ts';
+import { hangUp, joinAsGuest, joinRoomAsGuest, myGuestId, toggleCamera, toggleMute } from '../call.ts';
 import { errorText, t } from '../i18n.ts';
 import { asset } from '../router.ts';
 import { toast } from '../menu.tsx';
@@ -15,7 +15,8 @@ import { ScreenButton, ScreenTile, SharingBar, Tile, callPeople, useCallView } f
 
 const NAME_KEY = 'chaggu:guest-name';
 
-export default function GuestCallScreen({ token }: { token: string }) {
+/** Con `room` es una sala abierta (/sala/:código): siempre se puede entrar. Con `token`, el enlace de una llamada en curso. */
+export default function GuestCallScreen({ token = '', room }: { token?: string; room?: string }) {
   const v = useCallView();
   const [info, setInfo] = useState<GuestCallPreviewDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,13 +27,13 @@ export default function GuestCallScreen({ token }: { token: string }) {
 
   const load = () => {
     setError(null);
-    fetch(apiUrl(`/api/v1/call-links/${encodeURIComponent(token)}`)).then(async (r) => {
+    fetch(apiUrl(room ? `/api/v1/rooms/${encodeURIComponent(room)}` : `/api/v1/call-links/${encodeURIComponent(token)}`)).then(async (r) => {
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw Object.assign(new Error(''), { code: r.status === 404 ? 'link_revoked' : j?.error?.code });
+      if (!r.ok) throw Object.assign(new Error(''), { code: r.status === 404 || r.status === 410 ? 'link_revoked' : j?.error?.code });
       setInfo(j);
     }).catch((e) => setError(e?.code === 'link_revoked' ? t('guest.invalid') : errorText(e)));
   };
-  useEffect(load, [token]);
+  useEffect(load, [token, room]);
   // Se acabó la llamada (la cerraron o salió el último de chaggu) sin que yo colgara.
   useEffect(() => {
     if (v && v.phase !== 'ended') setWasIn(true);
@@ -46,7 +47,7 @@ export default function GuestCallScreen({ token }: { token: string }) {
     try { localStorage.setItem(NAME_KEY, n); } catch { /* sin almacenamiento */ }
     setBusy(true);
     setAfter(null);
-    try { await joinAsGuest(token, n, camera); }
+    try { await (room ? joinRoomAsGuest(room, n, camera) : joinAsGuest(token, n, camera)); }
     catch (err) { toast(errorText(err)); load(); }
     finally { setBusy(false); }
   }

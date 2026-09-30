@@ -23,10 +23,21 @@ export type Route =
   | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' } | { name: 'agenda' } | { name: 'share' } | { name: 'whatsapp' } | { name: 'files' } | { name: 'groups' } | { name: 'dms' } | { name: 'saved' } | { name: 'scheduled' } | { name: 'signed' } | { name: 'calls' } | { name: 'mail' }
   | { name: 'oversight'; id: string } | { name: 'readonly'; id: string }
   | { name: 'conversation'; id: string } | { name: 'workspace'; id: string }
-  | { name: 'login' } | { name: 'signup' } | { name: 'sso' } | { name: 'invite'; token: string } | { name: 'guestCall'; token: string } | { name: 'confirmSignup'; token: string };
+  | { name: 'login' } | { name: 'signup' } | { name: 'sso' } | { name: 'invite'; token: string } | { name: 'guestCall'; token: string } | { name: 'room'; code: string } | { name: 'booking'; slug: string } | { name: 'bookingManage'; token: string } | { name: 'bookingHome' } | { name: 'confirmSignup'; token: string };
+
+/** cita.chaggu.com (o book.): la ruta es directa, /<nombre> abre la página de citas y /r/<clave> administra una cita. */
+const vanityHost = typeof location !== 'undefined' && /^(cita|book)\./.test(location.hostname);
 
 export function parse(path: string): Route {
-  const [, a, b] = path.split('/');
+  const [, a, b, c] = path.split('/');
+  if (vanityHost) {
+    if (a === 'r' && b) return { name: 'bookingManage', token: decodeURIComponent(b) };
+    if (a && a !== 'r') return { name: 'booking', slug: decodeURIComponent(a) };
+    return { name: 'bookingHome' };
+  }
+  if (a === 'cita' && b === 'r' && c) return { name: 'bookingManage', token: decodeURIComponent(c) };
+  if (a === 'cita' && b) return { name: 'booking', slug: decodeURIComponent(b) };
+  if (a === 'sala' && b) return { name: 'room', code: decodeURIComponent(b) };
   if (a === 'c' && b) return { name: 'conversation', id: b };
   if (a === 'w' && b) return { name: 'workspace', id: b };
   if (a === 'invite' && b) return { name: 'invite', token: decodeURIComponent(b) };

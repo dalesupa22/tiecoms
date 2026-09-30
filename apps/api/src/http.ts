@@ -12,7 +12,7 @@ import {
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
   ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput, ForwardSharedInput,
-  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, GuestJoinInput, GuestSecretInput, BookingCreateInput, BookingRescheduleInput, BookingPageInput, BookingPagePatch, SignupConfirmInput, ReorderTopicsInput,
+  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, GuestJoinInput, GuestSecretInput, CreateRoomInput, BookingCreateInput, BookingRescheduleInput, BookingPageInput, BookingPagePatch, SignupConfirmInput, ReorderTopicsInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -548,6 +548,11 @@ export async function buildHttp() {
         offsetMs: Math.max(0, Number(req.headers['x-offset-ms']) || 0), durationMs: Math.max(0, Number(req.headers['x-duration-ms']) || 0),
       });
     });
+    // Salas abiertas (docs/LLAMADAS.md › Salas): «Crear una reunión para después» / «Iniciar una reunión ahora».
+    priv.get('/api/v1/rooms', async (req) => calls.myRooms(req.userId));
+    priv.post('/api/v1/rooms', callLimit, async (req) => calls.createRoom(req.userId, CreateRoomInput.parse(req.body ?? {}).title));
+    priv.delete<{ Params: { id: string } }>('/api/v1/rooms/:id', async (req) => calls.revokeRoom(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/rooms/:id/enter', callLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.enterRoom(req.userId, z.uuid().parse(req.params.id), calls.deviceOf(req.sessionId, CallDeviceInput.parse(req.body ?? {}).deviceKey)); });
     priv.get<{ Params: { id: string } }>('/api/v1/calls/:id/transcript', async (req) => calls.transcript(req.userId, z.uuid().parse(req.params.id)));
     priv.get('/api/v1/calls', async (req) => calls.history(req.userId, CallHistoryQuery.parse(req.query)));
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/share', callLimit, async (req) => calls.share(req.userId, z.uuid().parse(req.params.id), CallShareInput.parse(req.body)));
@@ -733,6 +738,11 @@ export async function buildHttp() {
   app.post<{ Params: { token: string } }>('/api/v1/call-links/:token/join', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req, reply) => {
     reply.header('cache-control', 'no-store');
     return calls.guestJoin(req.params.token, GuestJoinInput.parse(req.body).name);
+  });
+  app.get<{ Params: { code: string } }>('/api/v1/rooms/:code', guestLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.roomPreview(req.params.code); });
+  app.post<{ Params: { code: string } }>('/api/v1/rooms/:code/join', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req, reply) => {
+    reply.header('cache-control', 'no-store');
+    return calls.roomGuestJoin(req.params.code, GuestJoinInput.parse(req.body).name);
   });
   app.post<{ Params: { id: string } }>('/api/v1/call-guests/:id/heartbeat', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) =>
     calls.guestHeartbeat(z.uuid().parse(req.params.id), GuestSecretInput.parse(req.body).secret));

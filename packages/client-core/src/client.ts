@@ -8,7 +8,7 @@ import {
   type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallLinkDTO, type SignupConfirmPreviewDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentDTO, type CallTranscriptSegmentInput,
   type ActiveCallDTO, type MessageRefDTO, type ChatSearchPageDTO, type ViewOnceOpenDTO, type EventCommentDTO, type ViewOnceState,
   type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO, type IntegrationDTO, type IntegrationSecretDTO,
-  type StorageUsageDTO, type VideoPlayDTO,
+  type StorageUsageDTO, type VideoPlayDTO, type RoomDTO, type BookingPageDTO, type BookingHostBookingDTO,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -775,6 +775,21 @@ export class TieComsClient {
     this.putCall(r.call);
     return r.call;
   }
+  // ---------- Salas abiertas y citas por enlace (docs/LLAMADAS.md › Salas, docs/CITAS.md) ----------
+  async myRooms() { return (await this.request<{ rooms: RoomDTO[] }>('/rooms')).rooms; }
+  createRoom(title = '') { return this.request<RoomDTO>('/rooms', { method: 'POST', json: { title } }); }
+  deleteRoom(id: string) { return this.request<{ ok: true }>(`/rooms/${id}`, { method: 'DELETE' }); }
+  /** Entra a mi sala desde la app (la abre si estaba vacía). */
+  async enterRoom(id: string) {
+    const r = await this.request<CallJoinDTO>(`/rooms/${id}/enter`, { method: 'POST', json: { deviceKey: await this.callDeviceKey() } });
+    this.putCall(r.call);
+    return r;
+  }
+  async bookingPages() { return (await this.request<{ pages: BookingPageDTO[] }>('/booking/pages')).pages; }
+  createBookingPage(input: unknown) { return this.request<BookingPageDTO>('/booking/pages', { method: 'POST', json: input }); }
+  updateBookingPage(id: string, patch: unknown) { return this.request<BookingPageDTO>(`/booking/pages/${id}`, { method: 'PATCH', json: patch }); }
+  async bookings() { return (await this.request<{ bookings: BookingHostBookingDTO[] }>('/booking/bookings')).bookings; }
+  cancelBooking(id: string) { return this.request<{ ok: true }>(`/booking/bookings/${id}/cancel`, { method: 'POST', json: {} }); }
   /** Enlace para que terceros entren sin cuenta (vale mientras la llamada siga abierta). */
   async createCallLink(callId: string) { return this.request<CallLinkDTO>(`/calls/${callId}/link`, { method: 'POST', json: {} }); }
   async revokeCallLinks(callId: string) { return this.request<{ ok: true }>(`/calls/${callId}/link`, { method: 'DELETE' }); }

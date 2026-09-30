@@ -148,6 +148,22 @@ export async function joinAsGuest(token: string, name: string, camera: boolean) 
   await connect({ call: guestCall(j.call), meeting: j.meeting, attendee: j.attendee } as CallJoinDTO, camera);
 }
 
+/** Entrar como invitado a una sala abierta (/sala/:código): la abre si estaba vacía. */
+export async function joinRoomAsGuest(code: string, name: string, camera: boolean) {
+  if (view && view.phase !== 'ended') return;
+  await askDevices(camera);
+  const j = await publicPost<GuestJoinDTO>(`/rooms/${encodeURIComponent(code)}/join`, { name });
+  guest = { id: j.guestId, secret: j.secret };
+  await connect({ call: guestCall(j.call), meeting: j.meeting, attendee: j.attendee } as CallJoinDTO, camera);
+}
+
+/** Entrar a una de mis salas desde la app. */
+export async function startRoom(roomId: string, camera = true) {
+  if (view && view.phase !== 'ended') return;
+  await askDevices(camera);
+  await connect(await client.enterRoom(roomId), camera);
+}
+
 function beatOnce() {
   if (!view) return;
   if (guest) {

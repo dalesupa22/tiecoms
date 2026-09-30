@@ -66,7 +66,7 @@ http.createServer(async (req, res) => {
       const id = b.id ?? randomUUID();
       const key = `g:${id}`;
       if (state.events.has(id)) return send(res, 409, { error: { status: 'conflict' } });
-      const ev = { id, summary: b.summary, start: b.start, end: b.end, attendees: b.attendees, hangoutLink: `https://meet.google.com/mock-${id.slice(0, 4)}-${id.slice(4, 8)}`, conferenceData: { entryPoints: [{ entryPointType: 'video', uri: `https://meet.google.com/mock-${id.slice(0, 4)}-${id.slice(4, 8)}` }] } };
+      const ev = { id, summary: b.summary, start: b.start, end: b.end, attendees: b.attendees, location: b.location, conferenceData: b.conferenceData && { createRequest: b.conferenceData.createRequest }, hangoutLink: `https://meet.google.com/mock-${id.slice(0, 4)}-${id.slice(4, 8)}`, conferenceData: { entryPoints: [{ entryPointType: 'video', uri: `https://meet.google.com/mock-${id.slice(0, 4)}-${id.slice(4, 8)}` }] } };
       state.byKey.set(key, ev); state.events.set(id, ev); state.created.google++;
       if (state.dropAfterCreate === 'google') { state.dropAfterCreate = null; return res.destroy(); }
       return send(res, 200, state.googlePending || state.googleFailed ? { ...ev, hangoutLink: undefined, conferenceData: { createRequest: { status: { statusCode: state.googleFailed ? 'failure' : 'pending' } } } } : ev);

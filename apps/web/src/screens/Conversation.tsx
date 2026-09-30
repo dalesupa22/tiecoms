@@ -140,6 +140,18 @@ export function ConversationScreen({ id, embedded, pane }: { id: string; embedde
   const prevHeight = useRef(0);
   const prevFirst = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  // Altura de la caja de escribir: crece con el texto hasta un tope (30 % de la pantalla visible, máx. 180 px, para que
+  // un mensaje largo no se coma la conversación, sobre todo con el teclado del celular) y vuelve a una línea al enviar
+  // o vaciar. Se recalcula cada vez que cambia el texto, venga de donde venga (escribir, pegar, enviar, borrador).
+  useLayoutEffect(() => {
+    const el = input.current;
+    if (!el) return;
+    if (!text) { el.style.height = ''; return; }
+    el.style.height = 'auto';
+    const view = window.visualViewport?.height ?? window.innerHeight;
+    const cap = Math.max(72, Math.min(180, Math.round(view * 0.3)));
+    el.style.height = `${Math.min(cap, el.scrollHeight)}px`;
+  }, [text]);
   // Un hilo o sidechat abierto al lado recibe el cursor: se escribe ahí sin tocar el chat principal.
   useEffect(() => { if (embedded) requestAnimationFrame(() => input.current?.focus()); }, [embedded ? id : null]);
   const sideAnchorFor = () => replyTo ?? [...(local?.messages ?? [])].reverse().find((m) => m.kind === 'text' && !m.deletedAt && !!m.body) ?? null;
@@ -863,7 +875,7 @@ export function ConversationScreen({ id, embedded, pane }: { id: string; embedde
               <textarea
                 ref={input} rows={1} value={text} placeholder={isSide ? (sideOthers.length === 1 ? t('side.placeholder', { name: personById(d, sideOthers[0])?.name.split(' ')[0] ?? '' }) : t('side.placeholderMany')) : activeFilter ? t('topic.placeholder', { name: topicById.get(activeFilter)!.name }) : t('chat.placeholder', { name: title })} aria-label={t('common.message')}
                 onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
-                onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart); client.typing(id); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(180, e.target.scrollHeight)}px`; }}
+                onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart); client.typing(id); }}
                 onKeyDown={onKey} enterKeyHint="send"
                 onPaste={(e) => { const files = [...e.clipboardData.files]; if (files.length) { e.preventDefault(); drafts.add(files); } }}
               />

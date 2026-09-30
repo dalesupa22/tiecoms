@@ -183,9 +183,11 @@ final class MailUITests: XCTestCase {
         openChat(app, f)
         let plus = app.buttons["composer.attach"]
         XCTAssertTrue(plus.waitForExistence(timeout: 10))
-        plus.tap()
         let mail = app.buttons["composer.plus.mail"]
-        XCTAssertTrue(mail.waitForExistence(timeout: 5), "＋ › Correo")
+        // A veces el primer toque no abre el menú (otra ventana tapa el botón para XCTest): se reintenta.
+        for _ in 0..<3 where !mail.exists { tapC(plus); _ = mail.waitForExistence(timeout: 4) }
+        if !mail.exists { shot("correo-00-menu-mas") }
+        XCTAssertTrue(mail.exists, "＋ › Correo")
         XCTAssertTrue(app.buttons["composer.plus.whatsapp"].exists, "＋ › Mensaje de WhatsApp")
         mail.tap()
 
@@ -276,6 +278,66 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(app.buttons["mail.row.g1"].waitForExistence(timeout: 15), "la lista en vivo")
         shot("correo-12-conectado-lista")
     }
+    // MARK: 4. Tarjeta: Responder en la conversación (cita sin JSON) y Reenviar a otro chat
+
+    func test4ReplyAndForwardCard() throws {
+        let f = try fixture()
+        let app = login(f, as: f.a, extra: ["-TCOpenConversation", f.chatId])
+        openChat(app, f)
+        let card = el(app, "mailCard.\(f.g1)")
+        XCTAssertTrue(waitFor(card, 15, app), "tarjeta del comité")
+        // Pulsación larga › Responder: la barra cita «✉ asunto · remitente».
+        card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).press(forDuration: 1.2)
+        let reply = app.buttons["card.menu.reply"]
+        if !reply.waitForExistence(timeout: 5) { shot("correo-00-sin-menu-tarjeta") }
+        XCTAssertTrue(reply.exists, "menú de la tarjeta")
+        XCTAssertTrue(app.buttons["card.menu.forward"].exists)
+        shot("correo-15-menu-tarjeta")
+        reply.tap()
+        let bar = el(app, "composer.replyBar")
+        XCTAssertTrue(bar.waitForExistence(timeout: 5))
+        shot("correo-15b-barra-responder")
+        let quote = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "✉ Solicitud de presentación")).firstMatch
+        XCTAssertTrue(quote.waitForExistence(timeout: 5), "la barra cita «✉ asunto · remitente», sin JSON")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "{")).firstMatch.exists, "sin JSON")
+        let field = app.descendants(matching: .any)["composer.field"]
+        field.typeText("Yo le contesto hoy")
+        app.buttons["composer.send"].tap()
+        let sent = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Yo le contesto hoy")).firstMatch
+        XCTAssertTrue(sent.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "{\"k\"")).firstMatch.exists, "ninguna cita con JSON")
+        shot("correo-16-respuesta-a-tarjeta")
+        // Cerrar el teclado: tocar el área de mensajes (lo cierra sin quitar el toque a nada).
+        for _ in 0..<3 where app.keyboards.firstMatch.exists {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.45)).tap(); sleep(1)
+        }
+        XCTAssertTrue(waitFor(card, 10, app))
+
+        // Reenviar a «Compras»: la copia sale allá como «Reenviado desde «Ventas…»». (Se presiona sobre el estado, que queda a la vista.)
+        let pill = card.staticTexts["mail.status"]
+        XCTAssertTrue(pill.waitForExistence(timeout: 5))
+        pill.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 1.2)
+        let fwd = app.buttons["card.menu.forward"]
+        if !fwd.waitForExistence(timeout: 5) { shot("correo-00-sin-menu") }
+        XCTAssertTrue(fwd.exists)
+        fwd.tap()
+        let target = app.buttons["mail.target.\(f.otherId)"]
+        XCTAssertTrue(target.waitForExistence(timeout: 5), "el otro chat")
+        XCTAssertFalse(app.buttons["mail.target.\(f.chatId)"].exists, "sin el chat de origen")
+        target.tap()
+        shot("correo-17-reenviar")
+        app.buttons["card.forwardSend"].tap()
+        XCTAssertTrue(el(app, "toast").waitForExistence(timeout: 10), "«Compartido en el chat»")
+        // En «Compras» la copia dice «Reenviado desde «Ventas…»», con su propia tarjeta.
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let other = app.buttons["conv.row.\(f.otherId)"]
+        XCTAssertTrue(waitFor(other, 15, app))
+        let fwdLabel = el(app, "card.forwarded")
+        for _ in 0..<3 where !fwdLabel.exists { tapC(other); _ = fwdLabel.waitForExistence(timeout: 8) }
+        XCTAssertTrue(fwdLabel.exists, "«Reenviado desde…»")
+        XCTAssertTrue(fwdLabel.label.contains("Ventas correo"), fwdLabel.label)
+        shot("correo-18-reenviado")
+    }
     // MARK: 5. Regresión del cuelgue al volver a Grupos
 
     /// Grupos con un chat cuyo último mensaje es una tarjeta de correo.
@@ -289,7 +351,7 @@ final class MailUITests: XCTestCase {
     }
 
     /// Volver de un chat a Grupos no debe colgar la app (bucle de maquetación del List con el título grande y el buscador
-    /// que se esconde; intermitente, se corre varias veces: ver tools/fixtures/README.md).
+    /// que se esconde; intermitente, se corre varias veces).
     func test5BackToHome() throws {
         let f = try fixture()
         let app = login(f, as: f.a, extra: ["-TCOpenConversation", f.chatId])

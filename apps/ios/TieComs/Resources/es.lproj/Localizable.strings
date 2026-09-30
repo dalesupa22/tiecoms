@@ -397,6 +397,9 @@
 "card.commentAdded" = "Comentario añadido";
 "card.commentsNew" = "{n} comentarios nuevos";
 "card.doneBy" = "{name} completó la tarea";
+"card.forward" = "Reenviar";
+"card.forwardTitle" = "Reenviar a otros chats";
+"card.forwarded" = "Reenviado";
 "card.markDone" = "Marcar hecha";
 "card.newDate" = "Nueva fecha";
 "card.overdue" = "No cumplimos · venció el {date}";
@@ -458,6 +461,8 @@
 "chat.placeholder" = "Escribe a {name}";
 "chat.quick" = "Mensaje nuevo";
 "chat.quickHint" = "Mensaje nuevo ({key})";
+"chat.readLess" = "Ver menos";
+"chat.readMore" = "Ver más";
 "chat.readOnly" = "Solo lectura: no puedes publicar en esta conversación.";
 "chat.reconnecting" = "Reconectando… (chaggu se está actualizando)";
 "chat.remove" = "Quitar del grupo";

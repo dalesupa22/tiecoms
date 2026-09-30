@@ -24,6 +24,18 @@ enum Linkify {
         }
     }
 
+    private final class Box: NSObject { let v: AttributedString; init(_ v: AttributedString) { self.v = v } }
+    private static let cache: NSCache<NSString, Box> = { let c = NSCache<NSString, Box>(); c.countLimit = 400; return c }()
+
+    /// `attributed(_:)` con caché (1.7.1): el regex de enlaces no se repite en cada pintada de la fila.
+    static func cachedAttributed(_ text: String) -> AttributedString {
+        let k = text as NSString
+        if let hit = cache.object(forKey: k) { return hit.v }
+        let v = attributed(text)
+        cache.setObject(Box(v), forKey: k)
+        return v
+    }
+
     /// Texto con enlaces tocables (abren el navegador del sistema) y subrayados.
     static func attributed(_ text: String) -> AttributedString {
         var out = AttributedString(text)

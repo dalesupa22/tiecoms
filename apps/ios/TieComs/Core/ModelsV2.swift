@@ -626,6 +626,18 @@ struct HumanPreview: Codable, Equatable, Sendable {
     /// Una sola vista (tanda 1.7): «① Foto», «① Mensaje» o «① Nota de voz», nunca el contenido.
     var viewOnce = false
 
+    /// El «último mensaje de una persona» a partir de un mensaje (como humanPreviewOf de client-core, web 51b7536).
+    /// Con una sola vista el cuerpo va vacío.
+    init(_ m: MessageDTO) {
+        messageId = m.id; seq = m.seq; authorId = m.authorId; body = m.viewOnce ? "" : m.body; createdAt = m.createdAt; viewOnce = m.viewOnce
+        let voice = m.attachments.filter { $0.kind == "voice" }
+        let rest = m.attachments.filter { $0.kind != "voice" }
+        let images = rest.filter { $0.contentType.hasPrefix("image/") }.count
+        let videos = rest.filter { $0.contentType.hasPrefix("video/") }.count
+        attachments = m.attachments.isEmpty ? nil : Counts(count: m.attachments.count, images: images, videos: videos, files: rest.count - images - videos,
+                                                          firstName: m.attachments.first?.name, voices: voice.count, voiceDurationMs: voice.first?.durationMs)
+    }
+
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         viewOnce = c.v("viewOnce", false)

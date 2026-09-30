@@ -36,8 +36,8 @@ final class MailTests: XCTestCase {
     }
 
     func testChatKindParse() {
-        XCTAssertEqual(MailChatKind.parse(sys(#"{"k":"mail.shared","emailId":"e1","comment":"Miren"}"#).systemPayload), .shared(emailId: "e1", comment: "Miren"))
-        XCTAssertEqual(MailChatKind.parse(sys(#"{"k":"mail.shared","emailId":"e1"}"#).systemPayload), .shared(emailId: "e1", comment: nil))
+        XCTAssertEqual(MailChatKind.parse(sys(#"{"k":"mail.shared","emailId":"e1","comment":"Miren"}"#).systemPayload), .shared(emailId: "e1", comment: "Miren", forwardedFrom: nil))
+        XCTAssertEqual(MailChatKind.parse(sys(#"{"k":"mail.shared","emailId":"e1"}"#).systemPayload), .shared(emailId: "e1", comment: nil, forwardedFrom: nil))
         guard case .comments(let id, let info, let prov)? = MailChatKind.parse(sys(#"{"k":"mail.comments","emailId":"e2","title":"T","count":3,"lastById":"b","lastByName":"Bruno Díaz","lastExcerpt":"ok","provider":"whatsapp"}"#).systemPayload) else { return XCTFail() }
         XCTAssertEqual(id, "e2"); XCTAssertEqual(info.count, 3); XCTAssertEqual(info.lastByName, "Bruno Díaz"); XCTAssertEqual(info.lastExcerpt, "ok")
         XCTAssertEqual(info.title, "T"); XCTAssertEqual(prov, "whatsapp", "el aviso trae el proveedor para el icono")
@@ -96,6 +96,27 @@ final class MailTests: XCTestCase {
         XCTAssertEqual(MailShareResult.decode(Data(#"{"emails":[{"id":"a"},{"id":"b"}]}"#.utf8)).map(\.id), ["a", "b"])
         XCTAssertEqual(MailShareResult.decode(Data(#"{"id":"a","conversationId":"c1"}"#.utf8)).map(\.id), ["a"])
         XCTAssertTrue(MailShareResult.decode(Data(#"{"message":{"id":"m"}}"#.utf8)).isEmpty)
+    }
+
+    func testCardQuoteNeverJson() {
+        let saved = L10n.choice; defer { L10n.choice = saved }
+        L10n.choice = .es
+        let mail = #"{"k":"mail.shared","emailId":"e1","provider":"google","subject":"Comité del jueves","from":"Jorge Ramírez","comment":"Miren"}"#
+        XCTAssertEqual(MailText.cardQuote(kind: "system", body: mail), "✉ Comité del jueves · Jorge Ramírez")
+        XCTAssertEqual(MailText.cardQuote(kind: "system", body: #"{"k":"mail.shared","emailId":"e1","subject":""}"#), "✉ (sin asunto)")
+        XCTAssertEqual(MailText.cardQuote(kind: "system", body: #"{"k":"wa.shared","chatName":"Obra","text":"Llegó el cemento"}"#), "WhatsApp · Obra: Llegó el cemento")
+        // Cortado a 140 caracteres (vista previa): igual sale sin JSON.
+        let cut = String(#"{"k":"mail.shared","emailId":"e1","provider":"google","subject":"Solicitud de presentación para el comité del jueves","from":"Jorge Ramírez Martínez de la Universidad de los Andes"}"#.prefix(140))
+        XCTAssertLessThan(cut.count, 170)
+        XCTAssertEqual(MailText.cardQuote(kind: "system", body: cut), "✉ Solicitud de presentación para el comité del jueves")
+        XCTAssertNil(MailText.cardQuote(kind: "text", body: mail), "un mensaje de texto no es tarjeta")
+        // Cualquier otra cita de un aviso de sistema: su texto, nunca el JSON.
+        XCTAssertEqual(MailText.quoteText(kind: "system", body: #"{"k":"mail.replied","emailId":"e1","subject":"Comité","byName":"Ana"}"#), "✉ Ana respondió el correo «Comité»")
+        XCTAssertEqual(MailText.quoteText(kind: "text", body: "hola"), "hola")
+        // Reenviado: forwardedFrom en mail.shared y wa.shared.
+        XCTAssertEqual(MailChatKind.parse(sys(#"{"k":"mail.shared","emailId":"e2","forwardedFrom":"c9"}"#).systemPayload), .shared(emailId: "e2", comment: nil, forwardedFrom: "c9"))
+        guard case .waShared(let w)? = MailChatKind.parse(sys(#"{"k":"wa.shared","emailId":"e3","text":"x","forwardedFrom":"c9"}"#).systemPayload) else { return XCTFail() }
+        XCTAssertEqual(w.forwardedFrom, "c9")
     }
 
     func testLiveEventDecodes() throws {

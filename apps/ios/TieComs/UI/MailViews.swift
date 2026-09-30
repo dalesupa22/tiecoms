@@ -385,9 +385,10 @@ struct MailSharedRow: View {
     let message: MessageDTO
     let emailId: String
     let comment: String?
+    var forwardedFrom: String? = nil
     var canPost = true
     var body: some View {
-        SharedByRow(message: message, comment: comment) { MailCard(emailId: emailId, canPost: canPost) }
+        SharedByRow(message: message, comment: comment, forwardedFrom: forwardedFrom) { MailCard(emailId: emailId, canPost: canPost) }
     }
 }
 
@@ -396,6 +397,8 @@ struct SharedByRow<Card: View>: View {
     @Environment(AppStore.self) private var store
     let message: MessageDTO
     let comment: String?
+    /// Reenviada desde otro chat: «Reenviado desde «X»» (o «Reenviado» si no veo ese chat).
+    var forwardedFrom: String? = nil
     @ViewBuilder var card: () -> Card
     var body: some View {
         let d = store.data
@@ -406,6 +409,12 @@ struct SharedByRow<Card: View>: View {
                 HStack(spacing: 6) {
                     Text(author?.name ?? L("common.participant")).font(.subheadline.weight(.semibold)).foregroundStyle(PersonColor.text(message.authorId))
                     Text(L10n.clock(message.createdAt)).font(.caption2).foregroundStyle(Theme.textSecondary)
+                }
+                if let f = forwardedFrom {
+                    let name = d.flatMap { dd in store.meta(f).map { Naming.title(dd, $0) } }
+                    Label(name.map { L("fwd.fromConv", ["name": $0]) } ?? L("card.forwarded"), systemImage: "arrowshape.turn.up.right")
+                        .font(.caption).foregroundStyle(Theme.textSecondary)
+                        .accessibilityIdentifier("card.forwarded")
                 }
                 if let comment, !comment.isEmpty {
                     Text(comment).font(.body).foregroundStyle(Theme.textPrimary).fixedSize(horizontal: false, vertical: true)
@@ -425,7 +434,7 @@ struct WaSharedRow: View {
     let payload: WaSharedPayload
     var canPost = true
     var body: some View {
-        SharedByRow(message: message, comment: payload.comment) {
+        SharedByRow(message: message, comment: payload.comment, forwardedFrom: payload.forwardedFrom) {
             if let id = payload.emailId, store.mailEnabled { MailCard(emailId: id, canPost: canPost) } else { WaCard(message: message, payload: payload) }
         }
     }
@@ -477,10 +486,16 @@ struct MailChatRow: View {
     let message: MessageDTO
     let kind: MailChatKind
     var canPost = true
+    /// Responder aquí (replyTo = este mensaje de sistema) y en privado al autor, como en un mensaje normal.
+    var onReply: (() -> Void)? = nil
+    var onPrivateReply: (() -> Void)? = nil
     var body: some View {
         switch kind {
-        case .shared(let id, let comment):
-            if store.mailEnabled { MailSharedRow(message: message, emailId: id, comment: comment, canPost: canPost) } else { MailSysLine(message: message, emailId: id) }
+        case .shared(let id, let comment, let from):
+            if store.mailEnabled {
+                MailSharedRow(message: message, emailId: id, comment: comment, forwardedFrom: from, canPost: canPost)
+                    .modifier(CardActions(message: message, emailId: id, onReply: onReply, onPrivateReply: onPrivateReply))
+            } else { MailSysLine(message: message, emailId: id) }
         case .comments(let id, let info, let provider):
             // Una línea, no otra tarjeta: la tarjeta original ya muestra los comentarios.
             CommentsNoticeLine(count: info.count, title: info.title, lastByName: info.lastByName, lastExcerpt: info.lastExcerpt,
@@ -491,6 +506,97 @@ struct MailChatRow: View {
             MailSysLine(message: message, emailId: id)
         case .waShared(let p):
             WaSharedRow(message: message, payload: p, canPost: canPost)
+                .modifier(CardActions(message: message, emailId: store.mailEnabled ? p.emailId : nil, onReply: onReply, onPrivateReply: onPrivateReply))
+        }
+    }
+}
+
+/// Acciones de la tarjeta de un correo o un WhatsApp: pulsación larga (Responder, Responder en privado, Reenviar) y
+/// deslizar a la derecha para responder, como un mensaje normal.
+struct CardActions: ViewModifier {
+    let message: MessageDTO
+    let emailId: String?
+    var onReply: (() -> Void)?
+    var onPrivateReply: (() -> Void)?
+    @State private var forwarding = false
+
+    func body(content: Content) -> some View {
+        content
+            .contextMenu {
+                if let onReply { Button(action: onReply) { Label(L("menu.reply"), systemImage: "arrowshape.turn.up.left") }.accessibilityIdentifier("card.menu.reply") }
+                if let onPrivateReply {
+                    Button(action: onPrivateReply) { Label(L("preply.action"), systemImage: "envelope") }.accessibilityIdentifier("card.menu.privateReply")
+                }
+                if emailId != nil {
+                    Button { forwarding = true } label: { Label(L("card.forward"), systemImage: "arrowshape.turn.up.right") }.accessibilityIdentifier("card.menu.forward")
+                }
+            }
+            // Deslizar a la derecha = responder, igual que en un mensaje normal (SwipeToReply de la 1.7.1; por fuera del menú,
+            // como en las burbujas, para que la pulsación larga siga abriendo el menú).
+            .modifier(SwipeToReply(enabled: onReply != nil) { onReply?() })
+            .sheet(isPresented: $forwarding) { if let emailId { ForwardCardSheet(emailId: emailId) } }
+    }
+}
+
+/// «Reenviar a otros chats»: el selector de varios chats (sin el de origen), comentario y quiénes lo verán.
+struct ForwardCardSheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let emailId: String
+    @State private var picked: [String] = []
+    @State private var comment = ""
+    @State private var busy = false
+
+    var body: some View {
+        let e = store.mails[emailId]
+        NavigationStack {
+            List {
+                if let e {
+                    Section {
+                        HStack(alignment: .top, spacing: 10) {
+                            MailProviderIcon(provider: e.provider, size: 22)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(e.provider.isWhatsApp ? (e.wa?.chatName ?? e.subject) : (e.subject.isEmpty ? L("mail.noSubject") : e.subject))
+                                    .font(.subheadline.weight(.bold)).lineLimit(2)
+                                Text(e.snippet).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(2)
+                            }
+                        }
+                    }
+                }
+                Section { MailChatPicker(picked: $picked, exclude: e?.conversationId) }
+                Section {
+                    TextField(L("mail.commentPh"), text: $comment, axis: .vertical).lineLimit(2...5).accessibilityIdentifier("card.forwardComment")
+                } footer: {
+                    if let t = MailShareText.whoSees(store, picked) { Text(t) }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button { go() } label: { Text(busy ? L("mail.sharing") : MailShareText.button(store, picked)).lineLimit(1).frame(maxWidth: .infinity) }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(picked.isEmpty || busy)
+                    .padding(12)
+                    .background(.bar)
+                    .accessibilityIdentifier("card.forwardSend")
+            }
+            .navigationTitle(L("card.forwardTitle"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
+            }
+        }
+    }
+
+    private func go() {
+        guard !picked.isEmpty, !busy else { return }
+        busy = true
+        let ids = picked
+        Task {
+            defer { busy = false }
+            do {
+                try await store.forwardShared(emailId, conversationIds: ids, comment: comment)
+                store.show(MailShareText.done(ids.count))
+                dismiss()
+            } catch { store.show(L10n.errorText(error)) }
         }
     }
 }

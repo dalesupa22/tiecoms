@@ -19,6 +19,9 @@ enum GroupsSheet: Identifiable {
 struct HomeView: View {
     @Environment(AppStore.self) private var store
     @State private var query = ""
+    /// Último árbol sin búsqueda de esta pintada (referencia: escribirlo no vuelve a pintar).
+    @State private var treeMemo = TreeMemo()
+    final class TreeMemo { var tree: GroupsTree? }
     @State private var sheet: GroupsSheet?
     @State private var collapsed = HomeCollapse.load()
     @State private var tab = HomeFilter.savedGroups
@@ -39,8 +42,11 @@ struct HomeView: View {
         @Bindable var store = store
         Group {
             if let d = store.data {
-                let tree = Naming.groupsTree(d, query: query, filterWorkspace: store.workspaceFilter, tab: tab)
-                let flat = viewMode == .list ? Naming.groupsList(d, query: query, filterWorkspace: store.workspaceFilter, tab: tab) : []
+                let _ = PerfCounters.bump("home.body")
+                let tree = PerfCounters.measure("home.groupsTree") { Naming.groupsTree(d, query: query, filterWorkspace: store.workspaceFilter, tab: tab) }
+                let flat = viewMode == .list ? PerfCounters.measure("home.groupsList") { Naming.groupsList(d, from: tree) } : []
+                // El menú de plegar usa el árbol sin búsqueda: sin búsqueda es este mismo (no se arma otra vez).
+                let _ = { treeMemo.tree = query.trimmingCharacters(in: .whitespaces).isEmpty ? tree : nil }()
                 let hasGroups = viewMode == .list ? !flat.isEmpty : tree.hasGroups
                 let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
                 // Asuntos abiertos por conversación (se muestran bajo cada grupo).
@@ -150,7 +156,7 @@ struct HomeView: View {
             // Vista (plegar/desplegar): a la izquierda, aparte de ✏️ y «＋», que son para escribir y crear.
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
-                    if let d = store.data { foldMenu(Naming.groupsTree(d, filterWorkspace: store.workspaceFilter, tab: tab), issuesOnly: viewMode == .list) }
+                    if let d = store.data { foldMenu(treeMemo.tree ?? Naming.groupsTree(d, filterWorkspace: store.workspaceFilter, tab: tab), issuesOnly: viewMode == .list) }
                 } label: { Image(systemName: "list.bullet.indent") }
                 .accessibilityLabel(L("grp.foldMenu"))
                 .accessibilityIdentifier("home.fold")
@@ -281,7 +287,7 @@ struct HomeView: View {
         let chip = sum.count > 0 ? IssuesToggle(count: sum.count, overdue: sum.overdue, expanded: expanded) : nil
         let list = hits.isEmpty ? all : hits
         let showLines = expanded && !list.isEmpty
-        convButton(d, n.conv, badgeColor: color, group: true, guest: guest, label: n.label, threadUnread: n.threadUnread, threadMentions: n.tree.derivedMentions,
+        convButton(d, n.conv, badgeColor: color, group: true, guest: guest, label: n.label, company: n.company, threadUnread: n.threadUnread, threadMentions: n.tree.derivedMentions,
                    issues: chip, onToggleIssues: { toggle(HomeCollapse.issuesKey(n.conv.id)) }, flat: flat)
             .listRowInsets(EdgeInsets(top: 6, leading: 16 + CGFloat(indent) * 18, bottom: showLines ? 3 : 6, trailing: 12))
             .listRowSeparator(showLines ? .hidden : .automatic, edges: .bottom)
@@ -402,10 +408,11 @@ struct HomeView: View {
     /// fila no lleve chevron. Mantener presionado: el mismo menú de grupo en Lista y Árbol.
     @ViewBuilder
     private func convButton(_ d: BootstrapDTO, _ c: ConversationDTO, badgeColor: Color? = nil, showWs: Bool = false, group: Bool = false, guest: Bool = false,
-                            label: String? = nil, threadUnread: Int = 0, threadMentions: Int = 0, issues: IssuesToggle? = nil, onToggleIssues: (() -> Void)? = nil, flat: Bool = false) -> some View {
+                            label: String? = nil, company: String? = nil, threadUnread: Int = 0, threadMentions: Int = 0, issues: IssuesToggle? = nil, onToggleIssues: (() -> Void)? = nil, flat: Bool = false) -> some View {
         Button { store.homePath.append(.conversation(c.id)) } label: {
-            HierarchyConvRow(d: d, c: c, badgeColor: badgeColor, showWs: showWs, showIssueChip: !group, titleOverride: label, threadUnread: threadUnread, threadMentions: threadMentions,
-                             issuesToggle: issues, onToggleIssues: onToggleIssues, showOnlyOrg: !flat) { sheet = .issues(c.id) }
+            HierarchyConvRow(d: d, c: c, badgeColor: badgeColor, showIssueChip: !group, titleOverride: label, threadUnread: threadUnread, threadMentions: threadMentions,
+                             issuesToggle: issues, onToggleIssues: onToggleIssues, showOnlyOrg: !flat,
+                             company: flat ? company : showWs ? Naming.companyLine(d, c, title: label) : nil) { sheet = .issues(c.id) }
                 .contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
@@ -676,6 +683,8 @@ struct HierarchyConvRow: View {
     var onToggleIssues: (() -> Void)? = nil
     /// «Solo {empresa}» junto al nombre de un grupo interno (en la Lista basta el candado: el título ya lleva la empresa).
     var showOnlyOrg = true
+    /// Empresa en gris pequeño bajo el nombre (1.7.1): Lista, fijados, DMs 1:1 y búsqueda. En el Árbol no va.
+    var company: String? = nil
     var onIssues: () -> Void
 
     var body: some View {
@@ -713,12 +722,17 @@ struct HierarchyConvRow: View {
                     if c.unreadMentions > 0 || threadMentions > 0 { MentionBadge() }
                     if c.unread > 0 { UnreadPill(count: c.unread, color: badgeColor, muted: c.isMuted && c.unreadMentions == 0) }
                 }
+                if let company {
+                    Text(company).font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                        .padding(.top, -1)
+                        .accessibilityIdentifier("row.company.\(c.id)")
+                }
                 if Naming.isSide(c) {
                     // DMs: el sidechat se distingue con su burbuja y, si veo el origen, «desde #Grupo».
                     HStack(spacing: 6) {
-                        Text(L("dm.side")).font(.caption2.weight(.bold)).foregroundStyle(Theme.accentText)
+                        Text(L("dm.side")).font(.caption2.weight(.bold)).foregroundStyle(Theme.sideText)
                             .padding(.horizontal, 7).padding(.vertical, 2)
-                            .background(Capsule().fill(Theme.orange.opacity(0.14)))
+                            .background(Capsule().fill(Theme.sideFill))
                             .accessibilityIdentifier("dm.sideTag")
                         if let origin = Naming.sideOrigin(d, c) {
                             Text(L("dm.fromOrigin", ["name": Naming.title(d, origin)])).font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1)
@@ -743,7 +757,7 @@ struct HierarchyConvRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel([title, Naming.isSide(c) ? L("dm.side") : nil,
+        .accessibilityLabel([title, company, Naming.isSide(c) ? L("dm.side") : nil,
                              Naming.sideOrigin(d, c).map { L("dm.fromOrigin", ["name": Naming.title(d, $0)]) },
                              c.pinnedAt != nil ? L("side.pinned") : nil,
                              c.isMuted ? L("side.muted") : nil, c.unreadMentions > 0 || threadMentions > 0 ? L("mention.youMentioned") : nil,
@@ -804,7 +818,7 @@ struct ConvIcon: View {
         } else if c.kind == .direct, let other = Naming.otherInDirect(d, c) {
             Avatar(person: other, org: Naming.org(d, other.orgId), size: size)
         } else if Naming.isSide(c) {
-            glyph("bubble.left.and.text.bubble.right")
+            glyph("bubble.left.and.text.bubble.right", fg: Theme.sideText, bg: Theme.sideFill)
         } else if c.kind == .multi {
             StackedAvatars(d: d, c: c, box: size)
         } else {
@@ -812,12 +826,12 @@ struct ConvIcon: View {
         }
     }
 
-    private func glyph(_ name: String) -> some View {
+    private func glyph(_ name: String, fg: Color = Theme.accentText, bg: Color = Theme.orange.opacity(0.12)) -> some View {
         Image(systemName: name)
             .font(.system(size: size * 0.45, weight: .semibold))
-            .foregroundStyle(Theme.accentText)
+            .foregroundStyle(fg)
             .frame(width: size, height: size)
-            .background(RoundedRectangle(cornerRadius: size * 0.28).fill(Theme.orange.opacity(0.12)))
+            .background(RoundedRectangle(cornerRadius: size * 0.28).fill(bg))
             .accessibilityHidden(true)
     }
 }

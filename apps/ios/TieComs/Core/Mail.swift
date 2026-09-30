@@ -223,6 +223,16 @@ extension AppStore {
         for e in MailShareResult.decode(data) { putMail(e) }
     }
 
+    /// Reenviar una tarjeta a otros chats (hasta 10): cada uno recibe su copia con hilo propio (POST …/forward → {emails}).
+    @discardableResult
+    func forwardShared(_ emailId: String, conversationIds: [String], comment: String) async throws -> [SharedMailDTO] {
+        var json: [String: Any] = ["conversationIds": Array(conversationIds.prefix(10))]
+        let c = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !c.isEmpty { json["comment"] = String(c.prefix(4000)) }
+        let data = try await api.requestData("/mail/shared/\(emailId)/forward", method: "POST", json: json)
+        return MailShareResult.decode(data).map { putMail($0) }
+    }
+
     // MARK: Conectar
 
     func cancelMailAuthorization() {

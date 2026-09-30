@@ -225,9 +225,22 @@ enum L10n {
         return d.formatted(Date.FormatStyle().day().month(.abbreviated).locale(locale))
     }
 
+    /// Hora de cada burbuja (1.7.1: memorizada por fecha e idioma; formatear cuesta más que buscar).
+    private static let clockLock = NSLock()
+    nonisolated(unsafe) private static var clockMemo: [String: String] = [:]
     static func clock(_ iso: String) -> String {
+        let key = lang + iso
+        clockLock.lock()
+        if let s = clockMemo[key] { clockLock.unlock(); return s }
+        clockLock.unlock()
+        PerfCounters.bump("l10n.clock")
         guard let d = ISODate.parse(iso) else { return "" }
-        return d.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(locale))
+        let s = d.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(locale))
+        clockLock.lock()
+        if clockMemo.count >= 8000 { clockMemo.removeAll(keepingCapacity: true) }
+        clockMemo[key] = s
+        clockLock.unlock()
+        return s
     }
 
     static func dayLabel(_ d: Date, now: Date = Date()) -> String {

@@ -349,7 +349,7 @@ struct SidePanel: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(L("side.title")).font(.headline)
                     Label(L("side.privateN", ["n": c.memberIds.count]), systemImage: "lock.fill")
-                        .font(.caption).foregroundStyle(Theme.textSecondary)
+                        .font(.caption).foregroundStyle(Theme.sideText)
                 }
                 Spacer()
                 Menu {
@@ -471,8 +471,8 @@ struct SideEmptyState: View {
     var body: some View {
         VStack(spacing: 10) {
             ZStack {
-                Circle().fill(Theme.orange.opacity(0.12)).frame(width: 84, height: 84)
-                Image(systemName: "bubble.left.and.text.bubble.right.fill").font(.system(size: 34)).foregroundStyle(Theme.orange)
+                Circle().fill(Theme.sideFill).frame(width: 84, height: 84)
+                Image(systemName: "bubble.left.and.text.bubble.right.fill").font(.system(size: 34)).foregroundStyle(Theme.sideText)
                 Image(systemName: "lock.fill").font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
                     .padding(6).background(Circle().fill(Theme.bubbleMine)).offset(x: 30, y: 28)
             }
@@ -546,32 +546,32 @@ struct SideChip: View {
         let unread = HomeOrder.pending(s) > 0
         let label = returned ? L("side.returnedChip") : L("side.thread", ["n": n == 1 ? L("side.replyOne") : L("side.replies", ["n": n])])
         return HStack(spacing: 8) {
-            ThreadCurve().stroke(Theme.orange.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, lineCap: .round)).frame(width: 12, height: 16)
+            ThreadCurve().stroke(Theme.sideText.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, lineCap: .round)).frame(width: 12, height: 16)
                 .offset(y: -8).accessibilityHidden(true)
             StackedAvatars(d: d, c: s, size: 20)
                 .frame(width: 20 + CGFloat(max(0, min(3, Naming.others(d, s).count) - 1)) * 11, alignment: .leading)
             VStack(alignment: .leading, spacing: 1) {
-                Text(label).font(.caption.weight(.bold)).foregroundStyle(returned ? Color.green : Theme.accentText)
+                Text(label).font(.caption.weight(.bold)).foregroundStyle(returned ? Color.green : Theme.sideText)
                 if !returned, let last = s.lastHumanPreview, !last.body.isEmpty {
                     Text(last.body).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
                 }
             }
-            if unread { Circle().fill(Theme.orange).frame(width: 8, height: 8).accessibilityLabel(L("home.tab.unread")) }
+            if unread { Circle().fill(Theme.sideText).frame(width: 8, height: 8).accessibilityLabel(L("home.tab.unread")) }
             Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(Theme.textSecondary)
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 14).fill(returned ? Color.green.opacity(0.10) : Theme.orange.opacity(0.08)))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(returned ? Color.green.opacity(0.35) : Theme.orange.opacity(0.25)))
+        .background(RoundedRectangle(cornerRadius: 14).fill(returned ? Color.green.opacity(0.10) : Theme.sideFill))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(returned ? Color.green.opacity(0.35) : Theme.sideText.opacity(0.25)))
         .accessibilityElement(children: .combine)
     }
 
     private func multi(_ d: BootstrapDTO) -> some View {
         HStack(spacing: 6) {
-            Text(L("side.chipN", ["n": sides.count])).font(.caption.weight(.bold)).foregroundStyle(Theme.accentText)
-            if sides.contains(where: { HomeOrder.pending($0) > 0 }) { Circle().fill(Theme.orange).frame(width: 8, height: 8) }
+            Text(L("side.chipN", ["n": sides.count])).font(.caption.weight(.bold)).foregroundStyle(Theme.sideText)
+            if sides.contains(where: { HomeOrder.pending($0) > 0 }) { Circle().fill(Theme.sideText).frame(width: 8, height: 8) }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(Capsule().fill(Theme.orange.opacity(0.10)))
+        .background(Capsule().fill(Theme.sideFill))
     }
 }
 
@@ -697,7 +697,7 @@ struct FloatingSideBubble: View {
                     StackedAvatars(d: d, c: c, box: 48)
                         .frame(width: 58, height: 58)
                         .background(Circle().fill(Theme.surface))
-                        .overlay(Circle().stroke(Theme.orange, lineWidth: 2))
+                        .overlay(Circle().stroke(Theme.sideText, lineWidth: 2))
                         .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
                     if c.unread > 0 {
                         Text("\(c.unread)").font(.caption2.weight(.bold)).foregroundStyle(.white)

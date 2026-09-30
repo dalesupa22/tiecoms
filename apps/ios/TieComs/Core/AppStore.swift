@@ -847,7 +847,11 @@ final class AppStore {
 
     func patchPreviewIfLast(_ m: MessageDTO) {
         guard let c = meta(m.conversationId), c.lastMessageSeq == m.seq else { return }
-        patchMeta(m.conversationId) { $0.lastMessagePreview = String((m.deletedAt != nil ? L("chat.deleted") : m.body).prefix(140)) }
+        patchMeta(m.conversationId) {
+            $0.lastMessagePreview = String((m.deletedAt != nil ? L("chat.deleted") : m.body).prefix(140))
+            // Editado o borrado: la vista previa de la persona también (si es ese mensaje).
+            if !m.isSystem, $0.lastHumanPreview?.messageId == m.id { $0.lastHumanPreview = HumanPreview(m) }
+        }
     }
 
     func onConversationEvent(_ e: ConversationEvent, live: Bool) {
@@ -954,6 +958,9 @@ final class AppStore {
             $0.lastMessageSeq = m.seq
             $0.lastMessageAt = m.createdAt
             $0.lastMessagePreview = String(L10n.messagePreview(m).prefix(140))
+            // La lista ordena y previsualiza por el último mensaje de una persona (HomeOrder.activity, L10n.listPreview): se
+            // actualiza aquí y no solo en el bootstrap. Sin esto, escribirle a alguien no lo subía en «Recientes» (web 51b7536).
+            if !m.isSystem { $0.lastHumanPreview = HumanPreview(m) }
             if mine, max(c.lastReadSeq, c.historyFromSeq) >= c.lastMessageSeq, m.seq == c.lastMessageSeq + 1 { $0.lastReadSeq = m.seq }
             $0.unread = max(0, m.seq - max($0.lastReadSeq, $0.historyFromSeq))
             if let me = myId, MentionText.mentionsMe(m.mentions, me: me, authorId: m.authorId) { $0.unreadMentions += 1 }

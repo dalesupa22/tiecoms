@@ -397,6 +397,9 @@
 "card.commentAdded" = "Comment added";
 "card.commentsNew" = "{n} new comments";
 "card.doneBy" = "{name} completed the task";
+"card.forward" = "Forward";
+"card.forwardTitle" = "Forward to other chats";
+"card.forwarded" = "Forwarded";
 "card.markDone" = "Mark done";
 "card.newDate" = "New date";
 "card.overdue" = "We missed it · due {date}";
@@ -458,6 +461,8 @@
 "chat.placeholder" = "Message {name}";
 "chat.quick" = "New message";
 "chat.quickHint" = "New message ({key})";
+"chat.readLess" = "Show less";
+"chat.readMore" = "Show more";
 "chat.readOnly" = "Read only: you cannot post in this conversation.";
 "chat.reconnecting" = "Reconnecting… (chaggu is updating)";
 "chat.remove" = "Remove from group";

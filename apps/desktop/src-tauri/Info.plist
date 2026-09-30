@@ -3,6 +3,8 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Chaggu usa el micrófono para grabar notas de voz.</string>
+  <string>chaggu usa el micrófono para las llamadas y las notas de voz.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>chaggu usa la cámara en las videollamadas.</string>
 </dict>
 </plist>

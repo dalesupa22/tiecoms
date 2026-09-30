@@ -6,8 +6,9 @@ import { apiUrl } from './app-client.ts';
 import { companyLine, companyOf } from './quick-search.ts';
 
 export function initials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1]![0] : '')).toUpperCase();
+  // Solo palabras que empiezan con letra o número: «Laura (cliente)» → LC, no «L(».
+  const parts = name.trim().split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}]+/u, '')).filter(Boolean);
+  return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1]![0] : '')).toUpperCase() || '?';
 }
 
 export function OrgMark({ org, size = 26 }: { org?: OrganizationDTO | null; size?: number }) {

@@ -6,7 +6,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { flashTitle } from '../bubbles.tsx';
 import type { ActiveCallDTO, CallDTO, CallDeviceDTO, CallHistoryItemDTO, CallTranscriptDTO, ConversationDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
-import { bindTile, chooseAudioInput, chooseAudioOutput, currentCall, hangUp, joinCall, listAudioInputs, listAudioOutputs, passHere, setTranscription, startCall, subscribeCall, toggleCamera, toggleMute, type CallView } from '../call.ts';
+import { bindTile, canShareScreen, chooseAudioInput, chooseAudioOutput, currentCall, hangUp, joinCall, listAudioInputs, listAudioOutputs, passHere, setTranscription, startCall, startScreenShare, stopScreenShare, subscribeCall, toggleCamera, toggleMute, type CallView } from '../call.ts';
 import { errorText, locale, t } from '../i18n.ts';
 import { openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate } from '../router.ts';
@@ -14,7 +14,10 @@ import { openDialog } from '../actions.tsx';
 import { startRingtone, stopRingtone } from '../sound.ts';
 import { directOtherId, Avatar, ConvAvatar, Modal, conversationTitle, personById } from '../ui.tsx';
 
-const useCallView = () => useSyncExternalStore((l) => subscribeCall(() => l()), currentCall);
+export const useCallView = () => useSyncExternalStore((l) => subscribeCall(() => l()), currentCall);
+/** Quienes están dentro: personas de chaggu y, al final, los invitados por enlace ("guest:{id}", como en Chime). */
+export const callPeople = (c: CallDTO) => [...c.activeUserIds, ...(c.guests ?? []).map((g) => `guest:${g.id}`)];
+const guestName = (c: CallDTO, id: string | null) => (id?.startsWith('guest:') ? c.guests?.find((g) => `guest:${g.id}` === id)?.name ?? '' : '');
 /** Nombre corto; si la persona no está en mi lista (me agregaron a la llamada), sale de call.names. */
 const firstName = (d: ReturnType<typeof client.getState>['data'], id: string | null, names?: Record<string, string>) =>
   ((id && (personById(d!, id)?.name ?? names?.[id])) || '').split(' ')[0] ?? '';
@@ -88,12 +91,64 @@ export function IncomingCallHost() {
 }
 
 // ---------- Panel de la llamada ----------
-function Tile({ tileId, label, local }: { tileId: number; label: string; local: boolean }) {
+export function Tile({ tileId, label, local }: { tileId: number; label: string; local: boolean }) {
   return (
     <div className={`call-tile ${local ? 'is-local' : ''}`}>
       <video ref={(el) => bindTile(tileId, el)} autoPlay playsInline muted={local} />
       <span className="call-tile-name">{label}</span>
     </div>
+  );
+}
+
+/** Pantalla compartida por otra persona: entera (sin recortar) y con pantalla completa al tocarla. */
+export function ScreenTile({ tileId, label }: { tileId: number; label: string }) {
+  let el: HTMLVideoElement | null = null;
+  const full = () => { const v = el as any; if (!v) return; (v.requestFullscreen ?? v.webkitRequestFullscreen ?? v.webkitEnterFullscreen)?.call(v); };
+  return (
+    <div className="call-screen">
+      <video ref={(v) => { el = v; bindTile(tileId, v); }} autoPlay playsInline muted onDoubleClick={full} />
+      <span className="call-tile-name">🖥️ {t('call.screenOf', { name: label })}</span>
+      <button className="call-screen-full" onClick={full} title={t('call.fullscreen')} aria-label={t('call.fullscreen')}>⛶</button>
+    </div>
+  );
+}
+
+/** Franja «Estás compartiendo tu pantalla · Dejar de compartir». */
+export function SharingBar() {
+  return <div className="call-sharing" role="status">🖥️ {t('call.sharingNow')} <button className="btn small" onClick={stopScreenShare}>{t('call.shareStop')}</button></div>;
+}
+
+/** Botón 🖥️: compartir o dejar de compartir (solo donde el navegador lo permite). */
+export function ScreenButton({ v }: { v: CallView }) {
+  if (!canShareScreen()) return null;
+  return <button className={`call-ctl ${v.sharing ? 'is-rec' : ''}`} onClick={() => (v.sharing ? stopScreenShare() : void startScreenShare().catch(fail))}
+    aria-pressed={v.sharing} title={v.sharing ? t('call.shareStop') : t('call.shareScreen')} aria-label={v.sharing ? t('call.shareStop') : t('call.shareScreen')}>🖥️</button>;
+}
+
+/** «Enlace para invitados»: crea el enlace, lo copia y deja compartirlo o quitarlo. */
+function GuestLinkDialog({ call, onClose }: { call: CallDTO; onClose: () => void }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    client.createCallLink(call.id).then((l) => { setUrl(l.url); void navigator.clipboard?.writeText(l.url).then(() => toast(t('call.linkCopied'))).catch(() => {}); })
+      .catch((e) => setError(errorText(e)));
+  }, [call.id]);
+  const share = () => { if (url) void (navigator as any).share?.({ title: t('call.linkShareTitle'), url }).catch(() => {}); };
+  return (
+    <Modal title={t('call.guestLink')} onClose={onClose}>
+      <p className="small muted" style={{ marginTop: 0 }}>{t('call.guestLinkHelp')}</p>
+      {error ? <div className="error">{error}</div> : (
+        <div className="row" style={{ gap: 8 }}>
+          <input className="input grow" readOnly value={url ?? t('call.connecting')} onFocus={(e) => e.currentTarget.select()} />
+          <button className="btn primary small" disabled={!url} onClick={() => url && void navigator.clipboard?.writeText(url).then(() => toast(t('call.linkCopied')))}>{t('call.copy')}</button>
+        </div>
+      )}
+      <div className="row" style={{ gap: 8, marginTop: 12 }}>
+        {'share' in navigator && <button className="btn small" disabled={!url} onClick={share}>{t('call.linkShare')}</button>}
+        <span className="grow" />
+        <button className="btn small" onClick={() => void client.revokeCallLinks(call.id).then(() => { toast(t('call.linkRevoked')); onClose(); }).catch(fail)}>{t('call.linkRevoke')}</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -111,7 +166,9 @@ export function CallDock() {
   }, [v?.call.id]);
   if (!v || !d) return null;
   const conv = d.conversations.find((c) => c.id === v.call.conversationId);
-  const others = v.call.activeUserIds.filter((id) => id !== d.me.id);
+  const people = callPeople(v.call);
+  const others = people.filter((id) => id !== d.me.id);
+  const nameOf = (id: string) => (id === d.me.id ? t('call.you') : guestName(v.call, id) || firstName(d, id, v.call.names));
   const clock = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
   // Cuadrícula en cuanto alguien tiene video: quien no tiene cámara sigue ahí como avatar.
   const video = v.tiles.filter((x) => (x.local ? v.camera : x.active));
@@ -122,31 +179,33 @@ export function CallDock() {
     openDialog((close) => <TranscriptConsent onClose={close} onConfirm={(ai) => { close(); void setTranscription(true, ai).catch(fail); }} />);
   };
   return (
-    <aside className={`call-dock ${min ? 'is-min' : ''}`} aria-label={t('call.title')}>
+    <aside className={`call-dock ${min ? 'is-min' : ''} ${v.screens.length && !min ? 'has-screen' : ''}`} aria-label={t('call.title')}>
       <div className="row call-dock-head">
         <span className={`call-dot ${v.phase === 'live' ? 'is-live' : ''}`} aria-hidden />
         <button className="grow ellipsis call-dock-title" onClick={() => navigate(`/c/${v.call.conversationId}`)}>
-          {conv ? (conv.name ?? others.map((id) => firstName(d, id, v.call.names)).join(', ')) || t('call.title') : others.map((id) => firstName(d, id, v.call.names)).join(', ') || t('call.title')}
+          {conv ? (conv.name ?? others.map(nameOf).join(', ')) || t('call.title') : others.map(nameOf).join(', ') || t('call.title')}
         </button>
         <span className="small muted">{v.phase === 'connecting' ? t('call.connecting') : clock}</span>
         <button className="icon-btn" aria-label={min ? t('call.expand') : t('call.minimize')} onClick={() => setMin(!min)}>{min ? '▢' : '–'}</button>
       </div>
       {v.call.transcribing && <div className="call-rec" role="status">⏺ {t('call.transcribingAll')}</div>}
+      {v.sharing && <SharingBar />}
       {!min && <>
+        {v.screens.map((x) => <ScreenTile key={x.tileId} tileId={x.tileId} label={x.userId ? nameOf(x.userId) : ''} />)}
         {video.length > 0
-          ? <div className={`call-grid n${Math.min(v.call.activeUserIds.length, 4)}`}>{v.call.activeUserIds.map((id) => {
+          ? <div className={`call-grid n${Math.min(people.length, 4)}`}>{people.map((id) => {
               const x = videoBy.get(id);
-              const label = id === d.me.id ? t('call.you') : firstName(d, id, v.call.names);
+              const label = nameOf(id);
               const muted = id === d.me.id ? v.muted : v.mutedUsers.includes(id);
               return x
                 ? <div key={id} className="call-cell"><Tile tileId={x.tileId} local={x.local} label={label} /><PersonBadges muted={muted} camera /></div>
                 : <div key={id} className={`call-tile is-avatar ${v.speaking.includes(id) ? 'is-speaking' : ''}`}>
-                    <Avatar person={personById(d, id)} size={56} /><span className="call-tile-name">{label}</span><PersonBadges muted={muted} camera={false} />
+                    <Avatar person={personById(d, id) ?? ({ id, name: label } as any)} size={56} /><span className="call-tile-name">{label}</span><PersonBadges muted={muted} camera={false} />
                   </div>;
             })}</div>
-          : <div className="call-people">{v.call.activeUserIds.map((id) => (
+          : <div className="call-people">{people.map((id) => (
               <div key={id} className={`call-person ${v.speaking.includes(id) ? 'is-speaking' : ''}`}>
-                <Avatar person={personById(d, id)} size={44} /><span className="small ellipsis">{id === d.me.id ? t('call.you') : firstName(d, id, v.call.names)}</span>
+                <Avatar person={personById(d, id) ?? ({ id, name: nameOf(id) } as any)} size={44} /><span className="small ellipsis">{nameOf(id)}</span>
                 {(id === d.me.id ? v.muted : v.mutedUsers.includes(id)) && <span className="call-badge" title={t('call.personMuted')} aria-label={t('call.personMuted')}>🔇</span>}
               </div>))}
               {others.length === 0 && <div className="small muted">{t('call.waiting')}</div>}
@@ -162,7 +221,9 @@ export function CallDock() {
         <button className={`call-ctl ${v.muted ? 'is-off' : ''}`} onClick={toggleMute} aria-pressed={v.muted} title={v.muted ? t('call.unmute') : t('call.mute')}>{v.muted ? '🔇' : '🎙️'}</button>
         <button className={`call-ctl ${v.camera ? '' : 'is-off'}`} onClick={() => void toggleCamera().catch(fail)} aria-pressed={!v.camera} title={v.camera ? t('call.cameraOff') : t('call.cameraOn')}>{v.camera ? '🎥' : '📷'}</button>
         <button className={`call-ctl ${v.call.transcribing ? 'is-rec' : ''}`} onClick={toggleTranscript} aria-pressed={v.call.transcribing} title={v.call.transcribing ? t('call.transcriptOff') : t('call.transcriptOn')}>📝</button>
+        <ScreenButton v={v} />
         <button className="call-ctl" onClick={(e) => void openAudioMenu(e.currentTarget, v)} title={t('call.audioMenu')} aria-label={t('call.audioMenu')}>🔊</button>
+        <button className="call-ctl" onClick={() => openDialog((close) => <GuestLinkDialog call={v.call} onClose={close} />)} title={t('call.guestLink')} aria-label={t('call.guestLink')}>🔗</button>
         <button className="btn small call-add" onClick={() => openAddToCall(v.call)} title={t('call.add')}>{t('call.addShort')}</button>
         <span className="grow" />
         <button className="btn small call-hang" onClick={() => void hangUp()}>{t('call.hangUp')}</button>

@@ -5,7 +5,7 @@ import {
   type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type TopicColor, type TopicDTO, type UserDTO, normalizeEmoji,
-  type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentDTO, type CallTranscriptSegmentInput,
+  type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallLinkDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentDTO, type CallTranscriptSegmentInput,
   type ActiveCallDTO, type MessageRefDTO, type ChatSearchPageDTO, type ViewOnceOpenDTO, type EventCommentDTO, type ViewOnceState,
   type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO, type IntegrationDTO, type IntegrationSecretDTO,
   type StorageUsageDTO, type VideoPlayDTO,
@@ -755,6 +755,9 @@ export class TieComsClient {
     this.putCall(r.call);
     return r.call;
   }
+  /** Enlace para que terceros entren sin cuenta (vale mientras la llamada siga abierta). */
+  async createCallLink(callId: string) { return this.request<CallLinkDTO>(`/calls/${callId}/link`, { method: 'POST', json: {} }); }
+  async revokeCallLinks(callId: string) { return this.request<{ ok: true }>(`/calls/${callId}/link`, { method: 'DELETE' }); }
   async callHeartbeat(callId: string) { return this.request<{ ok: true }>(`/calls/${callId}/heartbeat`, { method: 'POST', json: { deviceKey: await this.callDeviceKey() } }); }
   /** Salir (este dispositivo, u otro mío con deviceKey: «Pasar aquí»). forAll = colgar para todos. */
   async leaveCall(callId: string, forAll = false, deviceKey?: string) {

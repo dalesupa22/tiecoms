@@ -1667,3 +1667,28 @@ mark { background: #f5e3b3; color: inherit; border-radius: 3px; padding: 0 1px; 
 @keyframes gg-shimmer { to { background-position: -200% 0, 0 0; } }
 @media (prefers-reduced-motion: reduce) { .mention.is-gg { animation: none; } }
 .mention-mirror mark.is-gg { background: linear-gradient(90deg, rgba(255, 90, 54, .22), rgba(255, 79, 163, .2), rgba(123, 97, 255, .22), rgba(47, 140, 255, .2)); }
+
+/* ---------- Compartir pantalla e invitados por enlace (30-sep-2026) ---------- */
+/* Con una pantalla compartida el panel se agranda: el texto de otra pantalla no se lee en 380 px. */
+.call-dock.has-screen { width: min(960px, calc(100vw - 36px)); max-height: calc(100vh - 36px - var(--safe-b)); overflow: auto; }
+.call-screen { position: relative; background: #000; border-radius: 10px; overflow: hidden; aspect-ratio: 16 / 9; }
+.call-screen video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.call-screen-full { position: absolute; right: 8px; top: 8px; border: 0; border-radius: 8px; padding: 4px 8px; font-size: 16px; background: rgba(0, 0, 0, 0.55); color: #fff; cursor: pointer; }
+.call-screen:fullscreen video { object-fit: contain; }
+.call-sharing { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 10px; background: #2f9e5a; color: #fff; font-size: 13px; font-weight: 600; }
+.call-sharing .btn { margin-left: auto; }
+@media (max-width: 860px) { .call-dock.has-screen { width: auto; } }
+
+.guest-call { position: fixed; inset: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px calc(12px + var(--safe-b)); background: var(--ink); color: var(--paper); }
+.guest-call-head { gap: 10px; }
+.guest-call-head img { filter: invert(1) hue-rotate(180deg); }
+.guest-call-stage { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.guest-call-stage .call-screen { flex: 1 1 auto; min-height: 240px; aspect-ratio: auto; }
+.guest-call-stage .call-grid { max-width: 1100px; width: 100%; margin: 0 auto; }
+.guest-call-controls { justify-content: center; gap: 10px; }
+.guest-call-controls .grow { max-width: 40px; }
+/* Con pantalla compartida, las personas bajan a una tira de recuadros pequeños y la pantalla ocupa el resto. */
+.guest-call-stage.has-screen .call-grid { display: flex; gap: 8px; overflow-x: auto; flex: none; justify-content: center; }
+.guest-call-stage.has-screen .call-grid > * { flex: 0 0 180px; min-height: 0; height: 110px; aspect-ratio: auto; }
+.guest-call-stage.has-screen .call-grid .call-tile { height: 110px; }
+.guest-call-stage.has-screen .call-grid .avatar { transform: scale(0.8); }

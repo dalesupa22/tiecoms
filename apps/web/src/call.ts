@@ -5,9 +5,9 @@
  * - Transcripción: el SDK entrega frases parciales (subtítulos en vivo) y finales; las finales se mandan
  *   al API en lotes para guardarlas (el API deduplica, todos los participantes las reportan).
  */
-import type { AccountEvent, CallDTO, CallJoinDTO, CallKind, CallTranscriptSegmentInput } from '@tiecoms/contracts';
+import type { AccountEvent, CallDTO, CallJoinDTO, CallKind, CallTranscriptSegmentInput, GuestCallStateDTO, GuestJoinDTO } from '@tiecoms/contracts';
 import { callUserId } from '@tiecoms/contracts';
-import { client } from './app-client.ts';
+import { apiUrl, client } from './app-client.ts';
 
 export interface CallTile { tileId: number; local: boolean; userId: string | null; active: boolean }
 export interface Caption { resultId: string; userId: string | null; text: string; partial: boolean; /** Pedazo de audio en Groq: «Procesando…». */ processing?: boolean }
@@ -26,7 +26,16 @@ export interface CallView {
   audioOutput: string;
   audioInput: string;
   error: string | null;
+  /** Estoy compartiendo mi pantalla. */
+  sharing: boolean;
+  /** Pantallas que comparten los demás (recuadros de contenido de Chime; la mía no se muestra). */
+  screens: CallTile[];
+  /** Entré como invitado por enlace (sin cuenta). */
+  guest: boolean;
 }
+
+/** El navegador deja compartir pantalla (en móviles no hay getDisplayMedia). */
+export const canShareScreen = () => typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia && !/Android|iPhone|iPad/.test(navigator.userAgent);
 
 type Listener = (v: CallView | null) => void;
 let view: CallView | null = null;
@@ -42,6 +51,12 @@ let beat: ReturnType<typeof setInterval> | null = null;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let outbox: CallTranscriptSegmentInput[] = [];
 let leaving = false;
+/** Invitado por enlace: su id y el secreto para latir y salir (no hay sesión de chaggu). */
+let guest: { id: string; secret: string } | null = null;
+/** Mi id dentro de la llamada si entré como invitado ("guest:{id}", como lo ven los demás). */
+export const myGuestId = () => (guest ? `guest:${guest.id}` : null);
+/** Mi attendee de Chime: su recuadro de contenido (mi propia pantalla) no se muestra. */
+let myAttendeeId = '';
 /** Último error al conectar (para mostrarlo). */
 export let lastError: string | null = null;
 
@@ -107,9 +122,48 @@ export async function joinCall(callId: string, camera: boolean) {
   await connect(await client.joinCall(callId), camera);
 }
 
+// ---------- Invitados por enlace ----------
+async function publicPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(apiUrl(`/api/v1${path}`), { method: 'POST', headers: { 'content-type': 'application/json', 'x-tiecoms-client': 'web' }, body: JSON.stringify(body) });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(json?.error?.message ?? ''), { code: json?.error?.code ?? 'internal', status: res.status });
+  return json as T;
+}
+
+/** Lo que ve un invitado de la llamada, con la forma de CallDTO para reusar el panel. */
+function guestCall(g: GuestCallStateDTO, prev?: CallDTO): CallDTO {
+  return {
+    id: g.callId, conversationId: '', kind: g.kind, startedBy: '', startedAt: prev?.startedAt ?? new Date().toISOString(),
+    endedAt: g.active ? null : new Date().toISOString(), activeUserIds: g.activeUserIds, transcribing: g.transcribing,
+    hasTranscript: false, names: g.names, guests: g.guests,
+  };
+}
+
+/** Entrar como invitado con el enlace (/llamada/:token), sin cuenta. */
+export async function joinAsGuest(token: string, name: string, camera: boolean) {
+  if (view && view.phase !== 'ended') return;
+  await askDevices(camera);
+  const j = await publicPost<GuestJoinDTO>(`/call-links/${encodeURIComponent(token)}/join`, { name });
+  guest = { id: j.guestId, secret: j.secret };
+  await connect({ call: guestCall(j.call), meeting: j.meeting, attendee: j.attendee } as CallJoinDTO, camera);
+}
+
+function beatOnce() {
+  if (!view) return;
+  if (guest) {
+    const g = guest;
+    void publicPost<GuestCallStateDTO>(`/call-guests/${g.id}/heartbeat`, { secret: g.secret })
+      .then((s) => { if (view && guest === g) { if (!s.active) void teardown(); else patch({ call: guestCall(s, view.call) }); } })
+      .catch((err) => { if (err?.code === 'not_in_call' || err?.status === 404) void teardown(); });
+    return;
+  }
+  client.callHeartbeat(view.call.id).catch((err) => { if (err?.code === 'not_in_call') void teardown(); });
+}
+
 async function connect(j: CallJoinDTO, camera: boolean) {
   leaving = false;
-  view = { call: j.call, phase: 'connecting', muted: false, camera, tiles: [], captions: [], speaking: [], mutedUsers: [], audioOutput: '', audioInput: '', error: null };
+  view = { call: j.call, phase: 'connecting', muted: false, camera, tiles: [], captions: [], speaking: [], mutedUsers: [], audioOutput: '', audioInput: '', error: null, sharing: false, screens: [], guest: !!guest };
+  myAttendeeId = (j.attendee as any)?.Attendee?.AttendeeId ?? '';
   emit();
   try {
     // El SDK de Chime usa `global` (de Node); en el navegador es globalThis. Sin esto falla al cargar.
@@ -128,12 +182,24 @@ async function connect(j: CallJoinDTO, camera: boolean) {
       audioVideoDidStart: () => { patch({ phase: 'live' }); const cb = onLive; onLive = null; cb?.(); },
       audioVideoDidStop: () => { if (!leaving) void teardown(); },
       videoTileDidUpdate: (t: any) => {
-        if (!view || !t.tileId || t.isContent) return;
+        if (!view || !t.tileId) return;
+        if (t.isContent) {
+          // La pantalla que comparto yo no se muestra (sería un espejo infinito); la de los demás, en grande.
+          if (myAttendeeId && String(t.boundAttendeeId ?? '').startsWith(myAttendeeId)) return;
+          const scr: CallTile = { tileId: t.tileId, local: false, userId: t.boundExternalUserId ? callUserId(t.boundExternalUserId) : null, active: t.active };
+          patch({ screens: [...view.screens.filter((x) => x.tileId !== t.tileId), scr] });
+          return;
+        }
         // ExternalUserId = "{userId}#{deviceKey}" (1.7.1) o solo el id (clientes 1.7.0).
         const tile: CallTile = { tileId: t.tileId, local: t.localTile, userId: t.boundExternalUserId ? callUserId(t.boundExternalUserId) : null, active: t.active };
         patch({ tiles: [...view.tiles.filter((x) => x.tileId !== t.tileId), tile] });
       },
-      videoTileWasRemoved: (tileId: number) => { if (view) patch({ tiles: view.tiles.filter((x) => x.tileId !== tileId) }); },
+      videoTileWasRemoved: (tileId: number) => { if (view) patch({ tiles: view.tiles.filter((x) => x.tileId !== tileId), screens: view.screens.filter((x) => x.tileId !== tileId) }); },
+    });
+    // También se entera cuando la persona deja de compartir desde la barra del navegador o del sistema.
+    av.addContentShareObserver({
+      contentShareDidStart: () => patch({ sharing: true }),
+      contentShareDidStop: () => patch({ sharing: false }),
     });
     av.realtimeSubscribeToMuteAndUnmuteLocalAudio((muted: boolean) => patch({ muted }));
     const attendeeUsers = new Map<string, string>();
@@ -158,7 +224,8 @@ async function connect(j: CallJoinDTO, camera: boolean) {
     av.transcriptionController?.subscribeToTranscriptEvent((e: any) => onTranscript(e));
     av.start();
     if (camera) await startCamera();
-    beat = setInterval(() => { if (view) client.callHeartbeat(view.call.id).catch((err) => { if (err?.code === 'not_in_call') void teardown(); }); }, 30_000);
+    // Los invitados laten más seguido: así también se enteran de quién entra y sale (no tienen socket).
+    beat = setInterval(beatOnce, guest ? 15_000 : 30_000);
     addEventListener('pagehide', onPageHide);
   } catch (e: any) {
     console.error('[call] no se pudo conectar', e);
@@ -171,8 +238,34 @@ async function connect(j: CallJoinDTO, camera: boolean) {
 }
 
 function onPageHide() {
-  // Al cerrar la pestaña se intenta avisar; si no alcanza, el servidor la saca al dejar de latir (75 s).
+  // Al cerrar la pestaña se intenta avisar; si no alcanza, el servidor la saca al dejar de latir (75 s; invitados 45 s).
+  if (guest) { navigator.sendBeacon?.(apiUrl(`/api/v1/call-guests/${guest.id}/leave`), new Blob([JSON.stringify({ secret: guest.secret })], { type: 'application/json' })); return; }
   if (view) void client.leaveCall(view.call.id).catch(() => {});
+}
+
+// ---------- Compartir pantalla ----------
+/**
+ * Comparte una pantalla, ventana o pestaña (la elige la persona en el selector del navegador o del sistema).
+ * Tiene que llamarse desde un clic. Chime la manda como un recuadro de contenido aparte, a 15 cuadros por
+ * segundo: texto nítido sin gastar de más. Cancelar el selector no es un error.
+ */
+export async function startScreenShare() {
+  const av = session?.audioVideo;
+  if (!av || !view || view.sharing) return;
+  try {
+    await av.startContentShareFromScreenCapture(undefined, 15);
+    patch({ sharing: true });
+  } catch (e: any) {
+    if (e?.name === 'NotAllowedError' || e?.name === 'AbortError') return;
+    throw Object.assign(new Error(''), { code: 'screen_share_failed' });
+  }
+}
+
+export function stopScreenShare() {
+  const av = session?.audioVideo;
+  if (!av || !view?.sharing) return;
+  av.stopContentShare();
+  patch({ sharing: false });
 }
 
 async function startCamera() {
@@ -264,7 +357,7 @@ function onTranscript(e: any) {
 
 async function flush() {
   flushTimer = null;
-  if (!view || !outbox.length) return;
+  if (!view || !outbox.length || guest) return;
   const callId = view.call.id;
   const batch = outbox.splice(0, 50);
   try { await client.sendCallTranscript(callId, batch); }
@@ -285,7 +378,8 @@ const VOICE_RMS = 0.015;
 let rec: { stop: () => void } | null = null;
 
 function syncRecorder() {
-  const want = !!view && view.phase === 'live' && view.call.transcribing;
+  // Los invitados no mandan audio a transcribir (el API pide sesión de chaggu).
+  const want = !!view && !view.guest && view.phase === 'live' && view.call.transcribing;
   if (want && !rec) startRecorder();
   if (!want && rec) { rec.stop(); rec = null; }
 }
@@ -370,6 +464,8 @@ export async function setTranscription(on: boolean, aiSummary = false) {
 export async function hangUp(forAll = false) {
   if (!view) return;
   const id = view.call.id;
+  const g = guest;
+  if (g) { await teardown(); await publicPost(`/call-guests/${g.id}/leave`, { secret: g.secret }).catch(() => {}); return; }
   await flush().catch(() => {});
   await teardown();
   await client.leaveCall(id, forAll).catch(() => {});
@@ -383,13 +479,16 @@ async function teardown() {
   removeEventListener('pagehide', onPageHide);
   const s = session;
   session = null;
+  guest = null;
+  myAttendeeId = '';
   if (s) {
+    try { s.audioVideo.stopContentShare(); } catch {}
     try { s.audioVideo.stopLocalVideoTile(); } catch {}
     await s.audioVideo.stopVideoInput().catch(() => {});
     await s.audioVideo.stopAudioInput().catch(() => {});
     s.audioVideo.stop();
   }
-  if (view) { view = { ...view, phase: 'ended', tiles: [] }; emit(); }
+  if (view) { view = { ...view, phase: 'ended', tiles: [], screens: [], sharing: false }; emit(); }
   view = null;
   emit();
 }

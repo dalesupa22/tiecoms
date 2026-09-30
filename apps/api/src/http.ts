@@ -12,7 +12,7 @@ import {
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
   ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput, ForwardSharedInput,
-  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput,
+  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, GuestJoinInput, GuestSecretInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -518,6 +518,8 @@ export async function buildHttp() {
       return calls.startOrJoin(req.userId, z.uuid().parse(req.params.id), b.kind, calls.deviceOf(req.sessionId, b.deviceKey));
     });
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/join', callLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.join(req.userId, z.uuid().parse(req.params.id), calls.deviceOf(req.sessionId, CallDeviceInput.parse(req.body ?? {}).deviceKey)); });
+    priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/link', callLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.createLink(req.userId, z.uuid().parse(req.params.id)); });
+    priv.delete<{ Params: { id: string } }>('/api/v1/calls/:id/link', callLimit, async (req) => calls.revokeLinks(req.userId, z.uuid().parse(req.params.id)));
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/invite', callLimit, async (req) => calls.invite(req.userId, z.uuid().parse(req.params.id), CallInviteInput.parse(req.body).userIds));
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/heartbeat', async (req) => calls.heartbeat(req.userId, z.uuid().parse(req.params.id), CallDeviceInput.parse(req.body ?? {}).deviceKey));
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/leave', async (req) => calls.leave(req.userId, z.uuid().parse(req.params.id), CallDeviceInput.parse(req.body ?? {}).deviceKey));
@@ -702,6 +704,17 @@ export async function buildHttp() {
     return reply.header('content-type', f.contentType).header('cache-control', 'public, max-age=31536000, immutable').send(f.body);
   });
 
+  // Invitados por enlace a una llamada (sin cuenta): ver, entrar con su nombre, latir y salir.
+  const guestLimit = { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } };
+  app.get<{ Params: { token: string } }>('/api/v1/call-links/:token', guestLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.previewLink(req.params.token); });
+  app.post<{ Params: { token: string } }>('/api/v1/call-links/:token/join', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req, reply) => {
+    reply.header('cache-control', 'no-store');
+    return calls.guestJoin(req.params.token, GuestJoinInput.parse(req.body).name);
+  });
+  app.post<{ Params: { id: string } }>('/api/v1/call-guests/:id/heartbeat', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) =>
+    calls.guestHeartbeat(z.uuid().parse(req.params.id), GuestSecretInput.parse(req.body).secret));
+  app.post<{ Params: { id: string } }>('/api/v1/call-guests/:id/leave', guestLimit, async (req) =>
+    calls.guestLeave(z.uuid().parse(req.params.id), GuestSecretInput.parse(req.body).secret));
   app.get<{ Params: { token: string } }>('/api/v1/org-invitations/:token', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => auth.previewOrgInvitation(req.params.token));
 
   // Vista previa pública de invitación (requiere el token; no expone datos del espacio más allá del nombre).

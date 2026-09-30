@@ -14,11 +14,13 @@ import {
   ChimeSDKMeetingsClient, CreateAttendeeCommand, CreateMeetingCommand, DeleteMeetingCommand, GetMeetingCommand,
   StartMeetingTranscriptionCommand, StopMeetingTranscriptionCommand,
 } from '@aws-sdk/client-chime-sdk-meetings';
-import type { ActiveCallDTO, CallDTO, CallHistoryItemDTO, CallJoinDTO, CallKind, CallTranscriptDTO, CallTranscriptSegmentDTO } from '@tiecoms/contracts';
-import { LEGACY_DEVICE_KEY, callUserId } from '@tiecoms/contracts';
+import type { ActiveCallDTO, CallDTO, CallHistoryItemDTO, CallJoinDTO, CallKind, CallLinkDTO, CallTranscriptDTO, CallTranscriptSegmentDTO, GuestCallPreviewDTO, GuestCallStateDTO, GuestJoinDTO } from '@tiecoms/contracts';
+import { LEGACY_DEVICE_KEY, callUserId, guestExternalId } from '@tiecoms/contracts';
 import type { z } from 'zod';
 import type { CallTranscriptInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
+import { config } from '../config.ts';
+import { randomToken, sha256 } from '../security.ts';
 import { pool, tx, type Db, type Tx, enqueueOutbox } from '../db.ts';
 import { ApiError, badRequest, notFound } from '../errors.ts';
 import { appendEvent, appendMessage, sendMessage } from './messages.ts';
@@ -188,7 +190,9 @@ async function callDTO(db: Db, id: string, viewerId?: string): Promise<CallDTO> 
                     ORDER BY g.rung_at) FROM call_rings g WHERE g.call_id = c.id) AS rings,
             (SELECT jsonb_object_agg(u.id, u.name) FROM users u
               WHERE u.id IN (SELECT p.user_id FROM call_participants p WHERE p.call_id = c.id UNION SELECT i.user_id FROM call_invites i WHERE i.call_id = c.id
-                             UNION SELECT g.user_id FROM call_rings g WHERE g.call_id = c.id)) AS names
+                             UNION SELECT g.user_id FROM call_rings g WHERE g.call_id = c.id)) AS names,
+            (SELECT jsonb_agg(jsonb_build_object('id', q.id, 'name', q.name) ORDER BY q.joined_at) FROM call_guests q
+              WHERE q.call_id = c.id AND q.left_at IS NULL) AS guests
        FROM calls c WHERE c.id = $1`,
     [id, viewerId ?? null],
   );
@@ -201,6 +205,7 @@ async function callDTO(db: Db, id: string, viewerId?: string): Promise<CallDTO> 
     ...(r.invited?.length ? { invitedUserIds: r.invited } : {}), names: r.names ?? {},
     ...(r.rings?.length ? { invited: r.rings } : {}),
     ...(viewerId ? { myDevices: r.my_devices ?? [] } : {}),
+    ...(r.guests?.length ? { guests: r.guests } : {}),
   };
 }
 
@@ -519,6 +524,8 @@ async function finish(callId: string) {
     const call = r.rows[0];
     if (!call) return;
     await c.query('UPDATE call_participants SET left_at = now() WHERE call_id = $1 AND left_at IS NULL', [callId]);
+    await c.query('UPDATE call_guests SET left_at = now() WHERE call_id = $1 AND left_at IS NULL', [callId]);
+    await c.query('UPDATE call_links SET revoked_at = now() WHERE call_id = $1 AND revoked_at IS NULL', [callId]);
     await callNote(c, callId, { conversationId: call.conversation_id, authorId: call.started_by, kind: 'system', body: sys('call.ended', { callId, durationSec: call.secs }) });
     const seg = await c.query('SELECT 1 FROM call_transcript_segments WHERE call_id = $1 LIMIT 1', [callId]);
     if (seg.rowCount) {
@@ -581,6 +588,13 @@ export async function reapCalls(): Promise<number> {
       RETURNING c.id, c.conversation_id`,
     [STALE_SECONDS],
   );
+  const staleGuests = await pool.query(
+    `UPDATE call_guests q SET left_at = now() FROM calls c
+      WHERE c.id = q.call_id AND c.ended_at IS NULL AND q.left_at IS NULL AND q.last_seen_at < now() - make_interval(secs => $1)
+      RETURNING c.id, c.conversation_id`,
+    [GUEST_STALE_SECONDS],
+  );
+  // Los invitados no sostienen la llamada: sin nadie de chaggu dentro, se cierra (y se les corta).
   const empty = await pool.query(
     `SELECT c.id FROM calls c WHERE c.ended_at IS NULL AND c.started_at < now() - interval '1 minute'
         AND NOT EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id AND p.left_at IS NULL)`,
@@ -588,9 +602,125 @@ export async function reapCalls(): Promise<number> {
   const ended = new Set(empty.rows.map((r) => r.id));
   for (const id of ended) await finish(id);
   // Los que siguen con gente pero perdieron a alguien: avisar quién quedó.
-  const touched = new Map(stale.rows.filter((r) => !ended.has(r.id)).map((r) => [r.id, r.conversation_id]));
+  const touched = new Map([...stale.rows, ...staleGuests.rows].filter((r) => !ended.has(r.id)).map((r) => [r.id, r.conversation_id]));
   for (const [id, conv] of touched) await tx((c) => publish(c, conv, id));
   return ended.size + touched.size;
+}
+
+// ---------- Invitados por enlace (docs/LLAMADAS.md › Invitados por enlace) ----------
+/** Invitados a la vez en una llamada. */
+export const MAX_GUESTS = 10;
+/** El invitado late cada 15 s (así también se entera de quién entra); a los 45 s sin latir sale. */
+const GUEST_STALE_SECONDS = 45;
+
+/**
+ * POST /calls/:id/link: un enlace nuevo para que terceros entren con su nombre, sin cuenta. Lo pide alguien que
+ * está dentro de la llamada. Vale mientras la llamada siga abierta (o hasta quitarlo con DELETE).
+ */
+export async function createLink(userId: string, callId: string): Promise<CallLinkDTO> {
+  requireEnabled();
+  const call = await callFor(pool, userId, callId, 'post');
+  if (call.ended_at) throw new ApiError(409, 'call_ended', 'La llamada ya terminó');
+  const inside = await pool.query('SELECT 1 FROM call_participants WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL LIMIT 1', [callId, userId]);
+  if (!inside.rowCount) throw new ApiError(409, 'not_in_call', 'Entra a la llamada para compartir el enlace');
+  const token = randomToken(18);
+  await pool.query('INSERT INTO call_links (call_id, token_hash, created_by) VALUES ($1,$2,$3)', [callId, sha256(token), userId]);
+  return { token, url: `${config.publicOrigin}/llamada/${token}` };
+}
+
+/** DELETE /calls/:id/link: los enlaces dejan de servir. Quien ya entró sigue dentro (se le puede sacar colgando para todos). */
+export async function revokeLinks(userId: string, callId: string) {
+  await callFor(pool, userId, callId, 'post');
+  await pool.query('UPDATE call_links SET revoked_at = now() WHERE call_id = $1 AND revoked_at IS NULL', [callId]);
+  return { ok: true };
+}
+
+async function linkRow(token: string) {
+  if (!/^[A-Za-z0-9_-]{16,64}$/.test(token)) throw notFound('Enlace');
+  const { rows } = await pool.query(
+    `SELECT l.id AS link_id, l.revoked_at, c.id AS call_id, c.kind, c.ended_at, c.external_id, c.meeting, c.conversation_id,
+            cv.kind AS conv_kind, cv.name AS conv_name, u.name AS host_name,
+            (SELECT o.name FROM organization_memberships om JOIN organizations o ON o.id = om.org_id WHERE om.user_id = c.started_by ORDER BY om.joined_at LIMIT 1) AS org_name,
+            EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id AND p.left_at IS NULL) AS live
+       FROM call_links l JOIN calls c ON c.id = l.call_id JOIN conversations cv ON cv.id = c.conversation_id JOIN users u ON u.id = c.started_by
+      WHERE l.token_hash = $1`,
+    [sha256(token)],
+  );
+  if (!rows[0]) throw notFound('Enlace');
+  return rows[0];
+}
+
+/** GET /call-links/:token (público): lo mínimo para la pantalla «Entrar a la llamada». Un chat directo no muestra su nombre. */
+export async function previewLink(token: string): Promise<GuestCallPreviewDTO> {
+  requireEnabled();
+  const r = await linkRow(token);
+  return {
+    title: r.conv_kind === 'direct' ? null : r.conv_name ?? null, hostName: r.host_name, orgName: r.org_name ?? null,
+    kind: r.kind, active: !r.revoked_at && !r.ended_at && r.live && !!r.external_id,
+  };
+}
+
+async function guestState(db: Db, callId: string): Promise<GuestCallStateDTO> {
+  const call = await callDTO(db, callId);
+  const guests = call.guests ?? [];
+  const names: Record<string, string> = {};
+  for (const id of call.activeUserIds) if (call.names?.[id]) names[id] = call.names[id]!;
+  for (const g of guests) names[guestExternalId(g.id)] = g.name;
+  return { callId, kind: call.kind, active: !call.endedAt, transcribing: call.transcribing, activeUserIds: call.activeUserIds, guests, names };
+}
+
+/** POST /call-links/:token/join (público): entra un invitado con su nombre. */
+export async function guestJoin(token: string, name: string): Promise<GuestJoinDTO> {
+  requireEnabled();
+  const r = await linkRow(token);
+  if (r.revoked_at) throw new ApiError(410, 'link_revoked', 'Este enlace ya no sirve. Pide uno nuevo.');
+  if (r.ended_at) throw new ApiError(409, 'call_ended', 'La llamada ya terminó');
+  if (!r.live || !r.external_id) throw new ApiError(409, 'call_not_live', 'No hay nadie en la llamada ahora');
+  const n = await pool.query('SELECT count(*)::int AS n FROM call_guests WHERE call_id = $1 AND left_at IS NULL', [r.call_id]);
+  if (n.rows[0].n >= MAX_GUESTS) throw new ApiError(409, 'call_full', 'La llamada ya tiene el máximo de invitados');
+  const secret = randomToken(24);
+  const clean = name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 60) || 'Invitado';
+  const ins = await pool.query('INSERT INTO call_guests (call_id, link_id, name, secret_hash) VALUES ($1,$2,$3,$4) RETURNING id', [r.call_id, r.link_id, clean, sha256(secret)]);
+  const guestId = ins.rows[0].id as string;
+  let attendee: Attendee;
+  try { attendee = await getProvider().attendee(r.external_id, guestExternalId(guestId)); }
+  catch (e) {
+    await pool.query('UPDATE call_guests SET left_at = now() WHERE id = $1', [guestId]);
+    if (e instanceof MeetingGone) { await finish(r.call_id); throw new ApiError(409, 'call_ended', 'La llamada ya terminó'); }
+    throw e;
+  }
+  const call = await tx(async (c) => {
+    await c.query('UPDATE call_guests SET attendee_id = $2 WHERE id = $1', [guestId, attendee.AttendeeId]);
+    await publish(c, r.conversation_id, r.call_id);
+    return guestState(c, r.call_id);
+  });
+  return { guestId, secret, call, meeting: { Meeting: r.meeting }, attendee: { Attendee: attendee } };
+}
+
+async function guestRow(guestId: string, secret: string) {
+  const { rows } = await pool.query(
+    'SELECT q.*, c.conversation_id, c.ended_at FROM call_guests q JOIN calls c ON c.id = q.call_id WHERE q.id = $1 AND q.secret_hash = $2',
+    [guestId, sha256(secret)],
+  );
+  if (!rows[0]) throw new ApiError(404, 'not_found', 'Invitado no encontrado');
+  return rows[0];
+}
+
+/** POST /call-guests/:id/heartbeat (público, con el secreto): sigue dentro y recibe quién está. */
+export async function guestHeartbeat(guestId: string, secret: string): Promise<GuestCallStateDTO> {
+  const g = await guestRow(guestId, secret);
+  if (g.left_at || g.ended_at) throw new ApiError(409, 'not_in_call', 'Ya no estás en esa llamada');
+  await pool.query('UPDATE call_guests SET last_seen_at = now() WHERE id = $1', [guestId]);
+  return guestState(pool, g.call_id);
+}
+
+export async function guestLeave(guestId: string, secret: string) {
+  const g = await guestRow(guestId, secret);
+  if (!g.left_at) await tx(async (c) => {
+    await c.query('UPDATE call_guests SET left_at = now() WHERE id = $1', [guestId]);
+    if (!g.ended_at) await publish(c, g.conversation_id, g.call_id);
+  });
+  return { ok: true };
 }
 
 // ---------- Transcripción ----------

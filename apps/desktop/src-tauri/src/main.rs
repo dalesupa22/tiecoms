@@ -1,7 +1,8 @@
 // Chaggu de escritorio (macOS y Windows): la misma web de apps/web empaquetada en local,
 // hablando con https://app.chaggu.com, más lo que un navegador no da: notificaciones del
 // sistema, enlaces chaggu://, token de sesión en el Llavero / Administrador de credenciales,
-// ventana que se oculta al cerrar, bandeja y descargas a la carpeta Descargas.
+// ventana que se oculta al cerrar, bandeja, descargas a la carpeta Descargas y llamadas con
+// micrófono, cámara y pantalla compartida.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
@@ -9,7 +10,7 @@ use std::sync::Mutex;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::webview::{DownloadEvent, NewWindowResponse};
+use tauri::webview::{DownloadEvent, NewWindowResponse, PermissionKind, PermissionResponse};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_notification::NotificationExt;
@@ -170,6 +171,16 @@ fn main() {
         .on_new_window(move |url, _features| {
           open_external(&popup, &url);
           NewWindowResponse::Deny
+        })
+        // Llamadas: micrófono, cámara y compartir pantalla, sin volver a preguntar dentro de la app
+        // (el sistema pide su permiso la primera vez). Solo para la interfaz empaquetada, nunca para otro origen.
+        .on_permission_request(|webview, kind| {
+          let ours = webview.url().map(|u| is_app_url(&u)).unwrap_or(false);
+          match kind {
+            PermissionKind::Microphone | PermissionKind::Camera | PermissionKind::DisplayCapture if ours => PermissionResponse::Allow,
+            PermissionKind::Microphone | PermissionKind::Camera | PermissionKind::DisplayCapture => PermissionResponse::Deny,
+            _ => PermissionResponse::Default,
+          }
         })
         .on_download(move |_webview, event| {
           match event {

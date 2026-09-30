@@ -148,7 +148,28 @@ export interface CallDTO {
    * esa llamada. Los clientes muestran «Llamando…» y, pasados 45 s sin entrar, «No contestó» con «Volver a llamar».
    */
   invited?: { userId: string; at: string; joined: boolean }[];
+  /** Invitados por enlace que están dentro ahora (sin cuenta). En Chime su externalUserId es "guest:{id}". */
+  guests?: CallGuestDTO[];
 }
+export interface CallGuestDTO { id: string; name: string }
+/** externalUserId de Chime de un invitado por enlace. */
+export const guestExternalId = (guestId: string) => `guest:${guestId}`;
+export const isGuestExternalId = (id: string | null | undefined) => !!id && id.startsWith('guest:');
+/** POST /calls/:id/link: enlace para que terceros entren sin cuenta (vale mientras la llamada siga abierta). */
+export interface CallLinkDTO { url: string; token: string }
+/** GET /api/v1/call-links/:token (público): qué llamada es, antes de pedir el nombre. */
+export interface GuestCallPreviewDTO { title: string | null; hostName: string; orgName: string | null; kind: CallKind; active: boolean }
+export const GuestJoinInput = z.object({ name: z.string().trim().min(1).max(60) });
+/** Lo que ve el invitado de la llamada (sin ids de la conversación ni del resto de chaggu). */
+export interface GuestCallStateDTO {
+  callId: string; kind: CallKind; active: boolean; transcribing: boolean;
+  /** Personas con cuenta que están dentro (ids solo para asociar los recuadros de video). */
+  activeUserIds: string[];
+  guests: CallGuestDTO[];
+  names: Record<string, string>;
+}
+export interface GuestJoinDTO { guestId: string; secret: string; call: GuestCallStateDTO; meeting: unknown; attendee: unknown }
+export const GuestSecretInput = z.object({ secret: z.string().min(20).max(100) });
 /** POST /calls/:id/invite: suma personas a la llamada en curso (les suena aunque no estén en el chat). */
 export const CallInviteInput = z.object({ userIds: z.array(z.uuid()).min(1).max(20) });
 /** aiSummary: quien la prende autoriza que DeepSeek resuma la transcripción al colgar. */

@@ -27,6 +27,8 @@ import { ScheduledScreen } from './screens/Scheduled.tsx';
 import { CallDock, CallsScreen, IncomingCallHost, OtherDeviceCallBar } from './screens/Call.tsx';
 /** «Documentos que firmé»: se carga aparte junto con el visor de PDF. */
 const SignedScreen = lazy(() => import('./screens/Signed.tsx'));
+/** /llamada/:token: invitados por enlace, sin cuenta. Se carga aparte. */
+const GuestCallScreen = lazy(() => import('./screens/GuestCall.tsx'));
 
 function nextParam() {
   const n = new URLSearchParams(location.search).get('next');
@@ -49,7 +51,7 @@ export function App() {
   useTabBadge();
 
   useEffect(() => {
-    if (status === 'anonymous' && !['login', 'signup', 'invite', 'sso'].includes(route.name)) navigate(`/login${path !== '/' ? `?next=${encodeURIComponent(path)}` : ''}`, true);
+    if (status === 'anonymous' && !['login', 'signup', 'invite', 'sso', 'guestCall'].includes(route.name)) navigate(`/login${path !== '/' ? `?next=${encodeURIComponent(path)}` : ''}`, true);
     // Con sesión desde antes, el enlace de una invitación a la empresa (/signup?org=…) se acepta en /invite/… (también
     // entra a sus grupos). Si la sesión acaba de nacer aquí mismo (se registró con el enlace), ya entró: sigue normal.
     const org = route.name === 'signup' ? new URLSearchParams(location.search).get('org') : null;
@@ -60,6 +62,8 @@ export function App() {
   }, [status, route.name, path]);
 
   if (status === 'ready') markOnce('chaggu:ready');
+  // Invitado por enlace: no necesita sesión, ni esperar a que cargue la de chaggu.
+  if (route.name === 'guestCall') return <Suspense fallback={null}><GuestCallScreen key={lang} token={route.token} /><ToastHost /></Suspense>;
   if (status === 'loading') return <div className="auth"><img src={asset("/chaggu-logo.svg")} alt="chaggu" width={128} height={56} style={{ opacity: 0.6 }} /></div>;
   if (route.name === 'sso') return <SsoReturnScreen key={lang} />;
   if (route.name === 'invite') return <InviteScreen key={lang} token={route.token} />;

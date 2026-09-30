@@ -157,3 +157,28 @@ Pedido de Danny. César lo llamó, contestó en el iPhone y el PC siguió sonand
 - **Cámara en plena llamada (web):** `toggleCamera` prende o apaga el recuadro local sin reconectar (`startVideoInput` + `startLocalVideoTile`; al apagar, `stopLocalVideoTile` y mi recuadro vuelve al avatar). Con al menos un video el panel pasa a cuadrícula con **todas** las personas: quien no tiene cámara se ve como avatar dentro de la cuadrícula. Cada persona lleva los indicadores de cámara apagada y micrófono silenciado (`realtimeSubscribeToVolumeIndicator`, `muted` por attendee; con varios dispositivos, silenciada si lo están todos).
 - **Audio (web):** botón 🔊 en la barra con «Salida de audio» (`listAudioOutputDevices` / `chooseAudioOutput`, solo donde existe `setSinkId`; si no, lo dice) y «Micrófono» (`listAudioInputDevices` / `startAudioInput`).
 - **Web, resto:** «Ahora no» llama a `POST /calls/:id/decline`; `call.answered` de otro dispositivo o `call.declined` cierran el aviso, el tono y la notificación del sistema. Franja fija «📞 En llamada en tu iPhone · {chat}» con Pasar aquí / Unirme también / ＋ Agregar. «En curso ahora» arriba del historial (`GET /calls/active`). Punto verde 📞 en la lista lateral (`calls[convId]`, que se llena con `/calls/active` tras el arranque y con `call.updated`).
+
+## Compartir pantalla (desde el 30-sep-2026)
+
+- Botón 🖥️ en la llamada (web, Mac y Windows; no en móviles, que no tienen `getDisplayMedia`). Usa `startContentShareFromScreenCapture` de Chime a 15 cuadros por segundo: un recuadro de contenido aparte, sin tocar la cámara.
+- La persona elige pantalla, ventana o pestaña en el selector del navegador o del sistema. Cancelar no es error. Si deja de compartir desde la barra del sistema, `contentShareDidStop` apaga el botón.
+- Los demás ven la pantalla grande (el panel se agranda a 960 px) y con pantalla completa. La propia no se muestra (el recuadro de contenido cuyo attendee empieza por el mío se ignora).
+- En Chime la pantalla es otro attendee, `{attendeeId}#content`, con externalUserId `{externalUserId}#content`: `callUserId` da la persona. Cobra como una persona más mientras se comparte.
+- Escritorio (Tauri): `on_permission_request` autoriza micrófono, cámara y captura de pantalla solo a la interfaz empaquetada. macOS pide una vez el permiso «Grabación de pantalla» para chaggu.
+
+## Invitados por enlace (desde el 30-sep-2026, migración 044)
+
+- Quien está dentro toca 🔗 «Enlace para invitados»: `POST /calls/:id/link` crea el enlace `https://app.chaggu.com/llamada/<token>` y se copia. `DELETE /calls/:id/link` lo quita (quien ya entró sigue).
+- El invitado abre `/llamada/<token>` sin cuenta, escribe su nombre y entra con voz o video; puede silenciarse, prender la cámara y compartir pantalla.
+- API público (sin sesión, con límite de peticiones):
+  - `GET /call-links/:token`: título (no en chats directos), quién invita y su empresa, y si hay alguien dentro. No devuelve ids de la conversación.
+  - `POST /call-links/:token/join {name}`: crea el attendee `guest:{id}` y devuelve la reunión, el `guestId` y un `secret`.
+  - `POST /call-guests/:id/heartbeat {secret}` cada 15 s (también trae quién está: el invitado no tiene socket) y `/leave`.
+- Reglas:
+  - Del token y del secreto solo se guarda el hash (`call_links`, `call_guests`).
+  - Máximo 10 invitados a la vez. El enlace muere cuando la llamada termina.
+  - Los invitados no sostienen la llamada: cuando sale el último de chaggu, termina y se les corta.
+  - A los 45 s sin latir, el worker los saca.
+  - No transcriben su audio (la transcripción con Groq pide sesión).
+- `CallDTO.guests` lleva los invitados que están dentro, para que todos vean su nombre.
+- Pruebas: `test/calls-guests.test.ts`.

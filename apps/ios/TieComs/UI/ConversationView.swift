@@ -1746,7 +1746,7 @@ struct MessageBubble: View {
                     if !attachments.isEmpty { AttachmentsBlock(attachments: attachments, mine: mine, messageId: messageId, conversationId: conversationId) }
                     if !text.isEmpty || attachments.isEmpty {
                     Group {
-                        if !mentions.isEmpty || highlight != nil {
+                        if !mentions.isEmpty || highlight != nil || !GGMention.typedRanges(in: text).isEmpty {
                             // Cada mención con el color de SU persona (y tocable); los enlaces http con el color de enlace.
                             RichMessageText(text: text, mentions: mentions, mine: mine, linkify: linkify, highlight: highlight,
                                             maxLines: collapsed ? collapsedLines : 0) { id in

@@ -160,6 +160,7 @@
 		94314AB98FC3D69091F7856E /* UpdateUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 637AC517AB3F0783C71B2F77 /* UpdateUITests.swift */; };
 		946150438681EBBE8EBA8E48 /* SignTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 807D4F6583A0E19D1793BBE2 /* SignTests.swift */; };
 		95B920D193BBFD6EAF1F8081 /* Sounds.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7568544A40900AFE4D73CA5 /* Sounds.swift */; };
+		970E12650BFD06ED805C1FE2 /* GGMentionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69279D9202F644384D6760EB /* GGMentionTests.swift */; };
 		9723C3D12BFBB6BC6BF3F6F5 /* MeetingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4531FCBB80CCAB8CACFCE4E /* MeetingTests.swift */; };
 		9AA25DAFAF89715401A83969 /* Tanda17.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2982F3F2155D87E8241D45FD /* Tanda17.swift */; };
 		9BDE9B49EC0E555C4CC7E332 /* snd_tambor.caf in Resources */ = {isa = PBXBuildFile; fileRef = 86C7F2D63EF39C79C3689D28 /* snd_tambor.caf */; };
@@ -191,6 +192,7 @@
 		B643DE8FB05C32E250BE762A /* snd_burbuja.caf in Resources */ = {isa = PBXBuildFile; fileRef = ABB6C9E0E385383C447388A4 /* snd_burbuja.caf */; };
 		B8C38482ADBC425E9FD69738 /* QuickSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 302C28C3E4BA05FEF2C7DA1B /* QuickSearch.swift */; };
 		BAAB9467E0B0EA44EEDB71D6 /* GG.swift in Sources */ = {isa = PBXBuildFile; fileRef = 203931682D36682DAEF0E412 /* GG.swift */; };
+		BC722072095C65CF20021E8C /* GgMention.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20373A44D85F975AC1AADB3 /* GgMention.swift */; };
 		BCEBBE1E4545F6632C9F1E56 /* SilenceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 893473FDBFD159D372AAD1A7 /* SilenceUITests.swift */; };
 		BF823CAF90098A4FBD5EF2A3 /* AttachmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 787E89B5DD3CCB47B23CF7B9 /* AttachmentViews.swift */; };
 		C0652C2639F88BE93F37B899 /* ChatRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D8D602F456FEA7F1B4BC2EE /* ChatRecoveryTests.swift */; };
@@ -390,6 +392,7 @@
 		654343158B0B1CD9C90EA5A4 /* AppUpdate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdate.swift; sourceTree = "<group>"; };
 		66C9A5B51B1E4B947A7785B5 /* Mail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Mail.swift; sourceTree = "<group>"; };
 		69213C7511D9460826E73827 /* PushPromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushPromptView.swift; sourceTree = "<group>"; };
+		69279D9202F644384D6760EB /* GGMentionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GGMentionTests.swift; sourceTree = "<group>"; };
 		693D6FE05E8BDE87A56C7102 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		6A577B2ED81F6A227F542212 /* AssistantViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantViews.swift; sourceTree = "<group>"; };
 		6AD86F9C677442AE4FEC6A20 /* ring_clasico.caf */ = {isa = PBXFileReference; path = ring_clasico.caf; sourceTree = "<group>"; };
@@ -471,6 +474,7 @@
 		B0596818D27C40A03BBD41CD /* SoundsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundsTests.swift; sourceTree = "<group>"; };
 		B101A1ED3F5900272C60D6B4 /* PasteImageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteImageTests.swift; sourceTree = "<group>"; };
 		B1FD141B091DFF880DF318BF /* ChatSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSearch.swift; sourceTree = "<group>"; };
+		B20373A44D85F975AC1AADB3 /* GgMention.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GgMention.swift; sourceTree = "<group>"; };
 		B27D458CCA260DEF9234EB80 /* ModelsV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsV2.swift; sourceTree = "<group>"; };
 		B2EF5FA7383307CC6AF4E8F7 /* Voice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Voice.swift; sourceTree = "<group>"; };
 		B3068A6F5B7DE8788B944476 /* Storage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage.swift; sourceTree = "<group>"; };
@@ -728,6 +732,7 @@
 				4257657A4BDB09D0C0C1CDB2 /* ConversationView.swift */,
 				F718A99EA118584855D36A3B /* DetailsSettingsInvite.swift */,
 				91B0C07E6212B358778CA533 /* EventChatCard.swift */,
+				B20373A44D85F975AC1AADB3 /* GgMention.swift */,
 				B6C6D89C1C0A915A5831A75C /* GgViews.swift */,
 				180B56319E81B9EDD1A43C5A /* GroupsViews.swift */,
 				8660E1C19B2B2260C1BB5CC2 /* HierarchyViews.swift */,
@@ -837,6 +842,7 @@
 				B70974444ADBE38043BB433E /* EventCardTests.swift */,
 				C03AC3D684CC8DA070505AB8 /* ForegroundAlertTests.swift */,
 				855185E6416DCE34440D1049 /* GGChatTests.swift */,
+				69279D9202F644384D6760EB /* GGMentionTests.swift */,
 				57E4213BD30CF814CD853450 /* GroupsTests.swift */,
 				10AC2E537D2E9D5B93E325A9 /* IntegrationTests.swift */,
 				8352A75C9CCA7DA3612850D3 /* IntegrationV2Tests.swift */,
@@ -1129,6 +1135,7 @@
 				D617012D196385E2A7505E73 /* Feedback.swift in Sources */,
 				A54D0E1477983D235D4FB46D /* ForegroundAlerts.swift in Sources */,
 				4D5FA93A99A9128778D9EA53 /* GG.swift in Sources */,
+				BC722072095C65CF20021E8C /* GgMention.swift in Sources */,
 				8E8C347E8FD27DB8C55ABC16 /* GgViews.swift in Sources */,
 				E918783B7780F302E5C9637B /* Groups.swift in Sources */,
 				872E82FB1C39CE8339D2F29F /* GroupsViews.swift in Sources */,
@@ -1279,6 +1286,7 @@
 				5909CED89F4B96B3D683C7BD /* EventCardTests.swift in Sources */,
 				24D24185115A6ED29550038F /* ForegroundAlertTests.swift in Sources */,
 				8EA6EDD4496C165D21AA8068 /* GGChatTests.swift in Sources */,
+				970E12650BFD06ED805C1FE2 /* GGMentionTests.swift in Sources */,
 				DC9B9B1BFE194309ADC252BB /* GroupsTests.swift in Sources */,
 				C6E3F8CBA1099F05CBEC7F95 /* IntegrationTests.swift in Sources */,
 				5E3407CBD9D372C2E43D5C86 /* IntegrationV2Tests.swift in Sources */,

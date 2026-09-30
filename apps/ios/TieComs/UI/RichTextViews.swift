@@ -37,6 +37,8 @@ enum RichText {
             }
             if !m.isAll, let u = URL(string: "chaggu-mention://\(m.userId)") { out.addAttribute(.link, value: u, range: nr) } else { out.removeAttribute(.link, range: nr) }
         }
+        // @gg multicolor (web 63e6b0f): la mención a gg o «@gg» escrito a mano.
+        GGMention.apply(to: out, text: text, mentions: mentions, mine: mine, font: boldFont())
         // Búsqueda en el chat (tanda 1.7 §6): lo que coincide, resaltado (sin mayúsculas ni tildes).
         if let highlight, highlight.count >= 2 {
             for r in ChatSearch.ranges(of: highlight, in: text) {
@@ -91,6 +93,8 @@ enum RichText {
             let c = mentionColor(m, mine: false)
             storage.addAttributes([.font: boldFont(), .foregroundColor: c, .backgroundColor: c.withAlphaComponent(0.13)], range: NSRange(location: m.start, length: m.length))
         }
+        // @gg mientras se escribe: fondo tenue del degradado.
+        GGMention.applyComposer(storage, mentions: mentions, font: boldFont())
         storage.endEditing()
     }
 }
@@ -129,7 +133,11 @@ struct RichMessageText: UIViewRepresentable {
         if context.coordinator.key != key {
             context.coordinator.key = key
             v.attributedText = RichText.cachedBubble(key)
+            context.coordinator.ggRanges = GGMention.ranges(in: text, mentions: mentions)
         }
+        // Brillo de @gg: después de maquetar (las posiciones dependen del ancho).
+        let gg = context.coordinator.ggRanges
+        DispatchQueue.main.async { GGShimmer.update(v, ranges: gg) }
         if v.textContainer.maximumNumberOfLines != maxLines {
             v.textContainer.maximumNumberOfLines = maxLines
             v.textContainer.lineBreakMode = maxLines > 0 ? .byTruncatingTail : .byWordWrapping
@@ -152,6 +160,7 @@ struct RichMessageText: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: RichMessageText
         var key: RichText.Key?
+        var ggRanges: [NSRange] = []
         init(_ p: RichMessageText) { parent = p }
         func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
             guard case .link(let url) = textItem.content else { return defaultAction }

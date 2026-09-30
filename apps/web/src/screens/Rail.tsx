@@ -2,7 +2,9 @@ import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react
 import type { BootstrapDTO, ConversationDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { t } from '../i18n.ts';
-import { openMenuAt, type MenuItem } from '../menu.tsx';
+import { contextHandler, openMenuAt, type MenuItem } from '../menu.tsx';
+import { isOpenInPanes, openBeside, paneDragProps, splitAvailable, wantsPane } from '../split.ts';
+import { viewKey, type ViewName } from '../panes-core.ts';
 import { asset, navigate, type Route } from '../router.ts';
 import { pendingOf } from '../home-order.ts';
 import { openAccountMenu } from './Profile.tsx';
@@ -73,19 +75,38 @@ const ICONS: Record<string, ReactNode> = {
   calls: <path d="M6.6 3.5h2.3l1.4 4-2 1.3a11 11 0 0 0 6.9 6.9l1.3-2 4 1.4v2.3a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2z" />,
   more: <><circle cx="5.5" cy="12" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="18.5" cy="12" r="1.2" /></>,
 };
+export const NavIcon = ({ name, size = 22 }: { name: string; size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{ICONS[name]}</svg>
+);
 const Icon = ({ name }: { name: string }) => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{ICONS[name]}</svg>
 );
 
 type Tone = 'brand' | 'wa' | 'mail' | 'call' | 'missed';
-function RailItem({ icon, label, on, count, tone = 'brand', dot, at, onClick }: {
-  icon: string; label: string; on: boolean; count?: number; tone?: Tone; dot?: boolean; at?: number; onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
+/**
+ * Las secciones que también son vistas (Hoy, WhatsApp, Correo, Agenda, Tareas) se arrastran al área de paneles,
+ * se abren al lado con ⌘/Ctrl + clic o con clic derecho › «Abrir en paralelo» (docs/PANELES.md).
+ */
+function viewProps(view: ViewName | undefined, label: string) {
+  if (!view || !splitAvailable()) return {};
+  const key = viewKey(view);
+  return {
+    ...paneDragProps(key, { title: label }),
+    onContextMenu: contextHandler(() => [
+      { label: isOpenInPanes(key) ? t('split.focusOpen') : t('split.open'), icon: '⊞', onSelect: () => openBeside(key) },
+    ]),
+  };
+}
+
+function RailItem({ icon, label, on, count, tone = 'brand', dot, at, onClick, view }: {
+  icon: string; label: string; on: boolean; count?: number; tone?: Tone; dot?: boolean; at?: number; onClick: (e: React.MouseEvent<HTMLButtonElement>) => void; view?: ViewName;
 }) {
   const lit = (count ?? 0) > 0 || (at ?? 0) > 0;
   const n = count ?? 0;
   const aria = n > 0 ? `${label}, ${n}` : label;
   return (
-    <button className={`rail-item ${on ? 'on' : ''} ${lit ? `lit tone-${tone}` : ''}`} onClick={onClick} title={label} aria-label={aria} aria-current={on ? 'page' : undefined}>
+    <button className={`rail-item ${on ? 'on' : ''} ${lit ? `lit tone-${tone}` : ''}`} title={label} aria-label={aria} aria-current={on ? 'page' : undefined}
+      onClick={(e) => { if (view && wantsPane(e)) openBeside(viewKey(view)); else onClick(e); }} {...viewProps(view, label)}>
       <Icon name={icon} />
       <span className="rail-label">{label}</span>
       {(at ?? 0) > 0 ? <span className="rail-count tone-brand">@{at! > 1 ? at : ''}</span>
@@ -137,6 +158,7 @@ export function Rail({ route }: { route: Route }) {
   const more = (e: React.MouseEvent<HTMLButtonElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     const items: MenuItem[] = PAGES_MORE.map((p) => ({ label: t(p.label as never), icon: p.icon, hint: route.name === p.name ? '✓' : undefined, onSelect: () => navigate(p.to) }));
+    if (splitAvailable()) items.push({ divider: true }, { label: `${t('nav.files')} · ${t('split.open')}`, icon: '⊞', onSelect: () => openBeside(viewKey('files')) });
     openMenuAt(r.right + 6, r.top, items);
   };
   const moreOn = PAGES_MORE.some((p) => p.name === route.name);
@@ -144,14 +166,14 @@ export function Rail({ route }: { route: Route }) {
   return (
     <nav className="rail" aria-label={t('nav.mainNav')}>
       <button className="rail-logo" onClick={() => pick('all')} aria-label="chaggu" title="chaggu"><img src={asset('/icon.svg')} alt="" width={30} height={30} /></button>
-      <RailItem icon="today" label={t('nav.today')} on={mode === 'all'} at={mentions} onClick={() => pick('all')} />
+      <RailItem icon="today" label={t('nav.today')} on={mode === 'all'} at={mentions} onClick={() => pick('all')} view="today" />
       <RailItem icon="groups" label={t('nav.groups')} on={mode === 'groups'} count={groups} onClick={() => pick(mode === 'groups' ? 'all' : 'groups')} />
       <RailItem icon="dms" label={t('nav.dms')} on={mode === 'dms'} count={dms} onClick={() => pick(mode === 'dms' ? 'all' : 'dms')} />
-      <RailItem icon="whatsapp" label={t('nav.whatsapp')} on={route.name === 'whatsapp'} count={wa} tone="wa" onClick={() => navigate('/whatsapp')} />
-      {mailOn && <RailItem icon="mail" label={t('nav.mail')} on={route.name === 'mail'} count={mail} tone="mail" onClick={() => navigate('/correo')} />}
+      <RailItem icon="whatsapp" label={t('nav.whatsapp')} on={route.name === 'whatsapp'} count={wa} tone="wa" onClick={() => navigate('/whatsapp')} view="whatsapp" />
+      {mailOn && <RailItem icon="mail" label={t('nav.mail')} on={route.name === 'mail'} count={mail} tone="mail" onClick={() => navigate('/correo')} view="mail" />}
       <span className="rail-sep" aria-hidden />
-      <RailItem icon="agenda" label={t('nav.agenda')} on={route.name === 'agenda'} dot={soon} onClick={() => navigate('/agenda')} />
-      <RailItem icon="tasks" label={t('nav.issues')} on={route.name === 'issues'} dot={due} onClick={() => navigate('/asuntos')} />
+      <RailItem icon="agenda" label={t('nav.agenda')} on={route.name === 'agenda'} dot={soon} onClick={() => navigate('/agenda')} view="agenda" />
+      <RailItem icon="tasks" label={t('nav.issues')} on={route.name === 'issues'} dot={due} onClick={() => navigate('/asuntos')} view="issues" />
       <RailItem icon="trazo" label={t('nav.trazo')} on={route.name === 'trazo'} onClick={() => navigate('/trazo')} />
       {callsOn && <RailItem icon="calls" label={missed > 0 ? t('calls.missedN', { n: missed }) : t('nav.calls')} on={route.name === 'calls'} count={missed} tone={missed > 0 ? 'missed' : 'call'} dot={anyCall || inCall} onClick={() => navigate('/llamadas')} />}
       <span className="grow" />

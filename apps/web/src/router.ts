@@ -23,12 +23,15 @@ export type Route =
   | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' } | { name: 'agenda' } | { name: 'share' } | { name: 'whatsapp' } | { name: 'files' } | { name: 'groups' } | { name: 'dms' } | { name: 'saved' } | { name: 'scheduled' } | { name: 'signed' } | { name: 'calls' } | { name: 'mail' }
   | { name: 'oversight'; id: string } | { name: 'readonly'; id: string }
   | { name: 'conversation'; id: string } | { name: 'workspace'; id: string }
+  /** Un panel que no tiene página propia (chat de WhatsApp, correo, tarea): /p/<clave> (split.ts). */
+  | { name: 'pane'; key: string }
   | { name: 'login' } | { name: 'signup' } | { name: 'sso' } | { name: 'invite'; token: string } | { name: 'guestCall'; token: string } | { name: 'confirmSignup'; token: string };
 
 export function parse(path: string): Route {
   const [, a, b] = path.split('/');
   if (a === 'c' && b) return { name: 'conversation', id: b };
   if (a === 'w' && b) return { name: 'workspace', id: b };
+  if (a === 'p' && b) { try { return { name: 'pane', key: decodeURIComponent(b) }; } catch { return { name: 'today' }; } }
   if (a === 'invite' && b) return { name: 'invite', token: decodeURIComponent(b) };
   if (a === 'llamada' && b) return { name: 'guestCall', token: decodeURIComponent(b) };
   if (a === 'confirmar' && b) return { name: 'confirmSignup', token: decodeURIComponent(b) };

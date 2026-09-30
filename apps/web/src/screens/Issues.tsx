@@ -9,6 +9,11 @@ import { destinationLabel, issueDestinations } from '../quick-search.ts';
 import { QuickActions } from './Quick.tsx';
 import { openDialog } from '../actions.tsx';
 import { IssueTopicTag, issueTopicMenu } from './Topics.tsx';
+import { taskKey } from '../panes-core.ts';
+import { openBeside, paneDragProps, splitAvailable, usePaneCtx, wantsPane } from '../split.ts';
+
+/** Un asunto o tarea en su propio panel (docs/PANELES.md). */
+export const openTaskPane = (i: Pick<IssueDTO, 'id' | 'title'>) => openBeside(taskKey(i.id), undefined, { meta: { title: i.title } });
 
 /** Destino «Personal · solo tú» en los selectores de «¿Dónde?». */
 export const PERSONAL_DEST = '__personal';
@@ -79,6 +84,7 @@ export function issueQuickMenu(i: IssueDTO): MenuItem[] {
   const top = !i.parentIssueId && !isPersonal(i);
   return [
     { label: t('issue.complete'), icon: '✓', onSelect: () => void toggleDone(i) },
+    ...(splitAvailable() ? [{ label: t('split.inPanel'), icon: '⊞', onSelect: () => openTaskPane(i) }] : []),
     ...(top ? [
       { label: t('task.add'), icon: '＋', onSelect: () => openDialog((close) => <TasksDialog parentId={i.id} onClose={close} />) },
       ...(i.visibility !== 'org' && i.visibility !== 'private' ? [{ label: t('task.sidechat'), icon: '💬', onSelect: () => openDialog((close) => <SideFromIssueDialog issue={i} onClose={close} />) }] : []),
@@ -128,7 +134,9 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
   ].filter(Boolean);
   return (
     <div role="button" tabIndex={0} className={`card issue-row ${child ? 'is-child' : ''} ${f.stalledDays || f.overdue ? 'is-jam' : ''} ${done ? 'is-done' : ''}`}
-      onClick={() => onOpen(i.id)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i.id); }} {...menuProps(() => issueQuickMenu(i))}>
+      // ⌘/Ctrl + clic (o arrastrarla al área de paneles): la tarea queda abierta en su propio panel.
+      onClick={(e) => { if (wantsPane(e)) openTaskPane(i); else onOpen(i.id); }} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i.id); }} {...menuProps(() => issueQuickMenu(i))}
+      {...paneDragProps(taskKey(i.id), { title: i.title })}>
       {child && <span className="child-elbow" aria-hidden>↳</span>}
       <IssueCheck i={i} size={child ? 18 : 20} />
       <span className="grow" style={{ minWidth: 0 }}>
@@ -327,7 +335,7 @@ function eventText(d: BootstrapDTO, e: IssueEventDTO) {
 }
 
 /** Detalle de un asunto: estado, responsable, fecha, a quién se espera, origen, historial y comentarios. */
-export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () => void }) {
+export function IssueDrawer({ id: startId, onClose, inline }: { id: string; onClose: () => void; inline?: boolean }) {
   const d = useClient((s) => s.data)!;
   // Se navega dentro del mismo diálogo: del asunto a una tarea y de vuelta.
   const [id, setId] = useState(startId);
@@ -341,7 +349,7 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
   const [error, setError] = useState<string | null>(null);
   const load = () => client.issueDetail(id).then((r) => setEvents(r.events)).catch((e) => setError(errorText(e)));
   useEffect(() => { void load(); }, [id, live?.updatedAt]);
-  if (!live) return <Modal title={t('nav.issues')} onClose={onClose}><div className="muted">{error ?? t('common.loading')}</div></Modal>;
+  if (!live) return <Modal inline={inline} title={t('nav.issues')} onClose={onClose}><div className="muted">{error ?? t('common.loading')}</div></Modal>;
   const i = live;
   const done = isClosed(i);
   const conv = d.conversations.find((c) => c.id === i.conversationId);
@@ -367,7 +375,7 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
   const when = (iso: string) => new Date(iso).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   // Un solo paso por pregunta: ¿quién?, ¿para cuándo?, ¿cómo va? Y un solo botón grande para terminar.
   return (
-    <Modal title={isPersonal(i) ? `🔒 ${t('issue.personalOption')}` : conv ? conversationTitle(d, conv) : t('nav.issues')} onClose={onClose}>
+    <Modal inline={inline} title={isPersonal(i) ? `🔒 ${t('issue.personalOption')}` : conv ? conversationTitle(d, conv) : t('nav.issues')} onClose={onClose}>
       <label className="issue-title-wrap">
         <input key={i.title} className={`issue-title-edit ${done ? 'is-done' : ''}`} defaultValue={i.title} maxLength={200} aria-label={t('issue.title')}
           onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { e.currentTarget.value = i.title; e.currentTarget.blur(); } }}
@@ -492,12 +500,15 @@ function dateShortcuts(): ['issue.dToday' | 'issue.dTomorrow' | 'issue.dFriday' 
 }
 
 export function IssuesScreen() {
+  const inPane = !!usePaneCtx();
   const d = useClient((s) => s.data)!;
   const all = useClient((s) => s.issues);
   const [filter, setFilter] = useState<'mine' | 'open' | 'closed'>(() => (localStorage.getItem('chaggu:issueFilter') as 'mine') || 'mine');
   const [groupBy, setGroupBy] = useState<'group' | 'person'>(() => (localStorage.getItem('chaggu:issueGroupBy') as 'person') || 'group');
   // ?issue=<id>: abre el asunto (enlaces de gg, del push o de un asunto personal).
-  const [open, setOpen] = useState<string | null>(() => queryParam('issue'));
+  const [open, setOpenState] = useState<string | null>(() => queryParam('issue'));
+  // En un panel, tocar una tarea la abre en su propio panel al lado (en vez de un diálogo encima de la lista).
+  const setOpen = (id: string | null) => { if (id && inPane && all[id]) openTaskPane(all[id]!); else setOpenState(id); };
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { client.loadIssues({}).catch((e) => setError(errorText(e))); }, []);
   const remember = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* sin almacenamiento */ } };
@@ -769,7 +780,7 @@ export function IssueChatCard({ issueId, creatorId, canPost, onOpen, banner, ton
     try { await client.commentIssue(i.id, body); setText(''); } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
   };
   return (
-    <div className={`card task-card ${done ? 'is-done' : ''} ${f.overdue ? 'is-overdue' : ''} ${tone ? `tone-${tone}` : ''}`} {...menuProps(() => issueQuickMenu(i))}>
+    <div className={`card task-card ${done ? 'is-done' : ''} ${f.overdue ? 'is-overdue' : ''} ${tone ? `tone-${tone}` : ''}`} {...menuProps(() => issueQuickMenu(i))} {...paneDragProps(taskKey(i.id), { title: i.title })}>
       {banner && <div className={`task-card-banner ${tone ? `is-${tone}` : ''}`}>{banner}</div>}
       <div className="task-card-top">
         <span className="task-card-kind">☑ {t('task.card', { name: creator?.name.split(' ')[0] ?? '' })}</span>
@@ -777,7 +788,8 @@ export function IssueChatCard({ issueId, creatorId, canPost, onOpen, banner, ton
       </div>
       <div className="task-card-main">
         <IssueCheck i={i} size={22} />
-        <button className="task-card-title" onClick={() => onOpen(i.id)}>{i.title}</button>
+        <button className="task-card-title" onClick={(e) => { if (wantsPane(e)) openTaskPane(i); else onOpen(i.id); }}>{i.title}</button>
+        {splitAvailable() && <button className="icon-btn task-panel-btn" title={t('split.inPanel')} aria-label={t('split.inPanel')} onClick={() => openTaskPane(i)}>⊞</button>}
       </div>
       <div className="task-card-meta">
         <span className="task-card-owner"><Avatar person={owner} org={orgById(d, owner?.orgId)} size={20} />{owner?.name ?? t('issue.noOwner')}</span>

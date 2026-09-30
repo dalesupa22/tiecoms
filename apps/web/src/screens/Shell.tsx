@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { BootstrapDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { navigate, type Route } from '../router.ts';
-import { DRAG_TYPE } from '../split.ts';
+import { isPaneDrag, keyToPath, openBeside, readPaneDrop, routeToKey, setPaneMeta, splitAvailable } from '../split.ts';
 import { Avatar, counterpartOrg, orgById, personById } from '../ui.tsx';
 import { MentionsInbox } from './Mentions.tsx';
 import type { ConversationDTO } from '@tiecoms/contracts';
@@ -203,17 +203,28 @@ function MobileTabs({ route }: { route: Route }) {
   );
 }
 
-export function Shell({ route, children }: { route: Route; children: ReactNode }) {
+export function Shell({ route, children, inPanes = false }: { route: Route; children: ReactNode; inPanes?: boolean }) {
   useSleepTzSync();
   const connection = useClient((s) => s.connection);
-  const inConv = route.name === 'conversation';
+  const inConv = route.name === 'conversation' || inPanes;
+  // Fuera del área de paneles, soltar algo (un chat, un correo, un ícono del riel): si esta página también es una
+  // vista (Tareas, Agenda, Correo…), quedan las dos lado a lado; si no, se abre lo que soltaste.
+  const here = routeToKey(route);
+  const onMainDrop = (e: React.DragEvent) => {
+    const got = readPaneDrop(e.dataTransfer);
+    if (!got || got.move) return;
+    e.preventDefault();
+    if (here && splitAvailable() && here !== got.key) { openBeside(got.key, here, { meta: got.meta }); return; }
+    if (got.meta) setPaneMeta(got.key, got.meta);
+    navigate(keyToPath(got.key));
+  };
   return (
     <div className={`shell ${inConv ? 'in-conv' : ''}`}>
       <Rail route={route} />
       <Sidebar route={route} />
       {/* Fuera de un chat, soltar una conversación arrastrada la abre (dentro, Split.tsx la pone al lado). */}
-      <main className="main" onDragOver={inConv ? undefined : (e) => { if (Array.from(e.dataTransfer.types).includes(DRAG_TYPE)) e.preventDefault(); }}
-        onDrop={inConv ? undefined : (e) => { const id = e.dataTransfer.getData(DRAG_TYPE); if (id) { e.preventDefault(); navigate(`/c/${id}`); } }}>
+      <main className="main" onDragOver={inConv ? undefined : (e) => { if (isPaneDrag(e.dataTransfer)) e.preventDefault(); }}
+        onDrop={inConv ? undefined : onMainDrop}>
         {connection !== 'online' && <div className="conn" role="status">{connection === 'connecting' ? t('conn.connecting') : t('conn.offline')}</div>}
         {children}
       </main>

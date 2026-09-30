@@ -3,6 +3,7 @@ import type { BootstrapDTO, ConversationDTO, IssueDTO } from '@tiecoms/contracts
 import { client, useClient } from '../app-client.ts';
 import { locale, t } from '../i18n.ts';
 import { Avatar, Modal, conversationTitle, personById, timeLabel } from '../ui.tsx';
+import { openMenuAt } from '../menu.tsx';
 import { EventRow, newEvent } from './Calendar.tsx';
 import { ConversationIssues, isClosed, localIso } from './Issues.tsx';
 
@@ -40,8 +41,8 @@ function useAgenda(conv: ConversationDTO, issues: IssueDTO[]) {
   return items.sort((a, b) => a.at.localeCompare(b.at));
 }
 
-export function ChatBar({ conv, pinnedCount, canOpenIssues, onPins, onLinks, onOpenIssue, onNewIssue, onOpenThread }: {
-  conv: ConversationDTO; pinnedCount: number; canOpenIssues: boolean;
+export function ChatBar({ conv, pinnedCount, canOpenIssues, onPins, onLinks, onOpenIssue, onNewIssue, onOpenThread, compact }: {
+  conv: ConversationDTO; pinnedCount: number; canOpenIssues: boolean; compact?: boolean;
   onPins: () => void; onLinks: () => void; onOpenIssue: (id: string) => void; onNewIssue: () => void; onOpenThread: (id: string) => void;
 }) {
   const d = useClient((s) => s.data)!;
@@ -64,8 +65,27 @@ export function ChatBar({ conv, pinnedCount, canOpenIssues, onPins, onLinks, onO
       <span aria-hidden>{icon}</span><b>{n}</b><span className="chatbar-label">{label}</span>
     </button>
   );
+  // En paralelo (docs/PANELES.md): un solo botón con el total y un punto si algo pide atención; el menú lista los cinco.
+  const total = pinnedCount + issues.length + openThreads.length + agenda.length + (conv.linkCount ?? 0);
+  const alert = overdue || threadUnread > 0 || soon;
+  const openCompact = (e: React.MouseEvent) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    openMenuAt(r.left, r.bottom + 4, [
+      { label: t('bar.pins'), icon: '📌', hint: String(pinnedCount), onSelect: onPins },
+      { label: t('bar.issues'), icon: '◆', hint: `${issues.length}${overdue ? ' !' : ''}`, onSelect: () => setPane('issues') },
+      { label: t('bar.threads'), icon: '💬', hint: `${openThreads.length}${threadUnread ? ' ●' : ''}`, onSelect: () => setPane('threads') },
+      { label: t('bar.agenda'), icon: '📅', hint: `${agenda.length}${soon ? ' ●' : ''}`, onSelect: () => setPane('agenda') },
+      { label: t('bar.links'), icon: '🔗', hint: String(conv.linkCount ?? 0), onSelect: onLinks },
+    ]);
+  };
   return (
     <>
+      {compact ? (
+        <button className={`chatbar-mini ${alert ? 'is-alert' : ''} ${total ? '' : 'is-zero'}`} aria-haspopup="menu" title={`${t('bar.label')}: ${[['📌', pinnedCount], ['◆', issues.length], ['💬', openThreads.length], ['📅', agenda.length], ['🔗', conv.linkCount ?? 0]].map(([a, b]) => `${a} ${b}`).join(' · ')}`}
+          aria-label={`${t('bar.label')}: ${total}`} onClick={openCompact}>
+          <span aria-hidden>▤</span>{total > 0 && <b>{total}</b>}{alert && <span className="chatbar-mini-dot" aria-hidden />}
+        </button>
+      ) : (
       <div className="chatbar" role="toolbar" aria-label={t('bar.label')}>
         {btn('pins', '📌', t('bar.pins'), pinnedCount, onPins)}
         {btn('issues', '◆', t('bar.issues'), issues.length, () => setPane('issues'), overdue)}
@@ -73,6 +93,7 @@ export function ChatBar({ conv, pinnedCount, canOpenIssues, onPins, onLinks, onO
         {btn('agenda', '📅', t('bar.agenda'), agenda.length, () => setPane('agenda'), soon)}
         {btn('links', '🔗', t('bar.links'), conv.linkCount ?? 0, onLinks)}
       </div>
+      )}
       {pane === 'issues' && (
         <Modal title={t('bar.issuesTitle')} onClose={() => setPane(null)}>
           <ConversationIssues conversationId={conv.id} canCreate={canOpenIssues} onOpen={(id) => { setPane(null); onOpenIssue(id); }} />

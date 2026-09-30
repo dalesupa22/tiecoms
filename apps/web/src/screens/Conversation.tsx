@@ -11,7 +11,10 @@ import { conversationMenu, forwardMenu, messageLink, muteMenu, muteOptions, mute
 import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate, queryParam } from '../router.ts';
-import { MAX_PANES, ZOOM_MAX, ZOOM_MIN, convZoomNow, setConvZoom, splitAvailable, useConvZoom } from '../split.ts';
+import { ZOOM_MAX, ZOOM_MIN, convZoomNow, setConvZoom, splitAvailable, takePaneFocus, useConvZoom } from '../split.ts';
+import { PaneControls, PaneNum, headDrag, type PaneProps } from './PaneBits.tsx';
+import { bgClass, effectiveBg, useChatBgs } from '../chat-bg.ts';
+import { openChatBgDialog } from './ChatBg.tsx';
 import { SplitPicker } from './SplitPicker.tsx';
 import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, isGgChat, isSelfChat, orgById, personById, personColor, personInk } from '../ui.tsx';
 import { PhotoCropDialog, pickImage } from './PhotoCrop.tsx';
@@ -54,7 +57,7 @@ const draftKey = (id: string) => `tiecoms:draft:${id}`;
 const excerpt = (s: string, n = 90) => s.replace(/\s+/g, ' ').trim().slice(0, n);
 
 /** Panel dentro de la vista en paralelo (Split.tsx): activo = el del URL; count = cuántos hay abiertos. */
-export interface PaneProps { active: boolean; count: number; onClose: () => void; onOnly: () => void }
+export type { PaneProps };
 
 export function ConversationScreen({ id, embedded, pane, search }: { id: string; embedded?: { onClose: () => void; anchor?: MessageDTO | null; onSeeAnchor?: () => void }; pane?: PaneProps; search?: string }) {
   const d = useClient((s) => s.data)!;
@@ -107,6 +110,11 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   hostRef.current = host;
   // Zoom de este chat (A− / A+ o ⌘/Ctrl + rueda), para leer mejor cuando hay varios en paralelo.
   const zoom = useConvZoom(id);
+  // Fondo del chat (chat-bg.ts): el elegido, o uno automático cuando hay varios paneles.
+  const bgs = useChatBgs();
+  const bg = embedded ? null : effectiveBg(bgs[id], id, !!pane);
+  // Con ⌘1…⌘8 o al abrirlo en paralelo, el cursor queda en este compositor.
+  useEffect(() => { if (pane?.active && takePaneFocus(id)) requestAnimationFrame(() => input.current?.focus({ preventScroll: true })); }, [pane?.active]);
   useEffect(() => {
     if (!host || embedded) return;
     const wheel = (e: WheelEvent) => {
@@ -668,17 +676,20 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   };
 
   return (
-    <div ref={setHost} style={zoom !== 1 && !embedded ? { zoom } : undefined} className={`conv ${panel || sideConv ? '' : 'no-panel'} ${sideConv ? 'has-side' : ''} ${embedded ? 'is-embedded' : ''}`}>
+    <div ref={setHost} style={{ ...(zoom !== 1 && !embedded ? { zoom } : {}), ...(bg ? { ['--chat-bg' as never]: `var(--cbg-${bg.tone})` } : {}) }}
+      className={`conv ${panel || sideConv ? '' : 'no-panel'} ${sideConv ? 'has-side' : ''} ${embedded ? 'is-embedded' : ''} ${pane ? 'is-pane' : ''} ${bgClass(bg)}`}>
       {sideConv && <SideConnector host={host} anchorId={sideConv.parentMessageId} color={personColor(sideAnchor?.authorId ?? sideConv.memberIds[0])} />}
       <section className={`conv-main ${dropping ? 'is-dropping' : ''}`}
         onDragOver={(e) => { if (conv.canPost && e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
         onDragLeave={(e) => { if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) setDropping(false); }}
         onDrop={(e) => { if (!e.dataTransfer.files.length) return; e.preventDefault(); setDropping(false); drafts.add(e.dataTransfer.files); input.current?.focus(); }}>
         {dropping && <div className="drop-hint" aria-hidden>{t('att.drop')}</div>}
-        <header className="conv-head" onContextMenu={contextHandler(() => conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) }))}>
-          {!embedded && <button className="icon-btn only-mobile" aria-label={t('common.back')} onClick={() => (history.length > 1 ? history.back() : navigate('/conversaciones'))}>‹</button>}
-          {conv.kind !== 'direct' && conv.avatarUrl && <ConvAvatar c={conv} size={30} />}
-          <div className="grow conv-head-title" style={{ minWidth: 0 }}>
+        <header className={`conv-head ${pane ? 'is-pane' : ''}`} onContextMenu={contextHandler(() => conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) }))} {...headDrag(pane)}>
+          {!embedded && !pane && <button className="icon-btn only-mobile" aria-label={t('common.back')} onClick={() => (history.length > 1 ? history.back() : navigate('/conversaciones'))}>‹</button>}
+          {pane && <PaneNum pane={pane} />}
+          {pane && conv.kind === 'direct' && <Avatar person={personById(d, conv.memberIds.find((m) => m !== d.me.id) ?? d.me.id)} size={22} />}
+          {conv.kind !== 'direct' && conv.avatarUrl && <ConvAvatar c={conv} size={pane ? 22 : 30} />}
+          <div className="grow conv-head-title" style={{ minWidth: 0 }} title={pane ? `${title} · ${conversationSubtitle(d, conv)}` : undefined}>
             <h2 className="ellipsis">{conv.kind === 'internal' ? '◌ ' : conv.level === 'directivo' ? '◆ ' : ''}{isSide ? `💬 ${t('side.title')}` : title}{muted && <> <button className="head-mute" title={`${muteLine ?? t('side.muted')} · ${t('menu.unmute')}`} aria-label={t('menu.unmute')} onClick={(e) => openMuteMenu(e.currentTarget)}>🔕</button></>}</h2>
             {isSide
               ? <div className="small muted ellipsis side-head-people"><StackedAvatars c={conv} size={18} /> 🔒 {t('side.privateN', { n: conv.memberIds.length })}</div>
@@ -695,16 +706,19 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
             <button className="icon-btn" aria-label={t('zoom.in')} title={t('zoom.in')} disabled={zoom >= ZOOM_MAX} onClick={() => setConvZoom(id, zoom + 0.1)}>A+</button>
           </span>}
           {/* ⊞ Abrir otro chat al lado (hasta 4, split.ts): lo mismo que arrastrar un chat de la lista. */}
-          {!embedded && splitAvailable() && (!pane || pane.count < MAX_PANES) && <button className="icon-btn only-desktop head-split" aria-label={t('split.add')} title={t('split.add')} onClick={() => openDialog((close) => <SplitPicker activeId={id} onClose={close} />)}>⊞</button>}
+          {!embedded && !pane && splitAvailable() && <button className="icon-btn only-desktop head-split" aria-label={t('split.add')} title={t('split.add')} onClick={() => openDialog((close) => <SplitPicker activeId={id} onClose={close} />)}>⊞</button>}
+          {/* En paralelo, Fijados · Tareas · Hilos · Agenda · Enlaces van en un solo botón (el alto queda para los mensajes). */}
+          {pane && <ChatBar compact conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)} onLinks={() => setShowLinks(true)}
+            onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />}
           <button className={`icon-btn only-desktop head-search ${searching ? 'is-on' : ''}`} aria-label={t('csearch.open')} title={t('csearch.open')} aria-pressed={searching} onClick={() => setSearching((v) => !v)}>🔎</button>
-          <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, [{ label: t('csearch.open'), icon: '🔎', onSelect: () => setSearching(true) }, ...(!embedded ? [{ label: `${t('zoom.in')} · ${Math.round(zoom * 100)}%`, icon: 'A+', onSelect: () => setConvZoom(id, zoom + 0.1) }, { label: t('zoom.out'), icon: 'A−', onSelect: () => setConvZoom(id, zoom - 0.1) }, ...(zoom !== 1 ? [{ label: t('zoom.reset'), icon: '↺', onSelect: () => setConvZoom(id, 1) }] : [])] : []), { divider: true }, ...conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) })]); }}>⋯</button>
+          <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, [{ label: t('csearch.open'), icon: '🔎', onSelect: () => setSearching(true) }, ...(!embedded ? [{ label: `${t('zoom.in')} · ${Math.round(zoom * 100)}%`, icon: 'A+', onSelect: () => setConvZoom(id, zoom + 0.1) }, { label: t('zoom.out'), icon: 'A−', onSelect: () => setConvZoom(id, zoom - 0.1) }, ...(zoom !== 1 ? [{ label: t('zoom.reset'), icon: '↺', onSelect: () => setConvZoom(id, 1) }] : [])] : []),
+            ...(!embedded ? [{ label: t('bg.menu'), icon: '🎨', onSelect: () => openChatBgDialog(id, !!pane) }] : []),
+            ...(pane ? [{ divider: true }, { label: pane.pinned ? t('split.unpin') : t('split.pin'), icon: '📌', onSelect: pane.onPin }, { label: pane.maximized ? t('split.restore', { n: pane.count }) : t('split.max'), icon: '⤢', onSelect: pane.onMax }, { label: t('split.only'), icon: '▢', onSelect: pane.onOnly }] : []),
+            { divider: true }, ...conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) })]); }}>⋯</button>
           {embedded ? <>
             <button className="icon-btn" aria-label={t('side.openFull')} title={t('side.openFull')} onClick={() => navigate(`/c/${id}`)}>⤢</button>
             <button className="icon-btn" aria-label={t('side.close')} title={t('side.close')} onClick={embedded.onClose}>×</button>
-          </> : pane ? <>
-            <button className="icon-btn head-keep" aria-label={t('split.only')} title={t('split.only')} onClick={pane.onOnly}>⤢</button>
-            <button className="icon-btn head-keep" aria-label={t('split.close')} title={t('split.close')} onClick={pane.onClose}>×</button>
-          </> : <button className="icon-btn" aria-label={t('chat.details')} onClick={() => setPanel(!panelPref)}>ⓘ</button>}
+          </> : pane ? <PaneControls pane={pane} /> : <button className="icon-btn" aria-label={t('chat.details')} onClick={() => setPanel(!panelPref)}>ⓘ</button>}
         </header>
         {searching && <ChatSearchBar conv={conv} scroller={scroller} onJump={jumpTo} onClose={() => { setSearching(false); input.current?.focus(); }} />}
         {!isSide && <CallBanner conversationId={id} />}
@@ -724,7 +738,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
           </div>
         )}
         <LineageBar conv={conv} />
-        {!embedded && (
+        {!embedded && !pane && (
           <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)} onLinks={() => setShowLinks(true)}
             onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
         )}
@@ -859,6 +873,8 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
                 openMenuAt(r.left, r.top - 8, [
                   { label: t('att.fromPhotos'), icon: '🖼', onSelect: () => pickFiles('media', drafts.add) },
                   { label: t('att.fromFiles'), icon: '📎', onSelect: () => pickFiles('any', drafts.add) },
+                  // En un panel angosto ⤓ se esconde: queda aquí.
+                  ...(pane ? [{ label: t('imp.action'), icon: '⤓', onSelect: () => openDialog((close) => <BringDialog conversationId={id} onClose={close} />) }] : []),
                   { divider: true },
                   { label: t('meet.nowTitle'), icon: '📹', onSelect: () => openDialog((close) => <MeetingDialog conversationId={id} onClose={close} />) },
                   { label: t('meet.laterTitle'), icon: '🔗', onSelect: () => openDialog((close) => <MeetingDialog conversationId={id} scheduled onClose={close} />) },
@@ -930,6 +946,15 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
             <button className="switch" role="switch" aria-checked={muted} aria-label={t('mute.switch')}
               onClick={(e) => { if (muted) void unmute(conv); else openMuteMenu(e.currentTarget); }} />
           </div>
+          {/* Fondo del chat (chat-bg.ts): se elige con vista previa; en paralelo ayuda a distinguirlo. */}
+          <button className="card mute-row" onClick={() => openChatBgDialog(id, false)}>
+            <span aria-hidden className={`bg-dot ${bgClass(effectiveBg(bgs[id], id, true))}`} style={{ ['--chat-bg' as never]: `var(--cbg-${effectiveBg(bgs[id], id, true)?.tone ?? 0})` }} />
+            <span className="grow" style={{ textAlign: 'left' }}>
+              <b style={{ display: 'block' }}>{t('bg.menu')}</b>
+              <span className="small muted" style={{ display: 'block' }}>{bgs[id] === 'none' ? t('bg.none') : bgs[id] ? t(`bg.${bgs[id]}` as never) : t('bg.autoHint')}</span>
+            </span>
+            <span className="muted">›</span>
+          </button>
           {/* Sonido de este chat (docs/SONIDOS.md): el menú lo cambia y lo hace sonar. */}
           <button className="card mute-row" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, soundMenu(conv).items!); }}>
             <span aria-hidden style={{ fontSize: 18 }}>🎵</span>

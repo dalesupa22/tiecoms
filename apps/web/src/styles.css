@@ -43,6 +43,8 @@
   --teal-bg: #eef7f8; --teal-line: #b9dde0; --teal-ink: #08636b; --teal: #0A7C87;
   --mark-bg: #f5e3b3; --hl: #ffe9a8; --hl-cur: #ffb938;
   --pdf-bg: #d9d4ca;
+  /* Fondos de chat (chat-bg.ts): tintes suaves con AA para --ink, --ink-2 y --muted (test/theme.test.ts). */
+  --cbg-0: #ecf1f9; --cbg-1: #eaf3ea; --cbg-2: #f2eef9; --cbg-3: #e7f2f2; --cbg-4: #f9edf2; --cbg-5: #f8efe4; --cbg-6: #eeeffa; --cbg-7: #fbeeea; --cbg-pat: rgb(27 25 23 / .07);
   /* Canales RGB para transparencias: rgb(var(--card-rgb) / .85). */
   --card-rgb: 251 249 244; --paper-rgb: 244 241 234; --ink-rgb: 27 25 23;
   --scrim: rgba(27, 25, 23, 0.35); --scrim-soft: rgba(27, 25, 23, 0.28); --shadow: rgba(27, 25, 23, 0.28);
@@ -106,6 +108,7 @@
   --teal-bg: #16312E; --teal-line: #245a54; --teal-ink: #7FD3CA; --teal: #4fc0c9;
   --mark-bg: #5a4812; --hl: #5e4a10; --hl-cur: #ffb938;
   --pdf-bg: #0e0d0c;
+  --cbg-0: #161c26; --cbg-1: #151d18; --cbg-2: #1c1824; --cbg-3: #131d1d; --cbg-4: #22171b; --cbg-5: #211a13; --cbg-6: #181a29; --cbg-7: #231714; --cbg-pat: rgb(244 241 234 / .06);
   --card-rgb: 31 29 27; --paper-rgb: 21 20 19; --ink-rgb: 244 241 234;
   --scrim: rgba(0, 0, 0, 0.6); --scrim-soft: rgba(0, 0, 0, 0.5); --shadow: rgba(0, 0, 0, 0.6);
   --call-bg: #24211e; --call-fg: #f4f1ea; --call-fg-2: #e0dace; --call-line: #37332e;
@@ -1800,29 +1803,6 @@ mark { background: var(--mark-bg); color: inherit; border-radius: 3px; padding: 
 .guest-call-stage.has-screen .call-grid .call-tile { height: 110px; }
 .guest-call-stage.has-screen .call-grid .avatar { transform: scale(0.8); }
 
-/* ---------- Conversaciones en paralelo: hasta 4 (split.ts, 30-sep-2026) ---------- */
-.split { position: relative; display: grid; gap: 6px; height: 100%; min-height: 0; background: var(--line); }
-.split.n1 { display: block; background: none; }
-.split.n1 > .split-cell { height: 100%; }
-.split.n2 { grid-template-columns: 1fr 1fr; }
-.split.n3, .split.n4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
-.split.n3 > .split-cell:nth-child(3) { grid-column: 1 / span 2; }
-.split-cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--paper); }
-.split-cell > .conv { flex: 1; min-height: 0; }
-.split:not(.n1) > .split-cell { border-radius: 8px; box-shadow: inset 0 0 0 1px transparent; transition: box-shadow 0.15s; }
-.split:not(.n1) > .split-cell.is-active::after { content: ""; position: absolute; inset: 0; border: 2px solid var(--accent); border-radius: 8px; pointer-events: none; z-index: 4; }
-.split:not(.n1) > .split-cell:not(.is-active) .conv-head { opacity: 0.8; }
-.split-cell.is-target { box-shadow: inset 0 0 0 3px var(--accent) !important; }
-/* Aviso al arrastrar: tenue sobre todo el área (con 4, se resalta el panel que se reemplaza). */
-.split-drop { position: absolute; inset: 0; pointer-events: none; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 10%, transparent); border: 2px dashed var(--accent); border-radius: 10px; z-index: 5; }
-.split-drop span { background: var(--ink); color: var(--paper); padding: 10px 16px; border-radius: 999px; font-weight: 600; font-size: 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2); }
-.side-conv[draggable="true"] { -webkit-user-drag: element; }
-.side-conv:active { cursor: grabbing; }
-/* Con 3 o 4 paneles: barra de fijados/tareas solo con íconos y números, y encabezado más bajo. */
-.split.n3 .chatbar-label, .split.n4 .chatbar-label { display: none; }
-.split.n3 .chatbar-btn, .split.n4 .chatbar-btn { padding-block: 4px; }
-.split.n3 .conv-head, .split.n4 .conv-head { padding-block: 8px; }
-
 /* ---------- Panel de la llamada como Meet: arrastrar, pantalla completa y ventana flotante (30-sep-2026) ---------- */
 .call-controls { flex-wrap: wrap; row-gap: 8px; }
 .call-dock { max-height: calc(100vh - 24px); overflow: auto; }
@@ -1869,23 +1849,14 @@ html.call-mini body { background: var(--call-bg); }
 .call-dock.is-mini .call-ctl { width: 40px; height: 40px; font-size: 17px; }
 .call-dock .call-add { background: rgba(255, 255, 255, 0.14); color: var(--call-fg); border-color: transparent; }
 .call-dock .call-add:hover { background: rgba(255, 255, 255, 0.24); }
-/* Divisiones de los paneles (Split.tsx): una franja fina que se arrastra. */
-.split-handle { position: absolute; z-index: 6; background: transparent; transition: background 0.15s; }
-.split-handle.is-col { top: 0; bottom: 0; width: 10px; cursor: col-resize; }
-.split-handle.is-row { left: 0; right: 0; height: 10px; cursor: row-resize; }
-.split-handle::after { content: ""; position: absolute; background: var(--line); border-radius: 99px; opacity: 0; transition: opacity 0.15s; }
-.split-handle.is-col::after { left: 4px; top: 50%; width: 3px; height: 44px; margin-top: -22px; }
-.split-handle.is-row::after { top: 4px; left: 50%; height: 3px; width: 44px; margin-left: -22px; }
-.split-handle:hover::after, body.is-resizing-col .split-handle.is-col::after, body.is-resizing-row .split-handle.is-row::after { opacity: 1; background: var(--accent); }
 body.is-resizing-col, body.is-resizing-col * { cursor: col-resize !important; user-select: none; }
 body.is-resizing-row, body.is-resizing-row * { cursor: row-resize !important; user-select: none; }
 /* Zoom por chat (A− / A+). */
 .zoom-pill { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--line); border-radius: 99px; padding: 0 2px; }
 .zoom-pill .icon-btn { width: 28px; height: 28px; font-size: 12px; font-weight: 700; }
 .zoom-val { border: 0; background: none; font-size: 11px; font-weight: 700; color: var(--muted); padding: 0 2px; cursor: pointer; }
-.split.n3 .zoom-pill, .split.n4 .zoom-pill { border: 0; }
 /* Paneles angostos: el nombre del chat primero; lo secundario se esconde (sigue en ⋯ o en la lista). */
-.split:not(.n1) .split-cell { container-type: inline-size; }
+.split.is-multi .split-cell { container-type: inline-size; }
 @container (max-width: 560px) {
   .conv-head .head-orgs, .conv-head .head-space, .conv-head .zoom-val { display: none; }
   .conv-head .conv-head-title { min-width: 96px !important; }
@@ -1896,8 +1867,8 @@ body.is-resizing-row, body.is-resizing-row * { cursor: row-resize !important; us
   .conv-head .icon-btn { width: 32px; }
   .conv-head .zoom-pill .icon-btn { width: 24px; }
 }
-.split:not(.n1) .conv-head { overflow: hidden; }
-.split:not(.n1) .conv-head > *:not(.conv-head-title) { flex-shrink: 0; }
+.split.is-multi .conv-head { overflow: hidden; }
+.split.is-multi .conv-head > *:not(.conv-head-title) { flex-shrink: 0; }
 @container (max-width: 380px) { .conv-head .head-call-video { display: none; } }
 @container (max-width: 380px) { .conv-head .zoom-pill { display: none; } }
 @container (max-width: 300px) { .conv-head .head-keep:first-of-type { display: none; } }
@@ -1923,3 +1894,178 @@ body.is-resizing-row, body.is-resizing-row * { cursor: row-resize !important; us
 :root[data-theme="dark"] .stat.dark .eyebrow { color: var(--accent-ink); }
 /* Diálogos y paneles flotantes en oscuro: un escalón más claro que el fondo, con borde, para que se separen. */
 :root[data-theme="dark"] .modal, :root[data-theme="dark"] .mail-drawer { background: var(--card); border: 1px solid var(--line); }
+
+/* ---------- Paneles en paralelo: hasta 8, con vistas, WhatsApp, correos y tareas (docs/PANELES.md) ---------- */
+.side-conv[draggable="true"] { -webkit-user-drag: element; }
+.side-conv:active { cursor: grabbing; }
+.split { position: relative; height: 100%; min-height: 0; }
+.split.n1 > .split-cell { height: 100%; }
+.split-cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--paper); }
+.split-cell > .conv, .split-cell > .solo-pane { flex: 1; min-height: 0; }
+.solo-pane { display: flex; flex-direction: column; min-height: 0; }
+.split.is-multi { display: flex; flex-direction: column; background: var(--paper-3); }
+.split-grid { position: relative; flex: 1; min-height: 0; margin: 0 6px 6px; }
+.split.is-multi .split-cell { position: absolute; border-radius: 10px; box-shadow: 0 0 0 1px var(--line); transition: box-shadow .15s; }
+.split.is-multi .split-cell.is-off { display: none; }
+/* El activo: anillo de su propio color y una sombra leve (sin gritar). Los demás, el encabezado más apagado. */
+.split.is-multi .split-cell.is-active { box-shadow: 0 0 0 2px var(--pane-fg, var(--accent)), 0 8px 22px rgb(var(--ink-rgb) / .12); z-index: 1; }
+.split.is-multi .split-cell:not(.is-active) .msgs-wrap, .split.is-multi .split-cell:not(.is-active) .pane-body { filter: saturate(.8); }
+.split.is-multi .split-cell.is-flash { animation: pane-flash .9s ease-out; }
+@keyframes pane-flash { 0% { box-shadow: 0 0 0 3px var(--pane-fg, var(--accent)), 0 0 0 10px color-mix(in srgb, var(--pane-fg, var(--accent)) 30%, transparent); } 100% { box-shadow: 0 0 0 2px var(--pane-fg, var(--accent)), 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .split.is-multi .split-cell.is-flash { animation: none; } }
+
+/* Encabezado de una línea: franja con el color del panel, número, ícono, nombre y 📌 ⤢ ×. */
+.split.is-multi .conv-head, .pane-head { min-height: 40px; padding: 4px 6px 4px 8px; gap: 6px; border-top: 3px solid var(--pane-fg, var(--line-2)); border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--pane-bg, var(--paper-2)) 62%, var(--paper)); cursor: grab; flex: none; }
+.split.is-multi .split-cell:not(.is-active) .conv-head, .split.is-multi .split-cell:not(.is-active) .pane-head { background: var(--paper-2); border-top-color: color-mix(in srgb, var(--pane-fg, var(--line-2)) 45%, var(--paper-2)); }
+.split.is-multi .split-cell:not(.is-active) .conv-head h2, .split.is-multi .split-cell:not(.is-active) .pane-title b { color: var(--ink-2); }
+.split.is-multi .conv-head:active, .pane-head:active { cursor: grabbing; }
+.split.is-multi .conv-head h2 { font-size: 14px; }
+.split.is-multi .conv-head .conv-head-title > .small { display: none; }
+.split.is-multi .conv-head .icon-btn, .pane-head .icon-btn { width: 30px; height: 30px; }
+.pane-head { display: flex; align-items: center; }
+.pane-head.is-solo { cursor: default; min-height: 52px; padding: 8px 12px; border-top-width: 0; }
+.pane-num { flex: none; width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; font-size: 11px; font-weight: 800; background: var(--pane-fg, var(--ink-2)); color: var(--paper); cursor: grab; }
+.split.is-multi .split-cell:not(.is-active) .pane-num { opacity: .75; }
+.pane-ico { flex: none; display: inline-flex; align-items: center; color: var(--pane-fg, var(--ink-2)); }
+.pane-glyph { font-size: 15px; line-height: 1; }
+.pane-hash { font-weight: 800; color: var(--pane-fg, var(--muted)); }
+.pane-title { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.pane-title b { font-size: 14px; min-width: 0; }
+.pane-sub { font-size: 12px; color: var(--muted); min-width: 0; }
+.pane-unread { flex: none; }
+.pane-ctl { display: inline-flex; align-items: center; flex: none; }
+.pane-ctl .icon-btn { width: 28px !important; height: 28px !important; font-size: 14px; }
+.pane-pin { filter: grayscale(1); opacity: .5; }
+.pane-pin.is-on { filter: none; opacity: 1; }
+.split.is-multi .split-cell:not(:hover):not(.is-active) .pane-pin:not(.is-on) { visibility: hidden; }
+.split-cell.is-pinned .pane-num { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3px var(--pane-fg, var(--ink-2)); }
+.pane-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.pane-scroll { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px 16px; }
+.pane-view { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.pane-view .page { padding: 10px 12px 18px; overflow: visible; flex: none; }
+.pane-view .page-narrow { max-width: none !important; }
+.pane-view .page h1, .pane-view .page-head h1 { display: none; }
+.pane-view .page-head { margin: 0 0 6px; }
+.pane-view .wa-split, .pane-view .wa-split.has-open { grid-template-columns: minmax(0, 1fr); }
+.modal.is-inline { max-width: none; max-height: none; width: auto; overflow: visible; padding: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.modal.is-inline h3 { font-size: 20px; }
+.mail-drawer.is-inline { width: auto; flex: 1; min-height: 0; height: auto; border-left: 0; box-shadow: none; padding: 0; background: var(--paper); }
+.pane-mail-links { display: flex; justify-content: flex-end; padding: 6px 10px 0; }
+.pane-mail { display: flex; flex-direction: column; gap: 10px; }
+.pane-mail-body { white-space: pre-wrap; }
+.pane-mail-foot { display: flex; align-items: center; gap: 8px; position: sticky; bottom: -16px; padding: 8px 0; background: var(--paper); border-top: 1px solid var(--line); }
+
+/* Barra de paneles: pestañas numeradas (qué es cada uno, de un vistazo) y las acciones del modo múltiple. */
+.panes-bar { height: 34px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 8px; min-width: 0; }
+.panes-tabs { display: flex; gap: 3px; min-width: 0; overflow: hidden; flex: 0 1 auto; }
+.pane-tab { display: inline-flex; align-items: center; gap: 5px; height: 25px; max-width: 170px; min-width: 32px; flex: 0 1 auto; padding: 0 8px 0 3px; border: 1px solid transparent; border-radius: 7px;
+  background: transparent; color: var(--ink-2); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.pane-tab:hover { background: var(--hover); }
+.pane-tab.is-active { background: var(--surface); border-color: var(--line); color: var(--ink); box-shadow: inset 0 -2px 0 var(--pane-fg, var(--accent)); }
+.pane-tab.is-dim { opacity: .55; }
+.pane-tab-n { width: 17px; height: 17px; border-radius: 5px; display: grid; place-items: center; font-size: 10px; font-weight: 800; background: var(--pane-fg, var(--ink-2)); color: var(--paper); flex: none; }
+.pane-tab-ico { display: inline-flex; flex: none; color: var(--pane-fg, var(--ink-2)); }
+.pane-tab-ico .avatar, .pane-tab-ico img { width: 16px !important; height: 16px !important; font-size: 8px !important; }
+.pane-tab-ico svg { width: 15px; height: 15px; }
+.pane-tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.panes-btn { height: 26px; flex: none; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: 0 9px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.panes-btn.icon { min-width: 30px; padding: 0 7px; font-variant-numeric: tabular-nums; }
+.panes-btn:hover { background: var(--surface); }
+.panes-btn.is-restore { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.panes-note { font-size: 11.5px; color: var(--muted); white-space: nowrap; padding: 0 6px; flex: none; }
+@media (max-width: 1180px) { .panes-note { display: none; } }
+
+/* Divisiones: la franja entre paneles se arrastra (doble clic: iguales). */
+.split-handle { position: absolute; z-index: 6; }
+.split-handle.is-col { width: 6px; cursor: col-resize; }
+.split-handle.is-row { left: 0; right: 0; height: 6px; cursor: row-resize; }
+.split-handle::after { content: ""; position: absolute; border-radius: 99px; opacity: 0; background: var(--accent); transition: opacity .15s; }
+.split-handle.is-col::after { left: 1.5px; top: 50%; width: 3px; height: 44px; margin-top: -22px; }
+.split-handle.is-row::after { top: 1.5px; left: 50%; height: 3px; width: 44px; margin-left: -22px; }
+.split-handle:hover::after, body.is-resizing-col .split-handle.is-col::after, body.is-resizing-row .split-handle.is-row::after { opacity: 1; }
+
+/* Al arrastrar: cada panel muestra su zona («Abrir aquí» en el centro, «Abrir al lado» en los bordes). */
+.split.is-dropping .split-cell::after { content: ""; position: absolute; inset: 0; border: 1px dashed var(--line-2); border-radius: 10px; pointer-events: none; z-index: 7; }
+.split-zone { position: absolute; inset: 0; z-index: 8; pointer-events: none; display: flex; align-items: center; justify-content: center; }
+.split-zone::before { content: ""; position: absolute; top: 4px; bottom: 4px; background: color-mix(in srgb, var(--pane-fg, var(--accent)) 16%, transparent); border: 2px dashed var(--pane-fg, var(--accent)); border-radius: 10px; }
+.split-zone.zone-center::before { left: 4px; right: 4px; }
+.split-zone.zone-before::before { left: 4px; width: 34%; }
+.split-zone.zone-after::before { right: 4px; width: 34%; }
+.split-zone.zone-before { justify-content: flex-start; padding-left: 12px; }
+.split-zone.zone-after { justify-content: flex-end; padding-right: 12px; }
+.split-zone span { position: relative; background: var(--ink); color: var(--paper); padding: 8px 14px; border-radius: 999px; font-weight: 700; font-size: 13px; box-shadow: 0 8px 24px var(--shadow); max-width: 80%; text-align: center; }
+
+/* Modo compacto del chat en un panel: una línea arriba, fijados/tareas/hilos en un botón, temas en una fila y
+   un compositor más bajo; los mensajes se quedan con casi todo el alto. */
+.chatbar-mini { position: relative; display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer; flex: none; }
+.chatbar-mini.is-zero { border-color: transparent; background: transparent; }
+.chatbar-mini b { font-weight: 700; color: var(--ink); }
+.chatbar-mini.is-alert { border-color: var(--amber-line); }
+.chatbar-mini-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--amber-ink); }
+.split.is-multi .topic-dock { height: 32px; padding: 0 8px; }
+.split.is-multi .topic-flag { height: 22px; font-size: 12px; }
+.split.is-multi .topic-flag:hover { height: 25px; }
+.split.is-multi .topic-flag.is-on { height: 29px; }
+.split.is-multi .msgs { padding: 8px 10px 6px; }
+.split.is-multi .typing { min-height: 14px; padding: 0 16px 2px; font-size: 11px; }
+.split.is-multi .composer { padding: 5px 8px 7px; }
+.split.is-multi .composer-box { padding: 3px 4px 3px 8px; border-radius: 12px; gap: 4px; }
+.split.is-multi .composer textarea { padding: 6px 0; font-size: 14px; }
+.split.is-multi .send { width: 34px; height: 34px; }
+@container (max-width: 700px) { .conv-head.is-pane .zoom-pill { display: none; } }
+@container (max-width: 480px) { .split.is-multi .composer-box > .bring-btn:nth-of-type(2), .split.is-multi .once-btn { display: none; } }
+@container (max-width: 360px) { .conv-head.is-pane .pane-pin:not(.is-on), .conv-head.is-pane .pane-max { display: none; } }
+@container (max-width: 420px) { .pane-head .pane-sub { display: none; } }
+
+/* WhatsApp en un panel: verde y con su ícono, para no confundir a dónde se envía. */
+.wa-panel.is-pane { position: static; flex: 1; min-height: 0; max-height: none; border: 0; border-radius: 0; box-shadow: none; background: var(--paper); }
+.wa-panel.is-pane .wa-msgs { min-height: 0; background: color-mix(in srgb, var(--green-bg) 45%, var(--paper)); }
+.wa-panel.is-pane .wa-panel-foot { max-height: 45%; overflow: auto; }
+.wa-linked-bar { display: flex; gap: 8px; align-items: center; padding: 5px 10px; border-bottom: 1px solid var(--line); background: var(--paper-2); }
+.wa-composer { padding: 6px 8px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--green-bg) 55%, var(--paper)); flex: none; }
+.wa-composer-box { display: flex; align-items: flex-end; gap: 6px; border: 1px solid color-mix(in srgb, var(--wa-ink) 45%, var(--line)); background: var(--card); border-radius: 12px; padding: 3px 4px 3px 8px; }
+.wa-composer-box:focus-within { border-color: var(--wa-ink); box-shadow: 0 0 0 2px color-mix(in srgb, var(--wa-ink) 20%, transparent); }
+.wa-composer-ico { color: var(--wa-ink); display: inline-flex; padding-bottom: 8px; flex: none; }
+.wa-composer textarea { flex: 1; border: 0; background: transparent; resize: none; outline: none; padding: 7px 0; font: inherit; font-size: 14px; line-height: 1.4; max-height: 140px; min-height: 22px; color: var(--ink); }
+.send.wa-send { background: #0f7a41; color: #fff; width: 34px; height: 34px; }
+.send.wa-send:disabled { background: var(--paper-3); color: var(--faint); }
+.wa-composer-hint { font-size: 11px; color: var(--muted); padding: 3px 4px 0; }
+.wa-reply-bar { border-left: 3px solid var(--wa-ink); }
+.wa-msg.is-pending { opacity: .7; }
+.wa-msg.is-failed { box-shadow: 0 0 0 1px var(--danger); }
+.wa-failed { font-size: 12px; color: var(--danger); margin-top: 2px; }
+.wa-quoted { border-left: 3px solid var(--wa-ink); padding: 2px 8px; margin-bottom: 4px; font-size: 12px; color: var(--ink-2); background: rgb(var(--ink-rgb) / .05); border-radius: 4px; }
+.wa-msg-acts { display: none; gap: 4px; }
+.wa-msg:hover .wa-msg-acts, .wa-msg:focus-within .wa-msg-acts { display: inline-flex; }
+.wa-msg-acts .wa-bring { display: inline-block; }
+.wa-settings-toggle { border: 0; border-top: 1px solid var(--line); background: var(--paper-2); color: var(--muted); text-align: left; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 12px; flex: none; }
+.wa-panel-btn, .mail-panel-btn { flex: none; align-self: center; }
+.task-panel-btn { width: 26px !important; height: 26px !important; font-size: 13px; margin-left: auto; flex: none; }
+.wa-chat[draggable="true"], .mail-row[draggable="true"], .issue-row[draggable="true"] { -webkit-user-drag: element; }
+
+/* «Abrir en paralelo»: vistas y recientes como fichas. */
+.pick-views { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+.pick-recent { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; }
+.keys-table { border-collapse: collapse; width: 100%; }
+.keys-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.keys-table td:first-child { white-space: nowrap; width: 1%; }
+
+/* Fondos de chat (chat-bg.ts): el tono en el área de mensajes y, si tiene, un patrón muy tenue. */
+.conv.has-bg .msgs-wrap, .bg-swatch, .bg-preview, .bg-dot { background-color: var(--chat-bg, var(--paper)); }
+.conv.bg-dots .msgs-wrap, .bg-swatch.bg-dots, .bg-preview.bg-dots, .bg-dot.bg-dots { background-image: radial-gradient(var(--cbg-pat) 1.3px, transparent 1.7px); background-size: 18px 18px; }
+.conv.bg-lines .msgs-wrap, .bg-swatch.bg-lines, .bg-preview.bg-lines, .bg-dot.bg-lines { background-image: repeating-linear-gradient(135deg, var(--cbg-pat) 0 1px, transparent 1px 14px); }
+.conv.bg-grid .msgs-wrap, .bg-swatch.bg-grid, .bg-preview.bg-grid, .bg-dot.bg-grid { background-image: linear-gradient(var(--cbg-pat) 1px, transparent 1px), linear-gradient(90deg, var(--cbg-pat) 1px, transparent 1px); background-size: 22px 22px; }
+.conv.bg-waves .msgs-wrap, .bg-swatch.bg-waves, .bg-preview.bg-waves, .bg-dot.bg-waves { background-image: radial-gradient(circle at 50% 100%, transparent 8px, var(--cbg-pat) 8.5px 10px, transparent 10.5px); background-size: 22px 11px; }
+.bg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+.bg-swatch { position: relative; height: 58px; border-radius: 10px; border: 1px solid var(--line); cursor: pointer; display: flex; align-items: flex-end; padding: 6px 8px; font: inherit; }
+.bg-swatch.is-on { box-shadow: 0 0 0 2px var(--pane-fg, var(--ink)); border-color: transparent; }
+.bg-swatch-name { font-size: 12px; font-weight: 700; color: var(--ink); }
+.bg-preview { border-radius: 12px; border: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.bg-preview-msg { display: flex; gap: 8px; align-items: baseline; font-size: 14px; }
+.bg-preview-msg span { color: var(--ink); flex: 1; }
+.bg-preview-msg i { font-style: normal; font-size: 11px; color: var(--muted); }
+.bg-dot { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line-2); flex: none; }
+
+/* RAM y pintura con 8 paneles: los mensajes fuera de la vista no se pintan ni se maquetan (el navegador guarda su alto). */
+.split.is-multi .msgs > .msg, .split.is-multi .msgs > .day { content-visibility: auto; contain-intrinsic-size: auto 56px; }

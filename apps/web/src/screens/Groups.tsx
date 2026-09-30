@@ -4,7 +4,7 @@ import type { BootstrapDTO, ConversationDTO, CreateGroupRequest, InvitationPrevi
 import { client, useClient } from '../app-client.ts';
 import { errorText, getLang, locale, t, tn } from '../i18n.ts';
 import { navigate, queryParam } from '../router.ts';
-import { DRAG_TYPE } from '../split.ts';
+import { DRAG_TYPE, openBeside, wantsPane } from '../split.ts';
 import { directOtherId, Avatar, ConvAvatar, Modal, OrgMark, SideIcon, badgeColor, conversationPreview, conversationTitle, orgById, personById, timeLabel, isGgChat, isSelfChat } from '../ui.tsx';
 import { openGgChat, openSelfChat } from './Assistant.tsx';
 import { asset } from '../router.ts';
@@ -359,8 +359,10 @@ export function ConvItem({ c, active, showWs = false, label, threadUnread = 0, t
   </>;
   const pin = <><CallDot conversationId={c.id} />{c.pinnedAt ? <span className="conv-pin" title={t('side.pinned')} aria-label={t('side.pinned')}>📌</span> : null}</>;
   return (
-    <button className={`side-conv ${preview ? 'has-preview' : ''} ${active ? 'active' : ''} ${c.unread && !muted ? 'unread' : ''} ${muted ? 'is-muted' : ''}`} onClick={() => navigate(`/c/${c.id}`)}
-      // Se arrastra al área del chat para abrirla en paralelo (hasta 4, split.ts).
+    <button className={`side-conv ${preview ? 'has-preview' : ''} ${active ? 'active' : ''} ${c.unread && !muted ? 'unread' : ''} ${muted ? 'is-muted' : ''}`}
+      // ⌘/Ctrl + clic: al lado, en paralelo (como abrir en otra pestaña); clic normal: en el panel enfocado.
+      onClick={(e) => { if (wantsPane(e)) openBeside(c.id); else navigate(`/c/${c.id}`); }}
+      // Se arrastra al área de paneles para abrirla en paralelo (hasta 8, split.ts).
       draggable onDragStart={(e) => { e.dataTransfer.setData(DRAG_TYPE, c.id); e.dataTransfer.setData('text/uri-list', `${location.origin}/c/${c.id}`); e.dataTransfer.effectAllowed = 'copyMove'; }}
       {...menuProps(() => [...conversationMenu(c, { onNewMeeting: () => newEvent({ conversationId: c.id }) }), ...extraMenu])}>
       {avatar}

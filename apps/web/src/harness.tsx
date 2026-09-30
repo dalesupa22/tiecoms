@@ -62,7 +62,7 @@ const g = [
   msg('general', 'danny', JSON.stringify({ k: 'mail.shared', emailId: 'em1', comment: 'De que es este cobro?' }), 5 * 60_000, { kind: 'system' }),
 ];
 const BANCO = 'header-logo [http://bancolombia-email-wsuite.s3.amazonaws.com/templates/60712c2057ad717760ad6b6c/img/header.png]\n\nHola DANNY SUAREZ,\n\nTe informamos que realizaste una compra por $189.900 en AMAZON WEB SERVICES con tu tarjeta *4521 el 30/09/2026 a las 05:58.\n\nSi no reconoces esta transacción comunícate con nosotros.\nVer detalle [https://www.bancolombia.com/personas/alertas-y-notificaciones?id=98231].\n\nfooter_img [https://bancolombia-email-wsuite.s3.amazonaws.com/templates/x/img/footer.png]\nBancolombia S.A. · Este correo es informativo, por favor no lo respondas.';
-const mails = { em1: { id: 'em1', conversationId: 'general', sharedBy: 'danny', provider: 'gmail', accountEmail: 'danny@xertify.co', direction: 'in', from: { name: 'Alertas y Notificaciones', email: 'alertasynotificaciones@an.notificacionesbancolombia.com' }, to: [], cc: [], subject: 'Alertas y Notificaciones', snippet: BANCO.slice(0, 300), body: BANCO, full: true, sentAt: iso(60 * 60_000), attachments: [], messageId: 'general-m99', comment: 'De que es este cobro?', status: 'pending', repliedAt: null, repliedBy: null, scheduledReply: null, issueId: null, commentCount: 0, lastComments: [], createdAt: iso(5 * 60_000) } };
+const mails = { em1: { id: 'em1', conversationId: 'general', sharedBy: 'danny', provider: 'google', accountEmail: 'danny@xertify.co', direction: 'in', from: { name: 'Alertas y Notificaciones', email: 'alertasynotificaciones@an.notificacionesbancolombia.com' }, to: [], cc: [], subject: 'Alertas y Notificaciones', snippet: BANCO.slice(0, 300), body: BANCO, full: true, sentAt: iso(60 * 60_000), attachments: [], messageId: 'general-m99', comment: 'De que es este cobro?', status: 'pending', repliedAt: null, repliedBy: null, scheduledReply: null, issueId: null, commentCount: 0, lastComments: [], createdAt: iso(5 * 60_000) } };
 seq = 0;
 const dg = [
   msg('diag', 'danny', JSON.stringify({ k: 'derived.here', parent: 'General', excerpt: 'Veo notificaciones duplicadas en las pruebas' }), 2 * D - H, { kind: 'system' }),
@@ -107,7 +107,7 @@ const tm = [
 ];
 
 const data: BootstrapDTO = {
-  contract: 'dev', serverTime: new Date().toISOString(),
+  contract: 'dev', serverTime: new Date().toISOString(), features: { calls: false, mail: q.get('mail') !== 'off' },
   me: { id: 'danny', name: 'Danny Suárez', kind: 'human', title: 'Líder técnico', area: null, primaryOrgId: 'xertify', email: 'danny@demo.tiecoms.com' },
   organizations: [org('xertify', 'Xertify', 'X', '#dcd0f2', '#3b2a5a', true), org('norte', 'Estudio Norte', 'EN', '#e8d5a8', '#4a3a14')],
   workspaces: [{ id: 'ws1', name: 'Lanzamiento · Estudio Norte', department: 'Portal de certificados', glyph: null, owningOrgId: 'xertify', organizationIds: ['xertify', 'norte'], memberIds: ['danny', 'laura', 'mateo', 'ana'], myRole: 'lead', createdAt: iso(4 * D), pinnedAt: null },
@@ -163,6 +163,11 @@ const reminders = [
     side1: { messages: sd, lastEventSeq: sd.length, hasMore: false, loaded: true, loading: false },
     temas: { messages: tm, lastEventSeq: tm.length, hasMore: false, loaded: true, loading: false },
     'dm-ana': { messages: dm, lastEventSeq: dm.length, hasMore: false, loaded: true, loading: false },
+    'multi1': { messages: [msg('multi1', 'mateo', '¿Nos vemos el jueves?', 3 * H)], lastEventSeq: 1, hasMore: false, loaded: true, loading: false },
+    'xflow': { messages: [msg('xflow', 'laura', 'Subí la versión 2 del flujo.', 3 * H)], lastEventSeq: 1, hasMore: false, loaded: true, loading: false },
+    'pagos': { messages: [msg('pagos', 'laura', 'Factura de septiembre lista.', 26 * H)], lastEventSeq: 1, hasMore: false, loaded: true, loading: false },
+    'dm-mateo': { messages: [msg('dm-mateo', 'mateo', 'Nos vemos el viernes.', 4 * H)], lastEventSeq: 1, hasMore: false, loaded: true, loading: false },
+    'internal': { messages: [msg('internal', 'laura', 'Revisemos el despliegue mañana.', 5 * H)], lastEventSeq: 1, hasMore: false, loaded: true, loading: false },
   },
 });
 // WhatsApp de ejemplo: la personal conectada y la Business esperando el QR.
@@ -184,11 +189,20 @@ const waChats = [
   waChat('g6@g.us', 'Estudio Norte · lanzamiento', 'trabajo', { lastPreview: 'Mateo: seguimos el viernes', lastMessageAt: iso(26 * H), participants: 6 }),
   waChat('g7@g.us', 'Viaje Cartagena 2026', 'amigos', { lastPreview: 'Tú: reservé el hotel', lastMessageAt: iso(3 * D), participants: 5 }),
 ];
+// Mensajes por chat (cada panel de WhatsApp tiene los suyos); enviar desde el panel los agrega aquí.
 const waMsgs = [
   { id: 'a', fromMe: false, author: 'Laura Gómez', kind: 'text', body: '¿Quién revisa el PR de firmas?', sentAt: iso(3 * H) },
   { id: 'b', fromMe: true, author: null, kind: 'text', body: 'Yo lo miro después del almuerzo', sentAt: iso(2 * H) },
   { id: 'c', fromMe: false, author: 'Carlos', kind: 'image', body: '📷 Captura del error', sentAt: iso(H) },
   { id: 'd', fromMe: false, author: 'Laura Gómez', kind: 'text', body: 'El despliegue quedó listo ✅', sentAt: iso(20 * 60_000) },
+];
+const waByJid: Record<string, { id: string; fromMe: boolean; author: string | null; kind: string; body: string; sentAt: string }[]> = {};
+const mailItem = (id: string, name: string, email: string, subject: string, snippet: string, ago: number, extra: Record<string, unknown> = {}) => ({ provider: 'google', id, threadId: id, from: { name, email }, to: [{ name: 'Danny Suárez', email: 'danny@xertify.co' }], subject, snippet, date: iso(ago), unread: false, hasAttachments: false, box: 'inbox', ...extra });
+const inbox = [
+  mailItem('m1', 'Lorena Pardo', 'lorena@uniandes.edu.co', 'Renovación del contrato de credenciales 2027', 'Hola Danny, adjunto la propuesta de renovación con los nuevos volúmenes para 2027.', 40 * 60_000, { unread: true, hasAttachments: true }),
+  mailItem('m2', 'Alertas Bancolombia', 'alertas@bancolombia.com', 'Compra aprobada por $189.900', 'Realizaste una compra en AMAZON WEB SERVICES con tu tarjeta *4521.', 2 * H),
+  mailItem('m3', 'José Luis Peñaranda', 'jlpenaranda@urosario.edu.co', 'Seguimiento Fast Track · jueves', 'Te comparto el acta de la reunión y los compromisos del jueves.', 5 * H, { unread: true }),
+  mailItem('m4', 'Stripe', 'receipts@stripe.com', 'Recibo de pago #4821', 'Gracias por tu pago. Este es tu recibo.', 26 * H),
 ];
 (client as any).listMentions = async () => ({ hasMore: false, mentions: g.filter((m) => m.mentions?.some((x) => x.userId === 'danny')).map((m) => ({ message: m, conversationId: 'general', all: false, read: false, createdAt: m.createdAt })) });
 (client as any).fetchBlob = async () => (await fetch('/chaggu-logo.svg')).blob();
@@ -204,7 +218,25 @@ const waMsgs = [
     for (const c of waChats) { const k = counts[c.category] ??= { total: 0, unread: 0 }; k.total++; if (c.unread) k.unread++; }
     return { chats: waChats.filter((c) => !cat || c.category === cat), categories: counts };
   }
-  if (/\/whatsapp\/chats\/.+\/messages/.test(path)) return { messages: waMsgs };
+  if (/\/whatsapp\/chats\/.+\/messages/.test(path)) {
+    const jid = decodeURIComponent(path.split('/')[4]!);
+    const list = (waByJid[jid] ??= jid === 'g1@g.us' ? [...waMsgs] : waMsgs.slice(0, 2).map((m) => ({ ...m, id: `${jid}-${m.id}`, body: jid === 'g2@g.us' ? (m.fromMe ? 'Ya quedó aplicada la recarga ✅' : 'Lorena: ¿ya se aplicó la recarga de UniAndes?') : m.body })));
+    if (init.method === 'POST') {
+      if (q.get('wasend') === 'off') { const e = new Error('not found') as Error & { status: number }; e.status = 404; throw e; }
+      const m = { id: `sent-${Date.now()}`, fromMe: true, author: null, kind: 'text', body: init.json.body, sentAt: new Date().toISOString() };
+      list.push(m);
+      return m;
+    }
+    return { messages: list };
+  }
+  if (path === '/mail/connections') return { connections: [{ provider: 'google', label: 'Gmail', available: true, unavailableReason: null, status: 'active', accountEmail: 'danny@xertify.co' }, { provider: 'microsoft', label: 'Outlook', available: true, unavailableReason: null, status: 'none', accountEmail: null }] };
+  if (path === '/mail/unread') return { unread: 3 };
+  if (path.startsWith('/mail/messages?')) return { items: inbox, nextPage: null, accountEmail: 'danny@xertify.co' };
+  if (path.startsWith('/mail/messages/')) { const id = decodeURIComponent(path.split('/')[4]!); const m = inbox.find((x) => x.id === id) ?? inbox[0]!; return { ...m, cc: [], body: `${m.snippet}\n\nQuedo atento a sus comentarios.\n\nSaludos,\n${m.from?.name ?? ''}`, attachments: m.hasAttachments ? [{ id: 'at1', name: 'Propuesta.pdf', size: 240_000, contentType: 'application/pdf' }] : [] }; }
+  if (path === '/mail/shared/em1/html') return { html: '<div style="font-family:Arial;max-width:600px;margin:auto;border:1px solid #eee"><div style="background:#fdda24;padding:14px 18px;font-weight:700;font-size:18px">Bancolombia</div><div style="padding:18px">Hola <b>DANNY SUAREZ</b>,<br><br>Te informamos que realizaste una compra por <b>$189.900</b> en AMAZON WEB SERVICES con tu tarjeta *4521 el 30/09/2026 a las 05:58.<br><br><a href="#">Ver detalle</a></div><div style="background:#2c2a29;color:#fff;padding:10px 18px;font-size:12px">Este correo es informativo, por favor no lo respondas.</div></div>' };
+  if (/^\/mail\/shared\/[^/]+\/comments$/.test(path)) return { comments: [] };
+  if (/^\/issues\/[^/?]+$/.test(path)) { const id = path.split('/')[2]!; return { issue: issues[id], events: [{ id: 'ev1', issueId: id, actorId: 'laura', kind: 'comment', payload: { body: 'Ya la revisé, falta el logo en alta.' }, createdAt: iso(3 * H) }], children: Object.values(issues).filter((x) => x.parentIssueId === id) }; }
+  if (path.startsWith('/issues?')) return { issues: Object.values(issues) };
   if (path.startsWith('/whatsapp/chats/') && init.method === 'PATCH') {
     const jid = decodeURIComponent(path.split('/')[4]!);
     const c = waChats.find((x) => x.jid === jid)!;

@@ -95,12 +95,15 @@ export function SideIcon({ size = 22 }: { size?: number }) {
   );
 }
 
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Modal({ title, onClose, children, inline }: { title: string; onClose: () => void; children: ReactNode; inline?: boolean }) {
   useEffect(() => {
+    if (inline) return;
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [onClose]);
+  // Dentro de un panel (docs/PANELES.md): el mismo contenido, sin fondo oscuro ni ×, que cierra el panel.
+  if (inline) return <div className="modal is-inline" role="region" aria-label={title}><div className="row"><h3 className="grow">{title}</h3></div>{children}</div>;
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-label={title}>

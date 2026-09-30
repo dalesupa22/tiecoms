@@ -7,6 +7,8 @@ import { navigate, queryParam } from '../router.ts';
 import { Avatar, Modal, conversationTitle, initials, orgById, personById, personColor } from '../ui.tsx';
 import { openDialog, quickTimes } from '../actions.tsx';
 import { mailParts, mailSnippet } from '../mail-text.ts';
+import { inboxKey, mailKey, waKey } from '../panes-core.ts';
+import { openBeside, paneDragProps, splitAvailable, usePaneCtx, wantsPane } from '../split.ts';
 import { prepareMeetingProof, takeMeetingProof, clearMeetingProof } from '../meeting-oauth.ts';
 
 /**
@@ -137,7 +139,17 @@ const previewOf = (provider: MailProvider, id: string) => {
 type Filters = { box: 'inbox' | 'sent' | 'all'; q: string; from: string; to: string; after: string; before: string; attachments: boolean; unread: boolean; label: string; range: string | null };
 const EMPTY: Filters = { box: 'inbox', q: '', from: '', to: '', after: '', before: '', attachments: false, unread: false, label: '', range: null };
 
+/** Un correo de la bandeja en su propio panel (se queda ahí mientras trabajas). */
+export const openInboxPane = (provider: MailProvider, m: MailListItemDTO) =>
+  openBeside(inboxKey(provider, m.id), undefined, { meta: { title: m.subject || t('mail.noSubject'), sub: who(m.box === 'sent' ? m.to[0] : m.from), snap: m } });
+/** Un correo traído a un chat, en panel (o en el panel lateral si la ventana es angosta). Nunca dos veces. */
+export function openMailPane(emailId: string, subject?: string) {
+  if (!splitAvailable()) { openMailDrawer(emailId, 'read'); return; }
+  openBeside(mailKey(emailId), undefined, subject ? { meta: { title: subject } } : {});
+}
+
 function MailBrowser({ connections, onPick, pickLabel, compact }: { connections: MailConnectionDTO[]; onPick: (provider: MailProvider, item: MailListItemDTO) => void; pickLabel: string; compact?: boolean }) {
+  const inPane = !!usePaneCtx();
   const ready = connections.filter((c) => c.status === 'active');
   const [provider, setProvider] = useState<MailProvider | null>(ready[0]?.provider ?? null);
   const [f, setF] = useState<Filters>(EMPTY);
@@ -250,8 +262,10 @@ function MailBrowser({ connections, onPick, pickLabel, compact }: { connections:
         {items?.map((m) => {
           const other = m.box === 'sent' ? m.to[0] : m.from;
           return (
-            <div key={m.id} className={`mail-row ${m.unread ? 'is-unread' : ''}`} onMouseEnter={() => prefetch(m)} onMouseLeave={() => { if (hover.current) clearTimeout(hover.current); }} onTouchStart={() => prefetch(m)}>
-              <button className="mail-row-main" onClick={() => setPreview(m)}>
+            <div key={m.id} className={`mail-row ${m.unread ? 'is-unread' : ''}`} onMouseEnter={() => prefetch(m)} onMouseLeave={() => { if (hover.current) clearTimeout(hover.current); }} onTouchStart={() => prefetch(m)}
+              {...(!compact ? paneDragProps(inboxKey(provider!, m.id), { title: m.subject || t('mail.noSubject'), sub: who(other), snap: m }) : {})}>
+              {/* En un panel, o con ⌘/Ctrl + clic, el correo se abre en su propio panel; si no, la vista previa. */}
+              <button className="mail-row-main" onClick={(e) => { if (!compact && (inPane || wantsPane(e))) openInboxPane(provider!, m); else setPreview(m); }}>
                 <span className="avatar" style={{ width: 32, height: 32, fontSize: 12, background: personColor(other?.email ?? m.id) }} aria-hidden>{initials(who(other) || '?')}</span>
                 <span className="grow" style={{ minWidth: 0 }}>
                   <span className="row" style={{ gap: 6 }}>{f.box !== 'inbox' && <DirBadge out={m.box === 'sent'} />}<b className="ellipsis grow">{m.box === 'sent' ? `${t('mail.toShort')} ${who(other)}` : who(other)}</b><span className="small muted mail-date">{fmtDate(m.date)}</span></span>
@@ -259,6 +273,7 @@ function MailBrowser({ connections, onPick, pickLabel, compact }: { connections:
                   <span className="small muted ellipsis" style={{ display: 'block' }}>{m.hasAttachments ? '📎 ' : ''}<Highlight text={m.snippet} q={f.q} /></span>
                 </span>
               </button>
+              {!compact && splitAvailable() && <button className="icon-btn mail-panel-btn" title={t('split.inPanel')} aria-label={t('split.inPanel')} onClick={() => openInboxPane(provider!, m)}>⊞</button>}
               <button className="btn small primary mail-pick" onClick={() => onPick(provider!, m)}>{pickLabel}</button>
             </div>
           );
@@ -293,7 +308,7 @@ function MailPreview({ provider, item, pickLabel, onPick, onClose }: { provider:
       {error && <div className="error">{error}</div>}
       <div className="mail-body">{m ? m.body || t('mail.noBody') : t('common.loading')}</div>
       {!!m?.attachments.length && <div className="att-chips">{m.attachments.map((a) => <span key={a.id} className="file-chip">📎 {a.name} · {kb(a.size)}</span>)}</div>}
-      <div className="modal-actions"><button className="btn ghost" onClick={onClose}>{t('common.close')}</button><button className="btn primary" onClick={onPick}>{pickLabel}</button></div>
+      <div className="modal-actions">{splitAvailable() && <button className="btn ghost" onClick={() => { onClose(); openInboxPane(provider, item); }}>⊞ {t('split.inPanel')}</button>}<button className="btn ghost" onClick={onClose}>{t('common.close')}</button><button className="btn primary" onClick={onPick}>{pickLabel}</button></div>
     </Modal>
   );
 }
@@ -374,6 +389,26 @@ function ShareStep({ provider, item, conversationId, onDone, onBack }: { provide
         <button className="btn primary" disabled={!picked.length || busy} onClick={() => void share()}>{busy ? t('mail.sharing') : shareLabel(d, picked)}</button>
       </div>
     </>
+  );
+}
+
+/** Un correo de la bandeja como panel: se lee completo y se lleva a un chat (ahí se comenta y se responde). */
+export function InboxMailReader({ provider, id, item }: { provider: MailProvider; id: string; item?: MailListItemDTO }) {
+  const [m, setM] = useState<MailMessageDTO | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { previewOf(provider, id).then(setM).catch((e) => setError(errorText(e))); }, [provider, id]);
+  const base = m ?? item;
+  const share = () => base && openDialog((close) => (
+    <Modal title={t('mail.shareTitle')} onClose={close}><ShareStep provider={provider} item={base} onBack={close} onDone={(cid) => { close(); openBeside(cid); }} /></Modal>
+  ));
+  return (
+    <div className="pane-mail">
+      {base && <MailMeta from={base.from} to={m?.to ?? base.to} cc={m?.cc ?? []} date={base.date} provider={provider} />}
+      {error && <div className="error">{error}</div>}
+      <div className="mail-body pane-mail-body">{m ? m.body || t('mail.noBody') : t('common.loading')}</div>
+      {!!m?.attachments.length && <div className="att-chips">{m.attachments.map((a) => <span key={a.id} className="file-chip">📎 {a.name} · {kb(a.size)}</span>)}</div>}
+      <div className="pane-mail-foot"><span className="small muted grow">{t('mail.paneHint')}</span><button className="btn small primary" disabled={!base} onClick={share}>{t('mail.bring')}</button></div>
+    </div>
   );
 }
 
@@ -526,7 +561,10 @@ export function MailCard({ emailId, banner, onIssue }: { emailId: string; banner
   const conv = d.conversations.find((c) => c.id === email.conversationId);
   const isWa = email.provider === 'whatsapp';
   const other = email.direction === 'out' ? email.to[0] : email.from;
-  const open = (mode: DrawerMode) => openMailDrawer(email.id, mode);
+  const open = (mode: DrawerMode) => (mode === 'read' ? openMailPane(email.id, email.subject) : openMailDrawer(email.id, mode));
+  // Se arrastra al área de paneles: el correo (o, si es tu WhatsApp, su chat) queda abierto al lado.
+  const waChat = isWa && mine && email.wa ? waKey(email.wa.accountId, email.wa.jid) : null;
+  const drag = paneDragProps(waChat ?? mailKey(email.id), { title: (isWa ? email.wa?.chatName : email.subject) || t('mail.noSubject') });
   const taskBtn = email.issueId
     ? <button className="btn small" onClick={() => onIssue?.(email.issueId!)}>◆ {t('mail.seeTask')}</button>
     : conv?.canPost ? <button className="btn small" onClick={() => openDialog((close) => <MailTaskDialog email={email} onClose={close} />)}>◆ {t('mail.task')}</button> : null;
@@ -534,7 +572,7 @@ export function MailCard({ emailId, banner, onIssue }: { emailId: string; banner
     const wa = email.wa;
     const author = email.direction === 'out' ? (mine ? t('common.youShort') : personById(d, email.sharedBy)?.name.split(' ')[0]) : email.from?.name ?? t('wa.someone');
     return (
-      <div className="card mail-card wa-card">
+      <div className="card mail-card wa-card" {...drag}>
         {banner}
         <div className="mail-card-top">
           <span className="src-ico wa"><WaIcon size={22} /></span>
@@ -548,13 +586,13 @@ export function MailCard({ emailId, banner, onIssue }: { emailId: string; banner
         <div className="mail-card-foot">
           <span className="grow" />
           {taskBtn}
-          {mine && wa && <button className="btn small" onClick={() => navigate('/whatsapp')}>{t('wa.seeIn')}</button>}
+          {mine && wa && <button className="btn small" onClick={() => (splitAvailable() ? openBeside(waChat!, undefined, { meta: { title: wa.chatName ?? email.subject } }) : navigate('/whatsapp'))}>{t('wa.seeIn')}</button>}
         </div>
       </div>
     );
   }
   return (
-    <div className={`card mail-card ${email.direction === 'out' ? 'is-out' : 'is-in'}`}>
+    <div className={`card mail-card ${email.direction === 'out' ? 'is-out' : 'is-in'}`} {...drag}>
       {banner}
       <div className="mail-card-top">
         <span className="src-ico"><SrcIcon provider={email.provider} size={22} /></span>
@@ -570,7 +608,7 @@ export function MailCard({ emailId, banner, onIssue }: { emailId: string; banner
         : <button className="mail-card-snip" onClick={() => setPeek(true)}>{mailSnippet(email.snippet) || t('mail.noBody')}</button>}
       <div className="mail-peek-bar">
         <button className="link-btn small" aria-expanded={peek} onClick={() => setPeek((v) => !v)}>{peek ? `▴ ${t('mail.peekHide')}` : `▾ ${t('mail.peek')}`}</button>
-        {peek && <button className="link-btn small" onClick={() => open('read')}>⤢ {t('mail.peekPanel')}</button>}
+        <button className="link-btn small" onClick={() => open('read')}>⤢ {splitAvailable() ? t('split.inPanel') : t('mail.peekPanel')}</button>
       </div>
       {!!email.attachments.length && (
         <div className="att-chips">
@@ -661,8 +699,10 @@ export function MailSharedRow({ m, p, onIssue, actions }: { m: MessageDTO; p: { 
 // ---------- Panel del correo: leer, comentar, responder o programar ----------
 type DrawerMode = 'read' | 'comments' | 'reply';
 export const openMailDrawer = (id: string, mode: DrawerMode = 'read') => openDialog((close) => <MailDrawer id={id} mode={mode} onClose={close} />);
+/** El mismo lector con diseño, comentarios y respuesta, dentro de un panel (docs/PANELES.md). */
+export const MailReader = ({ id, onClose }: { id: string; onClose: () => void }) => <MailDrawer id={id} mode="read" onClose={onClose} inline />;
 
-function MailDrawer({ id, mode, onClose }: { id: string; mode: DrawerMode; onClose: () => void }) {
+function MailDrawer({ id, mode, onClose, inline }: { id: string; mode: DrawerMode; onClose: () => void; inline?: boolean }) {
   const d = useClient((s) => s.data)!;
   const { email, missing } = useSharedMail(id);
   const [tab, setTab] = useState<'comment' | 'reply'>(mode === 'reply' ? 'reply' : 'comment');
@@ -678,21 +718,20 @@ function MailDrawer({ id, mode, onClose }: { id: string; mode: DrawerMode; onClo
     setOrigBusy(true);
     try { setOrig((await client.mailOriginal(id)).body); setBodyOpen(true); } catch (e) { toast(errorText(e)); } finally { setOrigBusy(false); }
   };
-  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }; addEventListener('keydown', k); return () => removeEventListener('keydown', k); }, []);
+  useEffect(() => { if (inline) return; const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }; addEventListener('keydown', k); return () => removeEventListener('keydown', k); }, []);
   useEffect(() => { if (mode === 'comments') commentsRef.current?.scrollIntoView({ block: 'start' }); }, [!!email]);
   const mine = email?.sharedBy === d.me.id;
   const conv = email ? d.conversations.find((c) => c.id === email.conversationId) : null;
   const other = email ? (email.direction === 'out' ? email.to[0] : email.from) : null;
   const gmailLink = mine ? email?.webLink ?? null : null;
-  return (
-    <div className="drawer-shade" onClick={onClose}>
-      <aside className="mail-drawer" role="dialog" aria-label={email?.subject ?? t('mail.title')} onClick={(e) => e.stopPropagation()}>
-        <header className="mail-drawer-h">
+  const body = (
+      <aside className={`mail-drawer ${inline ? 'is-inline' : ''}`} role={inline ? 'region' : 'dialog'} aria-label={email?.subject ?? t('mail.title')} onClick={(e) => e.stopPropagation()}>
+        {inline ? gmailLink && <div className="pane-mail-links"><a className="btn small ghost" href={gmailLink} target="_blank" rel="noopener noreferrer">{t('mail.openIn', { name: LABEL[email!.provider] })} ↗</a></div> : <header className="mail-drawer-h">
           {email && <span className={`src-ico ${email.provider === 'whatsapp' ? 'wa' : ''}`}><SrcIcon provider={email.provider} size={20} /></span>}
           <b className="grow ellipsis">{email ? email.subject || t('mail.noSubject') : t('mail.title')}</b>
           {gmailLink && <a className="btn small ghost" href={gmailLink} target="_blank" rel="noopener noreferrer">{t('mail.openIn', { name: LABEL[email!.provider] })} ↗</a>}
           <button className="icon-btn" onClick={onClose} aria-label={t('common.close')}>×</button>
-        </header>
+        </header>}
         {!email && <div className="hint" style={{ padding: 16 }}>{missing ? t('mail.unavailable') : t('common.loading')}</div>}
         {email && (
           <div className="mail-drawer-b">
@@ -729,12 +768,12 @@ function MailDrawer({ id, mode, onClose }: { id: string; mode: DrawerMode; onClo
               {/* Un WhatsApp se responde en WhatsApp: el API da 400 a /reply (docs/CORREO.md). */}
               {mine && email.provider !== 'whatsapp' && <button className={tab === 'reply' ? 'on' : ''} onClick={() => setTab('reply')}>✉ {t('mail.replyTo', { name: who(other).split(' ')[0] || '…' })}</button>}
             </div>
-            {tab === 'comment' || email.provider === 'whatsapp' ? <CommentBox email={email} /> : <ReplyBox email={email} onSent={onClose} />}
+            {tab === 'comment' || email.provider === 'whatsapp' ? <CommentBox email={email} autoFocus={!inline} /> : <ReplyBox email={email} onSent={inline ? () => setTab('comment') : onClose} />}
           </div>
         )}
       </aside>
-    </div>
   );
+  return inline ? body : <div className="drawer-shade" onClick={onClose}>{body}</div>;
 }
 
 function MailComments({ email }: { email: SharedMailDTO }) {
@@ -762,7 +801,7 @@ function MailComments({ email }: { email: SharedMailDTO }) {
   );
 }
 
-function CommentBox({ email }: { email: SharedMailDTO }) {
+function CommentBox({ email, autoFocus = true }: { email: SharedMailDTO; autoFocus?: boolean }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const send = async () => {
@@ -772,7 +811,7 @@ function CommentBox({ email }: { email: SharedMailDTO }) {
   };
   return (
     <>
-      <textarea className="input" rows={2} autoFocus value={text} placeholder={t('mail.commentTeamPh')} onChange={(e) => setText(e.target.value)}
+      <textarea className="input" rows={2} autoFocus={autoFocus} value={text} placeholder={t('mail.commentTeamPh')} onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} />
       <div className="row"><span className="small muted grow">{t('mail.teamOnly', { name: who(email.direction === 'out' ? email.to[0] : email.from).split(' ')[0] ?? '' })}</span><button className="btn small primary" disabled={!text.trim() || busy} onClick={() => void send()}>{t('comments.send')}</button></div>
     </>

@@ -63,4 +63,19 @@ describe('tema', () => {
       expect(ratio(DARK[`gc-${i}-fg`]!, DARK[`gc-${i}-bg`]!)).toBeGreaterThanOrEqual(4.5);
     }
   });
+
+  it('los fondos de chat (chat-bg.ts) mantienen AA para texto, secundario, gris y acento en los dos temas', () => {
+    for (const [name, tk] of [['claro', LIGHT], ['oscuro', DARK]] as const) {
+      for (let i = 0; i < 8; i++) {
+        const bg = tk[`cbg-${i}`];
+        expect(bg, `falta --cbg-${i} (${name})`).toBeTruthy();
+        for (const f of ['ink', 'ink-2', 'muted', 'accent', 'danger']) {
+          const r = ratio(val(tk, f), bg!);
+          expect(r, `${f} sobre --cbg-${i} (${name}) = ${r.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
+        }
+        // Nombres de las personas (en oscuro, --pc-N) y el acento del panel (--gc-N-fg) sobre su propio fondo.
+        if (name === 'oscuro') for (let k = 0; k < 8; k++) expect(ratio(tk[`pc-${k}`]!, bg!)).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
 });

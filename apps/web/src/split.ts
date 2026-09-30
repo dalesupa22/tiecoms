@@ -1,98 +1,228 @@
 /**
- * Hasta 4 conversaciones abiertas a la vez (pedido de Danny, 30-sep-2026): se arrastra un chat de la lista
- * al área del chat, o «Abrir en paralelo» en su menú. La del URL (/c/:id) es la activa; las demás quedan
- * guardadas en este navegador para volver a encontrarlas igual.
- * - Tocar un chat de la lista cambia el panel activo (como las pestañas de un editor).
- * - Tocar dentro de otro panel lo vuelve el activo (el URL cambia, sin recargar ni perder el scroll).
- * - En pantallas angostas solo se ve el activo.
+ * Paneles en paralelo (docs/PANELES.md): hasta 8 cosas abiertas a la vez en la web y en la app de escritorio —
+ * chats, vistas (Tareas, Agenda, Correo, WhatsApp, Hoy, Archivos) y elementos sueltos (un chat de WhatsApp, un
+ * correo, una tarea). La lógica pura vive en panes-core.ts; aquí se guarda (localStorage, por dispositivo) y se
+ * conecta con el URL:
+ * - el panel activo es el del URL (/c/:id, /asuntos, /p/<clave>…); enfocar otro cambia el URL sin recargar;
+ * - tocar un chat de la lista reemplaza al panel enfocado (como las pestañas de un editor), salvo que esté fijado;
+ * - en pantallas angostas (celular) solo se ve el activo.
  */
-import { useSyncExternalStore } from 'react';
-import { navigate } from './router.ts';
+import { createContext, useContext, useSyncExternalStore } from 'react';
+import { navigate, parse, BASE, type Route } from './router.ts';
+import * as core from './panes-core.ts';
+import { toast } from './menu.tsx';
+import { t } from './i18n.ts';
 
-export const MAX_PANES = 4;
-/** Desde qué ancho de ventana hay paneles (la app de Mac abre en ~1000 px: con 1100 no aparecían). */
+export { MAX_PANES } from './panes-core.ts';
+/** Desde qué ancho de ventana hay paneles (la app de Mac abre en ~1000 px). */
 export const SPLIT_MEDIA = '(min-width: 860px)';
 export const splitAvailable = () => typeof matchMedia !== 'undefined' && matchMedia(SPLIT_MEDIA).matches;
-/** Tipo del arrastre (dataTransfer) de una conversación de la lista. */
+/** Arrastre de una conversación de la lista (dataTransfer: su id). */
 export const DRAG_TYPE = 'application/x-chaggu-conversation';
+/** Arrastre de cualquier cosa que se abre como panel (dataTransfer: la clave; y su título en PANE_META_TYPE). */
+export const DRAG_PANE = 'application/x-chaggu-pane';
+const DRAG_META = 'application/x-chaggu-pane-meta';
+/** Arrastre del encabezado de un panel ya abierto (para moverlo o intercambiarlo). */
+export const DRAG_MOVE = 'application/x-chaggu-pane-move';
+
 const KEY = 'chaggu:split';
+const read = <T,>(k: string, fallback: T): T => { try { const v = localStorage.getItem(k); return v == null ? fallback : (JSON.parse(v) as T); } catch { return fallback; } };
+const write = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* sin almacenamiento */ } };
 
-function load(): string[] {
-  try { const v = JSON.parse(localStorage.getItem(KEY) ?? '[]'); return Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, MAX_PANES) : []; } catch { return []; }
+function store<T>(initial: T, persist?: (v: T) => void) {
+  let value = initial;
+  const ls = new Set<() => void>();
+  return {
+    get: () => value,
+    set: (v: T) => { if (v === value) return; value = v; persist?.(v); ls.forEach((l) => l()); },
+    subscribe: (l: () => void) => { ls.add(l); return () => { ls.delete(l); }; },
+  };
 }
-let panes: string[] = load();
-const listeners = new Set<() => void>();
-function set(next: string[]) {
-  panes = next.slice(0, MAX_PANES);
-  try { localStorage.setItem(KEY, JSON.stringify(panes)); } catch { /* sin almacenamiento */ }
-  listeners.forEach((l) => l());
-}
-const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
-export const usePanes = () => useSyncExternalStore(subscribe, () => panes);
-export const currentPanes = () => panes;
 
-/**
- * Los paneles a mostrar con `active` (el del URL) adentro: si no estaba, reemplaza al activo anterior
- * (o se agrega si no había paneles). Así tocar un chat en la lista cambia el panel que tienes enfocado.
- */
+// ---------- Estado de los paneles ----------
+const panesStore = store<core.PanesState>(core.normalize(read(KEY, null)), (v) => write(KEY, v));
+export const usePaneState = () => useSyncExternalStore(panesStore.subscribe, panesStore.get);
+export const usePanes = () => useSyncExternalStore(panesStore.subscribe, () => panesStore.get().panes);
+export const currentPanes = () => panesStore.get().panes;
+export const isOpenInPanes = (key: string) => panesStore.get().panes.includes(key);
+const setState = (s: core.PanesState) => panesStore.set(s);
+
+/** Cuántos caben en el área de ahora (lo actualiza Split.tsx al medir). Antes de medir, una estimación. */
+let currentMax = typeof window === 'undefined' ? core.MAX_PANES : core.maxPanesFor(Math.max(0, window.innerWidth - 340), window.innerHeight - 20);
+export const setCurrentMax = (n: number) => { currentMax = n; };
+export const paneLimit = () => currentMax;
+
+// ---------- Títulos para avisos y encabezados de lo que no es un chat ----------
+export interface PaneMeta { title: string; sub?: string; snap?: unknown }
+const META_KEY = 'chaggu:split-meta';
+const metaStore = store<Record<string, PaneMeta>>(read(META_KEY, {}), (v) => write(META_KEY, v));
+export const usePaneMeta = (key: string) => useSyncExternalStore(metaStore.subscribe, () => metaStore.get()[key]);
+export const paneMetaNow = (key: string) => metaStore.get()[key];
+export function setPaneMeta(key: string, m: PaneMeta) {
+  const cur = metaStore.get();
+  if (JSON.stringify(cur[key]) === JSON.stringify(m)) return;
+  // Solo se guarda lo de los paneles abiertos o recientes (máximo 40).
+  const keep = Object.entries({ ...cur, [key]: m }).filter(([k]) => k === key || isOpenInPanes(k) || core.paneKind(k) !== 'conv').slice(-40);
+  metaStore.set(Object.fromEntries(keep));
+}
+let describe: (key: string) => string = (k) => metaStore.get()[k]?.title ?? k;
+/** Split.tsx registra cómo nombrar un panel (necesita los datos del cliente). */
+export const setPaneDescriber = (f: (key: string) => string) => { describe = f; };
+
+// ---------- URL ↔ panel ----------
+const VIEW_PATH: Record<core.ViewName, string> = { issues: '/asuntos', agenda: '/agenda', mail: '/correo', whatsapp: '/whatsapp', today: '/', files: '/archivos' };
+const ROUTE_VIEW: Partial<Record<Route['name'], core.ViewName>> = { issues: 'issues', agenda: 'agenda', mail: 'mail', whatsapp: 'whatsapp', today: 'today', files: 'files' };
+export function keyToPath(key: string) {
+  const k = core.paneKind(key);
+  if (k === 'conv') return `/c/${key}`;
+  if (k === 'view' && core.isView(key)) return VIEW_PATH[key.slice(2) as core.ViewName];
+  return `/p/${encodeURIComponent(key)}`;
+}
+export function routeToKey(route: Route): string | null {
+  if (route.name === 'conversation') return route.id;
+  if (route.name === 'pane') return route.key;
+  const v = ROUTE_VIEW[route.name];
+  return v ? core.viewKey(v) : null;
+}
+/** La clave de lo que se ve ahora (null si la página no puede ser un panel, p. ej. Ajustes). */
+export const currentKey = () => routeToKey(parse(location.pathname.slice(BASE.length) || '/'));
+
+// ---------- Acciones ----------
 let lastActive: string | null = null;
 export function syncActive(active: string) {
-  if (panes.length === 0 || panes.includes(active)) { lastActive = active; return; }
-  const at = lastActive ? panes.indexOf(lastActive) : -1;
-  const next = [...panes];
-  if (at >= 0) next[at] = active; else next.unshift(active);
+  const s = panesStore.get();
+  const next = core.syncActive(s, active, lastActive, currentMax);
+  if (next !== s && next.panes !== s.panes) remember(active);
+  setState(next);
   lastActive = active;
-  set([...new Set(next)]);
 }
 
 /**
- * Abre `id` en paralelo junto a `active` (la conversación que se está viendo). Con 4 abiertos, reemplaza a
- * `replace` (el panel donde se soltó) o al último. Devuelve false si ya estaba abierta.
+ * Abrir `key` al lado de lo que se ve (o de `active`). Con 8 (o lo que quepa en esta ventana) reemplaza al no
+ * fijado menos reciente y lo avisa. Devuelve false si ya estaba abierto (entonces solo lo enfoca).
  */
-export function openBeside(id: string, active: string | null, replace?: string | null) {
-  const base = panes.length ? [...panes] : active ? [active] : [];
-  if (base.includes(id)) { navigate(`/c/${id}`, true); return false; }
-  if (base.length < MAX_PANES) base.push(id);
-  else base[Math.max(0, replace ? base.indexOf(replace) : base.length - 1)] = id;
-  set(base);
-  if (!active) navigate(`/c/${id}`);
+export function openBeside(key: string, active: string | null = currentKey(), opts: { target?: string | null; at?: number; meta?: PaneMeta } = {}) {
+  if (opts.meta) setPaneMeta(key, opts.meta);
+  if (!splitAvailable()) { navigate(keyToPath(key)); return true; }
+  const r = core.openBeside(panesStore.get(), key, active, currentMax, opts);
+  setState(r.state);
+  remember(key);
+  // Nunca dos veces lo mismo: si ya estaba abierto, se enfoca con un destello.
+  if (r.already) { focusPane(key); flashPane(key); return false; }
+  if (r.replaced) toast(t('split.replaced', { name: describe(r.replaced) }));
+  // El nuevo queda enfocado: se ve de inmediato, el URL lo recuerda y se puede escribir de una.
+  requestPaneFocus(key);
+  focusPane(key);
   return true;
 }
 
 /** Cierra un panel; si era el activo, el activo pasa al vecino. Con uno solo, vuelve a la vista normal. */
-export function closePane(id: string, active: string | null) {
-  const at = panes.indexOf(id);
-  const next = panes.filter((x) => x !== id);
-  set(next.length > 1 ? next : []);
-  if (id === active) {
-    const to = next[Math.min(Math.max(0, at - 1), next.length - 1)];
-    if (to) { lastActive = to; navigate(`/c/${to}`, true); }
-  }
+export function closePane(key: string, active: string | null = currentKey()) {
+  const before = panesStore.get();
+  const r = core.closePane(before, key, active);
+  setState(r.state);
+  remember(key);
+  // «Panel cerrado · Deshacer» por unos segundos: vuelve igual, en su lugar y con su fijado.
+  toast(t('split.closed', { name: describe(key) }), { label: t('split.undo'), run: () => { setState(before); focusPane(key); } }, 5000);
+  if (r.focus) { lastActive = r.focus; navigate(keyToPath(r.focus), true); }
+}
+/** Deja solo este panel. */
+export function onlyPane(key: string) { setState(core.EMPTY); navigate(keyToPath(key), true); }
+/** Enfocar un panel sin recargar: el URL pasa a ser el suyo. */
+export function focusPane(key: string) { lastActive = key; navigate(keyToPath(key), true); }
+/**
+ * Pasar el cursor al compositor del panel (con ⌘1…⌘8 o al abrir uno nuevo). Con un clic no: el clic ya deja el
+ * foco donde lo pusiste. Así lo que escribes siempre sale por el panel que ves enfocado.
+ */
+let focusIntent: string | null = null;
+export const requestPaneFocus = (key: string) => { focusIntent = key; };
+export const takePaneFocus = (key: string) => { if (focusIntent !== key) return false; focusIntent = null; return true; };
+export const togglePin = (key: string) => setState(core.togglePin(panesStore.get(), key));
+export const toggleMax = (key: string) => setState(core.toggleMax(panesStore.get(), key));
+export const swapPanes = (a: string, b: string) => setState(core.swap(panesStore.get(), a, b));
+export const movePane = (key: string, to: number) => setState(core.move(panesStore.get(), key, to));
+export const closeAllPanes = (keep: string) => onlyPane(keep);
+
+/** Dentro de un panel: las vistas lo usan para abrir lo que tocas como otro panel en vez de un diálogo. */
+export const PaneCtx = createContext<{ key: string; active: boolean } | null>(null);
+export const usePaneCtx = () => useContext(PaneCtx);
+
+// ---------- Destello al enfocar algo que ya estaba abierto ----------
+const flashStore = store<string | null>(null);
+export const useFlash = () => useSyncExternalStore(flashStore.subscribe, flashStore.get);
+let flashTimer: ReturnType<typeof setTimeout> | null = null;
+export function flashPane(key: string) {
+  flashStore.set(null);
+  requestAnimationFrame(() => flashStore.set(key));
+  if (flashTimer) clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => flashStore.set(null), 900);
 }
 
-/** Deja solo esta conversación (⤢). */
-export function onlyPane(id: string) { set([]); navigate(`/c/${id}`, true); }
+// ---------- Recientes: lo último abierto en paneles (para volver a abrir un correo, un WhatsApp o un chat) ----------
+const RECENT_KEY = 'chaggu:split-recent';
+const recentStore = store<string[]>((() => { const v = read<unknown>(RECENT_KEY, []); return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').slice(0, 12) : []; })(), (v) => write(RECENT_KEY, v));
+export const useRecentPanes = () => useSyncExternalStore(recentStore.subscribe, recentStore.get);
+function remember(key: string) { recentStore.set([key, ...recentStore.get().filter((x) => x !== key)].slice(0, 12)); }
 
-/** Enfocar un panel sin recargar: el URL pasa a ser el suyo. */
-export function focusPane(id: string) { lastActive = id; navigate(`/c/${id}`, true); }
+// ---------- Arrastrar ----------
+export function setPaneDrag(dt: DataTransfer, key: string, meta?: PaneMeta) {
+  dt.setData(DRAG_PANE, key);
+  if (meta) dt.setData(DRAG_META, JSON.stringify(meta));
+  if (core.paneKind(key) === 'conv') dt.setData(DRAG_TYPE, key);
+  try { dt.setData('text/uri-list', `${location.origin}${BASE}${keyToPath(key)}`); } catch { /* */ }
+  dt.effectAllowed = 'copyMove';
+}
+export const isPaneDrag = (dt: DataTransfer) => { const ty = Array.from(dt.types); return ty.includes(DRAG_PANE) || ty.includes(DRAG_TYPE) || ty.includes(DRAG_MOVE); };
+export const isMoveDrag = (dt: DataTransfer) => Array.from(dt.types).includes(DRAG_MOVE);
+/** Lo que se soltó: la clave y su título (si lo trae). */
+export function readPaneDrop(dt: DataTransfer): { key: string; move: boolean; meta?: PaneMeta } | null {
+  const mv = dt.getData(DRAG_MOVE);
+  if (mv) return { key: mv, move: true };
+  const key = dt.getData(DRAG_PANE) || dt.getData(DRAG_TYPE);
+  if (!key) return null;
+  let meta: PaneMeta | undefined;
+  try { const m = dt.getData(DRAG_META); if (m) meta = JSON.parse(m); } catch { /* */ }
+  return { key, move: false, meta };
+}
+/** Props para que una fila (WhatsApp, correo, tarea…) se pueda arrastrar al área de paneles. */
+export const paneDragProps = (key: string, meta?: PaneMeta) => ({
+  draggable: true,
+  onDragStart: (e: React.DragEvent) => { e.stopPropagation(); setPaneDrag(e.dataTransfer, key, meta); },
+});
+/** ¿Abrir en panel con este clic? (⌘/Ctrl + clic, como abrir en otra pestaña). */
+export const wantsPane = (e: { metaKey: boolean; ctrlKey: boolean }) => (e.metaKey || e.ctrlKey) && splitAvailable();
 
-/** ¿La conversación está a la vista en algún panel? (para no avisar de lo que ya se está leyendo). */
-export const isOpenInPanes = (id: string) => panes.includes(id);
+// ---------- Disposición: modo y tamaños (por dispositivo) ----------
+const MODE_KEY = 'chaggu:split-mode';
+const modeStore = store<core.LayoutMode>((() => { const v = read<string>(MODE_KEY, 'auto'); return v === 'columns' || v === 'grid' ? v : 'auto'; })(), (v) => write(MODE_KEY, v));
+export const useLayoutMode = () => useSyncExternalStore(modeStore.subscribe, modeStore.get);
+export const setLayoutMode = modeStore.set;
 
-// ---------- Tamaño de los paneles (se arrastran las divisiones) ----------
-/** Fracción del ancho para la columna izquierda y del alto para la fila de arriba (0,2–0,8). */
-const SIZE_KEY = 'chaggu:split-size';
-let sizes: { col: number; row: number } = (() => {
-  try { const v = JSON.parse(localStorage.getItem(SIZE_KEY) ?? 'null'); if (v && v.col > 0 && v.row > 0) return v; } catch { /* */ }
-  return { col: 0.5, row: 0.5 };
-})();
-const sizeListeners = new Set<() => void>();
-export const useSplitSizes = () => useSyncExternalStore((l) => { sizeListeners.add(l); return () => { sizeListeners.delete(l); }; }, () => sizes);
-export function setSplitSize(p: Partial<{ col: number; row: number }>, persist = false) {
-  const clamp = (x: number) => Math.min(0.8, Math.max(0.2, x));
-  sizes = { col: clamp(p.col ?? sizes.col), row: clamp(p.row ?? sizes.row) };
-  sizeListeners.forEach((l) => l());
-  if (persist) { try { localStorage.setItem(SIZE_KEY, JSON.stringify(sizes)); } catch { /* */ } }
+type Sizes = Record<string, { rows?: number[]; cols?: Record<string, number[]> }>;
+const SIZE_KEY = 'chaggu:split-sizes';
+const sizeStore = store<Sizes>(read<Sizes>(SIZE_KEY, {}));
+export const useSplitSizes = () => useSyncExternalStore(sizeStore.subscribe, sizeStore.get);
+export function setSplitFractions(sig: string, part: { rows?: number[]; count?: number; cols?: number[] }, persist = false) {
+  const cur = sizeStore.get();
+  const prev = cur[sig] ?? {};
+  const next = { ...prev, ...(part.rows ? { rows: part.rows } : {}), ...(part.cols && part.count ? { cols: { ...(prev.cols ?? {}), [part.count]: part.cols } } : {}) };
+  sizeStore.set({ ...cur, [sig]: next });
+  if (persist) write(SIZE_KEY, sizeStore.get());
+}
+export function resetSplitFractions(sig: string) { const cur = { ...sizeStore.get() }; delete cur[sig]; sizeStore.set(cur); write(SIZE_KEY, cur); }
+export const persistSplitSizes = () => write(SIZE_KEY, sizeStore.get());
+
+// ---------- Espacios de trabajo guardados ----------
+const SPACES_KEY = 'chaggu:split-spaces';
+const spacesStore = store<core.SavedSpace[]>((() => { const v = read<unknown>(SPACES_KEY, []); return Array.isArray(v) ? (v as core.SavedSpace[]).filter((x) => x && typeof x.name === 'string' && Array.isArray(x.panes)) : []; })(), (v) => write(SPACES_KEY, v));
+export const useSavedSpaces = () => useSyncExternalStore(spacesStore.subscribe, spacesStore.get);
+export function saveCurrentSpace(name: string) { spacesStore.set(core.saveSpace(spacesStore.get(), name, panesStore.get())); }
+export function deleteSpace(name: string) { spacesStore.set(spacesStore.get().filter((x) => x.name !== name)); }
+export function openSpace(sp: core.SavedSpace) {
+  const s = core.restoreSpace(sp);
+  if (!s.panes.length) return;
+  setState(s);
+  focusPane(s.panes[0]!);
 }
 
 // ---------- Zoom por conversación (A− / A+ o ⌘/Ctrl + rueda) ----------

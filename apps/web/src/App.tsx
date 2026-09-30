@@ -5,7 +5,8 @@ import { installSoundUnlock } from './sound.ts';
 import { t, useLang } from './i18n.ts';
 import { asset, navigate, parse, usePath } from './router.ts';
 import { AuthScreen, ConfirmSignupScreen, SsoReturnScreen } from './screens/Auth.tsx';
-import { ConversationArea } from './screens/Split.tsx';
+import { PaneArea, usePaneRoute } from './screens/Split.tsx';
+import { routeToKey } from './split.ts';
 import { InviteScreen } from './screens/Invite.tsx';
 import { InboxScreen, PeopleScreen, SettingsScreen, SpacesScreen, TodayScreen, WorkspaceScreen } from './screens/Pages.tsx';
 import { Shell } from './screens/Shell.tsx';
@@ -47,6 +48,9 @@ export function App() {
   // Cambiar de idioma vuelve a pintar toda la app (key={lang}).
   const lang = useLang();
   const route = parse(path);
+  // Paneles en paralelo (docs/PANELES.md): un chat, un /p/… o una vista abierta en paralelo se pintan en el área de paneles.
+  const paneKey = routeToKey(route);
+  const inPanes = usePaneRoute(paneKey, route.name === 'conversation' || route.name === 'pane');
   const prevStatus = useRef(status);
   useTabBadge();
 
@@ -73,7 +77,8 @@ export function App() {
 
   return (
     <>
-    <Shell key={lang} route={route}>
+    <Shell key={lang} route={route} inPanes={inPanes}>
+      {inPanes && paneKey ? <PaneArea active={paneKey} search={location.search} /> : <>
       {route.name === 'today' && <TodayScreen />}
       {route.name === 'inbox' && <InboxScreen />}
       {route.name === 'spaces' && <SpacesScreen />}
@@ -95,7 +100,7 @@ export function App() {
       {route.name === 'readonly' && <ReadOnlyConversationScreen key={route.id} id={route.id} />}
       {route.name === 'settings' && <SettingsScreen />}
       {route.name === 'workspace' && <WorkspaceScreen key={route.id} id={route.id} />}
-      {route.name === 'conversation' && <ConversationArea id={route.id} search={location.search} />}
+      </>}
     </Shell>
     <UpdateBanner />
     <MenuHost />

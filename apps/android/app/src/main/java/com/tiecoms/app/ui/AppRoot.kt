@@ -421,8 +421,8 @@ private fun MainNav() {
                 val items = listOfNotNull(
                     BottomTab("home?ws={ws}", R.string.nav_groups, groupsBadge, Icons.Outlined.Group, Icons.Rounded.Group),
                     BottomTab("dms", R.string.nav_dms, dmsBadge, Icons.Outlined.Forum, Icons.Rounded.Forum),
-                    // «Todo» / «Hub» (30-sep-2026): Tareas con atajos a Correo, WhatsApp, Archivos y Trazo; el número sigue siendo solo de tareas.
-                    BottomTab("issues", R.string.nav_hub, 0, TodoIcons.outlined, TodoIcons.filled),
+                    // «Todo» / «Hub» (30-sep-2026): Tareas con atajos a Correo, WhatsApp, Archivos y Trazo; el número son mis tareas sin cerrar (como iOS).
+                    BottomTab("issues", R.string.nav_hub, com.tiecoms.app.core.IssueTasks.myOpenCount(state.issues.values, data?.me?.id), TodoIcons.outlined, TodoIcons.filled),
                     BottomTab("agenda", R.string.nav_agenda, 0, Icons.Outlined.CalendarMonth, Icons.Rounded.CalendarMonth),
                     // Llamadas (docs/LLAMADAS.md): sexto ícono, solo si el servidor las tiene prendidas.
                     // Perdidas sin ver: número en pastilla roja e ícono rojo; se quita al abrir la pestaña (POST /calls/seen).

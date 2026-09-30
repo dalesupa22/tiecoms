@@ -88,7 +88,7 @@ private val HubTraceViolet = Color(0xFF7D4BC2)
 private data class HubShortcut(val route: String, val label: Int, val icon: ImageVector, val color: Color, val count: Int, val tag: String)
 
 /**
- * Fila compacta y deslizable de atajos arriba de Tareas: Correo (solo con el correo prendido en el servidor), WhatsApp
+ * Fila compacta y deslizable de atajos arriba de Tareas: Correo (solo con el correo prendido en el servidor, con GET /mail/unread), WhatsApp
  * (con sus no leídos, que ya da GET /whatsapp/chats), Archivos y Trazo. Pastillas pequeñas y discretas: el protagonista
  * sigue siendo la lista de Tareas. Cada una abre la misma pantalla que su fila de «Tú».
  */
@@ -104,8 +104,15 @@ fun HubShortcuts(onOpen: (String) -> Unit, modifier: Modifier = Modifier) {
             .onSuccess { p -> waUnread = p.categories.values.sumOf { it.unread } }
             .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
     }
+    // Correo: GET /mail/unread al abrir Todo; si falla, la pastilla va sin número.
+    var mailUnread by remember { mutableIntStateOf(0) }
+    LaunchedEffect(mailOn) {
+        if (mailOn) runCatching { client.mailUnread() }
+            .onSuccess { mailUnread = it }
+            .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; mailUnread = 0 }
+    }
     val items = listOfNotNull(
-        HubShortcut("mailbox?conv=", R.string.web_mail_title, Icons.Outlined.MailOutline, HubMailBlue, 0, "hubMail").takeIf { mailOn },
+        HubShortcut("mailbox?conv=", R.string.web_mail_title, Icons.Outlined.MailOutline, HubMailBlue, mailUnread, "hubMail").takeIf { mailOn },
         HubShortcut("whatsapp", R.string.nav_whatsapp, Icons.AutoMirrored.Outlined.Chat, HubWaGreen, waUnread, "hubWhatsApp"),
         HubShortcut("files", R.string.nav_files, Icons.Outlined.Folder, HubFilesAmber, 0, "hubFiles"),
         HubShortcut("trazo", R.string.nav_trazo, Icons.Outlined.AccountTree, HubTraceViolet, 0, "hubTrazo"),

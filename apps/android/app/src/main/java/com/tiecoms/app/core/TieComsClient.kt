@@ -2012,6 +2012,10 @@ class TieComsClient(
         val l = req("GET", "/mail/connections", null, MailConnectionsPage.serializer()).connections
         setState { copy(mailConnections = l) }; l
     }
+    /** No leídos de Recibidos › Principal/Prioritarios en todas mis cuentas de correo (tope 100; el servidor lo guarda 1 min). */
+    suspend fun mailUnread(): Int = withContext(dispatcher) {
+        req("GET", "/mail/unread", null, MailUnreadDTO.serializer()).unread
+    }
     suspend fun listMail(provider: String, f: Mail.Filters, category: String?, page: String? = null, fresh: Boolean = false): MailListDTO = withContext(dispatcher) {
         req("GET", Mail.listQuery(provider, f, category, page, fresh), null, MailListDTO.serializer())
     }

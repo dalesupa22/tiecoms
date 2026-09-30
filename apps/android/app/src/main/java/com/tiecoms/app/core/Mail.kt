@@ -49,6 +49,7 @@ data class MailListItemDTO(
     /** inbox | sent */
     val box: String = "inbox",
 )
+@Serializable data class MailUnreadDTO(val unread: Int = 0)
 @Serializable data class MailListDTO(val items: List<MailListItemDTO> = emptyList(), val nextPage: String? = null, val accountEmail: String? = null)
 
 /** Correo completo leído en vivo (vista previa antes de compartir). */

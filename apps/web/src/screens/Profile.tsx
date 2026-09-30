@@ -6,6 +6,7 @@ import { setSoundEnabled, soundEnabled } from '../sound.ts';
 import { errorText, getLang, langPreference, setLang, t, type Lang } from '../i18n.ts';
 import { openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate } from '../router.ts';
+import { THEME_PREFS, setThemePreference, themePreference } from '../theme.ts';
 import { Avatar, Modal, orgById, personById } from '../ui.tsx';
 import { PhotoCropDialog } from './PhotoCrop.tsx';
 
@@ -107,6 +108,8 @@ export function openAccountMenu(anchor: HTMLElement) {
     { label: t('nav.whatsapp'), icon: '✆', onSelect: () => navigate('/whatsapp') },
     { label: t('settings.language'), icon: '🌐', hint: pref ? (pref === 'es' ? 'ES' : 'EN') : getLang().toUpperCase(),
       items: langs.map(([v, label]) => ({ label, icon: pref === v ? '✓' : '', onSelect: () => setLang(v) })) },
+    { label: t('theme.title'), icon: '◐', hint: t(`theme.${themePreference()}`),
+      items: THEME_PREFS.map((v) => ({ label: t(`theme.${v}`), icon: themePreference() === v ? '✓' : '', onSelect: () => setThemePreference(v) })) },
     { label: t('settings.title'), icon: '⚙', onSelect: () => navigate('/ajustes') },
     { divider: true },
     { label: t('settings.logout'), icon: '⎋', danger: true, onSelect: () => void client.logout().then(() => navigate('/login', true)) },

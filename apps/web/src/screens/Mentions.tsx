@@ -6,7 +6,7 @@ import { client, useClient } from '../app-client.ts';
 import { attachmentSummaryText, errorText, t } from '../i18n.ts';
 import { openMenuAt, toast } from '../menu.tsx';
 import { navigate } from '../router.ts';
-import { Avatar, GG_ID, conversationTitle, orgById, personById, personColor, timeLabel } from '../ui.tsx';
+import { Avatar, GG_ID, conversationTitle, orgById, personById, personInk, timeLabel } from '../ui.tsx';
 import { personMenu } from '../actions.tsx';
 import { Linkify } from './Chats.tsx';
 
@@ -207,7 +207,7 @@ export function MessageText({ d, body: raw, mentions, refs }: { d: BootstrapDTO;
     const p = m.userId === 'all' ? null : personById(d, m.userId);
     const me = m.userId === 'all' || m.userId === d.me.id;
     return (
-      <button key={i} type="button" className={`mention ${me ? 'is-me' : ''}`} style={p ? { color: personColor(p.id) } : undefined}
+      <button key={i} type="button" className={`mention ${me ? 'is-me' : ''}`} style={p ? { color: personInk(p.id) } : undefined}
         onClick={(e) => { if (!p) return; const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, personMenu(p)); }}>
         {sg.text}
       </button>

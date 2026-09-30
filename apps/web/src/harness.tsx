@@ -9,10 +9,14 @@ import { showMessageBubble } from './bubbles.tsx';
 import { App } from './App.tsx';
 import { client } from './app-client.ts';
 import { setLang } from './i18n.ts';
+import { initTheme, setThemePreference } from './theme.ts';
 import './styles.css';
 
 const q = new URLSearchParams(location.search);
 if (q.get('lang') === 'en' || q.get('lang') === 'es') setLang(q.get('lang') as 'en' | 'es');
+initTheme();
+const qt = q.get('theme');
+if (qt === 'dark' || qt === 'light' || qt === 'system') setThemePreference(qt);
 const H = 3600_000, D = 24 * H, now = Date.now();
 const iso = (ms: number) => new Date(now - ms).toISOString();
 const org = (id: string, name: string, mark: string, bg: string, fg: string, mine = false) => ({ id, name, mark, colorBg: bg, colorFg: fg, ...(mine ? { myRole: 'owner' as const } : {}) });

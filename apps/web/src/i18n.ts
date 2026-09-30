@@ -315,6 +315,7 @@ const es = {
   // Ajustes
   'settings.title': 'Tu cuenta', 'settings.logout': 'Cerrar sesión', 'settings.devices': 'Dispositivos con sesión abierta', 'settings.lastSeen': 'Última actividad {date}',
   'settings.thisDevice': 'Este dispositivo', 'settings.closeSession': 'Cerrar', 'settings.language': 'Idioma', 'settings.langAuto': 'Automático (navegador)',
+  'theme.title': 'Apariencia', 'theme.system': 'Automático (sistema)', 'theme.light': 'Claro', 'theme.dark': 'Oscuro', 'theme.hint': 'Automático sigue el modo claro u oscuro de tu equipo. Se guarda solo en este dispositivo.',
   'settings.platforms': 'chaggu para Web · próximamente macOS, Windows, Android e iOS con la misma cuenta y los mismos no leídos.',
   'settings.team': 'Tu empresa', 'settings.inviteColleague': 'Invitar a un colega', 'settings.inviteColleagueHint': 'Le llega un correo para crear su cuenta dentro de {org}. El enlace es de un solo uso y vence en 14 días.',
   'settings.inviteEmailPh': 'correo@tuempresa.com', 'settings.generate': 'Generar enlace',
@@ -1210,6 +1211,7 @@ const en: Record<Key, string> = {
   'people.search': 'Search by name, role or company', 'people.empty': 'You do not share spaces with anyone yet.', 'people.until': 'until {date}',
   'settings.title': 'Your account', 'settings.logout': 'Sign out', 'settings.devices': 'Devices with an open session', 'settings.lastSeen': 'Last active {date}',
   'settings.thisDevice': 'This device', 'settings.closeSession': 'Sign out', 'settings.language': 'Language', 'settings.langAuto': 'Automatic (browser)',
+  'theme.title': 'Appearance', 'theme.system': 'Automatic (system)', 'theme.light': 'Light', 'theme.dark': 'Dark', 'theme.hint': 'Automatic follows your device’s light or dark mode. Saved on this device only.',
   'settings.platforms': 'chaggu for Web · macOS, Windows, Android and iOS coming soon with the same account and unread counts.',
   'settings.team': 'Your company', 'settings.inviteColleague': 'Invite a colleague', 'settings.inviteColleagueHint': 'They get an email to create their account inside {org}. The link is single-use and expires in 14 days.',
   'settings.inviteEmailPh': 'email@yourcompany.com', 'settings.generate': 'Generate link',

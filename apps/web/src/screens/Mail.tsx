@@ -479,7 +479,7 @@ export function MailText({ text }: { text: string }) {
  * El correo con su diseño. Iframe con sandbox sin scripts (el API ya quitó scripts y on*): solo deja abrir enlaces
  * en otra pestaña. allow-same-origin es para medir el alto y encoger los correos de 600 px al ancho de la tarjeta.
  */
-const HTML_HEAD = `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: http: data:; style-src 'unsafe-inline' https:; font-src https: data:"><base target="_blank"><style>html,body{margin:0;background:#fff;color:#1f1f1f;font:14px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow-wrap:anywhere}body{padding:12px}img{max-width:100%;height:auto}a{color:#1a5fd6}</style>`;
+const HTML_HEAD = `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: http: data:; style-src 'unsafe-inline' https:; font-src https: data:"><base target="_blank"><meta name="color-scheme" content="light"><style>:root{color-scheme:light}html,body{margin:0;background:#fff;color:#1f1f1f;font:14px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow-wrap:anywhere}body{padding:12px}img{max-width:100%;height:auto}a{color:#1a5fd6}</style>`;
 const htmlCache = new Map<string, string | null>();
 function useMailHtml(id: string, on: boolean) {
   const [html, setHtml] = useState<string | null | undefined>(htmlCache.get(id));

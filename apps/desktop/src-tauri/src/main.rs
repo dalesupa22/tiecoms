@@ -11,7 +11,8 @@ use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::{DownloadEvent, NewWindowResponse, PermissionKind, PermissionResponse};
-use tauri::{AppHandle, Emitter, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::webview::Color;
+use tauri::{AppHandle, Emitter, Manager, RunEvent, Theme, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
@@ -92,6 +93,47 @@ fn secret_set(value: Option<String>) -> Result<(), String> {
   }
 }
 
+// ---------- Tema claro/oscuro (web: src/theme.ts) ----------
+// La web guarda la elección en su localStorage, que Rust no lee al arrancar: se copia a un archivo
+// («theme» en la carpeta de configuración) para abrir la ventana ya con el tema y el fondo correctos, sin destello blanco.
+const THEME_FILE: &str = "theme";
+
+/// Fondo de la ventana (= --paper de la web) según el tema.
+fn theme_bg(theme: Theme) -> Color {
+  match theme {
+    Theme::Dark => Color(0x15, 0x14, 0x13, 0xff),
+    _ => Color(0xf4, 0xf1, 0xea, 0xff),
+  }
+}
+
+/// "light" | "dark" fijan el tema; cualquier otra cosa (o nada) sigue al sistema.
+fn parse_theme(pref: &str) -> Option<Theme> {
+  match pref.trim() {
+    "dark" => Some(Theme::Dark),
+    "light" => Some(Theme::Light),
+    _ => None,
+  }
+}
+
+fn saved_theme(app: &AppHandle) -> Option<Theme> {
+  let path = app.path().app_config_dir().ok()?.join(THEME_FILE);
+  parse_theme(&std::fs::read_to_string(path).ok()?)
+}
+
+/// La web avisa cada vez que cambia el tema: barra de título nativa, fondo de la ventana y lo guardado para el próximo arranque.
+#[tauri::command]
+fn set_theme(app: AppHandle, pref: String, dark: bool) -> Result<(), String> {
+  if let Ok(dir) = app.path().app_config_dir() {
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join(THEME_FILE), &pref);
+  }
+  if let Some(w) = app.get_webview_window(MAIN) {
+    w.set_theme(parse_theme(&pref)).map_err(|e| e.to_string())?;
+    let _ = w.set_background_color(Some(theme_bg(if dark { Theme::Dark } else { Theme::Light })));
+  }
+  Ok(())
+}
+
 /// Origen de la interfaz empaquetada (o del servidor de desarrollo).
 fn is_app_url(url: &Url) -> bool {
   match url.scheme() {
@@ -139,7 +181,7 @@ fn main() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_window_state::Builder::default().build())
     .manage(PendingPath::default())
-    .invoke_handler(tauri::generate_handler![take_pending_path, secret_get, secret_set])
+    .invoke_handler(tauri::generate_handler![take_pending_path, secret_get, secret_set, set_theme])
     .setup(|app| {
       let handle = app.handle().clone();
 
@@ -157,8 +199,12 @@ fn main() {
       let nav = handle.clone();
       let popup = handle.clone();
       let dl = handle.clone();
-      WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
+      // Tema guardado (o el del sistema): la ventana nace con su fondo, sin destello blanco antes del primer pintado.
+      let theme = saved_theme(&handle);
+      let win = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
         .title("chaggu")
+        .theme(theme)
+        .background_color(theme_bg(theme.unwrap_or(Theme::Light)))
         .inner_size(1280.0, 820.0)
         .min_inner_size(380.0, 560.0)
         .on_navigation(move |url| {
@@ -196,6 +242,12 @@ fn main() {
           true
         })
         .build()?;
+      // «Automático»: ya creada, la ventana sabe el tema del sistema; si es oscuro, el fondo pasa a oscuro.
+      if theme.is_none() {
+        if let Ok(t) = win.theme() {
+          let _ = win.set_background_color(Some(theme_bg(t)));
+        }
+      }
 
       let open = MenuItem::with_id(app, "open", "Abrir chaggu", true, None::<&str>)?;
       let quit = MenuItem::with_id(app, "quit", "Salir de chaggu", true, None::<&str>)?;

@@ -9,7 +9,7 @@ import { Avatar, Modal, conversationTitle, orgById, personById } from '../ui.tsx
 import { QuickActions } from './Quick.tsx';
 import { isMeetingUrl } from './Meetings.tsx';
 import { addDays, startOfDay, storedView, viewRange, VIEW_KEY, type CalView } from '../calendar-grid.ts';
-import { groupColor, isAllDayEvent } from '@tiecoms/client-core';
+import { groupColorIndex, isAllDayEvent } from '@tiecoms/client-core';
 
 // ---------- Zonas horarias sin librerías ----------
 const BROWSER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Bogota';
@@ -60,7 +60,11 @@ export function downloadIcs(ev: CalendarEventDTO) {
 }
 const isUrl = (s: string | null) => !!s && /^https?:\/\//i.test(s.trim());
 
-/** Un color por grupo (el mismo en web, iOS y Android: docs/AGENDA-COLORES.md). */
+/**
+ * Un color por grupo (el mismo en web, iOS y Android: docs/AGENDA-COLORES.md). Como variables de la hoja
+ * (--gc-N-bg/fg): en tema claro son los de GROUP_COLORS y en oscuro un tono profundo con texto claro (AA).
+ */
+const groupColor = (id: string) => { const i = groupColorIndex(id); return { bg: `var(--gc-${i}-bg)`, fg: `var(--gc-${i}-fg)` }; };
 function eventColors(_d: BootstrapDTO, ev: CalendarEventDTO) {
   return groupColor(ev.conversationId);
 }

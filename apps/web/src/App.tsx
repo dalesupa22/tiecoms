@@ -4,8 +4,8 @@ import { handleNotice } from './notices.ts';
 import { installSoundUnlock } from './sound.ts';
 import { t, useLang } from './i18n.ts';
 import { asset, navigate, parse, usePath } from './router.ts';
-import { AuthScreen, SsoReturnScreen } from './screens/Auth.tsx';
-import { ConversationScreen } from './screens/Conversation.tsx';
+import { AuthScreen, ConfirmSignupScreen, SsoReturnScreen } from './screens/Auth.tsx';
+import { ConversationArea } from './screens/Split.tsx';
 import { InviteScreen } from './screens/Invite.tsx';
 import { InboxScreen, PeopleScreen, SettingsScreen, SpacesScreen, TodayScreen, WorkspaceScreen } from './screens/Pages.tsx';
 import { Shell } from './screens/Shell.tsx';
@@ -51,7 +51,7 @@ export function App() {
   useTabBadge();
 
   useEffect(() => {
-    if (status === 'anonymous' && !['login', 'signup', 'invite', 'sso', 'guestCall'].includes(route.name)) navigate(`/login${path !== '/' ? `?next=${encodeURIComponent(path)}` : ''}`, true);
+    if (status === 'anonymous' && !['login', 'signup', 'invite', 'sso', 'guestCall', 'confirmSignup'].includes(route.name)) navigate(`/login${path !== '/' ? `?next=${encodeURIComponent(path)}` : ''}`, true);
     // Con sesión desde antes, el enlace de una invitación a la empresa (/signup?org=…) se acepta en /invite/… (también
     // entra a sus grupos). Si la sesión acaba de nacer aquí mismo (se registró con el enlace), ya entró: sigue normal.
     const org = route.name === 'signup' ? new URLSearchParams(location.search).get('org') : null;
@@ -66,6 +66,7 @@ export function App() {
   if (route.name === 'guestCall') return <Suspense fallback={null}><GuestCallScreen key={lang} token={route.token} /><ToastHost /></Suspense>;
   if (status === 'loading') return <div className="auth"><img src={asset("/chaggu-logo.svg")} alt="chaggu" width={128} height={56} style={{ opacity: 0.6 }} /></div>;
   if (route.name === 'sso') return <SsoReturnScreen key={lang} />;
+  if (route.name === 'confirmSignup') return <ConfirmSignupScreen key={lang} token={route.token} />;
   if (route.name === 'invite') return <InviteScreen key={lang} token={route.token} />;
   if (status === 'anonymous') return <AuthScreen key={lang} mode={route.name === 'signup' ? 'signup' : 'login'} after={nextParam()} />;
   if (route.name === 'login' || route.name === 'signup') return null;
@@ -94,7 +95,7 @@ export function App() {
       {route.name === 'readonly' && <ReadOnlyConversationScreen key={route.id} id={route.id} />}
       {route.name === 'settings' && <SettingsScreen />}
       {route.name === 'workspace' && <WorkspaceScreen key={route.id} id={route.id} />}
-      {route.name === 'conversation' && <ConversationScreen key={route.id + location.search} id={route.id} />}
+      {route.name === 'conversation' && <ConversationArea id={route.id} search={location.search} />}
     </Shell>
     <UpdateBanner />
     <MenuHost />

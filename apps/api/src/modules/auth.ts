@@ -5,6 +5,7 @@ import { audit, enqueueOutbox, pool, tx, type Db, type Tx } from '../db.ts';
 import { ApiError, badRequest, conflict, forbidden, notFound, unauthorized } from '../errors.ts';
 import { hashPassword, inviteCodeHash, normalizeInviteCode, orgLook, randomInviteCode, randomToken, sha256, signAccess, verifyPassword } from '../security.ts';
 import { claimedBy, emailDomain, isPublicDomain } from './domains.ts';
+import { mailEnabled, signupConfirmMail, trySendMail } from '../mail.ts';
 import { deliverInvitation, invitationUrl, prepareInvitationFor } from './invitations.ts';
 import { checkOrgInviteGroups, consumeOrgInvite, joinOrgInviteGroups, orgInviteGroupNames } from './workspaces.ts';
 
@@ -46,7 +47,7 @@ export interface DomainProof { provider: 'google' | 'microsoft'; tenant: string 
  * garantiza Google Workspace o Microsoft Entra; sin él (registro con contraseña)
  * nunca se entra sola a una empresa ajena.
  */
-export async function placeNewUser(c: Tx, email: string, opts: { orgInviteToken?: string; orgName?: string; fallbackOrgName: string; proof?: DomainProof | null }) {
+export async function placeNewUser(c: Tx, email: string, opts: { orgInviteToken?: string; orgName?: string; fallbackOrgName: string; proof?: DomainProof | null; /** Confirmó el correo con el enlace (registro con contraseña). */ emailProven?: boolean }) {
   if (opts.orgInviteToken) {
     // Se une a una empresa existente: por enlace (token) o código; de un solo uso salvo `multi_use`, y puede exigir un correo.
     const code = normalizeInviteCode(opts.orgInviteToken);
@@ -63,7 +64,7 @@ export async function placeNewUser(c: Tx, email: string, opts: { orgInviteToken?
   if (corporate) {
     const owner = await claimedBy(c, domain);
     if (owner) {
-      if (owner.joinPolicy === 'auto' && opts.proof) return { orgId: owner.orgId, role: 'member' as OrgRole, inviteId: null, invite: null, via: 'domain' as const };
+      if (owner.joinPolicy === 'auto' && (opts.proof || opts.emailProven)) return { orgId: owner.orgId, role: 'member' as OrgRole, inviteId: null, invite: null, via: 'domain' as const };
       throw new ApiError(409, 'domain_claimed', `${owner.orgName} ya está en chaggu con el dominio ${domain}. Pide a su administrador que te invite.`, { orgName: owner.orgName, domain });
     }
   }
@@ -83,7 +84,7 @@ export async function placeNewUser(c: Tx, email: string, opts: { orgInviteToken?
       await c.query(
         `INSERT INTO org_domains (org_id, domain, status, token, idp_provider, idp_tenant, verified_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [orgId, domain, opts.proof ? 'idp' : 'pending', randomToken(18), opts.proof?.provider ?? null, opts.proof?.tenant ?? null, opts.proof ? new Date() : null],
+        [orgId, domain, opts.proof ? 'idp' : opts.emailProven ? 'email' : 'pending', randomToken(18), opts.proof?.provider ?? null, opts.proof?.tenant ?? null, opts.proof || opts.emailProven ? new Date() : null],
       );
       await c.query('RELEASE SAVEPOINT claim_domain');
     } catch (e: any) {
@@ -116,14 +117,101 @@ export async function insertUser(c: Tx, u: { email: string; name: string; passwo
   return userId;
 }
 
-export async function signup(input: SignupInput): Promise<AuthResult> {
+export async function signup(input: SignupInput, lang?: string): Promise<AuthResult> {
   const passwordHash = await hashPassword(input.password);
+  // Correo corporativo sin invitación: la cuenta nace al confirmar el correo (docs/REGISTRO.md).
+  const domain = emailDomain(input.email);
+  // Correo personal: hay que crear una empresa (o traer invitación). Con uno corporativo basta el dominio.
+  if (!input.orgInviteToken && !input.orgName && isPublicDomain(domain)) throw new ApiError(400, 'bad_request', 'Falta el nombre de la empresa', [{ path: 'orgName', message: 'org_required' }]);
+  if (!input.orgInviteToken && !isPublicDomain(domain) && mailEnabled()) await startSignupConfirmation(input, passwordHash, lang);
   try {
     return await tx(async (c) => {
-      const place = await placeNewUser(c, input.email, { orgInviteToken: input.orgInviteToken, orgName: input.orgName, fallbackOrgName: '' });
+      const fallback = isPublicDomain(domain) ? '' : domain.split('.')[0]!.replace(/^./, (ch) => ch.toUpperCase());
+      const place = await placeNewUser(c, input.email, { orgInviteToken: input.orgInviteToken, orgName: input.orgName, fallbackOrgName: fallback });
       const userId = await insertUser(c, { email: input.email, name: input.name, passwordHash, title: input.title, emailVerified: false }, place);
       const s = await createSession(c, userId, input.device);
       await audit(c, userId, place.inviteId ? 'auth.signup_joined_org' : 'auth.signup', { type: 'organization', id: place.orgId });
+      return result(c, userId, s.sessionId, s.refreshToken);
+    });
+  } catch (e: any) {
+    if (e?.code === '23505') throw conflict('Ya existe una cuenta con ese correo');
+    throw e;
+  }
+}
+
+// ---------- Registro con correo corporativo: confirmar el correo (docs/REGISTRO.md) ----------
+const CONFIRM_TTL_HOURS = 48;
+/** Correos de confirmación por dirección y hora (evita usar chaggu para llenar buzones ajenos). */
+const CONFIRM_PER_HOUR = 5;
+
+/**
+ * Registro con contraseña y dominio corporativo: guarda la solicitud y manda el enlace. La cuenta todavía no
+ * existe; siempre termina en 409 `email_confirm_sent` (las apps publicadas muestran el mensaje del servidor).
+ */
+async function startSignupConfirmation(input: SignupInput, passwordHash: string, lang?: string): Promise<never> {
+  const domain = emailDomain(input.email);
+  const taken = await pool.query("SELECT 1 FROM users WHERE email = $1 AND kind = 'human'", [input.email]);
+  if (taken.rowCount) throw conflict('Ya existe una cuenta con ese correo');
+  const owner = await claimedBy(pool, domain);
+  if (owner && owner.joinPolicy !== 'auto') {
+    throw new ApiError(409, 'domain_claimed', `${owner.orgName} ya está en chaggu con el dominio ${domain}. Pide a su administrador que te invite.`, { orgName: owner.orgName, domain });
+  }
+  const recent = await pool.query("SELECT count(*)::int AS n FROM signup_confirmations WHERE email = $1 AND created_at > now() - interval '1 hour'", [input.email]);
+  if (recent.rows[0].n >= CONFIRM_PER_HOUR) throw new ApiError(429, 'too_many_requests', 'Ya te enviamos varios correos. Revisa tu bandeja (y el spam) o inténtalo en una hora.');
+  const token = randomToken(24);
+  await pool.query(
+    `INSERT INTO signup_confirmations (email, name, password_hash, title, org_name, lang, token_hash, expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7, now() + make_interval(hours => $8))`,
+    [input.email, input.name, passwordHash, input.title ?? null, input.orgName ?? null, lang ?? null, sha256(token), CONFIRM_TTL_HOURS],
+  );
+  const en = lang?.startsWith('en');
+  const sent = await trySendMail(signupConfirmMail({
+    lang: en ? 'en' : 'es', to: input.email, name: input.name, url: `${config.publicOrigin}/confirmar/${token}`,
+    orgName: owner?.orgName ?? input.orgName ?? null, joining: !!owner,
+  }));
+  if (sent.status === 'failed') throw new ApiError(502, 'mail_failed', 'No pudimos enviarte el correo de confirmación. Inténtalo de nuevo en un momento.');
+  const where = owner ? ` para unirte a ${owner.orgName}` : '';
+  throw new ApiError(409, 'email_confirm_sent',
+    `Te enviamos un correo a ${input.email}${where}. Ábrelo y toca «Confirmar» para entrar (revisa también el spam).`,
+    { email: input.email, ...(owner ? { orgName: owner.orgName } : {}) });
+}
+
+async function confirmationRow(db: Db, token: string) {
+  const gone = () => new ApiError(404, 'not_found', 'Este enlace de confirmación no existe. Revisa que lo copiaste completo.');
+  if (!/^[A-Za-z0-9_-]{20,80}$/.test(token)) throw gone();
+  const { rows } = await db.query('SELECT * FROM signup_confirmations WHERE token_hash = $1', [sha256(token)]);
+  const r = rows[0];
+  if (!r) throw gone();
+  if (r.used_at) throw new ApiError(410, 'confirm_used', 'Este enlace ya se usó. Entra con tu correo y contraseña.');
+  if (new Date(r.expires_at) < new Date()) throw new ApiError(410, 'confirm_expired', 'El enlace venció. Vuelve a crear la cuenta para recibir uno nuevo.');
+  return r;
+}
+
+/** GET /auth/signup/confirm/:token: a qué empresa entra (o cuál crea) antes de tocar «Confirmar». */
+export async function previewSignupConfirmation(token: string) {
+  const r = await confirmationRow(pool, token);
+  const owner = await claimedBy(pool, emailDomain(r.email));
+  return { email: r.email as string, name: r.name as string, orgName: (owner?.orgName ?? r.org_name ?? null) as string | null, joining: !!owner };
+}
+
+/**
+ * POST /auth/signup/confirm: el correo quedó probado. Se decide aquí, no al pedir el enlace: si entretanto otra
+ * persona del dominio creó la empresa, esta se suma a ella en vez de crear una segunda.
+ */
+export async function confirmSignup(token: string, device: DeviceInfo): Promise<AuthResult> {
+  try {
+    return await tx(async (c) => {
+      const r = await confirmationRow(c, token);
+      const used = await c.query('UPDATE signup_confirmations SET used_at = now() WHERE id = $1 AND used_at IS NULL', [r.id]);
+      if (!used.rowCount) throw new ApiError(410, 'confirm_used', 'Este enlace ya se usó. Entra con tu correo y contraseña.');
+      const domain = emailDomain(r.email);
+      const fallback = domain.split('.')[0]!.replace(/^./, (ch: string) => ch.toUpperCase());
+      const place = await placeNewUser(c, r.email, { orgName: r.org_name ?? undefined, fallbackOrgName: fallback, emailProven: true });
+      const userId = await insertUser(c, { email: r.email, name: r.name, passwordHash: r.password_hash, title: r.title, emailVerified: true }, place);
+      // Las demás solicitudes pendientes de ese correo ya no sirven.
+      await c.query('UPDATE signup_confirmations SET used_at = now() WHERE email = $1 AND used_at IS NULL', [r.email]);
+      const s = await createSession(c, userId, device);
+      await audit(c, userId, place.via === 'created' ? 'auth.signup' : 'auth.signup_joined_org', { type: 'organization', id: place.orgId }, { via: place.via, confirmed: 'email' });
       return result(c, userId, s.sessionId, s.refreshToken);
     });
   } catch (e: any) {

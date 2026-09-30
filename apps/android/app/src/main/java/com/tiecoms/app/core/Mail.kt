@@ -49,6 +49,7 @@ data class MailListItemDTO(
     /** inbox | sent */
     val box: String = "inbox",
 )
+@Serializable data class MailUnreadDTO(val unread: Int = 0)
 @Serializable data class MailListDTO(val items: List<MailListItemDTO> = emptyList(), val nextPage: String? = null, val accountEmail: String? = null)
 
 /** Correo completo leído en vivo (vista previa antes de compartir). */
@@ -119,6 +120,8 @@ data class SharedMailDTO(
 @Serializable data class MailCommentsPage(val comments: List<SharedMailCommentDTO> = emptyList())
 @Serializable data class MailCommentResult(val comment: SharedMailCommentDTO = SharedMailCommentDTO(), val email: SharedMailDTO = SharedMailDTO())
 @Serializable data class MailBodyResult(val body: String = "")
+/** GET /mail/shared/:id/html: el HTML ya limpio por el API; null si el correo solo tiene texto. */
+@Serializable data class MailHtmlResult(val html: String? = null)
 @Serializable data class MailTaskResult(val issue: IssueDTO? = null, val email: SharedMailDTO = SharedMailDTO())
 @Serializable data class MailConnectResult(val url: String = "")
 @Serializable data class MailConfirmResult(val ok: Boolean = false, val provider: String = "")

@@ -162,6 +162,8 @@ fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: Bo
                 onOverflow: ((Boolean) -> Unit)? = null,
                 /** Burbuja propia de color: @gg va como pastilla blanca con el texto en degradado. */
                 onColored: Boolean = false) {
+    // «- » al inicio de línea se ve como «• » (misma longitud: las menciones no se corren).
+    @Suppress("NAME_SHADOWING") val text = remember(text) { com.tiecoms.app.core.Fmt.bullets(text) }
     val hits = remember(text, highlight) { if (highlight.isNullOrBlank()) emptyList() else com.tiecoms.app.core.matchRanges(text, highlight) }
     // @gg (estructurada o escrita a mano como palabra) se pinta con el degradado de gg.
     val gg = remember(text, mentions) { com.tiecoms.app.core.Gg.ggMentions(text, mentions) }
@@ -179,6 +181,7 @@ fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: Bo
         else container.toast(ctx.getString(R.string.ref_no_access, label))
     }
     val annotated = remember(text, mentions, color, interactive, hits, gg, phase, onColored) {
+        val marks = mutableListOf<Int>()
         buildAnnotatedString {
             val valid = (mentions.filter { it.start >= 0 && it.start + it.length <= text.length && !com.tiecoms.app.core.Gg.isGg(it.userId) } + gg).sortedBy { it.start }
             var i = 0
@@ -186,7 +189,8 @@ fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: Bo
                 if (to <= i) return
                 Links.split(text.substring(i, to)).forEach { p ->
                     val u = p.url
-                    if (u == null || !interactive) append(p.text)
+                    if (u == null) appendFormatted(p.text, color, marks)
+                    else if (!interactive) append(p.text)
                     else withLink(LinkAnnotation.Url(u, TextLinkStyles(SpanStyle(color = color, textDecoration = TextDecoration.Underline))) { openUrl(ctx, u) }) { append(p.text) }
                 }
                 i = to
@@ -217,7 +221,7 @@ fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: Bo
             }
             plain(text.length)
             hits.forEach { r -> addStyle(SpanStyle(background = hitBg, fontWeight = FontWeight.SemiBold), r.first, r.last + 1) }
-        }
+        }.dropMarks(marks)
     }
     val pill = if (onColored && gg.isNotEmpty()) mapOf(GG_PILL to androidx.compose.foundation.text.InlineTextContent(
         androidx.compose.ui.text.Placeholder(2.3.em, 1.35.em, androidx.compose.ui.text.PlaceholderVerticalAlign.TextCenter)) { label ->

@@ -86,6 +86,10 @@ object IssueTasks {
         else -> !i.closed && i.ownerId == myId
     }
 
+    /** Número del ícono «Todo»: mis tareas sin cerrar (abiertas, en curso o esperando), la misma regla que iOS (myOpenIssues). */
+    fun myOpenCount(issues: Collection<IssueDTO>, myId: String?): Int =
+        if (myId == null) 0 else issues.count { it.ownerId == myId && !it.closed }
+
     /**
      * Secciones de la pestaña Asuntos. Por responsable: yo primero, luego por nombre y «Sin responsable» al final.
      * Por grupo: el que más asuntos tiene primero y luego por nombre. [title] da el nombre de la sección.

@@ -65,12 +65,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.Forum
-import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.Forum
-import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.ui.unit.sp
@@ -427,7 +425,8 @@ private fun MainNav() {
                 val items = listOfNotNull(
                     BottomTab("home?ws={ws}", R.string.nav_groups, groupsBadge, Icons.Outlined.Group, Icons.Rounded.Group),
                     BottomTab("dms", R.string.nav_dms, dmsBadge, Icons.Outlined.Forum, Icons.Rounded.Forum),
-                    BottomTab("issues", R.string.nav_issues, 0, Icons.Outlined.Checklist, Icons.Rounded.Checklist),
+                    // «Todo» / «Hub» (30-sep-2026): Tareas con atajos a Correo, WhatsApp, Archivos y Trazo; el número son mis tareas sin cerrar (como iOS).
+                    BottomTab("issues", R.string.nav_hub, com.tiecoms.app.core.IssueTasks.myOpenCount(state.issues.values, data?.me?.id), TodoIcons.outlined, TodoIcons.filled),
                     BottomTab("agenda", R.string.nav_agenda, 0, Icons.Outlined.CalendarMonth, Icons.Rounded.CalendarMonth),
                     // Llamadas (docs/LLAMADAS.md): sexto ícono, solo si el servidor las tiene prendidas.
                     // Perdidas sin ver: número en pastilla roja e ícono rojo; se quita al abrir la pestaña (POST /calls/seen).
@@ -487,7 +486,7 @@ private fun MainNav() {
                     quick = quick,
                 )
             }
-            composable("issues") { IssuesScreen(onOpen = { nav.navigate("issue/$it") }, quick = quick) }
+            composable("issues") { IssuesScreen(onOpen = { nav.navigate("issue/$it") }, quick = quick, hub = { r -> nav.navigate(r) { launchSingleTop = true } }) }
             composable("issues-of/{conv}") {
                 IssuesScreen(onOpen = { i -> nav.navigate("issue/$i") }, conversationFilter = it.arguments?.getString("conv"), onBack = { nav.popBackStack() })
             }

@@ -469,14 +469,14 @@ fun ConversationIssues(conversationId: String, canCreate: Boolean, onOpen: (Stri
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, onBack: (() -> Unit)? = null, quick: QuickNav? = null) {
+fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, onBack: (() -> Unit)? = null, quick: QuickNav? = null, hub: ((String) -> Unit)? = null) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val container = LocalContainer.current
     val st by client.state.collectAsStateWithLifecycle()
     val data = st.data ?: return
     val visible = data.conversations.associateBy { it.id }
-    val title = conversationFilter?.let { id -> visible[id]?.let { stringResource(R.string.issue_in_conversation, titleOf(ctx, it, data)) } } ?: stringResource(R.string.nav_issues)
+    val title = conversationFilter?.let { id -> visible[id]?.let { stringResource(R.string.issue_in_conversation, titleOf(ctx, it, data)) } } ?: stringResource(if (hub != null) R.string.nav_hub else R.string.nav_issues)
     Scaffold(
         topBar = { TopAppBar(
             navigationIcon = { if (onBack != null) IconButton(onClick = onBack, modifier = Modifier.testTag("back")) {
@@ -526,6 +526,12 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
             item(key = "head") {
                 // 1.6.6: sin el párrafo explicativo («Lo que quedó pendiente…»): los filtros van pegados al título.
                 Column(Modifier.padding(top = 2.dp).testTag("issuesHead"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Pestaña «Todo» (variante 2): atajos pequeños arriba y Tareas, como siempre, debajo.
+                    if (hub != null) {
+                        HubShortcuts(hub)
+                        Text(stringResource(R.string.nav_issues), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 4.dp).semantics { heading() }.testTag("hubTasksTitle"))
+                    }
                     Segmented(listOf(
                         "mine" to "${stringResource(R.string.issue_mine)} ${count("mine")}",
                         "open" to "${stringResource(R.string.issue_all_open)} ${count("open")}",

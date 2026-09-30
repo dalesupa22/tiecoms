@@ -105,19 +105,22 @@ fun LinkifiedText(text: String, color: Color, modifier: Modifier = Modifier, max
     val parts = remember(text) { Links.split(text) }
     val overflow = if (maxLines == Int.MAX_VALUE) androidx.compose.ui.text.style.TextOverflow.Clip else androidx.compose.ui.text.style.TextOverflow.Ellipsis
     val layout: (androidx.compose.ui.text.TextLayoutResult) -> Unit = onOverflow?.let { f -> { r -> f(r.hasVisualOverflow) } } ?: {}
-    if (parts.none { it.url != null }) {
+    // *negrilla*, _cursiva_, ~tachado~ y `código` (core/Fmt.kt): con formato también se arma el AnnotatedString.
+    val formatted = remember(parts) { parts.any { it.url == null && com.tiecoms.app.core.Fmt.spans(it.text).isNotEmpty() } }
+    if (parts.none { it.url != null } && !formatted) {
         Text(text, color = color, style = MaterialTheme.typography.bodyLarge, modifier = modifier, maxLines = maxLines, overflow = overflow, onTextLayout = layout)
         return
     }
     val styles = TextLinkStyles(SpanStyle(color = color, textDecoration = TextDecoration.Underline, fontWeight = FontWeight.Medium))
     val annotated = remember(parts, color) {
+        val marks = mutableListOf<Int>()
         buildAnnotatedString {
             parts.forEach { p ->
                 val u = p.url
-                if (u == null) append(p.text)
+                if (u == null) appendFormatted(p.text, color, marks)
                 else withLink(LinkAnnotation.Url(u, styles) { openUrl(ctx, u) }) { append(p.text) }
             }
-        }
+        }.dropMarks(marks)
     }
     Text(annotated, color = color, style = MaterialTheme.typography.bodyLarge, modifier = modifier, maxLines = maxLines, overflow = overflow, onTextLayout = layout)
 }

@@ -19,6 +19,15 @@ class IssueTasksTest {
                       owner: String? = null, conv: String = "c1", closedAt: String? = null) =
         IssueDTO(id = id, conversationId = conv, title = id, status = status, dueDate = due, statusSince = since, createdAt = created, ownerId = owner, closedAt = closedAt)
 
+    @Test fun `el numero de Todo cuenta solo mis tareas sin cerrar`() {
+        val list = listOf(
+            issue("a", owner = "me"), issue("b", "in_progress", owner = "me"), issue("c", "waiting", owner = "me"),
+            issue("d", "done", owner = "me"), issue("e", "cancelled", owner = "me"), issue("f", owner = "otro"), issue("g"),
+        )
+        assertEquals(3, IssueTasks.myOpenCount(list, "me"))
+        assertEquals(0, IssueTasks.myOpenCount(list, null))
+    }
+
     @Test fun `el circulo completa lo activo y reabre lo cerrado`() {
         assertEquals("done", IssueTasks.toggleTarget(issue("a")))
         assertEquals("done", IssueTasks.toggleTarget(issue("a", "in_progress")))

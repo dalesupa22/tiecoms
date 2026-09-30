@@ -1967,6 +1967,8 @@ class TieComsClient(
     suspend fun loadSharedMailFull(id: String): SharedMailDTO = withContext(dispatcher) { putMail(req("GET", "/mail/shared/$id?full=1", null, SharedMailDTO.serializer())) }
     /** El correo tal como está en el buzón (con historial citado y firma), en vivo y sin guardar. */
     suspend fun mailOriginal(id: String): String = withContext(dispatcher) { req("GET", "/mail/shared/$id/original", null, MailBodyResult.serializer()).body }
+    /** El HTML del correo (limpio en el API) para verlo con su diseño; null si solo tiene texto. Las imágenes vienen como /api/v1/mail/img/…. */
+    suspend fun mailHtml(id: String): String? = withContext(dispatcher) { req("GET", "/mail/shared/$id/html", null, MailHtmlResult.serializer()).html?.takeIf { it.isNotBlank() } }
     suspend fun mailComments(id: String): List<SharedMailCommentDTO> = withContext(dispatcher) { req("GET", "/mail/shared/$id/comments", null, MailCommentsPage.serializer()).comments }
     suspend fun commentMail(id: String, body: String): MailCommentResult = withContext(dispatcher) {
         val r = req("POST", "/mail/shared/$id/comments", buildJsonObject { put("body", JsonPrimitive(body)) }, MailCommentResult.serializer())
@@ -2009,6 +2011,10 @@ class TieComsClient(
     suspend fun loadMailConnections(): List<MailConnectionDTO> = withContext(dispatcher) {
         val l = req("GET", "/mail/connections", null, MailConnectionsPage.serializer()).connections
         setState { copy(mailConnections = l) }; l
+    }
+    /** No leídos de Recibidos › Principal/Prioritarios en todas mis cuentas de correo (tope 100; el servidor lo guarda 1 min). */
+    suspend fun mailUnread(): Int = withContext(dispatcher) {
+        req("GET", "/mail/unread", null, MailUnreadDTO.serializer()).unread
     }
     suspend fun listMail(provider: String, f: Mail.Filters, category: String?, page: String? = null, fresh: Boolean = false): MailListDTO = withContext(dispatcher) {
         req("GET", Mail.listQuery(provider, f, category, page, fresh), null, MailListDTO.serializer())

@@ -381,6 +381,19 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
             HorizontalDivider()
             NavRow("👤 " + stringResource(R.string.profile_edit), null, tag = "rowProfile") { onNavigate("profile") }
             HorizontalDivider()
+            // Correo, WhatsApp, Archivos y Trazo juntos y arriba de No molestar, sonidos y notificaciones
+            // (30-sep-2026); también se abren desde los atajos de la pestaña «Todo».
+            // Correo en el chat (docs/CORREO.md): solo con el correo prendido en el servidor.
+            if (data?.mailEnabled == true) {
+                NavRow("✉ " + stringResource(R.string.web_mail_title) + " · " + stringResource(R.string.web_mail_settingsRow), stringResource(R.string.web_mail_settingsHint), tag = "rowMail") { onNavigate("mailbox?conv=") }
+                HorizontalDivider()
+            }
+            NavRow("🟢 " + stringResource(R.string.nav_whatsapp), stringResource(R.string.settings_whatsapp_hint), tag = "rowWhatsApp") { onNavigate("whatsapp") }
+            HorizontalDivider()
+            NavRow("📁 " + stringResource(R.string.nav_files), null, tag = "rowFiles") { onNavigate("files") }
+            HorizontalDivider()
+            NavRow("⑂ " + stringResource(R.string.nav_trazo), null, tag = "rowTrazo") { onNavigate("trazo") }
+            HorizontalDivider()
             // SPEC-silencio §3: «No molestar» (1 hora · 8 horas · Hasta mañana · Hasta que lo reactive).
             DndRow()
             HorizontalDivider()
@@ -393,8 +406,6 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
                 NavRow("👁 " + stringResource(R.string.ov_title, o.name), null, tag = "rowOversight-${o.id}") { onNavigate("oversight/${o.id}") }
             }
             HorizontalDivider()
-            NavRow("📁 " + stringResource(R.string.nav_files), null, tag = "rowFiles") { onNavigate("files") }
-            HorizontalDivider()
             NavRow(stringResource(R.string.signed_row), stringResource(R.string.signed_row_hint), tag = "rowSigned") { onNavigate("signed") }
             HorizontalDivider()
             NavRow(stringResource(R.string.safety_blocked_users), null, tag = "rowBlockedUsers") { onNavigate("blocked-users") }
@@ -405,18 +416,9 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
                     tag = "rowCompany") { onNavigate("domains/${org.id}") }
                 HorizontalDivider()
             }
-            // Correo en el chat (docs/CORREO.md): solo con el correo prendido en el servidor.
-            if (data?.mailEnabled == true) {
-                NavRow("✉ " + stringResource(R.string.web_mail_title) + " · " + stringResource(R.string.web_mail_settingsRow), stringResource(R.string.web_mail_settingsHint), tag = "rowMail") { onNavigate("mailbox?conv=") }
-                HorizontalDivider()
-            }
-            NavRow("🟢 " + stringResource(R.string.nav_whatsapp), stringResource(R.string.settings_whatsapp_hint), tag = "rowWhatsApp") { onNavigate("whatsapp") }
-            HorizontalDivider()
             NavRow("⏰ " + stringResource(R.string.rem_title), null, tag = "rowReminders") { onNavigate("reminders") }
             HorizontalDivider()
             NavRow("🕒 " + stringResource(R.string.nav_scheduled) + if (state.scheduled.isNotEmpty()) " · ${state.scheduled.size}" else "", null, tag = "rowScheduled") { onNavigate("scheduled") }
-            HorizontalDivider()
-            NavRow("⑂ " + stringResource(R.string.nav_trazo), null, tag = "rowTrazo") { onNavigate("trazo") }
             HorizontalDivider()
             TextSizeRow()
             HorizontalDivider()

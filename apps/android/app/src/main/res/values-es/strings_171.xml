@@ -27,4 +27,8 @@
     <string name="dev_other">otro dispositivo</string>
     <string name="calls_active">En curso ahora</string>
     <string name="calls_active_in">%1$d en la llamada</string>
+    <string name="msg_see_more">Ver más</string>
+    <string name="msg_see_less">Ver menos</string>
+    <string name="swipe_reply_cd">Responder</string>
+    <string name="paste_image_failed">No se pudo adjuntar la imagen pegada</string>
 </resources>

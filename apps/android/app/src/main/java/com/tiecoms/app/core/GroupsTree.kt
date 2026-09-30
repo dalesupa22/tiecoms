@@ -33,6 +33,8 @@ object GroupsTree {
      * de sus hilos (no se listan en el árbol, viven en la barra del chat).
      */
     data class Group(val c: ConversationDTO, val level: Int, val pinnedSection: Boolean = false, val label: String? = null, val threadUnread: Int = 0,
+                     /** 1.7.1: empresa en una línea pequeña bajo el nombre (vista Lista y fijados del Árbol); null si no aplica. */
+                     val company: String? = null,
                      /** Asuntos activos (open, in_progress, waiting), contados aquí: el openIssues del servidor puede ir atrasado. */
                      val issueCount: Int = 0, val overdueCount: Int = 0,
                      /** Sus asuntos están desplegados (clave [issuesKey] en los ajustes, o buscando). */
@@ -182,13 +184,13 @@ object GroupsTree {
 
     /** Fila de un grupo y, si están desplegados, sus asuntos (hasta [MAX_ISSUES] y «+N asuntos»). Igual en Árbol y Lista. */
     private fun addGroup(rows: MutableList<Row>, c: ConversationDTO, level: Int, label: String?, threadUnread: Int, issues: Collection<IssueDTO>,
-                         collapsed: Set<String>, showAllIssues: Boolean, today: String) {
+                         collapsed: Set<String>, showAllIssues: Boolean, today: String, company: String? = null) {
         val open = openIssues(issues, c.id)
         // Sin asuntos cargados todavía, el chip usa el openIssues del servidor.
         val count = if (open.isNotEmpty() || issues.isNotEmpty()) open.size else c.openIssues
         val foldKey = if (showAllIssues) issuesHiddenKey(c.id) else issuesKey(c.id)
         val expanded = count > 0 && (if (showAllIssues) foldKey !in collapsed else foldKey in collapsed)
-        rows += Group(c, level, label = label, threadUnread = threadUnread,
+        rows += Group(c, level, label = label, threadUnread = threadUnread, company = company,
             issueCount = count, overdueCount = open.count { it.dueDate != null && it.dueDate < today }, issuesExpanded = expanded, foldKey = foldKey, key = "c:" + c.id)
         if (!expanded) return
         open.take(MAX_ISSUES).forEach { rows += Issue(it, level + 1, key = "i:" + it.id) }
@@ -205,7 +207,16 @@ object GroupsTree {
         return (Names.org(d, p.orgId)?.name ?: p.pendingName)?.trim()?.takeIf { it.isNotEmpty() }
     }
 
-    /** «{Empresa} · {Grupo}»; si el nombre del grupo ya empieza por la empresa, no se repite. */
+    /**
+     * Empresa para la línea pequeña bajo el nombre del grupo (1.7.1): null si no hay o si el nombre del grupo ya
+     * empieza por ella («Xertify - Xertiflow» no repite «Xertify»).
+     */
+    fun companyLine(company: String?, group: String): String? {
+        val c = company?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return if (group.trim().lowercase().startsWith(c.lowercase())) null else c
+    }
+
+    /** «{Empresa} · {Grupo}» (texto de búsqueda); si el nombre del grupo ya empieza por la empresa, no se repite. */
     fun listLabel(company: String?, group: String): String {
         val g = group.trim()
         if (company.isNullOrBlank()) return g
@@ -229,7 +240,9 @@ object GroupsTree {
         val tree = ReadTree.all(d, nowMs)
         val all = d.conversations.filter { isGroup(d, it) && it.parentId == null && (wsFilter == null || it.workspaceId == wsFilter) }
         if (all.isEmpty()) return listOf(Empty(filtered = wsFilter != null))
-        val labels = all.associate { it.id to listLabel(companyName(d, it, mine), title(it)) }
+        val companies = all.associate { it.id to companyName(d, it, mine) }
+        // La búsqueda sigue encontrando por empresa; en pantalla, el nombre arriba y la empresa abajo (1.7.1).
+        val labels = all.associate { it.id to listLabel(companies[it.id], title(it)) }
         val shown = all.filter { c -> (q.isEmpty() || labels[c.id]!!.lowercase().contains(q) || matchesText(d, c, q, title)) && inTab(tab, c, issues, nowMs, tree) }
         if (shown.isEmpty()) return listOf(Empty(filtered = true))
         val rows = mutableListOf<Row>()
@@ -238,7 +251,7 @@ object GroupsTree {
             val b = HomeTree.blockOf(c, nowMs, tree)
             if (b != block && !searching) rows += Divider(b)
             block = b
-            addGroup(rows, c, 0, labels[c.id], tree[c.id]?.threads ?: 0, issues, collapsed, showAllIssues, today)
+            addGroup(rows, c, 0, null, tree[c.id]?.threads ?: 0, issues, collapsed, showAllIssues, today, company = companyLine(companies[c.id], title(c)))
         }
         return rows
     }
@@ -285,7 +298,8 @@ object GroupsTree {
             val pinned = HomeTree.order(d.conversations.filter { it.pinnedAt != null && isGroup(d, it) && it.parentId == null }, nowMs, tree)
             if (pinned.isNotEmpty()) {
                 rows += Section(Kind.PINNED, null, false, 0, key = "s:PINNED")
-                pinned.forEach { rows += Group(it, 0, pinnedSection = true, threadUnread = threadUnread[it.id] ?: 0, key = "pc:" + it.id) }
+                // Los fijados van fuera de su empresa: llevan la empresa debajo, como en la Lista.
+                pinned.forEach { rows += Group(it, 0, pinnedSection = true, threadUnread = threadUnread[it.id] ?: 0, company = companyLine(companyName(d, it), title(it)), key = "pc:" + it.id) }
             }
         }
 

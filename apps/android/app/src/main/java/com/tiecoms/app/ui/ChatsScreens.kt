@@ -100,11 +100,13 @@ fun openUrl(ctx: Context, url: String) {
 
 /** Texto del mensaje con los enlaces tocables (Linkify de la web: la puntuación final queda fuera). */
 @Composable
-fun LinkifiedText(text: String, color: Color, modifier: Modifier = Modifier) {
+fun LinkifiedText(text: String, color: Color, modifier: Modifier = Modifier, maxLines: Int = Int.MAX_VALUE, onOverflow: ((Boolean) -> Unit)? = null) {
     val ctx = LocalContext.current
     val parts = remember(text) { Links.split(text) }
+    val overflow = if (maxLines == Int.MAX_VALUE) androidx.compose.ui.text.style.TextOverflow.Clip else androidx.compose.ui.text.style.TextOverflow.Ellipsis
+    val layout: (androidx.compose.ui.text.TextLayoutResult) -> Unit = onOverflow?.let { f -> { r -> f(r.hasVisualOverflow) } } ?: {}
     if (parts.none { it.url != null }) {
-        Text(text, color = color, style = MaterialTheme.typography.bodyLarge, modifier = modifier)
+        Text(text, color = color, style = MaterialTheme.typography.bodyLarge, modifier = modifier, maxLines = maxLines, overflow = overflow, onTextLayout = layout)
         return
     }
     val styles = TextLinkStyles(SpanStyle(color = color, textDecoration = TextDecoration.Underline, fontWeight = FontWeight.Medium))
@@ -117,7 +119,7 @@ fun LinkifiedText(text: String, color: Color, modifier: Modifier = Modifier) {
             }
         }
     }
-    Text(annotated, color = color, style = MaterialTheme.typography.bodyLarge, modifier = modifier)
+    Text(annotated, color = color, style = MaterialTheme.typography.bodyLarge, modifier = modifier, maxLines = maxLines, overflow = overflow, onTextLayout = layout)
 }
 
 /** Tarjeta de vista previa bajo el texto: miniatura, sitio, título (2 líneas) y descripción (2 líneas). */

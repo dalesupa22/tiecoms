@@ -523,7 +523,8 @@ private fun MainNav() {
                                 val author = client.state.value.data?.let { com.tiecoms.app.core.Names.person(it, m.authorId)?.name }
                                 val r = client.createChat(listOf(m.authorId), null)
                                 container.privateReply.value = com.tiecoms.app.AppContainer.PrivateReply(r.id, m, author)
-                                openConv(r.id)
+                                // Navegar siempre en el hilo principal (tras la red, la corrutina puede volver en otro hilo).
+                                withContext(Dispatchers.Main) { openConv(r.id) }
                             } catch (e: Exception) {
                                 container.toast(if ((e as? com.tiecoms.app.core.ApiException)?.status in setOf(403, 404)) ctx.getString(R.string.reply_private_unreachable) else errorText(ctx, e))
                             }

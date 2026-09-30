@@ -1936,7 +1936,9 @@ class TieComsClient(
         val d = kotlinx.coroutines.CompletableDeferred<SharedMailDTO>()
         synchronized(mailWanted) {
             mailWanted.getOrPut(id) { mutableListOf() } += d
-            if (mailBatchJob?.isActive != true) mailBatchJob = scope.launch { delay(16); flushMailBatches() }
+            // Sin lote en marcha, se abre uno. El lote se marca terminado dentro del mismo candado (ver flushMailBatches):
+            // así un pedido que llega justo cuando el lote termina no queda esperando para siempre.
+            if (mailBatchJob == null) mailBatchJob = scope.launch { try { delay(16); flushMailBatches() } finally { synchronized(mailWanted) { if (mailWanted.isEmpty()) mailBatchJob = null } } }
         }
         return d.await()
     }
@@ -1945,6 +1947,7 @@ class TieComsClient(
             val batch = synchronized(mailWanted) {
                 val b = mailWanted.entries.take(Mail.BATCH).map { it.key to it.value.toList() }
                 b.forEach { mailWanted.remove(it.first) }
+                if (b.isEmpty()) mailBatchJob = null
                 b
             }
             if (batch.isEmpty()) return
@@ -2029,6 +2032,14 @@ class TieComsClient(
             put("conversationIds", kotlinx.serialization.json.JsonArray(conversationIds.map { JsonPrimitive(it) }))
             comment?.takeIf { it.isNotBlank() }?.let { put("comment", JsonPrimitive(it.trim())) }
         }, WaShareResult.serializer()).also { r -> r.emails.forEach { putMail(it) } }
+    }
+
+    /** Reenviar la tarjeta de un correo o WhatsApp a otros chats (hasta 10): cada uno recibe su copia con hilo propio. */
+    suspend fun forwardShared(id: String, conversationIds: List<String>, comment: String?): List<SharedMailDTO> = withContext(dispatcher) {
+        req("POST", "/mail/shared/$id/forward", buildJsonObject {
+            put("conversationIds", kotlinx.serialization.json.JsonArray(conversationIds.map { JsonPrimitive(it) }))
+            comment?.takeIf { it.isNotBlank() }?.let { put("comment", JsonPrimitive(it.trim())) }
+        }, SharedMailsPage.serializer()).emails.map { putMail(it) }
     }
 
     @Volatile private var mailProof: MeetingProof? = null

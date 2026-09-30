@@ -82,13 +82,24 @@ class BandejaTest {
         assertEquals("Acme · Mentorías", GroupsTree.listLabel("Acme", "Mentorías"))
         assertEquals("Ongoing Ventas", GroupsTree.listLabel("Ongoing", "Ongoing Ventas"))
         assertEquals("Piloto", GroupsTree.listLabel(null, "Piloto"))
-        val labels = list().filterIsInstance<GroupsTree.Group>().associate { it.c.id to it.label }
-        assertEquals("Ongoing · Pagos", labels["g-home"])         // Tu organización → mi empresa dueña
-        assertEquals("Ongoing Ventas", labels["g-old"])
-        assertEquals("Acme · Mentorías", labels["g-a1"])          // Relaciones → la contraparte
-        assertEquals("Beta · Soporte", labels["g-b"])
-        assertEquals("Nestlé · Piloto", labels["g-p"])            // relación pendiente → counterpartName
-        assertEquals("Beta · Invitados", labels["g-g"])           // Invitado en → la anfitriona
+        // 1.7.1: arriba solo el grupo (sin etiqueta compuesta) y abajo, en pequeño, la empresa.
+        val rows = list().filterIsInstance<GroupsTree.Group>()
+        assertTrue(rows.all { it.label == null })
+        val companies = rows.associate { it.c.id to it.company }
+        assertEquals("Ongoing", companies["g-home"])         // Tu organización → mi empresa dueña
+        assertNull(companies["g-old"])                       // «Ongoing Ventas» ya empieza por la empresa
+        assertEquals("Acme", companies["g-a1"])              // Relaciones → la contraparte
+        assertEquals("Beta", companies["g-b"])
+        assertEquals("Nestlé", companies["g-p"])             // relación pendiente → counterpartName
+        assertEquals("Beta", companies["g-g"])               // Invitado en → la anfitriona
+        assertNull(GroupsTree.companyLine("Xertify", "Xertify - Xertiflow"))
+        assertEquals("Acme", GroupsTree.companyLine(" Acme ", "Mentorías"))
+        assertNull(GroupsTree.companyLine(null, "Piloto"))
+    }
+
+    @Test fun `la busqueda de la Lista sigue encontrando por empresa`() {
+        val found = list(q = "acme").filterIsInstance<GroupsTree.Group>().map { it.c.id }
+        assertTrue(found.toString(), "g-a1" in found)
     }
 
     @Test fun `lista plana con separadores Fijados, Sin leer y Recientes`() {

@@ -61,6 +61,14 @@ import java.time.ZoneId
 
 fun excerpt(s: String, n: Int = 90) = s.replace(Regex("\\s+"), " ").trim().take(n)
 
+/**
+ * Texto de un mensaje para citarlo (respuesta, barra de «Respondiendo a…», fijados, derivar): la tarjeta de un correo o un
+ * WhatsApp se cita «✉ asunto · remitente» y cualquier otro aviso de sistema con su texto; nunca el JSON.
+ */
+fun quoteText(ctx: android.content.Context, m: MessageDTO): String =
+    if (m.kind != "system" && !m.body.startsWith("{\"k\":")) m.body
+    else com.tiecoms.app.core.MailSystem.cardQuote("system", m.body, ctx.getString(R.string.web_mail_noSubject)) ?: systemText(ctx, m.body)
+
 /** Personas humanas de una conversación. */
 /** Personas de la conversación; sin conversación (asunto personal) no hay nadie más. */
 fun humansOf(d: BootstrapDTO, conversationId: String?): List<PersonDTO> =
@@ -265,7 +273,7 @@ fun DeriveDialog(conv: ConversationDTO, message: MessageDTO, onClose: () -> Unit
     val scope = rememberCoroutineScope()
     val data = client.state.collectAsStateWithLifecycle().value.data ?: return
     val myOrg = Names.org(data, data.me.primaryOrgId)
-    val full = excerpt(message.body, 10_000)
+    val full = excerpt(quoteText(ctx, message), 10_000)
     val short = if (full.length > 40) full.take(40).replace(Regex("\\s+\\S*$"), "") + "…" else full
     fun prefix(k: String) = ctx.getString(when (k) { "internal" -> R.string.derive_prefix_internal; "directive" -> R.string.derive_prefix_directive; else -> R.string.derive_prefix_same })
     var kind by rememberSaveable { mutableStateOf("same") }
@@ -408,7 +416,7 @@ fun PinsSheet(conv: ConversationDTO, onJump: (Long) -> Unit, onClose: () -> Unit
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(p?.name ?: "", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
-                        Text(excerpt(m.body, 140), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(excerpt(quoteText(androidx.compose.ui.platform.LocalContext.current, m), 140), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }

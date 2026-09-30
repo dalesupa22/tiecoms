@@ -10,6 +10,7 @@ import { client } from './app-client.ts';
 import { navigate } from './router.ts';
 import { pendingOf } from './screens/Shell.tsx';
 import { currentTheme, subscribeTheme, themePreference } from './theme.ts';
+import { cancelHidden, hintHidden } from './memory-trim.ts';
 
 function go(path: string) {
   if (path.startsWith('/') && !path.startsWith('//')) navigate(path);
@@ -58,8 +59,12 @@ export async function initDesktop() {
     e.preventDefault();
   });
 
+  // Cerrar la ventana la manda a la bandeja: si sigue oculta 5 min se podan las cachés (docs/MEMORIA.md). Por si el
+  // WebView no cambia visibilityState al ocultarse; al volver a enfocarla se cancela.
+  addEventListener('focus', cancelHidden);
   // Cerrar la ventana durante una llamada no la esconde: pasa al modo mini, siempre encima.
   await listen('chaggu:closed', () => {
+    hintHidden();
     void import('./call.ts').then((m) => {
       const v = m.currentCall();
       if (v && v.phase !== 'ended') window.dispatchEvent(new CustomEvent('chaggu:call-mini'));

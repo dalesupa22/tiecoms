@@ -17,7 +17,7 @@ import { errorText, getLang, t } from '../i18n.ts';
 import { toast } from '../menu.tsx';
 import { Modal } from '../ui.tsx';
 import { INK_COLORS, SCRIPT_FONTS, loadScriptFonts, photoCanvas, trimmedPng, typedCanvas, type InkColor } from '../sign-image.ts';
-import { blobUrl, downloadAttachment } from './Attachments.tsx';
+import { acquireBlobUrl, downloadAttachment } from './Attachments.tsx';
 
 GlobalWorkerOptions.workerSrc = workerSrc;
 const assetBase = `${import.meta.env.BASE_URL}pdfjs/`;
@@ -52,7 +52,13 @@ export function useSignatures() {
 }
 function useBlob(path: string | undefined) {
   const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => { let alive = true; if (path) blobUrl(path).then((u) => alive && setUrl(u)).catch(() => {}); return () => { alive = false; }; }, [path]);
+  useEffect(() => {
+    if (!path) return;
+    let alive = true;
+    const h = acquireBlobUrl(path);
+    h.promise.then((u) => alive && setUrl(u)).catch(() => {});
+    return () => { alive = false; h.release(); };
+  }, [path]);
   return url;
 }
 

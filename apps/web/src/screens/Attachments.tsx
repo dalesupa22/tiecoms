@@ -7,28 +7,33 @@ import { errorText, getLang, t } from '../i18n.ts';
 import { toast } from '../menu.tsx';
 import { VoiceNote } from './Voice.tsx';
 import { formatBytes, formatDuration } from '../video.ts';
+import { BlobCache } from '../blob-cache.ts';
+import { onTrim } from '../memory-trim.ts';
+import { shrinkImage } from '../image-shrink.ts';
 
-// ---------- Descarga autenticada con caché en memoria ----------
-const blobs = new Map<string, Promise<string>>();
-/** URL local (blob:) de una ruta del API que exige Bearer. */
-export function blobUrl(path: string) {
-  let p = blobs.get(path);
-  if (!p) {
-    p = client.fetchBlob(path).then((b) => URL.createObjectURL(b));
-    p.catch(() => blobs.delete(path));
-    blobs.set(path, p);
-  }
-  return p;
-}
-function useBlobUrl(path: string | null) {
+// ---------- Descarga autenticada con caché en memoria (con tope y revocación: blob-cache.ts) ----------
+export const blobs = new BlobCache({ fetch: (path) => client.fetchBlob(path) });
+onTrim(() => blobs.prune(true));
+/**
+ * URL local (blob:) de una ruta del API que exige Bearer, sin soltarla nunca (queda fija en memoria). Para pintar
+ * algo usa useBlobUrl o acquireBlobUrl, que la sueltan al terminar.
+ */
+export function blobUrl(path: string) { return blobs.acquire(path).promise; }
+/** Adquiere la URL de `path`; release() la deja libre para que la caché la revoque cuando sobre. */
+export const acquireBlobUrl = (path: string) => blobs.acquire(path);
+/** Foto para la burbuja sin miniatura del servidor: la original achicada una vez (image-shrink.ts). */
+const acquireTile = (path: string) => blobs.acquire(`${path}#tile`, async () => shrinkImage(await client.fetchBlob(path)));
+export function useBlobUrl(path: string | null, tile = false) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
-    let alive = true;
     setUrl(null); setFailed(false);
-    if (path) blobUrl(path).then((u) => alive && setUrl(u)).catch(() => alive && setFailed(true));
-    return () => { alive = false; };
-  }, [path]);
+    if (!path) return;
+    let alive = true;
+    const h = tile ? acquireTile(path) : blobs.acquire(path);
+    h.promise.then((u) => alive && setUrl(u)).catch(() => alive && setFailed(true));
+    return () => { alive = false; h.release(); };
+  }, [path, tile]);
   return { url, failed };
 }
 
@@ -58,19 +63,24 @@ function fileIcon(a: { contentType: string; name: string }) {
 
 export async function downloadAttachment(a: AttachmentDTO) {
   try {
-    const href = await blobUrl(a.url);
+    // Sin caché: un archivo descargado no se queda en la RAM (antes quedaba entero hasta cerrar la app).
+    const href = URL.createObjectURL(await client.fetchBlob(a.url));
     const link = document.createElement('a');
     link.href = href; link.download = a.name; document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 60_000);
   } catch (e) { toast(errorText(e) || t('att.unavailable')); }
 }
 
 // ---------- En la burbuja ----------
 function Tile({ a, more, onOpen }: { a: AttachmentDTO; more?: number; onOpen: () => void }) {
-  const { url, failed } = useBlobUrl(isImage(a) ? a.thumbUrl ?? a.url : a.thumbUrl);
+  // Se pide solo cerca de la pantalla; sin miniatura del servidor, la original achicada (no la foto entera).
+  const box = useRef<HTMLButtonElement>(null);
+  const seen = useSeen(box);
+  const { url, failed } = useBlobUrl(!seen ? null : a.thumbUrl ?? (isImage(a) ? a.url : null), !a.thumbUrl && isImage(a));
   const ratio = a.width && a.height ? a.width / a.height : 4 / 3;
   return (
-    <button type="button" className="att-tile" onClick={onOpen} aria-label={a.name} style={{ aspectRatio: String(Math.min(2, Math.max(0.6, ratio))) }}>
-      {url ? <img src={url} alt="" draggable={false} /> : <span className="att-tile-ph">{failed ? '⚠' : isVideo(a) ? '🎬' : ''}</span>}
+    <button ref={box} type="button" className="att-tile" onClick={onOpen} aria-label={a.name} style={{ aspectRatio: String(Math.min(2, Math.max(0.6, ratio))) }}>
+      {url ? <img src={url} alt="" draggable={false} decoding="async" /> : <span className="att-tile-ph">{failed ? '⚠' : isVideo(a) ? '🎬' : ''}</span>}
       {isVideo(a) && <span className="att-play">▶</span>}
       {more ? <span className="att-more">{t('att.more', { n: more })}</span> : null}
     </button>
@@ -328,6 +338,9 @@ export function useDrafts(conversationId: string) {
   const patch = (key: string, p: Partial<Draft>) => { if (alive.current) setDrafts((ds) => ds.map((d) => (d.key === key ? { ...d, ...p } : d))); };
   const controllers = useRef(new Map<string, AbortController>());
   useEffect(() => () => { for (const c of controllers.current.values()) c.abort(); }, []);
+  const draftsNow = useRef(drafts);
+  draftsNow.current = drafts;
+  useEffect(() => () => { for (const d of draftsNow.current) if (d.preview) URL.revokeObjectURL(d.preview); }, []);
   /** Progreso en pasos de 1 % (no re-renderiza el compositor en cada evento). */
   const lastPct = useRef(new Map<string, number>());
   const progress = (key: string, p: number) => {
@@ -393,7 +406,8 @@ export function useDrafts(conversationId: string) {
     controllers.current.delete(key);
     setDrafts((ds) => { const d = ds.find((x) => x.key === key); if (d?.preview) URL.revokeObjectURL(d.preview); return ds.filter((x) => x.key !== key); });
   };
-  const clear = () => setDrafts([]);
+  // Las vistas previas locales (blob:) se revocan al enviar o descartar; si no, cada foto adjunta quedaba en la RAM.
+  const clear = () => setDrafts((ds) => { for (const d of ds) if (d.preview) URL.revokeObjectURL(d.preview); return []; });
   const retry = (key: string) => { const d = drafts.find((x) => x.key === key); if (d) void uploadOne(d); };
   return {
     drafts, add, remove, clear, retry,

@@ -1,8 +1,8 @@
 import { TOPIC_ALL, filterForEntry, filterForMessage, topicUnreadCounts } from '../topic-order.ts';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
 import type { BootstrapDTO, ConversationDTO, IssueDTO, MessageDTO } from '@tiecoms/contracts';
 import type { PendingMessage } from '@tiecoms/client-core';
-import { client, useClient } from '../app-client.ts';
+import { client, useClient, useRetainConversation } from '../app-client.ts';
 import { ForwardToChatsDialog, Linkify, StackedAvatars } from './Chats.tsx';
 import { QUICK_REACTIONS } from '@tiecoms/contracts';
 import { ReactionBar, isJumbo, openEmojiPicker, toggleReaction, useEmojiAutocomplete } from './Reactions.tsx';
@@ -53,12 +53,25 @@ type Row =
 const draftKey = (id: string) => `tiecoms:draft:${id}`;
 const excerpt = (s: string, n = 90) => s.replace(/\s+/g, ' ').trim().slice(0, n);
 
+// Barra de acciones de un mensaje (reaccionar, responder, reenviar…): solo existe en el mensaje bajo el puntero.
+// Antes cada mensaje llevaba ~10 botones ocultos con CSS: en un chat de 300 mensajes, miles de nodos (docs/MEMORIA.md).
+let hoveredMsg: string | null = null;
+const hoverListeners = new Set<() => void>();
+const setHoveredMsg = (id: string | null) => { if (id === hoveredMsg) return; hoveredMsg = id; hoverListeners.forEach((l) => l()); };
+const subscribeHover = (l: () => void) => { hoverListeners.add(l); return () => { hoverListeners.delete(l); }; };
+function HoverActions({ mid, children }: { mid: string; children: () => ReactNode }) {
+  const on = useSyncExternalStore(subscribeHover, () => hoveredMsg === mid);
+  return on ? <div className="msg-actions">{children()}</div> : null;
+}
+
 /** Panel dentro de la vista en paralelo (Split.tsx): activo = el del URL; count = cuántos hay abiertos. */
 export interface PaneProps { active: boolean; count: number; onClose: () => void; onOnly: () => void }
 
 export function ConversationScreen({ id, embedded, pane, search }: { id: string; embedded?: { onClose: () => void; anchor?: MessageDTO | null; onSeeAnchor?: () => void }; pane?: PaneProps; search?: string }) {
   const d = useClient((s) => s.data)!;
   const conv = d.conversations.find((c) => c.id === id);
+  // A la vista: el cliente no la poda ni la recorta mientras esté montada (docs/MEMORIA.md).
+  useRetainConversation(id);
   const local = useClient((s) => s.conversations[id]);
   const pendingAll = useClient((s) => s.pending);
   const typing = useClient((s) => s.typing[id]);
@@ -736,7 +749,8 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
         {nav.lineAbove && entry && newLine != null && (
           <button className="jump-new" onClick={jumpToNewLine} aria-label={t('chat.jumpNew')} title={t('chat.jumpNew')}>{t('chat.newAbove', { n: entry.unread })}</button>
         )}
-        <div className="msgs" data-conv-id={id} ref={scroller} onScroll={onScroll} role="log" aria-live="polite">
+        <div className="msgs" data-conv-id={id} ref={scroller} onScroll={onScroll} role="log" aria-live="polite"
+          onMouseOver={(e) => setHoveredMsg((e.target as HTMLElement).closest?.('.msg[data-mid]')?.getAttribute('data-mid') ?? null)} onMouseLeave={() => setHoveredMsg(null)}>
           {local?.loading && !local.loaded && <div className="msg-sys">{t('common.loading')}</div>}
           {local?.loaded && !local.hasMore && conv.historyFromSeq > 0 && <div className="msg-sys">{t('chat.lateJoin')}</div>}
           {local?.loaded && local.hasMore && <div className="msg-sys">{local.loading ? t('chat.loadingOlder') : '·'}</div>}
@@ -796,7 +810,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
                   {!embedded && <SideChip d={d} sides={sidesOf(d, id, m.id)} onOpen={setSideId} />}
                   {issueOf(m.id) && <button className="msg-issue" onClick={() => setOpenIssue(issueOf(m.id)!.id)}>◆ {issueOf(m.id)!.title}</button>}
                   {!m.deletedAt && !isEditing && (
-                    <div className="msg-actions">
+                    <HoverActions mid={m.id}>{() => <>
                       {conv.canPost && <button className="msg-act-react" aria-label={t('react.add')} title={t('react.add')} onClick={(e) => { const rr = (e.currentTarget as HTMLElement).getBoundingClientRect(); pickReaction(m, rr.left, rr.bottom + 6); }}>☺</button>}
                       {conv.canPost && QUICK_REACTIONS.slice(0, 3).map((e) => <button key={e} className="msg-act-quick" aria-label={e} onClick={() => react(m, e)}>{e}</button>)}
                       {conv.canPost && <button onClick={() => { setReplyTo(m); input.current?.focus(); }}>↩ {t('menu.reply')}</button>}
@@ -805,7 +819,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
                       {canOpenIssues && !m.viewOnce && <button onClick={() => setNewIssue({ origin: m })}>{t('issue.fromMessage')}</button>}
                       {conv.canPost && !embedded && m.kind === 'text' && !m.viewOnce && <button onClick={(e) => openTopicMenu(e.currentTarget as HTMLElement, m, topics)}>🏷 {t('topic.set')}</button>}
                       <button aria-label={t('menu.open')} onClick={(e) => { const rr = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(rr.left, rr.bottom + 4, messageMenu(m)); }}>⋯</button>
-                    </div>
+                    </>}</HoverActions>
                   )}
                 </div>
               </div>

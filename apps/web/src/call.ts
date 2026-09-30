@@ -487,6 +487,11 @@ async function teardown() {
     await s.audioVideo.stopVideoInput().catch(() => {});
     await s.audioVideo.stopAudioInput().catch(() => {});
     s.audioVideo.stop();
+    // Memoria (docs/MEMORIA.md): se suelta el audio remoto y, cuando Chime terminó de parar, la sesión entera
+    // (controladores, WebRTC, observadores). El código del SDK queda cargado; lo pesado de la llamada, no.
+    try { s.audioVideo.unbindAudioElement(); } catch {}
+    if (audioEl) { audioEl.srcObject = null; }
+    setTimeout(() => { void Promise.resolve(s.destroy?.()).catch(() => {}); }, 2000);
   }
   if (view) { view = { ...view, phase: 'ended', tiles: [], screens: [], sharing: false }; emit(); }
   view = null;

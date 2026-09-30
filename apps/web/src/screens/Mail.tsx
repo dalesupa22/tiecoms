@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { LruMap } from '../lru.ts';
+import { onTrim } from '../memory-trim.ts';
 import type { MailConnectionDTO, MailListItemDTO, MailMessageDTO, MailProvider, MessageDTO, SharedMailDTO, SharedMailCommentDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
@@ -480,7 +482,9 @@ export function MailText({ text }: { text: string }) {
  * en otra pestaña. allow-same-origin es para medir el alto y encoger los correos de 600 px al ancho de la tarjeta.
  */
 const HTML_HEAD = `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: http: data:; style-src 'unsafe-inline' https:; font-src https: data:"><base target="_blank"><meta name="color-scheme" content="light"><style>:root{color-scheme:light}html,body{margin:0;background:#fff;color:#1f1f1f;font:14px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow-wrap:anywhere}body{padding:12px}img{max-width:100%;height:auto}a{color:#1a5fd6}</style>`;
-const htmlCache = new Map<string, string | null>();
+/** HTML de los últimos correos vistos (cada uno puede pesar cientos de KB): tope de 12 (docs/MEMORIA.md). */
+export const htmlCache = new LruMap<string, string | null>(12);
+onTrim(() => htmlCache.clear());
 function useMailHtml(id: string, on: boolean) {
   const [html, setHtml] = useState<string | null | undefined>(htmlCache.get(id));
   useEffect(() => {

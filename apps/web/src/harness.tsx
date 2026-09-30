@@ -8,6 +8,7 @@ import type { BootstrapDTO, ConversationDTO, IssueDTO, MessageDTO, TopicDTO } fr
 import { showMessageBubble } from './bubbles.tsx';
 import { App } from './App.tsx';
 import { client } from './app-client.ts';
+import { trimMemoryNow } from './memory-trim.ts';
 import { setLang } from './i18n.ts';
 import { initTheme, setThemePreference } from './theme.ts';
 import './styles.css';
@@ -235,6 +236,11 @@ const waMsgs = [
   throw new Error('arnés sin backend');
 };
 // Para las pruebas en el navegador: el cliente y la burbuja de mensaje nuevo.
-Object.assign(window, { __client: client, __bubble: showMessageBubble });
-history.replaceState(null, '', q.get('to') ?? '/');
-createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+Object.assign(window, { __client: client, __bubble: showMessageBubble, __trimMemory: trimMemoryNow });
+const boot = () => {
+  history.replaceState(null, '', q.get('to') ?? '/');
+  createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+};
+// ?carga=50: 50 chats × 100 mensajes con fotos y un «servidor» en memoria para medir la RAM (docs/MEMORIA.md).
+if (q.has('carga')) void import('./harness-load.ts').then((m) => m.installLoad(client, Number(q.get('carga')) || 50)).then(boot);
+else boot();

@@ -16,6 +16,7 @@ import {
   CACHE_VERSION, LAST_USER_KEY, PREFETCH_CONCURRENCY, bootKey, convIndexKey, convKey, conversationsToCache, prefetchCandidates, runLimited,
   snapshotConversation, usableBoot, usableConversation, type CachedBoot, type CachedConversation,
 } from './local-cache.ts';
+import { HOT_CONVERSATIONS, MAX_MESSAGES_PER_CONVERSATION, SHARED_GETS_SWEEP_AT, conversationsToEvict, pruneTyping, trimToLatest } from './memory.ts';
 
 /** Después de la primera pintura, cuando el navegador está libre (o a los 1,2 s). */
 const whenIdle = (fn: () => void) => {
@@ -185,7 +186,13 @@ export class TieComsClient {
   private bootDirty = false;
   private dirtyConvs = new Set<string>();
   private lastBootstrapAt = 0;
-  private sharedGets = new Map<string, { generation: number; at: number; promise: Promise<unknown> }>();
+  private sharedGets = new Map<string, { generation: number; at: number; ttl: number; promise: Promise<unknown> }>();
+  // ---------- Memoria (docs/MEMORIA.md): chats calientes (LRU) y retenidos (a la vista) ----------
+  private lastUse = new Map<string, number>();
+  private useTick = 0;
+  private retained = new Map<string, number>();
+  /** Lo último de un chat que se soltó antes de guardarlo en la caché local (persist lo escribe). */
+  private evictedSnapshots = new Map<string, CachedConversation>();
 
   constructor(private opts: ClientOptions) {}
 
@@ -233,14 +240,20 @@ export class TieComsClient {
     const keepSet = new Set(keep);
     const dirty = [...this.dirtyConvs];
     this.dirtyConvs.clear();
+    const evicted = new Map(this.evictedSnapshots);
+    this.evictedSnapshots.clear();
+    for (const id of evicted.keys()) if (!dirty.includes(id)) dirty.push(id);
+    const saved = new Set<string>();
     for (const id of dirty) {
       const c = this.state.conversations[id];
-      if (!keepSet.has(id) || !c?.loaded) continue;
-      await store.set(convKey(userId, id), snapshotConversation(c));
+      const snap = c?.loaded ? snapshotConversation(c) : evicted.get(id);
+      if (!keepSet.has(id) || !snap) continue;
+      await store.set(convKey(userId, id), snap);
+      saved.add(id);
       if (generation !== this.sessionGeneration) return;
     }
     const prev = (await store.get<string[]>(convIndexKey(userId))) ?? [];
-    const cached = new Set([...prev.filter((id) => keepSet.has(id)), ...dirty.filter((id) => keepSet.has(id) && this.state.conversations[id]?.loaded)]);
+    const cached = new Set([...prev.filter((id) => keepSet.has(id)), ...saved]);
     for (const id of prev) if (!keepSet.has(id)) await store.del(convKey(userId, id));
     if (generation !== this.sessionGeneration) return;
     await store.set(convIndexKey(userId), [...cached]);
@@ -263,9 +276,80 @@ export class TieComsClient {
     const hit = this.sharedGets.get(path);
     if (hit && hit.generation === generation && Date.now() - hit.at < ttl) return hit.promise as Promise<T>;
     const promise = this.request<T>(path);
-    this.sharedGets.set(path, { generation, at: Date.now(), promise });
+    if (this.sharedGets.size >= SHARED_GETS_SWEEP_AT) this.sweepSharedGets();
+    this.sharedGets.set(path, { generation, at: Date.now(), ttl, promise });
     promise.catch(() => { if (this.sharedGets.get(path)?.promise === promise) this.sharedGets.delete(path); });
     return promise;
+  }
+
+  /** Quita los GET compartidos vencidos (cada respuesta retenida es memoria: p. ej. los fijados de cada chat). */
+  private sweepSharedGets(now = Date.now()) {
+    for (const [k, v] of this.sharedGets) if (v.generation !== this.sessionGeneration || now - v.at >= v.ttl) this.sharedGets.delete(k);
+  }
+
+  // ---------- Memoria: LRU de conversaciones ----------
+  private touch(id: string) { this.lastUse.set(id, ++this.useTick); }
+  private isRetained = (id: string) => (this.retained.get(id) ?? 0) > 0;
+  /**
+   * La interfaz retiene la conversación que muestra (y la suelta al cerrarla): una retenida no se poda ni se recorta,
+   * aunque se haya subido a leer mucho historial. Devuelve la función para soltarla (se puede llamar varias veces).
+   */
+  retainConversation(id: string): () => void {
+    this.retained.set(id, (this.retained.get(id) ?? 0) + 1);
+    this.touch(id);
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      const n = (this.retained.get(id) ?? 1) - 1;
+      if (n > 0) { this.retained.set(id, n); return; }
+      this.retained.delete(id);
+      this.touch(id);
+      // Al dejar de verla: solo los últimos 300 mensajes (lo anterior se vuelve a pedir al subir).
+      const c = this.state.conversations[id];
+      if (c) { const t = trimToLatest(c.messages); if (t.trimmed) this.setConv(id, { messages: t.messages, hasMore: true }); }
+      this.enforceHot();
+    };
+  }
+  /** Ids de conversaciones con mensajes en memoria (para pruebas y la medición). */
+  hotConversations() { return Object.keys(this.state.conversations).filter((id) => { const c = this.state.conversations[id]!; return c.loaded || c.messages.length > 0; }); }
+  /** Deja como mucho `max` chats calientes: suelta los de uso más viejo que no estén a la vista ni ocupados. */
+  private enforceHot(max = HOT_CONVERSATIONS) {
+    const busy = (id: string) => this.isRetained(id) || this.opening.has(id) || this.catchingUp.has(id);
+    this.evict(conversationsToEvict(this.hotConversations(), this.lastUse, busy, max));
+  }
+  private evict(ids: string[]) {
+    if (!ids.length) return;
+    const gone = new Set(ids);
+    const conversations = { ...this.state.conversations };
+    for (const id of ids) {
+      const c = conversations[id];
+      // Lo que cambió y aún no se guardó queda para persist(): al volver se pinta igual desde la caché local.
+      if (c?.loaded && this.dirtyConvs.has(id)) this.evictedSnapshots.set(id, snapshotConversation(c));
+      delete conversations[id];
+      this.lastUse.delete(id);
+    }
+    const typing = { ...this.state.typing };
+    for (const id of ids) delete typing[id];
+    // Los correos llevados a un chat solo se pintan dentro de ese chat: se sueltan con él.
+    let mails = this.state.mails;
+    if (Object.values(mails).some((m) => gone.has(m.conversationId))) mails = Object.fromEntries(Object.entries(mails).filter(([, m]) => !gone.has(m.conversationId)));
+    this.set({ conversations, typing, mails });
+    if (this.evictedSnapshots.size) this.schedulePersist();
+  }
+  /**
+   * Poda fuerte (app oculta mucho tiempo, escritorio en la bandeja): suelta todos los chats que no están a la vista
+   * (los retenidos quedan igual), los GET compartidos vencidos y los «escribiendo…» viejos. Lo soltado se vuelve a
+   * pintar desde la caché local al abrirlo.
+   */
+  trimMemory() {
+    const busy = (id: string) => this.isRetained(id) || this.opening.has(id) || this.catchingUp.has(id);
+    const drop = this.hotConversations().filter((id) => !busy(id));
+    this.evict(drop);
+    this.sweepSharedGets();
+    const typing = pruneTyping(this.state.typing, Date.now());
+    if (typing !== this.state.typing) this.set({ typing });
+    return { conversations: drop.length };
   }
 
   /** Precarga en segundo plano: mensajes de las conversaciones con no leídos y las fijadas (máx. 8, de 2 en 2). */
@@ -482,6 +566,7 @@ export class TieComsClient {
     this.readTimers.clear();
     if (this.persistTimer) clearTimeout(this.persistTimer);
     this.persistTimer = null; this.bootDirty = false; this.dirtyConvs.clear(); this.sharedGets.clear(); this.needsLogin = false; this.lastBootstrapAt = 0;
+    this.lastUse.clear(); this.evictedSnapshots.clear();
     this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, mails: {}, waRevision: 0, driveRevision: 0, calls: {} };
     this.listeners.forEach((l) => l());
     await this.opts.secrets?.set(null);
@@ -572,12 +657,17 @@ export class TieComsClient {
     });
     s.on(SOCKET_EVENTS.conversationEvent, (e: ConversationEvent) => this.onConversationEvent(e));
     s.on(SOCKET_EVENTS.accountEvent, (e: AccountEvent) => this.onAccountEvent(e));
-    s.on(SOCKET_EVENTS.typing, (e: { conversationId: string; userId: string }) => {
-      if (e.userId === this.state.data?.me.id) return;
-      const now = Date.now();
-      const list = (this.state.typing[e.conversationId] ?? []).filter((t) => t.until > now && t.userId !== e.userId);
-      this.set({ typing: { ...this.state.typing, [e.conversationId]: [...list, { userId: e.userId, until: now + 4000 }] } });
-    });
+    s.on(SOCKET_EVENTS.typing, (e: { conversationId: string; userId: string }) => this.onTyping(e));
+  }
+
+  /** «Escribiendo…» de otra persona (evento del socket). */
+  private onTyping(e: { conversationId: string; userId: string }) {
+    if (e.userId === this.state.data?.me.id) return;
+    const now = Date.now();
+    // Se barren de paso las entradas vencidas de todos los chats (el mapa no crece con cada evento).
+    const typing = pruneTyping(this.state.typing, now);
+    const list = (typing[e.conversationId] ?? []).filter((t) => t.userId !== e.userId);
+    this.set({ typing: { ...typing, [e.conversationId]: [...list, { userId: e.userId, until: now + 4000 }] } });
   }
 
   /** Tras reconectar o volver del segundo plano: snapshot + recuperación de huecos + cola. */
@@ -692,10 +782,13 @@ export class TieComsClient {
     let messages = local.messages;
     if (e.type === 'message.updated') this.noticeReaction(local.messages.find((m) => m.id === e.message.id), e.message);
     if (e.type === 'message.created' || e.type === 'message.updated') messages = upsertMessage(messages, e.message);
+    // Un chat que no está a la vista no crece sin fin con lo que llega en vivo.
+    let hasMore: boolean | undefined;
+    if (messages.length > MAX_MESSAGES_PER_CONVERSATION && !this.isRetained(e.conversationId)) { messages = trimToLatest(messages).messages; hasMore = true; }
     if (e.type === 'members.changed') { this.patchConversationMeta(e.conversationId, { memberIds: e.memberIds, ...(e.adminIds ? { adminIds: e.adminIds } : {}) }); this.scheduleBootstrap(); }
     if (e.type === 'issue.updated') this.putIssues([e.issue]);
     if (e.type === 'message.updated') this.patchPreviewIfLast(e.message);
-    this.setConv(e.conversationId, { messages, lastEventSeq: e.eventSeq });
+    this.setConv(e.conversationId, { messages, lastEventSeq: e.eventSeq, ...(hasMore ? { hasMore } : {}) });
     if (e.type === 'message.created') this.dropPending(e.message);
   }
 
@@ -831,6 +924,7 @@ export class TieComsClient {
         active.promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
       });
     }
+    this.touch(id);
     const local = this.state.conversations[id];
     if (local?.loaded && !force) { void this.catchUp(id); return; }
     const operation = { generation, signal, promise: Promise.resolve() };
@@ -865,6 +959,7 @@ export class TieComsClient {
         throw e;
       } finally {
         if (this.opening.get(id) === operation) this.opening.delete(id);
+        if (generation === this.sessionGeneration) this.enforceHot();
       }
     });
     return operation.promise;

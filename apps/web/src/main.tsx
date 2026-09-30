@@ -4,9 +4,12 @@ import { applyTextSize } from './text-size.ts';
 import { initTheme } from './theme.ts';
 import { App } from './App.tsx';
 import { client, isDesktop } from './app-client.ts';
+import { installMemoryTrim } from './memory-trim.ts';
 import './styles.css';
 
 void client.start();
+// Oculta más de 5 min (pestaña de fondo, escritorio en la bandeja): se podan las cachés (docs/MEMORIA.md).
+installMemoryTrim();
 applyTextSize();
 initTheme();
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

@@ -4,7 +4,7 @@ import { MAX_VOICE_MS } from '@tiecoms/contracts';
 import { client } from '../app-client.ts';
 import { errorText, t, voiceDuration } from '../i18n.ts';
 import { copyText, toast } from '../menu.tsx';
-import { blobUrl } from './Attachments.tsx';
+import { acquireBlobUrl } from './Attachments.tsx';
 import { Modal } from '../ui.tsx';
 
 // ---------- Grabar ----------
@@ -173,6 +173,8 @@ const SPEEDS = [1, 1.5, 2];
 /** Burbuja de voz: play/pausa, onda con progreso, duración, velocidad, transcripción, resumen y asunto sugerido. */
 export function VoiceNote({ a, onCreateIssue }: { a: AttachmentDTO; onCreateIssue?: (title: string) => void }) {
   const audio = useRef<HTMLAudioElement | null>(null);
+  /** La URL local del audio queda en uso mientras la nota esté montada; al salir se suelta (blob-cache.ts). */
+  const held = useRef<(() => void) | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [pos, setPos] = useState(0);
@@ -188,14 +190,21 @@ export function VoiceNote({ a, onCreateIssue }: { a: AttachmentDTO; onCreateIssu
     const el = root.current;
     const h = () => void toggle(true);
     el?.addEventListener('voice:play', h);
-    return () => { el?.removeEventListener('voice:play', h); audio.current?.pause(); };
+    return () => {
+      el?.removeEventListener('voice:play', h);
+      const au = audio.current;
+      if (au) { au.pause(); au.removeAttribute('src'); au.load(); audio.current = null; }
+      held.current?.(); held.current = null;
+    };
   }, []);
 
   async function toggle(forcePlay = false) {
     if (playing && !forcePlay) { audio.current?.pause(); return; }
     try {
       if (!audio.current) {
-        const el = new Audio(await blobUrl(a.url));
+        const h = acquireBlobUrl(a.url);
+        held.current?.(); held.current = h.release;
+        const el = new Audio(await h.promise);
         el.ontimeupdate = () => setPos(el.currentTime * 1000);
         el.onplay = () => setPlaying(true);
         el.onpause = () => setPlaying(false);

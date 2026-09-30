@@ -1,8 +1,9 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import type { Platform } from '@tiecoms/contracts';
 import { clearForeignMeetingAttempts } from './meeting-attempt.ts';
 import { clearForeignMeetingProof } from './meeting-oauth.ts';
 import { browserLang } from './i18n.ts';
+import { onTrim } from './memory-trim.ts';
 import { IndexedDbStorage, MemoryStorage, TieComsClient, type ClientNotice, type ClientState, type SecretStore } from '@tiecoms/client-core';
 
 function makeStorage() {
@@ -72,6 +73,17 @@ client.subscribe(() => {
   }
 });
 
+// App oculta mucho tiempo: se sueltan los chats que no están a la vista (docs/MEMORIA.md).
+onTrim(() => client.trimMemory());
+
 export function useClient<T>(select: (s: ClientState) => T): T {
   return useSyncExternalStore(client.subscribe, () => select(client.getState()));
+}
+
+/**
+ * La conversación que esta pantalla muestra queda retenida mientras está montada: el cliente no la poda ni la
+ * recorta (docs/MEMORIA.md). Al desmontar se suelta y vuelve a entrar al LRU de chats calientes.
+ */
+export function useRetainConversation(id: string | null | undefined) {
+  useEffect(() => (id ? client.retainConversation(id) : undefined), [id]);
 }

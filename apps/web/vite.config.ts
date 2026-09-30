@@ -54,5 +54,9 @@ export default defineConfig({
     port: 5173,
     proxy: { '/api': { target: process.env.VITE_API_PROXY ?? 'http://localhost:3020', ws: true } },
   },
-  build: { target: 'es2022', sourcemap: true, chunkSizeWarningLimit: 800 },
+  build: {
+    target: 'es2022', sourcemap: true, chunkSizeWarningLimit: 800,
+    // CHAGGU_HARNESS=1: también construye el arnés (medición de memoria en modo producción, docs/MEMORIA.md).
+    ...(process.env.CHAGGU_HARNESS ? { outDir: 'dist-harness', rollupOptions: { input: { index: 'index.html', harness: 'harness.html' } } } : {}),
+  },
 });

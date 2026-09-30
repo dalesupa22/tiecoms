@@ -1,4 +1,4 @@
-// Chaggu de escritorio (macOS y Windows): la misma web de apps/web empaquetada en local,
+// chaggu de escritorio (macOS y Windows): la misma web de apps/web empaquetada en local,
 // hablando con https://app.chaggu.com, más lo que un navegador no da: notificaciones del
 // sistema, enlaces chaggu://, token de sesión en el Llavero / Administrador de credenciales,
 // ventana que se oculta al cerrar, bandeja, descargas a la carpeta Descargas y llamadas con
@@ -158,7 +158,7 @@ fn main() {
       let popup = handle.clone();
       let dl = handle.clone();
       WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
-        .title("Chaggu")
+        .title("chaggu")
         .inner_size(1280.0, 820.0)
         .min_inner_size(380.0, 560.0)
         .on_navigation(move |url| {
@@ -189,7 +189,7 @@ fn main() {
             }
             DownloadEvent::Finished { success, .. } => {
               let body = if success { "Quedó en tu carpeta Descargas." } else { "No se pudo descargar el archivo." };
-              let _ = dl.notification().builder().title("Chaggu").body(body).show();
+              let _ = dl.notification().builder().title("chaggu").body(body).show();
             }
             _ => {}
           }
@@ -197,12 +197,12 @@ fn main() {
         })
         .build()?;
 
-      let open = MenuItem::with_id(app, "open", "Abrir Chaggu", true, None::<&str>)?;
-      let quit = MenuItem::with_id(app, "quit", "Salir de Chaggu", true, None::<&str>)?;
+      let open = MenuItem::with_id(app, "open", "Abrir chaggu", true, None::<&str>)?;
+      let quit = MenuItem::with_id(app, "quit", "Salir de chaggu", true, None::<&str>)?;
       let menu = Menu::with_items(app, &[&open, &quit])?;
       TrayIconBuilder::with_id("tray")
         .icon(app.default_window_icon().unwrap().clone())
-        .tooltip("Chaggu")
+        .tooltip("chaggu")
         .menu(&menu)
         .show_menu_on_left_click(cfg!(target_os = "macos"))
         .on_menu_event(|app, e| match e.id.as_ref() {
@@ -228,7 +228,7 @@ fn main() {
       }
     })
     .build(tauri::generate_context!())
-    .expect("error al iniciar Chaggu");
+    .expect("error al iniciar chaggu");
 
   app.run(|app, event| {
     #[cfg(target_os = "macos")]

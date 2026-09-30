@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pestaña «Todo» (30-sep-2026): Tareas con atajos a Correo, WhatsApp, Archivos y Trazo. -->
+<resources>
+    <string name="nav_hub">Todo</string>
+    <string name="hub_unread">%d sin leer</string>
+</resources>

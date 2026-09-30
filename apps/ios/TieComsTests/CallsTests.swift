@@ -206,11 +206,13 @@ final class CallsTests: XCTestCase {
         XCTAssertFalse(TopicRules.hiddenInGeneral(msg(3, topic: "fin"), filter: nil, showAll: true, active: active, revealed: []), "Todo: todo")
         XCTAssertFalse(TopicRules.hiddenInGeneral(msg(3, topic: "fin"), filter: "fin", showAll: false, active: active, revealed: []), "con filtro no aplica")
         XCTAssertFalse(TopicRules.hiddenInGeneral(msg(3, topic: "fin"), filter: nil, showAll: false, active: [], revealed: []), "sin temas activos, todo")
-        // Saltar a un mensaje: su tema, o General; en Todo no cambia.
-        XCTAssertEqual(TopicRules.filterForJump(msg(3, topic: "fin"), current: nil, active: active), "fin")
-        XCTAssertNil(TopicRules.filterForJump(msg(3), current: "fin", active: active), "sin tema: a General")
-        XCTAssertNil(TopicRules.filterForJump(msg(3, topic: "old"), current: "fin", active: active), "tema archivado: a General")
-        XCTAssertEqual(TopicRules.filterForJump(msg(3, topic: "fin"), current: TopicRules.all, active: active), TopicRules.all, "en Todo no cambia")
+        // Saltar a un mensaje (1.7.5): su tema; sin tema (o archivado), «Todo»; sin temas activos, sin filtro.
+        XCTAssertEqual(TopicRules.filterForJump(msg(3, topic: "fin"), active: active), "fin")
+        XCTAssertEqual(TopicRules.filterForJump(msg(3), active: active), TopicRules.all, "sin tema: a Todo")
+        XCTAssertEqual(TopicRules.filterForJump(msg(3, topic: "old"), active: active), TopicRules.all, "tema archivado: a Todo")
+        XCTAssertNil(TopicRules.filterForJump(msg(3), active: []), "sin temas activos")
+        XCTAssertEqual(TopicRules.filterForJump(msg(3, topic: "fin"), active: active, current: TopicRules.all), TopicRules.all, "en Todo no cambia")
+        XCTAssertEqual(TopicRules.filterForJump(msg(3), active: active, current: nil), TopicRules.all, "desde General, sin tema: Todo")
         XCTAssertNil(TopicRules.effectiveFilter(TopicRules.all, in: [TopicDTO(id: "fin", conversationId: "c1", name: "Finanzas")]), "Todo no es un tema: lo escrito va sin tema")
         let list = [TopicDTO(id: "fin", conversationId: "c1", name: "Finanzas"), TopicDTO(id: "old", conversationId: "c1", name: "Viejo", archivedAt: "2026-09-01")]
         XCTAssertEqual(TopicRules.activeIds(list), ["fin"])
@@ -224,13 +226,17 @@ final class CallsTests: XCTestCase {
         XCTAssertEqual(TopicRules.unreadCounts(ms, read: 9, me: "a", active: ["fin"]), [:], "sin pendientes, sin número")
     }
 
-    func testAutoTopicOnlyWhenAllUnreadInOneTopic() {
+    func testOpenFilterIsTopicOfFirstUnread() {
         let active: Set<String> = ["fin", "ops"]
-        XCTAssertEqual(TopicRules.autoTopic([msg(1), msg(2, topic: "fin"), msg(3, topic: "fin"), msg(4, author: "a")], after: 1, me: "a", active: active), "fin")
-        XCTAssertNil(TopicRules.autoTopic([msg(2, topic: "fin"), msg(3, topic: "ops")], after: 1, me: "a", active: active), "repartido: «Todo»")
-        XCTAssertNil(TopicRules.autoTopic([msg(2, topic: "fin"), msg(3)], after: 1, me: "a", active: active), "hay no leídos sin tema: «Todo»")
-        XCTAssertNil(TopicRules.autoTopic([msg(2, topic: "fin")], after: 2, me: "a", active: active), "sin no leídos")
-        XCTAssertEqual(TopicRules.autoTopic([msg(2, topic: "fin"), msg(3, kind: "system")], after: 1, me: "a", active: active), "fin", "lo de sistema no cuenta")
+        XCTAssertEqual(TopicRules.openFilter([msg(1), msg(2, topic: "fin"), msg(3, topic: "fin"), msg(4, author: "a")], after: 1, me: "a", active: active), "fin")
+        XCTAssertEqual(TopicRules.openFilter([msg(3, topic: "ops"), msg(2, topic: "fin")], after: 1, me: "a", active: active), "fin", "repartido: el del primero (por seq)")
+        XCTAssertNil(TopicRules.openFilter([msg(2), msg(3, topic: "fin")], after: 1, me: "a", active: active), "primero sin tema: «General», donde se ve")
+        XCTAssertNil(TopicRules.openFilter([msg(2, topic: "old"), msg(3, topic: "fin")], after: 1, me: "a", active: active), "tema archivado = sin tema")
+        XCTAssertNil(TopicRules.openFilter([msg(2, topic: "fin")], after: 2, me: "a", active: active), "sin no leídos")
+        XCTAssertEqual(TopicRules.openFilter([msg(2, kind: "system"), msg(3, topic: "ops")], after: 1, me: "a", active: active), "ops", "lo de sistema no cuenta")
+        XCTAssertEqual(TopicRules.openFilter([msg(2, topic: "fin", author: "a"), msg(3, topic: "ops")], after: 1, me: "a", active: active), "ops", "lo mío no cuenta")
+        XCTAssertEqual(TopicRules.openFilter([msg(2, topic: "fin", deleted: true), msg(3, topic: "ops")], after: 1, me: "a", active: active), "ops", "lo borrado no cuenta")
+        XCTAssertNil(TopicRules.openFilter([msg(2, topic: "fin")], after: 1, me: "a", active: []), "sin temas activos")
     }
 
     // MARK: 1.6.8: Groq por pedazos, agregar personas y push de llamada

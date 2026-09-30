@@ -51,7 +51,7 @@ struct TieComsApp: App {
             Task { try? await s?.declineCallRequest(callId) }
         }
         AppFeedback.shared.onOpenSide = { [weak s] origin, side in s?.openSide(origin: origin, side: side) }
-        AppFeedback.shared.onOpenMessage = { [weak s] conv, mid in s?.openMessage(conv, messageId: mid) }
+        AppFeedback.shared.onOpenMessage = { [weak s] conv, mid, seq, topic in s?.openMessage(conv, messageId: mid, seq: seq, topicId: topic) }
         AppFeedback.shared.onOpenIssue = { [weak s] issue, conv, inChat in s?.openIssue(issue, conversationId: conv, inChat: inChat) }
         AppFeedback.shared.onReply = { [weak s] conv, text in await s?.replyFromNotification(conv, text: text) }
         AppFeedback.shared.onMarkRead = { [weak s] conv in await s?.markReadFromNotification(conv) }

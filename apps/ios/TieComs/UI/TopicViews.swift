@@ -55,7 +55,7 @@ private struct TopicFlag: View {
     }
 }
 
-/// Fila de banderitas: «💬 General», «☰ Todo» (solo con temas activos), los temas activos, «＋ Nuevo» y «🗄 Archivados N». Scroll horizontal.
+/// Fila de banderitas: «💬 General», «☰ Todo» (solo con temas activos), los temas activos (con no leídos primero), «＋ Nuevo» y «🗄 Archivados N». Scroll horizontal.
 struct TopicDock: View {
     @Environment(AppStore.self) private var store
     let conv: ConversationDTO
@@ -103,7 +103,8 @@ struct TopicDock: View {
                             .accessibilityAddTraits(filter == TopicRules.all ? .isSelected : [])
                             .accessibilityIdentifier("topic.all")
                         }
-                        ForEach(active) { t in
+                        // Primero los temas con no leídos para mí, luego el resto (TopicRules.dockOrder); cada uno una sola vez.
+                        ForEach(TopicRules.dockOrder(active, unread: unread)) { t in
                             Button { onFilter(filter == t.id ? nil : t.id) } label: {
                                 TopicFlag(text: "\(t.icon) \(t.name)", unread: unread[t.id], bg: TopicPalette.bg(t.color), ink: TopicPalette.ink(t.color), on: filter == t.id)
                             }
@@ -150,6 +151,8 @@ struct TopicDock: View {
                 }
                 .frame(height: 38)
                 .onChange(of: filter) { _, f in if let f { withAnimation { proxy.scrollTo(f, anchor: .center) } } }
+                // Al abrir ya filtrado (salto o no leídos) la banderita elegida queda a la vista.
+                .onAppear { if let f = filter { DispatchQueue.main.async { proxy.scrollTo(f, anchor: .center) } } }
             }
             .background(Theme.surface)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.textSecondary.opacity(0.15)).frame(height: 0.5) }

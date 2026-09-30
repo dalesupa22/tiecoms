@@ -11,6 +11,8 @@ final class TemasGeneralUITests: XCTestCase {
         var password: String
         var a: Person
         var conversationId: String
+        struct Messages: Decodable { var extracto: String; var camion: String; var vemos: String }
+        var messages: Messages?
     }
 
     override func setUp() { continueAfterFailure = false }
@@ -74,12 +76,26 @@ final class TemasGeneralUITests: XCTestCase {
             for surface in [app, springboard] { for label in ["Not Now", "Ahora no"] where surface.buttons[label].exists { surface.buttons[label].tap() } }
             sleep(1)
         }
-        // 1. Abre en «General» (los no leídos están repartidos): solo lo sin tema, con su número de sin leer.
+        // 1. (1.7.5) Abre en el tema del primer no leído: «Finanzas», en «Falta el extracto…».
         let general = app.buttons["topic.general"]
         XCTAssertTrue(general.waitForExistence(timeout: 10))
-        XCTAssertTrue(general.label.hasPrefix("General"), general.label)
         let selected = NSPredicate(format: "isSelected == true")
+        let fin0 = app.buttons["topic.flag.Finanzas"], ops0 = app.buttons["topic.flag.Operaciones"]
+        expectation(for: selected, evaluatedWith: fin0); waitForExpectations(timeout: 10)
+        XCTAssertTrue(text(app, "Falta el extracto de septiembre").waitForExistence(timeout: 8))
+        XCTAssertFalse(text(app, "Nos vemos mañana en la oficina").exists, "filtrado en el tema")
+        // Orden: General, Todo, luego los temas con no leídos. Leído Finanzas, Operaciones (sin leer) pasa adelante.
+        XCTAssertLessThan(general.frame.maxX, app.buttons["topic.all"].frame.minX + 1)
+        let reordered = Date().addingTimeInterval(12)
+        while Date() < reordered && !(ops0.frame.minX < fin0.frame.minX) { usleep(300_000) }
+        XCTAssertLessThan(ops0.frame.minX, fin0.frame.minX, "con no leídos primero: \(ops0.label) / \(fin0.label)")
+        XCTAssertLessThan(app.buttons["topic.all"].frame.maxX, ops0.frame.minX + 1, "Todo sigue segunda")
+        shot("temas-00-abre-en-tema")
+
+        // «General»: solo lo sin tema, con su número de sin leer.
+        tapC(general)
         expectation(for: selected, evaluatedWith: general); waitForExpectations(timeout: 8)
+        XCTAssertTrue(general.label.hasPrefix("General"), general.label)
         XCTAssertTrue(general.label.contains("1 sin leer"), "sin leer sin tema: \(general.label)")
         XCTAssertTrue(text(app, "Nos vemos mañana en la oficina").waitForExistence(timeout: 8))
         XCTAssertTrue(text(app, "Hola Ana, ¿cómo vas?").exists)
@@ -99,6 +115,12 @@ final class TemasGeneralUITests: XCTestCase {
 
         // 3. Un tema: solo lo suyo; tocarlo otra vez vuelve a General.
         let fin = app.buttons["topic.flag.Finanzas"]
+        // En «Todo» se lee todo: la fila vuelve al orden guardado (Finanzas antes de Operaciones). Se espera a que se
+        // acomode antes de tocar (si no, el toque cae donde estaba la banderita).
+        let settled = Date().addingTimeInterval(12)
+        while Date() < settled && (ops0.label.contains("sin leer") || !(fin.frame.minX < ops0.frame.minX)) { usleep(300_000) }
+        XCTAssertLessThan(fin.frame.minX, ops0.frame.minX, "leído: vuelve a su lugar")
+        sleep(1)
         tapC(fin)
         XCTAssertTrue(text(app, "Falta el extracto de septiembre").waitForExistence(timeout: 5))
         XCTAssertFalse(text(app, "Nos vemos mañana en la oficina").exists)
@@ -157,6 +179,13 @@ final class TemasGeneralUITests: XCTestCase {
         let all = app.buttons["topic.all"]
         let fin = app.buttons["topic.flag.Finanzas"], ops = app.buttons["topic.flag.Operaciones"]
         XCTAssertTrue(fin.waitForExistence(timeout: 10) && ops.exists)
+        // 1.7.5: los temas con no leídos van primero. Se lee todo en «Todo» para ver el orden guardado (de llegada).
+        tapC(all)
+        let allRead = Date().addingTimeInterval(15)
+        while Date() < allRead && (fin.label.contains("sin leer") || ops.label.contains("sin leer")) { usleep(300_000) }
+        XCTAssertFalse(fin.label.contains("sin leer") || ops.label.contains("sin leer"), "leído: \(fin.label) / \(ops.label)")
+        tapC(app.buttons["topic.general"])
+        sleep(1)
         XCTAssertEqual(all.label, "Todo", "accesibilidad con el nombre")
         XCTAssertLessThan(all.frame.width, general.frame.width, "compacta: solo el ícono")
         XCTAssertEqual(all.frame.height, fin.frame.height, accuracy: 1)
@@ -187,6 +216,42 @@ final class TemasGeneralUITests: XCTestCase {
             XCTAssertLessThan(app.buttons["topic.flag.Finanzas"].frame.minX, app.buttons["topic.flag.Operaciones"].frame.minX, "revirtió")
         } else {
             XCTAssertLessThan(app.buttons["topic.flag.Operaciones"].frame.minX, app.buttons["topic.flag.Finanzas"].frame.minX, "reordenada")
+        }
+    }
+
+    /// 1.7.5: tocar la burbuja / aviso de un mensaje (mismo camino que el push: `openMessage`) deja el chat en el tema
+    /// del mensaje y en el mensaje, resaltado; un mensaje sin tema abre en «Todo». Antes quedaba siempre en «General».
+    func testOpenFromBubbleLandsOnTopicAndMessage() throws {
+        let f = try fixture()
+        guard let ids = f.messages else { throw XCTSkip("Fixture sin ids de mensajes") }
+        for (mid, flag, textShown, hidden) in [(ids.camion, "topic.flag.Operaciones", "El camión llega el lunes", "Falta el extracto de septiembre"),
+                                               (ids.vemos, "topic.all", "Nos vemos mañana en la oficina", "")] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-TCApiURL", f.apiUrl, "-TCResetSession", "YES", "-TCNoSplash", "YES", "-TCNoPushPrompt", "YES",
+                                   "-AppleLanguages", "(es)", "-AppleLocale", "es_CO", "-TCResetLanguage", "YES",
+                                   "-TCOpenMessage", "\(f.conversationId):\(mid)"]
+            app.launch()
+            let email = app.textFields["login.email"]
+            XCTAssertTrue(email.waitForExistence(timeout: 20))
+            email.tap(); email.typeText(f.a.email)
+            let pw = app.secureTextFields["login.password"]
+            pw.tap(); pw.typeText(f.password)
+            app.buttons["login.submit"].tap()
+            let target = app.buttons[flag]
+            XCTAssertTrue(target.waitForExistence(timeout: 25), "abrió el chat")
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            for _ in 0..<4 {
+                for surface in [app, springboard] { for label in ["Not Now", "Ahora no"] where surface.buttons[label].exists { surface.buttons[label].tap() } }
+                sleep(1)
+            }
+            expectation(for: NSPredicate(format: "isSelected == true"), evaluatedWith: target); waitForExpectations(timeout: 10)
+            XCTAssertFalse(app.buttons["topic.general"].isSelected, "no queda en General")
+            let row = text(app, textShown)
+            XCTAssertTrue(row.waitForExistence(timeout: 8))
+            XCTAssertTrue(row.isHittable || app.windows.firstMatch.frame.intersects(row.frame), "el mensaje queda a la vista")
+            if !hidden.isEmpty { XCTAssertFalse(text(app, hidden).exists, "filtrado en su tema") }
+            shot("temas-20-burbuja-\(flag)")
+            app.terminate()
         }
     }
 }

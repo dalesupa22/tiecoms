@@ -109,8 +109,8 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
     var onOpenConversation: ((String) -> Void)?
     /// Toque en un push de sidechat: (origen, sidechat).
     var onOpenSide: ((String, String) -> Void)?
-    /// Toque en un push de reacción: (conversación, mensaje).
-    var onOpenMessage: ((String, String) -> Void)?
+    /// Toque en un push de mensaje, mención o reacción (o en el aviso in-app): (conversación, mensaje, seq?, tema?).
+    var onOpenMessage: ((String, String, Int?, String?) -> Void)?
     /// Push de tarea asignada: (issueId, conversationId, inChat).
     var onOpenIssue: ((String, String, Bool) -> Void)?
     /// Acción «Responder» desde la notificación (envía por HTTP).
@@ -309,11 +309,14 @@ final class AppFeedback: NSObject, FeedbackSink, UNUserNotificationCenterDelegat
         default:
             let p = PushPayload(userInfo: response.notification.request.content.userInfo)
             await MainActor.run {
-                if p?.kind == .call, let callId = p?.callId { AppFeedback.shared.onAnswerCall?(callId) }
-                else if p?.kind == .issue, let issue = p?.issueId { AppFeedback.shared.onOpenIssue?(issue, conv, p?.inChat ?? true) }
-                else if p?.kind == .side, let origin = p?.sideOfConversationId { AppFeedback.shared.onOpenSide?(origin, conv) }
-                else if p?.kind == .reaction, let mid = p?.messageId, let open = AppFeedback.shared.onOpenMessage { open(conv, mid) }
-                else { AppFeedback.shared.onOpenConversation?(conv) }
+                switch p?.route ?? .conversation(conv) {
+                case .call(let id): AppFeedback.shared.onAnswerCall?(id)
+                case .issue(let issue, let c, let inChat): AppFeedback.shared.onOpenIssue?(issue, c, inChat)
+                case .side(let origin, let side): AppFeedback.shared.onOpenSide?(origin, side)
+                case .message(let c, let mid, let seq, let topic):
+                    if let open = AppFeedback.shared.onOpenMessage { open(c, mid, seq, topic) } else { AppFeedback.shared.onOpenConversation?(c) }
+                case .conversation(let c): AppFeedback.shared.onOpenConversation?(c)
+                }
             }
         }
     }

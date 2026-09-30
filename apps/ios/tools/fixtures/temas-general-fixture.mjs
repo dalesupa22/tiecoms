@@ -1,7 +1,8 @@
 // Fixture de las tres vistas de temas (docs/TEMAS.md: «General», «Todo» y un tema) para la app iOS. Solo API local.
 //   API_URL=http://localhost:3097 FIXTURE_OUT=<ruta>.json node apps/ios/tools/fixtures/temas-general-fixture.mjs
 // Deja en un grupo: mensajes sin tema, mensajes del tema «Finanzas» (uno leído y uno sin leer) y otro tema activo (así
-// los no leídos quedan repartidos y el chat abre en General).
+// los no leídos quedan repartidos). 1.7.5: el chat abre en el tema del primer no leído (Finanzas); `messages` trae los ids
+// para simular el toque en la burbuja (-TCOpenMessage).
 import { randomBytes, randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 const API = process.env.API_URL ?? 'http://localhost:3097';
@@ -31,9 +32,10 @@ await say(b.accessToken, 'Hola Ana, ¿cómo vas?');
 await say(b.accessToken, 'Ya pagué la factura de agosto', fin.id);
 const read = await say(a.accessToken, 'Perfecto, gracias');
 await call(`/conversations/${conv}/read`, { token: a.accessToken, body: { seq: read.seq ?? read.message?.seq } }).catch(() => {});
-await say(b.accessToken, 'Falta el extracto de septiembre', fin.id);
-await say(b.accessToken, 'El camión llega el lunes', ops.id);
-await say(b.accessToken, 'Nos vemos mañana en la oficina');
+const idOf = (r) => r.id ?? r.message?.id;
+const extracto = idOf(await say(b.accessToken, 'Falta el extracto de septiembre', fin.id));
+const camion = idOf(await say(b.accessToken, 'El camión llega el lunes', ops.id));
+const vemos = idOf(await say(b.accessToken, 'Nos vemos mañana en la oficina'));
 writeFileSync(process.env.FIXTURE_OUT ?? '/dev/stdout', JSON.stringify({ apiUrl: API, password, a: { email: a.user.email, id: a.user.id }, b: { email: b.user.email, id: b.user.id },
-  conversationId: conv, fin: fin.id, ops: ops.id }, null, 2));
+  conversationId: conv, fin: fin.id, ops: ops.id, messages: { extracto, camion, vemos } }, null, 2));
 console.error('ok', conv);

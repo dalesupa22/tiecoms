@@ -14,6 +14,18 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.chaggu.com` por defecto (web: `https://www.chaggu.com`); `-TCApiURL <url>` al lanzar (pruebas) |
 
+## 1.7.5 (44): temas con no leídos primero y abrir en el tema del mensaje
+
+- Fila de temas (`TopicRules.dockOrder`): «General», «Todo», los temas con no leídos para mí y luego el resto, los dos grupos en
+  el orden guardado (arrastre; empate → llegada). Sin repetidos, sin archivados; al leerse vuelve a su lugar. El arrastre sigue
+  sobre el orden guardado. Igual que web `apps/web/src/topic-order.ts` y Android `core/Topics.kt`.
+- Abrir en un mensaje (aviso in-app / push de mensaje, mención y reacción, búsqueda, mención, enlace): filtra en su tema
+  (`TopicRules.filterForJump`); sin tema o archivado → «Todo»; en «Todo» no cambia; tarjeta de tarea → tema de la tarea. Antes de
+  decidir se esperan los temas del API. El push acepta `seq` y `topicId` opcionales (`PushPayload.route`).
+- Desde la lista con no leídos: el tema del primer no leído (`TopicRules.openFilter`); si no tiene tema, «General».
+- Pruebas: `TopicDockOpenTests`; `TemasGeneralUITests` (una fixture nueva por prueba: `tools/fixtures/temas-general-fixture.mjs`);
+  `-TCOpenMessage <conv>:<mensaje>` (Debug) simula el toque en el aviso.
+
 ## 1.7.1 (29): llamadas en varios dispositivos, altavoz, «En curso ahora» y agregar gente
 
 - docs/LLAMADAS.md › «Varios dispositivos, altavoz y llamadas en curso» (contrato `2026-09-29.1`): `deviceKey` (8 primeros

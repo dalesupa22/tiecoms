@@ -10,9 +10,15 @@ struct ForegroundMessage {
     let owner: String
     /// Archivo del sonido del chat (docs/SONIDOS.md), sin extensión; nil = sin sonido.
     var soundFile: String? = SoundName.notify.rawValue
+    /// Seq y tema del mensaje: tocar el aviso abre el chat filtrado en su tema y en el mensaje (1.7.5).
+    var seq: Int? = nil
+    var topicId: String? = nil
     var userInfo: [AnyHashable: Any] {
-        ["conversationId": conversationId, "messageId": messageId, "authorId": authorId,
-         "type": mention ? "mention" : "message", Self.ownerKey: owner]
+        var u: [AnyHashable: Any] = ["conversationId": conversationId, "messageId": messageId, "authorId": authorId,
+                                     "type": mention ? "mention" : "message", Self.ownerKey: owner]
+        if let seq { u["seq"] = seq }
+        if let topicId { u["topicId"] = topicId }
+        return u
     }
 }
 

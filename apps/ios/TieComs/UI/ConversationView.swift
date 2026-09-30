@@ -135,6 +135,8 @@ struct ConversationView: View {
     @State private var revealed: Set<Int> = []
     /// El filtro lo puso la apertura (todo lo no leído en un tema): no se baja al final, se queda en el primer no leído.
     @State private var autoFiltered = false
+    /// Se abrió (o se está abriendo) en un mensaje concreto: la apertura por no leídos no cambia el tema ni baja al divisor.
+    @State private var jumped = false
     /// Borde inferior del contenido en la vista (para detectar el hueco en blanco al final, ver ChatContentBottomKey).
     /// Medidas del scroll que cambian en cada fotograma (fondo del contenido, filas visibles y vistas). Viven en una
     /// referencia: escribirlas no vuelve a pintar el chat entero (1.7.1; antes, una pintada por cada arrastre).
@@ -327,11 +329,29 @@ struct ConversationView: View {
     /// «Todo» (con temas activos): todos los mensajes con su etiqueta; lo que se escribe va sin tema.
     private var showAll: Bool { !embedded && topicFilter == TopicRules.all && !activeTopicIds.isEmpty }
 
-    /// Saltar a un mensaje (búsqueda, mención, enlace o notificación): el filtro pasa a su tema, o a General. En Todo no cambia.
+    /// Saltar a un mensaje (burbuja, notificación, mención, búsqueda o enlace): el filtro pasa a su tema, o a «Todo» si no
+    /// tiene. En «Todo» no cambia (ya se ve).
     private func followTopic(_ m: MessageDTO?) {
         guard !embedded, let m else { return }
-        let want = TopicRules.filterForJump(m, current: showAll ? TopicRules.all : activeTopic?.id, active: activeTopicIds)
+        let issueTopic = m.isSystem ? ChatCards.kind(m)?.issueId.flatMap { store.issues[$0]?.topicId } : nil
+        setJumpFilter(TopicRules.filterForJump(m, active: activeTopicIds, current: showAll ? TopicRules.all : activeTopic?.id, issueTopic: issueTopic))
+    }
+
+    private func setJumpFilter(_ want: String?) {
         if want != (showAll ? TopicRules.all : activeTopic?.id) { autoFiltered = true; topicFilter = want }
+    }
+
+    /// Antes de saltar: los temas tienen que estar cargados (si no, el salto no sabe que el tema existe y queda en General).
+    /// Con la pista del push (`topicId`) el chat ya se ve en ese tema mientras carga el mensaje.
+    private func prepareJump(messageId: String?, seq: Int?) async {
+        guard !embedded else { return }
+        jumped = true
+        if store.topics[conversationId] == nil { try? await store.loadTopics(conversationId) }
+        let hint = store.jumpTopic.removeValue(forKey: conversationId)
+        if let want = TopicRules.filterForJump(messageId: messageId, seq: seq, in: store.conversations[conversationId]?.messages ?? [],
+                                               hint: hint, active: activeTopicIds, current: showAll ? TopicRules.all : activeTopic?.id) {
+            setJumpFilter(want)
+        }
     }
 
     /// Tema elegido si sigue activo (si lo archivan o quitan en otro dispositivo, el chat vuelve a «General»).
@@ -682,6 +702,7 @@ struct ConversationView: View {
                 let pause = UUID()
                 readPauseID = pause
                 defer { if readPauseID == pause { readPauseID = nil } }
+                await prepareJump(messageId: nil, seq: seq)
                 if let id = await store.ensureMessage(conversationId, seq: seq) {
                     followTopic(store.conversations[conversationId]?.messages.first { $0.seq == seq })
                     revealed.insert(seq)
@@ -700,6 +721,7 @@ struct ConversationView: View {
             // Push de reacción: se conoce el id del mensaje, no su seq.
             .task(id: store.jumpToMessage[conversationId]) {
                 guard let mid = store.jumpToMessage[conversationId] else { return }
+                await prepareJump(messageId: mid, seq: nil)
                 await store.resolveMessageJump(conversationId, messageId: mid)
             }
             .onChange(of: reveal) { _, id in
@@ -945,19 +967,23 @@ struct ConversationView: View {
             if retry { try await store.openConversation(conversationId, force: true) }
             let first = try await store.firstUnreadMessage(conversationId, snapshot: snap)
             if let first {
-                // Todo lo no leído está en un solo tema: el chat abre filtrado en esa banderita, en el primer no leído.
+                // El chat abre en el tema del primer no leído (TopicRules.openFilter), en ese mensaje.
                 // Los temas se piden en paralelo: si aún no llegan, se esperan aquí (una petición corta).
+                // Si se abrió en un mensaje concreto (burbuja, push, enlace, búsqueda), manda ese salto: ni tema ni divisor.
+                let jumping = jumped || store.jumpTo[conversationId] != nil || store.jumpToMessage[conversationId] != nil
                 if !embedded, store.topics[conversationId] == nil { try? await store.loadTopics(conversationId) }
-                if !embedded, topicFilter == nil, let me = store.me?.id,
-                   let only = TopicRules.autoTopic(store.conversations[conversationId]?.messages ?? [], after: max(snap.lastReadSeq, store.meta(conversationId)?.historyFromSeq ?? 0),
-                                                   me: me, active: activeTopicIds) {
+                if !embedded, !jumping, topicFilter == nil, let me = store.me?.id,
+                   let want = TopicRules.openFilter(store.conversations[conversationId]?.messages ?? [], after: max(snap.lastReadSeq, store.meta(conversationId)?.historyFromSeq ?? 0),
+                                                    me: me, active: activeTopicIds) {
                     autoFiltered = true
-                    topicFilter = only
+                    topicFilter = want
                 }
                 dividerId = first.id
                 mentionQueue = ChatNav.mentionIds(store.conversations[conversationId]?.messages ?? [], after: first.seq - 1, me: store.me?.id ?? "")
                 try await Task.sleep(nanoseconds: 200_000_000)
-                proxy.scrollTo(ChatNavIds.divider, anchor: .top)
+                if !(jumped || store.jumpTo[conversationId] != nil || store.jumpToMessage[conversationId] != nil) {
+                    proxy.scrollTo(ChatNavIds.divider, anchor: .top)
+                }
             }
             try await Task.sleep(nanoseconds: 350_000_000)
             positioned = true

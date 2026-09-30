@@ -122,6 +122,8 @@ final class AppStore {
     var sideToOpen: [String: String] = [:]
     /// Salto pendiente a un mensaje por id (push de reacción: no trae el seq).
     var jumpToMessage: [String: String] = [:]
+    /// Pista del tema del mensaje al que se salta (push con `topicId`): el chat se filtra en él mientras carga el mensaje.
+    var jumpTopic: [String: String] = [:]
     /// Respuestas en privado pendientes por conversación directa (cita sobre el compositor).
     var privateReplies: [String: PrivateReplyDraft] = [:]
     /// Texto compartido hacia Chaggu (chaggu://share?text=…).
@@ -527,6 +529,10 @@ final class AppStore {
         #if DEBUG
         // Solo pruebas/diagnóstico: abrir una conversación al entrar (-TCOpenConversation <id>).
         if let id = AppConfig.launchValue("TCOpenConversation") { navigate(to: .conversation(id)) }
+        // Toque simulado en la burbuja / aviso de un mensaje (-TCOpenMessage <conversación>:<mensaje>): mismo camino que el push.
+        if let v = AppConfig.launchValue("TCOpenMessage"), let i = v.firstIndex(of: ":") {
+            openMessage(String(v[..<i]), messageId: String(v[v.index(after: i)...]))
+        }
         #endif
         Perf.mark("ready.network")
         onReady?()
@@ -906,6 +912,9 @@ final class AppStore {
             var notice = ForegroundMessage(conversationId: c.id, messageId: msg.id, authorId: msg.authorId,
                                            mention: outcome == .mention, owner: foregroundOwner)
             notice.soundFile = ChatSounds.file(sound, mention: outcome == .mention)
+            // Tocar el aviso abre el chat en el tema del mensaje y en el mensaje (1.7.5).
+            notice.seq = msg.seq
+            notice.topicId = msg.topicId
             feedback?.notifyMessage(notice,
                 title: outcome == .mention ? L("mention.mentionedYou", ["name": author]) : Naming.notificationTitle(d, c),
                 author: outcome == .mention ? Naming.notificationTitle(d, c) : author, body: msg.body)
@@ -1495,9 +1504,16 @@ final class AppStore {
         }
     }
 
-    /// Push de reacción: abre la conversación y salta al mensaje (se resuelve su seq al abrir).
-    func openMessage(_ conversationId: String, messageId: String) {
-        jumpToMessage[conversationId] = messageId
+    /// Push (mensaje, mención, reacción) o aviso in-app: abre la conversación y salta al mensaje, filtrada en su tema (1.7.5).
+    /// Con `seq` se salta directo; si no, se resuelve el seq por id al abrir. `topicId` (si el push lo trae) es la pista del tema.
+    func openMessage(_ conversationId: String, messageId: String, seq: Int? = nil, topicId: String? = nil) {
+        if let topicId { jumpTopic[conversationId] = topicId } else { jumpTopic[conversationId] = nil }
+        if let seq {
+            jumpToMessage[conversationId] = nil
+            jumpTo[conversationId] = seq
+        } else {
+            jumpToMessage[conversationId] = messageId
+        }
         handle(.conversation(conversationId))
     }
 

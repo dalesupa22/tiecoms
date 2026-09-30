@@ -75,11 +75,27 @@ enum TopicRules {
         return false
     }
 
-    /// Al saltar a un mensaje (búsqueda, mención, enlace o notificación): el filtro pasa a su tema, o a General si no
-    /// tiene (o su tema está archivado). En «Todo» no cambia: devuelve el filtro actual.
-    static func filterForJump(_ m: MessageDTO, current: String?, active: Set<String>) -> String? {
+    /// Al saltar a un mensaje (burbuja, notificación, mención, búsqueda o enlace; 1.7.5): el chat queda en el tema del
+    /// mensaje si tiene uno activo; si no tiene (o su tema está archivado), en «Todo», que lo muestra con todo lo demás.
+    /// Sin temas activos no hay filtro (la única banderita es «Todo»). Si ya estaba en «Todo», el mensaje se ve y no cambia.
+    /// Una tarjeta de tarea (mensaje de sistema sin tema) va al tema de la tarea (`issueTopic`), como en Android.
+    /// Igual que `filterForMessage` de apps/web/src/topic-order.ts.
+    static func filterForJump(_ m: MessageDTO, active: Set<String>, current: String? = nil, issueTopic: String? = nil) -> String? {
+        guard !active.isEmpty else { return nil }
         if current == all { return all }
-        return m.topicId.flatMap { active.contains($0) ? $0 : nil }
+        if let t = m.topicId ?? (m.isSystem ? issueTopic : nil), active.contains(t) { return t }
+        return all
+    }
+
+    /// Filtro para un salto pedido por id o seq (push, aviso in-app, enlace): el tema del mensaje si ya está cargado; si
+    /// aún no, la pista `topicId` del push (si es un tema activo); si no hay nada, nil (se decide al cargar el mensaje).
+    static func filterForJump(messageId: String?, seq: Int?, in messages: [MessageDTO], hint: String?, active: Set<String>, current: String? = nil) -> String? {
+        if let m = messages.first(where: { (messageId != nil && $0.id == messageId) || (seq != nil && $0.seq == seq) }) {
+            return filterForJump(m, active: active, current: current)
+        }
+        if current == all, !active.isEmpty { return all }
+        if let hint, active.contains(hint) { return hint }
+        return nil
     }
 
     /// ¿Cuenta como no leído para las banderitas? Texto de otra persona, no eliminado, después de lo leído.
@@ -96,11 +112,22 @@ enum TopicRules {
         return n
     }
 
-    /// Al abrir con no leídos: si todos están en un solo tema activo, ese tema (el chat abre filtrado); si no, nil («General»).
-    static func autoTopic(_ messages: [MessageDTO], after read: Int, me: String, active: Set<String>) -> String? {
-        let keys = Set(unreadCounts(messages, read: read, me: me, active: active).keys)
-        guard keys.count == 1, let only = keys.first, !only.isEmpty else { return nil }
-        return only
+    /// Al abrir desde la lista con no leídos (1.7.5): el tema del primer no leído; si ese no tiene tema (o está archivado),
+    /// «General» (nil), que es donde se ve. Sin no leídos, nil. Igual que `filterForEntry` de apps/web/src/topic-order.ts.
+    static func openFilter(_ messages: [MessageDTO], after read: Int, me: String, active: Set<String>) -> String? {
+        let first = messages.filter { countsAsUnread($0, after: read, me: me) }.min { $0.seq < $1.seq }
+        guard let t = first?.topicId, active.contains(t) else { return nil }
+        return t
+    }
+
+    /// Orden de la fila (1.7.5; «General» y «Todo» van antes, fijas): primero los temas con no leídos para mí y después el
+    /// resto, cada grupo en el orden guardado (arrastre / llegada). Nunca un tema dos veces. Al leerse, vuelve a su lugar.
+    /// El arrastre y «mover» siguen operando sobre el orden guardado (`active`), no sobre este.
+    static func dockOrder(_ active: [TopicDTO], unread: [String: Int]) -> [TopicDTO] {
+        var seen = Set<String>()
+        let once = active.filter { !$0.isArchived && seen.insert($0.id).inserted }
+        let hot = once.filter { (unread[$0.id] ?? 0) > 0 }
+        return hot + once.filter { (unread[$0.id] ?? 0) <= 0 }
     }
 
     /// Primer ícono y color que el chat aún no usa (como la web).

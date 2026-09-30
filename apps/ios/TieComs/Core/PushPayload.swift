@@ -11,6 +11,9 @@ struct PushPayload: Equatable {
     var kind: Kind
     var conversationId: String
     var messageId: String?
+    /// Seq y tema del mensaje, si el servidor los manda (opcionales; hoy el API solo manda `messageId`).
+    var messageSeq: Int?
+    var topicId: String?
     var authorId: String?
     var authorName: String?
     /// Ruta relativa (/api/v1/avatars/…) o nil.
@@ -55,6 +58,8 @@ struct PushPayload: Equatable {
         conversationId = conv
         kind = Kind(rawValue: str("type") ?? "message") ?? .message
         messageId = str("messageId")
+        messageSeq = (str("seq") ?? str("messageSeq")).flatMap(Int.init)
+        topicId = str("topicId")
         authorId = str("authorId")
         authorName = str("authorName")
         authorAvatarPath = str("authorAvatarUrl")
@@ -83,6 +88,28 @@ struct PushPayload: Equatable {
         threadId = aps["thread-id"] as? String ?? str("threadId") ?? conv
         category = aps["category"] as? String ?? str("category")
         badge = (aps["badge"] as? NSNumber)?.intValue
+    }
+
+    /// Qué abre un toque en la notificación (o en el aviso in-app, que lleva el mismo userInfo).
+    enum Route: Equatable {
+        case call(String)
+        case issue(String, conversationId: String, inChat: Bool)
+        case side(origin: String, side: String)
+        /// Mensaje, mención o reacción: el chat en el tema del mensaje y en el mensaje (1.7.5; antes solo la reacción).
+        case message(conversationId: String, messageId: String, seq: Int?, topicId: String?)
+        case conversation(String)
+    }
+
+    var route: Route {
+        switch kind {
+        case .call: if let callId { return .call(callId) }
+        case .issue: if let issueId { return .issue(issueId, conversationId: conversationId, inChat: inChat) }
+        case .side: if let o = sideOfConversationId { return .side(origin: o, side: conversationId) }
+        case .message, .mention, .reaction:
+            if let messageId { return .message(conversationId: conversationId, messageId: messageId, seq: messageSeq, topicId: topicId) }
+        case .reminder, .event: break
+        }
+        return .conversation(conversationId)
     }
 
     /// Aviso «Empieza en 10 min» frente a la convocatoria a una reunión.

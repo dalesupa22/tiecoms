@@ -183,6 +183,7 @@ function Sidebar({ route }: { route: Route }) {
   const activeConv = route.name === 'conversation' ? route.id : null;
 
   const callsOn = useClient((s) => s.data?.features?.calls === true);
+  const missedCalls = useClient((s) => s.data?.missedCalls ?? 0);
   const mailOn = useClient((s) => s.data?.features?.mail === true);
   return (
     <aside className="side">
@@ -196,6 +197,7 @@ function Sidebar({ route }: { route: Route }) {
           <button key={n.name} className={`nav-item ${route.name === n.name ? 'active' : ''}`} onClick={() => navigate(n.to)}>
             <span className="ico">{n.ico}</span><span className="grow">{t(n.label)}</span>
             {n.name === 'today' && unreadTotal > 0 && <span className="pill">{unreadTotal}</span>}
+            {n.name === 'calls' && missedCalls > 0 && <span className="pill is-missed" title={t('calls.missedN', { n: missedCalls })}>{missedCalls}</span>}
           </button>
         ))}
         <button className="nav-item nav-more" aria-expanded={navMore} onClick={toggleNavMore}>
@@ -256,7 +258,7 @@ function MobileTabs({ route }: { route: Route }) {
     { name: 'dms', label: t('nav.dms'), ico: 'dms', to: '/dms', badge: unreadOf((c) => c.kind === 'direct' || c.kind === 'multi') },
     { name: 'issues', label: t('nav.issues'), ico: 'tasks', to: '/asuntos', badge: 0 },
     { name: 'agenda', label: t('nav.calendar'), ico: 'agenda', to: '/agenda', badge: 0 },
-    ...(d?.features?.calls ? [{ name: 'calls', label: t('nav.calls'), ico: 'calls', to: '/llamadas', badge: 0 }] : []),
+    ...(d?.features?.calls ? [{ name: 'calls', label: t('nav.calls'), ico: 'calls', to: '/llamadas', badge: d.missedCalls ?? 0 }] : []),
     { name: 'settings', label: t('nav.you'), ico: null, to: '/ajustes', badge: 0 },
   ];
   return (
@@ -266,7 +268,7 @@ function MobileTabs({ route }: { route: Route }) {
           aria-label={x.label} title={x.label}>
           {x.ico ? <span className="ico"><TabIcon name={x.ico} /></span> : <span className="ico">{d ? <MeAvatar size={24} /> : <Avatar person={me} org={null} size={24} />}</span>}
           {/* Solo íconos, sin texto (pedido de Danny, 29-sep-2026); el nombre va en aria-label y title. */}
-          {x.badge > 0 && <span className="pill">{x.badge}</span>}
+          {x.badge > 0 && <span className={`pill ${x.name === 'calls' ? 'is-missed' : ''}`}>{x.badge}</span>}
         </button>
       ))}
     </nav>

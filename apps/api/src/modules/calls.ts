@@ -291,13 +291,15 @@ export async function history(userId: string, q: { before?: string; limit: numbe
     `SELECT c.id, c.started_at,
             ARRAY(SELECT p.user_id FROM call_participants p WHERE p.call_id = c.id ORDER BY p.first_joined_at) AS participant_ids,
             CASE WHEN c.ended_at IS NOT NULL THEN extract(epoch FROM c.ended_at - c.started_at)::int END AS secs,
-            c.summary IS NOT NULL AS has_summary
+            c.summary IS NOT NULL AS has_summary,
+            EXISTS (SELECT 1 FROM call_ringees r WHERE r.call_id = c.id AND r.user_id = $1 AND ${MISSED_SQL}) AS missed
        FROM calls c
        LEFT JOIN conversation_memberships cm ON cm.conversation_id = c.conversation_id AND cm.user_id = $1 AND cm.removed_at IS NULL
        JOIN conversations cv ON cv.id = c.conversation_id AND cv.archived_at IS NULL
        LEFT JOIN messages m ON m.id = c.message_id
       WHERE ($2::timestamptz IS NULL OR c.started_at < $2)
         AND (EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id AND p.user_id = $1)
+             OR EXISTS (SELECT 1 FROM call_ringees r WHERE r.call_id = c.id AND r.user_id = $1)
              OR (cm.user_id IS NOT NULL AND (m.seq IS NULL OR m.seq > cm.history_from_seq) AND ${seesCallSql('$1')}))
       ORDER BY c.started_at DESC LIMIT $3`,
     [userId, q.before ?? null, q.limit + 1],
@@ -305,6 +307,7 @@ export async function history(userId: string, q: { before?: string; limit: numbe
   const page = rows.slice(0, q.limit);
   const calls = await Promise.all(page.map(async (r) => ({
     call: await callDTO(pool, r.id), participantIds: r.participant_ids, durationSec: r.secs, hasSummary: r.has_summary,
+    ...(r.missed ? { missed: true } : {}),
   })));
   return { calls, hasMore: rows.length > q.limit };
 }
@@ -380,16 +383,20 @@ async function joinCall(userId: string, callId: string, created: boolean, device
   return { call, meeting: { Meeting: row.meeting }, attendee: { Attendee: attendee } };
 }
 
-/** Aviso «te están llamando» a los demás miembros de la empresa de quien llama (o al otro en un directo), sin quien tiene No molestar. */
+/**
+ * Aviso «te están llamando» a los demás miembros de la empresa de quien llama (o al otro en un directo). A quien
+ * tiene No molestar no le suena, pero le queda como perdida.
+ */
 async function ring(c: Tx, call: CallDTO, callerId: string) {
-  const { rows } = await c.query(
-    `SELECT m.user_id FROM conversation_memberships m JOIN users u ON u.id = m.user_id
+  const { rows: all } = await c.query(
+    `SELECT m.user_id, (u.dnd_until IS NOT NULL AND u.dnd_until > now()) AS dnd FROM conversation_memberships m JOIN users u ON u.id = m.user_id
       WHERE m.conversation_id = $1 AND m.removed_at IS NULL AND m.user_id <> $2 AND u.disabled_at IS NULL
-        AND (u.dnd_until IS NULL OR u.dnd_until <= now())
         AND (EXISTS (SELECT 1 FROM conversations d WHERE d.id = m.conversation_id AND d.kind = 'direct')
              OR EXISTS (SELECT 1 FROM organization_memberships a JOIN organization_memberships b ON b.org_id = a.org_id WHERE a.user_id = $2 AND b.user_id = m.user_id))`,
     [call.conversationId, callerId],
   );
+  await markRung(c, call.id, all.filter((r) => r.dnd).map((r) => r.user_id));
+  const rows = all.filter((r) => !r.dnd);
   if (!rows.length) return;
   const info = (await c.query(
     'SELECT (SELECT name FROM users WHERE id = $2) AS caller, (SELECT name FROM conversations WHERE id = $1) AS title',
@@ -398,9 +405,20 @@ async function ring(c: Tx, call: CallDTO, callerId: string) {
   await ringUsers(c, call, rows.map((r) => r.user_id), info.caller ?? '', info.title ?? null);
 }
 
+/** Quedan anotados para las perdidas. Volver a sonar renueva la hora y borra un rechazo anterior. */
+async function markRung(c: Tx, callId: string, userIds: string[]) {
+  if (!userIds.length) return;
+  await c.query(
+    `INSERT INTO call_ringees (call_id, user_id) SELECT $1, unnest($2::uuid[])
+     ON CONFLICT (call_id, user_id) DO UPDATE SET rung_at = now(), declined_at = NULL`,
+    [callId, userIds],
+  );
+}
+
 /** Aviso en vivo (socket) y push de llamada entrante (para la app cerrada). */
 async function ringUsers(c: Tx, call: CallDTO, userIds: string[], callerName: string, title: string | null, again = false) {
   if (!userIds.length) return;
+  await markRung(c, call.id, userIds);
   await enqueueOutbox(c, 'account.event', { userIds, event: { type: 'call.ringing', call, conversationTitle: title, callerName } });
   await c.query(
     "INSERT INTO jobs (kind, payload, max_attempts, dedupe_key) VALUES ('push.call', $1, 1, $2) ON CONFLICT (dedupe_key) DO NOTHING",
@@ -469,7 +487,11 @@ export async function leave(userId: string, callId: string, deviceKey: string = 
 /** Rechazar en un dispositivo: todos los míos dejan de sonar. Para los demás no cambia nada. */
 export async function decline(userId: string, callId: string) {
   const call = await callFor(pool, userId, callId, 'read');
-  await tx((c) => enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'call.declined', callId, conversationId: call.conversation_id } }));
+  await tx(async (c) => {
+    // Rechazada no es perdida.
+    await c.query('UPDATE call_ringees SET declined_at = now() WHERE call_id = $1 AND user_id = $2', [callId, userId]);
+    await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'call.declined', callId, conversationId: call.conversation_id } });
+  });
   return { ok: true };
 }
 
@@ -505,7 +527,50 @@ async function finish(callId: string) {
       if (call.ai_summary) await c.query("INSERT INTO jobs (kind, payload, max_attempts, dedupe_key) VALUES ('call.summary', $1, 3, $2) ON CONFLICT (dedupe_key) DO NOTHING", [JSON.stringify({ callId }), `call-summary:${callId}`]);
     }
     await publish(c, call.conversation_id, callId);
+    await announceMissed(c, callId);
   });
+}
+
+// ---------- Perdidas ----------
+const MISSED_SQL = `c.ended_at IS NOT NULL AND r.declined_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id AND p.user_id = r.user_id)`;
+
+/** Al colgar: a quienes les sonó y no entraron, el aviso en vivo (el número rojo) y un push «Llamada perdida». */
+async function announceMissed(c: Tx, callId: string) {
+  const { rows } = await c.query(`SELECT r.user_id FROM call_ringees r JOIN calls c ON c.id = r.call_id WHERE r.call_id = $1 AND ${MISSED_SQL}`, [callId]);
+  if (!rows.length) return;
+  const userIds = rows.map((r) => r.user_id);
+  const counts = await missedCounts(c, userIds);
+  for (const id of userIds) await enqueueOutbox(c, 'account.event', { userIds: [id], event: { type: 'calls.missed', callId, missedCalls: counts.get(id) ?? 0 } });
+  await c.query(
+    "INSERT INTO jobs (kind, payload, max_attempts, dedupe_key) VALUES ('push.call_missed', $1, 1, $2) ON CONFLICT (dedupe_key) DO NOTHING",
+    [JSON.stringify({ callId, userIds }), `push-call-missed:${callId}`],
+  );
+}
+
+async function missedCounts(db: Db, userIds: string[]) {
+  const { rows } = await db.query(
+    `SELECT r.user_id, count(*)::int AS n FROM call_ringees r JOIN calls c ON c.id = r.call_id JOIN users u ON u.id = r.user_id
+      WHERE r.user_id = ANY($1) AND ${MISSED_SQL} AND (u.calls_seen_at IS NULL OR r.rung_at > u.calls_seen_at)
+      GROUP BY r.user_id`,
+    [userIds],
+  );
+  return new Map<string, number>(rows.map((r) => [r.user_id, r.n]));
+}
+
+/** Para el bootstrap: perdidas desde la última vez que abrí Llamadas. */
+export async function missedCount(userId: string): Promise<number> {
+  if (!callsEnabled()) return 0;
+  return (await missedCounts(pool, [userId])).get(userId) ?? 0;
+}
+
+/** POST /calls/seen: abrí la pestaña Llamadas; el número rojo se quita en todos mis dispositivos. */
+export async function markCallsSeen(userId: string) {
+  await tx(async (c) => {
+    await c.query('UPDATE users SET calls_seen_at = now() WHERE id = $1', [userId]);
+    await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'calls.missed', callId: null, missedCalls: 0 } });
+  });
+  return { missedCalls: 0 };
 }
 
 /** Worker: saca a quien dejó de latir y cierra las llamadas que quedaron vacías. */

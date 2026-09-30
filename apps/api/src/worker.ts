@@ -13,7 +13,7 @@ import { cleanupExpired as cleanupSso } from './modules/sso.ts';
 import { previewMessage } from './modules/link-preview.ts';
 import { deletePersonalObject } from './storage.ts';
 import { notifyReport } from './modules/safety.ts';
-import { pushCall, pushEvent, pushEventSoon, pushIssueAssigned, pushIssueOverdue, pushMessage, pushReaction, pushReminder } from './modules/push.ts';
+import { pushCall, pushCallMissed, pushEvent, pushEventSoon, pushIssueAssigned, pushIssueOverdue, pushMessage, pushReaction, pushReminder } from './modules/push.ts';
 import { fireOverdueIssues, fireTodayEvents } from './modules/chat-notices.ts';
 import { purgeViewOnce } from './modules/view-once.ts';
 import { digestFor, markDigestSent } from './modules/links.ts';
@@ -55,6 +55,8 @@ const handlers: Record<string, Handler> = {
   async 'integration.deliver'(p) { await deliverIntegrationEvent(p.deliveryId); },
   /** Llamada entrante: push para las apps cerradas. */
   async 'push.call'(p) { await pushCall(p); },
+  /** «Llamada perdida» (reemplaza el aviso de la llamada entrante). */
+  async 'push.call_missed'(p) { await pushCallMissed(p); },
   /** Resumen de la transcripción de una llamada (DeepSeek, si quien la prendió lo autorizó). */
   async 'call.summary'(p) { await summarizeCall(p.callId); },
   /** Vistas previas de los primeros 3 enlaces de un mensaje. */

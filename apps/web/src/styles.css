@@ -1572,3 +1572,7 @@ mark { background: #f5e3b3; color: inherit; border-radius: 3px; padding: 0 1px; 
 .card-actions-bar button:hover { background: var(--paper-2); color: var(--ink); }
 .card-msg:hover .card-actions-bar, .card-msg:focus-within .card-actions-bar { display: flex; }
 @media (hover: none) { .card-actions-bar { display: none !important; } }
+
+/* Llamadas perdidas sin ver: número rojo en Llamadas y etiqueta «Perdida» en el historial. */
+.pill.is-missed { background: #d93025; color: #fff; }
+.call-tag.is-missed { background: rgba(217, 48, 37, 0.12); color: #d93025; border-color: rgba(217, 48, 37, 0.35); }

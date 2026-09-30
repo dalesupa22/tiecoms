@@ -578,6 +578,8 @@ export class TieComsClient {
     }
     if (e.type === 'me.sleep') this.patchMe({ sleep: e.sleep });
     if (e.type === 'call.updated') this.putCall(e.call);
+    // Número rojo de Llamadas (perdidas sin ver); 0 cuando las vi en otro dispositivo.
+    if (e.type === 'calls.missed' && this.state.data) this.set({ data: { ...this.state.data, missedCalls: e.missedCalls } });
     if (e.type === 'call.processing' || e.type === 'call.transcript') this.opts.onNotice?.({ kind: 'callTranscript', event: e });
     if (e.type === 'call.answered' && e.deviceKey !== this.deviceKey) this.opts.onNotice?.({ kind: 'callHandled', callId: e.callId, how: 'answered', label: e.label });
     if (e.type === 'call.declined') this.opts.onNotice?.({ kind: 'callHandled', callId: e.callId, how: 'declined' });
@@ -761,6 +763,11 @@ export class TieComsClient {
   async setSounds(p: { messageSound?: SoundChoice | null; ringtone?: Ringtone | null }) {
     this.patchMe(p);
     await this.request('/me/sounds', { method: 'PUT', json: p });
+  }
+  /** Abrí Llamadas: el número rojo se quita aquí y en mis otros dispositivos. */
+  async markCallsSeen() {
+    if (this.state.data) this.set({ data: { ...this.state.data, missedCalls: 0 } });
+    await this.request('/calls/seen', { method: 'POST', json: {} }).catch(() => {});
   }
   callHistory(before?: string) { return this.request<{ calls: CallHistoryItemDTO[]; hasMore: boolean }>(`/calls?limit=30${before ? `&before=${encodeURIComponent(before)}` : ''}`); }
   shareCall(callId: string, conversationId: string, what: 'summary' | 'transcript' | 'both') {

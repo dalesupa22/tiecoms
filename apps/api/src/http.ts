@@ -479,6 +479,7 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/leave', async (req) => calls.leave(req.userId, z.uuid().parse(req.params.id), CallDeviceInput.parse(req.body ?? {}).deviceKey));
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/decline', callLimit, async (req) => calls.decline(req.userId, z.uuid().parse(req.params.id)));
     priv.get('/api/v1/calls/active', async (req) => calls.activeCalls(req.userId));
+    priv.post('/api/v1/calls/seen', async (req) => calls.markCallsSeen(req.userId));
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/end', async (req) => calls.endForAll(req.userId, z.uuid().parse(req.params.id)));
     priv.post<{ Params: { id: string } }>('/api/v1/calls/:id/transcription', callLimit, async (req) => {
       const b = CallTranscriptionInput.parse(req.body);

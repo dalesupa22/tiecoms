@@ -174,6 +174,8 @@ export interface CallHistoryItemDTO {
   participantIds: string[];
   durationSec: number | null;
   hasSummary: boolean;
+  /** Me sonó, no la rechacé y no entré (llamada perdida). */
+  missed?: boolean;
 }
 export const CallHistoryQuery = z.object({ before: z.iso.datetime({ offset: true }).optional(), limit: z.coerce.number().int().min(1).max(100).default(30) });
 /** Compartir el resumen o la transcripción en otra conversación (como mensaje mío). */
@@ -951,6 +953,8 @@ export interface BootstrapDTO {
   assistantId?: string;
   /** 1.7.1: la llamada en la que estoy desde algún dispositivo (con myDevices), o null. Ausente = servidor anterior. */
   myActiveCall?: CallDTO | null;
+  /** Llamadas perdidas desde la última vez que abrí Llamadas (número rojo). POST /calls/seen lo pone en 0. */
+  missedCalls?: number;
 }
 
 // ---------- Espacios y conversaciones ----------
@@ -1590,6 +1594,8 @@ export type AccountEvent =
    * entonces trae myDevices.
    */
   | { type: 'call.updated'; call: CallDTO }
+  /** Perdidas sin ver (el número rojo de Llamadas): al colgar una que me perdí (callId) o al abrir Llamadas en otro dispositivo (0). */
+  | { type: 'calls.missed'; callId: string | null; missedCalls: number }
   /** 1.7.1: contesté desde un dispositivo: los demás dejan de sonar y cierran el aviso (ignorar si deviceKey es el mío). */
   | { type: 'call.answered'; callId: string; conversationId: string; deviceKey: string; platform: string; label: string }
   /** 1.7.1: rechacé en un dispositivo (POST /calls/:id/decline): todos mis dispositivos dejan de sonar. */

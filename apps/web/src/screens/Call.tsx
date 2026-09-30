@@ -464,10 +464,13 @@ export function CallsScreen() {
   const [err, setErr] = useState<string | null>(null);
   // Recarga al cambiar alguna llamada en vivo (empezó, terminó, hay transcripción).
   const rev = useClient((s) => Object.values(s.calls).map((c) => `${c?.id ?? ''}:${c?.hasTranscript ? 1 : 0}`).sort().join(','));
+  // Abrir Llamadas quita el número rojo de perdidas (también si llega una perdida con la pestaña abierta).
+  const missedNow = useClient((s) => s.data?.missedCalls ?? 0);
+  useEffect(() => { if (on && missedNow > 0) void client.markCallsSeen(); }, [on, missedNow]);
   useEffect(() => {
     if (!on) return;
     client.callHistory().then((r) => { setItems(r.calls); setMore(r.hasMore); }, (e) => setErr(errorText(e)));
-  }, [on, rev]);
+  }, [on, rev, missedNow]);
   const loadMore = () => {
     const last = items?.at(-1);
     if (last) client.callHistory(last.call.startedAt).then((r) => { setItems([...(items ?? []), ...r.calls]); setMore(r.hasMore); }, fail);
@@ -502,7 +505,9 @@ function CallRow({ item }: { item: CallHistoryItemDTO }) {
   const others = item.participantIds.filter((id) => id !== d.me.id);
   const group = conv ? conv.kind !== 'direct' : others.length > 1;
   const name = conv ? conversationTitle(d, conv) : others.map((id) => personById(d, id)?.name ?? '').join(', ');
-  const missed = !!c.endedAt && item.participantIds.length < 2;
+  // Perdida para mí (me sonó y no entré) en rojo; «Sin respuesta» si nadie más entró.
+  const mine = !!item.missed;
+  const missed = mine || (!!c.endedAt && item.participantIds.length < 2);
   const live = !c.endedAt;
   const dur = item.durationSec != null ? `${Math.floor(item.durationSec / 60)}:${String(item.durationSec % 60).padStart(2, '0')}` : null;
   const who = group ? others.slice(0, 3).map((id) => personById(d, id)?.name.split(' ')[0]).filter(Boolean).join(', ') : '';
@@ -515,10 +520,11 @@ function CallRow({ item }: { item: CallHistoryItemDTO }) {
           <strong className="ellipsis">{name || t('call.title')}</strong>
           <span className="call-tag">{group ? t('calls.group') : t('calls.direct')}</span>
           {live && <span className="call-tag is-live">{t('calls.live')}</span>}
+          {mine && <span className="call-tag is-missed">{t('calls.missedMine')}</span>}
         </div>
         <div className="small muted ellipsis">
           {c.kind === 'video' ? '🎥' : '📞'} {new Date(c.startedAt).toLocaleString(locale(), { dateStyle: 'medium', timeStyle: 'short' })}
-          {dur && !missed ? ` · ${dur}` : ''}{missed ? ` · ${t('calls.missed')}` : ''}{who ? ` · ${who}` : ''}
+          {dur && !missed ? ` · ${dur}` : ''}{missed && !mine ? ` · ${t('calls.missed')}` : ''}{who ? ` · ${who}` : ''}
         </div>
         {(item.hasSummary || c.hasTranscript) && <div className="row" style={{ gap: 6, marginTop: 4 }}>
           {item.hasSummary && <span className="call-chip">✦ {t('call.summary')}</span>}

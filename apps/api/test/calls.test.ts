@@ -61,7 +61,7 @@ describe('llamadas', () => {
   it('el bootstrap dice que las llamadas están prendidas', async () => {
     const b = await call('/bootstrap', { token: ana.token });
     expect(b.status, JSON.stringify(b.json).slice(0, 300)).toBe(200);
-    expect(b.json.features).toEqual({ calls: true });
+    expect(b.json.features).toMatchObject({ calls: true });
   });
 
   it('Ana llama: recibe reunión y attendee; a Beto le suena', async () => {

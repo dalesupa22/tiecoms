@@ -458,6 +458,34 @@ export async function pushIssueOverdue(issueId: string, ownerId: string, dueDate
  * Llamada entrante (docs/LLAMADAS.md): push para quien tiene la app cerrada. category TC_CALL y data.type 'call'
  * para que las apps muestren Contestar / Ahora no. No sale con «No molestar» ni en modo sueño (ACTIVE_SESSION).
  */
+/**
+ * «Llamada perdida»: mismo collapseId que el aviso entrante, así lo reemplaza. Va como tipo message (abre el chat)
+ * para que las apps publicadas lo muestren. Sin push con No molestar ni en modo sueño (ACTIVE_SESSION).
+ */
+export async function pushCallMissed(p: { callId: string; userIds: string[] }) {
+  if (!p.userIds?.length) return 0;
+  const { rows } = await pool.query(
+    `SELECT c.id, c.conversation_id, c.kind, u.name AS caller, cv.name AS title, cv.kind AS conv_kind
+       FROM calls c JOIN users u ON u.id = c.started_by JOIN conversations cv ON cv.id = c.conversation_id WHERE c.id = $1`,
+    [p.callId],
+  );
+  const call = rows[0];
+  if (!call) return 0;
+  const { rows: targets } = await pool.query<Target>(
+    `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
+       FROM users u ${ACTIVE_SESSION} WHERE u.id = ANY($1) AND u.disabled_at IS NULL`,
+    [p.userIds],
+  );
+  await deliver(targets, (t) => ({
+    title: clip(call.caller ?? 'chaggu', 80),
+    subtitle: call.conv_kind !== 'direct' && call.title ? clip(call.title, 80) : null,
+    body: t.lang === 'en' ? (call.kind === 'video' ? '🎥 Missed video call' : '📞 Missed call') : (call.kind === 'video' ? '🎥 Videollamada perdida' : '📞 Llamada perdida'),
+    threadId: call.conversation_id, category: 'TC_MESSAGE', collapseId: `call-${call.id}`,
+    data: { type: 'message', callMissed: call.id, conversationId: call.conversation_id },
+  }));
+  return targets.length;
+}
+
 export async function pushCall(p: { callId: string; userIds: string[]; callerName: string; title: string | null }) {
   if (!p.userIds?.length) return 0;
   const { rows } = await pool.query('SELECT id, conversation_id, kind, ended_at FROM calls WHERE id = $1', [p.callId]);

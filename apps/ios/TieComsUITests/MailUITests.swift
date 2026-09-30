@@ -276,4 +276,33 @@ final class MailUITests: XCTestCase {
         XCTAssertTrue(app.buttons["mail.row.g1"].waitForExistence(timeout: 15), "la lista en vivo")
         shot("correo-12-conectado-lista")
     }
+    // MARK: 5. Regresión del cuelgue al volver a Grupos
+
+    /// Grupos con un chat cuyo último mensaje es una tarjeta de correo.
+    func test6HomeDirect() throws {
+        let f = try fixture()
+        let app = login(f, as: f.a)
+        XCTAssertTrue(waitFor(app.buttons["conv.row.\(f.otherId)"], 25, app), "Grupos responde")
+        sleep(3)
+        XCTAssertTrue(app.buttons["conv.row.\(f.otherId)"].exists)
+        shot("correo-20-grupos-directo")
+    }
+
+    /// Volver de un chat a Grupos no debe colgar la app (bucle de maquetación del List con el título grande y el buscador
+    /// que se esconde; intermitente, se corre varias veces: ver tools/fixtures/README.md).
+    func test5BackToHome() throws {
+        let f = try fixture()
+        let app = login(f, as: f.a, extra: ["-TCOpenConversation", f.chatId])
+        openChat(app, f)
+        // El aviso del sistema «¿Guardar contraseña?» llega unos segundos después de entrar: se cierra antes de volver.
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for _ in 0..<8 {
+            for surface in [app, springboard] { for label in ["Not Now", "Ahora no"] where surface.buttons[label].exists { surface.buttons[label].tap() } }
+            sleep(1)
+        }
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let ok = waitFor(app.buttons["conv.row.\(f.otherId)"], 20, app)
+        shot(ok ? "correo-19-grupos" : "correo-19-grupos-FALLO")
+        XCTAssertTrue(ok, "Grupos responde")
+    }
 }

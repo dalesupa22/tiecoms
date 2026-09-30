@@ -588,6 +588,10 @@ export async function buildHttp() {
       reply.header('cache-control', 'no-store');
       return mailbox.getMail(req.userId, MailProvider.parse(req.params.provider), z.string().min(1).max(500).parse(req.params.id));
     });
+    priv.get<{ Params: { provider: string; id: string } }>('/api/v1/mail/messages/:provider/:id/html', mailLimit, async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      return mailbox.liveHtml(req.userId, MailProvider.parse(req.params.provider), z.string().min(1).max(500).parse(req.params.id));
+    });
     priv.post('/api/v1/mail/share', mailLimit, async (req, reply) => reply.status(201).send(await mailbox.shareMail(req.userId, ShareMailInput.parse(req.body))));
     priv.get<{ Querystring: { ids?: string } }>('/api/v1/mail/shared', async (req) => mailbox.getSharedMany(req.userId, z.array(z.uuid()).min(1).max(50).parse(String(req.query.ids ?? '').split(',').filter(Boolean))));
     priv.get<{ Params: { id: string }; Querystring: { full?: string } }>('/api/v1/mail/shared/:id', async (req) => mailbox.getShared(req.userId, z.uuid().parse(req.params.id), req.query.full === '1'));

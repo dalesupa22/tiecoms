@@ -78,7 +78,7 @@ const dm = [
 ];
 
 const data: BootstrapDTO = {
-  contract: 'dev', serverTime: new Date().toISOString(),
+  contract: 'dev', serverTime: new Date().toISOString(), features: { mail: true } as never,
   me: { id: 'danny', name: 'Danny Suárez', kind: 'human', title: 'Líder técnico', area: null, primaryOrgId: 'xertify', email: 'danny@demo.tiecoms.com' },
   organizations: [org('xertify', 'Xertify', 'X', '#dcd0f2', '#3b2a5a', true), org('norte', 'Estudio Norte', 'EN', '#e8d5a8', '#4a3a14')],
   workspaces: [{ id: 'ws1', name: 'Lanzamiento · Estudio Norte', department: 'Portal de certificados', glyph: null, owningOrgId: 'xertify', organizationIds: ['xertify', 'norte'], memberIds: ['danny', 'laura', 'mateo', 'ana'], myRole: 'lead', createdAt: iso(4 * D), pinnedAt: null },
@@ -164,6 +164,26 @@ const waMsgs = [
 // Subidas simuladas: devuelven un AttachmentDTO y el envío queda en cola (sin backend).
 (client as any).uploadAttachment = async (_c: string, f: File, name: string) => { await new Promise((r) => setTimeout(r, 300)); return att(`up-${Date.now()}`, name, f.type || 'application/octet-stream', f.size); };
 (client as any).uploadAttachmentThumb = async (id: string) => att(id, 'thumb', 'image/jpeg', 1);
+// Correo de ejemplo (cuadrícula): lista, correo completo con su diseño y llevarlo a un chat.
+const mailAddr = (name: string, email: string) => ({ name, email });
+const mailItem = (id: string, name: string, email: string, subject: string, snippet: string, ago: number) => ({ provider: 'google' as const, id, threadId: id, from: mailAddr(name, email), to: [mailAddr('Danny', 'danny@xertify.co')], subject, snippet, date: iso(ago), unread: ago < H, hasAttachments: false, box: 'inbox' as const });
+const mailItems = [
+  mailItem('m1', 'Alertas y Notificaciones', 'alertas@bancolombia.com.co', 'Todo salió bien con tus movimientos', 'Compraste USD1.464,75 en DLC*INNOVATION EXPER con tu T.Cred *5307', 20 * 60_000),
+  mailItem('m2', 'ANDI Seccional', 'boletin@andi.com.co', 'Boletín #342 · El agua de Bogotá', 'Cundinamarca y Boyacá: les compartimos nuestro Boletín #342', 2 * H),
+  mailItem('m3', 'Gemini', 'gemini-notes@google.com', 'Notes: “Workshop de microcredenciales”', 'Notes from “Workshop”. The content was sent to invited guests.', 3 * H),
+];
+const mailHtml: Record<string, string> = {
+  m1: '<div style="background:#2b2b2b;color:#fff;padding:14px 16px;font-weight:700">Bancolombia</div><div style="background:#2b2b2b;color:#fff;padding:2px 16px 18px"><small style="color:#f2c200;font-weight:700">¡Listo!</small><h2 style="margin:4px 0 0;font-size:19px">Todo salió bien con tus movimientos</h2></div><div style="padding:14px 16px"><p>Hola Danny,</p><p>Compraste <b>USD 1.464,75</b> en DLC*INNOVATION EXPER con tu T.Cred *5307.</p><p style="background:#fff8d6;padding:9px 11px;border-radius:8px">Tu seguridad es nuestra prioridad.</p></div>',
+  m2: '<div style="background:#1b4f9c;color:#fff;padding:14px 16px"><small>Boletín #342</small><h2 style="margin:2px 0 0">El agua de Bogotá</h2></div><div style="padding:14px 16px"><p>Cundinamarca y Boyacá: les compartimos nuestro Boletín #342.</p></div>',
+};
+(client as any).mailConnections = async () => [{ provider: 'google', label: 'Gmail', available: true, unavailableReason: null, status: 'active', accountEmail: 'danny@xertify.co' }];
+(client as any).mailUnread = async () => 3;
+(client as any).listMail = async () => ({ items: mailItems, nextPage: null, accountEmail: 'danny@xertify.co' });
+(client as any).getMail = async (_p: string, id: string) => ({ ...mailItems.find((m) => m.id === id)!, cc: [], body: mailItems.find((m) => m.id === id)!.snippet + '\n\n(texto plano del correo)', attachments: [] });
+(client as any).liveMailHtml = async (_p: string, id: string) => ({ html: mailHtml[id] ?? null });
+(window as any).__shared = [];
+(client as any).shareMail = async (input: unknown) => { (window as any).__shared.push(['mail', input]); return {}; };
+(client as any).shareWhatsApp = async (input: unknown) => { (window as any).__shared.push(['wa', input]); return {}; };
 (client as any).request = async (path: string, init: any = {}) => {
   if (path === '/whatsapp/accounts' && !init.method) return { accounts: waAccounts, max: 5 };
   if (path.startsWith('/whatsapp/chats?')) {

@@ -618,6 +618,15 @@ export async function getMail(userId: string, provider: MailProvider, id: string
   return m;
 }
 
+/** El HTML limpio de un correo de tu propio buzón (vista previa antes de llevarlo al chat); null si solo trae texto. */
+export async function liveHtml(userId: string, provider: MailProvider, id: string): Promise<{ html: string | null }> {
+  if (!mailEnabled()) throw new ApiError(503, 'provider_unavailable', OFF_REASON);
+  const raw = provider === 'microsoft'
+    ? await cached(msgCache, `${userId}:${genOf(userId)}:html:${id}`, () => withProvider(userId, 'microsoft', (at) => PROVIDERS.microsoft.html!(at, id)))
+    : (await fullMail(userId, provider, id)).html ?? null;
+  return { html: raw ? safeHtml(raw, imgProxyUrl) : null };
+}
+
 // ---------- Correo compartido ----------
 /**
  * La tarjeta (resumen, sin cuerpo) o el correo completo (full). En vivo y en las tarjetas va sin cuerpo:

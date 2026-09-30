@@ -8,6 +8,8 @@ import { Avatar, Modal, conversationTitle, initials, orgById, personById, person
 import { openDialog, quickTimes } from '../actions.tsx';
 import { mailParts, mailSnippet } from '../mail-text.ts';
 import { prepareMeetingProof, takeMeetingProof, clearMeetingProof } from '../meeting-oauth.ts';
+import { setDrag, type DragPayload } from '../grid-actions.ts';
+import { GridSideButton, PinToGrid } from './Tray.tsx';
 
 /**
  * Correo en el chat (docs/CORREO.md): la lista es tu Gmail u Outlook en vivo; al llevar un correo a un chat
@@ -51,7 +53,7 @@ const fmtDate = (iso: string | null) => {
 };
 const fmtWhen = (iso: string) => new Date(iso).toLocaleString(locale(), { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 const who = (a: { name: string | null; email: string } | null | undefined) => (a ? a.name || a.email : '');
-const kb = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+export const kb = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 function Highlight({ text, q }: { text: string; q?: string }) {
   const words = (q ?? '').split(/\s+/).filter((w) => w.length > 1 && !w.includes(':'));
@@ -123,7 +125,7 @@ function ConnectCards({ list, reload }: { list: MailConnectionDTO[]; reload: () 
 // por detrás si tiene más de 20 s. La vista previa se precarga al pasar el cursor por la fila.
 const LIST_CACHE = new Map<string, { items: MailListItemDTO[]; next: string | null; at: number }>();
 const PREVIEW_CACHE = new Map<string, Promise<MailMessageDTO>>();
-const previewOf = (provider: MailProvider, id: string) => {
+export const previewOf = (provider: MailProvider, id: string) => {
   const k = `${provider}:${id}`;
   let p = PREVIEW_CACHE.get(k);
   if (!p) {
@@ -131,6 +133,19 @@ const previewOf = (provider: MailProvider, id: string) => {
     p.catch(() => PREVIEW_CACHE.delete(k));
     PREVIEW_CACHE.set(k, p);
     if (PREVIEW_CACHE.size > 60) PREVIEW_CACHE.delete(PREVIEW_CACHE.keys().next().value!);
+  }
+  return p;
+};
+const HTML_PREVIEW_CACHE = new Map<string, Promise<string | null>>();
+/** El diseño (HTML limpio) del correo en vivo; se pide aparte del texto para que el texto salga de una vez. */
+export const liveHtmlOf = (provider: MailProvider, id: string) => {
+  const k = `${provider}:${id}`;
+  let p = HTML_PREVIEW_CACHE.get(k);
+  if (!p) {
+    p = client.liveMailHtml(provider, id).then((r) => r.html);
+    p.catch(() => HTML_PREVIEW_CACHE.delete(k));
+    HTML_PREVIEW_CACHE.set(k, p);
+    if (HTML_PREVIEW_CACHE.size > 30) HTML_PREVIEW_CACHE.delete(HTML_PREVIEW_CACHE.keys().next().value!);
   }
   return p;
 };
@@ -182,7 +197,7 @@ function MailBrowser({ connections, onPick, pickLabel, compact }: { connections:
     else { setItems(null); void load(); }
   }, [cacheKey]);
   const hover = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prefetch = (m: MailListItemDTO) => { if (hover.current) clearTimeout(hover.current); hover.current = setTimeout(() => void previewOf(provider!, m.id).catch(() => {}), 250); };
+  const prefetch = (m: MailListItemDTO) => { if (hover.current) clearTimeout(hover.current); hover.current = setTimeout(() => { void previewOf(provider!, m.id).catch(() => {}); void liveHtmlOf(provider!, m.id).catch(() => {}); }, 250); };
   const filtered = !!(f.q || f.from || f.to || f.after || f.before || f.attachments || f.unread || f.label);
   const setRange = (key: string, after: string, before = '') => { setF((x) => ({ ...x, after, before, range: key })); setOpen(null); };
   const dateMenu = (e: React.MouseEvent) => {
@@ -250,7 +265,7 @@ function MailBrowser({ connections, onPick, pickLabel, compact }: { connections:
         {items?.map((m) => {
           const other = m.box === 'sent' ? m.to[0] : m.from;
           return (
-            <div key={m.id} className={`mail-row ${m.unread ? 'is-unread' : ''}`} onMouseEnter={() => prefetch(m)} onMouseLeave={() => { if (hover.current) clearTimeout(hover.current); }} onTouchStart={() => prefetch(m)}>
+            <div key={m.id} className={`mail-row ${m.unread ? 'is-unread' : ''}`} {...(compact ? {} : { draggable: true, onDragStart: (e: React.DragEvent) => setDrag(e, 'mail', { provider: provider!, id: m.id, subject: m.subject, from: who(other) }, m.subject || t('mail.noSubject')) })} onMouseEnter={() => prefetch(m)} onMouseLeave={() => { if (hover.current) clearTimeout(hover.current); }} onTouchStart={() => prefetch(m)}>
               <button className="mail-row-main" onClick={() => setPreview(m)}>
                 <span className="avatar" style={{ width: 32, height: 32, fontSize: 12, background: personColor(other?.email ?? m.id) }} aria-hidden>{initials(who(other) || '?')}</span>
                 <span className="grow" style={{ minWidth: 0 }}>
@@ -259,6 +274,7 @@ function MailBrowser({ connections, onPick, pickLabel, compact }: { connections:
                   <span className="small muted ellipsis" style={{ display: 'block' }}>{m.hasAttachments ? '📎 ' : ''}<Highlight text={m.snippet} q={f.q} /></span>
                 </span>
               </button>
+              {!compact && <PinToGrid payload={{ kind: 'mail', provider: provider!, id: m.id, subject: m.subject, from: who(other) }} name={m.subject || t('mail.noSubject')} />}
               <button className="btn small primary mail-pick" onClick={() => onPick(provider!, m)}>{pickLabel}</button>
             </div>
           );
@@ -266,7 +282,7 @@ function MailBrowser({ connections, onPick, pickLabel, compact }: { connections:
         {next && <div className="mail-more"><button className="btn small" disabled={busy} onClick={() => void load(next)}>{busy ? t('common.loading') : t('mail.more')}</button></div>}
       </div>
       <div className="mail-foot"><ProviderIcon provider={provider!} size={13} /> {filtered ? t('mail.searchFoot', { name: LABEL[provider!] }) : t('mail.liveFoot', { name: LABEL[provider!] })}</div>
-      {preview && <MailPreview provider={provider!} item={preview} pickLabel={pickLabel} onPick={() => { const p = preview; setPreview(null); onPick(provider!, p); }} onClose={() => setPreview(null)} />}
+      {preview && <MailPreview provider={provider!} item={preview} pickLabel={pickLabel} pin={compact ? undefined : { kind: 'mail', provider: provider!, id: preview.id, subject: preview.subject, from: who(preview.box === 'sent' ? preview.to[0] : preview.from) }} onPick={() => { const p = preview; setPreview(null); onPick(provider!, p); }} onClose={() => setPreview(null)} />}
     </div>
   );
 }
@@ -283,22 +299,31 @@ function FilterInput({ label, value, onApply }: { label: string; value: string; 
 }
 
 /** Vista previa del correo completo (en vivo) antes de llevarlo al chat. */
-function MailPreview({ provider, item, pickLabel, onPick, onClose }: { provider: MailProvider; item: MailListItemDTO; pickLabel: string; onPick: () => void; onClose: () => void }) {
+function MailPreview({ provider, item, pickLabel, pin, onPick, onClose }: { provider: MailProvider; item: MailListItemDTO; pickLabel: string; pin?: DragPayload; onPick: () => void; onClose: () => void }) {
   const [m, setM] = useState<MailMessageDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // null = solo texto (o no se pudo traer el diseño): se queda el texto de siempre.
+  const [html, setHtml] = useState<string | null | undefined>(undefined);
+  const [asText, setAsText] = useState(false);
   useEffect(() => { previewOf(provider, item.id).then(setM).catch((e) => setError(errorText(e))); }, [item.id]);
+  useEffect(() => {
+    let live = true;
+    liveHtmlOf(provider, item.id).then((h) => live && setHtml(h)).catch(() => live && setHtml(null));
+    return () => { live = false; };
+  }, [item.id]);
   return (
     <Modal title={item.subject || t('mail.noSubject')} onClose={onClose}>
       <MailMeta from={item.from} to={m?.to ?? item.to} cc={m?.cc ?? []} date={item.date} provider={provider} />
       {error && <div className="error">{error}</div>}
-      <div className="mail-body">{m ? m.body || t('mail.noBody') : t('common.loading')}</div>
+      {html && !asText ? <MailHtml html={html} maxHeight={560} /> : <div className="mail-body" aria-busy={!m || html === undefined}>{m ? m.body || t('mail.noBody') : t('common.loading')}</div>}
+      {html && <button className="link-btn" style={{ alignSelf: 'flex-start' }} onClick={() => setAsText((v) => !v)}>{asText ? t('mail.asDesign') : t('mail.asText')}</button>}
       {!!m?.attachments.length && <div className="att-chips">{m.attachments.map((a) => <span key={a.id} className="file-chip">📎 {a.name} · {kb(a.size)}</span>)}</div>}
-      <div className="modal-actions"><button className="btn ghost" onClick={onClose}>{t('common.close')}</button><button className="btn primary" onClick={onPick}>{pickLabel}</button></div>
+      <div className="modal-actions"><button className="btn ghost" onClick={onClose}>{t('common.close')}</button>{pin && <PinToGrid payload={pin} name={item.subject || t('mail.noSubject')} className="is-lg" />}<button className="btn primary" onClick={onPick}>{pickLabel}</button></div>
     </Modal>
   );
 }
 
-function MailMeta({ from, to, cc, date, provider }: { from: SharedMailDTO['from']; to: SharedMailDTO['to']; cc: SharedMailDTO['cc']; date: string | null; provider: MailProvider | 'whatsapp' }) {
+export function MailMeta({ from, to, cc, date, provider }: { from: SharedMailDTO['from']; to: SharedMailDTO['to']; cc: SharedMailDTO['cc']; date: string | null; provider: MailProvider | 'whatsapp' }) {
   const list = (l: SharedMailDTO['to']) => l.map((a) => (a.name ? `${a.name} <${a.email}>` : a.email)).join(', ');
   return (
     <dl className="mail-meta">
@@ -346,7 +371,7 @@ const shareLabel = (d: NonNullable<ReturnType<typeof client.getState>['data']>, 
   return picked.length > 1 ? t('mail.shareInMany', { n: picked.length }) : t('mail.share');
 };
 
-function ShareStep({ provider, item, conversationId, onDone, onBack }: { provider: MailProvider; item: MailListItemDTO; conversationId?: string; onDone: (convId: string) => void; onBack: () => void }) {
+export function ShareStep({ provider, item, conversationId, onDone, onBack }: { provider: MailProvider; item: MailListItemDTO; conversationId?: string; onDone: (convId: string) => void; onBack: () => void }) {
   const d = useClient((s) => s.data)!;
   const [picked, setPicked] = useState<string[]>(conversationId ? [conversationId] : []);
   const [comment, setComment] = useState('');
@@ -399,6 +424,7 @@ export function MailScreen() {
     <div className="page mail-page">
       <div className="page-head">
         <h1 className="serif">{t('mail.title')}</h1>
+        <GridSideButton />
         {ready && <button className="btn small ghost" onClick={() => openDialog((close) => <Modal title={t('mail.accounts')} onClose={close}><ConnectCards list={list!} reload={() => { close(); void reload(); }} /></Modal>)}>{t('mail.accounts')}</button>}
       </div>
       {error && <div className="error">{error}</div>}

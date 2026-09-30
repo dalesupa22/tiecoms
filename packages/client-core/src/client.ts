@@ -1250,6 +1250,10 @@ export class TieComsClient {
   async loadSharedMailFull(id: string) { return this.putMail(await this.sharedGet<import('@tiecoms/contracts').SharedMailDTO>(`/mail/shared/${id}?full=1`)); }
   /** El correo tal como está en el buzón (con historial citado y firma), en vivo y sin guardar. */
   mailOriginal(id: string) { return this.request<{ body: string }>(`/mail/shared/${id}/original`); }
+  /** El HTML limpio de un correo de tu buzón, en vivo (vista previa antes de llevarlo al chat); null si solo tiene texto. */
+  liveMailHtml(provider: import('@tiecoms/contracts').MailProvider, id: string) {
+    return this.request<{ html: string | null }>(`/mail/messages/${provider}/${encodeURIComponent(id)}/html`);
+  }
   /** El HTML del correo (limpio) para verlo con su diseño; null si solo tiene texto. */
   mailHtml(id: string) { return this.request<{ html: string | null }>(`/mail/shared/${id}/html`); }
   async mailComments(id: string) { return (await this.request<{ comments: import('@tiecoms/contracts').SharedMailCommentDTO[] }>(`/mail/shared/${id}/comments`)).comments; }

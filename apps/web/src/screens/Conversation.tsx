@@ -54,7 +54,7 @@ const draftKey = (id: string) => `tiecoms:draft:${id}`;
 const excerpt = (s: string, n = 90) => s.replace(/\s+/g, ' ').trim().slice(0, n);
 
 /** Panel dentro de la vista en paralelo (Split.tsx): activo = el del URL; count = cuántos hay abiertos. */
-export interface PaneProps { active: boolean; count: number; onClose: () => void; onOnly: () => void }
+export interface PaneProps { active: boolean; count: number; onClose: () => void; onOnly: () => void; pinned?: boolean; onPin?: () => void }
 
 export function ConversationScreen({ id, embedded, pane }: { id: string; embedded?: { onClose: () => void; anchor?: MessageDTO | null; onSeeAnchor?: () => void }; pane?: PaneProps }) {
   const d = useClient((s) => s.data)!;
@@ -699,7 +699,8 @@ export function ConversationScreen({ id, embedded, pane }: { id: string; embedde
             <button className="icon-btn" aria-label={t('side.openFull')} title={t('side.openFull')} onClick={() => navigate(`/c/${id}`)}>⤢</button>
             <button className="icon-btn" aria-label={t('side.close')} title={t('side.close')} onClick={embedded.onClose}>×</button>
           </> : pane ? <>
-            <button className="icon-btn head-keep" aria-label={t('split.only')} title={t('split.only')} onClick={pane.onOnly}>⤢</button>
+            {pane.onPin && <button className={`icon-btn head-keep ${pane.pinned ? 'is-on' : ''}`} aria-pressed={!!pane.pinned} aria-label={t(pane.pinned ? 'grid.unpin' : 'grid.pin')} title={t(pane.pinned ? 'grid.unpin' : 'grid.pin')} onClick={pane.onPin}>📌</button>}
+            {pane.count > 1 && <button className="icon-btn head-keep" aria-label={t('split.only')} title={t('split.only')} onClick={pane.onOnly}>⤢</button>}
             <button className="icon-btn head-keep" aria-label={t('split.close')} title={t('split.close')} onClick={pane.onClose}>×</button>
           </> : <button className="icon-btn" aria-label={t('chat.details')} onClick={() => setPanel(!panelPref)}>ⓘ</button>}
         </header>

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { BootstrapDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { navigate, type Route } from '../router.ts';
-import { DRAG_TYPE } from '../split.ts';
+import { DRAG_TYPE, useGridSide, useWide } from '../split.ts';
+import { GridArea } from './Split.tsx';
 import { Avatar, counterpartOrg, orgById, personById } from '../ui.tsx';
 import { MentionsInbox } from './Mentions.tsx';
 import type { ConversationDTO } from '@tiecoms/contracts';
@@ -207,15 +208,19 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   useSleepTzSync();
   const connection = useClient((s) => s.connection);
   const inConv = route.name === 'conversation';
+  // WhatsApp y Correo con la cuadrícula al lado (botón «Cuadrícula al lado»): arrastras directo a un cuadrito o a un chat.
+  const wide = useWide();
+  const sideGrid = useGridSide() && wide && (route.name === 'whatsapp' || route.name === 'mail');
   return (
     <div className={`shell ${inConv ? 'in-conv' : ''}`}>
       <Rail route={route} />
       <Sidebar route={route} />
       {/* Fuera de un chat, soltar una conversación arrastrada la abre (dentro, Split.tsx la pone al lado). */}
-      <main className="main" onDragOver={inConv ? undefined : (e) => { if (Array.from(e.dataTransfer.types).includes(DRAG_TYPE)) e.preventDefault(); }}
+      <main className={`main ${sideGrid ? 'has-grid-side' : ''}`} onDragOver={inConv ? undefined : (e) => { if (Array.from(e.dataTransfer.types).includes(DRAG_TYPE)) e.preventDefault(); }}
         onDrop={inConv ? undefined : (e) => { const id = e.dataTransfer.getData(DRAG_TYPE); if (id) { e.preventDefault(); navigate(`/c/${id}`); } }}>
         {connection !== 'online' && <div className="conn" role="status">{connection === 'connecting' ? t('conn.connecting') : t('conn.offline')}</div>}
         {children}
+        {sideGrid && <aside className="grid-side" aria-label={t('nav.grid')}><GridArea id={null} side /></aside>}
       </main>
       <MobileTabs route={route} />
       {/* gg siempre a mano (Danny, 29-sep-2026): también dentro de un chat, por encima del campo de escribir. */}

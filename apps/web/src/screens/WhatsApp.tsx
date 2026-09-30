@@ -7,6 +7,8 @@ import { openDialog } from '../actions.tsx';
 import { WaShareDialog } from './Mail.tsx';
 import { navigate } from '../router.ts';
 import { Modal, conversationTitle } from '../ui.tsx';
+import { setDrag } from '../grid-actions.ts';
+import { GridSideButton, PinToGrid } from './Tray.tsx';
 
 const CATEGORIES: WaCategory[] = ['trabajo', 'clientes', 'familia', 'amigos', 'comunidad', 'otros'];
 const CAT_ICON: Record<WaCategory, string> = { trabajo: '💼', clientes: '🤝', familia: '🏠', amigos: '🍻', comunidad: '🏘', otros: '◌' };
@@ -89,6 +91,7 @@ export function WhatsAppScreen() {
     <div className="page"><div className="page-narrow">
       <div className="row" style={{ flexWrap: 'wrap' }}>
         <h1 className="grow">{t('wa.title')}</h1>
+        <GridSideButton />
         {(accounts?.length ?? 0) < max && <button className="btn primary small" onClick={() => setConnectOpen(true)}>{t('wa.connect')}</button>}
       </div>
       <p className="muted" style={{ margin: '0 0 16px', maxWidth: 680 }}>{t('wa.intro')}</p>
@@ -258,7 +261,8 @@ function ConnectDialog({ existing, onClose, onDone }: { existing: WaAccountDTO[]
 
 function ChatRow({ c, active, multi, onOpen, onPatch }: { c: WaChatDTO; active: boolean; multi: boolean; onOpen: () => void; onPatch: (p: Record<string, unknown>) => void }) {
   return (
-    <div className={`card wa-chat ${active ? 'active' : ''} ${c.unread ? 'unread' : ''}`}>
+    <div className={`card wa-chat ${active ? 'active' : ''} ${c.unread ? 'unread' : ''}`} draggable
+      onDragStart={(e) => setDrag(e, 'wa', { accountId: c.accountId, jid: c.jid, name: c.name, isGroup: c.isGroup }, c.name)}>
       <button className="wa-chat-main" onClick={onOpen}>
         <span className="wa-av" aria-hidden>{c.isGroup ? '👥' : CAT_ICON[c.category]}</span>
         <span className="grow" style={{ minWidth: 0 }}>
@@ -275,6 +279,7 @@ function ChatRow({ c, active, multi, onOpen, onPatch }: { c: WaChatDTO; active: 
         </span>
         {c.unread > 0 && <span className="pill">{c.unread}</span>}
       </button>
+      <PinToGrid payload={{ kind: 'wa', accountId: c.accountId, jid: c.jid, name: c.name, isGroup: c.isGroup }} name={c.name} />
       <select className="wa-cat-select" value={c.category} onChange={(e) => onPatch({ category: e.target.value })} aria-label={t('wa.category')}
         title={c.categoryManual ? t('wa.manual') : t('wa.suggested')}>
         {CATEGORIES.map((k) => <option key={k} value={k}>{CAT_ICON[k]} {t(`wa.cat.${k}`)}</option>)}
@@ -296,6 +301,7 @@ function ChatPanel({ c, revision, onClose, onPatch }: { c: WaChatDTO; revision: 
     <aside className="card wa-panel">
       <div className="row" style={{ padding: '12px 14px', borderBottom: '1px solid var(--line)' }}>
         <b className="grow ellipsis">{c.name}</b>
+        <PinToGrid payload={{ kind: 'wa', accountId: c.accountId, jid: c.jid, name: c.name, isGroup: c.isGroup }} name={c.name} />
         <button className="icon-btn" onClick={onClose} aria-label={t('common.close')}>×</button>
       </div>
       <div className="row small muted" style={{ padding: '6px 14px', gap: 6, flexWrap: 'wrap', borderBottom: '1px solid var(--line)' }}>
@@ -320,6 +326,9 @@ function ChatPanel({ c, revision, onClose, onPatch }: { c: WaChatDTO; revision: 
             <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{m.body}</div>
             <div className="wa-time">{new Date(m.sentAt).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
             {mailOn && <button className="wa-bring" onClick={bring} title={t('wa.bring')}>⤴ {t('wa.bringShort')}</button>}
+            {mailOn && <span className="wa-grab" draggable title={t('grid.carryMsgHint')} aria-label={t('grid.carryMsgHint')}
+              onDragStart={(e) => { setDrag(e, 'wamsg', { accountId: c.accountId, jid: c.jid, messageId: m.id, chatName: c.name, text: m.body }, m.body.slice(0, 80)); const row = (e.currentTarget as HTMLElement).closest('.wa-msg'); if (row) e.dataTransfer.setDragImage(row, 12, 12); }}
+              onClick={bring}>⠿</span>}
           </div>
           );
         })}

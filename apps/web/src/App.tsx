@@ -5,7 +5,9 @@ import { installSoundUnlock } from './sound.ts';
 import { t, useLang } from './i18n.ts';
 import { asset, navigate, parse, usePath } from './router.ts';
 import { AuthScreen, ConfirmSignupScreen, SsoReturnScreen } from './screens/Auth.tsx';
-import { ConversationArea } from './screens/Split.tsx';
+import { ConversationArea, GridScreen } from './screens/Split.tsx';
+import { DragTray } from './screens/Tray.tsx';
+import { useGridSide } from './split.ts';
 import { InviteScreen } from './screens/Invite.tsx';
 import { InboxScreen, PeopleScreen, SettingsScreen, SpacesScreen, TodayScreen, WorkspaceScreen } from './screens/Pages.tsx';
 import { Shell } from './screens/Shell.tsx';
@@ -51,6 +53,7 @@ export function App() {
   const route = parse(path);
   const prevStatus = useRef(status);
   useTabBadge();
+  const gridSide = useGridSide();
 
   useEffect(() => {
     if (status === 'anonymous' && !['login', 'signup', 'invite', 'sso', 'guestCall', 'room', 'booking', 'bookingManage', 'bookingHome', 'confirmSignup'].includes(route.name)) navigate(`/login${path !== '/' ? `?next=${encodeURIComponent(path)}` : ''}`, true);
@@ -100,8 +103,10 @@ export function App() {
       {route.name === 'settings' && <SettingsScreen />}
       {route.name === 'workspace' && <WorkspaceScreen key={route.id} id={route.id} />}
       {route.name === 'conversation' && <ConversationArea id={route.id} search={location.search} />}
+      {route.name === 'grid' && <GridScreen />}
     </Shell>
     <UpdateBanner />
+    <DragTray gridVisible={route.name === 'conversation' || route.name === 'grid' || (gridSide && (route.name === 'whatsapp' || route.name === 'mail'))} />
     <MenuHost />
     <DialogHost />
     <ToastHost />

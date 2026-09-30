@@ -3,7 +3,9 @@ import type { BootstrapDTO, ConversationDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { t } from '../i18n.ts';
 import { openMenuAt, type MenuItem } from '../menu.tsx';
-import { asset, navigate, type Route } from '../router.ts';
+import { BASE, asset, navigate, type Route } from '../router.ts';
+import { rememberBack, usePanes, usePulse } from '../split.ts';
+import { GridGlyph } from './Tray.tsx';
 import { pendingOf } from '../home-order.ts';
 import { openAccountMenu } from './Profile.tsx';
 import { MeAvatar } from './Silence.tsx';
@@ -133,6 +135,10 @@ export function Rail({ route }: { route: Route }) {
   // Perdidas sin ver: número rojo; se quita al abrir Llamadas (POST /calls/seen).
   const missed = d.missedCalls ?? 0;
 
+  const panes = usePanes();
+  const pulse = usePulse();
+  // La cuadrícula siempre a la mano: un 2×2 vivo que se llena al fijar. Entrar guarda de dónde vienes para el «← Volver».
+  const goGrid = () => { rememberBack(route.name === 'grid' ? null : location.pathname.slice(BASE.length) || '/'); navigate('/cuadricula'); };
   const pick = (m: SideMode) => { setSideMode(m); if (m === 'all') navigate('/'); };
   const more = (e: React.MouseEvent<HTMLButtonElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -145,6 +151,11 @@ export function Rail({ route }: { route: Route }) {
     <nav className="rail" aria-label={t('nav.mainNav')}>
       <button className="rail-logo" onClick={() => pick('all')} aria-label="chaggu" title="chaggu"><img src={asset('/icon.svg')} alt="" width={30} height={30} /></button>
       <RailItem icon="today" label={t('nav.today')} on={mode === 'all'} at={mentions} onClick={() => pick('all')} />
+      <button className={`rail-item rail-grid ${route.name === 'grid' ? 'on' : ''} ${panes.length ? 'lit tone-brand' : ''}`} onClick={goGrid} title={t('nav.grid')} aria-label={panes.length ? `${t('nav.grid')}, ${panes.length}/4` : t('nav.grid')} aria-current={route.name === 'grid' ? 'page' : undefined}>
+        <span key={pulse} className={pulse ? 'glyph-pulse' : ''}><GridGlyph /></span>
+        <span className="rail-label">{t('nav.grid')}</span>
+        {panes.length > 0 && <span className="rail-count tone-brand">{panes.length}/4</span>}
+      </button>
       <RailItem icon="groups" label={t('nav.groups')} on={mode === 'groups'} count={groups} onClick={() => pick(mode === 'groups' ? 'all' : 'groups')} />
       <RailItem icon="dms" label={t('nav.dms')} on={mode === 'dms'} count={dms} onClick={() => pick(mode === 'dms' ? 'all' : 'dms')} />
       <RailItem icon="whatsapp" label={t('nav.whatsapp')} on={route.name === 'whatsapp'} count={wa} tone="wa" onClick={() => navigate('/whatsapp')} />

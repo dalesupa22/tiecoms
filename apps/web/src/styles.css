@@ -1725,3 +1725,50 @@ mark { background: #f5e3b3; color: inherit; border-radius: 3px; padding: 0 1px; 
 .split.n3 .chatbar-label, .split.n4 .chatbar-label { display: none; }
 .split.n3 .chatbar-btn, .split.n4 .chatbar-btn { padding-block: 4px; }
 .split.n3 .conv-head, .split.n4 .conv-head { padding-block: 8px; }
+
+/* ---------- Panel de la llamada como Meet: arrastrar, pantalla completa y ventana flotante (30-sep-2026) ---------- */
+.call-controls { flex-wrap: wrap; row-gap: 8px; }
+.call-dock { max-height: calc(100vh - 24px); overflow: auto; }
+.call-dock-head { cursor: grab; user-select: none; touch-action: none; }
+.call-dock.is-dragging { transition: none; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4); }
+.call-dock.is-dragging .call-dock-head { cursor: grabbing; }
+.call-dock.is-full {
+  inset: 0; left: 0 !important; top: 0 !important; right: 0 !important; bottom: 0 !important; width: auto; max-height: none;
+  border-radius: 0; padding: 14px 18px calc(16px + var(--safe-b)); z-index: 150;
+}
+.call-dock.is-full .call-dock-head { cursor: default; font-size: 16px; }
+.call-dock.is-full .call-grid { flex: 1; min-height: 0; align-content: center; grid-auto-rows: minmax(0, 1fr); }
+.call-dock.is-full .call-grid.n1 { grid-template-columns: minmax(0, 1100px); justify-content: center; }
+.call-dock.is-full .call-tile { aspect-ratio: auto; height: 100%; min-height: 160px; }
+.call-dock.is-full .call-tile.is-avatar .avatar { transform: scale(1.6); }
+.call-dock.is-full .call-screen { flex: 1 1 auto; min-height: 45vh; aspect-ratio: auto; }
+.call-dock.is-full:has(.call-screen) .call-grid { flex: none; display: flex; gap: 8px; justify-content: center; }
+.call-dock.is-full:has(.call-screen) .call-grid > * { flex: 0 0 200px; height: 120px; }
+.call-dock.is-full .call-people { flex: 1; justify-content: center; align-content: center; gap: 32px; }
+.call-dock.is-full .call-person { width: 110px; }
+.call-dock.is-full .call-person .avatar { transform: scale(1.5); margin-bottom: 14px; }
+.call-dock.is-full .call-controls { justify-content: center; }
+.call-dock.is-full .call-controls .grow { flex: 0 0 24px; }
+.call-dock.is-full .call-ctl { width: 50px; height: 50px; font-size: 20px; }
+.call-dock.is-in-pip { width: auto; min-width: 280px; }
+.call-in-pip { display: flex; align-items: center; gap: 10px; color: var(--paper-3); }
+.call-in-pip .btn { margin-left: auto; }
+/* Ventana flotante (Document Picture-in-Picture): la llamada sola, sin el resto de la app. */
+.call-pip-body { margin: 0; background: var(--ink); color: var(--paper); overflow: hidden; }
+.call-pip { box-sizing: border-box; height: 100vh; padding: 10px; display: flex; flex-direction: column; gap: 8px; overflow: auto; }
+.call-pip .call-grid { flex: 1; min-height: 0; grid-auto-rows: minmax(0, 1fr); }
+.call-pip .call-tile { aspect-ratio: auto; height: 100%; min-height: 90px; }
+.call-pip .call-screen { flex: 1 1 auto; min-height: 120px; aspect-ratio: auto; }
+.call-pip:has(.call-screen) .call-grid { flex: none; display: flex; gap: 6px; }
+.call-pip:has(.call-screen) .call-grid > * { flex: 0 0 110px; height: 70px; }
+.call-pip .call-people { flex: 1; justify-content: center; align-content: center; }
+.call-pip .call-controls { justify-content: center; }
+.call-pip .call-controls .grow { flex: 0 0 8px; }
+/* Modo mini de la app de escritorio: la ventana es solo la llamada, siempre encima (desktop.ts). */
+html.call-mini .shell, html.call-mini .update-banner, html.call-mini .bubble-host { display: none !important; }
+html.call-mini body { background: var(--ink); }
+.call-dock.is-mini { padding: 8px 10px 10px; }
+.call-dock.is-mini .call-dock-head { cursor: default; }
+.call-dock.is-mini .call-ctl { width: 40px; height: 40px; font-size: 17px; }
+.call-dock .call-add { background: rgba(255, 255, 255, 0.14); color: var(--paper); border-color: transparent; }
+.call-dock .call-add:hover { background: rgba(255, 255, 255, 0.24); }

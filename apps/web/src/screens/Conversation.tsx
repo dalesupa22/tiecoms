@@ -11,6 +11,8 @@ import { conversationMenu, forwardMenu, messageLink, muteMenu, muteOptions, mute
 import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate, queryParam } from '../router.ts';
+import { MAX_PANES, splitAvailable } from '../split.ts';
+import { SplitPicker } from './SplitPicker.tsx';
 import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, isGgChat, isSelfChat, orgById, personById, personColor } from '../ui.tsx';
 import { PhotoCropDialog, pickImage } from './PhotoCrop.tsx';
 import { AttachmentsView, DraftTray, pickFiles, useDrafts } from './Attachments.tsx';
@@ -660,6 +662,8 @@ export function ConversationScreen({ id, embedded, pane }: { id: string; embedde
           {embedded && conv.canManage && conv.kind !== 'direct' && <button className="btn ghost small" onClick={() => openDialog((close) => <AddMembersDialog conversationId={id} onClose={close} />)} title={t('bar.addPeople')}>＋ {t('bar.people')}</button>}
           {ws && !embedded && <button className="btn ghost small only-desktop" onClick={() => navigate(`/w/${ws.id}`)}>{t('chat.space')}</button>}
           {!isSide && <CallButtons conv={conv} />}
+          {/* ⊞ Abrir otro chat al lado (hasta 4, split.ts): lo mismo que arrastrar un chat de la lista. */}
+          {!embedded && splitAvailable() && (!pane || pane.count < MAX_PANES) && <button className="icon-btn only-desktop" aria-label={t('split.add')} title={t('split.add')} onClick={() => openDialog((close) => <SplitPicker activeId={id} onClose={close} />)}>⊞</button>}
           <button className={`icon-btn only-desktop ${searching ? 'is-on' : ''}`} aria-label={t('csearch.open')} title={t('csearch.open')} aria-pressed={searching} onClick={() => setSearching((v) => !v)}>🔎</button>
           <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, [{ label: t('csearch.open'), icon: '🔎', onSelect: () => setSearching(true) }, { divider: true }, ...conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) })]); }}>⋯</button>
           {embedded ? <>

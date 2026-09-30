@@ -2,10 +2,11 @@
  * Llamadas en la web: botones del encabezado, franja «llamada en curso», aviso de llamada entrante,
  * panel flotante de la llamada (con subtítulos y el interruptor de transcripción) y la transcripción guardada.
  */
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import { flashTitle } from '../bubbles.tsx';
 import type { ActiveCallDTO, CallDTO, CallDeviceDTO, CallHistoryItemDTO, CallTranscriptDTO, ConversationDTO } from '@tiecoms/contracts';
-import { client, useClient } from '../app-client.ts';
+import { client, isDesktop, useClient } from '../app-client.ts';
 import { bindTile, canShareScreen, chooseAudioInput, chooseAudioOutput, currentCall, hangUp, joinCall, listAudioInputs, listAudioOutputs, passHere, setTranscription, startCall, startScreenShare, stopScreenShare, subscribeCall, toggleCamera, toggleMute, type CallView } from '../call.ts';
 import { errorText, locale, t } from '../i18n.ts';
 import { openMenuAt, toast, type MenuItem } from '../menu.tsx';
@@ -152,10 +153,34 @@ function GuestLinkDialog({ call, onClose }: { call: CallDTO; onClose: () => void
   );
 }
 
+type ClientData = NonNullable<ReturnType<typeof client.getState>['data']>;
+
+/** Posición del panel arrastrado (esquina superior izquierda), guardada en este navegador. */
+const DOCK_POS_KEY = 'chaggu:call-dock-pos';
+function readDockPos(): { x: number; y: number } | null {
+  try { const v = JSON.parse(localStorage.getItem(DOCK_POS_KEY) ?? 'null'); return v && Number.isFinite(v.x) && Number.isFinite(v.y) ? v : null; } catch { return null; }
+}
+const clampPos = (p: { x: number; y: number }, el: HTMLElement | null) => {
+  const w = el?.offsetWidth ?? 380, h = el?.offsetHeight ?? 200;
+  return { x: Math.min(Math.max(8, p.x), Math.max(8, innerWidth - w - 8)), y: Math.min(Math.max(8, p.y), Math.max(8, innerHeight - h - 8)) };
+};
+
+/**
+ * Panel de la llamada, como Google Meet (pedido de Danny, 30-sep-2026):
+ * - se arrastra por el encabezado a cualquier parte y recuerda dónde quedó (doble clic lo devuelve a la esquina);
+ * - ⛶ pantalla completa (Esc sale), – minimiza;
+ * - ⧉ ventana flotante encima de todo (Picture-in-Picture): con Chrome/Edge es la llamada completa con sus
+ *   botones y se abre sola al cambiar de pestaña; en Safari y la app de Mac, el video de quien habla.
+ */
 export function CallDock() {
   const v = useCallView();
   const d = useClient((s) => s.data);
   const [min, setMin] = useState(false);
+  const [full, setFull] = useState(false);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(readDockPos);
+  const [dockEl, setDockEl] = useState<HTMLElement | null>(null);
+  const dragged = useRef(false);
+  const pip = usePip(v, d);
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
     if (!v) return;
@@ -164,73 +189,273 @@ export function CallDock() {
     const i = setInterval(tick, 1000);
     return () => clearInterval(i);
   }, [v?.call.id]);
+  // Esc sale de pantalla completa; si el navegador sale de su pantalla completa, también el panel.
+  useEffect(() => {
+    if (!full) return;
+    const k = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setFull(false); };
+    const fs = () => { if (!document.fullscreenElement) setFull(false); };
+    addEventListener('keydown', k);
+    document.addEventListener('fullscreenchange', fs);
+    return () => { removeEventListener('keydown', k); document.removeEventListener('fullscreenchange', fs); };
+  }, [full]);
+  // Al achicar la ventana, el panel no se queda por fuera.
+  useEffect(() => {
+    const on = () => setPos((p) => (p ? clampPos(p, dockEl) : p));
+    addEventListener('resize', on);
+    return () => removeEventListener('resize', on);
+  }, [dockEl]);
+  useEffect(() => { if (!v) { setFull(false); setMin(false); } }, [!!v]);
   if (!v || !d) return null;
+
+  const toggleFull = () => {
+    const next = !full;
+    setFull(next);
+    if (next) { setMin(false); if (document.fullscreenEnabled) void dockEl?.requestFullscreen?.().catch(() => {}); }
+    else if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+  };
+  const startDrag = (e: React.PointerEvent) => {
+    // Se arrastra desde cualquier parte del encabezado, también el título (un clic sin mover abre el chat).
+    const target = e.target as HTMLElement;
+    if (full || e.button !== 0 || (target.closest('button, a, input, select') && !target.closest('.call-dock-title'))) return;
+    const el = dockEl;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const dx = e.clientX - r.left, dy = e.clientY - r.top;
+    el.setPointerCapture(e.pointerId);
+    el.classList.add('is-dragging');
+    e.preventDefault();
+    let last = { x: r.left, y: r.top };
+    const x0 = e.clientX, y0 = e.clientY;
+    dragged.current = false;
+    const move = (ev: PointerEvent) => {
+      if (!dragged.current && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;
+      dragged.current = true;
+      last = clampPos({ x: ev.clientX - dx, y: ev.clientY - dy }, el); setPos(last);
+    };
+    const up = () => {
+      el.classList.remove('is-dragging');
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      if (dragged.current) { try { localStorage.setItem(DOCK_POS_KEY, JSON.stringify(last)); } catch { /* sin almacenamiento */ } }
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  };
+  const resetPos = () => { setPos(null); try { localStorage.removeItem(DOCK_POS_KEY); } catch { /* */ } };
+  const style = !full && pos && innerWidth > 860 ? { left: pos.x, top: pos.y, right: 'auto', bottom: 'auto' } : undefined;
   const conv = d.conversations.find((c) => c.id === v.call.conversationId);
+  const others = callPeople(v.call).filter((id) => id !== d.me.id);
+  const nameOf = (id: string) => (id === d.me.id ? t('call.you') : guestName(v.call, id) || firstName(d, id, v.call.names));
+  const title = (conv ? conv.name ?? others.map(nameOf).join(', ') : others.map(nameOf).join(', ')) || t('call.title');
+  const clock = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
+
+  return (
+    <aside ref={setDockEl} style={style}
+      className={`call-dock ${min && !full && !pip.mini ? 'is-min' : ''} ${full || pip.mini ? 'is-full' : ''} ${pip.mini ? 'is-mini' : ''} ${v.screens.length && !min ? 'has-screen' : ''} ${pip.docOpen ? 'is-in-pip' : ''}`} aria-label={t('call.title')}>
+      <div className="row call-dock-head" onPointerDown={startDrag} onDoubleClick={full ? undefined : resetPos} title={full ? undefined : t('call.dragHint')}>
+        <span className={`call-dot ${v.phase === 'live' ? 'is-live' : ''}`} aria-hidden />
+        <button className="grow ellipsis call-dock-title" onClick={() => { if (dragged.current) { dragged.current = false; return; } setFull(false); navigate(`/c/${v.call.conversationId}`); }}>{title}</button>
+        <span className="small muted">{v.phase === 'connecting' ? t('call.connecting') : clock}</span>
+        {pip.supported && <button className="icon-btn" aria-label={t('call.pip')} title={t('call.pip')} aria-pressed={pip.open} onClick={() => void pip.toggle()}>⧉</button>}
+        {!pip.mini && <button className="icon-btn" aria-label={full ? t('call.exitFull') : t('call.fullscreen')} title={full ? t('call.exitFull') : t('call.fullscreen')} onClick={toggleFull}>{full ? '⤡' : '⛶'}</button>}
+        {!full && !pip.mini && <button className="icon-btn" aria-label={min ? t('call.expand') : t('call.minimize')} title={min ? t('call.expand') : t('call.minimize')} onClick={() => setMin(!min)}>{min ? '▢' : '–'}</button>}
+      </div>
+      {pip.docOpen
+        ? <div className="call-in-pip small">⧉ {t('call.inPip')} <button className="btn small" onClick={() => void pip.toggle()}>{t('call.pipBack')}</button></div>
+        : <CallPanel v={v} d={d} compact={min && !full && !pip.mini} nameOf={nameOf} pip={pip.mini} />}
+      {pip.portal}
+    </aside>
+  );
+}
+
+/** Contenido de la llamada: pantallas, recuadros, subtítulos y botones (en el panel o en la ventana flotante). */
+function CallPanel({ v, d, compact, nameOf, pip }: { v: CallView; d: ClientData; compact: boolean; nameOf: (id: string) => string; pip?: boolean }) {
   const people = callPeople(v.call);
   const others = people.filter((id) => id !== d.me.id);
-  const nameOf = (id: string) => (id === d.me.id ? t('call.you') : guestName(v.call, id) || firstName(d, id, v.call.names));
-  const clock = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
   // Cuadrícula en cuanto alguien tiene video: quien no tiene cámara sigue ahí como avatar.
-  const video = v.tiles.filter((x) => (x.local ? v.camera : x.active));
+  // Los recuadros remotos se muestran aunque Chime diga active=false: se activan recién al enlazarlos a un
+  // <video> (antes se filtraban y el video de los demás nunca aparecía). Si alguien apaga la cámara, Chime
+  // quita el recuadro (videoTileWasRemoved).
+  const video = v.tiles.filter((x) => (x.local ? v.camera : true));
   const videoBy = new Map(video.map((x) => [x.local ? d.me.id : x.userId, x] as const));
   const pending = (v.call.invited ?? []).filter((x) => !x.joined && !v.call.activeUserIds.includes(x.userId));
   const toggleTranscript = () => {
     if (v.call.transcribing) { void setTranscription(false).catch(fail); return; }
     openDialog((close) => <TranscriptConsent onClose={close} onConfirm={(ai) => { close(); void setTranscription(true, ai).catch(fail); }} />);
   };
-  return (
-    <aside className={`call-dock ${min ? 'is-min' : ''} ${v.screens.length && !min ? 'has-screen' : ''}`} aria-label={t('call.title')}>
-      <div className="row call-dock-head">
-        <span className={`call-dot ${v.phase === 'live' ? 'is-live' : ''}`} aria-hidden />
-        <button className="grow ellipsis call-dock-title" onClick={() => navigate(`/c/${v.call.conversationId}`)}>
-          {conv ? (conv.name ?? others.map(nameOf).join(', ')) || t('call.title') : others.map(nameOf).join(', ') || t('call.title')}
-        </button>
-        <span className="small muted">{v.phase === 'connecting' ? t('call.connecting') : clock}</span>
-        <button className="icon-btn" aria-label={min ? t('call.expand') : t('call.minimize')} onClick={() => setMin(!min)}>{min ? '▢' : '–'}</button>
-      </div>
-      {v.call.transcribing && <div className="call-rec" role="status">⏺ {t('call.transcribingAll')}</div>}
-      {v.sharing && <SharingBar />}
-      {!min && <>
-        {v.screens.map((x) => <ScreenTile key={x.tileId} tileId={x.tileId} label={x.userId ? nameOf(x.userId) : ''} />)}
-        {video.length > 0
-          ? <div className={`call-grid n${Math.min(people.length, 4)}`}>{people.map((id) => {
-              const x = videoBy.get(id);
-              const label = nameOf(id);
-              const muted = id === d.me.id ? v.muted : v.mutedUsers.includes(id);
-              return x
-                ? <div key={id} className="call-cell"><Tile tileId={x.tileId} local={x.local} label={label} /><PersonBadges muted={muted} camera /></div>
-                : <div key={id} className={`call-tile is-avatar ${v.speaking.includes(id) ? 'is-speaking' : ''}`}>
-                    <Avatar person={personById(d, id) ?? ({ id, name: label } as any)} size={56} /><span className="call-tile-name">{label}</span><PersonBadges muted={muted} camera={false} />
-                  </div>;
-            })}</div>
-          : <div className="call-people">{people.map((id) => (
-              <div key={id} className={`call-person ${v.speaking.includes(id) ? 'is-speaking' : ''}`}>
-                <Avatar person={personById(d, id) ?? ({ id, name: nameOf(id) } as any)} size={44} /><span className="small ellipsis">{nameOf(id)}</span>
-                {(id === d.me.id ? v.muted : v.mutedUsers.includes(id)) && <span className="call-badge" title={t('call.personMuted')} aria-label={t('call.personMuted')}>🔇</span>}
-              </div>))}
-              {others.length === 0 && <div className="small muted">{t('call.waiting')}</div>}
-            </div>}
-        {pending.length > 0 && <InvitedList call={v.call} pending={pending} />}
-        {v.call.transcribing && v.captions.length > 0 && (
-          <div className="call-captions" aria-live="polite">
-            {v.captions.slice(-4).map((c) => <div key={c.resultId} className={c.partial ? 'is-partial' : ''}><b>{c.userId === d.me.id ? t('call.you') : firstName(d, c.userId, v.call.names) || '·'}:</b> {c.processing ? <span className="call-processing">⏳ {t('call.processing')}</span> : c.text}</div>)}
-          </div>
-        )}
-      </>}
-      <div className="row call-controls">
-        <button className={`call-ctl ${v.muted ? 'is-off' : ''}`} onClick={toggleMute} aria-pressed={v.muted} title={v.muted ? t('call.unmute') : t('call.mute')}>{v.muted ? '🔇' : '🎙️'}</button>
-        <button className={`call-ctl ${v.camera ? '' : 'is-off'}`} onClick={() => void toggleCamera().catch(fail)} aria-pressed={!v.camera} title={v.camera ? t('call.cameraOff') : t('call.cameraOn')}>{v.camera ? '🎥' : '📷'}</button>
-        <button className={`call-ctl ${v.call.transcribing ? 'is-rec' : ''}`} onClick={toggleTranscript} aria-pressed={v.call.transcribing} title={v.call.transcribing ? t('call.transcriptOff') : t('call.transcriptOn')}>📝</button>
-        <ScreenButton v={v} />
-        <button className="call-ctl" onClick={(e) => void openAudioMenu(e.currentTarget, v)} title={t('call.audioMenu')} aria-label={t('call.audioMenu')}>🔊</button>
-        <button className="call-ctl" onClick={() => openDialog((close) => <GuestLinkDialog call={v.call} onClose={close} />)} title={t('call.guestLink')} aria-label={t('call.guestLink')}>🔗</button>
-        <button className="btn small call-add" onClick={() => openAddToCall(v.call)} title={t('call.add')}>{t('call.addShort')}</button>
-        <span className="grow" />
-        <button className="btn small call-hang" onClick={() => void hangUp()}>{t('call.hangUp')}</button>
-      </div>
-      {v.error && <div className="small" style={{ color: 'var(--danger)' }}>{v.error === 'no_camera' ? t('call.noCamera') : v.error}</div>}
-    </aside>
-  );
+  return <>
+    {v.call.transcribing && <div className="call-rec" role="status">⏺ {t('call.transcribingAll')}</div>}
+    {v.sharing && <SharingBar />}
+    {!compact && <>
+      {v.screens.map((x) => <ScreenTile key={x.tileId} tileId={x.tileId} label={x.userId ? nameOf(x.userId) : ''} />)}
+      {video.length > 0
+        ? <div className={`call-grid n${Math.min(people.length, 4)}`}>{people.map((id) => {
+            const x = videoBy.get(id);
+            const label = nameOf(id);
+            const muted = id === d.me.id ? v.muted : v.mutedUsers.includes(id);
+            return x
+              ? <div key={id} className="call-cell"><Tile tileId={x.tileId} local={x.local} label={label} /><PersonBadges muted={muted} camera /></div>
+              : <div key={id} className={`call-tile is-avatar ${v.speaking.includes(id) ? 'is-speaking' : ''}`}>
+                  <Avatar person={personById(d, id) ?? ({ id, name: label } as any)} size={56} /><span className="call-tile-name">{label}</span><PersonBadges muted={muted} camera={false} />
+                </div>;
+          })}</div>
+        : <div className="call-people">{people.map((id) => (
+            <div key={id} className={`call-person ${v.speaking.includes(id) ? 'is-speaking' : ''}`}>
+              <Avatar person={personById(d, id) ?? ({ id, name: nameOf(id) } as any)} size={44} /><span className="small ellipsis">{nameOf(id)}</span>
+              {(id === d.me.id ? v.muted : v.mutedUsers.includes(id)) && <span className="call-badge" title={t('call.personMuted')} aria-label={t('call.personMuted')}>🔇</span>}
+            </div>))}
+            {others.length === 0 && <div className="small muted">{t('call.waiting')}</div>}
+          </div>}
+      {!pip && pending.length > 0 && <InvitedList call={v.call} pending={pending} />}
+      {v.call.transcribing && v.captions.length > 0 && (
+        <div className="call-captions" aria-live="polite">
+          {v.captions.slice(-4).map((c) => <div key={c.resultId} className={c.partial ? 'is-partial' : ''}><b>{c.userId === d.me.id ? t('call.you') : firstName(d, c.userId, v.call.names) || '·'}:</b> {c.processing ? <span className="call-processing">⏳ {t('call.processing')}</span> : c.text}</div>)}
+        </div>
+      )}
+    </>}
+    <div className="row call-controls">
+      <button className={`call-ctl ${v.muted ? 'is-off' : ''}`} onClick={toggleMute} aria-pressed={v.muted} title={v.muted ? t('call.unmute') : t('call.mute')}>{v.muted ? '🔇' : '🎙️'}</button>
+      <button className={`call-ctl ${v.camera ? '' : 'is-off'}`} onClick={() => void toggleCamera().catch(fail)} aria-pressed={!v.camera} title={v.camera ? t('call.cameraOff') : t('call.cameraOn')}>{v.camera ? '🎥' : '📷'}</button>
+      {!pip && <button className={`call-ctl ${v.call.transcribing ? 'is-rec' : ''}`} onClick={toggleTranscript} aria-pressed={v.call.transcribing} title={v.call.transcribing ? t('call.transcriptOff') : t('call.transcriptOn')}>📝</button>}
+      <ScreenButton v={v} />
+      {!pip && <button className="call-ctl" onClick={(e) => void openAudioMenu(e.currentTarget, v)} title={t('call.audioMenu')} aria-label={t('call.audioMenu')}>🔊</button>}
+      {!pip && <button className="call-ctl" onClick={() => openDialog((close) => <GuestLinkDialog call={v.call} onClose={close} />)} title={t('call.guestLink')} aria-label={t('call.guestLink')}>🔗</button>}
+      {!pip && <button className="btn small call-add" onClick={() => openAddToCall(v.call)} title={t('call.add')}>{t('call.addShort')}</button>}
+      <span className="grow" />
+      <button className="btn small call-hang" onClick={() => void hangUp()}>{t('call.hangUp')}</button>
+    </div>
+    {v.error && <div className="small" style={{ color: 'var(--danger)' }}>{v.error === 'no_camera' ? t('call.noCamera') : v.error}</div>}
+  </>;
+}
+
+// ---------- Ventana flotante (Picture-in-Picture), como Google Meet ----------
+/**
+ * - Document Picture-in-Picture (Chrome/Edge 116+): una ventana siempre encima con la llamada completa (la
+ *   interfaz se monta ahí con un portal, los videos siguen vivos). Chrome la abre sola al cambiar de pestaña
+ *   si la página registra la acción «enterpictureinpicture» de Media Session (videollamadas).
+ * - Si no existe (Safari, la app de Mac): Picture-in-Picture de un video: la pantalla compartida, el video de
+ *   quien habla o, sin cámaras, un lienzo con los participantes y quién habla.
+ */
+function usePip(v: CallView | null, d: ClientData | null) {
+  const docPip = typeof window !== 'undefined' && 'documentPictureInPicture' in window;
+  // App de escritorio sin Document PiP (el WebView de Mac): modo mini nativo, siempre encima (desktop.ts).
+  const miniPip = isDesktop && !docPip;
+  const videoPip = !miniPip && typeof document !== 'undefined' && !!document.pictureInPictureEnabled;
+  const [win, setWin] = useState<Window | null>(null);
+  const [videoOpen, setVideoOpen] = useState(false);
+  const [mini, setMini] = useState(false);
+  const live = !!v && v.phase !== 'ended';
+  const close = () => {
+    if (mini) { setMini(false); void import('../desktop.ts').then((m) => m.setCallMini(false)); }
+    if (win) { win.close(); setWin(null); }
+    if (document.pictureInPictureElement) void document.exitPictureInPicture().catch(() => {});
+  };
+  const open = async () => {
+    if (!live) return;
+    if (miniPip) { setMini(true); await (await import('../desktop.ts')).setCallMini(true); return; }
+    if (docPip) {
+      const w: Window = await (window as any).documentPictureInPicture.requestWindow({ width: 420, height: 360 });
+      // Mismos estilos que la app (hojas del documento principal).
+      for (const sheet of Array.from(document.styleSheets)) {
+        try {
+          const css = Array.from(sheet.cssRules).map((r) => r.cssText).join('\n');
+          const st = w.document.createElement('style'); st.textContent = css; w.document.head.appendChild(st);
+        } catch {
+          if (sheet.href) { const l = w.document.createElement('link'); l.rel = 'stylesheet'; l.href = sheet.href; w.document.head.appendChild(l); }
+        }
+      }
+      w.document.documentElement.className = document.documentElement.className;
+      w.document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme') ?? '');
+      w.document.title = 'chaggu';
+      w.document.body.className = 'call-pip-body';
+      w.addEventListener('pagehide', () => setWin(null));
+      setWin(w);
+      return;
+    }
+    if (videoPip) { await openVideoPip(v!, d); setVideoOpen(true); }
+  };
+  const toggle = async () => { try { if (win || mini || document.pictureInPictureElement) close(); else await open(); } catch (e) { console.warn('[pip]', e); } };
+  // Chrome abre la ventana sola al cambiar de pestaña durante la llamada (como Meet).
+  useEffect(() => {
+    const ms = (navigator as any).mediaSession;
+    if (!live || !docPip || !ms?.setActionHandler) return;
+    try { ms.setActionHandler('enterpictureinpicture', () => void open()); } catch { /* acción no soportada */ }
+    return () => { try { ms.setActionHandler('enterpictureinpicture', null); } catch { /* */ } };
+  }, [live, docPip]);
+  // Escritorio: al cerrar la ventana en plena llamada, desktop.ts pide el modo mini.
+  useEffect(() => {
+    if (!miniPip || !live) return;
+    const on = () => { if (!mini) void open(); };
+    addEventListener('chaggu:call-mini', on);
+    return () => removeEventListener('chaggu:call-mini', on);
+  }, [miniPip, live, mini]);
+  // Al colgar se cierra la ventana flotante.
+  useEffect(() => { if (!live) { close(); stopCanvasPip(); } }, [live]);
+  useEffect(() => {
+    const on = () => { setVideoOpen(false); stopCanvasPip(); };
+    document.addEventListener('leavepictureinpicture', on, true);
+    return () => document.removeEventListener('leavepictureinpicture', on, true);
+  }, []);
+  const nameOf = (id: string) => (!d ? '' : id === d.me.id ? t('call.you') : guestName(v!.call, id) || firstName(d, id, v!.call.names));
+  const portal = win && v && d ? createPortal(<div className="call-pip"><CallPanel v={v} d={d} compact={false} nameOf={nameOf} pip /></div>, win.document.body) : null;
+  return { supported: live && (docPip || miniPip || videoPip), open: !!win || videoOpen || mini, docOpen: !!win, mini, toggle, portal };
+}
+
+/** Picture-in-Picture de un solo video (Safari, WKWebView): la mejor imagen disponible. */
+async function openVideoPip(v: CallView, d: ClientData | null) {
+  const pick = (sel: string) => Array.from(document.querySelectorAll<HTMLVideoElement>(sel)).find((x) => x.readyState >= 2 && x.videoWidth > 0);
+  const el = pick('.call-dock .call-screen video') ?? pick('.call-dock .call-tile:not(.is-local) video') ?? pick('.call-dock .call-tile video');
+  if (el) { await el.requestPictureInPicture(); return; }
+  // Nadie con cámara: un lienzo con los participantes (se actualiza solo).
+  await (await canvasPip(v, d)).requestPictureInPicture();
+}
+
+let canvasTimer: ReturnType<typeof setInterval> | null = null;
+let canvasVideo: HTMLVideoElement | null = null;
+function stopCanvasPip() {
+  if (canvasTimer) clearInterval(canvasTimer);
+  canvasTimer = null;
+  if (canvasVideo) { (canvasVideo.srcObject as MediaStream | null)?.getTracks().forEach((x) => x.stop()); canvasVideo.remove(); canvasVideo = null; }
+}
+async function canvasPip(_v: CallView, d: ClientData | null) {
+  stopCanvasPip();
+  const c = document.createElement('canvas');
+  c.width = 640; c.height = 360;
+  const g = c.getContext('2d')!;
+  const draw = () => {
+    const v = currentCall();
+    if (!v) return;
+    const people = callPeople(v.call);
+    const name = (id: string) => (d && id === d.me.id ? t('call.you') : v.call.guests?.find((x) => `guest:${x.id}` === id)?.name ?? (d ? firstName(d, id, v.call.names) : ''));
+    g.fillStyle = '#151412'; g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = '#f4f1ea'; g.font = '600 22px system-ui, sans-serif'; g.fillText('chaggu', 24, 40);
+    const secs = Math.max(0, Math.floor((Date.now() - Date.parse(v.call.startedAt)) / 1000));
+    g.font = '18px system-ui, sans-serif'; g.fillStyle = '#b9b2a6';
+    g.fillText(`${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}${v.muted ? '  ·  🔇' : ''}`, c.width - 130, 40);
+    const n = Math.min(people.length, 6), r = 44, gap = (c.width - n * r * 2) / (n + 1);
+    people.slice(0, 6).forEach((id, i) => {
+      const cx = gap + r + i * (r * 2 + gap), cy = 180;
+      if (v.speaking.includes(id)) { g.beginPath(); g.arc(cx, cy, r + 6, 0, Math.PI * 2); g.fillStyle = '#3fbf6a'; g.fill(); }
+      g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fillStyle = '#3a3632'; g.fill();
+      const nm = name(id) || '·';
+      g.fillStyle = '#fff'; g.font = '600 26px system-ui, sans-serif'; g.textAlign = 'center';
+      g.fillText(nm.slice(0, 1).toUpperCase(), cx, cy + 9);
+      g.font = '16px system-ui, sans-serif'; g.fillStyle = '#e8e3d9'; g.fillText(nm.slice(0, 12), cx, cy + r + 28);
+      g.textAlign = 'left';
+    });
+  };
+  draw();
+  canvasTimer = setInterval(draw, 500);
+  const vid = document.createElement('video');
+  vid.muted = true; vid.playsInline = true;
+  vid.srcObject = c.captureStream(4);
+  vid.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;bottom:0;left:0';
+  document.body.appendChild(vid);
+  await vid.play();
+  canvasVideo = vid;
+  return vid;
 }
 
 /** Cámara apagada y micrófono silenciado de cada persona. */

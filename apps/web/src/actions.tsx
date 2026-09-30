@@ -9,7 +9,7 @@ import { previewModeMenu } from './screens/Links.tsx';
 import { SleepDialog, sleepSummary } from './screens/Sleep.tsx';
 import { MUTE_FOREVER, activeUntil, isForever, tomorrowAt8, untilText } from './silence.ts';
 import { DEFAULT_SOUND, playMessageSound } from './sound.ts';
-import { MAX_PANES, currentPanes, isOpenInPanes, openBeside } from './split.ts';
+import { MAX_PANES, currentPanes, isOpenInPanes, openBeside, splitAvailable } from './split.ts';
 
 // ---------- Diálogos globales (se pueden abrir desde cualquier menú) ----------
 let dialog: ((close: () => void) => ReactNode) | null = null;
@@ -242,7 +242,6 @@ export function treePending(conv: ConversationDTO) {
   return own + client.derivedOf(conv.id).reduce((n, x) => n + x.unread + (x.unreadMentions ?? 0), 0);
 }
 
-const splitAvailable = () => typeof matchMedia !== 'undefined' && matchMedia('(min-width: 1100px)').matches;
 /** La conversación del URL (/c/:id), si se está viendo una. */
 function currentConversationId() {
   const m = /\/c\/([^/?#]+)/.exec(location.pathname.slice(BASE.length));

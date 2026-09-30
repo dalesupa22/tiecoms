@@ -224,6 +224,8 @@ fn main() {
         if window.label() == MAIN {
           api.prevent_close();
           let _ = window.hide();
+          // Si hay una llamada, la interfaz vuelve a mostrar la ventana en modo mini (siempre encima, como Meet).
+          let _ = window.emit("chaggu:closed", ());
         }
       }
     })

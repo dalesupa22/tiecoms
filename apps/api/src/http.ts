@@ -12,7 +12,7 @@ import {
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
   ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput, ForwardSharedInput,
-  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, GuestJoinInput, GuestSecretInput, SignupConfirmInput,
+  SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, GuestJoinInput, GuestSecretInput, SignupConfirmInput, ReorderTopicsInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
 import { pool } from './db.ts';
@@ -489,6 +489,7 @@ export async function buildHttp() {
     // Temas (docs/TEMAS.md): banderitas del chat y etiqueta de cada mensaje.
     priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/topics', async (req) => ({ topics: await topics.listTopics(req.userId, req.params.id) }));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/topics', async (req) => topics.createTopic(req.userId, req.params.id, CreateTopicInput.parse(req.body)));
+    priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/topics/order', async (req) => topics.reorderTopics(req.userId, z.uuid().parse(req.params.id), ReorderTopicsInput.parse(req.body).ids));
     priv.patch<{ Params: { id: string } }>('/api/v1/topics/:id', async (req) => topics.updateTopic(req.userId, z.uuid().parse(req.params.id), UpdateTopicInput.parse(req.body)));
     priv.delete<{ Params: { id: string } }>('/api/v1/topics/:id', async (req) => topics.deleteTopic(req.userId, z.uuid().parse(req.params.id)));
     priv.put<{ Params: { id: string } }>('/api/v1/messages/:id/topic', async (req) => topics.setMessageTopic(req.userId, z.uuid().parse(req.params.id), SetMessageTopicInput.parse(req.body).topicId));

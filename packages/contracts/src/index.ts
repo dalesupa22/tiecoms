@@ -990,6 +990,8 @@ export const UpdateTopicInput = z.object({
   position: z.number().int().min(0).max(1000).optional(),
 });
 export const SetMessageTopicInput = z.object({ topicId: z.uuid().nullable() });
+/** PUT /conversations/:id/topics/order: el orden nuevo de las banderitas (arrastrar). */
+export const ReorderTopicsInput = z.object({ ids: z.array(z.uuid()).min(1).max(100) });
 
 export interface BootstrapDTO {
   contract: string;

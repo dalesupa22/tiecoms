@@ -119,6 +119,8 @@ data class SharedMailDTO(
 @Serializable data class MailCommentsPage(val comments: List<SharedMailCommentDTO> = emptyList())
 @Serializable data class MailCommentResult(val comment: SharedMailCommentDTO = SharedMailCommentDTO(), val email: SharedMailDTO = SharedMailDTO())
 @Serializable data class MailBodyResult(val body: String = "")
+/** GET /mail/shared/:id/html: el HTML ya limpio por el API; null si el correo solo tiene texto. */
+@Serializable data class MailHtmlResult(val html: String? = null)
 @Serializable data class MailTaskResult(val issue: IssueDTO? = null, val email: SharedMailDTO = SharedMailDTO())
 @Serializable data class MailConnectResult(val url: String = "")
 @Serializable data class MailConfirmResult(val ok: Boolean = false, val provider: String = "")

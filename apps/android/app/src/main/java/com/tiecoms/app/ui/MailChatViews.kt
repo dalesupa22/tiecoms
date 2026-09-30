@@ -334,7 +334,9 @@ internal fun MailCard(emailId: String, data: BootstrapDTO, canPost: Boolean, onO
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            if (e.snippet.isNotBlank()) Text(e.snippet, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("mailSnippet-${e.id}"))
+            // Sin «alt [http://…png]» ni direcciones sueltas (web: mailSnippet).
+            val snip = remember(e.snippet) { com.tiecoms.app.core.MailText.snippet(e.snippet) }
+            if (snip.isNotBlank()) Text(snip, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("mailSnippet-${e.id}"))
             if (e.attachments.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 val ctx = LocalContext.current
                 val container = LocalContainer.current

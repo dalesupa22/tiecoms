@@ -175,6 +175,15 @@ fun MailDetailScreen(id: String, mode: String, onBack: () -> Unit, onOpenIssue: 
     var orig by remember(id) { mutableStateOf<String?>(null) }
     var origBusy by remember { mutableStateOf(false) }
     var task by remember { mutableStateOf(false) }
+    // El correo con su diseño (GET /mail/shared/:id/html). Si no tiene HTML, falla o el API aún no lo tiene (404), queda el texto.
+    var html by remember(id) { mutableStateOf(MailHtmlCache.get(id)) }
+    var asText by rememberSaveable(id) { mutableStateOf(false) }
+    val wantsHtml = e != null && !e.isWhatsApp
+    LaunchedEffect(id, wantsHtml) {
+        if (!wantsHtml || MailHtmlCache.has(id)) return@LaunchedEffect
+        val got = try { client.mailHtml(id) } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Exception) { null }
+        MailHtmlCache.put(id, got); html = got
+    }
     val mine = e?.sharedBy == data.me.id
     // WhatsApp no se responde desde chaggu: solo comentarios y tarea.
     val canReplyHere = mine && e?.isWhatsApp == false
@@ -212,14 +221,25 @@ fun MailDetailScreen(id: String, mode: String, onBack: () -> Unit, onOpenIssue: 
                         }, modifier = Modifier.testTag("mailCancelSchedule")) { Text(stringResource(R.string.web_mail_cancelSchedule)) }
                     }
                     MailMeta(e.from, e.to, e.cc, e.sentAt, e.provider)
-                    val body = orig ?: if (e.full) e.body.ifBlank { stringResource(R.string.web_mail_noBody) } else "${e.snippet}…"
-                    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-                        Text(body, style = MaterialTheme.typography.bodyMedium, maxLines = if (bodyOpen || orig != null) Int.MAX_VALUE else 10, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(12.dp).testTag(if (e.full) "mailBody" else "mailBodyLoading"))
+                    val design = html?.takeIf { !asText && orig == null && !e.isWhatsApp }
+                    if (design != null) Surface(color = Color.White, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        MailHtmlView(design, client.baseUrl)
+                    } else Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        val tagBody = Modifier.padding(12.dp).testTag(if (e.full) "mailBody" else "mailBodyLoading")
+                        val lines = if (bodyOpen || orig != null) Int.MAX_VALUE else 10
+                        // WhatsApp es texto de un chat: se deja tal cual. El correo va sin «alt [http://…png]» y con «dominio ↗».
+                        val raw = orig ?: if (e.full) e.body.takeIf { it.isNotBlank() } else null
+                        if (raw != null && !e.isWhatsApp) MailBodyText(raw, lines, tagBody)
+                        else Text(raw ?: if (e.full) stringResource(R.string.web_mail_noBody) else (if (e.isWhatsApp) e.snippet else com.tiecoms.app.core.MailText.snippet(e.snippet)) + "…",
+                            style = MaterialTheme.typography.bodyMedium, maxLines = lines, overflow = TextOverflow.Ellipsis, modifier = tagBody)
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (e.full && orig == null && e.body.length > 400) TextButton(onClick = { bodyOpen = !bodyOpen }) { Text(stringResource(if (bodyOpen) R.string.web_mail_less else R.string.web_mail_moreBody)) }
-                        if (e.full && e.trimmed && orig == null) TextButton(enabled = !origBusy, onClick = {
+                        if (html != null && orig == null && !e.isWhatsApp) TextButton(onClick = { asText = !asText }, modifier = Modifier.testTag("mailAsText")) {
+                            Text(stringResource(if (asText) R.string.web_mail_asDesign else R.string.web_mail_asText))
+                        }
+                        val textShown = design == null
+                        if (textShown && e.full && orig == null && e.body.length > 400) TextButton(onClick = { bodyOpen = !bodyOpen }) { Text(stringResource(if (bodyOpen) R.string.web_mail_less else R.string.web_mail_moreBody)) }
+                        if (textShown && e.full && e.trimmed && orig == null) TextButton(enabled = !origBusy, onClick = {
                             origBusy = true
                             container.scope.launch {
                                 runCatching { client.mailOriginal(id) }.onSuccess { orig = it; bodyOpen = true }.onFailure { container.toast(errorText(ctx, it)) }
@@ -892,7 +912,7 @@ fun ForwardCardSheet(emailId: String, onClose: () -> Unit, onDone: (String) -> U
                 Column(Modifier.weight(1f)) {
                     Text(if (e.isWhatsApp) e.wa?.chatName ?: e.subject else e.subject.ifBlank { stringResource(R.string.web_mail_noSubject) }, fontWeight = FontWeight.Bold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(e.snippet, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(if (e.isWhatsApp) e.snippet else com.tiecoms.app.core.MailText.snippet(e.snippet), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }

@@ -213,6 +213,10 @@
     <string name="web_mail_less">Ver menos</string>
     <!-- mail.moreBody -->
     <string name="web_mail_moreBody">Ver el correo completo</string>
+    <!-- mail.asText -->
+    <string name="web_mail_asText">Ver solo el texto</string>
+    <!-- mail.asDesign -->
+    <string name="web_mail_asDesign">Ver con su diseño</string>
     <!-- mail.attachmentsOnDemand (name) -->
     <string name="web_mail_attachmentsOnDemand">Adjuntos · se bajan de %1$s al abrirlos</string>
     <!-- mail.open -->

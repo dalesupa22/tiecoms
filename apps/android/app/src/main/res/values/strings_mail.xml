@@ -213,6 +213,10 @@
     <string name="web_mail_less">Show less</string>
     <!-- mail.moreBody -->
     <string name="web_mail_moreBody">Show the whole email</string>
+    <!-- mail.asText -->
+    <string name="web_mail_asText">Show plain text</string>
+    <!-- mail.asDesign -->
+    <string name="web_mail_asDesign">Show with its design</string>
     <!-- mail.attachmentsOnDemand (name) -->
     <string name="web_mail_attachmentsOnDemand">Attachments · fetched from %1$s when opened</string>
     <!-- mail.open -->

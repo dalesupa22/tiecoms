@@ -133,6 +133,8 @@ class Notifier(private val context: Context) {
         shortcutLabel: String = title,
         /** Sonido del chat ya resuelto (docs/SONIDOS.md): usa el canal de ese sonido; null = el canal «Mensajes» de siempre. */
         sound: String? = null,
+        /** Tema del mensaje, si se conoce (1.7.5): va en el enlace para abrir filtrado en él. */
+        topicId: String? = null,
     ): Boolean {
         if (!enabled()) return false
         val lines = history.getOrPut(conversationId) { ArrayDeque() }
@@ -161,7 +163,9 @@ class Notifier(private val context: Context) {
             .build()
         runCatching { ShortcutManagerCompat.pushDynamicShortcut(context, shortcut) }
         val bubbleIntent = PendingIntent.getActivity(context, ("bubble$conversationId").hashCode(),
-            Intent(context, BubbleActivity::class.java).setAction(Intent.ACTION_VIEW).setData(Uri.parse(deep)),
+            // 1.7.5: la burbuja abre en el mensaje del aviso (y en su tema), no en «General».
+            Intent(context, BubbleActivity::class.java).setAction(Intent.ACTION_VIEW)
+                .setData(Uri.parse(com.tiecoms.app.core.DeepLinks.conversationUri(conversationId, seq, messageId, topicId))),
             PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
         val bubble = NotificationCompat.BubbleMetadata.Builder(bubbleIntent, shortcutIcon).setDesiredHeight(640).setSuppressNotification(false).build()
         val reply = NotificationCompat.Action.Builder(R.drawable.ic_stat_chaggu, context.getString(R.string.notif_reply), actionIntent(ACTION_REPLY, conversationId, mutable = true))
@@ -183,7 +187,7 @@ class Notifier(private val context: Context) {
             .setAutoCancel(true)
             .setOnlyAlertOnce(false)
             .setSilent(silent)
-            .setContentIntent(openIntent(openUri ?: (deep + (seq?.let { "?m=$it" } ?: "")), conversationId.hashCode()))
+            .setContentIntent(openIntent(openUri ?: com.tiecoms.app.core.DeepLinks.conversationUri(conversationId, seq, messageId, topicId), conversationId.hashCode()))
             .build()
         val posted = notify(conversationId.hashCode(), n)
         if (!posted) synchronized(lines) { lines.remove(line) }

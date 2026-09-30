@@ -202,7 +202,16 @@ fun ConversationScreen(
     embedded: Boolean = false,
     /** Sidechat a desplegar al abrir (notificación TC_SIDE: …/c/<origen>?side=<sidechat>). */
     openSide: String? = null,
+    /** Tema que trae el aviso o el enlace (?t=): pista para el filtro si el mensaje no se puede cargar. */
+    jumpTopicId: String? = null,
+    /** Burbuja flotante de Android (1.7.5): embebida, pero con la fila de temas y las etiquetas, para quedar en el tema. */
+    bubble: Boolean = false,
+    /** Burbuja ya abierta: salto pedido por un aviso nuevo (seq o messageId) y un contador para repetirlo. */
+    bubbleJump: Pair<Long?, String?>? = null,
+    bubbleJumpKey: Int = 0,
 ) {
+    // Fila de temas: a pantalla completa y en la burbuja; no en el panel de un sidechat.
+    val showTopics = !embedded || bubble
     val client = LocalClient.current
     val container = LocalContainer.current
     val ctx = LocalContext.current
@@ -285,7 +294,8 @@ fun ConversationScreen(
     // Temas (docs/TEMAS.md): null = «General» (así abre el chat), Topics.ALL = «Todo», o el id de un tema, que además es
     // el tema de lo que escribo.
     val topics = state.topics[id].orEmpty()
-    var topicFilter by rememberSaveable(id) { mutableStateOf<String?>(null) }
+    // Sin fila de temas (panel embebido) se abre en «Todo», para no esconder mensajes de un tema sin forma de cambiarlo.
+    var topicFilter by rememberSaveable(id) { mutableStateOf<String?>(if (showTopics) null else com.tiecoms.app.core.Topics.ALL) }
     val shownFilter = com.tiecoms.app.core.Topics.validFilter(topics, topicFilter)
     val activeTopic = com.tiecoms.app.core.Topics.composeTopic(topics, topicFilter)?.let { f -> topics.firstOrNull { it.id == f } }
     val topicById = remember(topics) { topics.associateBy { it.id } }
@@ -339,9 +349,12 @@ fun ConversationScreen(
     fun jumpTo(seq: Long) {
         scope.launch {
             if (!client.ensureMessage(id, seq)) { readLoadFailed = true; return@launch }
-            // El filtro pasa al tema del mensaje, o a «General» si no tiene; en «Todo» no cambia (docs/TEMAS.md).
+            // El filtro pasa al tema del mensaje, o a «Todo» si no tiene; en «Todo» no cambia (docs/TEMAS.md, 1.7.5).
+            // Los temas pueden no estar cargados todavía (burbuja o notificación en frío): se esperan, si no el salto
+            // creía que no había temas y dejaba el chat en «General».
             val target = client.state.value.conversations[id]?.messages?.firstOrNull { it.seq == seq }
-            topicFilter = com.tiecoms.app.core.Topics.jumpFilter(client.state.value.topics[id].orEmpty(), topicFilter, target)
+            val topicsNow = client.state.value.topics[id] ?: runCatching { client.loadTopics(id) }.getOrDefault(emptyList())
+            topicFilter = com.tiecoms.app.core.Topics.jumpFilter(topicsNow, topicFilter, target, jumpTopicId) { iid -> client.state.value.issues[iid]?.topicId }
             if (seq !in revealed) revealed.add(seq)
             var idx = -1
             for (i in 0 until 10) {
@@ -411,7 +424,12 @@ fun ConversationScreen(
         if (jumpSeq != null && jumpSeq > 0) jumpTo(jumpSeq)
         else if (jumpMessageId != null) {
             val seq = client.ensureMessageId(id, jumpMessageId)
-            if (seq != null) jumpTo(seq) else readLoadFailed = true
+            if (seq != null) jumpTo(seq) else {
+                // El mensaje no apareció: al menos el tema que traía el aviso.
+                val topicsNow = client.state.value.topics[id] ?: runCatching { client.loadTopics(id) }.getOrDefault(emptyList())
+                topicFilter = com.tiecoms.app.core.Topics.jumpFilter(topicsNow, topicFilter, null, jumpTopicId)
+                readLoadFailed = true
+            }
         }
         else if (!positioned) try {
             // Load back to the unread frontier. A failed page must not position at the end or clear unread.
@@ -463,6 +481,14 @@ fun ConversationScreen(
             if (e is kotlinx.coroutines.CancellationException) throw e
             readLoadFailed = true
         }
+    }
+
+    // Burbuja ya abierta que recibe otro aviso: salta al mensaje nuevo (y a su tema) sin recrear la pantalla.
+    LaunchedEffect(bubbleJumpKey, conv?.loaded == true) {
+        val (seq, mid) = bubbleJump ?: return@LaunchedEffect
+        if (bubbleJumpKey == 0 || conv?.loaded != true) return@LaunchedEffect
+        val s = seq?.takeIf { it > 0 } ?: mid?.let { client.ensureMessageId(id, it) }
+        if (s != null) jumpTo(s)
     }
 
     // Salto pedido para este chat ya abierto (enlace o notificación): sin reabrirlo, así «Todo» no se pierde.
@@ -761,7 +787,7 @@ fun ConversationScreen(
                 onPins = { showPins = true }, onOpenIssue = onOpenIssue, onNewIssue = { newIssue = true to null }, onNewEvent = { meeting = true to null },
                 onOpenEvent = onOpenEvent, onOpenThread = { t -> sideOpen = t })
             // Temas (docs/TEMAS.md): banderitas bajo la barra de accesos, con scroll horizontal.
-            if (!embedded) TopicDock(meta, topics, shownFilter, topicCounts, topicUnread, onFilter = { f ->
+            if (showTopics) TopicDock(meta, topics, shownFilter, topicCounts, topicUnread, onFilter = { f ->
                 topicFilter = f
                 scope.launch { runCatching { listState.scrollToItem(0) }; follow = true }
             })
@@ -837,7 +863,7 @@ fun ConversationScreen(
                                     onOpenPdf = { a, sign -> pdfViewer = a to sign; pdfSaved = a.id + "|" + (if (sign) "1" else "0") },
                                     canReact = canReact(item.m), reactionActions = reactionActions,
                                     onReact = { e, on -> react(item.m, e, on) }, onMoreReactions = { pickerFor = item.m },
-                                    topic = if (embedded || item.m.deletedAt != null) null else item.m.topicId?.let { topicById[it] },
+                                    topic = if (!showTopics || item.m.deletedAt != null) null else item.m.topicId?.let { topicById[it] },
                                     highlightQuery = searchHighlight,
                                     topicBy = com.tiecoms.app.core.Topics.setBy(item.m)?.let { by -> if (by == me) stringResource(R.string.common_you_short) else Names.person(data, by)?.name?.substringBefore(' ') ?: "" },
                                 )

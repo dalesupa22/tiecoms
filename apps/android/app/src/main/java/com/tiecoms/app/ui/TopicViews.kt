@@ -211,6 +211,9 @@ fun TopicDock(conv: ConversationDTO, topics: List<TopicDTO>, filter: String?, co
     val snackbar = LocalSnackbar.current
     // Orden de llegada: el más antiguo primero (position sigue el orden de creación; estable si empatan).
     val active = remember(topics) { Topics.ordered(topics) }
+    // 1.7.5: lo que se ve tras «General» y «Todo»: primero los temas con no leídos, luego el resto (los dos en el orden
+    // guardado). Al leerse, el tema vuelve a su lugar. El arrastre sigue sobre [active], el orden guardado.
+    val row = remember(topics, unread) { Topics.rowOrder(topics, unread) }
     // Arrastrar para reordenar (mantener presionado y mover; solo quien puede escribir): el tema arrastrado y cuánto se movió.
     val rowState = androidx.compose.foundation.lazy.rememberLazyListState()
     var dragging by remember { mutableStateOf<String?>(null) }
@@ -286,7 +289,7 @@ fun TopicDock(conv: ConversationDTO, topics: List<TopicDTO>, filter: String?, co
                     selected = filter == Topics.ALL, tag = "topicAll", onClick = { onFilter(if (filter == Topics.ALL) null else Topics.ALL) },
                     stripe = MaterialTheme.colorScheme.outlineVariant, hint = stringResource(R.string.topic_all_hint), a11y = a11y)
             }
-            items(active, key = { it.id }) { t ->
+            items(row, key = { it.id }) { t ->
                 val (bg, ink) = topicColors(t.color)
                 val isDragged = dragging == t.id
                 val over = dragging != null && !isDragged && dropTarget() == t.id

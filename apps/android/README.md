@@ -12,6 +12,11 @@ App nativa en Kotlin + Jetpack Compose (Material 3). No usa WebView ni Capacitor
 | Marca | **Chaggu** desde 1.6.0 (antes TieComs). Cambia solo lo visible: nombre, textos, dominios, ícono, splash y colores (tinta `#17161F`, mandarina `#FF5A36`, papel `#F6F3EC`). Se publica como app nueva: `applicationId` `com.chaggu.app` y esquema propio `chaggu://` (el SSO pide `redirect_scheme=chaggu`), para convivir con la app TieComs instalada. Lo demás interno se mantiene: `namespace`/paquetes Kotlin `com.tiecoms.app`, clave de subida `tiecoms-upload`, proyecto Firebase `tiecoms`, headers `x-tiecoms-*`, claves de SharedPreferences, IDs de canales y nombres de sonidos. |
 | Toolchain | Gradle 8.14.3 (wrapper), AGP 8.13.2, Kotlin 2.3.21 y JDK 17 |
 
+## Entrega 1.7.5 (44): orden de los temas y abrir en el tema del mensaje
+
+- **Fila de temas** (`Topics.rowOrder` / `rowKeys`): «General», «Todo», los temas con no leídos para mí (en el orden guardado) y luego el resto en el orden guardado; sin repetidos. Al leerse, el tema vuelve a su lugar. El arrastre sigue sobre el orden guardado (`Topics.ordered`). Los no leídos salen de los mensajes del cliente (seq > leído, de otra persona, texto, no borrado).
+- **Abrir en el tema y el mensaje**: burbuja de Android (ahora con la fila de temas), notificación (FCM y socket: `chaggu://c/<id>?m=&mid=&t=`, `DeepLinks.conversationUri`), mención, búsqueda y enlaces dejan el chat filtrado en el tema del mensaje y resaltado en él; sin tema (o tema archivado), en «Todo» (`Topics.jumpFilter`). El salto espera los temas del API antes de decidir. Desde la lista con no leídos: el tema del primer no leído, o «General» si no tiene (`Topics.autoTopic`). El push acepta `seq` y `topicId` opcionales. `TopicsUnreadFirstTest`.
+
 ## Entrega 1.6.7 (26): temas del chat, tareas y aviso de actualización
 
 - **Temas del chat** (`core/Topics.kt`, `ui/TopicViews.kt`, docs/TEMAS.md): banderitas bajo la barra de accesos que filtran el chat y ponen el tema a lo que se envía; etiqueta por mensaje y «🏷 Tema» en su menú. `TopicsTest`.

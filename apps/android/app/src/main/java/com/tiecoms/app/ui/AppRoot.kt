@@ -351,9 +351,9 @@ private fun MainNav() {
         container.chatJump.value = id to seq
         return true
     }
-    fun openConv(id: String, seq: Long? = null, side: String? = null, messageId: String? = null) {
+    fun openConv(id: String, seq: Long? = null, side: String? = null, messageId: String? = null, topicId: String? = null) {
         if (jumpHere(id, seq, side, messageId)) return
-        com.tiecoms.app.platform.Perf.chatTapped().let { nav.navigate("conv/$id?m=${seq ?: ""}&side=${side ?: ""}&mid=${messageId ?: ""}") { launchSingleTop = true } }
+        com.tiecoms.app.platform.Perf.chatTapped().let { nav.navigate("conv/$id?m=${seq ?: ""}&side=${side ?: ""}&mid=${messageId ?: ""}&t=${topicId ?: ""}") { launchSingleTop = true } }
     }
     fun tab(r: String) = nav.navigate(r) { popUpTo(nav.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true }
     // ✏️ y «＋ Crear» de Grupos, DMs, Asuntos y Calendario (docs/GRUPOS.md › Barra de arriba).
@@ -376,7 +376,7 @@ private fun MainNav() {
         when (p) {
             is DeepLink.Conversation ->
                 if (data.conversations.any { it.id == p.id }) {
-                    if (!jumpHere(p.id, p.seq, p.side, p.messageId)) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.id, p.seq, p.side, p.messageId) }
+                    if (!jumpHere(p.id, p.seq, p.side, p.messageId)) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.id, p.seq, p.side, p.messageId, p.topicId) }
                 }
                 // Sidechat de un chat que no puedo leer (colega que no está en el grupo): el sidechat a pantalla completa.
                 else if (p.side != null && data.conversations.any { it.id == p.side }) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.side) }
@@ -503,8 +503,9 @@ private fun MainNav() {
             composable("readonly/{id}?name={name}", arguments = listOf(navArgument("name") { type = NavType.StringType; defaultValue = "" })) {
                 ReadOnlyGroupScreen(it.arguments?.getString("id") ?: "", it.arguments?.getString("name") ?: "", onBack = { nav.popBackStack() })
             }
-            composable("conv/{id}?m={m}&side={side}&mid={mid}", arguments = listOf(
+            composable("conv/{id}?m={m}&side={side}&mid={mid}&t={t}", arguments = listOf(
                 navArgument("m") { type = NavType.StringType; nullable = true; defaultValue = null },
+                navArgument("t") { type = NavType.StringType; nullable = true; defaultValue = null },
                 navArgument("side") { type = NavType.StringType; nullable = true; defaultValue = null },
                 navArgument("mid") { type = NavType.StringType; nullable = true; defaultValue = null },
             )) {
@@ -513,6 +514,7 @@ private fun MainNav() {
                     id = id, jumpSeq = it.arguments?.getString("m")?.toLongOrNull(),
                     jumpMessageId = it.arguments?.getString("mid")?.takeIf { s -> s.isNotBlank() },
                     openSide = it.arguments?.getString("side")?.takeIf { s -> s.isNotBlank() },
+                    jumpTopicId = it.arguments?.getString("t")?.takeIf { s -> s.isNotBlank() },
                     onBack = { if (!nav.popBackStack()) tab("home") },
                     onDetails = { nav.navigate("details/$id") { launchSingleTop = true } },
                     onOpenConversation = { cid, seq -> openConv(cid, seq) },

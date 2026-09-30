@@ -35,6 +35,9 @@ data class PushMessage(
     val kind: String? = null,
     /** Push «📞 Llamada perdida» (type message): la llamada que me perdí; quita el aviso de llamada entrante si sigue. */
     val callMissed: String? = null,
+    /** 1.7.5, opcionales: seq y tema del mensaje, si el servidor los manda (hoy solo manda messageId). */
+    val seq: Long? = null,
+    val topicId: String? = null,
 )
 
 object PushPayload {
@@ -71,6 +74,8 @@ object PushPayload {
             callId = s("callId"),
             kind = s("kind"),
             callMissed = s("callMissed"),
+            seq = s("seq")?.toLongOrNull()?.takeIf { it > 0 },
+            topicId = s("topicId"),
         )
     }
 

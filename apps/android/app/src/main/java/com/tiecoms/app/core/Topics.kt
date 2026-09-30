@@ -43,7 +43,30 @@ object Topics {
     fun archived(list: List<TopicDTO>): List<TopicDTO> = list.filter { it.archived }
 
     /** 1.7.4: la fila en orden de llegada (position; estable si empatan). El orden lo cambia quien arrastra y es del chat. */
-    fun ordered(list: List<TopicDTO>): List<TopicDTO> = active(list).sortedBy { it.position }
+    fun ordered(list: List<TopicDTO>): List<TopicDTO> = active(list).distinctBy { it.id }.sortedBy { it.position }
+
+    /** Clave de «General» en la fila ([rowKeys]); «Todo» es [ALL]. Los ids de los temas nunca chocan con estas claves. */
+    const val GENERAL = "__general"
+
+    /**
+     * 1.7.5 (pedido de Danny del 30-sep-2026): los temas de la fila después de «General» y «Todo». Primero los que tienen no
+     * leídos para mí ([unread] > 0, clave = id del tema), de izquierda a derecha en el orden guardado; después el resto en el
+     * orden guardado (arrastre / llegada). Nunca se repite un tema. Al leerse, el tema vuelve a su lugar. El arrastre sigue
+     * operando sobre [ordered] (el orden guardado), no sobre este.
+     */
+    fun rowOrder(list: List<TopicDTO>, unread: Map<String, Int>): List<TopicDTO> {
+        val (withUnread, rest) = ordered(list).partition { (unread[it.id] ?: 0) > 0 }
+        return withUnread + rest
+    }
+
+    /**
+     * La fila completa como claves: [GENERAL] siempre primera y [ALL] segunda (solo si hay temas activos; sin temas son la
+     * misma banderita), luego [rowOrder]. Sin repetidos.
+     */
+    fun rowKeys(list: List<TopicDTO>, unread: Map<String, Int>): List<String> {
+        val topics = rowOrder(list, unread).map { it.id }
+        return (if (topics.isEmpty()) listOf(GENERAL) else listOf(GENERAL, ALL) + topics).distinct()
+    }
 
     /**
      * Soltar [from] sobre [target] (dropOn de la web): el orden nuevo de los ids activos, o null si no cambia nada.
@@ -121,13 +144,21 @@ object Topics {
     fun composeTopic(topics: List<TopicDTO>, filter: String?): String? = validFilter(topics, filter)?.takeIf { it != ALL }
 
     /**
-     * Saltar a un mensaje (búsqueda, mención, enlace o notificación): el filtro pasa a su tema, o a «General» si no tiene
-     * (o su tema ya no está activo). En «Todo» no cambia.
+     * Saltar a un mensaje (burbuja, notificación, búsqueda, mención o enlace; pedido de Danny del 30-sep-2026): el filtro
+     * pasa al tema del mensaje; si no tiene (o su tema ya no está activo), a «Todo», donde se ve con su contexto. En «Todo»
+     * no cambia. Sin temas activos, null («General» y «Todo» son lo mismo). [hintTopic] es el tema que trae el aviso, por si el
+     * mensaje no se pudo cargar ([target] null); sin mensaje ni pista, el filtro se queda como está. [issueTopic] da el tema
+     * de la tarea cuando el destino es su tarjeta.
      */
-    fun jumpFilter(topics: List<TopicDTO>, current: String?, target: MessageDTO?): String? {
+    fun jumpFilter(topics: List<TopicDTO>, current: String?, target: MessageDTO?, hintTopic: String? = null,
+                   issueTopic: (String) -> String? = { null }): String? {
         val cur = validFilter(topics, current)
-        if (cur == ALL || target == null) return cur
-        return target.topicId?.takeIf { it in activeIds(topics) }
+        val active = activeIds(topics)
+        if (active.isEmpty()) return null
+        if (cur == ALL) return ALL
+        if (target == null) return hintTopic?.takeIf { it in active } ?: cur
+        val t = target.topicId ?: if (target.kind == "system") cardIssueId(target)?.let(issueTopic) else null
+        return t?.takeIf { it in active } ?: ALL
     }
 
     /** Lo que cuenta como «sin leer» en los números de las banderitas: texto de otra persona, no eliminado, después de [readSeq]. */
@@ -149,13 +180,11 @@ object Topics {
     }
 
     /**
-     * Al abrir un chat con no leídos: si todos están en un solo tema activo, el id de ese tema (el chat abre filtrado ahí);
-     * si están repartidos, hay no leídos sin tema o no hay ninguno, null (abre en «General»).
+     * Al abrir un chat con no leídos desde la lista (1.7.5): el tema del primer no leído (el chat abre filtrado ahí, en ese
+     * mensaje). Si el primer no leído no tiene tema activo, o no hay ninguno, null (abre en «General», donde está).
      */
-    fun autoTopic(messages: List<MessageDTO>, activeIds: Set<String>, readFrom: Long, me: String?): String? {
-        val keys = messages.filter { countsAsUnread(it, readFrom, me) }.map { it.topicId?.takeIf { t -> t in activeIds } ?: "" }.toSet()
-        return keys.singleOrNull()?.takeIf { it.isNotEmpty() }
-    }
+    fun autoTopic(messages: List<MessageDTO>, activeIds: Set<String>, readFrom: Long, me: String?): String? =
+        messages.filter { countsAsUnread(it, readFrom, me) }.minByOrNull { it.seq }?.topicId?.takeIf { it in activeIds }
 
     /** El primer no leído del tema elegido al abrir: ahí va la línea «N mensajes nuevos». */
     fun firstUnreadIn(messages: List<MessageDTO>, topicId: String, readFrom: Long, me: String?): Long? =

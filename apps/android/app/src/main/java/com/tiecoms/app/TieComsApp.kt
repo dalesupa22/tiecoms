@@ -306,7 +306,9 @@ class AppContainer(private val app: Application) {
                     cachedPushAvatar(p.authorAvatarUrl), silent = !settings.soundsEnabled, badge = p.badge, messageId = p.messageId,
                     shortcutLabel = if (isGroup) conversationName(p.conversationId).ifBlank { p.title } else p.title,
                     // Sonido del chat si ya hay snapshot (el push remoto todavía no trae el nombre: docs/SONIDOS.md › pendiente).
-                    sound = client.value.meta(p.conversationId)?.let { com.tiecoms.app.core.Sounds.effective(it.sound, client.value.state.value.data?.me?.messageSound) })
+                    sound = client.value.meta(p.conversationId)?.let { com.tiecoms.app.core.Sounds.effective(it.sound, client.value.state.value.data?.me?.messageSound) },
+                    // 1.7.5: tocar el aviso o abrir la burbuja deja el chat en el tema del mensaje y en el mensaje.
+                    seq = p.seq, topicId = p.topicId)
             }
             // «Laura reaccionó 👍» (TC_MESSAGE, collapseId react-<id>): tocar abre la conversación en ese mensaje.
             // «Laura te asignó una tarea»: tocar abre el asunto (y antes el chat, si lo puedo leer).
@@ -315,7 +317,7 @@ class AppContainer(private val app: Application) {
                 openUri = "chaggu://issue/${p.issueId ?: ""}" + if (p.inChat) "?c=${p.conversationId}" else "")
             "reaction" -> notifier.showMessage(p.conversationId, p.title, listOf(p.subtitle, p.body).filter { it.isNotBlank() }.joinToString(" · "),
                 silent = !settings.soundsEnabled, tag = "react-" + (p.messageId ?: p.conversationId),
-                openUri = "chaggu://c/${p.conversationId}" + (p.messageId?.let { "?mid=$it" } ?: ""))
+                openUri = com.tiecoms.app.core.DeepLinks.conversationUri(p.conversationId, p.seq, p.messageId, p.topicId))
             else -> notifier.showMessage(p.conversationId, p.title, listOf(p.subtitle, p.body).filter { it.isNotBlank() }.joinToString(" · "),
                 silent = !settings.soundsEnabled, tag = p.type + ":" + (if (p.minutes != null) "soon:" else "") + (p.reminderId ?: p.eventId ?: p.messageId))
         }
@@ -519,7 +521,8 @@ class AppContainer(private val app: Application) {
                             notifier.showConversation(m.conversationId, chatTitle, isGroup || side != null,
                                 m.authorId ?: "?", authorName, if (m.viewOnce) com.tiecoms.app.core.ViewOnce.preview(m, app.getString(R.string.vo_photo), app.getString(R.string.vo_voice), app.getString(R.string.vo_message)) else m.body.take(300), cachedPushAvatar(author?.avatarUrl),
                                 silent = ctx.foreground || !settings.soundsEnabled, badge = c.badge(), messageId = m.id, seq = m.seq, openUri = open,
-                                shortcutLabel = if (isGroup && side == null) conversationName(m.conversationId) else chatTitle, sound = chatSound)
+                                shortcutLabel = if (isGroup && side == null) conversationName(m.conversationId) else chatTitle, sound = chatSound,
+                                topicId = m.topicId)
                         })
                     when (outcome) {
                         com.tiecoms.app.core.Notices.Outcome.SHOW -> if (ctx.foreground) sounds.playMessage(chatSound, mentioned)

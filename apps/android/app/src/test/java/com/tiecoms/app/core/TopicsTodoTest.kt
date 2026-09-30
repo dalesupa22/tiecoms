@@ -58,11 +58,13 @@ class TopicsTodoTest {
         assertNull(Topics.composeTopic(topics, "z")) // archivado
     }
 
-    @Test fun `saltar a un mensaje cambia el filtro a su tema o a General y en Todo no cambia`() {
+    @Test fun `saltar a un mensaje cambia el filtro a su tema o a Todo y en Todo no cambia`() {
         assertEquals("a", Topics.jumpFilter(topics, null, m(9, "a")))
         assertEquals("a", Topics.jumpFilter(topics, "b", m(9, "a")))
-        assertNull(Topics.jumpFilter(topics, "b", m(9)))
-        assertNull(Topics.jumpFilter(topics, "a", m(9, "z"))) // tema archivado: General
+        // 1.7.5: sin tema, «Todo» (antes «General»).
+        assertEquals(Topics.ALL, Topics.jumpFilter(topics, "b", m(9)))
+        assertEquals(Topics.ALL, Topics.jumpFilter(topics, null, m(9)))
+        assertEquals(Topics.ALL, Topics.jumpFilter(topics, "a", m(9, "z"))) // tema archivado: sin tema
         assertEquals(Topics.ALL, Topics.jumpFilter(topics, Topics.ALL, m(9, "a")))
         assertEquals(Topics.ALL, Topics.jumpFilter(topics, Topics.ALL, m(9)))
     }
@@ -78,15 +80,17 @@ class TopicsTodoTest {
         assertEquals(emptyMap<String, Int>(), Topics.unread(msgs, active, readSeq = 8, me = me))
     }
 
-    @Test fun `al abrir con todo lo no leido en un tema abre en esa banderita`() {
+    @Test fun `al abrir con no leidos abre en el tema del primer no leido`() {
         val onlyA = listOf(m(1), m(2, "b"), m(3, "a"), m(4, me.let { "a" }), m(5, author = me), m(6, kind = "system"))
         // No leídos (>2): 3 y 4 en «a»; el 5 es mío y el 6 de sistema no cuentan → abre en «a», en el primer no leído (3).
         assertEquals("a", Topics.autoTopic(onlyA, active, readFrom = 2, me = me))
         assertEquals(3L, Topics.firstUnreadIn(onlyA, "a", 2, me))
-        // Repartido entre temas: abre en «General».
-        assertNull(Topics.autoTopic(listOf(m(3, "a"), m(4, "b")), active, 2, me))
-        // Hay no leídos sin tema: «General».
-        assertNull(Topics.autoTopic(listOf(m(3, "a"), m(4)), active, 2, me))
+        // 1.7.5: repartido entre temas, el del primer no leído.
+        assertEquals("a", Topics.autoTopic(listOf(m(3, "a"), m(4, "b")), active, 2, me))
+        assertEquals("b", Topics.autoTopic(listOf(m(4, "a"), m(3, "b")), active, 2, me)) // por seq, no por posición en la lista
+        assertEquals("a", Topics.autoTopic(listOf(m(3, "a"), m(4)), active, 2, me))
+        // El primer no leído no tiene tema: «General», donde está.
+        assertNull(Topics.autoTopic(listOf(m(3), m(4, "a")), active, 2, me))
         // Un tema archivado es «sin tema»: «General».
         assertNull(Topics.autoTopic(listOf(m(3, "z")), active, 2, me))
         // Sin no leídos: nada que elegir.

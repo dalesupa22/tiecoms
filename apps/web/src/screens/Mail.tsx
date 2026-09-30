@@ -664,9 +664,10 @@ function MailDrawer({ id, mode, onClose }: { id: string; mode: DrawerMode; onClo
           <div className="mail-composer">
             <div className="seg mail-seg" role="tablist">
               <button className={tab === 'comment' ? 'on' : ''} onClick={() => setTab('comment')}>💬 {t('mail.toTeam')}</button>
-              {mine && <button className={tab === 'reply' ? 'on' : ''} onClick={() => setTab('reply')}>✉ {t('mail.replyTo', { name: who(other).split(' ')[0] || '…' })}</button>}
+              {/* Un WhatsApp se responde en WhatsApp: el API da 400 a /reply (docs/CORREO.md). */}
+              {mine && email.provider !== 'whatsapp' && <button className={tab === 'reply' ? 'on' : ''} onClick={() => setTab('reply')}>✉ {t('mail.replyTo', { name: who(other).split(' ')[0] || '…' })}</button>}
             </div>
-            {tab === 'comment' ? <CommentBox email={email} /> : <ReplyBox email={email} onSent={onClose} />}
+            {tab === 'comment' || email.provider === 'whatsapp' ? <CommentBox email={email} /> : <ReplyBox email={email} onSent={onClose} />}
           </div>
         )}
       </aside>

@@ -89,6 +89,8 @@ import java.time.format.FormatStyle
 private val CallInk = Color(0xFFF7F3EE)
 private val CallBg = Color(0xFF161412)
 private val HangRed = Color(0xFFD93B2B)
+/** Rojo de las llamadas perdidas (igual que la web): pastilla de «Llamadas» y etiqueta «Perdida». */
+internal val MissedRed = Color(0xFFD93025)
 
 /** Nombre corto; si la persona no está en mi lista (me agregaron a la llamada), sale de call.names. */
 private fun firstName(data: BootstrapDTO?, id: String?, call: com.tiecoms.app.core.CallDTO? = null): String =
@@ -675,6 +677,12 @@ fun CallsScreen(onOpenDetail: (String) -> Unit, onOpenConversation: (String) -> 
         catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = errorText(ctx, e) }
     }
     fun call(convId: String, kind: String) = launcher.launch(kind == "video") { cam -> container.calls.start(convId, if (cam) "video" else "audio") }
+    // Llamadas perdidas: abrir la pestaña las marca vistas (0 aquí y POST /calls/seen); si llega `calls.missed` > 0
+    // con la pestaña abierta, se vuelven a marcar. [opened] evita el doble POST al entrar con perdidas.
+    var opened by remember { mutableStateOf(false) }
+    LaunchedEffect(data.missedCalls) {
+        if (!opened || data.missedCalls > 0) { opened = true; client.markCallsSeen() }
+    }
     // 1.7.1: «En curso ahora» (GET /calls/active) arriba del historial.
     var active by remember { mutableStateOf<List<com.tiecoms.app.core.CallDTO>>(emptyList()) }
     var addingTo by remember { mutableStateOf<com.tiecoms.app.core.CallDTO?>(null) }
@@ -744,7 +752,9 @@ private fun CallRow(item: CallHistoryItemDTO, data: BootstrapDTO, onOpen: () -> 
     val others = item.participantIds.filter { it != me }
     val group = Calls.isGroup(item, conv, me)
     val name = conv?.let { titleOf(ctx, it, data) } ?: others.mapNotNull { Names.person(data, it)?.name ?: c.names[it] }.joinToString(", ")
-    val missed = Calls.isMissed(item)
+    // «Perdida» (me sonó y no entré) va en rojo como etiqueta; «Sin respuesta» solo si no es mía y nadie más entró.
+    val mine = Calls.isMissedByMe(item)
+    val missed = mine || Calls.isMissed(item)
     val live = Calls.isLive(item)
     val who = if (group) others.take(3).map { firstName(data, it) }.filter { it.isNotEmpty() }.joinToString(", ") else ""
     Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(horizontal = 16.dp, vertical = 10.dp).testTag("callRow-${c.id}"), verticalAlignment = Alignment.CenterVertically) {
@@ -755,9 +765,10 @@ private fun CallRow(item: CallHistoryItemDTO, data: BootstrapDTO, onOpen: () -> 
                 Text(name.ifEmpty { stringResource(R.string.call_title) }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 CallTag(stringResource(if (group) R.string.calls_group else R.string.calls_direct))
                 if (live) CallTag(stringResource(R.string.calls_live), live = true)
+                if (mine) CallTag(stringResource(R.string.calls_missed_mine), missed = true)
             }
             val dur = item.durationSec?.takeIf { !missed }?.let { " · " + Calls.clock(it) } ?: ""
-            Text((if (c.isVideo) "🎥 " else "📞 ") + dateTime(c.startedAt) + dur + (if (missed) " · " + stringResource(R.string.calls_missed) else "") + (if (who.isNotEmpty()) " · $who" else ""),
+            Text((if (c.isVideo) "🎥 " else "📞 ") + dateTime(c.startedAt) + dur + (if (missed && !mine) " · " + stringResource(R.string.calls_missed) else "") + (if (who.isNotEmpty()) " · $who" else ""),
                 style = MaterialTheme.typography.bodySmall, color = if (missed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (item.hasSummary || c.hasTranscript) Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (item.hasSummary) CallChip("✦ " + stringResource(R.string.call_summary))
@@ -797,9 +808,10 @@ private fun ActiveCallRow(c: com.tiecoms.app.core.CallDTO, data: BootstrapDTO, i
 }
 
 @Composable
-private fun CallTag(text: String, live: Boolean = false) {
-    Text(text, Modifier.background(if (live) Color(0xFF1F7A4D) else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
-        style = MaterialTheme.typography.labelSmall, color = if (live) Color.White else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+private fun CallTag(text: String, live: Boolean = false, missed: Boolean = false) {
+    Text(text, Modifier.background(if (live) Color(0xFF1F7A4D) else if (missed) MissedRed else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 1.dp)
+            .then(if (missed) Modifier.testTag("callMissedTag") else Modifier),
+        style = MaterialTheme.typography.labelSmall, color = if (live || missed) Color.White else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
 }
 
 @Composable

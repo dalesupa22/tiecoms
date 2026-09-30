@@ -264,6 +264,8 @@ class AppContainer(private val app: Application) {
             if (!c.dndActive()) calls.ring(com.tiecoms.app.core.CallDTO(id = callId, conversationId = p.conversationId, kind = p.kind ?: "audio"), p.title, p.subtitle.ifBlank { null })
             return
         }
+        // Llamada perdida: si el aviso de la llamada entrante (la misma) sigue a la vista o sonando, se quita.
+        p.callMissed?.let { calls.onElsewhere(it) }
         val generation = c.noticeGeneration
         c.withNoticeSession(generation) {
             if (client.value !== c) return@withNoticeSession

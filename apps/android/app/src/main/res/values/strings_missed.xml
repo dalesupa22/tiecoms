@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Llamadas perdidas (30-sep-2026): número rojo en «Llamadas» y etiqueta en el historial. -->
+<resources>
+    <string name="calls_missed_mine">Missed</string>
+    <string name="nav_calls_missed">%1$d missed calls</string>
+</resources>

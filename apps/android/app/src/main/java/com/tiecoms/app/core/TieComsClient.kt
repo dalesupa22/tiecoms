@@ -676,6 +676,8 @@ class TieComsClient(
                 // Si no es este dispositivo el que contestó (el servidor manda a mis OTRAS sesiones), deja de sonar.
                 if (e.info.deviceKey == null || e.info.deviceKey !in myDeviceKeys()) _signals.tryEmit(ClientSignal.CallElsewhere(e.info))
             }
+            // Perdidas sin ver: el número del servidor reemplaza al local (la pestaña Llamadas abierta lo vuelve a marcar visto).
+            is AccountEvent.CallsMissed -> setMissedCalls(e.missedCalls)
             is AccountEvent.Unknown -> Unit
         }
     }
@@ -1399,6 +1401,20 @@ class TieComsClient(
     suspend fun activeCalls(): List<CallDTO> = withContext(dispatcher) {
         // Sin subir callsRevision: la pestaña recarga con cada cambio y esto la haría recargar en bucle.
         Calls171.decodeActive(req("GET", "/calls/active", null, JsonElement.serializer())).also { list -> setState { copy(calls = list.fold(calls) { m, c -> Calls.put(m, c) }) } }
+    }
+    private fun setMissedCalls(n: Int) = setState { data?.let { copy(data = Calls.withMissed(it, n)) } ?: this }
+
+    /**
+     * Abrí la pestaña Llamadas: el número rojo se pone en 0 aquí mismo y se avisa con POST /calls/seen (el servidor
+     * manda `calls.missed` 0 a mis otros dispositivos). Un error no importa: el próximo bootstrap trae el número real.
+     */
+    suspend fun markCallsSeen() = withContext(dispatcher) {
+        setMissedCalls(0)
+        // Sin cancelar: poner 0 cambia la clave del LaunchedEffect de la pestaña, que cancela a quien llamó.
+        withContext(kotlinx.coroutines.NonCancellable) {
+            try { req("POST", "/calls/seen", buildJsonObject {}, JsonElement.serializer()) } catch (_: Exception) { }
+        }
+        Unit
     }
     /** Claves con las que el servidor puede nombrar a este dispositivo (8 primeros caracteres de la sesión o del dispositivo). */
     fun myDeviceKeys(): Set<String> = setOfNotNull(myDeviceKey())

@@ -33,6 +33,8 @@ data class PushMessage(
     val callId: String? = null,
     /** audio | video */
     val kind: String? = null,
+    /** Push «📞 Llamada perdida» (type message): la llamada que me perdí; quita el aviso de llamada entrante si sigue. */
+    val callMissed: String? = null,
 )
 
 object PushPayload {
@@ -68,6 +70,7 @@ object PushPayload {
             inChat = s("inChat")?.lowercase() != "false",
             callId = s("callId"),
             kind = s("kind"),
+            callMissed = s("callMissed"),
         )
     }
 

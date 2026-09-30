@@ -233,6 +233,10 @@ private val TABS = listOf("home?ws={ws}", "dms", "issues", "agenda", "calls", "s
 private class BottomTab(
     val route: String, val label: Int, val badge: Int,
     val outlined: androidx.compose.ui.graphics.vector.ImageVector? = null, val filled: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    /** Llamadas perdidas: globo e ícono en rojo ([MissedRed]) en lugar del acento. */
+    val alert: Boolean = false,
+    /** Nombre para lectores de pantalla cuando hay globo (p. ej. «2 llamadas perdidas»); null = nombre · número. */
+    val badgeLabel: String? = null,
     val custom: (@Composable (Boolean) -> Unit)? = null,
 )
 
@@ -259,7 +263,7 @@ private fun BottomTabs(items: List<BottomTab>, selected: String?, onSelect: (Str
                 items.forEach { t ->
                     val on = selected == t.route
                     val name = stringResource(t.label)
-                    val badgeCd = if (t.badge > 0) " · " + t.badge else ""
+                    val badgeCd = if (t.badge > 0) " · " + (t.badgeLabel ?: t.badge.toString()) else ""
                     Box(
                         Modifier.weight(1f).fillMaxHeight()
                             .androidx_selectable(on, name + badgeCd) {
@@ -274,8 +278,8 @@ private fun BottomTabs(items: List<BottomTab>, selected: String?, onSelect: (Str
                             contentAlignment = Alignment.Center) {
                             Box {
                                 if (t.custom != null) t.custom.invoke(on)
-                                else Icon(if (on) (t.filled ?: t.outlined!!) else t.outlined!!, null, Modifier.size(24.dp), tint = if (on) cs.primary else cs.onSurfaceVariant)
-                                if (t.badge > 0) TabBadge(t.badge, Modifier.align(Alignment.TopEnd).offset(x = 9.dp, y = (-5).dp))
+                                else Icon(if (on) (t.filled ?: t.outlined!!) else t.outlined!!, null, Modifier.size(24.dp), tint = if (t.alert && t.badge > 0) MissedRed else if (on) cs.primary else cs.onSurfaceVariant)
+                                if (t.badge > 0) TabBadge(t.badge, Modifier.align(Alignment.TopEnd).offset(x = 9.dp, y = (-5).dp), if (t.alert) MissedRed else null)
                             }
                         }
                     }
@@ -287,15 +291,15 @@ private fun BottomTabs(items: List<BottomTab>, selected: String?, onSelect: (Str
 
 /** Globo de no leídos: mín. 16 dp, 10 sp, acento, con borde de 1,5 dp del color de la barra. */
 @Composable
-private fun TabBadge(n: Int, modifier: Modifier) {
+private fun TabBadge(n: Int, modifier: Modifier, color: androidx.compose.ui.graphics.Color? = null) {
     val cs = MaterialTheme.colorScheme
     Box(modifier.height(16.dp).widthIn(min = 16.dp)
         .border(1.5.dp, cs.surfaceContainer, androidx.compose.foundation.shape.RoundedCornerShape(50))
-        .padding(1.5.dp).background(cs.primary, androidx.compose.foundation.shape.RoundedCornerShape(50)).padding(horizontal = 3.dp).testTag("tabBadge"),
+        .padding(1.5.dp).background(color ?: cs.primary, androidx.compose.foundation.shape.RoundedCornerShape(50)).padding(horizontal = 3.dp).testTag(if (color != null) "tabBadgeMissed" else "tabBadge"),
         contentAlignment = Alignment.Center) {
         val d = androidx.compose.ui.platform.LocalDensity.current
         androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density, 1f)) {
-            Text(if (n > 99) "99+" else n.toString(), color = cs.onPrimary, fontSize = 10.sp, lineHeight = 10.sp, maxLines = 1,
+            Text(if (n > 99) "99+" else n.toString(), color = if (color != null) androidx.compose.ui.graphics.Color.White else cs.onPrimary, fontSize = 10.sp, lineHeight = 10.sp, maxLines = 1,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
         }
     }
@@ -422,7 +426,11 @@ private fun MainNav() {
                     BottomTab("issues", R.string.nav_issues, 0, Icons.Outlined.Checklist, Icons.Rounded.Checklist),
                     BottomTab("agenda", R.string.nav_agenda, 0, Icons.Outlined.CalendarMonth, Icons.Rounded.CalendarMonth),
                     // Llamadas (docs/LLAMADAS.md): sexto ícono, solo si el servidor las tiene prendidas.
-                    BottomTab("calls", R.string.nav_calls, 0, Icons.Outlined.Call, Icons.Rounded.Call).takeIf { data?.callsEnabled == true },
+                    // Perdidas sin ver: número en pastilla roja e ícono rojo; se quita al abrir la pestaña (POST /calls/seen).
+                    (data?.missedCalls ?: 0).let { n ->
+                        BottomTab("calls", R.string.nav_calls, n, Icons.Outlined.Call, Icons.Rounded.Call, alert = true,
+                            badgeLabel = if (n > 0) stringResource(R.string.nav_calls_missed, n) else null)
+                    }.takeIf { data?.callsEnabled == true },
                     // «Tú»: la foto de la persona (26 dp) con anillo del acento si está seleccionada.
                     BottomTab("settings", R.string.nav_you, 0) { on ->
                         val me = data?.me

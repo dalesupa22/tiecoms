@@ -63,6 +63,11 @@ sealed interface AccountEvent {
     data class CallRinging(val call: CallDTO, val conversationTitle: String?, val callerName: String) : AccountEvent
     /** 1.7.1: `call.answered` / `call.declined` en otro de mis dispositivos: aquí deja de sonar. */
     data class CallElsewhere(val info: com.tiecoms.app.core.CallElsewhere) : AccountEvent
+    /**
+     * `calls.missed`: cuántas perdidas tengo sin ver. Llega al colgar una que me perdí ([callId]) o con 0 cuando
+     * abrí Llamadas en otro dispositivo ([callId] null). Reemplaza el número, no lo suma.
+     */
+    data class CallsMissed(val callId: String?, val missedCalls: Int) : AccountEvent
     data class Unknown(val type: String) : AccountEvent
 }
 
@@ -136,6 +141,7 @@ fun decodeAccountEvent(el: JsonElement): AccountEvent {
         "call.answered", "call.declined" -> o.str("callId")?.let {
             AccountEvent.CallElsewhere(CallElsewhere(it, type == "call.answered", o.str("deviceKey"), o.str("platform"), o.str("label")))
         } ?: AccountEvent.Unknown(type)
+        "calls.missed" -> o.long("missedCalls")?.let { AccountEvent.CallsMissed(o.str("callId"), it.toInt()) } ?: AccountEvent.Unknown(type)
         "me.dnd" -> if (o.containsKey("dndUntil")) AccountEvent.DndUpdated(o.str("dndUntil")) else AccountEvent.Unknown(type)
         else -> AccountEvent.Unknown(type)
     }

@@ -346,6 +346,8 @@ data class BootstrapDTO(
     val assistantId: String? = null,
     /** 1.7.1: la llamada en la que estoy ahora desde algún dispositivo (franja «En llamada en tu …»). */
     val myActiveCall: CallDTO? = null,
+    /** Llamadas perdidas sin ver (migración 042): el número rojo de «Llamadas»; se pone en 0 con POST /calls/seen. */
+    val missedCalls: Int = 0,
 ) {
     val callsEnabled: Boolean get() = features.calls
     /** Correo en el chat prendido (`MAIL_ENABLED` en el servidor). */

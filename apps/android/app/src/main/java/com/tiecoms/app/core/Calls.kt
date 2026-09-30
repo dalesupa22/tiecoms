@@ -96,6 +96,8 @@ data class CallHistoryItemDTO(
     val participantIds: List<String> = emptyList(),
     val durationSec: Long? = null,
     val hasSummary: Boolean = false,
+    /** Perdida para mí: me sonó, no rechacé y no entré (etiqueta roja «Perdida»). */
+    val missed: Boolean = false,
 )
 
 @Serializable data class CallHistoryPage(val calls: List<CallHistoryItemDTO> = emptyList(), val hasMore: Boolean = false)
@@ -182,6 +184,12 @@ object Calls {
         conv?.let { it.kind != "direct" } ?: (item.participantIds.count { it != me } > 1)
     /** «Sin respuesta»: terminó y nunca hubo dos personas dentro. */
     fun isMissed(item: CallHistoryItemDTO): Boolean = item.call.ended && item.participantIds.size < 2
+    /** «Perdida»: me la perdí yo (lo dice el servidor); va en lugar de «Sin respuesta». */
+    fun isMissedByMe(item: CallHistoryItemDTO): Boolean = item.missed
+
+    /** `calls.missed` y POST /calls/seen: el número REEMPLAZA al que había (nunca se suma); negativo = 0. */
+    fun withMissed(data: BootstrapDTO, missedCalls: Int): BootstrapDTO =
+        maxOf(0, missedCalls).let { if (it == data.missedCalls) data else data.copy(missedCalls = it) }
     fun isLive(item: CallHistoryItemDTO): Boolean = !item.call.ended
     /** Tocar una fila: el detalle si hay algo que leer; si no, el chat. */
     fun hasDetail(item: CallHistoryItemDTO): Boolean = item.call.hasTranscript || item.hasSummary

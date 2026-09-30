@@ -141,7 +141,11 @@ struct HomeView: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle(L("tab.groups"))
-        .searchable(text: $query, prompt: L("grp.search"))
+        // Título pequeño y buscador siempre visible: con el título grande y el buscador que se esconde al desplazar, volver
+        // de un chat a veces dejaba el List y la barra de navegación en un bucle de maquetación (UISearchBar ↔ safe area ↔
+        // UICollectionView; Grupos en blanco y la app congelada, desde 1.7.0 en iOS 26). Prueba: MailUITests.test5BackToHome.
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: L("grp.search"))
         .toolbar {
             // Vista (plegar/desplegar): a la izquierda, aparte de ✏️ y «＋», que son para escribir y crear.
             ToolbarItem(placement: .topBarLeading) {

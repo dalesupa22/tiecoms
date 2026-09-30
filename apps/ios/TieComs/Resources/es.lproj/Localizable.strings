@@ -2434,3 +2434,7 @@
 "ws.onlyYours" = "Solo ves los grupos en los que participas; los demás no revelan su nombre.";
 "ws.participants" = "Participantes";
 "ws.yourGroups" = "Tus grupos en este espacio";
+
+"composer.strike" = "Tachado";
+"mail.asText" = "Ver solo el texto";
+"mail.asDesign" = "Ver con su diseño";

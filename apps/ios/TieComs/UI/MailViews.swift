@@ -173,8 +173,10 @@ struct MailCard: View {
                         .font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
                 }
             }
-            if !e.snippet.isEmpty {
-                Text(e.snippet).font(.subheadline).foregroundStyle(Theme.textPrimary).lineLimit(2)
+            // Resumen sin direcciones de imágenes ni enlaces largos (web mailSnippet).
+            let snip = MailBodyText.snippet(e.snippet)
+            if !snip.isEmpty {
+                Text(snip).font(.subheadline).foregroundStyle(Theme.textPrimary).lineLimit(2)
             }
             if !e.attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -558,7 +560,7 @@ struct ForwardCardSheet: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(e.provider.isWhatsApp ? (e.wa?.chatName ?? e.subject) : (e.subject.isEmpty ? L("mail.noSubject") : e.subject))
                                     .font(.subheadline.weight(.bold)).lineLimit(2)
-                                Text(e.snippet).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(2)
+                                Text(e.provider.isWhatsApp ? e.snippet : MailBodyText.snippet(e.snippet)).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(2)
                             }
                         }
                     }
@@ -632,6 +634,10 @@ struct MailDetailView: View {
     @State private var fileURL: URL?
     @State private var opening: String?
     @State private var shareURL: URL?
+    /// HTML del correo: nil = sin pedir o cargando; "" = no tiene (o falló: 404 mientras el API no lo tenga).
+    @State private var html: String?
+    @State private var asText = false
+    @State private var htmlHeight: CGFloat = 240
     enum Tab: Hashable { case comment, reply }
 
     var body: some View {
@@ -657,7 +663,9 @@ struct MailDetailView: View {
         .task(id: emailId) {
             if mode == "reply" { tab = .reply }
             store.wantMail(emailId)
-            _ = try? await store.loadSharedMailFull(emailId)
+            async let full = store.loadSharedMailFull(emailId)
+            await loadHtml()
+            _ = try? await full
         }
         .task(id: store.mails[emailId]?.commentCount ?? -1) {
             guard store.mails[emailId] != nil else { return }
@@ -749,18 +757,50 @@ struct MailDetailView: View {
         }
     }
 
+    /// El correo con su diseño (GET /mail/shared/:id/html). Sin HTML o si falla, queda el texto.
+    private func loadHtml() async {
+        if let c = MailHTML.cached(emailId) { html = c; return }
+        // WhatsApp no tiene HTML.
+        if store.mails[emailId]?.provider.isWhatsApp == true { return }
+        let h = (try? await store.mailHtml(emailId)) ?? nil
+        MailHTML.store(emailId, h)
+        html = h ?? ""
+    }
+
+    private func bodyText(_ e: SharedMailDTO) -> AttributedString {
+        if let original { return MailBodyText.attributed(original) }
+        if e.full { return e.body.isEmpty ? AttributedString(L("mail.noBody")) : MailBodyText.attributed(e.body) }
+        return AttributedString(MailBodyText.snippet(e.snippet) + "…")
+    }
+
     @ViewBuilder private func mailBody(_ e: SharedMailDTO) -> some View {
+        let design = (html?.isEmpty == false) && !e.provider.isWhatsApp
         VStack(alignment: .leading, spacing: 8) {
-            Text(original ?? (e.full ? (e.body.isEmpty ? L("mail.noBody") : e.body) : e.snippet + "…"))
-                .font(.body).foregroundStyle(e.full || original != nil ? Theme.textPrimary : Theme.textSecondary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Theme.surface))
-                .accessibilityIdentifier("mail.body")
+            if design && !asText && original == nil, let html {
+                MailHTMLView(html: html, height: $htmlHeight)
+                    .frame(height: htmlHeight)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.textSecondary.opacity(0.15)))
+            } else {
+                // Enlaces como «dominio ↗» (abren Safari) y sin las direcciones de las imágenes.
+                Text(bodyText(e))
+                    .font(.body).foregroundStyle(e.full || original != nil ? Theme.textPrimary : Theme.textSecondary)
+                    .tint(Theme.accentText)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Theme.surface))
+                    .accessibilityIdentifier("mail.body")
+            }
+            if design && original == nil {
+                Button(L(asText ? "mail.asDesign" : "mail.asText")) { asText.toggle() }
+                    .font(.footnote.weight(.semibold))
+                    .accessibilityIdentifier("mail.asText")
+            }
             if original != nil {
                 Button(L("mail.hideHistory")) { original = nil }.font(.footnote.weight(.semibold))
-            } else if e.full && e.trimmed {
+            } else if e.full && e.trimmed && (!design || asText) {
                 Button(origBusy ? L("common.loading") : L("mail.showHistory")) { loadOriginal(e) }
                     .font(.footnote.weight(.semibold)).disabled(origBusy)
                     .accessibilityIdentifier("mail.showHistory")

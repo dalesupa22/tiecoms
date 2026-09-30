@@ -2434,3 +2434,7 @@
 "ws.onlyYours" = "You only see the groups you are in; the others do not reveal their name.";
 "ws.participants" = "Participants";
 "ws.yourGroups" = "Your groups in this space";
+
+"composer.strike" = "Strikethrough";
+"mail.asText" = "Show plain text";
+"mail.asDesign" = "Show with its design";

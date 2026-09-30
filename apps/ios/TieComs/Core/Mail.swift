@@ -131,6 +131,14 @@ extension AppStore {
         return r.body
     }
 
+    /// El HTML del correo (ya limpio por el servidor) para verlo con su diseño; nil si solo tiene texto.
+    /// Las imágenes vienen como rutas relativas /api/v1/mail/img/… (proxy firmado): se resuelven contra el origen del API.
+    func mailHtml(_ id: String) async throws -> String? {
+        struct R: Decodable { var html: String? }
+        let r: R = try await api.request("/mail/shared/\(id)/html")
+        return r.html.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+    }
+
     func mailComments(_ id: String) async throws -> [SharedMailCommentDTO] {
         struct R: Decodable { var comments: [SharedMailCommentDTO] }
         let r: R = try await api.request("/mail/shared/\(id)/comments")

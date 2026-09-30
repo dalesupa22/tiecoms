@@ -1608,7 +1608,83 @@ export interface WaChatDTO {
   archivedInWhatsApp: boolean;
   linkedConversationId: string | null;
 }
-export interface WaMessageDTO { id: string; fromMe: boolean; author: string | null; kind: string; body: string; sentAt: string; reactions?: { emoji: string; name: string }[] }
+export interface WaMessageDTO {
+  id: string; fromMe: boolean; author: string | null; kind: string; body: string; sentAt: string; reactions?: { emoji: string; name: string }[];
+  /** Foto, video, audio, documento o sticker (docs/WHATSAPP.md § Medios). Ausente = texto o servidor anterior. */
+  media?: WaMediaDTO | null;
+}
+
+// ---------- Medios de WhatsApp (docs/WHATSAPP.md § Medios) ----------
+export type WaMediaType = 'image' | 'video' | 'audio' | 'document' | 'sticker';
+/**
+ * remote: está en WhatsApp y se baja al pedirlo · ready: ya está en chaggu (S3) · pending: se le pidió al teléfono
+ * que lo vuelva a subir (reintentar en unos segundos) · unavailable: expiró en WhatsApp o llegó antes de que chaggu
+ * guardara medios («No disponible») · too_large: pasa el límite de descarga.
+ */
+export type WaMediaStatus = 'remote' | 'ready' | 'pending' | 'unavailable' | 'too_large';
+export interface WaMediaDTO {
+  type: WaMediaType;
+  /** Tipo del archivo tal como lo sirve chaggu (audio/ogg de WhatsApp se sirve como audio/mp4 si hay variante AAC). */
+  contentType: string;
+  sizeBytes: number | null;
+  durationMs: number | null;
+  /** Nota de voz (audio grabado en WhatsApp). */
+  ptt: boolean;
+  fileName: string | null;
+  width: number | null;
+  height: number | null;
+  /** ≤ 64 valores 0–1 (la onda que manda WhatsApp en las notas de voz). */
+  waveform: number[] | null;
+  /** data:image/jpeg;base64 de la miniatura borrosa que trae el mensaje (≤ 8 KB), para mostrar algo al instante. */
+  thumb: string | null;
+  caption: string | null;
+  status: WaMediaStatus;
+  /** Ruta del API (Bearer) con los bytes: GET la baja de WhatsApp si hace falta (409 media_pending, 410 media_unavailable, 413 media_too_large). */
+  url: string;
+  /** Ruta del API (Bearer) que responde { url, expiresIn, contentType } prefirmada de S3: videos en streaming y documentos grandes. */
+  linkUrl: string;
+}
+/** Límites de WhatsApp: fotos, videos, audios y stickers 16 MB al enviar (64 MB al bajar); documentos 100 MB. */
+export const WA_MAX_MEDIA_BYTES = 16 * 1024 * 1024;
+export const WA_MAX_DOWNLOAD_MEDIA_BYTES = 64 * 1024 * 1024;
+export const WA_MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
+export const WA_MAX_CAPTION = 4096;
+
+/** POST /whatsapp/chats/:accountId/:jid/messages/:id/forward — «Reenviar a chaggu…» a uno o varios chats, cada uno con su tema. */
+export const WaForwardInput = z.object({
+  targets: z.array(z.object({ conversationId: z.uuid(), topicId: z.uuid().nullable().optional() })).min(1).max(10),
+  comment: z.string().trim().max(4000).optional(),
+  /** Notas de voz: quien reenvía autoriza transcribirla con IA (como al grabar una en chaggu). */
+  aiConsent: z.boolean().optional(),
+});
+
+/** Mensaje que sale por WhatsApp desde chaggu. queued/sending → sent, o failed (reintentar con POST /whatsapp/outbox/:id/retry). */
+export type WaOutboxStatus = 'draft' | 'queued' | 'sending' | 'sent' | 'failed';
+export interface WaOutboxDTO {
+  id: string;
+  clientId: string | null;
+  accountId: string;
+  jid: string;
+  kind: 'text' | 'image' | 'video' | 'audio' | 'document';
+  ptt: boolean;
+  text: string | null;
+  fileName: string | null;
+  contentType: string | null;
+  sizeBytes: number | null;
+  durationMs: number | null;
+  waveform: number[] | null;
+  status: WaOutboxStatus;
+  error: string | null;
+  /** id del mensaje en WhatsApp cuando ya salió (aparece también en /messages). */
+  waMessageId: string | null;
+  createdAt: string;
+}
+/** POST /whatsapp/chats/:accountId/:jid/send: texto, o un archivo subido antes (uploads) con pie de foto opcional. */
+export const WaSendInput = z.object({
+  clientId: z.string().min(8).max(64),
+  text: z.string().trim().max(WA_MAX_CAPTION).optional(),
+  uploadId: z.uuid().optional(),
+}).refine((v) => !!v.uploadId || !!v.text, { message: 'text_or_upload', path: ['text'] });
 
 // ---------- Eventos en tiempo real ----------
 /** Evento durable de una conversación, ordenado por eventSeq. */

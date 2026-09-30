@@ -62,3 +62,22 @@
   document.querySelectorAll('.site-header a').forEach((link) => link.addEventListener('click', () => { header.classList.remove('menu-open'); menuToggle?.setAttribute('aria-expanded','false'); }));
   setPhase(0);
 })();
+
+// Descargas: resalta el sistema de quien visita (y lo pone primero) y muestra versión y peso reales.
+(() => {
+  const grid = document.querySelector('[data-downloads]');
+  if (!grid) return;
+  const ua = navigator.userAgent;
+  const os = /Windows/.test(ua) ? 'windows' : /Macintosh|Mac OS X/.test(ua) && !/iPhone|iPad/.test(ua) && navigator.maxTouchPoints < 2 ? 'mac' : null;
+  const mine = os && grid.querySelector(`[data-os="${os}"]`);
+  if (mine) { mine.classList.add('is-mine'); grid.prepend(mine); }
+  const mb = (n) => `${(n / 1048576).toFixed(1).replace('.', document.documentElement.lang === 'es' ? ',' : '.')} MB`;
+  fetch('/descargas/latest.json', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : null)).then((v) => {
+    if (!v) return;
+    const es = document.documentElement.lang === 'es';
+    const mac = grid.querySelector('[data-meta="mac"]');
+    if (mac && v.mac) mac.textContent = `${es ? 'Versión' : 'Version'} ${v.version} · .dmg · ${mb(v.mac.size)}`;
+    const win = grid.querySelector('[data-meta="windows"]');
+    if (win && v.windows) win.firstChild.textContent = `${es ? 'Versión' : 'Version'} ${v.version} · .exe · ${mb(v.windows.size)} · `;
+  }).catch(() => {});
+})();

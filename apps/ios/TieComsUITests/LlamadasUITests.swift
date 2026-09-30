@@ -15,6 +15,7 @@ final class LlamadasUITests: XCTestCase {
         var multiId: String
         var endedCallId: String
         var liveCallId: String
+        var missedCallId: String?
         var sleepDmId: String?
         var dndDmId: String?
         var bToken: String?
@@ -114,7 +115,12 @@ final class LlamadasUITests: XCTestCase {
         goTab(app, "calls")
         XCTAssertTrue(app.buttons["calls.row.\(f.endedCallId)"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["En curso"].exists)
-        XCTAssertTrue(app.staticTexts["Sin respuesta"].exists || app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Sin respuesta")).firstMatch.exists)
+        // La videollamada de Gloria que nadie contestó me sonó a mí: desde la migración 042 es «Perdida» (en rojo), no «Sin respuesta».
+        if let missed = f.missedCallId {
+            let row = app.buttons["calls.row.\(missed)"].firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 5))
+            XCTAssertTrue(row.label.contains("Perdida"), "perdida para mí: \(row.label)")
+        }
         shot("06-pestana-llamadas")
 
         // Chat grupal: franja «Llamada en curso · Unirse» y la llamada (medios nulos).
@@ -203,6 +209,11 @@ final class LlamadasUITests: XCTestCase {
                 XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "descansando")).firstMatch.waitForExistence(timeout: 5), "aviso de descanso")
             }
             XCTAssertFalse(app.tabBars.firstMatch.exists && app.tabBars.firstMatch.isHittable, "sin barra de pestañas dentro del chat")
+            // Arreglo de la prueba, no del producto: en un simulador recién arrancado, la primera vez que se abre la búsqueda
+            // el campo no toma el foco ni sale el teclado, y el toque siguiente en el compositor tampoco lo toma
+            // («Neither element nor any descendant has keyboard focus»; pasa igual en 791f219 y 59f6195). Un toque previo en el
+            // compositor despierta el teclado; después la búsqueda y el compositor toman el foco normalmente.
+            field.tap(); sleep(2)
             // Barra de búsqueda abierta (1.7) + teclado en el compositor.
             app.buttons["chat.search"].firstMatch.tap()
             XCTAssertTrue(app.textFields["chat.searchField"].waitForExistence(timeout: 3))

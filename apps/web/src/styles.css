@@ -1772,3 +1772,35 @@ html.call-mini body { background: var(--ink); }
 .call-dock.is-mini .call-ctl { width: 40px; height: 40px; font-size: 17px; }
 .call-dock .call-add { background: rgba(255, 255, 255, 0.14); color: var(--paper); border-color: transparent; }
 .call-dock .call-add:hover { background: rgba(255, 255, 255, 0.24); }
+/* Divisiones de los paneles (Split.tsx): una franja fina que se arrastra. */
+.split-handle { position: absolute; z-index: 6; background: transparent; transition: background 0.15s; }
+.split-handle.is-col { top: 0; bottom: 0; width: 10px; cursor: col-resize; }
+.split-handle.is-row { left: 0; right: 0; height: 10px; cursor: row-resize; }
+.split-handle::after { content: ""; position: absolute; background: var(--line); border-radius: 99px; opacity: 0; transition: opacity 0.15s; }
+.split-handle.is-col::after { left: 4px; top: 50%; width: 3px; height: 44px; margin-top: -22px; }
+.split-handle.is-row::after { top: 4px; left: 50%; height: 3px; width: 44px; margin-left: -22px; }
+.split-handle:hover::after, body.is-resizing-col .split-handle.is-col::after, body.is-resizing-row .split-handle.is-row::after { opacity: 1; background: var(--accent); }
+body.is-resizing-col, body.is-resizing-col * { cursor: col-resize !important; user-select: none; }
+body.is-resizing-row, body.is-resizing-row * { cursor: row-resize !important; user-select: none; }
+/* Zoom por chat (A− / A+). */
+.zoom-pill { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--line); border-radius: 99px; padding: 0 2px; }
+.zoom-pill .icon-btn { width: 28px; height: 28px; font-size: 12px; font-weight: 700; }
+.zoom-val { border: 0; background: none; font-size: 11px; font-weight: 700; color: var(--muted); padding: 0 2px; cursor: pointer; }
+.split.n3 .zoom-pill, .split.n4 .zoom-pill { border: 0; }
+/* Paneles angostos: el nombre del chat primero; lo secundario se esconde (sigue en ⋯ o en la lista). */
+.split:not(.n1) .split-cell { container-type: inline-size; }
+@container (max-width: 560px) {
+  .conv-head .head-orgs, .conv-head .head-space, .conv-head .zoom-val { display: none; }
+  .conv-head .conv-head-title { min-width: 96px !important; }
+  .conv-head { gap: 2px; }
+}
+@container (max-width: 420px) {
+  .conv-head .head-search, .conv-head .head-split { display: none; }
+  .conv-head .icon-btn { width: 32px; }
+  .conv-head .zoom-pill .icon-btn { width: 24px; }
+}
+.split:not(.n1) .conv-head { overflow: hidden; }
+.split:not(.n1) .conv-head > *:not(.conv-head-title) { flex-shrink: 0; }
+@container (max-width: 380px) { .conv-head .head-call-video { display: none; } }
+@container (max-width: 380px) { .conv-head .zoom-pill { display: none; } }
+@container (max-width: 300px) { .conv-head .head-keep:first-of-type { display: none; } }

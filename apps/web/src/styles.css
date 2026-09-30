@@ -186,6 +186,9 @@ a:hover { color: var(--accent-ink); }
 .msg-org { font-size: 11px; color: var(--muted); }
 .msg-time { font-size: 11px; color: var(--faint); }
 .msg-body { white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; }
+.fmt-mark { font-size: 0; }
+.fmt-strong { font-weight: 700; }
+.fmt-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; background: rgba(0,0,0,.06); border-radius: 4px; padding: 0 4px; }
 .msg.pending .msg-body { color: var(--muted); }
 .msg.failed .msg-body { color: var(--danger); }
 .msg-sys { text-align: center; font-size: 12px; color: var(--muted); padding: 6px 0; }
@@ -1533,7 +1536,14 @@ mark { background: #f5e3b3; color: inherit; border-radius: 3px; padding: 0 1px; 
 .mail-card-kind { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .mail-card-title { border: 0; background: none; padding: 0; font: inherit; font-size: 15px; font-weight: 700; color: var(--ink); text-align: left; cursor: pointer; line-height: 1.3; }
 .mail-card-title:hover { text-decoration: underline; }
-.mail-card-snip { font-size: 13px; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.mail-card-snip { border: 0; background: none; padding: 0; font: inherit; text-align: left; cursor: pointer; font-size: 13px; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.mail-card-snip:hover { color: var(--ink); }
+.mail-peek { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; font-size: 13.5px; color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; max-height: 360px; overflow: auto; overscroll-behavior: contain; }
+.mail-peek[aria-busy="true"] { color: var(--muted); }
+.mail-html { display: block; width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.mail-peek-bar { display: flex; gap: 14px; margin-top: -4px; }
+.mail-link { display: inline-block; font-size: 12px; font-weight: 600; color: #2f6fdb; background: rgba(47,111,219,.08); border-radius: 6px; padding: 0 6px; margin: 0 1px; text-decoration: none; white-space: nowrap; }
+.mail-link:hover { text-decoration: underline; }
 .mail-card-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pill-state { font-size: 11.5px; font-weight: 700; border-radius: 99px; padding: 3px 9px; white-space: nowrap; }
 .pill-state.wait { background: #f5ead0; color: #8a5d0c; }

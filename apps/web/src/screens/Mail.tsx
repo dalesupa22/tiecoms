@@ -6,6 +6,7 @@ import { openMenuAt, toast } from '../menu.tsx';
 import { navigate, queryParam } from '../router.ts';
 import { Avatar, Modal, conversationTitle, initials, orgById, personById, personColor } from '../ui.tsx';
 import { openDialog, quickTimes } from '../actions.tsx';
+import { mailParts, mailSnippet } from '../mail-text.ts';
 import { prepareMeetingProof, takeMeetingProof, clearMeetingProof } from '../meeting-oauth.ts';
 
 /**
@@ -466,9 +467,60 @@ function CardComments({ email, canPost }: { email: SharedMailDTO; canPost: boole
   );
 }
 
+/** Cuerpo del correo con los enlaces como «dominio ↗» y sin las direcciones de las imágenes. */
+export function MailText({ text }: { text: string }) {
+  const parts = useMemo(() => mailParts(text), [text]);
+  return <>{parts.map((p, i) => ('href' in p
+    ? <a key={i} className="mail-link" href={p.href} title={p.href} target="_blank" rel="noopener noreferrer nofollow">{p.label} ↗</a>
+    : <span key={i}>{p.text}</span>))}</>;
+}
+
+/**
+ * El correo con su diseño. Iframe con sandbox sin scripts (el API ya quitó scripts y on*): solo deja abrir enlaces
+ * en otra pestaña. allow-same-origin es para medir el alto y encoger los correos de 600 px al ancho de la tarjeta.
+ */
+const HTML_HEAD = `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: http: data:; style-src 'unsafe-inline' https:; font-src https: data:"><base target="_blank"><style>html,body{margin:0;background:#fff;color:#1f1f1f;font:14px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow-wrap:anywhere}body{padding:12px}img{max-width:100%;height:auto}a{color:#1a5fd6}</style>`;
+const htmlCache = new Map<string, string | null>();
+function useMailHtml(id: string, on: boolean) {
+  const [html, setHtml] = useState<string | null | undefined>(htmlCache.get(id));
+  useEffect(() => {
+    if (!on || htmlCache.has(id)) return;
+    let live = true;
+    client.mailHtml(id).then((r) => { htmlCache.set(id, r.html); if (live) setHtml(r.html); }).catch(() => live && setHtml(null));
+    return () => { live = false; };
+  }, [id, on]);
+  return html;
+}
+export function MailHtml({ html, maxHeight }: { html: string; maxHeight?: number }) {
+  const ref = useRef<HTMLIFrameElement>(null);
+  const [h, setH] = useState(160);
+  const fit = () => {
+    const f = ref.current, doc = f?.contentDocument;
+    if (!f || !doc?.body) return;
+    // Se mide sin zoom y se encoge lo que no cabe (los boletines vienen a 600 px).
+    const root = doc.documentElement;
+    root.style.zoom = '';
+    const w = f.clientWidth, sw = root.scrollWidth, sh = doc.body.offsetHeight;
+    const z = sw > w + 2 ? w / sw : 1;
+    if (z !== 1) root.style.zoom = String(z);
+    setH(Math.ceil(sh * z) + 2);
+  };
+  useEffect(() => { const f = ref.current; if (!f) return; const ro = new ResizeObserver(() => fit()); ro.observe(f); return () => ro.disconnect(); }, []);
+  return (
+    <iframe ref={ref} className="mail-html" title={t('mail.title')} sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      referrerPolicy="no-referrer" srcDoc={`<!doctype html><html><head>${HTML_HEAD}</head><body>${html}</body></html>`}
+      style={{ height: maxHeight ? Math.min(h, maxHeight) : h }} scrolling={maxHeight && h > maxHeight ? 'yes' : 'no'}
+      onLoad={() => { fit(); ref.current?.contentDocument?.querySelectorAll('img').forEach((i) => i.addEventListener('load', fit, { once: true })); }} />
+  );
+}
+
 export function MailCard({ emailId, banner, onIssue }: { emailId: string; banner?: React.ReactNode; onIssue?: (id: string) => void }) {
   const d = useClient((s) => s.data)!;
   const { email, missing } = useSharedMail(emailId);
+  // «Ver correo» lo abre ahí mismo, dentro de la tarjeta; el panel queda para responder o ver el hilo.
+  const [peek, setPeek] = useState(false);
+  const html = useMailHtml(emailId, peek && email?.provider !== 'whatsapp');
+  useEffect(() => { if (peek && email && !email.full) client.loadSharedMailFull(emailId).catch((e) => toast(errorText(e))); }, [peek, !!email, email?.full]);
   if (!email) return missing ? <div className="card mail-card is-missing small muted">{t('mail.unavailable')}</div> : <div className="card mail-card is-loading" aria-busy>…</div>;
   const mine = email.sharedBy === d.me.id;
   const conv = d.conversations.find((c) => c.id === email.conversationId);
@@ -512,7 +564,14 @@ export function MailCard({ emailId, banner, onIssue }: { emailId: string; banner
           <div className="small muted ellipsis">{email.direction === 'out' ? `${t('mail.toShort')} ` : ''}{who(other)}{other?.name ? ` · ${other.email}` : ''} · {fmtDate(email.sentAt)}</div>
         </div>
       </div>
-      <div className="mail-card-snip">{email.snippet}</div>
+      {peek
+        ? html ? <MailHtml html={html} maxHeight={460} />
+          : <div className="mail-peek" aria-busy={!email.full || html === undefined}>{email.full ? (email.body ? <MailText text={email.body} /> : t('mail.noBody')) : `${mailSnippet(email.snippet)}…`}</div>
+        : <button className="mail-card-snip" onClick={() => setPeek(true)}>{mailSnippet(email.snippet) || t('mail.noBody')}</button>}
+      <div className="mail-peek-bar">
+        <button className="link-btn small" aria-expanded={peek} onClick={() => setPeek((v) => !v)}>{peek ? `▴ ${t('mail.peekHide')}` : `▾ ${t('mail.peek')}`}</button>
+        {peek && <button className="link-btn small" onClick={() => open('read')}>⤢ {t('mail.peekPanel')}</button>}
+      </div>
       {!!email.attachments.length && (
         <div className="att-chips">
           {email.attachments.slice(0, 4).map((a) => <button key={a.id} className="file-chip" title={t('mail.openAttachment')} onClick={() => void openAttachment(email.id, a)}>📎 {a.name} · {kb(a.size)}</button>)}
@@ -610,6 +669,8 @@ function MailDrawer({ id, mode, onClose }: { id: string; mode: DrawerMode; onClo
   const [bodyOpen, setBodyOpen] = useState(mode === 'read');
   const [orig, setOrig] = useState<string | null>(null);
   const [origBusy, setOrigBusy] = useState(false);
+  const [asText, setAsText] = useState(false);
+  const html = useMailHtml(id, !!email && email.provider !== 'whatsapp');
   const commentsRef = useRef<HTMLDivElement>(null);
   // La tarjeta llega sin cuerpo: se pide al abrir el panel.
   useEffect(() => { if (email && !email.full) client.loadSharedMailFull(id).catch(() => {}); }, [id, !!email, email?.full]);
@@ -638,10 +699,11 @@ function MailDrawer({ id, mode, onClose }: { id: string; mode: DrawerMode; onClo
             <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}><MailStatus email={email} />{email.issueId && <span className="pill-state muted">◆ {t('mail.hasTask')}</span>}
               {email.scheduledReply && <button className="btn small ghost" onClick={() => void client.cancelMailReply(email.id).then(() => toast(t('mail.scheduleCancelled'))).catch((e) => toast(errorText(e)))}>{t('mail.cancelSchedule')}</button>}</div>
             <MailMeta from={email.from} to={email.to} cc={email.cc} date={email.sentAt} provider={email.provider} />
-            <div className={`mail-body ${bodyOpen || orig ? '' : 'is-clamped'}`} aria-busy={!email.full}>{orig ?? (email.full ? email.body || t('mail.noBody') : `${email.snippet}…`)}</div>
+            {html && !asText && !orig ? <MailHtml html={html} /> : <div className={`mail-body ${bodyOpen || orig ? '' : 'is-clamped'}`} aria-busy={!email.full}>{orig != null ? <MailText text={orig} /> : email.full ? (email.body ? <MailText text={email.body} /> : t('mail.noBody')) : `${mailSnippet(email.snippet)}…`}</div>}
             <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
-              {email.full && !orig && email.body.length > 400 && <button className="link-btn" onClick={() => setBodyOpen((v) => !v)}>{bodyOpen ? t('mail.less') : t('mail.moreBody')}</button>}
-              {email.full && email.trimmed && !orig && <button className="link-btn" disabled={origBusy} onClick={() => void showOriginal()}>{origBusy ? t('common.loading') : t('mail.showHistory')}</button>}
+              {html && !orig && <button className="link-btn" onClick={() => setAsText((v) => !v)}>{asText ? t('mail.asDesign') : t('mail.asText')}</button>}
+              {(!html || asText) && email.full && !orig && email.body.length > 400 && <button className="link-btn" onClick={() => setBodyOpen((v) => !v)}>{bodyOpen ? t('mail.less') : t('mail.moreBody')}</button>}
+              {(!html || asText) && email.full && email.trimmed && !orig && <button className="link-btn" disabled={origBusy} onClick={() => void showOriginal()}>{origBusy ? t('common.loading') : t('mail.showHistory')}</button>}
               {orig && <button className="link-btn" onClick={() => setOrig(null)}>{t('mail.hideHistory')}</button>}
             </div>
             {!!email.attachments.length && (

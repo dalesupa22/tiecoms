@@ -9,6 +9,7 @@
  *   node ops.js import-events <correo> <conversationId> < eventos.json   agenda sin convocatorias ni avisos (idempotente)
  *   node ops.js purge-integration-issues <integrationId> <externalId,...>  borra esos asuntos y sus avisos del chat
  *   node ops.js app-version <ios|android> <versión> <build> [minBuild] ["notas es"] ["notas en"]   última versión publicada (docs/ACTUALIZAR.md)
+ *   node ops.js app-version <mac|windows> <versión> [url de descarga]     escritorio: el build sale de la versión (0.3.0 → 300)
  *   node ops.js app-version <ios|android>                  muestra la registrada
  *       imprime el JSON con el token (y el secreto de salida) UNA vez: redirígelo a un archivo protegido.
  */
@@ -85,6 +86,16 @@ try {
       return { issues: ids.length, messages: msgs.length };
     });
     console.log(JSON.stringify(r));
+  } else if (command === 'app-version' && (a === 'mac' || a === 'windows')) {
+    if (b) {
+      const m = b.match(/^(\d+)\.(\d+)\.(\d+)$/);
+      if (!m || Number(m[2]) > 99 || Number(m[3]) > 99) throw new Error('versión como 0.3.0 (menor y parche ≤ 99)');
+      const build = Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3]);
+      if (c && !/^https:\/\//.test(c)) throw new Error('la url de descarga debe ser https://');
+      await pool.query('UPDATE app_releases SET latest_version = $2, latest_build = $3, url = COALESCE($4, url), updated_at = now() WHERE platform = $1', [a, b, build, c ?? null]);
+    }
+    const { rows } = await pool.query('SELECT * FROM app_releases WHERE platform = $1', [a]);
+    console.log(JSON.stringify(rows[0], null, 1));
   } else if (command === 'app-version' && (a === 'ios' || a === 'android')) {
     // Tras publicar una build: las apps con un build menor muestran «Actualización disponible» hasta instalarla.
     if (b && c) {

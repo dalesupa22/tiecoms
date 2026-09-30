@@ -133,7 +133,7 @@ export async function buildHttp() {
   app.get('/api/v1/meta', async () => ({ apiVersion: API_VERSION, contract: CONTRACT_VERSION, minClientContract: MIN_CLIENT_CONTRACT }));
   // «Actualización disponible» (docs/ACTUALIZAR.md): público, las apps lo piden al abrir y al volver al frente.
   app.get<{ Querystring: { platform?: string; lang?: string } }>('/api/v1/app-version', async (req, reply) => {
-    const q = z.object({ platform: z.enum(['ios', 'android']), lang: z.string().max(10).optional() }).parse(req.query);
+    const q = z.object({ platform: z.enum(['ios', 'android', 'mac', 'windows']), lang: z.string().max(10).optional() }).parse(req.query);
     const { rows } = await pool.query('SELECT * FROM app_releases WHERE platform = $1', [q.platform]);
     const r = rows[0];
     if (!r) throw notFound('Versión');
@@ -573,6 +573,7 @@ export async function buildHttp() {
     priv.get<{ Querystring: { ids?: string } }>('/api/v1/mail/shared', async (req) => mailbox.getSharedMany(req.userId, z.array(z.uuid()).min(1).max(50).parse(String(req.query.ids ?? '').split(',').filter(Boolean))));
     priv.get<{ Params: { id: string }; Querystring: { full?: string } }>('/api/v1/mail/shared/:id', async (req) => mailbox.getShared(req.userId, z.uuid().parse(req.params.id), req.query.full === '1'));
     priv.get<{ Params: { id: string } }>('/api/v1/mail/shared/:id/original', mailLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return mailbox.original(req.userId, z.uuid().parse(req.params.id)); });
+    priv.get<{ Params: { id: string } }>('/api/v1/mail/shared/:id/html', mailLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return mailbox.html(req.userId, z.uuid().parse(req.params.id)); });
     priv.get<{ Params: { id: string } }>('/api/v1/mail/shared/:id/comments', async (req) => mailbox.listComments(req.userId, z.uuid().parse(req.params.id)));
     priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/comments', async (req, reply) =>
       reply.status(201).send(await mailbox.comment(req.userId, z.uuid().parse(req.params.id), EventCommentInput.parse(req.body).body)));
@@ -691,6 +692,14 @@ export async function buildHttp() {
     const id = z.uuid().parse(req.params.id);
     const f = await imageCache.through(`a:${id}`, () => profile.readAvatar(id));
     return reply.header('content-type', f.contentType).header('cache-control', 'public, max-age=31536000, immutable').send(f.body);
+  });
+
+  // Imágenes de un correo visto con su diseño (URL firmada; ver mailbox.proxyImage).
+  app.get<{ Params: { token: string } }>('/api/v1/mail/img/:token', { config: { rateLimit: { max: 600, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const token = z.string().max(4096).parse(req.params.token);
+    const f = await imageCache.through(`m:${token}`, async () => (await mailbox.proxyImage(token)) ?? { body: Buffer.alloc(0), contentType: '' });
+    if (!f.body.length) return reply.status(404).send({ error: { code: 'not_found', message: 'No encontrada' } });
+    return reply.header('content-type', f.contentType).header('x-content-type-options', 'nosniff').header('cache-control', 'private, max-age=86400').send(f.body);
   });
 
   // Miniatura de una vista previa de enlace (guardada en S3 por el worker).

@@ -10,13 +10,14 @@ import { navigate } from '../router.ts';
 import { directOtherId, Avatar, ConvAvatar, Modal, OrgMark, conversationTitle, orgById, personById } from '../ui.tsx';
 import { companyLine, destinationLabel, peopleByOrg, recentPeopleIds, searchGroups } from '../quick-search.ts';
 import { openDirect } from './Quick.tsx';
+import { Formatted } from '../fmt.tsx';
 
 // ---------- Enlaces clicables en el texto ----------
 const URL_SPLIT = /(\bhttps?:\/\/[^\s<>"'`]+)/gi;
 export function Linkify({ text }: { text: string }) {
   const parts = text.split(URL_SPLIT);
   return <>{parts.map((part, i) => {
-    if (i % 2 === 0) return part;
+    if (i % 2 === 0) return <Formatted key={i} text={part} />;
     // La puntuación final no es parte del enlace.
     const trail = part.match(/[.,;:!?¿¡)\]}»”’]+$/u)?.[0] ?? '';
     const href = trail ? part.slice(0, -trail.length) : part;

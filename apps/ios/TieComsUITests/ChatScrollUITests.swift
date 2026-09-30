@@ -160,6 +160,44 @@ final class ChatScrollUITests: XCTestCase {
         shot(tag + "171-04-final")
     }
 
+    /// Pila perezosa con filas altas (foto vertical de 3000 px, video vertical, PDF, 30 enlaces, tarjeta de tarea, de evento y
+    /// de correo con comentarios): ninguna pasa de ≈ 60 % de lo visible y el chat se recorre de punta a punta sin congelarse.
+    /// Fixture: `tools/fixtures/tall-rows-fixture.mjs` por `TEST_RUNNER_TC_FIXTURE_TALL`.
+    func testTallRowsInLazyStack() throws { try tallRows(lazy: true) }
+    /// Lo mismo en la pila normal (control).
+    func testTallRowsInNormalStack() throws { try tallRows(lazy: false) }
+
+    private func tallRows(lazy: Bool) throws {
+        guard let path = env["TC_FIXTURE_TALL"], !path.isEmpty else { throw XCTSkip("Sin TC_FIXTURE_TALL") }
+        setenv("TC_FIXTURE_LONG", path, 1)
+        let (app, _) = try openChat(lazy: lazy)
+        let screen = app.windows.firstMatch.frame
+        let last = text(app, "ÚLTIMO MENSAJE CORTO")
+        if !last.waitForExistence(timeout: 15) { for _ in 0..<40 where !last.exists { drag(app, from: 0.80, to: 0.30) } }
+        XCTAssertTrue(last.exists, "llega al final")
+        shot((lazy ? "lazy-" : "normal-") + "altas-01-final")
+        // Hacia arriba hasta el primero, revisando que ninguna fila visible pase del tope.
+        let first = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "corto 1")).firstMatch
+        var tallest: CGFloat = 0
+        var step = 0, stubs = 0
+        for _ in 0..<80 where !(first.exists && first.isHittable && first.label == "corto 1") {
+            drag(app, from: 0.30, to: 0.80)
+            step += 1
+            if app.buttons["row.showAll"].exists { stubs += 1; if stubs == 1 { shot("lazy-altas-01b-ver-completo") } }
+            if step % 10 == 0 { shot((lazy ? "lazy-" : "normal-") + "altas-paso-\(step)") }
+            for id in ["msg.", "mailCard.", "taskCard.", "eventCard."] {
+                let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", id)).allElementsBoundByIndex.prefix(6)
+                for r in rows where r.exists { tallest = max(tallest, r.frame.height) }
+            }
+        }
+        XCTAssertTrue(first.exists, "llega al primer mensaje (carga las páginas viejas)")
+        shot("lazy-altas-02-arriba")
+        XCTAssertLessThan(tallest, screen.height * 0.75, "ninguna fila pasa del tope (la más alta: \(tallest) de \(screen.height))")
+        for _ in 0..<80 where !(last.exists && last.isHittable) { drag(app, from: 0.80, to: 0.30) }
+        XCTAssertTrue(last.exists && last.isHittable, "vuelve al último")
+        shot("lazy-altas-03-abajo")
+    }
+
     func testSwipeRightRepliesWithQuoteNotSidechat() throws {
         let (app, _) = try openChat()
         let target = text(app, "ÚLTIMO MENSAJE CORTO")

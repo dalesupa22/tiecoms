@@ -164,6 +164,8 @@ struct ConversationView: View {
     @State private var dividerId: String?
     /// Ya se colocó el chat al abrir (en el primer no leído o al final).
     @State private var positioned = false
+    /// Hay una página vieja en camino (no se pide otra a la vez).
+    @State private var loadingOlder = false
     /// A más de una pantalla del final: sale el botón ⌄ y los mensajes nuevos no arrastran la vista.
     @State private var farFromBottom = false
     /// Último seq visto estando al final: lo que llegue después cuenta en el globo del ⌄.
@@ -555,14 +557,15 @@ struct ConversationView: View {
                         ProgressView()
                             .padding(8)
                             .accessibilityLabel(L("chat.loadingOlder"))
-                            .onAppear {
-                                guard positioned, !positioning else { return }
-                                let anchor = state.messages.first?.id
-                                Task {
-                                    await store.loadOlder(conversationId)
-                                    if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                            .onAppear { loadOlder(proxy, state) }
+                            // En la pila normal (VStack) la rueda existe desde que abre el chat y onAppear no vuelve a
+                            // llegar: las páginas viejas se piden cuando la rueda entra en la pantalla al desplazar.
+                            .background(GeometryReader { g in
+                                Color.clear.onChange(of: positioned && !loadingOlder && g.frame(in: .named("chat.scroll")).minY > -40) { _, visible in
+                                    if visible { loadOlder(proxy, state) }
                                 }
-                            }
+                            })
+
                     } else if c.historyFromSeq > 0 {
                         Text(L("chat.lateJoin")).font(.footnote).foregroundStyle(Theme.textSecondary)
                             .multilineTextAlignment(.center).padding(12)
@@ -577,7 +580,10 @@ struct ConversationView: View {
                         Text(L("conv.noMessages")).font(.subheadline).foregroundStyle(Theme.textSecondary).padding(.top, 40)
                     }
                     ForEach(items) { item in
-                        row(d, c, item, byId: byId).id(item.id)
+                        row(d, c, item, byId: byId)
+                            .modifier(LazyRowCap(cap: lazyRows ? ChatRowCapRule.cap(viewport: viewportHeight) : 0))
+                            .environment(\.chatRowCap, lazyRows ? ChatRowCapRule.cap(viewport: viewportHeight) : 0)
+                            .id(item.id)
                             .background {
                                 if let seq = trackedSeq(item) {
                                     GeometryReader { g in
@@ -913,6 +919,19 @@ struct ConversationView: View {
         guard unreadSnap == nil, let c = store.meta(conversationId) else { return }
         readingSession = store.sessionStamp
         unreadSnap = .init(lastReadSeq: c.lastReadSeq, unread: c.unread)
+    }
+
+    /// Pide la página anterior (una a la vez) y deja a la vista el mensaje que estaba arriba.
+    private func loadOlder(_ proxy: ScrollViewProxy, _ state: ConversationState) {
+        guard positioned, !positioning, !loadingOlder, state.hasMore else { return }
+        loadingOlder = true
+        let anchor = state.messages.first?.id
+        Task {
+            await store.loadOlder(conversationId)
+            if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            loadingOlder = false
+        }
     }
 
     private func positionAtFirstUnread(_ proxy: ScrollViewProxy) async {
@@ -1683,6 +1702,7 @@ struct MessageBubble: View {
     @State private var expanded = false
     @State private var reading = false
     @Environment(\.chatLazyStack) private var inLazyStack
+    @Environment(\.chatRowCap) private var rowCap
 
     var body: some View {
         let _ = PerfCounters.bump("chat.bubble.body")
@@ -1810,9 +1830,9 @@ struct MessageBubble: View {
     /// Muy largo y sin búsqueda activa (con búsqueda se ve entero para que se vea lo resaltado).
     private var long: Bool { highlight == nil && !italic && LongText.isLong(text) }
     private var collapsed: Bool { long && (!expanded || inLazyStack) }
-    /// En la pila perezosa, plegado más corto: una fila más alta que la pantalla (30 líneas que se parten en 60) también
-    /// dejaba la LazyVStack re-estimando sin fin; con 12 queda siempre por debajo del alto de la pantalla.
-    private var collapsedLines: Int { inLazyStack ? LongText.lazyCollapsedLines : LongText.collapsedLines }
+    /// En la pila perezosa, plegado por alto: las líneas que caben en el tope de la fila (≈ 60 % de lo visible) con la
+    /// letra actual; una fila más alta que la pantalla dejaba la LazyVStack re-estimando sin fin.
+    private var collapsedLines: Int { inLazyStack ? ChatRowCapRule.lines(cap: rowCap > 0 ? rowCap : ChatRowCapRule.cap(viewport: 0)) : LongText.collapsedLines }
 
     private var jumbo: Bool { !italic && attachments.isEmpty && mentions.isEmpty && Reactions.isJumbo(text) }
 
@@ -1887,8 +1907,6 @@ struct LineageBar: View {
 /// Mensajes muy largos: más de 40 líneas o 3000 caracteres se muestran plegados a 30 líneas con «Ver más».
 enum LongText {
     static let collapsedLines = 30
-    /// En la pila perezosa (chats de más de 200 filas).
-    static let lazyCollapsedLines = 12
     static func isLong(_ s: String) -> Bool {
         if s.utf16.count > 3000 { return true }
         var lines = 1
@@ -1914,10 +1932,61 @@ struct ChatStack<Content: View>: View {
 /// fila más alta que la pantalla (LazyStack.measureEstimates / placeSubviews en bucle, app congelada). Ahí «Ver más» abre
 /// el texto completo en una hoja. Prueba: ChatScrollUITests.testLongMessageScrollsInLazyStack.
 private struct ChatLazyStackKey: EnvironmentKey { static let defaultValue = false }
+private struct ChatRowCapKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
 extension EnvironmentValues {
     var chatLazyStack: Bool {
         get { self[ChatLazyStackKey.self] }
         set { self[ChatLazyStackKey.self] = newValue }
+    }
+    /// Alto máximo de una fila en la pila perezosa (≈ 60 % de lo visible); 0 = sin tope.
+    var chatRowCap: CGFloat {
+        get { self[ChatRowCapKey.self] }
+        set { self[ChatRowCapKey.self] = newValue }
+    }
+}
+
+/// Tope de alto de las filas en la pila perezosa: ninguna fila pasa de ≈ 60 % de lo visible (iPhone SE, horizontal y
+/// letra grande incluidos). Si la fila entera no cabe, se ve su parte de arriba y «Ver completo», que la abre en una
+/// hoja. Una fila más alta que la pantalla dejaba la LazyVStack re-estimando sin fin (app congelada).
+enum ChatRowCapRule {
+    static let fraction: CGFloat = 0.6
+    static func cap(viewport: CGFloat, screen: CGFloat = UIScreen.main.bounds.height) -> CGFloat {
+        max(140, (viewport > 0 ? viewport : screen * 0.7) * fraction)
+    }
+    /// Líneas de un mensaje muy largo plegado que caben en el tope (con la letra actual).
+    static func lines(cap: CGFloat, lineHeight: CGFloat = UIFont.preferredFont(forTextStyle: .body).lineHeight) -> Int {
+        max(3, min(LongText.collapsedLines, Int((cap * 0.7) / max(1, lineHeight))))
+    }
+}
+
+struct LazyRowCap: ViewModifier {
+    let cap: CGFloat
+    @State private var open = false
+    func body(content: Content) -> some View {
+        if cap > 0 {
+            ViewThatFits(in: .vertical) {
+                content
+                VStack(spacing: 4) {
+                    content.frame(height: max(60, cap - 44), alignment: .top).clipped().allowsHitTesting(false)
+                        .overlay(alignment: .bottom) {
+                            LinearGradient(colors: [Theme.background.opacity(0), Theme.background], startPoint: .top, endPoint: .bottom).frame(height: 36)
+                        }
+                    Button(L("chat.readMore")) { open = true }
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accentText)
+                        .accessibilityIdentifier("row.showAll")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .frame(maxHeight: cap)
+            .sheet(isPresented: $open) {
+                NavigationStack {
+                    ScrollView { content.padding(.vertical, 12).environment(\.chatRowCap, 0).environment(\.chatLazyStack, false) }
+                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L("common.close")) { open = false } } }
+                }
+            }
+        } else {
+            content
+        }
     }
 }
 

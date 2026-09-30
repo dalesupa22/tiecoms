@@ -207,6 +207,9 @@ fn main() {
         .background_color(theme_bg(theme.unwrap_or(Theme::Light)))
         .inner_size(1280.0, 820.0)
         .min_inner_size(380.0, 560.0)
+        // Sin el manejador nativo de soltar archivos: así el WebView recibe el drag and drop HTML5 y se pueden
+        // soltar archivos en un chat (en Windows/WebView2, con él activo, ni los arrastres internos funcionan).
+        .disable_drag_drop_handler()
         .on_navigation(move |url| {
           if is_app_url(url) {
             return true;

@@ -40,6 +40,7 @@ import { TopicDock, TopicTag, activeTopicIdsNow, openTopicMenu, topicMenu, useTo
 import { ChatSearchBar, Notice17Row, ViewOnceBubble, parseNotice, useRefPicker } from './Chat17.tsx';
 import { backspaceRef, refsFor, viewOnceAllowed, type RefToken } from '../chat17.ts';
 import { markAgain } from '../perf.ts';
+import { claimFileDrag, clipboardFiles, installFileDropGuard, isFileDrag } from '../file-drop.ts';
 
 type Row =
   | { kind: 'day'; key: string; label: string }
@@ -75,6 +76,10 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   const [groupCrop, setGroupCrop] = useState<File | null>(null);
   const drafts = useDrafts(id);
   const [dropping, setDropping] = useState(false);
+  // La capa se apaga sola si dejan de llegar dragover (salió de la ventana o Safari no da relatedTarget).
+  const dropTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const endDrop = () => { if (dropTimer.current) clearTimeout(dropTimer.current); dropTimer.current = null; setDropping(false); };
+  useEffect(() => { installFileDropGuard(); return () => { if (dropTimer.current) clearTimeout(dropTimer.current); }; }, []);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deriving, setDeriving] = useState<MessageDTO | null>(null);
@@ -671,10 +676,22 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     <div ref={setHost} style={zoom !== 1 && !embedded ? { zoom } : undefined} className={`conv ${panel || sideConv ? '' : 'no-panel'} ${sideConv ? 'has-side' : ''} ${embedded ? 'is-embedded' : ''}`}>
       {sideConv && <SideConnector host={host} anchorId={sideConv.parentMessageId} color={personColor(sideAnchor?.authorId ?? sideConv.memberIds[0])} />}
       <section className={`conv-main ${dropping ? 'is-dropping' : ''}`}
-        onDragOver={(e) => { if (conv.canPost && e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
-        onDragLeave={(e) => { if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) setDropping(false); }}
-        onDrop={(e) => { if (!e.dataTransfer.files.length) return; e.preventDefault(); setDropping(false); drafts.add(e.dataTransfer.files); input.current?.focus(); }}>
-        {dropping && <div className="drop-hint" aria-hidden>{t('att.drop')}</div>}
+        // Archivos del sistema soltados en cualquier parte del chat: mismo flujo que «+» (drafts.add).
+        // Solo con «Files» en dataTransfer.types: los arrastres internos (chats a paneles, temas) no activan la capa.
+        onDragOver={(e) => {
+          if (!conv.canPost || !claimFileDrag(e)) return;
+          if (!dropping) setDropping(true);
+          if (dropTimer.current) clearTimeout(dropTimer.current);
+          dropTimer.current = setTimeout(endDrop, 700);
+        }}
+        onDragLeave={(e) => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node)) endDrop(); }}
+        onDrop={(e) => {
+          if (!conv.canPost || !isFileDrag(e.dataTransfer)) return;
+          e.preventDefault(); e.stopPropagation(); endDrop();
+          const files = [...e.dataTransfer.files];
+          if (files.length) { drafts.add(files); input.current?.focus(); }
+        }}>
+        {dropping && <div className="drop-hint" aria-hidden><span>⤓ {t('att.drop', { name: isSide ? t('side.title') : title })}</span></div>}
         <header className="conv-head" onContextMenu={contextHandler(() => conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) }))}>
           {!embedded && <button className="icon-btn only-mobile" aria-label={t('common.back')} onClick={() => (history.length > 1 ? history.back() : navigate('/conversaciones'))}>‹</button>}
           {conv.kind !== 'direct' && conv.avatarUrl && <ConvAvatar c={conv} size={30} />}
@@ -880,7 +897,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
                 onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
                 onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart); client.typing(id); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(180, e.target.scrollHeight)}px`; }}
                 onKeyDown={onKey} enterKeyHint="send"
-                onPaste={(e) => { const files = [...e.clipboardData.files]; if (files.length) { e.preventDefault(); drafts.add(files); } }}
+                onPaste={(e) => { const files = clipboardFiles(e.clipboardData); if (files.length) { e.preventDefault(); drafts.add(files); } }}
               />
               </div>
               {!privateReply && <button type="button" className={`bring-btn once-btn ${viewOnce ? 'is-on' : ''}`} aria-pressed={viewOnce} title={viewOnce ? t('once.on') : t('once.toggle')} aria-label={t('once.toggle')}

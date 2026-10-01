@@ -1,3 +1,4 @@
+import { usePersonalPreferences } from '../personal-prefs.ts';
 import { CallDot } from './Call.tsx';
 import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import type { BootstrapDTO, ConversationDTO, CreateGroupRequest, InvitationPreviewDTO, IssueDTO, MessageDTO, OrganizationDTO, OversightDTO, WorkspaceDTO } from '@tiecoms/contracts';
@@ -181,7 +182,9 @@ export function GroupsViewButton({ tab = 'all', withView = false }: { tab?: Home
 
 // ---------- Vista del árbol ----------
 export function GroupsTree({ tab = 'all', activeConv = null }: { tab?: HomeTab; activeConv?: string | null }) {
-  const d = useClient((s) => s.data)!;
+  const raw = useClient((s) => s.data)!;
+  const personal = usePersonalPreferences();
+  const d = useMemo(() => ({ ...raw, conversations: raw.conversations.filter((c) => !personal.conversations[c.id]?.archived) }), [raw, personal]);
   const issues = useClient((s) => s.issues);
   const sections = useMemo(() => buildGroupTree(d, issues, tab), [d, issues, tab]);
   const { folded, toggle } = useFolded();
@@ -409,7 +412,9 @@ function Separated<T>({ items, convOf, render, sepMenu }: { items: T[]; convOf: 
 }
 
 export function DmsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; activeConv?: string | null }) {
-  const d = useClient((s) => s.data)!;
+  const raw = useClient((s) => s.data)!;
+  const personal = usePersonalPreferences();
+  const d = useMemo(() => ({ ...raw, conversations: raw.conversations.filter((c) => !personal.conversations[c.id]?.archived) }), [raw, personal]);
   // gg y «Tú» van fijos arriba (docs/GG-CHAT.md), no en la lista.
   const list = dmConversations(d, tab).filter((c) => !isGgChat(c) && !isSelfChat(d, c));
   return (
@@ -454,7 +459,9 @@ export function groupListItems(sections: GroupSection[]): GroupListItem[] {
 }
 
 export function GroupsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; activeConv?: string | null }) {
-  const d = useClient((s) => s.data)!;
+  const raw = useClient((s) => s.data)!;
+  const personal = usePersonalPreferences();
+  const d = useMemo(() => ({ ...raw, conversations: raw.conversations.filter((c) => !personal.conversations[c.id]?.archived) }), [raw, personal]);
   const issues = useClient((s) => s.issues);
   const items = useMemo(() => groupListItems(buildGroupTree(d, issues, tab)), [d, issues, tab]);
   const issuesOpen = useIssuesOpen();
@@ -470,7 +477,9 @@ export function GroupsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; 
 
 /** «Todo» de la barra lateral: grupos (como en Lista) y DMs juntos, con el orden de la bandeja. */
 export function AllList({ tab = 'all', activeConv = null }: { tab?: HomeTab; activeConv?: string | null }) {
-  const d = useClient((s) => s.data)!;
+  const raw = useClient((s) => s.data)!;
+  const personal = usePersonalPreferences();
+  const d = useMemo(() => ({ ...raw, conversations: raw.conversations.filter((c) => !personal.conversations[c.id]?.archived) }), [raw, personal]);
   const issues = useClient((s) => s.issues);
   const issuesOpen = useIssuesOpen();
   type Item = { c: ConversationDTO; group?: GroupListItem };

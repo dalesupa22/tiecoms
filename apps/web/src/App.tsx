@@ -1,3 +1,7 @@
+import { NotesScreen } from './screens/Notes.tsx';
+import { PersonalChatsScreen } from './screens/PersonalChats.tsx';
+import { AlertsScreen } from './screens/Alerts.tsx';
+import { CommunityScreen } from './screens/Community.tsx';
 import { Suspense, lazy, useEffect, useRef } from 'react';
 import { notices, useClient } from './app-client.ts';
 import { handleNotice } from './notices.ts';
@@ -81,6 +85,10 @@ export function App() {
   return (
     <>
     <Shell key={lang} route={route}>
+      {route.name === 'notes' && <NotesScreen />}
+      {route.name === 'organize' && <PersonalChatsScreen />}
+      {route.name === 'alerts' && <AlertsScreen />}
+      {route.name === 'community' && <CommunityScreen />}
       {route.name === 'today' && <TodayScreen />}
       {route.name === 'inbox' && <InboxScreen />}
       {route.name === 'spaces' && <SpacesScreen />}

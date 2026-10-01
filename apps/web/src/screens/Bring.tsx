@@ -192,7 +192,7 @@ export function ShareScreen() {
 }
 
 // ---------- Recordatorios en Hoy ----------
-function ReminderRow({ r }: { r: ReminderDTO }) {
+export function ReminderRow({ r }: { r: ReminderDTO }) {
   const d = useClient((s) => s.data)!;
   const conv = d.conversations.find((c) => c.id === r.conversationId);
   const due = Date.parse(r.remindAt) <= Date.now();

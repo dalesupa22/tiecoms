@@ -30,15 +30,24 @@ async function announce(c: import('../db.ts').Tx, userId: string) {
      UNION
      SELECT DISTINCT o.user_id FROM organization_memberships mine
        JOIN organization_memberships o ON o.org_id = mine.org_id
-      WHERE mine.user_id = $1`,
+      WHERE mine.user_id = $1
+     UNION
+     SELECT DISTINCT other.user_id FROM conversation_memberships mine
+       JOIN conversation_memberships other ON other.conversation_id = mine.conversation_id AND other.removed_at IS NULL
+      WHERE mine.user_id = $1 AND mine.removed_at IS NULL`,
     [userId],
   );
   const ids = [...new Set([userId, ...rows.map((r) => r.user_id as string)])];
   await enqueueOutbox(c, 'account.event', { userIds: ids, event: { type: 'scope.changed', reason: 'profile.updated' } });
 }
 
-export async function updateProfile(userId: string, input: { name?: string; title?: string | null; area?: string | null; linkDigest?: boolean }) {
+export async function updateProfile(userId: string, input: { name?: string; title?: string | null; area?: string | null; linkDigest?: boolean; phone?: string | null; company?: string | null; bio?: string | null }) {
   await tx(async (c) => {
+    if (input.phone !== undefined || input.company !== undefined || input.bio !== undefined) await c.query(`UPDATE users SET
+      profile_phone = CASE WHEN $2 THEN $3 ELSE profile_phone END,
+      profile_company = CASE WHEN $4 THEN $5 ELSE profile_company END,
+      profile_bio = CASE WHEN $6 THEN $7 ELSE profile_bio END WHERE id=$1`,
+      [userId, input.phone !== undefined, input.phone || null, input.company !== undefined, input.company || null, input.bio !== undefined, input.bio || null]);
     if (input.linkDigest !== undefined) await c.query('UPDATE users SET link_digest = $2 WHERE id = $1', [userId, input.linkDigest]);
     if (input.name !== undefined) await c.query('UPDATE users SET name = $2 WHERE id = $1', [userId, input.name]);
     if (input.title !== undefined || input.area !== undefined) {

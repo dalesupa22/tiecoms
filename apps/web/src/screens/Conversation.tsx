@@ -1,3 +1,6 @@
+import { usePersonalPreferences, chatAppearanceStyle } from '../personal-prefs.ts';
+import { PersonalChatControls } from './PersonalChats.tsx';
+import { isTaskActivity } from '../chat-activity.ts';
 import { TOPIC_ALL, filterForEntry, filterForMessage, topicUnreadCounts } from '../topic-order.ts';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { BootstrapDTO, ConversationDTO, IssueDTO, MessageDTO } from '@tiecoms/contracts';
@@ -91,6 +94,9 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   const [revealed, setRevealed] = useState<Set<number>>(() => new Set());
   const [replyTo, setReplyTo] = useState<MessageDTO | null>(null);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const [messageFeed, setMessageFeed] = useState<'messages' | 'activity'>('messages');
+  const personal = usePersonalPreferences();
+  const personalChat = personal.conversations[id] ?? {};
   const [showPins, setShowPins] = useState(false);
   const [showLinks, setShowLinks] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
@@ -311,6 +317,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     let lastDay = '';
     let prev: MessageDTO | null = null;
     for (const m of local?.messages ?? []) {
+      if (messageFeed === 'messages' && isTaskActivity(m) && !revealed.has(m.seq)) continue;
       // Con un tema elegido se ven sus mensajes y las tarjetas de sus tareas.
       if (activeFilter && m.topicId !== activeFilter && !(m.kind === 'system' && issueTopicOf(m) === activeFilter)) continue;
       // «General»: solo lo que no tiene tema (ni tareas de un tema). «Todo» lo muestra todo (docs/TEMAS.md).
@@ -331,7 +338,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
       if (at >= 0) out.splice(at, 0, { kind: 'new', key: 'new-line' });
     }
     return groupLinkRuns(out, expandedGroups, highlight, baseRead);
-  }, [local?.messages, pending, expandedGroups, highlight, newLine, activeFilter, activeFilter || generalOnly ? allIssues : null, generalOnly, activeTopicIds, revealed]);
+  }, [messageFeed, local?.messages, pending, expandedGroups, highlight, newLine, activeFilter, activeFilter || generalOnly ? allIssues : null, generalOnly, activeTopicIds, revealed]);
   const topicCounts = useMemo(() => {
     const n: Record<string, number> = {};
     for (const m of local?.messages ?? []) if (m.topicId && !m.deletedAt) n[m.topicId] = (n[m.topicId] ?? 0) + 1;
@@ -436,7 +443,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
       const current = client.getState();
       const meta = current.data?.conversations.find((x) => x.id === id);
       const visible = (current.conversations[id]?.messages ?? []).filter((m) => {
-        if (isReadTransparentMessage(m)) return true;
+        if (isReadTransparentMessage(m) || (messageFeed === 'messages' && isTaskActivity(m) && !revealed.has(m.seq))) return true;
         const rect = document.getElementById(`msg-${id}-${m.seq}`)?.getBoundingClientRect();
         return !!rect && rect.top < box.bottom && rect.bottom > box.top;
       }).map((m) => m.seq);
@@ -716,6 +723,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
           <div className="row only-desktop head-orgs">{orgsHere.map((o) => o && <OrgMark key={o.id} org={o} size={22} />)}</div>
           {embedded && pinned.size > 0 && <button className="btn ghost small" onClick={() => setShowPins(true)} title={t('pins.title')}>📌 {pinned.size}</button>}
           {embedded && conv.canManage && conv.kind !== 'direct' && <button className="btn ghost small" onClick={() => openDialog((close) => <AddMembersDialog conversationId={id} onClose={close} />)} title={t('bar.addPeople')}>＋ {t('bar.people')}</button>}
+          {!embedded && <PersonalChatControls conv={conv} />}
           {ws && !embedded && <button className="btn ghost small only-desktop head-space" onClick={() => navigate(`/w/${ws.id}`)}>{t('chat.space')}</button>}
           {!isSide && <CallButtons conv={conv} />}
           {!embedded && <span className="zoom-pill only-desktop" role="group" aria-label={t('zoom.label')}>
@@ -754,6 +762,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
             </div>
           </div>
         )}
+        {!embedded && <div className="row" style={{ padding: '4px 12px', gap: 8 }}><div className="seg grow"><button className={messageFeed === 'messages' ? 'on' : ''} onClick={() => setMessageFeed('messages')}>{locale().startsWith('en') ? 'Messages' : 'Mensajes'}</button><button className={messageFeed === 'activity' ? 'on' : ''} onClick={() => setMessageFeed('activity')}>{locale().startsWith('en') ? 'All activity' : 'Toda la actividad'}</button></div><button className="btn small" onClick={() => navigate(`/archivos?conversationId=${id}`)}>▣ {t('nav.files')}</button></div>}
         <LineageBar conv={conv} />
         {!embedded && (
           <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)} onLinks={() => setShowLinks(true)}
@@ -767,7 +776,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
         {nav.lineAbove && entry && newLine != null && (
           <button className="jump-new" onClick={jumpToNewLine} aria-label={t('chat.jumpNew')} title={t('chat.jumpNew')}>{t('chat.newAbove', { n: entry.unread })}</button>
         )}
-        <div className="msgs" data-conv-id={id} ref={scroller} onScroll={onScroll} role="log" aria-live="polite">
+        <div className="msgs" style={chatAppearanceStyle(personalChat)} data-background={personalChat.background ?? 'default'} data-conv-id={id} ref={scroller} onScroll={onScroll} role="log" aria-live="polite">
           {local?.loading && !local.loaded && <div className="msg-sys">{t('common.loading')}</div>}
           {local?.loaded && !local.hasMore && conv.historyFromSeq > 0 && <div className="msg-sys">{t('chat.lateJoin')}</div>}
           {local?.loaded && local.hasMore && <div className="msg-sys">{local.loading ? t('chat.loadingOlder') : '·'}</div>}

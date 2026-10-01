@@ -1,10 +1,12 @@
+import { AppearanceSettings } from './Appearance.tsx';
+import { TodayTaskStats } from './TaskReports.tsx';
 import { MailConnectNudge, ProviderIcon } from './Mail.tsx';
 import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from 'react';
 import type { ConversationDTO, StorageUsageDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, getLang, langPreference, locale, setLang, t, tn, useLang, type Lang } from '../i18n.ts';
 import { navigate } from '../router.ts';
-import { openProfile } from './Profile.tsx';
+import { openProfile, openPersonProfile } from './Profile.tsx';
 import { NewChatDialog, StackedAvatars } from './Chats.tsx';
 import { directOtherId, Avatar, ConvAvatar, OrgMark, SideIcon, conversationSubtitle, conversationTitle, counterpartOrg, orgById, personById, conversationPreview, timeLabel } from '../ui.tsx';
 import { InviteDialog, NewGroupDialog } from './Dialogs.tsx';
@@ -55,9 +57,9 @@ export function TodayScreen() {
   const pending = useClient((s) => s.pending);
   const issues = useClient((s) => s.issues);
   const [openIssue, setOpenIssue] = useState<string | null>(null);
-  useEffect(() => { client.loadIssues({ mine: true, open: true }).catch(() => {}); }, []);
+  useEffect(() => { client.loadIssues({ mine: true }).catch(() => {}); }, []);
   const visible = new Set(d.conversations.map((c) => c.id));
-  const mine = Object.values(issues).filter((i) => i.ownerId === d.me.id && !isClosed(i) && (!i.conversationId || visible.has(i.conversationId)))
+  const mine = Object.values(issues).filter((i) => (i.ownerId === d.me.id || i.assigneeIds?.includes(d.me.id)) && !isClosed(i) && (!i.conversationId || visible.has(i.conversationId)))
     .sort((a, b) => (a.dueDate ?? '9').localeCompare(b.dueDate ?? '9'));
   const unreadConvs = d.conversations.filter((c) => c.unread > 0);
   const unread = unreadConvs.reduce((n, c) => n + c.unread, 0);
@@ -75,6 +77,7 @@ export function TodayScreen() {
         {unread ? t('today.summary', { messages: tn(unread, 'n.newMessage', 'n.newMessages'), conversations: tn(unreadConvs.length, 'n.conversation', 'n.conversations') }) : t('today.upToDate')}
         {' · '}{t('today.spacesWith', { spaces: tn(d.workspaces.length, 'n.space', 'n.spaces'), companies: tn(Math.max(0, orgsCount - 1), 'n.company', 'n.companies') })}
       </div>
+      <TodayTaskStats />
       <MailConnectNudge />
       <div className="stats">
         <div className="stat dark"><div className="eyebrow">{t('today.unread')}</div><div className="num">{unread}</div></div>
@@ -244,12 +247,12 @@ export function WorkspaceScreen({ id }: { id: string }) {
 export function PeopleScreen() {
   const d = useClient((s) => s.data)!;
   const [q, setQ] = useState('');
-  const people = d.people.filter((p) => p.id !== d.me.id && (!q || `${p.name} ${p.title ?? ''} ${orgById(d, p.orgId)?.name ?? ''}`.toLowerCase().includes(q.toLowerCase())));
+  const people = d.people.filter((p) => p.id !== d.me.id && (!q || `${p.name} ${p.title ?? ''} ${p.phone ?? ''} ${p.company ?? ''} ${orgById(d, p.orgId)?.name ?? ''}`.toLowerCase().includes(q.toLowerCase())));
   const byOrg = new Map<string, typeof people>();
   for (const p of people) { const k = p.kind === 'agent' ? 'agents' : p.orgId ?? 'guest'; byOrg.set(k, [...(byOrg.get(k) ?? []), p]); }
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 860 }}>
-      <h1>{t('nav.people')}</h1>
+      <h1>{t('nav.directory')}</h1>
       <div className="muted">{t('people.subtitle')}</div>
       <input className="input" style={{ margin: '14px 0' }} placeholder={t('people.search')} value={q} onChange={(e) => setQ(e.target.value)} />
       {people.length === 0 && <div className="empty">{t('people.empty')}</div>}
@@ -261,6 +264,7 @@ export function PeopleScreen() {
               <div key={p.id} className="card conv-card" {...menuProps(() => personMenu(p))}>
                 <Avatar person={p} org={orgById(d, p.orgId)} size={36} />
                 <span className="grow" style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{p.name}</b><span className="small muted ellipsis" style={{ display: 'block' }}>{[p.title, p.area].filter(Boolean).join(' · ')}{p.guest && p.guestUntil ? ` · ${t('people.until', { date: new Date(p.guestUntil).toLocaleDateString(locale(), { day: 'numeric', month: 'short' }) })}` : ''}</span></span>
+                <button className="btn small ghost" onClick={() => openPersonProfile(p)}>{getLang() === 'en' ? 'Profile' : 'Perfil'}</button>
                 {p.id !== d.me.id && <button className="btn small" onClick={() => client.openDirect(p.id).then((r) => navigate(`/c/${r.id}`)).catch((e) => toast(errorText(e)))}>✉ {t('people.sendMessage')}</button>}
               </div>
             ))}
@@ -317,6 +321,7 @@ export function SettingsScreen() {
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 720 }}>
       <h1>{t('nav.you')}</h1>
+      <div className="row" style={{ flexWrap: 'wrap', marginBottom: 16 }}>{([['/notas', 'nav.notes'], ['/alertas', 'nav.alerts'], ['/comunidad', 'nav.community'], ['/organizar', 'nav.organize'], ['/participantes', 'nav.directory'], ['/archivos', 'nav.files']] as const).map(([to, label]) => <button key={to} className="btn small" onClick={() => navigate(to)}>{t(label)}</button>)}</div>
       <div className="card" style={{ padding: 18, display: 'flex', gap: 14, alignItems: 'center', margin: '14px 0 24px', flexWrap: 'wrap' }}>
         <Avatar person={personById(d, d.me.id)} org={myOrg} size={48} />
         <div className="grow"><b>{d.me.name}</b><div className="small muted">{d.me.email} · {[d.me.title, myOrg?.name].filter(Boolean).join(' · ')}</div></div>
@@ -392,7 +397,7 @@ export function SettingsScreen() {
         ))}
       </div>
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('theme.title')}</div>
-      <ThemeSetting />
+      <AppearanceSettings />
 
       {canInvite && myOrg && (
         <>

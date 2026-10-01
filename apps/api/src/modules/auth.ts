@@ -14,14 +14,14 @@ const ROTATION_GRACE_MS = 30_000;
 
 export async function loadUser(db: Db, userId: string): Promise<UserDTO> {
   const { rows } = await db.query(
-    `SELECT u.id, u.name, u.email, u.kind, u.primary_org_id, u.avatar_file_id, om.title, om.area
+    `SELECT u.id, u.name, u.email, u.kind, u.primary_org_id, u.avatar_file_id, u.profile_phone, u.profile_company, u.profile_bio, om.title, om.area
        FROM users u LEFT JOIN organization_memberships om ON om.user_id = u.id AND om.org_id = u.primary_org_id
       WHERE u.id = $1 AND u.disabled_at IS NULL`,
     [userId],
   );
   const r = rows[0];
   if (!r) throw unauthorized();
-  return { id: r.id, name: r.name, email: r.email, kind: r.kind, title: r.title, area: r.area, primaryOrgId: r.primary_org_id, avatarUrl: r.avatar_file_id ? `/api/v1/avatars/${r.avatar_file_id}` : null };
+  return { id: r.id, name: r.name, email: r.email, kind: r.kind, phone: r.profile_phone, company: r.profile_company, bio: r.profile_bio, title: r.title, area: r.area, primaryOrgId: r.primary_org_id, avatarUrl: r.avatar_file_id ? `/api/v1/avatars/${r.avatar_file_id}` : null };
 }
 
 export async function createSession(c: Tx, userId: string, device: DeviceInfo) {

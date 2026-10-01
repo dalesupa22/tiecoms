@@ -10,6 +10,7 @@ import type { AttachmentDTO, AttachmentSummaryDTO, VideoPlayDTO } from '@tiecoms
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_VIDEO_BYTES, MAX_VOICE_MS, type VoiceTranscriptDTO } from '@tiecoms/contracts';
 import { transcriptionEnabled } from './voice-providers.ts';
 import { conversationAccess } from '../access.ts';
+import { loadVisible } from './issues.ts';
 import { pool, type Tx } from '../db.ts';
 import { ApiError, badRequest, forbidden, notFound, viewOnceConflict } from '../errors.ts';
 import { deleteObject, getObject, objectKey, presignDownload, putObject, putObjectStream } from '../storage.ts';
@@ -160,6 +161,24 @@ export async function upload(userId: string, conversationId: string, input: {
   return toDTO(rows[0]);
 }
 
+/** Archivo pendiente de una tarea, también personal. PATCH /issues/:id lo vincula y publica. */
+export async function uploadForIssue(userId: string, issueId: string, input: { body: Buffer; name?: string; type?: string }) {
+  const issue = await loadVisible(pool, userId, issueId);
+  if (issue.visibility === 'all' && issue.conversationId) await conversationAccess(pool, userId, issue.conversationId, 'post', true);
+  if (!Buffer.isBuffer(input.body) || !input.body.length) throw badRequest('Falta el archivo');
+  if (input.body.length > MAX_ATTACHMENT_BYTES) throw new ApiError(413, 'too_large', 'El archivo pesa más de 25 MB');
+  const sniffed = sniffImage(input.body);
+  const declared = String(input.type ?? '').toLowerCase().split(';')[0]!.trim();
+  const contentType = sniffed ?? (declared.startsWith('image/') || !/^[a-z]+\/[\w.+-]+$/.test(declared) ? 'application/octet-stream' : declared);
+  const size = sniffed ? imageSize(input.body) : null;
+  const id = randomUUID();
+  const key = objectKey(`task-attachments/${issueId}/${id}`);
+  await putObject(key, input.body, contentType);
+  const { rows } = await pool.query(`INSERT INTO attachments (id, conversation_id, owner_id, name, content_type, size_bytes, width, height, s3_key)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`, [id, issue.conversationId, userId, cleanName(input.name), contentType, input.body.length, size?.width ?? null, size?.height ?? null, key]);
+  return toDTO(rows[0]);
+}
+
 // ---------- Videos ----------
 const IMAGE_BRANDS = /^(heic|heix|hevc|hevx|heim|heis|mif1|msf1|avif|avis)$/;
 const AUDIO_BRANDS = /^(M4A |M4B |M4P )$/;
@@ -291,7 +310,7 @@ export async function uploadThumb(userId: string, attachmentId: string, body: Bu
   if (body.length > MAX_THUMB_BYTES) throw new ApiError(413, 'too_large', 'La miniatura pesa más de 512 KB');
   const type = sniffImage(body);
   if (!type || type === 'image/heic' || type === 'image/gif') throw badRequest('La miniatura debe ser JPEG, PNG o WebP');
-  const { rows } = await pool.query('SELECT * FROM attachments WHERE id = $1 AND owner_id = $2 AND message_id IS NULL AND deleted_at IS NULL', [attachmentId, userId]);
+  const { rows } = await pool.query('SELECT * FROM attachments WHERE id = $1 AND owner_id = $2 AND message_id IS NULL AND issue_id IS NULL AND deleted_at IS NULL', [attachmentId, userId]);
   const a = rows[0];
   if (!a) throw notFound('Adjunto pendiente');
   const key = `${a.s3_key}.thumb`;
@@ -312,7 +331,7 @@ export async function claimForMessage(c: Tx, userId: string, conversationId: str
   const out: { id: string; dto: AttachmentDTO }[] = [];
   if (own.length) {
     const { rows } = await c.query(
-      `SELECT * FROM attachments WHERE id = ANY($1) AND owner_id = $2 AND conversation_id = $3 AND message_id IS NULL AND deleted_at IS NULL FOR UPDATE`,
+      `SELECT * FROM attachments WHERE id = ANY($1) AND owner_id = $2 AND conversation_id = $3 AND message_id IS NULL AND issue_id IS NULL AND deleted_at IS NULL FOR UPDATE`,
       [own, userId, conversationId],
     );
     if (rows.length !== own.length) throw badRequest('Algún adjunto no existe, ya se usó o es de otra conversación');
@@ -372,6 +391,7 @@ export async function readable(userId: string, attachmentId: string) {
   );
   const a = rows[0];
   if (!a || a.deleted_at || a.message_deleted_at) throw notFound('Adjunto');
+  if (a.issue_id) { await loadVisible(pool, userId, a.issue_id).catch(() => { throw notFound('Adjunto'); }); return a; }
   if (!a.message_id) { if (a.owner_id !== userId) throw notFound('Adjunto'); return a; }
   const acc = await conversationAccess(pool, userId, a.conversation_id, 'read').catch(() => { throw notFound('Adjunto'); });
   if (a.message_seq <= acc.historyFromSeq) throw forbidden('Este adjunto está fuera de tu historial');
@@ -428,7 +448,7 @@ export function summaryText(s: AttachmentSummaryDTO, lang: 'es' | 'en') {
 /** Pendientes de más de 24 h: se borran las filas y el objeto si ninguna otra fila lo usa. */
 export async function cleanupPending() {
   const { rows } = await pool.query(
-    `DELETE FROM attachments WHERE message_id IS NULL AND created_at < now() - make_interval(hours => $1) RETURNING s3_key, thumb_key`,
+    `DELETE FROM attachments WHERE message_id IS NULL AND issue_id IS NULL AND created_at < now() - make_interval(hours => $1) RETURNING s3_key, thumb_key`,
     [PENDING_HOURS],
   );
   for (const r of rows) {

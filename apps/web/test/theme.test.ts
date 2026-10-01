@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { resolveTheme } from '../src/theme.ts';
+import { colorContrast, customAccentTokens, resolveTheme } from '../src/theme.ts';
 
 // Modo oscuro (tema de la web y del escritorio): elección y contraste WCAG AA de los tokens de styles.css.
 const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
@@ -35,6 +35,15 @@ const PAIRS: [string, string][] = [
 ];
 
 describe('tema', () => {
+  it('keeps custom accents readable in both themes, including extreme colors', () => {
+    for (const mode of ['light', 'dark'] as const) for (const color of ['#ffffff', '#000000', '#ffff00', '#0a7c87', '#ff0000', '#0000ff', '#888888']) {
+      const tokens = customAccentTokens(color, mode);
+      expect(colorContrast(tokens.accent!, mode === 'dark' ? '#151413' : '#f4f1ea')).toBeGreaterThanOrEqual(4.5);
+      expect(colorContrast(tokens['accent-ink']!, tokens['accent-soft']!)).toBeGreaterThanOrEqual(4.5);
+      expect(colorContrast(tokens['on-accent']!, tokens['accent-fill']!)).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(customAccentTokens('javascript:alert(1)', 'light')).toEqual({});
+  });
   it('Automático sigue al sistema; Claro y Oscuro lo fijan', () => {
     expect(resolveTheme('system', true)).toBe('dark');
     expect(resolveTheme('system', false)).toBe('light');

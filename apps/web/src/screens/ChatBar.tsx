@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { BootstrapDTO, ConversationDTO, IssueDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
-import { locale, t } from '../i18n.ts';
+import { getLang, locale, t } from '../i18n.ts';
 import { Avatar, Modal, conversationTitle, personById, timeLabel } from '../ui.tsx';
 import { EventRow, newEvent } from './Calendar.tsx';
 import { ConversationIssues, isClosed, localIso } from './Issues.tsx';
+import { updatePersonalChat, usePersonalPreferences } from '../personal-prefs.ts';
 
 /**
  * Barra de accesos del chat (mismas reglas en web, iOS y Android: docs/GRUPOS.md): Fijados, Asuntos, Hilos,
@@ -49,6 +50,9 @@ export function ChatBar({ conv, pinnedCount, canOpenIssues, onPins, onLinks, onO
   const reminders = useClient((s) => s.reminders);
   const events = useClient((s) => s.events);
   const [pane, setPane] = useState<ChatBarPane | null>(null);
+  const personal = usePersonalPreferences();
+  const hidden = !!personal.conversations[conv.id]?.hideBar;
+  const toggleBar = () => { void updatePersonalChat(conv.id, { hideBar: !hidden }).catch(() => {}); };
   const issues = Object.values(allIssues).filter((i) => i.conversationId === conv.id && !isClosed(i))
     .sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999'));
   const threads = threadsOf(d, conv.id);
@@ -66,13 +70,14 @@ export function ChatBar({ conv, pinnedCount, canOpenIssues, onPins, onLinks, onO
   );
   return (
     <>
-      <div className="chatbar" role="toolbar" aria-label={t('bar.label')}>
+      {hidden ? <button className="btn ghost small" style={{ alignSelf: 'flex-end' }} aria-expanded={false} onClick={toggleBar}>⌄ {getLang() === 'en' ? 'Show message toolbar' : 'Mostrar barra de mensajes'}</button> : <div className="chatbar" role="toolbar" aria-label={t('bar.label')}>
         {btn('pins', '📌', t('bar.pins'), pinnedCount, onPins)}
         {btn('issues', '◆', t('bar.issues'), issues.length, () => setPane('issues'), overdue)}
         {btn('threads', '💬', t('bar.threads'), openThreads.length, () => setPane('threads'), threadUnread > 0)}
         {btn('agenda', '📅', t('bar.agenda'), agenda.length, () => setPane('agenda'), soon)}
         {btn('links', '🔗', t('bar.links'), conv.linkCount ?? 0, onLinks)}
-      </div>
+        <button className="chatbar-btn" aria-expanded title={getLang() === 'en' ? 'Hide message toolbar' : 'Ocultar barra de mensajes'} aria-label={getLang() === 'en' ? 'Hide message toolbar' : 'Ocultar barra de mensajes'} onClick={toggleBar}>⌃</button>
+      </div>}
       {pane === 'issues' && (
         <Modal title={t('bar.issuesTitle')} onClose={() => setPane(null)}>
           <ConversationIssues conversationId={conv.id} canCreate={canOpenIssues} onOpen={(id) => { setPane(null); onOpenIssue(id); }} />

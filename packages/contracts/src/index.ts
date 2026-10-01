@@ -7,6 +7,7 @@
  * versión anterior durante la ventana de soporte (MIN_CLIENT_CONTRACT).
  */
 import { z } from 'zod';
+import type { DriveFileDTO } from './drive.ts';
 
 export const API_VERSION = 1;
 export const CONTRACT_VERSION = '2026-09-29.2';
@@ -241,6 +242,9 @@ export type SsoExchangeInput = z.infer<typeof SsoExchangeInput>;
 /** Eliminar la cuenta: se confirma escribiendo el correo; con contraseña, también se pide. */
 export const DeleteAccountInput = z.object({ confirmEmail: email, password: z.string().max(200).optional() });
 export const UpdateProfileInput = z.object({
+  phone: z.string().trim().max(40).regex(/^[+\d\s().-]*$/, 'Teléfono inválido').nullable().optional(),
+  company: z.string().trim().max(120).nullable().optional(),
+  bio: z.string().trim().max(1000).nullable().optional(),
   name: personName.optional(),
   title: z.string().trim().max(120).nullable().optional(),
   area: z.string().trim().max(120).nullable().optional(),
@@ -266,6 +270,9 @@ export type ConversationKind = 'group' | 'internal' | 'direct' | 'multi';
 export type ConversationLevel = 'directivo' | 'operativo' | null;
 
 export interface UserDTO {
+  phone?: string | null;
+  company?: string | null;
+  bio?: string | null;
   id: string;
   name: string;
   email?: string;
@@ -328,6 +335,9 @@ export interface OrgDomainDTO {
 }
 
 export interface PersonDTO {
+  phone?: string | null;
+  company?: string | null;
+  bio?: string | null;
   id: string;
   name: string;
   kind: 'human' | 'agent';
@@ -884,6 +894,10 @@ export interface IssueDTO {
   status: IssueStatus;
   waitingOnOrgId: string | null;
   ownerId: string | null;
+  /** Todos los responsables; ownerId conserva el primero para clientes anteriores. */
+  assigneeIds?: string[];
+  /** Imágenes y documentos de la tarea, con el mismo acceso que la tarea. */
+  attachments?: AttachmentDTO[];
   requestedBy: string | null;
   dueDate: string | null;
   createdBy: string;
@@ -914,7 +928,7 @@ export interface IssueEventDTO {
   id: number;
   issueId: string;
   actorId: string;
-  kind: 'created' | 'status' | 'owner' | 'due' | 'title' | 'comment' | 'waiting' | 'visibility';
+  kind: 'created' | 'status' | 'owner' | 'due' | 'title' | 'comment' | 'waiting' | 'visibility' | 'assignees' | 'attachments' | 'moved';
   payload: Record<string, unknown>;
   createdAt: string;
 }
@@ -1239,6 +1253,8 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const CreateIssueInput = z.object({
   title: z.string().trim().min(2).max(200),
   ownerId: z.uuid().nullable().optional(),
+  assigneeIds: z.array(z.uuid()).max(20).optional(),
+  attachmentIds: z.array(z.uuid()).max(20).optional(),
   dueDate: isoDate.nullable().optional(),
   originMessageId: z.uuid().nullable().optional(),
   visibility: z.enum(['all', 'org', 'private']).optional(),
@@ -1257,16 +1273,22 @@ export const CreateChildIssueInput = z.object({
   /** Sidechat que salió del chat del asunto (si no, la tarea queda en el mismo chat). */
   conversationId: z.uuid().optional(),
   ownerId: z.uuid().nullable().optional(),
+  assigneeIds: z.array(z.uuid()).max(20).optional(),
+  attachmentIds: z.array(z.uuid()).max(20).optional(),
   dueDate: isoDate.nullable().optional(),
   visibility: z.enum(['all', 'org', 'private']).optional(),
   viewerIds: z.array(z.uuid()).max(50).optional(),
 });
 export const UpdateIssueInput = z.object({
+  /** Mover la tarea a otro chat donde puedo escribir. */
+  conversationId: z.uuid().optional(),
   visibility: z.enum(['all', 'org', 'private']).optional(),
   viewerIds: z.array(z.uuid()).max(50).optional(),
   title: z.string().trim().min(2).max(200).optional(),
   status: z.enum(['open', 'in_progress', 'waiting', 'done', 'cancelled']).optional(),
   ownerId: z.uuid().nullable().optional(),
+  assigneeIds: z.array(z.uuid()).max(20).optional(),
+  attachmentIds: z.array(z.uuid()).max(20).optional(),
   dueDate: isoDate.nullable().optional(),
   waitingOnOrgId: z.uuid().nullable().optional(),
   topicId: z.uuid().nullable().optional(),
@@ -1536,15 +1558,7 @@ export interface PushData {
 }
 
 // ---------- Archivos (árbol de carpetas) ----------
-export interface DriveFolderDTO { id: string; parentId: string | null; name: string; createdBy: string; createdAt: string }
-export interface DriveFileDTO { id: string; folderId: string | null; name: string; contentType: string; size: number; createdBy: string; createdAt: string; updatedAt: string }
-/** Un árbol completo: «Mis archivos» (workspaceId null) o el de un espacio. */
-export interface DriveTreeDTO { workspaceId: string | null; folders: DriveFolderDTO[]; files: DriveFileDTO[]; canManageAll: boolean }
-const driveName = z.string().trim().min(1).max(120);
-export const CreateFolderInput = z.object({ workspaceId: z.uuid().nullable().optional(), parentId: z.uuid().nullable().optional(), name: driveName });
-export const UpdateFolderInput = z.object({ name: driveName.optional(), parentId: z.uuid().nullable().optional() });
-export const UpdateFileInput = z.object({ name: driveName.optional(), folderId: z.uuid().nullable().optional() });
-export const UploadFileQuery = z.object({ workspaceId: z.uuid().optional(), folderId: z.uuid().optional(), name: z.string().min(1).max(400) });
+export * from './drive.ts';
 
 // ---------- Conectar WhatsApp ----------
 export const WaKind = z.enum(['personal', 'business']);
@@ -1676,7 +1690,7 @@ export type AccountEvent =
   /** Cambió mi modo sueño (desde este u otro dispositivo). */
   | { type: 'me.sleep'; sleep: SleepDTO }
   | { type: 'whatsapp.updated'; accountId: string }
-  | { type: 'drive.updated'; workspaceId: string | null };
+  | { type: 'drive.updated'; workspaceId: string | null; conversationId?: string | null };
 
 export interface EventsPage {
   events: ConversationEvent[];
@@ -1789,3 +1803,26 @@ export const BookingPageInput = z.object({
 });
 export const BookingPagePatch = BookingPageInput.partial();
 export interface BookingHostBookingDTO { id: string; pageId: string; pageTitle: string; startsAt: string; endsAt: string; guestName: string; guestEmail: string; note: string; joinUrl: string | null; status: 'confirmed' | 'cancelled'; hostIds: string[] }
+
+// ---------- Private notes and personal chat organization ----------
+export const NoteTagInput = z.object({ kind: z.enum(['label', 'conversation', 'issue']), label: z.string().trim().min(1).max(120), id: z.uuid().optional() }).refine((tag) => tag.kind === 'label' || !!tag.id, 'Falta la referencia');
+export type NoteTagDTO = z.infer<typeof NoteTagInput>;
+export const NoteInput = z.object({
+  title: z.string().trim().min(1).max(200), body: z.string().max(50000).default(''),
+  tags: z.array(NoteTagInput).max(50).default([]), fileIds: z.array(z.uuid()).max(50).default([]),
+  links: z.array(z.url().refine((url) => /^https?:\/\//i.test(url), 'Usa un enlace http o https')).max(50).default([]),
+});
+export type NoteInput = z.infer<typeof NoteInput>;
+export interface NoteDTO extends NoteInput { id: string; createdAt: string; updatedAt: string; files: DriveFileDTO[] }
+export const ChatPersonalPreferenceInput = z.object({
+  favorite: z.boolean().optional(), archived: z.boolean().optional(), sectionId: z.uuid().nullable().optional(),
+  background: z.enum(['default', 'sand', 'mint', 'sky', 'rose', 'dusk']).optional(),
+  font: z.enum(['system', 'serif', 'mono', 'rounded']).optional(), hideBar: z.boolean().optional(),
+});
+export type ChatPersonalPreferenceDTO = z.infer<typeof ChatPersonalPreferenceInput>;
+export const PersonalPreferencesInput = z.object({
+  appearance: z.object({ mode: z.enum(['system', 'light', 'dark']), accent: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable() }).optional(),
+  sections: z.array(z.object({ id: z.uuid(), name: z.string().trim().min(1).max(80) })).max(100).default([]),
+  conversations: z.record(z.uuid(), ChatPersonalPreferenceInput).default({}),
+}).refine((value) => Object.keys(value.conversations).length <= 5000, 'Demasiados chats').refine((value) => new Set(value.sections.map((s) => s.id)).size === value.sections.length, 'Secciones duplicadas').refine((value) => Object.values(value.conversations).every((p) => !p.sectionId || value.sections.some((s) => s.id === p.sectionId)), 'La sección no existe');
+export type PersonalPreferencesDTO = z.infer<typeof PersonalPreferencesInput>;

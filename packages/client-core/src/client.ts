@@ -170,6 +170,8 @@ export class TieComsClient {
   private accessToken: string | null = null;
   private accessExp = 0;
   private sessionGeneration = 0;
+  private issueHiddenRevision = 0;
+  private issueHiddenAt = new Map<string, number>();
   private refreshing: Promise<boolean> | null = null;
   private socket: Socket | null = null;
   private deviceId = '';
@@ -471,6 +473,7 @@ export class TieComsClient {
     const userId = this.state.data?.me.id;
     ++this.sessionGeneration;
     this.refreshing = null;
+    this.issueHiddenAt.clear(); this.issueHiddenRevision = 0;
     this.socket?.removeAllListeners();
     this.socket?.disconnect();
     this.socket = null;
@@ -609,6 +612,7 @@ export class TieComsClient {
     if (e.type === 'issue.updated') { this.putIssues([e.issue]); this.recountIssues(e.issue.conversationId); }
     if (e.type === 'issue.personal') this.putIssues([e.issue]);
     if (e.type === 'issue.hidden') {
+      this.issueHiddenAt.set(e.issueId, ++this.issueHiddenRevision);
       const next = { ...this.state.issues }; delete next[e.issueId];
       this.set({ issues: next }); this.recountIssues(e.conversationId);
     }
@@ -1081,19 +1085,21 @@ export class TieComsClient {
     return this.request<MeetingDTO>('/meetings', { method: 'POST', json: input });
   }
   /** Tarea hija de un asunto (en su chat o, con conversationId, en un sidechat que salió de él). */
-  async createChildIssue(parentId: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; visibility?: IssueVisibility; viewerIds?: string[]; conversationId?: string }) {
+  async createChildIssue(parentId: string, input: { title: string; assigneeIds?: string[]; attachmentIds?: string[]; ownerId?: string | null; dueDate?: string | null; visibility?: IssueVisibility; viewerIds?: string[]; conversationId?: string }) {
     const i = await this.request<IssueDTO>(`/issues/${parentId}/children`, { method: 'POST', json: input });
     this.putIssues([i]); this.recountIssues(i.conversationId);
     return i;
   }
-  async createIssue(conversationId: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; originMessageId?: string | null; visibility?: IssueVisibility; viewerIds?: string[]; parentIssueId?: string | null; topicId?: string | null }) {
+  async createIssue(conversationId: string, input: { title: string; assigneeIds?: string[]; attachmentIds?: string[]; ownerId?: string | null; dueDate?: string | null; originMessageId?: string | null; visibility?: IssueVisibility; viewerIds?: string[]; parentIssueId?: string | null; topicId?: string | null }) {
     const i = await this.request<IssueDTO>(`/conversations/${conversationId}/issues`, { method: 'POST', json: input });
     this.putIssues([i]); this.recountIssues(conversationId);
     return i;
   }
-  async updateIssue(id: string, patch: Partial<Pick<IssueDTO, 'title' | 'status' | 'ownerId' | 'dueDate' | 'waitingOnOrgId' | 'visibility' | 'viewerIds' | 'topicId'>>) {
+  async updateIssue(id: string, patch: { assigneeIds?: string[]; attachmentIds?: string[]; conversationId?: string | null } & Partial<Pick<IssueDTO, 'title' | 'status' | 'ownerId' | 'dueDate' | 'waitingOnOrgId' | 'visibility' | 'viewerIds' | 'topicId'>>) {
+    const previousConversationId = this.state.issues[id]?.conversationId;
     const i = await this.request<IssueDTO>(`/issues/${id}`, { method: 'PATCH', json: patch });
     this.putIssues([i]); this.recountIssues(i.conversationId);
+    if (previousConversationId && previousConversationId !== i.conversationId) this.recountIssues(previousConversationId);
     return i;
   }
   async issueDetail(id: string) {
@@ -1276,7 +1282,7 @@ export class TieComsClient {
     return this.putMail(await this.request<import('@tiecoms/contracts').SharedMailDTO>(`/mail/shared/${id}/reply`, { method: 'POST', json: input }));
   }
   async cancelMailReply(id: string) { return this.putMail(await this.request<import('@tiecoms/contracts').SharedMailDTO>(`/mail/shared/${id}/reply`, { method: 'DELETE' })); }
-  async mailTask(id: string, input: { title: string; ownerId?: string | null; dueDate?: string | null; closeOnReply?: boolean }) {
+  async mailTask(id: string, input: { title: string; assigneeIds?: string[]; attachmentIds?: string[]; ownerId?: string | null; dueDate?: string | null; closeOnReply?: boolean }) {
     const r = await this.request<{ issue: IssueDTO; email: import('@tiecoms/contracts').SharedMailDTO }>(`/mail/shared/${id}/task`, { method: 'POST', json: input });
     this.putMail(r.email);
     return r;
@@ -1477,6 +1483,20 @@ export class TieComsClient {
 
   /** Personas que bloqueé (compartido por un minuto). */
   async loadBlocks() { return (await this.sharedGet<{ userIds: string[] }>('/blocks', 60_000)).userIds; }
+  async issueReport() {
+    const generation = this.sessionGeneration;
+    const hiddenRevision = this.issueHiddenRevision;
+    const r = await this.request<{ issues: IssueDTO[] }>('/issues/report');
+    this.assertSession(generation);
+    // Un GET iniciado antes de una revocación o de un cambio de estado no restaura ese estado antiguo.
+    const fresh = r.issues.filter((i) => !((this.issueHiddenAt.get(i.id) ?? 0) > hiddenRevision && !this.state.issues[i.id]))
+      .map((i) => { const live = this.state.issues[i.id]; return live && live.updatedAt > i.updatedAt ? live : i; });
+    this.putIssues(fresh);
+    return fresh;
+  }
+  uploadIssueAttachment(issueId: string, file: Blob, name: string) {
+    return this.request<AttachmentDTO>(`/issues/${issueId}/attachments`, { method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream', 'x-file-name': encodeURIComponent(name), 'x-file-type': file.type || 'application/octet-stream' } });
+  }
   async loadReminders() { const r = await this.request<{ reminders: ReminderDTO[] }>('/reminders'); this.set({ reminders: r.reminders }); return r.reminders; }
   async createReminder(input: { conversationId: string; messageId?: string | null; note?: string | null; remindAt: string }) {
     const r = await this.request<ReminderDTO>('/reminders', { method: 'POST', json: input });

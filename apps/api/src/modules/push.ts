@@ -404,13 +404,13 @@ export async function pushReaction(messageId: string) {
 /** «Te asignaron una tarea»: al responsable nuevo (no a quien asignó), respetando No molestar y las noches. */
 export async function pushIssueAssigned(issueId: string, ownerId: string, actorId: string) {
   const { rows } = await pool.query(
-    `SELECT i.id, i.title, i.conversation_id, i.owner_id, i.status, u.name AS actor_name,
+    `SELECT i.id, i.title, i.conversation_id, i.owner_id, i.assignee_ids, i.status, u.name AS actor_name,
             EXISTS (SELECT 1 FROM conversation_memberships cm WHERE cm.conversation_id = i.conversation_id AND cm.user_id = $2 AND cm.removed_at IS NULL) AS in_chat
        FROM issues i JOIN users u ON u.id = $3 WHERE i.id = $1`,
     [issueId, ownerId, actorId],
   );
   const r = rows[0];
-  if (!r || r.owner_id !== ownerId || r.status === 'done' || r.status === 'cancelled') return 0;
+  if (!r || (r.owner_id !== ownerId && !(r.assignee_ids ?? []).includes(ownerId)) || r.status === 'done' || r.status === 'cancelled') return 0;
   const { rows: targets } = await pool.query<Target>(
     `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
        FROM users u ${ACTIVE_SESSION} WHERE u.id = $1 AND u.disabled_at IS NULL`,
@@ -431,13 +431,13 @@ export async function pushIssueAssigned(issueId: string, ownerId: string, actorI
 /** «No cumplimos» (tanda 1.7): la tarea venció. Al responsable, con la categoría de tarea. */
 export async function pushIssueOverdue(issueId: string, ownerId: string, dueDate: string) {
   const { rows } = await pool.query(
-    `SELECT i.id, i.title, i.conversation_id, i.owner_id, i.status, to_char(i.due_date, 'YYYY-MM-DD') AS due,
+    `SELECT i.id, i.title, i.conversation_id, i.owner_id, i.assignee_ids, i.status, to_char(i.due_date, 'YYYY-MM-DD') AS due,
             EXISTS (SELECT 1 FROM conversation_memberships cm WHERE cm.conversation_id = i.conversation_id AND cm.user_id = $2 AND cm.removed_at IS NULL) AS in_chat
        FROM issues i WHERE i.id = $1`,
     [issueId, ownerId],
   );
   const r = rows[0];
-  if (!r || r.owner_id !== ownerId || r.status === 'done' || r.status === 'cancelled' || r.due !== dueDate) return 0;
+  if (!r || (r.owner_id !== ownerId && !(r.assignee_ids ?? []).includes(ownerId)) || r.status === 'done' || r.status === 'cancelled' || r.due !== dueDate) return 0;
   const { rows: targets } = await pool.query<Target>(
     `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
        FROM users u ${ACTIVE_SESSION} WHERE u.id = $1 AND u.disabled_at IS NULL`,

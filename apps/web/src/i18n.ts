@@ -43,6 +43,7 @@ const es = {
   'groups.archive': 'Archivar grupo', 'groups.archiveConfirm': '¿Archivar «{name}»? Sale de la lista de todos sus participantes.', 'groups.archived': 'Grupo archivado',
   // Reacciones y enlaces (docs/REACCIONES_ENLACES.md)
   'common.and': 'y',
+  'nav.notes': 'Notas', 'nav.alerts': 'Alertas', 'nav.community': 'Comunidad', 'nav.organize': 'Organizar chats', 'nav.directory': 'Directorio',
   'nav.saved': 'Ver después',
   'sleep.title': 'Todas las noches', 'sleep.switch': 'No molestar todas las noches', 'sleep.summary': 'De {from} a {to}', 'sleep.off': 'Apagado',
   'sleep.explain': 'Es «No molestar» automático: en tu horario de descanso no te suena nada y lo lees al despertar. Quien te escriba verá que te llega sin sonar.',
@@ -1310,6 +1311,7 @@ const en: Record<Key, string> = {
   'over.banner': 'Read only · admin oversight',
   'over.older': 'See older messages', 'over.noMessages': 'No messages in this group yet.',
   'over.entryHint': 'See the groups your people are in',
+  'nav.notes': 'Notes', 'nav.alerts': 'Alerts', 'nav.community': 'Community', 'nav.organize': 'Organize chats', 'nav.directory': 'Directory',
   'nav.today': 'Today', 'nav.inbox': 'Conversations', 'nav.chats': 'Chats', 'nav.spaces': 'Spaces', 'nav.people': 'People', 'nav.peopleShort': 'People',
   'nav.mainNav': 'Main navigation', 'side.companies': 'Companies and spaces', 'side.newSpace': 'New space with a client',
   'side.empty': 'Create your first workspace with another company.', 'side.directs': 'Chats',

@@ -1,0 +1,33 @@
+{
+  "runtime": "node22-alpine compiled artifact",
+  "documents": [
+    {
+      "format": "docx",
+      "type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "size": 9568,
+      "visibility": "private",
+      "valid": true
+    },
+    {
+      "format": "xlsx",
+      "type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "size": 6681,
+      "visibility": "private",
+      "valid": true
+    },
+    {
+      "format": "pdf",
+      "type": "application/pdf",
+      "size": 1107,
+      "visibility": "private",
+      "valid": true
+    },
+    {
+      "format": "pptx",
+      "type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "size": 46881,
+      "visibility": "private",
+      "valid": true
+    }
+  ]
+}

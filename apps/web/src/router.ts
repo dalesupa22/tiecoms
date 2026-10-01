@@ -20,7 +20,7 @@ export function usePath() {
 }
 
 export type Route =
-  | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' } | { name: 'agenda' } | { name: 'share' } | { name: 'whatsapp' } | { name: 'files' } | { name: 'groups' } | { name: 'dms' } | { name: 'saved' } | { name: 'scheduled' } | { name: 'signed' } | { name: 'calls' } | { name: 'mail' } | { name: 'grid' }
+  | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' } | { name: 'agenda' } | { name: 'share' } | { name: 'whatsapp' } | { name: 'files' } | { name: 'groups' } | { name: 'dms' } | { name: 'saved' } | { name: 'scheduled' } | { name: 'signed' } | { name: 'calls' } | { name: 'mail' } | { name: 'grid' } | { name: 'notes' } | { name: 'alerts' } | { name: 'community' } | { name: 'organize' }
   | { name: 'oversight'; id: string } | { name: 'readonly'; id: string }
   | { name: 'conversation'; id: string } | { name: 'workspace'; id: string }
   | { name: 'login' } | { name: 'signup' } | { name: 'sso' } | { name: 'invite'; token: string } | { name: 'guestCall'; token: string } | { name: 'room'; code: string } | { name: 'booking'; slug: string } | { name: 'bookingManage'; token: string } | { name: 'bookingHome' } | { name: 'confirmSignup'; token: string };
@@ -65,6 +65,11 @@ export function parse(path: string): Route {
   if (a === 'firmas') return { name: 'signed' };
   if (a === 'llamadas') return { name: 'calls' };
   if (a === 'correo') return { name: 'mail' };
+  if (a === 'notas') return { name: 'notes' };
+  if (a === 'alertas') return { name: 'alerts' };
+  if (a === 'comunidad') return { name: 'community' };
+  if (a === 'organizar') return { name: 'organize' };
+  if (a === 'directorio') return { name: 'people' };
   if (a === 'cuadricula') return { name: 'grid' };
   return { name: 'today' };
 }

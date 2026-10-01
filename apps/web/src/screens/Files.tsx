@@ -1,22 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
-import type { DriveFileDTO, DriveFolderDTO, DriveTreeDTO, WorkspaceDTO } from '@tiecoms/contracts';
+import type { CreateDriveDocumentInput, DriveFileDTO, DriveFolderDTO, DriveTreeDTO, DriveVisibility } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
 import { menuProps, toast, type MenuItem } from '../menu.tsx';
-import { Modal, personById } from '../ui.tsx';
+import { Modal, conversationTitle, personById } from '../ui.tsx';
+import { filesCopy } from './files-copy.ts';
 
-/** 'me' = Mis archivos; si no, el id del espacio. */
+/** Separate audience keys keep a group/DM tree separate from its workspace. */
 type ScopeKey = 'me' | string;
-const wsParam = (k: ScopeKey) => (k === 'me' ? null : k);
+const scopeParams = (k: ScopeKey): Record<string, string> => k === 'me' ? {} : k.startsWith('chat:') ? { conversationId: k.slice(5) } : { workspaceId: k };
+function initialScope(conversationId?: string) {
+  const q = new URLSearchParams(window.location.search);
+  return conversationId || q.get('conversationId') ? `chat:${conversationId || q.get('conversationId')}` : q.get('workspaceId') || 'me';
+}
 
 const api = {
-  tree: (k: ScopeKey) => client.request<DriveTreeDTO>(`/drive/tree${k === 'me' ? '' : `?workspaceId=${k}`}`),
-  mkdir: (k: ScopeKey, parentId: string | null, name: string) => client.request<DriveFolderDTO>('/drive/folders', { method: 'POST', json: { workspaceId: wsParam(k), parentId, name } }),
+  tree: (k: ScopeKey) => client.request<DriveTreeDTO>(`/drive/tree?${new URLSearchParams(scopeParams(k))}`),
+  mkdir: (k: ScopeKey, parentId: string | null, name: string) => client.request<DriveFolderDTO>('/drive/folders', { method: 'POST', json: { ...scopeParams(k), parentId, name } }),
   patchFolder: (id: string, p: Record<string, unknown>) => client.request<DriveFolderDTO>(`/drive/folders/${id}`, { method: 'PATCH', json: p }),
   rmFolder: (id: string) => client.request(`/drive/folders/${id}`, { method: 'DELETE' }),
-  upload: (k: ScopeKey, folderId: string | null, file: File) => {
-    const q = new URLSearchParams({ name: file.name });
-    if (k !== 'me') q.set('workspaceId', k);
+  upload: (k: ScopeKey, folderId: string | null, file: File, visibility: DriveVisibility) => {
+    const q = new URLSearchParams({ name: file.name, visibility, ...scopeParams(k) });
     if (folderId) q.set('folderId', folderId);
     return client.request<DriveFileDTO>(`/drive/files?${q}`, {
       method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream', 'x-file-type': file.type || 'application/octet-stream' },
@@ -25,6 +29,7 @@ const api = {
   patchFile: (id: string, p: Record<string, unknown>) => client.request<DriveFileDTO>(`/drive/files/${id}`, { method: 'PATCH', json: p }),
   rmFile: (id: string) => client.request(`/drive/files/${id}`, { method: 'DELETE' }),
   link: (id: string) => client.request<{ url: string }>(`/drive/files/${id}/link`),
+  create: (input: CreateDriveDocumentInput) => client.request<DriveFileDTO>('/drive/documents', { method: 'POST', json: input }),
 };
 
 const MAX = 25 * 1024 * 1024;
@@ -59,27 +64,39 @@ function pathTo(tree: DriveTreeDTO | undefined, id: string | null): DriveFolderD
   return out;
 }
 
-export function FilesScreen() {
+export function FilesScreen({ initialConversationId }: { initialConversationId?: string } = {}) {
   const d = useClient((s) => s.data)!;
+  const copy = filesCopy();
   const revision = useClient((s) => s.driveRevision);
   const [trees, setTrees] = useState<Record<ScopeKey, DriveTreeDTO>>({});
-  const [scope, setScope] = useState<ScopeKey>('me');
+  const [scope, setScope] = useState<ScopeKey>(() => initialScope(initialConversationId));
   const [folderId, setFolderId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['me']));
   const [uploading, setUploading] = useState<{ done: number; total: number } | null>(null);
   const [drag, setDrag] = useState(false);
   const [q, setQ] = useState('');
+  const [visibility, setVisibility] = useState<DriveVisibility>('private');
+  const [creating, setCreating] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const scopes: { key: ScopeKey; name: string; ws?: WorkspaceDTO }[] = useMemo(
-    () => [{ key: 'me', name: t('files.mine') }, ...d.workspaces.map((w) => ({ key: w.id, name: w.name, ws: w }))], [d.workspaces],
+  const scopes: { key: ScopeKey; name: string; kind: 'me' | 'space' | 'chat' }[] = useMemo(
+    () => [{ key: 'me', name: t('files.mine'), kind: 'me' },
+      ...d.workspaces.map((w) => ({ key: w.id, name: w.name, kind: 'space' as const })),
+      ...d.conversations.filter((c) => c.memberIds.includes(d.me.id)).map((c) => ({ key: `chat:${c.id}`, name: conversationTitle(d, c), kind: 'chat' as const })),
+    ], [d],
   );
 
   const load = useCallback(async (k: ScopeKey) => {
     try { const tr = await api.tree(k); setTrees((all) => ({ ...all, [k]: tr })); } catch (e) { toast(errorText(e)); }
   }, []);
   // Se recargan los árboles abiertos cuando alguien cambia algo.
-  useEffect(() => { for (const k of new Set([scope, ...expanded])) void load(k); }, [revision, load]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { for (const k of scopes.filter((s) => s.key === scope || expanded.has(s.key)).map((s) => s.key)) void load(k); }, [revision, load]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!trees[scope]) void load(scope); }, [scope, trees, load]);
+  useEffect(() => { if (initialConversationId) { setScope(`chat:${initialConversationId}`); setFolderId(null); } }, [initialConversationId]);
+  useEffect(() => {
+    const navigate = () => { setScope(initialScope(initialConversationId)); setFolderId(null); setQ(''); };
+    window.addEventListener('popstate', navigate);
+    return () => window.removeEventListener('popstate', navigate);
+  }, [initialConversationId]);
 
   const tree = trees[scope];
   // Si la carpeta abierta se borró, vuelve a la raíz.
@@ -108,7 +125,7 @@ export function FilesScreen() {
     setUploading({ done: 0, total: ok.length });
     let failed = 0;
     for (const [i, f] of ok.entries()) {
-      try { await api.upload(scope, folderId, f); } catch (e) { failed++; toast(`${f.name}: ${errorText(e)}`); }
+      try { await api.upload(scope, folderId, f, scope === 'me' ? 'private' : visibility); } catch (e) { failed++; toast(`${f.name}: ${errorText(e)}`); }
       setUploading({ done: i + 1, total: ok.length });
     }
     setUploading(null);
@@ -147,6 +164,9 @@ export function FilesScreen() {
         if (name && name !== f.name) try { await api.patchFile(f.id, { name }); void load(scope); } catch (e) { toast(errorText(e)); }
       } },
       { label: t('files.move'), icon: '↦', disabled: !canEdit(f.createdBy), onSelect: () => setMoving({ kind: 'file', item: f }) },
+      ...(scope !== 'me' ? [{ label: f.visibility === 'private' ? copy.makeShared : copy.makePrivate, icon: f.visibility === 'private' ? '👥' : '🔒', disabled: f.createdBy !== d.me.id, onSelect: async () => {
+        try { await api.patchFile(f.id, { visibility: f.visibility === 'private' ? 'shared' : 'private' }); toast(copy.changed); void load(scope); } catch (e) { toast(errorText(e)); }
+      } }] : []),
       { divider: true },
       { label: t('files.delete'), icon: '🗑', danger: true, disabled: !canEdit(f.createdBy), onSelect: async () => {
         if (!confirm(t('files.deleteFileConfirm', { name: f.name }))) return;
@@ -161,17 +181,28 @@ export function FilesScreen() {
     <div className="page"><div className="page-narrow">
       <div className="row" style={{ flexWrap: 'wrap' }}>
         <h1 className="grow">{t('files.title')}</h1>
-        <button className="btn small" onClick={newFolder}>＋ {t('files.newFolder')}</button>
-        <button className="btn primary small" disabled={!!uploading} onClick={() => input.current?.click()}>⤒ {t('files.upload')}</button>
+        <button className="btn small" disabled={tree?.canUpload === false} onClick={newFolder}>＋ {t('files.newFolder')}</button>
+        <button className="btn small" disabled={tree?.canUpload === false} onClick={() => setCreating(true)} title={copy.exportHint}>📄 {copy.create}</button>
+        <button className="btn primary small" disabled={!!uploading || tree?.canUpload === false} onClick={() => input.current?.click()}>⤒ {t('files.upload')}</button>
         <input ref={input} type="file" multiple hidden onChange={(e) => { void uploadMany([...(e.target.files ?? [])]); e.target.value = ''; }} />
       </div>
       <p className="muted" style={{ margin: '0 0 16px' }}>{t('files.intro')}</p>
+      <div className="row" style={{ flexWrap: 'wrap', marginBottom: 14 }}>
+        <label className="small" htmlFor="drive-privacy">{copy.privacy}</label>
+        <select id="drive-privacy" className="input" style={{ width: 'auto' }} value={scope === 'me' ? 'private' : visibility} disabled={scope === 'me'} onChange={(e) => setVisibility(e.target.value as DriveVisibility)}>
+          <option value="private">🔒 {copy.private}</option>
+          <option value="shared">👥 {copy.shared}</option>
+        </select>
+        <span className="small muted grow">{scope === 'me' ? copy.personal : copy.audience}</span>
+      </div>
+      {tree?.canUpload === false && <p className="hint">{copy.noUpload}</p>}
 
       <div className="drive">
         <nav className="card drive-tree" aria-label={t('files.tree')}>
           {scopes.map((s) => (
             <div key={s.key}>
-              <TreeRow depth={0} label={s.name} icon={s.key === 'me' ? '🔒' : '▦'} active={scope === s.key && !folderId}
+              {s === scopes.find((x) => x.kind === s.kind) && s.kind !== 'me' && <div className="small muted" style={{ padding: '14px 12px 4px' }}>{s.kind === 'space' ? copy.spaces : copy.chats}</div>}
+              <TreeRow depth={0} label={s.name} icon={s.kind === 'me' ? '🔒' : s.kind === 'chat' ? '💬' : '▦'} active={scope === s.key && !folderId}
                 open={expanded.has(s.key)} hasChildren onToggle={() => { toggle(s.key); if (!trees[s.key]) void load(s.key); }} onOpen={() => open(s.key, null)} />
               {expanded.has(s.key) && <Branch tree={trees[s.key]} parentId={null} depth={1} expanded={expanded} toggle={toggle}
                 activeId={scope === s.key ? folderId : '__none'} onOpen={(id) => open(s.key, id)} />}
@@ -180,7 +211,7 @@ export function FilesScreen() {
         </nav>
 
         <section className={`card drive-main ${drag ? 'is-drag' : ''}`}
-          onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={(e) => { if (e.currentTarget === e.target) setDrag(false); }} onDrop={onDrop}>
+          onDragOver={(e) => { e.preventDefault(); if (tree?.canUpload !== false) setDrag(true); }} onDragLeave={(e) => { if (e.currentTarget === e.target) setDrag(false); }} onDrop={(e) => { if (tree?.canUpload === false) { e.preventDefault(); setDrag(false); } else onDrop(e); }}>
           <div className="drive-head">
             <div className="drive-crumbs">
               <button className={!folderId ? 'on' : ''} onClick={() => open(scope, null)}>{scopeName}</button>
@@ -212,7 +243,7 @@ export function FilesScreen() {
                 <span className="grow" style={{ minWidth: 0 }}>
                   <span className="ellipsis" style={{ display: 'block' }}>{f.name}</span>
                   <span className="small muted ellipsis" style={{ display: 'block' }}>
-                    {size(f.size)} · {personById(d, f.createdBy)?.name ?? ''} · {new Date(f.createdAt).toLocaleDateString(locale(), { day: 'numeric', month: 'short', year: 'numeric' })}
+                    {f.visibility === 'private' || scope === 'me' ? `🔒 ${copy.privateBadge}` : `👥 ${copy.sharedBadge}`} · {size(f.size)} · {personById(d, f.createdBy)?.name ?? ''} · {new Date(f.createdAt).toLocaleDateString(locale(), { day: 'numeric', month: 'short', year: 'numeric' })}
                     {found && ` · ${pathTo(tree, f.folderId).map((p) => p.name).join(' › ') || scopeName}`}
                   </span>
                 </span>
@@ -224,6 +255,7 @@ export function FilesScreen() {
         </section>
       </div>
       {moving && tree && <MoveDialog tree={tree} scopeName={scopeName} moving={moving} onClose={() => setMoving(null)} onDone={() => { setMoving(null); void load(scope); }} />}
+      {creating && <CreateDocumentDialog scope={scope} folderId={folderId} visibility={scope === 'me' ? 'private' : visibility} onClose={() => setCreating(false)} onDone={() => { setCreating(false); void load(scope); }} />}
     </div></div>
   );
 }
@@ -291,6 +323,53 @@ function MoveDialog({ tree, scopeName, moving, onClose, onDone }: {
         <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
         <button className="btn primary" disabled={busy || target === current} onClick={go}>{t('files.moveHere')}</button>
       </div>
+    </Modal>
+  );
+}
+
+function CreateDocumentDialog({ scope, folderId, visibility, onClose, onDone }: {
+  scope: ScopeKey; folderId: string | null; visibility: DriveVisibility; onClose: () => void; onDone: () => void;
+}) {
+  const copy = filesCopy();
+  const [name, setName] = useState('');
+  const [format, setFormat] = useState<CreateDriveDocumentInput['format']>('docx');
+  const [content, setContent] = useState('');
+  const [privacy, setPrivacy] = useState<DriveVisibility>(visibility);
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    try {
+      await api.create({ ...scopeParams(scope), folderId, visibility: scope === 'me' ? 'private' : privacy, name: name.trim(), format, content });
+      toast(copy.created); onDone();
+    } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
+  }
+  return (
+    <Modal title={copy.create} onClose={onClose}>
+      <form onSubmit={(e) => { e.preventDefault(); void save(); }}>
+        <label style={{ display: 'block', marginBottom: 12 }}>{copy.name}
+          <input className="input" autoFocus maxLength={110} value={name} onChange={(e) => setName(e.target.value)} required />
+        </label>
+        <label style={{ display: 'block', marginBottom: 12 }}>{copy.format}
+          <select className="input" value={format} onChange={(e) => setFormat(e.target.value as CreateDriveDocumentInput['format'])}>
+            <option value="docx">Word (.docx)</option><option value="xlsx">Excel (.xlsx)</option>
+            <option value="pdf">PDF (.pdf)</option><option value="pptx">PowerPoint (.pptx)</option>
+          </select>
+        </label>
+        <label style={{ display: 'block', marginBottom: 8 }}>{copy.content}
+          <textarea className="input" rows={10} maxLength={100_000} style={{ resize: 'vertical' }} value={content} onChange={(e) => setContent(e.target.value)} />
+        </label>
+        <p className="small muted">{format === 'xlsx' ? copy.sheetHint : format === 'pptx' ? copy.slideHint : copy.docHint}</p>
+        {scope !== 'me' && <label style={{ display: 'block' }}>{copy.privacy}
+          <select className="input" value={privacy} onChange={(e) => setPrivacy(e.target.value as DriveVisibility)}>
+            <option value="private">{copy.private}</option><option value="shared">{copy.shared}</option>
+          </select>
+        </label>}
+        <div className="modal-actions">
+          <button className="btn ghost" type="button" disabled={busy} onClick={onClose}>{t('common.cancel')}</button>
+          <button className="btn primary" type="submit" disabled={busy || !name.trim()}>{busy ? t('common.loading') : copy.save}</button>
+        </div>
+      </form>
     </Modal>
   );
 }

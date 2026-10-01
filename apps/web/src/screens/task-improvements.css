@@ -1,0 +1,22 @@
+.task-today { display:flex; flex-wrap:wrap; align-items:center; gap:20px; padding:20px; margin:12px 0 20px }
+.task-progress-chart { height:104px; width:104px; flex-shrink:0; border-radius:50%; display:grid; place-items:center }
+.task-progress-chart>span { width:82px; height:82px; border-radius:50%; background:var(--card, #fff); display:flex; flex-direction:column; align-items:center; justify-content:center }
+.task-progress-chart b { font-size:24px } .task-progress-chart small { font-size:10px; color:var(--muted) }
+.task-stat-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; flex:1; min-width:240px }
+.task-stat { display:flex; flex-direction:column; gap:3px } .task-stat b { font-size:24px; font-weight:750 } .task-stat span { font-size:12px; color:var(--muted) }
+.task-stat-note { flex-basis:100% }
+.task-report-options { display:flex; flex-direction:column; gap:14px }
+.task-report-preview { background:#f0f8f6; border:1px solid #cbded9; border-radius:12px; color:#203236; padding:20px; margin-top:4px }
+.task-report-preview h2 { margin:4px 0 } .task-report-preview .task-stat-grid { margin:16px 0 } .task-report-brand { color:#117568; font-size:20px; font-weight:850 }
+.task-board { display:grid; grid-template-columns:repeat(5,minmax(170px,1fr)); gap:10px; overflow-x:auto; padding:8px 0 18px }
+.task-board-column { background:var(--bg-soft, #f3f5f5); border:1px solid var(--line, #dce7e3); border-radius:12px; padding:10px; min-height:200px }
+.task-board-column>h3 { font-size:13px; margin:0 0 10px } .task-board-column .issue-row { margin-bottom:8px }
+.task-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:10px }
+.task-cards .issue-group, .task-cards>.issue-row { min-width:0 }
+.task-cards .issue-row, .task-board .issue-row { flex-wrap:wrap; align-content:flex-start; padding:14px; min-height:115px }
+.task-cards .issue-title, .task-board .issue-title { white-space:normal; overflow-wrap:anywhere }
+.task-cards .issue-meta, .task-board .issue-meta { white-space:normal; margin-top:4px }
+.task-cards .issue-row>.grow, .task-board .issue-row>.grow { flex-basis:75% }
+.task-attachment-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px }
+.task-move-form { display:flex; gap:8px; flex-wrap:wrap } .task-move-form select { max-width:100%; flex:1 }
+@media(max-width:540px){.task-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.task-today{gap:16px;padding:16px}.task-cards{grid-template-columns:1fr}.task-board{grid-template-columns:repeat(5,230px)}}

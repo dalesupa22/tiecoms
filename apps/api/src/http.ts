@@ -4,10 +4,10 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { ZodError } from 'zod';
 import {
-  AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput, CreateGroupInput, JoinPolicyInput,
+  NoteInput, PersonalPreferencesInput, AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput, CreateGroupInput, JoinPolicyInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateChildIssueInput, CreatePersonalIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateScheduledInput, UpdateScheduledInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MarkTreeReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, CreateTopicInput, UpdateTopicInput, SetMessageTopicInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
-  UpdateProfileInput, DndInput, MeetingProvider, MeetingConnectInput, MeetingConfirmInput, CreateMeetingInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery, WaSendInput, MailLiveReplyInput,
+  UpdateProfileInput, DndInput, MeetingProvider, MeetingConnectInput, MeetingConfirmInput, CreateMeetingInput, SleepInput, CreateChatInput, DriveTreeQuery, CreateDriveDocumentInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery, WaSendInput, MailLiveReplyInput,
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
@@ -29,6 +29,7 @@ import * as invitations from './modules/invitations.ts';
 import * as issues from './modules/issues.ts';
 import * as cal from './modules/calendar.ts';
 import * as prefs from './modules/prefs.ts';
+import * as notes from './modules/notes.ts';
 import * as reminders from './modules/reminders.ts';
 import * as meetings from './modules/meetings.ts';
 import * as booking from './modules/booking.ts';
@@ -620,6 +621,13 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/task', async (req, reply) => reply.status(201).send(await mailbox.createTask(req.userId, z.uuid().parse(req.params.id), MailTaskInput.parse(req.body))));
     priv.post<{ Params: { id: string } }>('/api/v1/mail/shared/:id/forward', mailLimit, async (req, reply) => reply.status(201).send(await mailbox.forwardShared(req.userId, z.uuid().parse(req.params.id), ForwardSharedInput.parse(req.body))));
     priv.post('/api/v1/whatsapp/share', mailLimit, async (req, reply) => reply.status(201).send(await mailbox.shareWhatsApp(req.userId, ShareWaInput.parse(req.body))));
+    priv.get('/api/v1/notes', async (req) => notes.listNotes(req.userId));
+    priv.post('/api/v1/notes', async (req) => notes.saveNote(req.userId, NoteInput.parse(req.body)));
+    priv.put<{ Params: { id: string } }>('/api/v1/notes/:id', async (req) => notes.saveNote(req.userId, NoteInput.parse(req.body), z.uuid().parse(req.params.id)));
+    priv.delete<{ Params: { id: string } }>('/api/v1/notes/:id', async (req) => notes.deleteNote(req.userId, z.uuid().parse(req.params.id)));
+    priv.get('/api/v1/me/personal-preferences', async (req) => notes.getPersonalPreferences(req.userId));
+    priv.put('/api/v1/me/personal-preferences', async (req) => notes.setPersonalPreferences(req.userId, PersonalPreferencesInput.parse(req.body)));
+
     priv.get('/api/v1/reminders', async (req) => ({ reminders: await reminders.listReminders(req.userId) }));
     priv.post('/api/v1/reminders', async (req) => reminders.createReminder(req.userId, CreateReminderInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/reminders/:id/done', async (req) => reminders.completeReminder(req.userId, req.params.id));
@@ -653,14 +661,22 @@ export async function buildHttp() {
     }));
     priv.post('/api/v1/issues', async (req) => issues.createPersonalIssue(req.userId, CreatePersonalIssueInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/issues', async (req) => issues.createIssue(req.userId, req.params.id, CreateIssueInput.parse(req.body)));
+    priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/attachments', { bodyLimit: attachments.MAX_UPLOAD_BYTES, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => {
+      if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube el archivo como application/octet-stream');
+      return attachments.uploadForIssue(req.userId, z.uuid().parse(req.params.id), { body: req.body, name: decodeURIComponent(String(req.headers['x-file-name'] ?? 'archivo')), type: String(req.headers['x-file-type'] ?? 'application/octet-stream') });
+    });
+    priv.get('/api/v1/issues/report', async (req) => ({ issues: await issues.listIssueReport(req.userId) }));
     priv.get<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.getIssue(req.userId, req.params.id));
     priv.patch<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.updateIssue(req.userId, req.params.id, UpdateIssueInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/children', async (req) => issues.createChildIssue(req.userId, req.params.id, CreateChildIssueInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/comments', async (req) => issues.commentIssue(req.userId, req.params.id, IssueCommentInput.parse(req.body).body));
 
     // Archivos en árbol de carpetas («Mis archivos» o un espacio)
-    priv.get<{ Querystring: { workspaceId?: string } }>('/api/v1/drive/tree', async (req) =>
-      drive.tree(req.userId, req.query.workspaceId ? z.uuid().parse(req.query.workspaceId) : null));
+    priv.get('/api/v1/drive/tree', async (req) => {
+      const q = DriveTreeQuery.parse(req.query);
+      return drive.tree(req.userId, q.workspaceId ?? null, q.conversationId ?? null);
+    });
+    priv.post('/api/v1/drive/documents', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => drive.createDocument(req.userId, CreateDriveDocumentInput.parse(req.body)));
     priv.post('/api/v1/drive/folders', async (req) => drive.createFolder(req.userId, CreateFolderInput.parse(req.body)));
     priv.patch<{ Params: { id: string } }>('/api/v1/drive/folders/:id', async (req) => drive.updateFolder(req.userId, z.uuid().parse(req.params.id), UpdateFolderInput.parse(req.body)));
     priv.delete<{ Params: { id: string } }>('/api/v1/drive/folders/:id', async (req) => drive.deleteFolder(req.userId, z.uuid().parse(req.params.id)));
@@ -668,7 +684,7 @@ export async function buildHttp() {
       const q = UploadFileQuery.parse(req.query);
       if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube el archivo como application/octet-stream');
       return drive.uploadFile(req.userId, {
-        workspaceId: q.workspaceId ?? null, folderId: q.folderId ?? null, name: q.name,
+        workspaceId: q.workspaceId ?? null, conversationId: q.conversationId ?? null, visibility: q.visibility, folderId: q.folderId ?? null, name: q.name,
         contentType: String(req.headers['x-file-type'] ?? 'application/octet-stream'), body: req.body,
       });
     });

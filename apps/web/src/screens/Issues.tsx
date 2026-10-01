@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { BootstrapDTO, IssueDTO, IssueEventDTO, IssueStatus, IssueVisibility } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { PinToGrid } from './Tray.tsx';
@@ -11,6 +11,9 @@ import { destinationLabel, issueDestinations } from '../quick-search.ts';
 import { QuickActions } from './Quick.tsx';
 import { openDialog } from '../actions.tsx';
 import { IssueTopicTag, issueTopicMenu } from './Topics.tsx';
+import { assignedTo, taskAssignees } from '../task-report.ts';
+import { TaskReportButton, taskText } from './TaskReports.tsx';
+import { TaskAttachments } from './TaskAttachments.tsx';
 
 /** Destino «Personal · solo tú» en los selectores de «¿Dónde?». */
 export const PERSONAL_DEST = '__personal';
@@ -112,6 +115,7 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
   const d = useClient((s) => s.data)!;
   const all = useClient((s) => s.issues);
   const owner = personById(d, i.ownerId);
+  const responsible = taskAssignees(i).map((uid) => personById(d, uid)?.name ?? t('common.participant')).join(', ');
   const conv = d.conversations.find((c) => c.id === i.conversationId);
   const f = issueFlags(i);
   const done = isClosed(i);
@@ -121,7 +125,7 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
   // Una tarea en un sidechat se marca para que se sepa dónde se habla de ella.
   const inSide = !!parent && parent.conversationId !== i.conversationId;
   const meta = [
-    isPersonal(i) ? t('issue.personalShort') : showOwner ? owner?.name ?? t('issue.noOwner') : null,
+    isPersonal(i) ? t('issue.personalShort') : showOwner ? responsible || t('issue.noOwner') : null,
     !child && parent ? `↳ ${parent.title}` : null,
     !child && !parent && i.parentIssueId ? t('task.ofHidden') : null,
     showWhere && conv && !child ? t('issue.in', { name: conversationTitle(d, conv) }) : null,
@@ -129,7 +133,7 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
     i.commentCount > 0 ? `💬 ${i.commentCount}` : null,
   ].filter(Boolean);
   return (
-    <div role="button" tabIndex={0} draggable title={t('grid.dragTask')} onDragStart={(e) => setDrag(e, 'task', { id: i.id, title: i.title }, i.title)} className={`card issue-row ${child ? 'is-child' : ''} ${f.stalledDays || f.overdue ? 'is-jam' : ''} ${done ? 'is-done' : ''}`}
+    <div role="button" tabIndex={0} draggable title={t('grid.dragTask')} onDragStart={(e) => { setDrag(e, 'task', { id: i.id, title: i.title }, i.title); e.dataTransfer.setData('application/x-chaggu-issue-id', i.id); }} className={`card issue-row ${child ? 'is-child' : ''} ${f.stalledDays || f.overdue ? 'is-jam' : ''} ${done ? 'is-done' : ''}`}
       onClick={() => onOpen(i.id)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i.id); }} {...menuProps(() => issueQuickMenu(i))}>
       {child && <span className="child-elbow" aria-hidden>↳</span>}
       <IssueCheck i={i} size={child ? 18 : 20} />
@@ -149,7 +153,7 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
         <button className="row-add" title={t('task.add')} aria-label={t('task.add')}
           onClick={(e) => { e.stopPropagation(); openDialog((close) => <TasksDialog parentId={i.id} onClose={close} />); }}>＋</button>
       )}
-      {showOwner && <Avatar person={owner} org={orgById(d, owner?.orgId)} size={child ? 20 : 24} />}
+      {showOwner && <span className="row" title={responsible} style={{ gap: 3 }}><Avatar person={owner} org={orgById(d, owner?.orgId)} size={child ? 20 : 24} />{taskAssignees(i).length > 1 && <span className="small muted">+{taskAssignees(i).length - 1}</span>}</span>}
     </div>
   );
 }
@@ -270,7 +274,7 @@ export function NewIssueDialog({ conversationId, originMessageId, defaultTitle =
   const [conv, setConv] = useState(conversationId ?? PERSONAL_DEST);
   const members = membersOf(d, conv);
   const [title, setTitle] = useState(defaultTitle);
-  const [ownerId, setOwnerId] = useState(d.me.id);
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([d.me.id]);
   const [due, setDue] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -281,7 +285,7 @@ export function NewIssueDialog({ conversationId, originMessageId, defaultTitle =
     try {
       const i = conv === PERSONAL_DEST
         ? await client.createPersonalIssue({ title, dueDate: due || null })
-        : await client.createIssue(conv, { title, ownerId, dueDate: due || null, originMessageId: originMessageId ?? null, ...(topicId && !originMessageId ? { topicId } : {}) });
+        : await client.createIssue(conv, { title, assigneeIds: assigneeIds.filter((uid) => members.some((p) => p.id === uid)), dueDate: due || null, originMessageId: originMessageId ?? null, ...(topicId && !originMessageId ? { topicId } : {}) });
       onCreated?.(i);
       onClose();
     } catch (err) { setError(errorText(err)); } finally { setBusy(false); }
@@ -292,7 +296,7 @@ export function NewIssueDialog({ conversationId, originMessageId, defaultTitle =
         <label className="field"><span>{t('issue.title')}</span><input className="input" required minLength={2} maxLength={200} autoFocus value={title} onChange={(e) => setTitle(e.target.value)} /></label>
         {!conversationId && (
           <label className="field"><span>{t('issue.where')}</span>
-            <select className="input" value={conv} onChange={(e) => { setConv(e.target.value); setOwnerId(d.me.id); }}>
+            <select className="input" value={conv} onChange={(e) => { setConv(e.target.value); setAssigneeIds([d.me.id]); }}>
               <option value={PERSONAL_DEST}>🔒 {t('issue.personalOption')}</option>
               {destinations.map((c) => <option key={c.id} value={c.id}>{destinationLabel(d, c, conversationTitle(d, c))}</option>)}
             </select>
@@ -301,9 +305,7 @@ export function NewIssueDialog({ conversationId, originMessageId, defaultTitle =
         {conv === PERSONAL_DEST && <div className="hint">🔒 {t('issue.personalHint')}</div>}
         <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
           {conv !== PERSONAL_DEST && <label className="field grow"><span>{t('issue.owner')}</span>
-            <select className="input" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
-              {members.map((p) => <option key={p.id} value={p.id}>{p.name}{p.id === d.me.id ? ` ${t('common.you')}` : ''} · {orgById(d, p.orgId)?.name ?? t('common.guest')}</option>)}
-            </select>
+            <div className="chips">{members.map((p) => <button key={p.id} type="button" className={`chip-person ${assigneeIds.includes(p.id) ? 'on' : ''}`} aria-pressed={assigneeIds.includes(p.id)} onClick={() => setAssigneeIds((ids) => ids.includes(p.id) ? ids.filter((uid) => uid !== p.id) : [...ids, p.id])}>{p.name}{p.id === d.me.id ? ` ${t('common.you')}` : ''}</button>)}</div>
           </label>}
           <label className="field"><span>{t('issue.due')}</span><input className="input" type="date" value={due} onChange={(e) => setDue(e.target.value)} /></label>
         </div>
@@ -319,6 +321,9 @@ function eventText(d: BootstrapDTO, e: IssueEventDTO) {
   switch (e.kind) {
     case 'created': return t('issue.ev.created');
     case 'status': return t('issue.ev.status', { to: t(`issue.st.${p.to}` as 'issue.st.open') });
+    case 'assignees': return `${taskText('Responsables', 'Responsible')} → ${(p.to as string[]).map((id) => personById(d, id)?.name ?? t('common.participant')).join(', ') || t('issue.noOwner')}`;
+    case 'attachments': return `${taskText('Archivos de la tarea', 'Task files')}: ${p.count}`;
+    case 'moved': return taskText('Tarea movida de chat', 'Task moved to another chat');
     case 'owner': return `${t('issue.ev.owner')} → ${personById(d, p.to)?.name ?? t('common.none')}`;
     case 'due': return t('issue.ev.due', { to: p.to ? new Date(`${p.to}T12:00:00`).toLocaleDateString(locale(), { day: 'numeric', month: 'short' }) : t('issue.noDue') });
     case 'title': return `${t('issue.ev.title')} → «${p.to}»`;
@@ -340,6 +345,9 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
   const [comment, setComment] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [pickDate, setPickDate] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [moveTo, setMoveTo] = useState('');
+  const uploadInput = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const load = () => client.issueDetail(id).then((r) => setEvents(r.events)).catch((e) => setError(errorText(e)));
   useEffect(() => { void load(); }, [id, live?.updatedAt]);
@@ -357,6 +365,17 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
   const canSeeOrigin = !!conv && i.originMessageSeq !== null && i.originMessageSeq > conv.historyFromSeq;
   const requester = personById(d, i.requestedBy);
   const update = (patch: Parameters<typeof client.updateIssue>[1]) => client.updateIssue(i.id, patch).catch((e) => setError(errorText(e)));
+  const upload = async (files: FileList | null) => {
+    if (!files?.length || uploading) return;
+    if ((i.attachments?.length ?? 0) + files.length > 20) { setError(taskText('Máximo 20 archivos por tarea.', 'Maximum 20 files per task.')); return; }
+    setUploading(true); setError(null);
+    try {
+      const added: string[] = [];
+      for (const file of Array.from(files)) { const a = await client.uploadIssueAttachment(i.id, file, file.name); added.push(a.id); }
+      await client.updateIssue(i.id, { attachmentIds: [...(i.attachments ?? []).map((a) => a.id), ...added] });
+    } catch (e) { setError(errorText(e)); } finally { setUploading(false); if (uploadInput.current) uploadInput.current.value = ''; }
+  };
+
   const send = async (e: FormEvent) => {
     e.preventDefault();
     if (!comment.trim()) return;
@@ -399,11 +418,11 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
         <div className="issue-q-label">{t('issue.qWho')}</div>
         <div className="chips">
           {members.map((p) => (
-            <button key={p.id} className={`chip-person ${i.ownerId === p.id ? 'on' : ''}`} aria-pressed={i.ownerId === p.id} onClick={() => update({ ownerId: p.id })}>
+            <button key={p.id} className={`chip-person ${assignedTo(i, p.id) ? 'on' : ''}`} aria-pressed={assignedTo(i, p.id)} onClick={() => update({ assigneeIds: assignedTo(i, p.id) ? taskAssignees(i).filter((uid) => uid !== p.id) : [...taskAssignees(i), p.id] })}>
               <Avatar person={p} org={orgById(d, p.orgId)} size={22} /> {p.id === d.me.id ? t('issue.me') : p.name.split(' ')[0]}
             </button>
           ))}
-          {i.ownerId && <button className="chip-person ghost" onClick={() => update({ ownerId: null })}>{t('issue.noOwner')}</button>}
+          {taskAssignees(i).length > 0 && <button className="chip-person ghost" onClick={() => update({ assigneeIds: [] })}>{t('issue.noOwner')}</button>}
         </div>
       </div>}
 
@@ -433,6 +452,18 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
           )}
         </div>
       )}
+
+      <div className="issue-q">
+        <div className="issue-q-label">{taskText('Imágenes y documentos', 'Images and documents')} · {i.attachments?.length ?? 0}</div>
+        <TaskAttachments files={i.attachments ?? []} disabled={uploading} onRemove={(fileId) => void update({ attachmentIds: (i.attachments ?? []).filter((a) => a.id !== fileId).map((a) => a.id) })} />
+        <div className="task-attachment-actions"><button className="btn small" disabled={uploading} onClick={() => uploadInput.current?.click()}>📎 {uploading ? taskText('Subiendo…', 'Uploading…') : taskText('Agregar archivo', 'Add file')}</button><span className="small muted">{taskText('Cada archivo comparte la privacidad de esta tarea · 25 MB por archivo.', 'Files share this task’s privacy · 25 MB per file.')}</span></div>
+        <input ref={uploadInput} type="file" multiple hidden onChange={(e) => void upload(e.target.files)} />
+      </div>
+      {!isPersonal(i) && i.createdBy === d.me.id && <div className="issue-q">
+        <div className="issue-q-label">{taskText('Mover a otro chat', 'Move to another chat')}</div>
+        <div className="task-move-form"><select className="input" value={moveTo} onChange={(e) => setMoveTo(e.target.value)} aria-label={taskText('Chat de destino', 'Destination chat')}><option value="">{taskText('Elegir chat…', 'Choose chat…')}</option>{issueDestinations(d).filter((c) => c.id !== i.conversationId).map((c) => <option key={c.id} value={c.id}>{destinationLabel(d, c, conversationTitle(d, c))}</option>)}</select><button className="btn small" disabled={!moveTo || childrenOf(client.getState().issues, i.id).length > 0} onClick={() => void update({ conversationId: moveTo }).then(() => setMoveTo(''))}>{taskText('Mover', 'Move')}</button></div>
+        <p className="hint">{childrenOf(client.getState().issues, i.id).length ? taskText('Mueve primero las subtareas. Cada responsable debe participar en el chat de destino para tareas visibles a todo el chat.', 'Move subtasks first. Every responsible person must belong to the destination for tasks visible to the whole chat.') : taskText('La tarea se verá en el destino según su privacidad. Si sales del chat de la tarea principal, se independiza.', 'The task appears at the destination with its visibility. Moving outside the parent task chat detaches it.')}</p>
+      </div>}
 
       {!i.parentIssueId && !isPersonal(i) && <TasksSection parentId={i.id} onOpen={setId} />}
       {isPersonal(i) && <div className="hint">🔒 {t('issue.personalHint')}</div>}
@@ -499,6 +530,7 @@ export function IssuesBody() {
   const all = useClient((s) => s.issues);
   const [filter, setFilter] = useState<'mine' | 'open' | 'closed'>(() => (localStorage.getItem('chaggu:issueFilter') as 'mine') || 'mine');
   const [groupBy, setGroupBy] = useState<'group' | 'person'>(() => (localStorage.getItem('chaggu:issueGroupBy') as 'person') || 'group');
+  const [view, setView] = useState<'list' | 'cards' | 'board'>(() => (localStorage.getItem('chaggu:issueView') as 'list') || 'list');
   // ?issue=<id>: abre el asunto (enlaces de gg, del push o de un asunto personal).
   const [open, setOpen] = useState<string | null>(() => queryParam('issue'));
   const [error, setError] = useState<string | null>(null);
@@ -508,7 +540,7 @@ export function IssuesBody() {
   // Los restringidos pueden ser de un chat que no leo (me asignaron una tarea): el servidor ya filtró.
   const list = Object.values(all)
     .filter((i) => !i.conversationId || visibleConvs.has(i.conversationId) || isRestricted(i))
-    .filter((i) => (filter === 'closed' ? isClosed(i) : !isClosed(i) && (filter === 'open' || i.ownerId === d.me.id)))
+    .filter((i) => (filter === 'closed' ? isClosed(i) : !isClosed(i) && (filter === 'open' || assignedTo(i, d.me.id))))
     .sort(filter === 'closed' ? (a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? '') : byUrgency);
   // Por grupo: la conversación con su espacio. Por persona: el responsable, yo primero y «Sin responsable» al final.
   const NONE = '__none';
@@ -517,7 +549,7 @@ export function IssuesBody() {
   const shown = groupBy === 'group' ? tops(list, all) : list;
   const PERSONAL = '__personal';
   const convOf = (i: IssueDTO) => (i.parentIssueId && all[i.parentIssueId] ? all[i.parentIssueId]!.conversationId ?? PERSONAL : i.conversationId ?? PERSONAL);
-  for (const i of shown) { const k = groupBy === 'person' ? i.ownerId ?? NONE : convOf(i); buckets.set(k, [...(buckets.get(k) ?? []), i]); }
+  for (const i of shown) { const keys = groupBy === 'person' ? taskAssignees(i).length ? taskAssignees(i) : [NONE] : [convOf(i)]; for (const k of keys) buckets.set(k, [...(buckets.get(k) ?? []), i]); }
   const sectionTitle = (k: string) => {
     if (groupBy === 'person') return k === NONE ? t('issue.noOwner') : `${personById(d, k)?.name ?? t('common.participant')}${k === d.me.id ? ` ${t('common.you')}` : ''}`;
     if (k === PERSONAL) return `🔒 ${t('issue.personalSection')}`;
@@ -529,7 +561,7 @@ export function IssuesBody() {
     ? (Number(b === d.me.id) - Number(a === d.me.id)) || (Number(a === NONE) - Number(b === NONE)) || sectionTitle(a).localeCompare(sectionTitle(b))
     : bi.length - ai.length || sectionTitle(a).localeCompare(sectionTitle(b)));
   const label = { mine: t('issue.mine'), open: t('issue.allOpen'), closed: t('issue.closed') };
-  const count = (f: 'mine' | 'open' | 'closed') => Object.values(all).filter((i) => (!i.conversationId || visibleConvs.has(i.conversationId) || isRestricted(i)) && (f === 'closed' ? isClosed(i) : !isClosed(i) && (f === 'open' || i.ownerId === d.me.id))).length;
+  const count = (f: 'mine' | 'open' | 'closed') => Object.values(all).filter((i) => (!i.conversationId || visibleConvs.has(i.conversationId) || isRestricted(i)) && (f === 'closed' ? isClosed(i) : !isClosed(i) && (f === 'open' || assignedTo(i, d.me.id)))).length;
   return (
     <>
       <div className="row issue-toolbar">
@@ -539,14 +571,17 @@ export function IssuesBody() {
         <div className="seg" role="radiogroup" aria-label={t('issue.groupBy')}>
           {(['group', 'person'] as const).map((g) => <button key={g} role="radio" aria-checked={groupBy === g} className={groupBy === g ? 'on' : ''} onClick={() => { setGroupBy(g); remember('chaggu:issueGroupBy', g); }}>{g === 'group' ? t('issue.byGroup') : t('issue.byPerson')}</button>)}
         </div>
+        <div className="seg" role="radiogroup" aria-label={taskText('Vista de tareas', 'Task view')}>{(['list', 'cards', 'board'] as const).map((v) => <button key={v} role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => { setView(v); remember('chaggu:issueView', v); }}>{v === 'list' ? taskText('Lista', 'List') : v === 'cards' ? taskText('Tarjetas', 'Cards') : taskText('Tablero', 'Board')}</button>)}</div>
+        <TaskReportButton />
       </div>
       {filter !== 'closed' && <QuickAddIssue />}
       {error && <div className="error">{error}</div>}
       {list.length === 0 && <div className="empty">{t('issue.empty')}</div>}
-      {sections.map(([k, items]) => (
+      {view === 'board' && <div className="task-board">{ISSUE_STATUSES.map((status) => <section key={status} className="task-board-column" onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-chaggu-issue-id')) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); const taskId = e.dataTransfer.getData('application/x-chaggu-issue-id'); if (all[taskId]) void client.updateIssue(taskId, { status }).catch((err) => setError(errorText(err))); }}><h3>{t(`issue.st.${status}`)} · {list.filter((i) => i.status === status).length}</h3>{list.filter((i) => i.status === status).map((i) => <IssueRow key={i.id} i={i} showWhere onOpen={setOpen} />)}</section>)}</div>}
+      {view !== 'board' && sections.map(([k, items]) => (
         <section key={k} style={{ marginBottom: 18 }}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>{sectionTitle(k)} · {items.length}</div>
-          <div className="list" style={{ gap: 6 }}>{items.map((i) => groupBy === 'group'
+          <div className={view === 'cards' ? 'task-cards' : 'list'} style={{ gap: 6 }}>{items.map((i) => groupBy === 'group'
             ? <IssueWithTasks key={i.id} i={i} showWhere={false} onOpen={setOpen} />
             : <IssueRow key={i.id} i={i} showWhere showOwner={false} onOpen={setOpen} />)}</div>
         </section>
@@ -584,11 +619,13 @@ function TaskQuickAdd({ parent, conversationId, autoFocus }: { parent: IssueDTO;
   const inSide = where !== parent.conversationId;
   const members = membersOf(d, where);
   const [title, setTitle] = useState('');
-  const [ownerId, setOwnerId] = useState(d.me.id);
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([d.me.id]);
+  const ownerId = assigneeIds[0] ?? d.me.id;
+  const toggleAssignee = (uid: string) => setAssigneeIds((ids) => ids.includes(uid) ? ids.filter((x) => x !== uid) : [...ids, uid]);
   const [vis, setVis] = useState<IssueVisibility>(() => (inSide ? 'all' : defaultVisibility(d, parent.conversationId)));
   const [busy, setBusy] = useState(false);
   const [pickOther, setPickOther] = useState(false);
-  const outsider = !members.some((p) => p.id === ownerId);
+  const outsider = assigneeIds.some((uid) => !members.some((p) => p.id === uid));
   const effective: IssueVisibility = outsider && vis === 'all' ? 'private' : vis;
   const myOrg = orgById(d, d.me.primaryOrgId);
   const contacts = d.people.filter((p) => p.kind === 'human' && !members.some((m) => m.id === p.id) && p.id !== d.me.id);
@@ -599,7 +636,7 @@ function TaskQuickAdd({ parent, conversationId, autoFocus }: { parent: IssueDTO;
     if (text.length < 2 || busy) return;
     setBusy(true);
     try {
-      await client.createChildIssue(parent.id, { title: text, ownerId, visibility: effective, ...(inSide ? { conversationId: where } : {}) });
+      await client.createChildIssue(parent.id, { title: text, assigneeIds, visibility: effective, ...(inSide ? { conversationId: where } : {}) });
       setTitle('');
     } catch (err) { toast(errorText(err)); } finally { setBusy(false); }
   }
@@ -619,13 +656,13 @@ function TaskQuickAdd({ parent, conversationId, autoFocus }: { parent: IssueDTO;
           <div className="chips" aria-label={t('issue.qWho')}>
             <span className="small muted">{t('issue.qWho')}</span>
             {members.map((p) => (
-              <button type="button" key={p.id} className={`chip-person ${ownerId === p.id ? 'on' : ''}`} aria-pressed={ownerId === p.id} onClick={() => setOwnerId(p.id)}>
+              <button type="button" key={p.id} className={`chip-person ${assigneeIds.includes(p.id) ? 'on' : ''}`} aria-pressed={assigneeIds.includes(p.id)} onClick={() => toggleAssignee(p.id)}>
                 <Avatar person={p} org={orgById(d, p.orgId)} size={20} /> {p.id === d.me.id ? t('issue.me') : p.name.split(' ')[0]}
               </button>
             ))}
-            {outsider && owner && <button type="button" className="chip-person on"><Avatar person={owner} org={orgById(d, owner.orgId)} size={20} /> {owner.name.split(' ')[0]}</button>}
+            {assigneeIds.filter((uid) => !members.some((p) => p.id === uid)).map((uid) => <button key={uid} type="button" className="chip-person on" onClick={() => toggleAssignee(uid)}>{personById(d, uid)?.name ?? t('common.participant')} ×</button>)}
             {contacts.length > 0 && (pickOther
-              ? <select className="input" autoFocus style={{ maxWidth: 220 }} value="" onChange={(e) => { if (e.target.value) { setOwnerId(e.target.value); setPickOther(false); } }}>
+              ? <select className="input" autoFocus style={{ maxWidth: 220 }} value="" onChange={(e) => { if (e.target.value) { toggleAssignee(e.target.value); setPickOther(false); } }}>
                   <option value="">{t('task.pickPerson')}</option>
                   {contacts.map((p) => <option key={p.id} value={p.id}>{p.name} · {orgById(d, p.orgId)?.name ?? t('common.guest')}</option>)}
                 </select>

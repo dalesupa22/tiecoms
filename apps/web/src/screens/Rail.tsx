@@ -102,11 +102,15 @@ function RailItem({ icon, label, on, count, tone = 'brand', dot, at, drag, onCli
 }
 
 const PAGES_MORE: { name: Route['name']; label: string; icon: string; to: string }[] = [
+  { name: 'notes', label: 'nav.notes', icon: '📝', to: '/notas' },
+  { name: 'alerts', label: 'nav.alerts', icon: '⏰', to: '/alertas' },
+  { name: 'community', label: 'nav.community', icon: '📣', to: '/comunidad' },
+  { name: 'organize', label: 'nav.organize', icon: '▤', to: '/organizar' },
   { name: 'saved', label: 'nav.saved', icon: '🔖', to: '/ver-despues' },
   { name: 'scheduled', label: 'nav.scheduled', icon: '🕒', to: '/programados' },
   { name: 'signed', label: 'nav.signed', icon: '✍️', to: '/firmas' },
   { name: 'files', label: 'nav.files', icon: '▣', to: '/archivos' },
-  { name: 'people', label: 'nav.people', icon: '◎', to: '/participantes' },
+  { name: 'people', label: 'nav.directory', icon: '◎', to: '/participantes' },
 ];
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

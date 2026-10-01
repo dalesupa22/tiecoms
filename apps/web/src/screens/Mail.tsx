@@ -1,3 +1,4 @@
+import { MailLiveReply } from './MailLiveReply.tsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MailConnectionDTO, MailListItemDTO, MailMessageDTO, MailProvider, MessageDTO, SharedMailDTO, SharedMailCommentDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
@@ -319,6 +320,7 @@ function MailPreview({ provider, item, pickLabel, pin, onPick, onClose }: { prov
       {html && !asText ? <MailHtml html={html} maxHeight={560} /> : <div className="mail-body" aria-busy={!m || html === undefined}>{m ? m.body || t('mail.noBody') : t('common.loading')}</div>}
       {html && <button className="link-btn" style={{ alignSelf: 'flex-start' }} onClick={() => setAsText((v) => !v)}>{asText ? t('mail.asDesign') : t('mail.asText')}</button>}
       {!!m?.attachments.length && <div className="att-chips">{m.attachments.map((a) => <span key={a.id} className="file-chip">📎 {a.name} · {kb(a.size)}</span>)}</div>}
+      {m && <MailLiveReply provider={provider} id={item.id} m={m} onSent={() => LIST_CACHE.clear()} />}
       <div className="modal-actions"><button className="btn ghost" onClick={onClose}>{t('common.close')}</button>{pin && <PinToGrid payload={pin} name={item.subject || t('mail.noSubject')} className="is-lg" />}<button className="btn primary" onClick={onPick}>{pickLabel}</button></div>
     </Modal>
   );

@@ -55,6 +55,8 @@ export async function deleteAccount(userId: string, input: { confirmEmail: strin
     await c.query('DELETE FROM user_identities WHERE user_id = $1', [userId]);
     await c.query('DELETE FROM sso_codes WHERE user_id = $1', [userId]);
     await c.query('DELETE FROM reminders WHERE user_id = $1', [userId]);
+    await c.query('DELETE FROM personal_notes WHERE owner_id = $1', [userId]);
+    await c.query('DELETE FROM user_personal_preferences WHERE user_id = $1', [userId]);
     await c.query('DELETE FROM conversation_prefs WHERE user_id = $1', [userId]);
     await c.query('DELETE FROM workspace_prefs WHERE user_id = $1', [userId]);
     await c.query('DELETE FROM read_cursors WHERE user_id = $1', [userId]);
@@ -64,7 +66,7 @@ export async function deleteAccount(userId: string, input: { confirmEmail: strin
     // borra S3 con reintentos durables; los archivos compartidos del espacio permanecen.
     const personalFiles = await c.query(
       `UPDATE files SET deleted_at = COALESCE(deleted_at, now()), name = NULL, updated_at = now()
-        WHERE owner_id = $1 AND (purpose = 'avatar' OR (purpose = 'document' AND workspace_id IS NULL))
+        WHERE owner_id = $1 AND (purpose = 'avatar' OR (purpose = 'document' AND (visibility = 'private' OR (workspace_id IS NULL AND conversation_id IS NULL))))
         RETURNING id, s3_key`, [userId],
     );
     for (const file of personalFiles.rows) {
@@ -89,7 +91,7 @@ export async function deleteAccount(userId: string, input: { confirmEmail: strin
 
     await c.query(
       `UPDATE users SET name = 'Cuenta eliminada', email = 'deleted+' || id || '@deleted.tiecoms.invalid',
-              password_hash = NULL, avatar_file_id = NULL, primary_org_id = NULL, email_verified_at = NULL, disabled_at = now() WHERE id = $1`,
+              password_hash = NULL, avatar_file_id = NULL, primary_org_id = NULL, email_verified_at = NULL, profile_phone = NULL, profile_company = NULL, profile_bio = NULL, disabled_at = now() WHERE id = $1`,
       [userId],
     );
     if (peers.rows.length) {

@@ -1,0 +1,15 @@
+.personal-notes { display: grid; gap: 14px; margin-top: 18px; }
+.personal-notes.cards { grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); }
+.personal-note { display: grid; gap: 12px; padding: 18px; text-align: left; color: var(--ink); min-width: 0; }
+.personal-note-body { white-space: pre-wrap; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; font-weight: normal; }
+.personal-notes.list .personal-note-body { -webkit-line-clamp: 2; }
+.personal-chat-row { padding: 6px; }
+.note-media-preview { width: 100%; max-height: 55vh; object-fit: contain; }
+.msgs[data-background="sand"] { background: linear-gradient(#c69c6420, #c69c6420), var(--paper); }
+.msgs[data-background="mint"] { background: linear-gradient(#31896c20, #31896c20), var(--paper); }
+.msgs[data-background="sky"] { background: linear-gradient(#4187bc20, #4187bc20), var(--paper); }
+.msgs[data-background="rose"] { background: linear-gradient(#b9708620, #b9708620), var(--paper); }
+.msgs[data-background="dusk"] { background: linear-gradient(135deg, #9b67ac22, #da865624), var(--paper); }
+.person-profile-details { display: grid; gap: 12px; margin: 0; }
+.person-profile-details dt { color: var(--muted); font-size: 12px; }
+.person-profile-details dd { margin: 3px 0 0; white-space: pre-wrap; }

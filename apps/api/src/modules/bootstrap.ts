@@ -71,9 +71,15 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
       `WITH visible AS (
          SELECT DISTINCT other.user_id FROM conversation_memberships mine
            JOIN conversation_memberships other ON other.conversation_id = mine.conversation_id AND other.removed_at IS NULL
+           JOIN conversations visible_chat ON visible_chat.id = mine.conversation_id AND visible_chat.archived_at IS NULL
+           LEFT JOIN workspace_memberships visible_space ON visible_space.workspace_id = visible_chat.workspace_id AND visible_space.user_id = mine.user_id
+           LEFT JOIN workspaces visible_workspace ON visible_workspace.id = visible_chat.workspace_id AND visible_workspace.archived_at IS NULL
           WHERE mine.user_id = $1 AND mine.removed_at IS NULL
+            AND (visible_chat.workspace_id IS NULL OR (visible_workspace.id IS NOT NULL AND visible_space.user_id IS NOT NULL
+              AND visible_space.revoked_at IS NULL AND (visible_space.expires_at IS NULL OR visible_space.expires_at > now())))
          UNION
          SELECT DISTINCT o.user_id FROM workspace_memberships wm
+           JOIN workspaces directory_space ON directory_space.id = wm.workspace_id AND directory_space.archived_at IS NULL
            JOIN workspace_memberships o ON o.workspace_id = wm.workspace_id AND o.revoked_at IS NULL AND (o.expires_at IS NULL OR o.expires_at > now())
           WHERE wm.user_id = $1 AND wm.role <> 'guest' AND ${ACTIVE_WM}
          UNION
@@ -85,7 +91,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
          -- gg, el asistente (docs/GG-CHAT.md).
          UNION SELECT '0a9a9a9a-0000-4000-8000-000000000066'::uuid
        )
-       SELECT u.id, u.name, u.kind, u.primary_org_id, u.avatar_file_id, om.title, om.area, u.sleep_on, u.sleep_start, u.sleep_end, u.sleep_tz,
+       SELECT u.id, u.name, u.kind, u.primary_org_id, u.avatar_file_id, u.profile_phone, u.profile_company, u.profile_bio, om.title, om.area, u.sleep_on, u.sleep_start, u.sleep_end, u.sleep_tz,
               (SELECT bool_and(g.role = 'guest') FROM workspace_memberships g WHERE g.user_id = u.id AND g.revoked_at IS NULL) AS guest,
               (SELECT max(g.expires_at) FROM workspace_memberships g WHERE g.user_id = u.id AND g.role = 'guest' AND g.revoked_at IS NULL) AS guest_until
          FROM visible v JOIN users u ON u.id = v.user_id AND u.disabled_at IS NULL
@@ -133,7 +139,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   });
 
   const personList: PersonDTO[] = people.rows.map((r) => ({
-    id: r.id, name: r.name, kind: r.kind, orgId: r.guest ? null : r.primary_org_id, title: r.title, area: r.area,
+    id: r.id, name: r.name, kind: r.kind, phone: r.profile_phone, company: r.profile_company, bio: r.profile_bio, orgId: r.guest ? null : r.primary_org_id, title: r.title, area: r.area,
     guest: Boolean(r.guest), guestUntil: r.guest_until ? new Date(r.guest_until).toISOString() : null,
     avatarUrl: r.avatar_file_id ? `/api/v1/avatars/${r.avatar_file_id}` : null,
     sleep: r.kind === 'human' && r.sleep_on && r.sleep_start ? { start: String(r.sleep_start).slice(0, 5), end: String(r.sleep_end).slice(0, 5), tz: r.sleep_tz } : null,

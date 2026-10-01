@@ -5,6 +5,7 @@
 import { tx, type Tx } from '../db.ts';
 import { appendEvent, appendMessage, toMessageDTO } from './messages.ts';
 import { localDate, todayDecision } from './today.ts';
+import { normalizeAssignees } from './issue-assignees.ts';
 
 export { localDate, todayDecision };
 
@@ -81,7 +82,7 @@ export async function fireOverdueIssues(now = new Date()): Promise<number> {
   const today = localDate(now, ORG_TZ);
   return tx(async (c) => {
     const { rows } = await c.query(
-      `SELECT i.id, i.title, i.conversation_id, i.owner_id, i.created_by, i.visibility, to_char(i.due_date, 'YYYY-MM-DD') AS due, u.name AS owner_name
+      `SELECT i.id, i.title, i.conversation_id, i.owner_id, i.assignee_ids, i.created_by, i.visibility, to_char(i.due_date, 'YYYY-MM-DD') AS due, u.name AS owner_name
          FROM issues i LEFT JOIN users u ON u.id = i.owner_id
         WHERE i.due_date IS NOT NULL AND i.due_date < $1::date AND i.status NOT IN ('done', 'cancelled')
           AND (i.overdue_posted_for IS NULL OR i.overdue_posted_for <> i.due_date)
@@ -99,7 +100,8 @@ export async function fireOverdueIssues(now = new Date()): Promise<number> {
           });
         }
       }
-      if (r.owner_id) await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('push.issue_overdue', $1, 2)", [JSON.stringify({ issueId: r.id, ownerId: r.owner_id, dueDate: r.due })]);
+      const assignees = normalizeAssignees({ assigneeIds: r.assignee_ids?.length ? r.assignee_ids : r.owner_id ? [r.owner_id] : [] }, []);
+      for (const ownerId of assignees) await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('push.issue_overdue', $1, 2)", [JSON.stringify({ issueId: r.id, ownerId, dueDate: r.due })]);
     }
     return rows.length;
   });

@@ -3,7 +3,8 @@
  *
  * Usa Baileys, que se vincula como «dispositivo vinculado» (igual que WhatsApp
  * Web), así funciona tanto con WhatsApp personal como con WhatsApp Business y
- * lee grupos, chats y mensajes. Solo lee: no envía mensajes ni marca como leído.
+ * lee grupos, chats y mensajes. Lee y nada más, salvo lo que la persona responde desde chaggu en una cuenta
+ * con «Responder desde chaggu» activado (wa_outbox). Nunca marca como leído.
  *
  * Un proceso reclama cada cuenta con un lease en la BD (una sesión por cuenta
  * aunque haya varias réplicas). Las credenciales se guardan cifradas en wa_auth.
@@ -216,8 +217,41 @@ async function purgeRemoved() {
   }
 }
 
+/**
+ * Manda lo que las personas respondieron desde chaggu (wa_outbox) por las cuentas que atiende este proceso. El texto se borra al
+ * enviar (queda en WhatsApp). Un envío que se quedó «sending» no se reintenta a ciegas: pudo haber salido.
+ */
+async function processOutbox() {
+  const live = [...sessions.values()].filter((s) => s.sock && s.registered && !s.stopping);
+  if (live.length) {
+    const { rows } = await pool.query(
+      `UPDATE wa_outbox SET status = 'sending', attempts = attempts + 1
+        WHERE id IN (SELECT o.id FROM wa_outbox o JOIN wa_accounts a ON a.id = o.account_id
+                      WHERE o.status = 'queued' AND o.account_id = ANY($1) AND a.send_enabled
+                      ORDER BY o.created_at LIMIT 20 FOR UPDATE OF o SKIP LOCKED)
+        RETURNING id, account_id, jid, body`,
+      [live.map((s) => s.id)],
+    );
+    for (const r of rows) {
+      const s = sessions.get(r.account_id);
+      try {
+        if (!s?.sock) throw new Error('La sesión de WhatsApp no está lista');
+        await s.sock.sendMessage(r.jid, { text: r.body });
+        await pool.query("UPDATE wa_outbox SET status = 'sent', sent_at = now(), body = '' WHERE id = $1", [r.id]);
+        notifyOwner(s);
+      } catch (e: any) {
+        console.error(`[wa] ${r.account_id} no pude enviar`, e?.message);
+        await pool.query("UPDATE wa_outbox SET status = 'failed', error = $2, body = '' WHERE id = $1", [r.id, String(e?.message ?? e).slice(0, 300)]);
+      }
+    }
+  }
+  await pool.query("UPDATE wa_outbox SET status = 'failed', error = 'Se interrumpió el envío. Revisa en WhatsApp antes de reintentar.', body = '' WHERE status = 'sending' AND created_at < now() - interval '2 minutes'");
+  await pool.query("DELETE FROM wa_outbox WHERE status IN ('sent', 'failed') AND created_at < now() - interval '7 days'");
+}
+
 async function tick() {
   await purgeRemoved();
+  await processOutbox().catch((e: any) => console.error('[wa] outbox', e?.message));
   const mine = [...sessions.keys()];
   if (mine.length) {
     await pool.query(`UPDATE wa_accounts SET lease_until = now() + make_interval(secs => $3) WHERE id = ANY($1) AND lease_owner = $2`, [mine, BRIDGE_ID, LEASE_SECONDS]);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isChatKey, mailKey, parseKey, placeInto, replaceIndex, slots, waKey } from '../src/grid-keys.ts';
+import { SECTIONS, isChatKey, mailKey, parseKey, placeInto, replaceIndex, sectionKey, slots, waKey } from '../src/grid-keys.ts';
 
 describe('claves de la cuadrícula', () => {
   it('un chat conserva su id a secas y un correo o WhatsApp llevan prefijo', () => {
@@ -8,6 +8,10 @@ describe('claves de la cuadrícula', () => {
     expect(parseKey(waKey('acc1', '573001112233:4@s.whatsapp.net'))).toEqual({ kind: 'wa', accountId: 'acc1', jid: '573001112233:4@s.whatsapp.net' });
     expect(isChatKey('0b9c')).toBe(true);
     expect(isChatKey(mailKey('microsoft', 'AAMk='))).toBe(false);
+  });
+  it('las secciones enteras (tareas, bandeja, todas las conversaciones de WhatsApp) tienen su clave', () => {
+    for (const k of SECTIONS) { expect(parseKey(sectionKey(k))).toEqual({ kind: k }); expect(isChatKey(sectionKey(k))).toBe(false); }
+    expect(parseKey('inbox').kind).toBe('chat'); // sin los dos puntos no es una sección
   });
   it('un prefijo mal formado se trata como chat (lo guardado antes no se rompe)', () => {
     expect(parseKey('mail:yahoo:1').kind).toBe('chat');

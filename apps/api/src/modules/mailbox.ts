@@ -860,6 +860,24 @@ export async function reply(userId: string, id: string, input: z.infer<typeof Ma
   return load(pool, id, userId);
 }
 
+/**
+ * Responder un correo de tu buzón en vivo, sin traerlo antes a un chat (paneles de la cuadrícula). Sale ya, desde tu cuenta
+ * (Gmail u Outlook), en el mismo hilo y con «Re:». A quien le escribiste y con copia: lo mismo que al responder una tarjeta.
+ */
+export async function replyLive(userId: string, provider: MailProvider, id: string, input: { body: string; cc?: string[] }) {
+  const f = await fullMail(userId, provider, id);
+  let to: MailAddressDTO[] = [];
+  await withProvider(userId, provider, async (at, mine) => {
+    const r = recipients({ from_email: f.from?.email ?? null, from_name: f.from?.name ?? null, to_list: f.to, cc_list: f.cc, direction: f.box === 'sent' ? 'out' : 'in' }, mine?.toLowerCase() ?? null, input.cc);
+    if (!r.to.length) throw new ApiError(400, 'no_recipient', 'Este correo no tiene a quién responder');
+    to = r.to;
+    await PROVIDERS[provider].reply(at, { externalId: f.id, threadId: f.threadId, internetId: f.internetId, references: f.references },
+      { to: r.to, cc: r.cc, subject: reSubject(f.subject || ''), body: input.body, files: [] });
+  });
+  bumpUser(userId); // la carpeta Enviados cambió
+  return { ok: true as const, to };
+}
+
 export async function cancelReply(userId: string, id: string) {
   return tx(async (c) => {
     await readable(c, userId, id, 'read', true);

@@ -99,7 +99,7 @@ function useConfirmReturn(onDone: () => void) {
   }, []);
 }
 
-function ConnectCards({ list, reload }: { list: MailConnectionDTO[]; reload: () => void }) {
+export function ConnectCards({ list, reload }: { list: MailConnectionDTO[]; reload: () => void }) {
   return (
     <div className="mail-connect">
       {list.map((c) => (
@@ -152,7 +152,8 @@ export const liveHtmlOf = (provider: MailProvider, id: string) => {
 type Filters = { box: 'inbox' | 'sent' | 'all'; q: string; from: string; to: string; after: string; before: string; attachments: boolean; unread: boolean; label: string; range: string | null };
 const EMPTY: Filters = { box: 'inbox', q: '', from: '', to: '', after: '', before: '', attachments: false, unread: false, label: '', range: null };
 
-function MailBrowser({ connections, onPick, pickLabel, compact }: { connections: MailConnectionDTO[]; onPick: (provider: MailProvider, item: MailListItemDTO) => void; pickLabel: string; compact?: boolean }) {
+/** inPane: dentro de un panel de la cuadrícula: tocar un correo lo abre con `onOpen` (en vez de la vista previa) y se puede arrastrar. */
+export function MailBrowser({ connections, onPick, pickLabel, compact, inPane, onOpen }: { connections: MailConnectionDTO[]; onPick: (provider: MailProvider, item: MailListItemDTO) => void; pickLabel: string; compact?: boolean; inPane?: boolean; onOpen?: (provider: MailProvider, item: MailListItemDTO) => void }) {
   const ready = connections.filter((c) => c.status === 'active');
   const [provider, setProvider] = useState<MailProvider | null>(ready[0]?.provider ?? null);
   const [f, setF] = useState<Filters>(EMPTY);
@@ -265,8 +266,8 @@ function MailBrowser({ connections, onPick, pickLabel, compact }: { connections:
         {items?.map((m) => {
           const other = m.box === 'sent' ? m.to[0] : m.from;
           return (
-            <div key={m.id} className={`mail-row ${m.unread ? 'is-unread' : ''}`} {...(compact ? {} : { draggable: true, onDragStart: (e: React.DragEvent) => setDrag(e, 'mail', { provider: provider!, id: m.id, subject: m.subject, from: who(other) }, m.subject || t('mail.noSubject')) })} onMouseEnter={() => prefetch(m)} onMouseLeave={() => { if (hover.current) clearTimeout(hover.current); }} onTouchStart={() => prefetch(m)}>
-              <button className="mail-row-main" onClick={() => setPreview(m)}>
+            <div key={m.id} className={`mail-row ${m.unread ? 'is-unread' : ''}`} {...(compact && !inPane ? {} : { draggable: true, onDragStart: (e: React.DragEvent) => setDrag(e, 'mail', { provider: provider!, id: m.id, subject: m.subject, from: who(other) }, m.subject || t('mail.noSubject')) })} onMouseEnter={() => prefetch(m)} onMouseLeave={() => { if (hover.current) clearTimeout(hover.current); }} onTouchStart={() => prefetch(m)}>
+              <button className="mail-row-main" onClick={() => (onOpen ? onOpen(provider!, m) : setPreview(m))}>
                 <span className="avatar" style={{ width: 32, height: 32, fontSize: 12, background: personColor(other?.email ?? m.id) }} aria-hidden>{initials(who(other) || '?')}</span>
                 <span className="grow" style={{ minWidth: 0 }}>
                   <span className="row" style={{ gap: 6 }}>{f.box !== 'inbox' && <DirBadge out={m.box === 'sent'} />}<b className="ellipsis grow">{m.box === 'sent' ? `${t('mail.toShort')} ${who(other)}` : who(other)}</b><span className="small muted mail-date">{fmtDate(m.date)}</span></span>
@@ -274,7 +275,7 @@ function MailBrowser({ connections, onPick, pickLabel, compact }: { connections:
                   <span className="small muted ellipsis" style={{ display: 'block' }}>{m.hasAttachments ? '📎 ' : ''}<Highlight text={m.snippet} q={f.q} /></span>
                 </span>
               </button>
-              {!compact && <PinToGrid payload={{ kind: 'mail', provider: provider!, id: m.id, subject: m.subject, from: who(other) }} name={m.subject || t('mail.noSubject')} />}
+              {!compact && !inPane && <PinToGrid payload={{ kind: 'mail', provider: provider!, id: m.id, subject: m.subject, from: who(other) }} name={m.subject || t('mail.noSubject')} />}
               <button className="btn small primary mail-pick" onClick={() => onPick(provider!, m)}>{pickLabel}</button>
             </div>
           );
@@ -424,6 +425,7 @@ export function MailScreen() {
     <div className="page mail-page">
       <div className="page-head">
         <h1 className="serif">{t('mail.title')}</h1>
+        <PinToGrid payload={{ kind: 'section', section: 'inbox' }} name={t('nav.mail')} />
         <GridSideButton />
         {ready && <button className="btn small ghost" onClick={() => openDialog((close) => <Modal title={t('mail.accounts')} onClose={close}><ConnectCards list={list!} reload={() => { close(); void reload(); }} /></Modal>)}>{t('mail.accounts')}</button>}
       </div>

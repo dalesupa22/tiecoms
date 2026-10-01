@@ -31,8 +31,10 @@ export const DRAG_TYPE = 'application/x-chaggu-conversation';
 export const DRAG_MAIL = 'application/x-chaggu-mail';
 export const DRAG_WA = 'application/x-chaggu-wa';
 export const DRAG_WAMSG = 'application/x-chaggu-wamsg';
-export type DragKind = 'chat' | 'mail' | 'wa' | 'wamsg';
-const DRAG_KINDS: [string, DragKind][] = [[DRAG_TYPE, 'chat'], [DRAG_MAIL, 'mail'], [DRAG_WA, 'wa'], [DRAG_WAMSG, 'wamsg']];
+/** Una sección entera (Tareas, Correo, WhatsApp) arrastrada desde el riel o desde su página. */
+export const DRAG_SECTION = 'application/x-chaggu-section';
+export type DragKind = 'chat' | 'mail' | 'wa' | 'wamsg' | 'section';
+const DRAG_KINDS: [string, DragKind][] = [[DRAG_TYPE, 'chat'], [DRAG_MAIL, 'mail'], [DRAG_WA, 'wa'], [DRAG_WAMSG, 'wamsg'], [DRAG_SECTION, 'section']];
 /** Qué se está arrastrando (por los tipos del dataTransfer, que sí se ven mientras se arrastra). */
 export function dragKindOf(types: readonly string[] | DOMStringList): DragKind | null {
   const list = Array.from(types as ArrayLike<string>);
@@ -40,7 +42,7 @@ export function dragKindOf(types: readonly string[] | DOMStringList): DragKind |
 }
 export const dragType = (k: DragKind) => DRAG_KINDS.find(([, kind]) => kind === k)![0];
 /** Lo que se puede soltar en un cuadrito (todo menos un mensaje suelto) y lo que se puede llevar a un chat (correo y mensaje). */
-export const fitsSlot = (k: DragKind | null) => k === 'chat' || k === 'mail' || k === 'wa';
+export const fitsSlot = (k: DragKind | null) => k === 'chat' || k === 'mail' || k === 'wa' || k === 'section';
 export const fitsChat = (k: DragKind | null) => k === 'mail' || k === 'wamsg';
 
 const KEY = 'chaggu:split';

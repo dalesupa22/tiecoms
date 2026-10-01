@@ -2,6 +2,15 @@
 
 Hasta **4 paneles** a la vez (`apps/web/src/split.ts`). Un panel es un **chat de chaggu**, un **correo** de tu buzón (con su diseño) o una **conversación de WhatsApp** (sus mensajes). Pedido de Danny, 30-sep-2026.
 
+## Qué es un panel
+
+Un chat de chaggu, un correo, una conversación de WhatsApp o una **sección entera**: **Tareas** (la lista con sus filtros), **Correo** (la bandeja completa con búsqueda y filtros; al tocar un correo se abre ahí mismo, con «← Bandeja») y **WhatsApp** (todas las conversaciones; se abre una adentro, con «← Conversaciones»). Las secciones se arrastran desde el **riel** (Tareas, Correo, WhatsApp), o con el botón Fijar de su página.
+
+## Responder desde el panel
+
+- **Correo:** botón *Responder* en el correo abierto; sale ya, desde tu Gmail u Outlook, en el mismo hilo (`POST /api/v1/mail/messages/:provider/:id/reply`, sin traerlo antes a un chat; copia a quien tú elijas).
+- **WhatsApp:** caja de texto bajo los mensajes. Solo si la cuenta tiene **Responder desde chaggu** (apagado por defecto: el panel lo ofrece con el aviso del riesgo). Ver `docs/WHATSAPP.md`.
+
 ## Las dos acciones
 
 | | Qué se lleva | A dónde | Resultado |
@@ -32,4 +41,4 @@ Sin arrastrar: el botón **Fijar** de cada fila (`PinToGrid`) abre un mini mapa 
 
 ## Pendiente a propósito
 
-Tareas e «Inbox completo» como panel; bandeja en pantallas táctiles (hoy la cuadrícula solo existe desde 860 px de ancho).
+Arrastrar una tarea suelta a un chat; adjuntos al responder un correo en vivo; la bandeja en pantallas táctiles (hoy la cuadrícula solo existe desde 860 px de ancho).

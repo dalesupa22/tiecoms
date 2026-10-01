@@ -6,15 +6,22 @@
  */
 export const MAX_PANES_DEFAULT = 4;
 export type MailProviderKey = 'google' | 'microsoft';
+/** Las secciones enteras que también caben en un cuadrito: la lista de tareas, la bandeja de correo y todas las conversaciones de WhatsApp. */
+export type Section = 'tasks' | 'inbox' | 'wachats';
+export const SECTIONS: Section[] = ['tasks', 'inbox', 'wachats'];
 export type PaneRef =
   | { kind: 'chat'; id: string }
   | { kind: 'mail'; provider: MailProviderKey; id: string }
-  | { kind: 'wa'; accountId: string; jid: string };
+  | { kind: 'wa'; accountId: string; jid: string }
+  | { kind: Section };
 
 export const mailKey = (provider: MailProviderKey, id: string) => `mail:${provider}:${id}`;
 export const waKey = (accountId: string, jid: string) => `wa:${accountId}:${jid}`;
+export const sectionKey = (section: Section) => `${section}:`;
 
 export function parseKey(key: string): PaneRef {
+  const section = SECTIONS.find((s) => key === `${s}:`);
+  if (section) return { kind: section };
   if (key.startsWith('mail:')) {
     const rest = key.slice(5), at = rest.indexOf(':');
     const provider = rest.slice(0, at);

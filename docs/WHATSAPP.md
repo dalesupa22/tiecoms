@@ -10,7 +10,8 @@ Cada persona puede conectar varias cuentas (hasta 5): su WhatsApp personal y su 
 - **API** (`apps/api/src/modules/whatsapp.ts`): `/api/v1/whatsapp/accounts` (crear, listar, `relink`, borrar), `/api/v1/whatsapp/chats` (filtros por cuenta, categoría, grupos, búsqueda, ocultos), `PATCH /chats/:accountId/:jid` (categoría, fijar, ocultar, vincular) y `/organize`.
 - **Organizador** (`apps/api/src/modules/wa-organize.ts`): sugiere Trabajo, Clientes, Familia, Amigos, Comunidad u Otros por el nombre del grupo o contacto. Lo que la persona mueve a mano no se vuelve a tocar.
 - **Vincular a Chaggu:** un chat puede enviar sus mensajes *nuevos* a una conversación donde la persona puede publicar; llegan como «reenviado de WhatsApp», a su nombre, sin duplicados.
-- **Solo lectura:** no envía mensajes, no marca como leído y no se pone «en línea».
+- **Solo lectura por defecto:** no envía mensajes, no marca como leído y no se pone «en línea».
+- **Responder desde chaggu (opcional, por cuenta):** la persona lo enciende en la tarjeta de la cuenta (`wa_accounts.send_enabled`, apagado por defecto; migración 050). Con eso puede contestar un chat desde un panel de la cuadrícula: el API (`POST /api/v1/whatsapp/chats/:accountId/:jid/send`) encola en `wa_outbox`, el puente manda el texto con la sesión de la cuenta y deja el resultado (`sent`, `failed`; si el puente tarda, la respuesta dice `queued`). El texto se borra al enviar. Sigue sin marcar como leído ni ponerse «en línea». Al encenderlo se avisa del riesgo de suspensión de WhatsApp; es para contestar, no para envíos masivos (límite de 30 por minuto).
 
 ## Vincular
 
@@ -20,5 +21,5 @@ QR (Ajustes › Dispositivos vinculados › Vincular un dispositivo) o, desde el
 
 - Con `Browsers.macOS('Desktop')` WhatsApp cierra con 428 antes del QR (probado el 24-sep-2026); se usa `Browsers.macOS('Chrome')`.
 - Se anuncia la versión actual de WhatsApp Web (`fetchLatestWaWebVersion`, refrescada cada 6 h).
-- Riesgo: WhatsApp no permite oficialmente clientes no oficiales y puede suspender números que los usan de forma abusiva. Para lectura personal el riesgo es bajo, pero existe.
+- Riesgo: WhatsApp no permite oficialmente clientes no oficiales y puede suspender números que los usan de forma abusiva. Para lectura personal el riesgo es bajo, pero existe; al enviar mensajes sube. Por eso responder es opcional y viene apagado.
 - Pruebas: `test/whatsapp.test.ts` (API + guardado, sin hablar con WhatsApp).

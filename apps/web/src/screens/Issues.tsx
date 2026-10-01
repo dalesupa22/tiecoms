@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { BootstrapDTO, IssueDTO, IssueEventDTO, IssueStatus, IssueVisibility } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
+import { PinToGrid } from './Tray.tsx';
 import { errorText, locale, t } from '../i18n.ts';
 import { navigate, queryParam } from '../router.ts';
 import { Avatar, Modal, conversationTitle, orgById, personById } from '../ui.tsx';
@@ -491,7 +492,8 @@ function dateShortcuts(): ['issue.dToday' | 'issue.dTomorrow' | 'issue.dFriday' 
   return out;
 }
 
-export function IssuesScreen() {
+/** La lista de asuntos con sus filtros: la página Tareas y el panel de la cuadrícula comparten esto. */
+export function IssuesBody() {
   const d = useClient((s) => s.data)!;
   const all = useClient((s) => s.issues);
   const [filter, setFilter] = useState<'mine' | 'open' | 'closed'>(() => (localStorage.getItem('chaggu:issueFilter') as 'mine') || 'mine');
@@ -528,8 +530,7 @@ export function IssuesScreen() {
   const label = { mine: t('issue.mine'), open: t('issue.allOpen'), closed: t('issue.closed') };
   const count = (f: 'mine' | 'open' | 'closed') => Object.values(all).filter((i) => (!i.conversationId || visibleConvs.has(i.conversationId) || isRestricted(i)) && (f === 'closed' ? isClosed(i) : !isClosed(i) && (f === 'open' || i.ownerId === d.me.id))).length;
   return (
-    <div className="page"><div className="page-narrow" style={{ maxWidth: 900 }}>
-      <div className="row page-head"><h1 className="grow">{t('nav.issues')}</h1><QuickActions /></div>
+    <>
       <div className="row issue-toolbar">
         <div className="seg">
           {(['mine', 'open', 'closed'] as const).map((f) => <button key={f} className={filter === f ? 'on' : ''} onClick={() => { setFilter(f); remember('chaggu:issueFilter', f); }}>{label[f]} <span className="muted">{count(f)}</span></button>)}
@@ -550,6 +551,15 @@ export function IssuesScreen() {
         </section>
       ))}
       {open && <IssueDrawer id={open} onClose={() => setOpen(null)} />}
+    </>
+  );
+}
+
+export function IssuesScreen() {
+  return (
+    <div className="page"><div className="page-narrow" style={{ maxWidth: 900 }}>
+      <div className="row page-head"><h1 className="grow">{t('nav.issues')}</h1><PinToGrid payload={{ kind: 'section', section: 'tasks' }} name={t('nav.issues')} /><QuickActions /></div>
+      <IssuesBody />
     </div></div>
   );
 }

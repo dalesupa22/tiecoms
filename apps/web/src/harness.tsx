@@ -184,7 +184,11 @@ const mailHtml: Record<string, string> = {
 (window as any).__shared = [];
 (client as any).shareMail = async (input: unknown) => { (window as any).__shared.push(['mail', input]); return {}; };
 (client as any).shareWhatsApp = async (input: unknown) => { (window as any).__shared.push(['wa', input]); return {}; };
+(waAccounts as any[]).forEach((a) => { a.sendEnabled = false; });
+(client as any).replyLiveMail = async (p: string, id: string, input: unknown) => { (window as any).__shared.push(['mail-reply', p, id, input]); return { ok: true, to: [] }; };
+(client as any).sendWhatsApp = async (a: string, j: string, text: string) => { (window as any).__shared.push(['wa-send', a, j, text]); return { id: 'o1', status: 'sent' }; };
 (client as any).request = async (path: string, init: any = {}) => {
+  if (/^\/whatsapp\/accounts\/[^/]+$/.test(path) && init.method === 'PATCH') { const a = (waAccounts as any[]).find((x) => path.endsWith(x.id))!; Object.assign(a, init.json); return a; }
   if (path === '/whatsapp/accounts' && !init.method) return { accounts: waAccounts, max: 5 };
   if (path.startsWith('/whatsapp/chats?')) {
     const p = new URLSearchParams(path.split('?')[1]);

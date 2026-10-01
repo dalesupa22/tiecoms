@@ -7,7 +7,7 @@ import {
   AcceptInvitationInput, AddMembersInput, API_VERSION, CONTRACT_VERSION, CreateConversationInput, CreateDirectInput, CreateGroupInput, JoinPolicyInput,
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateChildIssueInput, CreatePersonalIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateScheduledInput, UpdateScheduledInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MarkTreeReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, CreateTopicInput, UpdateTopicInput, SetMessageTopicInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
-  UpdateProfileInput, DndInput, MeetingProvider, MeetingConnectInput, MeetingConfirmInput, CreateMeetingInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery,
+  UpdateProfileInput, DndInput, MeetingProvider, MeetingConnectInput, MeetingConfirmInput, CreateMeetingInput, SleepInput, CreateChatInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery, WaSendInput, MailLiveReplyInput,
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
@@ -592,6 +592,10 @@ export async function buildHttp() {
       reply.header('cache-control', 'no-store');
       return mailbox.liveHtml(req.userId, MailProvider.parse(req.params.provider), z.string().min(1).max(500).parse(req.params.id));
     });
+    priv.post<{ Params: { provider: string; id: string } }>('/api/v1/mail/messages/:provider/:id/reply', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      return mailbox.replyLive(req.userId, MailProvider.parse(req.params.provider), z.string().min(1).max(500).parse(req.params.id), MailLiveReplyInput.parse(req.body));
+    });
     priv.post('/api/v1/mail/share', mailLimit, async (req, reply) => reply.status(201).send(await mailbox.shareMail(req.userId, ShareMailInput.parse(req.body))));
     priv.get<{ Querystring: { ids?: string } }>('/api/v1/mail/shared', async (req) => mailbox.getSharedMany(req.userId, z.array(z.uuid()).min(1).max(50).parse(String(req.query.ids ?? '').split(',').filter(Boolean))));
     priv.get<{ Params: { id: string }; Querystring: { full?: string } }>('/api/v1/mail/shared/:id', async (req) => mailbox.getShared(req.userId, z.uuid().parse(req.params.id), req.query.full === '1'));
@@ -684,6 +688,10 @@ export async function buildHttp() {
       return wa.listChats(req.userId, { accountId: q.accountId, category: q.category, groups: q.groups === undefined ? undefined : q.groups === '1', search: q.q, hidden: q.hidden === '1', limit: q.limit });
     });
     priv.post('/api/v1/whatsapp/organize', async (req) => wa.reorganize(req.userId));
+    priv.post<{ Params: { accountId: string; jid: string } }>('/api/v1/whatsapp/chats/:accountId/:jid/send', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      return wa.sendToChat(req.userId, z.uuid().parse(req.params.accountId), req.params.jid, WaSendInput.parse(req.body).text);
+    });
     priv.patch<{ Params: { accountId: string; jid: string } }>('/api/v1/whatsapp/chats/:accountId/:jid', async (req) =>
       wa.updateChat(req.userId, z.uuid().parse(req.params.accountId), req.params.jid, UpdateWaChatInput.parse(req.body)));
     priv.get<{ Params: { accountId: string; jid: string } }>('/api/v1/whatsapp/chats/:accountId/:jid/messages', async (req) => {

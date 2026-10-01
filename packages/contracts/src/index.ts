@@ -842,6 +842,8 @@ export interface SharedMailDTO {
   /** Abrir en Gmail/Outlook (solo para quien lo compartió; null para los demás y en vivo). */
   webLink?: string | null;
 }
+/** Responder un correo de tu buzón en vivo (sin traerlo antes a un chat). */
+export const MailLiveReplyInput = z.object({ body: z.string().trim().min(1).max(20000), cc: z.array(z.email()).max(20).optional() });
 export const MailReplyInput = z.object({
   body: z.string().trim().min(1).max(20000),
   cc: z.array(z.email()).max(20).optional(),
@@ -1554,7 +1556,9 @@ export type WaStatus = 'pending' | 'qr' | 'connected' | 'reconnecting' | 'expire
 /** Número con indicativo para vincular con código de 8 letras en vez de QR (útil desde el mismo teléfono). */
 const PairPhone = z.string().trim().max(24).regex(/^[+\d\s()-]*$/, 'Solo números').nullable().optional();
 export const CreateWaAccountInput = z.object({ label: z.string().trim().min(1).max(60), kind: WaKind, pairPhone: PairPhone });
-export const UpdateWaAccountInput = z.object({ label: z.string().trim().min(1).max(60).optional(), kind: WaKind.optional() });
+export const UpdateWaAccountInput = z.object({ label: z.string().trim().min(1).max(60).optional(), kind: WaKind.optional(), /** Permitir responder desde chaggu con esta cuenta (apagado por defecto: solo lectura). */ sendEnabled: z.boolean().optional() });
+/** Responder un chat de WhatsApp desde chaggu: solo si la cuenta lo tiene activado. */
+export const WaSendInput = z.object({ text: z.string().trim().min(1).max(4000) });
 export const RelinkWaAccountInput = z.object({ pairPhone: PairPhone });
 export const WaChatsQuery = z.object({
   accountId: z.uuid().optional(),
@@ -1576,6 +1580,8 @@ export const WaMessagesQuery = z.object({ before: z.iso.datetime().optional(), l
 
 export interface WaAccountDTO {
   id: string;
+  /** ¿Se puede responder desde chaggu con esta cuenta? Por defecto no. */
+  sendEnabled: boolean;
   label: string;
   kind: WaKind;
   status: WaStatus;

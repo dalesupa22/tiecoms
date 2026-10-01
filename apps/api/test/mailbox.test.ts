@@ -223,6 +223,27 @@ describe('correo en el chat (API + proveedor falso)', () => {
     expect(task.json.issue.status).toBe('done');
   });
 
+  it('responder un correo en vivo, sin traerlo antes a un chat', async () => {
+    const before = (await sentOut()).length;
+    expect((await post('/mail/messages/google/g1/reply', ana.token, { body: '   ' })).status).toBe(400);
+    const r = await post('/mail/messages/google/g1/reply', ana.token, { body: 'Listo, Jorge: te lo mando hoy.' });
+    expect(r.status).toBe(200);
+    expect(r.json.ok).toBe(true);
+    expect(r.json.to.map((x: any) => x.email)).toEqual(['jorge.ramirez@uniandes.edu.co']);
+    const out = (await sentOut()).slice(before);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ provider: 'google', threadId: 't1', inReplyTo: '<g1@mock>' });
+    expect(out[0].cc).toContain('oscar@uniandes.edu.co');
+    expect(out[0].cc).not.toContain('mock.google@example.com');
+    // Con copia a quien tú elijas, y solo desde tu propio buzón (Carla no tiene el correo conectado).
+    const cc = await post('/mail/messages/google/g1/reply', ana.token, { body: 'Con copia', cc: ['nuevo@uniandes.edu.co'] });
+    expect(cc.status).toBe(200);
+    const last = (await sentOut()).slice(-1)[0];
+    expect(last.cc).toContain('nuevo@uniandes.edu.co');
+    expect(last.cc).not.toContain('oscar@uniandes.edu.co');
+    expect((await post('/mail/messages/google/g1/reply', carla.token, { body: 'hola' })).status).not.toBe(200);
+  });
+
   it('Outlook: Prioritarios, compartir y responder por Graph', async () => {
     await connect(beto, 'microsoft');
     const focused = await call('/mail/messages?provider=microsoft&box=inbox&category=focused', { token: beto.token });

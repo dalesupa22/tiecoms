@@ -8,13 +8,13 @@ import { client } from './app-client.ts';
 import { errorText, t } from './i18n.ts';
 import { toast } from './menu.tsx';
 import { navigate } from './router.ts';
-import { type MailProviderKey, mailKey, waKey } from './grid-keys.ts';
+import { type MailProviderKey, type Section, mailKey, sectionKey, waKey } from './grid-keys.ts';
 import { DRAG_MAIL, DRAG_TYPE, DRAG_WA, DRAG_WAMSG, type DragKind, MAX_PANES, currentPanes, dragType, openBeside, pinAt, rememberMeta } from './split.ts';
 
 export interface MailDrag { provider: MailProviderKey; id: string; subject: string; from: string }
 export interface WaDrag { accountId: string; jid: string; name: string; isGroup: boolean }
 export interface WaMsgDrag { accountId: string; jid: string; messageId: string; chatName: string; text: string }
-export type DragPayload = { kind: 'chat'; id: string } | ({ kind: 'mail' } & MailDrag) | ({ kind: 'wa' } & WaDrag) | ({ kind: 'wamsg' } & WaMsgDrag);
+export type DragPayload = { kind: 'chat'; id: string } | { kind: 'section'; section: Section } | ({ kind: 'mail' } & MailDrag) | ({ kind: 'wa' } & WaDrag) | ({ kind: 'wamsg' } & WaMsgDrag);
 
 /** Pone lo que se arrastra en el dataTransfer, con el tipo que dice qué es (así la bandeja lo sabe mientras se arrastra). */
 export function setDrag(e: { dataTransfer: DataTransfer | null }, kind: DragKind, payload: object, label: string) {
@@ -35,6 +35,7 @@ export function paneOf(p: DragPayload): { key: string; title: string; sub?: stri
   if (p.kind === 'chat') return { key: p.id, title: '' };
   if (p.kind === 'mail') return { key: mailKey(p.provider, p.id), title: p.subject || t('mail.noSubject'), sub: p.from };
   if (p.kind === 'wa') return { key: waKey(p.accountId, p.jid), title: p.name, sub: 'WhatsApp' };
+  if (p.kind === 'section') return { key: sectionKey(p.section), title: p.section === 'tasks' ? t('nav.issues') : p.section === 'inbox' ? t('nav.mail') : 'WhatsApp', sub: p.section === 'wachats' ? t('grid.allChats') : undefined };
   return null;
 }
 

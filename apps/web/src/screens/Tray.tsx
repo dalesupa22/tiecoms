@@ -31,6 +31,9 @@ function useSlotLabels() {
       return { title: c && d ? conversationTitle(d, c) : '…', icon: c ? <ConvAvatar c={c} size={18} /> : null };
     }
     if (ref.kind === 'mail') return { title: metas[key]?.title ?? t('mail.title'), icon: <ProviderIcon provider={ref.provider} size={18} /> };
+    if (ref.kind === 'tasks') return { title: t('nav.issues'), icon: <span aria-hidden>☑</span> };
+    if (ref.kind === 'inbox') return { title: t('nav.mail'), icon: <ProviderIcon provider="google" size={18} /> };
+    if (ref.kind === 'wachats') return { title: `WhatsApp · ${t('grid.allChats')}`, icon: <WaIcon size={18} /> };
     return { title: metas[key]?.title ?? 'WhatsApp', icon: <WaIcon size={18} /> };
   };
 }
@@ -142,7 +145,7 @@ export function DragTray({ gridVisible }: { gridVisible: boolean }) {
   };
   return (
     <div className="tray" role="region" aria-label={t('tray.title')}>
-      <div className={`tray-zone ${toChat ? '' : 'is-off'}`} data-off={t('tray.noChat')}>
+      <div className={`tray-zone ${toChat ? '' : 'is-off'}`} data-off={t(dragging === 'section' ? 'tray.noChatSection' : 'tray.noChat')}>
         <h3><span className="tray-n">1</span>{t('grid.toChat')}</h3>
         <div className="tray-chats">
           {chats.map((c) => (

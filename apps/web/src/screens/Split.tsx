@@ -17,7 +17,7 @@ import {
   useActiveKey, useBack, usePanes, usePinned, useSplitSizes, useWide, type DragKind,
 } from '../split.ts';
 import { ConversationScreen } from './Conversation.tsx';
-import { MailPane, WaPane } from './Panes.tsx';
+import { InboxPane, MailPane, TasksPane, WaListPane, WaPane } from './Panes.tsx';
 
 /** /c/:id: el chat del URL es el panel activo. */
 export function ConversationArea({ id, search }: { id: string; search: string }) {
@@ -124,7 +124,10 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
         onPointerDownCapture={() => { if (x !== active) focusPane(x); }}>
         {ref.kind === 'chat' ? <ConversationScreen key={x === id ? x + search : x} id={x} pane={list.length > 1 || !id ? frame : undefined} />
           : ref.kind === 'mail' ? <MailPane key={x} paneKey={x} provider={ref.provider} id={ref.id} frame={frame} />
-          : <WaPane key={x} paneKey={x} accountId={ref.accountId} jid={ref.jid} frame={frame} />}
+          : ref.kind === 'wa' ? <WaPane key={x} paneKey={x} accountId={ref.accountId} jid={ref.jid} frame={frame} />
+          : ref.kind === 'tasks' ? <TasksPane key={x} frame={frame} />
+          : ref.kind === 'inbox' ? <InboxPane key={x} frame={frame} />
+          : <WaListPane key={x} frame={frame} />}
       </div>
     );
   };

@@ -7,7 +7,7 @@ import QRCode from 'qrcode';
 import type { WaAccountDTO, WaChatDTO, WaMessageDTO } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { pool, tx } from '../db.ts';
-import { badRequest, conflict, notFound } from '../errors.ts';
+import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { suggestCategory, type WaCategory } from './wa-organize.ts';
 
 export const MAX_WA_ACCOUNTS = 5;
@@ -15,6 +15,7 @@ export const MAX_WA_ACCOUNTS = 5;
 async function toAccountDTO(r: any): Promise<WaAccountDTO> {
   return {
     id: r.id,
+    sendEnabled: r.send_enabled === true,
     label: r.label,
     kind: r.kind,
     status: r.status,
@@ -68,11 +69,11 @@ export async function createAccount(userId: string, input: { label: string; kind
   return (await listAccounts(userId)).find((a) => a.id === id)!;
 }
 
-export async function updateAccount(userId: string, id: string, input: { label?: string; kind?: 'personal' | 'business' }) {
+export async function updateAccount(userId: string, id: string, input: { label?: string; kind?: 'personal' | 'business'; sendEnabled?: boolean }) {
   await ownAccount(pool, userId, id);
   await pool.query(
-    'UPDATE wa_accounts SET label = COALESCE($3, label), kind = COALESCE($4, kind), updated_at = now() WHERE id = $1 AND user_id = $2',
-    [id, userId, input.label ?? null, input.kind ?? null],
+    'UPDATE wa_accounts SET label = COALESCE($3, label), kind = COALESCE($4, kind), send_enabled = COALESCE($5, send_enabled), updated_at = now() WHERE id = $1 AND user_id = $2',
+    [id, userId, input.label ?? null, input.kind ?? null, input.sendEnabled ?? null],
   );
   return (await listAccounts(userId)).find((a) => a.id === id)!;
 }
@@ -240,4 +241,26 @@ export async function listChatMessages(userId: string, accountId: string, jid: s
   }));
   await pool.query('UPDATE wa_chats SET unread = 0 WHERE account_id = $1 AND jid = $2 AND unread > 0', [accountId, jid]);
   return { messages, hasMore: rows.length === limit };
+}
+
+/**
+ * Responder un chat de WhatsApp desde chaggu. Solo si la persona activó «Responder desde chaggu» en esa cuenta
+ * (por defecto es de solo lectura). Se encola en wa_outbox y el puente, que tiene la sesión, lo manda; aquí se espera
+ * hasta ~12 s por el resultado: si el puente tarda, queda 'queued' y sale en cuanto pueda.
+ */
+export async function sendToChat(userId: string, accountId: string, jid: string, text: string): Promise<{ id: string; status: 'sent' | 'queued' | 'failed'; error?: string }> {
+  const a = await ownAccount(pool, userId, accountId);
+  if (!a.send_enabled) throw forbidden('Esta cuenta está en solo lectura. Activa «Responder desde chaggu» en WhatsApp para poder escribir.');
+  if (a.status !== 'connected') throw conflict('La cuenta de WhatsApp no está conectada ahora mismo');
+  await ownChat(userId, accountId, jid);
+  const { rows } = await pool.query('INSERT INTO wa_outbox (account_id, user_id, jid, body) VALUES ($1,$2,$3,$4) RETURNING id', [accountId, userId, jid, text]);
+  const id = rows[0].id as string;
+  await pool.query("SELECT pg_notify('tiecoms_wa', $1)", [accountId]);
+  for (let i = 0; i < 24; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    const s = (await pool.query('SELECT status, error FROM wa_outbox WHERE id = $1', [id])).rows[0];
+    if (s?.status === 'sent') return { id, status: 'sent' };
+    if (s?.status === 'failed') return { id, status: 'failed', error: s.error ?? 'No se pudo enviar' };
+  }
+  return { id, status: 'queued' };
 }

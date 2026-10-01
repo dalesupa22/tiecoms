@@ -166,6 +166,74 @@ describe('vincular un chat a una conversación de Chaggu', () => {
   });
 });
 
+describe('responder desde chaggu (apagado por defecto)', () => {
+  const jid = '1@g.us';
+  const send = (token: string, accountId: string, text: unknown) => call(`/whatsapp/chats/${accountId}/${encodeURIComponent(jid)}/send`, { token, body: { text } });
+  /** Hace de puente: espera lo encolado y le pone el resultado. */
+  const bridge = async (status: 'sent' | 'failed', error?: string) => {
+    for (let i = 0; i < 40; i++) {
+      const { rows } = await pool.query("SELECT id FROM wa_outbox WHERE account_id = $1 AND status = 'queued'", [personal.id]);
+      if (rows[0]) { await pool.query('UPDATE wa_outbox SET status = $2, error = $3, body = $4 WHERE id = $1', [rows[0].id, status, error ?? null, '']); return; }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  };
+
+  it('la cuenta nace en solo lectura y no deja enviar', async () => {
+    expect(personal.sendEnabled).toBe(false);
+    expect((await send(ana.token, personal.id, 'hola')).status).toBe(403);
+    expect((await pool.query('SELECT count(*)::int AS n FROM wa_outbox WHERE account_id = $1', [personal.id])).rows[0].n).toBe(0);
+  });
+
+  it('solo su dueña lo activa; otra persona no puede enviar por su cuenta', async () => {
+    expect((await call(`/whatsapp/accounts/${personal.id}`, { token: beto.token, method: 'PATCH', body: { sendEnabled: true } })).status).toBe(404);
+    const on = await call(`/whatsapp/accounts/${personal.id}`, { token: ana.token, method: 'PATCH', body: { sendEnabled: true } });
+    expect(on.status).toBe(200);
+    expect(on.json.sendEnabled).toBe(true);
+    expect((await send(beto.token, personal.id, 'hola')).status).toBe(404);
+  });
+
+  it('con la cuenta sin conectar responde 409 y no encola', async () => {
+    expect((await send(ana.token, personal.id, 'hola')).status).toBe(409);
+    expect((await pool.query('SELECT count(*)::int AS n FROM wa_outbox WHERE account_id = $1', [personal.id])).rows[0].n).toBe(0);
+  });
+
+  it('conectada: encola, el puente lo manda y la respuesta dice enviado', async () => {
+    await pool.query("UPDATE wa_accounts SET status = 'connected' WHERE id = $1", [personal.id]);
+    expect((await send(ana.token, personal.id, '   ')).status).toBe(400);
+    expect((await send(ana.token, personal.id, 'x'.repeat(4001))).status).toBe(400);
+    const [r] = await Promise.all([send(ana.token, personal.id, 'Hola equipo, ya quedó.'), bridge('sent')]);
+    expect(r.status).toBe(200);
+    expect(r.json.status).toBe('sent');
+  });
+
+  it('si el puente no pudo mandarlo, devuelve failed con el motivo', async () => {
+    const [r] = await Promise.all([send(ana.token, personal.id, 'otro'), bridge('failed', 'La sesión de WhatsApp no está lista')]);
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ status: 'failed', error: 'La sesión de WhatsApp no está lista' });
+  });
+
+  it('sin puente atendiendo, queda en cola (no se pierde)', async () => {
+    const r = await send(ana.token, personal.id, 'en cola');
+    expect(r.status).toBe(200);
+    expect(r.json.status).toBe('queued');
+    const row = (await pool.query("SELECT status, body FROM wa_outbox WHERE account_id = $1 AND id = $2", [personal.id, r.json.id])).rows[0];
+    expect(row).toMatchObject({ status: 'queued', body: 'en cola' });
+    await pool.query("UPDATE wa_outbox SET status = 'failed', body = '' WHERE id = $1", [r.json.id]);
+  }, 30_000);
+
+  it('apagarlo vuelve a cerrar el envío', async () => {
+    const off = await call(`/whatsapp/accounts/${personal.id}`, { token: ana.token, method: 'PATCH', body: { sendEnabled: false } });
+    expect(off.json.sendEnabled).toBe(false);
+    expect((await send(ana.token, personal.id, 'hola')).status).toBe(403);
+  });
+
+  it('responder un correo en vivo pide un texto (y la sesión)', async () => {
+    const bad = await call('/mail/messages/google/abc/reply', { token: ana.token, body: { body: '   ' } });
+    expect(bad.status).toBe(400);
+    expect((await call('/mail/messages/google/abc/reply', { body: { body: 'hola' } })).status).toBe(401);
+  });
+});
+
 describe('desconectar', () => {
   it('marca la cuenta para que el puente cierre la sesión y la borre', async () => {
     expect((await call(`/whatsapp/accounts/${business.id}`, { token: ana.token, method: 'DELETE' })).status).toBe(200);

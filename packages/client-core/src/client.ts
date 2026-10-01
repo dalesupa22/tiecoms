@@ -1250,6 +1250,14 @@ export class TieComsClient {
   async loadSharedMailFull(id: string) { return this.putMail(await this.sharedGet<import('@tiecoms/contracts').SharedMailDTO>(`/mail/shared/${id}?full=1`)); }
   /** El correo tal como está en el buzón (con historial citado y firma), en vivo y sin guardar. */
   mailOriginal(id: string) { return this.request<{ body: string }>(`/mail/shared/${id}/original`); }
+  /** Responder un correo de tu buzón en vivo (panel de la cuadrícula): sale ya, en su mismo hilo. */
+  replyLiveMail(provider: import('@tiecoms/contracts').MailProvider, id: string, input: { body: string; cc?: string[] }) {
+    return this.request<{ ok: true; to: import('@tiecoms/contracts').MailAddressDTO[] }>(`/mail/messages/${provider}/${encodeURIComponent(id)}/reply`, { method: 'POST', json: input });
+  }
+  /** Responder un chat de WhatsApp desde chaggu. Solo si esa cuenta tiene «Responder desde chaggu» activado. */
+  sendWhatsApp(accountId: string, jid: string, text: string) {
+    return this.request<{ id: string; status: 'sent' | 'queued' | 'failed'; error?: string }>(`/whatsapp/chats/${accountId}/${encodeURIComponent(jid)}/send`, { method: 'POST', json: { text } });
+  }
   /** El HTML limpio de un correo de tu buzón, en vivo (vista previa antes de llevarlo al chat); null si solo tiene texto. */
   liveMailHtml(provider: import('@tiecoms/contracts').MailProvider, id: string) {
     return this.request<{ html: string | null }>(`/mail/messages/${provider}/${encodeURIComponent(id)}/html`);

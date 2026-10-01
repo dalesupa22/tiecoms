@@ -5,6 +5,8 @@ import { t } from '../i18n.ts';
 import { openMenuAt, type MenuItem } from '../menu.tsx';
 import { BASE, asset, navigate, type Route } from '../router.ts';
 import { rememberBack, usePanes, usePulse } from '../split.ts';
+import { setDrag } from '../grid-actions.ts';
+import type { Section } from '../grid-keys.ts';
 import { GridGlyph } from './Tray.tsx';
 import { pendingOf } from '../home-order.ts';
 import { openAccountMenu } from './Profile.tsx';
@@ -80,14 +82,16 @@ const Icon = ({ name }: { name: string }) => (
 );
 
 type Tone = 'brand' | 'wa' | 'mail' | 'call' | 'missed';
-function RailItem({ icon, label, on, count, tone = 'brand', dot, at, onClick }: {
-  icon: string; label: string; on: boolean; count?: number; tone?: Tone; dot?: boolean; at?: number; onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
+function RailItem({ icon, label, on, count, tone = 'brand', dot, at, drag, onClick }: {
+  icon: string; label: string; on: boolean; count?: number; tone?: Tone; dot?: boolean; at?: number; drag?: Section; onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   const lit = (count ?? 0) > 0 || (at ?? 0) > 0;
   const n = count ?? 0;
   const aria = n > 0 ? `${label}, ${n}` : label;
   return (
-    <button className={`rail-item ${on ? 'on' : ''} ${lit ? `lit tone-${tone}` : ''}`} onClick={onClick} title={label} aria-label={aria} aria-current={on ? 'page' : undefined}>
+    // Tareas, Correo y WhatsApp se arrastran enteros a la cuadrícula (o a la bandeja que sube al arrastrar).
+    <button className={`rail-item ${on ? 'on' : ''} ${lit ? `lit tone-${tone}` : ''}`} onClick={onClick} title={drag ? `${label} · ${t('grid.railDrag')}` : label} aria-label={aria} aria-current={on ? 'page' : undefined}
+      {...(drag ? { draggable: true, onDragStart: (e: React.DragEvent) => setDrag(e, 'section', { section: drag }, label) } : {})}>
       <Icon name={icon} />
       <span className="rail-label">{label}</span>
       {(at ?? 0) > 0 ? <span className="rail-count tone-brand">@{at! > 1 ? at : ''}</span>
@@ -158,11 +162,11 @@ export function Rail({ route }: { route: Route }) {
       </button>
       <RailItem icon="groups" label={t('nav.groups')} on={mode === 'groups'} count={groups} onClick={() => pick(mode === 'groups' ? 'all' : 'groups')} />
       <RailItem icon="dms" label={t('nav.dms')} on={mode === 'dms'} count={dms} onClick={() => pick(mode === 'dms' ? 'all' : 'dms')} />
-      <RailItem icon="whatsapp" label={t('nav.whatsapp')} on={route.name === 'whatsapp'} count={wa} tone="wa" onClick={() => navigate('/whatsapp')} />
-      {mailOn && <RailItem icon="mail" label={t('nav.mail')} on={route.name === 'mail'} count={mail} tone="mail" onClick={() => navigate('/correo')} />}
+      <RailItem icon="whatsapp" label={t('nav.whatsapp')} on={route.name === 'whatsapp'} count={wa} tone="wa" drag="wachats" onClick={() => navigate('/whatsapp')} />
+      {mailOn && <RailItem icon="mail" label={t('nav.mail')} on={route.name === 'mail'} count={mail} tone="mail" drag="inbox" onClick={() => navigate('/correo')} />}
       <span className="rail-sep" aria-hidden />
       <RailItem icon="agenda" label={t('nav.agenda')} on={route.name === 'agenda'} dot={soon} onClick={() => navigate('/agenda')} />
-      <RailItem icon="tasks" label={t('nav.issues')} on={route.name === 'issues'} dot={due} onClick={() => navigate('/asuntos')} />
+      <RailItem icon="tasks" label={t('nav.issues')} on={route.name === 'issues'} dot={due} drag="tasks" onClick={() => navigate('/asuntos')} />
       <RailItem icon="trazo" label={t('nav.trazo')} on={route.name === 'trazo'} onClick={() => navigate('/trazo')} />
       {callsOn && <RailItem icon="calls" label={missed > 0 ? t('calls.missedN', { n: missed }) : t('nav.calls')} on={route.name === 'calls'} count={missed} tone={missed > 0 ? 'missed' : 'call'} dot={anyCall || inCall} onClick={() => navigate('/llamadas')} />}
       <span className="grow" />

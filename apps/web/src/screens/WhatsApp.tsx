@@ -30,6 +30,19 @@ const api = {
   organize: () => client.request<{ reviewed: number; changed: number }>('/whatsapp/organize', { method: 'POST', json: {} }),
 };
 
+/**
+ * «Responder desde chaggu» por cuenta. Apagado por defecto (solo lectura): al encenderlo se avisa de lo que implica.
+ * Lo usan la tarjeta de la cuenta y el panel de la cuadrícula. Devuelve true si cambió.
+ */
+export async function setWaSend(a: { id: string; label: string }, on: boolean): Promise<boolean> {
+  if (on && !confirm(t('wa.sendConfirm', { name: a.label }))) return false;
+  try {
+    await client.request(`/whatsapp/accounts/${a.id}`, { method: 'PATCH', json: { sendEnabled: on } });
+    toast(t(on ? 'wa.sendOnToast' : 'wa.sendOffToast'));
+    return true;
+  } catch (e) { toast(errorText(e)); return false; }
+}
+
 function when(iso: string | null) {
   if (!iso) return '';
   const d = new Date(iso);
@@ -91,6 +104,7 @@ export function WhatsAppScreen() {
     <div className="page"><div className="page-narrow">
       <div className="row" style={{ flexWrap: 'wrap' }}>
         <h1 className="grow">{t('wa.title')}</h1>
+        <PinToGrid payload={{ kind: 'section', section: 'wachats' }} name="WhatsApp" />
         <GridSideButton />
         {(accounts?.length ?? 0) < max && <button className="btn primary small" onClick={() => setConnectOpen(true)}>{t('wa.connect')}</button>}
       </div>
@@ -204,6 +218,12 @@ function AccountCard({ a, onChanged }: { a: WaAccountDTO; onChanged: () => void 
             <button className="btn ghost small" onClick={() => setUsePhone(!usePhone)}>{usePhone ? t('wa.useQr') : t('wa.usePhone')}</button>
           </div>
         </div>
+      )}
+      {a.status === 'connected' && (
+        <label className="wa-send-opt">
+          <input type="checkbox" checked={a.sendEnabled} disabled={busy} onChange={(e) => void run(() => setWaSend(a, e.target.checked))} />
+          <span><b>{t('wa.sendOpt')}</b><span className="small muted" style={{ display: 'block' }}>{t('wa.sendHint')}</span></span>
+        </label>
       )}
       <div className="row" style={{ marginTop: 10, justifyContent: 'flex-end' }}>
         <button className="btn ghost small" disabled={busy} onClick={() => { if (confirm(t('wa.disconnectConfirm', { label: a.label }))) void run(() => api.remove(a.id)); }}>{t('wa.disconnect')}</button>

@@ -179,6 +179,17 @@ describe('memegen.link (plantillas de memes)', () => {
     expect(isAllowedMediaUrl('memegen', 'http://api.memegen.link/images/x.jpg')).toBe(false);
     expect(isAllowedMediaUrl('memegen', 'https://api.memegen.link.evil.com/images/x.jpg')).toBe(false);
   });
+  it('mantiene IDs únicos cuando variantes del catálogo comparten la imagen base', () => {
+    const items = normalizeMemegen([
+      { name: 'Primera plantilla', blank: 'https://api.memegen.link/images/drake.jpg' },
+      { name: 'Variante repetida', blank: 'https://api.memegen.link/images/drake.png' },
+      { name: 'Otra repetida', blank: 'https://api.memegen.link/images/DRAKE.jpg' },
+      { name: 'Otra plantilla', blank: 'https://api.memegen.link/images/trio.jpg' },
+    ], mint);
+    expect(items.map((item) => item.id)).toEqual(['memegen:drake', 'memegen:trio']);
+    expect(items[0]!.title).toBe('Primera plantilla');
+    expect(new Set(items.map((item) => item.id)).size).toBe(items.length);
+  });
 });
 
 describe('nombres de archivo', () => {

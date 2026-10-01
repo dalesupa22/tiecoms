@@ -170,17 +170,24 @@ export function normalizeOpenverse(json: any, mint: Mint, page: number): { items
 const MEMEGEN_BOX = 400;
 export function normalizeMemegen(json: any, mint: Mint): GifItemDTO[] {
   const out: GifItemDTO[] = [];
+  const seen = new Set<string>();
   for (const m of Array.isArray(json) ? json : []) {
     const url = String(m?.blank ?? '');
     const ok = /^https:\/\/api\.memegen\.link\/images\/([a-z0-9_-]{1,40})\.(jpg|jpeg|png)$/i.exec(url);
     if (!ok || !isAllowedMediaUrl('memegen', url)) continue;
+    // Algunas variantes del catálogo comparten la misma imagen base. Todos los
+    // clientes usan este ID para sus tarjetas: mantenerlo único evita que una
+    // tarjeta anterior sobreviva al cambiar el filtro.
+    const id = `memegen:${ok[1]!.toLowerCase()}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
     const title = String(m.name ?? 'Meme').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Meme';
     const lines = Math.min(6, Math.max(1, Number(m.lines) || 2));
     const sourceUrl = provenanceUrl(m.source);
     const attribution = `Meme: «${title}» · Plantilla vía memegen.link${sourceUrl ? ` · Fuente: ${sourceUrl}` : ''} · Texto añadido en Chaggu`;
     // memegen redimensiona con ?width= (la vista previa pesa unos 10 KB; la plantilla para el editor, ≤ 800 px).
     out.push({
-      id: `memegen:${ok[1]}`, provider: 'memegen', title,
+      id, provider: 'memegen', title,
       previewUrl: mint('memegen', `${url}?width=300`, 'p', null, title), url: mint('memegen', `${url}?width=800`, 'f', attribution, title),
       width: MEMEGEN_BOX, height: MEMEGEN_BOX, attribution, sourceUrl, boxCount: lines,
     });

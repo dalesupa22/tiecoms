@@ -1,6 +1,6 @@
 import { TOPIC_ALL, filterForEntry, filterForMessage, topicUnreadCounts } from '../topic-order.ts';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import type { BootstrapDTO, ConversationDTO, IssueDTO, MessageDTO } from '@tiecoms/contracts';
+import type { AttachmentDTO, BootstrapDTO, ConversationDTO, IssueDTO, MessageDTO } from '@tiecoms/contracts';
 import type { PendingMessage } from '@tiecoms/client-core';
 import { client, useClient } from '../app-client.ts';
 import { ForwardToChatsDialog, Linkify, StackedAvatars } from './Chats.tsx';
@@ -41,6 +41,9 @@ import { ChatSearchBar, Notice17Row, ViewOnceBubble, parseNotice, useRefPicker }
 import { backspaceRef, refsFor, viewOnceAllowed, type RefToken } from '../chat17.ts';
 import { markAgain } from '../perf.ts';
 import { claimFileDrag, clipboardFiles, installFileDropGuard, isFileDrag } from '../file-drop.ts';
+
+import { GifButton, openGifPicker } from './Gifs.tsx';
+import { parseGifCommand } from '../gifs.ts';
 
 type Row =
   | { kind: 'day'; key: string; label: string }
@@ -491,7 +494,17 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   };
   const jumpToNewLine = () => document.getElementById(`new-${id}`)?.scrollIntoView({ block: 'start', behavior: 'instant' });
 
+  /** GIF o meme elegido en el selector (Gifs.tsx): sale como un mensaje con la imagen adjunta y la atribución. */
+  const sendMedia = (attachment: AttachmentDTO, body: string) => {
+    atBottom.current = true;
+    void client.send(id, body, replyTo?.id ?? null, null, { attachments: [attachment], topicId: activeFilter });
+    setReplyTo(null);
+    input.current?.focus();
+  };
   const send = () => {
+    // «/gif gato»: abre el selector con esa búsqueda en vez de enviar el texto.
+    const gifQuery = drafts.drafts.length || privateReply ? null : parseGifCommand(text);
+    if (gifQuery !== null) { setText(''); openGifPicker({ conversationId: id, query: gifQuery, onSend: sendMedia }); return; }
     const body = text.trim();
     if (drafts.busy) { toast(t('att.uploading')); return; }
     const attachments = drafts.ready;
@@ -901,6 +914,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
               }}>＋</button>
               <button className="bring-btn" title={t('imp.action')} aria-label={t('imp.action')} onClick={() => openDialog((close) => <BringDialog conversationId={id} onClose={close} />)}>⤓</button>
               <button className="bring-btn composer-emoji" title={t('react.insert')} aria-label={t('react.insert')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openEmojiPicker(r.left, r.top - 8, insertEmoji); }}>☺</button>
+              <GifButton conversationId={id} onSend={sendMedia} />
               <div className="mention-wrap">
               {picker.view}
               {refPicker.view}

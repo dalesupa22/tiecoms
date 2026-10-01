@@ -75,7 +75,7 @@ export const safeLookup: net.LookupFunction = (hostname, options, cb) => {
 
 interface Got { url: string; status: number; type: string; body: Buffer }
 
-function getOnce(target: URL, accept: string, max: number, ua = UA): Promise<Got & { location?: string }> {
+export function getOnce(target: URL, accept: string, max: number, ua = UA): Promise<Got & { location?: string }> {
   return new Promise((resolve, reject) => {
     if (target.protocol !== 'http:' && target.protocol !== 'https:') return reject(new Error('Protocolo no permitido'));
     if (target.port && !['80', '443'].includes(target.port)) return reject(new Error('Puerto no permitido'));

@@ -1789,3 +1789,6 @@ export const BookingPageInput = z.object({
 });
 export const BookingPagePatch = BookingPageInput.partial();
 export interface BookingHostBookingDTO { id: string; pageId: string; pageTitle: string; startsAt: string; endsAt: string; guestName: string; guestEmail: string; note: string; joinUrl: string | null; status: 'confirmed' | 'cancelled'; hostIds: string[] }
+
+// GIFs y memes (docs/GIFS.md).
+export * from './gifs.ts';

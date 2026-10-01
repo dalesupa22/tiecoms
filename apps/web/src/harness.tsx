@@ -4,14 +4,19 @@
  */
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { BootstrapDTO, ConversationDTO, IssueDTO, MessageDTO } from '@tiecoms/contracts';
+import type { BootstrapDTO, ConversationDTO, IssueDTO, MessageDTO, TopicDTO } from '@tiecoms/contracts';
+import { showMessageBubble } from './bubbles.tsx';
 import { App } from './App.tsx';
 import { client } from './app-client.ts';
 import { setLang } from './i18n.ts';
+import { initTheme, setThemePreference } from './theme.ts';
 import './styles.css';
 
 const q = new URLSearchParams(location.search);
 if (q.get('lang') === 'en' || q.get('lang') === 'es') setLang(q.get('lang') as 'en' | 'es');
+initTheme();
+const qt = q.get('theme');
+if (qt === 'dark' || qt === 'light' || qt === 'system') setThemePreference(qt);
 const H = 3600_000, D = 24 * H, now = Date.now();
 const iso = (ms: number) => new Date(now - ms).toISOString();
 const org = (id: string, name: string, mark: string, bg: string, fg: string, mine = false) => ({ id, name, mark, colorBg: bg, colorFg: fg, ...(mine ? { myRole: 'owner' as const } : {}) });
@@ -76,6 +81,30 @@ const dm = [
   msg('dm-ana', 'danny', 'Te cuento por aquí para no llenar el grupo: es el job de las 10.', 3 * H, { forwarded: { source: 'tiecoms', author: 'Ana Torres', sentAt: iso(2 * D), fromConversationId: 'general', messageId: 'general-m4', messageSeq: 4, excerpt: 'Veo notificaciones duplicadas en las pruebas, ¿es un reenvío manual o el job?' } }),
   msg('dm-ana', 'ana', '¡Gracias! Mucho más claro.', 2 * H),
 ];
+// Temas (docs/TEMAS.md): orden guardado Diseño, Pagos, Legal, Marketing; lo leído llega hasta el 8.
+// Sin leer: 9 Legal, 10 sin tema, 11 Marketing, 12 Legal → fila General, Todo, Legal, Marketing, Diseño, Pagos.
+const TP = ['00000000-0000-4000-8000-00000000000a', '00000000-0000-4000-8000-00000000000b', '00000000-0000-4000-8000-00000000000c', '00000000-0000-4000-8000-00000000000d'];
+const topicsTemas: TopicDTO[] = [
+  { id: TP[0]!, conversationId: 'temas', name: 'Diseño', color: 'violet', icon: '🎯', position: 0, archivedAt: null, createdBy: 'danny', createdAt: iso(4 * D) },
+  { id: TP[1]!, conversationId: 'temas', name: 'Pagos', color: 'green', icon: '💰', position: 1, archivedAt: null, createdBy: 'danny', createdAt: iso(4 * D) },
+  { id: TP[2]!, conversationId: 'temas', name: 'Legal', color: 'orange', icon: '⚖️', position: 2, archivedAt: null, createdBy: 'laura', createdAt: iso(3 * D) },
+  { id: TP[3]!, conversationId: 'temas', name: 'Marketing', color: 'blue', icon: '📣', position: 3, archivedAt: null, createdBy: 'mateo', createdAt: iso(2 * D) },
+];
+seq = 0;
+const tm = [
+  msg('temas', 'mateo', 'Arrancamos el lanzamiento con Estudio Norte.', 2 * D),
+  msg('temas', 'ana', 'La portada va en tonos violeta.', 2 * D - H, { topicId: TP[0] }),
+  msg('temas', 'danny', 'Perfecto, la reviso hoy.', 2 * D - 2 * H, { topicId: TP[0] }),
+  msg('temas', 'laura', 'Factura de septiembre enviada.', 30 * H, { topicId: TP[1] }),
+  msg('temas', 'mateo', '¿Quién confirma el comité del jueves?', 26 * H),
+  msg('temas', 'ana', 'El pago de la primera cuota entra el viernes.', 24 * H, { topicId: TP[1] }),
+  msg('temas', 'danny', 'Yo confirmo el comité.', 20 * H),
+  msg('temas', 'laura', 'Subí el contrato marco v3.', 10 * H, { topicId: TP[2] }),
+  msg('temas', 'ana', 'La cláusula 4 necesita otra vuelta con el abogado.', 3 * H, { topicId: TP[2] }),
+  msg('temas', 'mateo', 'Mañana llego a las 8 con el diseñador.', 2 * H),
+  msg('temas', 'mateo', 'El reel del lanzamiento sale el lunes.', 90 * 60_000, { topicId: TP[3] }),
+  msg('temas', 'laura', 'El abogado aprobó la cláusula 4 con un cambio.', 30 * 60_000, { topicId: TP[2] }),
+];
 
 const data: BootstrapDTO = {
   contract: 'dev', serverTime: new Date().toISOString(), features: { mail: true } as never,
@@ -94,6 +123,7 @@ const data: BootstrapDTO = {
     conv({ id: 'xflow', workspaceId: 'wsx', name: 'Xertify - Xertiflow', memberIds: ['danny', 'laura'], lastMessageAt: iso(3 * H), lastMessagePreview: 'Subí la versión 2 del flujo.' }),
     conv({ id: 'pagos', workspaceId: 'wsx', name: 'Pagos', memberIds: ['danny', 'laura'], lastMessageAt: iso(26 * H), lastMessagePreview: 'Factura de septiembre lista.' }),
     conv({ id: 'dm-mateo', kind: 'direct', workspaceId: null, level: null, memberIds: ['danny', 'mateo'], lastMessageAt: iso(4 * H), lastMessagePreview: 'Nos vemos el viernes.' }),
+    conv({ id: 'temas', name: 'Lanzamiento con temas', memberIds: ['danny', 'laura', 'mateo', 'ana'], lastMessageSeq: tm.length, lastEventSeq: tm.length, lastReadSeq: 8, unread: 4, lastMessageAt: iso(30 * 60_000), lastMessagePreview: tm[tm.length - 1]!.body }),
     conv({ id: 'internal', name: 'Equipo interno', kind: 'internal', level: null, internalOrgId: 'xertify', memberIds: ['danny', 'laura'] }),
   ],
   people: [person('danny', 'Danny Suárez', 'xertify', 'Líder técnico'), person('laura', 'Laura Gómez', 'xertify', 'Soporte'), person('mateo', 'Mateo Rivas', 'norte', 'Director de proyectos'), { ...person('ana', 'Ana Torres', 'norte', 'Coordinadora'), sleep: { start: `${String((new Date().getHours() + 23) % 24).padStart(2, '0')}:00`, end: `${String((new Date().getHours() + 7) % 24).padStart(2, '0')}:00`, tz: Intl.DateTimeFormat().resolvedOptions().timeZone } }],
@@ -131,6 +161,7 @@ const reminders = [
     diag: { messages: dg, lastEventSeq: dg.length, hasMore: false, loaded: true, loading: false },
     dec: { messages: [], lastEventSeq: 0, hasMore: false, loaded: true, loading: false },
     side1: { messages: sd, lastEventSeq: sd.length, hasMore: false, loaded: true, loading: false },
+    temas: { messages: tm, lastEventSeq: tm.length, hasMore: false, loaded: true, loading: false },
     'dm-ana': { messages: dm, lastEventSeq: dm.length, hasMore: false, loaded: true, loading: false },
   },
 });
@@ -206,6 +237,15 @@ const mailHtml: Record<string, string> = {
   }
   if (path === '/whatsapp/organize') return { reviewed: 7, changed: 0 };
   if (path === '/blocks') return { userIds: [] };
+  // Temas: llegan tarde a propósito (?lento=ms), como en un teléfono con mala señal; así se prueba que abrir en el
+  // tema del mensaje no depende de que ya estén cargados.
+  if (path === '/conversations/temas/topics') { await new Promise((r) => setTimeout(r, Number(q.get('lento') ?? 400))); return { topics: topicsTemas }; }
+  if (path === '/conversations/temas/topics/order') {
+    const ids: string[] = init.json.ids;
+    topicsTemas.forEach((x) => { if (ids.includes(x.id)) x.position = ids.indexOf(x.id); });
+    topicsTemas.sort((a, b) => a.position - b.position);
+    return { topics: topicsTemas.map((x) => ({ ...x })) };
+  }
   if (path.startsWith('/drive/tree')) {
     const ws = path.includes('workspaceId');
     const fo = (id: string, name: string, parentId: string | null) => ({ id, name, parentId, createdBy: 'danny', createdAt: iso(3 * D) });
@@ -218,5 +258,7 @@ const mailHtml: Record<string, string> = {
   }
   throw new Error('arnés sin backend');
 };
+// Para las pruebas en el navegador: el cliente y la burbuja de mensaje nuevo.
+Object.assign(window, { __client: client, __bubble: showMessageBubble });
 history.replaceState(null, '', q.get('to') ?? '/');
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

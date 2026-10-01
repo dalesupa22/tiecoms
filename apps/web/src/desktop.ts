@@ -9,6 +9,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { client } from './app-client.ts';
 import { navigate } from './router.ts';
 import { pendingOf } from './screens/Shell.tsx';
+import { currentTheme, subscribeTheme, themePreference } from './theme.ts';
 
 function go(path: string) {
   if (path.startsWith('/') && !path.startsWith('//')) navigate(path);
@@ -19,6 +20,17 @@ export async function initDesktop() {
   // Enlace con el que se abrió la app antes de que la interfaz escuchara.
   const pending = await invoke<string | null>('take_pending_path');
   if (pending) go(pending);
+
+  // Tema: la barra de título nativa y el fondo de la ventana acompañan a la web; Rust lo guarda para el próximo arranque.
+  let sentTheme = '';
+  const syncTheme = () => {
+    const pref = themePreference(), dark = currentTheme() === 'dark', key = `${pref}:${dark}`;
+    if (key === sentTheme) return;
+    sentTheme = key;
+    void invoke('set_theme', { pref, dark }).catch(() => {});
+  };
+  subscribeTheme(syncTheme);
+  syncTheme();
 
   const win = getCurrentWindow();
   const mac = navigator.userAgent.includes('Mac');

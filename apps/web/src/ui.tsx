@@ -12,7 +12,7 @@ export function initials(name: string) {
 }
 
 export function OrgMark({ org, size = 26 }: { org?: OrganizationDTO | null; size?: number }) {
-  if (!org) return <span className="mark" style={{ width: size, height: size, background: '#fff', color: '#5c554c', fontSize: size * 0.42, border: '1px solid #ddd6ca' }}>◦</span>;
+  if (!org) return <span className="mark" style={{ width: size, height: size, background: 'var(--surface)', color: 'var(--ink-2)', fontSize: size * 0.42, border: '1px solid var(--line)' }}>◦</span>;
   return <span className="mark" title={org.name} style={{ width: size, height: size, background: org.colorBg, color: org.colorFg, fontSize: size * 0.4 }}>{org.mark}</span>;
 }
 
@@ -36,11 +36,18 @@ export function contrastWithWhite(hex: string): number {
 export const BADGE_ORANGE = '#B45309';
 /** Fondo del globo de no leídos: el color de la empresa solo si el texto blanco cumple AA; si no, el naranja sobrio. */
 export const badgeColor = (org?: OrganizationDTO | null) => (org && contrastWithWhite(org.colorBg) >= 4.5 ? org.colorBg : BADGE_ORANGE);
-export function personColor(id: string | null | undefined): string {
-  if (!id) return '#8a8177';
+function personIndex(id: string): number {
   let h = 0x811c9dc5;
   for (const ch of id.toLowerCase()) { h ^= ch.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
-  return PERSON_COLORS[h % PERSON_COLORS.length]!;
+  return h % PERSON_COLORS.length;
+}
+export function personColor(id: string | null | undefined): string {
+  if (!id) return '#8a8177';
+  return PERSON_COLORS[personIndex(id)]!;
+}
+/** El color de la persona como texto (nombre en el chat, menciones): igual en claro; más claro en oscuro para AA (--pc-N). */
+export function personInk(id: string | null | undefined): string {
+  return id ? `var(--pc-${personIndex(id)})` : 'var(--muted)';
 }
 
 /** gg, el asistente: participante bot con id fijo (docs/GG-CHAT.md). */
@@ -52,15 +59,15 @@ export const isGgChat = (c: ConversationDTO) => c.kind === 'direct' && c.memberI
 
 export function Avatar({ person, org, size = 34 }: { person?: PersonDTO | null; org?: OrganizationDTO | null; size?: number }) {
   if (person?.id === GG_ID) return <span className="avatar gg-avatar" style={{ width: size, height: size }}><img src={asset('/gg-mark.svg')} alt="gg" draggable={false} /></span>;
-  // Sin foto: iniciales sobre el color estable de la persona; la empresa va en la insignia.
-  const bg = person?.kind === 'agent' ? '#1b1917' : person ? personColor(person.id) : '#e0dace';
-  const fg = person?.kind === 'agent' ? '#f4f1ea' : person ? '#ffffff' : '#5c554c';
+  // Sin foto: iniciales sobre el color estable de la persona. Sin insignia de empresa: el nombre
+  // de la empresa ya va escrito junto a la persona y la letra suelta («x») confundía.
+  const bg = person?.kind === 'agent' ? 'var(--ink)' : person ? personColor(person.id) : 'var(--paper-3)';
+  const fg = person?.kind === 'agent' ? 'var(--paper)' : person ? '#ffffff' : 'var(--ink-2)';
   return (
     <span className="avatar" style={{ width: size, height: size, background: bg, color: fg, fontSize: size * 0.36, borderRadius: person?.kind === 'agent' ? 10 : 99 }}>
       {person?.avatarUrl
         ? <img src={apiUrl(person.avatarUrl)} alt="" loading="lazy" draggable={false} style={{ width: '100%', height: '100%', borderRadius: 'inherit', objectFit: 'cover' }} />
         : person?.kind === 'agent' ? '◇' : initials(person?.name ?? '?')}
-      {org && size >= 30 && <span className="badge" style={{ background: org.colorBg, color: org.colorFg }}>{org.mark}</span>}
     </span>
   );
 }

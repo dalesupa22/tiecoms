@@ -122,7 +122,7 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
       <div key={x} data-pane={x} className={`split-cell ${x === active ? 'is-active' : ''} ${drop && drop.over === x && (full || (chatOver(x) && fitsChat(drop.kind))) ? 'is-target' : ''}`}
         // Tocar un panel lo vuelve el activo (antes del clic, para que el clic siga funcionando adentro).
         onPointerDownCapture={() => { if (x !== active) focusPane(x); }}>
-        {ref.kind === 'chat' ? <ConversationScreen key={x === id ? x + search : x} id={x} pane={list.length > 1 || !id ? frame : undefined} />
+        {ref.kind === 'chat' ? <ConversationScreen key={list.length === 1 && x === id ? x + search : x} id={x} search={x === id ? search : ''} pane={list.length > 1 || !id ? frame : undefined} />
           : ref.kind === 'mail' ? <MailPane key={x} paneKey={x} provider={ref.provider} id={ref.id} frame={frame} />
           : ref.kind === 'wa' ? <WaPane key={x} paneKey={x} accountId={ref.accountId} jid={ref.jid} frame={frame} />
           : ref.kind === 'tasks' ? <TasksPane key={x} frame={frame} />

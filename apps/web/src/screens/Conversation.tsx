@@ -1,4 +1,4 @@
-import { TOPIC_ALL } from './Topics.tsx';
+import { TOPIC_ALL, filterForEntry, filterForMessage, topicUnreadCounts } from '../topic-order.ts';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { BootstrapDTO, ConversationDTO, IssueDTO, MessageDTO } from '@tiecoms/contracts';
 import type { PendingMessage } from '@tiecoms/client-core';
@@ -13,7 +13,7 @@ import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem }
 import { navigate, queryParam } from '../router.ts';
 import { MAX_PANES, ZOOM_MAX, ZOOM_MIN, convZoomNow, setConvZoom, splitAvailable, useConvZoom } from '../split.ts';
 import { SplitPicker } from './SplitPicker.tsx';
-import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, isGgChat, isSelfChat, orgById, personById, personColor } from '../ui.tsx';
+import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, isGgChat, isSelfChat, orgById, personById, personColor, personInk } from '../ui.tsx';
 import { PhotoCropDialog, pickImage } from './PhotoCrop.tsx';
 import { AttachmentsView, DraftTray, pickFiles, useDrafts } from './Attachments.tsx';
 import { VoiceRecorder } from './Voice.tsx';
@@ -36,7 +36,7 @@ import { ChatBar, ThreadChip, threadsOf } from './ChatBar.tsx';
 import { AddMembersDialog } from './Dialogs.tsx';
 import { firstUnread, readThroughVisible, isReadTransparentMessage } from '../chat-nav.ts';
 import { IntegrationsPanel } from './Integrations.tsx';
-import { TopicDock, TopicTag, openTopicMenu, topicMenu, useTopics } from './Topics.tsx';
+import { TopicDock, TopicTag, activeTopicIdsNow, openTopicMenu, topicMenu, useTopics } from './Topics.tsx';
 import { ChatSearchBar, Notice17Row, ViewOnceBubble, parseNotice, useRefPicker } from './Chat17.tsx';
 import { backspaceRef, refsFor, viewOnceAllowed, type RefToken } from '../chat17.ts';
 import { markAgain } from '../perf.ts';
@@ -56,7 +56,7 @@ const excerpt = (s: string, n = 90) => s.replace(/\s+/g, ' ').trim().slice(0, n)
 /** Panel dentro de la vista en paralelo (Split.tsx): activo = el del URL; count = cuántos hay abiertos. */
 export interface PaneProps { active: boolean; count: number; onClose: () => void; onOnly: () => void; pinned?: boolean; onPin?: () => void }
 
-export function ConversationScreen({ id, embedded, pane }: { id: string; embedded?: { onClose: () => void; anchor?: MessageDTO | null; onSeeAnchor?: () => void }; pane?: PaneProps }) {
+export function ConversationScreen({ id, embedded, pane, search }: { id: string; embedded?: { onClose: () => void; anchor?: MessageDTO | null; onSeeAnchor?: () => void }; pane?: PaneProps; search?: string }) {
   const d = useClient((s) => s.data)!;
   const conv = d.conversations.find((c) => c.id === id);
   const local = useClient((s) => s.conversations[id]);
@@ -90,9 +90,11 @@ export function ConversationScreen({ id, embedded, pane }: { id: string; embedde
   const [showLinks, setShowLinks] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   // Temas (docs/TEMAS.md): la banderita elegida filtra el chat y es el tema de lo que escribo.
-  const topics = useTopics(id);
+  const { list: topics, ready: topicsReady } = useTopics(id);
   // null = «General» (lo que no tiene tema; así abre el chat), TOPIC_ALL = «Todo», o el id de un tema (docs/TEMAS.md).
   const [topicFilter, setTopicFilter] = useState<string | null>(null);
+  const topicFilterNow = useRef(topicFilter);
+  topicFilterNow.current = topicFilter;
   const topicById = useMemo(() => new Map(topics.map((x) => [x.id, x])), [topics]);
   const activeFilter = topicFilter && topicById.get(topicFilter) && !topicById.get(topicFilter)!.archivedAt ? topicFilter : null;
   const activeTopicIds = useMemo(() => new Set(topics.filter((x) => !x.archivedAt).map((x) => x.id)), [topics]);
@@ -219,19 +221,25 @@ export function ConversationScreen({ id, embedded, pane }: { id: string; embedde
     const pos = a + e.length;
     requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(pos, pos); setCaret(pos); });
   };
+  // Mensaje al que se saltó: se centra cuando ya está pintado con el filtro nuevo (ver el efecto sobre `rows`).
+  const scrollToSeq = useRef<number | null>(null);
+  const [, setJumpTick] = useState(0);
   const jumpTo = (seq: number) => {
     atBottom.current = false;
-    void client.ensureMessage(id, seq).then((found) => {
+    // Los temas se esperan antes de decidir: si aún no habían llegado, el chat quedaba siempre en «General».
+    void Promise.all([client.ensureMessage(id, seq), activeTopicIdsNow(id)]).then(([found, activeIds]) => {
       if (!found) return;
-      // Saltar a un mensaje (búsqueda, mención, enlace): el filtro pasa a su tema, o a «General» si no tiene.
+      // Saltar a un mensaje (burbuja, notificación, mención, búsqueda, enlace): el filtro pasa a su tema, o a «Todo»
+      // si no tiene; si ya estaba en «Todo», se queda ahí (topic-order.ts › filterForMessage).
       const target = client.getState().conversations[id]?.messages.find((m) => m.seq === seq);
-      if (target && topicFilter !== TOPIC_ALL) {
-        const want = target.topicId && activeTopicIds.has(target.topicId) ? target.topicId : null;
-        if (want !== activeFilter) setTopicFilter(want);
+      if (target) {
+        const want = filterForMessage(target, activeIds, topicFilterNow.current);
+        if (want !== topicFilterNow.current) setTopicFilter(want);
       }
       setHighlight(seq);
       setRevealed((x) => (x.has(seq) ? x : new Set(x).add(seq)));
-      requestAnimationFrame(() => document.getElementById(`msg-${id}-${seq}`)?.scrollIntoView({ block: 'center', behavior: 'instant' }));
+      scrollToSeq.current = seq;
+      setJumpTick((n) => n + 1);
       setTimeout(() => setHighlight(null), 2800);
     });
   };
@@ -272,6 +280,13 @@ export function ConversationScreen({ id, embedded, pane }: { id: string; embedde
     const target = Number(queryParam('m'));
     if (target > 0) jumpTo(target);
   }, [id]);
+  // Con varios paneles el chat ya abierto no se vuelve a montar: un ?m= nuevo (burbuja, notificación, mención) salta aquí.
+  const firstSearch = useRef(true);
+  useEffect(() => {
+    if (firstSearch.current) { firstSearch.current = false; return; }
+    const target = Number(new URLSearchParams(search ?? '').get('m'));
+    if (pane?.active && target > 0) jumpTo(target);
+  }, [search]);
 
   // Borrador local por conversación: sobrevive recargas y cambios de conversación.
   useEffect(() => { try { if (text) localStorage.setItem(draftKey(id), text); else localStorage.removeItem(draftKey(id)); } catch {} }, [id, text]);
@@ -319,15 +334,7 @@ export function ConversationScreen({ id, embedded, pane }: { id: string; embedde
   }, [local?.messages]);
   // Sin leer por tema (y sin tema, clave ''), con lo leído en vivo: el número junto a cada banderita.
   const readNow = Math.max(conv?.lastReadSeq ?? 0, conv?.historyFromSeq ?? 0);
-  const topicUnread = useMemo(() => {
-    const n: Record<string, number> = {};
-    for (const m of local?.messages ?? []) {
-      if (m.seq <= readNow || m.deletedAt || m.kind !== 'text' || m.authorId === d?.me.id) continue;
-      const k = m.topicId && activeTopicIds.has(m.topicId) ? m.topicId : '';
-      n[k] = (n[k] ?? 0) + 1;
-    }
-    return n;
-  }, [local?.messages, readNow, activeTopicIds]);
+  const topicUnread = useMemo(() => topicUnreadCounts(local?.messages ?? [], readNow, d?.me.id, activeTopicIds), [local?.messages, readNow, activeTopicIds]);
 
   // Mantiene la vista abajo al llegar mensajes, y la posición al cargar historial antiguo.
   useLayoutEffect(() => {
@@ -341,6 +348,15 @@ export function ConversationScreen({ id, embedded, pane }: { id: string; embedde
     prevHeight.current = el.scrollHeight;
     prevFirst.current = first;
   }, [rows.length]);
+  // Salto pendiente a un mensaje: se centra en cuanto está pintado (tras cambiar de tema el mensaje aparece en otro render).
+  useLayoutEffect(() => {
+    const seq = scrollToSeq.current;
+    if (seq == null) return;
+    const el = document.getElementById(`msg-${id}-${seq}`);
+    if (!el) return;
+    scrollToSeq.current = null;
+    el.scrollIntoView({ block: 'center', behavior: 'instant' });
+  });
 
   useEffect(() => {
     if (conv && conv.unread > 0 && local?.loaded && !placing.current && document.visibilityState === 'visible') updateNav();
@@ -348,7 +364,8 @@ export function ConversationScreen({ id, embedded, pane }: { id: string; embedde
 
   // Locate every pending page; a failed page never turns into a successful jump to the end.
   useEffect(() => {
-    if (!placing.current || !entry || !local?.loaded || local.loading || loadingUnread.current || placementFailed) return;
+    // También se esperan los temas: el chat abre en el tema del primer no leído.
+    if (!placing.current || !entry || !local?.loaded || local.loading || loadingUnread.current || placementFailed || !topicsReady) return;
     const r = firstUnread(local.messages, entry.readFrom, entry.unread, local.hasMore);
     if (r === 'older') {
       loadingUnread.current = true;
@@ -358,18 +375,16 @@ export function ConversationScreen({ id, embedded, pane }: { id: string; embedde
     if (!r && entry.unread > 0) { setPlacementFailed(true); return; }
     placing.current = false;
     if (r) {
-      // Todo lo no leído está en un solo tema: el chat abre en esa banderita.
-      const unreadTopics = new Set(local.messages.filter((m) => m.seq > entry.readFrom && m.kind === 'text' && !m.deletedAt && m.authorId !== d?.me.id)
-        .map((m) => (m.topicId && activeTopicIds.has(m.topicId) ? m.topicId : '')));
-      const only = unreadTopics.size === 1 ? [...unreadTopics][0] : '';
-      if (only) setTopicFilter(only);
+      // El chat abre en el tema del primer no leído (sin tema: «General») (topic-order.ts › filterForEntry).
+      const first = filterForEntry(local.messages, entry.readFrom, d?.me.id, activeTopicIds);
+      if (first) setTopicFilter(first);
       justPlaced.current = true; setNewLine(r.seq); return;
     }
     atBottom.current = true;
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
     updateNav();
-  }, [local?.loaded, local?.loading, local?.messages, placementFailed, placementStep]);
+  }, [local?.loaded, local?.loading, local?.messages, placementFailed, placementStep, topicsReady]);
   async function retryUnreadHistory() {
     if (loadingUnread.current || local?.loading) return;
     placing.current = true;
@@ -726,7 +741,7 @@ export function ConversationScreen({ id, embedded, pane }: { id: string; embedde
           <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)} onLinks={() => setShowLinks(true)}
             onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
         )}
-        {!embedded && <TopicDock conv={conv} list={topics} filter={showAll ? TOPIC_ALL : activeFilter} onFilter={(x) => { setTopicFilter(x); atBottom.current = true; requestAnimationFrame(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }); }} counts={topicCounts} unread={topicUnread} />}
+        {!embedded && <TopicDock conv={conv} list={topics} filter={showAll && activeTopicIds.size ? TOPIC_ALL : activeFilter} onFilter={(x) => { setTopicFilter(x); atBottom.current = true; requestAnimationFrame(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }); }} counts={topicCounts} unread={topicUnread} />}
         {!embedded && <DerivedPendingStrip conv={conv} />}
 
         {placementFailed && <div className="error" role="alert">{t('chat.unreadLoadFailed')} <button className="link-btn" disabled={local?.loading} onClick={() => void retryUnreadHistory()}>{t('chat.retryUnread')}</button></div>}
@@ -759,7 +774,7 @@ export function ConversationScreen({ id, embedded, pane }: { id: string; embedde
                 <div style={{ minWidth: 0 }}>
                   {!r.cont && (
                     <div className="msg-meta">
-                      <span className="msg-author" style={conv.kind !== 'direct' && author ? { color: personColor(author.id) } : undefined}>{author?.name ?? t('chat.formerParticipant')}</span>
+                      <span className="msg-author" style={conv.kind !== 'direct' && author ? { color: personInk(author.id) } : undefined}>{author?.name ?? t('chat.formerParticipant')}</span>
                       <span className="msg-org">{org?.name ?? (author?.guest ? t('common.guest') : '')}</span>
                       <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span>
                       {pinned.has(m.id) && <span className="msg-time">📌</span>}

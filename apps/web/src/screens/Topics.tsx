@@ -5,6 +5,7 @@ import { openDialog } from '../actions.tsx';
 import { errorText, t } from '../i18n.ts';
 import { menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { Modal, personById } from '../ui.tsx';
+import { TOPIC_ALL, orderTopicsForDock } from '../topic-order.ts';
 
 /**
  * Temas del chat (docs/TEMAS.md): banderitas arriba del chat, con scroll horizontal.
@@ -17,8 +18,16 @@ const EMPTY: TopicDTO[] = [];
 
 export function useTopics(conversationId: string) {
   const list = useClient((s) => s.topics[conversationId]) ?? EMPTY;
-  useEffect(() => { client.loadTopics(conversationId).catch(() => {}); }, [conversationId]);
-  return list;
+  const known = useClient((s) => !!s.topics[conversationId]);
+  // `ready`: ya se sabe qué temas tiene el chat (o no se pudieron pedir). Hasta entonces no se decide en qué tema abrir.
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); client.loadTopics(conversationId).catch(() => setFailed(true)); }, [conversationId]);
+  return { list, ready: known || failed };
+}
+/** Temas activos del chat ya cargados (los pide si aún no están); vacío si no se pudieron pedir. */
+export async function activeTopicIdsNow(conversationId: string): Promise<Set<string>> {
+  const list = client.getState().topics[conversationId] ?? await client.loadTopics(conversationId).catch(() => EMPTY);
+  return new Set(activeTopics(list).map((x) => x.id));
 }
 export const activeTopics = (list: TopicDTO[]) => list.filter((x) => !x.archivedAt);
 
@@ -166,8 +175,7 @@ function ArchivedDialog({ list, onClose }: { list: TopicDTO[]; onClose: () => vo
   );
 }
 
-/** Filtro «Todo»: todos los mensajes, con y sin tema. */
-export const TOPIC_ALL = '__all';
+export { TOPIC_ALL };
 
 export function TopicDock({ conv, list, filter, onFilter, counts, unread = {} }: {
   conv: ConversationDTO; list: TopicDTO[]; filter: string | null; onFilter: (id: string | null) => void; counts: Record<string, number>;
@@ -175,16 +183,20 @@ export function TopicDock({ conv, list, filter, onFilter, counts, unread = {} }:
   unread?: Record<string, number>;
 }) {
   const d = useClient((s) => s.data)!;
-  // Orden de llegada por defecto; quien puede escribir lo cambia arrastrando las banderitas (Danny, 30-sep-2026).
+  // Orden guardado: de llegada por defecto; quien puede escribir lo cambia arrastrando las banderitas (Danny, 30-sep-2026).
+  // En la fila van primero los que tienen algo sin leer para mí (en ese mismo orden) y luego el resto (topic-order.ts).
   const act = activeTopics(list);
+  const saved = orderTopicsForDock(act, {});
+  const shown = orderTopicsForDock(act, unread);
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const dropOn = (targetId: string) => {
     const from = dragging;
     setDragging(null); setOver(null);
     if (!from || from === targetId) return;
-    const ids = act.map((x) => x.id).filter((id) => id !== from);
-    ids.splice(ids.indexOf(targetId) + (act.findIndex((x) => x.id === from) < act.findIndex((x) => x.id === targetId) ? 1 : 0), 0, from);
+    // Se mueve dentro del orden guardado (el bloque de no leídos es solo presentación).
+    const ids = saved.map((x) => x.id).filter((id) => id !== from);
+    ids.splice(ids.indexOf(targetId) + (saved.findIndex((x) => x.id === from) < saved.findIndex((x) => x.id === targetId) ? 1 : 0), 0, from);
     void client.reorderTopics(conv.id, list, ids).catch((e) => toast(errorText(e)));
   };
   const archived = list.filter((x) => x.archivedAt);
@@ -219,7 +231,7 @@ export function TopicDock({ conv, list, filter, onFilter, counts, unread = {} }:
         <button role="tab" aria-selected={filter === TOPIC_ALL} aria-label={t('topic.all')} className={`topic-flag c-plain is-compact ${filter === TOPIC_ALL ? 'is-on' : ''}`} onClick={() => onFilter(filter === TOPIC_ALL ? null : TOPIC_ALL)}
           title={`${t('topic.all')} · ${t('topic.allHint')}`}>☰{filter === TOPIC_ALL ? <span className="topic-flag-text"> {t('topic.all')}</span> : null}</button>
       )}
-      {act.map((x) => (
+      {shown.map((x) => (
         <button key={x.id} role="tab" aria-selected={filter === x.id} className={`topic-flag c-${x.color} ${filter === x.id ? 'is-on' : ''} ${dragging === x.id ? 'is-dragging' : ''} ${over === x.id && dragging !== x.id ? 'is-drop' : ''}`}
           draggable={canEdit} onDragStart={(e) => { setDragging(x.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', x.name); }}
           onDragOver={(e) => { if (!dragging) return; e.preventDefault(); if (over !== x.id) setOver(x.id); }} onDragLeave={() => setOver((o) => (o === x.id ? null : o))}

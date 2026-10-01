@@ -1,0 +1,42 @@
+{
+  "version": "0.3.4",
+  "source_commit": "00e8dbc",
+  "original_dmg_sha256": "dab3214c28d62940807da01b7ec5de87acb88b36361a76d4eeb6259258e5a73d",
+  "signer": "Developer ID Application: CERTILABOR SAS (B76US7H3L3)",
+  "notarization_app": {
+    "status": "Accepted",
+    "id": "3210ae9a-6445-44e0-8c74-1ea0559488ab",
+    "message": "Processing complete"
+  },
+  "notarization_dmg": {
+    "status": "Accepted",
+    "id": "2fa8583d-a0ba-49bb-a6d8-b3a05d09529e",
+    "message": "Processing complete"
+  },
+  "sha256": "684929dd7030a9f3afafef1589b004e944ba7d31337a97e0b3895069a18f4d76",
+  "size": 12516589,
+  "verified_at": "2026-10-01T02:47:42.903850+00:00",
+  "screen_recording_permission_persistence_tested": false,
+  "file": "chaggu-0.3.4-mac-signed.dmg",
+  "checks": {
+    "signature_app": {
+      "exit_code": 0
+    },
+    "stapler_app": {
+      "exit_code": 0
+    },
+    "gatekeeper_app": {
+      "exit_code": 0
+    },
+    "signature_dmg": {
+      "exit_code": 0
+    },
+    "stapler_dmg": {
+      "exit_code": 0
+    },
+    "gatekeeper_dmg": {
+      "exit_code": 0
+    }
+  },
+  "windows_signed": false
+}

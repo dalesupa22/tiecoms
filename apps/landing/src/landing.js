@@ -78,9 +78,17 @@
   const esTop = document.documentElement.lang === 'es';
   if (top && os) top.setAttribute('href', os === 'mac' ? '/descargas/chaggu-mac.dmg' : '/descargas/chaggu-windows.exe');
   if (topLabel && os) topLabel.textContent = esTop ? `Descargar para ${os === 'mac' ? 'Mac' : 'Windows'}` : `Download for ${os === 'mac' ? 'Mac' : 'Windows'}`;
-  fetch('/descargas/latest.json', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : null)).then((v) => {
+  fetch('/descargas/latest.json?schema=2', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : null)).then((v) => {
     if (!v) return;
     const es = document.documentElement.lang === 'es';
+    // Usa el nombre versionado del manifiesto para evitar descargas anteriores en caché.
+    for (const platform of ['mac', 'windows']) {
+      const file = v[platform]?.file;
+      if (typeof file !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(file)) continue;
+      const href = `/descargas/${file}`;
+      grid?.querySelector(`[data-os="${platform}"] a.button`)?.setAttribute('href', href);
+      if (os === platform) top?.setAttribute('href', href);
+    }
     if (topLabel && v.version) { const sm = document.createElement('small'); sm.textContent = ` v${v.version}`; topLabel.after(sm); }
     const mac = grid?.querySelector('[data-meta="mac"]');
     if (mac && v.mac) mac.textContent = `${es ? 'Versión' : 'Version'} ${v.version} · .dmg · ${mb(v.mac.size)}`;

@@ -20,8 +20,8 @@
     "System notifications, calls with screen sharing and up to four chats open at once. Under 20 MB and it starts in a second."
   ],
   [
-    "<p>macOS 12 o posterior. Apple Silicon e Intel.</p>",
-    "<p>macOS 12 or later. Apple Silicon and Intel.</p>"
+    "<p>macOS 12 o posterior. Apple Silicon e Intel. Firmada y notarizada.</p>",
+    "<p>macOS 12 or later. Apple Silicon and Intel. Signed and notarized.</p>"
   ],
   [
     "Descargar para Mac <span aria-hidden=\"true\">↓</span>",
@@ -56,8 +56,8 @@
     "Open chaggu <span aria-hidden=\"true\">↗</span></a><small class=\"download-meta\">Also on iPhone and Android.</small>"
   ],
   [
-    "<summary>¿Tu computador muestra un aviso al abrirla?</summary><p><b>Mac:</b> abre el archivo, arrastra chaggu a Aplicaciones y ábrela. Si macOS dice que no puede comprobar al desarrollador, entra a Ajustes del Sistema › Privacidad y seguridad y toca «Abrir de todos modos».</p><p><b>Windows:</b> si aparece «Windows protegió tu PC», toca «Más información» y luego «Ejecutar de todos modos».</p><p>Estamos terminando la firma de Apple y de Microsoft para que estos avisos desaparezcan.</p>",
-    "<summary>Does your computer show a warning when opening it?</summary><p><b>Mac:</b> open the file, drag chaggu to Applications and open it. If macOS says it cannot verify the developer, go to System Settings › Privacy &amp; Security and click «Open Anyway».</p><p><b>Windows:</b> if «Windows protected your PC» appears, click «More info» and then «Run anyway».</p><p>We are finishing the Apple and Microsoft signing so these warnings go away.</p>"
+    "<summary>Instalación y avisos del sistema</summary><p><b>Mac:</b> abre el archivo, arrastra chaggu a Aplicaciones y ábrela. La descarga está firmada y cuenta con notarización de Apple.</p><p><b>Windows:</b> si aparece «Windows protegió tu PC», toca «Más información» y luego «Ejecutar de todos modos».</p><p>La firma de Windows está pendiente de validación por Microsoft.</p>",
+    "<summary>Installation and system warnings</summary><p><b>Mac:</b> open the file, drag chaggu to Applications and open it. The download is signed and has Apple notarization.</p><p><b>Windows:</b> if «Windows protected your PC» appears, click «More info» and then «Run anyway».</p><p>Windows signing is awaiting validation by Microsoft.</p>"
   ],
   [
     "<a class=\"text-link lang-link\" href=\"/en/\" hreflang=\"en\" lang=\"en\" aria-label=\"English version\">EN</a>",

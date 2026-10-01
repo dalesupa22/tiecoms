@@ -325,6 +325,8 @@ const es = {
   'people.search': 'Buscar por nombre, cargo o empresa', 'people.empty': 'Aún no compartes espacios con otras personas.', 'people.until': 'hasta {date}',
   // Ajustes
   'settings.title': 'Tu cuenta', 'settings.logout': 'Cerrar sesión', 'settings.devices': 'Dispositivos con sesión abierta', 'settings.lastSeen': 'Última actividad {date}',
+  'mcp.title': 'Conector para IAs (MCP)', 'mcp.lead': 'Deja que Claude, Codex, ChatGPT u otra IA lea y envíe mensajes de chaggu en tu nombre. Crea un token, cópialo (solo se muestra una vez) y pégalo en tu IA.',
+  'mcp.namePh': 'Nombre (p. ej. Claude Code)', 'mcp.create': 'Crear token', 'mcp.copy': 'Copiar', 'mcp.copied': 'Copiado', 'mcp.once': 'Guárdalo ahora: no lo volverás a ver.', 'mcp.revoke': 'Revocar', 'mcp.lastUsed': 'Último uso: {date}', 'mcp.never': 'Sin usar',
   'settings.thisDevice': 'Este dispositivo', 'settings.closeSession': 'Cerrar', 'settings.language': 'Idioma', 'settings.langAuto': 'Automático (navegador)',
   'theme.title': 'Apariencia', 'theme.system': 'Automático (sistema)', 'theme.light': 'Claro', 'theme.dark': 'Oscuro', 'theme.hint': 'Automático sigue el modo claro u oscuro de tu equipo. Se guarda solo en este dispositivo.',
   'settings.platforms': 'chaggu para Web · próximamente macOS, Windows, Android e iOS con la misma cuenta y los mismos no leídos.',
@@ -1336,6 +1338,8 @@ const en: Record<Key, string> = {
   'people.subtitle': 'People you share spaces with and colleagues from your company. You only see who is within your scope.',
   'people.search': 'Search by name, role or company', 'people.empty': 'You do not share spaces with anyone yet.', 'people.until': 'until {date}',
   'settings.title': 'Your account', 'settings.logout': 'Sign out', 'settings.devices': 'Devices with an open session', 'settings.lastSeen': 'Last active {date}',
+  'mcp.title': 'AI connector (MCP)', 'mcp.lead': 'Let Claude, Codex, ChatGPT or another AI read and send chaggu messages on your behalf. Create a token, copy it (shown only once) and paste it into your AI.',
+  'mcp.namePh': 'Name (e.g. Claude Code)', 'mcp.create': 'Create token', 'mcp.copy': 'Copy', 'mcp.copied': 'Copied', 'mcp.once': 'Save it now: you won\'t see it again.', 'mcp.revoke': 'Revoke', 'mcp.lastUsed': 'Last used: {date}', 'mcp.never': 'Never used',
   'settings.thisDevice': 'This device', 'settings.closeSession': 'Sign out', 'settings.language': 'Language', 'settings.langAuto': 'Automatic (browser)',
   'theme.title': 'Appearance', 'theme.system': 'Automatic (system)', 'theme.light': 'Light', 'theme.dark': 'Dark', 'theme.hint': 'Automatic follows your device’s light or dark mode. Saved on this device only.',
   'settings.platforms': 'chaggu for Web · macOS, Windows, Android and iOS coming soon with the same account and unread counts.',

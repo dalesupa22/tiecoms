@@ -409,6 +409,8 @@ export function SettingsScreen() {
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('storage.title')}</div>
       <StorageUsage adminOrgs={d.organizations.filter((o) => o.myRole === 'owner' || o.myRole === 'admin').map((o) => ({ id: o.id, name: o.name }))} />
 
+      <AiConnector />
+
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('settings.devices')}</div>
       <div className="list">
         {sessions?.sessions.map((s) => (
@@ -420,6 +422,52 @@ export function SettingsScreen() {
       </div>
       <div className="hint" style={{ marginTop: 18 }}>{t('settings.platforms')}</div>
     </div></div>
+  );
+}
+
+/** Conector MCP: tokens personales para que una IA use chaggu como la persona (docs/MCP.md). */
+function AiConnector() {
+  const [tokens, setTokens] = useState<Awaited<ReturnType<typeof client.mcpTokens>>['tokens']>([]);
+  const [name, setName] = useState('');
+  const [fresh, setFresh] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const load = () => client.mcpTokens().then((r) => setTokens(r.tokens)).catch(() => {});
+  useEffect(() => { void load(); }, []);
+  const endpoint = `${location.origin}/api/mcp`;
+  const cmd = fresh ? `claude mcp add --transport http chaggu ${endpoint} --header "Authorization: Bearer ${fresh}"` : '';
+  const copy = (text: string) => { void navigator.clipboard?.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); };
+  return (
+    <>
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{t('mcp.title')}</div>
+      <div className="card" style={{ padding: 16, marginBottom: 24 }}>
+        <div className="small muted" style={{ marginBottom: 10 }}>{t('mcp.lead')}</div>
+        <div className="small" style={{ marginBottom: 10 }}>URL: <code>{endpoint}</code></div>
+        <form className="row" style={{ gap: 8, flexWrap: 'wrap' }} onSubmit={(e) => {
+          e.preventDefault(); setBusy(true);
+          client.createMcpToken(name.trim() || 'Mi IA').then((r) => { setFresh(r.token); setName(''); return load(); }).catch(() => {}).finally(() => setBusy(false));
+        }}>
+          <input className="grow" value={name} maxLength={60} placeholder={t('mcp.namePh')} onChange={(e) => setName(e.target.value)} />
+          <button className="btn primary" disabled={busy}>{busy ? t('common.wait') : t('mcp.create')}</button>
+        </form>
+        {fresh && (
+          <div style={{ marginTop: 12 }}>
+            <div className="small" style={{ marginBottom: 6 }}><b>{t('mcp.once')}</b></div>
+            <div className="row" style={{ gap: 8 }}><code className="grow" style={{ wordBreak: 'break-all' }}>{fresh}</code><button className="btn small" onClick={() => copy(fresh)}>{copied ? t('mcp.copied') : t('mcp.copy')}</button></div>
+            <div className="small muted" style={{ margin: '10px 0 4px' }}>Claude Code:</div>
+            <div className="row" style={{ gap: 8 }}><code className="grow small" style={{ wordBreak: 'break-all' }}>{cmd}</code><button className="btn small" onClick={() => copy(cmd)}>{t('mcp.copy')}</button></div>
+          </div>
+        )}
+        {!!tokens.length && <div className="list" style={{ marginTop: 12 }}>
+          {tokens.map((tk) => (
+            <div key={tk.id} className="card conv-card">
+              <span className="grow"><b>{tk.name}</b> <span className="tag">{tk.tokenHint}</span><span className="small muted" style={{ display: 'block' }}>{tk.lastUsedAt ? t('mcp.lastUsed', { date: new Date(tk.lastUsedAt).toLocaleString(locale()) }) : t('mcp.never')}</span></span>
+              <button className="btn small" onClick={() => client.revokeMcpToken(tk.id).then(load)}>{t('mcp.revoke')}</button>
+            </div>
+          ))}
+        </div>}
+      </div>
+    </>
   );
 }
 

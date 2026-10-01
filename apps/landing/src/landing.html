@@ -140,12 +140,21 @@
       <details class="download-help"><summary>¿Tu computador muestra un aviso al abrirla?</summary><p><b>Mac:</b> abre el archivo, arrastra chaggu a Aplicaciones y ábrela. La aplicación está firmada y notarizada por Apple.</p><p><b>Windows:</b> si aparece «Windows protegió tu PC», toca «Más información» y luego «Ejecutar de todos modos».</p><p>La validación de la firma de Microsoft sigue pendiente.</p></details>
     </section>
 
+    <section class="download-section mcp-section" id="mcp" aria-labelledby="mcp-title">
+      <div class="download-intro"><p class="eyebrow"><span class="eyebrow-dot eyebrow-dot-lilac"></span> Conector MCP</p><h2 id="mcp-title">Tu IA también<br><em>trabaja en chaggu.</em></h2><p class="section-lede">chaggu tiene servidor MCP. Conecta Claude, Codex, ChatGPT o tu propio agente para leer tus chats, resumir lo pendiente, buscar y enviar mensajes en tu nombre, con tus mismos permisos.</p></div>
+      <div class="download-grid">
+        <article class="download-card"><h3>1. Crea tu token</h3><p>En la app, entra a <b>Tú › Conector para IAs</b> y toca «Crear token». Se muestra una sola vez y lo revocas cuando quieras.</p><a class="button button-dark" href="https://app.chaggu.com/">Abrir chaggu <span aria-hidden="true">↗</span></a></article>
+        <article class="download-card"><h3>2. Conéctalo</h3><p>Claude Code:</p><code class="mcp-code">claude mcp add --transport http chaggu https://app.chaggu.com/api/mcp --header "Authorization: Bearer TU_TOKEN"</code><small class="download-meta">Codex, Cursor y otras IAs: URL <b>https://app.chaggu.com/api/mcp</b> con el encabezado Authorization: Bearer.</small></article>
+        <article class="download-card"><h3>3. Pídeselo</h3><p>«¿Qué tengo sin leer en chaggu?», «Respóndele a Laura que mañana entregamos», «Busca lo que dijimos del contrato».</p><small class="download-meta">Herramientas: list_chats, read_messages, send_message, send_direct_message, search_messages, unread_summary, mark_read, list_people, whoami.</small></article>
+      </div>
+    </section>
+
     <section class="manifesto" id="confianza" aria-labelledby="manifesto-title"><div class="manifesto-mark" aria-hidden="true">✦</div><p class="eyebrow"><span class="eyebrow-dot eyebrow-dot-orange"></span> La regla de chaggu</p><h2 id="manifesto-title">La inteligencia ayuda.<br><em>La conversación decide.</em></h2><p>Los bots proponen, las empresas colaboran y las personas mantienen el criterio. Cada paso queda visible para que el trabajo avance con confianza.</p><div class="manifesto-signature"><img src="/assets/chaggu.svg" alt="chaggu"></div></section>
 
     <section class="cta-section" aria-labelledby="cta-title"><div class="cta-orbit" aria-hidden="true"></div><div class="cta-content"><p class="eyebrow"><span class="eyebrow-dot"></span> El siguiente hilo puede empezar aquí</p><h2 id="cta-title">Conecta lo que hoy<br><em>trabaja separado.</em></h2><p>Descubre una forma de trabajar donde cada conversación tiene un camino y cada respuesta encuentra su lugar.</p><a class="button button-light" href="https://app.chaggu.com/signup">Empezar ahora <span aria-hidden="true">↗</span></a></div><div class="cta-aside"><div class="cta-stat"><strong>∞</strong><span>contexto que<br>viaja contigo</span></div><div class="cta-stat"><strong>01</strong><span>hilo para<br>todo el equipo</span></div></div></section>
   </main>
 
-  <footer class="site-footer"><a class="brand brand-footer" href="#inicio"><img src="/assets/chaggu-oscuro.svg" alt="chaggu"></a><p>Conecta humanos, empresas y bots.</p><div class="footer-links"><a href="#recorrido">Cómo funciona</a><a href="#espacios">Producto</a><a href="#descargar">Descargar</a><a href="https://app.chaggu.com/">App</a><a href="/privacidad/">Privacidad</a><a href="/terminos/">Términos</a><a href="#inicio">Volver arriba ↑</a></div><small>© 2026 chaggu</small></footer>
+  <footer class="site-footer"><a class="brand brand-footer" href="#inicio"><img src="/assets/chaggu-oscuro.svg" alt="chaggu"></a><p>Conecta humanos, empresas y bots.</p><div class="footer-links"><a href="#recorrido">Cómo funciona</a><a href="#espacios">Producto</a><a href="#descargar">Descargar</a><a href="#mcp">MCP</a><a href="https://app.chaggu.com/">App</a><a href="/privacidad/">Privacidad</a><a href="/terminos/">Términos</a><a href="#inicio">Volver arriba ↑</a></div><small>© 2026 chaggu</small></footer>
 
 
 </body>

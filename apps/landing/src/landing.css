@@ -64,3 +64,6 @@
 .header-download{min-height:40px;padding:0 16px;font-size:13.5px;font-weight:600;white-space:nowrap;margin-top:0}
 .header-download small{font-family:var(--mono);font-size:11px;opacity:.8;font-weight:500}
 @media (max-width:900px){.header-download{display:none}}
+
+/* Conector MCP: el comando se puede copiar entero. */
+.mcp-code { display: block; margin: 8px 0 12px; padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0,.06); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; user-select: all; }

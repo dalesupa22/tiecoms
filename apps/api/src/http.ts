@@ -47,6 +47,7 @@ import * as voice from './modules/voice.ts';
 import * as calls from './modules/calls.ts';
 import * as assistant from './modules/assistant.ts';
 import * as gg from './modules/gg.ts';
+import * as mcp from './modules/mcp.ts';
 import { getOrCreateDirect } from './modules/workspaces.ts';
 import * as signatures from './modules/signatures.ts';
 import * as mentions from './modules/mentions.ts';
@@ -240,6 +241,22 @@ export async function buildHttp() {
       integrations.commentIssue(integ(req), z.uuid().parse(req.params.id), IntegrationCommentInput.parse(req.body), idemKey(req)));
   });
 
+  // ---------- Conector MCP (Claude, Codex y otras IAs) ----------
+  // Streamable HTTP sin estado: POST con JSON-RPC; GET/DELETE no aplican (sin SSE ni sesiones).
+  const mcpLimit = { config: { rateLimit: { max: 120, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => `mcp:${r.headers.authorization?.slice(-12) ?? r.ip}` } } };
+  app.post('/api/mcp', mcpLimit, async (req, reply) => {
+    let userId: string;
+    try { userId = await mcp.authenticate(req.headers.authorization); } catch (err) {
+      reply.header('www-authenticate', 'Bearer realm="chaggu", error="invalid_token"');
+      throw err;
+    }
+    const out = await mcp.handleRpc(userId, req.body);
+    if (out === null) return reply.status(202).send();
+    return reply.header('cache-control', 'no-store').send(out);
+  });
+  app.get('/api/mcp', async (_req, reply) => reply.status(405).header('allow', 'POST').send({ error: { code: 'method_not_allowed', message: 'Usa POST (MCP Streamable HTTP)' } }));
+  app.delete('/api/mcp', async (_req, reply) => reply.status(405).header('allow', 'POST').send());
+
   // ---------- Rutas autenticadas ----------
   app.register(async (priv) => {
     priv.addHook('onRequest', async (req) => {
@@ -273,6 +290,11 @@ export async function buildHttp() {
     });
 
     priv.get('/api/v1/bootstrap', async (req) => bootstrap(req.userId));
+    // Tokens personales del conector MCP (se muestran una vez al crearlos).
+    priv.get('/api/v1/me/mcp-tokens', async (req) => mcp.listTokens(req.userId));
+    priv.post('/api/v1/me/mcp-tokens', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) =>
+      mcp.createToken(req.userId, z.object({ name: z.string().trim().min(1).max(60).default('Mi IA') }).parse(req.body ?? {}).name));
+    priv.delete<{ Params: { id: string } }>('/api/v1/me/mcp-tokens/:id', async (req) => mcp.revokeToken(req.userId, z.uuid().parse(req.params.id)));
     priv.get('/api/v1/blocks', async (req) => safety.listBlocks(req.userId));
     priv.put<{ Params: { id: string } }>('/api/v1/blocks/:id', async (req) => safety.setBlock(req.userId, z.uuid().parse(req.params.id), true));
     priv.delete<{ Params: { id: string } }>('/api/v1/blocks/:id', async (req) => safety.setBlock(req.userId, z.uuid().parse(req.params.id), false));

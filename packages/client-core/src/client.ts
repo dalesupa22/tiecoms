@@ -1790,6 +1790,10 @@ export class TieComsClient {
   }
   sessions() { return this.request<{ sessions: { id: string; deviceName: string; platform: string; lastSeenAt: string }[]; current: string }>('/sessions'); }
   revokeSession(id: string) { return this.request(`/sessions/${id}`, { method: 'DELETE' }); }
+  // Conector MCP para IAs (Claude, Codex…): el token se muestra una sola vez.
+  mcpTokens() { return this.request<{ tokens: { id: string; name: string; tokenHint: string; createdAt: string; lastUsedAt: string | null }[] }>('/me/mcp-tokens'); }
+  createMcpToken(name: string) { return this.request<{ id: string; name: string; token: string }>('/me/mcp-tokens', { method: 'POST', json: { name } }); }
+  revokeMcpToken(id: string) { return this.request(`/me/mcp-tokens/${id}`, { method: 'DELETE' }); }
 }
 
 function upsertMessage(list: MessageDTO[], m: MessageDTO): MessageDTO[] {

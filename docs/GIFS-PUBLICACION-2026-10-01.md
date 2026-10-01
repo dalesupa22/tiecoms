@@ -38,7 +38,7 @@ Descargas verificadas mediante el cuerpo recibido por HTTPS, tamaño y SHA256, s
 
 ## Validación
 
-- Web: 194 pruebas aprobadas en 29 archivos; typecheck de contratos/cliente/API/web correcto.
+- Web: 194 pruebas aprobadas en 29 archivos; typecheck de contratos/cliente/API/web correcto. Revisión independiente final de las correcciones de identidad de sesión y envío duplicado aprobada en `0692c2f`, sin bloqueadores en ese alcance.
 - API GIFs: 21 pruebas aprobadas; regresión Lorena: 23 aprobadas. Permisos, proxy, token, SSRF, límites de cola y descarga/importación comprobados.
 - Web local: catálogo real y editor; meme enviado a un chat de prueba, JPEG descargado del S3 local y revisado visualmente con ambas frases; GIF de una sola vista persiste oculto y el control se restablece tras envío. Capturas en `docs/qa/gifs-20261001/`.
 - Web producción: selector GIF abierto en chat personal, catálogo e imágenes reales cargan; no se enviaron mensajes en producción. API de producción comprobado con Openverse y memegen reales, GIF animado, JPEG y atribución.

@@ -2134,3 +2134,23 @@ button.slot:disabled { opacity: .5; cursor: not-allowed; }
 .grid-glyph { width: 30px; grid-template: 1fr 1fr / 1fr 1fr .7fr; }
 .grid-glyph i.tall { grid-column: 3; grid-row: 1 / 3; }
 .grid-glyph.big { width: 84px; }
+
+/* ---------- Un color de fondo por cuadrito (tints.ts) ----------
+   Se cambian los mismos tokens de fondo, solo dentro del cuadrito: todo lo que usa --paper, --card o --line se pinta solo. */
+.split-cell[data-tint="sage"] { --th: 145; }
+.split-cell[data-tint="sky"] { --th: 205; }
+.split-cell[data-tint="lilac"] { --th: 265; }
+.split-cell[data-tint="peach"] { --th: 22; }
+.split-cell[data-tint="sand"] { --th: 46; }
+.split-cell[data-tint="rose"] { --th: 340; }
+.split-cell[data-tint] {
+  --paper: hsl(var(--th) 36% 92.5%); --paper-2: hsl(var(--th) 30% 88.5%); --paper-3: hsl(var(--th) 26% 83.5%); --paper-soft: hsl(var(--th) 38% 94.5%);
+  --card: hsl(var(--th) 44% 96%); --pop: hsl(var(--th) 48% 97.5%); --hover: hsl(var(--th) 30% 89.5%); --grid: hsl(var(--th) 28% 87.5%);
+  --line: hsl(var(--th) 24% 80%); --line-2: hsl(var(--th) 22% 74%); --scroll: hsl(var(--th) 20% 76%);
+}
+:root[data-theme="dark"] .split-cell[data-tint] {
+  --paper: hsl(var(--th) 24% 12%); --paper-2: hsl(var(--th) 22% 15%); --paper-3: hsl(var(--th) 19% 20%); --paper-soft: hsl(var(--th) 23% 13.5%);
+  --card: hsl(var(--th) 21% 16.5%); --pop: hsl(var(--th) 19% 19%); --hover: hsl(var(--th) 20% 18%); --grid: hsl(var(--th) 18% 18%);
+  --line: hsl(var(--th) 15% 27%); --line-2: hsl(var(--th) 14% 32%); --scroll: hsl(var(--th) 13% 31%);
+}
+.split-cell[data-tint] .pane-head, .split-cell[data-tint] .conv-head { background: var(--paper-soft); }

@@ -18,7 +18,7 @@ import { IssuesBody } from './Issues.tsx';
 import { navigate } from '../router.ts';
 import { toast } from '../menu.tsx';
 
-export interface PaneFrame { active: boolean; count: number; pinned: boolean; onClose: () => void; onOnly: () => void; onPin: () => void }
+export interface PaneFrame { active: boolean; count: number; pinned: boolean; onClose: () => void; onOnly: () => void; onPin: () => void; onTint: (anchor: HTMLElement) => void }
 
 /** Cabecera común de un panel: qué es, cómo se llama, fijar, dejar solo este y cerrar. */
 function PaneHead({ icon, title, sub, frame }: { icon: ReactNode; title: string; sub?: string; frame: PaneFrame }) {
@@ -26,6 +26,7 @@ function PaneHead({ icon, title, sub, frame }: { icon: ReactNode; title: string;
     <div className="pane-head">
       <span className="pane-ico" aria-hidden>{icon}</span>
       <div className="pane-title"><b className="ellipsis">{title}</b>{sub && <span className="small muted ellipsis">{sub}</span>}</div>
+      <button className="icon-btn head-keep" aria-label={t('tint.title')} title={t('tint.title')} onClick={(e) => frame.onTint(e.currentTarget)}>🎨</button>
       <button className={`icon-btn head-keep ${frame.pinned ? 'is-on' : ''}`} aria-pressed={frame.pinned} aria-label={t(frame.pinned ? 'grid.unpin' : 'grid.pin')} title={t(frame.pinned ? 'grid.unpin' : 'grid.pin')} onClick={frame.onPin}>📌</button>
       {frame.count > 1 && <button className="icon-btn head-keep" aria-label={t('split.only')} title={t('split.only')} onClick={frame.onOnly}>⤢</button>}
       <button className="icon-btn head-keep" aria-label={t('split.close')} title={t('split.close')} onClick={frame.onClose}>×</button>

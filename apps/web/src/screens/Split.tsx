@@ -17,6 +17,7 @@ import {
   useActiveKey, useBack, usePanes, usePinned, useSplitSizes, useWide, type DragKind,
 } from '../split.ts';
 import { ConversationScreen } from './Conversation.tsx';
+import { ensureAssigned, openTintMenu, usePaneTints } from '../tints.ts';
 import { InboxPane, MailPane, TasksPane, WaListPane, WaPane } from './Panes.tsx';
 
 /** /c/:id: el chat del URL es el panel activo. */
@@ -58,6 +59,9 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   const grid = withTasks ? list.filter((k) => k !== TASKS_KEY) : list;
   const full = grid.length >= MAX_PANES;
   const sizes = useSplitSizes();
+  // Cada cuadrito con su color (tints.ts): los nuevos reciben uno que no esté repetido.
+  const tints = usePaneTints();
+  useEffect(() => { ensureAssigned(list); }, [list.join('|')]);
 
   const cellOf = (e: DragEvent) => (e.target as HTMLElement).closest<HTMLElement>('[data-pane]')?.dataset.pane ?? null;
   const chatOver = (over: string | null) => (over && parseKey(over).kind === 'chat' ? over : null);
@@ -107,9 +111,9 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
 
   const cell = (x: string) => {
     const ref = parseKey(x);
-    const frame = { active: x === active, count: list.length, pinned: pinned.has(x), onClose: () => closePane(x, id), onOnly: () => onlyPane(x), onPin: () => togglePin(x) };
+    const frame = { active: x === active, count: list.length, pinned: pinned.has(x), onClose: () => closePane(x, id), onOnly: () => onlyPane(x), onPin: () => togglePin(x), onTint: (el: HTMLElement) => openTintMenu(el, x) };
     return (
-      <div key={x} data-pane={x} className={`split-cell ${x === active ? 'is-active' : ''} ${drop && drop.over === x && (full || (chatOver(x) && fitsChat(drop.kind))) ? 'is-target' : ''}`}
+      <div key={x} data-pane={x} data-tint={tints[x]} className={`split-cell ${x === active ? 'is-active' : ''} ${drop && drop.over === x && (full || (chatOver(x) && fitsChat(drop.kind))) ? 'is-target' : ''}`}
         // Tocar un panel lo vuelve el activo (antes del clic, para que el clic siga funcionando adentro).
         onPointerDownCapture={() => { if (x !== active) focusPane(x); }}>
         {ref.kind === 'chat' ? <ConversationScreen key={list.length === 1 && x === id ? x + search : x} id={x} search={x === id ? search : ''} pane={list.length > 1 || !id ? frame : undefined} />

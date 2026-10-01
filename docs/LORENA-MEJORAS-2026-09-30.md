@@ -92,4 +92,14 @@ Rama: `temporal/lorena-mejoras-20260930`, basada en `00e8dbc` de `principal`, qu
 - Revisión independiente de permisos y compatibilidad: sin bloqueadores pendientes.
 - Validación visual en cuenta local: Hoy, notas, tareas/reporte, favoritos/fondos/fuentes, Drive/editor y comunidad. Evidencia de ejemplo en `docs/qa/lorena-20260930/`.
 
-El resultado de despliegue y la comprobación de que `app_releases` móvil sigue intacto se registran después de publicar.
+## Publicación verificada
+
+- Web/API publicado: `20261001031634-7f855ef` (30 de septiembre, 22:16 Bogotá). Código: `7f855ef`.
+- API listo y contenedores API, worker y WhatsApp activos. Contrato móvil mínimo conservado: `2026-09-29.2`.
+- Migraciones `071_lorena_tasks.sql`, `072_lorena_drive.sql`, `073_lorena_notes.sql` aplicadas.
+- Recursos públicos de `https://app.chaggu.com` contienen las nuevas rutas y `/issues/report`.
+- Verificado en la sesión de Danny: Notas carga desde el API y Reporte incluye 48 asignadas (43 pendientes, 5 completadas). Solo se hicieron lecturas; no se crearon notas/tareas ni se enviaron mensajes en producción durante QA.
+- Registros `app_releases` idénticos antes/después, incluidos `updated_at`: Android `1.6.7` build `26`, iOS `1.6.7` build `24`. Esto verifica que esta entrega no cambió los registros; el estado de revisión de las tiendas lo informó Danny y no se modificó.
+- La captura autenticada de producción se guarda localmente fuera de Git para preservar el contenido privado de la cuenta.
+
+Para acumular más mejoras, continuar en esta rama. Antes de un futuro despliegue desde `principal`, integrar este commit para conservar las funciones publicadas. El siguiente release nativo se prepara después de la aprobación de las versiones pendientes, como indicó Danny.

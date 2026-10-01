@@ -1,0 +1,22 @@
+{
+  "release": "20261001031634-7f855ef",
+  "codeCommit": "7f855ef",
+  "url": "https://app.chaggu.com",
+  "contract": "2026-09-29.2",
+  "mobileRecordsUnchanged": true,
+  "android": {
+    "version": "1.6.7",
+    "build": 26
+  },
+  "ios": {
+    "version": "1.6.7",
+    "build": 24
+  },
+  "authenticatedReadChecks": {
+    "notes": "loaded",
+    "assignedReport": 48,
+    "pending": 43,
+    "completed": 5
+  },
+  "apiReady": true
+}

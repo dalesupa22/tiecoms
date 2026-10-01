@@ -17,7 +17,7 @@ import { type DragPayload, paneOf, pinToSlot, readDrag, shareToChat } from '../g
 import {
   MAX_PANES, type DragKind, dragKindOf, fitsChat, fitsSlot, setDragging, setGridSide, splitAvailable, togglePin, useDragging, useGridSide, useMetas, usePanes, usePinned, useWide,
 } from '../split.ts';
-import { slots } from '../grid-keys.ts';
+import { TASKS_KEY, TASKS_SLOT, slots, splitMain } from '../grid-keys.ts';
 import { ProviderIcon, WaIcon } from './Mail.tsx';
 
 /** Lo que dice un cuadrito: qué es y cómo se llama. */
@@ -43,8 +43,14 @@ export function SlotMap({ onPick, drop, over }: { onPick?: (i: number) => void; 
   const panes = usePanes();
   const pinned = usePinned();
   const label = useSlotLabels();
+  const tasksOpen = splitMain(panes).tasks;
+  const tasksCls = `slot slot-tall ${tasksOpen ? 'is-full' : ''} ${tasksOpen && pinned.has(TASKS_KEY) ? 'is-pinned' : ''} ${over === TASKS_SLOT ? 'is-over' : ''}`;
+  const tasksInner = <><span className="slot-what"><span aria-hidden>☑</span><b>{t('nav.issues')}</b></span><span className="slot-free">{tasksOpen ? (pinned.has(TASKS_KEY) ? `📌 ${t('grid.pinned')}` : '') : `＋ ${t('grid.free')}`}</span></>;
   return (
     <div className="slot-map">
+      {onPick
+        ? <button type="button" className={tasksCls} title={t('grid.tasksSlot')} onClick={() => onPick(TASKS_SLOT)}>{tasksInner}</button>
+        : <div className={tasksCls} title={t('grid.tasksSlot')} onDragOver={drop ? (e) => drop.onOver(TASKS_SLOT, e) : undefined} onDrop={drop ? (e) => drop.onDrop(TASKS_SLOT, e) : undefined} onDragLeave={drop?.onLeave}>{tasksInner}</div>}
       {slots(panes, MAX_PANES).map((key, i) => {
         const on = over === i;
         const inner = key ? (
@@ -96,7 +102,8 @@ export function PinToGrid({ payload, name, className = '' }: { payload: DragPayl
 export function GridGlyph({ big }: { big?: boolean }) {
   const panes = usePanes();
   const pinned = usePinned();
-  return <span className={`grid-glyph ${big ? 'big' : ''}`} aria-hidden>{slots(panes, MAX_PANES).map((k, i) => <i key={i} className={k ? (pinned.has(k) ? 'is-pinned' : 'is-on') : ''} />)}</span>;
+  const tasksOpen = splitMain(panes).tasks;
+  return <span className={`grid-glyph ${big ? 'big' : ''}`} aria-hidden>{slots(panes, MAX_PANES).map((k, i) => <i key={i} className={k ? (pinned.has(k) ? 'is-pinned' : 'is-on') : ''} />)}<i className={`tall ${tasksOpen ? (pinned.has(TASKS_KEY) ? 'is-pinned' : 'is-on') : ''}`} /></span>;
 }
 
 /** Los chats a mano para la zona 1: fijados primero y luego los más recientes. */

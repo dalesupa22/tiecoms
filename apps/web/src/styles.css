@@ -2069,10 +2069,10 @@ button.slot:disabled { opacity: .5; cursor: not-allowed; }
 .btn.small .grid-glyph i { border-width: 1.2px; }
 /* /cuadricula, vacía, y al lado de WhatsApp y Correo */
 .grid-screen { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.grid-screen > .split { flex: 1; min-height: 0; height: auto; }
+.grid-screen > .split-root { flex: 1; min-height: 0; height: auto; }
 .grid-back { align-self: flex-start; margin: 10px 12px 0; border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 5px 14px 5px 10px; font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
 .grid-back:hover { border-color: var(--accent); color: var(--ink); }
-.grid-screen > .grid-back + .split { margin-top: 10px; }
+.grid-screen > .grid-back + .split-root { margin-top: 10px; }
 .split.grid-empty { display: grid; place-items: center; background: none; }
 .grid-empty-card { max-width: 440px; text-align: center; display: grid; gap: 10px; justify-items: center; padding: 24px; }
 .grid-empty-card h2 { font-size: 34px; margin: 4px 0 0; line-height: 1.05; }
@@ -2082,7 +2082,7 @@ button.slot:disabled { opacity: .5; cursor: not-allowed; }
 .main.has-grid-side { flex-direction: row; }
 .main.has-grid-side > .page { flex: 1 1 0; min-width: 0; }
 .grid-side { flex: 1 1 0; min-width: 0; min-height: 0; border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--paper); }
-.grid-side > .split { flex: 1; min-height: 0; height: auto; }
+.grid-side > .split-root { flex: 1; min-height: 0; height: auto; }
 @media (prefers-reduced-motion: reduce) { .tray, .rail-grid .glyph-pulse { animation: none; } }
 
 .split.is-side.n3 > .split-cell:nth-child(3) { grid-column: auto; }
@@ -2119,3 +2119,18 @@ button.slot:disabled { opacity: .5; cursor: not-allowed; }
 :root[data-theme="dark"] .stat.dark .eyebrow { color: var(--accent-ink); }
 /* Diálogos y paneles flotantes en oscuro: un escalón más claro que el fondo, con borde, para que se separen. */
 :root[data-theme="dark"] .modal, :root[data-theme="dark"] .mail-drawer { background: var(--card); border: 1px solid var(--line); }
+
+/* La tercera columna: Tareas a la derecha, de arriba a abajo, sin gastar uno de los 4 cuaditos */
+.split-root { position: relative; height: 100%; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.split-root > .split { height: 100%; min-height: 0; }
+.split-root.has-tasks { grid-template-columns: minmax(0, 1fr) clamp(300px, 28%, 440px); gap: 6px; background: var(--line); }
+.split-tasks { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-radius: 8px; overflow: hidden; background: var(--paper); }
+.split-tasks > .split-cell { flex: 1; min-height: 0; }
+.split-root.has-tasks > .split.n1:not(.grid-empty) { background: none; }
+/* El mapa de cuaditos con la columna alta de Tareas a la derecha */
+.slot-map { grid-template: 1fr 1fr / 1fr 1fr minmax(0, .62fr); }
+.slot-tall { grid-column: 3; grid-row: 1 / 3; align-items: center; text-align: center; justify-content: center; }
+.slot-tall .slot-what { justify-content: center; flex-direction: column; gap: 2px; }
+.grid-glyph { width: 30px; grid-template: 1fr 1fr / 1fr 1fr .7fr; }
+.grid-glyph i.tall { grid-column: 3; grid-row: 1 / 3; }
+.grid-glyph.big { width: 84px; }

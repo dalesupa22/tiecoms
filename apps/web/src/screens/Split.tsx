@@ -10,7 +10,7 @@ import { useClient } from '../app-client.ts';
 import { t } from '../i18n.ts';
 import { navigate } from '../router.ts';
 import { conversationTitle } from '../ui.tsx';
-import { parseKey } from '../grid-keys.ts';
+import { TASKS_KEY, parseKey } from '../grid-keys.ts';
 import { openInGrid, readDrag, shareToChat } from '../grid-actions.ts';
 import {
   MAX_PANES, closePane, dragKindOf, fitsChat, fitsSlot, focusPane, onlyPane, rememberBack, setSplitSize, syncActive, togglePin,
@@ -51,17 +51,23 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   if (id && !list.includes(id)) list[0] = id;
   const active = id ?? (activeStore && list.includes(activeStore) ? activeStore : list[0] ?? null);
   const [drop, setDrop] = useState<{ over: string | null; kind: DragKind } | null>(null);
-  const full = list.length >= MAX_PANES;
+  // Tareas va en su propia columna, a la derecha y de arriba a abajo (la tercera columna): no gasta uno de los 4 cuaditos.
+  // Al lado de WhatsApp o Correo el espacio es angosto y va apilada con los demás.
+  const hasTasks = list.includes(TASKS_KEY);
+  const withTasks = hasTasks && !side;
+  const grid = withTasks ? list.filter((k) => k !== TASKS_KEY) : list;
+  const full = grid.length >= MAX_PANES;
   const sizes = useSplitSizes();
 
   const cellOf = (e: DragEvent) => (e.target as HTMLElement).closest<HTMLElement>('[data-pane]')?.dataset.pane ?? null;
   const chatOver = (over: string | null) => (over && parseKey(over).kind === 'chat' ? over : null);
+  /** Lo que solo viaja a un chat (un mensaje o una tarea suelta) no se acepta fuera de un chat. */
+  const onlyChat = (k: DragKind) => k === 'wamsg' || k === 'task';
   const onDragOver = (e: DragEvent) => {
     const kind = dragKindOf(e.dataTransfer.types);
     if (!wide || !kind) return;
     const over = cellOf(e);
-    // Un mensaje suelto solo viaja a un chat; lo demás se puede llevar a un cuadrito.
-    if (kind === 'wamsg' ? !chatOver(over) : !fitsSlot(kind) && !fitsChat(kind)) { if (drop) setDrop(null); return; }
+    if (onlyChat(kind) ? !chatOver(over) : !fitsSlot(kind) && !fitsChat(kind)) { if (drop) setDrop(null); return; }
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
     if (!drop || drop.over !== over || drop.kind !== kind) setDrop({ over, kind });
@@ -79,14 +85,14 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
     e.preventDefault();
     e.stopPropagation(); // el área principal de otras pantallas también recibe soltados (Shell.tsx): este ya lo atendió
     const chat = chatOver(over);
-    // Acción 1: un correo o un mensaje de WhatsApp sobre un chat se lleva a ese chat.
-    if (chat && (p.kind === 'mail' || p.kind === 'wamsg')) {
+    // Acción 1: un correo, un mensaje de WhatsApp o una tarea sobre un chat se lleva a ese chat.
+    if (chat && (p.kind === 'mail' || p.kind === 'wamsg' || p.kind === 'task')) {
       const title = conversationTitle(d!, d!.conversations.find((c) => c.id === chat)!);
       void shareToChat(p, chat, title);
       return;
     }
-    if (p.kind === 'wamsg') return;
-    // Acción 2: un cuadrito.
+    if (p.kind === 'wamsg' || p.kind === 'task') return;
+    // Acción 2: un cuadrito (Tareas, a su columna).
     openInGrid(p, active, full ? over : null);
   };
   const hint = (() => {
@@ -96,25 +102,9 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
       const c = d?.conversations.find((x) => x.id === chat);
       return t('grid.dropShare', { name: c && d ? conversationTitle(d, c) : '' });
     }
-    return full ? t('split.dropReplace') : t('split.dropAdd', { n: list.length + 1, max: MAX_PANES });
+    return full ? t('split.dropReplace') : t('split.dropAdd', { n: grid.length + 1, max: MAX_PANES });
   })();
 
-  if (list.length === 0) {
-    return (
-      <div className={`split n1 grid-empty ${drop ? 'is-dropping' : ''}`} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
-        <div className="grid-empty-card">
-          <div className="grid-glyph big" aria-hidden><i /><i /><i /><i /></div>
-          <h2 className="serif">{t('grid.emptyTitle')}</h2>
-          <p>{t('grid.emptyBody')}</p>
-          <ul className="grid-empty-list">
-            <li><b>{t('grid.toChat')}</b> {t('grid.toChatHow')}</li>
-            <li><b>{t('grid.toSlot')}</b> {t('grid.toSlotHow')}</li>
-          </ul>
-        </div>
-        {hint && <div className="split-drop" aria-hidden><span>⊞ {hint}</span></div>}
-      </div>
-    );
-  }
   const cell = (x: string) => {
     const ref = parseKey(x);
     const frame = { active: x === active, count: list.length, pinned: pinned.has(x), onClose: () => closePane(x, id), onOnly: () => onlyPane(x), onPin: () => togglePin(x) };
@@ -131,31 +121,46 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
       </div>
     );
   };
-  if (list.length === 1) {
+  /** Los cuaditos: 1 → completo · 2 → lado a lado · 3 → dos arriba y uno abajo · 4 → 2×2 (al lado de otra página, uno sobre otro). */
+  const body = (items: string[]) => {
+    if (items.length === 0) {
+      return (
+        <div className="split n1 grid-empty">
+          <div className="grid-empty-card">
+            <div className="grid-glyph big" aria-hidden><i /><i /><i /><i /><i className="tall" /></div>
+            <h2 className="serif">{t('grid.emptyTitle')}</h2>
+            <p>{t('grid.emptyBody')}</p>
+            <ul className="grid-empty-list">
+              <li><b>{t('grid.toChat')}</b> {t('grid.toChatHow')}</li>
+              <li><b>{t('grid.toSlot')}</b> {t('grid.toSlotHow')}</li>
+              <li><b>{t('nav.issues')}</b> {t('grid.tasksColHow')}</li>
+            </ul>
+          </div>
+        </div>
+      );
+    }
+    if (items.length === 1) return <div className="split n1">{cell(items[0]!)}</div>;
+    if (side) {
+      return (
+        <div className={`split n${items.length} is-side`} style={{ gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: `repeat(${items.length}, minmax(0, 1fr))` }}>
+          {items.map(cell)}
+        </div>
+      );
+    }
     return (
-      <div className={`split n1 ${side ? 'is-side' : ''} ${drop ? 'is-dropping' : ''}`} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
-        {cell(list[0]!)}
-        {hint && <div className="split-drop" aria-hidden><span>⊞ {hint}</span></div>}
+      <div className={`split n${items.length}`}
+        style={{ gridTemplateColumns: `${sizes.col}fr ${1 - sizes.col}fr`, ...(items.length > 2 ? { gridTemplateRows: `${sizes.row}fr ${1 - sizes.row}fr` } : {}) }}>
+        {items.map(cell)}
+        {/* Divisiones que se arrastran para cambiar el tamaño (doble clic: mitad y mitad). */}
+        <SplitHandle dir="col" at={sizes.col} />
+        {items.length > 2 && <SplitHandle dir="row" at={sizes.row} />}
       </div>
     );
-  }
-  // Al lado de WhatsApp o Correo el espacio es angosto: los paneles van uno sobre otro, sin divisiones.
-  if (side) {
-    return (
-      <div className={`split n${list.length} is-side ${drop ? 'is-dropping' : ''}`} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
-        style={{ gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: `repeat(${list.length}, minmax(0, 1fr))` }}>
-        {list.map(cell)}
-        {hint && <div className="split-drop" aria-hidden><span>⊞ {hint}</span></div>}
-      </div>
-    );
-  }
+  };
   return (
-    <div className={`split n${list.length} ${drop ? 'is-dropping' : ''}`} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
-      style={{ gridTemplateColumns: `${sizes.col}fr ${1 - sizes.col}fr`, ...(list.length > 2 ? { gridTemplateRows: `${sizes.row}fr ${1 - sizes.row}fr` } : {}) }}>
-      {list.map(cell)}
-      {/* Divisiones que se arrastran para cambiar el tamaño (doble clic: mitad y mitad). */}
-      <SplitHandle dir="col" at={sizes.col} />
-      {list.length > 2 && <SplitHandle dir="row" at={sizes.row} />}
+    <div className={`split-root ${withTasks ? 'has-tasks' : ''} ${side ? 'is-side' : ''} ${drop ? 'is-dropping' : ''}`} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+      {body(grid)}
+      {withTasks && <div className="split-tasks">{cell(TASKS_KEY)}</div>}
       {hint && <div className="split-drop" aria-hidden><span>⊞ {hint}</span></div>}
     </div>
   );

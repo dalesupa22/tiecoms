@@ -7,14 +7,15 @@
 import { client } from './app-client.ts';
 import { errorText, t } from './i18n.ts';
 import { toast } from './menu.tsx';
-import { navigate } from './router.ts';
-import { type MailProviderKey, type Section, mailKey, sectionKey, waKey } from './grid-keys.ts';
+import { BASE, navigate } from './router.ts';
+import { TASKS_KEY, TASKS_SLOT, type MailProviderKey, type Section, mailKey, sectionKey, splitMain, waKey } from './grid-keys.ts';
 import { DRAG_MAIL, DRAG_TYPE, DRAG_WA, DRAG_WAMSG, type DragKind, MAX_PANES, currentPanes, dragType, openBeside, pinAt, rememberMeta } from './split.ts';
 
 export interface MailDrag { provider: MailProviderKey; id: string; subject: string; from: string }
 export interface WaDrag { accountId: string; jid: string; name: string; isGroup: boolean }
 export interface WaMsgDrag { accountId: string; jid: string; messageId: string; chatName: string; text: string }
-export type DragPayload = { kind: 'chat'; id: string } | { kind: 'section'; section: Section } | ({ kind: 'mail' } & MailDrag) | ({ kind: 'wa' } & WaDrag) | ({ kind: 'wamsg' } & WaMsgDrag);
+export interface TaskDrag { id: string; title: string }
+export type DragPayload = { kind: 'chat'; id: string } | { kind: 'section'; section: Section } | ({ kind: 'task' } & TaskDrag) | ({ kind: 'mail' } & MailDrag) | ({ kind: 'wa' } & WaDrag) | ({ kind: 'wamsg' } & WaMsgDrag);
 
 /** Pone lo que se arrastra en el dataTransfer, con el tipo que dice qué es (así la bandeja lo sabe mientras se arrastra). */
 export function setDrag(e: { dataTransfer: DataTransfer | null }, kind: DragKind, payload: object, label: string) {
@@ -43,6 +44,7 @@ export function paneOf(p: DragPayload): { key: string; title: string; sub?: stri
 export async function shareToChat(p: DragPayload, conversationId: string, chatName: string): Promise<boolean> {
   try {
     if (p.kind === 'mail') await client.shareMail({ provider: p.provider, messageId: p.id, conversationIds: [conversationId] });
+    else if (p.kind === 'task') await client.send(conversationId, `☑ ${p.title}\n${location.origin}${BASE}/asuntos?issue=${p.id}`);
     else if (p.kind === 'wamsg') await client.shareWhatsApp({ accountId: p.accountId, jid: p.jid, messageId: p.messageId, conversationIds: [conversationId] });
     else return false;
     toast(t('grid.sharedTo', { name: chatName }), { label: t('lin.open'), run: () => navigate(`/c/${conversationId}`) });
@@ -62,9 +64,11 @@ export function openInGrid(p: DragPayload, active: string | null, replace: strin
 /** Acción 2 desde la bandeja o el botón Fijar: queda fijado en el cuadrito elegido. Devuelve el lugar (0–3) o -1. */
 export function pinToSlot(p: DragPayload, index: number, chatTitle?: string): number {
   const pane = paneOf(p); if (!pane) return -1;
+  // La columna alta de la derecha es solo de Tareas.
+  if (index === TASKS_SLOT && pane.key !== TASKS_KEY) { toast(t('grid.tasksOnly')); return -1; }
   const at = pinAt(pane.key, index, p.kind === 'chat' ? undefined : { title: pane.title, sub: pane.sub });
-  if (at < 0) { toast(currentPanes().length >= MAX_PANES ? t('grid.slotPinned') : t('grid.allPinned')); return -1; }
+  if (at < 0) { toast(splitMain(currentPanes()).main.length >= MAX_PANES ? t('grid.slotPinned') : t('grid.allPinned')); return -1; }
   const name = p.kind === 'chat' ? chatTitle ?? '' : pane.title;
-  toast(t('grid.pinnedAt', { name, n: at + 1 }), { label: t('grid.see'), run: () => navigate('/cuadricula') });
+  toast(pane.key === TASKS_KEY ? t('grid.pinnedTasks', { name }) : t('grid.pinnedAt', { name, n: at + 1 }), { label: t('grid.see'), run: () => navigate('/cuadricula') });
   return at;
 }

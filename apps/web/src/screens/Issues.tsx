@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { BootstrapDTO, IssueDTO, IssueEventDTO, IssueStatus, IssueVisibility } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { PinToGrid } from './Tray.tsx';
+import { setDrag } from '../grid-actions.ts';
 import { errorText, locale, t } from '../i18n.ts';
 import { navigate, queryParam } from '../router.ts';
 import { Avatar, Modal, conversationTitle, orgById, personById } from '../ui.tsx';
@@ -128,7 +129,7 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
     i.commentCount > 0 ? `💬 ${i.commentCount}` : null,
   ].filter(Boolean);
   return (
-    <div role="button" tabIndex={0} className={`card issue-row ${child ? 'is-child' : ''} ${f.stalledDays || f.overdue ? 'is-jam' : ''} ${done ? 'is-done' : ''}`}
+    <div role="button" tabIndex={0} draggable title={t('grid.dragTask')} onDragStart={(e) => setDrag(e, 'task', { id: i.id, title: i.title }, i.title)} className={`card issue-row ${child ? 'is-child' : ''} ${f.stalledDays || f.overdue ? 'is-jam' : ''} ${done ? 'is-done' : ''}`}
       onClick={() => onOpen(i.id)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i.id); }} {...menuProps(() => issueQuickMenu(i))}>
       {child && <span className="child-elbow" aria-hidden>↳</span>}
       <IssueCheck i={i} size={child ? 18 : 20} />

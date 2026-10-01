@@ -9,7 +9,7 @@
  */
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { navigate } from './router.ts';
-import { MAX_PANES_DEFAULT, isChatKey, placeInto, replaceIndex } from './grid-keys.ts';
+import { MAX_PANES_DEFAULT, TASKS_KEY, isChatKey, placeIntoGrid, replaceIndex, splitMain } from './grid-keys.ts';
 
 export const MAX_PANES = MAX_PANES_DEFAULT;
 /** Desde qué ancho de ventana hay paneles (la app de Mac abre en ~1000 px: con 1100 no aparecían). */
@@ -33,8 +33,10 @@ export const DRAG_WA = 'application/x-chaggu-wa';
 export const DRAG_WAMSG = 'application/x-chaggu-wamsg';
 /** Una sección entera (Tareas, Correo, WhatsApp) arrastrada desde el riel o desde su página. */
 export const DRAG_SECTION = 'application/x-chaggu-section';
-export type DragKind = 'chat' | 'mail' | 'wa' | 'wamsg' | 'section';
-const DRAG_KINDS: [string, DragKind][] = [[DRAG_TYPE, 'chat'], [DRAG_MAIL, 'mail'], [DRAG_WA, 'wa'], [DRAG_WAMSG, 'wamsg'], [DRAG_SECTION, 'section']];
+/** Una tarea suelta: se lleva a un chat como enlace. */
+export const DRAG_TASK = 'application/x-chaggu-task';
+export type DragKind = 'chat' | 'mail' | 'wa' | 'wamsg' | 'section' | 'task';
+const DRAG_KINDS: [string, DragKind][] = [[DRAG_TYPE, 'chat'], [DRAG_MAIL, 'mail'], [DRAG_WA, 'wa'], [DRAG_WAMSG, 'wamsg'], [DRAG_SECTION, 'section'], [DRAG_TASK, 'task']];
 /** Qué se está arrastrando (por los tipos del dataTransfer, que sí se ven mientras se arrastra). */
 export function dragKindOf(types: readonly string[] | DOMStringList): DragKind | null {
   const list = Array.from(types as ArrayLike<string>);
@@ -43,7 +45,7 @@ export function dragKindOf(types: readonly string[] | DOMStringList): DragKind |
 export const dragType = (k: DragKind) => DRAG_KINDS.find(([, kind]) => kind === k)![0];
 /** Lo que se puede soltar en un cuadrito (todo menos un mensaje suelto) y lo que se puede llevar a un chat (correo y mensaje). */
 export const fitsSlot = (k: DragKind | null) => k === 'chat' || k === 'mail' || k === 'wa' || k === 'section';
-export const fitsChat = (k: DragKind | null) => k === 'mail' || k === 'wamsg';
+export const fitsChat = (k: DragKind | null) => k === 'mail' || k === 'wamsg' || k === 'task';
 
 const KEY = 'chaggu:split';
 const PIN_KEY = 'chaggu:split-pinned';
@@ -53,7 +55,9 @@ const SIDE_KEY = 'chaggu:grid-side';
 function read<T>(key: string, fallback: T): T { try { const v = JSON.parse(localStorage.getItem(key) ?? 'null'); return v ?? fallback; } catch { return fallback; } }
 function write(key: string, value: unknown) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* sin almacenamiento */ } }
 
-function load(): string[] { const v = read<unknown>(KEY, []); return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').slice(0, MAX_PANES) : []; }
+/** Hasta 4 cuaditos más la columna de Tareas. */
+const MAX_STORED = MAX_PANES + 1;
+function load(): string[] { const v = read<unknown>(KEY, []); return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').slice(0, MAX_STORED) : []; }
 let panes: string[] = load();
 let pinned: Set<string> = new Set(read<string[]>(PIN_KEY, []).filter((k) => typeof k === 'string'));
 export interface PaneMeta { title: string; sub?: string }
@@ -66,7 +70,7 @@ const emit = () => listeners.forEach((l) => l());
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
 
 function set(next: string[]) {
-  panes = next.slice(0, MAX_PANES);
+  panes = next.slice(0, MAX_STORED);
   // Lo que ya no está en la cuadrícula deja de estar fijado y de guardar su nombre.
   pinned = new Set([...pinned].filter((k) => panes.includes(k)));
   metas = Object.fromEntries(Object.entries(metas).filter(([k]) => panes.includes(k)));
@@ -110,14 +114,16 @@ let lastActive: string | null = null;
 export function syncActive(active: string) {
   activeKey = active;
   if (panes.length === 0 || panes.includes(active)) { lastActive = active; emit(); return; }
-  const at = lastActive ? panes.indexOf(lastActive) : -1;
-  const next = [...panes];
+  // Tareas va en su columna y no entra en estas cuentas.
+  const { main, tasks } = splitMain(panes);
+  const at = lastActive ? main.indexOf(lastActive) : -1;
+  const next = [...main];
   // Un panel fijado no cede su lugar al chat que abres: ese entra en otro hueco (o reemplaza al último sin fijar).
   if (at >= 0 && !pinned.has(lastActive!)) next[at] = active;
   else if (next.length < MAX_PANES) next.unshift(active);
   else { const r = replaceIndex(next, pinned); if (r >= 0) next[r] = active; else { lastActive = active; emit(); return; } }
   lastActive = active;
-  set([...new Set(next)]);
+  set([...new Set(next), ...(tasks ? [TASKS_KEY] : [])]);
 }
 
 export type OpenResult = 'opened' | 'focused' | 'blocked';
@@ -129,13 +135,18 @@ export type OpenResult = 'opened' | 'focused' | 'blocked';
 export function openBeside(key: string, active: string | null, replace?: string | null): OpenResult {
   const base = panes.length ? [...panes] : active ? [active] : [];
   if (base.includes(key)) { focusPane(key); return 'focused'; }
-  if (base.length < MAX_PANES) base.push(key);
+  // Tareas va a su columna (a la derecha, de arriba a abajo) y no gasta uno de los 4 cuaditos.
+  const { main, tasks } = splitMain(base);
+  let next: string[];
+  if (key === TASKS_KEY) next = [...main, TASKS_KEY];
+  else if (main.length < MAX_PANES) next = [...main, key, ...(tasks ? [TASKS_KEY] : [])];
   else {
-    const at = replaceIndex(base, pinned, replace ?? null);
+    const at = replaceIndex(main, pinned, replace ?? null);
     if (at < 0) return 'blocked';
-    base[at] = key;
+    const m = [...main]; m[at] = key;
+    next = [...m, ...(tasks ? [TASKS_KEY] : [])];
   }
-  set(base);
+  set(next);
   activeKey = key;
   if (!active && isChatKey(key)) navigate(`/c/${key}`);
   emit();
@@ -147,7 +158,7 @@ export function openBeside(key: string, active: string | null, replace?: string 
  * Devuelve el lugar (0–3) o -1 si ese cuadrito es de un panel fijado o la cuadrícula está llena.
  */
 export function pinAt(key: string, index: number, meta?: PaneMeta): number {
-  const r = placeInto(panes, key, index, pinned, MAX_PANES);
+  const r = placeIntoGrid(panes, key, index, pinned, MAX_PANES);
   if (!r) return -1;
   if (r.replaced) pinned.delete(r.replaced);
   if (r.panes !== panes) set(r.panes);

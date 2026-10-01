@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SECTIONS, isChatKey, mailKey, parseKey, placeInto, replaceIndex, sectionKey, slots, waKey } from '../src/grid-keys.ts';
+import { SECTIONS, TASKS_KEY, isChatKey, mailKey, parseKey, placeInto, placeIntoGrid, replaceIndex, sectionKey, slots, splitMain, waKey } from '../src/grid-keys.ts';
 
 describe('claves de la cuadrícula', () => {
   it('un chat conserva su id a secas y un correo o WhatsApp llevan prefijo', () => {
@@ -47,5 +47,30 @@ describe('fijar en un cuadrito', () => {
   });
   it('con 4 llenos y un hueco más allá no entra', () => {
     expect(placeInto(['a', 'b', 'c', 'd'], 'x', 4, none, 4)).toBeNull();
+  });
+});
+
+describe('la tercera columna: Tareas aparte de los 4 cuaditos', () => {
+  const none = new Set<string>();
+  it('Tareas no cuenta entre los cuaditos', () => {
+    expect(splitMain(['a', 'b', TASKS_KEY])).toEqual({ main: ['a', 'b'], tasks: true });
+    expect(slots(['a', TASKS_KEY], 4)).toEqual(['a', null, null, null]);
+  });
+  it('con los 4 cuaditos llenos todavía cabe Tareas en su columna', () => {
+    expect(placeIntoGrid(['a', 'b', 'c', 'd'], TASKS_KEY, 0, none, 4)).toEqual({ panes: ['a', 'b', 'c', 'd', TASKS_KEY], at: 4, replaced: null });
+  });
+  it('Tareas se queda al final aunque entren otros paneles', () => {
+    expect(placeIntoGrid(['a', TASKS_KEY], 'x', 3, none, 4)).toEqual({ panes: ['a', 'x', TASKS_KEY], at: 1, replaced: null });
+  });
+  it('un cuadrito ocupado se reemplaza sin tocar la columna de Tareas, y uno fijado no', () => {
+    expect(placeIntoGrid(['a', 'b', TASKS_KEY], 'x', 0, none, 4)).toEqual({ panes: ['x', 'b', TASKS_KEY], at: 0, replaced: 'a' });
+    expect(placeIntoGrid(['a', 'b', TASKS_KEY], 'x', 0, new Set(['a']), 4)).toBeNull();
+  });
+  it('con 4 llenos más Tareas no entra un quinto cuadrito', () => {
+    expect(placeIntoGrid(['a', 'b', 'c', 'd', TASKS_KEY], 'x', 4, none, 4)).toBeNull();
+  });
+  it('si Tareas ya estaba, se queda donde estaba', () => {
+    const r = placeIntoGrid(['a', TASKS_KEY], TASKS_KEY, 4, none, 4)!;
+    expect(r.panes).toEqual(['a', TASKS_KEY]);
   });
 });

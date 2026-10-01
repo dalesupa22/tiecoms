@@ -6,7 +6,7 @@ import { openMenuAt, type MenuItem } from '../menu.tsx';
 import { BASE, asset, navigate, type Route } from '../router.ts';
 import { rememberBack, usePanes, usePulse } from '../split.ts';
 import { setDrag } from '../grid-actions.ts';
-import type { Section } from '../grid-keys.ts';
+import { splitMain, type Section } from '../grid-keys.ts';
 import { GridGlyph } from './Tray.tsx';
 import { pendingOf } from '../home-order.ts';
 import { openAccountMenu } from './Profile.tsx';
@@ -155,10 +155,10 @@ export function Rail({ route }: { route: Route }) {
     <nav className="rail" aria-label={t('nav.mainNav')}>
       <button className="rail-logo" onClick={() => pick('all')} aria-label="chaggu" title="chaggu"><img src={asset('/icon.svg')} alt="" width={30} height={30} /></button>
       <RailItem icon="today" label={t('nav.today')} on={mode === 'all'} at={mentions} onClick={() => pick('all')} />
-      <button className={`rail-item rail-grid ${route.name === 'grid' ? 'on' : ''} ${panes.length ? 'lit tone-brand' : ''}`} onClick={goGrid} title={t('nav.grid')} aria-label={panes.length ? `${t('nav.grid')}, ${panes.length}/4` : t('nav.grid')} aria-current={route.name === 'grid' ? 'page' : undefined}>
+      <button className={`rail-item rail-grid ${route.name === 'grid' ? 'on' : ''} ${panes.length ? 'lit tone-brand' : ''}`} onClick={goGrid} title={t('nav.grid')} aria-label={panes.length ? `${t('nav.grid')}, ${splitMain(panes).main.length}/4${splitMain(panes).tasks ? ` + ${t('nav.issues')}` : ''}` : t('nav.grid')} aria-current={route.name === 'grid' ? 'page' : undefined}>
         <span key={pulse} className={pulse ? 'glyph-pulse' : ''}><GridGlyph /></span>
         <span className="rail-label">{t('nav.grid')}</span>
-        {panes.length > 0 && <span className="rail-count tone-brand">{panes.length}/4</span>}
+        {panes.length > 0 && <span className="rail-count tone-brand">{splitMain(panes).main.length}/4{splitMain(panes).tasks ? '+☑' : ''}</span>}
       </button>
       <RailItem icon="groups" label={t('nav.groups')} on={mode === 'groups'} count={groups} onClick={() => pick(mode === 'groups' ? 'all' : 'groups')} />
       <RailItem icon="dms" label={t('nav.dms')} on={mode === 'dms'} count={dms} onClick={() => pick(mode === 'dms' ? 'all' : 'dms')} />

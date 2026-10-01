@@ -35,9 +35,21 @@ export function parseKey(key: string): PaneRef {
 }
 export const isChatKey = (key: string) => parseKey(key).kind === 'chat';
 
-/** Los 4 cuaditos en orden: hueco i → la clave que lo ocupa, o null si está libre. */
+/**
+ * Tareas vive en su propia columna, a la derecha y de arriba a abajo (la tercera columna): no gasta uno de los 4 cuaditos.
+ * Si está abierta, su clave va siempre al final de la lista guardada.
+ */
+export const TASKS_KEY = sectionKey('tasks');
+/** En el mapa de cuaditos, la columna de Tareas es el número 5 (los 4 cuaditos son 0–3). */
+export const TASKS_SLOT = 4;
+export function splitMain(panes: string[]): { main: string[]; tasks: boolean } {
+  const main = panes.filter((k) => k !== TASKS_KEY);
+  return { main, tasks: main.length !== panes.length };
+}
+/** Los 4 cuaditos en orden: hueco i → la clave que lo ocupa, o null si está libre (Tareas no cuenta: tiene su columna). */
 export function slots(panes: string[], max: number): (string | null)[] {
-  return Array.from({ length: max }, (_, i) => panes[i] ?? null);
+  const { main } = splitMain(panes);
+  return Array.from({ length: max }, (_, i) => main[i] ?? null);
 }
 
 /**
@@ -68,4 +80,16 @@ export function placeInto(panes: string[], key: string, index: number, pinned: R
   if (next.length >= max) return null;
   next.push(key);
   return { panes: next, at: next.length - 1, replaced: null };
+}
+
+/**
+ * Como placeInto pero con la columna de Tareas aparte: Tareas se agrega (o se queda) en su columna sin gastar un cuadrito; lo demás
+ * va a los 4 cuaditos y Tareas, si estaba, sigue al final.
+ */
+export function placeIntoGrid(panes: string[], key: string, index: number, pinned: ReadonlySet<string>, max: number): { panes: string[]; at: number; replaced: string | null } | null {
+  const { main, tasks } = splitMain(panes);
+  if (key === TASKS_KEY) return tasks ? { panes, at: panes.length - 1, replaced: null } : { panes: [...main, TASKS_KEY], at: main.length, replaced: null };
+  const r = placeInto(main, key, index, pinned, max);
+  if (!r) return null;
+  return { panes: tasks ? [...r.panes, TASKS_KEY] : r.panes, at: r.at, replaced: r.replaced };
 }

@@ -1826,3 +1826,5 @@ export const PersonalPreferencesInput = z.object({
   conversations: z.record(z.uuid(), ChatPersonalPreferenceInput).default({}),
 }).refine((value) => Object.keys(value.conversations).length <= 5000, 'Demasiados chats').refine((value) => new Set(value.sections.map((s) => s.id)).size === value.sections.length, 'Secciones duplicadas').refine((value) => Object.values(value.conversations).every((p) => !p.sectionId || value.sections.some((s) => s.id === p.sectionId)), 'La sección no existe');
 export type PersonalPreferencesDTO = z.infer<typeof PersonalPreferencesInput>;
+// GIFs y memes (docs/GIFS.md).
+export * from './gifs.ts';

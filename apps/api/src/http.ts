@@ -41,6 +41,7 @@ import * as drive from './modules/drive.ts';
 import * as safety from './modules/safety.ts';
 import * as push from './modules/push.ts';
 import * as attachments from './modules/attachments.ts';
+import { registerGifMediaRoute, registerGifRoutes } from './modules/gifs.ts';
 import * as storageUsage from './modules/storage-usage.ts';
 import * as voice from './modules/voice.ts';
 import * as calls from './modules/calls.ts';
@@ -370,6 +371,8 @@ export async function buildHttp() {
       });
     }
     // Almacenamiento usado (solo medición, para cobrarlo más adelante): mío y de la empresa (owner/admin).
+    // GIFs y memes (docs/GIFS.md): búsqueda, tendencias, plantillas y enviar como adjunto.
+    registerGifRoutes(priv);
     priv.get('/api/v1/me/storage', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => storageUsage.myStorage(req.userId));
     priv.get<{ Params: { id: string } }>('/api/v1/organizations/:id/storage', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
       async (req) => storageUsage.orgStorage(req.userId, z.uuid().parse(req.params.id)));
@@ -748,6 +751,9 @@ export async function buildHttp() {
     if (!f.body.length) return reply.status(404).send({ error: { code: 'not_found', message: 'No encontrada' } });
     return reply.header('content-type', f.contentType).header('x-content-type-options', 'nosniff').header('cache-control', 'private, max-age=86400').send(f.body);
   });
+
+  // Imágenes de GIFs y memes por token cifrado (modules/gifs.ts).
+  registerGifMediaRoute(app);
 
   // Miniatura de una vista previa de enlace (guardada en S3 por el worker).
   app.get<{ Params: { id: string } }>('/api/v1/previews/:id', async (req, reply) => {

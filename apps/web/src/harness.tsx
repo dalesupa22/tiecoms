@@ -218,7 +218,19 @@ const mailHtml: Record<string, string> = {
 (waAccounts as any[]).forEach((a) => { a.sendEnabled = false; });
 (client as any).replyLiveMail = async (p: string, id: string, input: unknown) => { (window as any).__shared.push(['mail-reply', p, id, input]); return { ok: true, to: [] }; };
 (client as any).sendWhatsApp = async (a: string, j: string, text: string) => { (window as any).__shared.push(['wa-send', a, j, text]); return { id: 'o1', status: 'sent' }; };
+// GIFs y memes de ejemplo (sin backend): cuadros de colores como imágenes.
+const gifImg = (bg: string, label: string, w = 300, h = 220) => `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="${bg}"/><text x="50%" y="50%" font-size="34" font-family="sans-serif" fill="#fff" text-anchor="middle" dominant-baseline="middle">${label}</text></svg>`)}`;
+const gifItems = [['#3b6ea8', 'gato', 300, 220], ['#a8553b', 'perro', 300, 300], ['#3ba87a', 'baile', 300, 180], ['#7a3ba8', 'aplauso', 300, 260], ['#a83b6e', 'risa', 300, 200], ['#a89a3b', 'ok', 300, 240]].map(([bg, label, w, h], i) => ({
+  id: `openverse:${i}`, provider: 'openverse', title: String(label), previewUrl: gifImg(String(bg), String(label), Number(w), Number(h)), url: gifImg(String(bg), String(label), Number(w), Number(h)),
+  width: Number(w), height: Number(h), attribution: `GIF: «${label}» · Ana · CC BY-SA 4.0 · Wikimedia Commons (vía Openverse)`, sourceUrl: null,
+}));
+const memeItems = [['#444', 'Drake', 2], ['#555', 'Distracted', 3], ['#666', 'Success Kid', 2], ['#777', 'Two Buttons', 2]].map(([bg, label, boxes], i) => ({
+  id: `memegen:${i}`, provider: 'memegen', title: String(label), previewUrl: gifImg(String(bg), String(label), 400, 400), url: gifImg(String(bg), String(label), 400, 400), width: 400, height: 400, attribution: null, sourceUrl: null, boxCount: Number(boxes),
+}));
 (client as any).request = async (path: string, init: any = {}) => {
+  if (path.startsWith('/gifs/search') || path.startsWith('/gifs/trending')) return { provider: 'openverse', items: gifItems, next: null, poweredBy: { label: 'Wikimedia Commons · Openverse', url: 'https://openverse.org' } };
+  if (path.startsWith('/memes/templates')) return { provider: 'memegen', items: memeItems, next: null, poweredBy: { label: 'memegen.link · código abierto', url: 'https://memegen.link' } };
+  if (/^\/conversations\/[^/]+\/gifs$/.test(path) && init.method === 'POST') return { attachment: att(`gif-${Date.now()}`, 'gato.gif', 'image/gif', 90_000), attribution: 'GIF: «gato» · Ana · CC BY-SA 4.0 · Wikimedia Commons (vía Openverse)' };
   if (/^\/whatsapp\/accounts\/[^/]+$/.test(path) && init.method === 'PATCH') { const a = (waAccounts as any[]).find((x) => path.endsWith(x.id))!; Object.assign(a, init.json); return a; }
   if (path === '/whatsapp/accounts' && !init.method) return { accounts: waAccounts, max: 5 };
   if (path.startsWith('/whatsapp/chats?')) {

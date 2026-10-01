@@ -83,6 +83,8 @@ function SlotPicker({ slug, tz, onTz, onPick }: { slug: string; tz: string; onTz
   const [slots, setSlots] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [day, setDay] = useState<string | null>(null);
+  // Si el primer mes ya no tiene horarios (p. ej. a fin de mes), se salta solo al siguiente; si la persona navega, se respeta.
+  const [auto, setAuto] = useState(2);
 
   useEffect(() => {
     let live = true;
@@ -102,6 +104,7 @@ function SlotPicker({ slug, tz, onTz, onPick }: { slug: string; tz: string; onTz
   }, [slots, tz]);
   const prefix = `${ym[0]}-${pad(ym[1] + 1)}`;
   const monthDays = [...byDay.keys()].filter((k) => k.startsWith(prefix)).sort();
+  useEffect(() => { if (slots && auto > 0 && !monthDays.length) { setAuto(auto - 1); setYm(([y, m]) => (m === 11 ? [y + 1, 0] : [y, m + 1])); } else if (slots && auto > 0) setAuto(0); }, [slots]);
   // Al cargar, se elige de una vez el primer día con horarios (menos clics).
   useEffect(() => { if (slots && (!day || !byDay.has(day) || !day.startsWith(prefix))) setDay(monthDays[0] ?? null); }, [slots, tz, prefix]);
 
@@ -111,7 +114,7 @@ function SlotPicker({ slug, tz, onTz, onPick }: { slug: string; tz: string; onTz
   const cells = [...Array(lead).fill(null), ...Array.from({ length: total }, (_, i) => i + 1)];
   const weekdays = Array.from({ length: 7 }, (_, i) => new Intl.DateTimeFormat(locale(), { weekday: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(2024, 0, 1 + i))));
   const isCurrent = ym[0] === now.getFullYear() && ym[1] === now.getMonth();
-  const shift = (n: number) => setYm(([y, m]) => { const d = new Date(Date.UTC(y, m + n, 1)); return [d.getUTCFullYear(), d.getUTCMonth()]; });
+  const shift = (n: number) => { setAuto(0); setYm(([y, m]) => { const d = new Date(Date.UTC(y, m + n, 1)); return [d.getUTCFullYear(), d.getUTCMonth()]; }); };
   const zones = useMemo(() => { const l = tzList(); return l.includes(tz) ? l : [tz, ...l]; }, [tz]);
 
   return (

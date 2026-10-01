@@ -8,13 +8,13 @@ Entrega autorizada: GIFs y memes en todos los clientes de Chaggu, con iOS/Androi
 - GIFs animados: destacados, búsqueda y paginación mediante [Openverse](https://github.com/WordPress/openverse), filtrados a GIFs de Wikimedia Commons con BY/BY-SA/CC0/PDM. Se conserva autor, fuente y licencia al enviarlos. El catálogo libre es más pequeño que los comerciales.
 - Memes: plantillas de [memegen](https://github.com/jacebrowning/memegen), motor MIT. La licencia del motor no se aplica automáticamente a las imágenes de las plantillas. Texto superior e inferior generado en el dispositivo, sin enviar las frases al proveedor. Procedencia de la plantilla conservada.
 - Adjuntos estándar, con permisos existentes. Borrador, respuesta, tema y una sola vista preservados. Importaciones pendientes se descartan al cambiar de sesión; envío protegido contra doble clic.
-- Proxy con token autenticado/cifrado, controles de hosts y DNS, tipos/tamaños comprobados y colas acotadas. Ver [contrato y proveedores](GIFS.md).
+- Proxy con token autenticado/cifrado, controles de hosts y DNS, tipos/tamaños comprobados y colas acotadas. Plantillas repetidas filtradas en el API para conservar IDs únicos en todos los clientes. Ver [contrato y proveedores](GIFS.md).
 
 ## Entrega verificada
 
 | Cliente | Entrega | Fuente y rama |
 | --- | --- | --- |
-| Web/API | Producción `20261001035401-0692c2f`; API listo, contrato `2026-09-29.2` | `0692c2f`, `temporal/lorena-mejoras-20260930` |
+| Web/API | Producción `20261001043707-f6c21c3`; API listo, contrato `2026-09-29.2` | `f6c21c3`, `temporal/lorena-mejoras-20260930` |
 | Mac | 0.3.5 universal (Apple Silicon e Intel), firmada y notarizada; Gatekeeper Accepted | `51fffe84`, `temporal/desktop-gifs-035` |
 | Windows | 0.3.5: instalador EXE y MSI, CI y prueba Rust aprobados | `7f8c920`, `temporal/desktop-gifs-035`; ejecución GitHub 36812431060 |
 | iOS | 1.7.6 (45), TestFlight interno, `VALID / IN_BETA_TESTING`, cinco testers existentes | `4299a727`, `temporal/ios-gifs-memes-176` |
@@ -39,9 +39,9 @@ Descargas verificadas mediante el cuerpo recibido por HTTPS, tamaño y SHA256, s
 ## Validación
 
 - Web: 194 pruebas aprobadas en 29 archivos; typecheck de contratos/cliente/API/web correcto. Revisión independiente final de las correcciones de identidad de sesión y envío duplicado aprobada en `0692c2f`, sin bloqueadores en ese alcance.
-- API GIFs: 21 pruebas aprobadas; regresión Lorena: 23 aprobadas. Permisos, proxy, token, SSRF, límites de cola y descarga/importación comprobados.
+- API GIFs: 22 pruebas aprobadas; regresión Lorena: 23 aprobadas. Permisos, proxy, token, SSRF, límites de cola y descarga/importación comprobados.
 - Web local: catálogo real y editor; meme enviado a un chat de prueba, JPEG descargado del S3 local y revisado visualmente con ambas frases; GIF de una sola vista persiste oculto y el control se restablece tras envío. Capturas en `docs/qa/gifs-20261001/`.
-- Web producción: selector GIF abierto en chat personal, catálogo e imágenes reales cargan; no se enviaron mensajes en producción. API de producción comprobado con Openverse y memegen reales, GIF animado, JPEG y atribución.
+- Web producción: selector GIF abierto en chat personal, catálogo e imágenes reales cargan; no se enviaron mensajes en producción. API de producción comprobado con Openverse y memegen reales, GIF animado, JPEG y atribución; 209 plantillas con IDs únicos. El filtro Drake se comprobó de nuevo tras la corrección y muestra solamente Drakeposting.
 - Android: 522 pruebas unitarias, 512 aprobadas y 10 omitidas por fixtures; 5/5 de interfaz en emulador API36. Lint sin errores y AAB firmado con versión/número/certificado comprobados.
 - iOS: 604 pruebas unitarias, 38 omitidas por fixtures y cero fallos; 32 enfocadas aprobadas; prueba de interfaz local GIF+memes con borrador y ambos textos, sin pulsar Enviar. IPA, app y extensiones 1.7.6 (45), firma strict/deep correcta.
 - Windows: CI success, instaladores EXE/MSI generados, una prueba Rust aprobada. No se hizo prueba de instalación en un PC físico. La firma de Microsoft sigue pendiente, igual que la distribución anterior; la landing lo indica.
@@ -60,4 +60,4 @@ Los recibos locales se guardan fuera de Git en `../release-assets/1.7.6/` y `../
 | Windows EXE 0.3.5 | `7637113a68700f2b4eead37a1f930d648fa646d020511df7dafda8a03c120a6b` |
 | Windows MSI 0.3.5 | `ab54940922a49b9cc9ecd11e70500c98b3fa6ffeee4bc58253efe37de872f7ac` |
 
-Recibos clave: `1.7.6/backend-verification.json`, `1.7.6/ios/internal-45-receipt.json`, `1.7.6/android/internal-45-receipt.json`, `desktop-0.3.5/mac-signing-receipt.json`, `desktop-0.3.5/deployment-receipt.json` y `desktop-0.3.5/public-verification.json`. Apple build45 ID: `945f1ea4-4b89-45ee-894b-e6c4977e4d7e`; Google release interna `19`.
+Recibos clave: `1.7.6/backend-verification.json`, `1.7.6/ios/internal-45-receipt.json`, `1.7.6/android/internal-45-receipt.json`, `desktop-0.3.5/mac-signing-receipt.json`, `desktop-0.3.5/deployment-receipt.json` y `desktop-0.3.5/public-verification.json` y `desktop-0.3.5/after-api-fix.json` (descargas y landing preservadas tras el ajuste del API). Apple build45 ID: `945f1ea4-4b89-45ee-894b-e6c4977e4d7e`; Google release interna `19`.

@@ -76,7 +76,7 @@ Rama: `temporal/lorena-mejoras-20260930`, basada en `00e8dbc` de `principal`, qu
 
 ## Límites del alcance
 
-- Se publica web/API. Android e iOS siguen con las versiones enviadas a revisión; no se compilan, cargan, promocionan ni cambian números de versión de las apps. La rama acumula trabajo para un release posterior a su aprobación.
+- Las mejoras de Lorena se publican en web/API. Android/iOS públicos mantienen la versión enviada a revisión. Posteriormente Danny autorizó GIFs y memes 1.7.6 (45) solo para TestFlight y Google Play interno; ver [esa entrega](GIFS-PUBLICACION-2026-10-01.md).
 - Drive corresponde al almacenamiento de Chaggu; esta entrega no introduce una nueva conexión OAuth a Google Drive.
 - Crear documentos usa un editor de contenido simple; no reemplaza una suite Office completa. PDF conserva caracteres españoles y rechaza explícitamente símbolos sin representación en su fuente, indicando usar Word para conservarlos.
 - Comunidad es una vista de las publicaciones de grupos existentes; no amplía la audiencia ni agrega estados efímeros.
@@ -102,4 +102,4 @@ Rama: `temporal/lorena-mejoras-20260930`, basada en `00e8dbc` de `principal`, qu
 - Registros `app_releases` idénticos antes/después, incluidos `updated_at`: Android `1.6.7` build `26`, iOS `1.6.7` build `24`. Esto verifica que esta entrega no cambió los registros; el estado de revisión de las tiendas lo informó Danny y no se modificó.
 - La captura autenticada de producción se guarda localmente fuera de Git para preservar el contenido privado de la cuenta.
 
-Para acumular más mejoras, continuar en esta rama. Antes de un futuro despliegue desde `principal`, integrar este commit para conservar las funciones publicadas. El siguiente release nativo se prepara después de la aprobación de las versiones pendientes, como indicó Danny.
+Para acumular más mejoras, continuar en esta rama. Antes de un futuro despliegue desde `principal`, integrar este commit para conservar las funciones publicadas. Los lanzamientos públicos nativos posteriores esperan la aprobación pendiente. La beta interna de GIFs/memes fue autorizada posteriormente y no reemplaza esa revisión.

@@ -26,7 +26,7 @@ export type Route =
   | { name: 'login' } | { name: 'signup' } | { name: 'sso' } | { name: 'invite'; token: string } | { name: 'guestCall'; token: string } | { name: 'room'; code: string } | { name: 'booking'; slug: string } | { name: 'bookingManage'; token: string } | { name: 'bookingHome' } | { name: 'confirmSignup'; token: string };
 
 /** cita.chaggu.com (o book.): la ruta es directa, /<nombre> abre la página de citas y /r/<clave> administra una cita. */
-const vanityHost = typeof location !== 'undefined' && /^(cita|book)\./.test(location.hostname);
+const vanityHost = typeof location !== 'undefined' && /^(calendar|cita|book)\./.test(location.hostname);
 
 export function parse(path: string): Route {
   const [, a, b, c] = path.split('/');

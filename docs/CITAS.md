@@ -19,7 +19,7 @@ Pedido de Danny (30-sep-2026): «la competencia de Calendly por chaggu», con `/
 - Límites: máximo 3 citas futuras y 5 por hora por correo; campo trampa anti-bots; límite de peticiones por IP.
 
 ## Dónde se ve
-- **Público:** `https://cita.chaggu.com/<nombre>` (mientras el dominio no esté listo, `https://app.chaggu.com/cita/<nombre>`). Responsive, es/en según el navegador.
+- **Público:** `https://calendar.chaggu.com/<nombre>` (mientras el dominio no esté listo, `https://app.chaggu.com/cita/<nombre>`). Responsive, es/en según el navegador.
 - **Administración (web):** Agenda › **Mis enlaces**: crear y editar páginas (título, enlace, duración, modo, anfitriones, días y horas, zona, aviso mínimo, días hacia adelante), copiar el enlace, ver qué anfitriones tienen calendario conectado («Conectar mi calendario» lleva a Ajustes › Reuniones) y las próximas citas.
 - Por consola: `node ops.js booking-page <correo dueño> <slug> "<título>" <collective|round_robin> <minutos> <correos> ["<descripción>"]` (crea o actualiza) y `node ops.js booking-status`.
 
@@ -27,9 +27,9 @@ Pedido de Danny (30-sep-2026): «la competencia de Calendly por chaggu», con `/
 No hay permisos nuevos: se usa la conexión de **Ajustes › Reuniones** (Google `calendar.events.owned`, Microsoft `Calendars.ReadWrite`). Solo se leen horas ocupadas (no el contenido); los eventos «disponible» o rechazados no bloquean. Un anfitrión **sin calendario conectado** solo cuenta con su agenda de chaggu y se marca en rojo en Mis enlaces: conviene que conecte el suyo. Si Google no responde, ese anfitrión se da por ocupado (nunca se ofrece un horario sin poder comprobarlo).
 
 ## Configuración
-- `BOOKING_PUBLIC_ORIGIN=https://cita.chaggu.com` cuando el dominio esté listo (enlaces de la página y de «Cambiar o cancelar»).
+- `BOOKING_PUBLIC_ORIGIN=https://calendar.chaggu.com` cuando el dominio esté listo (enlaces de la página y de «Cambiar o cancelar»).
 - `BOOKING_CACHE_MS` (45 000): cuánto se recuerda la agenda de Google entre consultas; reservar siempre mira en fresco.
-- Dominio: DNS `cita` (CNAME, con proxy de Cloudflare) y `sudo tiecoms-cert add-chaggu cita.chaggu.com` en el servidor para agregarlo al certificado. nginx ya lo sirve (mismo app y API que app.chaggu.com; la web reconoce el host `cita.`).
+- Dominio: DNS `calendar` (A → la IP del servidor, con proxy de Cloudflare; ya creado el 30-sep-2026) y `sudo tiecoms-cert add-chaggu calendar.chaggu.com` en el servidor para agregarlo al certificado. nginx ya lo sirve (mismo app y API que app.chaggu.com; la web reconoce el host `calendar.`).
 
 ## Pruebas
 `test/booking.test.ts` (API con MEETINGS_ENABLED, CALLS_ENABLED + CALLS_PROVIDER=fake, `test/fake-meetings.mjs` y `test/fake-brevo.mjs`; BOOKING_CACHE_MS=0): zonas y cambio de horario, páginas, horarios contra el calendario, reparto, carrera de dos personas, collective, anti-abuso, cambiar y cancelar, avisos de correo y de gg. Esto NO prueba OAuth ni la agenda real de Google.

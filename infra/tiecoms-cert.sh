@@ -37,7 +37,7 @@ cert() {
   fi
 }
 
-# Agrega un nombre a un certificado que ya existe (p. ej. cita.chaggu.com cuando su DNS ya llega aquí).
+# Agrega un nombre a un certificado que ya existe (p. ej. calendar.chaggu.com cuando su DNS ya llega aquí).
 # Uso: tiecoms-cert add-chaggu <nombre>. Mantiene los nombres actuales y recarga nginx.
 if [ "${1:-}" = add-chaggu ] && [ -n "${2:-}" ]; then
   LE=/etc/letsencrypt/live/chaggu.com
@@ -54,6 +54,6 @@ if [ "${1:-}" != chaggu ]; then
   cert tiecoms.com /etc/nginx/tiecoms/tls www.tiecoms.com tiecoms.com www.tiecoms.com app.tiecoms.com || pending=1
 fi
 if [ "${1:-}" != tiecoms ]; then
-  cert chaggu.com /etc/nginx/tiecoms/tls-chaggu www.chaggu.com chaggu.com www.chaggu.com app.chaggu.com cita.chaggu.com || pending=1
+  cert chaggu.com /etc/nginx/tiecoms/tls-chaggu www.chaggu.com chaggu.com www.chaggu.com app.chaggu.com calendar.chaggu.com || pending=1
 fi
 [ "$pending" = 1 ] || systemctl disable --now tiecoms-cert.timer 2>/dev/null || true

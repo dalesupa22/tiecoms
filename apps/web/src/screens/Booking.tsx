@@ -176,7 +176,7 @@ function Summary({ b, tz }: { b: BookingDTO; tz: string }) {
 
 function Done({ b, tz, title, onAnother }: { b: BookingDTO; tz: string; title: string; onAnother?: () => void }) {
   const cal = calendarLinks(b);
-  const manage = b.manageToken ? `${location.origin}${/^(cita|book)\./.test(location.hostname) ? '' : '/cita'}/r/${b.manageToken}` : null;
+  const manage = b.manageToken ? `${location.origin}${/^(calendar|cita|book)\./.test(location.hostname) ? '' : '/cita'}/r/${b.manageToken}` : null;
   return (
     <div className="bk-done">
       <div className="bk-check" aria-hidden>✓</div>
@@ -278,7 +278,7 @@ function ManagePage({ token }: { token: string }) {
   const past = Date.parse(b.startsAt) < Date.now();
   if (b.status === 'cancelled') {
     return <Shell><div className="bk-done"><div className="bk-check off" aria-hidden>×</div><h2 className="bk-h2 big">{t('bk.cancelledTitle')}</h2><p className="muted">{t('bk.cancelledSub')}</p>
-      <div className="bk-actions"><a className="bk-btn primary" href={b.page.slug ? `${/^(cita|book)\./.test(location.hostname) ? '' : '/cita'}/${b.page.slug}` : '/'}>{t('bk.bookAgain')}</a></div></div></Shell>;
+      <div className="bk-actions"><a className="bk-btn primary" href={b.page.slug ? `${/^(calendar|cita|book)\./.test(location.hostname) ? '' : '/cita'}/${b.page.slug}` : '/'}>{t('bk.bookAgain')}</a></div></div></Shell>;
   }
   if (moved) return <Shell><Done b={b} tz={tz} title={t('bk.movedTitle')} /></Shell>;
   if (mode === 'move') {

@@ -20,8 +20,9 @@ Lo común va en `desktop` y se fusiona a las dos.
 
 Los instaladores viven fuera de las releases del servidor: un despliegue no los borra ni los vuelve a subir.
 
-## Firma (pendiente)
+## Firma
 
-- **Mac:** el certificado «Developer ID Application: CERTILABOR SAS» ya está creado en Apple (vence en 2031). Falta importarlo en el Llavero junto con `tiecoms/.secrets/developerid_app.key`. La notarización usa la llave de App Store Connect guardada en `.secrets/notary_*`. Sin firma, macOS pide «Abrir de todos modos» en Privacidad y seguridad.
-- **Windows:** Azure Trusted Signing. Sin firma, SmartScreen muestra «Más información › Ejecutar de todos modos».
-- La landing explica los dos avisos en «¿Tu computador muestra un aviso al abrirla?». Quítalo cuando las dos firmas estén listas.
+- **Mac:** Developer ID Application: CERTILABOR SAS (B76US7H3L3) está instalado con su clave privada en el Llavero. La 0.3.4 pública está firmada, notarizada y engrapada (app y DMG), con `codesign`, `stapler` y Gatekeeper verificados. La notarización usa `.secrets/notary_*`; no se incluyen secretos en Git.
+- **Windows:** Azure Artifact Signing ya tiene la cuenta `xertichaggusigning` y los permisos de validación y firma. La identidad pública de XERTI, INC. está `In Progress`; los instaladores de Windows 0.3.4 siguen sin firma hasta la aprobación de Microsoft.
+- La landing distingue la descarga de Mac firmada del aviso de Windows. Los enlaces usan los nombres versionados de `latest.json` para evitar servir un instalador anterior desde caché.
+- No se ha verificado todavía que el permiso de grabación de pantalla persista entre versiones.

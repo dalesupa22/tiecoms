@@ -30,13 +30,17 @@ rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
 CI=true npx tauri build --target universal-apple-darwin --bundles app,dmg
 
 VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-DMG="src-tauri/target/universal-apple-darwin/release/bundle/dmg/Chaggu_${VERSION}_universal.dmg"
-APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/Chaggu.app"
+PRODUCT=$(node -p "require('./src-tauri/tauri.conf.json').productName")
+DMG="src-tauri/target/universal-apple-darwin/release/bundle/dmg/${PRODUCT}_${VERSION}_universal.dmg"
+APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/${PRODUCT}.app"
 # Tauri notariza y engrapa la .app; el .dmg también se notariza para que abra sin avisos sin conexión.
 codesign --force --sign "$IDENTITY" --timestamp "$DMG"
 xcrun notarytool submit "$DMG" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait
 xcrun stapler staple "$DMG"
 
+codesign --verify --deep --strict --verbose=2 "$APP"
+xcrun stapler validate "$APP"
+xcrun stapler validate "$DMG"
 spctl -a -vvv -t exec "$APP"
 spctl -a -vvv -t open --context context:primary-signature "$DMG"
 mkdir -p "$OUT/desktop-$VERSION"

@@ -931,6 +931,7 @@ fun ConversationScreen(
                 meta.sideIssueId?.let { SideIssueStrip(id, it, onOpen = onOpenIssue) }
                 // Mensajes programados de este chat (solo los veo yo): «🕒 N programados · el próximo sale … · Ver».
                 ScheduledStrip(id)
+                val composerReplyId = replyTo?.id
                 Composer(
                 id, title, data, replyTo, editing,
                 onCancelReply = { replyTo = null }, onCancelEdit = { editing = null },
@@ -940,7 +941,7 @@ fun ConversationScreen(
                         val src = privateHere.source
                         client.send(id, text, null, com.tiecoms.app.core.ForwardedInfo("tiecoms", privateHere.authorName, src.createdAt, src.conversationId, src.id), attachments = att, mentions = mentions)
                         container.privateReply.value = null
-                    } else client.send(id, text, replyTo?.id, attachments = att, mentions = mentions, topicId = activeTopic?.id, viewOnce = once)
+                    } else client.send(id, text, composerReplyId, attachments = att, mentions = mentions, topicId = activeTopic?.id, viewOnce = once)
                     replyTo = null
                 },
                 onSaveEdit = { m, text, mentions ->
@@ -1133,6 +1134,9 @@ private fun Composer(
     var editSel by remember(editing?.id) { mutableStateOf(androidx.compose.ui.text.TextRange(editing?.body?.length ?: 0)) }
     // Adjuntos elegidos (copiados a caché) antes de enviar; se suben al pulsar Enviar (SPEC-v4).
     var files by remember(id) { mutableStateOf(listOf<com.tiecoms.app.core.Attachments.Shared>()) }
+    var creativePicker by remember(id) { mutableStateOf(false) }
+    var gif by remember(id) { mutableStateOf<com.tiecoms.app.core.CreativeMediaDTO?>(null) }
+    var memeSources by remember(id) { mutableStateOf(mapOf<String, String>()) }
     var uploading by remember(id) { mutableStateOf<Pair<Int, Float>?>(null) }
     var attError by remember(id) { mutableStateOf<String?>(null) }
     var picker by remember { mutableStateOf(false) }
@@ -1205,6 +1209,7 @@ private fun Composer(
         dismissButton = { TextButton(onClick = { micWhy = false }) { Text(stringResource(R.string.cancel)) } },
     )
     fun add(uris: List<android.net.Uri>, done: () -> Unit = {}) {
+        if (uploading != null) { done(); return }
         if (uris.isEmpty()) { done(); return }
         scope.launch {
             val copied = try {
@@ -1215,6 +1220,7 @@ private fun Composer(
                 attError = ctx.getString(R.string.paste_image_failed); emptyList()
             } finally { done() }
             if (copied.isEmpty()) return@launch
+            if (uploading != null) { copied.forEach { java.io.File(it.path).delete() }; return@launch }
             val plan = com.tiecoms.app.core.Attachments.plan(files + copied, null)
             attError = plan.tooLarge.firstOrNull()?.let { ctx.getString(R.string.att_too_large, it.name) }
                 ?: if (plan.dropped > 0) ctx.getString(R.string.att_too_many) else null
@@ -1223,7 +1229,14 @@ private fun Composer(
     }
     val taskDialogs = LocalTaskDialogs.current
     val sideIssue = client.meta(id)?.sideIssueId
-    AttachPicker(picker, onDismiss = { picker = false }, onPicked = { add(it) }, onEvent = onNewEvent, onIssue = onNewIssue,
+    if (creativePicker && com.tiecoms.app.core.CreativeMedia.available(client.meta(id)?.kind)) CreativeMediaPicker(
+        onDismiss = { creativePicker = false }, onGif = { gif = it }, onMeme = { file, source ->
+            val plan = com.tiecoms.app.core.Attachments.plan(files + file, null)
+            files = plan.files
+            if (file in files) memeSources = memeSources + (file.path to source)
+            else { java.io.File(file.path).delete(); attError = ctx.getString(R.string.att_too_many) }
+        })
+    AttachPicker(picker && uploading == null, onDismiss = { picker = false }, onPicked = { add(it) }, onEvent = onNewEvent, onIssue = onNewIssue,
         onTask = sideIssue?.let { sid -> { picker = false; taskDialogs.openTasks(sid, id) } },
         onMeetNow = onMeeting?.let { f -> { picker = false; f(true) } }, onMeetSchedule = onMeeting?.let { f -> { picker = false; f(false) } },
         onMail = onMail?.let { f -> { picker = false; f() } }, onWhatsApp = onWhatsApp?.let { f -> { picker = false; f() } })
@@ -1231,35 +1244,69 @@ private fun Composer(
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(id, autoFocus) { if (autoFocus) { delay(300); runCatching { focus.requestFocus() } } }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     LaunchedEffect(focusSignal) { if (focusSignal > 0) { withFrameNanos { }; runCatching { focus.requestFocus() }; keyboard?.show() } }
     fun sendNow() {
+        if (uploading != null) return
         val body = text
         val bodyMents = ments
         // ① solo con texto, fotos o nota de voz: con otros archivos no se manda (el servidor respondería 400).
         if (viewOnce && !files.all { it.contentType?.startsWith("image/") == true }) { attError = ctx.getString(R.string.vo_only_photos); return }
         val once = viewOnce
-        viewOnce = false
-        if (files.isEmpty()) { if (body.isNotBlank()) { onSend(body, emptyList(), bodyMents, once); text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0) }; return }
+        val selectedGif = gif
+        if (files.isEmpty() && selectedGif == null) { if (body.isNotBlank()) { onSend(body, emptyList(), bodyMents, once); viewOnce = false; text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0) }; return }
+        if (files.size + (if (selectedGif != null) 1 else 0) > com.tiecoms.app.core.Attachments.MAX_PER_MESSAGE) { attError = ctx.getString(R.string.att_too_many); return }
         attError = null
+        val selectedFiles = files.toList()
+        val selectedSources = memeSources.toMap()
+        val session = client.sessionGeneration
+        val author = client.myId
+        fun requireOwner() {
+            if (client.sessionGeneration != session || client.myId != author || author == null) throw kotlinx.coroutines.CancellationException("Session changed")
+        }
+        val send = onSend
+        // Set synchronously: a second tap cannot start another import before the coroutine runs.
+        uploading = 0 to 0f
         scope.launch {
-            val done = mutableListOf<com.tiecoms.app.core.AttachmentDTO>()
-            for ((i, f) in files.withIndex()) {
-                uploading = i to 0f
-                try {
-                    done += com.tiecoms.app.platform.AttachmentUpload.upload(ctx.applicationContext, client, id, java.io.File(f.path), f.name, f.contentType) { sent, total ->
-                        uploading = i to (if (total > 0) sent.toFloat() / total else 0f)
+            try {
+                requireOwner()
+                val done = mutableListOf<com.tiecoms.app.core.AttachmentDTO>()
+                val sources = selectedFiles.mapNotNull { selectedSources[it.path] }.toMutableList()
+                if (selectedGif != null) {
+                    try {
+                        requireOwner()
+                        val imported = client.importGif(id, selectedGif)
+                        requireOwner()
+                        done += imported.attachment
+                        sources += imported.attribution ?: com.tiecoms.app.core.CreativeMedia.attribution(selectedGif)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        attError = errorText(ctx, e); uploading = null; return@launch
                     }
-                } catch (e: Exception) {
-                    attError = ctx.getString(R.string.att_upload_failed, f.name) + " · " + errorText(ctx, e)
-                    // Los ya subidos quedan pendientes en el servidor (el worker los borra a las 24 h); se reintenta todo.
-                    uploading = null
-                    return@launch
                 }
-            }
-            uploading = null
-            onSend(body, done, bodyMents, once)
-            files.forEach { java.io.File(it.path).delete() }
-            files = emptyList(); text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0)
+                for ((i, f) in selectedFiles.withIndex()) {
+                    uploading = i to 0f
+                    try {
+                        requireOwner()
+                        done += com.tiecoms.app.platform.AttachmentUpload.upload(ctx.applicationContext, client, id, java.io.File(f.path), f.name, f.contentType) { sent, total ->
+                            uploading = i to (if (total > 0) sent.toFloat() / total else 0f)
+                        }
+                        requireOwner()
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        attError = ctx.getString(R.string.att_upload_failed, f.name) + " · " + errorText(ctx, e)
+                        // Los ya subidos quedan pendientes en el servidor (el worker los borra a las 24 h); se reintenta todo.
+                        uploading = null
+                        return@launch
+                    }
+                }
+                requireOwner()
+                send(com.tiecoms.app.core.CreativeMedia.body(body, sources), done, bodyMents, once)
+                selectedFiles.forEach { java.io.File(it.path).delete() }
+                files = emptyList(); gif = null; memeSources = emptyMap(); viewOnce = false; text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0)
+            } finally { uploading = null }
         }
     }
     var editText by rememberSaveable(editing?.id) { mutableStateOf(editing?.body ?: "") }
@@ -1267,7 +1314,7 @@ private fun Composer(
     var scheduling by remember { mutableStateOf(false) }
     val snackbar = LocalSnackbar.current
     val view = LocalView.current
-    val schedulable = canSchedule && editing == null && files.isEmpty() && text.isNotBlank() && uploading == null
+    val schedulable = canSchedule && editing == null && files.isEmpty() && gif == null && text.isNotBlank() && uploading == null
     if (scheduling) ScheduleSheet(onDismiss = { scheduling = false }, onPick = { at ->
         val body = text; val bodyMents = ments
         text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0)
@@ -1314,7 +1361,17 @@ private fun Composer(
             }
             if (viewOnce && editing == null) Text("① " + stringResource(R.string.vo_next), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("viewOnceOn"))
-            if (editing == null && files.isNotEmpty()) PendingFiles(files, uploading, onRemove = { f -> if (uploading == null) { files = files - f; java.io.File(f.path).delete() } })
+            if (editing == null && files.isNotEmpty()) PendingFiles(files, uploading, onRemove = { f -> if (uploading == null) { files = files - f; memeSources = memeSources - f.path; java.io.File(f.path).delete() } })
+            if (editing == null) gif?.let { item ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("pendingGif"), verticalAlignment = Alignment.CenterVertically) {
+                    AnimatedMediaImage(item.previewUrl, item.title, Modifier.size(56.dp))
+                    Column(Modifier.weight(1f).padding(8.dp)) {
+                        Text(item.title, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(com.tiecoms.app.core.CreativeMedia.attribution(item), style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    IconButton(onClick = { gif = null }, enabled = uploading == null, modifier = Modifier.testTag("gifRemove")) { Icon(Icons.Filled.Close, stringResource(R.string.cancel)) }
+                }
+            }
             if (editing == null && draft != null && !rec.recording) VoiceDraftBar(draft, busy = uploading != null,
                 onRetry = { if (draft.aiConsent != null) uploadVoice(draft.result, draft.aiConsent) else { com.tiecoms.app.platform.VoiceDrafts.take(id); pendingVoice = draft.result } },
                 onDelete = { com.tiecoms.app.platform.VoiceDrafts.discard(id); container.toast(ctx.getString(R.string.voice_cancelled)) })
@@ -1327,6 +1384,10 @@ private fun Composer(
                 }
                 if (editing == null) IconButton(onClick = onBring, modifier = Modifier.size(48.dp).semantics { contentDescription = bringLabel }.testTag("bring")) {
                     Text("⤓", style = MaterialTheme.typography.titleLarge)
+                }
+                if (editing == null && com.tiecoms.app.core.CreativeMedia.available(client.meta(id)?.kind)) IconButton(onClick = { focusManager.clearFocus(); keyboard?.hide(); creativePicker = true }, enabled = uploading == null && !rec.recording,
+                    modifier = Modifier.size(40.dp).testTag("creativeButton").semantics { contentDescription = ctx.getString(R.string.creative_title) }) {
+                    Text("GIF", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 }
                 if (rec.recording) RecordingBar(rec, locked, gesture, onDelete = { recorder.cancel(); locked = false; container.toast(ctx.getString(R.string.voice_cancelled)) }, onSend = { sendVoice() }, modifier = Modifier.weight(1f))
                 else RichPasteScope(enabled = editing == null && uploading == null, onImages = { uris, done -> add(uris, done) }) { OutlinedTextField(
@@ -1361,19 +1422,29 @@ private fun Composer(
                     FilledIconButton(onClick = { onSaveEdit(editing, editText, editMents) }, enabled = editText.isNotBlank(), modifier = Modifier.size(52.dp).testTag("saveEdit"),
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary)) { Icon(Icons.Filled.Check, stringResource(R.string.edit_save)) }
                 } else {
-                    if (text.isBlank() && files.isEmpty() && uploading == null && !locked) MicButton(
-                        onStart = { if (!hasMic()) { micWhy = true; false } else { gesture = com.tiecoms.app.core.Waveform.Gesture.RECORDING; recorder.start() } },
-                        // Un toque rápido no descarta: deja la grabación bloqueada (manos libres) con Borrar y Enviar.
-                        onRelease = { held -> if (com.tiecoms.app.core.VoiceRules.onRelease(held) == com.tiecoms.app.core.VoiceRules.Release.LOCK) locked = true else sendVoice() },
-                        onCancel = { recorder.cancel(); container.toast(ctx.getString(R.string.voice_cancelled)) }, onLock = { locked = true }, onDrag = { gesture = it },
-                    ) else if (!rec.recording) {
+                    if (text.isBlank() && files.isEmpty() && gif == null && uploading == null && !locked) {
+                        MicButton(
+                            onStart = {
+                                if (!hasMic()) {
+                                    micWhy = true
+                                    false
+                                } else {
+                                    gesture = com.tiecoms.app.core.Waveform.Gesture.RECORDING
+                                    recorder.start()
+                                }
+                            },
+                            // Un toque rápido no descarta: deja la grabación bloqueada (manos libres) con Borrar y Enviar.
+                            onRelease = { held -> if (com.tiecoms.app.core.VoiceRules.onRelease(held) == com.tiecoms.app.core.VoiceRules.Release.LOCK) locked = true else sendVoice() },
+                            onCancel = { recorder.cancel(); container.toast(ctx.getString(R.string.voice_cancelled)) }, onLock = { locked = true }, onDrag = { gesture = it },
+                        )
+                    } else if (!rec.recording) {
                         if (schedulable) {
                             IconButton(onClick = { scheduling = true }, modifier = Modifier.size(48.dp).testTag("schedButton")) {
                                 Text("🕒", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = ctx.getString(R.string.sched_button) })
                             }
                             Spacer(Modifier.width(4.dp))
                         }
-                        val enabled = uploading == null && (text.isNotBlank() || files.isNotEmpty())
+                        val enabled = uploading == null && (text.isNotBlank() || files.isNotEmpty() || gif != null)
                         val sendLabel = stringResource(R.string.send)
                         val schedLabel = stringResource(R.string.sched_button)
                         // ➤ con pulsación larga = el mismo menú de «Programar envío».
@@ -1778,14 +1849,23 @@ private fun Modifier.swipeToReply(
             while (true) {
                 val ev = awaitPointerEvent()
                 val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
-                if (!ch.pressed) break
+                if (!ch.pressed) {
+                    break
+                }
                 val d = ch.position - ch.previousPosition
                 if (!claimed) {
-                    if (ch.isConsumed) break
-                    dx += d.x; dy += d.y
+                    if (ch.isConsumed) {
+                        break
+                    }
+                    dx += d.x
+                    dy += d.y
                     when (com.tiecoms.app.core.SwipeReply.decide(dx, dy, slop)) {
                         com.tiecoms.app.core.SwipeReply.Decision.REJECT -> break
-                        com.tiecoms.app.core.SwipeReply.Decision.CLAIM -> { claimed = true; ch.consume(); dx -= slop }
+                        com.tiecoms.app.core.SwipeReply.Decision.CLAIM -> {
+                            claimed = true
+                            ch.consume()
+                            dx -= slop
+                        }
                         com.tiecoms.app.core.SwipeReply.Decision.UNDECIDED -> Unit
                     }
                 } else {

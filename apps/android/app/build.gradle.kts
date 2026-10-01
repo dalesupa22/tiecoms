@@ -70,8 +70,8 @@ android {
         applicationId = "com.chaggu.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 44
-        versionName = "1.7.5"
+        versionCode = 45
+        versionName = "1.7.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "DEFAULT_API_URL", "\"https://app.chaggu.com\"")
         buildConfigField("String", "CONTRACT_VERSION", "\"2026-09-29.1\"")
@@ -172,6 +172,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
+    // Animated GIF on Android 8+ (ImageDecoder on 9+, GifDecoder on 8).
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("io.coil-kt:coil-gif:2.7.0")
     implementation(libs.androidx.browser)
     implementation(libs.androidx.splashscreen)
     implementation(libs.firebase.messaging)

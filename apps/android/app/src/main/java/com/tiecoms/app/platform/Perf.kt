@@ -28,7 +28,7 @@ object Perf {
 
     fun chatTapped() {
         chatTapAt = SystemClock.uptimeMillis()
-        Trace.beginAsyncSection("tcOpenChat", 1)
+        if (android.os.Build.VERSION.SDK_INT >= 29) Trace.beginAsyncSection("tcOpenChat", 1)
     }
 
     /** Primer fotograma con mensajes del chat abierto. */
@@ -36,7 +36,7 @@ object Perf {
         val now = SystemClock.uptimeMillis()
         val tap = chatTapAt.takeIf { it in 1..enteredAt }?.let { now - it }
         chatTapAt = 0L
-        Trace.endAsyncSection("tcOpenChat", 1)
+        if (android.os.Build.VERSION.SDK_INT >= 29) Trace.endAsyncSection("tcOpenChat", 1)
         Log.i(TAG, "chat ${conversationId.take(8)} tap=${tap ?: -1} ms screen=${now - enteredAt} ms memory=$fromMemory")
     }
 }

@@ -141,7 +141,8 @@ class CallService : Service() {
                 .addPerson(person)
                 .build()
             n.flags = n.flags or android.app.Notification.FLAG_INSISTENT
-            runCatching { NotificationManagerCompat.from(ctx).notify("call:" + call.id, 1, n) }
+            try { NotificationManagerCompat.from(ctx).notify("call:" + call.id, 1, n) }
+            catch (_: SecurityException) { /* Notification permission was denied or revoked. */ }
         }
 
         fun cancelIncoming(ctx: Context, callId: String) { runCatching { NotificationManagerCompat.from(ctx).cancel("call:$callId", 1) } }

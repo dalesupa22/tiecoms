@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="creative_title">GIFs y memes</string>
+    <string name="creative_search">Buscar</string>
+    <string name="creative_empty">Sin resultados</string>
+    <string name="creative_more">Más GIFs</string>
+    <string name="creative_add">Añadir al mensaje</string>
+    <string name="creative_back">Volver a resultados</string>
+    <string name="memes">Memes</string>
+    <string name="meme_top">Texto superior</string>
+    <string name="meme_bottom">Texto inferior</string>
+    <string name="meme_local">El texto se dibuja en tu dispositivo. Enviar comparte la imagen terminada.</string>
     <string name="tagline">Una sola red entre las empresas con las que trabajas. Cada persona ve su propio alcance.</string>
     <string name="cd_logo">Logo de chaggu</string>
     <string name="email">Correo de trabajo</string>

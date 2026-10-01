@@ -880,9 +880,15 @@ class TieComsClient(
             refs = refs, viewOnce = viewOnce && forwarded == null && fwd.isEmpty() && ViewOnce.allowed(attachments),
         )
         // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
+        val generation = noticeGeneration
+        val author = myId
         scope.launch {
-            savePending(s.pending + p)
-            scheduleFlush(0)
+            withNoticeSession(generation) {
+                if (author != null && author == myId) {
+                    savePending(s.pending + p)
+                    scheduleFlush(0)
+                }
+            }
         }
         return p.clientMessageId
     }
@@ -1614,6 +1620,19 @@ class TieComsClient(
     }
 
     // ---------- Adjuntos (SPEC-v4 §A) ----------
+    suspend fun creativeCatalogue(query: String = "", language: String = "es", cursor: String? = null): CreativeMediaPage = withContext(dispatcher) {
+        req("GET", CreativeMedia.cataloguePath(query, language, cursor), null, CreativeMediaPage.serializer())
+    }
+    suspend fun memeTemplates(): CreativeMediaPage = withContext(dispatcher) {
+        req("GET", "/memes/templates", null, CreativeMediaPage.serializer())
+    }
+    /** Imports bytes only. The caller explicitly sends a normal attachment message afterwards. */
+    suspend fun importGif(conversationId: String, item: CreativeMediaDTO): GifAttachmentResult = withContext(dispatcher) {
+        require(CreativeMedia.available(meta(conversationId)?.kind)) { "Native chat required" }
+        require(CreativeMedia.isProxy(item.url)) { "Chaggu media proxy required" }
+        req("POST", "/conversations/$conversationId/gifs", buildJsonObject { put("url", JsonPrimitive(item.url)) }, GifAttachmentResult.serializer())
+    }
+
     /**
      * POST /conversations/:id/attachments con el archivo en crudo (se transmite desde disco). Queda pendiente en el
      * servidor hasta que un mensaje lo use con [send]. [onProgress] recibe (enviados, total).

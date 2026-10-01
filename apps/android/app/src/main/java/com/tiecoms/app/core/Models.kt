@@ -299,7 +299,23 @@ data class AttachmentDTO(
     val isVoice: Boolean get() = kind == "voice"
     val isImage: Boolean get() = !isVoice && contentType.startsWith("image/")
     val isVideo: Boolean get() = !isVoice && contentType.startsWith("video/")
+    val isGif: Boolean get() = isImage && contentType.substringBefore(';').equals("image/gif", ignoreCase = true)
 }
+
+/** Open media catalogue, served through Chaggu's authenticated media proxy. */
+@Serializable
+data class CreativeMediaDTO(
+    val id: String = "", val provider: String = "", val title: String = "",
+    val previewUrl: String = "", val url: String = "", val width: Int = 0, val height: Int = 0,
+    val attribution: String? = null, val sourceUrl: String? = null, val boxCount: Int? = null,
+)
+@Serializable
+data class CreativeProviderDTO(val label: String = "", val url: String = "")
+@Serializable
+data class CreativeMediaPage(val provider: String = "", val items: List<CreativeMediaDTO> = emptyList(),
+    val next: String? = null, val poweredBy: CreativeProviderDTO? = null)
+@Serializable
+data class GifAttachmentResult(val attachment: AttachmentDTO, val attribution: String? = null)
 
 /** Transcripción de una nota de voz: pending | done | failed | disabled. */
 @Serializable

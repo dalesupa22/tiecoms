@@ -141,11 +141,12 @@ fun AttachmentsBlock(list: List<AttachmentDTO>, fg: Color, onOpenMedia: (Int) ->
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun MediaTile(a: AttachmentDTO, modifier: Modifier, more: Int?, onLongPress: (() -> Unit)?, onClick: () -> Unit) {
-    val img = rememberAttachmentImage(a, full = false, px = 480)
+    val img = if (!a.isGif) rememberAttachmentImage(a, full = false, px = 480) else null
     val label = if (a.isVideo) stringResource(R.string.att_video) else stringResource(R.string.att_photo)
     Box(modifier.clip(RoundedCornerShape(12.dp)).background(Color(0x22000000)).combinedClickable(onClick = onClick, onLongClick = onLongPress)
         .semantics { contentDescription = "$label ${a.name}" }.testTag("att-${a.id}"), contentAlignment = Alignment.Center) {
-        if (img != null) Image(img, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        if (a.isGif) AnimatedMediaImage(a.url, a.name, Modifier.fillMaxSize(), px = 480)
+        else if (img != null) Image(img, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         else if (!a.isVideo) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
         if (a.isVideo) Icon(Icons.Outlined.PlayCircle, null, tint = Color.White, modifier = Modifier.size(44.dp))
         if (more != null) Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.Center) {
@@ -219,8 +220,8 @@ fun MediaViewer(media: List<AttachmentDTO>, start: Int, onClose: () -> Unit) {
 
 @Composable
 private fun ZoomImage(a: AttachmentDTO) {
-    val thumb = rememberAttachmentImage(a, full = false, px = 480)
-    val full = rememberAttachmentImage(a, full = true, px = 2048)
+    val thumb = if (!a.isGif) rememberAttachmentImage(a, full = false, px = 480) else null
+    val full = if (!a.isGif) rememberAttachmentImage(a, full = true, px = 2048) else null
     var zoom by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     Box(Modifier.fillMaxSize()
@@ -232,7 +233,9 @@ private fun ZoomImage(a: AttachmentDTO) {
             }
         }, contentAlignment = Alignment.Center) {
         val img = full ?: thumb
-        if (img != null) Image(img, a.name, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
+        if (a.isGif) AnimatedMediaImage(a.url, a.name, Modifier.fillMaxSize()
+            .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = offset.x; translationY = offset.y }.testTag("viewerImage"), fit = true, px = 2048)
+        else if (img != null) Image(img, a.name, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
             .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = offset.x; translationY = offset.y }.testTag("viewerImage"))
         else CircularProgressIndicator(color = Color.White)
     }

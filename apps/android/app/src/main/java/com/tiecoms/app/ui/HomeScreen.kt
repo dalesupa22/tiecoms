@@ -129,7 +129,7 @@ fun GroupsScreen(
     val scope = rememberCoroutineScope()
     val (data, state) = visibleData() ?: return
     // Velocidad (1.7.0): primer fotograma con la lista → reportFullyDrawn y marca TcPerf.
-    val perfActivity = LocalContext.current as? android.app.Activity
+    val perfActivity = androidx.activity.compose.LocalActivity.current
     androidx.compose.runtime.LaunchedEffect(Unit) { androidx.compose.runtime.withFrameNanos { }; com.tiecoms.app.platform.Perf.listDrawn(perfActivity, client.paintedFromCache) }
     var query by rememberSaveable { mutableStateOf("") }
     var refreshing by remember { mutableStateOf(false) }

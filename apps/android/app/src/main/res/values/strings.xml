@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="creative_title">GIFs and memes</string>
+    <string name="creative_search">Search</string>
+    <string name="creative_empty">No results</string>
+    <string name="creative_more">More GIFs</string>
+    <string name="creative_add">Add to message</string>
+    <string name="creative_back">Back to results</string>
+    <string name="memes">Memes</string>
+    <string name="meme_top">Top caption</string>
+    <string name="meme_bottom">Bottom caption</string>
+    <string name="meme_local">Captions are drawn on your device. Send shares the finished image.</string>
     <string name="app_name" translatable="false">chaggu</string>
     <string name="tagline">One network across the companies you work with. Everyone sees their own scope.</string>
     <string name="cd_logo">chaggu logo</string>

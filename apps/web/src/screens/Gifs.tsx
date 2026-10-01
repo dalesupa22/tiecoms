@@ -66,7 +66,8 @@ export function GifPicker({ conversationId, query: initialQuery = '', tab: initi
   useEffect(() => {
     const check = () => { if (client.getSessionIdentity() !== sessionIdentity) onClose(); };
     check();
-    return client.subscribe(check);
+    const unsubscribe = client.subscribe(check);
+    return () => { unsubscribe(); };
   }, [sessionIdentity, onClose]);
   // Esc: primero sale del editor; si no, cierra.
   useEffect(() => {

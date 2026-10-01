@@ -53,11 +53,13 @@ struct AttachmentImage: View {
     var useThumb = true
     @State private var image: UIImage?
     @State private var failed = false
+    @State private var animation: GifAnimation?
 
     var body: some View {
         ZStack {
             Rectangle().fill(Theme.bubbleOther)
-            if let image {
+            if let animation { AnimatedGifImage(animation: animation, fill: true) }
+            else if let image {
                 Image(uiImage: image).resizable().scaledToFill()
             } else if failed {
                 Image(systemName: "photo").foregroundStyle(Theme.textSecondary)
@@ -67,8 +69,12 @@ struct AttachmentImage: View {
         }
         .clipped()
         .task(id: att.id) {
-            let path = (useThumb ? att.thumbUrl : nil) ?? att.url
-            if let d = try? await AttachmentCache.shared.data(path, api: store.api), let img = UIImage(data: d) { image = img } else { failed = true }
+            image = nil; animation = nil; failed = false
+            let path = (useThumb && att.contentType != "image/gif" ? att.thumbUrl : nil) ?? att.url
+            if let d = try? await AttachmentCache.shared.data(path, api: store.api), let img = UIImage(data: d) {
+                let decoded = att.contentType == "image/gif" ? await Task.detached { GifAnimation.decode(d) }.value : nil
+                guard !Task.isCancelled else { return }; image = decoded?.frames.first ?? img; animation = decoded
+            } else { failed = true }
         }
     }
 }
@@ -235,13 +241,17 @@ private struct ZoomablePhoto: View {
     @Environment(AppStore.self) private var store
     let att: AttachmentDTO
     @State private var image: UIImage?
+    @State private var animation: GifAnimation?
     var body: some View {
         Group {
-            if let image { ZoomableImage(image: image) } else { ProgressView().tint(.white) }
+            if let image { ZoomableImage(image: image, animation: animation) } else { ProgressView().tint(.white) }
         }
         .accessibilityIdentifier("viewer.photo")
         .task(id: att.id) {
-            if let d = try? await AttachmentCache.shared.data(att.url, api: store.api) { image = UIImage(data: d) }
+            if let d = try? await AttachmentCache.shared.data(att.url, api: store.api) {
+                let decoded = att.contentType == "image/gif" ? await Task.detached { GifAnimation.decode(d, maxSide: 1280) }.value : nil
+                guard !Task.isCancelled else { return }; image = decoded?.frames.first ?? UIImage(data: d); animation = decoded
+            }
         }
     }
 }
@@ -249,6 +259,7 @@ private struct ZoomablePhoto: View {
 /// UIScrollView para zoom nativo.
 struct ZoomableImage: UIViewRepresentable {
     let image: UIImage
+    var animation: GifAnimation? = nil
     func makeUIView(context: Context) -> UIScrollView {
         let s = UIScrollView()
         s.minimumZoomScale = 1
@@ -256,7 +267,8 @@ struct ZoomableImage: UIViewRepresentable {
         s.delegate = context.coordinator
         s.showsHorizontalScrollIndicator = false
         s.showsVerticalScrollIndicator = false
-        let iv = UIImageView(image: image)
+        let iv = GifImageView(image: image)
+        iv.configure(animation)
         iv.contentMode = .scaleAspectFit
         iv.frame = s.bounds
         iv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -264,15 +276,20 @@ struct ZoomableImage: UIViewRepresentable {
         iv.accessibilityTraits = .image
         s.addSubview(iv)
         context.coordinator.imageView = iv
+        context.coordinator.configuredImage = image
         let dbl = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.doubleTap(_:)))
         dbl.numberOfTapsRequired = 2
         s.addGestureRecognizer(dbl)
         return s
     }
-    func updateUIView(_ s: UIScrollView, context: Context) { context.coordinator.imageView?.image = image }
+    func updateUIView(_ s: UIScrollView, context: Context) {
+        if context.coordinator.configuredImage !== image { context.coordinator.configuredImage = image; context.coordinator.imageView?.image = image; (context.coordinator.imageView as? GifImageView)?.configure(animation) }
+    }
+    static func dismantleUIView(_ s: UIScrollView, coordinator: Coordinator) { (coordinator.imageView as? GifImageView)?.stop() }
     func makeCoordinator() -> Coordinator { Coordinator() }
     final class Coordinator: NSObject, UIScrollViewDelegate {
         weak var imageView: UIImageView?
+        var configuredImage: UIImage?
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
         @objc func doubleTap(_ g: UITapGestureRecognizer) {
             guard let s = g.view as? UIScrollView else { return }
@@ -322,6 +339,7 @@ struct QuickLookView: UIViewControllerRepresentable {
 /// Botón clip del compositor: Fotos (varias), Cámara o Archivos.
 struct AttachButton: View {
     @Binding var staged: [LocalAttachment]
+    var otherStagedCount = 0
     @State private var photos: [PhotosPickerItem] = []
     @State private var showPhotos = false
     @State private var showCamera = false
@@ -334,6 +352,7 @@ struct AttachButton: View {
     /// «✉ Correo» y «Mensaje de WhatsApp» (docs/CORREO.md), solo con features.mail.
     var onMail: (() -> Void)? = nil
     var onWhatsApp: (() -> Void)? = nil
+    var onGifs: (() -> Void)? = nil
     var onError: (String) -> Void
 
     var body: some View {
@@ -343,6 +362,7 @@ struct AttachButton: View {
                 Button { showCamera = true } label: { Label(L("att.fromCamera"), systemImage: "camera") }
             }
             Button { showFiles = true } label: { Label(L("att.fromFiles"), systemImage: "folder") }
+            if let onGifs { Button(action: onGifs) { Label(L("gifs.title"), systemImage: "face.smiling") }.accessibilityIdentifier("composer.plus.gifs") }
             if onEvent != nil || onIssue != nil { Divider() }
             if let onEvent { Button(action: onEvent) { Label(L("bar.newEvent"), systemImage: "calendar.badge.plus") }.accessibilityIdentifier("composer.plus.event") }
             if let onIssue { Button(action: onIssue) { Label(L("bar.newIssue"), systemImage: "diamond") }.accessibilityIdentifier("composer.plus.issue") }
@@ -360,7 +380,7 @@ struct AttachButton: View {
         }
         .accessibilityLabel(onEvent != nil || onIssue != nil || onMeeting != nil ? L("bar.plus") : L("att.attach"))
         .accessibilityIdentifier("composer.attach")
-        .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: AttachmentRules.maxPerMessage,
+        .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: max(1, AttachmentRules.maxPerMessage - staged.count - otherStagedCount),
                       matching: .any(of: [.images, .videos]), photoLibrary: .shared())
         .onChange(of: photos) { _, items in
             guard !items.isEmpty else { return }
@@ -409,7 +429,7 @@ struct AttachButton: View {
     }
 
     private func add(_ a: LocalAttachment) {
-        guard staged.count < AttachmentRules.maxPerMessage else { onError(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
+        guard staged.count + otherStagedCount < AttachmentRules.maxPerMessage else { onError(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
         if a.tooBig { onError(L("att.tooBig", ["name": a.name])); return }
         staged.append(a)
     }

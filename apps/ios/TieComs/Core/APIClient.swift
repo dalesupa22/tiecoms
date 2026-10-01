@@ -121,6 +121,11 @@ final class APIClient {
     let baseURL: URL
     private let session: URLSession
     private let secrets: SecretStore
+    private let uncachedSession: URLSession
+    static func uncachedConfiguration() -> URLSessionConfiguration {
+        let cfg = URLSessionConfiguration.ephemeral; cfg.urlCache = nil; cfg.requestCachePolicy = .reloadIgnoringLocalCacheData; cfg.httpShouldSetCookies = false
+        return cfg
+    }
     private(set) var accessToken: String?
     private var requestGeneration = UUID()
     func invalidateRequests() {
@@ -136,9 +141,10 @@ final class APIClient {
     /// Se llama cuando el servidor da la sesión por terminada.
     var onSignedOut: (() -> Void)?
 
-    init(baseURL: URL, secrets: SecretStore, session: URLSession? = nil) {
+    init(baseURL: URL, secrets: SecretStore, session: URLSession? = nil, uncachedSession: URLSession? = nil) {
         self.baseURL = baseURL
         self.secrets = secrets
+        self.uncachedSession = uncachedSession ?? URLSession(configuration: Self.uncachedConfiguration())
         MediaURL.base = baseURL
         if let session { self.session = session } else {
             let cfg = URLSessionConfiguration.default
@@ -168,8 +174,9 @@ final class APIClient {
         var headers: [String: String] = [:]
     }
 
-    private func raw(_ path: String, method: String = "GET", json: [String: Any]? = nil, body: RawBody? = nil, auth: Bool = true) async throws -> (Data, HTTPURLResponse) {
+    private func raw(_ path: String, method: String = "GET", json: [String: Any]? = nil, body: RawBody? = nil, auth: Bool = true, uncached: Bool = false) async throws -> (Data, HTTPURLResponse) {
         var req = URLRequest(url: url(path))
+        if uncached { req.cachePolicy = .reloadIgnoringLocalCacheData; req.setValue("no-store", forHTTPHeaderField: "cache-control") }
         req.httpMethod = method
         req.setValue("ios", forHTTPHeaderField: "x-tiecoms-client")
         req.setValue(L10n.lang, forHTTPHeaderField: "accept-language")
@@ -188,7 +195,7 @@ final class APIClient {
         }
         if auth, let t = accessToken { req.setValue("Bearer \(t)", forHTTPHeaderField: "authorization") }
         do {
-            let (data, resp) = try await session.data(for: req)
+            let (data, resp) = try await (uncached ? uncachedSession : session).data(for: req)
             guard let http = resp as? HTTPURLResponse else { throw ApiRequestError(status: 0, code: "network", message: "Sin respuesta") }
             return (data, http)
         } catch let e as ApiRequestError { throw e } catch { throw ApiRequestError.network(error) }
@@ -226,16 +233,16 @@ final class APIClient {
     }
 
     @discardableResult
-    func requestData(_ path: String, method: String = "GET", json: [String: Any]? = nil, body: RawBody? = nil) async throws -> Data {
+    func requestData(_ path: String, method: String = "GET", json: [String: Any]? = nil, body: RawBody? = nil, uncached: Bool = false) async throws -> Data {
         let generation = requestGeneration
         if accessToken == nil || Date() > accessExp.addingTimeInterval(-30) { _ = await refresh() }
         try requireGeneration(generation)
-        var (data, res) = try await raw(path, method: method, json: json, body: body)
+        var (data, res) = try await raw(path, method: method, json: json, body: body, uncached: uncached)
         try requireGeneration(generation)
         if res.statusCode == 401 {
             let r = await refresh()
             try requireGeneration(generation)
-            if r == .ok { (data, res) = try await raw(path, method: method, json: json, body: body) }
+            if r == .ok { (data, res) = try await raw(path, method: method, json: json, body: body, uncached: uncached) }
             // Solo se cierra la sesión si el servidor rechaza el refresh; un fallo de red o un 5xx
             // (API reiniciándose) no la borra.
             else if r == .network { throw APIClient.parseError(data, status: 401) }
@@ -293,6 +300,21 @@ final class APIClient {
     /// Descarga autenticada (adjuntos): Bearer en la cabecera; sigue la redirección firmada si la hay.
     func download(_ path: String) async throws -> Data {
         try await requestData(path)
+    }
+
+    /// View-once signed media never enters URLCache or the attachment cache.
+    func uncachedDownload(_ path: String) async throws -> Data {
+        let generation = requestGeneration
+        if let u = URL(string: path), u.scheme != nil {
+            guard u.scheme == "https" || u.scheme == "http" else { throw ApiRequestError(status: 400, code: "invalid_media", message: "") }
+            var req = URLRequest(url: u, cachePolicy: .reloadIgnoringLocalCacheData)
+            req.setValue("no-store", forHTTPHeaderField: "cache-control")
+            let (data, response) = try await uncachedSession.data(for: req)
+            try requireGeneration(generation)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw ApiRequestError(status: 403, code: "forbidden", message: "") }
+            return data
+        }
+        return try await requestData(path, uncached: true)
     }
 
     /// Petición pública (sin token).

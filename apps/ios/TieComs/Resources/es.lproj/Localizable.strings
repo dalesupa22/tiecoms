@@ -2471,3 +2471,15 @@
 /* Temas: reordenar (arrastrar la banderita o desde el menú) */
 "topic.moveLeft" = "Mover a la izquierda";
 "topic.moveRight" = "Mover a la derecha";
+
+"gifs.title" = "GIFs y memes";
+"gifs.memes" = "Memes";
+"gifs.search" = "Buscar GIFs";
+"gifs.empty" = "No hay resultados";
+"gifs.more" = "Ver más";
+"gifs.top" = "Texto de arriba";
+"gifs.bottom" = "Texto de abajo";
+"gifs.localText" = "El texto se añade en tu dispositivo.";
+"gifs.add" = "Añadir al mensaje";
+"gifs.remove" = "Quitar GIF";
+"gifs.source" = "Ver fuente";

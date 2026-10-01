@@ -3606,5 +3606,49 @@
  "card.forwarded": [
   "Reenviado",
   "Forwarded"
+ ],
+ "gifs.title": [
+  "GIFs y memes",
+  "GIFs & memes"
+ ],
+ "gifs.memes": [
+  "Memes",
+  "Memes"
+ ],
+ "gifs.search": [
+  "Buscar GIFs",
+  "Search GIFs"
+ ],
+ "gifs.empty": [
+  "No hay resultados",
+  "No results"
+ ],
+ "gifs.more": [
+  "Ver más",
+  "Load more"
+ ],
+ "gifs.top": [
+  "Texto de arriba",
+  "Top text"
+ ],
+ "gifs.bottom": [
+  "Texto de abajo",
+  "Bottom text"
+ ],
+ "gifs.localText": [
+  "El texto se añade en tu dispositivo.",
+  "Captions are added on your device."
+ ],
+ "gifs.add": [
+  "Añadir al mensaje",
+  "Add to message"
+ ],
+ "gifs.remove": [
+  "Quitar GIF",
+  "Remove GIF"
+ ],
+ "gifs.source": [
+  "Ver fuente",
+  "View source"
  ]
 }

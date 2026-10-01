@@ -47,6 +47,7 @@ struct LocalAttachment: Identifiable, Equatable {
     var name: String
     var contentType: String
     var data: Data
+    var attribution: String? = nil
     var sizeBytes: Int { data.count }
     var isImage: Bool { contentType.hasPrefix("image/") }
     var isVideo: Bool { contentType.hasPrefix("video/") }

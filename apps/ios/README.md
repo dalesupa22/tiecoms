@@ -10,9 +10,23 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Bundle ID | `com.chaggu.app` (app) · `com.chaggu.app.share` (Compartir) · `com.chaggu.app.notifications` (Notification Service Extension) · pruebas `com.chaggu.app.tests` / `com.chaggu.app.uitests` |
 | Team | `B76US7H3L3` (CERTILABOR SAS), firma automática |
 | App Group | `group.com.chaggu.app`: Keychain compartido (servicio `com.chaggu.app.session`) y lista de conversaciones para la extensión |
-| Versión | 1.6.7 (build 24), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
+| Versión | 1.7.6 (build 45), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.chaggu.com` por defecto (web: `https://www.chaggu.com`); `-TCApiURL <url>` al lanzar (pruebas) |
+
+## 1.7.6 (45): GIFs y memes en chats nativos
+
+- ＋ › GIFs y memes abre el catálogo autenticado: Openverse/Wikimedia para GIFs y plantillas de memegen. Solo se ofrece en
+  `ConversationView`, sin ampliar los compositores de correo o WhatsApp. Buscar, paginar y elegir conservan el borrador;
+  la importación ocurre al pulsar el Enviar habitual, conservando tema, respuesta, menciones y una sola vista.
+- Los GIFs conservan sus fotogramas/tiempos con ImageIO y CADisplayLink (sin SDK nuevo), en la burbuja, el visor y una sola
+  vista. Se limita la memoria decodificada y se pausa al salir de pantalla, pasar al fondo o activar Reducir movimiento.
+- El meme se dibuja en el dispositivo y se sube como JPEG. Los textos personalizados no se envían a memegen; se conserva
+  la procedencia del catálogo en el cuerpo del mensaje. Las URLs de medios se aceptan únicamente a través del proxy del API.
+- Una sola vista usa una sesión efímera sin URLCache y nunca utiliza `AttachmentCache`; las imágenes/animación se descartan
+  al cerrar. Las burbujas cerradas conservan el flujo de autorización `POST /messages/:id/open`.
+- `GifMemeTests` cubre fotogramas/tiempos/límites, JPEG y dimensiones, captions locales, origen y codificación de URL,
+  contratos de catálogo/importación, atribución y aislamiento de una sola vista; no envía mensajes de producción.
 
 ## 1.7.5 (44): temas con no leídos primero y abrir en el tema del mensaje
 

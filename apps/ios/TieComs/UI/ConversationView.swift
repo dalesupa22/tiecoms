@@ -110,6 +110,8 @@ struct ConversationView: View {
     @State private var sideForPerson: String?
     @State private var highlighted: String?
     @State private var staged: [LocalAttachment] = []
+    @State private var stagedGifs: [GifMediaItem] = []
+    @State private var pickingGifs = false
     @State private var uploadProgress: [UUID: Double] = [:]
     @State private var uploading = false
     @State private var askSide: MessageDTO?
@@ -1403,6 +1405,7 @@ struct ConversationView: View {
             ScheduledStrip(conversationId: conversationId) { showScheduled = true }
             SleepNoticeBar(conversation: c, typing: !trimmed.isEmpty && editing == nil, onSchedule: scheduleDraft)
             StagedAttachments(staged: $staged, progress: uploadProgress)
+            StagedGifs(items: $stagedGifs).disabled(uploading)
             if let v = failedVoice {
                 // La nota no se subió: queda aquí para reintentar o descartar.
                 HStack(spacing: 10) {
@@ -1425,19 +1428,21 @@ struct ConversationView: View {
                 } else {
                 // «＋»: fotos, archivos y, aparte, evento o asunto del chat.
                 if editing == nil && !commenting {
-                    AttachButton(staged: $staged, onEvent: embedded ? nil : { sheet = .newEvent(nil) },
+                    AttachButton(staged: $staged, otherStagedCount: stagedGifs.count, onEvent: embedded ? nil : { sheet = .newEvent(nil) },
                                  onIssue: embedded || !canOpenIssues ? nil : { sheet = .newIssue(nil) },
                                  onMeeting: embedded ? nil : { now in sheet = .meeting(now: now) },
                                  // Correo en el chat (docs/CORREO.md): ＋ › Correo con este chat como destino; WhatsApp va a su pantalla.
                                  onMail: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.mailBox(conversationId: conversationId)) },
-                                 onWhatsApp: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.whatsapp) }) { store.show($0) }
+                                 onWhatsApp: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.whatsapp) },
+                                 onGifs: { pickingGifs = true }) { store.show($0) }
+                        .disabled(uploading)
                 }
                 if editing == nil && !commenting && !embedded { ViewOnceToggle(on: $viewOnceNext) }
                 // UITextView: tokens resaltados, cursor real y retroceso que borra el token entero.
                 ComposerTextView(text: $draft, mentions: $draftMentions, cursor: $draftCursor, focused: $composerFocused,
                                  placeholder: composerPlaceholder(d, c), accessibilityLabel: L("chat.composerLabel"),
                                  onChange: { new in if !new.isEmpty && editing == nil { store.userIsTyping(conversationId) } },
-                                 onPasteAttachments: editing == nil && !commenting && !recorder.isActive ? { stagePasted($0) } : nil)
+                                 onPasteAttachments: editing == nil && !commenting && !recorder.isActive && !uploading ? { stagePasted($0) } : nil)
                     .overlay(alignment: .topLeading) {
                         if draft.isEmpty {
                             Text(composerPlaceholder(d, c)).font(.body).foregroundStyle(Theme.textSecondary.opacity(0.8))
@@ -1448,7 +1453,7 @@ struct ConversationView: View {
                     .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.textSecondary.opacity(0.25)))
                 }
                 // Compositor vacío: micrófono (mantener pulsado para grabar). Con texto o adjuntos: enviar.
-                if editing == nil && !commenting && trimmed.isEmpty && staged.isEmpty && !uploading && recorder.state != .locked {
+                if editing == nil && !commenting && trimmed.isEmpty && staged.isEmpty && stagedGifs.isEmpty && !uploading && recorder.state != .locked {
                     VoiceRecordButton(recorder: recorder, onSend: sendVoice)
                 } else if !recorder.isActive {
                 // Con texto (sin adjuntos): 🕒 para programar el envío.
@@ -1460,9 +1465,9 @@ struct ConversationView: View {
                         .font(.system(size: 17, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 40, height: 40)
-                        .background(Circle().fill(trimmed.isEmpty && staged.isEmpty ? Theme.textSecondary.opacity(0.35) : Theme.bubbleMine))
+                        .background(Circle().fill(trimmed.isEmpty && staged.isEmpty && stagedGifs.isEmpty ? Theme.textSecondary.opacity(0.35) : Theme.bubbleMine))
                 }
-                .disabled((trimmed.isEmpty && staged.isEmpty) || uploading)
+                .disabled((trimmed.isEmpty && staged.isEmpty && stagedGifs.isEmpty) || uploading)
                 .accessibilityLabel(editing != nil ? L("edit.save") : L("chat.send"))
                 .accessibilityIdentifier("composer.send")
                 // Mantener presionado ➤: el mismo menú de programar.
@@ -1476,12 +1481,18 @@ struct ConversationView: View {
         .background(Theme.surface.ignoresSafeArea(edges: .bottom))
         .sheet(isPresented: $pickingSchedule) { PickWhenSheet(onPick: scheduleDraft) }
         .sheet(isPresented: $showScheduled) { ScheduledSheet(conversationId: conversationId) }
+        .sheet(isPresented: $pickingGifs) {
+            GifMemePicker(onGif: { item in
+                guard staged.count + stagedGifs.count < AttachmentRules.maxPerMessage else { store.show(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
+                if !stagedGifs.contains(where: { $0.id == item.id }) { stagedGifs.append(item) }
+            }, onMeme: { stagePasted([$0]) })
+        }
     }
 
     /// Imágenes pegadas: a la misma bandeja de adjuntos que Fotos (con sus límites de cantidad y tamaño).
     private func stagePasted(_ list: [LocalAttachment]) {
         for a in list {
-            guard staged.count < AttachmentRules.maxPerMessage else { store.show(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
+            guard staged.count + stagedGifs.count < AttachmentRules.maxPerMessage else { store.show(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
             if a.tooBig { store.show(L("att.tooBig", ["name": a.name])); continue }
             staged.append(a)
         }
@@ -1490,7 +1501,7 @@ struct ConversationView: View {
 
     /// Solo se programa texto (con menciones y respuesta); adjuntos, notas de voz y respuestas privadas salen al momento.
     private func canSchedule(_ trimmed: String) -> Bool {
-        editing == nil && !commenting && !viewOnceNext && !trimmed.isEmpty && staged.isEmpty && !uploading && store.privateReplies[conversationId] == nil
+        editing == nil && !commenting && !viewOnceNext && !trimmed.isEmpty && staged.isEmpty && stagedGifs.isEmpty && !uploading && store.privateReplies[conversationId] == nil
     }
 
     /// Programa el borrador: el compositor se vacía y el aviso trae «Deshacer» (devuelve el texto).
@@ -1536,7 +1547,8 @@ struct ConversationView: View {
 
     private func submit() {
         let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty || !staged.isEmpty, !uploading else { return }
+        guard !body.isEmpty || !staged.isEmpty || !stagedGifs.isEmpty, !uploading else { return }
+        guard staged.count + stagedGifs.count <= AttachmentRules.maxPerMessage else { store.show(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
         if let ce = commentingEvent {
             guard !body.isEmpty else { return }
             commentingEvent = nil
@@ -1564,27 +1576,45 @@ struct ConversationView: View {
             if body != e.body || ms != e.mentions { act { try await store.editMessage(e.id, body: body, mentions: ms) } }
             return
         }
-        if !staged.isEmpty {
+        if !staged.isEmpty || !stagedGifs.isEmpty {
             // Adjuntos: se suben (con progreso) y luego se envía el mensaje con sus ids.
-            let files = staged, text = draft, reply = replyTo?.id, ms = draftMentions, topic = activeTopic?.id, vo = viewOnceNext
+            let files = staged, gifs = stagedGifs, text = draft, reply = replyTo?.id, ms = draftMentions, topic = activeTopic?.id, vo = viewOnceNext
             viewOnceNext = false
             uploading = true
+            let session = store.sessionStamp
             Task {
                 defer { uploading = false; uploadProgress = [:] }
                 var done: [AttachmentDTO] = []
+                var attributions = files.compactMap(\.attribution)
                 for f in files {
+                    guard store.sessionStamp == session else { return }
                     uploadProgress[f.id] = 0
                     do {
                         let a = try await store.api.uploadAttachment(conversationId, f) { p in Task { @MainActor in uploadProgress[f.id] = p } }
+                        guard store.sessionStamp == session else { return }
                         done.append(a)
                     } catch {
                         // Los adjuntos siguen en el compositor para reintentar; el aviso dice por qué.
+                        viewOnceNext = vo
                         store.show(AttachmentRules.uploadErrorText(error, name: f.name))
                         return
                     }
                 }
-                store.send(conversationId, body: text, replyTo: reply, attachments: done, mentions: ms, topicId: topic, viewOnce: vo)
-                staged = []
+                for gif in gifs {
+                    guard store.sessionStamp == session else { return }
+                    do {
+                        let imported = try await store.api.importGif(conversationId, item: gif)
+                        guard store.sessionStamp == session else { return }
+                        done.append(imported.attachment)
+                        if let attribution = imported.attribution { attributions.append(attribution) }
+                    } catch {
+                        viewOnceNext = vo
+                        store.show(L10n.errorText(error)); return
+                    }
+                }
+                guard store.sessionStamp == session else { return }
+                store.send(conversationId, body: GifMediaRules.body(text, attributions: attributions), replyTo: reply, attachments: done, mentions: ms, topicId: topic, viewOnce: vo)
+                staged = []; stagedGifs = []
                 draftMentions = []
                 draft = ""
                 replyTo = nil

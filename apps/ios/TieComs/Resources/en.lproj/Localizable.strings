@@ -2471,3 +2471,15 @@
 /* Topics: reorder (drag the flag or from the menu) */
 "topic.moveLeft" = "Move left";
 "topic.moveRight" = "Move right";
+
+"gifs.title" = "GIFs & memes";
+"gifs.memes" = "Memes";
+"gifs.search" = "Search GIFs";
+"gifs.empty" = "No results";
+"gifs.more" = "Load more";
+"gifs.top" = "Top text";
+"gifs.bottom" = "Bottom text";
+"gifs.localText" = "Captions are added on your device.";
+"gifs.add" = "Add to message";
+"gifs.remove" = "Remove GIF";
+"gifs.source" = "View source";
